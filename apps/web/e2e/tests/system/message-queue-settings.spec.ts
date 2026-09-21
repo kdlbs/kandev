@@ -230,7 +230,11 @@ test.describe.serial("Message Queue task behavior settings", () => {
     await expect(testPage.getByTestId("message-queue-max-per-session")).toBeDisabled();
     await expect(testPage.getByTestId("message-queue-merge-enabled")).toBeDisabled();
     await expect(testPage.getByTestId("message-queue-auto-merge-enabled")).toBeDisabled();
-    await expect(testPage.getByText("Only administrators can change this setting.")).toBeVisible();
+    await expect(
+      testPage
+        .getByTestId("message-queue-settings")
+        .getByText("Only administrators can change this setting."),
+    ).toBeVisible();
     await expect(testPage.getByTestId("settings-floating-save")).toHaveCount(0);
   });
 });

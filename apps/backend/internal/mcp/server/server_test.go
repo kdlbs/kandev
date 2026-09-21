@@ -1037,7 +1037,7 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 	// Existing configuration tools plus the five compact settings tools.
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
-	assert.Equal(t, 41, len(tools))
+	assert.Equal(t, 42, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {

@@ -13,7 +13,7 @@ Canvases own agent-authored task applications and their promotion to workspace
 applications. The system owns canvas scope, source lineage, release selection,
 editing sessions, discovery, and portable canvas distribution.
 
-The Plugins system owns the isolated web-application runtime, permissions,
+The Plugins system owns the web-application runtime, permissions,
 Kandev data access, state, events, and package validation. The task system
 remains authoritative for task data and permissions.
 

@@ -138,7 +138,7 @@ replace state verification, installation association, or HMAC verification.
 - `RequiresApproval` on actions: transitions requiring review gating are skipped
 - Idempotent by `OperationID`; session-scoped data bag via `MachineState.Data`
 
-**Agent Runtime** (`internal/agent/runtime/`) is the single seam for launching, resuming, stopping, and observing agent executions. ADR 0004 introduced this in Phase 1 of task-model-unification. The public surface is `runtime.Runtime` (`runtime.go`); a thin facade (`facade.go`) delegates to a `Backend` (satisfied by `*lifecycle.Manager`).
+**Agent Runtime** (`internal/agent/runtime/`) is the single seam for launching, resuming, stopping, and observing agent executions. ADR 0004 introduced this in Phase 1 of task-model-unification. The public surface is `runtime.Runtime` (`runtime.go`); a thin facade (`facade.go`) delegates to a `Backend` (satisfied by `*lifecycle.Manager`). Run-owned executions use `runtime.LaunchSpec.Owner` (`kind=run`) with durable run-session identity; admission fails closed before allocation and lifecycle registration, and `runtime.Start` rolls back failed startup while task launches keep task/session checks.
 
 **Runtime environment invariant:** `Agent.Runtime().Env` applies to every ACP subprocess entry point. Route new overrides through host-utility probes and sessionless prompts into agentctl child processes before sanitization; cover probe DTO, prompt DTO, and child-process boundaries.
 

@@ -1,6 +1,8 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowMovePreviewResponse } from "@/lib/api";
+import type { AppState } from "@/lib/state/store";
+import { getWorkflowMovePreviewRevision } from "./use-workflow-move-preview-revision";
 import {
   MAX_PREVIEW_CONCURRENT_REQUESTS,
   useWorkflowMovePreview,
@@ -35,6 +37,38 @@ function makePreview(stepId: string): WorkflowMovePreviewResponse {
     source_disposition: "park",
     dispatch: "prompt",
   };
+}
+
+function makeRevisionState() {
+  return {
+    connection: { status: "connected" },
+    workspaceContextGeneration: 1,
+    kanban: {
+      workflowId: WORKFLOW_ID,
+      steps: [{ id: FIRST_STEP_ID, title: "Implement", position: 0 }],
+      tasks: [
+        {
+          id: TASK_ID,
+          workflowId: WORKFLOW_ID,
+          workflowStepId: FIRST_STEP_ID,
+          title: "Task",
+          description: "Initial description",
+          position: 0,
+        },
+      ],
+    },
+    kanbanMulti: { snapshots: {} },
+    workflows: { items: [{ id: WORKFLOW_ID }], activeId: WORKFLOW_ID },
+    taskSessions: { items: {} },
+    taskSessionsByTask: {
+      itemsByTaskId: {},
+      loadingByTaskId: {},
+      loadedByTaskId: {},
+      errorByTaskId: {},
+    },
+    agentProfiles: { items: [], version: 1 },
+    sessionModels: { bySessionId: {} },
+  } as unknown as AppState;
 }
 
 function useThreePreviews() {
@@ -198,6 +232,55 @@ describe("useWorkflowMovePreview invalidation", () => {
     });
     expect(previewWorkflowMoveMock).toHaveBeenCalledTimes(2);
     expect(result.current.status).toBe("success");
+  });
+});
+
+describe("useWorkflowMovePreview stability", () => {
+  it("keeps success and request count stable across harmless store updates", async () => {
+    previewWorkflowMoveMock.mockResolvedValueOnce(makePreview(FIRST_STEP_ID));
+    const revisionState = makeRevisionState();
+    const { result, rerender } = renderHook(
+      ({ revision }: { revision: string }) =>
+        useWorkflowMovePreview({
+          taskId: TASK_ID,
+          workflowId: WORKFLOW_ID,
+          workflowStepId: FIRST_STEP_ID,
+          invalidationKey: revision,
+          enabled: true,
+        }),
+      {
+        initialProps: {
+          revision: getWorkflowMovePreviewRevision(
+            revisionState,
+            TASK_ID,
+            WORKFLOW_ID,
+            FIRST_STEP_ID,
+          ),
+        },
+      },
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+    });
+    expect(result.current.status).toBe("success");
+
+    (revisionState.kanban.tasks[0] as { description?: string }).description = "Updated copy";
+    const nextRevision = getWorkflowMovePreviewRevision(
+      revisionState,
+      TASK_ID,
+      WORKFLOW_ID,
+      FIRST_STEP_ID,
+    );
+    rerender({ revision: nextRevision });
+
+    expect(nextRevision).toBe(
+      getWorkflowMovePreviewRevision(revisionState, TASK_ID, WORKFLOW_ID, FIRST_STEP_ID),
+    );
+    expect(result.current.status).toBe("success");
+    expect(result.current.preview?.workflow_step_id).toBe(FIRST_STEP_ID);
+    expect(previewWorkflowMoveMock).toHaveBeenCalledOnce();
   });
 });
 

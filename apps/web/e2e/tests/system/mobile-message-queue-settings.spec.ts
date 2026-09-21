@@ -26,8 +26,8 @@ test("mobile navigation reaches the Message Queue section with touch-safe shared
   const mobile = new MobileKanbanPage(testPage);
   await mobile.goto();
   await mobile.mobileMenuButton.click();
-  const homeMenu = testPage.getByTestId("mobile-home-menu-card");
-  await homeMenu.getByRole("link", { name: "Settings" }).click();
+  const homeMenu = testPage.getByTestId("app-nav-sheet");
+  await homeMenu.getByRole("link", { name: "Settings", exact: true }).click();
   // Settings lands on the /settings index; the queue lives on Task behavior.
   const index = testPage.getByTestId("settings-index");
   await index.getByRole("link", { name: /^Task Behavior/ }).click();
@@ -117,8 +117,8 @@ test("mobile configuration lock keeps the source and accessible controls consist
   await mobile.goto();
   await mobile.mobileMenuButton.click();
   await testPage
-    .getByTestId("mobile-home-menu-card")
-    .getByRole("link", { name: "Settings" })
+    .getByTestId("app-nav-sheet")
+    .getByRole("link", { name: "Settings", exact: true })
     .click();
   await testPage
     .getByTestId("settings-index")

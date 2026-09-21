@@ -63,6 +63,8 @@ import {
   LaunchQueueStatus,
   ParkedSessionNote,
 } from "./launch-queue-status";
+import { WipQueueStatus } from "./wip-queue-status";
+import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -445,6 +447,60 @@ export function usePendingMessageScroll({
   return { isLoading };
 }
 
+const SCROLL_TO_START_RETRY_DELAY_MS = 50;
+const MAX_SCROLL_TO_START_ATTEMPTS = 120;
+
+type PendingScrollToStartOptions = {
+  messageListRef: RefObject<MessageListHandle | null>;
+  firstMessageId: string | null;
+  hasMore: boolean;
+  pending: boolean;
+  requestKey: number;
+  onComplete: (didScroll: boolean) => void;
+};
+
+/** Keeps a scroll-to-start request alive until the final page's row is mounted. */
+export function usePendingScrollToStart({
+  messageListRef,
+  firstMessageId,
+  hasMore,
+  pending,
+  requestKey,
+  onComplete,
+}: PendingScrollToStartOptions) {
+  useEffect(() => {
+    if (!pending || hasMore) return;
+    if (!firstMessageId) {
+      onComplete(false);
+      return;
+    }
+
+    let cancelled = false;
+    let frameId: number | null = null;
+    let timeoutId: number | null = null;
+    let attempts = 0;
+    const attempt = () => {
+      if (cancelled) return;
+      attempts += 1;
+      const didScroll = Boolean(
+        messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" }),
+      );
+      if (didScroll || attempts >= MAX_SCROLL_TO_START_ATTEMPTS) {
+        onComplete(didScroll);
+        return;
+      }
+      timeoutId = window.setTimeout(attempt, SCROLL_TO_START_RETRY_DELAY_MS);
+    };
+
+    frameId = requestAnimationFrame(attempt);
+    return () => {
+      cancelled = true;
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [firstMessageId, hasMore, messageListRef, onComplete, pending, requestKey]);
+}
+
 /** Computes the render-item key the unread "New" divider should appear
  * immediately before: tracks the latest rendered message id for session read
  * tracking, then maps the resulting divider anchor onto the grouped items. */
@@ -573,11 +629,13 @@ type TaskChatPanelProps = {
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
   /** Callback to open a file at a specific line (for comment clicks) */
-  onOpenFileAtLine?: (filePath: string) => void;
+  onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
   /** Hide the sessions dropdown (session tabs in dockview replace it) */
   hideSessionsDropdown?: boolean;
   /** Mobile layout renders the task queue above its session picker. */
   hideLaunchQueueStatus?: boolean;
+  /** Mobile layout renders the WIP queue above its session picker. */
+  hideWipQueueStatus?: boolean;
   /**
    * Embedded multi-panel hosts do not own the global workbench or shortcuts.
    * They keep the conversation and composer, but suppress those side effects.
@@ -1004,6 +1062,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   pendingScrollTarget,
   onPendingScrollConsumed,
   hideLaunchQueueStatus = false,
+  hideWipQueueStatus = false,
 }: TaskChatPanelProps) {
   const isArchived = useIsTaskArchived();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
@@ -1044,6 +1103,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarificationGroup,
   } = panelState;
   const taskLaunchError = statusSummaryTaskError(launchStatusSummary);
+  const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
   const launchErrorOwned = Boolean(taskLaunchError);
   const showAgentStartHint = useComposerAgentStartHint(
     resolvedSessionId,
@@ -1133,23 +1193,24 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   // which grows as pages prepend) has settled on the true first prompt by the
   // time the scroll fires.
   const [pendingScrollToStart, setPendingScrollToStart] = useState(false);
+  const [scrollToStartRequest, setScrollToStartRequest] = useState(0);
   useDrainOlderMessages(resolvedSessionId, pendingScrollToStart && hasMore);
-  useEffect(() => {
-    if (!pendingScrollToStart || hasMore) return;
+  const completeScrollToStart = useCallback((didScroll: boolean) => {
     setPendingScrollToStart(false);
-    if (firstMessageId) {
-      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
-    }
-  }, [pendingScrollToStart, hasMore, firstMessageId]);
+    if (didScroll) setIsFirstMessageHidden(false);
+  }, []);
+  usePendingScrollToStart({
+    messageListRef,
+    firstMessageId,
+    hasMore,
+    pending: pendingScrollToStart,
+    requestKey: scrollToStartRequest,
+    onComplete: completeScrollToStart,
+  });
   const scrollToStart = useCallback(() => {
-    if (hasMore) {
-      setPendingScrollToStart(true);
-      return;
-    }
-    if (firstMessageId) {
-      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
-    }
-  }, [hasMore, firstMessageId]);
+    setScrollToStartRequest((request) => request + 1);
+    setPendingScrollToStart(true);
+  }, []);
   // Search can target backend rows before the visible transcript boundary.
   const navigateSearchHit = useCallback(
     (id: string) => {
@@ -1190,6 +1251,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       className="outline-none"
     >
       {!hideLaunchQueueStatus && <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />}
+      {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
       <ParkedSessionNote visible={hasWorkflowParkingMarker(session?.metadata)} />
       <PanelBody padding={false} scroll={false} className="relative overflow-hidden">
         <TaskMarkdownFileLinkProvider
@@ -1258,6 +1320,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             messages={pendingClarificationGroup}
             agentDisconnected={session?.pending_action === null}
             onResolved={handleClarificationResolved}
+            onLateAnswer={lateAnswer.send}
+            lateAnswerState={lateAnswer.state}
             shortcutScopeRef={panelRef}
             maxHeightVh={50}
           />

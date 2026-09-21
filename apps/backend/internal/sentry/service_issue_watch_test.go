@@ -102,6 +102,121 @@ func TestService_UpdateIssueWatch_LegacyMultiStatusToggle(t *testing.T) {
 	}
 }
 
+// TestService_UpdateIssueWatch_PersistsLookbackPeriod covers the update half of
+// the offered-token contract: a filter-carrying update stores the selected
+// lookback unchanged, so a non-default choice survives the write path.
+//
+// @covers AC-INTEGRATIONS-SENTRY-WATCHER-LOOKBACK-PERIODS-001.1
+func TestService_UpdateIssueWatch_PersistsLookbackPeriod(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	created, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", SentryInstanceID: f.ensureInstance(t, "ws-1"),
+		WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	filter := validFilter()
+	filter.StatsPeriod = "30d"
+	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{Filter: &filter}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	reloaded, err := f.store.GetIssueWatch(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.Filter.StatsPeriod != "30d" {
+		t.Errorf("stored lookback = %q, want %q", reloaded.Filter.StatsPeriod, "30d")
+	}
+}
+
+// TestService_IssueWatch_LookbackPeriodValidation covers the two guards that
+// replace the project-scoped request parameter as the rejection point for a
+// lookback outside Kandev's supported syntax (a whole number of hours, days,
+// or weeks): the write sites reject it, an empty value stays acceptable, an
+// unrelated partial update never re-validates a stored value, and a row that
+// already stores one fails its poll closed without searching.
+//
+// @covers AC-INTEGRATIONS-SENTRY-WATCHER-LOOKBACK-PERIODS-001.4, AC-INTEGRATIONS-SENTRY-WATCHER-LOOKBACK-PERIODS-001.6
+func TestService_IssueWatch_LookbackPeriodValidation(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	instID := f.ensureInstance(t, "ws-1")
+	createReq := func(filter SearchFilter) *CreateIssueWatchRequest {
+		return &CreateIssueWatchRequest{
+			WorkspaceID: "ws-1", SentryInstanceID: instID,
+			WorkflowID: "wf", WorkflowStepID: "step", Filter: filter,
+		}
+	}
+
+	// 30m is a valid Sentry relative duration but outside the accepted set. Both
+	// write sites must reject it: the shared parser derives nothing from it, so
+	// the stored search would carry no age term at all and the watch would match
+	// issues of any age.
+	unsupported := validFilter()
+	unsupported.StatsPeriod = "30m"
+	if _, err := f.svc.CreateIssueWatch(ctx, createReq(unsupported)); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("create with a 30m lookback must be rejected, got %v", err)
+	}
+
+	created, err := f.svc.CreateIssueWatch(ctx, createReq(validFilter()))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{
+		Filter: &unsupported,
+	}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("filter-carrying update with a 30m lookback must be rejected, got %v", err)
+	}
+
+	// An empty lookback stays accepted: the field is optional and a legacy row
+	// may store it.
+	for _, empty := range []string{"", "   "} {
+		filter := validFilter()
+		filter.StatsPeriod = empty
+		if _, err := f.svc.CreateIssueWatch(ctx, createReq(filter)); err != nil {
+			t.Errorf("empty lookback %q must be accepted, got %v", empty, err)
+		}
+	}
+
+	// A row that already stores an unsupported value is neither rewritten nor
+	// re-validated by an update that omits the filter.
+	stored := newTestIssueWatch("ws-1")
+	stored.Filter.StatsPeriod = "30m"
+	if err := f.store.CreateIssueWatch(ctx, stored); err != nil {
+		t.Fatalf("seed watch: %v", err)
+	}
+	disabled := false
+	if _, err := f.svc.UpdateIssueWatch(ctx, stored.ID, &UpdateIssueWatchRequest{
+		Enabled: &disabled,
+	}); err != nil {
+		t.Errorf("unrelated partial update must not re-validate the stored lookback, got %v", err)
+	}
+
+	// That row's poll fails closed: the error is recorded and no search is
+	// issued, so an old issue cannot become a task through an age-less query.
+	searched := false
+	f.client.searchIssuesFn = func(_ SearchFilter, _ string) (*SearchResult, error) {
+		searched = true
+		return &SearchResult{IsLast: true}, nil
+	}
+	if _, _, err := f.svc.CheckIssueWatch(ctx, stored); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("poll with a stored 30m lookback must fail closed, got %v", err)
+	}
+	if searched {
+		t.Error("poll must not search when the stored lookback is outside the supported syntax")
+	}
+	refreshed, err := f.store.GetIssueWatch(ctx, stored.ID)
+	if err != nil {
+		t.Fatalf("reload watch: %v", err)
+	}
+	if refreshed.LastError == "" {
+		t.Error("expected the poll failure recorded on the watch")
+	}
+}
+
 func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
@@ -336,6 +451,42 @@ func TestService_CheckIssueWatch_ClearsLastErrorAfterSuccess(t *testing.T) {
 	}
 	if reloaded.LastErrorAt != nil {
 		t.Errorf("last error timestamp = %v, want cleared after success", reloaded.LastErrorAt)
+	}
+}
+
+// TestService_CheckIssueWatch_PollsStoredLookbackPeriod proves an existing
+// watch keeps polling with the lookback token it stored: the row round-trips
+// through the store unaltered and the search client receives that token.
+//
+// @covers AC-INTEGRATIONS-SENTRY-WATCHER-LOOKBACK-PERIODS-001.3
+func TestService_CheckIssueWatch_PollsStoredLookbackPeriod(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	f.seedInstance(t, "ws-1", "Primary", "tok")
+	w := newTestIssueWatch("ws-1")
+	w.Filter.StatsPeriod = "30d"
+	if err := f.store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("seed watch: %v", err)
+	}
+
+	var polled []string
+	f.client.searchIssuesFn = func(filter SearchFilter, _ string) (*SearchResult, error) {
+		polled = append(polled, filter.StatsPeriod)
+		return &SearchResult{IsLast: true}, nil
+	}
+
+	reloaded, err := f.store.GetIssueWatch(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("reload watch: %v", err)
+	}
+	if reloaded.Filter.StatsPeriod != "30d" {
+		t.Fatalf("stored lookback = %q, want %q", reloaded.Filter.StatsPeriod, "30d")
+	}
+	if _, _, err := f.svc.CheckIssueWatch(ctx, reloaded); err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if len(polled) != 1 || polled[0] != "30d" {
+		t.Errorf("search client received lookbacks %v, want [30d]", polled)
 	}
 }
 

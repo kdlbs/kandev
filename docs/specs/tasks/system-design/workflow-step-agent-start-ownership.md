@@ -7,6 +7,7 @@ requirements:
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005
+  - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006
 ---
 
 # Workflow Step Agent Start Ownership System Design
@@ -28,6 +29,7 @@ The design preserves runtime configuration through the existing reset contract. 
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003` | [Prompt fallback ownership](#prompt-fallback-ownership), [Prompt-history contract](#prompt-history-contract), [Workflow-entry prompt flow](#workflow-entry-prompt-flow) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004` | [Creation destination routing](#creation-destination-routing) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005` | [Asynchronous launch prompt preservation](#asynchronous-launch-prompt-preservation) |
+| `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006` | [Initial creation prompt admission](#initial-creation-prompt-admission) |
 
 ## Components and responsibilities
 
@@ -72,6 +74,71 @@ Desktop and mobile use the same task-create payload builder and submission
 handler. The implementation does not change their layout, labels, touch
 targets, or navigation. Separate Playwright scenarios exercise the desktop
 split-menu action and the mobile plan-mode action.
+
+## Initial creation prompt admission
+
+This draft extension preserves initial placement from requirement `004`.
+The explicit step remains the source of the first user-message transition.
+The task system already owns this transition through `ProcessOnTurnStart`.
+The correction connects immediate REST and MCP creation to that existing boundary.
+
+### Eligibility and transport ownership
+
+Capture explicit step selection from the original create request before destination resolution.
+MCP fills `WorkflowStepID` even when the caller omits it, so the resolved value cannot prove explicit selection.
+Set a private `InitialCreatePrompt` marker on `LaunchSessionRequest` with `json:"-"`.
+The marker applies only to an admitted immediate create with an explicit step and non-empty textual input.
+It is not an agent-supplied or WebSocket-supplied launch option.
+
+REST preserves its synchronous `IntentPrepare` and asynchronous `IntentStartCreated` sequence.
+MCP preserves its existing asynchronous boundary and creation-settlement checks.
+For a marked MCP `IntentStart`, prepare a session through the existing prepare path with `DeferredStart: true`.
+Then use the same marked prepared-session dispatch as REST.
+Unmarked starts retain their current path. Do not infer eligibility from `AutoStart`, which has different workflow and scheduling semantics.
+
+Keep the shared orchestration in a focused helper, proposed as `task_create_prompt.go`.
+Keep `StartCreatedSession` free of unconditional trigger processing because workflow automatic starts also call it.
+
+### Transition before composition
+
+After preparation and before prompt composition, call `ProcessOnTurnStart` once.
+Use its existing transition lifecycle, which suppresses the destination's competing automatic prompt.
+Do not invoke the full `on_enter` sequence separately.
+Reload the task and resolve the resulting session using the same ownership rules as ordinary message submission.
+Reject a terminal or superseded session instead of reviving it.
+
+Resolve the effective profile and session settings from the resulting route.
+Build workflow content and the Kandev system block only after this resolution.
+Retain initial-task-brief admission, attachments, saved prompt expansion, and the existing first-message record.
+Do not duplicate the original description or persist two user messages.
+
+### Queues and running notifications
+
+If `ProcessOnTurnStartResult.Queued` is true, retain the input through the existing message queue and WIP admission path.
+Set `MetaKeyTurnStartAlreadyProcessed` on that queued input.
+Do not send the prompt or allocate a second session while WIP admission is pending.
+Queue insertion must retain attachment ownership and existing session-incarnation checks.
+
+For passthrough, the initial running notification must not evaluate the same trigger again.
+Bind the processed-trigger evidence to the admitted initial turn and execution identity.
+Consume or retire it through the matching running, failure, cancellation, or replacement path.
+A session-wide permanent skip flag would suppress later terminal input and is prohibited.
+Unmarked passthrough launches retain their existing event-driven trigger behavior.
+Queue replay must transfer the processed evidence to its actual dispatch identity.
+
+### Failures and verification
+
+Return processing and session-resolution errors before provider dispatch.
+Use existing launch-error persistence so asynchronous failure remains visible.
+Do not convert an error into a successful launch or bypass creation settlement, dependency, WIP, cancellation, or terminal-session gates.
+The existing engine logs identify successful transitions; failure logs include task and session identity without prompt text.
+
+Test both transport adapters and the real orchestration/engine path with controlled executor callbacks.
+At the first dispatch boundary, assert the step, session, profile, content, and dispatch count.
+Cover WIP release, profile switching, passthrough duplicate events, and a subsequent user turn.
+Keep automatic-entry and omitted-step controls to prevent cascading transitions.
+This package changes no rendered UI, public request field, storage schema, or provider protocol.
+The existing board projection shows the resulting step on desktop and phone.
 
 ## Session states
 
@@ -327,7 +394,11 @@ Recovery boots the session and lets the existing queue drain send its preserved 
 Do not send the same prompt as both a launch description and a queue entry.
 
 A queue write failure does not mask the original startup failure.
-Log a separate bounded preservation diagnostic with task, session, execution, and attempt identity, without input text or attachment contents.
+The attempt-owned preservation path retries queue admission once while its
+claim remains current. It releases the claim only after that retry fails, so a
+later callback can retry only with the same launch ownership. Log a separate
+bounded preservation diagnostic with task, session, execution, and attempt
+identity, without input text or attachment contents.
 The existing persistent launch error remains the visible recovery signal.
 No frontend layout or copy changes are required by this package.
 

@@ -103,6 +103,10 @@ export async function updateMessageQueueSettings(
     },
   });
 }
+export {
+  fetchSessionCapacitySettings,
+  updateSessionCapacitySettings,
+} from "./session-capacity-api";
 
 // Executors
 export async function listExecutors(options?: ApiRequestOptions): Promise<ListExecutorsResponse> {

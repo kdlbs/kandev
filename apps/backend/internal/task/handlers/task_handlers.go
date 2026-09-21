@@ -291,6 +291,7 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 	result := make([]service.TaskRepositoryInput, len(repos))
 	for i, r := range repos {
 		result[i] = service.TaskRepositoryInput{
+			CheckoutOptions:    r.CheckoutOptions,
 			RepositoryID:       r.RepositoryID,
 			BaseBranch:         r.BaseBranch,
 			CheckoutBranch:     r.CheckoutBranch,

@@ -78,7 +78,7 @@ test.describe("Mobile sidebar PR automation indicators", () => {
 
     await testPage.goto(`/t/${navigationTaskId}`);
     await new SessionPage(testPage).waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const targetRow = sheet.locator(`[data-task-row-id="${targetTaskId}"]`);

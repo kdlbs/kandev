@@ -37,11 +37,11 @@ async function assertCatchUpPolicyToggles(page: Page, catchUpMaxInput: () => Pro
   await catchUpMaxInput();
 
   await catchUpPolicyCombobox(page).click();
-  await page.getByRole("option", { name: "Skip missed" }).click();
+  await page.getByRole("option", { name: "Skip missed", exact: true }).click();
   await expect(page.getByText("Catch-up max", { exact: true })).toHaveCount(0);
 
   await catchUpPolicyCombobox(page).click();
-  await page.getByRole("option", { name: SUMMARIZE_MISSED_LABEL }).click();
+  await page.getByRole("option", { name: SUMMARIZE_MISSED_LABEL, exact: true }).click();
   await catchUpMaxInput();
 
   await expect(page.getByText(RETIRED_LABEL)).toHaveCount(0);
@@ -61,7 +61,7 @@ test.describe("Routine catch-up policy UI", () => {
       .locator("..")
       .getByRole("combobox")
       .click();
-    await testPage.getByRole("option", { name: "CEO" }).click();
+    await testPage.getByRole("option", { name: "CEO", exact: true }).click();
     await testPage.getByRole("button", { name: "Next" }).click();
     await testPage.getByRole("button", { name: "Next" }).click();
 
@@ -86,7 +86,7 @@ test.describe("Routine catch-up policy UI", () => {
     expect(routine.id).toBeTruthy();
 
     await testPage.goto(`/office/routines/${routine.id}`);
-    await expect(testPage.getByText("E2E Catch-up Detail Toggle")).toBeVisible({
+    await expect(testPage.getByText("E2E Catch-up Detail Toggle").last()).toBeVisible({
       timeout: 10_000,
     });
 

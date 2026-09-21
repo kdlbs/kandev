@@ -422,7 +422,7 @@ test.describe("Plugin-backed canvases on mobile", () => {
 
       await testPage.goto("/");
       await expect(testPage.getByTestId("kanban-board")).toBeVisible({ timeout: 20_000 });
-      const menuButton = testPage.getByRole("button", { name: "Open menu" });
+      const menuButton = testPage.getByTestId("app-nav-trigger");
       await expect(menuButton).toBeVisible();
       await menuButton.tap();
 

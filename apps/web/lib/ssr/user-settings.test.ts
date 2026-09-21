@@ -51,6 +51,22 @@ describe("user settings revision ordering", () => {
 
     expect(result.revision).toBeNull();
   });
+
+  it("hydrates workspace sidebar layouts without dropping their revisions", () => {
+    const result = buildCoreFields({
+      sidebar_layouts_by_workspace: {
+        "workspace-a": {
+          version: 1,
+          revision: 3,
+          nodes: [],
+        },
+      },
+    } as never) as Record<string, unknown>;
+
+    expect(result.sidebarLayoutsByWorkspace).toEqual({
+      "workspace-a": { version: 1, revision: 3, nodes: [] },
+    });
+  });
 });
 
 describe("startup page user settings", () => {

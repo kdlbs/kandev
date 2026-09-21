@@ -112,9 +112,12 @@ export type ActivityEntry = {
   workspaceId: string;
   actorType: "user" | "agent" | "system";
   actorId: string;
+  actorName?: string;
   action: string;
   targetType?: string;
   targetId?: string;
+  targetName?: string;
+  targetIdentifier?: string;
   details?: Record<string, unknown>;
   runId?: string;
   sessionId?: string;
@@ -150,6 +153,25 @@ export type BudgetPolicy = {
 
 export type RoutineStatus = "active" | "paused" | "archived";
 
+// ScheduleState is REQ-OFFICE-ROUTINE-ARMING-001's classification of whether a
+// routine's triggers can currently fire it, independent of `status` (intent).
+export type ScheduleState =
+  | "armed"
+  | "trigger_invalid"
+  | "trigger_unscheduled"
+  | "trigger_disabled"
+  | "event_only"
+  | "unscheduled_manual_only"
+  | "unscheduled_no_trigger"
+  | "unknown";
+
+export type UnarmedReason = "disabled" | "not_schedulable" | "stalled";
+
+export type UnarmedCronTrigger = {
+  triggerId: string;
+  reasons: UnarmedReason[];
+};
+
 export type Routine = {
   id: string;
   workspaceId: string;
@@ -167,6 +189,8 @@ export type Routine = {
   lastRunAt?: string;
   createdAt: string;
   updatedAt: string;
+  scheduleState?: ScheduleState;
+  unarmedCronTriggers?: UnarmedCronTrigger[];
 };
 
 export type RoutineTriggerKind = "cron" | "webhook";

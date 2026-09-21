@@ -115,6 +115,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_OFFICE_SCHEDULER_TICK_MS", class: "catalog"},
 		{envVar: "KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL", class: "catalog"},
 		{envVar: "KANDEV_TASK_PREPARATION_TIMEOUT", class: "catalog"},
+		{envVar: "KANDEV_TASK_STALL_DETECTION_THRESHOLD", class: "catalog"},
 		{envVar: "KANDEV_CREDENTIALS_FILE", class: "catalog"},
 		{envVar: "KANDEV_GH_MAX_CONCURRENT", class: "catalog"},
 		{envVar: "KANDEV_GIT_MAX_CONCURRENT", class: "catalog"},

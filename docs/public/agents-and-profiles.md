@@ -24,13 +24,44 @@ Open **Settings > Agents** (`/settings/agents`). Kandev scans the host on which 
 
 ![Settings > Agents showing detected agent CLIs, profiles, configured status, unavailable status, update indicators, and New profile controls.](../screenshots/settings-agents.png)
 
-The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, Hermes, Goose, and Antigravity. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
+The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, Hermes, Goose, Muse, and Antigravity. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
 
 Hermes launches with `hermes acp`. Install the required `hermes` executable from its **Settings > Agents** card, which runs the official Hermes installer. Hermes currently supports task and workspace sessions. Office-assigned skill injection is not yet supported.
 
 Goose launches with `goose acp`. Its **Settings > Agents** card runs only the official `download_cli.sh` installer. Homebrew (`block-goose-cli`) and pip (`pip install goose-ai`) are manual alternatives. Configure your model provider with `goose configure`. Goose currently supports task and workspace sessions.
 
 Antigravity has no automated install: Google distributes `agy_acp_server.par` (`agy_acp_server.exe` on Windows) and its `localharness_external` or `localharness` sibling (`localharness_external.exe` or `localharness.exe` on Windows) as a signed archive through the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp) rather than npm, so extract both files into one directory and add it to PATH yourself. Kandev fails discovery closed when the harness sibling is missing or not executable, so a partial extraction reports as not installed rather than as a broken session.
+
+### Muse command surfaces
+
+Muse Code has no native ACP server, so Kandev runs it through the community
+[`@bex-co/muse-code-acp`](https://github.com/bex-co/muse-code-acp) adapter,
+which is not affiliated with Meta:
+
+- Structured ACP sessions and one-shot inference use
+  `npx --yes --prefer-offline @bex-co/muse-code-acp@<effective-version>`, which
+  needs Node.js 22 or later.
+- The adapter drives the native `muse` executable through `muse serve`; CLI
+  Passthrough starts `muse` directly.
+- On POSIX hosts, the Muse install action runs the official
+  `https://dev.meta.ai/install.sh` installer into the first writable directory
+  on the backend's `PATH`. Windows has no automated Muse install action because
+  the official installer is a POSIX shell script.
+
+Kandev detects Muse when `muse` is on the `PATH` of the backend process and
+responds to `--version`. Sign in with `muse login`, or set `META_API_KEY` for
+headless and remote executors. Muse keeps sessions under
+`~/.local/share/muse`, which Kandev uses for session resume.
+Kandev removes `XDG_CONFIG_HOME` and `XDG_DATA_HOME` overrides from Muse
+processes so credentials and sessions use these managed paths. Executors use an
+isolated home directory for both `~/.config/muse` and `~/.local/share/muse`; the
+real host home directory is not mounted.
+
+The adapter starts sessions on the `model` in Muse's
+`~/.config/muse/settings.json` and falls back to its own default otherwise,
+while the interactive `muse` CLI falls back to Meta's catalogue default. To
+pin one model for both, set it there, for example
+`{"schema_version": 1, "model": "muse-spark-1.3"}`.
 
 ### Pi command surfaces
 
@@ -56,7 +87,7 @@ The status shown on this page is authoritative for the current host. A CLI that 
 ### Update a managed agent runtime
 
 The update icon is available on managed Claude, Codex, OpenCode, Copilot,
-Gemini, and Pi agent cards. It updates the runtime on the Kandev host.
+Gemini, Pi, and Muse agent cards. It updates the runtime on the Kandev host.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone

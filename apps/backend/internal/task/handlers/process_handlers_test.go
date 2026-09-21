@@ -124,6 +124,12 @@ func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models
 func (m *mockRepository) ListArchivedTasksWithActiveSessions(ctx context.Context) ([]string, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListUnarchivedTasksWithActiveSessions(ctx context.Context) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetLastMessageTimeBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]time.Time, error) {
+	return nil, nil
+}
 func (m *mockRepository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
 	return nil, nil
 }
@@ -471,6 +477,12 @@ func (m *mockRepository) ListLiveWorkspaceSessions(ctx context.Context) ([]*mode
 	return nil, nil
 }
 func (m *mockRepository) CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error) {
+	return nil, nil
+}
+func (m *mockRepository) CancelActiveTaskSessionsByIDs(ctx context.Context, taskID string, sessionIDs []string, reason string) ([]*models.TaskSession, error) {
+	return nil, nil
+}
+func (m *mockRepository) CancelActiveTaskSessionsByCandidates(ctx context.Context, taskID string, candidates []models.ActiveSessionCancellationCandidate, reason string) ([]*models.TaskSession, error) {
 	return nil, nil
 }
 func (m *mockRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {

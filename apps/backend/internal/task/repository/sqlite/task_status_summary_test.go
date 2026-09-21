@@ -66,10 +66,10 @@ func TestTaskStatusSummarySchemaReplayAndCascade(t *testing.T) {
 		t.Fatalf("summary rows after task deletion = %d, want 0", count)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay migrations: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay migrations twice: %v", err)
 	}
 }

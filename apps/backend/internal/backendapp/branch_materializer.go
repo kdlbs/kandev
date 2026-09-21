@@ -24,6 +24,7 @@ type branchMaterializerRepo interface {
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 }
@@ -81,8 +82,12 @@ func newBranchMaterializer(repo branchMaterializerRepo, mgr *worktree.Manager, l
 // Designed to be idempotent: the worktree manager's reuse path catches a
 // rerun for the same (session, repo, branch_slug) triple and returns the
 // existing worktree.
-func (b *branchMaterializer) MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) (*taskservice.BranchMaterializationResult, error) {
-	materialization, err := b.materializeUnfinalized(ctx, taskID, taskRepositoryID)
+func (b *branchMaterializer) MaterializeBranch(
+	ctx context.Context,
+	taskID, taskRepositoryID string,
+	target taskservice.BranchMaterializationTarget,
+) (*taskservice.BranchMaterializationResult, error) {
+	materialization, err := b.materializeUnfinalized(ctx, taskID, taskRepositoryID, &target)
 	if err != nil || materialization == nil {
 		return nil, err
 	}
@@ -94,7 +99,11 @@ func (b *branchMaterializer) MaterializeBranch(ctx context.Context, taskID, task
 // promote, rescan, or notify. Workspace-source batches call this phase for
 // every repository and publish only after their folders and live sessions have
 // all adopted the new root.
-func (b *branchMaterializer) materializeUnfinalized(ctx context.Context, taskID, taskRepositoryID string) (*branchMaterialization, error) {
+func (b *branchMaterializer) materializeUnfinalized(
+	ctx context.Context,
+	taskID, taskRepositoryID string,
+	expected *taskservice.BranchMaterializationTarget,
+) (*branchMaterialization, error) {
 	if b == nil || b.worktreeMgr == nil {
 		return nil, nil
 	}
@@ -104,6 +113,13 @@ func (b *branchMaterializer) materializeUnfinalized(ctx context.Context, taskID,
 	}
 	if !ok {
 		return nil, nil
+	}
+	if expected != nil && expected.TaskEnvironmentID != "" &&
+		(expected.TaskEnvironmentID != env.ID || expected.SessionID != session.ID) {
+		return nil, fmt.Errorf("%w: branch materialization target changed", models.ErrWorkspaceReuseUnsafe)
+	}
+	if err := b.verifyMaterializationTarget(ctx, taskID, session.ID, env.ID); err != nil {
+		return nil, err
 	}
 	wt, err := b.worktreeMgr.Create(ctx, req)
 	if err != nil {
@@ -149,19 +165,18 @@ func (b *branchMaterializer) prepareMaterializeRequest(
 			zap.String("task_id", taskID))
 		return worktree.CreateRequest{}, nil, nil, "", false, nil
 	}
-	env, err := b.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	env, err := b.resolveMaterializationEnvironment(ctx, taskID, session)
 	if err != nil {
-		return worktree.CreateRequest{}, nil, nil, "", false, fmt.Errorf("lookup task environment: %w", err)
+		return worktree.CreateRequest{}, nil, nil, "", false, err
 	}
-	if env == nil || env.TaskDirName == "" {
-		b.logger.Info("skipping materialize: task environment not provisioned yet",
-			zap.String("task_id", taskID))
+	if env == nil {
 		return worktree.CreateRequest{}, nil, nil, "", false, nil
 	}
 	slug := deriveBranchSlugForRow(tr)
 	req := worktree.CreateRequest{
 		TaskID:                 taskID,
 		SessionID:              session.ID,
+		TaskEnvironmentID:      env.ID,
 		TaskTitle:              task.Title,
 		RepositoryID:           repo.ID,
 		RepositoryPath:         repo.LocalPath,
@@ -178,6 +193,91 @@ func (b *branchMaterializer) prepareMaterializeRequest(
 		BranchSlug:             slug,
 	}
 	return req, env, session, slug, true, nil
+}
+
+func (b *branchMaterializer) resolveMaterializationEnvironment(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) (*models.TaskEnvironment, error) {
+	env, err := b.loadMaterializationEnvironment(ctx, taskID, session)
+	if err != nil || env == nil {
+		return env, err
+	}
+	if session == nil || session.TaskEnvironmentID != env.ID {
+		return nil, fmt.Errorf("%w: selected session is not bound to task environment %s", models.ErrWorkspaceReuseUnsafe, env.ID)
+	}
+	if err := b.validateMaterializationEnvironmentOwner(ctx, taskID, env); err != nil {
+		return nil, err
+	}
+	if env.ExecutorType != string(models.ExecutorTypeWorktree) {
+		return nil, fmt.Errorf("%w: branch materialization requires the worktree executor, got %q", models.ErrWorkspaceReuseUnsafe, env.ExecutorType)
+	}
+	if env.Status != models.TaskEnvironmentStatusReady || env.TaskDirName == "" {
+		return nil, fmt.Errorf("%w: task environment %s is not provisioned", models.ErrWorkspaceReuseUnsafe, env.ID)
+	}
+	return env, nil
+}
+
+func (b *branchMaterializer) loadMaterializationEnvironment(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) (*models.TaskEnvironment, error) {
+	if session == nil || session.TaskEnvironmentID == "" {
+		env, err := b.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("lookup task environment: %w", err)
+		}
+		return env, nil
+	}
+	env, err := b.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: session task environment %s could not be resolved: %w", models.ErrWorkspaceReuseUnsafe, session.TaskEnvironmentID, err)
+	}
+	if env == nil {
+		return nil, fmt.Errorf("%w: session task environment %s no longer exists", models.ErrWorkspaceReuseUnsafe, session.TaskEnvironmentID)
+	}
+	return env, nil
+}
+
+func (b *branchMaterializer) validateMaterializationEnvironmentOwner(
+	ctx context.Context,
+	taskID string,
+	env *models.TaskEnvironment,
+) error {
+	if env == nil || env.TaskID == "" {
+		return fmt.Errorf("%w: task environment owner could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	if env.TaskID == taskID {
+		return nil
+	}
+	owner, err := b.repo.GetTask(ctx, env.TaskID)
+	if err != nil {
+		return fmt.Errorf("%w: inherited task environment owner %s could not be verified: %w", models.ErrWorkspaceReuseUnsafe, env.TaskID, err)
+	}
+	if owner == nil {
+		return fmt.Errorf("%w: inherited task environment owner %s could not be verified", models.ErrWorkspaceReuseUnsafe, env.TaskID)
+	}
+	if owner.ArchivedAt != nil {
+		return fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe,
+			models.DescribeInheritedEnvironmentUnavailable(env.TaskID, owner))
+	}
+	return nil
+}
+
+func (b *branchMaterializer) verifyMaterializationTarget(
+	ctx context.Context,
+	taskID, sessionID, environmentID string,
+) error {
+	current, err := b.pickActiveSession(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.ID != sessionID || current.TaskEnvironmentID != environmentID {
+		return fmt.Errorf("%w: branch materialization session binding changed", models.ErrWorkspaceReuseUnsafe)
+	}
+	return nil
 }
 
 func taskRepositoryIntegrationRef(taskRepo *models.TaskRepository) string {
@@ -335,27 +435,7 @@ func (b *branchMaterializer) pickActiveSession(ctx context.Context, taskID strin
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
-	var best *models.TaskSession
-	for _, s := range sessions {
-		if !sessionEligibleForMaterialize(s) {
-			continue
-		}
-		if best == nil || s.UpdatedAt.After(best.UpdatedAt) {
-			best = s
-		}
-	}
-	return best, nil
-}
-
-func sessionEligibleForMaterialize(s *models.TaskSession) bool {
-	switch s.State {
-	case models.TaskSessionStateRunning,
-		models.TaskSessionStateStarting,
-		models.TaskSessionStateWaitingForInput,
-		models.TaskSessionStateCreated:
-		return true
-	}
-	return false
+	return taskservice.SelectBranchMaterializationSession(sessions), nil
 }
 
 // deriveBranchSlugForRow chooses the slug input that uniquely identifies the

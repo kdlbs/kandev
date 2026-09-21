@@ -43,6 +43,10 @@ func (r failProfileSwitchPromotionRepo) SetSessionPrimary(context.Context, strin
 	return r.err
 }
 
+func (r failProfileSwitchPromotionRepo) SetSessionPrimaryIfNonterminal(context.Context, string) (bool, error) {
+	return false, r.err
+}
+
 type profileSwitchFixture struct {
 	repo        *sqliterepo.Repository
 	svc         *Service

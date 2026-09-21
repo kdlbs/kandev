@@ -80,8 +80,8 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
 	}
 	running := &models.ExecutorRunning{
-		ID:                 execution.SessionID,
-		SessionID:          execution.SessionID,
+		ID:                 executionInventorySessionID(execution),
+		SessionID:          executionInventorySessionID(execution),
 		TaskID:             execution.TaskID,
 		ExecutorID:         strings.TrimSpace(getMetadataString(metadata, "executor_id")),
 		ExecutionProfileID: execution.AgentProfileID,
@@ -104,6 +104,14 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 			running.Metadata = make(map[string]interface{})
 		}
 		running.Metadata[MetadataKeyOfficeAgentProfileID] = officeProfileID
+	}
+	if execution.Owner.Kind == ExecutionOwnerRun {
+		if running.Metadata == nil {
+			running.Metadata = make(map[string]interface{})
+		}
+		running.Metadata[runExecutionOwnerMetadataKey] = execution.Owner
+		running.Resumable = false
+		running.WorktreePath = execution.WorkspacePath
 	}
 	if prior != nil {
 		if strings.TrimSpace(prior.ExecutorID) != "" {
@@ -279,7 +287,7 @@ func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *A
 	// its current columns and the next transition (or reconciliation) re-persists.
 	var prior *models.ExecutorRunning
 	if reader, ok := m.runningWriter.(executorRunningReader); ok {
-		existing, err := reader.GetExecutorRunningBySessionID(ctx, execution.SessionID)
+		existing, err := reader.GetExecutorRunningBySessionID(ctx, executionInventorySessionID(execution))
 		switch {
 		case err == nil:
 			prior = existing

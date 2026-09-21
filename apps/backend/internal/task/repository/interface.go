@@ -95,6 +95,14 @@ type TaskRepository interface {
 	// Returns whether the row was updated.
 	UnarchiveTask(ctx context.Context, id string) (bool, error)
 	ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error)
+	// ListUnarchivedTasksWithActiveSessions returns the unarchived tasks
+	// (archived_at IS NULL) that still have at least one task_sessions row
+	// in an active DB state (CREATED/STARTING/RUNNING/WAITING_FOR_INPUT).
+	// This is the candidate list for the session reconciliation sweep's
+	// active-task pass: unarchived tasks holding active sessions whose
+	// backing execution may be gone (e.g. after a backend restart). The
+	// archived counterpart is ListArchivedTasksWithActiveSessions.
+	ListUnarchivedTasksWithActiveSessions(ctx context.Context) ([]*models.Task, error)
 	// ListArchivedTasksWithActiveSessions returns the IDs of archived tasks
 	// (archived_at IS NOT NULL) that still have at least one task_sessions
 	// row in an active DB state (CREATED/STARTING/RUNNING/WAITING_FOR_INPUT).
@@ -290,6 +298,12 @@ type MessageRepository interface {
 	// merges the restored content back into message.Metadata. No-op when the
 	// message has no external payload (message.PayloadDigest == "").
 	RehydrateMessagePayload(ctx context.Context, message *models.Message) error
+	// GetLastMessageTimeBySessionIDs returns the newest task_session_messages
+	// updated_at for each requested session, in one chunked query. Sessions
+	// with no messages are absent from the result; callers fall back to the
+	// session row's own timestamps. Used by the session reconciliation sweep
+	// to measure per-session event silence.
+	GetLastMessageTimeBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]time.Time, error)
 	// HasUserPromptHistory reports whether the session has ever accepted a user
 	// prompt. The durable prompt sequence remains after message deletion.
 	HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error)
@@ -460,6 +474,21 @@ type SessionRepository interface {
 	// behavior by picking up IDLE sessions.
 	ListLiveWorkspaceSessions(ctx context.Context) ([]*models.TaskSession, error)
 	CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error)
+	// CancelActiveTaskSessionsByIDs transitions exactly the listed active
+	// sessions (CREATED/STARTING/RUNNING/WAITING_FOR_INPUT) to CANCELLED,
+	// returning the full row of each session actually transitioned. It is
+	// the session-scoped counterpart of CancelActiveTaskSessionsByTaskID:
+	// sessions outside the ID list — including ones that became active
+	// after the caller classified its set — are never touched. Callers that
+	// classified a stale or partial snapshot use it so a mid-sweep
+	// registration of new live work cannot be cancelled by a bulk
+	// task-scoped write. Same RETURNING contract as the task-scoped method.
+	CancelActiveTaskSessionsByIDs(ctx context.Context, taskID string, sessionIDs []string, reason string) ([]*models.TaskSession, error)
+	// ActiveSessionCancellationCandidate captures the activity and current-turn
+	// identity observed by a reconciliation pass. Implementations must cancel a
+	// candidate only when the session row, message activity clock, and active
+	// turn still match this snapshot at the write boundary.
+	CancelActiveTaskSessionsByCandidates(ctx context.Context, taskID string, candidates []models.ActiveSessionCancellationCandidate, reason string) ([]*models.TaskSession, error)
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
 	GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error)
 	HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error)

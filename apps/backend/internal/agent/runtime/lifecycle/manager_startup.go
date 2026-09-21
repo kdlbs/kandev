@@ -110,6 +110,12 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if err := execution.contextResetAdmissionError(); err != nil {
 		return err
 	}
+	if err := m.admitExecutionOwner(ctx, &LaunchRequest{
+		Owner:          execution.Owner,
+		OwnerAdmission: execution.OwnerAdmission,
+	}); err != nil {
+		return err
+	}
 	defer func() {
 		retErr = wrapBootstrapFailure(execution, retErr)
 	}()
@@ -193,6 +199,13 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
 
 	execution.remoteInstanceLifecycleMu.Lock()
+	if err := m.admitExecutionOwner(operationCtx, &LaunchRequest{
+		Owner:          execution.Owner,
+		OwnerAdmission: execution.OwnerAdmission,
+	}); err != nil {
+		execution.remoteInstanceLifecycleMu.Unlock()
+		return err
+	}
 	if err := m.ensureLaunchSessionStillActive(operationCtx, execution.SessionID, executionAdmissionAgent); err != nil {
 		execution.remoteInstanceLifecycleMu.Unlock()
 		return err

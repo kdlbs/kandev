@@ -253,10 +253,11 @@ func (h *Handlers) applyMoveTaskImmediate(
 		return ws.NewError(msg.ID, msg.Action, classifyMoveTaskError(err), moveTaskErrorMessage(err), nil)
 	}
 	response := dto.MoveTaskResponse{
-		Task:         dto.FromTask(result.Task),
-		MoveID:       result.MoveID,
-		EntryOptions: result.EntryOptions,
-		Disposition:  moveDispositionApplied,
+		Task:                  dto.FromTask(result.Task),
+		WorkflowEntryIdentity: result.WorkflowEntryIdentity,
+		MoveID:                result.MoveID,
+		EntryOptions:          result.EntryOptions,
+		Disposition:           moveDispositionApplied,
 	}
 	if result.WorkflowStep != nil {
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)

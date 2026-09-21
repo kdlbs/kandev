@@ -51,6 +51,16 @@ const translate = (key: string) =>
   )[key] ?? key;
 
 describe("settings discovery catalog invariants", () => {
+  it("places sidebar customization under the Layouts page", () => {
+    const sidebar = SETTINGS_DISCOVERY_DEFINITIONS.find((entry) => entry.id === "layouts-sidebar");
+
+    expect(sidebar).toMatchObject({
+      kind: "section",
+      parentId: "preferences-layouts",
+      href: "/settings/preferences/layouts?tab=sidebar",
+    });
+  });
+
   it("uses unique ids, valid parents, and targets for every control", () => {
     const ids = new Set(SETTINGS_DISCOVERY_DEFINITIONS.map((entry) => entry.id));
     const targets = SETTINGS_DISCOVERY_DEFINITIONS.flatMap((entry) =>

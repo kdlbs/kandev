@@ -1,4 +1,9 @@
 "use client";
+import { MobileListingOptionsContext } from "./mobile-listing-options-context";
+import {
+  MobileConfirmationHost,
+  MobileConfirmationHostBody,
+} from "@/components/confirmation/mobile-confirmation-host";
 import { type ReactNode, type RefObject } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
@@ -37,6 +42,8 @@ export type MobileMenuSheetProps = {
   isSearchLoading?: boolean;
   tasksListOptions?: TasksListDisplayOptions;
   pageActions?: ReactNode;
+  listingOnly?: boolean;
+  listingControls?: ReactNode;
 };
 
 function MobileSearchSection({
@@ -140,6 +147,7 @@ function MobileViewSection({
 
 function ResponsiveMenuSurface({
   isMobile,
+  listingOnly,
   open,
   onOpenChange,
   contentRef,
@@ -148,6 +156,7 @@ function ResponsiveMenuSurface({
   children,
 }: {
   isMobile: boolean;
+  listingOnly?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   contentRef: RefObject<HTMLDivElement | null>;
@@ -158,30 +167,39 @@ function ResponsiveMenuSurface({
   const { t } = useTranslation();
   if (isMobile) {
     return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent
-          ref={contentRef}
-          tabIndex={-1}
-          onOpenAutoFocus={onOpenAutoFocus}
-          onCloseAutoFocus={onCloseAutoFocus}
-          className="h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] !max-h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] outline-none"
-        >
-          <div
-            data-testid="mobile-home-menu-card"
-            className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-background shadow-2xl shadow-black/20"
-          >
-            <DrawerHeader className="shrink-0 border-b border-border/70 pb-3 text-left">
-              <DrawerTitle>{t("kanban:menu")}</DrawerTitle>
-            </DrawerHeader>
-            <div
-              data-testid="mobile-home-menu-scroll"
-              className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom,0px)]"
+      <MobileConfirmationHost open={open} surface="drawer">
+        {({ contentProps }) => (
+          <Drawer open={open} onOpenChange={onOpenChange}>
+            <DrawerContent
+              {...contentProps}
+              ref={contentRef}
+              tabIndex={-1}
+              onOpenAutoFocus={onOpenAutoFocus}
+              onCloseAutoFocus={onCloseAutoFocus}
+              className="h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] !max-h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] outline-none"
             >
-              {children}
-            </div>
-          </div>
-        </DrawerContent>
-      </Drawer>
+              <MobileConfirmationHostBody>
+                <div
+                  data-testid="mobile-home-menu-card"
+                  className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-background shadow-2xl shadow-black/20"
+                >
+                  <DrawerHeader className="shrink-0 border-b border-border/70 pb-3 text-left">
+                    <DrawerTitle>
+                      {t(listingOnly ? "common:viewOptions" : "kanban:menu")}
+                    </DrawerTitle>
+                  </DrawerHeader>
+                  <div
+                    data-testid="mobile-home-menu-scroll"
+                    className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom,0px)]"
+                  >
+                    {children}
+                  </div>
+                </div>
+              </MobileConfirmationHostBody>
+            </DrawerContent>
+          </Drawer>
+        )}
+      </MobileConfirmationHost>
     );
   }
 
@@ -218,6 +236,8 @@ function MobileMenuContent({
   displayOptions,
   navControls,
   pageActions,
+  listingOnly,
+  listingControls,
 }: Pick<
   MobileMenuSheetProps,
   | "workspaceId"
@@ -226,6 +246,8 @@ function MobileMenuContent({
   | "isSearchLoading"
   | "onOpenChange"
   | "pageActions"
+  | "listingOnly"
+  | "listingControls"
 > & {
   isMobile: boolean;
   open: boolean;
@@ -244,21 +266,28 @@ function MobileMenuContent({
           isSearchLoading={isSearchLoading ?? false}
         />
       )}
-      <MobileWorkspaceSection onOpenChange={onOpenChange} />
+      {!listingOnly && <MobileWorkspaceSection onOpenChange={onOpenChange} />}
       <MobileViewSection
         viewValue={viewValue}
         onViewChange={onViewChange}
         showPipeline={showPipeline}
       />
       <MobileDisplayOptions open={open} {...displayOptions} />
+      {listingControls && (
+        <MobileListingOptionsContext.Provider value={{ close: () => onOpenChange(false) }}>
+          {listingControls}
+        </MobileListingOptionsContext.Provider>
+      )}
       {/* Phone Home lives in this menu; the View toggle owns listing modes. */}
-      <AppNavSections
-        onNavigate={() => onOpenChange(false)}
-        omitSections={isMobile || viewValue === "threads" ? [] : ["primary"]}
-        omitDestinations={["tasks", "threads"]}
-        workspaceActions={<MobileWorkspaceActionsSection workspaceId={workspaceId} />}
-        controls={navControls}
-      />
+      {!listingOnly && (
+        <AppNavSections
+          onNavigate={() => onOpenChange(false)}
+          omitSections={isMobile || viewValue === "threads" ? [] : ["primary"]}
+          omitDestinations={["tasks", "threads"]}
+          workspaceActions={<MobileWorkspaceActionsSection workspaceId={workspaceId} />}
+          controls={navControls}
+        />
+      )}
     </div>
   );
 }
@@ -274,6 +303,8 @@ export function MobileMenuSheet({
   isSearchLoading = false,
   tasksListOptions,
   pageActions,
+  listingOnly = false,
+  listingControls,
 }: MobileMenuSheetProps) {
   const navControls = useAppNavDialogs(() => onOpenChange(false));
   const { contentRef, isMobile, viewValue, handleViewChange, displayOptions, focusMenu } =
@@ -299,6 +330,8 @@ export function MobileMenuSheet({
       displayOptions={displayOptions}
       navControls={navControls}
       pageActions={pageActions}
+      listingOnly={listingOnly}
+      listingControls={listingControls}
     />
   );
 }
@@ -314,6 +347,8 @@ function MobileMenuRender(
     | "onSearchChange"
     | "isSearchLoading"
     | "pageActions"
+    | "listingOnly"
+    | "listingControls"
   > & {
     isMobile: boolean;
     contentRef: RefObject<HTMLDivElement | null>;

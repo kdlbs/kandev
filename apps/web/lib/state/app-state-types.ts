@@ -46,6 +46,7 @@ import {
   defaultReviewState,
   defaultNeedsYouInboxState,
   defaultFailedInboxState,
+  defaultInboxHistoryState,
 } from "./slices";
 import type {
   WorkspaceState,
@@ -225,6 +226,10 @@ export type AppState = KanbanSlice & {
   // intersection on AppState)
   failedInbox: (typeof defaultFailedInboxState)["failedInbox"];
 
+  // Inbox History slice (actions merged via InboxHistorySliceActions
+  // intersection on AppState)
+  inboxHistory: (typeof defaultInboxHistoryState)["inboxHistory"];
+
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
   rightPanel: (typeof defaultUIState)["rightPanel"];
@@ -309,7 +314,7 @@ export type AppState = KanbanSlice & {
   upsertRepositoryBranchPolicy: (policy: RepositoryBranchPolicy) => void;
   removeRepositoryBranchPolicy: (repositoryId: string, policyId: string) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
-  setEditors: (editors: EditorsState["items"]) => void;
+  setEditors: (editors: EditorsState["items"], folderOpeningAvailable?: boolean) => void;
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState["items"]) => void;
   setPromptsLoading: (loading: boolean) => void;

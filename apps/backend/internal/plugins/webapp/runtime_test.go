@@ -23,7 +23,7 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func TestRuntimeServesEntryWithSecurityHeadersAndNoCookies(t *testing.T) {
+func TestRuntimeServesEntryWithSecurityHeadersAndCookiesDoNotReplaceCapability(t *testing.T) {
 	archive := canvasArchive(t, map[string]string{
 		"manifest.yaml": staticManifestYAML,
 		"ui/index.html": "<!doctype html><html><body>safe</body></html>",
@@ -59,7 +59,7 @@ func TestRuntimeServesEntryWithSecurityHeadersAndNoCookies(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "safe") {
 		t.Fatalf("body = %q", response.Body.String())
 	}
-	if got := response.Header().Get("Content-Security-Policy"); !strings.Contains(got, "sandbox allow-scripts allow-forms") || !strings.Contains(got, "form-action 'none'") || !strings.Contains(got, "frame-ancestors 'self' http://127.0.0.1:38429") {
+	if got := response.Header().Get("Content-Security-Policy"); !strings.Contains(got, "sandbox allow-scripts allow-forms allow-same-origin") || !strings.Contains(got, "form-action 'none'") || !strings.Contains(got, "frame-ancestors 'self' http://127.0.0.1:38429") {
 		t.Fatalf("CSP = %q", got)
 	}
 	for key, want := range map[string]string{
@@ -75,6 +75,22 @@ func TestRuntimeServesEntryWithSecurityHeadersAndNoCookies(t *testing.T) {
 	}
 	if got := response.Header().Get("Set-Cookie"); got != "" {
 		t.Fatalf("runtime set a cookie: %q", got)
+	}
+}
+
+func TestRuntimeCookieDoesNotReplaceCapability(t *testing.T) {
+	runtime := NewRuntime(NewTokenManager(nil), nil, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(&http.Cookie{Name: "kandev_session", Value: "valid-session"})
+	response := httptest.NewRecorder()
+
+	runtime.Serve(response, request, "missing-runtime-capability", "_kandev/v1/context")
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want missing capability to be rejected despite cookie", response.Code)
+	}
+	if !strings.Contains(response.Body.String(), "runtime_token_invalid") {
+		t.Fatalf("body = %q, want the runtime token error", response.Body.String())
 	}
 }
 

@@ -92,6 +92,7 @@ var startupCatalog = []CatalogEntry{
 	{Key: "office.schedulerTickMs", EnvVars: []string{"KANDEV_OFFICE_SCHEDULER_TICK_MS"}, Owner: "office", Default: "5000"},
 	{Key: "githubCredentialBroker.publicBaseUrl", EnvVars: []string{"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL"}, Owner: "github credential broker", Default: ""},
 	{Key: "tasks.preparationTimeout", EnvVars: []string{"KANDEV_TASK_PREPARATION_TIMEOUT"}, Owner: "task lifecycle", Default: "10m"},
+	{Key: "tasks.stallDetectionThreshold", EnvVars: []string{"KANDEV_TASK_STALL_DETECTION_THRESHOLD"}, Owner: "task lifecycle", Default: "2h"},
 	{Key: "credentials.file", EnvVars: []string{"KANDEV_CREDENTIALS_FILE"}, Owner: "credentials", Default: ""},
 	{Key: "limits.ghMaxConcurrent", EnvVars: []string{"KANDEV_GH_MAX_CONCURRENT"}, Owner: "subprocess admission", Default: "8"},
 	{Key: "limits.gitMaxConcurrent", EnvVars: []string{"KANDEV_GIT_MAX_CONCURRENT"}, Owner: "subprocess admission", Default: "12"},
@@ -146,7 +147,7 @@ var startupExclusions = []CatalogExclusion{
 	{EnvVar: "KANDEV_MCP_LOG_FILE", Class: "debug", Reason: "agentctl MCP debug logging"},
 	{EnvVar: "KANDEV_DEBUG_LOG_DIR", Class: "debug", Reason: "ACP debug logging directory"},
 	{EnvVar: "AGENTCTL_AUTO_APPROVE_PERMISSIONS", Class: "test", Reason: "profile-selected E2E behavior"},
-	{EnvVar: "KANDEV_MAX_CONCURRENT_SESSIONS", Class: "startup only", Reason: "instance session ceiling, environment-only, resolved once at startup with no YAML setting by contract"},
+	{EnvVar: "KANDEV_MAX_CONCURRENT_SESSIONS", Class: "startup override", Reason: "instance session capacity override for the live install setting; resolved once at startup and takes precedence over the saved value"},
 }
 
 // ConfigurationCatalog returns a defensive copy of the stable startup

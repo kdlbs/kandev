@@ -105,6 +105,23 @@ settings appear only after typing, while **Go to Settings** remains in the comma
 Discovery searches setting names and curated aliases, never saved values, secrets, paths, or other
 configuration content.
 
+## Customize the sidebar
+
+Open **Settings > Preferences > Sidebar** to customize the optional navigation for the active
+workspace. You can hide or reorder Home, New Task, Automations, Canvases, Integrations, and
+available plugin links. The setting belongs to your account and workspace, so it follows you
+across clients without changing another user's layout.
+
+Create named shortcut sections for destinations, canvases, automations, and plugin links. Fold a
+section to keep its header icons visible, or open the labelled list to use a shortcut. Automation
+icons show running, idle, or paused activity. Tasks and required inbox entries remain available in
+their fixed navigation area, and hiding a shortcut does not disable the underlying feature.
+
+On a phone, open the menu and choose **Sidebar** to edit the same layout. Use the move controls to
+reorder entries or move a shortcut to another section. **Restore defaults** resets the draft for the
+active workspace; the shared **Save changes** action persists it. If another client saves first, the
+editor keeps your draft and reports the conflict so you can reconcile it.
+
 ## Switch workspace
 
 The workspace picker sits in the sidebar header, next to the Kandev brand. It lists every
@@ -195,6 +212,8 @@ The dialog also supports multiple repositories, remote GitHub rows, and a single
 4. Run the repository's required checks. Agent completion does not prove that tests passed.
 5. Inspect commits and branch state. Create or associate a pull request only after provider credentials and the target base branch are correct.
 6. Move the task through the workflow's human review gate. Archive it only after deciding what should happen to its branch, worktree, and external issue or pull request.
+
+Large user messages keep their complete source for storage, agent input, copying, editing, and delivery. Kandev shortens the rendered transcript, raw text, workflow instructions, pinned prompt, and queued-message previews when they exceed the display limit. Select **Download full text** below a shortened preview to save the complete message.
 
 See [Sessions and review](sessions-and-review.md) for the workbench and [Tasks and workflows](tasks-and-workflows.md) for transitions, plans, workflow automation, and the current document and label limitations.
 

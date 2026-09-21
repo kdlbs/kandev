@@ -66,6 +66,12 @@ with a Luna profile can retain a later Astra model selection when reused.
   options, known routing/configuration state, or the connection state shall
   invalidate the preview. Late responses shall not overwrite a newer selection.
   Actual moves shall retain execution-time validation, including deferred moves.
+- **AC-TASKS-WORKFLOW-MOVE-PREVIEW-001.8:** While a disclosure remains open,
+  updates that do not affect its prediction shall preserve the displayed result
+  without another preview request. Examples include task descriptions, read
+  cursors, command counts, and activity-summary bookkeeping. Timestamp changes
+  that leave session selection unchanged shall also preserve the result.
+  Changes that alter candidate eligibility or selection shall still invalidate it.
 
 ### REQ-TASKS-WORKFLOW-MOVE-PREVIEW-002: Compact accessible disclosure
 
@@ -101,6 +107,7 @@ with a Luna profile can retain a later Astra model selection when reused.
 - [Conditional settings](workflow-session-settings.md)
 - [Design](../system-design/workflow-move-preview.md)
 - [Implementation plan](../../../plans/workflow-move-preview/plan.md)
+- [Preview stability repair](../../../plans/workflow-move-preview-stability/plan.md)
 
 ## Out of scope
 

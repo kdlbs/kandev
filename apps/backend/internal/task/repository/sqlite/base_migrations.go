@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/startup"
 )
 
 // migrateMessagePayloadStorage adds digest-backed external storage for large
@@ -75,7 +76,9 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 }
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
-func (r *Repository) runMigrations() error {
+//
+//nolint:cyclop,funlen,maintidx // Legacy flat list of ~60 independent idempotent migration steps predating startup-step instrumentation; splitting it is out of scope here.
+func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrateTaskPriorityToTextPostgres(); err != nil {
 		return err
 	}
@@ -138,6 +141,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
 	}
+	// Store task-local fixed-step profile substitutions after the workflow-FK
+	// rebuild so legacy databases cannot lose the column during that recreate.
+	_ = r.migrate.Apply("tasks.workflow_agent_overrides", `ALTER TABLE tasks ADD COLUMN workflow_agent_overrides TEXT`)
 	// Must run AFTER migrateTasksRemoveWorkflowFK: that migration recreates
 	// tasks from an explicit column list. Adding this column beforehand would
 	// have it silently dropped by the recreate on any database still carrying
@@ -233,7 +239,9 @@ func (r *Repository) runMigrations() error {
 	// explicitly in CreateMessage/UpdateMessage. The backfill UPDATE is idempotent
 	// (WHERE updated_at IS NULL).
 	r.migrate.Apply("task_session_messages.updated_at", `ALTER TABLE task_session_messages ADD COLUMN updated_at TIMESTAMP`)
+	startup.BeginStep(ctx, startup.StepMessageTimestampsBackfill)
 	r.migrate.Apply("task_session_messages.updated_at.backfill", `UPDATE task_session_messages SET updated_at = created_at WHERE updated_at IS NULL`)
+	startup.EndStep(ctx, startup.StepMessageTimestampsBackfill)
 	r.migrate.Apply("idx_messages_session_updated", `CREATE INDEX IF NOT EXISTS idx_messages_session_updated ON task_session_messages(task_session_id, updated_at)`)
 
 	// task_session_commits gains a uniqueness constraint before its writer
@@ -397,7 +405,7 @@ func (r *Repository) runMigrations() error {
 	// table is not part of the supported upgrade path, so there is no
 	// intermediate-shape rebuild to run here. Only the historical-message
 	// backfill belongs in the migration phase.
-	r.migrateSubagentContextBackfill()
+	r.migrateSubagentContextBackfill(ctx)
 
 	// Durable per-session prompt ordinals. prompt_seq is allocated from a
 	// per-session sequence counter inside the create write boundary, so an
@@ -416,7 +424,7 @@ func (r *Repository) runMigrations() error {
 			task_session_id TEXT PRIMARY KEY,
 			last_seq INTEGER NOT NULL
 		)`)
-	if err := r.backfillPromptSeq(); err != nil {
+	if err := r.backfillPromptSeq(ctx); err != nil {
 		return err
 	}
 
@@ -535,7 +543,7 @@ func (r *Repository) backfillTaskSessionQueueIncarnations() error {
 // session's sequence counter at its backfilled maximum. Idempotent: user rows
 // already carrying a nonzero prompt_seq are untouched, and the counter seed
 // ignores existing rows.
-func (r *Repository) backfillPromptSeq() error {
+func (r *Repository) backfillPromptSeq(ctx context.Context) error {
 	nmU := dialect.NormalizedMicrosecond(r.db.DriverName(), "u.created_at")
 	nmM := dialect.NormalizedMicrosecond(r.db.DriverName(), "task_session_messages.created_at")
 	update := fmt.Sprintf(`
@@ -547,7 +555,8 @@ func (r *Repository) backfillPromptSeq() error {
 			  AND (%s < %s OR (%s = %s AND u.id <= task_session_messages.id))
 		)
 		WHERE author_type = 'user' AND prompt_seq = 0`, nmU, nmM, nmU, nmM)
-	ctx := r.migrationContext()
+	startup.BeginStep(ctx, startup.StepPromptSeqBackfill)
+	defer startup.EndStep(ctx, startup.StepPromptSeqBackfill)
 	if _, err := r.db.ExecContext(ctx, update); err != nil {
 		return fmt.Errorf("backfill prompt_seq: %w", err)
 	}

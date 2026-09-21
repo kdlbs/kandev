@@ -1,14 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type RefObject, type ReactNode } from "react";
-import {
-  IconChevronDown,
-  IconCloudDownload,
-  IconGitBranch,
-  IconPlus,
-  IconStack2,
-  IconX,
-} from "@tabler/icons-react";
+import { IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -25,12 +18,6 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@kandev/ui/drawer";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
 import { Input } from "@kandev/ui/input";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
@@ -46,6 +33,7 @@ import {
   getWorkspaceSourceCapabilities,
   hasCloneableSavedRepository,
 } from "@/components/workspace-source-picker/executor-capabilities";
+import { RepositorySourceMenu } from "./repository-source-menu";
 import { AddFolderButton } from "./add-folder-button";
 import { SavedRepositorySourceRow } from "./saved-repository-source-row";
 import { useDialogOpenerFocus } from "./use-dialog-opener-focus";
@@ -53,7 +41,6 @@ import { useSubmitWorkspaceSources } from "./use-submit-workspace-sources";
 import { useWorkspaceRepositoryOptions } from "./use-workspace-repository-options";
 import { useWorkspaceSourceRows } from "./use-workspace-source-rows";
 import { WorkspaceChangeConsequences } from "./workspace-change-consequences";
-import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
@@ -341,79 +328,6 @@ function SourceForm({
         />
       ))}
     </div>
-  );
-}
-
-function RepositorySourceMenu({
-  isMobile,
-  onAdd,
-}: {
-  isMobile: boolean;
-  onAdd: (kind: "saved_repository" | "local_repository" | "remote_repository") => void;
-}) {
-  const { t } = useTranslation();
-  const itemClass = cn("cursor-pointer items-start gap-3", isMobile ? "min-h-11" : "py-2");
-  return (
-    <DropdownMenu modal={!isMobile}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          className={cn("cursor-pointer", isMobile ? "min-h-11" : "h-9 px-3")}
-        >
-          <IconPlus className="h-4 w-4" />
-          {t("task:addRepository")}
-          <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-80 max-w-[calc(100vw-2rem)]">
-        <RepositorySourceMenuItem
-          label={t("task:workspaceRepository")}
-          description={t("task:chooseFromSavedOrDiscoveredRepositories")}
-          icon={<IconStack2 className="mt-0.5 h-4 w-4 text-muted-foreground" />}
-          className={itemClass}
-          onSelect={() => onAdd("saved_repository")}
-        />
-        <RepositorySourceMenuItem
-          label={t("task:localGitRepository")}
-          description={t("task:useAnExistingCheckoutOnThis")}
-          icon={<IconGitBranch className="mt-0.5 h-4 w-4 text-muted-foreground" />}
-          className={itemClass}
-          onSelect={() => onAdd("local_repository")}
-        />
-        <RepositorySourceMenuItem
-          label={t("task:remoteRepository")}
-          description={t("task:cloneFromAProviderOrGit")}
-          icon={<IconCloudDownload className="mt-0.5 h-4 w-4 text-muted-foreground" />}
-          className={itemClass}
-          onSelect={() => onAdd("remote_repository")}
-        />
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function RepositorySourceMenuItem({
-  label,
-  description,
-  icon,
-  className,
-  onSelect,
-}: {
-  label: string;
-  description: string;
-  icon: ReactNode;
-  className: string;
-  onSelect: () => void;
-}) {
-  return (
-    <DropdownMenuItem aria-label={label} className={className} onSelect={onSelect}>
-      {icon}
-      <span className="min-w-0">
-        <span className="block text-sm font-medium text-foreground">{label}</span>
-        <span className="block text-xs text-muted-foreground">{description}</span>
-      </span>
-    </DropdownMenuItem>
   );
 }
 

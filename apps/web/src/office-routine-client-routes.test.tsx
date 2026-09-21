@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { defaultOfficeState } from "@/lib/state/slices/office/office-slice";
 import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
 import { RoutineDetailRoute } from "./office-routine-client-routes";
@@ -63,7 +64,9 @@ function renderRoute() {
         office: { ...defaultOfficeState.office },
       }}
     >
-      <RoutineDetailRoute routineId={ROUTINE_ID} />
+      <TooltipProvider>
+        <RoutineDetailRoute routineId={ROUTINE_ID} />
+      </TooltipProvider>
     </StateProvider>,
   );
 }

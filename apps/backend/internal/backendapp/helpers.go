@@ -84,6 +84,7 @@ import (
 	"github.com/kandev/kandev/internal/sentry"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
+	"github.com/kandev/kandev/internal/startup"
 	systemsvc "github.com/kandev/kandev/internal/system"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
@@ -729,6 +730,7 @@ type routeParams struct {
 	homeDir                       string
 	interimSettingsInterlockToken string
 	log                           *logger.Logger
+	progress                      *startup.Reporter
 }
 
 // registerRoutes sets up all HTTP and WebSocket routes on the given router.
@@ -865,6 +867,7 @@ func registerRoutes(p routeParams) {
 		p.services.GitLab.SetWatchDependencyValidator(&gitLabWatchDependencyValidator{
 			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
 		})
+		p.services.GitLab.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	}
 	if p.services.AzureDevOps != nil {
 		p.services.AzureDevOps.SetWatchRepositoryLookup(repoLookup)
@@ -885,6 +888,7 @@ func registerRoutes(p routeParams) {
 	if p.services.Sentry != nil {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)
 		p.services.Sentry.SetRepositoryLookup(repoLookup)
+		p.services.Sentry.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	}
 	if p.services.Automation != nil {
 		p.services.Automation.Service.SetRepositoryLookup(repoLookup)
@@ -1013,29 +1017,27 @@ func healthHandler(p routeParams) gin.HandlerFunc {
 func readyHandler(p routeParams) gin.HandlerFunc {
 	version := resolveVersion(p)
 	return func(c *gin.Context) {
+		body := gin.H{
+			serviceFieldKey: kandevName,
+			versionFieldKey: version,
+		}
+		if p.progress != nil {
+			body["startup"] = p.progress.Snapshot()
+		}
 		if !ready.Load() {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				statusKey:       startingStatus,
-				serviceFieldKey: kandevName,
-				versionFieldKey: version,
-			})
+			body[statusKey] = startingStatus
+			c.JSON(http.StatusServiceUnavailable, body)
 			return
 		}
 		if p.persistenceHealth != nil && !p.persistenceHealth.Healthy() {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				statusKey:       startingStatus,
-				serviceFieldKey: kandevName,
-				versionFieldKey: version,
-				"reason":        "persistence",
-				"store_ids":     p.persistenceHealth.UnhealthyStoreIDs(),
-			})
+			body[statusKey] = startingStatus
+			body["reason"] = "persistence"
+			body["store_ids"] = p.persistenceHealth.UnhealthyStoreIDs()
+			c.JSON(http.StatusServiceUnavailable, body)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			statusKey:       "ok",
-			serviceFieldKey: kandevName,
-			versionFieldKey: version,
-		})
+		body[statusKey] = "ok"
+		c.JSON(http.StatusOK, body)
 	}
 }
 
@@ -1596,6 +1598,7 @@ func registerSecondaryRoutes(
 	registerE2EResetRoutes(
 		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
 	)
+	registerE2EStartupPageFixtureRoute(p.router, p.log)
 
 	if officetestharness.Enabled() {
 		var officeAgentSvc *officeagents.AgentService
@@ -2001,6 +2004,9 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
+	if p.services.Automation != nil {
+		mcpHandlers.SetAutomationCreator(p.services.Automation.Service)
+	}
 	mcpHandlers.SetSettingsBroadcaster(p.gateway.Hub)
 	if settingsRegistry, err := buildSettingsRegistry(); err != nil {
 		p.log.Error("failed to build settings catalog", zap.Error(err))

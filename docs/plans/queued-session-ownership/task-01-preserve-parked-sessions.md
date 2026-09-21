@@ -22,6 +22,15 @@ system_design:
 
 # Task 01: Preserve parked sessions during inspection
 
+## Policy supersession, 2026-09-18
+
+The [revised conversation recovery package](../session-open-recovery-eligibility/plan.md)
+supersedes parked-session suppression and parking-note presentation in this
+historical package. Opening an earlier conversation now follows normal recovery.
+Keep queue identity, admission, callback, and reconciliation coverage. Replace
+old no-resume and parked-note assertions in the revised package's work orders.
+Historical results and outstanding PostgreSQL checks below are unchanged.
+
 ## Summary
 
 Make workflow parking durable and keep passive inspection separate from explicit
@@ -143,3 +152,11 @@ Passing checks:
 The PostgreSQL counterpart `TestPostgresWorkflowParking` is implemented, but
 the required command is blocked because `KANDEV_TEST_POSTGRES_DSN` is unset.
 The work order therefore remains in progress until that database check runs.
+
+## Follow-up: Session-open recovery eligibility
+
+The [recovery eligibility repair](../session-open-recovery-eligibility/plan.md)
+owns the historical-stop and settled-deferral regressions found after restart.
+It replaces the parking suppression policy and removes the parking note, with
+separate and combined recovery cases on desktop and phone. Existing results and PostgreSQL prerequisites here
+remain unchanged. The follow-up work order is pending implementation.

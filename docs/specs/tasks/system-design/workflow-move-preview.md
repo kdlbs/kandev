@@ -126,6 +126,68 @@ updates, profile updates, workflow-step updates, reconnect, and draft changes.
 Clear on close and fetch fresh on reopen. Debounce draft edits; typing instruction
 text need not refresh unless its presence changes prompt dispatch semantics.
 
+### Semantic revision inputs
+
+`getWorkflowMovePreviewRevision` in `use-workflow-move-preview-revision.ts`
+shall serialize explicit prediction inputs, not complete store records. This
+implements AC-TASKS-WORKFLOW-MOVE-PREVIEW-001.8 while preserving .7. The existing
+request hook remains responsible for loading, cancellation, retry, and generation
+checks. An irrelevant update retains the same key and successful result. A real
+input change clears that result before requesting another prediction. Do not
+retain a stale result as current, add polling, or cache completed requests.
+
+Use these projection boundaries for active and background workflow snapshots:
+
+| Input | Included meaning | Excluded bookkeeping |
+| --- | --- | --- |
+| Task | Identity, placement, primary session/state, archive eligibility, task profile fallback, initial-session and routing metadata | Title, description, position, unrelated metadata, status-summary counters and timestamps |
+| Sessions belonging to the task | Membership, identity/name, profile identities, state, primary/passthrough flags, configuration and original-session provenance | Read cursor, command counts, error prose, activity counters, workspace paths |
+| Configuration | Runtime configuration, overrides, original effective snapshot, profile snapshot fields used by preview, model/capability/config-option data | Unrelated session metadata and capability-fetch bookkeeping |
+| Workflow and steps | Default profile; source end policy; destination profile, target, start policy, entry actions; referenced target-step inputs | Workflow/step colors and unrelated presentation fields |
+| Profiles | Prediction-relevant identity, display name, family, model, mode, config options, passthrough and dynamic-routing configuration; scoped profile revision when the normalized option lacks a full field | Global profile version counters and capability error prose without a projected change |
+| Context | Connection status, workspace generation, requested task/workflow/step, normalized move options | Unrelated store activity |
+
+Keep both session stores and both task projections observable. Do not choose a
+new authority or collapse conflicting snapshots as part of this repair.
+Project metadata keys explicitly, including `agent_profile_id`,
+`workflow_initial_session`, `workflow_session_route`, `runtime_config`,
+`runtime_config_overrides`, `original_effective_config`, and
+`completion_follow_up` where the backend reads them. Trace the preview's helper
+calls when maintaining this list; arbitrary metadata is not an invalidation key.
+
+Timestamps require semantic treatment. `selectReusableWorkflowSession` uses
+`UpdatedAt` to rank eligible same-profile candidates, while `previewCurrentSession`
+uses primary flags and then `StartedAt` with an ID tie-break. Encode candidate
+ordering or selected identity dependencies instead of raw changing timestamps.
+Preserve exclusion and tie behavior, including terminal and completion-follow-up
+sessions. A timestamp update that changes selection must change the revision;
+one that leaves candidate order unchanged must not. Task-session and indexed
+session stores can contain two projections of the same logical session. Keep
+their raw projections and sensitivity, but calculate current-session,
+original-session, and candidate-order dependencies independently per store so
+the duplicate is never treated as two candidates or two marked originals.
+This is a freshness signal, not a frontend replacement for the server's move
+decision.
+
+Profile events update the full settings profile and a normalized picker option.
+The revision must read `mode` and `configOptions` from the full settings
+profile, and include the normalized profile's `updatedAt` as a scoped fallback
+when those fields are unavailable. An unrelated profile event or global profile
+version bump must not invalidate a preview that does not reference that profile.
+When an initial-target snapshot names an `agent_profile_id`, include that profile
+even if the historical session named by the snapshot is no longer present.
+
+Normalize object key order in projected maps. Sort collections only when their
+order is not meaningful; preserve rule order, selection order, and ties.
+Retain explicit empty and missing configuration distinctions where the backend
+distinguishes them. Never log revision contents.
+
+The correction covers `StepMoveControls`, `StepDisclosureMoveControls`, and
+`WorkflowMovePreviewFooter` through their shared hooks. It changes no drawer
+geometry, controls, copy, or endpoint contract. The
+[stability repair plan](../../../plans/workflow-move-preview-stability/plan.md)
+defines the implementation and regression matrix.
+
 Keep two-line loading/error states compact. Retry is explicit and does not move
 the task. Preview failure does not introduce a new move barrier. Show predictions
 as planned, not guaranteed; details explain that execution rechecks current state.

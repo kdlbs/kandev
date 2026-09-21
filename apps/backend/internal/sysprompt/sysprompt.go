@@ -166,10 +166,16 @@ func FormatOfficeContext(taskID, sessionID string) string {
 	return FormatOfficeContextWithOptions(taskID, sessionID, false)
 }
 
+const stepCompleteRecoveryInstruction = "If it reports that the workflow step changed, retries in this turn cannot recover. " +
+	"End the turn and have the user resume the session for the current step, then complete it in the new turn. " +
+	"already_signaled means the signal was accepted. " +
+	"Do not move the task solely to bypass a stale-turn error.\n"
+
 const officeStepCompleteInstruction = "This workflow step requires an explicit completion signal. " +
 	"Call step_complete_kandev as the LAST action after every requirement is satisfied. " +
 	"Do not call it before a question or during partial progress. " +
-	"If the tool is not visible, use the client's tool search or discovery with the canonical name.\n"
+	"If the tool is not visible, use the client's tool search or discovery with the canonical name.\n" +
+	stepCompleteRecoveryInstruction
 
 // FormatOfficeContextWithOptions formats the Office context for the current
 // workflow step. The imperative completion instruction is present only when
@@ -256,7 +262,8 @@ const richOutputSection = `- show_rich_output_kandev: For a chart, graph, plot, 
 const stepCompleteSection = "- step_complete_kandev: Signal that every requirement for the CURRENT workflow step is satisfied. " +
 	"Call it as the LAST action, never before a question or during partial progress. " +
 	"If it is not visible, use the client's tool search/discovery with the canonical name; some clients display mcp__kandev__step_complete_kandev. " +
-	"Required param: summary.\n"
+	"Required param: summary.\n" +
+	stepCompleteRecoveryInstruction
 
 // coordinatorTaskControlSection documents task-mode-only parent/child controls.
 // Restricted MCP modes omit the section because neither message_task_kandev nor

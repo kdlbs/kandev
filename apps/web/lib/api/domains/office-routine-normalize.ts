@@ -4,7 +4,10 @@ import type {
   Routine,
   RoutineRun,
   RoutineTrigger,
+  ScheduleState,
   UpdateRoutinePatch,
+  UnarmedCronTrigger,
+  UnarmedReason,
 } from "@/lib/state/slices/office/types";
 
 type WireRecord = Record<string, unknown>;
@@ -31,6 +34,38 @@ function optNum(record: WireRecord, key: string): number | undefined {
 function optBool(record: WireRecord, key: string): boolean | undefined {
   const value = record[key];
   return typeof value === "boolean" ? value : undefined;
+}
+
+const SCHEDULE_STATES = new Set<ScheduleState>([
+  "armed",
+  "trigger_invalid",
+  "trigger_unscheduled",
+  "trigger_disabled",
+  "event_only",
+  "unscheduled_manual_only",
+  "unscheduled_no_trigger",
+  "unknown",
+]);
+
+const UNARMED_REASONS = new Set<UnarmedReason>(["disabled", "not_schedulable", "stalled"]);
+
+function normalizeScheduleState(value: unknown): ScheduleState | undefined {
+  if (typeof value !== "string") return undefined;
+  return SCHEDULE_STATES.has(value as ScheduleState) ? (value as ScheduleState) : undefined;
+}
+
+function normalizeUnarmedCronTriggers(value: unknown): UnarmedCronTrigger[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isJSONObject).map((entry) => {
+    const trigger = asRecord(entry);
+    const reasons = Array.isArray(trigger.reasons)
+      ? trigger.reasons.filter(
+          (reason): reason is UnarmedReason =>
+            typeof reason === "string" && UNARMED_REASONS.has(reason as UnarmedReason),
+        )
+      : [];
+    return { triggerId: str(trigger, "trigger_id"), reasons };
+  });
 }
 
 function isJSONObject(value: unknown): value is WireRecord {
@@ -68,7 +103,7 @@ function assignIfDefined(body: WireRecord, key: string, value: unknown): void {
 
 export function normalizeRoutine(raw: unknown): Routine {
   const r = asRecord(raw);
-  return {
+  const routine: Routine = {
     id: str(r, "id"),
     workspaceId: str(r, "workspace_id"),
     name: str(r, "name"),
@@ -84,6 +119,12 @@ export function normalizeRoutine(raw: unknown): Routine {
     createdAt: str(r, "created_at"),
     updatedAt: str(r, "updated_at"),
   };
+  const scheduleState = normalizeScheduleState(r.schedule_state);
+  if (scheduleState !== undefined) routine.scheduleState = scheduleState;
+  if (Array.isArray(r.unarmed_cron_triggers)) {
+    routine.unarmedCronTriggers = normalizeUnarmedCronTriggers(r.unarmed_cron_triggers);
+  }
+  return routine;
 }
 
 export function normalizeRoutineTrigger(raw: unknown): RoutineTrigger {

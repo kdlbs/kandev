@@ -42,6 +42,7 @@ retains ownership of its values, validation, authority, and persistence.
 - [CI performance](requirements/ci-performance.md)
 
 - [Startup lifecycle](requirements/startup-lifecycle.md)
+- [Startup progress visibility](requirements/startup-progress-visibility.md)
 
 - [Agent-accessible Kandev settings](requirements/agent-settings-parity.md)
 
@@ -93,6 +94,7 @@ retains ownership of its values, validation, authority, and persistence.
 - [CI performance](system-design/ci-performance.md)
 
 - [Startup lifecycle](system-design/startup-lifecycle.md)
+- [Startup progress visibility](system-design/startup-progress-visibility.md)
 
 - [Agent-accessible Kandev settings](system-design/agent-settings-parity.md)
 - [Core settings domain adoption](system-design/agent-settings-domains.md)
