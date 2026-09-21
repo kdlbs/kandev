@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -19,6 +20,22 @@ type containerNetwork struct {
 	// GwPriority is the endpoint's gateway priority. Nil leaves Docker's own
 	// default-route selection unchanged, which a configured zero does not.
 	GwPriority *int
+	// Additional are the networks attached after the container is created, in
+	// configured order. They do not publish ports, so this is where an L2
+	// attachment belongs.
+	Additional []additionalNetwork
+}
+
+// additionalNetwork is one attachment beyond the primary network.
+type additionalNetwork struct {
+	Name       string
+	GwPriority *int
+}
+
+// additionalNetworkSpec is the persisted form of one additional network.
+type additionalNetworkSpec struct {
+	Name       string `json:"name"`
+	GwPriority *int   `json:"gw_priority,omitempty"`
 }
 
 // reservedContainerNetworkNames are Docker network *modes*. None of them names
@@ -66,7 +83,63 @@ func resolveContainerNetwork(
 			MetadataKeyDockerNetworkGwPriority, MetadataKeyDockerNetwork)
 	}
 
-	return containerNetwork{Name: name, GwPriority: priority}, nil
+	additional, err := parseAdditionalNetworks(
+		getMetadataString(metadata, MetadataKeyDockerAdditionalNetworks), name)
+	if err != nil {
+		return containerNetwork{}, err
+	}
+
+	return containerNetwork{Name: name, GwPriority: priority, Additional: additional}, nil
+}
+
+// parseAdditionalNetworks reads the configured attachment list.
+//
+// A duplicate is rejected here rather than left to the daemon, which reports a
+// repeated attachment as a conflict naming neither the field nor the intent.
+func parseAdditionalNetworks(raw, primary string) ([]additionalNetwork, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	var specs []additionalNetworkSpec
+	if err := json.Unmarshal([]byte(trimmed), &specs); err != nil {
+		return nil, fmt.Errorf("%s is not a list of networks: %w", MetadataKeyDockerAdditionalNetworks, err)
+	}
+
+	seen := map[string]bool{}
+	if primary != "" {
+		seen[primary] = true
+	}
+	networks := make([]additionalNetwork, 0, len(specs))
+	for _, spec := range specs {
+		name := strings.TrimSpace(spec.Name)
+		if name == "" {
+			return nil, fmt.Errorf("%s contains an entry with no network name", MetadataKeyDockerAdditionalNetworks)
+		}
+		if err := validateAdditionalNetworkName(name); err != nil {
+			return nil, err
+		}
+		if seen[name] {
+			return nil, fmt.Errorf(
+				"%s lists %q more than once, or repeats the primary network",
+				MetadataKeyDockerAdditionalNetworks, name)
+		}
+		seen[name] = true
+		networks = append(networks, additionalNetwork{Name: name, GwPriority: spec.GwPriority})
+	}
+	return networks, nil
+}
+
+// validateAdditionalNetworkName refuses a network mode here too. A mode is not
+// something a container can hold alongside another attachment.
+func validateAdditionalNetworkName(name string) error {
+	lowered := strings.ToLower(name)
+	if reservedContainerNetworkNames[lowered] || strings.HasPrefix(lowered, containerNetworkModePrefix) {
+		return fmt.Errorf(
+			"%s = %q names a Docker network mode, not a network",
+			MetadataKeyDockerAdditionalNetworks, name)
+	}
+	return nil
 }
 
 // validateContainerNetworkName rejects the values that name a network mode
@@ -146,8 +219,31 @@ func verifyPrimaryNetwork(ctx context.Context, inspector networkInspector, name 
 	if nonPublishingNetworkDrivers[strings.ToLower(info.Driver)] {
 		return fmt.Errorf(
 			"%s = %q uses the %s driver, which does not publish container ports; "+
-				"the primary network must publish the agentctl port",
-			MetadataKeyDockerNetwork, name, info.Driver)
+				"the primary network must publish the agentctl port, so configure "+
+				"this network under %s instead",
+			MetadataKeyDockerNetwork, name, info.Driver, MetadataKeyDockerAdditionalNetworks)
+	}
+	return nil
+}
+
+// networkConnector attaches a created container to a further network.
+type networkConnector interface {
+	ConnectNetwork(ctx context.Context, containerID string, endpoint docker.NetworkEndpointConfig) error
+}
+
+// attachAdditionalNetworks connects every configured additional network, in
+// configured order.
+//
+// An empty list makes no daemon call at all, so a launch that configures no
+// additional network is indistinguishable from one made before this existed.
+func attachAdditionalNetworks(
+	ctx context.Context, connector networkConnector, containerID string, networks []additionalNetwork,
+) error {
+	for _, net := range networks {
+		endpoint := docker.NetworkEndpointConfig{Network: net.Name, GwPriority: net.GwPriority}
+		if err := connector.ConnectNetwork(ctx, containerID, endpoint); err != nil {
+			return fmt.Errorf("attach network %s: %w", net.Name, err)
+		}
 	}
 	return nil
 }

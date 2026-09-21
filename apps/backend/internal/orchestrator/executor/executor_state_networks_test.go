@@ -15,6 +15,7 @@ import (
 var dockerNetworkAuthoritativeKeys = []string{
 	lifecycle.MetadataKeyDockerNetwork,
 	lifecycle.MetadataKeyDockerNetworkGwPriority,
+	lifecycle.MetadataKeyDockerAdditionalNetworks,
 }
 
 // @covers AC-EXECUTORS-DOCKER-NETWORKS-001.5

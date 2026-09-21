@@ -285,6 +285,7 @@ var profileConfigAuthoritativeKeys = []string{
 	// to, or join a LAN segment the profile never granted.
 	lifecycle.MetadataKeyDockerNetwork,
 	lifecycle.MetadataKeyDockerNetworkGwPriority,
+	lifecycle.MetadataKeyDockerAdditionalNetworks,
 }
 
 // clearAuthoritativeMetadataKeys blanks every profile-owned key in the

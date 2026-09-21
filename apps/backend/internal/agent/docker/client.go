@@ -667,6 +667,34 @@ func (c *Client) InspectNetwork(ctx context.Context, name string) (NetworkInfo, 
 	return NetworkInfo{Name: result.Network.Name, Driver: result.Network.Driver}, nil
 }
 
+// ConnectNetwork attaches an existing container to a further network.
+//
+// It is how a container holds more than one attachment: the network it was
+// created on publishes its ports, and these carry whatever else the operator
+// needs, including an L2 network that publishes nothing.
+func (c *Client) ConnectNetwork(ctx context.Context, containerID string, endpoint NetworkEndpointConfig) error {
+	settings := &network.EndpointSettings{}
+	if endpoint.GwPriority != nil {
+		settings.GwPriority = *endpoint.GwPriority
+	}
+	_, err := c.cli.NetworkConnect(ctx, endpoint.Network, client.NetworkConnectOptions{
+		Container:      containerID,
+		EndpointConfig: settings,
+	})
+	if err != nil {
+		return fmt.Errorf("connect container %s to network %s: %w", containerID, endpoint.Network, err)
+	}
+	// The negotiated API version is logged because GwPriority is silently
+	// ignored by a daemon too old for it, rather than refused. Without the
+	// version, a default route that went to the wrong attachment looks the
+	// same as one that was never configured.
+	c.logger.Info("Container attached to network",
+		zap.String("container_id", containerID),
+		zap.String("network", endpoint.Network),
+		zap.String("api_version", c.cli.ClientVersion()))
+	return nil
+}
+
 // GetContainerHostPort returns the Docker host endpoint for a published TCP port.
 func (c *Client) GetContainerHostPort(ctx context.Context, containerID string, containerPort int) (string, int, error) {
 	c.logger.Debug("Getting container host port",

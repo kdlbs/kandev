@@ -1,7 +1,7 @@
 ---
 id: "02-additional-networks"
 title: "Additional network attachments and gateway priority"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-primary-network"]
 plan: "plan.md"

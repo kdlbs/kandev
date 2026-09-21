@@ -337,6 +337,9 @@ func TestVerifyPrimaryNetworkDriver(t *testing.T) {
 			if !strings.Contains(err.Error(), "publish") {
 				t.Errorf("error = %q, want it to state the port-publishing requirement", err)
 			}
+			if !strings.Contains(err.Error(), MetadataKeyDockerAdditionalNetworks) {
+				t.Errorf("error = %q, want it to point at the additional-networks field", err)
+			}
 		}
 	})
 

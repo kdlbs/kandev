@@ -177,6 +177,9 @@ type ContainerManager struct {
 	// networkInspector reads a network's driver from the daemon this manager
 	// talks to. Nil means the manager's own Docker client.
 	networkInspector networkInspector
+	// networkConn attaches a created container to its additional networks.
+	// Nil means the manager's own Docker client.
+	networkConn networkConnector
 	// seedCreatedContainer delivers container inputs into a created container
 	// before it is started. Nil for a daemon that shares the backend's
 	// filesystem, where those inputs are bind-mounted instead.
@@ -283,15 +286,24 @@ func (cm *ContainerManager) createAndStartContainer(
 	ctx context.Context, config ContainerConfig,
 ) (string, string, string, int, error) {
 	if err := verifyPrimaryNetwork(ctx, cm.networks(), config.Network.Name); err != nil {
+		cm.logger.Error("container network rejected",
+			zap.String("network", config.Network.Name),
+			zap.Error(err))
 		return "", "", "", 0, err
 	}
+	cm.logger.Info("container network resolved",
+		zap.String("primary_network", config.Network.Name),
+		zap.Int("additional_networks", len(config.Network.Additional)))
 
 	containerCfg, err := cm.buildContainerConfig(config)
 	if err != nil {
 		return "", "", "", 0, fmt.Errorf("failed to build container config: %w", err)
 	}
 
-	containerID, err := createSeedAndStart(ctx, cm.dockerClient, containerCfg, cm.seedCreatedContainerHook(config), cm.logger)
+	containerID, err := createSeedAndStart(ctx, cm.dockerClient, containerCfg, containerCreateHooks{
+		attachNetworks: cm.attachNetworksHook(config),
+		seed:           cm.seedCreatedContainerHook(config),
+	}, cm.logger)
 	if err != nil {
 		return "", "", "", 0, err
 	}
@@ -379,6 +391,32 @@ func (cm *ContainerManager) resolveContainerEndpoint(ctx context.Context, contai
 		return "", 0, err
 	}
 	return host, port, nil
+}
+
+// attachNetworksHook returns the additional-network attachment step for one
+// launch, or nil when the launch configures none.
+func (cm *ContainerManager) attachNetworksHook(config ContainerConfig) func(context.Context, string) error {
+	if len(config.Network.Additional) == 0 {
+		return nil
+	}
+	return func(ctx context.Context, containerID string) error {
+		if err := attachAdditionalNetworks(ctx, cm.connector(), containerID, config.Network.Additional); err != nil {
+			cm.logger.Error("failed to attach additional network",
+				zap.String("container_id", containerID),
+				zap.Error(err))
+			return err
+		}
+		return nil
+	}
+}
+
+// connector returns the manager's network connector, defaulting to its own
+// Docker client.
+func (cm *ContainerManager) connector() networkConnector {
+	if cm.networkConn != nil {
+		return cm.networkConn
+	}
+	return cm.dockerClient
 }
 
 // networks returns the manager's network inspector, defaulting to its own

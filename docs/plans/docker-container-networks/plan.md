@@ -181,6 +181,6 @@ present.
 ## Work orders
 
 - [x] [Task 01: Resolve and validate the primary container network](task-01-primary-network.md)
-- [ ] [Task 02: Additional network attachments and gateway priority](task-02-additional-networks.md)
+- [x] [Task 02: Additional network attachments and gateway priority](task-02-additional-networks.md)
 - [ ] [Task 03: Executor profile network editor](task-03-profile-editor.md)
 - [ ] [Task 04: Container end-to-end coverage](task-04-e2e.md)

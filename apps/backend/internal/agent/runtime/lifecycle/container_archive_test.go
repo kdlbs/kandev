@@ -163,11 +163,11 @@ func TestCreateSeedAndStartSeedsBeforeStart(t *testing.T) {
 	var seeded []string
 
 	id, err := createSeedAndStart(context.Background(), api, docker.ContainerConfig{},
-		func(_ context.Context, containerID string) error {
+		containerCreateHooks{seed: func(_ context.Context, containerID string) error {
 			seeded = append(seeded, containerID)
 			api.calls = append(api.calls, "seed:"+containerID)
 			return nil
-		}, newTestLogger())
+		}}, newTestLogger())
 
 	require.NoError(t, err)
 	require.Equal(t, "cid-1", id)
@@ -182,7 +182,7 @@ func TestCreateSeedAndStartRemovesContainerWhenSeedingFails(t *testing.T) {
 	seedErr := errors.New("deliver agentctl: connection reset")
 
 	id, err := createSeedAndStart(context.Background(), api, docker.ContainerConfig{},
-		func(_ context.Context, _ string) error { return seedErr }, newTestLogger())
+		containerCreateHooks{seed: func(_ context.Context, _ string) error { return seedErr }}, newTestLogger())
 
 	require.Empty(t, id)
 	require.ErrorIs(t, err, seedErr)
@@ -195,7 +195,7 @@ func TestCreateSeedAndStartRemovesContainerWhenSeedingFails(t *testing.T) {
 func TestCreateSeedAndStartWithoutSeederIsUnchanged(t *testing.T) {
 	api := &fakeContainerStarter{createID: "cid-3"}
 
-	id, err := createSeedAndStart(context.Background(), api, docker.ContainerConfig{}, nil, newTestLogger())
+	id, err := createSeedAndStart(context.Background(), api, docker.ContainerConfig{}, containerCreateHooks{}, newTestLogger())
 
 	require.NoError(t, err)
 	require.Equal(t, "cid-3", id)
@@ -207,7 +207,7 @@ func TestCreateSeedAndStartWithoutSeederIsUnchanged(t *testing.T) {
 func TestCreateSeedAndStartRemovesContainerWhenStartFails(t *testing.T) {
 	api := &fakeContainerStarter{createID: "cid-4", startErr: errors.New("no such image")}
 
-	id, err := createSeedAndStart(context.Background(), api, docker.ContainerConfig{}, nil, newTestLogger())
+	id, err := createSeedAndStart(context.Background(), api, docker.ContainerConfig{}, containerCreateHooks{}, newTestLogger())
 
 	require.Empty(t, id)
 	require.Error(t, err)

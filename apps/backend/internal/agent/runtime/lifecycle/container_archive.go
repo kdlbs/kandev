@@ -157,6 +157,15 @@ func archiveName(p string) string {
 
 // containerStarter is the subset of the daemon API the create-seed-start
 // sequence uses, narrow enough to drive the sequence without a daemon.
+// containerCreateHooks are the steps that run between creating a container and
+// starting it, in that order. A nil hook is skipped and makes no daemon call.
+type containerCreateHooks struct {
+	// attachNetworks connects the container's additional networks.
+	attachNetworks func(ctx context.Context, containerID string) error
+	// seed delivers the container's inputs.
+	seed func(ctx context.Context, containerID string) error
+}
+
 type containerStarter interface {
 	CreateContainer(ctx context.Context, cfg docker.ContainerConfig) (string, error)
 	StartContainer(ctx context.Context, containerID string) error
@@ -174,7 +183,7 @@ func createSeedAndStart(
 	ctx context.Context,
 	api containerStarter,
 	cfg docker.ContainerConfig,
-	seed func(ctx context.Context, containerID string) error,
+	hooks containerCreateHooks,
 	log *logger.Logger,
 ) (string, error) {
 	containerID, err := api.CreateContainer(ctx, cfg)
@@ -182,10 +191,16 @@ func createSeedAndStart(
 		return "", fmt.Errorf("failed to create container: %w", err)
 	}
 
-	if seed != nil {
-		if seedErr := seed(ctx, containerID); seedErr != nil {
+	// Attaching precedes seeding because the seed extracts the agent's
+	// credentials into the container. A network failure after that point would
+	// have already placed them in a container about to be removed.
+	for _, hook := range []func(context.Context, string) error{hooks.attachNetworks, hooks.seed} {
+		if hook == nil {
+			continue
+		}
+		if hookErr := hook(ctx, containerID); hookErr != nil {
 			removeContainerAfterFailure(api, containerID, log)
-			return "", seedErr
+			return "", hookErr
 		}
 	}
 
