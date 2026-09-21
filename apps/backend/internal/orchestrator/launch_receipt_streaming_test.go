@@ -172,6 +172,45 @@ func TestHandleAgentStreamEventRejectsDelayedSameExecutionStartupFact(t *testing
 	}
 }
 
+func TestHandleAgentStreamEventRejectsDelayedSameExecutionActivity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-activity-replaced", "session-activity-replaced", "step-activity-replaced")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	for _, generation := range []uint64{1, 2} {
+		svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID: "task-activity-replaced", SessionID: "session-activity-replaced", ExecutionID: "execution-reused",
+			Data: &lifecycle.AgentStreamEventData{Type: "launch_receipt", Data: "started", StartupGeneration: generation},
+		})
+	}
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID: "task-activity-replaced", SessionID: "session-activity-replaced", ExecutionID: "execution-reused",
+		Data: &lifecycle.AgentStreamEventData{Type: agentEventToolCall, ToolCallID: "late-tool", ToolStatus: "running", StartupGeneration: 1},
+	})
+	session, err := repo.GetTaskSession(ctx, "session-activity-replaced")
+	if err != nil {
+		t.Fatalf("get session after delayed activity: %v", err)
+	}
+	current := session.Metadata[models.SessionMetaKeyLaunchReceiptState].(map[string]interface{})["current"].(map[string]interface{})
+	if current["inference_started"] != string(LaunchTriStateUnknown) {
+		t.Fatalf("delayed activity mutated replacement receipt: %#v", current)
+	}
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID: "task-activity-replaced", SessionID: "session-activity-replaced", ExecutionID: "execution-reused",
+		Data: &lifecycle.AgentStreamEventData{Type: agentEventToolCall, ToolCallID: "current-tool", ToolStatus: "running", StartupGeneration: 2},
+	})
+	session, err = repo.GetTaskSession(ctx, "session-activity-replaced")
+	if err != nil {
+		t.Fatalf("get session after current activity: %v", err)
+	}
+	current = session.Metadata[models.SessionMetaKeyLaunchReceiptState].(map[string]interface{})["current"].(map[string]interface{})
+	if current["inference_started"] != string(LaunchTriStateTrue) {
+		t.Fatalf("current activity did not record inference: %#v", current)
+	}
+}
+
 func TestSyntheticCopilotFreshAndResumeReceiptsReachFirstActivity(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -186,7 +225,7 @@ func TestSyntheticCopilotFreshAndResumeReceiptsReachFirstActivity(t *testing.T) 
 				Data: &lifecycle.AgentStreamEventData{Type: "launch_receipt", Data: fact, StartupGeneration: tc.generation}})
 		}
 		svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{TaskID: "copilot-task", SessionID: "copilot-session", ExecutionID: tc.executionID,
-			Data: &lifecycle.AgentStreamEventData{Type: agentEventToolCall, ToolCallID: "copilot-activity", ToolStatus: "running"}})
+			Data: &lifecycle.AgentStreamEventData{Type: agentEventToolCall, ToolCallID: "copilot-activity", ToolStatus: "running", StartupGeneration: tc.generation}})
 		session, err := repo.GetTaskSession(ctx, "copilot-session")
 		if err != nil {
 			t.Fatalf("get receipt: %v", err)

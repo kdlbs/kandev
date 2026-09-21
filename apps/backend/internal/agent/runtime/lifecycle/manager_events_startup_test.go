@@ -352,4 +352,7 @@ func TestStartupGenerationCapturesAttemptIDForReusedExecutionMessageChunk(t *tes
 	if streamEvents[0].AttemptID != "attempt-new" {
 		t.Fatalf("message stream attempt ID = %q, want attempt-new", streamEvents[0].AttemptID)
 	}
+	if streamEvents[0].Data.StartupGeneration != newGeneration {
+		t.Fatalf("message stream startup generation = %d, want %d", streamEvents[0].Data.StartupGeneration, newGeneration)
+	}
 }

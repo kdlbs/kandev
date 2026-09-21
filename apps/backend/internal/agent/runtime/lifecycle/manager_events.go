@@ -853,6 +853,7 @@ func (m *Manager) handlePromptHandoffEvent(
 // handleAgentEvent processes incoming agent events from the agent
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	startupGeneration := execution.startupAttemptSnapshot()
+	event.StartupGeneration = startupGeneration
 	execution.withStartupAttempt(startupGeneration, func(attemptID string) {
 		m.handleAgentEventWithAttempt(execution, event, attemptID)
 	})
@@ -872,6 +873,7 @@ func (m *Manager) handleAgentEventWithAttempt(
 // must not be buffered again.
 func (m *Manager) handleAgentEventAfterContextReset(execution *AgentExecution, event agentctl.AgentEvent) {
 	startupGeneration := execution.startupAttemptSnapshot()
+	event.StartupGeneration = startupGeneration
 	execution.withStartupAttempt(startupGeneration, func(attemptID string) {
 		m.handleAgentEventAtContextResetBoundary(execution, event, false, attemptID)
 	})
@@ -1067,6 +1069,7 @@ func (m *Manager) handleAgentEventWithStartupGeneration(
 	event agentctl.AgentEvent,
 	startupGeneration uint64,
 ) {
+	event.StartupGeneration = startupGeneration
 	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
 		event.AttemptID = attemptID
 		if !execution.isSessionInitialized() && event.PromptGeneration == 0 && event.Type == toolStatusComplete {

@@ -300,7 +300,7 @@ func (s *Service) recordLaunchReceiptInference(ctx context.Context, payload *lif
 	if !ok {
 		return
 	}
-	if history.Current.Identity.SessionID != payload.SessionID || history.Current.Identity.Incarnation != payload.ExecutionID {
+	if !launchReceiptActivityMatchesCurrent(history, payload) {
 		return
 	}
 	if launchReceiptInferenceRecorded(history) {
@@ -316,6 +316,12 @@ func (s *Service) recordLaunchReceiptInference(ctx context.Context, payload *lif
 	if err := s.repo.SetSessionMetadataKey(context.WithoutCancel(ctx), payload.SessionID, models.SessionMetaKeyLaunchReceiptState, history); err != nil {
 		s.logger.Warn("failed to persist launch receipt inference evidence", zap.String("session_id", payload.SessionID), zap.Error(err))
 	}
+}
+
+func launchReceiptActivityMatchesCurrent(history LaunchReceiptHistory, payload *lifecycle.AgentStreamEventPayload) bool {
+	return history.Current.Identity.SessionID == payload.SessionID &&
+		history.Current.Identity.Incarnation == payload.ExecutionID &&
+		history.Current.Identity.Generation == payload.Data.StartupGeneration
 }
 
 func applyLaunchReceiptEvent(history *LaunchReceiptHistory, identity LaunchAttemptIdentity, value interface{}) bool {
