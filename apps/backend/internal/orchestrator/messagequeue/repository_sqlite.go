@@ -5757,7 +5757,7 @@ func (r *sqliteRepository) transferSession(
 	if err := r.bumpSendNowGenerationTx(ctx, tx, newSessionID); err != nil {
 		return err
 	}
-	if err := r.transferPendingSendNowClaimTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+	if err := r.transferPendingSendNowClaimTx(ctx, tx, oldSessionID, newSessionID, destination); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5817,7 +5817,7 @@ func (r *sqliteRepository) transferSessionOwnedTx(
 	if err := r.transferSessionStateTx(ctx, tx, oldSessionID, newSessionID); err != nil {
 		return err
 	}
-	if err := r.transferPendingSendNowClaimTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+	if err := r.transferPendingSendNowClaimTx(ctx, tx, oldSessionID, newSessionID, nil); err != nil {
 		return err
 	}
 	return commitAuthorizedSessionTransferTx(

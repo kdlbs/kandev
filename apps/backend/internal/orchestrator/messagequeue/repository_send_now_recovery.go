@@ -140,6 +140,7 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	oldSessionID, newSessionID string,
+	destination *QueueSessionIdentity,
 ) error {
 	var claimID, claimJSON string
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
@@ -178,10 +179,14 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 		claim.Sources[sourceIndex].SessionID = newSessionID
 	}
 	claim.Dispatch.SessionID = newSessionID
+	if destination != nil {
+		claim.Identity = *destination
+	}
 	claim.SessionGeneration, err = r.getSendNowGenerationTx(ctx, tx, newSessionID)
 	if err != nil {
 		return err
 	}
+	claim.OperationGeneration = claim.SessionGeneration
 	claimJSONBytes, err := json.Marshal(&claim)
 	if err != nil {
 		return fmt.Errorf("marshal transferred Send Now claim: %w", err)
