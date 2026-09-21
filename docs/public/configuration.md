@@ -140,7 +140,7 @@ An external NATS URL moves event traffic across the configured network and can e
 | `docker.host`           | `KANDEV_DOCKER_HOST`           | `DOCKER_HOST`, otherwise platform socket                                      | Docker endpoint used by the client. Defaults to `unix:///var/run/docker.sock` on Unix and `npipe:////./pipe/docker_engine` on Windows. |
 | `docker.apiVersion`     | `KANDEV_DOCKER_APIVERSION`     | empty                                                                         | Empty uses Docker API negotiation.                                                                                                     |
 | `docker.tlsVerify`      | `KANDEV_DOCKER_TLSVERIFY`      | `false`                                                                       | Accepted compatibility field; not wired into the current client.                                                                       |
-| `docker.defaultNetwork` | `KANDEV_DOCKER_DEFAULTNETWORK` | `kandev-network`                                                              | Accepted compatibility field; not wired into current executor networking.                                                              |
+| `docker.defaultNetwork` | `KANDEV_DOCKER_DEFAULTNETWORK` | empty                                                                         | Network local Docker task containers are created on when their executor profile names none. Empty uses the daemon's own default. The network must already exist; Kandev creates none. Does not apply to a `remote_docker` profile. |
 | `docker.volumeBasePath` | `KANDEV_DOCKER_VOLUMEBASEPATH` | `/var/lib/kandev/volumes` on Unix; `%LOCALAPPDATA%\kandev\volumes` on Windows | Accepted compatibility field; not wired into current executor volume placement.                                                        |
 
 The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon; it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](docker.md) and [Executors](executors.md).
@@ -430,7 +430,7 @@ docker:
   host: "unix:///var/run/docker.sock" # use the Windows named pipe on Windows
   apiVersion: ""
   tlsVerify: false # compatibility-only today
-  defaultNetwork: "kandev-network" # compatibility-only today
+  defaultNetwork: "" # empty = the daemon's own default network
   volumeBasePath: "/var/lib/kandev/volumes" # compatibility-only today
 
 agent:

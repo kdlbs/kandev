@@ -85,8 +85,8 @@ deployment requires.
   including when the profile's value is empty.
 - **AC-EXECUTORS-DOCKER-NETWORKS-001.6:** A primary network shall be rejected
   when it is not a port-publishing network, when it names a network mode rather
-  than a network (`host`, `none`, `bridge` as a mode, or a `container:` form),
-  or when it does not exist on the target daemon. The rejection shall name the
+  than a network (`host`, `none`, `default`, or a `container:` form), or when it
+  does not exist on the target daemon. The rejection shall name the
   profile field, the network name, and the reason, and shall be reported before
   or in place of a launch, never as a container that starts and cannot be
   reached.

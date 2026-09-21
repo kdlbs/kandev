@@ -203,7 +203,7 @@ func (r *RemoteDockerExecutor) dialRemote(ctx context.Context, req *ExecutorCrea
 		sshPortForwarder{client: sshClient, logger: r.logger},
 	)
 
-	mgr := NewContainerManager(dockerClient, "", "", r.logger)
+	mgr := NewContainerManager(dockerClient, "", r.logger)
 	mgr.containerHostFiles = newRemoteContainerHostFiles(info.Platform)
 	mgr.endpointResolver = session.endpoints
 

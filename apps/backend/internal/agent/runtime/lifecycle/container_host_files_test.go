@@ -137,7 +137,7 @@ func TestRemoteLaunchConfigDropsLocalClonePath(t *testing.T) {
 		},
 	}
 
-	local, err := buildDockerContainerConfig(req, "local_docker")
+	local, err := buildDockerContainerConfig(req, "local_docker", "")
 	if err != nil {
 		t.Fatalf("local config: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestRemoteLaunchConfigDropsLocalClonePath(t *testing.T) {
 		t.Fatal("local_docker lost its clone mount; this test would not detect the remote bug")
 	}
 
-	remote, err := buildDockerContainerConfig(req, "remote_docker")
+	remote, err := buildDockerContainerConfig(req, "remote_docker", "")
 	if err != nil {
 		t.Fatalf("remote config: %v", err)
 	}

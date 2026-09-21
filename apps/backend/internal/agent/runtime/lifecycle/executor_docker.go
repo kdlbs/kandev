@@ -139,7 +139,7 @@ func (r *DockerExecutor) ensureClient() (*docker.Client, *ContainerManager, erro
 	cli.SetActivityCoordinator(r.activity)
 
 	r.docker = cli
-	r.containerMgr = NewContainerManager(cli, "", r.kandevHomeDir, r.logger)
+	r.containerMgr = NewContainerManager(cli, r.kandevHomeDir, r.logger)
 	r.initialized = true
 
 	return r.docker, r.containerMgr, nil
@@ -286,7 +286,7 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 }
 
 func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) (ContainerConfig, error) {
-	return buildDockerContainerConfig(req, string(models.ExecutorTypeLocalDocker))
+	return buildDockerContainerConfig(req, string(models.ExecutorTypeLocalDocker), r.cfg.DefaultNetwork)
 }
 
 func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result *LaunchResult, containerIP string) *ExecutorInstance {

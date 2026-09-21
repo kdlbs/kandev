@@ -100,17 +100,18 @@ already establish for `docker.host`
 (`AC-EXECUTORS-REMOTE-DOCKER-001.1`): an install-wide daemon-scoped value does
 not reach a remote profile.
 
-`ContainerManager` gains a resolved `networkPlan` in place of the bare
-`networkName` string. The constructor takes the plan, so every construction site
-is forced to state what it resolved; there is no implicit fallback inside the
-manager.
+`ContainerManager.networkName` is removed rather than replaced. A local
+executor builds one manager and caches it in `ensureClient`, while the profile
+that names the network is per-launch, so a network held on the manager would
+give every task the first task's network.
 
-Because a `ContainerManager` for the local executor is built once and cached in
-`ensureClient`, and the profile is per-launch, the per-launch part of the plan
-is passed on the launch path rather than baked into the cached manager. The
-plan is built in `buildDockerContainerConfig` from launch metadata, and
-`ContainerManager` holds only the install-wide default to fall back to, which is
-constant for the process.
+Resolution happens in `buildDockerContainerConfig`, which already receives the
+launch metadata and the executor type, and the resolved `containerNetwork`
+travels on the launch's own `ContainerConfig`. The install-wide default reaches
+it as a parameter: `DockerExecutor` passes `r.cfg.DefaultNetwork`, and
+`RemoteDockerExecutor` passes an empty string through `dockerLaunchTarget`. The
+executor-type guard still lives inside `resolveContainerNetwork`, so the rule is
+asserted by a test rather than by what a caller happens to pass.
 
 ### Profile configuration keys
 
@@ -147,7 +148,8 @@ container, before `ContainerCreate`:
 
 1. Reject a value that names a network *mode* rather than a network: `host`,
    `none`, `default`, and any `container:` prefix. These are rejected on the
-   string alone, with no daemon call.
+   string alone, with no daemon call. `bridge` is not in that set: it names the
+   daemon's real default bridge network, which publishes ports.
 2. `NetworkInspect` the name. A missing network is reported as a launch failure
    naming the profile field, the network, and the daemon.
 3. Reject a driver that does not honour published ports: `macvlan`, `ipvlan`,
@@ -177,8 +179,10 @@ touched. Once the primary network is restricted to a port-publishing driver,
 cannot be read, iterates `NetworkSettings.Networks` and returns the first
 endpoint with a valid address. With more than one attachment that iteration is
 map-ordered and therefore non-deterministic, so it could return a macvlan
-address the backend cannot route to. The fallback is narrowed to the primary
-network's endpoint when a primary network is named, and left as-is otherwise.
+address the backend cannot route to. `Client.GetContainerIPOn` takes the
+preferred network and falls back to any attachment; `GetContainerIP` calls it
+with an empty preference, so callers that know no network keep today's
+behavior.
 
 ## Additional attachments
 

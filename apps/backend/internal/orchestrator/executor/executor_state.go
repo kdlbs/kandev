@@ -280,6 +280,11 @@ var profileConfigAuthoritativeKeys = []string{
 	// which the reader treats as disabled.
 	lifecycle.MetadataKeySSHReclaimTaskDir,
 	lifecycle.MetadataKeyAllowUserNamespaces,
+	// Network placement is a containment boundary. A task that could supply
+	// its own value would leave an internal network its profile confined it
+	// to, or join a LAN segment the profile never granted.
+	lifecycle.MetadataKeyDockerNetwork,
+	lifecycle.MetadataKeyDockerNetworkGwPriority,
 }
 
 // clearAuthoritativeMetadataKeys blanks every profile-owned key in the

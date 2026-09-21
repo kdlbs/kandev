@@ -1,7 +1,7 @@
 ---
 id: "01-primary-network"
 title: "Resolve and validate the primary container network"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

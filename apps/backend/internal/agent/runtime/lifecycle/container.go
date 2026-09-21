@@ -81,6 +81,10 @@ type ContainerConfig struct {
 	// so its warnings reach the user through the launch's own callback rather
 	// than a field on the shared container manager.
 	OnProgress PrepareProgressCallback
+	// Network is the resolved primary network for this launch. It is resolved
+	// on the launch path rather than held on the manager, because one manager
+	// serves every profile that reaches its daemon.
+	Network containerNetwork
 }
 
 func boolPtr(v bool) *bool {
@@ -150,7 +154,6 @@ type ContainerManager struct {
 	dockerClient   *docker.Client
 	commandBuilder *CommandBuilder
 	logger         *logger.Logger
-	networkName    string
 	// kandevHomeDir is the resolved Kandev root dir, used to derive the
 	// per-container agent session dirs that replace host home bind-mounts.
 	// Empty means "fall back to legacy {home}/.<agent>" — production callers
@@ -171,6 +174,9 @@ type ContainerManager struct {
 	// dial. Nil means the local resolver; a remote daemon installs one that
 	// forwards the remote host's published ports back to backend loopback.
 	endpointResolver containerEndpointResolver
+	// networkInspector reads a network's driver from the daemon this manager
+	// talks to. Nil means the manager's own Docker client.
+	networkInspector networkInspector
 	// seedCreatedContainer delivers container inputs into a created container
 	// before it is started. Nil for a daemon that shares the backend's
 	// filesystem, where those inputs are bind-mounted instead.
@@ -181,14 +187,13 @@ type ContainerManager struct {
 // resolved Kandev root dir used to host per-container agent session dirs;
 // pass "" only in legacy callers/tests that don't exercise the session-dir
 // mount path.
-func NewContainerManager(dockerClient *docker.Client, networkName, kandevHomeDir string, log *logger.Logger) *ContainerManager {
+func NewContainerManager(dockerClient *docker.Client, kandevHomeDir string, log *logger.Logger) *ContainerManager {
 	resolver := NewAgentctlResolver(log)
 	mockResolver := NewMockAgentResolver(log)
 	return &ContainerManager{
 		dockerClient:           dockerClient,
 		commandBuilder:         NewCommandBuilder(),
 		logger:                 log.WithFields(zap.String("component", "container-manager")),
-		networkName:            networkName,
 		kandevHomeDir:          kandevHomeDir,
 		resolveAgentctlBinary:  resolver.ResolveLinuxBinary,
 		resolveMockAgentBinary: mockResolver.ResolveLinuxBinary,
@@ -277,6 +282,10 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 func (cm *ContainerManager) createAndStartContainer(
 	ctx context.Context, config ContainerConfig,
 ) (string, string, string, int, error) {
+	if err := verifyPrimaryNetwork(ctx, cm.networks(), config.Network.Name); err != nil {
+		return "", "", "", 0, err
+	}
+
 	containerCfg, err := cm.buildContainerConfig(config)
 	if err != nil {
 		return "", "", "", 0, fmt.Errorf("failed to build container config: %w", err)
@@ -287,7 +296,7 @@ func (cm *ContainerManager) createAndStartContainer(
 		return "", "", "", 0, err
 	}
 
-	containerIP, err := cm.dockerClient.GetContainerIP(ctx, containerID)
+	containerIP, err := cm.dockerClient.GetContainerIPOn(ctx, containerID, config.Network.Name)
 	if err != nil {
 		cm.logger.Warn("failed to get container IP, trying localhost",
 			zap.String("container_id", containerID), zap.Error(err))
@@ -370,6 +379,15 @@ func (cm *ContainerManager) resolveContainerEndpoint(ctx context.Context, contai
 		return "", 0, err
 	}
 	return host, port, nil
+}
+
+// networks returns the manager's network inspector, defaulting to its own
+// Docker client.
+func (cm *ContainerManager) networks() networkInspector {
+	if cm.networkInspector != nil {
+		return cm.networkInspector
+	}
+	return cm.dockerClient
 }
 
 // endpoints returns the manager's resolver, defaulting to the local one built
@@ -623,15 +641,16 @@ exec /usr/local/bin/agentctl`,
 	}
 
 	containerCfg := docker.ContainerConfig{
-		Name:         containerName,
-		Image:        imageName,
-		Entrypoint:   bootstrap,
-		Cmd:          nil,
-		Env:          env,
-		WorkingDir:   cm.expandMountSource(rt.WorkingDir, containerWorkspacePath),
-		Mounts:       mounts,
-		PortBindings: dockerAgentctlPortBindings(),
-		NetworkMode:  cm.networkName,
+		Name:            containerName,
+		Image:           imageName,
+		Entrypoint:      bootstrap,
+		Cmd:             nil,
+		Env:             env,
+		WorkingDir:      cm.expandMountSource(rt.WorkingDir, containerWorkspacePath),
+		Mounts:          mounts,
+		PortBindings:    dockerAgentctlPortBindings(),
+		NetworkMode:     config.Network.Name,
+		NetworkEndpoint: config.Network.endpointConfig(),
 		// Give every agent container the host.docker.internal alias so a profile
 		// whose OpenAI-compatible provider is a service on the developer's host
 		// (loopback URLs are rewritten to this hostname) resolves on Linux too,

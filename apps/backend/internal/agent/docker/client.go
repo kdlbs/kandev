@@ -52,6 +52,30 @@ type ContainerConfig struct {
 	// "seccomp=<profile>" or "apparmor=<profile>". A nil or empty slice
 	// leaves SecurityOpt unset (nil), preserving Docker defaults.
 	SecurityOpt []string
+	// NetworkEndpoint configures the endpoint the container is created on.
+	// Nil means the container is created with no EndpointsConfig at all,
+	// which is the only way to leave Docker's own endpoint defaults alone.
+	// Set it only to carry a property NetworkMode cannot, such as the
+	// gateway priority; its Network must match NetworkMode.
+	NetworkEndpoint *NetworkEndpointConfig
+}
+
+// NetworkInfo is the part of a Docker network's state Kandev reads. The
+// driver decides whether the network honours published ports, which decides
+// whether the backend can reach agentctl through it.
+type NetworkInfo struct {
+	Name   string
+	Driver string
+}
+
+// NetworkEndpointConfig describes one network attachment's settings.
+type NetworkEndpointConfig struct {
+	// Network is the network the endpoint attaches to.
+	Network string
+	// GwPriority selects which of a container's attachments provides its
+	// default route; the highest value wins. Nil leaves Docker's own
+	// selection unchanged, which a zero does not.
+	GwPriority *int
 }
 
 // PortBindingConfig describes a container port to publish on the Docker host.
@@ -293,9 +317,10 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 	hostCfg := buildHostConfig(cfg, mounts, portBindings)
 
 	resp, err := c.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Config:     containerCfg,
-		HostConfig: hostCfg,
-		Name:       cfg.Name,
+		Config:           containerCfg,
+		HostConfig:       hostCfg,
+		NetworkingConfig: buildNetworkingConfig(cfg.NetworkEndpoint),
+		Name:             cfg.Name,
 	})
 	if err != nil {
 		c.logger.Error("Failed to create container",
@@ -341,6 +366,23 @@ func buildHostConfig(cfg ContainerConfig, mounts []mount.Mount, portBindings net
 		hc.SecurityOpt = cfg.SecurityOpt
 	}
 	return hc
+}
+
+// buildNetworkingConfig turns the optional primary endpoint into the Docker
+// create argument. It returns nil when no endpoint is configured, so a
+// container with no network settings is created with exactly the arguments it
+// was created with before endpoints were configurable.
+func buildNetworkingConfig(endpoint *NetworkEndpointConfig) *network.NetworkingConfig {
+	if endpoint == nil || endpoint.Network == "" {
+		return nil
+	}
+	settings := &network.EndpointSettings{}
+	if endpoint.GwPriority != nil {
+		settings.GwPriority = *endpoint.GwPriority
+	}
+	return &network.NetworkingConfig{
+		EndpointsConfig: map[string]*network.EndpointSettings{endpoint.Network: settings},
+	}
 }
 
 func buildDockerPortBindings(bindings []PortBindingConfig) (network.PortSet, network.PortMap, error) {
@@ -563,9 +605,22 @@ func (c *Client) IsContainerRunning(ctx context.Context, containerID string) (bo
 	return info.State == "running", nil
 }
 
-// GetContainerIP returns the IP address of a container
+// GetContainerIP returns the IP address of a container on any attachment.
 func (c *Client) GetContainerIP(ctx context.Context, containerID string) (string, error) {
-	c.logger.Debug("Getting container IP", zap.String("container_id", containerID))
+	return c.GetContainerIPOn(ctx, containerID, "")
+}
+
+// GetContainerIPOn returns a container's address, preferring the named
+// network's endpoint.
+//
+// A container with more than one attachment has no single address, and map
+// iteration order is undefined, so without a preference this can return an
+// address on a network the backend cannot route to. Naming the primary network
+// makes the answer the one the backend reaches agentctl through.
+func (c *Client) GetContainerIPOn(ctx context.Context, containerID, preferred string) (string, error) {
+	c.logger.Debug("Getting container IP",
+		zap.String("container_id", containerID),
+		zap.String("preferred_network", preferred))
 
 	inspect, err := c.inspectContainer(ctx, containerID)
 	if err != nil {
@@ -574,21 +629,42 @@ func (c *Client) GetContainerIP(ctx context.Context, containerID string) (string
 	}
 
 	if inspect.NetworkSettings != nil {
-		// Check available networks for an IP address.
-		for netName, netSettings := range inspect.NetworkSettings.Networks {
-			if netSettings == nil || !netSettings.IPAddress.IsValid() {
-				continue
-			}
-			ip := netSettings.IPAddress.String()
+		if ip, ok := selectContainerIP(inspect.NetworkSettings.Networks, preferred); ok {
 			c.logger.Debug("Found container IP",
 				zap.String("container_id", containerID),
-				zap.String("network", netName),
 				zap.String("ip", ip))
 			return ip, nil
 		}
 	}
 
 	return "", fmt.Errorf("no IP address found for container %s", containerID)
+}
+
+// selectContainerIP picks a container address, preferring the named network's
+// endpoint and falling back to any attachment that has one.
+func selectContainerIP(networks map[string]*network.EndpointSettings, preferred string) (string, bool) {
+	if preferred != "" {
+		if settings, ok := networks[preferred]; ok && settings != nil && settings.IPAddress.IsValid() {
+			return settings.IPAddress.String(), true
+		}
+	}
+	for _, settings := range networks {
+		if settings == nil || !settings.IPAddress.IsValid() {
+			continue
+		}
+		return settings.IPAddress.String(), true
+	}
+	return "", false
+}
+
+// InspectNetwork returns the named network's state, or an error naming the
+// network when the daemon does not have it.
+func (c *Client) InspectNetwork(ctx context.Context, name string) (NetworkInfo, error) {
+	result, err := c.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
+	if err != nil {
+		return NetworkInfo{}, fmt.Errorf("inspect network %s: %w", name, err)
+	}
+	return NetworkInfo{Name: result.Network.Name, Driver: result.Network.Driver}, nil
 }
 
 // GetContainerHostPort returns the Docker host endpoint for a published TCP port.

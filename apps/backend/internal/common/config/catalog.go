@@ -68,7 +68,7 @@ var startupCatalog = []CatalogEntry{
 	{Key: "docker.host", EnvVars: []string{"KANDEV_DOCKER_HOST", "DOCKER_HOST"}, Owner: "docker", Default: "platform socket"},
 	{Key: "docker.apiVersion", EnvVars: []string{"KANDEV_DOCKER_APIVERSION"}, Owner: "docker", Default: ""},
 	{Key: "docker.tlsVerify", EnvVars: []string{"KANDEV_DOCKER_TLSVERIFY"}, Owner: "docker", Default: "false"},
-	{Key: "docker.defaultNetwork", EnvVars: []string{"KANDEV_DOCKER_DEFAULTNETWORK"}, Owner: "docker", Default: "kandev-network"},
+	{Key: "docker.defaultNetwork", EnvVars: []string{"KANDEV_DOCKER_DEFAULTNETWORK"}, Owner: "docker", Default: ""},
 	{Key: "docker.volumeBasePath", EnvVars: []string{"KANDEV_DOCKER_VOLUMEBASEPATH"}, Owner: "docker", Default: "platform default"},
 	{Key: "agent.standaloneHost", EnvVars: []string{"KANDEV_AGENT_STANDALONE_HOST"}, Owner: "agentctl", Default: "localhost"},
 	{Key: "agent.standalonePort", EnvVars: []string{"AGENTCTL_PORT", "KANDEV_AGENT_STANDALONE_PORT"}, Owner: "agentctl", Default: "39429"},
