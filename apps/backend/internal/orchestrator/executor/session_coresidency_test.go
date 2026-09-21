@@ -146,11 +146,12 @@ func TestObserveSessionCoresidency_SiblingReadFailureRecordsSkipNotAbsence(t *te
 	}
 }
 
-// TestLaunchPreparedSession_ObservesWorkingSiblingBeforeStartingAgent pins
-// the wiring half of AC-004.1: LaunchPreparedSession calls the observation
+// TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart pins the
+// wiring half of AC-004.1: LaunchPreparedSession calls the observation
 // before the agent process starts, for a real launch that otherwise
-// succeeds, not just the extracted helper.
-func TestLaunchPreparedSession_ObservesWorkingSiblingBeforeStartingAgent(t *testing.T) {
+// succeeds, not just the extracted helper. Ordering is enforced by
+// production code structure, not a synchronized assertion here.
+func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-123"] = &models.TaskSession{
 		ID:             "session-123",
@@ -207,9 +208,10 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingBeforeStartingAgent(t *test
 	}
 }
 
-// TestResumeSession_ObservesWorkingSiblingBeforeStartingAgent pins the
-// wiring half of AC-004.1 for the resume seam.
-func TestResumeSession_ObservesWorkingSiblingBeforeStartingAgent(t *testing.T) {
+// TestResumeSession_ObservesWorkingSiblingOnAgentStart pins the wiring
+// half of AC-004.1 for the resume seam. Ordering is enforced by
+// production code structure, not a synchronized assertion here.
+func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
 	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
