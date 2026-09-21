@@ -107,6 +107,13 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 		if err := validateRequesterIdentity(ctx, db, tx, req); err != nil {
 			return nil, err
 		}
+		snapshot, err := loadAdmissionSnapshot(ctx, db, tx, req.TaskEnvironmentID, req.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		if ClassifyAdmission(snapshot) == models.TaskEnvironmentAdmissionLiveBlocker {
+			return nil, fmt.Errorf("%w: environment %s has a live session or runtime", ErrBusy, req.TaskEnvironmentID)
+		}
 		if claim.OwnerTaskID == req.OwnerTaskID && claim.OwnershipGeneration == req.OwnershipGeneration &&
 			claim.SessionID == req.SessionID && claim.SessionIncarnationID == req.SessionIncarnationID &&
 			claim.OperationID == req.OperationID && claim.ExecutorType == req.ExecutorType {
