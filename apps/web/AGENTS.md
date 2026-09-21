@@ -111,8 +111,8 @@ surface.
   `next-themes` directly. The routing/image/dynamic adapters now provide
   browser-native behavior for the Vite SPA while legacy Next entrypoints are
   phased out.
-- Components: <200 lines, extract to domain components, composition over props.
-- Hooks: domain-organized in `hooks/domains/`, encapsulate subscription + selection.
+- Task links: `lib/links.ts::linkToTask` is the only `/t/:taskId` builder; pass raw IDs, use `TaskLink` or `AppLink`, and use `linkToTask` for router pushes. Keep compatibility `/tasks/:id`, Office/API paths, and route-recognition prefixes separate.
+- Components stay under 200 lines; extract domain components. Hooks belong in `hooks/domains/` and encapsulate subscription plus selection.
 - **Code-host dashboards:** GitHub, GitLab, and plugin code-host pages must use
   the provider-neutral primitives in `components/integrations/` for
   change-request lists, rows, toolbars, scope controls, task preset menus, and

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useRouter } from "@/lib/routing/client-router";
+import { linkToTask } from "@/lib/links";
 import {
   canvasHref,
   getCanvas,
@@ -372,10 +373,7 @@ async function editCanvasFromHost(options: CanvasHostEditOptions): Promise<void>
   try {
     const response = await startCanvasEdit(canvas.id);
     if (response.task_id) {
-      const query = response.session_id
-        ? `?sessionId=${encodeURIComponent(response.session_id)}`
-        : "";
-      router.push(`/t/${encodeURIComponent(response.task_id)}${query}`);
+      router.push(linkToTask(response.task_id, { sessionId: response.session_id ?? undefined }));
     }
   } catch (reason: unknown) {
     onError(reason);
