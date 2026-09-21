@@ -58,6 +58,7 @@ const (
 const defaultEventNamespace = "default"
 
 func provideOrchestrator(
+	ctx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
 	pool *db.Pool,
@@ -116,7 +117,7 @@ func provideOrchestrator(
 
 	queueRepo, err := messagequeue.NewSQLiteRepository(pool.Writer(), pool.Reader())
 	if len(trackers) > 0 && trackers[0] != nil {
-		if recordErr := recordRequiredStore(trackers[0], "message-queue", err); recordErr != nil {
+		if recordErr := recordRequiredStore(ctx, trackers[0], "message-queue", err); recordErr != nil {
 			return nil, nil, fmt.Errorf("message queue store: %w", recordErr)
 		}
 	}
@@ -169,6 +170,13 @@ func provideOrchestrator(
 	// Runtime-aware liveness lets durable cleanup treat a not-found stop for a
 	// confirmed-dead local runtime as already stopped instead of retrying forever.
 	taskSvc.SetRowLivenessProber(agentManagerClient)
+	// The orphan-session sweep terminalizes stale STARTING/RUNNING sessions no
+	// live in-memory execution backs (backend-restart residue, #3711).
+	taskSvc.SetExecutionLivenessChecker(agentManagerClient)
+	// The session reconciliation sweep's active-task pass (stall detection and
+	// orphaned-session healing) verifies "no live execution" against the agent
+	// runtime's in-memory execution store through this registry.
+	taskSvc.SetSessionExecutionRegistry(agentManagerClient)
 	taskSvc.SetContextWindowResetter(orchestratorSvc.ResetContextWindow)
 	taskSvc.SetGitArchiveCapture(orchestratorSvc)
 	// Automation runs keep their worktrees so they stay repliable, which makes
@@ -1221,10 +1229,6 @@ func (a *repositoryResolverAdapter) persistDetectedDefaultBranch(
 	// later write succeeds — and this call site retries with the same
 	// detected value on every future invocation, so a rejection driven by
 	// validation (as opposed to a transient DB error) will repeat forever.
-	// Review round 3, finding #4: this used to log at Warn and nothing
-	// else, making that permanent degradation invisible. Error level plus
-	// the dedicated counter make it observable the same way ancestry/write
-	// failures already are in internal/delivery/metrics.go.
 	if _, err := a.taskSvc.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{
 		DefaultBranch: &detected,
 	}); err != nil {

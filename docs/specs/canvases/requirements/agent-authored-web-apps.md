@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-08-26
-last_updated: 2026-09-10
+last_updated: 2026-09-19
 ---
 
 # Agent-authored web-app canvases Requirements
@@ -18,8 +18,8 @@ user can promote a useful task canvas to its workspace. A workspace canvas
 appears in workspace navigation and can use workspace-scoped data.
 
 The Canvases system owns the canvas scope, source lineage, release selection,
-promotion, editing flow, and discovery. The Plugins system owns the isolated
-web-application runtime and its data contract.
+promotion, editing flow, and discovery. The Plugins system owns the web-application
+runtime and its data contract.
 
 ## Terminology
 
@@ -208,6 +208,16 @@ canvas through native Kandev navigation.
 - **AC-CANVASES-AGENT-WEB-APPS-006.9:** A two-permission review shall expose
   both permissions and its actions without scrolling at 1280 by 720 CSS pixels.
   Longer reviews shall keep actions reachable at 390 by 844 CSS pixels.
+
+- **AC-CANVASES-AGENT-WEB-APPS-006.10:** An embedded canvas shall have one
+  host action toolbar aligned with other task panels under the shared
+  [panel toolbar contract](../../ui/requirements/panel-toolbars.md).
+  A standalone canvas shall retain one page navigation/action header.
+- **AC-CANVASES-AGENT-WEB-APPS-006.11:** Neither presentation shall add a
+  separate status-only toolbar. Loading and blocking errors shall appear once
+  in the body, with recovery actions. Ready shall show the application and an
+  accessible status announcement. Nonblocking offline state may appear inline
+  in the existing header while retaining the application.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-007: Visible runtime and release state
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -124,6 +125,17 @@ type TaskExecutionStopper interface {
 	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
 }
 
+// SessionExecutionRegistry reports which sessions of a task currently have a
+// live in-memory execution registered by the agent runtime's execution store.
+// The session reconciliation sweep uses it to tell an active session whose
+// backing actor is alive from one whose actor is gone (e.g. after a backend
+// restart), independent of the persisted session state.
+type SessionExecutionRegistry interface {
+	// LiveSessionIDsForTask returns the session IDs under taskID that have a
+	// registered in-memory execution. The snapshot is read-only.
+	LiveSessionIDsForTask(taskID string) []string
+}
+
 // synchronousTaskExecutionStopper is an optional cleanup-only extension. The
 // normal StopSession contract schedules process teardown asynchronously, but
 // destructive resource cleanup must wait until the process exits.
@@ -165,6 +177,16 @@ type SessionCeilingReleaser interface {
 // mistaken for an absent runtime.
 type TaskRowLivenessProber interface {
 	RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness
+}
+
+// TaskExecutionLivenessChecker reports whether a task session still has a
+// live agent execution backing it in the agent runtime's in-memory store.
+// Implementers must distinguish agent-owned executions from workspace-only
+// infrastructure and must answer from the store only — never lazily
+// (re)create an execution the way the GetOrEnsureExecution recovery
+// chokepoint does.
+type TaskExecutionLivenessChecker interface {
+	HasLiveExecution(sessionID string) bool
 }
 
 // TaskResourceCleanupActivityGate serializes durable cleanup with install-wide maintenance.
@@ -278,6 +300,25 @@ type WorkflowStepGetter interface {
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 }
 
+// AgentProfileReader provides the create-time eligibility check for a
+// task-local replacement profile without coupling task service to the full
+// settings repository contract.
+type AgentProfileReader interface {
+	GetAgentProfile(ctx context.Context, id string) (*settingsmodels.AgentProfile, error)
+}
+
+// AgentProfileExecutorValidator checks that a replacement profile can run on
+// the task's effective executor. It is injected by backend composition so the
+// task service does not depend on agent registry or runtime packages.
+type AgentProfileExecutorValidator interface {
+	ValidateAgentProfileForExecutor(
+		ctx context.Context,
+		profile *settingsmodels.AgentProfile,
+		executor *models.Executor,
+		executorProfile *models.ExecutorProfile,
+	) error
+}
+
 // WorkflowMovePreflight validates the destination lifecycle before a task
 // move is committed. The orchestrator owns the credential and session-target
 // checks, while the task service owns the move transaction.
@@ -364,30 +405,32 @@ func validateExecutorConfig(config map[string]string) error {
 
 // Repos holds the repository sub-interfaces used by the task service.
 type Repos struct {
-	Workspaces        repository.WorkspaceRepository
-	Tasks             repository.TaskRepository
-	TaskRepos         repository.TaskRepoRepository
-	WorkspaceFolders  repository.TaskWorkspaceFolderRepository
-	Workflows         repository.WorkflowRepository
-	Messages          repository.MessageRepository
-	Attachments       repository.AttachmentRepository
-	Turns             repository.TurnRepository
-	Sessions          repository.SessionRepository
-	GitSnapshots      repository.GitSnapshotRepository
-	RepoEntities      repository.RepositoryEntityRepository
-	DiscoveryRoots    repository.DesktopDiscoveryRootRepository
-	RepositorySets    repository.RepositorySetRepository
-	BranchPolicies    repository.RepositoryBranchPolicyRepository
-	RepositoryCleanup repository.RepositoryCleanupRepository
-	Executors         repository.ExecutorRepository
-	Environments      repository.EnvironmentRepository
-	TaskEnvironments  repository.TaskEnvironmentRepository
-	Reviews           repository.ReviewRepository
-	ResourceCleanups  repository.TaskResourceCleanupRepository
-	StatusSummaries   repository.TaskStatusSummaryRepository
-	TaskActivity      repository.TaskActivityRepository
-	SubagentContexts  repository.SubagentContextRepository
-	Usage             repository.UsageRepository
+	Workspaces                    repository.WorkspaceRepository
+	Tasks                         repository.TaskRepository
+	TaskRepos                     repository.TaskRepoRepository
+	WorkspaceFolders              repository.TaskWorkspaceFolderRepository
+	Workflows                     repository.WorkflowRepository
+	Messages                      repository.MessageRepository
+	Attachments                   repository.AttachmentRepository
+	Turns                         repository.TurnRepository
+	Sessions                      repository.SessionRepository
+	GitSnapshots                  repository.GitSnapshotRepository
+	RepoEntities                  repository.RepositoryEntityRepository
+	DiscoveryRoots                repository.DesktopDiscoveryRootRepository
+	RepositorySets                repository.RepositorySetRepository
+	BranchPolicies                repository.RepositoryBranchPolicyRepository
+	RepositoryCleanup             repository.RepositoryCleanupRepository
+	Executors                     repository.ExecutorRepository
+	Environments                  repository.EnvironmentRepository
+	TaskEnvironments              repository.TaskEnvironmentRepository
+	Reviews                       repository.ReviewRepository
+	ResourceCleanups              repository.TaskResourceCleanupRepository
+	StatusSummaries               repository.TaskStatusSummaryRepository
+	TaskActivity                  repository.TaskActivityRepository
+	SubagentContexts              repository.SubagentContextRepository
+	Usage                         repository.UsageRepository
+	AgentProfiles                 AgentProfileReader
+	AgentProfileExecutorValidator AgentProfileExecutorValidator
 }
 
 // Service provides task business logic
@@ -420,6 +463,8 @@ type Service struct {
 	taskActivity                    repository.TaskActivityRepository
 	subagentContexts                repository.SubagentContextRepository
 	usage                           repository.UsageRepository
+	agentProfiles                   AgentProfileReader
+	agentProfileExecutorValidator   AgentProfileExecutorValidator
 	workspacePolicyAttacher         WorkspacePolicyAttacher
 	autoArchiveCoordinator          AutoArchiveCoordinator
 	workflowTaskArchiveCoordinator  WorkflowTaskArchiveCoordinator
@@ -446,6 +491,7 @@ type Service struct {
 	parkedProjectionCanceller       ParkedProjectionCanceller
 	sessionCeilingReleaser          SessionCeilingReleaser
 	rowLivenessProber               TaskRowLivenessProber
+	executionLivenessChecker        TaskExecutionLivenessChecker
 	contextWindowResetter           func(context.Context, string) error
 	cleanupActivity                 TaskResourceCleanupActivityGate
 	branchMaterializer              BranchMaterializer
@@ -467,15 +513,25 @@ type Service struct {
 	envDestroyer                    EnvironmentDestroyer
 	wsGroupMembership               WorkspaceGroupMembershipReader
 	executorCapabilityProber        ExecutorCapabilityProber
+	checkoutCredentialPolicy        func(context.Context, string) (bool, error)
 	sshTaskDirReclaimer             SSHTaskDirReclaimer
 	// orphanReapHostSnapshotter and orphanReapVerifier back the reap phase's
 	// host process detection. Nil selects the real platform implementation
 	// (resource_cleanup_orphan_reap_host_*.go); tests override them
 	// directly since they are unexported and this is a whitebox package.
-	orphanReapHostSnapshotter   orphanReapHostSnapshotter
-	orphanReapVerifier          orphanReapVerifier
-	orphanReapSignaler          orphanReapSignaler
-	sessionRunningChecker       SessionRunningChecker
+	orphanReapHostSnapshotter orphanReapHostSnapshotter
+	orphanReapVerifier        orphanReapVerifier
+	orphanReapSignaler        orphanReapSignaler
+	sessionRunningChecker     SessionRunningChecker
+	sessionExecutionRegistry  SessionExecutionRegistry
+	stallDetectionThreshold   time.Duration
+	// stallNotifiedSessions dedupes task.stalled events per stall episode:
+	// task ID -> session IDs already reported. A session is reported at most
+	// once per episode; an episode ends when the session leaves the stalled
+	// set (terminal, healed, or a live execution reappeared), which clears
+	// its entry so a later stall on the same session reports again. Accessed
+	// only from the reconciliation sweep's single goroutine.
+	stallNotifiedSessions       map[string]map[string]struct{}
 	remoteBranchLister          RemoteBranchLister
 	repositorySelectionResolver RepositorySelectionResolver
 	repoCloneLocation           RepoCloneLocation
@@ -683,42 +739,45 @@ func (s *Service) SetWorkflowTaskArchiveCoordinator(coordinator WorkflowTaskArch
 // NewService creates a new task service
 func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
 	return &Service{
-		workspaces:            repos.Workspaces,
-		tasks:                 repos.Tasks,
-		taskRepos:             repos.TaskRepos,
-		workspaceFolders:      repos.WorkspaceFolders,
-		workflows:             repos.Workflows,
-		messages:              repos.Messages,
-		attachments:           repos.Attachments,
-		turns:                 repos.Turns,
-		sessions:              repos.Sessions,
-		gitSnapshots:          repos.GitSnapshots,
-		repoEntities:          repos.RepoEntities,
-		desktopRootStore:      repos.DiscoveryRoots,
-		repositorySets:        repos.RepositorySets,
-		branchPolicies:        repos.BranchPolicies,
-		repositoryCleanup:     repos.RepositoryCleanup,
-		executors:             repos.Executors,
-		environments:          repos.Environments,
-		taskEnvironments:      repos.TaskEnvironments,
-		reviews:               repos.Reviews,
-		resourceCleanups:      repos.ResourceCleanups,
-		statusSummaries:       repos.StatusSummaries,
-		taskActivity:          repos.TaskActivity,
-		subagentContexts:      repos.SubagentContexts,
-		usage:                 repos.Usage,
-		eventBus:              eventBus,
-		logger:                log,
-		discoveryConfig:       discoveryConfig,
-		discoveryCache:        make(map[string]discoveryCacheEntry),
-		discoveryRootCache:    make(map[string]discoveryRootCacheEntry),
-		discoveryFlights:      make(map[string]*discoveryFlight),
-		discoveryNow:          time.Now,
-		discoveryScanRoot:     scanRootForRepos,
-		filesystemWarnings:    fsdiagnostics.NewWarningLimiter(0),
-		branchFetcher:         newBranchFetcher(log.Zap()),
-		lastTaskActivity:      make(map[string]v1.ForegroundActivity),
-		lastTaskSubagentCount: make(map[string]int),
+		workspaces:                    repos.Workspaces,
+		tasks:                         repos.Tasks,
+		taskRepos:                     repos.TaskRepos,
+		workspaceFolders:              repos.WorkspaceFolders,
+		workflows:                     repos.Workflows,
+		messages:                      repos.Messages,
+		attachments:                   repos.Attachments,
+		turns:                         repos.Turns,
+		sessions:                      repos.Sessions,
+		gitSnapshots:                  repos.GitSnapshots,
+		repoEntities:                  repos.RepoEntities,
+		desktopRootStore:              repos.DiscoveryRoots,
+		repositorySets:                repos.RepositorySets,
+		branchPolicies:                repos.BranchPolicies,
+		repositoryCleanup:             repos.RepositoryCleanup,
+		executors:                     repos.Executors,
+		environments:                  repos.Environments,
+		taskEnvironments:              repos.TaskEnvironments,
+		reviews:                       repos.Reviews,
+		resourceCleanups:              repos.ResourceCleanups,
+		statusSummaries:               repos.StatusSummaries,
+		taskActivity:                  repos.TaskActivity,
+		subagentContexts:              repos.SubagentContexts,
+		usage:                         repos.Usage,
+		agentProfiles:                 repos.AgentProfiles,
+		agentProfileExecutorValidator: repos.AgentProfileExecutorValidator,
+		eventBus:                      eventBus,
+		logger:                        log,
+		discoveryConfig:               discoveryConfig,
+		discoveryCache:                make(map[string]discoveryCacheEntry),
+		discoveryRootCache:            make(map[string]discoveryRootCacheEntry),
+		discoveryFlights:              make(map[string]*discoveryFlight),
+		discoveryNow:                  time.Now,
+		discoveryScanRoot:             scanRootForRepos,
+		filesystemWarnings:            fsdiagnostics.NewWarningLimiter(0),
+		branchFetcher:                 newBranchFetcher(log.Zap()),
+		lastTaskActivity:              make(map[string]v1.ForegroundActivity),
+		lastTaskSubagentCount:         make(map[string]int),
+		stallNotifiedSessions:         make(map[string]map[string]struct{}),
 		// Focused service tests do not run backend composition. Production
 		// replaces this fallback with a database-allocated generation.
 		pendingActionProjectionEpoch: "1",
@@ -785,6 +844,28 @@ func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
 }
 
+// SetSessionExecutionRegistry wires the live-execution reader (agent runtime
+// lifecycle manager) used by the session reconciliation sweep to distinguish
+// an active session whose backing actor is still registered in this process
+// from one whose actor is gone. Optional: without it the sweep's active-task
+// pass (stall detection and orphaned-session healing) is skipped rather than
+// guessing, because "no live execution" cannot be verified.
+func (s *Service) SetSessionExecutionRegistry(registry SessionExecutionRegistry) {
+	s.sessionExecutionRegistry = registry
+}
+
+// SetStallDetectionThreshold configures the event-silence window after which
+// the session reconciliation sweep classifies an execution-less active
+// session as stalled (tasks.stallDetectionThreshold, default 2h). Non-positive
+// values keep the default. The orphaned-session healing grace window is
+// derived from this threshold (twice its value).
+func (s *Service) SetStallDetectionThreshold(threshold time.Duration) {
+	if threshold <= 0 {
+		return
+	}
+	s.stallDetectionThreshold = threshold
+}
+
 // SetClarificationCanceller wires terminal clarification cleanup for session
 // transitions owned by the task service.
 func (s *Service) SetClarificationCanceller(canceller TerminalClarificationCanceller) {
@@ -810,6 +891,15 @@ func (s *Service) SetSessionCeilingReleaser(releaser SessionCeilingReleaser) {
 // treats every row as Unknown.
 func (s *Service) SetRowLivenessProber(prober TaskRowLivenessProber) {
 	s.rowLivenessProber = prober
+}
+
+// SetExecutionLivenessChecker wires the in-memory execution-store lookup
+// (satisfied by the lifecycle adapter) used by the orphan-session
+// reconciliation sweep. It is optional; when unwired the sweep is inert,
+// because absent-from-store is its only dead signal and a nil checker can
+// never prove a session unbacked.
+func (s *Service) SetExecutionLivenessChecker(checker TaskExecutionLivenessChecker) {
+	s.executionLivenessChecker = checker
 }
 
 // SetContextWindowResetter wires the guarded context-window reset callback

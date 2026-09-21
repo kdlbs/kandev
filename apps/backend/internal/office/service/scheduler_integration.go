@@ -741,8 +741,8 @@ func (si *SchedulerIntegration) launchAgent(
 		si.logger.Error("agent launch failed",
 			zap.String("run_id", runID), zap.Error(err))
 		si.svc.AppendRunEvent(ctx, runID, "error", "error", map[string]interface{}{
-			"phase":         "adapter.invoke",
-			"error_message": err.Error(),
+			"phase":                   "adapter.invoke",
+			runEventFieldErrorMessage: err.Error(),
 		})
 		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
@@ -853,8 +853,8 @@ func (si *SchedulerIntegration) failTasklessRun(
 		return
 	}
 	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
-		"phase":         "scheduler.launch",
-		"error_message": msg,
+		"phase":                   "scheduler.launch",
+		runEventFieldErrorMessage: msg,
 	})
 	si.svc.recordTerminalShape(ctx, run, RunStatusFailed, nil)
 	run.ErrorMessage = msg
@@ -906,8 +906,8 @@ func (si *SchedulerIntegration) failUnlaunchableRun(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance, msg string,
 ) {
 	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
-		"phase":         "scheduler.launch",
-		"error_message": msg,
+		"phase":                   "scheduler.launch",
+		runEventFieldErrorMessage: msg,
 	})
 	si.releaseCheckoutIfNeeded(ctx, run)
 	// No lifecycle event backs a wiring fault, so there is no agent id to
@@ -947,8 +947,8 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 		si.logger.Error("routing dispatch failed",
 			zap.String("run_id", run.ID), zap.Error(err))
 		si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
-			"phase":         "routing.dispatch",
-			"error_message": err.Error(),
+			"phase":                   "routing.dispatch",
+			runEventFieldErrorMessage: err.Error(),
 		})
 		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)

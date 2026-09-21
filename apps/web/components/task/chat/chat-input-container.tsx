@@ -56,6 +56,8 @@ export type ChatSubmitResult = void | boolean | Promise<void | boolean>;
 
 export type ChatSubmitPayload = {
   message: string;
+  /** Reused by recovery-aware adapters when an admission survives remounting. */
+  clientMessageId?: string;
   reviewComments?: ReviewComment[];
   attachments?: MessageAttachment[];
   inlineMentions?: ContextFile[];

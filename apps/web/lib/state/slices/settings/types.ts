@@ -17,6 +17,7 @@ import type {
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
+import type { SidebarLayoutApi } from "@/lib/types/http-user-settings";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
@@ -363,6 +364,7 @@ export type AgentUpdateJobsState = {
 };
 
 export type EditorsState = {
+  folderOpeningAvailable?: boolean;
   items: EditorOption[];
   loaded: boolean;
   loading: boolean;
@@ -449,6 +451,7 @@ export type UserSettingsState = {
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];
   sidebarViewsByWorkspace: Record<string, SidebarWorkspaceStateApi>;
+  sidebarLayoutsByWorkspace: Record<string, SidebarLayoutApi>;
   sidebarActiveViewId: string | null;
   sidebarDraft: SidebarViewDraft | null;
   threadViews: ThreadView[];
@@ -538,7 +541,7 @@ export type SettingsSliceActions = {
   upsertAgentUpdateJob: (job: AgentUpdateJob) => void;
   appendAgentUpdateOutput: (agentName: string, jobId: string, chunk: string) => void;
   clearAgentUpdateJob: (agentName: string) => void;
-  setEditors: (editors: EditorsState["items"]) => void;
+  setEditors: (editors: EditorsState["items"], folderOpeningAvailable?: boolean) => void;
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState["items"]) => void;
   setPromptsLoading: (loading: boolean) => void;

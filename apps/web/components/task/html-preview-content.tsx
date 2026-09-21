@@ -88,7 +88,7 @@ function HtmlPreviewContentToolbar({
               onClick={onRefresh}
               disabled={isLoading}
               aria-label={t("task:refreshHtmlPreview")}
-              className="h-11 w-11 cursor-pointer p-0 text-foreground sm:h-8 sm:w-8"
+              className="h-6 w-6 cursor-pointer p-0 text-foreground max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
             >
               <IconRefresh className="h-4 w-4" />
             </Button>
@@ -99,7 +99,7 @@ function HtmlPreviewContentToolbar({
               variant="ghost"
               onClick={onOpenInBrowser}
               aria-label={t("task:openInBrowserPanel")}
-              className="h-11 w-11 cursor-pointer p-0 text-foreground sm:h-8 sm:w-8"
+              className="h-6 w-6 cursor-pointer p-0 text-foreground max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
             >
               <IconBrowser className="h-4 w-4" />
             </Button>
@@ -112,7 +112,7 @@ function HtmlPreviewContentToolbar({
                 onClick={onTogglePreview}
                 aria-label={t("task:showCode")}
                 title={trustWarning}
-                className="h-11 w-11 cursor-pointer p-0 text-foreground sm:h-8 sm:w-8"
+                className="h-6 w-6 cursor-pointer p-0 text-foreground max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
                 data-testid="html-preview-code-toggle"
               >
                 <IconCode className="h-4 w-4" />

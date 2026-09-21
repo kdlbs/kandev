@@ -135,7 +135,7 @@ test("opens move options from the mobile task-switcher context menu", async ({
     seedData,
     "Mobile Task Switcher Move",
   );
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
   const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
   const taskRow = taskSheet

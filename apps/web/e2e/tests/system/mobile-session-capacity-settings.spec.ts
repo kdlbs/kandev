@@ -28,10 +28,7 @@ test("reaches Task Behavior and keeps the form touch-safe", async ({ testPage })
   const mobile = new MobileKanbanPage(testPage);
   await mobile.goto();
   await mobile.mobileMenuButton.click();
-  await testPage
-    .getByTestId("mobile-home-menu-card")
-    .getByRole("link", { name: "Settings" })
-    .click();
+  await testPage.getByTestId("app-nav-sheet").getByRole("link", { name: "Settings" }).click();
   await testPage
     .getByTestId("settings-index")
     .getByRole("link", { name: /^Task Behavior/ })

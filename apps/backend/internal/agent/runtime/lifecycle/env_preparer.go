@@ -78,6 +78,7 @@ type RepoPrepareSpec struct {
 	CheckoutBranch     string
 	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution *models.RemoteContribution
+	CheckoutOptions    *models.RepositoryCheckoutOptions
 	WorktreeID         string
 	// WorkspaceReuseRequired makes preparation attach to the exact canonical
 	// environment. It forbids worktree creation/recreation and all repository
@@ -131,6 +132,7 @@ type EnvPrepareRequest struct {
 	CheckoutBranch          string
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	WorktreeID              string
 	WorktreeBranch          string
@@ -192,6 +194,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		CheckoutBranch:             r.CheckoutBranch,
 		PRNumber:                   r.PRNumber,
 		RemoteContribution:         r.RemoteContribution,
+		CheckoutOptions:            r.CheckoutOptions,
 		WorktreeID:                 r.WorktreeID,
 		WorkspaceReuseRequired:     r.WorkspaceReuseRequired,
 		AllowBranchReplacement:     r.AllowBranchReplacement,

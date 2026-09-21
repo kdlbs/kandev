@@ -8,6 +8,8 @@ import (
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
+const assignmentWakeActorTypeAgent = "agent"
+
 // assignmentWakePredicate is the result of classifying an incoming wake
 // against the three-step predicate in the system design's "## The
 // predicate": reason == task_assigned, actor_type == "agent", and the
@@ -47,7 +49,7 @@ func classifyAssignmentWake(reason, payload string) assignmentWakePredicate {
 		return assignmentWakePredicate{}
 	}
 	actorType, _ := raw["actor_type"].(string)
-	if actorType != "agent" {
+	if actorType != assignmentWakeActorTypeAgent {
 		return assignmentWakePredicate{}
 	}
 	actorID, _ := raw["actor_id"].(string)

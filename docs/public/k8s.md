@@ -201,7 +201,7 @@ The **Active sessions** card refreshes every 90 seconds and reads only Kandev's 
 
 On a Kubernetes task, use the Pod control in the task header to inspect the exact authorized Pod's live phase, container state, restart count, workspace mode, creation time, and sanitized failure reason. Desktop opens this disclosure on hover; touch and coarse-pointer layouts provide a named 44 px button that opens a Drawer with the same structured Pod summary. Quiet Refresh and Settings icons sit in the summary header. Refresh visibly stays busy until the immediate status read settles, and Settings opens the exact selected profile. Kubernetes does not show the generic **Reset environment** action because Pod and PVC lifecycle remains owned by Stop, Resume, Archive, and Delete.
 
-The smaller Pod glyphs on Kanban cards and in task lists request their exact session status as soon as they appear, so their healthy or failed color does not depend on a first hover. On a fine pointer, hover or keyboard focus opens a compact summary with the Pod identity and aligned rows for state, restarts, workspace mode, creation time, last check, and any sanitized failure. On touch layouts, the same glyph has an expanded 44 px hit target and opens that summary in a bottom Drawer without selecting the task row.
+The smaller Pod glyphs on Kanban cards and in task lists request their exact session status as soon as they appear, so their healthy or failed color does not depend on a first hover. While the page is visible, mounted indicators refresh automatically every 90 seconds and retry failed reads. On a fine pointer, hover or keyboard focus opens a compact summary with the Pod identity and aligned rows for state, restarts, workspace mode, creation time, last check, and any sanitized failure. On touch layouts, the same glyph has an expanded 44 px hit target and opens that summary in a bottom Drawer without selecting the task row.
 
 ### Understand template ownership
 
@@ -353,6 +353,12 @@ Current connection configuration and recorded workload configuration serve diffe
 - Saved profile edits affect new sessions. An existing Pod is never live-mutated, and a missing-Pod replacement uses the recorded workload snapshot rather than the profile's current image, template, platform, main container, or storage fields.
 
 Ordinary Stop and backend shutdown close local clients and forwards but preserve the Pod and workspace. Agent or main-container restart keeps the Pod volumes; Kandev performs a new nonce handshake and local port-forward. If a Pod disappears, managed or existing PVC storage can support a replacement Pod after identity checks; `emptyDir` cannot.
+
+A recoverable agent error also preserves the established Pod, workspace, and
+recovery credentials. Use **Resume** to continue that session. If its retained
+credentials or storage are missing, recovery fails rather than silently creating
+an empty replacement workspace. A software update cannot restore resources that
+were already deleted.
 
 Archive/delete terminal cleanup and explicit force cleanup are destructive. Before deletion, Kandev verifies the recorded namespace, name, UID, and complete standard plus `kandev.ai/*` ownership-label set. It then deletes the exact Pod with UID/resource-version preconditions and deletes a PVC only when inventory proves Kandev created that managed claim. Existing claims are never deleted. A missing object is idempotent; an inventory read error, same-name replacement, UID mismatch, missing label, changed label, extra `kandev.ai/*` label, or mismatched create nonce fails closed without deleting the ambiguous object.
 

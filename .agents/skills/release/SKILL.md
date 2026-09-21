@@ -63,6 +63,15 @@ complete only after `publish-release`, `publish-npm`, `update-homebrew-tap`, and
 `update-scoop-bucket` each succeed and their artifacts are verified—an aggregate
 green run can hide skipped publication jobs.
 
+Required web, runtime, and desktop artifact uploads attempt up to three times,
+with waits of 30 seconds and 60 seconds between attempts. They fail explicitly
+when an expected file is missing. Desktop matrix targets use `fail-fast: false`
+so a transient upload failure does not cancel sibling targets, but publication
+still requires the complete matrix to succeed. Rerun a failed producer job in
+the same workflow run after a transient failure. If the signed tag already
+exists and the run remains partial, use `backfill_tag` for that tag after
+checking which channels already succeeded.
+
 Stable has no local release driver; the entire Stable flow runs in GHA. The Nightly metadata and
 publication revalidation state machine lives in `scripts/release/nightly-release.sh`, which GHA
 invokes for scheduled and manual Nightly runs.

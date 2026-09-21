@@ -265,6 +265,7 @@ type UserSettingsProvider interface {
 
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
+	automationCreator      AutomationCreator
 	taskSvc                *service.Service
 	workflowCtrl           *workflowctrl.Controller
 	clarificationSvc       ClarificationService
@@ -571,6 +572,7 @@ func (h *Handlers) registerTaskQuestionHandlers(d *guardedMCPDispatcher) {
 }
 
 func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
+	d.RegisterFunc(ws.ActionMCPCreateAutomation, h.handleCreateAutomation)
 	if h.settingsRegistry != nil {
 		h.registerSettingsHandlers(d)
 	}
@@ -797,6 +799,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	startAgent := req.StartAgent == nil || *req.StartAgent
 	explicitWorkspaceID := req.WorkspaceID != ""
 	explicitWorkflowID := req.WorkflowID != ""
+	explicitWorkflowStep := req.WorkflowStepID != ""
 
 	// Only require description for subtasks if we're starting an agent
 	if req.ParentID != "" && req.Description == "" && startAgent {
@@ -908,6 +911,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 	}
+	launchConfig.InitialCreatePrompt = startAgent && explicitWorkflowStep && req.WorkflowStepID != "" && strings.TrimSpace(req.Description) != ""
 	metadata = workspacePolicy.MergeMetadataBlock(metadata)
 	var deferredLaunch map[string]interface{}
 	if startAgent {
@@ -1368,6 +1372,7 @@ type mcpAutoStartConfig struct {
 	ExecutorID           string
 	ExecutorProfileID    string
 	InitialRuntimeConfig *models.SessionRuntimeConfig
+	InitialCreatePrompt  bool
 }
 
 var errMCPAgentProfileRequired = errors.New("agent_profile_id is required because the selected task profile policy, workflow, and workspace defaults did not resolve a profile")
@@ -1732,7 +1737,7 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 
-		resp, err := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+		launchReq := &orchestrator.LaunchSessionRequest{
 			TaskID:            task.ID,
 			Intent:            orchestrator.IntentStart,
 			AgentProfileID:    config.AgentProfileID,
@@ -1740,10 +1745,50 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 			ExecutorProfileID: config.ExecutorProfileID,
 			WorkflowStepID:    task.WorkflowStepID,
 			Prompt:            task.Description,
-		})
+		}
+		if config.InitialCreatePrompt {
+			prepResp, prepErr := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+				TaskID:               task.ID,
+				Intent:               orchestrator.IntentPrepare,
+				AgentProfileID:       config.AgentProfileID,
+				ExecutorID:           config.ExecutorID,
+				ExecutorProfileID:    config.ExecutorProfileID,
+				WorkflowStepID:       task.WorkflowStepID,
+				InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(task.Description), nil),
+				DeferredStart:        true,
+			})
+			if prepErr != nil {
+				h.logger.Error("failed to prepare initial MCP creation prompt",
+					zap.String("task_id", task.ID), zap.Error(prepErr))
+				return
+			}
+			if prepResp == nil || prepResp.SessionID == "" {
+				h.logger.Error("initial MCP creation prompt preparation returned no session",
+					zap.String("task_id", task.ID))
+				return
+			}
+			launchReq = &orchestrator.LaunchSessionRequest{
+				TaskID:              task.ID,
+				Intent:              orchestrator.IntentStartCreated,
+				SessionID:           prepResp.SessionID,
+				AgentProfileID:      config.AgentProfileID,
+				ExecutorID:          config.ExecutorID,
+				ExecutorProfileID:   config.ExecutorProfileID,
+				WorkflowStepID:      task.WorkflowStepID,
+				Prompt:              task.Description,
+				InitialCreatePrompt: true,
+			}
+		}
+
+		resp, err := h.sessionLauncher.LaunchSession(ctx, launchReq)
 		if err != nil {
 			h.logger.Error("failed to auto-start task",
 				zap.String("task_id", task.ID), zap.Error(err))
+			return
+		}
+		if resp == nil {
+			h.logger.Error("auto-start returned no response",
+				zap.String("task_id", task.ID))
 			return
 		}
 		h.logger.Info("auto-started agent for MCP-created task",

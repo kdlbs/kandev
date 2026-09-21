@@ -742,6 +742,7 @@ func (r *Repository) runTaskPriorityRecreate() error {
 		{"external_id_settled_at", `ALTER TABLE tasks ADD COLUMN external_id_settled_at TIMESTAMP`},
 		{"assignee_user_id", `ALTER TABLE tasks ADD COLUMN assignee_user_id TEXT NOT NULL DEFAULT ''`},
 		{"assignment_generation", `ALTER TABLE tasks ADD COLUMN assignment_generation INTEGER NOT NULL DEFAULT 0`},
+		{"workflow_agent_overrides", `ALTER TABLE tasks ADD COLUMN workflow_agent_overrides TEXT`},
 	}
 	for _, column := range legacyColumns {
 		if _, err := conn.ExecContext(ctx, column.stmt); err != nil && !db.IsDuplicateColumnError(err) {
@@ -778,6 +779,7 @@ func taskPriorityMigrationStatements() []string {
 			workspace_id TEXT NOT NULL DEFAULT '',
 			workflow_id TEXT NOT NULL DEFAULT '',
 			workflow_step_id TEXT NOT NULL DEFAULT '',
+			workflow_agent_overrides TEXT,
 			title TEXT NOT NULL,
 			description TEXT DEFAULT '',
 			state TEXT DEFAULT 'TODO',
@@ -819,7 +821,7 @@ func taskPriorityMigrationStatements() []string {
 		// recreate dance. external_id is not COALESCEd — NULL is its
 		// meaningful "no identity" state.
 		`INSERT INTO tasks_priority_new (
-			id, workspace_id, workflow_id, workflow_step_id, title, description,
+			id, workspace_id, workflow_id, workflow_step_id, workflow_agent_overrides, title, description,
 			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled,
 			archived_at, archived_by_cascade_id, created_at, updated_at,
 			origin, project_id,
@@ -828,7 +830,7 @@ func taskPriorityMigrationStatements() []string {
 			external_id, external_id_settled_at, assignee_user_id, assignment_generation
 		) SELECT
 			id, COALESCE(workspace_id,''), COALESCE(workflow_id,''),
-			COALESCE(workflow_step_id,''), title, COALESCE(description,''),
+			COALESCE(workflow_step_id,''), workflow_agent_overrides, title, COALESCE(description,''),
 			COALESCE(state,'TODO'), 'medium', COALESCE(position,0),
 			COALESCE(wip_admitted,1), COALESCE(queued_for_step_id,''), queued_at,
 			COALESCE(metadata,'{}'), COALESCE(is_ephemeral,0),

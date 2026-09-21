@@ -76,6 +76,7 @@ const SEGMENT_LABEL_KEYS: Record<string, string> = {
   repositories: "sidebar:repositories",
   secrets: "settings:secrets",
   security: "settings:security",
+  sidebar: "settings:sidebar",
   status: "common:status",
   storage: "system:storageTitle",
   system: "common:system",

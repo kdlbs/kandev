@@ -49,7 +49,7 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
   await failedWorkflowRead;
   await session.waitForLoad();
   const drawer = testPage.getByRole("dialog", { name: "Tasks", exact: true });
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
   await expect(drawer).toBeVisible();
   await expect(drawer.getByText("Mobile retained task", { exact: true })).toBeVisible();
   await expect(drawer.getByTestId("sidebar-task-load-error")).toBeVisible();
@@ -111,7 +111,7 @@ test("mobile task drawer surfaces a failed workflow snapshot and recovers", asyn
   await failedSnapshotRead;
 
   const drawer = testPage.getByRole("dialog", { name: "Tasks", exact: true });
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
   await expect(drawer).toBeVisible();
   await expect(drawer.getByTestId("sidebar-task-load-error")).toBeVisible();
   await expect(drawer.getByText("No tasks yet.", { exact: true })).toHaveCount(0);
