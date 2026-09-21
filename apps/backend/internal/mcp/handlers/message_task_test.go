@@ -1993,6 +1993,26 @@ func TestHandleMessageTask_PromptFailsWithExecutionNotFound_AutoResumes(t *testi
 	})
 }
 
+func TestHandleMessageTask_CrossWorkspaceQueuedMessageIsPreserved(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, _, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-foreign", Name: "Foreign"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-foreign", WorkspaceID: "ws-foreign", Name: "Foreign board"}))
+	targetResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{WorkspaceID: "ws-foreign", WorkflowID: "wf-foreign", Title: "Foreign target"})
+	require.NoError(t, err)
+	target := targetResult.Task
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "foreign-session", TaskID: target.ID, AgentProfileID: "agent-profile-1", State: models.TaskSessionStateRunning}))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	resp, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask,
+		senderPayloadWithMode(target.ID, "cross workspace", sender.ID, "queued")))
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+	assert.Empty(t, orch.interruptCalls, "queued delivery must not interrupt")
+	assert.Len(t, orch.promptCalls, 0, "running target keeps queued delivery")
+}
+
 func TestHandleMessageTask_CreatedSession_StartsAgent(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
