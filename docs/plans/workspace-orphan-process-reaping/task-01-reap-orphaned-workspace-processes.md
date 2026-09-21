@@ -155,3 +155,17 @@ frozen spec's nine accepted-open gaps (each with its safe reading recorded in
 the system design doc). 87 top-level tests across 9
 `resource_cleanup_orphan_reap*_test.go` files pass under `-race`; the existing
 regression suite is unaffected (verified against a merge-base baseline).
+
+### Process snapshot race regression
+
+The Linux process snapshot regression now covers a process directory that is
+present during enumeration but disappears before its `stat` record is read.
+The scanner skips that unrelated exited PID while still failing closed for
+partial stat data, permission failures, and malformed records.
+
+Verification:
+
+- `go test ./internal/task/service -run 'OrphanReap' -count=1` passed.
+- `go test -race ./internal/task/service -run 'OrphanReap' -count=1` passed.
+- The focused normal and race process-snapshot cases passed.
+- `git diff --check` passed.
