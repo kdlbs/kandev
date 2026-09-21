@@ -34,7 +34,7 @@
   "autoKeepEngagedTasks": "自動, エンゲージ中のタスクを維持",
   "between60And3600Seconds": "60秒から3600秒の間で指定してください。",
   "bugBackend": "バグ, バックエンド",
-  "byAuthorOpenedAgo": "{{author}}による · {{time}}前に作成",
+  "byAuthorOpenedAgo": "{{author}}による · {{time}}に作成",
   "checkNow": "今すぐ確認",
   "checkingGitlabStatus": "GitLabのステータスを確認しています…",
   "chooseAWorkspacePatTheLocal": "ワークスペースPAT、ローカルのglab CLIログイン、または環境で提供されたトークンを選択してください。CLIと環境の認証情報は、事前にkandevバックエンドから利用できる必要があります。",

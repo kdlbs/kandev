@@ -214,7 +214,7 @@
   "toggleRawJqlEditor": "生JQLエディタ切り替え",
   "unassigned": "未割り当て",
   "update": "更新",
-  "updatedAgo": "· {{time}}前に更新",
+  "updatedAgo": "· {{time}}に更新",
   "updatedTime": "{{time}}に更新",
   "updateFailed": "更新失敗: {{error}}",
   "watchDialogDescription": "JQLクエリをポーリングして、新しく一致した各チケットにKandevタスク自動作成。必要ならリポジトリも紐付けて、そのコードベースで各タスク実行。未設定ならリポジトリなしで実行。",

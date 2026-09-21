@@ -170,7 +170,7 @@
   "clearSavedQueryAsDefaultView": "{{label}} の既定ビューを解除",
   "selectAWorkspace": "ワークスペースを選択…",
   "shortNameCreated": "{{shortName}} を作成済み",
-  "closedRelative": "{{relative}} 前にクローズ",
+  "closedRelative": "{{relative}}にクローズ",
   "stageAllChangesBeforeCommitting": "コミット前にすべての変更をステージ",
   "targetWorkspace": "対象ワークスペース",
   "timedOut": "タイムアウト",
