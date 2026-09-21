@@ -22,7 +22,7 @@ func TestPostgresRecoveryClaimTaskLockOrdersBeforeTurnWriter(t *testing.T) {
 	)
 	seedTurnAdmissionRace(t, repoA, taskID, environmentID, requesterID, foreignID)
 
-	claim := recoveryClaimRequest(environmentID, taskID, requesterID, "operation-claim-before-turn", 1)
+	claim := recoveryClaimRequest(t, repoA, environmentID, taskID, requesterID, "operation-claim-before-turn", 1)
 	holder, err := repoA.db.BeginTxx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin claim transaction: %v", err)
@@ -117,7 +117,7 @@ func TestPostgresTurnWriterTaskLockOrdersBeforeRecoveryClaim(t *testing.T) {
 	var claimErr error
 	go func() {
 		_, claimErr = repoB.AcquireTaskEnvironmentRecoveryClaim(ctx,
-			recoveryClaimRequest(environmentID, taskID, requesterID, "operation-after-turn", 1))
+			recoveryClaimRequest(t, repoB, environmentID, taskID, requesterID, "operation-after-turn", 1))
 		close(claimDone)
 	}()
 	t.Cleanup(func() {

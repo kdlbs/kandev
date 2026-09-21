@@ -28,6 +28,8 @@ var (
 	ErrClaimMismatch = errors.New("task environment recovery claim mismatch")
 )
 
+const forUpdateClause = ` FOR UPDATE`
+
 type claimContextKey struct{}
 
 // WithClaim attaches a recovery claim to an internal operation context. The
@@ -69,8 +71,8 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 	if db == nil {
 		return nil, errors.New("task environment recovery claim: database is required")
 	}
-	if req.TaskEnvironmentID == "" || req.OwnerTaskID == "" || req.SessionID == "" || req.OperationID == "" || req.ExecutorType == "" {
-		return nil, errors.New("task environment recovery claim: environment, owner, session, operation, and executor are required")
+	if req.TaskEnvironmentID == "" || req.OwnerTaskID == "" || req.SessionID == "" || req.SessionIncarnationID == "" || req.OperationID == "" || req.ExecutorType == "" {
+		return nil, errors.New("task environment recovery claim: environment, owner, session, session incarnation, operation, and executor are required")
 	}
 
 	tx, err := db.BeginTxx(ctx, nil)
@@ -96,17 +98,23 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 	if executorType != req.ExecutorType {
 		return nil, fmt.Errorf("%w: environment %s uses executor %q, request selected %q", ErrClaimMismatch, req.TaskEnvironmentID, executorType, req.ExecutorType)
 	}
-
 	claim, err := loadClaim(ctx, db, tx, req.TaskEnvironmentID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	if claim != nil {
+		if err := validateRequesterIdentity(ctx, db, tx, req); err != nil {
+			return nil, err
+		}
 		if claim.OwnerTaskID == req.OwnerTaskID && claim.OwnershipGeneration == req.OwnershipGeneration &&
-			claim.SessionID == req.SessionID && claim.OperationID == req.OperationID && claim.ExecutorType == req.ExecutorType {
+			claim.SessionID == req.SessionID && claim.SessionIncarnationID == req.SessionIncarnationID &&
+			claim.OperationID == req.OperationID && claim.ExecutorType == req.ExecutorType {
 			return claim, tx.Commit()
 		}
 		return nil, fmt.Errorf("%w: environment %s is claimed by operation %s", ErrBusy, req.TaskEnvironmentID, claim.OperationID)
+	}
+	if err := validateRequesterIdentity(ctx, db, tx, req); err != nil {
+		return nil, err
 	}
 
 	snapshot, err := loadAdmissionSnapshot(ctx, db, tx, req.TaskEnvironmentID, req.SessionID)
@@ -121,16 +129,17 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 	claim = &models.TaskEnvironmentRecoveryClaim{
 		TaskEnvironmentID: req.TaskEnvironmentID, OwnerTaskID: req.OwnerTaskID,
 		OwnershipGeneration: req.OwnershipGeneration, SessionID: req.SessionID,
-		OperationID: req.OperationID, ExecutorType: req.ExecutorType,
+		SessionIncarnationID: req.SessionIncarnationID,
+		OperationID:          req.OperationID, ExecutorType: req.ExecutorType,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, err := tx.ExecContext(ctx, db.Rebind(`
 		INSERT INTO task_environment_recovery_claims (
-			task_environment_id, owner_task_id, ownership_generation, session_id,
+			task_environment_id, owner_task_id, ownership_generation, session_id, session_incarnation_id,
 			operation_id, executor_type, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), claim.TaskEnvironmentID, claim.OwnerTaskID, claim.OwnershipGeneration,
-		claim.SessionID, claim.OperationID, claim.ExecutorType, claim.CreatedAt, claim.UpdatedAt); err != nil {
+		claim.SessionID, claim.SessionIncarnationID, claim.OperationID, claim.ExecutorType, claim.CreatedAt, claim.UpdatedAt); err != nil {
 		if isUniqueViolation(err) {
 			return nil, fmt.Errorf("%w: environment %s was claimed concurrently", ErrBusy, req.TaskEnvironmentID)
 		}
@@ -140,6 +149,35 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 		return nil, err
 	}
 	return claim, nil
+}
+
+func validateRequesterIdentity(
+	ctx context.Context,
+	db *sqlx.DB,
+	tx *sqlx.Tx,
+	req models.TaskEnvironmentRecoveryClaimRequest,
+) error {
+	query := `
+		SELECT task_id, task_environment_id, queue_incarnation_id
+		FROM task_sessions
+		WHERE id = ?`
+	if dialect.IsPostgres(db.DriverName()) {
+		query += forUpdateClause
+	}
+	var taskID, incarnationID string
+	var environmentID sql.NullString
+	if err := tx.QueryRowContext(ctx, db.Rebind(query), req.SessionID).Scan(
+		&taskID, &environmentID, &incarnationID,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: requesting session is not current", ErrClaimMismatch)
+		}
+		return err
+	}
+	if taskID != req.OwnerTaskID || !environmentID.Valid || environmentID.String != req.TaskEnvironmentID || incarnationID == "" || incarnationID != req.SessionIncarnationID {
+		return fmt.Errorf("%w: requesting session authority changed", ErrClaimMismatch)
+	}
+	return nil
 }
 
 // Release removes exactly the operation and generation supplied by claim.
@@ -167,9 +205,9 @@ func Release(ctx context.Context, db *sqlx.DB, claim *models.TaskEnvironmentReco
 	result, err := tx.ExecContext(ctx, db.Rebind(`
 		DELETE FROM task_environment_recovery_claims
 		WHERE task_environment_id = ? AND owner_task_id = ? AND ownership_generation = ?
-		  AND session_id = ? AND operation_id = ? AND executor_type = ?
+		  AND session_id = ? AND session_incarnation_id = ? AND operation_id = ? AND executor_type = ?
 	`), claim.TaskEnvironmentID, claim.OwnerTaskID, claim.OwnershipGeneration,
-		claim.SessionID, claim.OperationID, claim.ExecutorType)
+		claim.SessionID, claim.SessionIncarnationID, claim.OperationID, claim.ExecutorType)
 	if err != nil {
 		return err
 	}
@@ -282,7 +320,19 @@ func ValidateTx(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, claim *models.Tas
 	if !sameClaim(current, claim) {
 		return ErrClaimMismatch
 	}
+	if err := validateClaimRequesterIdentity(ctx, db, tx, claim); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateClaimRequesterIdentity(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, claim *models.TaskEnvironmentRecoveryClaim) error {
+	return validateRequesterIdentity(ctx, db, tx, models.TaskEnvironmentRecoveryClaimRequest{
+		TaskEnvironmentID:    claim.TaskEnvironmentID,
+		OwnerTaskID:          claim.OwnerTaskID,
+		SessionID:            claim.SessionID,
+		SessionIncarnationID: claim.SessionIncarnationID,
+	})
 }
 
 func loadEnvironmentOwner(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID string) (string, error) {
@@ -298,7 +348,7 @@ func lockTask(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID string) erro
 	//nolint:nestif // SQLite and PostgreSQL require different row-locking paths.
 	query := `SELECT id FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += forUpdateClause
 	} else {
 		// SQLite starts deferred transactions by default. Take its single-writer
 		// reservation before reading the owner and environment rows so an
@@ -351,7 +401,7 @@ func ensureCleanupAbsent(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID s
 func loadEnvironmentIdentity(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID string) (string, int64, string, error) {
 	query := `SELECT task_id, ownership_generation, executor_type FROM task_environments WHERE id = ?`
 	if dialect.IsPostgres(db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += forUpdateClause
 	}
 	var ownerTaskID, executorType string
 	var generation int64
@@ -417,12 +467,12 @@ func loadAdmissionSnapshot(
 func loadClaim(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID string) (*models.TaskEnvironmentRecoveryClaim, error) {
 	claim := &models.TaskEnvironmentRecoveryClaim{}
 	err := tx.QueryRowContext(ctx, db.Rebind(`
-		SELECT task_environment_id, owner_task_id, ownership_generation, session_id,
+		SELECT task_environment_id, owner_task_id, ownership_generation, session_id, session_incarnation_id,
 			operation_id, executor_type, created_at, updated_at
 		FROM task_environment_recovery_claims WHERE task_environment_id = ?
-	`), environmentID).Scan(
+	`+claimForUpdateClause(db.DriverName())), environmentID).Scan(
 		&claim.TaskEnvironmentID, &claim.OwnerTaskID, &claim.OwnershipGeneration,
-		&claim.SessionID, &claim.OperationID, &claim.ExecutorType,
+		&claim.SessionID, &claim.SessionIncarnationID, &claim.OperationID, &claim.ExecutorType,
 		&claim.CreatedAt, &claim.UpdatedAt,
 	)
 	if err != nil {
@@ -434,7 +484,15 @@ func loadClaim(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID stri
 func sameClaim(left, right *models.TaskEnvironmentRecoveryClaim) bool {
 	return left != nil && right != nil && left.TaskEnvironmentID == right.TaskEnvironmentID &&
 		left.OwnerTaskID == right.OwnerTaskID && left.OwnershipGeneration == right.OwnershipGeneration &&
-		left.SessionID == right.SessionID && left.OperationID == right.OperationID && left.ExecutorType == right.ExecutorType
+		left.SessionID == right.SessionID && left.SessionIncarnationID == right.SessionIncarnationID &&
+		left.OperationID == right.OperationID && left.ExecutorType == right.ExecutorType
+}
+
+func claimForUpdateClause(driverName string) string {
+	if dialect.IsPostgres(driverName) {
+		return forUpdateClause
+	}
+	return ""
 }
 
 func isUniqueViolation(err error) bool {

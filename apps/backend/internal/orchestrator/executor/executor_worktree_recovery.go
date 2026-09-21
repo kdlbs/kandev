@@ -68,13 +68,14 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 	}
 
 	admission, err := e.selectedWorktreeRecoveryAdmission(ctx, worktree.RecoveryAdmissionRequest{
-		TaskID:              taskID,
-		SessionID:           session.ID,
-		TaskEnvironmentID:   env.ID,
-		OwnerTaskID:         env.TaskID,
-		OwnershipGeneration: env.OwnershipGeneration,
-		ExecutorType:        executorType,
-		Slots:               slots,
+		TaskID:               taskID,
+		SessionID:            session.ID,
+		SessionIncarnationID: session.QueueIncarnationID,
+		TaskEnvironmentID:    env.ID,
+		OwnerTaskID:          env.TaskID,
+		OwnershipGeneration:  env.OwnershipGeneration,
+		ExecutorType:         executorType,
+		Slots:                slots,
 	})
 	if err != nil {
 		return nil, err

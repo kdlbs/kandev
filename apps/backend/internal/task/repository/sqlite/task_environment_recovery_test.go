@@ -24,14 +24,20 @@ func seedRecoveryClaimEnvironment(t *testing.T, repo *Repository, taskID, enviro
 	}
 }
 
-func recoveryClaimRequest(environmentID, ownerTaskID, sessionID, operationID string, generation int64) models.TaskEnvironmentRecoveryClaimRequest {
+func recoveryClaimRequest(t *testing.T, repo *Repository, environmentID, ownerTaskID, sessionID, operationID string, generation int64) models.TaskEnvironmentRecoveryClaimRequest {
+	t.Helper()
+	session, err := repo.GetTaskSession(t.Context(), sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession(%s): %v", sessionID, err)
+	}
 	return models.TaskEnvironmentRecoveryClaimRequest{
-		TaskEnvironmentID:   environmentID,
-		OwnerTaskID:         ownerTaskID,
-		OwnershipGeneration: generation,
-		SessionID:           sessionID,
-		OperationID:         operationID,
-		ExecutorType:        string(models.ExecutorTypeWorktree),
+		TaskEnvironmentID:    environmentID,
+		OwnerTaskID:          ownerTaskID,
+		OwnershipGeneration:  generation,
+		SessionID:            sessionID,
+		SessionIncarnationID: session.QueueIncarnationID,
+		OperationID:          operationID,
+		ExecutorType:         string(models.ExecutorTypeWorktree),
 	}
 }
 
@@ -51,8 +57,22 @@ func TestTaskEnvironmentRecoveryClaimSerializesMutationsAndConsumers(t *testing.
 	}); err != nil {
 		t.Fatalf("create requesting session: %v", err)
 	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "session-recovery-2",
+		TaskID:            taskID,
+		TaskEnvironmentID: environmentID,
+		State:             models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("create competing session: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-recovery-2", SessionID: "session-recovery-2", TaskID: taskID,
+		ExecutorID: "executor-recovery-2", Status: models.ExecutorRunningStatusStopped,
+	}); err != nil {
+		t.Fatalf("create stopped competing executor: %v", err)
+	}
 
-	request := recoveryClaimRequest(environmentID, taskID, "session-recovery-1", "operation-recovery-1", 1)
+	request := recoveryClaimRequest(t, repo, environmentID, taskID, "session-recovery-1", "operation-recovery-1", 1)
 	claim, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, request)
 	if err != nil {
 		t.Fatalf("acquire recovery claim: %v", err)
@@ -68,7 +88,7 @@ func TestTaskEnvironmentRecoveryClaimSerializesMutationsAndConsumers(t *testing.
 	}
 
 	_, err = repo.AcquireTaskEnvironmentRecoveryClaim(ctx,
-		recoveryClaimRequest(environmentID, taskID, "session-recovery-2", "operation-recovery-2", 1))
+		recoveryClaimRequest(t, repo, environmentID, taskID, "session-recovery-2", "operation-recovery-2", 1))
 	if !errors.Is(err, recoveryclaim.ErrBusy) {
 		t.Fatalf("competing claim error = %v, want ErrBusy", err)
 	}
@@ -140,7 +160,7 @@ func TestTaskEnvironmentRecoveryClaimSerializesMutationsAndConsumers(t *testing.
 	}
 
 	_, err = repo.AcquireTaskEnvironmentRecoveryClaim(ctx,
-		recoveryClaimRequest(environmentID, taskID, "session-recovery-new", "operation-recovery-new", 1))
+		recoveryClaimRequest(t, repo, environmentID, taskID, "session-recovery-2", "operation-recovery-new", 1))
 	if !errors.Is(err, recoveryclaim.ErrBusy) {
 		t.Fatalf("claim with live attached session error = %v, want ErrBusy", err)
 	}
@@ -149,8 +169,11 @@ func TestTaskEnvironmentRecoveryClaimSerializesMutationsAndConsumers(t *testing.
 func TestTaskEnvironmentRecoveryClaimRejectsStaleOwnership(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	seedRecoveryClaimEnvironment(t, repo, "task-recovery-generation", "environment-recovery-generation")
-	_, err := repo.AcquireTaskEnvironmentRecoveryClaim(context.Background(), recoveryClaimRequest(
-		"environment-recovery-generation", "task-recovery-generation", "session-generation", "operation-generation", 2))
+	_, err := repo.AcquireTaskEnvironmentRecoveryClaim(context.Background(), models.TaskEnvironmentRecoveryClaimRequest{
+		TaskEnvironmentID: "environment-recovery-generation", OwnerTaskID: "task-recovery-generation",
+		OwnershipGeneration: 2, SessionID: "session-generation", SessionIncarnationID: "stale",
+		OperationID: "operation-generation", ExecutorType: string(models.ExecutorTypeWorktree),
+	})
 	if !errors.Is(err, repoerrors.ErrTaskEnvironmentOwnershipChanged) {
 		t.Fatalf("stale generation error = %v, want ErrTaskEnvironmentOwnershipChanged", err)
 	}

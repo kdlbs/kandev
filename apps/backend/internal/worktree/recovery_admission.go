@@ -31,14 +31,15 @@ type RecoverySlot struct {
 // its complete canonical repository inventory. An empty inventory is a
 // deliberate no-op and never triggers filesystem or Git inspection.
 type RecoveryAdmissionRequest struct {
-	TaskID              string
-	SessionID           string
-	TaskEnvironmentID   string
-	OwnerTaskID         string
-	OwnershipGeneration int64
-	ExecutorType        string
-	OperationID         string
-	Slots               []RecoverySlot
+	TaskID               string
+	SessionID            string
+	SessionIncarnationID string
+	TaskEnvironmentID    string
+	OwnerTaskID          string
+	OwnershipGeneration  int64
+	ExecutorType         string
+	OperationID          string
+	Slots                []RecoverySlot
 }
 
 // RecoveryAdmission retains the environment authority and per-worktree locks
@@ -109,7 +110,7 @@ func (m *Manager) AdmitRecovery(ctx context.Context, req RecoveryAdmissionReques
 		req.ExecutorType != string(models.ExecutorTypeWorktree) || len(req.Slots) == 0 {
 		return nil, nil
 	}
-	if req.TaskID == "" || req.OwnerTaskID == "" || req.SessionID == "" || req.OwnershipGeneration <= 0 {
+	if req.TaskID == "" || req.OwnerTaskID == "" || req.SessionID == "" || req.SessionIncarnationID == "" || req.OwnershipGeneration <= 0 {
 		return nil, recoveryAdmissionError(req, "recovery request identity is incomplete")
 	}
 	if claim := recoveryclaim.ClaimFromContext(ctx); claim != nil {
@@ -164,12 +165,13 @@ func (m *Manager) AdmitRecovery(ctx context.Context, req RecoveryAdmissionReques
 			return nil, operationErr
 		}
 		claim, err = claimStore.AcquireTaskEnvironmentRecoveryClaim(ctx, models.TaskEnvironmentRecoveryClaimRequest{
-			TaskEnvironmentID:   req.TaskEnvironmentID,
-			OwnerTaskID:         req.OwnerTaskID,
-			OwnershipGeneration: req.OwnershipGeneration,
-			SessionID:           req.SessionID,
-			OperationID:         operationID,
-			ExecutorType:        req.ExecutorType,
+			TaskEnvironmentID:    req.TaskEnvironmentID,
+			OwnerTaskID:          req.OwnerTaskID,
+			OwnershipGeneration:  req.OwnershipGeneration,
+			SessionID:            req.SessionID,
+			SessionIncarnationID: req.SessionIncarnationID,
+			OperationID:          operationID,
+			ExecutorType:         req.ExecutorType,
 		})
 		if err != nil {
 			_ = releaseLocks(ctx)
@@ -468,6 +470,7 @@ func (slot RecoverySlot) WorktreePath() string {
 func recoveryClaimMatchesRequest(claim *models.TaskEnvironmentRecoveryClaim, req RecoveryAdmissionRequest) bool {
 	return claim != nil && claim.TaskEnvironmentID == req.TaskEnvironmentID && claim.OwnerTaskID == req.OwnerTaskID &&
 		claim.OwnershipGeneration == req.OwnershipGeneration && claim.SessionID == req.SessionID &&
+		claim.SessionIncarnationID == req.SessionIncarnationID &&
 		claim.ExecutorType == req.ExecutorType && (req.OperationID == "" || claim.OperationID == req.OperationID)
 }
 

@@ -1407,6 +1407,12 @@ func (r *Repository) claimPromptableTaskSessionIfActive(
 		return models.PromptableTaskSessionClaim{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if _, err := r.admitSessionWriteTx(ctx, tx, id); err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionInactive}, nil
+		}
+		return models.PromptableTaskSessionClaim{}, err
+	}
 
 	var state models.TaskSessionState
 	var active bool
@@ -1742,6 +1748,9 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	expected *models.TaskSessionState,
 ) (bool, error) {
 	if tx, ok := exec.(*sqlx.Tx); ok {
+		if _, err := r.admitSessionWriteTx(ctx, tx, session.ID); err != nil {
+			return false, err
+		}
 		if err := r.ensureTaskSessionEnvironmentAvailableTx(ctx, tx, session.ID, session.TaskEnvironmentID); err != nil {
 			return false, err
 		}
@@ -1885,10 +1894,18 @@ func (r *Repository) UpdateTaskSessionAgentProfileSnapshot(
 
 // UpdateTaskSessionState updates just the state and error message of an agent session
 func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, status models.TaskSessionState, errorMessage string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := r.admitSessionWriteTx(ctx, tx, id); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	completedAt := completedAtForTaskSessionState(status, now)
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET state = ?, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?
 	`), string(status), errorMessage, completedAt, now, id)
 	if err != nil {
@@ -1899,7 +1916,7 @@ func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, stat
 	if rows == 0 {
 		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, id)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // UpdateTaskSessionStateIfCurrent transitions a session only when its state
@@ -1911,9 +1928,20 @@ func (r *Repository) UpdateTaskSessionStateIfCurrent(
 	expected, status models.TaskSessionState,
 	errorMessage string,
 ) (bool, time.Time, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := r.admitSessionWriteTx(ctx, tx, id); err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return false, time.Now().UTC(), nil
+		}
+		return false, time.Time{}, err
+	}
 	now := time.Now().UTC()
 	completedAt := completedAtForTaskSessionState(status, now)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
 		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
 		WHERE id = ? AND state = ?
@@ -1925,6 +1953,9 @@ func (r *Repository) UpdateTaskSessionStateIfCurrent(
 	if err != nil {
 		return false, time.Time{}, err
 	}
+	if err := tx.Commit(); err != nil {
+		return false, time.Time{}, err
+	}
 	return rows > 0, now, nil
 }
 
@@ -1934,9 +1965,20 @@ func (r *Repository) UpdateTaskSessionStateIfCurrentIdentity(
 	expected, status models.TaskSessionState,
 	errorMessage string,
 ) (bool, time.Time, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := r.admitSessionWriteTx(ctx, tx, id); err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return false, time.Now().UTC(), nil
+		}
+		return false, time.Time{}, err
+	}
 	now := time.Now().UTC()
 	completedAt := completedAtForTaskSessionState(status, now)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
 		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
 		WHERE id = ? AND task_id = ? AND queue_incarnation_id = ? AND state = ?
@@ -1947,6 +1989,9 @@ func (r *Repository) UpdateTaskSessionStateIfCurrentIdentity(
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
+		return false, time.Time{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return false, time.Time{}, err
 	}
 	return rows > 0, now, nil

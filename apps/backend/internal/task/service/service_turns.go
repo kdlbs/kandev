@@ -889,6 +889,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	info := &lifecycle.WorkspaceInfo{
 		TaskID:                  taskID,
 		SessionID:               sessionID,
+		SessionIncarnationID:    session.QueueIncarnationID,
 		TaskEnvironmentID:       session.TaskEnvironmentID,
 		WorkspacePath:           workspacePath,
 		AgentProfileID:          session.AgentProfileID,

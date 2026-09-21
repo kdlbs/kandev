@@ -1440,9 +1440,10 @@ type McpConfigProvider interface {
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation
 type WorkspaceInfo struct {
-	TaskID            string
-	SessionID         string // Task session ID (from task_sessions table)
-	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	TaskID               string
+	SessionID            string // Task session ID (from task_sessions table)
+	SessionIncarnationID string // Immutable session incarnation used for recovery admission
+	TaskEnvironmentID    string // Env this session belongs to (shared across sessions in same task)
 	// EnvironmentOwnerTaskID and OwnershipGeneration are the durable identity
 	// used to guard host worktree recovery across inherited environments.
 	EnvironmentOwnerTaskID string

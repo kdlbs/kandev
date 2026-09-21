@@ -182,7 +182,7 @@ func seedForeignTurnClaim(
 		t.Fatalf("UpsertExecutorRunning(%s): %v", foreignID, err)
 	}
 	claim, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx,
-		recoveryClaimRequest(environmentID, taskID, requesterID, "operation-turn-surface-"+suffix, 1))
+		recoveryClaimRequest(t, repo, environmentID, taskID, requesterID, "operation-turn-surface-"+suffix, 1))
 	if err != nil {
 		t.Fatalf("AcquireTaskEnvironmentRecoveryClaim: %v", err)
 	}
