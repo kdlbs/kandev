@@ -30,6 +30,7 @@ const (
 	MaxAttachmentCount           = models.MaxMessageAttachmentCount
 	attachmentDeliveryModePrompt = "prompt"
 	attachmentDeliveryModePath   = "path"
+	previewScreenshotMimeType    = "image/png"
 )
 
 var (
@@ -294,7 +295,7 @@ func validatePreviewScreenshotMetadata(
 	if !validPreviewScreenshotClaim(attachment, ownerID, workspaceID, taskID) {
 		return ErrAttachmentClaimConflict
 	}
-	if attachment.MimeType != "image/png" || attachment.Kind != "image" ||
+	if attachment.MimeType != previewScreenshotMimeType || attachment.Kind != "image" ||
 		attachment.DeliveryMode != attachmentDeliveryModePrompt {
 		return fmt.Errorf("%w: screenshot attachment metadata", previewfeedback.ErrCaptureInvalid)
 	}
