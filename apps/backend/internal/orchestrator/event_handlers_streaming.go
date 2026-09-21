@@ -275,7 +275,7 @@ func (s *Service) handleSessionLaunchReceiptEvent(ctx context.Context, payload *
 	}
 	history, _ := loadLaunchReceiptHistory(session.Metadata[models.SessionMetaKeyLaunchReceiptState])
 	identity := LaunchAttemptIdentity{
-		SessionID: payload.SessionID, Incarnation: payload.ExecutionID, Generation: payload.Data.PromptGeneration,
+		SessionID: payload.SessionID, Incarnation: payload.ExecutionID, Generation: payload.Data.StartupGeneration,
 	}
 	if !applyLaunchReceiptEvent(&history, identity, payload.Data.Data) {
 		return

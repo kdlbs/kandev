@@ -97,3 +97,29 @@ func TestHandleAgentStreamEventStartsReceiptBeforeProcessConfiguration(t *testin
 		t.Fatalf("current receipt = %#v, want unknown process state before configuration", current)
 	}
 }
+
+func TestHandleAgentStreamEventRejectsDelayedSameExecutionStartupFact(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-replaced", "session-replaced", "step-replaced")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	for _, event := range []struct {
+		generation uint64
+		fact       string
+	}{{1, "started"}, {2, "started"}, {1, "process_started"}} {
+		svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID: "task-replaced", SessionID: "session-replaced", ExecutionID: "execution-reused",
+			Data: &lifecycle.AgentStreamEventData{Type: "launch_receipt", Data: event.fact, StartupGeneration: event.generation},
+		})
+	}
+	session, err := repo.GetTaskSession(ctx, "session-replaced")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	stored := session.Metadata["launch_receipt_state"].(map[string]interface{})
+	current := stored["current"].(map[string]interface{})
+	identity := current["identity"].(map[string]interface{})
+	if identity["generation"] != float64(2) || current["process_created"] != string(LaunchTriStateUnknown) {
+		t.Fatalf("current receipt = %#v, want replacement generation with no stale process fact", current)
+	}
+}

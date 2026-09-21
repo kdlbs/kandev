@@ -2489,7 +2489,11 @@ func (m *Manager) publishLaunchReceipt(execution *AgentExecution, fact string) {
 		WorkspaceID: execution.WorkspaceID,
 		TaskID:      execution.TaskID,
 		SessionID:   execution.SessionID,
-		Data:        &AgentStreamEventData{Type: "launch_receipt", Data: fact},
+		Data: &AgentStreamEventData{
+			Type:              "launch_receipt",
+			Data:              fact,
+			StartupGeneration: execution.startupAttemptSnapshot(),
+		},
 	})
 }
 

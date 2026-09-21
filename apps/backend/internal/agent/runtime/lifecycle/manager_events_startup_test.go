@@ -59,6 +59,7 @@ func TestHandleCompleteEventMarkState_DefersUninitializedStartupFailure(t *testi
 func TestPublishLaunchReceiptCarriesProcessFactOnTheSessionStream(t *testing.T) {
 	mgr, eventBus := createTestManagerWithTracking()
 	execution := createTestExecution("exec-receipt", "task-receipt", "session-receipt")
+	execution.beginStartupAttempt()
 
 	mgr.publishLaunchReceipt(execution, launchReceiptProcessStarted)
 
@@ -68,7 +69,7 @@ func TestPublishLaunchReceiptCarriesProcessFactOnTheSessionStream(t *testing.T) 
 	}
 	event := streamEvents[0]
 	if event.ExecutionID != execution.ID || event.SessionID != execution.SessionID || event.Data == nil ||
-		event.Data.Type != "launch_receipt" || event.Data.Data != launchReceiptProcessStarted {
+		event.Data.Type != "launch_receipt" || event.Data.Data != launchReceiptProcessStarted || event.Data.StartupGeneration == 0 {
 		t.Fatalf("launch receipt event = %+v, want session-scoped process fact", event)
 	}
 }
