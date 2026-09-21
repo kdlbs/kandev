@@ -124,10 +124,9 @@ test("saves the agent-tab close preference with a touch-safe selector", async ({
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
     await mobile.mobileMenuButton.click();
-    await testPage
-      .getByTestId("mobile-home-menu-card")
-      .getByRole("link", { name: "Settings" })
-      .click();
+    const menuCard = testPage.getByTestId("mobile-home-menu-card");
+    await expect(menuCard).toBeVisible();
+    await menuCard.getByRole("link", { name: "Settings" }).click();
     await testPage
       .getByTestId("settings-index")
       .getByRole("link", { name: /^Task Behavior/ })

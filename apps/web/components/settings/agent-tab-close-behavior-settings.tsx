@@ -6,6 +6,8 @@ import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
+import { isUserSettingsResponseCurrent } from "@/lib/settings/user-settings-revision";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { SettingsCard } from "./settings-card";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useSettingsSaveContributor } from "./settings-save-provider";
@@ -13,10 +15,11 @@ import { useSettingsSaveContributor } from "./settings-save-provider";
 type AgentTabCloseBehavior = "delete_session" | "hide_panel";
 
 export function shouldApplyAgentTabCloseBehavior(
-  submitted: AgentTabCloseBehavior,
-  current: AgentTabCloseBehavior,
+  responseRevision: number | null | undefined,
+  currentRevision: number | null | undefined,
+  isSubmittedSnapshot: boolean,
 ): boolean {
-  return submitted === current;
+  return isUserSettingsResponseCurrent(responseRevision, currentRevision, isSubmittedSnapshot);
 }
 
 export function AgentTabCloseBehaviorSettings() {
@@ -44,17 +47,20 @@ export function AgentTabCloseBehaviorSettings() {
     isDirty,
     save: async (revision) => {
       const submitted = revision as AgentTabCloseBehavior;
-      await updateUserSettings({ agent_tab_close_behavior: submitted });
+      const settingsAtSubmit = storeApi.getState().userSettings;
+      const response = await updateUserSettings({ agent_tab_close_behavior: submitted });
+      const state = storeApi.getState();
       if (
         !shouldApplyAgentTabCloseBehavior(
-          submitted,
-          storeApi.getState().userSettings.agentTabCloseBehavior,
+          response.settings.revision,
+          state.userSettings.revision,
+          state.userSettings === settingsAtSubmit,
         )
       ) {
         return;
       }
       setSaved(submitted);
-      setUserSettings({ ...storeApi.getState().userSettings, agentTabCloseBehavior: submitted });
+      setUserSettings(mapUserSettingsResponse(response, state.userSettings));
     },
     discard: () => setDraft(saved),
   });
