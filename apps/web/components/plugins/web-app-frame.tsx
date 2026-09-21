@@ -162,12 +162,7 @@ function useWebAppFrameLifecycle({
     frameWindow.postMessage(createWebAppStartupProbe(attempt.nonce), "*");
   }, [iframeRef]);
 
-  const handleError = useCallback(
-    () => finishAttempt({ result: "failed", reason: "document_error" }),
-    [finishAttempt],
-  );
-
-  return { frameState, handleLoad, handleError };
+  return { frameState, handleLoad };
 }
 
 /**
@@ -187,7 +182,7 @@ export function WebAppFrame({ runtimeUrl, title, className, onLoad, onError }: W
     target.postMessage(resolveWebAppAppearance(document, resolvedTheme), "*");
   }, [resolvedTheme]);
 
-  const { frameState, handleLoad, handleError } = useWebAppFrameLifecycle({
+  const { frameState, handleLoad } = useWebAppFrameLifecycle({
     runtimeUrl,
     iframeRef,
     sendAppearance,
@@ -208,6 +203,10 @@ export function WebAppFrame({ runtimeUrl, title, className, onLoad, onError }: W
       aria-busy={frameState === "loading"}
     >
       {runtimeUrl && frameState !== "unavailable" ? (
+        // No onError here: React never attaches a DOM "error" listener for iframe/object/embed
+        // (it only listens for "load"), so a document-load failure is unobservable from the
+        // frame element itself. It surfaces only through the guest's own postMessage handshake
+        // (the "document_error" reason) or the startup timeout.
         <iframe
           key={runtimeUrl}
           title={title}
@@ -218,7 +217,6 @@ export function WebAppFrame({ runtimeUrl, title, className, onLoad, onError }: W
           loading="eager"
           className="block h-full min-h-0 w-full min-w-0 flex-1 border-0"
           onLoad={handleLoad}
-          onError={handleError}
         />
       ) : null}
       {frameState !== "ready" && (

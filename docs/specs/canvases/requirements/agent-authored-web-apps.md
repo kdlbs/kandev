@@ -280,11 +280,12 @@ blocked by permissions, invalid, or using a prior release.
   active release as unavailable.
 - **AC-CANVASES-AGENT-WEB-APPS-007.10:** The runtime-startup-failure state
   shall distinguish at least these reported causes through its description: an
-  error raised by the canvas application while starting, a canvas application
-  that cannot reach its runtime capability API, a browser failure to load the
-  application document, and an absent acknowledgement at the
-  `AC-CANVASES-AGENT-WEB-APPS-007.5` deadline. A cause that the host cannot
-  determine shall not be reported as a release problem.
+  error raised by the canvas application while starting (including a browser
+  failure to load the application document, which the host cannot observe
+  separately and shall report under this same cause), a canvas application
+  that cannot reach its runtime capability API, and an absent acknowledgement
+  at the `AC-CANVASES-AGENT-WEB-APPS-007.5` deadline. A cause that the host
+  cannot determine shall not be reported as a release problem.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-008: Bounded agent authoring
 
