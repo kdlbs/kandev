@@ -53,3 +53,19 @@ viewport.
 - Changing backend task movement, Git operations, APIs, persistence, or
   permissions.
 - Removing or reorganizing other phone task-top-bar actions.
+
+## Navigation entry points
+
+The [unified phone navigation package](../../../plans/unified-mobile-navigation/plan.md)
+changes the hamburger to app navigation and the task-title button to the existing
+task picker. Its [design](../system-design/unified-mobile-navigation.md)
+owns that entry-point change; existing task actions, saved-view controller
+lifetime, history, and desktop/tablet guarantees here remain compatibility
+requirements. Historical hamburger descriptions above describe the preceding composition;
+the unified navigation design defines the current entry points.
+
+The September 2026 revision embeds the collapsible Tasks sidebar directly in
+the shared phone menu, replacing the Task views action and dedicated pinned
+shortcuts. Kanban/Threads/List title dropdowns open display options; Threads
+saved-view editing remains inside that surface. See REQ-UI-MOBILE-MENU-004/005
+in the unified navigation requirements for the current composition.

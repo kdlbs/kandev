@@ -72,6 +72,7 @@ type repoInfo struct {
 	CheckoutBranch             string
 	PRNumber                   int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
 	RemoteContribution         *models.RemoteContribution
+	CheckoutOptions            *models.RepositoryCheckoutOptions
 	ContributionDestination    *models.ContributionDestination
 	ComparisonTarget           *models.ComparisonTarget
 	Position                   int
@@ -167,7 +168,12 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 func (e *Executor) resolveTaskRepoInfoForSession(
 	ctx context.Context, sessionID string, tr *models.TaskRepository,
 ) (*repoInfo, error) {
+	options, err := models.GetRepositoryCheckoutOptions(tr.Metadata)
+	if err != nil {
+		return nil, err
+	}
 	info := &repoInfo{
+		CheckoutOptions:  options,
 		TaskRepositoryID: tr.ID,
 		RepositoryID:     tr.RepositoryID,
 		BaseBranch:       tr.BaseBranch,
@@ -215,7 +221,10 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 	}
 	e.resolvePRBaseForLaunch(ctx, tr, repo, info)
 
-	remoteRefState, err := e.ensureRepoLocalPathForSessionAndState(ctx, tr.TaskID, sessionID, repo)
+	// Task checkout modes select a separate cache without rewriting the repository record.
+	repoCopy := *repo
+	repo = &repoCopy
+	remoteRefState, err := e.ensureTaskCheckoutPath(ctx, tr.TaskID, sessionID, repo, options)
 	if err != nil {
 		return nil, err
 	}
@@ -255,12 +264,12 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		prNumber, checkoutBranch := info.PRNumber, info.CheckoutBranch
 		info.RefreshRepository = func(refreshCtx context.Context) error {
 			return e.refreshManagedRepositoryForSession(
-				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch,
+				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch, options,
 			)
 		}
 		info.RefreshRepositoryWithState = func(refreshCtx context.Context) (repoclone.RemoteRefState, error) {
 			return e.refreshManagedRepositoryForSessionWithState(
-				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch,
+				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch, options,
 			)
 		}
 	}
@@ -345,16 +354,16 @@ func isPluginManagedRepository(repo *models.Repository) bool {
 }
 
 func (e *Executor) refreshManagedRepositoryForSession(
-	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string,
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string, options ...*models.RepositoryCheckoutOptions,
 ) error {
 	_, err := e.refreshManagedRepositoryForSessionWithState(
-		ctx, taskID, sessionID, repo, prNumber, checkoutBranch,
+		ctx, taskID, sessionID, repo, prNumber, checkoutBranch, options...,
 	)
 	return err
 }
 
 func (e *Executor) refreshManagedRepositoryForSessionWithState(
-	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string,
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string, options ...*models.RepositoryCheckoutOptions,
 ) (repoclone.RemoteRefState, error) {
 	if e.repoCloner == nil || repo.LocalPath == "" {
 		return repoclone.RemoteRefStateUnknown, errors.New("managed repository refresh is unavailable")
@@ -384,6 +393,9 @@ func (e *Executor) refreshManagedRepositoryForSessionWithState(
 		)
 	}
 	request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
+	if len(options) > 0 {
+		request.CheckoutOptions = options[0]
+	}
 	if isGitHubRepository(repo) {
 		request.PRNumber = prNumber
 		request.CheckoutBranch = checkoutBranch
@@ -1518,7 +1530,11 @@ func (e *Executor) applyRecordedKubernetesExecutorConfigToResumeRequest(
 		ExecutorID: executorID, ExecutorType: string(current.Type), ExecutorCfg: current.Config,
 		Metadata: metadata, Resumable: current.Resumable, RuntimeName: string(current.Type),
 	}
+	if err := e.restoreKubernetesProfileEnvironment(ctx, &config, running.Metadata); err != nil {
+		return executorConfig{}, err
+	}
 	session.ExecutorID = executorID
+	session.ExecutorProfileID, _ = running.Metadata[lifecycle.MetadataKeyExecutorProfileID].(string)
 	req.ExecutorType = config.ExecutorType
 	req.ExecutorConfig = config.ExecutorCfg
 	req.Metadata = metadata
@@ -1663,16 +1679,15 @@ func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *
 	return execConfig
 }
 
-// isArchiveCancelledResumeSession reports whether session was cancelled by an
-// archive (Service.ArchiveTask's single-task path or HandoffService's cascade
-// archive) rather than an explicit user/coordinator stop. Mirrors
-// orchestrator.isArchiveCancelledSession — kept local to this package since
-// the two live on opposite sides of the executor/orchestrator boundary and
-// the check is two lines over already-exported models helpers.
-func isArchiveCancelledResumeSession(session *models.TaskSession) bool {
+// isRecoverableCancelledResumeSession reports whether session was cancelled by
+// a system reconciliation path rather than an explicit user/coordinator stop.
+// Mirrors the orchestrator's eligibility checks while keeping the executor's
+// prompt-free launch behavior aligned for legacy archive and orphan rows.
+func isRecoverableCancelledResumeSession(session *models.TaskSession) bool {
 	return session != nil &&
 		session.State == models.TaskSessionStateCancelled &&
-		models.IsArchiveCancelReason(session.ErrorMessage)
+		(models.IsArchiveCancelReason(session.ErrorMessage) ||
+			models.IsOrphanCancelReason(session.ErrorMessage))
 }
 
 // applyRunningRecordToResumeRequest loads the ExecutorRunning record and applies
@@ -1686,12 +1701,12 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 ) *models.ExecutorRunning {
 	if running == nil {
 		// Archive cleanup tears down the executors_running row entirely, so an
-		// archive-cancelled session reaches this point with running == nil. The
+		// system-cancelled session reaches this point with running == nil. The
 		// session metadata mirrors the provider conversation identity so an
 		// explicit completed follow-up can still restore the same conversation
 		// after runtime cleanup removed the operational row.
 		noAutoPromptState := session.State == models.TaskSessionStateWaitingForInput ||
-			isArchiveCancelledResumeSession(session) ||
+			isRecoverableCancelledResumeSession(session) ||
 			session.State == models.TaskSessionStateCompleted
 		if startAgent && noAutoPromptState {
 			if token := persistedSessionResumeToken(session); token != "" {
@@ -1739,9 +1754,9 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 			zap.String("session_id", session.ID),
 			zap.Bool("has_resume_token", running.ResumeToken != ""))
 	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput ||
-		isArchiveCancelledResumeSession(session) || session.State == models.TaskSessionStateCompleted) {
+		isRecoverableCancelledResumeSession(session) || session.State == models.TaskSessionStateCompleted) {
 		// Fresh-start resume (no resume token): don't auto-prompt with the task
-		// description. Also covers completed and archive-cancelled sessions whose
+		// description. Also covers completed and system-cancelled sessions whose
 		// running record survived cleanup but carries no token — the same
 		// auto-resume shape as the running==nil branch above.
 		req.TaskDescription = ""

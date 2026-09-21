@@ -1203,11 +1203,10 @@ func (s *Service) updateTaskSessionStateWithHook(
 				zap.Error(err))
 		}
 	}
-	// Work has resumed: a session entering STARTING/RUNNING clears the
-	// startup interruption marker and republishes the task so open clients
-	// drop the red interruption icon. No-op when the marker is absent.
+	// Entering STARTING/RUNNING only records a recovery attempt. The durable
+	// interruption marker is cleared after the provider confirms boot/readiness,
+	// so failed or cancelled attempts remain visible to the user.
 	if nextState == models.TaskSessionStateStarting || nextState == models.TaskSessionStateRunning {
-		s.clearTaskInterruptedMarker(ctx, taskID)
 		s.clearTaskAutoStartFailedMarker(ctx, taskID)
 	}
 	if authoritativeUpdatedAt == nil {
@@ -2174,9 +2173,8 @@ func (s *Service) setSessionStartingWithOptions(
 	}
 
 	// The launch path moves a session to STARTING without going through
-	// updateTaskSessionStateWithHook, so clear the interruption marker here
-	// too (no-op when absent).
-	s.clearTaskInterruptedMarker(ctx, taskID)
+	// updateTaskSessionStateWithHook. It records an attempt only; the
+	// interruption marker is cleared after confirmed provider readiness.
 	s.clearTaskAutoStartFailedMarker(ctx, taskID)
 
 	if publishSession != nil {
@@ -2187,14 +2185,39 @@ func (s *Service) setSessionStartingWithOptions(
 
 // clearTaskInterruptedMarker removes the startup interruption marker from a
 // task and republishes task.updated when it was actually present, so open
-// clients drop the red interruption icon. Called from the session-start
-// funnel when a session enters STARTING/RUNNING — work has resumed, so the
-// task is no longer interrupted. No-op when the marker is absent.
-func (s *Service) clearTaskInterruptedMarker(ctx context.Context, taskID string) {
+// clients drop the warning icon. Callers invoke it only after provider
+// readiness confirms that recovery succeeded. No-op when the marker is absent.
+func (s *Service) clearTaskInterruptedMarker(
+	ctx context.Context,
+	taskID string,
+	expectedMarker string,
+) {
 	if taskID == "" {
 		return
 	}
-	removed, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyInterruptedAt)
+	var (
+		removed bool
+		err     error
+	)
+	if strings.TrimSpace(expectedMarker) == "" {
+		// A recovery callback without a valid immutable marker snapshot fails
+		// closed. There is no safe unconditional removal path.
+		return
+	}
+	if remover, ok := s.repo.(interface {
+		RemoveTaskMetadataKeyIfValue(context.Context, string, string, string) (bool, error)
+	}); ok {
+		removed, err = remover.RemoveTaskMetadataKeyIfValue(
+			ctx, taskID, models.MetaKeyInterruptedAt, expectedMarker,
+		)
+	} else {
+		// A read followed by an unconditional legacy removal is not a
+		// compare-and-set. Refuse to clear when the adapter cannot provide the
+		// guarded primitive so a delayed callback cannot erase a newer marker.
+		s.logger.Warn("skipping interrupted-marker clear without compare-and-set support",
+			zap.String("task_id", taskID))
+		return
+	}
 	if err != nil {
 		s.logger.Warn("failed to clear interrupted marker",
 			zap.String("task_id", taskID),
@@ -2216,9 +2239,9 @@ func (s *Service) clearTaskInterruptedMarker(ctx context.Context, taskID string)
 
 // clearTaskAutoStartFailedMarker removes the auto-start-failure marker from a
 // task and republishes task.updated when it was actually present, so open
-// clients drop the failure badge. Called from the same session-start funnel
-// as clearTaskInterruptedMarker: a session entering STARTING/RUNNING means an
-// agent did launch, so any earlier auto-start failure no longer applies.
+// clients drop the failure badge. It shares the session-start funnel with the
+// interruption marker, but remains clear at launch admission because it means
+// the auto-start request itself was accepted.
 // No-op when the marker is absent.
 func (s *Service) clearTaskAutoStartFailedMarker(ctx context.Context, taskID string) {
 	if taskID == "" {
@@ -2699,7 +2722,6 @@ func (s *Service) setQueuedSessionRunningForIdentity(
 	session.UpdatedAt = updatedAt
 	if oldState != models.TaskSessionStateRunning {
 		s.reconcileRunningTaskStateLocked(ctx, identity.TaskID, identity.SessionID)
-		s.clearTaskInterruptedMarker(ctx, identity.TaskID)
 		s.clearTaskAutoStartFailedMarker(ctx, identity.TaskID)
 		s.publishTaskSessionStateChanged(
 			ctx,

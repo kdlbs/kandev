@@ -11,9 +11,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@kandev/ui/dialog";
+import { Progress } from "@kandev/ui/progress";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconAlertTriangle, IconCheck } from "@tabler/icons-react";
 import type { KandevRestartPhase } from "@/hooks/domains/system/use-kandev-restart";
+import { useStartupProgress } from "@/hooks/domains/system/use-startup-progress";
+import {
+  formatElapsed,
+  formatEta,
+  formatPhaseLabel,
+  formatStalled,
+  formatStepLabel,
+  formatStepProgress,
+  percentDone,
+} from "@/lib/startup-progress/format";
+import type { StartupSnapshot, StartupStepSnapshot } from "@/lib/startup-progress/types";
 
 type RestartProgressDialogProps = {
   phase: KandevRestartPhase;
@@ -27,6 +39,7 @@ export function RestartProgressDialog({
   onDismiss,
 }: RestartProgressDialogProps) {
   const { t } = useTranslation();
+  const startupProgress = useStartupProgress(phase === "restarting");
   if (phase === "idle") return null;
   const done = phase === "done";
   const failed = phase === "error";
@@ -44,6 +57,13 @@ export function RestartProgressDialog({
           </DialogTitle>
           <DialogDescription>{restartDescription(phase, errorMessage, t)}</DialogDescription>
         </DialogHeader>
+        {phase === "restarting" && (
+          <StartupProgressDetail
+            snapshot={startupProgress.snapshot}
+            lastKnown={startupProgress.lastKnown}
+            t={t}
+          />
+        )}
         {(done || failed) && (
           <DialogFooter>
             <Button
@@ -100,4 +120,44 @@ function restartDescription(
     default:
       return "";
   }
+}
+
+type StartupProgressDetailProps = {
+  snapshot: StartupSnapshot | null;
+  lastKnown: boolean;
+  t: TFunction;
+};
+
+/** Step-level detail for the "restarting" phase, polled by useStartupProgress (AC-PLATFORM-STARTUP-PROGRESS-003). */
+function StartupProgressDetail({ snapshot, lastKnown, t }: StartupProgressDetailProps) {
+  if (!snapshot) {
+    return (
+      <p className="text-muted-foreground text-sm" role="status" aria-live="polite">
+        {t("startup:page.waiting")}
+      </p>
+    );
+  }
+  return (
+    <div className="text-muted-foreground space-y-1 text-sm" role="status" aria-live="polite">
+      <p>{formatPhaseLabel(t, snapshot.phase)}</p>
+      <p>{formatElapsed(t, snapshot.elapsed_ms)}</p>
+      {snapshot.step && <StartupStepDetail step={snapshot.step} t={t} />}
+      {lastKnown && <p className="opacity-60">{t("startup:page.lastKnown")}</p>}
+    </div>
+  );
+}
+
+function StartupStepDetail({ step, t }: { step: StartupStepSnapshot; t: TFunction }) {
+  const showBar = step.measure === "counted" && (step.total ?? 0) > 0;
+  const showEta = step.measure === "counted" && step.eta_ms != null;
+  const showStalled = step.stalled && step.since_advance_ms != null;
+  return (
+    <>
+      <p>{formatStepLabel(t, step)}</p>
+      <p>{formatStepProgress(t, step)}</p>
+      {showEta && <p>{formatEta(t, step.eta_ms as number)}</p>}
+      {showBar && <Progress value={percentDone(step.done ?? 0, step.total ?? 0)} />}
+      {showStalled && <p>{formatStalled(t, step.since_advance_ms as number)}</p>}
+    </>
+  );
 }

@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   passthrough: ({ children }: { children: React.ReactNode }) => children,
 }));
 
+vi.mock("@/components/navigation/mobile-task-navigation-provider", () => ({
+  MobileTaskNavigationProvider: mocks.passthrough,
+}));
 vi.mock("@/components/app-sidebar/app-sidebar", () => ({ AppSidebar: () => null }));
 vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
   AppStatusSurfaceProvider: mocks.passthrough,

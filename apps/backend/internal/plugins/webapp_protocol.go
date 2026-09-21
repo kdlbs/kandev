@@ -240,11 +240,11 @@ func (s *Service) handleWebAppWorkflows(ctx context.Context, w http.ResponseWrit
 }
 
 func (s *Service) handleWebAppAction(w http.ResponseWriter, r *http.Request, binding webapp.CapabilityBinding, parts []string) {
-	if r.Method != http.MethodPost || len(parts) != 2 || !validWebAppKey(parts[1]) {
+	if r.Method != http.MethodPost || len(parts) != 3 || parts[1] != "actions" || !validWebAppKey(parts[2]) {
 		writeWebAppError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	if !webAppHasActionPermission(binding.Permissions, parts[1]) {
+	if !webAppHasActionPermission(binding.Permissions, parts[2]) {
 		writeWebAppError(w, http.StatusForbidden, "plugin_permission_denied")
 		return
 	}

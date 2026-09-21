@@ -74,7 +74,7 @@ async function openCreationDialog(page: Page, open: () => Promise<void>) {
 
 async function openFromTask(page: Page, mobile: boolean) {
   if (mobile) {
-    await page.getByTestId("mobile-session-menu").click();
+    await page.getByTestId("mobile-task-picker-trigger").click();
     await page
       .getByRole("dialog", { name: "Tasks", exact: true })
       .getByRole("button", { name: "New", exact: true })
@@ -130,7 +130,7 @@ export async function verifyCreationAutoFocus(
     await openCreationDialog(page, () => openFromTask(page, mobile));
     await submitTask(page, "Background task with agent", true, mobile);
     await expect(page).toHaveURL(activeURL);
-    if (mobile) await expect(page.getByTestId("mobile-session-menu")).toBeFocused();
+    if (mobile) await expect(page.getByTestId("mobile-task-picker-trigger")).toBeFocused();
     const secondID = await taskID(api, workspaceID, "Background task with agent");
     await expect
       .poll(

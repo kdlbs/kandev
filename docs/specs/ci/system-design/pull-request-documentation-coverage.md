@@ -1,6 +1,6 @@
 ---
 status: draft
-last_updated: 2026-09-16
+last_updated: 2026-09-21
 system: ci
 requirements:
   - REQ-CI-PR-DOCS-001
@@ -46,9 +46,11 @@ Initial exemptions:
 - Exact canonical registry source `plugin-registry/plugins.yaml`.
 - Exact lock basenames `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `go.sum`, and `Cargo.lock`.
 - Recognized non-Markdown harness files: `.codex/agents/*.toml`, `.codex/config.toml`, `.claude/settings.json`, and `.cursor/rules/*.mdc`.
+- CI infrastructure paths `.github/workflows/**`, `.github/scripts/**`, and `.github/actions/**`. These change the delivery pipeline, not shipped product behavior, and are already governed by workflow contract tests.
 
 Keep other `plugin-registry/**` paths subject to normal coverage. Do not exempt all JSON, YAML, assets, scripts, package manifests, Rust files, workflows, generated directories, or files containing the word `test`.
-These can change shipped behavior or repository contracts. Add exemptions later only with concrete fixtures.
+These can change shipped behavior or repository contracts. The `.github/` CI exemption is a directory-scoped rule; a workflow, script, or action outside `.github/` still requires coverage.
+Add exemptions later only with concrete fixtures.
 This conservative policy creates false positives for small runtime fixes and refactors. The explicit label is their escape hatch.
 
 ## Artifact contract

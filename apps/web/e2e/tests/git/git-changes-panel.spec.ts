@@ -1896,7 +1896,7 @@ test.describe("Git Changes Panel", () => {
     expect(await diffViewerOpen(), "no cumulative diff panel before clicking Diff").toBe(false);
 
     // Click the "Diff" button in the header to open the cumulative diff view
-    await session.changes.getByRole("button", { name: "Diff", exact: true }).click();
+    await session.openChangesDiff();
 
     // Assert what the click actually opens. Without this the checks below are
     // vacuous: the two commit texts were already visible before the click and

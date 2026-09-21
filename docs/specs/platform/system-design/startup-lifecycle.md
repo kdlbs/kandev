@@ -35,6 +35,11 @@ returns 503 with a `startup` object containing a fixed phase name, total elapsed
 milliseconds, and phase elapsed milliseconds. No paths, SQL, credentials, or raw
 errors enter this unauthenticated payload. Application routes remain 503.
 
+[Startup progress visibility](startup-progress-visibility.md) extends that same
+object with a sequence number and an optional step below the phase, and serves a
+rendered page rather than JSON to an application route that prefers HTML. The
+phase-only fields above keep their names and meanings.
+
 Phases cover database opening, backup, migrations, service initialization,
 required session recovery, and ready. Structured logs record transitions and
 phase duration. Launcher readiness polling reads JSON, reports transitions and
@@ -92,7 +97,7 @@ crash-safe retention, and restore tests. Never reuse by filename or target versi
 | Criteria | Mechanism |
 | --- | --- |
 | .1, .2, .3, .8 | Early bootstrap binding, atomic router handoff, existing launcher waits |
-| .4, .5 | Typed phase snapshot, structured timing, child-exit diagnostics |
+| .4, .5 | Typed phase snapshot, structured timing, child-exit diagnostics; the step layer and measured percentages live in [startup progress visibility](startup-progress-visibility.md) |
 | .6, .7 | Separate process/worker cancellation ownership, schema/store admission barriers, sequential initialization, backup gate |
 
 ## Decisions

@@ -126,16 +126,24 @@ const (
 	MessageTypeTodo     MessageType = "todo"
 )
 
+// RepositoryCheckoutOptions configures one task attachment's materialization.
+type RepositoryCheckoutOptions struct {
+	Version           int      `json:"version"`
+	DownloadMode      string   `json:"download_mode"`
+	SparseDirectories []string `json:"sparse_directories"`
+}
+
 // TaskRepository represents a repository associated with a task
 type TaskRepository struct {
-	ID           string                 `json:"id"`
-	TaskID       string                 `json:"task_id"`
-	RepositoryID string                 `json:"repository_id"`
-	BaseBranch   string                 `json:"base_branch"`
-	Position     int                    `json:"position"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
+	CheckoutOptions *RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
+	ID              string                     `json:"id"`
+	TaskID          string                     `json:"task_id"`
+	RepositoryID    string                     `json:"repository_id"`
+	BaseBranch      string                     `json:"base_branch"`
+	Position        int                        `json:"position"`
+	Metadata        map[string]interface{}     `json:"metadata,omitempty"`
+	CreatedAt       time.Time                  `json:"created_at"`
+	UpdatedAt       time.Time                  `json:"updated_at"`
 }
 
 // TaskWorkspaceFolder represents a non-Git folder associated with a task.
@@ -190,9 +198,10 @@ type Task struct {
 
 // TaskRepositoryInput for creating/updating task repositories
 type TaskRepositoryInput struct {
-	RepositoryID   string `json:"repository_id" binding:"required"`
-	BaseBranch     string `json:"base_branch" binding:"required"`
-	BranchPolicyID string `json:"branch_policy_id,omitempty"`
+	CheckoutOptions *RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
+	RepositoryID    string                     `json:"repository_id" binding:"required"`
+	BaseBranch      string                     `json:"base_branch" binding:"required"`
+	BranchPolicyID  string                     `json:"branch_policy_id,omitempty"`
 }
 
 // CreateTaskRequest for creating a new task

@@ -73,10 +73,7 @@ test.describe("Native code review — on demand", () => {
       timeout: 30_000,
     });
 
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible();
@@ -145,10 +142,7 @@ test.describe("Native code review — on demand", () => {
     const changesTabAfterReload = testPage.getByTestId("dockview-tab-changes");
     await expect(changesTabAfterReload).toBeVisible({ timeout: 30_000 });
     await changesTabAfterReload.click();
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const reopened = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(reopened).toBeVisible();
@@ -208,10 +202,7 @@ test.describe("Native code review — on demand", () => {
     ).toBeVisible({
       timeout: 30_000,
     });
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible();

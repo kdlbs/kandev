@@ -105,6 +105,7 @@ func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo
 		RepoEntities:     repo,
 		Executors:        repo,
 		Environments:     repo,
+		TaskEnvironments: repo,
 		Reviews:          repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
 	svc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
@@ -2150,10 +2151,13 @@ func seedWorkflowStep(t *testing.T, ctx context.Context, repo *workflowrepo.Repo
 
 // mockSessionLauncher captures LaunchSession calls for testing autoStartTask.
 type mockSessionLauncher struct {
-	mu      sync.Mutex
-	req     *orchestrator.LaunchSessionRequest
-	called  chan struct{}
-	inspect func(context.Context)
+	mu         sync.Mutex
+	req        *orchestrator.LaunchSessionRequest
+	requests   []*orchestrator.LaunchSessionRequest
+	called     chan struct{}
+	calls      chan struct{}
+	calledOnce sync.Once
+	inspect    func(context.Context)
 }
 
 func newMockSessionLauncher() *mockSessionLauncher {
@@ -2163,11 +2167,15 @@ func newMockSessionLauncher() *mockSessionLauncher {
 func (m *mockSessionLauncher) LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
 	m.mu.Lock()
 	m.req = req
+	m.requests = append(m.requests, req)
 	m.mu.Unlock()
 	if m.inspect != nil {
 		m.inspect(ctx)
 	}
-	close(m.called)
+	m.calledOnce.Do(func() { close(m.called) })
+	if m.calls != nil {
+		m.calls <- struct{}{}
+	}
 	return &orchestrator.LaunchSessionResponse{
 		Success:   true,
 		TaskID:    req.TaskID,
@@ -2269,6 +2277,41 @@ func TestAutoStartTask_ExplicitExecutorProfilePreserved(t *testing.T) {
 	req := launcher.getRequest()
 	assert.Equal(t, "exec-profile-docker", req.ExecutorProfileID, "explicit executor profile should be preserved")
 	assert.Equal(t, "", req.ExecutorID, "executorID should be empty when profile is set")
+}
+
+func TestLaunchAutoStartTask_ExplicitCreatePromptUsesPreparedStart(t *testing.T) {
+	launcher := newMockSessionLauncher()
+	launcher.calls = make(chan struct{}, 2)
+	h := &Handlers{
+		sessionLauncher: launcher,
+		logger:          testLogger(t),
+	}
+
+	h.launchAutoStartTask(context.Background(), &models.Task{
+		ID: "task-1", WorkflowStepID: "step-explicit", Description: "initial request",
+	}, mcpAutoStartConfig{
+		AgentProfileID:      "agent-profile-1",
+		ExecutorID:          models.ExecutorIDWorktree,
+		InitialCreatePrompt: true,
+	})
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-launcher.calls:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("LaunchSession call %d did not complete", i+1)
+		}
+	}
+
+	launcher.mu.Lock()
+	requests := append([]*orchestrator.LaunchSessionRequest(nil), launcher.requests...)
+	launcher.mu.Unlock()
+	require.Len(t, requests, 2)
+	assert.Equal(t, orchestrator.IntentPrepare, requests[0].Intent)
+	assert.True(t, requests[0].DeferredStart)
+	assert.Equal(t, orchestrator.IntentStartCreated, requests[1].Intent)
+	assert.Equal(t, "session-1", requests[1].SessionID)
+	assert.True(t, requests[1].InitialCreatePrompt)
 }
 
 func TestLaunchAutoStartTask_PreservesContextValuesWithoutCallerCancellation(t *testing.T) {
@@ -2559,6 +2602,89 @@ func TestHandleCreateTask_SubtaskBaseBranchOverride_ExplicitReposWin(t *testing.
 	assert.Equal(t, "repo-sibling", subtask.Repositories[0].RepositoryID)
 	assert.Equal(t, "develop", subtask.Repositories[0].BaseBranch,
 		"explicit per-repo base_branch must win over the top-level override")
+}
+
+// @covers AC-TASKS-MCP-WORKSPACE-MODE-004.5
+func TestHandleCreateTask_InheritParentRejectsUnmatchedMaterializedRepository(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	parentEnv := &models.TaskEnvironment{
+		ID:            "env-parent-admission",
+		TaskID:        parentID,
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		Status:        models.TaskEnvironmentStatusCreating,
+		WorkspacePath: "/tmp/parent-admission",
+	}
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, parentEnv))
+	require.NoError(t, repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		TaskEnvironmentID: parentEnv.ID,
+		RepositoryID:      "repo-parent",
+		BranchSlug:        "feature-parent",
+		Status:            "active",
+	}))
+	parentEnv.Status = models.TaskEnvironmentStatusReady
+	require.NoError(t, repo.UpdateTaskEnvironment(ctx, parentEnv))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"repositories":     []map[string]interface{}{{"repository_id": "repo-parent", "base_branch": "main"}},
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	require.Contains(t, string(resp.Payload), "workspace_mode=new_workspace")
+
+	children, err := repo.ListChildren(ctx, parentID)
+	require.NoError(t, err)
+	assert.Empty(t, children, "rejected admission must not create a child task")
+}
+
+func TestHandleCreateTask_InheritParentRejectsUnmatchedBaseBranchOverride(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	parentEnv := &models.TaskEnvironment{
+		ID:            "env-parent-base-override",
+		TaskID:        parentID,
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		Status:        models.TaskEnvironmentStatusCreating,
+		WorkspacePath: "/tmp/parent-base-override",
+	}
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, parentEnv))
+	require.NoError(t, repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		TaskEnvironmentID: parentEnv.ID,
+		RepositoryID:      "repo-parent",
+		BranchSlug:        "feature-parent",
+		Status:            "active",
+	}))
+	parentEnv.Status = models.TaskEnvironmentStatusReady
+	require.NoError(t, repo.UpdateTaskEnvironment(ctx, parentEnv))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"base_branch":      "main",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	require.Contains(t, string(resp.Payload), "workspace_mode=new_workspace")
+
+	children, err := repo.ListChildren(ctx, parentID)
+	require.NoError(t, err)
+	assert.Empty(t, children, "rejected branch override must not create a child task")
 }
 
 func TestHandleCreateTask_SubtaskDefaultsToParentWorkspaceAndWorkflow(t *testing.T) {

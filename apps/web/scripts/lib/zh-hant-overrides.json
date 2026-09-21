@@ -22,7 +22,8 @@
       "task": {
         "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。您的訊息會保留。",
         "proxy": "代理伺服器",
-        "pathBasedProxyWorksForApis": "路徑型代理伺服器。適用於 API，但可能導致預期由 / 提供服務的 Web 應用程式無法正常運作。"
+        "pathBasedProxyWorksForApis": "路徑型代理伺服器。適用於 API，但可能導致預期由 / 提供服務的 Web 應用程式無法正常運作。",
+        "checkoutOptions.providerUnsupported": "高階檢出選項目前適用於 GitHub 儲存庫。"
       },
       "workspaces": {
         "failedToSaveRepository": "無法儲存此儲存庫"

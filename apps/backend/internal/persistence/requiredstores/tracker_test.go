@@ -1,14 +1,15 @@
 package requiredstores
 
 import (
+	"github.com/kandev/kandev/internal/startup"
 	"strings"
 	"testing"
 )
 
 func TestTrackerRejectsUnknownDuplicateAndOutOfOrderResults(t *testing.T) {
 	tracker, err := NewTracker([]Descriptor{
-		{ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}},
-		{ID: "second", OwnerPackage: "owner/second", RequiredTables: []string{"second"}, DependsOn: []string{"first"}},
+		{ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories},
+		{ID: "second", OwnerPackage: "owner/second", RequiredTables: []string{"second"}, DependsOn: []string{"first"}, Sweep: startup.StepStoresRepositories},
 	})
 	if err != nil {
 		t.Fatalf("NewTracker() error = %v", err)
@@ -24,8 +25,8 @@ func TestTrackerRejectsUnknownDuplicateAndOutOfOrderResults(t *testing.T) {
 
 func TestTrackerSnapshotUsesCatalogOrderAndDetectsFailures(t *testing.T) {
 	tracker, err := NewTracker([]Descriptor{
-		{ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}},
-		{ID: "second", OwnerPackage: "owner/second", RequiredTables: []string{"second"}, DependsOn: []string{"first"}},
+		{ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories},
+		{ID: "second", OwnerPackage: "owner/second", RequiredTables: []string{"second"}, DependsOn: []string{"first"}, Sweep: startup.StepStoresRepositories},
 	})
 	if err != nil {
 		t.Fatalf("NewTracker() error = %v", err)
@@ -54,8 +55,8 @@ func TestTrackerSnapshotUsesCatalogOrderAndDetectsFailures(t *testing.T) {
 
 func TestTrackerDetectsMissingResults(t *testing.T) {
 	tracker, err := NewTracker([]Descriptor{
-		{ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}},
-		{ID: "second", OwnerPackage: "owner/second", RequiredTables: []string{"second"}},
+		{ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories},
+		{ID: "second", OwnerPackage: "owner/second", RequiredTables: []string{"second"}, Sweep: startup.StepStoresRepositories},
 	})
 	if err != nil {
 		t.Fatalf("NewTracker() error = %v", err)
@@ -70,8 +71,8 @@ func TestTrackerDetectsMissingResults(t *testing.T) {
 
 func TestTrackerProbeStateRecoversAndReportsUnavailableStores(t *testing.T) {
 	tracker, err := NewTracker([]Descriptor{
-		{ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}},
-		{ID: "second", OwnerPackage: "owner/second", RequiredTables: []string{"second"}},
+		{ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories},
+		{ID: "second", OwnerPackage: "owner/second", RequiredTables: []string{"second"}, Sweep: startup.StepStoresRepositories},
 	})
 	if err != nil {
 		t.Fatalf("NewTracker() error = %v", err)

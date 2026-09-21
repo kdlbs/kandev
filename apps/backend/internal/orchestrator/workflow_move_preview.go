@@ -249,7 +249,7 @@ func (s *Service) resolveWorkflowMovePreviewRecipient(
 ) {
 	if destination.SessionTarget != nil {
 		input.ExplicitTarget = true
-		target, profileID, err := s.resolvePreviewWorkflowSessionTarget(ctx, taskID, destination)
+		target, profileID, err := s.resolvePreviewWorkflowSessionTarget(ctx, taskID, task, destination)
 		if err != nil {
 			input.Notices = append(input.Notices, workflowMovePreviewNotice("target_unavailable", nil))
 		} else {
@@ -286,6 +286,11 @@ func (s *Service) previewStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 	if step == nil || step.SessionTarget != nil {
 		return "", nil
 	}
+	if task != nil && task.WorkflowID == step.WorkflowID {
+		if replacement, ok := task.WorkflowAgentOverrides.ReplacementFor(task.WorkflowID, step.ID); ok {
+			return replacement, nil
+		}
+	}
 	if profileID := strings.TrimSpace(step.AgentProfileID); profileID != "" {
 		return profileID, nil
 	}
@@ -309,6 +314,7 @@ func (s *Service) previewStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 func (s *Service) resolvePreviewWorkflowSessionTarget(
 	ctx context.Context,
 	taskID string,
+	task *models.Task,
 	step *wfmodels.WorkflowStep,
 ) (*models.TaskSession, string, error) {
 	if step == nil || step.SessionTarget == nil {
@@ -331,7 +337,11 @@ func (s *Service) resolvePreviewWorkflowSessionTarget(
 	if err != nil {
 		return nil, "", err
 	}
-	return session, sourceStep.AgentProfileID, nil
+	profileID, err := s.previewStepAgentProfile(ctx, sourceStep, task, true)
+	if err != nil {
+		return nil, "", err
+	}
+	return session, profileID, nil
 }
 
 // resolvePreviewInitialWorkflowSession is the read-only sibling of

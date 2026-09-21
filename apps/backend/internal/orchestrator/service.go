@@ -695,9 +695,11 @@ type Service struct {
 	watcher   *watcher.Watcher
 
 	// Message queue service for queueing messages while agent is running
-	messageQueue          *messagequeue.Service
-	passthroughDispatchMu sync.Mutex
-	passthroughDispatches map[string]map[*passthroughDispatchToken]struct{}
+	messageQueue                   *messagequeue.Service
+	passthroughDispatchMu          sync.Mutex
+	passthroughDispatches          map[string]map[*passthroughDispatchToken]struct{}
+	initialCreatePromptMu          sync.Mutex
+	initialCreatePromptPassthrough map[string]initialCreatePromptPassthroughEvidence
 
 	// autoStartOnCreateMu serializes the local ownership hand-off for the
 	// durable auto-start-on-create marker. The database marker survives a
@@ -1470,7 +1472,7 @@ type Service struct {
 	ciAutomationStopped bool
 	ciAutomationWorkers sync.WaitGroup
 
-	// dynamicSuccessorWorkers owns the detached dynamic fallback launches. The
+	// dynamicSuccessorWorkers owns detached dynamic launches and failure recovery. The
 	// launch has to leave the agent.failed dispatch to avoid the prompt
 	// lifecycle deadlock, but a detached goroutine must still stop mutating
 	// session state once Stop begins, so it runs under a service-owned context
@@ -2591,6 +2593,7 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 
 	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
 		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
+			s.clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turnID)
 			s.bindAcceptedDispatchTurn(sessionID, turnID)
 			return turnID, false, nil, nil
 		}
@@ -2602,6 +2605,7 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 	}
 	if turn != nil {
 		s.activeTurns.Store(sessionID, turn.ID)
+		s.clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turn.ID)
 		s.bindAcceptedDispatchTurn(sessionID, turn.ID)
 		return turn.ID, false, nil, nil
 	}
@@ -2617,9 +2621,11 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 
 	if reserve {
 		s.reservedPromptTurns.Store(sessionID, newReservedPromptTurn(turn.ID))
+		s.clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turn.ID)
 		return turn.ID, true, turn, nil
 	}
 	s.activeTurns.Store(sessionID, turn.ID)
+	s.clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turn.ID)
 	s.bindAcceptedDispatchTurn(sessionID, turn.ID)
 	return turn.ID, true, nil, nil
 }
@@ -3665,20 +3671,34 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	}
 
 	// Mark the task interrupted when its session was mid-turn when the backend
-	// died (STARTING/RUNNING) so task-list surfaces can show the red
-	// interruption icon. WAITING_FOR_INPUT sessions were idle, not interrupted.
+	// died (STARTING/RUNNING) so task-list surfaces can show the warning
+	// indicator. WAITING_FOR_INPUT sessions were idle, not interrupted.
 	// A re-tracked session's task was never actually interrupted -- its agent
 	// kept running across the restart -- so this is skipped for it per
 	// AC-EXECUTORS-SURVIVAL-003.2.
 	// The write is archive-atomic (SetTaskMetadataKeyIfNotArchived), so an
 	// archive that commits after this check cannot leave a stale marker on an
-	// archived task. The marker is cleared when a session of the task next
-	// enters STARTING/RUNNING (see updateTaskSessionStateWithHook).
+	// archived task. The marker is cleared after the provider confirms recovery
+	// (see markRecoveryResolved).
 	if !retracked && running.TaskID != "" && (previousState == models.TaskSessionStateStarting || previousState == models.TaskSessionStateRunning) {
-		if _, setErr := s.repo.SetTaskMetadataKeyIfNotArchived(ctx, running.TaskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339)); setErr != nil {
+		changed, setErr := s.repo.SetTaskMetadataKeyIfNotArchived(ctx, running.TaskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339))
+		if setErr != nil {
 			s.logger.Warn("failed to mark task interrupted on startup",
 				zap.String("task_id", running.TaskID),
 				zap.Error(setErr))
+		} else if changed {
+			// Startup reconciliation writes the marker directly because it runs
+			// before the task service's periodic sweep. Publish the committed
+			// task projection so already-connected clients show the warning
+			// without waiting for a reload or unrelated task update.
+			task, taskErr := s.repo.GetTask(ctx, running.TaskID)
+			if taskErr != nil || task == nil {
+				s.logger.Warn("failed to load task after startup interruption marker",
+					zap.String("task_id", running.TaskID),
+					zap.Error(taskErr))
+			} else {
+				s.publishTaskUpdated(ctx, task)
+			}
 		}
 	}
 
@@ -4080,7 +4100,7 @@ func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID 
 		go func(profileID string) {
 			_, launchErr := s.startCreatedSessionWithComposedPrompt(
 				context.WithoutCancel(ctx), taskID, sessionID, profileID,
-				"", "", true, false, false, nil, nil,
+				"", "", true, false, false, false, nil, nil,
 			)
 			if launchErr != nil && !errors.Is(launchErr, ErrAgentPromptInProgress) {
 				s.logger.Warn("failed to start session for durable queued prompt",

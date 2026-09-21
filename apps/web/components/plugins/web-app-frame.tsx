@@ -143,8 +143,8 @@ function useWebAppFrameLifecycle({
 
 /**
  * Hosts a static plugin web application without bringing it into the SPA
- * process. The sandbox deliberately omits allow-same-origin, top navigation,
- * popups, downloads, and a privileged host bridge.
+ * process. The sandbox preserves same-origin requests while omitting top
+ * navigation, popups, downloads, and a privileged host bridge.
  */
 export function WebAppFrame({ runtimeUrl, title, className, onLoad, onError }: WebAppFrameProps) {
   const { isMobile } = useResponsiveBreakpoint();
@@ -184,7 +184,7 @@ export function WebAppFrame({ runtimeUrl, title, className, onLoad, onError }: W
           title={title}
           src={runtimeUrl}
           ref={iframeRef}
-          sandbox="allow-scripts allow-forms"
+          sandbox="allow-scripts allow-forms allow-same-origin"
           referrerPolicy="no-referrer"
           loading="eager"
           className="block h-full min-h-0 w-full min-w-0 flex-1 border-0"
