@@ -68,7 +68,11 @@ func (s *Service) resolveExistingInheritedRepository(
 	}
 	var found *models.Repository
 	if path := strings.TrimSpace(repository.LocalPath); path != "" {
-		found, err = s.repoEntities.GetRepositoryByLocalPath(ctx, task.WorkspaceID, filepath.Clean(path))
+		var lookupErr error
+		found, lookupErr = s.repoEntities.GetRepositoryByLocalPath(ctx, task.WorkspaceID, filepath.Clean(path))
+		if lookupErr != nil {
+			return repository, fmt.Errorf("%w: resolve inherited repository locator", models.ErrWorkspaceReuseUnsafe)
+		}
 	} else if rawURL := effectiveRemoteURL(repository); rawURL != "" {
 		provider, owner, name, _, parseErr := parseRemoteRepositoryURL(rawURL, repository.Provider)
 		if parseErr != nil {

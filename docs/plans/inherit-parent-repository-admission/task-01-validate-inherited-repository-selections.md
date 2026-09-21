@@ -62,6 +62,7 @@ git diff --check -- apps/backend/internal/task/service apps/backend/internal/mcp
 - `apps/backend/internal/task/service/inherit_parent_repository_admission_test.go`
 - `apps/backend/internal/mcp/handlers/handlers.go`
 - `apps/backend/internal/mcp/handlers/handlers_test.go`
+- `apps/web/e2e/tests/task/subtask.spec.ts`
 - `docs/specs/tasks/requirements/mcp-workspace-mode.md`
 - `docs/specs/tasks/system-design/mcp-workspace-mode.md`
 
