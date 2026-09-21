@@ -81,6 +81,8 @@ func RegisterRoutes(g *gin.RouterGroup, h *Handler) {
 	g.POST("/runtime/workspace/manage", h.manageWorkspace)
 	assistant.GET("/runtime/tasks", h.workspaceTasks)
 	g.GET("/runtime/tasks/:id/details", h.details)
+	g.GET("/runtime/tasks/:id/content", h.taskContent)
+	g.GET("/runtime/tasks/:id/permissions", h.taskPermissions)
 	g.POST("/runtime/tasks", h.createTask)
 	g.POST("/runtime/tasks/:id/manage", h.manageTask)
 	g.POST("/runtime/tasks/:id/status", h.updateTask)
@@ -286,6 +288,12 @@ func (h *Handler) details(c *gin.Context) {
 	if err != nil {
 		fail(c, err)
 		return
+	}
+	if c.Query("include_result") == "false" {
+		if data, ok := result.(map[string]any); ok {
+			delete(data, "messages")
+			delete(data, "session_results")
+		}
 	}
 	c.JSON(200, result)
 }

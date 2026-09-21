@@ -48,13 +48,13 @@ func TestAssistantBrokerForwardsOnlyNamedOperations(t *testing.T) {
 func TestWorkspaceBrokerAdvertisesUsableTaskControls(t *testing.T) {
 	t.Setenv("KANDEV_ORCHESTRATOR_SCOPE", "workspace")
 	s := newAssistantMCP(&kandevClient{})
-	for _, name := range []string{"workspace", "workspace_tasks", "task_details", "capabilities", "memory", "create_task", "manage_task", "task_status"} {
+	for _, name := range []string{"workspace", "workspace_tasks", "task_details", "task_content", "task_permissions", "capabilities", "memory", "create_task", "manage_task", "task_status"} {
 		require.NotNil(t, s.GetTool(name), name)
 	}
 	for _, name := range []string{"create_objective", "objectives", "maintenance", "workspace_links", "answer_question"} {
 		require.Nil(t, s.GetTool(name), name)
 	}
-	for _, action := range []string{"edit", "move", "archive", "delete", "assign", "start", "stop", "message"} {
+	for _, action := range []string{"edit", "move", "archive", "delete", "assign", "start", "stop", "message", "session_mode", "resolve_permission"} {
 		require.Contains(t, s.GetTool("manage_task").Tool.Description, action)
 	}
 	require.Contains(t, s.GetTool("create_task").Tool.Description, "No objective")

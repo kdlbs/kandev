@@ -26,6 +26,10 @@ type WorkspaceTaskCommand struct {
 	DirectProfile  bool   `json:"-"`
 	SessionID      string `json:"session_id"`
 	Prompt         string `json:"prompt"`
+	Mode           string `json:"mode,omitempty"`
+	RequestID      string `json:"request_id,omitempty"`
+	PendingID      string `json:"pending_id,omitempty"`
+	OptionID       string `json:"option_id,omitempty"`
 	WorkspaceID    string
 	ChiefID        string
 	TaskID         string

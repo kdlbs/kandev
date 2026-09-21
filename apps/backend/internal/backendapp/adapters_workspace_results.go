@@ -37,7 +37,7 @@ func (a *taskCreatorAdapter) WorkspaceTaskDetails(ctx context.Context, workspace
 	if err != nil {
 		return nil, err
 	}
-	result := map[string]any{workspaceResultTaskKey: task, "sessions": sessions}
+	result := map[string]any{workspaceResultTaskKey: workspaceTaskDetailSummary(task), "sessions": workspaceSessionSummaries(sessions)}
 	completionErr := a.ValidateAssistantTaskCompletion(ctx, workspaceID, taskID)
 	result["completion_ready"] = completionErr == nil
 	if completionErr != nil {
@@ -68,19 +68,11 @@ func (a *taskCreatorAdapter) attachLatestWorkspaceMessages(ctx context.Context, 
 		if message.Type != "message" && !message.RequestsInput {
 			continue
 		}
-		if len(rows) == 6 {
+		if len(rows) == 1 {
 			more = true
 			break
 		}
-		text := []rune(message.Content)
-		clipped := len(text) > 4000
-		if clipped {
-			text = text[:4000]
-		}
-		row := map[string]any{"id": message.ID, "author_type": message.AuthorType, workspaceResultContentKey: string(text), "requests_input": message.RequestsInput, "truncated": clipped}
-		if message.RequestsInput {
-			row["metadata"] = message.Metadata
-		}
+		row := map[string]any{"id": message.ID, "author_type": message.AuthorType, workspaceResultContentKey: workspaceExportText(message.Content, 4000), "requests_input": message.RequestsInput, "truncated": len(message.Content) > 4000}
 		rows = append(rows, row)
 	}
 	result["messages"], result["has_more"], result[sessionIDPayloadKey] = rows, more, latest.ID
@@ -109,12 +101,7 @@ func (a *taskCreatorAdapter) attachWorkspaceSessionResults(ctx context.Context, 
 				more = true
 				break
 			}
-			text := []rune(m.Content)
-			truncated := len(text) > 1000
-			if truncated {
-				text = text[:1000]
-			}
-			excerpts = append(excerpts, map[string]any{"id": m.ID, workspaceResultContentKey: string(text), "author_type": m.AuthorType, "truncated": truncated})
+			excerpts = append(excerpts, map[string]any{"id": m.ID, workspaceResultContentKey: workspaceExportText(m.Content, 256), "author_type": m.AuthorType, "truncated": len(m.Content) > 256})
 		}
 		rows = append(rows, map[string]any{sessionIDPayloadKey: session.ID, "profile_id": session.AgentProfileID, workspaceResultStateKey: session.State, "review_status": session.ReviewStatus, "messages": excerpts, "has_more": more})
 	}

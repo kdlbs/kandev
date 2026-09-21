@@ -68,20 +68,25 @@ func TestWorkspaceControlUsesSignedScope(t *testing.T) {
 	manager := &workspaceCommandManager{assistantTaskManager: &assistantTaskManager{}}
 	s.Manager = manager
 	router, token, run := workspaceControlCaller(t, s, task)
-	for _, action := range []string{"edit", "move", "assign", "adopt", "start", "stop", "message", "archive", "delete"} {
+	for _, action := range []string{"edit", "move", "assign", "adopt", "start", "stop", "message", "archive", "delete", "session_mode", "resolve_permission"} {
 		response := runtimeRequest(t, router, "POST", "/api/v1/orchestration/runtime/tasks/target/manage", token, run,
-			map[string]any{"action": action, "WorkspaceID": "foreign", "ChiefID": "foreign", "TaskID": "foreign", "title": "Synthetic edit", "workflow_step_id": "progress"})
+			map[string]any{"action": action, "WorkspaceID": "foreign", "ChiefID": "foreign", "TaskID": "foreign", "title": "Synthetic edit", "workflow_step_id": "progress", "session_id": "worker", "mode": "default", "request_id": "request", "pending_id": "generation", "option_id": "once"})
 		require.Equal(t, 200, response.Code, response.Body.String())
 		got := manager.commands[len(manager.commands)-1]
 		require.Equal(t, "ws", got.WorkspaceID)
 		require.Equal(t, "chief", got.ChiefID)
 		require.Equal(t, "target", got.TaskID)
+		require.Equal(t, "worker", got.SessionID)
+		require.Equal(t, "default", got.Mode)
+		require.Equal(t, "request", got.RequestID)
+		require.Equal(t, "generation", got.PendingID)
+		require.Equal(t, "once", got.OptionID)
 		require.True(t, got.DirectProfile)
 	}
 	require.NoError(t, s.Runs.FinishRun(context.Background(), run, "finished", nil))
 	response := runtimeRequest(t, router, "POST", "/api/v1/orchestration/runtime/tasks/target/manage", token, run, map[string]string{"action": "delete"})
 	require.Equal(t, 403, response.Code)
-	require.Len(t, manager.commands, 9)
+	require.Len(t, manager.commands, 11)
 }
 
 func TestPrivateTaskDeletionDoesNotCreateObjectiveLink(t *testing.T) {

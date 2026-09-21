@@ -111,6 +111,18 @@ uncommitted work. Other workspaces, Office tasks and private conversations are
 outside these controls. The Orchestrator inspects native task details after an
 uncertain result before deciding whether an action needs retrying.
 
+Task details contain compact status and result previews. The Orchestrator can
+read full requirements, worker replies, answered questions and command failures
+in bounded pages, so long conversations do not require shell or file access.
+
+For an authorized task blocked by a provider's automatic permission classifier,
+the Orchestrator can switch that session to manual permission review, ask the
+worker to retry, and inspect the resulting native request. It can approve or
+reject one exact request using the provider's offered option. This does not
+disable permission checks, create persistent allow rules, or override explicit
+denials. New consequential scope still requires your authorization. Permission
+decisions use Kandev's native audit and stale-request checks.
+
 Tool discovery follows the conversation's scope. A workspace conversation gets
 workspace task controls and its own memory; owner-scoped objectives, linked
 workspace grants and maintenance tools belong to a selected private conversation.
