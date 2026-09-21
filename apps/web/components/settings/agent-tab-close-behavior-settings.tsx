@@ -12,6 +12,13 @@ import { useSettingsSaveContributor } from "./settings-save-provider";
 
 type AgentTabCloseBehavior = "delete_session" | "hide_panel";
 
+export function shouldApplyAgentTabCloseBehavior(
+  submitted: AgentTabCloseBehavior,
+  current: AgentTabCloseBehavior,
+): boolean {
+  return submitted === current;
+}
+
 export function AgentTabCloseBehaviorSettings() {
   const { t } = useTranslation();
   const preference = useAppStore((state) => state.userSettings.agentTabCloseBehavior);
@@ -38,6 +45,14 @@ export function AgentTabCloseBehaviorSettings() {
     save: async (revision) => {
       const submitted = revision as AgentTabCloseBehavior;
       await updateUserSettings({ agent_tab_close_behavior: submitted });
+      if (
+        !shouldApplyAgentTabCloseBehavior(
+          submitted,
+          storeApi.getState().userSettings.agentTabCloseBehavior,
+        )
+      ) {
+        return;
+      }
       setSaved(submitted);
       setUserSettings({ ...storeApi.getState().userSettings, agentTabCloseBehavior: submitted });
     },

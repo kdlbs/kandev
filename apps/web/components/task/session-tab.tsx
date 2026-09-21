@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -37,6 +38,7 @@ import { SessionTabCloseAction } from "./session-tab-close-action";
 import { clearHiddenSessionPanel, hideSessionPanel } from "./dockview-hidden-session-panels";
 import { useSessionTabDelete } from "./use-session-tab-delete";
 import { MAX_SESSION_NAME_LENGTH, useSessionRenameCommitter } from "./use-session-rename";
+import { countVisibleSessionPanels } from "./session-tab-visibility";
 
 function useSessionTabState(sessionId: string | undefined) {
   const isPrimary = useAppStore((state) => {
@@ -136,12 +138,17 @@ function useSessionTabActions(
   containerApi: IDockviewPanelHeaderProps["containerApi"],
 ) {
   const dockviewApi = useDockviewStore((state) => state.api);
+  const taskSessions = useAppStore((state) =>
+    taskId ? state.taskSessionsByTask.itemsByTaskId[taskId] : undefined,
+  );
+  const taskSessionIds = useMemo(
+    () => new Set(taskSessions?.map((session) => session.id) ?? []),
+    [taskSessions],
+  );
   const [visibleSessionCount, setVisibleSessionCount] = useState(0);
   useEffect(() => {
     const update = () =>
-      setVisibleSessionCount(
-        containerApi.panels.filter((panel) => panel.id.startsWith("session:")).length,
-      );
+      setVisibleSessionCount(countVisibleSessionPanels(containerApi.panels, taskSessionIds));
     update();
     const added = containerApi.onDidAddPanel(update);
     const removed = containerApi.onDidRemovePanel(update);
@@ -149,7 +156,7 @@ function useSessionTabActions(
       added.dispose();
       removed.dispose();
     };
-  }, [containerApi]);
+  }, [containerApi, taskSessionIds]);
   const onDeleted = useCallback(() => {
     if (sessionId) clearHiddenSessionPanel(containerApi, sessionId);
     const panel = containerApi.getPanel(api.id);
