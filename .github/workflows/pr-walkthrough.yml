@@ -8,6 +8,10 @@ on:
     types: [opened, ready_for_review, reopened, synchronize, labeled]
 
 env:
+  # Free model, accepted explicitly: it may use prompts and completions to
+  # train future Meta models, so PR patches and prepared head context are
+  # subject to that policy. To revoke, restore a non-training model such as
+  # opencode-go/muse-spark-1.3-contributor here and in the agent block below.
   PR_WALKTHROUGH_MODEL: opencode/muse-spark-1.3-contributor-free
   PR_WALKTHROUGH_VARIANT: high
 
