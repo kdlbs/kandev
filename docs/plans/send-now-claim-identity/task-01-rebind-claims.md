@@ -29,6 +29,8 @@ reconciliation usable while retaining exact claim fencing.
 - Claim IDs, accepted state, source rows, dispatch metadata, FIFO order, and
   rollback behavior remain unchanged.
 - Requests and settlements using the retired source identity remain fenced.
+- Legacy transfer fallback fails closed when it encounters an identity-aware
+  claim instead of persisting the retired identity.
 - Reconciliation after source-session removal and process restart can settle
   both claim states under the successor identity.
 
@@ -45,6 +47,8 @@ reconciliation usable while retaining exact claim fencing.
 The direct and durable transfer paths now pass the live destination identity
 into the atomic transfer transaction, which validates it before rebinding the
 claim and derives the claim generation from the destination session generation.
-Accepted and unaccepted transfer, restart reconciliation, source fencing, and
-race coverage pass. No UI or public documentation change is required.
-
+The legacy transfer fallback rejects an identity-aware claim rather than
+retaining the retired identity, while identity-free legacy claims keep their
+existing behavior. Accepted and unaccepted transfer, restart reconciliation,
+source fencing, fallback rejection, and race coverage pass. No UI or public
+documentation change is required.

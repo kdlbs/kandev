@@ -175,6 +175,9 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 	if err != nil || sessionID != oldSessionID || claim.Dispatch.SessionID != oldSessionID {
 		return ErrSendNowClaimChanged
 	}
+	if destination == nil && claim.Identity.SessionIncarnationID != "" {
+		return ErrSessionIdentityMismatch
+	}
 	for sourceIndex := range claim.Sources {
 		claim.Sources[sourceIndex].SessionID = newSessionID
 	}
