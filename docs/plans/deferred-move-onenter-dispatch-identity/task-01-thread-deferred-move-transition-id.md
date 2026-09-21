@@ -1,6 +1,17 @@
 ---
-plan: docs/plans/deferred-move-onenter-dispatch-identity/plan.md
+id: "01-thread-deferred-move-transition-id"
+title: "Thread the deferred-move transition ID into processOnEnter"
 status: done
+wave: 1
+depends_on: []
+plan: "plan.md"
+requirements:
+  - REQ-TASKS-DEFERRED-MOVE-ONENTER-DISPATCH-IDENTITY-001
+acceptance_criteria:
+  - AC-TASKS-DEFERRED-MOVE-ONENTER-DISPATCH-IDENTITY-001.1
+  - AC-TASKS-DEFERRED-MOVE-ONENTER-DISPATCH-IDENTITY-001.2
+system_design:
+  - ../../specs/tasks/system-design/deferred-move-onenter-dispatch-identity.md
 ---
 
 # Work Order 01: Thread the deferred-move transition ID into processOnEnter

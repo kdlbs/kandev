@@ -1,8 +1,13 @@
 ---
-spec: docs/specs/workflow-on-enter-action-dispatch/spec.md
-system-design: docs/specs/tasks/system-design/workflow-task-step-transition-ledger.md
 created: 2026-09-21
 status: implemented
+requirements:
+  - REQ-TASKS-DEFERRED-MOVE-ONENTER-DISPATCH-IDENTITY-001
+system_design:
+  - ../../specs/tasks/system-design/deferred-move-onenter-dispatch-identity.md
+legacy_specs:
+  - ../../specs/workflow-on-enter-action-dispatch/spec.md
+  - ../../specs/tasks/system-design/workflow-task-step-transition-ledger.md
 ---
 
 # Implementation Plan: Deferred move on_enter dispatch identity
