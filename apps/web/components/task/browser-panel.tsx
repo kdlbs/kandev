@@ -264,6 +264,7 @@ function BrowserPanelHeader({
         />
       }
       right={directActions}
+      rightClassName="overflow-visible"
       rightWhenOverflow={
         showInspect ? <PreviewFeedbackControls capture={capture} enabled={enabled} /> : undefined
       }

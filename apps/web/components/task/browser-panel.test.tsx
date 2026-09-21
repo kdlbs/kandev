@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserPanel } from "./browser-panel";
 
@@ -83,5 +83,15 @@ describe("BrowserPanel preview feedback", () => {
 
     await waitFor(() => expect(screen.getByTestId("panel-header-overflow")).toBeTruthy());
     expect(screen.getByRole("button", { name: "Annotate (0)" })).toBeTruthy();
+  });
+
+  it("allows the annotation popover to extend beyond the panel header", () => {
+    usePreviewCapture.mockReturnValue(capture);
+    render(<BrowserPanel panelId="browser-1" params={{ url: "http://localhost:3000/products" }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Annotate (0)" }));
+    const actionSlot = screen.getByTestId("preview-feedback-popover").parentElement?.parentElement;
+    expect(actionSlot?.className).toContain("overflow-visible");
+    expect(actionSlot?.className).not.toContain("overflow-hidden");
   });
 });

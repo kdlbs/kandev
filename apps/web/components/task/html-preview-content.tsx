@@ -133,6 +133,7 @@ function HtmlPreviewContentToolbar({
           </Tooltip>
         </div>
       }
+      rightClassName="overflow-visible"
     />
   );
 }
