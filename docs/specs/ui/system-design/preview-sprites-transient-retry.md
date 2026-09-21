@@ -28,8 +28,9 @@ GitHub description writes remain outside this retry boundary.
   provides bounded, context-aware control-plane retries. It recognizes
   transport timeouts, temporary network errors, HTTP 429, and HTTP 5xx errors.
 - `retrySpriteControl` creates a fresh two-minute operation context for each
-  attempt, emits the operation and backoff to stderr, honors the Sprites SDK
-  `Retry-After` value, and stops after the shared control retry budget.
+  attempt, emits the operation and backoff to stderr, honors a positive Sprites
+  SDK `Retry-After` value up to the 30-second retry-delay cap, and stops after
+  the shared control retry budget.
 - `apps/backend/cmd/preview/deploy.go` uses the helper for the idempotent public
   URL update and for the sprite URL lookup that follows it.
 
@@ -42,9 +43,11 @@ the CLI retrieves the sprite URL through the same policy. Repeating the URL
 update is safe because the requested state is the same public setting.
 
 Each operation receives at most three attempts. Exponential backoff starts at
-700 milliseconds and doubles between attempts unless the provider supplies a
-larger `Retry-After` delay. Parent cancellation stops the backoff and the
-operation. Permanent client errors return immediately with the provider error.
+700 milliseconds and doubles between attempts. A positive provider
+`Retry-After` delay replaces the calculated backoff, including when it is
+shorter, and is capped at 30 seconds. Parent cancellation stops the backoff
+and the operation. Permanent client errors return immediately with the
+provider error.
 
 ## Failure and recovery behavior
 
@@ -56,5 +59,6 @@ consequence of a control-plane retry.
 ## Verification
 
 The preview package tests use an HTTP test server with the real Sprites SDK to
-verify transient update and lookup recovery, permanent update failure without
-an extra request, and the existing get-or-create retry behavior.
+verify transient update and lookup recovery, retry-budget exhaustion, permanent
+update failure without an extra request, bounded `Retry-After` handling, and
+the existing get-or-create retry behavior.

@@ -24,9 +24,9 @@ credential errors remain visible on their first attempt.
 
 - `apps/backend/cmd/preview/sprite_ops.go`: introduce transient-error
   classification and a bounded backoff helper. Retry discovery and creation
-  with fresh per-attempt contexts; use `Retry-After` from `sprites.APIError`
-  where it is supplied. Re-read the named sprite after a transient create
-  error before another create request.
+  with fresh per-attempt contexts; use positive `Retry-After` values from
+  `sprites.APIError` where supplied, capped at 30 seconds. Re-read the named
+  sprite after a transient create error before another create request.
 - Preserve the existing upload retry independently. Do not broaden retries to
   bundle build, extraction, service deployment, health checking, or GitHub
   metadata updates.

@@ -58,7 +58,8 @@ failure.
 - After the retry budget is exhausted, deployment fails with the last Sprites
   operation error so the GitHub Actions log remains actionable.
 - A Sprites-provided `Retry-After` delay takes precedence over exponential
-  backoff when present.
+  backoff when present and is capped at 30 seconds so provider input cannot
+  stall a preview deployment indefinitely.
 
 ## Scenarios
 

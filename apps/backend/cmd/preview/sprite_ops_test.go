@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	sprites "github.com/superfly/sprites-go"
 )
@@ -136,6 +137,17 @@ func TestGetOrCreateSpriteReturnsFinalTransientErrorAfterRetryBudget(t *testing.
 	}
 }
 
+func TestSpriteRetryDelayCapsRetryAfter(t *testing.T) {
+	err := &sprites.APIError{
+		StatusCode:        http.StatusServiceUnavailable,
+		RetryAfterSeconds: int(spriteRetryMaxDelay/time.Second) + 1,
+	}
+
+	if got := spriteRetryDelay(1, err); got != spriteRetryMaxDelay {
+		t.Fatalf("spriteRetryDelay() = %v, want cap %v", got, spriteRetryMaxDelay)
+	}
+}
+
 func TestEnablePublicURLRetriesTransientUpdate(t *testing.T) {
 	updateCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -167,6 +179,31 @@ func TestEnablePublicURLRetriesTransientUpdate(t *testing.T) {
 	}
 	if updateCalls != 2 {
 		t.Fatalf("URL settings update calls = %d, want 2", updateCalls)
+	}
+}
+
+func TestEnablePublicURLReturnsErrorAfterRetryBudget(t *testing.T) {
+	updateCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/sprites/kandev-pr-2115":
+			updateCalls++
+			w.WriteHeader(http.StatusServiceUnavailable)
+		default:
+			t.Errorf("unexpected %s %s request", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := sprites.New("token", sprites.WithBaseURL(server.URL))
+	t.Cleanup(func() { _ = client.Close() })
+
+	_, err := enablePublicURL(t.Context(), client, "kandev-pr-2115")
+	if err == nil {
+		t.Fatal("enablePublicURL() error = nil, want transient error after budget exhausted")
+	}
+	if updateCalls != spriteControlRetries {
+		t.Fatalf("URL settings update calls = %d, want %d", updateCalls, spriteControlRetries)
 	}
 }
 

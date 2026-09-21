@@ -31,6 +31,8 @@ operations outside this retry boundary.
 
 - A transient 500 or 502 during public URL configuration or URL lookup retries
   and then returns the preview URL without rebuilding the artifact.
+- A transient failure on every attempt stops at the shared retry budget, and a
+  provider `Retry-After` delay is capped at 30 seconds.
 - A permanent 401 during public URL configuration makes one request, returns
   the provider error, and does not request the sprite URL.
 - The focused preview package test passes with race detection.
@@ -62,7 +64,8 @@ their reconciliation behavior.
 
 Implemented the shared control retry wrapper for public URL configuration and
 sprite URL lookup. Added real SDK-backed HTTP regression tests for transient
-500/502 recovery and permanent 401 fail-fast behavior.
+500/502 recovery, retry-budget exhaustion, bounded provider delays, and
+permanent 401 fail-fast behavior.
 
 Verification passed:
 
