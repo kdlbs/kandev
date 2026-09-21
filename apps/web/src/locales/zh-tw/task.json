@@ -2362,5 +2362,6 @@
   "checkoutOptions.invalidLine": "第 {{line}} 行的目錄無效。",
   "checkoutOptions.credentialsUnsupported": "請使用由 Kandev 管理的 Git 認證資訊啟用高階檢出選項。",
   "toolPayloadRemovedAt": "工具詳細資料已於 {{date}} 刪除。",
-  "toolPayloadRemoved": "工具詳細資料已刪除。"
+  "toolPayloadRemoved": "工具詳細資料已刪除。",
+  "openTaskSwitcherFor": "開啟任務切換器：{{title}}"
 }

@@ -23,6 +23,13 @@ const (
 	// predecessor failed or was cancelled. Payload:
 	// {task_id, failed_task_id, failed_state}.
 	TaskDependencyFailed = "task.dependency_failed"
+	// TaskStalled fires when the session reconciliation sweep observes a task
+	// holding an active session with no live execution behind it and no
+	// session events or messages for longer than the stall threshold.
+	// Detection only: the event never accompanies a state transition, a
+	// synthesized decision, or a queued run. Payload:
+	// {task_id, workspace_id, session_ids, stalled_for, last_event_at}.
+	TaskStalled = "task.stalled"
 )
 
 // Event types for plugin-backed canvas lifecycle changes. Payloads contain

@@ -50,8 +50,11 @@ export type AppNavDialogControls = {
   dialogs: ReactNode;
 };
 
-export function useAppNavDialogs(closeMenu: () => void): AppNavDialogControls {
-  const taskViews = useTaskViewNavigation(closeMenu);
+export function useAppNavDialogs(
+  closeMenu: () => void,
+  onOpenTaskViews?: () => void,
+): AppNavDialogControls {
+  const taskViews = useTaskViewNavigation(closeMenu, onOpenTaskViews);
   const router = useRouter();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const health = useSystemHealthIndicator();
@@ -121,6 +124,9 @@ type AppNavSectionsProps = {
   omitDestinations?: string[];
   /** Optional workspace-scoped plugin actions for the current phone surface. */
   workspaceActions?: ReactNode;
+  afterPrimary?: ReactNode;
+  quickActions?: ReactNode;
+  phoneNavigation?: boolean;
   controls: AppNavDialogControls;
 };
 
@@ -135,6 +141,9 @@ export function AppNavSections({
   omitSections = [],
   omitDestinations = [],
   workspaceActions,
+  afterPrimary,
+  quickActions,
+  phoneNavigation = false,
   controls,
 }: AppNavSectionsProps) {
   const { t } = useTranslation();
@@ -142,16 +151,22 @@ export function AppNavSections({
   const hasSavedSidebarLayout = useHasSavedSidebarLayout();
   return (
     <>
-      {workspaceActions}
       {hasSavedSidebarLayout ? (
         <MobileSidebarLayoutNavigation
           onNavigate={onNavigate}
           omitSections={omit}
           omitDestinations={omitDestinations}
+          quickActions={quickActions}
+          homeCoversListings={phoneNavigation}
         />
       ) : (
         !omit.has("primary") && (
-          <PrimaryNavSection onNavigate={onNavigate} omitDestinations={omitDestinations} />
+          <PrimaryNavSection
+            onNavigate={onNavigate}
+            omitDestinations={omitDestinations}
+            phoneNavigation={phoneNavigation}
+            quickActions={quickActions}
+          />
         )
       )}
       {controls.openTaskViews && (
@@ -164,13 +179,23 @@ export function AppNavSections({
           {t("sidebar:taskViews")}
         </Button>
       )}
+      {afterPrimary}
+      {workspaceActions}
       {!hasSavedSidebarLayout && !omit.has("plugins") && (
         <MobilePluginNavSection onNavigate={onNavigate} />
       )}
       {!hasSavedSidebarLayout && !omit.has("integrations") && (
-        <MobileIntegrationsSection onNavigate={onNavigate} />
+        <MobileIntegrationsSection
+          onNavigate={onNavigate}
+          showSetup={phoneNavigation}
+          collapsible={phoneNavigation}
+        />
       )}
-      <UtilityNavSection onNavigate={onNavigate} controls={controls} />
+      <UtilityNavSection
+        onNavigate={onNavigate}
+        controls={controls}
+        phoneNavigation={phoneNavigation}
+      />
     </>
   );
 }
@@ -178,9 +203,13 @@ export function AppNavSections({
 function PrimaryNavSection({
   onNavigate,
   omitDestinations,
+  phoneNavigation,
+  quickActions,
 }: {
   onNavigate: () => void;
   omitDestinations: string[];
+  phoneNavigation: boolean;
+  quickActions?: ReactNode;
 }) {
   const all = useStaticDestinations("mobileMenu", "primary");
   const destinations = all.filter((destination) => !omitDestinations.includes(destination.id));
@@ -190,8 +219,10 @@ function PrimaryNavSection({
       <DestinationRows
         destinations={destinations}
         onNavigate={onNavigate}
+        homeCoversListings={phoneNavigation}
         className="gap-3 px-3 text-sm"
       />
+      {quickActions}
     </div>
   );
 }
@@ -199,16 +230,29 @@ function PrimaryNavSection({
 function UtilityNavSection({
   onNavigate,
   controls,
+  phoneNavigation,
 }: {
+  phoneNavigation: boolean;
   onNavigate: () => void;
   controls: AppNavDialogControls;
 }) {
   const { t } = useTranslation();
-  const destinations = useStaticDestinations("mobileMenu", MOBILE_MENU_UTILITY_SECTIONS);
+  const allDestinations = useStaticDestinations("mobileMenu", MOBILE_MENU_UTILITY_SECTIONS);
+  const destinations = phoneNavigation
+    ? [
+        ...allDestinations.filter((item) => item.id === "settings"),
+        ...allDestinations.filter((item) => item.id !== "settings"),
+      ]
+    : allDestinations;
   const { resolvedTheme, setTheme } = useTheme();
   const utilityRowClass = "h-11 w-full cursor-pointer justify-start gap-3 px-3 text-sm";
   return (
-    <div className="mt-auto flex flex-col gap-3 border-t border-border pt-4">
+    <div
+      className={cn(
+        "flex flex-col gap-3 border-t border-border pt-4",
+        !phoneNavigation && "mt-auto",
+      )}
+    >
       <div className="text-sm font-medium">{t("common:utilities")}</div>
       <StatusRow closeMenu={onNavigate} />
       <DestinationRows

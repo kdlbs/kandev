@@ -124,7 +124,7 @@ test("Kubernetes task disclosure exposes live Pod details and safe actions by to
     await testPage.goto(`/t/${navigationTaskId}`);
     await new SessionPage(testPage).waitForLoad(30_000);
 
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const taskSwitcher = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = taskSwitcher.locator(`[data-task-row-id="${task.id}"]`);
     const statusTrigger = taskRow.getByTestId("remote-executor-status-trigger");

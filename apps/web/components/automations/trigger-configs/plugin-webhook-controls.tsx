@@ -5,6 +5,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import type { AutomationTrigger } from "@/lib/types/automation";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import TaskLink from "@/components/routing/task-link";
 
 export function PluginWebhookControls({
   trigger,
@@ -81,9 +82,9 @@ export function PluginWebhookControls({
           {new Date(receipt.created_at * 1000).toLocaleString()}:{" "}
           {t(`automations:pluginWebhookState_${receipt.state}`)}{" "}
           {receipt.task_id ? (
-            <a className="underline" href={`/tasks/${receipt.task_id}`}>
+            <TaskLink taskId={receipt.task_id} className="underline">
               {receipt.run_id}
-            </a>
+            </TaskLink>
           ) : (
             receipt.run_id
           )}

@@ -107,6 +107,18 @@ startup; it does not certify application business health.
 
 Kandev calculates effective access from the package declaration, instance grant, trusted task or workspace scope, and current caller authorization. A release receives only the intersection of those permissions. See [Security and trust](security.md#isolated-web-applications) for the security boundary.
 
+### Return to a task after publication
+
+When you return to a task, Kandev checks the current task canvas inventory. It can show an eligible canvas published while the task page was closed, reloaded, or disconnected. Kandev remembers a canvas that was already presented in the current browser tab, including a canvas that you closed. Use the existing task panel or phone canvas picker to open it again.
+
+On a phone, Kandev opens one new canvas route at a time. Use Back to return to the task. The route does not open again until a new browser tab offers it.
+
+### Reverse proxy requirements
+
+Keep the runtime document, packaged assets, and host bootstrap responses unmodified. The responses include `Cache-Control: no-store, no-transform`. Exclude the runtime path `/api/v1/plugins/web-apps/runtime/` from analytics injection, HTML rewriting, and similar response transforms. Keep the existing content security policy and capability checks.
+
+If a proxy strips or ignores `no-transform`, canvas startup can fail with **Canvas unavailable** and **Try again**. Restore the proxy rule, then select **Try again**. Republish only when the release itself changed.
+
 ## Promote a task canvas
 
 Only a user can promote a task canvas. An agent cannot promote, demote, grant permissions, approve a release, archive, restore, roll back, or remove a canvas.

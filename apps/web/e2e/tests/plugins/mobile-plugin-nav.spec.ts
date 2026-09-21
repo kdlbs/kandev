@@ -112,7 +112,7 @@ test.describe("Mobile plugin navigation", () => {
     // The desktop rail carries the same item but is hidden on a phone.
     await expect(testPage.getByTestId("app-sidebar")).toBeHidden();
 
-    await testPage.getByRole("button", { name: "Open menu" }).click();
+    await testPage.getByTestId("app-nav-trigger").click();
     const navItem = testPage.getByTestId(`mobile-plugin-nav-item-${NAV_ITEM_ID}`);
     await expect(navItem).toBeVisible();
     await expect(navItem).toHaveText(/Hello E2E/);
@@ -302,7 +302,7 @@ test.describe("Mobile plugin navigation", () => {
 
     await testPage.goto("/");
     await testPage.reload();
-    await testPage.getByRole("button", { name: "Open menu" }).click();
+    await testPage.getByTestId("app-nav-trigger").click();
 
     // Utilities rows carry no data-testid (see spec's Rendered identity
     // section) — select by the visible label instead.

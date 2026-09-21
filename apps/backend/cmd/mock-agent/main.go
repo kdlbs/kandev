@@ -51,6 +51,7 @@ type mockAgent struct {
 	model             string
 	sessions          map[acp.SessionId]bool
 	promptCancels     map[acp.SessionId]context.CancelFunc
+	promptCancelHolds map[acp.SessionId]chan struct{}
 	sessionMCPServers map[acp.SessionId]map[string]mcpServerDef
 	sessionConfig     map[acp.SessionId][]acp.SessionConfigOption
 	commandsEmitted   map[acp.SessionId]bool
@@ -87,6 +88,7 @@ func main() {
 		model:             model,
 		sessions:          make(map[acp.SessionId]bool),
 		promptCancels:     make(map[acp.SessionId]context.CancelFunc),
+		promptCancelHolds: make(map[acp.SessionId]chan struct{}),
 		sessionMCPServers: make(map[acp.SessionId]map[string]mcpServerDef),
 		sessionConfig:     make(map[acp.SessionId][]acp.SessionConfigOption),
 		commandsEmitted:   make(map[acp.SessionId]bool),
@@ -348,23 +350,37 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 // Prompt processes a user message and streams responses via SessionUpdate.
 func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	promptCtx, cancelPrompt := context.WithCancel(ctx)
+	prompt := extractPromptText(req.Prompt)
+	var cancelHold chan struct{}
+	if isCancelHoldPrompt(prompt) {
+		cancelHold = make(chan struct{})
+	}
 	a.mu.Lock()
 	if a.promptCancels == nil {
 		a.promptCancels = make(map[acp.SessionId]context.CancelFunc)
 	}
+	if a.promptCancelHolds == nil {
+		a.promptCancelHolds = make(map[acp.SessionId]chan struct{})
+	}
 	a.promptCancels[req.SessionId] = cancelPrompt
+	if cancelHold != nil {
+		a.promptCancelHolds[req.SessionId] = cancelHold
+	}
 	a.mu.Unlock()
 	defer func() {
 		cancelPrompt()
 		a.mu.Lock()
-		if current := a.promptCancels[req.SessionId]; current != nil {
-			delete(a.promptCancels, req.SessionId)
-		}
+		delete(a.promptCancels, req.SessionId)
+		delete(a.promptCancelHolds, req.SessionId)
 		a.mu.Unlock()
 	}()
 
 	a.emitAvailableCommandsOnce(promptCtx, req.SessionId)
-	prompt := extractPromptText(req.Prompt)
+	if cancelHold != nil {
+		<-cancelHold
+		time.Sleep(mockCancelHoldDuration())
+		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+	}
 	// The /overloaded scenario must surface a real prompt-time ACP *error*
 	// (a JSON-RPC error response), which handlePrompt's emitter cannot do —
 	// so intercept it here and return the error from Prompt directly.
@@ -402,8 +418,17 @@ func (a *mockAgent) sessionModel(sessionID acp.SessionId) string {
 // Cancel handles session cancellation.
 func (a *mockAgent) Cancel(_ context.Context, req acp.CancelNotification) error {
 	a.mu.Lock()
+	cancelHold := a.promptCancelHolds[req.SessionId]
 	cancelPrompt := a.promptCancels[req.SessionId]
 	a.mu.Unlock()
+	if cancelHold != nil {
+		select {
+		case <-cancelHold:
+		default:
+			close(cancelHold)
+		}
+		return nil
+	}
 	if cancelPrompt != nil {
 		cancelPrompt()
 	}
@@ -728,4 +753,19 @@ func parseMCPConfigFromArgs(args []string) string {
 		}
 	}
 	return ""
+}
+
+// isCancelHoldPrompt identifies the E2E-only fixture that holds an acknowledged
+// cancellation long enough to exercise remount and hydration projections.
+func isCancelHoldPrompt(prompt string) bool {
+	return strings.EqualFold(strings.TrimSpace(stripKandevSystem(prompt)), "/e2e:cancel-hold")
+}
+
+func mockCancelHoldDuration() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("KANDEV_E2E_CANCEL_HOLD_DURATION")); raw != "" {
+		if duration, err := time.ParseDuration(raw); err == nil && duration >= 0 {
+			return duration
+		}
+	}
+	return 8 * time.Second
 }

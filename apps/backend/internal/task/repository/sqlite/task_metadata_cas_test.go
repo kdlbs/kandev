@@ -144,6 +144,82 @@ func runMetadataNoActiveSessionContract(t *testing.T, repo *Repository) {
 	}
 }
 
+func runInterruptedMarkerCASContract(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := context.Background()
+	if err := repo.SetTaskMetadataKey(ctx, casTaskID, models.MetaKeyInterruptedAt, "old-marker"); err != nil {
+		t.Fatalf("seed interrupted marker: %v", err)
+	}
+	removed, err := repo.RemoveTaskMetadataKeyIfValue(ctx, casTaskID, models.MetaKeyInterruptedAt, "new-marker")
+	if err != nil {
+		t.Fatalf("remove with stale marker: %v", err)
+	}
+	if removed {
+		t.Fatal("stale marker comparison must not remove the current value")
+	}
+	if value, ok := metadataValue(t, repo, models.MetaKeyInterruptedAt); !ok || value != "old-marker" {
+		t.Fatalf("marker after stale removal = %v (present=%v), want old-marker", value, ok)
+	}
+	removed, err = repo.RemoveTaskMetadataKeyIfValue(ctx, casTaskID, models.MetaKeyInterruptedAt, "old-marker")
+	if err != nil {
+		t.Fatalf("remove with current marker: %v", err)
+	}
+	if !removed {
+		t.Fatal("current marker comparison must remove the marker")
+	}
+}
+
+func runRecoveryMarkerCASContract(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	settlement := models.InterruptedRecoverySettlement{
+		Token:              "recovery-token",
+		ExpectedState:      models.TaskSessionStateRunning,
+		RecoveredUpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-recovery-cas", TaskID: casTaskID,
+		State: models.TaskSessionStateWaitingForInput, UpdatedAt: now,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRecoverySettlementPending: settlement,
+		},
+	}); err != nil {
+		t.Fatalf("create recovery session: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-recovery-cas")
+	if err != nil {
+		t.Fatalf("load recovery session: %v", err)
+	}
+	written, err := repo.SetTaskMetadataKeyIfRecoveryCurrent(
+		ctx, casTaskID, session.ID, session.UpdatedAt, settlement.Token,
+		models.MetaKeyInterruptedAt, "recovery-marker",
+	)
+	if err != nil {
+		t.Fatalf("write recovery marker: %v", err)
+	}
+	if !written {
+		t.Fatal("current recovery generation must write its marker")
+	}
+	if value, ok := metadataValue(t, repo, models.MetaKeyInterruptedAt); !ok || value != "recovery-marker" {
+		t.Fatalf("recovery marker = %v (present=%v), want recovery-marker", value, ok)
+	}
+
+	if err := repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateStarting, ""); err != nil {
+		t.Fatalf("advance successor session: %v", err)
+	}
+	written, err = repo.SetTaskMetadataKeyIfRecoveryCurrent(
+		ctx, casTaskID, session.ID, session.UpdatedAt, settlement.Token,
+		"later_marker", "stale-marker",
+	)
+	if err != nil {
+		t.Fatalf("write stale recovery marker: %v", err)
+	}
+	if written {
+		t.Fatal("a successor session state must block a stale recovery marker")
+	}
+}
+
 func runManualMoveLifecycleMarkerContract(t *testing.T, repo *Repository) {
 	t.Helper()
 	ctx := context.Background()
@@ -210,6 +286,8 @@ func TestSetTaskMetadataKeyIfPresentSQLite(t *testing.T) {
 	})
 	runMetadataCASContract(t, repo)
 	runMetadataNoActiveSessionContract(t, repo)
+	runInterruptedMarkerCASContract(t, repo)
+	runRecoveryMarkerCASContract(t, repo)
 	runManualMoveLifecycleMarkerContract(t, repo)
 }
 
@@ -227,6 +305,8 @@ func TestPostgresSetTaskMetadataKeyIfPresent(t *testing.T) {
 	})
 	runMetadataCASContract(t, repo)
 	runMetadataNoActiveSessionContract(t, repo)
+	runInterruptedMarkerCASContract(t, repo)
+	runRecoveryMarkerCASContract(t, repo)
 	runManualMoveLifecycleMarkerContract(t, repo)
 }
 

@@ -38,7 +38,7 @@ test.describe("Improve Kandev on mobile", () => {
     );
 
     await testPage.goto("/");
-    await testPage.getByRole("button", { name: "Open menu" }).tap();
+    await testPage.getByTestId("app-nav-trigger").tap();
     const improveButton = testPage.getByTestId("mobile-improve-kandev-button");
     await expect(improveButton).toBeVisible();
     await improveButton.tap();

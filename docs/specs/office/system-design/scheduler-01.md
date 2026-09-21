@@ -130,7 +130,7 @@ Each trigger firing creates a routine run record (`office_routine_runs`) with `r
 
 #### Heavy vs lightweight routines
 
-- **Lightweight** (`task_template` empty): fire produces a taskless agent run. Continuation summary keyed by `routine:<routine_id>`. Use case: "check upstream PRs" without a trackable artifact.
+- **Lightweight** (`task_template` empty): fire produces a taskless agent run. Continuation summary keyed by `routine:<routine_id>`. Use case: "check upstream PRs" without a trackable artifact. How that run acquires a session is specified by [run-owned sessions](taskless-run-sessions.md) (`REQ-OFFICE-TASKLESS-001`): the record is an Office-owned `office_run_sessions` row, not a `task_session`. Neither a nullable `task_sessions.task_id` nor a synthetic task is permitted.
 - **Heavy** (`task_template` set): fire creates a task in the system `routine` workflow (one hidden `in_progress -> done` step). Its `task.created` event evaluates `auto_start_agent` and starts a task-bound run. Use case: "daily review" with trackable output.
 
 #### Concurrency policy
@@ -362,7 +362,7 @@ LIMIT 1
 
 Each wakeup produces a single agent session that runs to completion and exits. The agent receives a structured prompt describing why it was woken.
 
-**Taskless runs always start a fresh session.** A defensive `taskID==""` short-circuit in `HasPriorSessionForAgent` ensures we never resume across taskless fires.
+**Taskless runs always start a fresh session.** A defensive `taskID==""` short-circuit in `HasPriorSessionForAgent` ensures we never resume across taskless fires. The session record itself and its attempt numbering are specified by [run-owned sessions](taskless-run-sessions.md). Cancellation and restart reconciliation remain outstanding requirements and are not implemented by the current coverage change; the follow-up scope is recorded under [Outstanding: stop controls and restart recovery](../requirements/taskless-run-sessions.md#outstanding-stop-controls-and-restart-recovery).
 
 **Task-bound wakeups use session resume by default**: each subsequent wakeup for a `(task, agent)` pair reloads the prior ACP session via `session/load`, falling back to `session/new` on error. See `office-task-session-lifecycle` for the per-pair model.
 

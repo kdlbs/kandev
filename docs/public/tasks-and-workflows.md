@@ -453,13 +453,20 @@ preference applies in two situations:
   prepared session and the agent stays stopped until you select **Start agent**.
   Opening the same task with the preference off keeps the workflow step's
   normal auto-start behavior.
-- **Opening a task whose agent was stopped by a Kandev restart.** The session
-  is recovered and shown stopped instead of being resumed automatically. Select
-  **Start agent** to resume it.
+- **Opening a task whose agent was interrupted by a Kandev restart.** Kandev
+  restores the selected session when the task opens, unless this preference is
+  enabled. It restores the existing conversation and workspace without
+  replaying the previous prompt. A new message continues that conversation,
+  including while the agent is starting. Opening the application does not
+  resume every interrupted task; each task starts recovery when you focus it.
 
 The preference only gates opening a task. Choosing **Start agent** (or a
 workflow step transition) always starts the agent as usual, and a failed or
 interrupted session still shows its recovery actions.
+
+An interrupted task keeps a warning indicator until the agent confirms
+recovery. Opening the task or starting a recovery attempt does not clear the
+indicator; a failed attempt keeps it visible with the existing retry actions.
 
 ## Answer clarification questions
 
@@ -550,16 +557,17 @@ On desktop and tablet, the header switches between **Kanban**, **Pipeline**,
 **Threads**, and **List**. Kanban and Pipeline show the same workflow steps in
 different layouts. Threads shows agent conversations side by side. Kandev
 remembers the last selected view in that browser on the current device. Phones
-offer **Kanban**, **Threads**, and **List** in the topbar menu, with a native
+offer **Kanban**, **Threads**, and **List** under **View options**, with a native
 Threads deck showing one conversation at a time. A saved desktop Pipeline
 preference is kept but shown as Kanban on the phone.
 
 Kanban and List share a compact phone header showing the workspace and current
-mode. Tap that context or the menu button to change views, workspaces, or display
-options, or return **Home**. In Threads, tap the view name to choose a saved
-Threads view. Phone **Search tasks** lives in the menu: selecting it reveals
-and focuses the search field below the header. Selecting it again hides the
-field and clears the query.
+mode. Tap the **Kanban**, **Threads**, or **List** title dropdown to open view options and change display settings, or tap the
+Kanban/List context to open the same controls. The hamburger opens app
+navigation, including the workspace picker and **Home**. In Threads, tap the
+view name to choose a saved Threads view. Phone **Search tasks** lives under
+**View options**: selecting it reveals and focuses the search field below the
+header. Selecting it again hides the field and clears the query.
 
 Under **Settings → Preferences → Appearance → Startup Page**, choose a destination, then select **Save changes**:
 
@@ -585,7 +593,7 @@ The **TASKS** list in the left sidebar has two time-based sort choices. These ch
 Choose **Last activity** when you want to review tasks by the least recent user or agent interaction.
 
 - Search matches tasks without changing their state.
-- The display menu groups its controls into collapsible **Filters**, **Sort**, **Preview panel**, and, in **List**, **List rows** sections. Each section shows its current values while collapsed. Filters cover **Workflow**, **Repository**, and, in Kanban, **Priority**; registered plugin filters appear there when available. In Kanban/Pipeline, each workflow lane has a **Columns** menu outside these groups to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, open the existing menu drawer to expand the same display groups and change columns for the focused workflow.
+- The display menu groups its controls into collapsible **Filters**, **Sort**, **Preview panel**, and, in **List**, **List rows** sections. Each section shows its current values while collapsed. Filters cover **Workflow**, **Repository**, and, in Kanban, **Priority**; registered plugin filters appear there when available. In Kanban/Pipeline, each workflow lane has a **Columns** menu outside these groups to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, tap the listing-title dropdown to open **View options** and expand the same display groups and change columns for the focused workflow.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
 - **List** can group by **State**, **Workflow**, **Repository**, or **None**.
 - **List** can sort by updated time, created time, or title in either direction.

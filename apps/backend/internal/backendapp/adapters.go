@@ -960,6 +960,27 @@ func (a *lifecycleAdapter) ListExecutionsForTask(taskID string) []lifecycle.Exec
 	return a.mgr.ListExecutionsForTask(taskID)
 }
 
+// LiveSessionIDsForTask satisfies taskservice.SessionExecutionRegistry: the
+// session IDs under taskID that currently have a live in-memory execution
+// registered by the agent runtime. The session reconciliation sweep uses the
+// snapshot to tell an active session whose backing actor is alive from one
+// whose actor is gone. Pinned here so a signature drift is a build error.
+var _ taskservice.SessionExecutionRegistry = (*lifecycleAdapter)(nil)
+
+func (a *lifecycleAdapter) LiveSessionIDsForTask(taskID string) []string {
+	references := a.mgr.ListExecutionsForTask(taskID)
+	sessionIDs := make([]string, 0, len(references))
+	for _, reference := range references {
+		// ListExecutionsForTask includes workspace-only infrastructure created
+		// by file/shell access. Only an execution with an agent command (or a
+		// live passthrough process) owns the agent session lifecycle.
+		if reference.SessionID != "" && a.mgr.HasLiveAgentExecution(reference.SessionID) {
+			sessionIDs = append(sessionIDs, reference.SessionID)
+		}
+	}
+	return sessionIDs
+}
+
 func (a *lifecycleAdapter) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
 	status, ok := a.mgr.GetRemoteStatusBySessionID(ctx, sessionID)
 	if !ok || status == nil {
@@ -998,6 +1019,14 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		EnvVars:                    append([]models.ProfileEnvVar(nil), info.EnvVars...),
 		SupportsMCP:                info.SupportsMCP,
 	}, nil
+}
+
+// HasLiveExecution reports whether the session still has an agent execution
+// owned by the runtime. It backs the task service's orphan-session
+// reconciliation sweep; workspace-only infrastructure is not a live agent,
+// and this lookup must never lazily create an execution.
+func (a *lifecycleAdapter) HasLiveExecution(sessionID string) bool {
+	return a.mgr.HasLiveAgentExecution(sessionID)
 }
 
 // GetGitLog retrieves the git log for a session from baseCommit to HEAD.

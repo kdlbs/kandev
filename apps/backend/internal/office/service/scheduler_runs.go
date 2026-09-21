@@ -244,7 +244,7 @@ func (s *Service) publishRunProcessedForWorkspace(
 		data["task_id"] = taskID
 		data["comment_id"] = commentID
 		if run.ErrorMessage != "" {
-			data["error_message"] = run.ErrorMessage
+			data[runEventFieldErrorMessage] = run.ErrorMessage
 		}
 	}
 	event := bus.NewEvent(events.OfficeRunProcessed, "office-service", data)

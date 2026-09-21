@@ -48,7 +48,7 @@ type PageShellProps = {
 
 /**
  * The one page chrome for top-level routes: `PageTopbar` with the app nav
- * trigger injected ahead of any page `leading`, the home affordance resolved by
+ * trigger following the page actions, the home affordance resolved by
  * `useHomeAffordance` (instead of each shell hand-rolling an escape hatch), and
  * a scroll container below.
  *
@@ -75,12 +75,13 @@ export function PageShell({
         testId={topbarTestId}
         homeAffordance={home.mode}
         homeHref={home.href}
-        leading={
+        leading={leading}
+        actions={
           <>
+            {forwarded.actions}
             {showNavTrigger && (
               <AppNavSheet pageNav={pageNav} omitDestinations={navOmitDestinations} />
             )}
-            {leading}
           </>
         }
       />

@@ -14,7 +14,11 @@ type MobileSidebarLayoutNode = {
   }>;
 };
 
-async function seedMobileLayout(apiClient: ApiClient, workspaceId: string): Promise<void> {
+async function seedMobileLayout(
+  apiClient: ApiClient,
+  workspaceId: string,
+  homeVisible = true,
+): Promise<void> {
   const current = await apiClient.getUserSettings();
   const expectedRevision =
     current.settings.sidebar_layouts_by_workspace?.[workspaceId]?.revision ?? 0;
@@ -26,7 +30,7 @@ async function seedMobileLayout(apiClient: ApiClient, workspaceId: string): Prom
         version: 1,
         revision: expectedRevision,
         nodes: [
-          { id: "home", kind: "builtin", visible: true, destination_id: "home" },
+          { id: "home", kind: "builtin", visible: homeVisible, destination_id: "home" },
           { id: "new-task", kind: "builtin", visible: true, destination_id: "new_task" },
           { id: "automations", kind: "builtin", visible: true, destination_id: "automations" },
           { id: "canvases", kind: "builtin", visible: true, destination_id: "canvases" },
@@ -104,3 +108,40 @@ test.describe("Sidebar customization on phone", () => {
     ).toBe(true);
   });
 });
+
+for (const homeVisible of [true, false]) {
+  test(`saved phone layout preserves unified task access with Home visible=${homeVisible}`, async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedMobileLayout(apiClient, seedData.workspaceId, homeVisible);
+    await testPage.goto("/tasks");
+    await testPage.getByTestId("app-nav-trigger").tap();
+    const menu = testPage.getByTestId("app-nav-sheet");
+    const layout = menu.getByTestId("mobile-sidebar-layout-navigation");
+    await expect(layout).toBeVisible();
+    const chat = layout.getByTestId("mobile-quick-chat-button");
+    await expect(chat).toBeVisible();
+    await expect(layout.getByTestId("mobile-quick-terminal-button")).toBeVisible();
+    const home = layout.getByRole("link", { name: "Home", exact: true });
+    await expect(home).toHaveCount(homeVisible ? 1 : 0);
+    if (homeVisible) {
+      await expect(home).toHaveAttribute("aria-current", "page");
+      const order = await layout
+        .locator("a, button")
+        .evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute("data-testid") ?? node.textContent?.trim()),
+        );
+      expect(order.indexOf("mobile-quick-chat-button")).toBe(order.indexOf("Home") + 1);
+    }
+    await expect(menu.getByRole("link", { name: /^(Tasks|Threads)$/ })).toHaveCount(0);
+    await expect(menu.getByTestId("mobile-navigation-tasks-toggle")).toBeVisible();
+    await expect(menu.getByTestId("mobile-automations-section")).toHaveCount(0);
+    const integrations = layout.getByTestId("mobile-shortcut-section-toggle-integrations");
+    await expect(integrations).toHaveAttribute("aria-expanded", "false");
+    await integrations.tap();
+    await expect(integrations).toHaveAttribute("aria-expanded", "true");
+    await expect(menu.getByTestId("mobile-customize-sidebar-button")).toBeVisible();
+  });
+}

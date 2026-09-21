@@ -747,11 +747,11 @@ func (s *Service) publishRunFailed(
 		"run_id":               run.ID,
 		"agent_profile_id":     run.AgentProfileID,
 		"task_id":              taskIDFromRunPayload(run.Payload),
-		"error_message":        errorMessage,
 		"consecutive_failures": count,
 		"threshold":            threshold,
 		"finished_at":          time.Now().UTC().Format(time.RFC3339),
 	}
+	data[runEventFieldErrorMessage] = errorMessage
 	_ = s.eb.Publish(ctx, "office.run.failed",
 		bus.NewEvent("office.run.failed", "office-failure", data))
 }

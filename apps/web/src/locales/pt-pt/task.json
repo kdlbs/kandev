@@ -2362,5 +2362,6 @@
   "checkoutOptions.invalidLine": "Diretório inválido na linha {{line}}.",
   "checkoutOptions.credentialsUnsupported": "Utilize credenciais Git geridas pelo Kandev para as opções avançadas de obtenção.",
   "toolPayloadRemovedAt": "Detalhes da ferramenta removidos em {{date}}.",
-  "toolPayloadRemoved": "Detalhes da ferramenta removidos."
+  "toolPayloadRemoved": "Detalhes da ferramenta removidos.",
+  "openTaskSwitcherFor": "Abrir seletor de tarefas: {{title}}"
 }

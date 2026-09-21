@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconInbox, IconSquarePlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -31,12 +31,16 @@ import { DestinationRows } from "./destination-rows";
 const INTEGRATION_DESTINATION_IDS = new Set(["azure-devops", "github", "gitlab", "jira", "linear"]);
 
 type MobileSidebarLayoutNavigationProps = {
+  quickActions?: ReactNode;
+  homeCoversListings?: boolean;
   onNavigate: () => void;
   omitSections: Set<string>;
   omitDestinations: string[];
 };
 
 type MobileLayoutNodeProps = {
+  quickActions?: ReactNode;
+  homeCoversListings?: boolean;
   node: ProjectedSidebarNode;
   homeDestination?: ResolvedDestination;
   destinationHrefs: Map<string, string | undefined>;
@@ -204,6 +208,8 @@ function MobileRequiredRows({
 
 function MobileBuiltinNode({
   node,
+  quickActions,
+  homeCoversListings,
   homeDestination,
   integrationEntries,
   canvasEntries,
@@ -218,11 +224,15 @@ function MobileBuiltinNode({
     case "home":
       if (omitSections.has("primary") || omitDestinations.includes("home")) return null;
       return homeDestination ? (
-        <DestinationRows
-          destinations={[homeDestination]}
-          onNavigate={onNavigate}
-          className="h-11 gap-3 px-3 text-sm"
-        />
+        <>
+          <DestinationRows
+            destinations={[homeDestination]}
+            onNavigate={onNavigate}
+            homeCoversListings={homeCoversListings}
+            className="h-11 gap-3 px-3 text-sm"
+          />
+          {quickActions}
+        </>
       ) : null;
     case "new_task":
       return omitDestinations.includes("new_task") ? null : (
@@ -291,6 +301,8 @@ function MobileLayoutNode(props: MobileLayoutNodeProps) {
 }
 
 export function MobileSidebarLayoutNavigation({
+  quickActions,
+  homeCoversListings,
   onNavigate,
   omitSections,
   omitDestinations,
@@ -324,6 +336,10 @@ export function MobileSidebarLayoutNavigation({
   // Office-specific required rows are added below, while user-selected
   // visibility and order still come from the layout projection.
   const visibleNodes = projection.nodes.filter((node) => node.visible);
+  const hasVisibleHome =
+    !omitSections.has("primary") &&
+    !omitDestinations.includes("home") &&
+    visibleNodes.some((node) => node.destinationId === "home");
   const homeDestination = primary.find((destination) => destination.id === "home");
   const integrationEntries = catalog.catalog.filter(
     (entry) =>
@@ -336,11 +352,14 @@ export function MobileSidebarLayoutNavigation({
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-testid="mobile-sidebar-layout-navigation">
+      {!hasVisibleHome && quickActions}
       {visibleNodes.map((node) => (
         <MobileLayoutNode
           key={node.id}
           node={node}
           homeDestination={homeDestination}
+          homeCoversListings={homeCoversListings}
+          quickActions={quickActions}
           destinationHrefs={destinationHrefs}
           integrationEntries={integrationEntries}
           canvasEntries={canvasEntries}

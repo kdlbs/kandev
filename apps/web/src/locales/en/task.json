@@ -2362,5 +2362,6 @@
   "checkoutOptions.invalidLine": "Invalid directory on line {{line}}.",
   "checkoutOptions.credentialsUnsupported": "Use Kandev-managed Git credentials for advanced checkout options.",
   "toolPayloadRemovedAt": "Tool details removed on {{date}}.",
-  "toolPayloadRemoved": "Tool details removed."
+  "toolPayloadRemoved": "Tool details removed.",
+  "openTaskSwitcherFor": "Open task switcher: {{title}}"
 }

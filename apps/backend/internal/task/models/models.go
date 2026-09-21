@@ -178,11 +178,10 @@ const (
 	// because the winner will (or already did) handle it.
 	// Absent on ordinary (non-watcher) auto-start tasks, which launch normally.
 	MetaKeyAutoStartClaimed = "auto_start_claimed"
-	// MetaKeyInterruptedAt is set by startup reconciliation when a task's
-	// session was mid-turn (STARTING/RUNNING) when the backend died. Its
-	// presence makes the task DTO report `interrupted: true` so task-list
-	// surfaces show the red interruption icon; the orchestrator removes the
-	// key when a session of the task next enters STARTING/RUNNING.
+	// MetaKeyInterruptedAt is set by reconciliation when a task's session lost
+	// an active turn. Its presence makes the task DTO report `interrupted: true`
+	// so task-list surfaces show the warning indicator. The orchestrator removes
+	// the key only after the provider confirms recovery.
 	MetaKeyInterruptedAt = "interrupted_at"
 	// MetaKeyAutoStartFailed is set when a workflow step's auto_start_agent
 	// on_enter action fails to launch a run (kanban StartTask error, or an
@@ -400,12 +399,83 @@ const (
 	// latest successful agent boot. Recovery cards compare this timestamp with
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
+	// SessionMetaKeyInterruptedRecoveryPending is a durable token written by
+	// session reconciliation when execution loss returns a conversation to
+	// WAITING_FOR_INPUT. It distinguishes an interrupted waiting session from
+	// an ordinary idle conversation even when the executor row was removed.
+	SessionMetaKeyInterruptedRecoveryPending = "interrupted_recovery_pending"
+	// SessionMetaKeyRecoverySettlementPending carries the immutable recovery
+	// snapshot needed to retry post-commit effects after a partial failure.
+	SessionMetaKeyRecoverySettlementPending = "recovery_settlement_pending"
 	// SessionMetaKeyInitialCreatePromptPassthrough stores the durable
 	// execution and turn evidence for a creation prompt admitted before a
 	// passthrough agent.running event. It prevents recovery from evaluating
 	// the same on_turn_start transition a second time after restart.
 	SessionMetaKeyInitialCreatePromptPassthrough = "initial_create_prompt_passthrough"
 )
+
+// InterruptedRecoverySettlement is the durable recovery snapshot used when a
+// session transition committed but one of its cross-repository effects did
+// not. The executor identity and turn ID are compare-and-set inputs; they
+// must never be refreshed from a successor execution during retry.
+type InterruptedRecoverySettlement struct {
+	Token         string           `json:"token"`
+	ExpectedState TaskSessionState `json:"expected_state"`
+	// RecoveredUpdatedAt is the session generation written by the recovery
+	// transition. Retries must compare against this immutable timestamp rather
+	// than treating a later session read as the recovery generation.
+	RecoveredUpdatedAt               time.Time `json:"recovered_updated_at"`
+	ExpectedTurnID                   string    `json:"expected_turn_id,omitempty"`
+	ExpectedExecutorID               string    `json:"expected_executor_id,omitempty"`
+	ExpectedExecutorAgentExecutionID string    `json:"expected_executor_agent_execution_id,omitempty"`
+	ExpectedExecutorUpdatedAt        time.Time `json:"expected_executor_updated_at,omitempty"`
+}
+
+// HasInterruptedRecoveryPending reports whether metadata carries a valid
+// interrupted-session token. Older in-process callers used a boolean marker,
+// so explicit true remains accepted during the transition to tokens.
+func HasInterruptedRecoveryPending(metadata map[string]interface{}) bool {
+	if metadata == nil {
+		return false
+	}
+	value, ok := metadata[SessionMetaKeyInterruptedRecoveryPending]
+	if !ok || value == nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.TrimSpace(typed) != ""
+	default:
+		return true
+	}
+}
+
+// LoadInterruptedRecoverySettlement decodes the immutable post-commit
+// snapshot. Invalid or incomplete values fail closed so a retry cannot repair
+// a successor executor or abandon an unrelated turn.
+func LoadInterruptedRecoverySettlement(metadata map[string]interface{}) (InterruptedRecoverySettlement, bool) {
+	if metadata == nil {
+		return InterruptedRecoverySettlement{}, false
+	}
+	value, ok := metadata[SessionMetaKeyRecoverySettlementPending]
+	if !ok || value == nil {
+		return InterruptedRecoverySettlement{}, false
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return InterruptedRecoverySettlement{}, false
+	}
+	var settlement InterruptedRecoverySettlement
+	if err := json.Unmarshal(payload, &settlement); err != nil {
+		return InterruptedRecoverySettlement{}, false
+	}
+	if strings.TrimSpace(settlement.Token) == "" || settlement.ExpectedState == "" || settlement.RecoveredUpdatedAt.IsZero() {
+		return InterruptedRecoverySettlement{}, false
+	}
+	return settlement, true
+}
 
 // IsCompletionFollowUpSession reports whether a session was explicitly
 // reopened only to continue its completed conversation. The marker remains
@@ -1891,6 +1961,37 @@ type TaskSession struct {
 	TokensIn       int64 `json:"tokens_in"`
 	TokensCachedIn int64 `json:"tokens_cached_in"`
 	TokensOut      int64 `json:"tokens_out"`
+}
+
+// ActiveSessionCancellationCandidate is the compare-and-set snapshot used by
+// the active-session stall healer. An empty ExpectedTurnID means that no turn
+// may be active when the cancellation is written.
+type ActiveSessionCancellationCandidate struct {
+	SessionID           string
+	ExpectedUpdatedAt   time.Time
+	ExpectedLastEventAt time.Time
+	ExpectedTurnID      string
+}
+
+// ActiveSessionRecoveryCandidate is the compare-and-set snapshot used by
+// session reconciliation when execution loss should return a conversation to
+// WAITING_FOR_INPUT. The observed state, activity clock, and turn identity
+// must still match at the write boundary; a newer launch, message, or turn
+// therefore owns the session and prevents stale recovery.
+type ActiveSessionRecoveryCandidate struct {
+	TaskID            string
+	SessionID         string
+	ExpectedState     TaskSessionState
+	ExpectedUpdatedAt time.Time
+	// RecoveredUpdatedAt is populated from the durable settlement on retry.
+	// The initial candidate leaves it zero because the repository assigns the
+	// committed generation when it performs the state transition.
+	RecoveredUpdatedAt               time.Time
+	ExpectedLastEventAt              time.Time
+	ExpectedTurnID                   string
+	ExpectedExecutorID               string
+	ExpectedExecutorAgentExecutionID string
+	ExpectedExecutorUpdatedAt        time.Time
 }
 
 // ToAPI converts internal TaskSession to API type

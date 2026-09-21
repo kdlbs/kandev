@@ -22,7 +22,7 @@ test.describe("Mobile workflow session focus", () => {
         response.request().method() === "POST" &&
         new URL(response.url()).pathname === `/api/v1/tasks/${scenario.task.id}/move`,
     );
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = sheet.locator(`[data-task-row-id="${scenario.task.id}"]`);
     await expect(taskRow).toBeVisible();

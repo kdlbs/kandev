@@ -1269,6 +1269,11 @@ export class ApiClient {
     default_utility_agent_id?: string;
     default_utility_model?: string;
     default_utility_agent_profile_id?: string;
+    sidebar_task_prefs?: {
+      pinned_task_ids?: string[];
+      ordered_task_ids?: string[];
+      subtask_order_by_parent_id?: Record<string, string[]>;
+    };
     sidebar_view_state?: {
       workspace_id: string;
       views?: unknown[];
