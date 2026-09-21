@@ -107,5 +107,7 @@ Completed on 2026-09-21.
   canonical URL construction, AppLink callback timing, dependency interception,
   disclosure dismissal, and touch-row sizing.
 - The focused Vitest suite passed 4 files and 32 tests after implementation.
+- Review follow-up added explicit blocker-cancellation coverage; the focused
+  suite now passes 4 files and 33 tests.
 - `pnpm run typecheck` passed.
 - Focused ESLint passed with zero warnings.

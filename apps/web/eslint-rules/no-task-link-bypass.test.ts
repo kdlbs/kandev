@@ -52,6 +52,10 @@ ruleTester.run("no-task-link-bypass", noTaskLinkBypass, {
       errors: [{ messageId: "taskLinkBypass" }],
     },
     {
+      code: "const href = condition && `/t/${taskId}`;",
+      errors: [{ messageId: "taskLinkBypass" }],
+    },
+    {
       code: '<a href="/t/task-1">Task</a>;',
       errors: [{ messageId: "taskLinkBypass" }],
     },
@@ -72,6 +76,11 @@ ruleTester.run("no-task-link-bypass", noTaskLinkBypass, {
       code: `import { linkToTask } from "@/lib/links";
         const href = linkToTask(taskId);
         <a href={href}>Task</a>;`,
+      errors: [{ messageId: "taskLinkBypass" }],
+    },
+    {
+      code: `import * as Links from "@/lib/links";
+        <a href={Links.linkToTask(taskId)}>Task</a>;`,
       errors: [{ messageId: "taskLinkBypass" }],
     },
     {

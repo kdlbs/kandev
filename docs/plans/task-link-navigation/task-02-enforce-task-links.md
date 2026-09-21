@@ -82,13 +82,16 @@ Preserve existing route guards, query context, and browser-native alternate-tab 
 Completed on 2026-09-21.
 
 - The bounded `task-links/no-task-link-bypass` rule and real-config wiring test
-  passed, with 31 tests in the focused rule and link suite.
+  passed, with 31 tests in the initial focused rule and link suite.
 - All known first-party task-detail builders and raw task anchors were migrated;
   the production rule scan found zero violations.
 - Review follow-up now checks quoted and expression literal task URLs on custom
   `Link` and `AppLink` elements while preserving shared-builder cases. Static
   evaluation uses branch-local recursion guards, so prefix aliases combined
   with dynamic task IDs are detected in anchors and `location.assign` calls.
-- The broad related Vitest run passed 437 files and 4,254 tests.
-- The focused rule and wiring suite passed 36 tests. `pnpm run typecheck`,
-  `pnpm run lint`, Prettier checks, and `git diff --check` passed.
+- The broad related Vitest run before review follow-up passed 437 files and
+  4,254 tests.
+- Review follow-up coverage passed 3 files and 38 rule/link tests; the combined
+  rule, AppLink, wiring, and link suite passed 4 files and 48 tests.
+- `pnpm run typecheck`, `pnpm run lint`, Prettier checks, and `git diff --check`
+  passed.
