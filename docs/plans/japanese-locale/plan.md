@@ -1,6 +1,6 @@
 ---
 created: 2026-09-20
-status: done
+status: in_progress
 requirements:
   - REQ-PLATFORM-JAPANESE-LOCALE-001
 system_design:

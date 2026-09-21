@@ -1,7 +1,7 @@
 ---
 id: "04-repository-verification"
 title: "Repository verification"
-status: done
+status: in_progress
 wave: 4
 depends_on:
   - "01-frontend-ja-locale-catalogs"
@@ -109,5 +109,8 @@ package ready for user review.
   - `pnpm run lint` → exit 0
   - `pnpm exec vitest run lib/i18n` → 9 files, 100 tests, GREEN
   - `go test ./internal/i18n/... ./internal/webapp/...` GREEN. Full
-    `make -C apps/backend test` timed out here and is not claimed green
+    `make -C apps/backend test` timed out here and is not claimed green,
+    so this work order stays `in_progress`
   - focused E2E chromium + mobile-chrome → GREEN
+  - Remaining system-design wording that still called real-locale parity
+    advisory is now aligned with the hard `i18n:check` gate
