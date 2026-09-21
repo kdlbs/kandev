@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import {
   getConversationComments,
+  getConversationCommentPage,
   postConversationComment,
   retryConversation,
 } from "./orchestration-conversation-api";
@@ -42,4 +43,36 @@ it("uses independent endpoints and preserves comment run state", async () => {
     expect.arrayContaining([expect.stringContaining("/api/v1/orchestration/tasks/t/retry")]),
   );
   expect(fetcher.mock.calls.every((call) => !String(call[0]).includes("/office/"))).toBe(true);
+});
+
+it("shows an accepted user message as queued before a run exists", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          comments: [
+            {
+              id: "c",
+              task_id: "t",
+              author_id: "owner",
+              author_type: "user",
+              body: "Still waiting",
+              created_at: "2026-09-18",
+              receipt_status: "accepted",
+            },
+          ],
+          next_cursor: "",
+        }),
+        { status: 200 },
+      ),
+    ),
+  );
+
+  const page = await getConversationCommentPage("t");
+
+  expect(page.comments[0]).toMatchObject({
+    receiptStatus: "accepted",
+    runStatus: "queued",
+  });
 });

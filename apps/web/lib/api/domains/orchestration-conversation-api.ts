@@ -27,13 +27,22 @@ type CommentDTO = {
 const path = (id: string) => `/api/v1/orchestration/tasks/${encodeURIComponent(id)}`;
 export const getConversation = (id: string) => fetchJson<ConversationTask>(path(id));
 function mapComment(row: CommentDTO): TaskComment {
+  // Intake is durable before the scheduler creates a run. Keep that short
+  // window visible in the transcript so a sent message never looks ignored.
+  // Once a run exists, run_status remains authoritative (including failures).
+  const runStatus =
+    row.run_status ??
+    (row.author_type === "user" &&
+    (row.receipt_status === "accepted" || row.receipt_status === "queued")
+      ? "queued"
+      : undefined);
   return {
     id: row.id,
     taskId: row.task_id,
     authorId: row.author_id,
     authorType: row.author_type,
     runId: row.run_id,
-    runStatus: row.run_status,
+    runStatus,
     runError: row.run_error,
     authorName: "",
     content: row.body,
