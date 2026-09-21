@@ -5,10 +5,10 @@ migration/replay/rollback rehearsal completed before the authorized cutover.
 
 | Review item | Prepared result |
 | --- | --- |
-| Candidate | `0.94.0-orchestration.20260921.sha8d9bb81c64d0` |
-| Source | `8d9bb81c64d0` |
+| Candidate | `0.94.0-orchestration.20260921.sha41b9afc0aae6` |
+| Source | `41b9afc0aae6` |
 | Base | Exact v0.94.0, `bf819a0228e742d069c528293d848c985a4d1bd1` |
-| Bundle | Six immutable binaries; [current SHA-256 receipt](workspace-administration-live-receipt.json) |
+| Bundle | Six immutable binaries; [current SHA-256 receipt](conversation-scroll-live-receipt.json) |
 | Qualification | [Completed checks and platform/provider limits](candidate-qualification.md) |
 | Data rehearsal | [Migration, replay, synthetic Coordinator APIs and matched rollback](migration-rehearsal.md) |
 | Service patch | Staged private override; merged user-unit validation passed |
@@ -64,4 +64,10 @@ Claude trial with generic prompts before cutover. The cold backup, web readiness
 authentication, data integrity and retained-history checks passed, and the running
 binary matches the persistent service selection. Startup health became available
 before the web interface; final verification waited for web readiness. See the
-[current deployment receipt](workspace-administration-live-receipt.json).
+[workspace administration deployment receipt](workspace-administration-live-receipt.json).
+
+The [conversation scroll repair](conversation-scroll.md) opens the Orchestrator
+at the latest messages on desktop and mobile while preserving deliberate reading
+of older messages. The queued update completed in an idle window. The cold backup,
+health, web readiness, authentication, retained history and running binary checks
+passed. See the [current deployment receipt](conversation-scroll-live-receipt.json).

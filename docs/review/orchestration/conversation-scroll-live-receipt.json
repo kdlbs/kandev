@@ -1,0 +1,25 @@
+{
+  "candidate": "0.94.0-orchestration.20260921.sha41b9afc0aae6",
+  "binaries_sha256": {
+    "agentctl-linux-amd64": "24ad9f0e111862b1fcaa76e40917f8dbb6ac848e62489387b9e09bdba9df1e11",
+    "agentctl-linux-arm64": "860633168c8853ac0ab4fb6ad12912fa69491429cc7204b18be6da060f0c8ccf",
+    "agentctl-darwin-arm64": "8821096ea6eacbed4295915b4a39df558f67723353ddcd4dc75dba84bd275519",
+    "agentctl": "3b664a6ba2a8b9417c32d309b513cd6af91e51a836a7d66c1f9732b394f8339f",
+    "agentctl-darwin-amd64": "ff0b6815e3e90d7584c1c900505f818444d032a31175bf00f87d8b4e5988aa0d",
+    "kandev": "7a4d7ec20eeb152dd481baf96bb07e9dd540e3f69d92980821a49a8462d5d574"
+  },
+  "backup_verified": true,
+  "outcome": "passed",
+  "health": {
+    "mode": "websocket+http",
+    "service": "kandev",
+    "status": "ok",
+    "version": "0.94.0-orchestration.20260921.sha41b9afc0aae6"
+  },
+  "auth_enforced": true,
+  "source_commit": "41b9afc0aae6538acde89bc5feb010af96d9b2f3",
+  "retained_rows_verified": true,
+  "service_selection_verified": true,
+  "web_ready": true,
+  "deployed_at": "2026-09-21T17:41:50.078920+00:00"
+}
