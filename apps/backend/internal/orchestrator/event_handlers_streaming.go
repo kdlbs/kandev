@@ -277,25 +277,8 @@ func (s *Service) handleSessionLaunchReceiptEvent(ctx context.Context, payload *
 	identity := LaunchAttemptIdentity{
 		SessionID: payload.SessionID, Incarnation: payload.ExecutionID, Generation: payload.Data.PromptGeneration,
 	}
-	fact, ok := payload.Data.Data.(string)
-	if !ok {
+	if !applyLaunchReceiptEvent(&history, identity, payload.Data.Data) {
 		return
-	}
-	if fact == "started" {
-		history.Start(identity)
-	} else {
-		var kind LaunchFactKind
-		switch fact {
-		case string(LaunchFactProcessStarted):
-			kind = LaunchFactProcessStarted
-		case string(LaunchFactTerminalPreflightFailure):
-			kind = LaunchFactTerminalPreflightFailure
-		default:
-			return
-		}
-		if !history.Apply(LaunchReceiptFact{Identity: identity, Kind: kind}) {
-			return
-		}
 	}
 	if err := s.repo.SetSessionMetadataKey(context.WithoutCancel(ctx), payload.SessionID, models.SessionMetaKeyLaunchReceiptState, history); err != nil {
 		s.logger.Warn("failed to persist launch receipt", zap.String("session_id", payload.SessionID), zap.Error(err))
@@ -306,9 +289,7 @@ func (s *Service) recordLaunchReceiptInference(ctx context.Context, payload *lif
 	if payload == nil || payload.Data == nil || payload.SessionID == "" || payload.ExecutionID == "" || s.repo == nil {
 		return
 	}
-	switch payload.Data.Type {
-	case "message_streaming", "thinking_streaming", agentEventToolCall, agentEventToolUpdate:
-	default:
+	if !launchReceiptActivity(payload.Data.Type) {
 		return
 	}
 	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
@@ -322,6 +303,9 @@ func (s *Service) recordLaunchReceiptInference(ctx context.Context, payload *lif
 	if history.Current.Identity.SessionID != payload.SessionID || history.Current.Identity.Incarnation != payload.ExecutionID {
 		return
 	}
+	if launchReceiptInferenceRecorded(history) {
+		return
+	}
 	fact := LaunchReceiptFact{
 		Identity: history.Current.Identity,
 		Kind:     LaunchFactInferenceStarted,
@@ -332,6 +316,47 @@ func (s *Service) recordLaunchReceiptInference(ctx context.Context, payload *lif
 	if err := s.repo.SetSessionMetadataKey(context.WithoutCancel(ctx), payload.SessionID, models.SessionMetaKeyLaunchReceiptState, history); err != nil {
 		s.logger.Warn("failed to persist launch receipt inference evidence", zap.String("session_id", payload.SessionID), zap.Error(err))
 	}
+}
+
+func applyLaunchReceiptEvent(history *LaunchReceiptHistory, identity LaunchAttemptIdentity, value interface{}) bool {
+	fact, ok := value.(string)
+	if !ok {
+		return false
+	}
+	if fact == "started" {
+		return startLaunchReceipt(history, identity)
+	}
+	var kind LaunchFactKind
+	switch fact {
+	case string(LaunchFactProcessStarted):
+		kind = LaunchFactProcessStarted
+	case string(LaunchFactTerminalPreflightFailure):
+		kind = LaunchFactTerminalPreflightFailure
+	default:
+		return false
+	}
+	return history.Apply(LaunchReceiptFact{Identity: identity, Kind: kind})
+}
+
+func launchReceiptActivity(eventType string) bool {
+	switch eventType {
+	case "message_streaming", "thinking_streaming", agentEventToolCall, agentEventToolUpdate:
+		return true
+	default:
+		return false
+	}
+}
+
+func startLaunchReceipt(history *LaunchReceiptHistory, identity LaunchAttemptIdentity) bool {
+	if history == nil || history.Current.Identity.equal(identity) {
+		return false
+	}
+	history.Start(identity)
+	return true
+}
+
+func launchReceiptInferenceRecorded(history LaunchReceiptHistory) bool {
+	return history.Current.InferenceStarted != LaunchTriStateUnknown
 }
 
 func (s *Service) responseAttemptResetOwnsCurrentPrompt(
