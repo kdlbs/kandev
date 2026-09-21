@@ -32,8 +32,8 @@ canonical inventory admission detects the mismatch.
 
 ### In scope
 
-- Validate explicit repository inputs for `inherit_parent` against an existing
-  parent environment before task creation.
+- Validate explicit repository inputs and top-level branch overrides for
+  `inherit_parent` against an existing parent environment before task creation.
 - Require exactly one active canonical inventory match per requested slot.
 - Return bounded validation guidance to use `new_workspace`.
 - Preserve current behavior when no parent environment is materialized.
@@ -64,8 +64,8 @@ and `CreateTask`. Return a validation error that recommends
 ## Tests
 
 - `AC-TASKS-MCP-WORKSPACE-MODE-004.5`: a materialized parent with only
-  feature-branch inventory rejects an explicit default-branch child before
-  creation.
+  feature-branch inventory rejects explicit repository and branch-only
+  default-branch child selections before creation.
 - A uniquely matching explicit repository/branch slot remains allowed.
 - A parent without a materialized environment preserves existing behavior.
 - Rejection leaves task and session counts unchanged.

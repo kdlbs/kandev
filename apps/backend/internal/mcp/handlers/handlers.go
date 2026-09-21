@@ -885,7 +885,8 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
-	if workspacePolicy.Mode == mcpWorkspaceModeInheritParent && len(req.Repositories) > 0 {
+	if workspacePolicy.Mode == mcpWorkspaceModeInheritParent &&
+		(len(req.Repositories) > 0 || req.BaseBranch != "") {
 		if err := h.taskSvc.ValidateInheritedWorkspaceRepositorySelection(ctx, req.ParentID, repos); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}

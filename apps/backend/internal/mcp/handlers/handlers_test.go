@@ -2646,6 +2646,47 @@ func TestHandleCreateTask_InheritParentRejectsUnmatchedMaterializedRepository(t 
 	assert.Empty(t, children, "rejected admission must not create a child task")
 }
 
+func TestHandleCreateTask_InheritParentRejectsUnmatchedBaseBranchOverride(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	parentEnv := &models.TaskEnvironment{
+		ID:            "env-parent-base-override",
+		TaskID:        parentID,
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		Status:        models.TaskEnvironmentStatusCreating,
+		WorkspacePath: "/tmp/parent-base-override",
+	}
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, parentEnv))
+	require.NoError(t, repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		TaskEnvironmentID: parentEnv.ID,
+		RepositoryID:      "repo-parent",
+		BranchSlug:        "feature-parent",
+		Status:            "active",
+	}))
+	parentEnv.Status = models.TaskEnvironmentStatusReady
+	require.NoError(t, repo.UpdateTaskEnvironment(ctx, parentEnv))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"base_branch":      "main",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	require.Contains(t, string(resp.Payload), "workspace_mode=new_workspace")
+
+	children, err := repo.ListChildren(ctx, parentID)
+	require.NoError(t, err)
+	assert.Empty(t, children, "rejected branch override must not create a child task")
+}
+
 func TestHandleCreateTask_SubtaskDefaultsToParentWorkspaceAndWorkflow(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()

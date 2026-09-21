@@ -38,8 +38,9 @@ or session is created.
 
 ## Acceptance
 
-- An explicit `repository@main` selection is rejected when the inherited
-  environment contains that repository only on feature-branch slots.
+- An explicit `repository@main` selection or branch-only `base_branch: main`
+  override is rejected when the inherited environment contains that
+  repository only on feature-branch slots.
 - One active exact slot is accepted; missing, failed, deleted, or multiple
   matches are rejected.
 - Rejection occurs before task and session creation and contains no filesystem
