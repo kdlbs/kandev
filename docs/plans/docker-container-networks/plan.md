@@ -1,6 +1,6 @@
 ---
 created: 2026-09-19
-status: planned
+status: implemented
 requirements:
   - REQ-EXECUTORS-DOCKER-NETWORKS-001
   - REQ-EXECUTORS-DOCKER-NETWORKS-002
@@ -182,5 +182,5 @@ present.
 
 - [x] [Task 01: Resolve and validate the primary container network](task-01-primary-network.md)
 - [x] [Task 02: Additional network attachments and gateway priority](task-02-additional-networks.md)
-- [ ] [Task 03: Executor profile network editor](task-03-profile-editor.md)
-- [ ] [Task 04: Container end-to-end coverage](task-04-e2e.md)
+- [x] [Task 03: Executor profile network editor](task-03-profile-editor.md)
+- [x] [Task 04: Container end-to-end coverage](task-04-e2e.md)

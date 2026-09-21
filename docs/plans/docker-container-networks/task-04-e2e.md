@@ -1,7 +1,7 @@
 ---
 id: "04-e2e"
 title: "Container end-to-end coverage"
-status: pending
+status: done
 wave: 4
 depends_on: ["03-profile-editor"]
 plan: "plan.md"

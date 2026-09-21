@@ -1,7 +1,7 @@
 ---
 id: "03-profile-editor"
 title: "Executor profile network editor"
-status: pending
+status: done
 wave: 3
 depends_on: ["01-primary-network", "02-additional-networks"]
 plan: "plan.md"

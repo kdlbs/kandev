@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: executors
 requirements:
   - REQ-EXECUTORS-DOCKER-NETWORKS-001
@@ -261,9 +261,15 @@ Dockerfile build card and the user-namespaces card.
   priority number input, with add and remove controls. The primary network's own
   gateway priority is an optional field on the primary row.
 
-The install-wide default value is read from the existing system settings the
-profile editor already loads; when it is empty, the helper text states that the
-daemon's own default applies rather than showing a blank name.
+The install-wide default value has no existing read surface, so
+`GET /api/v1/docker/network-default` is added to the Docker route group. It
+reports `docker.defaultNetwork` and is admin-gated like the image build beside
+it, because it exposes an install-wide operator setting. The value is always
+present in the response, including when it is empty, so the editor can tell
+"no default is configured" apart from a response it failed to read; when it is
+empty the helper text says the daemon's own default applies rather than showing
+a blank name. A non-admin cannot read it and gets the wording that does not
+claim to know which network applies.
 
 `buildSaveConfig` in `serialize-executor-config.ts` writes `docker_network` and
 `docker_network_gw_priority` with `setTextConfig` and

@@ -135,3 +135,75 @@ export function dockerSecurityOpt(containerID: string): string[] | null {
     );
   return JSON.parse(result.stdout) as string[] | null;
 }
+
+/** Creates a network with a non-default driver, reporting whether the host
+ *  Docker accepted it. Some drivers are unavailable on some hosts. */
+export function dockerNetworkCreateWithDriver(name: string, driver: string): boolean {
+  return (
+    spawnSync("docker", ["network", "create", "--driver", driver, name], { stdio: "ignore" })
+      .status === 0
+  );
+}
+
+export function dockerNetworkCreate(name: string): void {
+  const result = spawnSync("docker", ["network", "create", name], { encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error(`failed to create Docker network ${name}: ${result.stderr.trim()}`);
+  }
+}
+
+/**
+ * Removes a network, disconnecting anything still attached first.
+ *
+ * `docker network rm` refuses while a container holds an endpoint, and a
+ * silent refusal leaves host state behind for every later run. This forces the
+ * disconnect and then verifies the network is gone.
+ */
+export function dockerNetworkRemove(name: string): void {
+  if (spawnSync("docker", ["network", "rm", name], { stdio: "ignore" }).status === 0) return;
+
+  const inspect = spawnSync(
+    "docker",
+    ["network", "inspect", "--format", "{{json .Containers}}", name],
+    { encoding: "utf8" },
+  );
+  // Already gone, or never created: nothing to clean up.
+  if (inspect.status !== 0) return;
+
+  for (const id of Object.keys(JSON.parse(inspect.stdout) as Record<string, unknown>)) {
+    spawnSync("docker", ["network", "disconnect", "--force", name, id], { stdio: "ignore" });
+  }
+  spawnSync("docker", ["network", "rm", name], { stdio: "ignore" });
+
+  const stillThere = spawnSync("docker", ["network", "inspect", name], { stdio: "ignore" });
+  if (stillThere.status === 0) {
+    throw new Error(`failed to remove Docker network ${name}; it is still on the host`);
+  }
+}
+
+/** The names of every network a container is attached to. */
+export function dockerContainerNetworks(containerID: string): string[] {
+  const result = spawnSync(
+    "docker",
+    ["inspect", "--format", "{{json .NetworkSettings.Networks}}", containerID],
+    { encoding: "utf8" },
+  );
+  if (result.status !== 0) {
+    throw new Error(`failed to inspect networks for ${containerID}: ${result.stderr.trim()}`);
+  }
+  return Object.keys(JSON.parse(result.stdout) as Record<string, unknown>).sort();
+}
+
+/** The host port a container port is published on, or null when unpublished. */
+export function dockerPublishedPort(containerID: string, containerPort: number): string | null {
+  const result = spawnSync(
+    "docker",
+    ["inspect", "--format", `{{json (index .NetworkSettings.Ports "${containerPort}/tcp")}}`, containerID],
+    { encoding: "utf8" },
+  );
+  if (result.status !== 0) {
+    throw new Error(`failed to inspect published ports for ${containerID}: ${result.stderr.trim()}`);
+  }
+  const bindings = JSON.parse(result.stdout) as { HostPort?: string }[] | null;
+  return bindings?.[0]?.HostPort ?? null;
+}
