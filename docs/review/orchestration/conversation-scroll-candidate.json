@@ -1,0 +1,44 @@
+{
+  "candidate": "0.94.0-orchestration.20260921.sha41b9afc0aae6",
+  "source_commit": "41b9afc0aae6538acde89bc5feb010af96d9b2f3",
+  "outcome": "queued_until_idle",
+  "runtime_bundle_build": "passed",
+  "frontend_tests": 29,
+  "browser_regression": "passed_desktop_and_phone_widths",
+  "typecheck": "passed",
+  "lint": "passed",
+  "deployment_unit": "kandev-conversation-scroll-deploy.service",
+  "maximum_idle_wait_minutes": 90,
+  "binaries_sha256": {
+    "agentctl-linux-amd64": "24ad9f0e111862b1fcaa76e40917f8dbb6ac848e62489387b9e09bdba9df1e11",
+    "agentctl-linux-arm64": "860633168c8853ac0ab4fb6ad12912fa69491429cc7204b18be6da060f0c8ccf",
+    "agentctl-darwin-arm64": "8821096ea6eacbed4295915b4a39df558f67723353ddcd4dc75dba84bd275519",
+    "agentctl": "3b664a6ba2a8b9417c32d309b513cd6af91e51a836a7d66c1f9732b394f8339f",
+    "agentctl-darwin-amd64": "ff0b6815e3e90d7584c1c900505f818444d032a31175bf00f87d8b4e5988aa0d",
+    "kandev": "7a4d7ec20eeb152dd481baf96bb07e9dd540e3f69d92980821a49a8462d5d574"
+  },
+  "commit_hooks": {
+    "parent_sha": "15ebb34d3",
+    "commit_sha": "41b9afc0aae6538acde89bc5feb010af96d9b2f3",
+    "pre_commit_hook": "active",
+    "commit_msg_hook": "active",
+    "bypass": false,
+    "commit_result": "pass",
+    "worktree": "clean",
+    "passed": [
+      "harness-lint",
+      "architecture-lint",
+      "prettier",
+      "eslint",
+      "i18n-new-code",
+      "e2e-sleep-guard",
+      "public-copy-guard",
+      "commitlint"
+    ],
+    "not_applicable": [
+      "spec-lint",
+      "gofmt",
+      "golangci-lint"
+    ]
+  }
+}

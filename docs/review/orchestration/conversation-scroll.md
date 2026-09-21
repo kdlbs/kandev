@@ -24,3 +24,14 @@ Validation uses generic example requests and an isolated test database:
 The implementation and its tests are committed on the private review branch.
 Live cutover is performed only when existing sessions are quiescent, with the
 matched cold backup and health/authentication/history checks used for this pilot.
+
+## Prepared live update
+
+Candidate `0.94.0-orchestration.20260921.sha41b9afc0aae6` is built and queued
+behind the existing live session. See the [candidate receipt](conversation-scroll-candidate.json).
+The user service `kandev-conversation-scroll-deploy.service` checks for an idle
+window, then runs the pilot's cold-backup deployment procedure. It cancels if the
+selected live service configuration changes and expires after 90 minutes if work
+is still active. The deployment is pending; the candidate receipt is not a live
+deployment receipt. Local operational status and the eventual cutover receipt
+remain in the private implementation state directory.
