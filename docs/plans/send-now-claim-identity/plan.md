@@ -32,4 +32,3 @@ database repair, deployment, and backup cleanup.
 ## Delivery
 
 See [Task 01: Rebind transferred Send Now claims](task-01-rebind-claims.md).
-
