@@ -81,6 +81,11 @@ type resumeAttemptTombstone struct {
 	interruptedMarkerCaptured bool
 }
 
+type interruptedMarkerSnapshot struct {
+	value    string
+	captured bool
+}
+
 func newResumeAttemptRegistry() *resumeAttemptRegistry {
 	return &resumeAttemptRegistry{
 		attempts:        make(map[string]*resumeAttempt),
@@ -571,24 +576,40 @@ func (s *Service) captureInterruptedMarkerForResumeAttempt(ctx context.Context, 
 	attempt.setInterruptedMarkerSnapshot(marker, ok)
 }
 
-func (s *Service) interruptedMarkerForResumeAttempt(sessionID, attemptID string) string {
+func (s *Service) interruptedMarkerSnapshotForResumeAttempt(
+	sessionID, attemptID string,
+) (interruptedMarkerSnapshot, bool) {
 	if s == nil || sessionID == "" || attemptID == "" {
-		return ""
+		return interruptedMarkerSnapshot{}, false
 	}
 	id, isRecovery := parseResumeAttemptIdentity(attemptID)
 	if !isRecovery {
-		return ""
+		return interruptedMarkerSnapshot{}, false
 	}
 	registry := s.resumeAttemptStore()
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	if attempt := registry.attempts[sessionID]; attempt != nil && attempt.id == id {
-		return attempt.interruptedMarkerValue()
+		return interruptedMarkerSnapshot{
+			value:    attempt.interruptedMarkerValue(),
+			captured: attempt.interruptedMarkerSnapshotCaptured(),
+		}, true
 	}
-	if tombstone, ok := registry.tombstoneLocked(sessionID, id); ok && tombstone.interruptedMarkerCaptured {
-		return tombstone.interruptedMarker
+	if tombstone, ok := registry.tombstoneLocked(sessionID, id); ok {
+		return interruptedMarkerSnapshot{
+			value:    tombstone.interruptedMarker,
+			captured: tombstone.interruptedMarkerCaptured,
+		}, true
 	}
-	return ""
+	return interruptedMarkerSnapshot{}, false
+}
+
+func (s *Service) interruptedMarkerForResumeAttempt(sessionID, attemptID string) string {
+	snapshot, known := s.interruptedMarkerSnapshotForResumeAttempt(sessionID, attemptID)
+	if !known || !snapshot.captured {
+		return ""
+	}
+	return snapshot.value
 }
 
 func (s *Service) validateResumeAttempt(attempt *resumeAttempt) error {

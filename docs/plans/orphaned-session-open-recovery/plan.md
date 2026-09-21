@@ -202,6 +202,9 @@ not prove the revised behavior.
   marker CAS, and committed-generation retry regressions.
 - Targeted backend recovery, reconciliation, metadata-CAS, and marker-lifecycle tests: passed.
 - Targeted frontend Vitest, typecheck, and ESLint checks: passed.
+- Review-fixup regressions for fail-closed executor snapshots, CREATED-session
+  recovery tokens, abandoned-turn tool-call retry, fresh delayed-commit effects
+  context, and false-to-true-to-false marker generations: passed.
 - Chromium and mobile-chrome interrupted-indicator E2E tests: passed (one test each).
 - `node --test scripts/validate-public-docs.test.mjs` and
   `node scripts/validate-public-docs.mjs`: passed.
@@ -219,7 +222,7 @@ provider recovery.
 
 The three work orders are complete together with the follow-up review fixes:
 
-- Recovered STARTING and RUNNING sessions persist an immutable settlement token
+- Recovered CREATED, STARTING, and RUNNING sessions persist an immutable settlement token
   and executor snapshot. A missing `executors_running` row is still resumable,
   and task-open status plus focus recovery use the same session and profile.
 - Active and restart reconciliation use a bounded post-commit context. Turn,
@@ -230,7 +233,10 @@ The three work orders are complete together with the follow-up review fixes:
 - Recovery attempts retain the interruption-marker snapshot through active and
   tombstoned attempts. Boot callbacks without a valid generation fail closed,
   and a committed marker publishes `task.updated` with the interruption state
-  so connected desktop and phone clients update without a reload.
+  so connected desktop and phone clients update without a reload. Live task
+  merges carry a per-task marker generation, so an in-flight snapshot cannot
+  erase a newer interruption episode when its final boolean matches the
+  fetch-start value.
 
 The integrated implementation and regressions are validated by the backend
 package tests, the targeted marker and UI checks, the workspace build and lint,

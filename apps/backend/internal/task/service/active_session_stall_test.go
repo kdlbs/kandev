@@ -454,6 +454,20 @@ func TestService_ActiveSessionSweepRetriesPartialSettlement(t *testing.T) {
 		t.Fatalf("StartTurn: %v", err)
 	}
 	old := fixture.now.Add(-5 * time.Hour)
+	if err := fixture.svc.messages.CreateMessage(ctx, &models.Message{
+		ID:            "retry-pending-tool-message",
+		TaskSessionID: "session-1",
+		TaskID:        "task-1",
+		TurnID:        turn.ID,
+		AuthorType:    models.MessageAuthorAgent,
+		Type:          models.MessageTypeToolExecute,
+		Content:       "tool output",
+		Metadata:      map[string]interface{}{"tool_call_id": "retry-call-1", "status": "pending"},
+		CreatedAt:     old,
+		UpdatedAt:     old,
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
 	if _, err := fixture.rawRepo.DB().ExecContext(ctx,
 		`UPDATE task_session_turns SET started_at = ?, created_at = ?, updated_at = ? WHERE id = ?`,
 		old, old, old, turn.ID); err != nil {
@@ -502,6 +516,34 @@ func TestService_ActiveSessionSweepRetriesPartialSettlement(t *testing.T) {
 	}
 	if stopped.Status != models.ExecutorRunningStatusStopped || stopped.LocalPID != 0 {
 		t.Fatalf("executor after retry = %+v, want repaired stopped row", stopped)
+	}
+	message, err := fixture.svc.messages.GetMessage(ctx, "retry-pending-tool-message")
+	if err != nil {
+		t.Fatalf("GetMessage after retry: %v", err)
+	}
+	if got := message.Metadata["status"]; got != "complete" {
+		t.Fatalf("pending tool status after retry = %v, want complete", got)
+	}
+}
+
+func TestService_ActiveSessionSweepSkipsRecoveryWhenExecutorSnapshotFails(t *testing.T) {
+	fixture := newSweepFixture(t, 5*time.Hour)
+	fixture.svc.executors = failGetExecutorRunningRepository{
+		ExecutorRepository: fixture.rawRepo,
+		err:                errors.New("executor inventory unavailable"),
+	}
+
+	fixture.svc.runActiveSessionSweep(context.Background(), fixture.now)
+
+	session, err := fixture.repo.GetTaskSession(context.Background(), "session-1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.State != models.TaskSessionStateRunning {
+		t.Fatalf("session state = %q, want RUNNING when executor snapshot fails", session.State)
+	}
+	if models.HasInterruptedRecoveryPending(session.Metadata) {
+		t.Fatalf("session metadata = %#v, want no recovery marker", session.Metadata)
 	}
 }
 

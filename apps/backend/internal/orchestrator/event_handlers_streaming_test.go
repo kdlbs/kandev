@@ -2824,7 +2824,7 @@ func TestSessionStartKeepsInterruptedMarkerUntilRecovery(t *testing.T) {
 		require.NoError(t, err)
 		marker, ok := task.Metadata[models.MetaKeyInterruptedAt].(string)
 		require.True(t, ok)
-		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, marker))
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, interruptedMarkerSnapshot{value: marker, captured: true}, true))
 
 		task, err = repo.GetTask(ctx, "t1")
 		require.NoError(t, err)
@@ -2846,7 +2846,7 @@ func TestSessionStartKeepsInterruptedMarkerUntilRecovery(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
 
-		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, "old-marker"))
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, interruptedMarkerSnapshot{value: "old-marker", captured: true}, true))
 		task, err := repo.GetTask(ctx, "t1")
 		require.NoError(t, err)
 		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
@@ -2865,12 +2865,65 @@ func TestSessionStartKeepsInterruptedMarkerUntilRecovery(t *testing.T) {
 		session, err := repo.GetTaskSession(ctx, "s1")
 		require.NoError(t, err)
 		// A recovery attempt can finish after its task snapshot failed to load.
-		// Passing an empty expected marker must remain a guarded no-op.
-		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, ""))
+		// An uncaptured snapshot must remain a guarded no-op.
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, interruptedMarkerSnapshot{}, true))
 		task, err := repo.GetTask(ctx, "t1")
 		require.NoError(t, err)
 		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
 		require.Empty(t, publisher.updatedTaskIDs)
+	})
+
+	t.Run("finished recovery attempt with absent marker preserves a newer marker", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		registry := newResumeAttemptRegistry()
+		svc.resumeAttemptsMu.Lock()
+		svc.resumeAttempts = registry
+		svc.resumeAttemptsMu.Unlock()
+		attempt, owner := registry.begin(ctx, "t1", "s1")
+		require.True(t, owner)
+		attempt.setInterruptedMarkerSnapshot("", true)
+		attempt.finish(registry)
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		snapshot, known := svc.interruptedMarkerSnapshotForResumeAttempt("s1", attempt.identity())
+		require.True(t, known)
+		require.True(t, snapshot.captured)
+		require.Empty(t, snapshot.value)
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, snapshot, known))
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
+	})
+
+	t.Run("finished recovery attempt with failed marker read preserves a newer marker", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		registry := newResumeAttemptRegistry()
+		svc.resumeAttemptsMu.Lock()
+		svc.resumeAttempts = registry
+		svc.resumeAttemptsMu.Unlock()
+		attempt, owner := registry.begin(ctx, "t1", "s1")
+		require.True(t, owner)
+		// Leave the snapshot uncaptured to model a failed GetTask read.
+		attempt.finish(registry)
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		snapshot, known := svc.interruptedMarkerSnapshotForResumeAttempt("s1", attempt.identity())
+		require.True(t, known)
+		require.False(t, snapshot.captured)
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, snapshot, known))
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
 	})
 
 	t.Run("finished recovery attempt retains its immutable marker snapshot", func(t *testing.T) {
@@ -2892,7 +2945,7 @@ func TestSessionStartKeepsInterruptedMarkerUntilRecovery(t *testing.T) {
 		require.NoError(t, err)
 		marker := svc.interruptedMarkerForResumeAttempt("s1", attempt.identity())
 		require.Equal(t, "old-marker", marker)
-		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, marker))
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, interruptedMarkerSnapshot{value: marker, captured: true}, true))
 		task, err := repo.GetTask(ctx, "t1")
 		require.NoError(t, err)
 		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
@@ -3081,7 +3134,7 @@ func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
 			},
 		))
 
-		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", snapshot))
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", snapshot, interruptedMarkerSnapshot{}, false))
 
 		stored, err := repo.GetTaskSession(ctx, "s1")
 		require.NoError(t, err)
@@ -3163,7 +3216,7 @@ func TestTransitionBootstrapFailurePersistsSessionHistory(t *testing.T) {
 
 	reloaded, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
 	require.NoError(t, err)
-	resolvedAt := svc.markRecoveryResolved(ctx, reloaded.ID, reloaded)
+	resolvedAt := svc.markRecoveryResolved(ctx, reloaded.ID, reloaded, interruptedMarkerSnapshot{}, false)
 	require.NotNil(t, resolvedAt)
 
 	afterRecovery, err := repo.GetTaskSession(ctx, "bootstrap-history-session")

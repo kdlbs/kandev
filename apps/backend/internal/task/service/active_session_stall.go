@@ -383,7 +383,13 @@ func (s *Service) healOrphanedSessions(
 		if turn != nil {
 			candidate.ExpectedTurnID = turn.ID
 		}
-		s.captureRecoveryExecutorSnapshot(ctx, &candidate)
+		if err := s.captureRecoveryExecutorSnapshot(ctx, &candidate); err != nil {
+			s.logger.Warn("active-session sweep: failed to capture executor reservation; skipping heal",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+			return
+		}
 		candidates = append(candidates, candidate)
 	}
 	s.logger.Info("active-session sweep: preserving interrupted sessions for lazy recovery",
@@ -410,9 +416,8 @@ func (s *Service) healOrphanedSessions(
 		if recovered == nil {
 			continue
 		}
-		completionDeadline := time.Now().Add(taskPublicationTimeout)
-		completionCtx, cancelCompletion := context.WithDeadline(
-			context.WithoutCancel(healCtx), completionDeadline,
+		completionCtx, cancelCompletion := context.WithTimeout(
+			context.WithoutCancel(ctx), taskPublicationTimeout,
 		)
 		s.settleRecoveredSession(completionCtx, candidate, recovered)
 		cancelCompletion()

@@ -139,4 +139,6 @@ The review remediation keeps the marker generation through failed, cancelled,
 and tombstoned attempts. Empty or unreadable attempt snapshots cannot clear a
 newer marker. Reconciliation publishes the committed marker through
 `task.updated`, including its explicit interruption projection, so connected
-clients see the warning immediately without a reload.
+clients see the warning immediately without a reload. The client task merge
+also records every explicit marker update, preserving a newer false marker
+after a complete interruption episode races an in-flight workflow snapshot.

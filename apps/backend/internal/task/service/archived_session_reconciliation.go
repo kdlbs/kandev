@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/constants"
@@ -219,7 +220,12 @@ func (s *Service) reconcileOrphanedSessionsUntil(
 		if turn != nil {
 			candidate.ExpectedTurnID = turn.ID
 		}
-		s.captureRecoveryExecutorSnapshot(ctx, &candidate)
+		if err := s.captureRecoveryExecutorSnapshot(ctx, &candidate); err != nil {
+			s.logger.Warn("orphaned-session reconciliation: failed to capture executor reservation; skipping session",
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+			continue
+		}
 		// The turn read above can take long enough for a replacement
 		// execution to register. Re-check immediately before the guarded write
 		// so a live successor keeps ownership of the session.
@@ -239,9 +245,8 @@ func (s *Service) reconcileOrphanedSessionsUntil(
 			// sweep will classify any still-interrupted state again.
 			continue
 		}
-		completionDeadline := time.Now().Add(taskPublicationTimeout)
-		completionCtx, cancelCompletion := context.WithDeadline(
-			context.WithoutCancel(ctx), completionDeadline,
+		completionCtx, cancelCompletion := context.WithTimeout(
+			context.WithoutCancel(ctx), taskPublicationTimeout,
 		)
 		s.settleRecoveredSession(completionCtx, candidate, recovered)
 		cancelCompletion()
@@ -256,25 +261,24 @@ func (s *Service) reconcileOrphanedSessionsUntil(
 // the session candidate. Post-commit repair must use this immutable snapshot;
 // reading the row again after the session write can otherwise stop a successor
 // that registered during the effects window.
-func (s *Service) captureRecoveryExecutorSnapshot(ctx context.Context, candidate *models.ActiveSessionRecoveryCandidate) {
+func (s *Service) captureRecoveryExecutorSnapshot(ctx context.Context, candidate *models.ActiveSessionRecoveryCandidate) error {
 	if s == nil || s.executors == nil || candidate == nil || candidate.SessionID == "" {
-		return
+		return nil
 	}
 	running, err := s.executors.GetExecutorRunningBySessionID(ctx, candidate.SessionID)
 	if errors.Is(err, models.ErrExecutorRunningNotFound) {
-		return
+		return nil
 	}
 	if err != nil {
-		s.logger.Warn("failed to capture executor reservation for session recovery",
-			zap.String("session_id", candidate.SessionID), zap.Error(err))
-		return
+		return fmt.Errorf("failed to capture executor reservation for session recovery: %w", err)
 	}
 	if running == nil {
-		return
+		return nil
 	}
 	candidate.ExpectedExecutorID = running.ID
 	candidate.ExpectedExecutorAgentExecutionID = running.AgentExecutionID
 	candidate.ExpectedExecutorUpdatedAt = running.UpdatedAt
+	return nil
 }
 
 // settleRecoveredSession applies the side effects shared by both execution
@@ -314,6 +318,7 @@ func (s *Service) settleRecoveredSession(
 		return
 	}
 	if candidate.ExpectedTurnID != "" ||
+		candidate.ExpectedState == models.TaskSessionStateCreated ||
 		candidate.ExpectedState == models.TaskSessionStateStarting ||
 		candidate.ExpectedState == models.TaskSessionStateRunning {
 		if _, err := s.markTaskInterrupted(ctx, recovered); err != nil {
@@ -323,6 +328,9 @@ func (s *Service) settleRecoveredSession(
 	if !s.recoveredSessionStillOwned(ctx, candidate, recovered, true) {
 		return
 	}
+	// Publish before clearing the durable settlement. If the clear fails, the
+	// next sweep republishes this idempotent state event so the recovery cannot
+	// be lost between the database write and publication.
 	if err := s.publishSessionRecovered(ctx, candidate.TaskID, candidate.ExpectedState, recovered); err != nil {
 		settlementComplete = false
 	}
@@ -347,7 +355,7 @@ func (s *Service) settleRecoveredTurn(
 		return false, false
 	}
 	if activeTurn == nil {
-		return true, false
+		return s.completeRecoveredTurnToolCalls(ctx, candidate), false
 	}
 	if activeTurn.ID != candidate.ExpectedTurnID {
 		// A different active turn proves a successor crossed the effects
@@ -361,13 +369,20 @@ func (s *Service) settleRecoveredTurn(
 			zap.Error(err))
 		return false, false
 	}
+	return s.completeRecoveredTurnToolCalls(ctx, candidate), false
+}
+
+func (s *Service) completeRecoveredTurnToolCalls(
+	ctx context.Context,
+	candidate models.ActiveSessionRecoveryCandidate,
+) bool {
 	affected, err := s.turns.CompletePendingToolCallsForTurn(ctx, candidate.ExpectedTurnID)
 	if err != nil {
 		s.logger.Warn("failed to complete pending tool calls for recovered turn",
 			zap.String("session_id", candidate.SessionID),
 			zap.String("turn_id", candidate.ExpectedTurnID),
 			zap.Error(err))
-		return false, false
+		return false
 	}
 	if affected > 0 {
 		s.logger.Info("completed pending tool calls for recovered turn",
@@ -375,7 +390,7 @@ func (s *Service) settleRecoveredTurn(
 			zap.String("turn_id", candidate.ExpectedTurnID),
 			zap.Int64("affected", affected))
 	}
-	return true, false
+	return true
 }
 
 // repairRecoveredExecutor releases the stale runtime reservation while
@@ -511,7 +526,7 @@ func (s *Service) markTaskInterrupted(ctx context.Context, recovered *models.Tas
 	// The concrete SQLite task repository owns the archive-atomic metadata CAS.
 	// Keep this optional so focused task-service users and test repositories
 	// without the newer marker primitive remain compatible.
-	setter, ok := s.tasks.(interruptedTaskMetadataSetter)
+	_, ok := s.tasks.(interruptedTaskMetadataSetter)
 	if !ok {
 		return false, errors.New("task repository does not support recovery interruption markers")
 	}
@@ -535,7 +550,13 @@ func (s *Service) markTaskInterrupted(ctx context.Context, recovered *models.Tas
 	} else if absentSetter, supported := s.tasks.(interruptedTaskMetadataAbsentSetter); supported {
 		changed, err = absentSetter.SetTaskMetadataKeyIfAbsentNotArchived(ctx, recovered.TaskID, models.MetaKeyInterruptedAt, value)
 	} else {
-		changed, err = setter.SetTaskMetadataKeyIfNotArchived(ctx, recovered.TaskID, models.MetaKeyInterruptedAt, value)
+		// A plain archive guard does not protect a recovery marker from a
+		// newer interruption arriving between the ownership check and this write.
+		// Fail closed when the adapter lacks either generation-safe primitive.
+		s.logger.Warn("skipping recovery interruption marker without generation-safe setter",
+			zap.String("task_id", recovered.TaskID),
+			zap.String("session_id", recovered.ID))
+		return false, errors.New("task repository does not support generation-safe recovery interruption markers")
 	}
 	if err != nil {
 		return false, err

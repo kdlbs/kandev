@@ -2280,6 +2280,7 @@ func (r *Repository) RecoverTaskSessionByCandidate(
 	// an ordinary idle session even when executors_running has no row, and a
 	// partial post-commit settlement can retry without inspecting a successor.
 	settlementPending := candidate.ExpectedTurnID != "" ||
+		candidate.ExpectedState == models.TaskSessionStateCreated ||
 		candidate.ExpectedState == models.TaskSessionStateStarting ||
 		candidate.ExpectedState == models.TaskSessionStateRunning
 	setClause := "state = ?, error_message = ?, completed_at = ?, updated_at = ?"

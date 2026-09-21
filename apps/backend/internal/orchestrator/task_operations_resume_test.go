@@ -882,6 +882,8 @@ func TestResumeTaskSession_RecoversSweptSessionWithoutExecutorRow(t *testing.T) 
 
 	ready := make(chan struct{})
 	checked := make(chan struct{}, 1)
+	pollCtx, cancelPoll := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancelPoll)
 	agentMgr := &mockAgentManager{
 		isAgentRunning:         false,
 		repoForExecutionLookup: repo,
@@ -900,6 +902,11 @@ func TestResumeTaskSession_RecoversSweptSessionWithoutExecutorRow(t *testing.T) 
 		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 			go func(sessionID string) {
 				for {
+					select {
+					case <-pollCtx.Done():
+						return
+					default:
+					}
 					sess, getErr := repo.GetTaskSession(context.Background(), sessionID)
 					if getErr == nil && sess != nil && sess.State == models.TaskSessionStateStarting {
 						sess.State = models.TaskSessionStateWaitingForInput

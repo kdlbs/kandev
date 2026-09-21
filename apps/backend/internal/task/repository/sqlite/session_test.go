@@ -2291,6 +2291,31 @@ func TestRecoverTaskSessionByCandidatePreservesConversationAndGuardsTurn(t *test
 	ctx := context.Background()
 	seedRepoLink(t, repo, "ws-recover", "repo-recover", "task-recover", "session-recover", "RUNNING")
 	seedRepoLink(t, repo, "ws-recover", "repo-recover-2", "task-recover-2", "session-recover-2", "RUNNING")
+	seedRepoLink(t, repo, "ws-recover", "repo-recover-created", "task-recover-created", "session-recover-created", "CREATED")
+
+	created, err := repo.GetTaskSession(ctx, "session-recover-created")
+	if err != nil {
+		t.Fatalf("GetTaskSession created candidate: %v", err)
+	}
+	recovered, err := repo.RecoverTaskSessionByCandidate(ctx, models.ActiveSessionRecoveryCandidate{
+		TaskID:              created.TaskID,
+		SessionID:           created.ID,
+		ExpectedState:       created.State,
+		ExpectedUpdatedAt:   created.UpdatedAt,
+		ExpectedLastEventAt: created.UpdatedAt,
+	}, time.Now().UTC().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("RecoverTaskSessionByCandidate created session: %v", err)
+	}
+	if recovered == nil {
+		t.Fatal("RecoverTaskSessionByCandidate created session returned nil")
+	}
+	if !models.HasInterruptedRecoveryPending(recovered.Metadata) {
+		t.Fatalf("created recovered metadata = %#v, want durable recovery marker", recovered.Metadata)
+	}
+	if _, ok := models.LoadInterruptedRecoverySettlement(recovered.Metadata); !ok {
+		t.Fatalf("created recovered metadata = %#v, want settlement snapshot", recovered.Metadata)
+	}
 
 	idleCandidate, err := repo.GetTaskSession(ctx, "session-recover")
 	if err != nil {
@@ -2299,7 +2324,7 @@ func TestRecoverTaskSessionByCandidatePreservesConversationAndGuardsTurn(t *test
 	// A cutoff in the future admits this stale snapshot. The absence of an
 	// active turn is part of the candidate predicate for a session whose actor
 	// died before a turn row was persisted.
-	recovered, err := repo.RecoverTaskSessionByCandidate(ctx, models.ActiveSessionRecoveryCandidate{
+	recovered, err = repo.RecoverTaskSessionByCandidate(ctx, models.ActiveSessionRecoveryCandidate{
 		TaskID:              idleCandidate.TaskID,
 		SessionID:           idleCandidate.ID,
 		ExpectedState:       idleCandidate.State,

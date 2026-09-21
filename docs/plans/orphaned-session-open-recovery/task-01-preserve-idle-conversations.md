@@ -139,3 +139,6 @@ detached writes, and retry incomplete settlement from the session metadata.
 The retry path accepts the same committed session generation after its stale
 executor row was repaired, so an abandoned turn cannot lose its remaining
 effects after the session becomes idle or after a successor changes the row.
+Executor inventory read failures fail closed before the recovery write, and
+CREATED sessions receive the same durable recovery token and interruption
+marker as STARTING and RUNNING sessions.

@@ -2190,7 +2190,7 @@ func (s *Service) setSessionStartingWithOptions(
 func (s *Service) clearTaskInterruptedMarker(
 	ctx context.Context,
 	taskID string,
-	expectedMarker ...string,
+	expectedMarker string,
 ) {
 	if taskID == "" {
 		return
@@ -2199,7 +2199,7 @@ func (s *Service) clearTaskInterruptedMarker(
 		removed bool
 		err     error
 	)
-	if len(expectedMarker) == 0 || expectedMarker[0] == "" {
+	if strings.TrimSpace(expectedMarker) == "" {
 		// A recovery callback without a valid immutable marker snapshot fails
 		// closed. There is no safe unconditional removal path.
 		return
@@ -2208,7 +2208,7 @@ func (s *Service) clearTaskInterruptedMarker(
 		RemoveTaskMetadataKeyIfValue(context.Context, string, string, string) (bool, error)
 	}); ok {
 		removed, err = remover.RemoveTaskMetadataKeyIfValue(
-			ctx, taskID, models.MetaKeyInterruptedAt, expectedMarker[0],
+			ctx, taskID, models.MetaKeyInterruptedAt, expectedMarker,
 		)
 	} else {
 		// A read followed by an unconditional legacy removal is not a

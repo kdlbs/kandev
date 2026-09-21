@@ -567,14 +567,16 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.String("session_state", string(session.State)))
 		return
 	}
-	marker := s.interruptedMarkerForResumeAttempt(data.SessionID, data.AttemptID)
+	markerSnapshot, markerSnapshotKnown := s.interruptedMarkerSnapshotForResumeAttempt(data.SessionID, data.AttemptID)
 	// Every boot-ready callback is a recovery callback for marker purposes. A
 	// missing/finished attempt, empty attempt ID, or failed task snapshot leaves
-	// marker empty and therefore fails closed in clearTaskInterruptedMarker.
+	// the marker snapshot unavailable and therefore fails closed in
+	// clearTaskInterruptedMarker.
 	// Ordinary sessions without a marker take the same no-op path; only an
 	// immutable marker captured for this attempt can clear the warning.
-	expectedMarker := []string{marker}
-	recoveryResolvedAt := s.markRecoveryResolved(ctx, data.SessionID, session, expectedMarker...)
+	recoveryResolvedAt := s.markRecoveryResolved(
+		ctx, data.SessionID, session, markerSnapshot, markerSnapshotKnown,
+	)
 
 	// Idempotent: if the session is already WAITING_FOR_INPUT (e.g. revived
 	// from a previously launched session and the boot signal arrived faster
@@ -3226,7 +3228,8 @@ func (s *Service) markRecoveryResolved(
 	ctx context.Context,
 	sessionID string,
 	session *models.TaskSession,
-	expectedInterruptedMarker ...string,
+	markerSnapshot interruptedMarkerSnapshot,
+	markerSnapshotKnown bool,
 ) *time.Time {
 	resolvedAt := time.Now().UTC()
 	resolvedAtValue := resolvedAt.Format(time.RFC3339Nano)
@@ -3250,16 +3253,14 @@ func (s *Service) markRecoveryResolved(
 		// Boot-ready is the provider-confirmed recovery boundary. Keeping this
 		// out of the STARTING/RUNNING state funnel leaves the durable warning in
 		// place when a launch later fails or is cancelled.
-		s.clearTaskInterruptedMarker(ctx, session.TaskID, expectedInterruptedMarker...)
+		if markerSnapshotKnown && markerSnapshot.captured {
+			s.clearTaskInterruptedMarker(ctx, session.TaskID, markerSnapshot.value)
+		}
 	}
 	// A guarded boot callback may clear recovery ownership only when it carries
-	// a non-empty immutable marker generation. The handler passes an empty
-	// guarded value for missing/failed/finished attempts, so those callbacks
-	// leave the durable settlement available for retry. Direct legacy callers
-	// that omit the variadic argument retain their established cleanup path.
-	guardedGeneration := len(expectedInterruptedMarker) > 0
-	validGeneration := guardedGeneration && strings.TrimSpace(expectedInterruptedMarker[0]) != ""
-	if !guardedGeneration || validGeneration {
+	// a valid immutable marker snapshot. A known recovery attempt whose task
+	// read failed keeps its durable settlement so a later sweep can retry it.
+	if !markerSnapshotKnown || markerSnapshot.captured {
 		s.clearRecoveryMetadataAfterBoot(ctx, sessionID, session)
 	}
 	return &resolvedAt
