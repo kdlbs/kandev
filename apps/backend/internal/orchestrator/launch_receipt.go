@@ -24,9 +24,10 @@ func (i LaunchAttemptIdentity) equal(other LaunchAttemptIdentity) bool {
 type LaunchFactKind string
 
 const (
-	LaunchFactProcessStarted           LaunchFactKind = "process_started"
-	LaunchFactInferenceStarted         LaunchFactKind = "inference_started"
-	LaunchFactTerminalPreflightFailure LaunchFactKind = "terminal_preflight_failure"
+	LaunchFactProcessStarted                   LaunchFactKind = "process_started"
+	LaunchFactInferenceStarted                 LaunchFactKind = "inference_started"
+	LaunchFactTerminalPreflightFailure         LaunchFactKind = "terminal_preflight_failure"
+	LaunchFactTerminalACPInitializationFailure LaunchFactKind = "terminal_acp_initialization_failure"
 )
 
 type LaunchReceiptFact struct {
@@ -92,6 +93,8 @@ func (h *LaunchReceiptHistory) Apply(fact LaunchReceiptFact) bool {
 		h.Current.InferenceStarted = LaunchTriStateTrue
 	case LaunchFactTerminalPreflightFailure:
 		h.Current.ProcessCreated = LaunchTriStateFalse
+		h.Current.InferenceStarted = LaunchTriStateFalse
+	case LaunchFactTerminalACPInitializationFailure:
 		h.Current.InferenceStarted = LaunchTriStateFalse
 	}
 	return true

@@ -36,3 +36,16 @@ func TestLaunchReceiptTriStateOnlyTurnsFalseOnTypedPreflightFailure(t *testing.T
 		t.Fatalf("preflight states = %+v", history.Current)
 	}
 }
+
+func TestLaunchReceiptRetainsProcessEvidenceForTypedACPInitializationFailure(t *testing.T) {
+	var history LaunchReceiptHistory
+	id := LaunchAttemptIdentity{SessionID: "session", Incarnation: "exec", Generation: 1}
+	history.Start(id)
+	history.Apply(LaunchReceiptFact{Identity: id, Kind: LaunchFactProcessStarted})
+	if !history.Apply(LaunchReceiptFact{Identity: id, Kind: LaunchFactTerminalACPInitializationFailure}) {
+		t.Fatal("ACP initialization failure was rejected")
+	}
+	if history.Current.ProcessCreated != LaunchTriStateTrue || history.Current.InferenceStarted != LaunchTriStateFalse {
+		t.Fatalf("receipt = %+v, want process true and inference false", history.Current)
+	}
+}

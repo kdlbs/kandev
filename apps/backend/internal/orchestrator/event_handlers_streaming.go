@@ -332,6 +332,8 @@ func applyLaunchReceiptEvent(history *LaunchReceiptHistory, identity LaunchAttem
 		kind = LaunchFactProcessStarted
 	case string(LaunchFactTerminalPreflightFailure):
 		kind = LaunchFactTerminalPreflightFailure
+	case string(LaunchFactTerminalACPInitializationFailure):
+		kind = LaunchFactTerminalACPInitializationFailure
 	default:
 		return false
 	}

@@ -2468,9 +2468,10 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 }
 
 const (
-	launchReceiptStarted                  = "started"
-	launchReceiptProcessStarted           = "process_started"
-	launchReceiptTerminalPreflightFailure = "terminal_preflight_failure"
+	launchReceiptStarted                          = "started"
+	launchReceiptProcessStarted                   = "process_started"
+	launchReceiptTerminalPreflightFailure         = "terminal_preflight_failure"
+	launchReceiptTerminalACPInitializationFailure = "terminal_acp_initialization_failure"
 )
 
 // publishLaunchReceipt emits backend-owned launch facts through the existing
@@ -2556,6 +2557,7 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 		}
 		m.finalizeBootMessage(execution, bootMsg, bootStopCh, "failed")
 		m.updateExecutionError(execution.ID, "failed to initialize ACP: "+err.Error())
+		m.publishLaunchReceipt(execution, launchReceiptTerminalACPInitializationFailure)
 		return fmt.Errorf("failed to initialize ACP: %w", err)
 	}
 
