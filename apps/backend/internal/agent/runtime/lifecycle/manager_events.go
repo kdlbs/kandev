@@ -941,8 +941,14 @@ func (m *Manager) handleMCPAttachmentEvent(
 		attempt.TaskID = execution.TaskID
 		attempt.SessionID = execution.SessionID
 		attempt.ExecutionID = execution.ID
+		attempt.StartupGeneration = execution.startupAttemptSnapshot()
 		attempt.AgentID = execution.AgentID
 		event.MCPAttachmentAttempt = &attempt
+	}
+	if event.MCPAttachment != nil {
+		evidence := *event.MCPAttachment
+		evidence.StartupGeneration = execution.startupAttemptSnapshot()
+		event.MCPAttachment = &evidence
 	}
 	// Attachment diagnostics must not count as model activity or alter turn
 	// ownership. They flow directly to the orchestrator for persistence.

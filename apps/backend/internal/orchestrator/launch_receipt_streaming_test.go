@@ -74,6 +74,53 @@ func TestBindLaunchReceiptToMCPAttemptKeepsMatchingExecutionOnly(t *testing.T) {
 	}
 }
 
+// TestHandleSessionMCPAttachmentEventRejectsDelayedSameExecutionAttachment
+// proves that an attachment queued by a replaced startup cannot bind to the
+// current receipt merely because its execution was reused.
+func TestHandleSessionMCPAttachmentEventRejectsDelayedSameExecutionAttachment(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-attachment-generation", "session-attachment-generation", "step-attachment-generation")
+	history := LaunchReceiptHistory{Current: LaunchReceipt{Identity: LaunchAttemptIdentity{
+		SessionID: "session-attachment-generation", Incarnation: "execution-reused", Generation: 2,
+	}}}
+	if err := repo.SetSessionMetadataKey(ctx, "session-attachment-generation", models.SessionMetaKeyLaunchReceiptState, history); err != nil {
+		t.Fatalf("seed launch receipt: %v", err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.handleSessionMCPAttachmentEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID: "task-attachment-generation", SessionID: "session-attachment-generation", ExecutionID: "execution-reused",
+		Data: &lifecycle.AgentStreamEventData{
+			MCPAttachmentAttempt: &streams.MCPAttachmentAttempt{AttemptID: "catalog-delayed", ExecutionID: "execution-reused", StartupGeneration: 1},
+			MCPAttachment:        &streams.MCPAttachmentEvidence{AttemptID: "catalog-delayed", StartupGeneration: 1, ServerName: "kandev", Kind: streams.MCPAttachmentEvidenceConfigured},
+		},
+	})
+	session, err := repo.GetTaskSession(ctx, "session-attachment-generation")
+	if err != nil {
+		t.Fatalf("get delayed receipt: %v", err)
+	}
+	delayedCurrent := session.Metadata[models.SessionMetaKeyLaunchReceiptState].(map[string]interface{})["current"].(map[string]interface{})
+	if _, bound := delayedCurrent["catalog_attachment_attempt_id"]; bound {
+		t.Fatalf("delayed attachment bound replacement receipt: %#v", delayedCurrent)
+	}
+	svc.handleSessionMCPAttachmentEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID: "task-attachment-generation", SessionID: "session-attachment-generation", ExecutionID: "execution-reused",
+		Data: &lifecycle.AgentStreamEventData{
+			MCPAttachmentAttempt: &streams.MCPAttachmentAttempt{AttemptID: "catalog-current", ExecutionID: "execution-reused", StartupGeneration: 2},
+			MCPAttachment:        &streams.MCPAttachmentEvidence{AttemptID: "catalog-current", StartupGeneration: 2, ServerName: "kandev", Kind: streams.MCPAttachmentEvidenceConfigured},
+		},
+	})
+
+	session, err = repo.GetTaskSession(ctx, "session-attachment-generation")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	current := session.Metadata[models.SessionMetaKeyLaunchReceiptState].(map[string]interface{})["current"].(map[string]interface{})
+	if current["catalog_attachment_attempt_id"] != "catalog-current" {
+		t.Fatalf("receipt = %#v, want only current attachment", current)
+	}
+}
+
 func TestHandleAgentStreamEventStartsReceiptBeforeProcessConfiguration(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

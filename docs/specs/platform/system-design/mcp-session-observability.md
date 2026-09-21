@@ -32,6 +32,7 @@ Implementation plans:
 
 - [Session MCP attachment observability](../../../plans/mcp-session-observability/plan.md)
 - [MCP server explorer](../../../plans/mcp-server-explorer/plan.md)
+- [Copilot task session catalog and launch receipts](../../../plans/copilot-task-session-catalog/plan.md)
 
 ## Why
 

@@ -161,6 +161,7 @@ type MCPServerAttachment struct {
 // sanitized projection.
 type MCPAttachmentEvidence struct {
 	AttemptID                string                    `json:"attachment_attempt_id"`
+	StartupGeneration        uint64                    `json:"startup_generation,omitempty"`
 	ServerName               string                    `json:"server_name,omitempty"`
 	Kind                     MCPAttachmentEvidenceKind `json:"kind"`
 	OccurredAt               time.Time                 `json:"occurred_at"`
@@ -179,19 +180,20 @@ type MCPAttachmentEvidence struct {
 
 // MCPAttachmentAttempt is one ACP new/load/reset or passthrough process start.
 type MCPAttachmentAttempt struct {
-	AttemptID      string                  `json:"attachment_attempt_id"`
-	TaskID         string                  `json:"task_id,omitempty"`
-	SessionID      string                  `json:"session_id,omitempty"`
-	ExecutionID    string                  `json:"execution_id,omitempty"`
-	AgentID        string                  `json:"agent_id,omitempty"`
-	AgentProfileID string                  `json:"agent_profile_id,omitempty"`
-	ACPSessionID   string                  `json:"acp_session_id,omitempty"`
-	StartedAt      time.Time               `json:"started_at"`
-	UpdatedAt      time.Time               `json:"updated_at,omitempty"`
-	SupersededAt   *time.Time              `json:"superseded_at,omitempty"`
-	Servers        []MCPServerAttachment   `json:"servers,omitempty"`
-	Evidence       []MCPAttachmentEvidence `json:"evidence,omitempty"`
-	SessionError   string                  `json:"session_error,omitempty"`
+	AttemptID         string                  `json:"attachment_attempt_id"`
+	TaskID            string                  `json:"task_id,omitempty"`
+	SessionID         string                  `json:"session_id,omitempty"`
+	ExecutionID       string                  `json:"execution_id,omitempty"`
+	StartupGeneration uint64                  `json:"startup_generation,omitempty"`
+	AgentID           string                  `json:"agent_id,omitempty"`
+	AgentProfileID    string                  `json:"agent_profile_id,omitempty"`
+	ACPSessionID      string                  `json:"acp_session_id,omitempty"`
+	StartedAt         time.Time               `json:"started_at"`
+	UpdatedAt         time.Time               `json:"updated_at,omitempty"`
+	SupersededAt      *time.Time              `json:"superseded_at,omitempty"`
+	Servers           []MCPServerAttachment   `json:"servers,omitempty"`
+	Evidence          []MCPAttachmentEvidence `json:"evidence,omitempty"`
+	SessionError      string                  `json:"session_error,omitempty"`
 }
 
 // MCPAttachmentHistory is the bounded persisted state for one Kandev session.

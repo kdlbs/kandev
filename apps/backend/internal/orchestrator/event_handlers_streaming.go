@@ -4266,13 +4266,7 @@ func (s *Service) bindLaunchReceiptToMCPAttempt(
 	if data == nil || sessionID == "" || executionID == "" || s.repo == nil {
 		return
 	}
-	attemptID := ""
-	if data.MCPAttachmentAttempt != nil {
-		attemptID = data.MCPAttachmentAttempt.AttemptID
-	}
-	if attemptID == "" && data.MCPAttachment != nil {
-		attemptID = data.MCPAttachment.AttemptID
-	}
+	attemptID, startupGeneration := launchReceiptMCPAttachmentIdentity(data)
 	if attemptID == "" {
 		return
 	}
@@ -4281,13 +4275,28 @@ func (s *Service) bindLaunchReceiptToMCPAttempt(
 		return
 	}
 	receipts, ok := loadLaunchReceiptHistory(session.Metadata[models.SessionMetaKeyLaunchReceiptState])
-	if !ok || receipts.Current.Identity.Incarnation != executionID || receipts.Current.CatalogAttachmentAttemptID == attemptID {
+	if !ok || receipts.Current.Identity.Incarnation != executionID ||
+		receipts.Current.Identity.Generation != startupGeneration ||
+		receipts.Current.CatalogAttachmentAttemptID == attemptID {
 		return
 	}
 	receipts.Current.CatalogAttachmentAttemptID = attemptID
 	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLaunchReceiptState, receipts); err != nil {
 		s.logger.Warn("failed to bind launch receipt to MCP attachment", zap.String("session_id", sessionID), zap.Error(err))
 	}
+}
+
+func launchReceiptMCPAttachmentIdentity(data *lifecycle.AgentStreamEventData) (string, uint64) {
+	if data == nil {
+		return "", 0
+	}
+	if data.MCPAttachmentAttempt != nil {
+		return data.MCPAttachmentAttempt.AttemptID, data.MCPAttachmentAttempt.StartupGeneration
+	}
+	if data.MCPAttachment != nil {
+		return data.MCPAttachment.AttemptID, data.MCPAttachment.StartupGeneration
+	}
+	return "", 0
 }
 
 func staleMCPAttachmentAttempt(payload *lifecycle.AgentStreamEventPayload) bool {

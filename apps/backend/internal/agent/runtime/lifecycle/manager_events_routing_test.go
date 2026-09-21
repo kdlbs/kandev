@@ -68,11 +68,14 @@ func TestHandleAgentEventStampsMCPAttachmentIdentity(t *testing.T) {
 	h := newWorkspaceEventsHarness(t)
 	h.exec.AgentID = "claude-acp"
 	h.exec.Status = v1.AgentStatusReady
+	h.exec.beginStartupAttemptWithID("attempt-1")
 	attempt := &streams.MCPAttachmentAttempt{AttemptID: "attempt-1"}
+	evidence := &streams.MCPAttachmentEvidence{AttemptID: "attempt-1", ServerName: "kandev", Kind: streams.MCPAttachmentEvidenceConfigured}
 
 	h.mgr.handleAgentEvent(h.exec, agentctl.AgentEvent{
 		Type:                 streams.EventTypeMCPAttachment,
 		MCPAttachmentAttempt: attempt,
+		MCPAttachment:        evidence,
 	})
 
 	got := h.only(t)
@@ -85,9 +88,14 @@ func TestHandleAgentEventStampsMCPAttachmentIdentity(t *testing.T) {
 	require.Equal(t, "session-1", published.SessionID)
 	require.Equal(t, "exec-1", published.ExecutionID)
 	require.Equal(t, "claude-acp", published.AgentID)
+	require.Equal(t, uint64(1), published.StartupGeneration)
+	require.NotNil(t, got.Event.Data.(AgentStreamEventPayload).Data.MCPAttachment)
+	require.Equal(t, uint64(1), got.Event.Data.(AgentStreamEventPayload).Data.MCPAttachment.StartupGeneration)
 
 	require.Empty(t, attempt.ExecutionID,
 		"the caller's attempt must not be stamped in place; a copy is published")
+	require.Zero(t, evidence.StartupGeneration,
+		"the caller's evidence must not be stamped in place")
 	require.Equal(t, v1.AgentStatusReady, h.exec.Status,
 		"attachment diagnostics are not model activity and must not flip Ready into Running")
 }
