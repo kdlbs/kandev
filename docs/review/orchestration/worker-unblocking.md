@@ -90,6 +90,14 @@ Final deployed candidate: `0.94.0-orchestration.20260921.sha4fda12610b7c`. The s
 also passed verified cold backup, health and web readiness, authentication,
 retained-row, SQLite integrity and foreign-key checks.
 
+The follow-up chat-state changes were built from the public fork branch
+`Corey-Fogg/kandev:feat/workspace-orchestration` at commit
+`aa0407394653899dde226f719845e3acfcc541ae` and deployed as
+`0.94.0-orchestration.20260921.shaaa0407394653`. The local deployment remote now
+points at that public fork; the former private repository remains available as
+the `private` remote for historical review. The fork and upstream review are
+linked from [kdlbs/kandev#3853](https://github.com/kdlbs/kandev/pull/3853).
+
 On the final candidate, a second live conversation asked the same worker for a
 read-only confirmation of its completed results. The broker's single `message`
 request completed successfully; the worker returned the confirmation, and the
