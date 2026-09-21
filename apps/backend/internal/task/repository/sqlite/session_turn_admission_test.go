@@ -109,6 +109,59 @@ func TestCreateTurnWithStepStampConversationReceiptPersistsUnstampedWhenPayloadT
 	}
 }
 
+func TestCreateTurnWithStepStampUsesInheritedSessionTaskStep(t *testing.T) {
+	repo := newTurnStepStampTestRepo(t)
+	ctx := t.Context()
+	const (
+		workspaceID   = "workspace-inherited-turn-stamp"
+		workflowID    = "workflow-inherited-turn-stamp"
+		ownerTaskID   = "task-inherited-turn-owner"
+		childTaskID   = "task-inherited-turn-child"
+		environmentID = "environment-inherited-turn"
+		sessionID     = "session-inherited-turn"
+	)
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: workspaceID, Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: ownerTaskID, WorkspaceID: workspaceID, Title: "Owner"}); err != nil {
+		t.Fatalf("CreateTask owner: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: childTaskID, WorkspaceID: workspaceID, WorkflowID: workflowID, WorkflowStepID: "step-child",
+		ParentID: ownerTaskID, Title: "Child",
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}); err != nil {
+		t.Fatalf("CreateTask child: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: ownerTaskID, ExecutorType: string(models.ExecutorTypeLocal),
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: childTaskID, TaskEnvironmentID: environmentID,
+		State: models.TaskSessionStateRunning,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	turn := &models.Turn{ID: "turn-inherited-step", TaskSessionID: sessionID, TaskID: childTaskID}
+	stamped, err := repo.CreateTurnWithStepStamp(ctx, turn)
+	if err != nil {
+		t.Fatalf("CreateTurnWithStepStamp: %v", err)
+	}
+	if !stamped {
+		t.Fatal("stamped = false, want child workflow step stamp")
+	}
+	if got := turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart]; got != "step-child" {
+		t.Fatalf("stamp = %v, want step-child", got)
+	}
+}
+
 func TestCreateTurnSurfacesRejectForeignEnvironmentRecoveryClaim(t *testing.T) {
 	for _, test := range turnCreateSurfaces() {
 		t.Run(test.name, func(t *testing.T) {

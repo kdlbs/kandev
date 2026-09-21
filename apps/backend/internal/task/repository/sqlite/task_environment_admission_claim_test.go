@@ -128,6 +128,155 @@ func TestCreateTurnWithStepStampRejectsForeignEnvironmentRecoveryClaim(t *testin
 	}
 }
 
+func TestTaskEnvironmentRecoveryClaimAllowsAuthorizedInheritedSession(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	const (
+		workspaceID   = "workspace-inherited-claim"
+		ownerTaskID   = "task-inherited-claim-owner"
+		childTaskID   = "task-inherited-claim-child"
+		environmentID = "environment-inherited-claim"
+		sessionID     = "session-inherited-claim"
+	)
+	seedWorkspace(t, repo, workspaceID)
+	if err := repo.CreateTask(ctx, &models.Task{ID: ownerTaskID, WorkspaceID: workspaceID, Title: "Owner"}); err != nil {
+		t.Fatalf("CreateTask owner: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: childTaskID, WorkspaceID: workspaceID, ParentID: ownerTaskID, Title: "Child",
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}); err != nil {
+		t.Fatalf("CreateTask child: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: ownerTaskID, ExecutorType: string(models.ExecutorTypeWorktree),
+		Status: models.TaskEnvironmentStatusCreating, OwnershipGeneration: 1,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: childTaskID, TaskEnvironmentID: environmentID,
+		QueueIncarnationID: "incarnation-inherited-claim", State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	request := recoveryClaimRequest(t, repo, environmentID, ownerTaskID, sessionID, "operation-inherited-claim", 1)
+	claim, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, request)
+	if err != nil {
+		t.Fatalf("AcquireTaskEnvironmentRecoveryClaim: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim) })
+	replayed, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, request)
+	if err != nil {
+		t.Fatalf("replay inherited recovery claim: %v", err)
+	}
+	if replayed.SessionID != sessionID || replayed.SessionIncarnationID != request.SessionIncarnationID {
+		t.Fatalf("replayed claim = %+v, want session %q incarnation %q", replayed, sessionID, request.SessionIncarnationID)
+	}
+}
+
+func TestTaskEnvironmentRecoveryClaimRejectsUnauthorizedInheritedSession(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		requesterTaskID string
+		requesterParent string
+		requesterSpace  string
+	}{
+		{name: "unrelated-task", requesterTaskID: "task-unrelated-claim", requesterSpace: "workspace-authorized-claim"},
+		{name: "cross-workspace-child", requesterTaskID: "task-cross-workspace-claim", requesterParent: "task-authorized-claim-owner", requesterSpace: "workspace-other-claim"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := newRepoForEntityTests(t)
+			ctx := context.Background()
+			const (
+				ownerTaskID   = "task-authorized-claim-owner"
+				environmentID = "environment-authorized-claim"
+				sessionID     = "session-authorized-claim"
+			)
+			seedWorkspace(t, repo, "workspace-authorized-claim")
+			if test.requesterSpace != "workspace-authorized-claim" {
+				seedWorkspace(t, repo, test.requesterSpace)
+			}
+			if err := repo.CreateTask(ctx, &models.Task{ID: ownerTaskID, WorkspaceID: "workspace-authorized-claim", Title: "Owner"}); err != nil {
+				t.Fatalf("CreateTask owner: %v", err)
+			}
+			if err := repo.CreateTask(ctx, &models.Task{
+				ID: test.requesterTaskID, WorkspaceID: test.requesterSpace, ParentID: test.requesterParent, Title: "Requester",
+				Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+			}); err != nil {
+				t.Fatalf("CreateTask requester: %v", err)
+			}
+			if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+				ID: environmentID, TaskID: ownerTaskID, ExecutorType: string(models.ExecutorTypeWorktree),
+				Status: models.TaskEnvironmentStatusCreating, OwnershipGeneration: 1,
+			}); err != nil {
+				t.Fatalf("CreateTaskEnvironment: %v", err)
+			}
+			if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+				ID: sessionID, TaskID: test.requesterTaskID, TaskEnvironmentID: environmentID,
+				QueueIncarnationID: "incarnation-authorized-claim", State: models.TaskSessionStateCreated,
+			}); err != nil {
+				t.Fatalf("CreateTaskSession: %v", err)
+			}
+
+			_, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx,
+				recoveryClaimRequest(t, repo, environmentID, ownerTaskID, sessionID, "operation-"+test.name, 1))
+			if !errors.Is(err, recoveryclaim.ErrClaimMismatch) {
+				t.Fatalf("AcquireTaskEnvironmentRecoveryClaim error = %v, want ErrClaimMismatch", err)
+			}
+		})
+	}
+}
+
+func TestTaskEnvironmentRecoveryClaimAllowsBoundSharedGroupSession(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	const (
+		workspaceID   = "workspace-group-claim"
+		ownerTaskID   = "task-group-claim-owner"
+		memberTaskID  = "task-group-claim-member"
+		environmentID = "environment-group-claim"
+		sessionID     = "session-group-claim"
+	)
+	seedWorkspace(t, repo, workspaceID)
+	for _, task := range []*models.Task{
+		{ID: ownerTaskID, WorkspaceID: workspaceID, Title: "Owner"},
+		{ID: memberTaskID, WorkspaceID: workspaceID, Title: "Member", Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "shared_group"}}},
+	} {
+		if err := repo.CreateTask(ctx, task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", task.ID, err)
+		}
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: ownerTaskID, ExecutorType: string(models.ExecutorTypeWorktree),
+		Status: models.TaskEnvironmentStatusCreating, OwnershipGeneration: 1,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	seedWorkspaceGroupOwnerFixture(t, repo)
+	if _, err := repo.db.Exec(`ALTER TABLE task_workspace_groups ADD COLUMN materialized_environment_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		t.Fatalf("add materialized environment column: %v", err)
+	}
+	insertWorkspaceGroupMember(t, repo, "group-claim", ownerTaskID, memberTaskID, time.Now().UTC())
+	if _, err := repo.db.Exec(`UPDATE task_workspace_groups SET materialized_environment_id = ? WHERE id = ?`, environmentID, "group-claim"); err != nil {
+		t.Fatalf("bind group environment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: memberTaskID, TaskEnvironmentID: environmentID,
+		QueueIncarnationID: "incarnation-group-claim", State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	claim, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx,
+		recoveryClaimRequest(t, repo, environmentID, ownerTaskID, sessionID, "operation-group-claim", 1))
+	if err != nil {
+		t.Fatalf("AcquireTaskEnvironmentRecoveryClaim: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim) })
+}
+
 func TestTaskEnvironmentRecoveryClaimRejectsReplayedSessionIncarnation(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

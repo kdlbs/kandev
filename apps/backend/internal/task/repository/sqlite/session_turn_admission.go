@@ -35,12 +35,12 @@ func (r *Repository) createTurnTx(
 		return false, nil, fmt.Errorf("begin turn creation: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	authorityTaskID, err := r.admitSessionWriteTx(ctx, tx, turn.TaskSessionID)
+	authority, err := r.admitSessionWriteTx(ctx, tx, turn.TaskSessionID)
 	if err != nil {
 		return false, nil, err
 	}
 
-	stamped, err := r.stampTurnStepTx(ctx, tx, turn, authorityTaskID, options.stampStep)
+	stamped, err := r.stampTurnStepTx(ctx, tx, turn, authority.taskID, options.stampStep)
 	if err != nil {
 		return false, nil, err
 	}
@@ -67,32 +67,33 @@ func (r *Repository) admitSessionWriteTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	sessionID string,
-) (string, error) {
+) (turnSessionAuthority, error) {
 	authority, err := r.readTurnSessionAuthorityTx(ctx, tx, sessionID)
 	if err != nil {
-		return "", err
+		return turnSessionAuthority{}, err
 	}
 	lockTaskID, err := r.turnSessionAuthorityTaskTx(ctx, tx, authority)
 	if err != nil {
-		return "", err
+		return turnSessionAuthority{}, err
 	}
 	if err := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), lockTaskID); err != nil {
-		return "", fmt.Errorf("lock task for turn creation: %w", err)
+		return turnSessionAuthority{}, fmt.Errorf("lock task for turn creation: %w", err)
 	}
 	confirmed, err := r.confirmTurnSessionAuthorityTx(ctx, tx, sessionID, authority, lockTaskID)
 	if err != nil {
-		return "", err
+		return turnSessionAuthority{}, err
 	}
 	if err := r.ensureTurnSessionRecoveryAvailableTx(ctx, tx, sessionID, confirmed); err != nil {
-		return "", err
+		return turnSessionAuthority{}, err
 	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
-		return "", err
+		return turnSessionAuthority{}, err
 	}
-	if _, err := r.confirmTurnSessionAuthorityTx(ctx, tx, sessionID, confirmed, lockTaskID); err != nil {
-		return "", err
+	confirmed, err = r.confirmTurnSessionAuthorityTx(ctx, tx, sessionID, confirmed, lockTaskID)
+	if err != nil {
+		return turnSessionAuthority{}, err
 	}
-	return lockTaskID, nil
+	return confirmed, nil
 }
 
 func (r *Repository) confirmTurnSessionAuthorityTx(
@@ -183,10 +184,10 @@ func (r *Repository) stampTurnStepTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	turn *models.Turn,
-	authorityTaskID string,
+	workflowTaskID string,
 	enabled bool,
 ) (bool, error) {
-	if !enabled || turn.TaskID != authorityTaskID {
+	if !enabled || turn.TaskID != workflowTaskID {
 		return false, nil
 	}
 	_, stepID, found, err := r.readTaskStepInTx(ctx, tx, turn.TaskID)

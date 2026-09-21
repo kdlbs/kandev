@@ -108,8 +108,9 @@ required for the backend-only change.
 
 ## Verification results
 
-Implementation checks pass locally. The PostgreSQL concurrency check and a full
-real-Git-to-lifecycle integration test remain outstanding.
+Implementation checks pass locally. The non-skipped PostgreSQL concurrency
+receipt is preserved. A full real-Git-to-lifecycle integration test remains
+outstanding.
 
 Design-package checks on 2026-09-10:
 

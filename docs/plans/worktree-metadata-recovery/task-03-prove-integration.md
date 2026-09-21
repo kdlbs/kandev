@@ -120,6 +120,8 @@ runtime startup, so this work order remains in progress.
 `GetWorkspaceInfoForSession` now has an explicit assertion that it projects the
 durable `QueueIncarnationID`. The selected-worktree launch and resume integration
 fixture carries a nonempty incarnation and asserts that the captured
-`RecoveryAdmissionRequest` retains it. The lifecycle boundary has matching
-request-capture coverage. These focused assertions preserve the recovery claim's
-session-incarnation fence across every production admission path.
+`RecoveryAdmissionRequest` retains it. The lifecycle test carries a matching
+durable claim through `admitWorkspaceRecovery`, so the real worktree manager
+verifies the request's session incarnation. These focused assertions preserve
+the recovery claim's session-incarnation fence across every production admission
+path.

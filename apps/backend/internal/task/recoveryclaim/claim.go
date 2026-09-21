@@ -12,6 +12,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	kandevdb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -174,10 +175,99 @@ func validateRequesterIdentity(
 		}
 		return err
 	}
-	if taskID != req.OwnerTaskID || !environmentID.Valid || environmentID.String != req.TaskEnvironmentID || incarnationID == "" || incarnationID != req.SessionIncarnationID {
+	if !environmentID.Valid || environmentID.String != req.TaskEnvironmentID || incarnationID == "" || incarnationID != req.SessionIncarnationID {
+		return fmt.Errorf("%w: requesting session authority changed", ErrClaimMismatch)
+	}
+	authorized, err := requesterTaskCanUseEnvironment(ctx, db, tx, req, taskID)
+	if err != nil {
+		return err
+	}
+	if !authorized {
 		return fmt.Errorf("%w: requesting session authority changed", ErrClaimMismatch)
 	}
 	return nil
+}
+
+func requesterTaskCanUseEnvironment(
+	ctx context.Context,
+	db *sqlx.DB,
+	tx *sqlx.Tx,
+	req models.TaskEnvironmentRecoveryClaimRequest,
+	requesterTaskID string,
+) (bool, error) {
+	ownerWorkspaceID, err := taskWorkspaceID(ctx, db, tx, req.OwnerTaskID)
+	if err != nil {
+		return false, err
+	}
+	for taskID := requesterTaskID; taskID != ""; {
+		workspaceID, parentID, mode, taskErr := taskInheritance(ctx, db, tx, taskID)
+		if errors.Is(taskErr, sql.ErrNoRows) {
+			return false, nil
+		}
+		if taskErr != nil || workspaceID != ownerWorkspaceID {
+			return false, taskErr
+		}
+		if taskID == req.OwnerTaskID {
+			return true, nil
+		}
+		if mode != "inherit_parent" {
+			break
+		}
+		taskID = parentID
+	}
+	return requesterTaskSharesEnvironment(ctx, db, tx, req, requesterTaskID, ownerWorkspaceID)
+}
+
+func taskWorkspaceID(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID string) (string, error) {
+	var workspaceID string
+	query := `SELECT workspace_id FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(db.DriverName()) {
+		query += forUpdateClause
+	}
+	err := tx.QueryRowContext(ctx, db.Rebind(query), taskID).Scan(&workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("%w: environment owner is not current", ErrClaimMismatch)
+	}
+	return workspaceID, err
+}
+
+func taskInheritance(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID string) (string, string, string, error) {
+	var workspaceID, parentID, mode string
+	query := fmt.Sprintf(`
+		SELECT workspace_id, COALESCE(parent_id, ''), COALESCE(%s, '')
+		FROM tasks WHERE id = ?`, dialect.JSONExtractPath(db.DriverName(), "metadata", "workspace", "mode"))
+	if dialect.IsPostgres(db.DriverName()) {
+		query += forUpdateClause
+	}
+	err := tx.QueryRowContext(ctx, db.Rebind(query), taskID).Scan(&workspaceID, &parentID, &mode)
+	return workspaceID, parentID, mode, err
+}
+
+func requesterTaskSharesEnvironment(
+	ctx context.Context,
+	db *sqlx.DB,
+	tx *sqlx.Tx,
+	req models.TaskEnvironmentRecoveryClaimRequest,
+	requesterTaskID, ownerWorkspaceID string,
+) (bool, error) {
+	var matched int
+	err := tx.QueryRowContext(ctx, db.Rebind(`
+		SELECT 1
+		FROM task_workspace_groups groups
+		JOIN task_workspace_group_members member
+		  ON member.workspace_group_id = groups.id
+		JOIN tasks requester ON requester.id = member.task_id
+		WHERE groups.owner_task_id = ?
+		  AND groups.materialized_environment_id = ?
+		  AND member.task_id = ?
+		  AND member.released_at IS NULL
+		  AND requester.workspace_id = ?
+		LIMIT 1
+	`), req.OwnerTaskID, req.TaskEnvironmentID, requesterTaskID, ownerWorkspaceID).Scan(&matched)
+	if errors.Is(err, sql.ErrNoRows) || kandevdb.IsMissingTableError(err) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // Release removes exactly the operation and generation supplied by claim.
