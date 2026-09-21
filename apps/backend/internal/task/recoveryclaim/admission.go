@@ -23,6 +23,9 @@ func consumerBlocksAdmission(consumer models.TaskEnvironmentAdmissionConsumer) b
 	if consumer.HasExecutor && consumer.ExecutorStatus != models.ExecutorRunningStatusStopped {
 		return true
 	}
+	if consumer.IsRequester && consumer.SessionState == models.TaskSessionStateCreated {
+		return false
+	}
 	switch consumer.SessionState {
 	case models.TaskSessionStateIdle,
 		models.TaskSessionStateWaitingForInput:

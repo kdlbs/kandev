@@ -530,9 +530,9 @@ func loadAdmissionSnapshot(
 			COALESCE(er.status, '')
 		FROM task_sessions ts
 		LEFT JOIN executors_running er ON er.session_id = ts.id
-		WHERE ts.task_environment_id = ? AND ts.id <> ?
+		WHERE ts.task_environment_id = ?
 		ORDER BY ts.id
-	`), environmentID, requestingSessionID)
+	`), environmentID)
 	if err != nil {
 		return snapshot, err
 	}
@@ -549,6 +549,7 @@ func loadAdmissionSnapshot(
 		); err != nil {
 			return snapshot, err
 		}
+		consumer.IsRequester = consumer.SessionID == requestingSessionID
 		snapshot.Consumers = append(snapshot.Consumers, consumer)
 	}
 	return snapshot, rows.Err()

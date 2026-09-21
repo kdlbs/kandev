@@ -24,4 +24,5 @@ type TaskEnvironmentAdmissionConsumer struct {
 	HasActiveTurn  bool
 	HasExecutor    bool
 	ExecutorStatus string
+	IsRequester    bool
 }

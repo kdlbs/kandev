@@ -22,6 +22,9 @@ func TestTaskEnvironmentAdmissionClassification(t *testing.T) {
 		{name: "no consumers", want: models.TaskEnvironmentAdmissionInactivePreserved},
 		{name: "waiting without executor", snapshot: snapshotWith(waiting), want: models.TaskEnvironmentAdmissionLiveBlocker},
 		{name: "waiting with stopped executor", snapshot: snapshotWith(stopped), want: models.TaskEnvironmentAdmissionInactivePreserved},
+		{name: "pre-launch requester", snapshot: snapshotWith(models.TaskEnvironmentAdmissionConsumer{
+			SessionID: "session-requester", SessionState: models.TaskSessionStateCreated, IsRequester: true,
+		}), want: models.TaskEnvironmentAdmissionInactivePreserved},
 		{name: "idle without executor", snapshot: snapshotWith(admissionConsumer(models.TaskSessionStateIdle)), want: models.TaskEnvironmentAdmissionLiveBlocker},
 		{name: "terminal without executor", snapshot: snapshotWith(admissionConsumer(models.TaskSessionStateCompleted)), want: models.TaskEnvironmentAdmissionInactivePreserved},
 		{name: "materializing", snapshot: models.TaskEnvironmentAdmissionSnapshot{MaterializationSessionID: "session-materializing"}, want: models.TaskEnvironmentAdmissionLiveBlocker},
