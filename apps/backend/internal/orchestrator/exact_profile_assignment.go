@@ -116,8 +116,9 @@ func (s *Service) ExactTaskProfileGeneration(ctx context.Context, taskID string)
 }
 
 // AssignExactTaskProfile records and activates the next immutable profile
-// selection. The profile must be concrete, enabled, task-workspace scoped, and
-// unchanged at assignment time; later launch validation repeats those checks.
+// selection. The profile must be concrete, enabled, globally available or
+// task-workspace scoped, and unchanged at assignment time; later launch
+// validation repeats those checks.
 //
 //nolint:cyclop // Strict validation branches intentionally fail closed at each boundary.
 func (s *Service) AssignExactTaskProfile(
@@ -140,7 +141,8 @@ func (s *Service) AssignExactTaskProfile(
 		return nil, ErrExactProfileAssignmentTargetChanged
 	}
 	profile, err := s.agentManager.ResolveAgentProfile(ctx, request.AgentProfileID)
-	if err != nil || profile == nil || !profile.Enabled || profile.WorkspaceID != task.WorkspaceID || profile.Revision.IsZero() {
+	if err != nil || profile == nil || !profile.Enabled ||
+		(profile.WorkspaceID != "" && profile.WorkspaceID != task.WorkspaceID) || profile.Revision.IsZero() {
 		return nil, ErrExactProfileAssignmentInvalid
 	}
 	if profile.Model != request.ExpectedModel {
@@ -198,7 +200,8 @@ func (a ExactProfileAssigner) Resolve(ctx context.Context, taskID, workspaceID s
 	}
 	profile, err := a.Profiles.ResolveAgentProfile(ctx, assignment.AgentProfileID)
 	if err != nil || profile == nil || profile.ProfileID != assignment.AgentProfileID ||
-		!profile.Enabled || profile.WorkspaceID != workspaceID || !profile.Revision.Equal(assignment.ProfileRevision) {
+		!profile.Enabled || (profile.WorkspaceID != "" && profile.WorkspaceID != workspaceID) ||
+		!profile.Revision.Equal(assignment.ProfileRevision) {
 		return nil, ErrExactProfileAssignmentInvalid
 	}
 	return &ExactProfileLaunchDecision{
