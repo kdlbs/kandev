@@ -103,11 +103,6 @@ func (r *Repository) ensureTaskEnvironmentRecoveryClaimsSchema() error {
 		)`); err != nil {
 		return fmt.Errorf("create task environment recovery claim table: %w", err)
 	}
-	if err := r.migrate.Apply("task_environment_recovery_claims.session_incarnation_id", `
-		ALTER TABLE task_environment_recovery_claims
-			ADD COLUMN session_incarnation_id TEXT NOT NULL DEFAULT ''`); err != nil {
-		return fmt.Errorf("add task environment recovery claim session incarnation: %w", err)
-	}
 	if err := r.migrate.Apply("task_environment_recovery_claims.operation_index", `
 		CREATE INDEX IF NOT EXISTS idx_task_environment_recovery_claims_operation
 			ON task_environment_recovery_claims(operation_id)`); err != nil {

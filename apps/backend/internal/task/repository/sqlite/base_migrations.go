@@ -422,6 +422,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// current step definition, which may have changed since that entry was
 	// allocated.
 	_ = r.migrate.Apply("workflow_step_entries.marker_positions", `ALTER TABLE workflow_step_entries ADD COLUMN marker_positions TEXT NOT NULL DEFAULT ''`)
+	if err := r.migrateTaskEnvironmentRecoveryClaimSessionIncarnation(); err != nil {
+		return err
+	}
 
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
@@ -430,6 +433,25 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		return fmt.Errorf("required task migration: %w", err)
 	}
 
+	return nil
+}
+
+// migrateTaskEnvironmentRecoveryClaimSessionIncarnation upgrades claims that
+// predate session-incarnation binding. Fresh databases create the column inline
+// after runMigrations; only an existing recovery-claim table needs this ALTER.
+func (r *Repository) migrateTaskEnvironmentRecoveryClaimSessionIncarnation() error {
+	exists, err := r.tableExists("task_environment_recovery_claims")
+	if err != nil {
+		return fmt.Errorf("inspect task environment recovery claims: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	if err := r.migrate.Apply("task_environment_recovery_claims.session_incarnation_id", `
+		ALTER TABLE task_environment_recovery_claims
+			ADD COLUMN session_incarnation_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add task environment recovery claim session incarnation: %w", err)
+	}
 	return nil
 }
 

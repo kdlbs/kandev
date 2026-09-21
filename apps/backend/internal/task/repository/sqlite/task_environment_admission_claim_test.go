@@ -371,11 +371,15 @@ func TestTaskEnvironmentRecoveryClaimLegacyIncarnationFailsClosed(t *testing.T) 
 	`), environmentID, taskID, 1, sessionID, request.OperationID, request.ExecutorType, now, now); err != nil {
 		t.Fatalf("insert legacy claim: %v", err)
 	}
-	migrated, err := NewWithDB(repo.db, repo.ro, nil)
-	if err != nil {
+	// The legacy table already exists, so the column must be introduced by the
+	// ordered migration runner rather than the fresh-table CREATE step. Replay
+	// it to pin both upgrade and idempotency behavior.
+	if err := repo.runMigrations(ctx); err != nil {
 		t.Fatalf("migrate pre-incarnation recovery claim table: %v", err)
 	}
-	repo = migrated
+	if err := repo.runMigrations(ctx); err != nil {
+		t.Fatalf("replay pre-incarnation recovery claim migration: %v", err)
+	}
 	var legacyIncarnation string
 	if err := repo.db.GetContext(ctx, &legacyIncarnation, repo.db.Rebind(`
 		SELECT session_incarnation_id FROM task_environment_recovery_claims WHERE task_environment_id = ?
