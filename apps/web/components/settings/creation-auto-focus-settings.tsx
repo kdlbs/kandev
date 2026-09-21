@@ -58,6 +58,7 @@ export function CreationAutoFocusSettings({
       }
       description={t("settings:autoFocusNewTasksHelp")}
       controlId="creation-auto-focus"
+      data-testid="creation-auto-focus-row"
       touchTarget="switch"
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.creationAutoFocus}
       isDirty={isDirty}

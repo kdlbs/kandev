@@ -1,21 +1,17 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("MCP-created task agent profile default on mobile", () => {
-  test("Task Actions choice is touch-usable, viewport-safe, and persists", async ({
+  test("Creating and opening tasks choice is touch-usable, viewport-safe, and persists", async ({
     testPage,
     apiClient,
   }) => {
     await testPage.goto("/settings");
-    // Task Actions is a section inside the Task Behavior page now; the menu row
-    // that reaches it is the page, not the section.
     const taskBehaviorLink = testPage.getByRole("link", { name: /Task Behavior/ });
     await expect(taskBehaviorLink).toBeVisible({ timeout: 15_000 });
     await taskBehaviorLink.tap();
 
     await expect(testPage).toHaveURL(/\/settings\/preferences\/task-behavior$/);
-    await expect(
-      testPage.getByRole("heading", { name: "Task Actions", exact: true }),
-    ).toBeVisible();
+    await expect(testPage.getByTestId("task-behavior-creating-title")).toBeVisible();
     await expect(
       testPage.getByText(/when an agent calls a Kandev MCP tool that creates a task/i),
     ).toBeVisible();
@@ -31,7 +27,6 @@ test.describe("MCP-created task agent profile default on mobile", () => {
     await expect(testPage.getByRole("tooltip")).toContainText(
       "spawn_session_kandev adds a session to the current task",
     );
-    await testPage.getByRole("heading", { name: "Task Actions", exact: true }).tap();
 
     const currentTask = testPage.getByRole("radio", { name: "Creating session profile" });
     const workspaceDefault = testPage.getByRole("radio", {
@@ -41,7 +36,7 @@ test.describe("MCP-created task agent profile default on mobile", () => {
 
     const choice = testPage.locator('label[for="mcp-task-profile-workspace_default"]');
     const card = testPage
-      .locator('[data-slot="card"]')
+      .locator('[data-settings-group-card="true"]')
       .filter({ hasText: "Profile for Tasks Created by Agents" });
     const [choiceBox, cardBox, viewport] = await Promise.all([
       choice.boundingBox(),

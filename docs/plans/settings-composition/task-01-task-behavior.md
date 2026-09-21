@@ -162,3 +162,11 @@ runtime owner reopens the group while the first owner remains failed. It also
 made discovery disclosure opening synchronize through an explicit event and
 added the Sleep attention callback regression. The focused fixup suite passed
 4 files and 28 tests.
+
+The follow-up E2E selector migration uses the shipped row surface for the
+auto-focus preference instead of the former standalone card. The exact desktop
+and mobile flows pass with retries disabled.
+
+- `(cd apps/web && pnpm e2e:raw --project chromium --retries=0 e2e/tests/task/creation-auto-focus.spec.ts)`: passed, 1 test.
+- `(cd apps/web && pnpm e2e:raw --project mobile-chrome --retries=0 e2e/tests/task/mobile-creation-auto-focus.spec.ts)`: passed, 1 test.
+- `(cd apps/web && pnpm e2e:raw --project mobile-chrome --retries=0 e2e/tests/task/mobile-mcp-task-agent-profile-default.spec.ts)`: passed, 1 test after aligning the flow with the group-owned surface.

@@ -304,6 +304,8 @@ Remediation checks run after these changes:
   typography/type-scale checks: 3 tests passed.
 - Desktop runtime/manual-save checks: 14 tests passed. Mobile runtime/settings
   checks: 9 tests passed.
+- Existing auto-focus desktop and mobile flows were updated to target the
+  migrated row surface and passed with retries disabled (1 test each).
 
 Use the exact commands in each work order. Install dependencies once with `(cd apps && pnpm install --frozen-lockfile)` before the first package command.
 The managed E2E runner rebuilds the frontend and backend and enforces its resource limits.
