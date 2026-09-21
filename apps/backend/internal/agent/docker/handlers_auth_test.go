@@ -182,7 +182,7 @@ func dockerTestRouter(
 			c.Next()
 		})
 	}
-	registerRoutes(router, func() containerAPI { return client }, titles, authorizer, testLogger(t))
+	registerRoutes(router, func() containerAPI { return client }, titles, authorizer, "", testLogger(t))
 	return router
 }
 

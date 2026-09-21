@@ -39,6 +39,9 @@ import {
   type DockerBuildSuccess,
 } from "@/components/settings/profile-edit/docker-sections";
 import { SpritesApiKeyCard } from "@/components/settings/profile-edit/sprites-api-key-card";
+import { DockerNetworkCard } from "@/components/settings/profile-edit/docker-network-card";
+import { buildProfileConfig } from "@/components/settings/profile-edit/build-create-profile-config";
+import { useDockerNetworksFormState } from "@/components/settings/profile-edit/use-docker-networks-form-state";
 import { NetworkPoliciesCard } from "@/components/settings/profile-edit/sprites-sections";
 import {
   RemoteCredentialsCard,
@@ -130,83 +133,7 @@ function CreateProfileHeader({ type, typeInfo }: { type: string; typeInfo: Execu
   );
 }
 
-type BuildProfileConfigInput = {
-  isRemote: boolean;
-  isSprites: boolean;
-  isDocker: boolean;
-  isLocalDocker: boolean;
-  networkPolicyRules: NetworkPolicyRule[];
-  remoteCredentials: string[];
-  configBundleIds: string[];
-  agentEnvVars: Record<string, string | null>;
-  gitIdentityMode: GitIdentityMode;
-  localGitIdentity: GitIdentityState;
-  gitUserName: string;
-  gitUserEmail: string;
-  dockerfile: string;
-  imageTag: string;
-  allowUserNamespaces: boolean;
-};
 
-function buildProfileConfig(input: BuildProfileConfigInput): Record<string, string> | undefined {
-  const {
-    isRemote,
-    isSprites,
-    networkPolicyRules,
-    remoteCredentials,
-    configBundleIds,
-    agentEnvVars,
-    gitIdentityMode,
-    localGitIdentity,
-    gitUserName,
-    gitUserEmail,
-  } = input;
-  const config: Record<string, string> = {};
-  if (isSprites && networkPolicyRules.length > 0) {
-    config.sprites_network_policy_rules = JSON.stringify(networkPolicyRules);
-  }
-  if (isRemote && remoteCredentials.length > 0) {
-    config.remote_credentials = JSON.stringify(remoteCredentials);
-  }
-  if (isRemote && configBundleIds.length > 0) {
-    config.agent_config_bundles = JSON.stringify(configBundleIds);
-  }
-  const nonNullEnvVars = Object.fromEntries(
-    Object.entries(agentEnvVars).filter(([, v]) => v != null),
-  );
-  if (isRemote && Object.keys(nonNullEnvVars).length > 0) {
-    config.remote_auth_secrets = JSON.stringify(nonNullEnvVars);
-  }
-  if (isRemote) {
-    const effectiveName =
-      gitIdentityMode === "local" ? localGitIdentity.userName.trim() : gitUserName.trim();
-    const effectiveEmail =
-      gitIdentityMode === "local" ? localGitIdentity.userEmail.trim() : gitUserEmail.trim();
-    if (effectiveName) {
-      config.git_user_name = effectiveName;
-    }
-    if (effectiveEmail) {
-      config.git_user_email = effectiveEmail;
-    }
-  }
-  applyDockerCreateConfig(config, input);
-  return Object.keys(config).length > 0 ? config : undefined;
-}
-
-function applyDockerCreateConfig(
-  config: Record<string, string>,
-  input: BuildProfileConfigInput,
-): void {
-  if (input.isDocker && input.dockerfile.trim()) {
-    config.dockerfile = input.dockerfile;
-  }
-  if (input.isDocker && input.imageTag.trim()) {
-    config.image_tag = input.imageTag.trim();
-  }
-  if (input.isLocalDocker && input.allowUserNamespaces) {
-    config.allow_user_namespaces = "true";
-  }
-}
 
 function useDefaultScripts(executorType: string, setPrepareScript: (v: string) => void) {
   useEffect(() => {
@@ -308,6 +235,7 @@ function useCreateProfileFormState(executorType: ExecutorType) {
   const [dockerfile, setDockerfile] = useState("");
   const [imageTag, setImageTag] = useState("");
   const [allowUserNamespaces, setAllowUserNamespaces] = useState(false);
+  const dockerNetworks = useDockerNetworksFormState(undefined);
   const [builtDockerImage, setBuiltDockerImage] = useState<DockerBuildSuccess | null>(null);
   const flags = useCreateRemoteFlags(executorType);
   const gitIdentity = useCreateGitIdentityState(flags.isRemote);
@@ -377,6 +305,7 @@ function useCreateProfileFormState(executorType: ExecutorType) {
     setImageTag,
     allowUserNamespaces,
     setAllowUserNamespaces,
+    ...dockerNetworks,
     recordDockerBuildSuccess,
     dockerImageBuilt,
     gitUserName: gitIdentity.gitUserName,
@@ -459,6 +388,17 @@ function CreateProfileSections({
             baselineImageTag=""
             onImageTagChange={form.setImageTag}
             onBuildSuccess={form.recordDockerBuildSuccess}
+          />
+          <DockerNetworkCard
+            isRemote={executorType === "remote_docker"}
+            primaryNetwork={form.primaryNetwork}
+            onPrimaryNetworkChange={form.setPrimaryNetwork}
+            primaryGwPriority={form.primaryGwPriority}
+            onPrimaryGwPriorityChange={form.setPrimaryGwPriority}
+            additionalNetworks={form.additionalNetworks}
+            onAddAdditionalNetwork={form.addAdditionalNetwork}
+            onUpdateAdditionalNetwork={form.updateAdditionalNetwork}
+            onRemoveAdditionalNetwork={form.removeAdditionalNetwork}
           />
           {form.isLocalDocker && (
             <UserNamespacesCard
@@ -593,6 +533,9 @@ function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormS
       dockerfile: form.dockerfile,
       imageTag: form.imageTag,
       allowUserNamespaces: form.allowUserNamespaces,
+      primaryNetwork: form.primaryNetwork,
+      primaryGwPriority: form.primaryGwPriority,
+      additionalNetworks: form.additionalNetworks,
     }),
     prepare_script: form.prepareScript,
     cleanup_script: form.cleanupScript,

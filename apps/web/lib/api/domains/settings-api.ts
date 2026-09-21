@@ -596,6 +596,18 @@ export async function listDockerContainers(
   );
 }
 
+/**
+ * Reads the effective `docker.defaultNetwork` value.
+ *
+ * The profile editor uses it to say which network a local Docker profile that
+ * names none will use. An empty string means the daemon's own default.
+ */
+export async function getDockerDefaultNetwork(
+  options?: ApiRequestOptions,
+): Promise<{ default_network: string }> {
+  return fetchJson<{ default_network: string }>("/api/v1/docker/network-default", options);
+}
+
 export async function stopDockerContainer(id: string, options?: ApiRequestOptions): Promise<void> {
   await fetchJson<{ success: boolean }>(`/api/v1/docker/containers/${id}/stop`, {
     ...options,

@@ -683,48 +683,52 @@ func sessionACPConfigBaseline(session *models.TaskSession) map[string]string {
 
 // routeParams holds all dependencies needed for HTTP and WebSocket route registration.
 type routeParams struct {
-	router                        *gin.Engine
-	gateway                       *gateways.Gateway
-	taskSvc                       *taskservice.Service
-	taskRepo                      *sqliterepo.Repository
-	officeRepo                    *officesqlite.Repository
-	analyticsRepo                 analyticsrepository.Repository
-	orchestratorSvc               *orchestrator.Service
-	lifecycleMgr                  *lifecycle.Manager
-	loginMgr                      *loginpty.Manager
-	quickTerminalSvc              *quickterminal.Service
-	hostUtilityMgr                *hostutility.Manager
-	eventBus                      bus.EventBus
-	services                      *Services
-	systemSvc                     *systemsvc.Service
-	workspaceRestorer             taskhandlers.WorkspaceQuarantineRestorer
-	temporaryArtifacts            *tempartifacts.Registry
-	runtimeFlagsSvc               *runtimeflags.Service
-	dbPool                        *db.Pool
-	persistenceHealth             *requiredstores.Health
-	agentSettingsController       *agentsettingscontroller.Controller
-	agentSettingsRepo             settingsstore.Repository
-	agentList                     taskhandlers.AgentLister
-	agentRegistry                 *registry.Registry
-	userCtrl                      *usercontroller.Controller
-	notificationCtrl              *notificationcontroller.Controller
-	editorCtrl                    *editorcontroller.Controller
-	promptCtrl                    *promptcontroller.Controller
-	utilityCtrl                   *utilitycontroller.Controller
-	msgCreator                    *messageCreatorAdapter
-	secretsSvc                    *secrets.Service
-	secretStore                   secrets.SecretStore
-	mcpConfigSvc                  *mcpconfig.Service
-	authSvc                       *auth.Service
-	agentRuntimeAvailability      *client.Availability
-	addCleanup                    func(func() error)
-	repoCloner                    *repoclone.Cloner
-	version                       string
-	webInternalURL                string
-	webTitlePrefix                string
-	devMode                       bool
-	httpPort                      int
-	features                      config.FeaturesConfig
+	router                   *gin.Engine
+	gateway                  *gateways.Gateway
+	taskSvc                  *taskservice.Service
+	taskRepo                 *sqliterepo.Repository
+	officeRepo               *officesqlite.Repository
+	analyticsRepo            analyticsrepository.Repository
+	orchestratorSvc          *orchestrator.Service
+	lifecycleMgr             *lifecycle.Manager
+	loginMgr                 *loginpty.Manager
+	quickTerminalSvc         *quickterminal.Service
+	hostUtilityMgr           *hostutility.Manager
+	eventBus                 bus.EventBus
+	services                 *Services
+	systemSvc                *systemsvc.Service
+	workspaceRestorer        taskhandlers.WorkspaceQuarantineRestorer
+	temporaryArtifacts       *tempartifacts.Registry
+	runtimeFlagsSvc          *runtimeflags.Service
+	dbPool                   *db.Pool
+	persistenceHealth        *requiredstores.Health
+	agentSettingsController  *agentsettingscontroller.Controller
+	agentSettingsRepo        settingsstore.Repository
+	agentList                taskhandlers.AgentLister
+	agentRegistry            *registry.Registry
+	userCtrl                 *usercontroller.Controller
+	notificationCtrl         *notificationcontroller.Controller
+	editorCtrl               *editorcontroller.Controller
+	promptCtrl               *promptcontroller.Controller
+	utilityCtrl              *utilitycontroller.Controller
+	msgCreator               *messageCreatorAdapter
+	secretsSvc               *secrets.Service
+	secretStore              secrets.SecretStore
+	mcpConfigSvc             *mcpconfig.Service
+	authSvc                  *auth.Service
+	agentRuntimeAvailability *client.Availability
+	addCleanup               func(func() error)
+	repoCloner               *repoclone.Cloner
+	version                  string
+	webInternalURL           string
+	webTitlePrefix           string
+	devMode                  bool
+	httpPort                 int
+	features                 config.FeaturesConfig
+	// dockerDefaultNetwork is the effective docker.defaultNetwork value, read
+	// back by the executor profile editor so it can state which network a
+	// profile that names none will use.
+	dockerDefaultNetwork          string
 	planCoalesceWindow            time.Duration
 	planCoalesceWindowConfigured  bool
 	homeDir                       string
@@ -1561,7 +1565,8 @@ func registerSecondaryRoutes(
 
 	docker.RegisterDockerRoutes(
 		p.router, p.lifecycleMgr.DockerClientProvider(),
-		dockerTaskTitleProvider(p.taskRepo, p.log), dockerSessionAuthorizer(p.taskSvc), p.log,
+		dockerTaskTitleProvider(p.taskRepo, p.log), dockerSessionAuthorizer(p.taskSvc),
+		p.dockerDefaultNetwork, p.log,
 	)
 	p.log.Debug("Registered Docker management handlers (HTTP)")
 

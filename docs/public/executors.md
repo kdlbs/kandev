@@ -300,6 +300,21 @@ Kandev passes each agent definition's CPU and memory limits to Docker. These are
 
 </details>
 
+### Container networks
+
+Both Docker profiles have a **Container networks** card. It chooses which Docker networks a task container attaches to. Kandev never creates a network; every name must already exist on the daemon that will host the container.
+
+**Primary network** is the network the container is created on, and the one Docker publishes its ports on. Kandev reaches the agent through a published port, so this must be a network that publishes ports. A `macvlan`, `ipvlan`, or `null` network is refused here, as is a network mode such as `host`, `none`, or a `container:` value. A missing network is refused too, and every rejection names the field and the reason before any container is created.
+
+Leaving it empty means:
+
+- On a **Local Docker** profile, the install-wide `docker.defaultNetwork` value, or the daemon's own default when that is unset. See [Configuration](configuration.md).
+- On a **Remote Docker** profile, the remote daemon's own default. `docker.defaultNetwork` names a network on the machine running Kandev, so it deliberately does not apply to another host.
+
+**Additional networks** are attached after the container is created and before it starts, so the agent sees every interface for its whole life. Any driver is allowed here, which is where a `macvlan` or `ipvlan` network belongs when a task container needs an address on your physical LAN.
+
+**Gateway priority** selects which attachment provides the container's default route; the highest value wins. Set it when a secondary attachment would otherwise capture the default route and break the return path for the agent connection arriving on the primary network. Leave every priority empty to keep Docker's own choice. The field requires Docker 28 or newer; an older daemon ignores it rather than reporting an error.
+
 ### User namespace support
 
 Profiles can enable **User namespace support** under the Dockerfile build card. When enabled, the container is launched with a tailored seccomp profile that relaxes namespace-related syscall restrictions, plus `apparmor=unconfined`. This allows agent runtimes that sandbox file edits via user namespaces (e.g., Codex's `apply_patch` → bwrap) to work inside the container.
