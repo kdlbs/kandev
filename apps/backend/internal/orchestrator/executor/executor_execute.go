@@ -150,7 +150,34 @@ func executorNeedsResolvedCredentials(executorType string) bool {
 // starts detach from request cancellation; resume starts marked by
 // WithCancellableResumeContext retain cancellation so an explicit stop can
 // interrupt a startup that is still waiting for ACP readiness.
-func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string, onSuccess func(context.Context), escalateTaskOnFailure, fromResume bool) {
+func (e *Executor) runAgentProcessAsync(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	onSuccess func(context.Context),
+	escalateTaskOnFailure, fromResume bool,
+) {
+	e.runAgentProcessAsyncWithObservation(
+		ctx,
+		taskID,
+		sessionID,
+		agentExecutionID,
+		"",
+		onSuccess,
+		escalateTaskOnFailure,
+		fromResume,
+	)
+}
+
+// runAgentProcessAsyncWithObservation starts an agent process after the
+// caller has persisted STARTING. The observation stays in this shared seam so
+// full launches, existing-workspace starts, and resumes all inspect the same
+// durable state immediately before process startup.
+func (e *Executor) runAgentProcessAsyncWithObservation(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID, observationSite string,
+	onSuccess func(context.Context),
+	escalateTaskOnFailure, fromResume bool,
+) {
 	e.auditCeilingBypass(ctx, "runAgentProcessAsync", sessionID, true, zap.String("agent_execution_id", agentExecutionID))
 	go func() {
 		startParent := context.WithoutCancel(ctx)
@@ -161,6 +188,10 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 		}
 		startCtx, cancel := context.WithTimeout(startParent, 5*time.Minute)
 		defer cancel()
+
+		if observationSite != "" {
+			e.observeSessionCoresidency(startCtx, observationSite, taskID, sessionID)
+		}
 
 		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
 			if isCancellableResumeContext(ctx) && ctx.Err() != nil {
@@ -368,7 +399,7 @@ func (e *Executor) stopStartedExecutionIfSessionTerminal(
 // startAgentProcessAsync starts the agent subprocess and transitions its session
 // to RUNNING before reconciling the owning task to IN_PROGRESS on success.
 func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string) {
-	e.runAgentProcessAsync(ctx, taskID, sessionID, agentExecutionID, func(updCtx context.Context) {
+	e.runAgentProcessAsyncWithObservation(ctx, taskID, sessionID, agentExecutionID, sessionCoresidencySiteLaunch, func(updCtx context.Context) {
 		if !e.markSessionRunningAfterProcessStart(updCtx, taskID, sessionID) {
 			return
 		}

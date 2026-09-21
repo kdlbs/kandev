@@ -5,7 +5,9 @@ import (
 	"errors"
 	"expvar"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -247,5 +249,86 @@ func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	fields := warnings[0].ContextMap()
 	if fields["site"] != sessionCoresidencySiteResume {
 		t.Fatalf("site field = %v, want %q", fields["site"], sessionCoresidencySiteResume)
+	}
+}
+
+// TestRunAgentProcessAsync_ObservesStartingSiblingsBeforeProcessStart pins
+// the concurrent-start boundary: both sessions are durably STARTING before
+// their process-start goroutines inspect siblings, and each observation runs
+// before its own process-start call.
+func TestRunAgentProcessAsync_ObservesStartingSiblingsBeforeProcessStart(t *testing.T) {
+	exec, repo, logs := newSessionCoresidencyTestExecutor(t)
+	repo.sessions["session-a"] = &models.TaskSession{
+		ID: "session-a", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.sessions["session-b"] = &models.TaskSession{
+		ID: "session-b", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+
+	// Return detached snapshots so the asynchronous RUNNING transitions cannot
+	// race with the observer's sibling-state reads.
+	repo.listTaskSessionsFunc = func(_ context.Context, _ string) ([]*models.TaskSession, error) {
+		repo.mu.Lock()
+		defer repo.mu.Unlock()
+		return []*models.TaskSession{
+			cloneMockTaskSession(repo.sessions["session-a"]),
+			cloneMockTaskSession(repo.sessions["session-b"]),
+		}, nil
+	}
+
+	before := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch)
+	var managerMu sync.Mutex
+	startedWithoutObservation := make(map[string]int)
+	started := make(chan string, 2)
+	executionSessions := map[string]string{"exec-a": "session-a", "exec-b": "session-b"}
+	manager := &mockAgentManager{
+		startAgentProcessFunc: func(_ context.Context, agentExecutionID string) error {
+			managerMu.Lock()
+			sessionID := executionSessions[agentExecutionID]
+			observed := false
+			for _, entry := range logs.FilterLevelExact(zapcore.WarnLevel).All() {
+				if entry.ContextMap()["session_id"] == sessionID {
+					observed = true
+					break
+				}
+			}
+			if !observed {
+				startedWithoutObservation[sessionID]++
+			}
+			managerMu.Unlock()
+			started <- agentExecutionID
+			return nil
+		},
+	}
+	exec.agentManager = manager
+
+	exec.runAgentProcessAsyncWithObservation(
+		context.Background(), "task-123", "session-a", "exec-a",
+		sessionCoresidencySiteLaunch, func(context.Context) {}, false, false,
+	)
+	exec.runAgentProcessAsyncWithObservation(
+		context.Background(), "task-123", "session-b", "exec-b",
+		sessionCoresidencySiteLaunch, func(context.Context) {}, false, false,
+	)
+
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for both agent processes to start")
+		}
+	}
+
+	managerMu.Lock()
+	startedBeforeObservation := len(startedWithoutObservation)
+	managerMu.Unlock()
+	if startedBeforeObservation != 0 {
+		t.Fatalf("agent process started before co-residency observation for %d session(s): %v", startedBeforeObservation, startedWithoutObservation)
+	}
+	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after != before+2 {
+		t.Fatalf("admitted[launch] counter = %d, want %d", after, before+2)
+	}
+	if warnings := logs.FilterLevelExact(zapcore.WarnLevel).All(); len(warnings) != 2 {
+		t.Fatalf("warning entries = %d, want 2", len(warnings))
 	}
 }
