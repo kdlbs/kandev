@@ -49,8 +49,9 @@ or session is created.
 ## Verification
 
 ```bash
-(cd apps/backend && go test ./internal/task/service -run '^TestValidateInheritedWorkspaceRepositorySelection' -count=1)
-(cd apps/backend && go test ./internal/mcp/handlers -run '^TestHandleCreateTask_InheritParent.*Repository' -count=1)
+(cd apps/backend && go test -race ./internal/task/service -run '^TestValidateInheritedWorkspaceRepositorySelection' -count=1)
+(cd apps/backend && go test -race ./internal/mcp/handlers -run '^TestHandleCreateTask_InheritParentRejects' -count=1)
+(cd apps/backend && golangci-lint run ./... --new-from-rev=db8131436fe06482c883a9027d95e5888ae4658d --timeout=5m)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check -- apps/backend/internal/task/service apps/backend/internal/mcp/handlers docs/specs/tasks docs/plans/inherit-parent-repository-admission
@@ -92,3 +93,9 @@ None.
 - Review coverage now includes exact active slots, legacy unscoped inventory,
   inherited environments bound through sessions, and pre-materialization
   passthrough.
+- CI remediation reproduced the `cyclop` and `nestif` failures in
+  `resolveExistingInheritedRepository`. Extracting locator lookup and candidate
+  matching preserves the existing behavior and satisfies both limits.
+- Both focused race-enabled test commands above pass. The exact CI lint
+  command reports zero issues; documentation catalog, specification lint, and
+  diff checks also pass. Remote verification of the remediation remains pending.

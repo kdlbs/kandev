@@ -66,31 +66,9 @@ func (s *Service) resolveExistingInheritedRepository(
 	if err != nil || task == nil {
 		return repository, fmt.Errorf("%w: resolve inherited repository workspace", models.ErrWorkspaceReuseUnsafe)
 	}
-	var found *models.Repository
-	if path := strings.TrimSpace(repository.LocalPath); path != "" {
-		var lookupErr error
-		found, lookupErr = s.repoEntities.GetRepositoryByLocalPath(ctx, task.WorkspaceID, filepath.Clean(path))
-		if lookupErr != nil {
-			return repository, fmt.Errorf("%w: resolve inherited repository locator", models.ErrWorkspaceReuseUnsafe)
-		}
-	} else if rawURL := effectiveRemoteURL(repository); rawURL != "" {
-		provider, owner, name, _, parseErr := parseRemoteRepositoryURL(rawURL, repository.Provider)
-		if parseErr != nil {
-			return repository, fmt.Errorf("%w: resolve inherited repository locator", models.ErrWorkspaceReuseUnsafe)
-		}
-		repositories, listErr := s.repoEntities.ListRepositories(ctx, task.WorkspaceID)
-		if listErr != nil {
-			return repository, fmt.Errorf("%w: resolve inherited repository locator", models.ErrWorkspaceReuseUnsafe)
-		}
-		for _, candidate := range repositories {
-			if candidate != nil &&
-				strings.EqualFold(candidate.Provider, provider) &&
-				candidate.ProviderOwner == owner &&
-				candidate.ProviderName == name {
-				found = candidate
-				break
-			}
-		}
+	found, err := s.findExistingInheritedRepository(ctx, task.WorkspaceID, repository)
+	if err != nil {
+		return repository, fmt.Errorf("%w: resolve inherited repository locator", models.ErrWorkspaceReuseUnsafe)
 	}
 	if found == nil {
 		return repository, fmt.Errorf(
@@ -103,6 +81,44 @@ func (s *Service) resolveExistingInheritedRepository(
 		repository.BaseBranch = found.DefaultBranch
 	}
 	return repository, nil
+}
+
+func (s *Service) findExistingInheritedRepository(
+	ctx context.Context,
+	workspaceID string,
+	repository TaskRepositoryInput,
+) (*models.Repository, error) {
+	if path := strings.TrimSpace(repository.LocalPath); path != "" {
+		return s.repoEntities.GetRepositoryByLocalPath(ctx, workspaceID, filepath.Clean(path))
+	}
+	rawURL := effectiveRemoteURL(repository)
+	if rawURL == "" {
+		return nil, nil
+	}
+	provider, owner, name, _, err := parseRemoteRepositoryURL(rawURL, repository.Provider)
+	if err != nil {
+		return nil, err
+	}
+	repositories, err := s.repoEntities.ListRepositories(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return findRepositoryByProviderIdentity(repositories, provider, owner, name), nil
+}
+
+func findRepositoryByProviderIdentity(
+	repositories []*models.Repository,
+	provider, owner, name string,
+) *models.Repository {
+	for _, candidate := range repositories {
+		if candidate != nil &&
+			strings.EqualFold(candidate.Provider, provider) &&
+			candidate.ProviderOwner == owner &&
+			candidate.ProviderName == name {
+			return candidate
+		}
+	}
+	return nil
 }
 
 func countActiveInventoryMatches(

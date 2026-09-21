@@ -81,6 +81,20 @@ and `CreateTask`. Return a validation error that recommends
 - MCP coverage passes for rejection and existing workspace-mode behavior.
 - Specification validation and diff checks pass.
 
+### CI remediation
+
+- Extracted locator lookup and candidate matching from inherited repository
+  resolution to satisfy the existing complexity and nesting limits. Admission
+  behavior and error messages are unchanged, so no requirement or public
+  documentation update is needed.
+- Passed from `apps/backend`:
+  - `go test -race ./internal/task/service -run '^TestValidateInheritedWorkspaceRepositorySelection' -count=1`
+  - `go test -race ./internal/mcp/handlers -run '^TestHandleCreateTask_InheritParentRejects' -count=1`
+  - `golangci-lint run ./... --new-from-rev=db8131436fe06482c883a9027d95e5888ae4658d --timeout=5m` (zero issues).
+- Passed `python3 scripts/list-docs.py validate`,
+  `python3 scripts/lint-spec-files.py --all`, and `git diff --check`.
+- Remote CI and review verification remain pending for the remediation commit.
+
 ## Risks
 
 - Repository matching must use the same sanitized branch identity semantics as
