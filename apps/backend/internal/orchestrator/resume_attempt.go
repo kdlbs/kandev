@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // ErrResumeAttemptCancelled is returned when a startup continuation no longer
@@ -33,6 +34,12 @@ type resumeAttempt struct {
 	finishOnce  sync.Once
 	executionMu sync.Mutex
 	executionID string
+	// interruptedMarker is the marker value observed when this recovery attempt
+	// was admitted. A delayed boot callback may clear only that exact marker;
+	// a later restart must remain visible until its own attempt succeeds.
+	interruptedMarkerMu       sync.RWMutex
+	interruptedMarker         string
+	interruptedMarkerCaptured bool
 	// retained is protected by resumeAttemptRegistry.mu. A cancelled attempt
 	// can be retained when a replacement is admitted and retained again when
 	// its owner eventually returns; both paths must describe one tombstone.
@@ -66,10 +73,17 @@ const maxResumeAttemptTombstones = 16
 const resumeAttemptIdentityPrefix = "resume-"
 
 type resumeAttemptTombstone struct {
-	id          uint64
-	executionID string
-	cancelled   bool
-	accepted    bool
+	id                        uint64
+	executionID               string
+	cancelled                 bool
+	accepted                  bool
+	interruptedMarker         string
+	interruptedMarkerCaptured bool
+}
+
+type interruptedMarkerSnapshot struct {
+	value    string
+	captured bool
 }
 
 func newResumeAttemptRegistry() *resumeAttemptRegistry {
@@ -231,6 +245,8 @@ func (r *resumeAttemptRegistry) retainLocked(attempt *resumeAttempt) {
 			}
 			if entries[index].id == attempt.id {
 				entries[index].accepted = attempt.accepted
+				entries[index].interruptedMarker = attempt.interruptedMarkerValue()
+				entries[index].interruptedMarkerCaptured = attempt.interruptedMarkerSnapshotCaptured()
 				break
 			}
 		}
@@ -240,10 +256,12 @@ func (r *resumeAttemptRegistry) retainLocked(attempt *resumeAttempt) {
 	attempt.retained = true
 	entries := r.tombstones[attempt.sessionID]
 	entries = append(entries, resumeAttemptTombstone{
-		id:          attempt.id,
-		executionID: executionID,
-		cancelled:   attempt.ctx.Err() != nil,
-		accepted:    attempt.accepted,
+		id:                        attempt.id,
+		executionID:               executionID,
+		cancelled:                 attempt.ctx.Err() != nil,
+		accepted:                  attempt.accepted,
+		interruptedMarker:         attempt.interruptedMarkerValue(),
+		interruptedMarkerCaptured: attempt.interruptedMarkerSnapshotCaptured(),
 	})
 	if len(entries) > maxResumeAttemptTombstones {
 		entries = entries[len(entries)-maxResumeAttemptTombstones:]
@@ -424,6 +442,34 @@ func (attempt *resumeAttempt) setExecutionID(executionID string) {
 	attempt.executionMu.Unlock()
 }
 
+func (attempt *resumeAttempt) setInterruptedMarkerSnapshot(marker string, captured bool) {
+	if attempt == nil {
+		return
+	}
+	attempt.interruptedMarkerMu.Lock()
+	attempt.interruptedMarker = marker
+	attempt.interruptedMarkerCaptured = captured
+	attempt.interruptedMarkerMu.Unlock()
+}
+
+func (attempt *resumeAttempt) interruptedMarkerValue() string {
+	if attempt == nil {
+		return ""
+	}
+	attempt.interruptedMarkerMu.RLock()
+	defer attempt.interruptedMarkerMu.RUnlock()
+	return attempt.interruptedMarker
+}
+
+func (attempt *resumeAttempt) interruptedMarkerSnapshotCaptured() bool {
+	if attempt == nil {
+		return false
+	}
+	attempt.interruptedMarkerMu.RLock()
+	defer attempt.interruptedMarkerMu.RUnlock()
+	return attempt.interruptedMarkerCaptured
+}
+
 func (attempt *resumeAttempt) execution() string {
 	if attempt == nil {
 		return ""
@@ -494,6 +540,9 @@ func (s *Service) beginResumeAttempt(
 			attempt, owner := s.resumeAttemptStore().begin(ctx, taskID, sessionID)
 			lock.Unlock()
 			release()
+			if owner {
+				s.captureInterruptedMarkerForResumeAttempt(ctx, attempt)
+			}
 			return attempt, owner, nil
 		}
 		lock.Unlock()
@@ -506,6 +555,61 @@ func (s *Service) beginResumeAttempt(
 			return nil, false, fmt.Errorf("wait for session cancellation before resume: %w", err)
 		}
 	}
+}
+
+func (s *Service) captureInterruptedMarkerForResumeAttempt(ctx context.Context, attempt *resumeAttempt) {
+	if s == nil || s.repo == nil || attempt == nil || attempt.taskID == "" {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, attempt.taskID)
+	if err != nil || task == nil {
+		return
+	}
+	if task.Metadata == nil {
+		attempt.setInterruptedMarkerSnapshot("", true)
+		return
+	}
+	marker, ok := task.Metadata[models.MetaKeyInterruptedAt].(string)
+	// A successful task read with no marker is still an immutable snapshot.
+	// Preserve that fact through tombstones, while the empty value remains a
+	// fail-closed generation for the recovery callback.
+	attempt.setInterruptedMarkerSnapshot(marker, ok)
+}
+
+func (s *Service) interruptedMarkerSnapshotForResumeAttempt(
+	sessionID, attemptID string,
+) (interruptedMarkerSnapshot, bool) {
+	if s == nil || sessionID == "" || attemptID == "" {
+		return interruptedMarkerSnapshot{}, false
+	}
+	id, isRecovery := parseResumeAttemptIdentity(attemptID)
+	if !isRecovery {
+		return interruptedMarkerSnapshot{}, false
+	}
+	registry := s.resumeAttemptStore()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if attempt := registry.attempts[sessionID]; attempt != nil && attempt.id == id {
+		return interruptedMarkerSnapshot{
+			value:    attempt.interruptedMarkerValue(),
+			captured: attempt.interruptedMarkerSnapshotCaptured(),
+		}, true
+	}
+	if tombstone, ok := registry.tombstoneLocked(sessionID, id); ok {
+		return interruptedMarkerSnapshot{
+			value:    tombstone.interruptedMarker,
+			captured: tombstone.interruptedMarkerCaptured,
+		}, true
+	}
+	return interruptedMarkerSnapshot{}, false
+}
+
+func (s *Service) interruptedMarkerForResumeAttempt(sessionID, attemptID string) string {
+	snapshot, known := s.interruptedMarkerSnapshotForResumeAttempt(sessionID, attemptID)
+	if !known || !snapshot.captured {
+		return ""
+	}
+	return snapshot.value
 }
 
 func (s *Service) validateResumeAttempt(attempt *resumeAttempt) error {

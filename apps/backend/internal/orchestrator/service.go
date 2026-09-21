@@ -3671,20 +3671,34 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	}
 
 	// Mark the task interrupted when its session was mid-turn when the backend
-	// died (STARTING/RUNNING) so task-list surfaces can show the red
-	// interruption icon. WAITING_FOR_INPUT sessions were idle, not interrupted.
+	// died (STARTING/RUNNING) so task-list surfaces can show the warning
+	// indicator. WAITING_FOR_INPUT sessions were idle, not interrupted.
 	// A re-tracked session's task was never actually interrupted -- its agent
 	// kept running across the restart -- so this is skipped for it per
 	// AC-EXECUTORS-SURVIVAL-003.2.
 	// The write is archive-atomic (SetTaskMetadataKeyIfNotArchived), so an
 	// archive that commits after this check cannot leave a stale marker on an
-	// archived task. The marker is cleared when a session of the task next
-	// enters STARTING/RUNNING (see updateTaskSessionStateWithHook).
+	// archived task. The marker is cleared after the provider confirms recovery
+	// (see markRecoveryResolved).
 	if !retracked && running.TaskID != "" && (previousState == models.TaskSessionStateStarting || previousState == models.TaskSessionStateRunning) {
-		if _, setErr := s.repo.SetTaskMetadataKeyIfNotArchived(ctx, running.TaskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339)); setErr != nil {
+		changed, setErr := s.repo.SetTaskMetadataKeyIfNotArchived(ctx, running.TaskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339))
+		if setErr != nil {
 			s.logger.Warn("failed to mark task interrupted on startup",
 				zap.String("task_id", running.TaskID),
 				zap.Error(setErr))
+		} else if changed {
+			// Startup reconciliation writes the marker directly because it runs
+			// before the task service's periodic sweep. Publish the committed
+			// task projection so already-connected clients show the warning
+			// without waiting for a reload or unrelated task update.
+			task, taskErr := s.repo.GetTask(ctx, running.TaskID)
+			if taskErr != nil || task == nil {
+				s.logger.Warn("failed to load task after startup interruption marker",
+					zap.String("task_id", running.TaskID),
+					zap.Error(taskErr))
+			} else {
+				s.publishTaskUpdated(ctx, task)
+			}
 		}
 	}
 

@@ -1011,6 +1011,65 @@ func TestResumeSession_ArchiveCancelledWithoutRunningRow_ClearsTaskDescription(t
 	}
 }
 
+// TestResumeSession_OrphanCancelledWithoutRunningRow_ClearsTaskDescription
+// preserves the prompt-free recovery contract for legacy rows that the
+// reconciliation sweep cancelled after losing their runtime inventory.
+func TestResumeSession_OrphanCancelledWithoutRunningRow_ClearsTaskDescription(t *testing.T) {
+	repo := newMockRepository()
+	now := time.Now().UTC()
+	repo.tasks["task-1"] = &models.Task{
+		ID:          "task-1",
+		WorkspaceID: "workspace-1",
+		Description: "do the original thing",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	repo.sessions["sess-1"] = &models.TaskSession{
+		ID:             "sess-1",
+		TaskID:         "task-1",
+		AgentProfileID: "profile-1",
+		State:          models.TaskSessionStateCancelled,
+		ErrorMessage:   models.SessionOrphanedCancelReason,
+	}
+
+	var capturedReq *LaunchAgentRequest
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			capturedReq = req
+			return &LaunchAgentResponse{AgentExecutionID: "exec-new", Status: v1.AgentStatusStarting}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	callerSession := *repo.sessions["sess-1"]
+	if _, err := exec.ResumeSession(context.Background(), &callerSession, true); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+	if capturedReq == nil {
+		t.Fatal("LaunchAgent was not called")
+	}
+	if capturedReq.TaskDescription != "" {
+		t.Errorf("TaskDescription = %q, want empty — auto-resuming an orphan-cancelled "+
+			"session without a running row must not replay the original prompt", capturedReq.TaskDescription)
+	}
+}
+
+func TestApplyRunningRecordToResumeRequest_OrphanCancelledTokenlessRowClearsTaskDescription(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskDescription: "do the original thing"}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{
+		ID: "sess-1", State: models.TaskSessionStateCancelled,
+		ErrorMessage: models.SessionOrphanedCancelReason,
+	}
+
+	exec.applyRunningRecordToResumeRequest(req, task, session, true, &models.ExecutorRunning{})
+	if req.TaskDescription != "" {
+		t.Fatalf("TaskDescription = %q, want empty for tokenless orphan recovery", req.TaskDescription)
+	}
+}
+
 func TestApplyRunningRecordToResumeRequest_FailedSessionKeepsTaskDescription(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)

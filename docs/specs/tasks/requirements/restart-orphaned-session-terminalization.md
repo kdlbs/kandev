@@ -6,41 +6,60 @@ owners:
   - kandev
 ---
 
-# Restart-Orphaned Session Terminalization Requirements
+# Session recovery after backend interruption
 
 ## Overview
 
-A task session records the lifecycle of one agent conversation turn. When the
-backend process dies while a session's turn is open — a graceful restart, a
-crash, or a kill — the component that would have transitioned the session to a
-terminal state dies with it. No other actor retries that transition, so the
-session row stays in an active state forever and the task appears to wait for
-an agent that already finished.
-
-The tasks system owns the task-session lifecycle, so it owns this
-reconciliation: the system itself must detect and terminalize sessions that
-lost their backing actor, without depending on the dead process, the agent, or
-a human SQL edit.
-
-## Terminology
-
-- **Active session state:** A `task_sessions.state` value that implies work is
-  in flight: `CREATED`, `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT`.
-- **Terminal session state:** A state a session never leaves: `COMPLETED`,
-  `FAILED`, or `CANCELLED`.
-- **Orphaned session:** An active-state session whose transition actor is gone:
-  the backend that would complete or fail its turn terminated, and no live
-  agent execution backs the session anymore.
-- **Live execution:** An agent execution the current backend process tracks in
-  its in-memory execution store. A session backed by a live execution is not
-  orphaned even when its row is stale.
-- **Launch grace window:** The interval between a session row entering
-  `STARTING` and its execution necessarily being visible in the in-memory
-  store. A session inside this window is not eligible for orphan detection.
-- **Reconciliation sweep:** The periodic pass that lists candidate sessions
-  and terminalizes the orphaned ones.
+A backend restart can interrupt an agent turn. The conversation remains available
+for recovery. Opening Kandev must not cancel interrupted tasks or resume every
+agent at once. Focusing a task restores its selected conversation. A new user
+message continues the work without replaying the interrupted prompt.
 
 ## Requirements
+
+### REQ-TASKS-RESTART-ORPHAN-SESSIONS-002: Interrupted conversations remain resumable
+
+This requirement supersedes requirement 001's automatic cancellation policy.
+
+- **AC-TASKS-RESTART-ORPHAN-SESSIONS-002.1:** After a backend interruption,
+  an unarchived session that lost its execution shall remain recoverable.
+  Reconciliation shall represent it as waiting for recovery, never cancelled
+  solely because its execution is absent or its activity is old.
+- **AC-TASKS-RESTART-ORPHAN-SESSIONS-002.2:** Opening Kandev shall not start
+  all interrupted agents. Focusing an eligible task shall restore its selected
+  agent and conversation under the existing auto-start preference.
+- **AC-TASKS-RESTART-ORPHAN-SESSIONS-002.3:** Focusing a task shall not send
+  or replay a prompt. A subsequent user message shall continue that conversation
+  through normal prompt delivery, including during recovery startup.
+- **AC-TASKS-RESTART-ORPHAN-SESSIONS-002.4:** Recovery shall preserve session,
+  workspace, transcript, and available provider resume identity. Missing runtime
+  records shall not cause cancellation or silent conversation replacement.
+- **AC-TASKS-RESTART-ORPHAN-SESSIONS-002.5:** Surviving executions, recent
+  launches, newer turns, and healthy siblings shall remain untouched. Unknown
+  liveness or failed reads shall defer reconciliation.
+- **AC-TASKS-RESTART-ORPHAN-SESSIONS-002.6:** Settling an interrupted turn
+  shall not complete the task, advance its workflow, or report successful work.
+  The session shall remain available for the next message.
+- **AC-TASKS-RESTART-ORPHAN-SESSIONS-002.7:** Explicit stops, archive rules,
+  authorization, capacity admission, and deferred-launch ownership shall retain
+  their existing authority. Neither sweep shall override these rules.
+- **AC-TASKS-RESTART-ORPHAN-SESSIONS-002.8:** Desktop and phone shall support
+  focus, recovery, and follow-up messaging without an orphan-cancellation banner.
+  Actual recovery failures shall retain explicit retry actions and stored history.
+
+## Interruption visibility
+
+Interrupted tasks retain the [interruption warning](interrupted-task-indicator.md)
+until successful agent recovery. The warning uses the shared triangle and
+warning color on sidebar rows and task cards, including phone surfaces.
+Focus or an unsuccessful resume attempt alone does not clear it.
+
+## Historical requirement
+
+Requirement 001 and its criteria below record the superseded cancellation policy.
+They must not drive new implementation. The pending
+[recovery package](../../../plans/orphaned-session-open-recovery/plan.md)
+replaces that policy with requirement 002.
 
 ### REQ-TASKS-RESTART-ORPHAN-SESSIONS-001: Sessions orphaned by a backend restart reach a terminal state
 
@@ -94,10 +113,10 @@ that the task board stays truthful and the task can move on.
   `is_primary` flag, so the status-summary projection keeps the durable
   primary-session assignment.
 
-## Out of scope
+## Historical exclusions
 
-- Resuming or replaying a turn that was interrupted mid-flight; the orphaned
-  session is terminalized, not resumed.
+- The sweep does not resume or replay interrupted turns. Later task opening
+  follows the [orphan recovery contract](session-stall-visibility.md).
 - Detecting orphans of already-archived tasks; the archived-task
   reconciliation pass owns those.
 - Agent-side heartbeats or adapter-side turn-state persistence.

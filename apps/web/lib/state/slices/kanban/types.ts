@@ -142,6 +142,8 @@ export type KanbanState = {
     foregroundActivity?: ForegroundActivity | null;
     /** True when the task's session was mid-turn when the backend died. */
     interrupted?: boolean;
+    /** Monotonic client generation for explicit interruption-marker updates. */
+    interruptedGeneration?: number;
     /** True when a workflow step's auto_start_agent on_enter action failed to
      *  launch a run for this task. */
     autoStartFailed?: boolean;

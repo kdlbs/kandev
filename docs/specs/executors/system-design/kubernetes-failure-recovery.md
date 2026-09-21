@@ -68,6 +68,26 @@ Shutdown rejects new workers, cancels active work, and drains within the existin
 shutdown bound. Workflow recovery checks cancellation after cleanup and receives
 the worker context, so a stop finishing during shutdown cannot start Resume.
 
+## Resume environment sources
+
+Criteria .6-.8 use the authoritative `executors_running` profile identity.
+`applyRecordedKubernetesExecutorConfigToResumeRequest` restores current executor
+connection settings and immutable recorded workload metadata, then calls
+`restoreKubernetesProfileEnvironment` to load only `ProfileEnvVars` from that
+recorded profile. The mutable session profile selection and current profile
+workload configuration cannot replace the recorded runtime snapshot. Resume also
+restores the session's `ExecutorProfileID` before the existing guarded full-row
+persistence, so `configureExistingWorkspace` and the lifecycle
+`ExecutorProfileEnvForSession` reader use the same profile on later starts.
+
+The environment definitions flow through `resolveLaunchEnvironment` to the
+existing lifecycle launch checkpoint. Literal and secret-reference definitions
+remain distinct; this helper does not resolve secrets or change precedence.
+Current profile environment edits therefore apply to resumed processes.
+`ErrExecutorProfileNotFound` or an absent profile returns no definitions;
+other repository failures and executor ownership mismatches return an error.
+No missing profile is replaced with a different profile.
+
 ## Validation
 
 Map criteria .1-.3 to orchestrator failure-handler, teardown ownership, and
@@ -80,6 +100,13 @@ a backend restart; archive at the end to prove cleanup remains available.
 No rendered interface changes are required. The existing Resume control is the
 user-visible entry point. The separate error-UI task owns presentation changes.
 
+`TestKubernetesResumeRestoresRecordedProfileEnvironment` covers .6 and .8,
+including a conflicting session profile, unresolved secret references, and an
+unchanged workload snapshot. `TestKubernetesResumeProfileEnvironmentFailures`
+covers .7 with deleted, absent, lookup-error, and foreign-executor cases.
+
 ## Implementation plan
 
 [Kubernetes recoverable failure cleanup](../../../plans/kubernetes-recoverable-failure-cleanup/plan.md)
+
+[Resume profile environment repair](../../../plans/kubernetes-resume-profile-env/plan.md)
