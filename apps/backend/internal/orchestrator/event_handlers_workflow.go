@@ -4935,12 +4935,13 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	}
 	deferredMoveCtx := steptelemetry.WithAttribution(ctx, deferredMoveAttribution)
 	var transitionErr error
+	var transitionID int64
 	if s.messageQueue.SupportsAtomicDeferredMoveTransition() {
-		transitionErr = s.workflowStore.ApplyDeferredMoveTransition(
+		transitionID, transitionErr = s.workflowStore.ApplyDeferredMoveTransition(
 			deferredMoveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID, move.MoveID, record,
 		)
 	} else {
-		transitionErr = s.workflowStore.applyTransition(
+		transitionID, transitionErr = s.workflowStore.applyTransition(
 			deferredMoveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID,
 			engine.TriggerOnEnter, move.MoveID, nil,
 		)
@@ -5004,7 +5005,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	taskDescription := task.Description
 	go s.processStepExitAndEnterForDeferredMove(
 		context.WithoutCancel(ctx), identity, freshSession,
-		fromStepID, move.WorkflowStepID, taskDescription, move.EntryOptions,
+		fromStepID, move.WorkflowStepID, taskDescription, move.EntryOptions, transitionID,
 	)
 }
 
@@ -5053,6 +5054,7 @@ func (s *Service) processStepExitAndEnterForDeferredMove(
 	session *models.TaskSession,
 	fromStepID, toStepID, taskDescription string,
 	entryOptions *workflowmove.EntryOptions,
+	transitionID int64,
 ) {
 	current, err := s.messageQueue.ResolveSessionIdentity(ctx, identity.TaskID, identity.SessionID)
 	if err != nil || current != identity || session.QueueIncarnationID != identity.SessionIncarnationID {
@@ -5083,7 +5085,7 @@ func (s *Service) processStepExitAndEnterForDeferredMove(
 	if entryOptions != nil {
 		entryStep = workflowmove.OverlayStep(targetStep, entryOptions)
 	}
-	s.processOnEnter(ctx, identity.TaskID, fresh, entryStep, taskDescription, 0, fromStep)
+	s.processOnEnter(ctx, identity.TaskID, fresh, entryStep, taskDescription, transitionID, fromStep)
 }
 
 func (s *Service) removePendingMoveHandoffPromptForSession(
