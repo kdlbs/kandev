@@ -384,6 +384,8 @@ describe("TaskPreviewPanel actions menu — confirmation retargeting (AC-TASKS-T
 describe("TaskPreviewPanel copy task link", () => {
   const COPY_TEST_ID = "task-preview-copy-url";
   const ARIA_LABEL_ATTRIBUTE = "aria-label";
+  const COPY_LABEL = "Copy task link";
+  const COPIED_LABEL = "Task link copied";
 
   it("renders no copy control when the panel has no subject task", () => {
     renderPanel(<TaskPreviewPanel task={null} onClose={vi.fn()} />);
@@ -396,7 +398,7 @@ describe("TaskPreviewPanel copy task link", () => {
     renderPanel(<TaskPreviewPanel task={TASK} onClose={vi.fn()} />);
 
     const copyButton = screen.getByTestId(COPY_TEST_ID);
-    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe("Copy task link");
+    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COPY_LABEL);
 
     fireEvent.click(copyButton);
     await act(async () => {});
@@ -404,12 +406,12 @@ describe("TaskPreviewPanel copy task link", () => {
     expect(clipboardMocks.copyToClipboard).toHaveBeenCalledWith(
       `${window.location.origin}/t/${TASK.id}`,
     );
-    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe("Task link copied");
+    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COPIED_LABEL);
 
     await act(async () => {
       vi.advanceTimersByTime(1500);
     });
-    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe("Copy task link");
+    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COPY_LABEL);
   });
 
   it("does not show copied confirmation when the clipboard write fails", async () => {
@@ -420,7 +422,7 @@ describe("TaskPreviewPanel copy task link", () => {
     fireEvent.click(copyButton);
 
     await waitFor(() => expect(clipboardMocks.copyToClipboard).toHaveBeenCalled());
-    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe("Copy task link");
+    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COPY_LABEL);
   });
 
   it("renders the copy control before Maximize, alongside the other panel controls", () => {
@@ -431,5 +433,19 @@ describe("TaskPreviewPanel copy task link", () => {
     const maximizeIndex = controls.findIndex((el) => el.title === "Open full page");
     expect(copyIndex).toBeGreaterThanOrEqual(0);
     expect(copyIndex).toBeLessThan(maximizeIndex);
+  });
+
+  it("resets the copied confirmation when the previewed task changes (regression)", async () => {
+    vi.useFakeTimers();
+    const OTHER_TASK: Task = { id: "task-2", title: "Other task", workflowStepId: "step-1" };
+    const { rerender } = renderPanel(<TaskPreviewPanel task={TASK} onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId(COPY_TEST_ID));
+    await act(async () => {});
+    expect(screen.getByTestId(COPY_TEST_ID).getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COPIED_LABEL);
+
+    rerenderPanel(rerender, <TaskPreviewPanel task={OTHER_TASK} onClose={vi.fn()} />);
+
+    expect(screen.getByTestId(COPY_TEST_ID).getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COPY_LABEL);
   });
 });

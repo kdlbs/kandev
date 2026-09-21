@@ -205,7 +205,7 @@ function PreviewPanelHeader({
             onOpenChange={setActionsMenuOpen}
           />
         )}
-        {task && <CopyTaskUrlButton taskId={task.id} />}
+        {task && <CopyTaskUrlButton key={task.id} taskId={task.id} />}
         {onMaximize && task && (
           <Button
             variant="ghost"

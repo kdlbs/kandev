@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { TaskPreviewPanel } from "./task-preview-panel";
@@ -40,7 +41,9 @@ const STEPS: WorkflowStepperStep[] = [
 function withProviders(ui: ReactNode) {
   return (
     <ToastProvider>
-      <StateProvider>{ui}</StateProvider>
+      <StateProvider>
+        <TooltipProvider>{ui}</TooltipProvider>
+      </StateProvider>
     </ToastProvider>
   );
 }

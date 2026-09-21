@@ -224,7 +224,7 @@ and must never turn the header into a second row or a scrolling surface.
   the cap alone can no longer guarantee the title floor at the 300px minimum
   width whenever the step name is long enough to want its full cap, at any
   value of the header row's inter-element gaps. The header shall still
-  guarantee the title floor while those gaps total 70px or less, which the
+  guarantee the title floor while those gaps total 34px or less, which the
   system design derives from the narrower of the two preview layouts and which
   the header shall respect.
 - **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.5:** The preview header shall not

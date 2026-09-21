@@ -229,7 +229,7 @@ test.describe("Kanban preview workflow step navigation", () => {
 
     // Single row: every header element shares the same vertical center. Comparing
     // raw tops would fail spuriously — items-center aligns centers, not tops, and
-    // the h2 title's text line-box is naturally shorter than the 32px icon buttons.
+    // the h2 title's text line-box is naturally shorter than the icon buttons.
     const centerY = (box: { y: number; height: number }) => box.y + box.height / 2;
     expect(Math.abs(centerY(titleBox) - centerY(closeBox))).toBeLessThan(4);
     expect(Math.abs(centerY(triggerBox) - centerY(closeBox))).toBeLessThan(4);
@@ -240,8 +240,10 @@ test.describe("Kanban preview workflow step navigation", () => {
     expect(copyBox.x).toBeLessThan(maximizeBox.x);
 
     // The title floor AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3 requires, now
-    // proven with three fixed-width panel controls in the budget (system design's
-    // Header layout section derives the g<=70px bound this relies on).
+    // proven with three panel controls in the budget at this project's fine
+    // pointer (system design's Header layout section derives g<=74px fine
+    // pointer here; the tighter g<=34px coarse-pointer/tablet bound is not
+    // exercised by this desktop-chromium project).
     expect(titleBox.width).toBeGreaterThanOrEqual(88);
 
     // No horizontal scrolling in the header row.
