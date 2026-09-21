@@ -2009,8 +2009,21 @@ func TestHandleMessageTask_CrossWorkspaceQueuedMessageIsPreserved(t *testing.T) 
 		senderPayloadWithMode(target.ID, "cross workspace", sender.ID, "queued")))
 	require.NoError(t, err)
 	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var response map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &response))
+	assert.Equal(t, "queued", response[stopTaskStatusKey])
+	assert.Equal(t, "foreign-session", response["session_id"])
 	assert.Empty(t, orch.interruptCalls, "queued delivery must not interrupt")
 	assert.Len(t, orch.promptCalls, 0, "running target keeps queued delivery")
+
+	status := orch.queue.GetStatus(ctx, "foreign-session")
+	require.Len(t, status.Entries, 1, "queued delivery must retain exactly one FIFO entry")
+	entry := status.Entries[0]
+	assert.Equal(t, "foreign-session", entry.SessionID)
+	assert.Equal(t, target.ID, entry.TaskID)
+	assert.Contains(t, entry.Content, "cross workspace")
+	assert.Equal(t, sender.ID, entry.Metadata["sender_task_id"])
+	assert.Equal(t, "sender-sess-1", entry.Metadata["sender_session_id"])
 }
 
 func TestHandleMessageTask_CreatedSession_StartsAgent(t *testing.T) {
