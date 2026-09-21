@@ -50,16 +50,17 @@ func seedSelectedWorktreeRecoveryEnvironment(
 	}
 	repo.taskEnvironmentRepos["environment-recovery"] = environmentRepos
 	repo.sessions[sessionID] = &models.TaskSession{
-		ID:                sessionID,
-		TaskID:            taskID,
-		TaskEnvironmentID: "environment-recovery",
-		AgentProfileID:    "profile-recovery",
-		ExecutorID:        models.ExecutorIDWorktree,
-		RepositoryID:      "repo-recovery",
-		BaseBranch:        "main",
-		State:             sessionState,
-		StartedAt:         time.Now().UTC(),
-		UpdatedAt:         time.Now().UTC(),
+		ID:                 sessionID,
+		TaskID:             taskID,
+		TaskEnvironmentID:  "environment-recovery",
+		QueueIncarnationID: "incarnation-recovery",
+		AgentProfileID:     "profile-recovery",
+		ExecutorID:         models.ExecutorIDWorktree,
+		RepositoryID:       "repo-recovery",
+		BaseBranch:         "main",
+		State:              sessionState,
+		StartedAt:          time.Now().UTC(),
+		UpdatedAt:          time.Now().UTC(),
 	}
 }
 
@@ -128,6 +129,9 @@ func assertSelectedWorktreeRecoveryRequest(
 	t.Helper()
 	if req.TaskID != taskID || req.SessionID != sessionID {
 		t.Fatalf("admission identity = task %q/session %q, want %q/%q", req.TaskID, req.SessionID, taskID, sessionID)
+	}
+	if req.SessionIncarnationID != "incarnation-recovery" {
+		t.Fatalf("admission session incarnation = %q, want incarnation-recovery", req.SessionIncarnationID)
 	}
 	if req.TaskEnvironmentID != "environment-recovery" || req.OwnerTaskID != taskID {
 		t.Fatalf("admission environment = %q, owner %q, want environment-recovery/%q", req.TaskEnvironmentID, req.OwnerTaskID, taskID)

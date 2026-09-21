@@ -24,6 +24,11 @@ The package started as a design handoff against PR head
 are now present locally. Work-order status and verification gaps remain tracked
 below.
 
+The branch also retains `cfd6bdf65ae6f631d7701c105791a099c0325cc3`
+(`fix(agentctl): allow guarded ACP inference`) as the authorized prerequisite
+in its preserved lineage. It is not part of the recovery implementation, and
+this package does not rewrite or duplicate that prerequisite.
+
 ## Scope
 
 ### In scope
@@ -75,6 +80,13 @@ Each numeric criterion belongs to
 `AC-TASKS-WORKTREE-METADATA-RECOVERY-<requirement>.<criterion>`.
 Task 03 owns cross-layer evidence from selected launch through durable inventory
 and lifecycle request. A helper-only test does not prove production wiring.
+
+### Session-incarnation admission evidence
+
+Recovery authority is additionally bound to the durable session incarnation.
+Task 03 records the task-service projection and both executor and lifecycle
+admission boundaries, so a caller cannot accidentally omit the identity after it
+has been read from `task_sessions`.
 
 ## End-to-end evidence
 

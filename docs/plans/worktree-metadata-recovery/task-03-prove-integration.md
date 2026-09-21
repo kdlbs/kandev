@@ -42,6 +42,8 @@ Complete public guidance only after the compatibility contract has executable ev
 - Final public documentation for automatic recovery eligibility, retained files,
   branch naming, staging limits, busy refusal, and per-slot partial success.
 - Accurate requirement, design, ADR, and work-order statuses.
+- Session-incarnation projection from the task service through executor and
+  lifecycle recovery admission.
 
 ## Out of scope
 
@@ -112,3 +114,12 @@ orchestrator/worktree and lifecycle packages pass, and existing real-Git
 worktree recovery tests pass. The integration tests use a recording admission
 boundary rather than combining real SQLite recovery publication with lifecycle
 runtime startup, so this work order remains in progress.
+
+### Session-incarnation recovery admission, 2026-09-21
+
+`GetWorkspaceInfoForSession` now has an explicit assertion that it projects the
+durable `QueueIncarnationID`. The selected-worktree launch and resume integration
+fixture carries a nonempty incarnation and asserts that the captured
+`RecoveryAdmissionRequest` retains it. The lifecycle boundary has matching
+request-capture coverage. These focused assertions preserve the recovery claim's
+session-incarnation fence across every production admission path.
