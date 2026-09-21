@@ -49,3 +49,32 @@ func TestLaunchReceiptRetainsProcessEvidenceForTypedACPInitializationFailure(t *
 		t.Fatalf("receipt = %+v, want process true and inference false", history.Current)
 	}
 }
+
+func TestLaunchReceiptBoundsHistoryAndRejectsDelayedFacts(t *testing.T) {
+	var history LaunchReceiptHistory
+	ids := []LaunchAttemptIdentity{
+		{SessionID: "session", Incarnation: "exec-1", Generation: 1},
+		{SessionID: "session", Incarnation: "exec-2", Generation: 2},
+		{SessionID: "session", Incarnation: "exec-3", Generation: 3},
+		{SessionID: "session", Incarnation: "exec-4", Generation: 4},
+	}
+	for _, id := range ids {
+		history.Start(id)
+		history.Apply(LaunchReceiptFact{Identity: id, Kind: LaunchFactProcessStarted})
+	}
+	if len(history.Previous) != 2 || history.Previous[0].Identity.Incarnation != "exec-3" || history.Previous[1].Identity.Incarnation != "exec-2" {
+		t.Fatalf("history = %+v, want current plus two preceding attempts", history)
+	}
+	if history.Apply(LaunchReceiptFact{Identity: ids[0], Kind: LaunchFactInferenceStarted}) {
+		t.Fatal("delayed fact from evicted attempt applied")
+	}
+}
+
+func TestLaunchReceiptKeepsMissingEvidenceUnknown(t *testing.T) {
+	var history LaunchReceiptHistory
+	id := LaunchAttemptIdentity{SessionID: "session", Incarnation: "exec", Generation: 1}
+	history.Start(id)
+	if history.Current.ProcessCreated != LaunchTriStateUnknown || history.Current.InferenceStarted != LaunchTriStateUnknown {
+		t.Fatalf("receipt = %+v, want unknown absent facts", history.Current)
+	}
+}
