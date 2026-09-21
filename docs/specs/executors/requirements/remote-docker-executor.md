@@ -76,6 +76,11 @@ image build loop, and lifecycle semantics of the Local Docker executor.
   bind-mounted into a remote container. The `agentctl` helper, the per-instance
   agent session directory, and any seeded agent configuration shall be
   materialized on the remote host or inside the container.
+
+  The remote host is no longer an acceptable destination. See
+  [Remote Docker container inputs](remote-docker-container-inputs.md), whose
+  `REQ-EXECUTORS-REMOTE-DOCKER-002` requires every container input to be
+  delivered through the Docker Engine API.
 - **AC-EXECUTORS-REMOTE-DOCKER-001.9:** The `agentctl` helper delivered to the
   remote shall match the remote architecture reported by the connection test.
   An unsupported or mismatched remote platform shall fail the launch with that

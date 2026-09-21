@@ -87,91 +87,41 @@ func (cm *ContainerManager) hostFiles() ContainerHostFiles {
 	}
 }
 
-// remoteHostFileStore materializes container inputs on a remote host. The SSH
-// implementation lives with the remote Docker runtime; keeping it an interface
-// here lets the mount composition be tested without a live connection.
-type remoteHostFileStore interface {
-	// EnsureAgentctl uploads (or reuses a cached) agentctl helper matching
-	// the remote platform and returns its remote path.
-	EnsureAgentctl(platform SSHRemotePlatform) (string, error)
-
-	// EnsureSessionDir creates the per-instance session directory on the
-	// remote host and returns its remote path.
-	EnsureSessionDir(instanceID string) (string, error)
-
-	// EnsureFile uploads a local file to the remote host under name and
-	// returns its remote path.
-	EnsureFile(name, localPath string) (string, error)
-}
-
-// remoteContainerHostFiles resolves every mount source on the remote host.
+// remoteContainerHostFiles supplies no mount at all.
+//
+// A remote daemon resolves a bind-mount source against the remote host's
+// filesystem, so every source here would be a file Kandev had to create there.
+// The remote runtime delivers those inputs into the container through the
+// Docker Engine API instead (see remoteContainerInputs), which is what lets a
+// task run on a host that accepts no filesystem writes.
+//
+// The provider still exists for one reason: the platform check has to fail
+// before a container is created, and this is the only hook that runs that
+// early.
 type remoteContainerHostFiles struct {
-	store          remoteHostFileStore
-	platform       SSHRemotePlatform
-	commandBuilder *CommandBuilder
-	// resolveMockAgentBinary is the backend-side E2E mock-agent lookup. It
-	// returns "" in production, so the upload below never runs there.
-	resolveMockAgentBinary func() (string, error)
+	platform SSHRemotePlatform
 }
 
-func newRemoteContainerHostFiles(
-	store remoteHostFileStore,
-	platform SSHRemotePlatform,
-	commandBuilder *CommandBuilder,
-) *remoteContainerHostFiles {
-	return &remoteContainerHostFiles{store: store, platform: platform, commandBuilder: commandBuilder}
+func newRemoteContainerHostFiles(platform SSHRemotePlatform) remoteContainerHostFiles {
+	return remoteContainerHostFiles{platform: platform}
 }
 
-func (r *remoteContainerHostFiles) AgentctlBinary() (string, error) {
-	// Checked before the upload so an unsupported remote fails with its own
-	// cause rather than producing a container whose helper cannot execute.
+// AgentctlBinary reports no mount source, and rejects a remote whose platform
+// has no matching helper. Failing here keeps an unsupported remote from
+// producing a container whose helper cannot execute.
+func (r remoteContainerHostFiles) AgentctlBinary() (string, error) {
 	if err := SSHRequireSupportedRemotePlatform(r.platform); err != nil {
 		return "", err
 	}
-	path, err := r.store.EnsureAgentctl(r.platform)
-	if err != nil {
-		return "", fmt.Errorf("remote docker: deliver agentctl: %w", err)
-	}
-	return path, nil
+	return "", nil
 }
 
-// MockAgentBinary uploads the E2E mock agent when the backend resolves one.
-//
-// The binary lives in the backend's own build tree, so the remote daemon
-// cannot mount that path. It is delivered the same way agentctl is, rather
-// than dropped: dropping it produces a container that starts and then fails
-// with "the agent could not start", which names nothing useful.
-//
-// The production resolver returns "", so nothing is uploaded there.
-func (r *remoteContainerHostFiles) MockAgentBinary() (string, error) {
-	if r.resolveMockAgentBinary == nil {
-		return "", nil
-	}
-	localPath, err := r.resolveMockAgentBinary()
-	if err != nil {
-		return "", fmt.Errorf("mock-agent binary lookup: %w", err)
-	}
-	if localPath == "" {
-		return "", nil
-	}
-	remotePath, err := r.store.EnsureFile("mock-agent", localPath)
-	if err != nil {
-		return "", fmt.Errorf("remote docker: deliver mock-agent: %w", err)
-	}
-	return remotePath, nil
-}
+// MockAgentBinary reports no mount source. The E2E helper is delivered with
+// agentctl.
+func (r remoteContainerHostFiles) MockAgentBinary() (string, error) { return "", nil }
 
-func (r *remoteContainerHostFiles) SessionDir(ag agents.Agent, instanceID string) (string, string, error) {
-	if r.commandBuilder == nil {
-		return "", "", nil
-	}
-	target := r.commandBuilder.GetSessionDirTarget(ag)
-	if target == "" {
-		return "", "", nil
-	}
-	source, err := r.store.EnsureSessionDir(instanceID)
-	if err != nil {
-		return "", "", fmt.Errorf("remote docker: create agent session dir: %w", err)
-	}
-	return source, target, nil
+// SessionDir reports no mount. The directory is created inside the container by
+// the delivered archive, so it is removed when the container is.
+func (r remoteContainerHostFiles) SessionDir(agents.Agent, string) (string, string, error) {
+	return "", "", nil
 }

@@ -24,13 +24,19 @@ An executor determines where Kandev creates a task environment and runs `agentct
 | Kubernetes    | Dependency-bound on cluster access, namespaced RBAC, admission, storage, and streaming support | `/workspace` in one Pod per task session | You need sessions scheduled inside an administrator-managed cluster boundary |
 | Sprites.dev   | Supported, provider-dependent                                                   | `/workspace` in a provider sandbox                                      | You need remote compute and accept provider lifecycle/billing            |
 | SSH           | Supported for repository sources on a trusted host                              | A task folder on a trusted SSH host                                     | You need a remote host with SSH, SFTP, forwarding, and clone credentials |
-| Remote Docker | Supported over SSH; local Git sources are not yet rejected (see below) | `/workspace` in a container on a remote Docker daemon | You want a container boundary on one remote machine and do not run Kubernetes |
+| Remote Docker | Supported over SSH; local Git sources are not yet rejected (see below) | `/workspace` in a container on a remote Docker daemon | You want a container boundary on one remote machine, including a host that accepts no filesystem writes, and do not run Kubernetes |
 
 `mock_remote` also exists in backend models for tests. It is not a product executor.
 
 Only administrators can create, edit, or test a Remote Docker executor, and only administrators can build its image. A saved profile grants effective root on the remote host, and a build runs Dockerfile instructions with that daemon's authority.
 
 Remote Docker reaches its daemon over SSH, not over a daemon URL. The profile stores an SSH target, and Kandev rejects any value carrying a scheme, so `tcp://` is excluded by construction. An unsecured daemon port is remote root; `ssh://` needs no extra setup because Docker's SSH transport runs `docker system dial-stdio` over the connection you already have. The older stored fields `docker_host`, `docker_tls_verify`, and `docker_cert_path` are not used by this runtime.
+
+Remote Docker writes nothing to the remote host's filesystem. The `agentctl` helper, the agent's session directory, and the credential and configuration files seeded into it are all delivered into the container through the Docker Engine API, so they live in Docker-managed storage and are removed when the container is. Nothing accumulates in the SSH user's home directory, and archiving or deleting a task removes that agent's credentials with its container.
+
+That makes the remote host's requirements narrow: an SSH account that can run commands (`docker system dial-stdio` and a platform probe) and open TCP forwards, plus access to the Docker socket. Remote Docker needs no SFTP subsystem and no writable home directory, so a minimal or immutable host where Docker is the only management surface is supported. This is the one place Remote Docker is less demanding than SSH, which does require SFTP and a writable workdir root.
+
+If you ran Remote Docker before this change, the remote account may still hold a `~/.kandev` tree from those launches. Kandev removes a task's own `~/.kandev/agent-sessions/<instance-id>/` directory when you archive or delete it. The cached `~/.kandev/bin/agentctl` helper is shared with the SSH executor and is left alone; remove it by hand if no SSH profile targets that host.
 
 The connection test's **Docker daemon** step reports which of three different problems it hit, because each needs a different fix on the remote host. The SSH user cannot use the Docker socket: add that user to the `docker` group there, then test again over a new connection, since group membership applies from the next login. The host has no `docker` command: install the Docker CLI, which the SSH transport needs in addition to the daemon. The CLI ran but no daemon answered: start Docker on that host. Each failure shows the remote's own error alongside the fix.
 
@@ -307,7 +313,7 @@ The setting is **off by default**, only available on Docker profiles, and affect
 <details>
 <summary>Docker credential and security details</summary>
 
-Docker profiles can inject resolved environment secrets. For agent file-based authentication, Kandev selectively seeds a per-execution directory under `<KANDEV_HOME_DIR>/agent-sessions/` and mounts that directory at the agent's expected config path. It does not intentionally mount the entire host home.
+Docker profiles can inject resolved environment secrets. For agent file-based authentication, Kandev selectively seeds a per-execution directory under `<KANDEV_HOME_DIR>/agent-sessions/` and mounts that directory at the agent's expected config path. It does not intentionally mount the entire host home. Remote Docker seeds the same files, but delivers them into the container through the Docker Engine API instead of mounting a directory, so nothing is written to either the Kandev host or the remote host.
 
 A container is a useful boundary, not a hostile-code security sandbox. The Docker daemon has host-level power, bind mounts expose their sources, the agent can use every injected secret, and the default image has outbound network access. Kandev does **not** mount the Docker socket into agent containers automatically.
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"strconv"
 	"sync"
 	"time"
@@ -47,13 +48,16 @@ type RemoteDockerExecutor struct {
 // remoteDockerSession is one executor profile's live connection to a remote
 // daemon, plus the per-session resources that ride it.
 type remoteDockerSession struct {
-	sshClient     *ssh.Client
-	dockerClient  *docker.Client
-	containerMgr  *ContainerManager
-	endpoints     containerEndpointResolver
-	hostFileStore *sshHostFileStore
-	platform      SSHRemotePlatform
-	watchdog      *sshKeepaliveWatchdog
+	sshClient    *ssh.Client
+	dockerClient *docker.Client
+	containerMgr *ContainerManager
+	endpoints    containerEndpointResolver
+	// inputs delivers the container's agentctl helper, session directory, and
+	// seeded credentials through the Engine API. Nothing reaches the remote
+	// host's filesystem.
+	inputs   *remoteContainerInputs
+	platform SSHRemotePlatform
+	watchdog *sshKeepaliveWatchdog
 }
 
 func (s *remoteDockerSession) close() error {
@@ -199,13 +203,13 @@ func (r *RemoteDockerExecutor) dialRemote(ctx context.Context, req *ExecutorCrea
 		sshPortForwarder{client: sshClient, logger: r.logger},
 	)
 
-	session.hostFileStore = newSSHHostFileStore(sshClient, NewAgentctlResolver(r.logger), r.logger)
-
 	mgr := NewContainerManager(dockerClient, "", "", r.logger)
-	remoteFiles := newRemoteContainerHostFiles(session.hostFileStore, info.Platform, mgr.commandBuilder)
-	remoteFiles.resolveMockAgentBinary = mgr.resolveMockAgentBinary
-	mgr.containerHostFiles = remoteFiles
+	mgr.containerHostFiles = newRemoteContainerHostFiles(info.Platform)
 	mgr.endpointResolver = session.endpoints
+
+	session.inputs = newRemoteContainerInputs(dockerClient, info.Platform, mgr.commandBuilder, r.logger)
+	session.inputs.resolveMockAgentBinary = mgr.resolveMockAgentBinary
+	mgr.seedCreatedContainer = session.inputs.DeliverLaunchInputs
 	session.containerMgr = mgr
 
 	return session, nil
@@ -255,11 +259,6 @@ func (r *RemoteDockerExecutor) CreateInstance(ctx context.Context, req *Executor
 		return instance, nil
 	}
 
-	if err := r.seedRemoteSessionDir(ctx, session, req); err != nil {
-		r.releaseSession(req.InstanceID)
-		return nil, err
-	}
-
 	instance, err := r.launch(ctx, session, req)
 	if err != nil {
 		r.releaseSession(req.InstanceID)
@@ -299,7 +298,7 @@ func (r *RemoteDockerExecutor) reconnectToContainer(
 		return nil, false
 	}
 
-	delegate := &DockerExecutor{logger: r.logger, endpoints: session.endpoints}
+	delegate := r.reconnectDelegate(session)
 	instance, err := delegate.reconnectToContainer(ctx, session.dockerClient, req)
 	if err != nil {
 		r.logger.Info("remote docker: could not reconnect, launching fresh",
@@ -308,6 +307,21 @@ func (r *RemoteDockerExecutor) reconnectToContainer(
 	}
 	instance.RuntimeName = r.Name()
 	return instance, true
+}
+
+// reconnectDelegate builds the Docker executor that adopts a preserved
+// container.
+//
+// It carries the session's forwarding endpoint resolver, so the endpoints it
+// reports are backend loopback rather than the remote host's, and the session's
+// helper redelivery, so a container preserved across a backend upgrade does not
+// resume on the agentctl it was created with.
+func (r *RemoteDockerExecutor) reconnectDelegate(session *remoteDockerSession) *DockerExecutor {
+	delegate := &DockerExecutor{logger: r.logger, endpoints: session.endpoints}
+	if session.inputs != nil {
+		delegate.beforeContainerStart = session.inputs.DeliverHelpers
+	}
+	return delegate
 }
 
 // startTransportWatchdog surfaces a dropped SSH connection as a failure
@@ -331,40 +345,6 @@ func (r *RemoteDockerExecutor) startTransportWatchdog(instanceID string, session
 	)
 }
 
-// seedRemoteSessionDir copies the agent's credentials and selected config
-// bundles into the directory the container mounts. Without it the container
-// mounts an empty directory and the agent starts with no login.
-func (r *RemoteDockerExecutor) seedRemoteSessionDir(
-	ctx context.Context, session *remoteDockerSession, req *ExecutorCreateRequest,
-) error {
-	if req.AgentConfig == nil || session.hostFileStore == nil {
-		return nil
-	}
-	remoteDir, err := session.hostFileStore.EnsureSessionDir(req.InstanceID)
-	if err != nil {
-		return err
-	}
-	// A credential failure is reported but does not stop the launch, matching
-	// the local Docker path: some agents authenticate from the environment or
-	// their in-container setup script instead.
-	if seedErr := seedRemoteAgentSessionDir(
-		ctx,
-		session.sshClient,
-		req.AgentConfig,
-		remoteDir,
-		selectedPortableConfigBundleIDs(req.Metadata),
-		r.logger,
-		func(warnings []PortableConfigWarning) {
-			reportPortableConfigWarnings(req.OnProgress, warnings)
-		},
-	); seedErr != nil {
-		r.logger.Warn("remote docker: failed to seed agent session dir (continuing)",
-			zap.String("instance_id", req.InstanceID),
-			zap.Error(seedErr))
-	}
-	return nil
-}
-
 func (r *RemoteDockerExecutor) releaseSession(instanceID string) {
 	r.mu.Lock()
 	session := r.sessions[instanceID]
@@ -378,6 +358,63 @@ func (r *RemoteDockerExecutor) releaseSession(instanceID string) {
 	}
 }
 
+// remoteKandevHomeDir is the Kandev root on the remote host.
+//
+// A launch writes nothing there: a remote container's inputs are delivered
+// through the Docker Engine API. It survives because a container provisioned
+// before that change bind-mounts a per-instance directory beneath it, holding
+// that agent's credential files, and the container's removal does not take a
+// bind-mount source with it.
+const remoteKandevHomeDir = "~/.kandev"
+
+// remoteSessionDirRemovalTimeout bounds the removal so a wedged host delays a
+// teardown rather than blocking it.
+const remoteSessionDirRemovalTimeout = 30 * time.Second
+
+// removeLegacySessionDir removes the per-instance agent session directory a
+// pre-container-delivery launch created on the remote host.
+//
+// It runs on the same stop reasons the local Docker executor removes its own
+// session directory for. The path is composed here and shell-quoted: this is a
+// recursive delete on a machine Kandev does not own, so it must never be steered
+// by stored metadata. A failure is reported and does not fail the stop, because
+// stop runs inside archive and delete.
+func (r *RemoteDockerExecutor) removeLegacySessionDir(ctx context.Context, instance *ExecutorInstance) {
+	if !shouldRunExecutorCleanup(instance.StopReason) || instance.InstanceID == "" {
+		return
+	}
+
+	r.mu.Lock()
+	session := r.sessions[instance.InstanceID]
+	r.mu.Unlock()
+	if session == nil || session.sshClient == nil {
+		return
+	}
+
+	cleanupCtx, cancel := context.WithTimeout(ctx, remoteSessionDirRemovalTimeout)
+	defer cancel()
+
+	root, err := expandRemoteHome(cleanupCtx, session.sshClient, remoteKandevHomeDir)
+	if err != nil {
+		r.logger.Warn("remote docker: could not resolve the remote Kandev home to clean up",
+			zap.String("instance_id", instance.InstanceID), zap.Error(err))
+		return
+	}
+	dir := path.Join(root, "agent-sessions", instance.InstanceID)
+
+	if _, stderr, err := runSSHCommand(cleanupCtx, session.sshClient, "rm -rf "+shellQuote(dir)); err != nil {
+		r.logger.Warn("remote docker: failed to remove the remote agent session dir",
+			zap.String("instance_id", instance.InstanceID),
+			zap.String("path", dir),
+			zap.String("stderr", stderr),
+			zap.Error(err))
+		return
+	}
+	r.logger.Info("remote docker: removed the remote agent session dir",
+		zap.String("instance_id", instance.InstanceID),
+		zap.String("path", dir))
+}
+
 func (r *RemoteDockerExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	if instance == nil {
 		return nil
@@ -389,6 +426,8 @@ func (r *RemoteDockerExecutor) StopInstance(ctx context.Context, instance *Execu
 	if teardown {
 		defer r.releaseSession(instance.InstanceID)
 	}
+
+	r.removeLegacySessionDir(ctx, instance)
 
 	if instance.ContainerID == "" {
 		// Nothing was provisioned. Stop runs inside archive and delete, so

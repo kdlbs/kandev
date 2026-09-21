@@ -76,6 +76,11 @@ type ContainerConfig struct {
 	RemoteContributions      map[string]models.RemoteContribution
 	ContributionDestinations map[string]models.ContributionDestination
 	ComparisonTargets        map[string]models.ComparisonTarget
+	// OnProgress streams preparation progress for this launch. The remote
+	// runtime seeds container inputs during the launch rather than before it,
+	// so its warnings reach the user through the launch's own callback rather
+	// than a field on the shared container manager.
+	OnProgress PrepareProgressCallback
 }
 
 func boolPtr(v bool) *bool {
@@ -166,6 +171,10 @@ type ContainerManager struct {
 	// dial. Nil means the local resolver; a remote daemon installs one that
 	// forwards the remote host's published ports back to backend loopback.
 	endpointResolver containerEndpointResolver
+	// seedCreatedContainer delivers container inputs into a created container
+	// before it is started. Nil for a daemon that shares the backend's
+	// filesystem, where those inputs are bind-mounted instead.
+	seedCreatedContainer func(ctx context.Context, containerID string, config ContainerConfig) error
 }
 
 // NewContainerManager creates a new ContainerManager. kandevHomeDir is the
@@ -273,14 +282,9 @@ func (cm *ContainerManager) createAndStartContainer(
 		return "", "", "", 0, fmt.Errorf("failed to build container config: %w", err)
 	}
 
-	containerID, err := cm.dockerClient.CreateContainer(ctx, containerCfg)
+	containerID, err := createSeedAndStart(ctx, cm.dockerClient, containerCfg, cm.seedCreatedContainerHook(config), cm.logger)
 	if err != nil {
-		return "", "", "", 0, fmt.Errorf("failed to create container: %w", err)
-	}
-
-	if err := cm.dockerClient.StartContainer(ctx, containerID); err != nil {
-		cm.removeContainerBestEffort(containerID)
-		return "", "", "", 0, fmt.Errorf("failed to start container: %w", err)
+		return "", "", "", 0, err
 	}
 
 	containerIP, err := cm.dockerClient.GetContainerIP(ctx, containerID)
@@ -384,6 +388,19 @@ type dockerPublishedPorts struct {
 
 func (d dockerPublishedPorts) PublishedPort(ctx context.Context, containerID string, containerPort int) (string, int, error) {
 	return d.client.GetContainerHostPort(ctx, containerID, containerPort)
+}
+
+// seedCreatedContainerHook binds the manager's configured seeder to one
+// launch's configuration, or returns nil when no seeder is installed.
+func (cm *ContainerManager) seedCreatedContainerHook(
+	config ContainerConfig,
+) func(context.Context, string) error {
+	if cm.seedCreatedContainer == nil {
+		return nil
+	}
+	return func(ctx context.Context, containerID string) error {
+		return cm.seedCreatedContainer(ctx, containerID, config)
+	}
 }
 
 func (cm *ContainerManager) removeContainerBestEffort(containerID string) {

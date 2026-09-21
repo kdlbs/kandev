@@ -89,6 +89,13 @@ type DockerExecutor struct {
 	// backend cannot reach.
 	endpoints containerEndpointResolver
 
+	// beforeContainerStart re-delivers container inputs into a preserved
+	// container about to be restarted for a reconnect. Nil when the inputs
+	// are bind-mounted, which is every daemon that shares the backend's
+	// filesystem. A remote daemon supplies one so a container preserved
+	// across a backend upgrade does not resume on a stale helper.
+	beforeContainerStart func(ctx context.Context, containerID string) error
+
 	// Lazy-initialized on first use via ensureClient().
 	// Uses mu + initialized instead of sync.Once so that transient Docker
 	// daemon failures can be retried on subsequent calls.
@@ -371,6 +378,11 @@ func (r *DockerExecutor) ensureContainerRunning(ctx context.Context, dockerClien
 		r.logger.Info("starting stopped docker container for reconnect",
 			zap.String("container_id", info.ID),
 			zap.String("state", info.State))
+		if r.beforeContainerStart != nil {
+			if err := r.beforeContainerStart(ctx, info.ID); err != nil {
+				return nil, "", fmt.Errorf("failed to prepare container %s for restart: %w", info.ID, err)
+			}
+		}
 		if err := dockerClient.StartContainer(ctx, info.ID); err != nil {
 			return nil, "", fmt.Errorf("failed to start container %s: %w", info.ID, err)
 		}

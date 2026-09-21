@@ -45,6 +45,8 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Kubernetes startup timing](requirements/kubernetes-startup-timing.md)
 - [Kubernetes retained compute visibility](requirements/kubernetes-retained-compute.md)
 - [SSH Session Transport Liveness](requirements/ssh-transport-liveness.md)
+- [Remote Docker Executor](requirements/remote-docker-executor.md)
+- [Remote Docker container inputs](requirements/remote-docker-container-inputs.md)
 
 ### System design
 
@@ -64,6 +66,8 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Kubernetes startup timing](system-design/kubernetes-startup-timing.md)
 - [Kubernetes retained compute visibility](system-design/kubernetes-retained-compute.md)
 - [SSH Session Transport Liveness](system-design/ssh-transport-liveness.md)
+- [Remote Docker Executor](system-design/remote-docker-executor.md)
+- [Remote Docker container inputs](system-design/remote-docker-container-inputs.md)
 
 ## Migration record
 

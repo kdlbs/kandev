@@ -120,6 +120,7 @@ func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string)
 		AgentctlStartupConfig:          req.AgentctlStartupConfig,
 		ProviderGatewayAuth:            req.ProviderGatewayAuth,
 		Metadata:                       req.Metadata,
+		OnProgress:                     req.OnProgress,
 	}, nil
 }
 
