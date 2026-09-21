@@ -10,6 +10,7 @@ import {
 } from "@/lib/types/http";
 import { TopbarWorkingIndicator } from "./topbar-working-indicator";
 import { ActiveSessionRefProvider, useActiveSessionRef } from "./active-session-ref-context";
+import type { TaskComment } from "../types";
 
 afterEach(() => cleanup());
 
@@ -35,6 +36,17 @@ function wrap(node: ReactNode, sessions: Record<string, TaskSession>) {
   );
 }
 
+const queuedComment: TaskComment = {
+  id: "comment-1",
+  taskId: "task-1",
+  authorType: "user",
+  authorId: "owner",
+  authorName: "",
+  content: "Please continue",
+  createdAt: T_START,
+  runStatus: "queued",
+};
+
 describe("TopbarWorkingIndicator", () => {
   it("renders nothing when there is no live session for the task", () => {
     render(wrap(<TopbarWorkingIndicator taskId="task-1" />, {}));
@@ -51,6 +63,13 @@ describe("TopbarWorkingIndicator", () => {
     const spinner = container.querySelector(".animate-spin");
     expect(spinner?.tagName).toBe("SPAN");
     expect(spinner?.querySelector("svg")?.classList.contains("animate-spin")).toBe(false);
+  });
+
+  it("renders a queued state before the scheduler creates a session", () => {
+    render(wrap(<TopbarWorkingIndicator taskId="task-1" comments={[queuedComment]} />, {}));
+    expect(screen.getByTestId(INDICATOR_TID)).toBeTruthy();
+    expect(screen.getByTestId("topbar-working-active").textContent).toBe("Queued");
+    expect(screen.getByTestId(INDICATOR_TID).querySelector(".animate-spin")).toBeNull();
   });
 
   it("drops the spinner when an office session goes RUNNING → IDLE", () => {

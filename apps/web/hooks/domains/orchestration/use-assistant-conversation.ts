@@ -50,15 +50,23 @@ export function useAssistantConversation(binding: AssistantBinding, revision: nu
   useEffect(() => {
     void view.refresh();
   }, [view, revision, connection]);
+  const hasPendingComment = snapshot.entries.some(
+    (comment) =>
+      comment.authorType === "user" &&
+      (comment.runStatus === "queued" || comment.runStatus === "claimed"),
+  );
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (!document.hidden) {
-        metadata.refresh();
-        void view.refresh();
-      }
-    }, 3000);
+    const timer = window.setInterval(
+      () => {
+        if (!document.hidden) {
+          metadata.refresh();
+          void view.refresh();
+        }
+      },
+      hasPendingComment ? 1000 : 3000,
+    );
     return () => window.clearInterval(timer);
-  }, [view, metadata.refresh]);
+  }, [hasPendingComment, view, metadata.refresh]);
   const sessionIds = metadata.data?.sessions.map((session) => session.id) ?? [];
   useSessionLiveSyncSubscriptions({ connectionStatus: connection, taskId: id, sessionIds });
   const transport = useMemo(() => createConversationSender(id), [id, identity]);

@@ -86,7 +86,7 @@ export function OrchestratorConversationPane({
               </nav>
             )}
             <h1 className="text-xl font-semibold my-4">{task.title}</h1>
-            <TopbarWorkingIndicator taskId={task.id} />
+            <TopbarWorkingIndicator taskId={task.id} comments={comments} />
             <RecoveryTransportContext.Provider value={retryConversation}>
               <CommentTransportContext.Provider value={transport}>
                 <TaskChat
