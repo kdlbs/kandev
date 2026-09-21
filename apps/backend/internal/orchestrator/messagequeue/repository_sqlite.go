@@ -5495,8 +5495,9 @@ func lifecycleReservationFromMetadataJSON(metadataJSON string) (string, bool, er
 func (r *sqliteRepository) transferSessionOwned(
 	ctx context.Context,
 	oldSessionID, newSessionID, operationID string,
+	destination *QueueSessionIdentity,
 ) error {
-	return r.transferSessionOwnedTx(ctx, oldSessionID, newSessionID, operationID)
+	return r.transferSessionOwnedTx(ctx, oldSessionID, newSessionID, operationID, destination)
 }
 
 func (r *sqliteRepository) beginAuthorizedSessionTransferTx(
@@ -5766,6 +5767,7 @@ func (r *sqliteRepository) transferSession(
 func (r *sqliteRepository) transferSessionOwnedTx(
 	ctx context.Context,
 	oldSessionID, newSessionID, operationID string,
+	destination *QueueSessionIdentity,
 ) error {
 	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
 		return err
@@ -5800,6 +5802,11 @@ func (r *sqliteRepository) transferSessionOwnedTx(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if destination != nil {
+		if err := r.validateSessionIdentityTx(ctx, tx, *destination); err != nil {
+			return err
+		}
+	}
 	if oldSessionID == newSessionID {
 		return commitAuthorizedSessionTransferTx(
 			ctx, tx, r.db, oldSessionID, newSessionID, operationID,
@@ -5817,7 +5824,7 @@ func (r *sqliteRepository) transferSessionOwnedTx(
 	if err := r.transferSessionStateTx(ctx, tx, oldSessionID, newSessionID); err != nil {
 		return err
 	}
-	if err := r.transferPendingSendNowClaimTx(ctx, tx, oldSessionID, newSessionID, nil); err != nil {
+	if err := r.transferPendingSendNowClaimTx(ctx, tx, oldSessionID, newSessionID, destination); err != nil {
 		return err
 	}
 	return commitAuthorizedSessionTransferTx(

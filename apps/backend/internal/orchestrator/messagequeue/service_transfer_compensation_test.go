@@ -3,9 +3,11 @@ package messagequeue
 import (
 	"context"
 	"errors"
+	"fmt"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestTransferSessionWithPreparationRollsBackPreparationError(t *testing.T) {
@@ -124,6 +126,47 @@ func TestDurableSessionTransferIncludesInFlightOrdinaryAttachment(t *testing.T) 
 	require.Len(t, pending, 1)
 	assert.Equal(t, "session-new", pending[0].Message.SessionID)
 	assert.Equal(t, queued.ID, pending[0].Message.ID)
+}
+
+func TestDurableSessionTransferRebindsPendingSendNowClaimIdentity(t *testing.T) {
+	for _, accepted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("accepted=%t", accepted), func(t *testing.T) {
+			ctx := context.Background()
+			repo := newTestSQLiteRepo(t)
+			sourceIdentity := QueueSessionIdentity{
+				TaskID:               "task",
+				SessionID:            "session-old",
+				SessionIncarnationID: "incarnation-old",
+			}
+			destinationIdentity := QueueSessionIdentity{
+				TaskID:               sourceIdentity.TaskID,
+				SessionID:            "session-new",
+				SessionIncarnationID: "incarnation-new",
+			}
+			seedQueueSessionIdentity(t, repo, sourceIdentity)
+			seedQueueSessionIdentity(t, repo, destinationIdentity)
+			service := newAutoMergeTestServiceWithRepository(t, repo, DefaultMaxPerSession)
+			source, err := service.QueueMessageWithMetadataForSession(
+				ctx, sourceIdentity, "handoff", "", "user", false, nil, nil,
+			)
+			require.NoError(t, err)
+			claim, err := service.ClaimSendNowForSession(ctx, sourceIdentity, []QueuedMessage{*source})
+			require.NoError(t, err)
+			if accepted {
+				require.NoError(t, service.MarkPendingSendNowClaimAccepted(ctx, claim))
+			}
+
+			require.NoError(t, service.TransferSessionWithDurableAttachmentPreparation(
+				ctx, sourceIdentity.TaskID, sourceIdentity.SessionID, destinationIdentity.SessionID, nil, nil,
+			))
+			pending, err := service.ListPendingSendNowClaims(ctx)
+			require.NoError(t, err)
+			require.Len(t, pending, 1)
+			assert.Equal(t, destinationIdentity, pending[0].Claim.Identity)
+			assert.Equal(t, pending[0].Claim.SessionGeneration, pending[0].Claim.OperationGeneration)
+			assert.Equal(t, accepted, pending[0].Accepted)
+		})
+	}
 }
 
 func TestDurableSessionTransferIncludesCleanupOnlyAttachmentClaim(t *testing.T) {

@@ -133,7 +133,9 @@ func TestTransferredIdentityAwareSendNowClaimReconcilesAfterProcessRestart(t *te
 					t.Fatal(err)
 				}
 			}
-			if err := queue.TransferSessionIdentities(ctx, sourceIdentity, destinationIdentity); err != nil {
+			if err := queue.TransferSessionWithDurableAttachmentPreparation(
+				ctx, sourceIdentity.TaskID, sourceIdentity.SessionID, destinationIdentity.SessionID, nil, nil,
+			); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := db.Exec(`DELETE FROM task_sessions WHERE id = ?`, sourceIdentity.SessionID); err != nil {
