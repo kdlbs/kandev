@@ -935,6 +935,10 @@ func (e *Executor) resumeSession(
 	if recoveryAdmission != nil {
 		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
 	}
+	// Selected recovery may replace canonical worktree rows. Reapply the
+	// environment projection after admission so lifecycle receives the
+	// replacement identities rather than the request assembled before repair.
+	e.reuseExistingEnvironment(launchCtx, req, existingEnv)
 	cleanupCtx := resumeOwnedCleanupContext(launchCtx)
 	defer func() { _ = releaseSelectedWorktreeRecovery(cleanupCtx, &recoveryAdmission) }()
 

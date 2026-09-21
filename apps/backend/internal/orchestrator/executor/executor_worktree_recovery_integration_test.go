@@ -118,6 +118,9 @@ func TestWorktreeRecoveryResumeRealStoreFixture(t *testing.T) {
 		if claim == nil || claim.TaskEnvironmentID != environmentID || claim.SessionID != sessionID || claim.SessionIncarnationID != "incarnation-recovery-real-store" {
 			t.Fatalf("lifecycle handoff claim = %+v, want exact durable recovery authority", claim)
 		}
+		if request.WorktreeID == worktreeID || request.WorktreeID == "" {
+			t.Fatalf("lifecycle request worktree ID = %q, want recovered canonical identity", request.WorktreeID)
+		}
 		return &LaunchAgentResponse{AgentExecutionID: "execution-recovery-real-store", Status: v1.AgentStatusStarting}, nil
 	}}
 	exec := newTestExecutor(t, agentManager, repo)
