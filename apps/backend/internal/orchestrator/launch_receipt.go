@@ -38,6 +38,8 @@ type LaunchReceiptFact struct {
 type LaunchReceipt struct {
 	Identity                   LaunchAttemptIdentity `json:"identity"`
 	CatalogAttachmentAttemptID string                `json:"catalog_attachment_attempt_id,omitempty"`
+	RequestedModel             string                `json:"requested_model,omitempty"`
+	EffectiveModel             string                `json:"effective_model,omitempty"`
 	ProcessCreated             LaunchTriState        `json:"process_created"`
 	InferenceStarted           LaunchTriState        `json:"inference_started"`
 	Facts                      []LaunchReceiptFact   `json:"facts,omitempty"`
