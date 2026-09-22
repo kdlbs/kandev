@@ -297,7 +297,10 @@ function TokenUsagePageView({
       freeWidth="actions"
       actionsClassName="min-w-0 max-w-full flex-1 !shrink overflow-x-auto"
       actions={
-        <div className="flex min-w-max items-center gap-2" data-testid="token-usage-topbar-actions">
+        <div
+          className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-x-auto"
+          data-testid="token-usage-topbar-actions"
+        >
           <StatsNavigation />
           <StatsRangeToggle range={range} onChange={onRangeChange} />
           <Button
