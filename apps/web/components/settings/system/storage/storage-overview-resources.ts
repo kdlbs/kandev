@@ -302,29 +302,25 @@ function goCacheResources(
   progress: StorageSourceProgress | undefined,
   managedPath: string,
 ): StorageResource[] {
-  const resources: StorageResource[] = [
-    goCache
-      ? {
-          id: "go-cache",
-          label: t("system:storageGoBuildCache"),
-          value:
-            goCache.available === false || measuredBytes(goCache.size_bytes) === undefined
-              ? t(STORAGE_UNAVAILABLE_VALUE_KEY)
-              : formatGigabytes(measuredBytes(goCache.size_bytes)!),
-          // A filesystem path from the API is never routed through the catalog.
-          detail: goCache.path ?? managedPath,
-          warning: goCache.warning,
-          source: "go_cache",
-          sizeBytes: goCache.available === false ? undefined : measuredBytes(goCache.size_bytes),
-        }
-      : pendingStorageResource(
-          t,
-          "go-cache",
-          t("system:storageGoBuildCache"),
-          progress,
-          "go_cache",
-        ),
-  ];
+  const resources: StorageResource[] = [];
+  if (goCache) {
+    const sizeBytes = goCache.available === false ? undefined : measuredBytes(goCache.size_bytes);
+    resources.push({
+      id: "go-cache",
+      label: t("system:storageGoBuildCache"),
+      value:
+        sizeBytes === undefined ? t(STORAGE_UNAVAILABLE_VALUE_KEY) : formatGigabytes(sizeBytes),
+      // A filesystem path from the API is never routed through the catalog.
+      detail: goCache.path ?? managedPath,
+      warning: goCache.warning,
+      source: "go_cache",
+      sizeBytes,
+    });
+  } else {
+    resources.push(
+      pendingStorageResource(t, "go-cache", t("system:storageGoBuildCache"), progress, "go_cache"),
+    );
+  }
   if (goCache?.unmanaged_path) {
     const sizeBytes =
       goCache.available === false ? undefined : measuredBytes(goCache.unmanaged_size_bytes);
