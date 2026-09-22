@@ -983,8 +983,6 @@ func (s *Service) startCreatedSession(
 	if err := s.persistExactProfileSessionBinding(ctx, launchedSession, exactAssignment); err != nil {
 		return nil, err
 	}
-	s.recordExactProfileLaunchReceipt(ctx, taskID, execution.SessionID, exactAssignment, exactProfileModel(exactAssignment), nil)
-
 	// Record the initial user message and set plan mode metadata after launch.
 	// Note: we do NOT set session state here — the executor sets it to STARTING,
 	// and event handlers (handleAgentReady) transition it to WAITING_FOR_INPUT.
@@ -3001,6 +2999,11 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	if err := s.persistExactProfileSessionBinding(ctx, session, exactAssignment); err != nil {
 		return nil, err
 	}
+	if exactAssignment != nil {
+		options.ExactProfile = true
+		options.ExactProfileModel = exactAssignment.Model
+		options.ExactProfileRevision = exactAssignment.Revision
+	}
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, entryBinding); err != nil {
 		return nil, err
 	}
@@ -3218,6 +3221,7 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		return nil, attemptErr
 	}
 	execution.SessionState = v1.TaskSessionState(readySession.State)
+	s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), nil)
 	seam4Res.consume()
 	persistBranchRecovery()
 
