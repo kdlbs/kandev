@@ -694,8 +694,8 @@ func seedSessionAdmissionClaim(
 	foreignID := "session-state-foreign-" + suffix
 	seedRecoveryClaimEnvironment(t, repo, taskID, environmentID)
 	for _, session := range []*models.TaskSession{
-		{ID: holderID, TaskID: taskID, TaskEnvironmentID: environmentID, State: models.TaskSessionStateWaitingForInput},
-		{ID: foreignID, TaskID: taskID, TaskEnvironmentID: environmentID, State: models.TaskSessionStateWaitingForInput},
+		{ID: holderID, TaskID: taskID, TaskEnvironmentID: environmentID, State: models.TaskSessionStateCreated},
+		{ID: foreignID, TaskID: taskID, TaskEnvironmentID: environmentID, State: models.TaskSessionStateCancelled},
 	} {
 		if err := repo.CreateTaskSession(ctx, session); err != nil {
 			t.Fatalf("CreateTaskSession(%s): %v", session.ID, err)
@@ -711,6 +711,12 @@ func seedSessionAdmissionClaim(
 		recoveryClaimRequest(t, repo, environmentID, taskID, holderID, "operation-state-admission-"+suffix, 1))
 	if err != nil {
 		t.Fatalf("AcquireTaskEnvironmentRecoveryClaim: %v", err)
+	}
+	// The holder acquired while prelaunch. Move it to the legacy surface's
+	// promptable state through the durable fixture boundary so each mutation
+	// can prove that carrying its exact claim remains authorized.
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE task_sessions SET state = ? WHERE id = ?`), models.TaskSessionStateWaitingForInput, holderID); err != nil {
+		t.Fatalf("advance claim holder fixture state: %v", err)
 	}
 	t.Cleanup(func() { _ = repo.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim) })
 	return repo, ctx, claim, holderID, foreignID

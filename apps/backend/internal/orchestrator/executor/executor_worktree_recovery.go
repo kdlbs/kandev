@@ -26,6 +26,16 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 		env.ExecutorType != string(models.ExecutorTypeWorktree) {
 		return nil, nil
 	}
+	// A fresh launch may have reserved a creating environment before its
+	// session incarnation and worktree identities are durable. It has no
+	// reusable checkout to recover; defer admission until materialization.
+	if env.Status == models.TaskEnvironmentStatusCreating && env.MaterializationSessionID == session.ID &&
+		!environmentHasMaterializedWorktree(env) {
+		return nil, nil
+	}
+	if environmentHasRecoveryRepositoryWithoutWorktreeIdentity(env) {
+		return nil, fmt.Errorf("worktree recovery admission: selected environment has a repository without a durable worktree identity")
+	}
 	if env.TaskID == "" || env.OwnershipGeneration <= 0 {
 		return nil, fmt.Errorf("worktree recovery admission: selected environment identity is incomplete")
 	}
@@ -101,6 +111,33 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 		}
 	}
 	return admission, nil
+}
+
+func environmentHasMaterializedWorktree(env *models.TaskEnvironment) bool {
+	if env == nil {
+		return false
+	}
+	for _, repo := range env.Repos {
+		if repo != nil && (repo.WorktreeID != "" || repo.WorktreePath != "" || repo.WorktreeBranch != "") {
+			return true
+		}
+	}
+	return false
+}
+
+func environmentHasRecoveryRepositoryWithoutWorktreeIdentity(env *models.TaskEnvironment) bool {
+	if env == nil {
+		return false
+	}
+	for _, repo := range env.Repos {
+		if repo == nil || repo.RepositoryID == "" || repo.DeletedAt != nil || (repo.Status != "" && repo.Status != "active") {
+			continue
+		}
+		if repo.WorktreeID == "" || repo.WorktreePath == "" || repo.WorktreeBranch == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Executor) repositoryLocalPath(ctx context.Context, repositoryID string) (string, error) {

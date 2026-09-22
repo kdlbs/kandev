@@ -20,6 +20,43 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+func TestEnvironmentHasMaterializedWorktree(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		env  *models.TaskEnvironment
+		want bool
+	}{
+		{name: "fresh", env: &models.TaskEnvironment{}, want: false},
+		{name: "empty slot", env: &models.TaskEnvironment{Repos: []*models.TaskEnvironmentRepo{{}}}, want: false},
+		{name: "worktree identity", env: &models.TaskEnvironment{Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "worktree"}}}, want: true},
+		{name: "worktree path", env: &models.TaskEnvironment{Repos: []*models.TaskEnvironmentRepo{{WorktreePath: "/tasks/worktree"}}}, want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := environmentHasMaterializedWorktree(test.env); got != test.want {
+				t.Fatalf("environmentHasMaterializedWorktree() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestEnvironmentHasRecoveryRepositoryWithoutWorktreeIdentity(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		env  *models.TaskEnvironment
+		want bool
+	}{
+		{name: "repo free", env: &models.TaskEnvironment{}, want: false},
+		{name: "complete", env: &models.TaskEnvironment{Repos: []*models.TaskEnvironmentRepo{{RepositoryID: "repository", WorktreeID: "worktree", WorktreePath: "/tasks/worktree", WorktreeBranch: "branch", Status: "active"}}}, want: false},
+		{name: "missing identity", env: &models.TaskEnvironment{Repos: []*models.TaskEnvironmentRepo{{RepositoryID: "repository", Status: "active"}}}, want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := environmentHasRecoveryRepositoryWithoutWorktreeIdentity(test.env); got != test.want {
+				t.Fatalf("environmentHasRecoveryRepositoryWithoutWorktreeIdentity() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestWorktreeRecoveryResumeRealStoreFixture(t *testing.T) {
 	ctx := context.Background()
 	const (

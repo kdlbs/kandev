@@ -175,7 +175,7 @@ func (m *Manager) AdmitRecovery(ctx context.Context, req RecoveryAdmissionReques
 		})
 		if err != nil {
 			_ = releaseLocks(ctx)
-			return nil, recoveryAdmissionError(req, err.Error())
+			return nil, recoveryAdmissionErrorWithCause(req, err)
 		}
 		claimOwned = true
 	}
@@ -476,6 +476,10 @@ func recoveryClaimMatchesRequest(claim *models.TaskEnvironmentRecoveryClaim, req
 
 func recoveryAdmissionError(req RecoveryAdmissionRequest, reason string) error {
 	return &WorktreeRecoveryError{TaskID: req.TaskID, State: "admission", Reason: reason}
+}
+
+func recoveryAdmissionErrorWithCause(req RecoveryAdmissionRequest, cause error) error {
+	return &WorktreeRecoveryError{TaskID: req.TaskID, State: "admission", Reason: cause.Error(), Cause: cause}
 }
 
 func recoverySlotError(taskID, checkout, reason string) error {
