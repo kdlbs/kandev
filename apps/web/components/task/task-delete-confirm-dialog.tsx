@@ -314,7 +314,7 @@ export function TaskDeleteConfirmDialog({
   const cleanup = isBulkOperation
     ? getBulkCleanupSummary(executorTypes ?? [])
     : getCleanupSummary(executorType, {
-        sharesParentWorkspace: sharesParentWorkspace ?? storeSharesParentWorkspace,
+        sharesParentWorkspace: storeSharesParentWorkspace ?? sharesParentWorkspace,
       });
 
   const {

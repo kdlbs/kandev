@@ -494,6 +494,25 @@ describe("TaskDeleteConfirmDialog inherited-parent workspace copy", () => {
     ).toBeTruthy();
     expect(screen.queryByText(/worktree and its branch will be deleted/i)).toBeNull();
   });
+
+  it("prefers the live task-store mode over stale caller context", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="Child task"
+        taskId={TASK_ID}
+        executorType="worktree"
+        sharesParentWorkspace
+        onConfirm={() => {}}
+      />,
+      [{ id: TASK_ID, workspaceMode: "new_workspace" }],
+    );
+
+    expect(screen.getByText(/worktree and its branch will be deleted/i)).toBeTruthy();
+    expect(screen.queryByText(/shares its parent's workspace/i)).toBeNull();
+  });
 });
 
 describe("TaskDeleteConfirmDialog still-working guard", () => {
