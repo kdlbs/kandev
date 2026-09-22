@@ -56,12 +56,14 @@ type Provider struct {
 
 // Analysis describes the configured cache without changing it.
 type Analysis struct {
-	Path               string `json:"path"`
-	SizeBytes          int64  `json:"size_bytes"`
-	Owned              bool   `json:"owned"`
-	Enabled            bool   `json:"enabled"`
-	UnmanagedPath      string `json:"unmanaged_path,omitempty"`
-	UnmanagedSizeBytes int64  `json:"unmanaged_size_bytes,omitempty"`
+	Path          string `json:"path"`
+	SizeBytes     int64  `json:"size_bytes"`
+	Owned         bool   `json:"owned"`
+	Enabled       bool   `json:"enabled"`
+	UnmanagedPath string `json:"unmanaged_path,omitempty"`
+	// Zero is a valid measured size for a distinct user cache. Keep the field
+	// in the successful response when that cache was measured.
+	UnmanagedSizeBytes int64 `json:"unmanaged_size_bytes"`
 }
 
 // CleanupResult describes one cache rotation.

@@ -315,7 +315,17 @@ The Storage page also reports **System temporary folders** as a read-only footpr
 service's effective temporary folder and, on Unix, `/tmp` when it resolves to a distinct folder.
 Resolved roots, measured size, and partial or unavailable status are shown. This footprint is
 informational and can overlap counted categories, so it is excluded from **Total counted**. It has
-no cleanup action and does not claim ownership of any path.
+no cleanup action and does not claim ownership of any path. The analysis rows use the measured byte
+values to order categories from largest to smallest. A decorative bar compares each displayed
+measurement with the largest displayed measurement; zero measurements have an empty bar, and
+unknown or unavailable measurements have no bar. These bars compare footprints and do not change
+**Total counted**, capacity thresholds, or cleanup behavior. Overlapping categories can therefore
+appear in more than one row.
+
+A temporary-folder scan that reaches its deadline keeps the sampled bytes, partial status, and
+skipped-entry counts. The expanded row shows one timeout explanation and keeps a bounded set of
+other diagnostic examples. A timeout does not authorize cleanup or indicate that the sampled size
+is a final folder total.
 
 The Host tab separately reports **Temporary Kandev files** created by services that need a short-lived
 directory under the host temporary root. Each current file is registered in the Kandev database

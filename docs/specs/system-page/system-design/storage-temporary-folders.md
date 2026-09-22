@@ -143,6 +143,10 @@ Permanent deletion retains its existing reporting and retention deadline.
 
 ## Presentation
 
+The current [storage analysis presentation design](storage-analysis-presentation.md) extends row ordering
+and timeout feedback. Its measured size order supersedes the adjacency described below.
+The existing reader, ownership, totals, and cleanup contracts remain authoritative.
+
 Add a System temporary folders disclosure beside Kandev temporary artifacts in the analysis section.
 Show full folder size and the visible note: `Informational. Can overlap counted categories.`
 Expanded content shows resolved roots, partial status, and measurement limitations.
