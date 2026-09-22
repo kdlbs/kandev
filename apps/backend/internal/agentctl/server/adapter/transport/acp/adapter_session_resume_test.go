@@ -18,6 +18,12 @@ type sessionResumeAgent struct {
 	resumeRequest acpsdk.ResumeSessionRequest
 	resumeError   error
 	resumeCalls   int
+	loadResponse  acpsdk.LoadSessionResponse
+}
+
+func (a *sessionResumeAgent) LoadSession(ctx context.Context, req acpsdk.LoadSessionRequest) (acpsdk.LoadSessionResponse, error) {
+	_, err := a.sessionRequestCaptureAgent.LoadSession(ctx, req)
+	return a.loadResponse, err
 }
 
 func (a *sessionResumeAgent) ResumeSession(_ context.Context, req acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
@@ -46,6 +52,8 @@ func newSessionResumeAdapter(t *testing.T, load, resume bool) (*Adapter, *sessio
 	_ = acpsdk.NewAgentSideConnection(fake, fromAgent, toAgent)
 	a := newTestAdapter()
 	t.Cleanup(func() { _ = a.Close() })
+	a.agentID = codexAgentID
+	a.dialect = newACPDialect(codexAgentID)
 	a.acpConn = conn
 	a.cfg.WorkDir = t.TempDir()
 	a.capabilities.LoadSession = load
@@ -113,6 +121,47 @@ func TestLoadSessionFallsBackToReplayOnlyWhenResumeUnsupported(t *testing.T) {
 				t.Fatalf("resume calls=%d advertised=%t", fake.resumeCalls, advertised)
 			}
 		})
+	}
+}
+
+func TestLoadSessionPreservesLegacyModelsForOtherDialects(t *testing.T) {
+	for _, agentID := range []string{"auggie", claudeAgentID, "unknown-agent"} {
+		t.Run(agentID, func(t *testing.T) {
+			a, fake := newSessionResumeAdapter(t, true, true)
+			a.agentID = agentID
+			a.dialect = newACPDialect(agentID)
+			if err := json.Unmarshal([]byte(`{"models":{
+				"currentModelId":"legacy-model",
+				"availableModels":[{"modelId":"legacy-model","name":"Legacy model"}]
+			}}`), &fake.loadResponse); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.LoadSession(t.Context(), "saved-session", nil); err != nil {
+				t.Fatalf("LoadSession: %v", err)
+			}
+			if fake.resumeCalls != 0 || fake.loadRequest.SessionId != "saved-session" || fake.sessionCounter != 0 {
+				t.Fatalf("want compatible load, got resume=%d load=%q new=%d",
+					fake.resumeCalls, fake.loadRequest.SessionId, fake.sessionCounter)
+			}
+			models := findSessionModelsEvent(t, drainEvents(a))
+			if models.CurrentModelID != "legacy-model" || len(models.SessionModels) != 1 {
+				t.Fatalf("load lost legacy model state: %+v", models)
+			}
+			if state := a.GetSessionModelState(); state == nil || len(state.Models) != 1 || state.Models[0].ModelID != "legacy-model" {
+				t.Fatalf("cached model state = %+v", state)
+			}
+		})
+	}
+}
+
+func TestLoadSessionRejectsIncompatibleResumeOnlyDialect(t *testing.T) {
+	a, fake := newSessionResumeAdapter(t, false, true)
+	a.dialect = newACPDialect("auggie")
+	if err := a.LoadSession(t.Context(), "saved-session", nil); err == nil {
+		t.Fatal("expected unsupported session loading")
+	}
+	if fake.resumeCalls != 0 || fake.loadRequest.SessionId != "" || fake.sessionCounter != 0 {
+		t.Fatal("unsupported restore sent a session request")
 	}
 }
 

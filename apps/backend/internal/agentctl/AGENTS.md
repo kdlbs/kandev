@@ -86,7 +86,9 @@ Grok ACP currently exposes neither per-turn cost nor subscription quota/reset va
 
 ## ACP Protocol
 
-JSON-RPC 2.0 over stdin/stdout between agentctl and agent process. Requests: `initialize`, `session/new`, `session/load`, `session/prompt`, `session/cancel`, `session/close`. Notifications: `session/update` with types `message_chunk`, `tool_call`, `tool_update`, `complete`, `error`, `permission_request`, `context_window`.
+JSON-RPC 2.0 over stdin/stdout between agentctl and agent process. Requests: `initialize`, `session/new`, `session/load`, `session/resume`, `session/prompt`, `session/cancel`, `session/close`. Notifications: `session/update` with types `message_chunk`, `tool_call`, `tool_update`, `complete`, `error`, `permission_request`, `context_window`.
+
+Codex's dialect prefers advertised `session/resume` to restore the saved conversation without replaying its history. Other dialects retain `session/load`, whose SDK response preserves legacy model state. If Codex advertises resume but returns method-not-found, the adapter uses `session/load` only when advertised and the context is still active. Restore traces contain separate `session.resume` and `session.load` spans for the actual requests.
 
 ### ACP permission identity and injected MCP approval
 

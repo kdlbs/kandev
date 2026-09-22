@@ -29,6 +29,7 @@ const (
 // "started" activity are creation signals.
 func newCodexACPDialect() acpDialect {
 	return acpDialect{
+		resumeWithoutReplay:  true,
 		subagentFrame:        parseCodexSubagentFrame,
 		normalizePromptUsage: normalizeCodexPromptUsage,
 		mcpToolCall:          parseCodexMCPToolCall,

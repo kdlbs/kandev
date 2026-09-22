@@ -12,7 +12,7 @@ Two resume strategies exist depending on agent capabilities:
 
 | Strategy | When used | What happens |
 |----------|-----------|--------------|
-| **Native resume** (ACP `session/load`) | Agent has `NativeSessionResume: true` and a stored resume token | Agent restores its own conversation context via ACP protocol |
+| **Native resume** (ACP `session/resume` or `session/load`) | Agent has `NativeSessionResume: true` and a stored resume token | Agent restores its own conversation context via ACP protocol |
 | **History injection** (fresh start) | Agent has `HistoryContextInjection: true`, no resume token | Agent starts fresh; conversation history is injected into the first user prompt |
 
 Agents with neither flag simply boot idle with no context restoration.
@@ -123,7 +123,7 @@ This is where the system decides whether to auto-prompt the agent:
 ```go
 // Case A: Native resume -- has resume token
 if running.ResumeToken != "" && startAgent {
-    req.ACPSessionID = running.ResumeToken  // triggers session/load
+    req.ACPSessionID = running.ResumeToken  // restores the saved ACP session
     req.TaskDescription = ""                 // don't auto-prompt
 }
 
@@ -154,20 +154,30 @@ Runs `StartAgentProcess` in a background goroutine. On success, the callback res
 1. Wait for agentctl HTTP server ready (60s timeout)
 2. Configure agent (command, env, working directory)
 3. Start agent subprocess via agentctl
-4. Initialize ACP session (`session/new` or `session/load`)
+4. Initialize ACP session (`session/new`, `session/resume`, or `session/load`)
 5. Call `dispatchInitialPrompt()`
 
-### ACP session creation: `session/load` vs `session/new`
+### ACP session restoration and creation
 
 **`internal/agent/lifecycle/session.go`** ~line 118
 
 ```
 If agent has NativeSessionResume: true AND existingSessionID is non-empty:
-  -> Try session/load (ACP protocol)
-  -> On failure (method not found / capability false): fallback to session/new
+  -> Codex with advertised resume: session/resume without history replay
+     -> Method not found, load advertised, context active: session/load of the same session
+  -> Other agents or Codex without advertised resume: session/load
+  -> Only explicitly unsupported or unknown-session errors may fall back to session/new
+  -> Transport, authentication, cancellation, and inconclusive errors preserve the saved identity
 Otherwise:
   -> session/new
 ```
+
+The Codex dialect opts into replay-free resume because its response supplies typed
+configuration and model state. Other dialects retain `session/load` to preserve
+legacy model responses that the SDK's resume response cannot represent. Kandev
+already stores the displayed conversation, so Codex can restore its provider
+context without transferring that history again. Traces distinguish the actual
+`acp.session.resume` and `acp.session.load` requests beneath `acp.session.restore`.
 
 ### `dispatchInitialPrompt` (three-way switch)
 
@@ -183,7 +193,7 @@ Otherwise:
 
 ## History Injection
 
-For agents that cannot natively restore their session (no ACP `session/load`), conversation history can be injected into the first user prompt after resume. This is opt-in via the `HistoryContextInjection` flag on `SessionConfig`.
+For agents that cannot natively restore their session, conversation history can be injected into the first user prompt after resume. This is opt-in via the `HistoryContextInjection` flag on `SessionConfig`.
 
 ### Recording
 
@@ -306,7 +316,7 @@ The session is NOT marked as failed -- the user can send a new message to start 
 | Agent | NativeSessionResume | HistoryContextInjection | Notes |
 |-------|:---:|:---:|-------|
 | Claude Code | - | - | Uses `--resume` CLI flag with stored resume token |
-| Codex | yes | - | ACP `session/load` restores context |
+| Codex | yes | - | Prefers advertised ACP `session/resume` without history replay; falls back to `session/load` when resume is unsupported |
 | Copilot | yes | - | ACP `session/load` restores context |
 | Auggie | yes | - | ACP `session/load` restores context (v0.18.1+) |
 | Gemini | - | - | Boots idle, no context restoration |
@@ -325,7 +335,7 @@ Persists runtime state for a session across backend restarts:
 
 | Field | Purpose |
 |-------|---------|
-| `ResumeToken` | ACP session ID (used for `session/load` or `--resume` CLI flag) |
+| `ResumeToken` | ACP session ID (used for `session/resume`, `session/load`, or `--resume` CLI flag) |
 | `LastMessageUUID` | For `--resume-session-at` flag |
 | `ContainerID` | Docker container ID (for recovery) |
 | `AgentctlURL` / `AgentctlPort` | agentctl connection info |
@@ -338,7 +348,7 @@ The resume token is stored/updated in `storeResumeToken()` (`internal/orchestrat
 - `handleSessionStatusEvent` -- on session status updates
 - `handleCompleteStreamEvent` -- on stream completion
 
-The token is always stored regardless of `NativeSessionResume`. Agents with native resume use it for ACP `session/load`; others (e.g., Claude Code) use it for their `--resume` CLI flag.
+The token is always stored regardless of `NativeSessionResume`. Agents with native resume use it for ACP `session/resume` or `session/load`; others (e.g., Claude Code) use it for their `--resume` CLI flag.
 
 ---
 
