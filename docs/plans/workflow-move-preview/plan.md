@@ -256,6 +256,10 @@ Final post-remediation verification passed on 2026-09-15:
 
 ## Risks
 
+Follow-up: [Preview stability repair](../workflow-move-preview-stability/plan.md)
+narrows live invalidation. The results above describe the original delivery;
+the follow-up package is complete and owns its implementation and verification.
+
 - Selection helpers can write provenance or warnings; preview must isolate pure decisions.
 - Live provider rejection and deferred moves cannot be guaranteed by a hover snapshot.
 - Runtime configuration can differ from mutable profile rows.

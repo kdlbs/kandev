@@ -1203,11 +1203,10 @@ func (s *Service) updateTaskSessionStateWithHook(
 				zap.Error(err))
 		}
 	}
-	// Work has resumed: a session entering STARTING/RUNNING clears the
-	// startup interruption marker and republishes the task so open clients
-	// drop the red interruption icon. No-op when the marker is absent.
+	// Entering STARTING/RUNNING only records a recovery attempt. The durable
+	// interruption marker is cleared after the provider confirms boot/readiness,
+	// so failed or cancelled attempts remain visible to the user.
 	if nextState == models.TaskSessionStateStarting || nextState == models.TaskSessionStateRunning {
-		s.clearTaskInterruptedMarker(ctx, taskID)
 		s.clearTaskAutoStartFailedMarker(ctx, taskID)
 	}
 	if authoritativeUpdatedAt == nil {
@@ -1327,6 +1326,7 @@ func (s *Service) logTaskSessionStateWriteError(
 func (s *Service) transitionTaskSessionState(
 	ctx context.Context,
 	taskID, sessionID string,
+	expectedState *models.TaskSessionState,
 	nextState models.TaskSessionState,
 	errorMessage string,
 	onChanged func(),
@@ -1342,6 +1342,7 @@ func (s *Service) transitionTaskSessionState(
 					admittedCtx,
 					taskID,
 					sessionID,
+					expectedState,
 					nextState,
 					errorMessage,
 					onChanged,
@@ -1357,6 +1358,9 @@ func (s *Service) transitionTaskSessionState(
 	}
 	if session == nil {
 		return false, "", fmt.Errorf("get session before state transition: session %q is nil", sessionID)
+	}
+	if expectedState != nil && session.State != *expectedState {
+		return false, session.State, nil
 	}
 	if isTerminalSessionState(session.State) || session.State == nextState {
 		return false, session.State, nil
@@ -2174,9 +2178,8 @@ func (s *Service) setSessionStartingWithOptions(
 	}
 
 	// The launch path moves a session to STARTING without going through
-	// updateTaskSessionStateWithHook, so clear the interruption marker here
-	// too (no-op when absent).
-	s.clearTaskInterruptedMarker(ctx, taskID)
+	// updateTaskSessionStateWithHook. It records an attempt only; the
+	// interruption marker is cleared after confirmed provider readiness.
 	s.clearTaskAutoStartFailedMarker(ctx, taskID)
 
 	if publishSession != nil {
@@ -2187,14 +2190,39 @@ func (s *Service) setSessionStartingWithOptions(
 
 // clearTaskInterruptedMarker removes the startup interruption marker from a
 // task and republishes task.updated when it was actually present, so open
-// clients drop the red interruption icon. Called from the session-start
-// funnel when a session enters STARTING/RUNNING — work has resumed, so the
-// task is no longer interrupted. No-op when the marker is absent.
-func (s *Service) clearTaskInterruptedMarker(ctx context.Context, taskID string) {
+// clients drop the warning icon. Callers invoke it only after provider
+// readiness confirms that recovery succeeded. No-op when the marker is absent.
+func (s *Service) clearTaskInterruptedMarker(
+	ctx context.Context,
+	taskID string,
+	expectedMarker string,
+) {
 	if taskID == "" {
 		return
 	}
-	removed, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyInterruptedAt)
+	var (
+		removed bool
+		err     error
+	)
+	if strings.TrimSpace(expectedMarker) == "" {
+		// A recovery callback without a valid immutable marker snapshot fails
+		// closed. There is no safe unconditional removal path.
+		return
+	}
+	if remover, ok := s.repo.(interface {
+		RemoveTaskMetadataKeyIfValue(context.Context, string, string, string) (bool, error)
+	}); ok {
+		removed, err = remover.RemoveTaskMetadataKeyIfValue(
+			ctx, taskID, models.MetaKeyInterruptedAt, expectedMarker,
+		)
+	} else {
+		// A read followed by an unconditional legacy removal is not a
+		// compare-and-set. Refuse to clear when the adapter cannot provide the
+		// guarded primitive so a delayed callback cannot erase a newer marker.
+		s.logger.Warn("skipping interrupted-marker clear without compare-and-set support",
+			zap.String("task_id", taskID))
+		return
+	}
 	if err != nil {
 		s.logger.Warn("failed to clear interrupted marker",
 			zap.String("task_id", taskID),
@@ -2216,9 +2244,9 @@ func (s *Service) clearTaskInterruptedMarker(ctx context.Context, taskID string)
 
 // clearTaskAutoStartFailedMarker removes the auto-start-failure marker from a
 // task and republishes task.updated when it was actually present, so open
-// clients drop the failure badge. Called from the same session-start funnel
-// as clearTaskInterruptedMarker: a session entering STARTING/RUNNING means an
-// agent did launch, so any earlier auto-start failure no longer applies.
+// clients drop the failure badge. It shares the session-start funnel with the
+// interruption marker, but remains clear at launch admission because it means
+// the auto-start request itself was accepted.
 // No-op when the marker is absent.
 func (s *Service) clearTaskAutoStartFailedMarker(ctx context.Context, taskID string) {
 	if taskID == "" {
@@ -2443,10 +2471,10 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 		return
 	}
 
-	s.taskRuntimeStateMu.Lock()
-	defer s.taskRuntimeStateMu.Unlock()
 	ctx, releaseCeilingEntry := s.lockCeilingEntryAdmission(ctx, taskID)
 	defer releaseCeilingEntry()
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
 
 	if completedSessionID != "" {
 		if session, err := s.repo.GetTaskSession(ctx, completedSessionID); err == nil && session != nil && isWorkingSessionState(session.State) {
@@ -2699,7 +2727,6 @@ func (s *Service) setQueuedSessionRunningForIdentity(
 	session.UpdatedAt = updatedAt
 	if oldState != models.TaskSessionStateRunning {
 		s.reconcileRunningTaskStateLocked(ctx, identity.TaskID, identity.SessionID)
-		s.clearTaskInterruptedMarker(ctx, identity.TaskID)
 		s.clearTaskAutoStartFailedMarker(ctx, identity.TaskID)
 		s.publishTaskSessionStateChanged(
 			ctx,
@@ -3282,18 +3309,29 @@ func (s *Service) handleOfficeTurnComplete(
 	return true
 }
 
-// handleAgentPlanEvent handles agent_plan events from tool calls (e.g. ExitPlanMode)
-// and creates a dedicated agent_plan message in the session.
+// handleAgentPlanEvent handles agent_plan events from tool calls (e.g. ExitPlanMode).
 func (s *Service) handleAgentPlanEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload.SessionID == "" || payload.Data.PlanContent == "" || s.messageCreator == nil {
 		return
 	}
 	sessionID := payload.SessionID
-	if err := s.messageCreator.CreateSessionMessage(
-		ctx, payload.TaskID, payload.Data.PlanContent, sessionID,
-		string(models.MessageTypeAgentPlan), s.getActiveTurnID(sessionID), nil, false,
+	turnID := s.getActiveTurnID(sessionID)
+	if payload.Data.ToolCallID == "" {
+		if err := s.messageCreator.CreateSessionMessage(
+			ctx, payload.TaskID, payload.Data.PlanContent, sessionID,
+			string(models.MessageTypeAgentPlan), turnID, nil, false,
+		); err != nil {
+			s.logger.Error("failed to create uncorrelated agent plan message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return
+	}
+	if err := s.messageCreator.UpsertAgentPlanMessage(
+		ctx, payload.TaskID, payload.Data.ToolCallID, sessionID, payload.Data.PlanContent, turnID,
 	); err != nil {
-		s.logger.Error("failed to create agent plan message",
+		s.logger.Error("failed to upsert agent plan message",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))

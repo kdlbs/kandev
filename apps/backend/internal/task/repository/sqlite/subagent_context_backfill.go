@@ -12,6 +12,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/startup"
 )
 
 const (
@@ -45,7 +46,7 @@ func (r *Repository) warnSubagentContextMigration(name string, err error) {
 // both, and having each key's own INSERT use ON CONFLICT DO NOTHING, is what
 // lets a partial pre-existing pair repair itself on the next boot without a
 // second mechanism.
-func (r *Repository) migrateSubagentContextBackfill() {
+func (r *Repository) migrateSubagentContextBackfill(ctx context.Context) {
 	capturePresent, err := r.subagentContextActivationKeyPresent(subagentContextCaptureSinceKey)
 	if err != nil {
 		r.warnSubagentContextMigration(subagentContextBackfillMigrationName+".guard", err)
@@ -57,9 +58,15 @@ func (r *Repository) migrateSubagentContextBackfill() {
 		return
 	}
 	if capturePresent && throughPresent {
+		// Both activation keys are already written: the backfill already
+		// completed on an earlier boot, so the step is never opened. Opening
+		// and immediately ending it here would flash a step at the operator
+		// on every normal boot after the first.
 		return
 	}
 
+	startup.BeginStep(ctx, startup.StepSubagentContextBackfill)
+	defer startup.EndStep(ctx, startup.StepSubagentContextBackfill)
 	if err := r.migrateSubagentContextBackfillUnsafe(); err != nil {
 		r.warnSubagentContextMigration(subagentContextBackfillMigrationName, err)
 	}

@@ -66,6 +66,7 @@ func insertWorkflow(t *testing.T, db *sqlx.DB, id, name string) {
 type mockWorkflowProvider struct {
 	workflows        []*taskmodels.Workflow
 	getWorkflowCalls int
+	deleted          []string
 	// forceUpdateWorkflowErr, when set, makes UpdateWorkflow fail without
 	// mutating state - used to test that a rebind Warn never fires for a
 	// change that was not actually persisted.
@@ -121,6 +122,17 @@ func (m *mockWorkflowProvider) UpdateWorkflow(_ context.Context, workflow *taskm
 		}
 	}
 	return fmt.Errorf("workflow %s not found", workflow.ID)
+}
+
+func (m *mockWorkflowProvider) DeleteWorkflow(_ context.Context, id string) error {
+	m.deleted = append(m.deleted, id)
+	for i, wf := range m.workflows {
+		if wf.ID == id {
+			m.workflows = append(m.workflows[:i], m.workflows[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("workflow %s not found", id)
 }
 
 func (m *mockWorkflowProvider) addWorkflow(id, workspaceID, name string) {

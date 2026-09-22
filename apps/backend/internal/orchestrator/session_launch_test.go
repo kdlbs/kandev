@@ -189,7 +189,7 @@ func TestValidateLaunchActivationSource(t *testing.T) {
 	}
 }
 
-func TestPassiveLaunchResponseSuppressesParkedSession(t *testing.T) {
+func TestPassiveLaunchResponseAllowsParkedSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
@@ -213,20 +213,14 @@ func TestPassiveLaunchResponseSuppressesParkedSession(t *testing.T) {
 	}
 
 	service := &Service{repo: repo}
-	response, err := service.LaunchSession(ctx, &LaunchSessionRequest{
+	response := service.passiveLaunchResponse(ctx, &LaunchSessionRequest{
 		TaskID:           "task1",
 		SessionID:        "session1",
 		Intent:           IntentResume,
 		ActivationSource: LaunchActivationSourceSessionOpen,
-	})
-	if err != nil {
-		t.Fatalf("LaunchSession: %v", err)
-	}
-	if response == nil || response.ActivationDisposition != "suppressed" {
-		t.Fatalf("passive parked launch response = %#v, want suppressed disposition", response)
-	}
-	if response.ActivationReason != autoResumeBlockedWorkflowParked {
-		t.Fatalf("passive parked launch reason = %q, want %q", response.ActivationReason, autoResumeBlockedWorkflowParked)
+	}, IntentResume)
+	if response != nil {
+		t.Fatalf("passive parked launch response = %#v, want no suppression", response)
 	}
 	updated, err := repo.GetTaskSession(ctx, "session1")
 	if err != nil {
@@ -359,7 +353,7 @@ func TestClearWorkflowParkingForSessionPreservesNewerMarkerAndStopIntent(t *test
 	}
 }
 
-func TestPassiveLaunchResponseBlocksAmbiguousLegacyParking(t *testing.T) {
+func TestPassiveLaunchResponseAllowsLegacyStopIntent(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
@@ -383,18 +377,14 @@ func TestPassiveLaunchResponseBlocksAmbiguousLegacyParking(t *testing.T) {
 	}
 
 	service := &Service{repo: repo}
-	response, err := service.LaunchSession(ctx, &LaunchSessionRequest{
+	response := service.passiveLaunchResponse(ctx, &LaunchSessionRequest{
 		TaskID:           "task1",
 		SessionID:        "session1",
 		Intent:           IntentResume,
 		ActivationSource: LaunchActivationSourceSessionOpen,
-	})
-	if err != nil {
-		t.Fatalf("LaunchSession: %v", err)
-	}
-	if response == nil || response.ActivationDisposition != "suppressed" ||
-		response.ActivationReason != autoResumeBlockedOwnershipUnavailable {
-		t.Fatalf("ambiguous legacy passive response = %#v", response)
+	}, IntentResume)
+	if response != nil {
+		t.Fatalf("legacy stop-intent passive response = %#v, want no suppression", response)
 	}
 }
 

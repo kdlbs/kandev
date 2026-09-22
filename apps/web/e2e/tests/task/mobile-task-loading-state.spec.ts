@@ -105,7 +105,7 @@ test.describe("Mobile task loading state", () => {
       await expect(routeLoading).toBeHidden();
       const session = new SessionPage(testPage);
       const mobileTopBar = testPage
-        .getByTestId("mobile-session-menu")
+        .getByTestId("mobile-task-picker-trigger")
         .locator("xpath=ancestor::header");
       await expect(mobileTopBar.getByText(title, { exact: true })).toBeVisible();
       await expect(session.activeChat().getByText(responseText).last()).toBeVisible({

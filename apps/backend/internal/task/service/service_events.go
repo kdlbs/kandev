@@ -244,6 +244,54 @@ func (s *Service) publishSessionsCancelled(
 	}
 }
 
+// publishSessionRecovered publishes the state transition produced by
+// execution-loss recovery. It mirrors the session.state_changed payload used
+// by cancellation while carrying an empty error message and the recoverable
+// WAITING_FOR_INPUT state.
+func (s *Service) publishSessionRecovered(
+	ctx context.Context,
+	taskID string,
+	oldState models.TaskSessionState,
+	session *models.TaskSession,
+) error {
+	if s.eventBus == nil || session == nil {
+		return nil
+	}
+	sessCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	data := map[string]interface{}{
+		sessionEventFieldTaskID:    taskID,
+		sessionEventFieldSessionID: session.ID,
+		"old_state":                string(oldState),
+		"new_state":                string(session.State),
+		"error_message":            "",
+		"agent_profile_id":         session.AgentProfileID,
+		"agent_profile_snapshot":   session.AgentProfileSnapshot,
+		"is_passthrough":           session.IsPassthrough,
+		"is_primary":               session.IsPrimary,
+		sessionEventFieldUpdatedAt: session.UpdatedAt.Format(time.RFC3339Nano),
+		sessionEventFieldName:      session.Name,
+	}
+	if session.ReviewStatus != models.ReviewStatusNone {
+		data["review_status"] = string(session.ReviewStatus)
+	}
+	if len(session.Metadata) > 0 {
+		data["session_metadata"] = session.Metadata
+	}
+	if session.TaskEnvironmentID != "" {
+		data["task_environment_id"] = session.TaskEnvironmentID
+	}
+	event := bus.NewEvent(events.TaskSessionStateChanged, "task-service", data)
+	if err := s.eventBus.Publish(sessCtx, events.TaskSessionStateChanged, event); err != nil {
+		s.logger.Error("failed to publish session recovery event",
+			zap.String(sessionEventFieldTaskID, taskID),
+			zap.String(sessionEventFieldSessionID, session.ID),
+			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
 // publishTaskEvent publishes task events to the event bus
 func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, oldWorkflowIDs ...string) {
 	s.publishTaskEventWithExtra(ctx, eventType, task, oldState, nil, oldWorkflowIDs...)
@@ -439,6 +487,10 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		// omitted key here would make clearTaskAutoStartFailedMarker's publish
 		// as invisible as the set it is meant to undo.
 		"auto_start_failed": task.Metadata[models.MetaKeyAutoStartFailed] != nil,
+		// Keep the interruption projection explicit on task.updated so a live
+		// client receives the warning immediately after reconciliation writes
+		// the marker; task-merge preserves omitted fields for partial updates.
+		"interrupted": task.Metadata[models.MetaKeyInterruptedAt] != nil,
 		// The human assignee, always sent, never omitted when empty, for the
 		// same reason as auto_start_failed above: the frontend pins the
 		// previous value when the key is absent, so omitting it would make

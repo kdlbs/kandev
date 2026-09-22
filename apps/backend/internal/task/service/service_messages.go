@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/previewfeedback"
 	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -30,6 +31,8 @@ const (
 
 var ErrMessageIDConflict = errors.New("client message id is already used")
 
+var agentPlanMessageIDNamespace = uuid.MustParse("138966de-88bc-49c0-b65f-cbfbac17f729")
+
 type planCommentMessageWriter interface {
 	CreateMessageWithPlanComments(
 		context.Context,
@@ -39,6 +42,37 @@ type planCommentMessageWriter interface {
 		models.TaskSessionState,
 		*messagequeue.QueueAttachmentClaim,
 	) (*models.TaskPlanCommentSnapshot, error)
+}
+
+type taskFeedbackMessageWriter interface {
+	CreateMessageWithTaskFeedback(
+		context.Context,
+		*models.Message,
+		[]models.TaskPlanCommentRef,
+		[]models.TaskPreviewFeedbackRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+	) (*models.TaskPlanCommentSnapshot, *models.TaskPreviewFeedbackSnapshot, error)
+}
+
+type initialTaskBriefTaskFeedbackMessageWriter interface {
+	CreateMessageWithTaskFeedbackWithInitialTaskBrief(
+		context.Context,
+		*models.Message,
+		*admission.InitialTaskBriefCandidate,
+		[]models.TaskPlanCommentRef,
+		[]models.TaskPreviewFeedbackRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+	) (*models.TaskPlanCommentSnapshot, *models.TaskPreviewFeedbackSnapshot, error)
+}
+
+type messageFeedbackSnapshots struct {
+	plan    *models.TaskPlanCommentSnapshot
+	preview *models.TaskPreviewFeedbackSnapshot
+	receipt *models.ConversationMutationReceipt
 }
 
 type queuedPlanCommentMessageWriter interface {
@@ -52,6 +86,35 @@ type queuedPlanCommentMessageWriter interface {
 		*messagequeue.QueueAttachmentClaim,
 		int,
 	) (*models.TaskPlanCommentSnapshot, error)
+}
+
+type queuedTaskFeedbackMessageWriter interface {
+	CreateMessageWithTaskFeedbackAndQueue(
+		context.Context,
+		*models.Message,
+		*messagequeue.QueuedMessage,
+		[]models.TaskPlanCommentRef,
+		[]models.TaskPreviewFeedbackRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+		int,
+	) (*models.TaskPlanCommentSnapshot, *models.TaskPreviewFeedbackSnapshot, error)
+}
+
+type initialTaskBriefQueuedTaskFeedbackMessageWriter interface {
+	CreateMessageWithTaskFeedbackAndQueueWithInitialTaskBrief(
+		context.Context,
+		*models.Message,
+		*messagequeue.QueuedMessage,
+		*admission.InitialTaskBriefCandidate,
+		[]models.TaskPlanCommentRef,
+		[]models.TaskPreviewFeedbackRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+		int,
+	) (*models.TaskPlanCommentSnapshot, *models.TaskPreviewFeedbackSnapshot, error)
 }
 
 type initialTaskBriefMessageWriter interface {
@@ -88,6 +151,13 @@ type conversationMessageReceiptWriter interface {
 	CreateMessageWithConversationReceipt(context.Context, *models.Message) (*models.ConversationMutationReceipt, error)
 	UpdateMessageWithConversationReceipt(context.Context, *models.Message) (*models.ConversationMutationReceipt, error)
 	DeleteMessageWithConversationReceipt(context.Context, string) (*models.ConversationMutationReceipt, error)
+}
+
+type agentPlanMessageWriter interface {
+	UpsertAgentPlanMessageWithConversationReceipt(
+		context.Context,
+		*models.Message,
+	) (*models.Message, *models.ConversationMutationReceipt, bool, error)
 }
 
 type planCommentAdmissionLocker interface {
@@ -168,7 +238,7 @@ func (s *Service) acquireMessageCreateAdmission(
 	messageID string,
 	req *CreateMessageRequest,
 ) (context.Context, func(), error) {
-	if req != nil && len(req.PlanCommentRefs) > 0 {
+	if req != nil && (len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0) {
 		return s.AcquirePlanCommentAndMessageAdmission(ctx, req.TaskID, messageID)
 	}
 	return s.AcquireMessageAdmission(ctx, messageID)
@@ -252,15 +322,15 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 		// as an explicit import and reject same-microsecond creates.
 	}
 
-	snapshot, receipt, err := s.persistMessage(ctx, message, req)
+	snapshots, err := s.persistMessage(ctx, message, req)
 	if err != nil {
 		s.logger.Error("failed to create message", zap.Error(err))
 		return nil, err
 	}
 
 	// Publish message.added event
-	_ = s.publishMessageEvent(ctx, events.MessageAdded, message, receipt)
-	s.publishMessagePlanCommentSnapshot(ctx, snapshot)
+	_ = s.publishMessageEvent(ctx, events.MessageAdded, message, snapshots.receipt)
+	s.publishMessageFeedbackSnapshots(ctx, snapshots)
 
 	s.logger.Info("message created",
 		zap.String("message_id", message.ID),
@@ -334,6 +404,46 @@ type planCommentMessageValidator interface {
 	) error
 }
 
+type taskFeedbackMessageValidator interface {
+	ValidateMessageTaskFeedback(
+		context.Context,
+		string,
+		string,
+		string,
+		[]models.TaskPlanCommentRef,
+		[]models.TaskPreviewFeedbackRef,
+		bool,
+		models.TaskSessionState,
+	) error
+}
+
+// ValidateTaskFeedbackMessage rejects stale preview references before stateful
+// workflow hooks. Persistence repeats this under the final transaction.
+func (s *Service) ValidateTaskFeedbackMessage(
+	ctx context.Context,
+	taskID, sessionID, content string,
+	planRefs []models.TaskPlanCommentRef,
+	previewRefs []models.TaskPreviewFeedbackRef,
+	requirePrimary bool,
+	expectedState models.TaskSessionState,
+) error {
+	if len(previewRefs) == 0 {
+		return s.ValidatePlanCommentMessage(
+			ctx, taskID, sessionID, content, planRefs, requirePrimary, expectedState,
+		)
+	}
+	validator, ok := s.messages.(taskFeedbackMessageValidator)
+	if !ok {
+		return errors.New("task feedback message validation is unavailable")
+	}
+	if len(planRefs) > 0 {
+		content = plancomments.WithPlaceholder(content)
+	}
+	return validator.ValidateMessageTaskFeedback(
+		ctx, taskID, sessionID, content, planRefs, previewRefs, requirePrimary, expectedState,
+	)
+}
+
 // ValidatePlanCommentMessage rejects stale references before callers execute
 // stateful turn-start hooks. Persistence repeats the same validation under its
 // atomic message/comment boundary to close races.
@@ -398,22 +508,42 @@ func (s *Service) CreateQueuedMessageIdempotent(
 	queued.Content = message.Content
 	queued.QueuedBy = messagequeue.QueuedByUser
 
-	writer, ok := s.messages.(queuedPlanCommentMessageWriter)
-	if !ok {
-		return nil, errors.New("queued plan comment message admission is unavailable")
-	}
-	var snapshot *models.TaskPlanCommentSnapshot
+	var snapshots messageFeedbackSnapshots
 	if req.InitialTaskBrief != nil {
-		initialWriter, initialOK := s.messages.(initialTaskBriefQueuedPlanCommentMessageWriter)
-		if !initialOK {
-			return nil, errors.New("queued initial task brief admission is unavailable")
+		if len(req.PreviewFeedbackRefs) > 0 {
+			writer, ok := s.messages.(initialTaskBriefQueuedTaskFeedbackMessageWriter)
+			if !ok {
+				return nil, errors.New("queued preview feedback initial task brief admission is unavailable")
+			}
+			snapshots.plan, snapshots.preview, err = writer.CreateMessageWithTaskFeedbackAndQueueWithInitialTaskBrief(
+				ctx, message, queued, req.InitialTaskBrief, req.PlanCommentRefs, req.PreviewFeedbackRefs,
+				req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim, maxPerSession,
+			)
+		} else {
+			initialWriter, initialOK := s.messages.(initialTaskBriefQueuedPlanCommentMessageWriter)
+			if !initialOK {
+				return nil, errors.New("queued initial task brief admission is unavailable")
+			}
+			snapshots.plan, err = initialWriter.CreateMessageWithPlanCommentsAndQueueWithInitialTaskBrief(
+				ctx, message, queued, req.InitialTaskBrief, req.PlanCommentRefs,
+				req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim, maxPerSession,
+			)
 		}
-		snapshot, err = initialWriter.CreateMessageWithPlanCommentsAndQueueWithInitialTaskBrief(
-			ctx, message, queued, req.InitialTaskBrief, req.PlanCommentRefs,
+	} else if len(req.PreviewFeedbackRefs) > 0 {
+		writer, ok := s.messages.(queuedTaskFeedbackMessageWriter)
+		if !ok {
+			return nil, errors.New("queued task feedback message admission is unavailable")
+		}
+		snapshots.plan, snapshots.preview, err = writer.CreateMessageWithTaskFeedbackAndQueue(
+			ctx, message, queued, req.PlanCommentRefs, req.PreviewFeedbackRefs,
 			req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim, maxPerSession,
 		)
 	} else {
-		snapshot, err = writer.CreateMessageWithPlanCommentsAndQueue(
+		writer, ok := s.messages.(queuedPlanCommentMessageWriter)
+		if !ok {
+			return nil, errors.New("queued plan comment message admission is unavailable")
+		}
+		snapshots.plan, err = writer.CreateMessageWithPlanCommentsAndQueue(
 			ctx, message, queued, req.PlanCommentRefs, req.RequirePrimarySession,
 			req.ExpectedSessionState, req.AttachmentClaim, maxPerSession,
 		)
@@ -427,7 +557,7 @@ func (s *Service) CreateQueuedMessageIdempotent(
 	}
 
 	_ = s.publishMessageEvent(ctx, events.MessageAdded, message)
-	s.publishMessagePlanCommentSnapshot(ctx, snapshot)
+	s.publishMessageFeedbackSnapshots(ctx, &snapshots)
 	s.logger.Info("queued message created with ID",
 		zap.String("message_id", message.ID),
 		zap.String("session_id", message.TaskSessionID),
@@ -443,8 +573,8 @@ func validateQueuedPlanCommentMessage(
 	if id == "" {
 		return errors.New("message id is required for idempotent creation")
 	}
-	if req == nil || len(req.PlanCommentRefs) == 0 {
-		return errors.New("plan comment refs are required for queued message creation")
+	if req == nil || len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 {
+		return errors.New("task feedback refs are required for queued message creation")
 	}
 	if queued == nil {
 		return errors.New("queued message is required")
@@ -510,7 +640,7 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 		return nil, err
 	}
 
-	snapshot, receipt, err := s.createMessageWithRequestRetry(
+	snapshots, err := s.createMessageWithRequestRetry(
 		ctx, message, req, messageCreateMaxRetries, messageCreateRetryDelay,
 	)
 	if err != nil {
@@ -518,8 +648,8 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 	}
 
 	// Publish message.added event
-	_ = s.publishMessageEvent(ctx, events.MessageAdded, message, receipt)
-	s.publishMessagePlanCommentSnapshot(ctx, snapshot)
+	_ = s.publishMessageEvent(ctx, events.MessageAdded, message, snapshots.receipt)
+	s.publishMessageFeedbackSnapshots(ctx, snapshots)
 
 	s.logger.Info("message created with ID",
 		zap.String("message_id", message.ID),
@@ -651,20 +781,19 @@ func (s *Service) createMessageWithRequestRetry(
 	req *CreateMessageRequest,
 	maxRetries int,
 	retryDelay time.Duration,
-) (*models.TaskPlanCommentSnapshot, *models.ConversationMutationReceipt, error) {
+) (*messageFeedbackSnapshots, error) {
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		var snapshot *models.TaskPlanCommentSnapshot
-		var receipt *models.ConversationMutationReceipt
-		snapshot, receipt, err = s.persistMessage(ctx, message, req)
+		var snapshots *messageFeedbackSnapshots
+		snapshots, err = s.persistMessage(ctx, message, req)
 		if err == nil {
-			return snapshot, receipt, nil
+			return snapshots, nil
 		}
 		if ctx.Err() != nil {
-			return nil, nil, ctx.Err()
+			return nil, ctx.Err()
 		}
 		if errors.Is(err, repoerrors.ErrInitialTaskBriefStale) {
-			return nil, nil, err
+			return nil, err
 		}
 		if attempt < maxRetries-1 {
 			s.logger.Debug("failed to create message, retrying",
@@ -679,75 +808,100 @@ func (s *Service) createMessageWithRequestRetry(
 		zap.String("id", message.ID),
 		zap.Int("retries", maxRetries),
 		zap.Error(err))
-	return nil, nil, err
+	return nil, err
 }
 
 func (s *Service) persistMessage(
 	ctx context.Context,
 	message *models.Message,
 	req *CreateMessageRequest,
-) (*models.TaskPlanCommentSnapshot, *models.ConversationMutationReceipt, error) {
-	if len(req.PlanCommentRefs) == 0 {
+) (*messageFeedbackSnapshots, error) {
+	if len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 {
 		if req.InitialTaskBrief != nil {
 			writer, ok := s.messages.(initialTaskBriefMessageWriter)
 			if !ok {
-				return nil, nil, errors.New("initial task brief admission is unavailable")
+				return nil, errors.New("initial task brief admission is unavailable")
 			}
-			return nil, nil, writer.CreateMessageWithInitialTaskBrief(ctx, message, req.InitialTaskBrief)
+			return &messageFeedbackSnapshots{}, writer.CreateMessageWithInitialTaskBrief(ctx, message, req.InitialTaskBrief)
 		}
 		if writer, ok := s.messages.(conversationMessageReceiptWriter); ok {
 			receipt, err := writer.CreateMessageWithConversationReceipt(ctx, message)
-			return nil, receipt, err
+			return &messageFeedbackSnapshots{receipt: receipt}, err
 		}
-		return nil, nil, s.messages.CreateMessage(ctx, message)
+		return &messageFeedbackSnapshots{}, s.messages.CreateMessage(ctx, message)
+	}
+	if len(req.PreviewFeedbackRefs) > 0 {
+		if req.InitialTaskBrief != nil {
+			writer, ok := s.messages.(initialTaskBriefTaskFeedbackMessageWriter)
+			if !ok {
+				return nil, errors.New("preview feedback initial task brief admission is unavailable")
+			}
+			planSnapshot, previewSnapshot, err := writer.CreateMessageWithTaskFeedbackWithInitialTaskBrief(
+				ctx, message, req.InitialTaskBrief, req.PlanCommentRefs, req.PreviewFeedbackRefs,
+				req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim,
+			)
+			return &messageFeedbackSnapshots{plan: planSnapshot, preview: previewSnapshot}, err
+		}
+		writer, ok := s.messages.(taskFeedbackMessageWriter)
+		if !ok {
+			return nil, errors.New("task feedback message admission is unavailable")
+		}
+		planSnapshot, previewSnapshot, err := writer.CreateMessageWithTaskFeedback(
+			ctx, message, req.PlanCommentRefs, req.PreviewFeedbackRefs,
+			req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim,
+		)
+		return &messageFeedbackSnapshots{plan: planSnapshot, preview: previewSnapshot}, err
 	}
 	if req.InitialTaskBrief != nil {
 		writer, ok := s.messages.(initialTaskBriefPlanCommentMessageWriter)
 		if !ok {
-			return nil, nil, errors.New("plan comment initial task brief admission is unavailable")
+			return nil, errors.New("plan comment initial task brief admission is unavailable")
 		}
 		snapshot, err := writer.CreateMessageWithPlanCommentsWithInitialTaskBrief(
 			ctx, message, req.InitialTaskBrief, req.PlanCommentRefs, req.RequirePrimarySession,
 			req.ExpectedSessionState, req.AttachmentClaim,
 		)
-		return snapshot, nil, err
+		return &messageFeedbackSnapshots{plan: snapshot}, err
 	}
 	writer, ok := s.messages.(planCommentMessageWriter)
 	if !ok {
-		return nil, nil, errors.New("plan comment message admission is unavailable")
+		return nil, errors.New("plan comment message admission is unavailable")
 	}
 	snapshot, err := writer.CreateMessageWithPlanComments(
 		ctx, message, req.PlanCommentRefs, req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim,
 	)
-	return snapshot, nil, err
+	return &messageFeedbackSnapshots{plan: snapshot}, err
 }
 
 type planCommentMessageReplayIdentity struct {
-	TaskSessionID  string                      `json:"session_id"`
-	TaskID         string                      `json:"task_id"`
-	TurnID         string                      `json:"turn_id"`
-	Content        string                      `json:"content"`
-	AuthorID       string                      `json:"author_id"`
-	MessageType    string                      `json:"message_type"`
-	Metadata       map[string]interface{}      `json:"metadata"`
-	Refs           []models.TaskPlanCommentRef `json:"refs"`
-	RequirePrimary bool                        `json:"require_primary"`
+	TaskSessionID  string                          `json:"session_id"`
+	TaskID         string                          `json:"task_id"`
+	TurnID         string                          `json:"turn_id"`
+	Content        string                          `json:"content"`
+	AuthorID       string                          `json:"author_id"`
+	MessageType    string                          `json:"message_type"`
+	Metadata       map[string]interface{}          `json:"metadata"`
+	Refs           []models.TaskPlanCommentRef     `json:"refs"`
+	PreviewRefs    []models.TaskPreviewFeedbackRef `json:"preview_refs"`
+	RequirePrimary bool                            `json:"require_primary"`
 }
 
 func preparePlanCommentMessageRequest(req *CreateMessageRequest) error {
-	if req == nil || len(req.PlanCommentRefs) == 0 {
+	if req == nil || len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 {
 		return nil
 	}
-	metadata := make(map[string]interface{}, len(req.Metadata)+2)
+	metadata := make(map[string]interface{}, len(req.Metadata)+4)
 	for key, value := range req.Metadata {
-		if key != plancomments.MetadataRefs && key != plancomments.MetadataRequestFingerprint {
+		if key != plancomments.MetadataRefs && key != plancomments.MetadataRequestFingerprint &&
+			key != previewfeedback.MetadataRefs && key != previewfeedback.MetadataRequestFingerprint {
 			metadata[key] = value
 		}
 	}
 	identity := planCommentMessageReplayIdentity{
 		TaskSessionID: req.TaskSessionID, TaskID: req.TaskID, TurnID: req.TurnID,
 		Content: req.Content, AuthorID: req.AuthorID, MessageType: req.Type,
-		Metadata: metadata, Refs: req.PlanCommentRefs, RequirePrimary: req.RequirePrimarySession,
+		Metadata: metadata, Refs: req.PlanCommentRefs, PreviewRefs: req.PreviewFeedbackRefs,
+		RequirePrimary: req.RequirePrimarySession,
 	}
 	fingerprint, err := plancomments.Fingerprint(identity)
 	if err != nil {
@@ -755,6 +909,8 @@ func preparePlanCommentMessageRequest(req *CreateMessageRequest) error {
 	}
 	metadata[plancomments.MetadataRefs] = req.PlanCommentRefs
 	metadata[plancomments.MetadataRequestFingerprint] = fingerprint
+	metadata[previewfeedback.MetadataRefs] = req.PreviewFeedbackRefs
+	metadata[previewfeedback.MetadataRequestFingerprint] = fingerprint
 	req.Metadata = metadata
 	return nil
 }
@@ -764,12 +920,41 @@ func matchesPlanCommentMessageReplay(existing *models.Message, req *CreateMessag
 		got, _ := existing.Metadata[plancomments.MetadataClientMessageFingerprint].(string)
 		return got == want
 	}
-	if len(req.PlanCommentRefs) == 0 {
+	if len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 {
 		return true
 	}
 	want, _ := req.Metadata[plancomments.MetadataRequestFingerprint].(string)
 	got, _ := existing.Metadata[plancomments.MetadataRequestFingerprint].(string)
 	return want != "" && got == want
+}
+
+func (s *Service) publishMessageFeedbackSnapshots(
+	ctx context.Context,
+	snapshots *messageFeedbackSnapshots,
+) {
+	if snapshots == nil {
+		return
+	}
+	s.publishMessagePlanCommentSnapshot(ctx, snapshots.plan)
+	s.publishMessagePreviewFeedbackSnapshot(ctx, snapshots.preview)
+}
+
+func (s *Service) publishMessagePreviewFeedbackSnapshot(
+	ctx context.Context,
+	snapshot *models.TaskPreviewFeedbackSnapshot,
+) {
+	if snapshot == nil || s.eventBus == nil {
+		return
+	}
+	if err := s.eventBus.Publish(ctx, events.TaskPreviewFeedbackChanged,
+		bus.NewEvent(events.TaskPreviewFeedbackChanged, "task-service", snapshot)); err != nil {
+		s.logger.Error("publish consumed preview feedback",
+			zap.String("task_id", snapshot.TaskID),
+			zap.Int64("revision", snapshot.Revision),
+			zap.Int("item_count", len(snapshot.Items)),
+			zap.Error(err),
+		)
+	}
 }
 
 func (s *Service) publishMessagePlanCommentSnapshot(
@@ -806,6 +991,16 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, e
 		}
 	}
 	return message, nil
+}
+
+// RehydrateMessagePayload resolves an externalized large tool-output
+// payload (see PayloadDigest) back into message.Metadata for the explicit,
+// single-message lazy-detail routes (e.g. httpGetShellOutput). Callers must
+// have already authorized access to message (typically via GetMessage), so
+// this performs no additional authorization itself. A no-op when the
+// message has no external payload.
+func (s *Service) RehydrateMessagePayload(ctx context.Context, message *models.Message) error {
+	return s.messages.RehydrateMessagePayload(ctx, message)
 }
 
 // GetMessageWithPromptIndex retrieves a message by ID with its computed
@@ -1018,6 +1213,130 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 // The normalized parameter contains typed tool payload data that gets added to metadata.
 func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCallID, status, result, title string, normalized *streams.NormalizedPayload) error {
 	return s.UpdateToolCallMessageWithCreate(ctx, sessionID, toolCallID, "", status, result, title, normalized, "", "", "")
+}
+
+// UpsertAgentPlanMessage persists the latest snapshot for one plan-producing
+// tool call. Its deterministic identity makes first delivery and retries use
+// the same row without the missing-tool retry delay.
+func (s *Service) UpsertAgentPlanMessage(
+	ctx context.Context,
+	taskID, sourceToolCallID, sessionID, content, turnID string,
+) error {
+	name := fmt.Sprintf("%s\x00%s\x00%s", sessionID, turnID, sourceToolCallID)
+	messageID := uuid.NewSHA1(agentPlanMessageIDNamespace, []byte(name)).String()
+	correlationID := "agent-plan:" + messageID
+	req := &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeAgentPlan),
+		Metadata: map[string]interface{}{
+			"tool_call_id":            correlationID,
+			"agent_plan_tool_call_id": sourceToolCallID,
+		},
+	}
+	if err := s.authorizeMessageCreate(ctx, req); err != nil {
+		return err
+	}
+	session, err := s.getSessionWithRetry(
+		ctx, sessionID, messageID, messageCreateMaxRetries, messageCreateRetryDelay,
+	)
+	if err != nil {
+		return err
+	}
+	message, err := s.buildMessage(ctx, messageID, req, session)
+	if err != nil {
+		return err
+	}
+	if writer, ok := s.messages.(agentPlanMessageWriter); ok {
+		persisted, receipt, created, err := writer.UpsertAgentPlanMessageWithConversationReceipt(ctx, message)
+		if errors.Is(err, repoerrors.ErrMessageIdentityConflict) {
+			return ErrMessageIDConflict
+		}
+		if err != nil || receipt == nil {
+			return err
+		}
+		return s.publishAgentPlanMessage(ctx, persisted, receipt, created)
+	}
+	return s.upsertAgentPlanMessageFallback(ctx, message, req)
+}
+
+func (s *Service) upsertAgentPlanMessageFallback(
+	ctx context.Context,
+	message *models.Message,
+	req *CreateMessageRequest,
+) error {
+	admissionCtx, releaseAdmission, err := s.AcquireMessageAdmission(ctx, message.ID)
+	if err != nil {
+		return err
+	}
+	defer releaseAdmission()
+
+	existing, err := s.messages.GetMessageWithPromptIndex(admissionCtx, message.ID)
+	if err == nil && existing != nil {
+		if !sameAgentPlanMessageIdentity(existing, message) {
+			return ErrMessageIDConflict
+		}
+		if existing.Content == message.Content {
+			return nil
+		}
+		existing.Content = message.Content
+		receipt, err := s.updateMessageWithReceipt(admissionCtx, existing)
+		if err != nil {
+			return err
+		}
+		return s.publishAgentPlanMessage(admissionCtx, existing, receipt, false)
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("check existing agent plan message: %w", err)
+	}
+	snapshots, err := s.createMessageWithRequestRetry(
+		admissionCtx, message, req, messageCreateMaxRetries, messageCreateRetryDelay,
+	)
+	if err != nil {
+		return err
+	}
+	return s.publishAgentPlanMessage(admissionCtx, message, snapshots.receipt, true)
+}
+
+func (s *Service) publishAgentPlanMessage(
+	ctx context.Context,
+	message *models.Message,
+	receipt *models.ConversationMutationReceipt,
+	created bool,
+) error {
+	eventType := events.MessageUpdated
+	if created {
+		eventType = events.MessageAdded
+	}
+	err := s.publishMessageEvent(ctx, eventType, message, receipt)
+	if created {
+		return nil
+	}
+	return err
+}
+
+func sameAgentPlanMessageIdentity(existing, incoming *models.Message) bool {
+	if existing.ID != incoming.ID ||
+		existing.TaskSessionID != incoming.TaskSessionID ||
+		existing.TaskID != incoming.TaskID ||
+		existing.TurnID != incoming.TurnID ||
+		existing.AuthorType != incoming.AuthorType ||
+		existing.AuthorID != incoming.AuthorID ||
+		existing.Type != incoming.Type ||
+		existing.RequestsInput != incoming.RequestsInput {
+		return false
+	}
+	for _, key := range []string{"tool_call_id", "agent_plan_tool_call_id"} {
+		existingValue, existingOK := existing.Metadata[key].(string)
+		incomingValue, incomingOK := incoming.Metadata[key].(string)
+		if !existingOK || !incomingOK || existingValue != incomingValue {
+			return false
+		}
+	}
+	return true
 }
 
 // UpdateToolCallMessageWithCreate is like UpdateToolCallMessage but can create the message if not found.

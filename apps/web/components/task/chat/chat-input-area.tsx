@@ -25,7 +25,7 @@ import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-
 import { useToast } from "@/components/toast-provider";
 import { isMessageSendError, MessageSendError } from "@/lib/chat/message-send-error";
 import { QueueAdmissionError, QueueFullError } from "@/lib/api/domains/queue-api";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { ChatPanelState } from "./use-chat-panel-state";
 import { useComposerProps } from "./use-composer-props";
@@ -34,9 +34,15 @@ import { resolveComposerWorkspaceId } from "./composer-workspace";
 import { t } from "@/lib/i18n";
 import { ChatStatusBar, ComposerCIStatus, resolveStatusRowTaskId } from "./chat-status-bar";
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
-import { hasPendingClarification } from "./types";
+import {
+  hasPendingClarification,
+  shouldHideChatInputForLaunchError,
+  shouldRenderStoppedSessionBanner,
+} from "./types";
 import { toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
+import { toTaskPreviewFeedbackRefs } from "@/lib/preview-feedback-refs";
 import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
+import { PreviewFeedbackCollectionSurface } from "@/components/task/inspector/preview-feedback-collection";
 import {
   ComposerCollapseButton,
   ComposerDisclosureRegion,
@@ -52,7 +58,7 @@ const PLAN_CONTEXT_PATH = "plan:context";
  */
 export function buildSubmitMessage(args: {
   message: string;
-  reviewComments?: DiffComment[];
+  reviewComments?: ReviewComment[];
   pendingPRFeedback: import("@/lib/state/slices/comments").PRFeedbackComment[];
   planComments: import("@/lib/state/slices/comments").PlanComment[];
   walkthroughComments?: import("@/lib/state/slices/comments").WalkthroughComment[];
@@ -176,6 +182,7 @@ function usePanelMessageHandler(panelState: ChatPanelState) {
     pendingClarification,
     activeDocument,
     planComments,
+    previewFeedback,
     contextFiles,
     prompts,
   } = panelState;
@@ -188,9 +195,35 @@ function usePanelMessageHandler(panelState: ChatPanelState) {
     hasPendingClarification: !!pendingClarification,
     activeDocument,
     planComments,
+    previewFeedback,
     contextFiles,
     prompts,
   });
+}
+
+function completeChatSubmission(payload: ChatSubmitPayload, panelState: ChatPanelState) {
+  const {
+    resolvedSessionId,
+    pendingPRFeedback,
+    walkthroughComments,
+    messageComments,
+    markCommentsSent,
+    handleClearPRFeedback,
+    handleClearWalkthroughComments,
+    clearEphemeral,
+    addContextFile,
+    planModeEnabled,
+  } = panelState;
+  if (payload.reviewComments?.length) markCommentsSent(payload.reviewComments.map((c) => c.id));
+  if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
+  if (pendingPRFeedback.length > 0) handleClearPRFeedback();
+  if (walkthroughComments.length > 0) handleClearWalkthroughComments();
+  if (!resolvedSessionId) return true;
+  clearEphemeral(resolvedSessionId);
+  if (planModeEnabled) {
+    addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
+  }
+  return true;
 }
 
 async function submitChatPayload({
@@ -207,17 +240,11 @@ async function submitChatPayload({
   handleSendMessage: (payload: ChatSubmitPayload) => Promise<void | boolean>;
 }) {
   const {
-    resolvedSessionId,
     planComments,
+    previewFeedback,
     pendingPRFeedback,
     walkthroughComments,
     messageComments,
-    markCommentsSent,
-    handleClearPRFeedback,
-    handleClearWalkthroughComments,
-    clearEphemeral,
-    addContextFile,
-    planModeEnabled,
     pendingClarification,
   } = panelState;
   const finalMessage = buildSubmitMessage({
@@ -229,10 +256,12 @@ async function submitChatPayload({
     messageComments,
   });
   const planCommentRefs = toTaskPlanCommentRefs(planComments);
+  const previewFeedbackRefs = toTaskPreviewFeedbackRefs(previewFeedback ?? []);
   const outbound = {
     ...payload,
     message: finalMessage,
     ...(planCommentRefs.length > 0 ? { planCommentRefs } : {}),
+    ...(previewFeedbackRefs.length > 0 ? { previewFeedbackRefs } : {}),
   };
   let submissionResult: void | boolean;
   if (onSend && !pendingClarification) {
@@ -244,16 +273,7 @@ async function submitChatPayload({
     submissionResult = await handleSendMessage(outbound);
   }
   if (submissionResult === false) return false;
-  if (payload.reviewComments?.length) markCommentsSent(payload.reviewComments.map((c) => c.id));
-  if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
-  if (pendingPRFeedback.length > 0) handleClearPRFeedback();
-  if (walkthroughComments.length > 0) handleClearWalkthroughComments();
-  if (!resolvedSessionId) return true;
-  clearEphemeral(resolvedSessionId);
-  if (planModeEnabled) {
-    addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
-  }
-  return true;
+  return completeChatSubmission(payload, panelState);
 }
 
 /** Builds the composer's submit handler, tracking in-flight sends and
@@ -455,6 +475,65 @@ function useChatInputDerived(
   return { planActions, executor, placeholder };
 }
 
+export function shouldShowPreviewFeedbackFallback(args: {
+  taskId: string | null;
+  resolvedSessionId: string | null;
+  itemCount: number;
+  isFailed: boolean;
+  isCompleted: boolean;
+  executorUnavailable: boolean;
+  launchErrorOwned?: boolean;
+}) {
+  if (!args.taskId || args.itemCount === 0) return false;
+  return (
+    !args.resolvedSessionId ||
+    shouldHideChatInputForLaunchError({
+      isFailed: args.isFailed,
+      launchErrorOwned: args.launchErrorOwned,
+    }) ||
+    shouldRenderStoppedSessionBanner({
+      isFailed: args.isFailed,
+      isCompleted: args.isCompleted,
+      executorUnavailable: args.executorUnavailable,
+      launchErrorOwned: args.launchErrorOwned,
+    })
+  );
+}
+
+function PreviewFeedbackFallbackSurface({
+  panelState,
+  taskId,
+  executorUnavailable,
+  launchErrorOwned,
+}: {
+  panelState: ChatPanelState;
+  taskId: string | null;
+  executorUnavailable: boolean;
+  launchErrorOwned?: boolean;
+}) {
+  const [fallbackOpen, setFallbackOpen] = useState(false);
+  const collection = panelState.previewFeedbackState;
+  const showTrigger = shouldShowPreviewFeedbackFallback({
+    taskId,
+    resolvedSessionId: panelState.resolvedSessionId,
+    itemCount: panelState.previewFeedback?.length ?? 0,
+    isFailed: panelState.isFailed,
+    isCompleted: panelState.isCompleted,
+    executorUnavailable,
+    launchErrorOwned,
+  });
+  if (!collection || !taskId || (panelState.previewFeedback?.length ?? 0) === 0) return null;
+  return (
+    <PreviewFeedbackCollectionSurface
+      taskId={taskId}
+      collection={collection}
+      open={panelState.previewFeedbackOpen ?? fallbackOpen}
+      onOpenChange={panelState.setPreviewFeedbackOpen ?? setFallbackOpen}
+      showTrigger={showTrigger}
+    />
+  );
+}
+
 /**
  * The chat composer: input box, submit/cancel handling, plan-mode toggle,
  * clarification banner, and the {@link ChatStatusBar} above it.
@@ -547,6 +626,12 @@ export function ChatInputArea(props: ChatInputAreaProps) {
         </QueueAffordance>
         <ComposerCollapseButton />
       </ComposerDisclosureRegion>
+      <PreviewFeedbackFallbackSurface
+        panelState={panelState}
+        taskId={taskId}
+        executorUnavailable={executor.unavailable}
+        launchErrorOwned={props.launchErrorOwned}
+      />
     </div>
   );
 }

@@ -7,34 +7,37 @@ import { KanbanPage } from "../../pages/kanban-page";
 const AGENT_NAME = "opencode-acp";
 const PROFILE_NAME = "Recovered OpenCode profile";
 
-test.describe("host utility managed runtime recovery", () => {
-  test("recovers the model catalogue before task creation", async ({
+test.describe("host utility native runtime", () => {
+  test("uses the native binary for the model catalogue before task creation", async ({
     apiClient,
     backend,
     testPage,
   }) => {
-    test.skip(process.platform === "win32", "the managed npm fixture uses a POSIX launcher");
+    test.skip(process.platform === "win32", "the native fixture uses a POSIX npx sentinel");
     test.setTimeout(120_000);
 
-    const wrapperSource = path.resolve(__dirname, "../../fixtures/managed-runtime-npx.sh");
-    const wrapperPath = path.join(backend.tmpDir, "bin", "npx");
+    const npxPath = path.join(backend.tmpDir, "bin", "npx");
     const discoveryPath = path.join(backend.tmpDir, "bin", "opencode");
     const cacheRoot = path.join(backend.tmpDir, "managed-npm-cache");
     const mockAgentPath = path.resolve(__dirname, "../../../../backend/bin/mock-agent");
-    fs.copyFileSync(wrapperSource, wrapperPath);
-    fs.chmodSync(wrapperPath, 0o755);
-    fs.writeFileSync(discoveryPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const npxInvocationPath = path.join(cacheRoot, "npx-invocations");
+    fs.writeFileSync(
+      npxPath,
+      `#!/bin/sh\nprintf 'unexpected npx invocation\\n' >> '${npxInvocationPath}'\nexit 1\n`,
+      { mode: 0o755 },
+    );
+    fs.copyFileSync(mockAgentPath, discoveryPath);
+    fs.chmodSync(discoveryPath, 0o755);
 
     const runtimeEnv = {
       KANDEV_MOCK_AGENT: "true",
       KANDEV_E2E_MOCK_AGENT_PATH: mockAgentPath,
-      KANDEV_E2E_NPX_MOCK_OTHERS: "true",
       NPM_CONFIG_CACHE: cacheRoot,
     };
     let releaseEnv: (() => Promise<void>) | undefined;
     let profileId = "";
     try {
-      await backend.restart({ ...runtimeEnv, KANDEV_E2E_NPX_BYPASS_FAILURE: "true" });
+      await backend.restart(runtimeEnv);
       const { agents: persistedAgents } = await apiClient.listAgents();
       const persistedAgent = persistedAgents.find((candidate) => candidate.name === AGENT_NAME);
       expect(persistedAgent).toBeDefined();
@@ -64,23 +67,15 @@ test.describe("host utility managed runtime recovery", () => {
           },
           {
             timeout: 60_000,
-            message: "OpenCode host capabilities should recover before task creation",
+            message: "OpenCode host capabilities should load before task creation",
           },
         )
         .toBe("ok:true:true:");
 
       const target = path.join(cacheRoot, "_npx", managedRuntimeExecutionCacheKey(packageSpec));
       expect(fs.existsSync(path.join(target, "stale-marker"))).toBe(false);
-      expect(fs.readFileSync(path.join(target, "fresh-marker"), "utf8")).toBe("fresh\n");
-      expect(
-        fs.readFileSync(path.join(cacheRoot, "_npx", "0123456789abcdef", "sibling-marker"), "utf8"),
-      ).toBe("sibling\n");
-      expect(fs.readFileSync(path.join(cacheRoot, "offline-invocations"), "utf8").trim()).toBe(
-        packageSpec,
-      );
-      expect(fs.readFileSync(path.join(cacheRoot, "online-invocations"), "utf8").trim()).toBe(
-        packageSpec,
-      );
+      expect(fs.existsSync(path.join(target, "fresh-marker"))).toBe(false);
+      expect(fs.existsSync(npxInvocationPath)).toBe(false);
 
       const kanban = new KanbanPage(testPage);
       await kanban.goto();
@@ -101,7 +96,7 @@ test.describe("host utility managed runtime recovery", () => {
       expect(stored.model).toBe("mock-fast");
     } finally {
       if (profileId) await apiClient.deleteAgentProfile(profileId, true).catch(() => undefined);
-      fs.rmSync(wrapperPath, { force: true });
+      fs.rmSync(npxPath, { force: true });
       fs.rmSync(discoveryPath, { force: true });
       if (releaseEnv) await releaseEnv();
     }

@@ -1,5 +1,7 @@
 "use client";
 
+import { useWorkflowMoveSubmit, workflowMoveShortcutLabel } from "./use-workflow-move-submit";
+
 import {
   useCallback,
   type Dispatch,
@@ -413,6 +415,7 @@ function StepMoveControls({
     enabled: previewEnabled,
     invalidationKey,
   });
+  const submission = useWorkflowMoveSubmit(isMoving, () => onMove(step.id, entryOptions));
 
   return (
     <div className="flex w-full flex-col items-stretch gap-1.5">
@@ -420,17 +423,25 @@ function StepMoveControls({
         size="sm"
         variant="default"
         className="cursor-pointer text-xs h-6 px-2.5 rounded-sm"
-        disabled={isMoving}
-        onClick={() => void onMove(step.id, entryOptions)}
+        disabled={submission.busy}
+        onClick={() => void submission.submit()}
         data-testid="workflow-step-move-here"
       >
         <IconArrowRight className="h-3 w-3" />
         {isMoving ? t("task:moving") : t("task:moveHere")}
+        {showOptions && (
+          <kbd className="self-center font-sans text-[10px] leading-none opacity-60">
+            {workflowMoveShortcutLabel()}
+          </kbd>
+        )}
       </Button>
       {showOptions ? (
         <div
           className="w-64 max-w-[calc(100vw-2rem)]"
-          onKeyDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            submission.onKeyDown(event);
+            event.stopPropagation();
+          }}
         >
           <WorkflowMoveOptionsFields
             draft={draft}

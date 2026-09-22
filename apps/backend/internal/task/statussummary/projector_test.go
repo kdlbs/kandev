@@ -45,8 +45,11 @@ func (s *projectorTestStore) CompareAndUpdateTaskStatusSummary(_ context.Context
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if previous := s.rows[stored.TaskID]; previous != nil && previous.Summary.Revision >= stored.Summary.Revision {
-		return false, nil
+	if previous := s.rows[stored.TaskID]; previous != nil {
+		if previous.Summary.Revision >= stored.Summary.Revision ||
+			(previous.WorkspaceID == stored.WorkspaceID && previous.Summary.SemanticEqual(stored.Summary)) {
+			return false, nil
+		}
 	}
 	copy := *stored
 	copy.Summary = *cloneSummary(&stored.Summary)

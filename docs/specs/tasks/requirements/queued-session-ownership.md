@@ -11,8 +11,8 @@ owners:
 ## Overview
 
 A workflow can select its next session before instance capacity permits launch.
-Users must be able to inspect that task without waking a parked predecessor or
-losing the visible queued state. The task system owns the selected recipient,
+Users can open earlier conversations with normal recovery behavior without
+changing the selected workflow recipient or losing the visible queued state. The task system owns the selected recipient,
 durable launch intent, and its presentation across task surfaces.
 
 This capability extends [workflow session lifecycle](workflow-profile-session-lifecycle.md).
@@ -35,16 +35,17 @@ destination entry, whereas a ceiling can delay a session already selected by ent
 
 ### REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001: Inspection preserves execution ownership
 
-**Intent:** Reading a task must not wake its retired workflow participant.
+**Intent:** Opening a conversation resumes it without transferring workflow ownership.
 
 #### Acceptance criteria
 
-- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.1:** Passive inspection shall not
-  start, resume, prompt, or enqueue work for a parked predecessor. This applies
-  with free or full capacity and with either auto-start-on-open preference value.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.1:** Superseded by criterion 001.9
+  under [the session-open decision](../../../decisions/2026-09-18-session-open-resumes-conversation.md).
+  The original prohibition on resuming workflow-stopped conversations no longer applies.
 - **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.2:** When a destination is queued,
   passive inspection of any conversation shall preserve its recipient, prompt,
-  queue time, primary ownership, and workflow step. It shall not create another launch.
+  queue time, primary ownership, and workflow step. It shall not duplicate or
+  replace that accepted launch. A different conversation can recover under 001.9.
 - **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.3:** Explicit execution for a parked
   predecessor shall target that conversation only. It shall not replace the
   queued destination, consume its prompt, or acquire its workflow ownership.
@@ -54,9 +55,25 @@ destination entry, whereas a ceiling can delay a session already selected by ent
 - **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.5:** Passive recovery that remains
   eligible under existing preferences shall respect the automatic session
   ceiling. It shall never produce a manual-override audit message.
-- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.6:** If current ownership cannot be
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.6:** If pending launch ownership cannot be
   established, passive inspection shall remain available without starting work
   or attempting a fresh-session fallback. Explicit recovery shall remain separately available.
+
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.7:** After a workflow legitimately
+  reuses a conversation, historical workflow stops shall not prevent its otherwise
+  eligible recovery after restart. Desktop and phone task opening shall honor
+  the existing auto-start preference and automatic capacity limit. Pending launch ownership shall still prevent duplicate execution.
+  Workflow parking shall not independently block recovery.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.8:** After a deferred launch settles
+  and no pending launch remains, queue history shall not block otherwise eligible
+  open-time recovery. Recovery shall preserve the conversation and shall not
+  replay the settled workflow prompt.
+
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.9:** Opening or selecting a
+  workflow-stopped conversation shall use normal automatic recovery, including
+  non-primary conversations. Recovery shall honor auto-start prevention, capacity,
+  authorization, archive, and terminal-session rules. It shall preserve conversation
+  context without sending a new prompt or transferring workflow ownership.
 
 ### REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002: Deferred work survives sibling lifecycle events
 
@@ -99,9 +116,8 @@ destination entry, whereas a ceiling can delay a session already selected by ent
   queued destination, waiting reason, queue time, capacity observation, and
   automatic retry explanation outside the historical transcript. This status
   shall remain visible when the user selects a parked predecessor.
-- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.3:** A parked conversation shall be
-  identified as parked for the workflow. A queued destination shall not offer
-  a misleading recovery prompt or imply that the user must restart it.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.3:** Superseded by criterion 003.10.
+  The original requirement to identify a conversation as parked no longer applies.
 - **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.4:** Queue status shall clear after
   confirmed dispatch or final disposition. Older snapshots shall not restore a
   cleared queue or erase newer queued work. Pending questions and real errors
@@ -117,6 +133,21 @@ destination entry, whereas a ceiling can delay a session already selected by ent
 - **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.7:** Passive inspection and ordinary
   queue waiting shall not generate an empty-output completion warning. A real
   prompt that completes without output shall retain its existing warning behavior.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.8:** When a launch waits for session
+  capacity, its banner shall name the Global session limit and state that it
+  applies across all workspaces. It shall offer a link to the Session capacity
+  section in Settings. The link shall work on desktop and phone without starting
+  or resuming a session. Settings permissions and environment locks still apply.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.9:** The banner shall distinguish global
+  session capacity from workflow WIP, ownership errors, and replay errors. A
+  stale or unavailable capacity count shall not hide the known limit scope.
+  After a limit change, the banner shall show refreshed state without a page
+  reload and remain until dispatch or final disposition is confirmed.
+
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.10:** Desktop and phone conversation
+  surfaces shall not show a parked-session banner, toolbar, badge, or recovery
+  explanation. Normal conversation controls shall remain available. Genuine queued
+  destinations shall retain queue status without a duplicate Start or Resume action.
 
 ## Compatibility and exclusions
 

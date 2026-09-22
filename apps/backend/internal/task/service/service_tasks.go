@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -303,6 +304,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.preflightRepositorySelections(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.validateTaskCheckoutCapabilities(ctx, req); err != nil {
+		return nil, err
+	}
 	if err := s.validateTaskRepositoryPolicies(ctx, req.WorkspaceID, req.Repositories); err != nil {
 		return nil, err
 	}
@@ -314,6 +318,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 		}
 	}
 	if err := s.validateTaskWorkflow(ctx, req); err != nil {
+		return nil, err
+	}
+	if err := s.validateWorkflowAgentOverrides(ctx, req); err != nil {
 		return nil, err
 	}
 	if err := s.prepareContributionDestination(ctx, req); err != nil {
@@ -732,9 +739,14 @@ func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTask
 		if r == nil || r.RepositoryID == "" {
 			continue
 		}
+		options, err := models.GetRepositoryCheckoutOptions(r.Metadata)
+		if err != nil {
+			return err
+		}
 		inherited = append(inherited, TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			BaseBranch:   r.BaseBranch,
+			CheckoutOptions: options,
+			RepositoryID:    r.RepositoryID,
+			BaseBranch:      r.BaseBranch,
 		})
 	}
 	if len(inherited) > 0 {
@@ -923,8 +935,14 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		// so callers (e.g. onboarding) can omit it.
 		priority = defaultPriority
 	}
-	metadata := cloneTaskMetadata(req.Metadata)
-	delete(metadata, models.MetaKeyDeferredLaunch)
+	metadata := protectedTaskMetadataForCreate(req.Metadata, req.TrustedHandoffMetadata)
+	models.StripOfficeCarrierMetadata(metadata)
+	if len(req.OfficeCarrierMetadata) > 0 {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		maps.Copy(metadata, req.OfficeCarrierMetadata)
+	}
 	if req.DeferredLaunch != nil {
 		if metadata == nil {
 			metadata = make(map[string]interface{})
@@ -958,6 +976,7 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		WorkspaceID:            req.WorkspaceID,
 		WorkflowID:             req.WorkflowID,
 		WorkflowStepID:         workflowStepID,
+		WorkflowAgentOverrides: req.normalizedWorkflowAgentOverrides,
 		Title:                  req.Title,
 		Description:            req.Description,
 		State:                  state,
@@ -1078,6 +1097,9 @@ func (s *Service) resolveTaskRepositoryRow(
 	ctx context.Context, workspaceID string, index int,
 	repoInput TaskRepositoryInput, repoByPath map[string]*models.Repository,
 ) (*models.TaskRepository, error) {
+	if err := s.validateRepositoryCheckoutInput(ctx, workspaceID, repoInput); err != nil {
+		return nil, err
+	}
 	repoInput, err := normalizeContributionBindings(repoInput)
 	if err != nil {
 		return nil, err
@@ -1171,6 +1193,9 @@ func applyBranchPolicyBaseBranch(
 // buildTaskRepositoryMetadata assembles the row's metadata blob.
 func buildTaskRepositoryMetadata(repoInput TaskRepositoryInput) (map[string]interface{}, error) {
 	metadata := make(map[string]interface{})
+	if err := models.PutRepositoryCheckoutOptions(metadata, repoInput.CheckoutOptions); err != nil {
+		return nil, err
+	}
 	if prNum := resolvePRNumber(repoInput); prNum > 0 {
 		metadata["pr_number"] = prNum
 	}
@@ -1892,6 +1917,18 @@ func (s *Service) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Ta
 	return s.tasks.GetTasksByIDs(ctx, ids)
 }
 
+// GetWorkflowStep resolves one workflow step by ID for a caller that has
+// already authorized the owning task/workspace, mirroring GetTasksByIDs.
+// The Inbox History read uses this to test whether a task's current step
+// starts an agent; s.workflowStepGetter is always wired in production, but a
+// nil getter omits the label rather than panicking.
+func (s *Service) GetWorkflowStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	if s.workflowStepGetter == nil {
+		return nil, nil
+	}
+	return s.workflowStepGetter.GetStep(ctx, stepID)
+}
+
 func (s *Service) tryUpdateTaskPriorityOnly(
 	ctx context.Context,
 	id string,
@@ -1956,6 +1993,9 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		return nil, err
 	}
 	if req.Repositories != nil {
+		if err := s.preserveRepositoryCheckoutOptions(ctx, task, req.Repositories); err != nil {
+			return nil, err
+		}
 		if err := s.preflightRepositoryInputs(ctx, task.WorkspaceID, req.Repositories); err != nil {
 			return nil, err
 		}
@@ -2428,7 +2468,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 3b. Finalize active sessions in the DB and publish their cancellation
 	// events. See finalizeCancelledSessions for the detailed rationale.
-	s.finalizeCancelledSessions(finalizeCtx, id, activeSessions, archiveDeadline)
+	s.finalizeCancelledSessions(finalizeCtx, id, activeSessions, archiveDeadline, models.SessionArchiveCancelReason)
 	var postCommitErr error
 
 	// 4. Re-read task for updated archived_at field. The archive row is
@@ -2590,15 +2630,44 @@ func waitForCancellationRetry(ctx context.Context, delay time.Duration) bool {
 const maxCancelAttempts = 3
 
 func (s *Service) cancelActiveTaskSessionsWithRetry(
-	ctx context.Context, taskID string,
+	ctx context.Context, taskID, reason string, sessionIDs []string,
 ) ([]*models.TaskSession, error) {
 	const cancelRetryBackoff = 250 * time.Millisecond
 
 	var cancelledSessions []*models.TaskSession
 	var cancelErr error
 	for attempt := 1; attempt <= maxCancelAttempts; attempt++ {
-		cancelledSessions, cancelErr = s.sessions.CancelActiveTaskSessionsByTaskID(
-			ctx, taskID, models.SessionArchiveCancelReason,
+		if len(sessionIDs) == 0 {
+			cancelledSessions, cancelErr = s.sessions.CancelActiveTaskSessionsByTaskID(
+				ctx, taskID, reason,
+			)
+		} else {
+			cancelledSessions, cancelErr = s.sessions.CancelActiveTaskSessionsByIDs(
+				ctx, taskID, sessionIDs, reason,
+			)
+		}
+		if cancelErr == nil {
+			return cancelledSessions, nil
+		}
+		if attempt < maxCancelAttempts && !waitForCancellationRetry(ctx, cancelRetryBackoff) {
+			return nil, ctx.Err()
+		}
+	}
+	return nil, cancelErr
+}
+
+func (s *Service) cancelActiveTaskSessionsByCandidatesWithRetry(
+	ctx context.Context,
+	taskID, reason string,
+	candidates []models.ActiveSessionCancellationCandidate,
+) ([]*models.TaskSession, error) {
+	const cancelRetryBackoff = 250 * time.Millisecond
+
+	var cancelledSessions []*models.TaskSession
+	var cancelErr error
+	for attempt := 1; attempt <= maxCancelAttempts; attempt++ {
+		cancelledSessions, cancelErr = s.sessions.CancelActiveTaskSessionsByCandidates(
+			ctx, taskID, candidates, reason,
 		)
 		if cancelErr == nil {
 			return cancelledSessions, nil
@@ -2610,6 +2679,93 @@ func (s *Service) cancelActiveTaskSessionsWithRetry(
 	return nil, cancelErr
 }
 
+// finalizeCancelledSessionCandidates is the guarded cancellation path used
+// by active-session healing. It closes the exact orphan turn that was part of
+// the compare-and-set snapshot, and completes its pending tool calls without
+// publishing turn.completed. Automatic system cancellation must not enter the
+// normal turn/workflow completion path.
+func (s *Service) finalizeCancelledSessionCandidates(
+	ctx context.Context,
+	taskID string,
+	activeSessions []*models.TaskSession,
+	candidates []models.ActiveSessionCancellationCandidate,
+	deadline time.Time,
+	reason string,
+) {
+	cancelledSessions, cancelErr := s.cancelActiveTaskSessionsByCandidatesWithRetry(
+		ctx, taskID, reason, candidates,
+	)
+	if cancelErr != nil {
+		s.logger.Error("failed to reap guarded active sessions after retries",
+			zap.String("task_id", taskID),
+			zap.Int("attempts", maxCancelAttempts),
+			zap.Error(cancelErr))
+		return
+	}
+	if len(cancelledSessions) == 0 {
+		return
+	}
+	s.abandonCancelledSessionTurns(ctx, candidates, cancelledSessions)
+	s.logger.Info("reaped guarded active sessions",
+		zap.String("task_id", taskID),
+		zap.Int("count", len(cancelledSessions)))
+	s.runCancelledSessionEffects(ctx, taskID, activeSessions, cancelledSessions, deadline, reason)
+}
+
+func (s *Service) abandonCancelledSessionTurns(
+	ctx context.Context,
+	candidates []models.ActiveSessionCancellationCandidate,
+	cancelledSessions []*models.TaskSession,
+) {
+	turnIDs := make(map[string]string, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.SessionID != "" && candidate.ExpectedTurnID != "" {
+			turnIDs[candidate.SessionID] = candidate.ExpectedTurnID
+		}
+	}
+	for _, session := range cancelledSessions {
+		if session == nil {
+			continue
+		}
+		turnID := turnIDs[session.ID]
+		if turnID == "" {
+			continue
+		}
+		activeTurn, err := s.GetActiveTurn(ctx, session.ID)
+		if err != nil {
+			s.logger.Warn("failed to inspect orphan turn after session cancellation",
+				zap.String("session_id", session.ID),
+				zap.String("turn_id", turnID),
+				zap.Error(err))
+			continue
+		}
+		if activeTurn == nil || activeTurn.ID != turnID {
+			// A different turn owns the session now. Never abandon it using a
+			// stale session-only lookup; the next reconciliation pass can
+			// inspect the new identity.
+			continue
+		}
+		if err := s.turns.AbandonTurn(ctx, turnID); err != nil {
+			s.logger.Warn("failed to abandon orphan turn after session cancellation",
+				zap.String("session_id", session.ID),
+				zap.String("turn_id", turnID),
+				zap.Error(err))
+			continue
+		}
+		if affected, err := s.turns.CompletePendingToolCallsForTurn(ctx, turnID); err != nil {
+			s.logger.Warn("failed to complete pending tool calls for cancelled session turn",
+				zap.String("session_id", session.ID),
+				zap.String("turn_id", turnID),
+				zap.Error(err))
+		} else if affected > 0 {
+			s.logger.Info("completed pending tool calls for cancelled session turn",
+				zap.String("session_id", session.ID),
+				zap.String("turn_id", turnID),
+				zap.Int64("affected", affected))
+		}
+	}
+}
+
 // finalizeCancelledSessions finalizes an archived task's active sessions in
 // the DB and publishes a session.state_changed event for each one actually
 // cancelled. The async cleanup that follows tears down the agent processes;
@@ -2618,6 +2774,12 @@ func (s *Service) cancelActiveTaskSessionsWithRetry(
 // (e.g. an Office task list's "is running" indicator) that's kept fresh
 // exclusively by that event, and would otherwise show a live spinner
 // forever after archive.
+//
+// reason is the TaskSession.ErrorMessage the cancellation carries ("task
+// archived", "orphaned session", ...). Callers choose the value that names
+// their path; models.IsArchiveCancelReason consumers key off the archive
+// values for unarchive resume semantics, so a non-archive reason keeps the
+// cancellation treated like an explicit stop.
 //
 // CancelActiveTaskSessionsByTaskID is bounded by its own internal 10s
 // timeout, so a single attempt can time out under SQLite writer contention
@@ -2635,8 +2797,25 @@ func (s *Service) finalizeCancelledSessions(
 	taskID string,
 	activeSessions []*models.TaskSession,
 	deadline time.Time,
+	reason string,
 ) {
-	cancelledSessions, cancelErr := s.cancelActiveTaskSessionsWithRetry(ctx, taskID)
+	s.finalizeCancelledSessionIDs(ctx, taskID, activeSessions, nil, deadline, reason)
+}
+
+// finalizeCancelledSessionIDs is finalizeCancelledSessions with an optional
+// session-ID scope: when sessionIDs is non-empty only those sessions are
+// cancelled (a nil/empty scope means every active session of the task, the
+// archive semantics). Callers that need activity and turn compare-and-set
+// protection use finalizeCancelledSessionCandidates instead.
+func (s *Service) finalizeCancelledSessionIDs(
+	ctx context.Context,
+	taskID string,
+	activeSessions []*models.TaskSession,
+	sessionIDs []string,
+	deadline time.Time,
+	reason string,
+) {
+	cancelledSessions, cancelErr := s.cancelActiveTaskSessionsWithRetry(ctx, taskID, reason, sessionIDs)
 	if cancelErr != nil {
 		s.logger.Error("failed to reap active sessions on archive after retries",
 			zap.String("task_id", taskID),
@@ -2650,6 +2829,21 @@ func (s *Service) finalizeCancelledSessions(
 	s.logger.Info("reaped active sessions on archive",
 		zap.String("task_id", taskID),
 		zap.Int("count", len(cancelledSessions)))
+	s.runCancelledSessionEffects(ctx, taskID, activeSessions, cancelledSessions, deadline, reason)
+}
+
+// runCancelledSessionEffects owns every post-cancellation effect shared by
+// the archive and heal paths: clarification expiry, parked-projection
+// cleanup, session-ceiling release, and one session.state_changed per
+// cancelled session. CancelledSessionEffects run on a detached-but-bounded
+// context because the DB write already committed.
+func (s *Service) runCancelledSessionEffects(
+	ctx context.Context,
+	taskID string,
+	activeSessions, cancelledSessions []*models.TaskSession,
+	deadline time.Time,
+	reason string,
+) {
 	// Detach from ctx via WithoutCancel: the DB write above already
 	// committed on a detached context, so a client disconnect here must
 	// not also suppress the event publish below — event-driven clients
@@ -2668,7 +2862,7 @@ func (s *Service) finalizeCancelledSessions(
 			_, err := s.clarificationCanceller.ExpireSessionAndNotify(expireCtx, session.ID)
 			cancelExpire()
 			if err != nil {
-				s.logger.Error("failed to expire clarification after archive cancellation; response claims remain quarantined",
+				s.logger.Error("failed to expire clarification after session cancellation; response claims remain quarantined",
 					zap.String("task_id", taskID),
 					zap.String("session_id", session.ID),
 					zap.Error(err))
@@ -2685,7 +2879,7 @@ func (s *Service) finalizeCancelledSessions(
 			cancelParked()
 		}
 	}
-	// CancelActiveTaskSessionsByTaskID is a bulk writer: RETURNING reports every
+	// The cancellation writers are bulk writers: RETURNING reports every
 	// row's post-update CANCELLED state, not which were in an AC-1 state before
 	// the update, so every returned id is released unconditionally rather than
 	// branched on state (AC-51e). Releasing an id that held no reservation is a
@@ -2698,7 +2892,7 @@ func (s *Service) finalizeCancelledSessions(
 			s.sessionCeilingReleaser.ReleaseCeilingReservation(session.ID)
 		}
 	}
-	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, models.SessionArchiveCancelReason)
+	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, reason)
 }
 
 func (s *Service) registerTaskRuntimeStopOwners(stopTargets []taskStopTarget, force bool) {

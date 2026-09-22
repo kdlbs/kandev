@@ -37,7 +37,8 @@ export async function checkImmediateArchive(options: {
     else await locator.click();
   };
   const openPicker = async () => {
-    if (mobile && !(await sheet.isVisible())) await page.getByTestId("mobile-session-menu").tap();
+    if (mobile && !(await sheet.isVisible()))
+      await page.getByTestId("mobile-task-picker-trigger").tap();
   };
   const openArchive = async () => {
     await openPicker();
@@ -66,6 +67,7 @@ export async function checkImmediateArchive(options: {
     await expect(progressToast().locator("svg")).toHaveClass(/animate-spin/);
     await expect(page.getByTestId("toast-container")).toHaveAttribute("aria-live", "polite");
     await expect(progressToast()).toBeInViewport();
+    await expect(page.getByText("Kandev update available", { exact: true })).toBeHidden();
     await expect
       .poll(async () => {
         const currentViewport = page.viewportSize();
@@ -92,7 +94,7 @@ export async function checkImmediateArchive(options: {
         fullPage: true,
       },
     );
-    if (mobile) await page.getByTestId("mobile-session-menu").tap();
+    if (mobile) await page.getByTestId("mobile-task-picker-trigger").tap();
     await expect(targetRow()).toBeVisible();
     await expect(targetRow()).toHaveAttribute("aria-busy", "true");
     await expect(targetRow()).toHaveClass(/opacity-60/);
@@ -122,7 +124,7 @@ export async function checkImmediateArchive(options: {
     await press(page.getByTestId("archive-task-confirm"));
     await expect.poll(() => pending !== null).toBe(true);
     await expect(progressToast()).toBeVisible();
-    if (mobile) await page.getByTestId("mobile-session-menu").tap();
+    if (mobile) await page.getByTestId("mobile-task-picker-trigger").tap();
     await expect(targetRow()).toBeVisible();
     await expect(targetRow()).toHaveAttribute("aria-busy", "true");
     await expect(targetRow().getByTestId("task-state-archive-pending")).toBeVisible();

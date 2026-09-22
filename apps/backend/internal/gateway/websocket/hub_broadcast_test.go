@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -44,6 +45,45 @@ func TestBroadcastToSessionReachesFocusedAndSubscribedClients(t *testing.T) {
 	}
 	if clientReceived(other) {
 		t.Fatal("uninterested client received the broadcast")
+	}
+}
+
+func TestSessionLaunchWarningReplaysToLateSubscriber(t *testing.T) {
+	h := newTestHub(t)
+	warning, err := ws.NewNotification(ws.ActionSessionLaunchWarning, map[string]any{
+		"session_id": "sess-1",
+		"host":       "10.0.0.5",
+	})
+	if err != nil {
+		t.Fatalf("notification: %v", err)
+	}
+	h.rememberAndBroadcastSessionLaunchWarning("sess-1", warning)
+
+	late := newTestClient("late")
+	registerTestClient(h, late)
+	if !h.SubscribeToSession(late, "sess-1") {
+		t.Fatal("late subscriber should create a new membership")
+	}
+
+	select {
+	case data := <-late.send:
+		var got ws.Message
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatalf("decode replay: %v", err)
+		}
+		if got.Action != ws.ActionSessionLaunchWarning {
+			t.Fatalf("replayed action = %q, want %q", got.Action, ws.ActionSessionLaunchWarning)
+		}
+	default:
+		t.Fatal("late subscriber did not receive the cached launch warning")
+	}
+
+	h.clearSessionLaunchWarning("sess-1")
+	newClient := newTestClient("new")
+	registerTestClient(h, newClient)
+	h.SubscribeToSession(newClient, "sess-1")
+	if clientReceived(newClient) {
+		t.Fatal("cleared launch warning was replayed")
 	}
 }
 

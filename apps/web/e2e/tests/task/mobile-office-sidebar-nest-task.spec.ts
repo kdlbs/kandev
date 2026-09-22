@@ -64,7 +64,7 @@ test.describe("Mobile Office sidebar Nest under", () => {
 
     await testPage.goto(`/t/${subject.id}`);
     await new SessionPage(testPage).waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
     const subjectRow = taskSheet

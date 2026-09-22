@@ -589,6 +589,10 @@ export class OfficeApiClient {
     return res.routine ?? (res as unknown as Record<string, unknown>);
   }
 
+  async listRoutineRuns(routineId: string): Promise<Record<string, unknown>> {
+    return this.request("GET", `/routines/${routineId}/runs`);
+  }
+
   /** Manual fire (AC-OFFICE-KILL-SWITCH-002.4). Raw: a paused workspace answers 409. */
   async runRoutine(routineId: string): Promise<Response> {
     return this.rawRequest("POST", `/routines/${routineId}/run`);

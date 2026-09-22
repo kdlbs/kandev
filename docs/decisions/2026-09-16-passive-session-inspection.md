@@ -1,8 +1,12 @@
 # ADR-2026-09-16-passive-session-inspection: Keep inspection separate from execution ownership
 
-**Status:** proposed
+**Status:** superseded in part by [ADR-2026-09-18-session-open-resumes-conversation](2026-09-18-session-open-resumes-conversation.md)
 **Date:** 2026-09-16
 **Area:** workflow
+
+The successor replaces parking-based suppression and the parked-session note.
+Queue ownership, automatic admission, and reconciliation constraints remain.
+The text below records the original decision.
 
 ## Context
 

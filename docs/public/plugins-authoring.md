@@ -150,9 +150,13 @@ the canvas recoverable after 15 seconds. Keep the entry document and its
 relative assets valid HTML, and make the app render its own loading and error
 states after startup.
 
-The frame has an opaque browser origin. Do not use `localStorage`,
-`sessionStorage`, IndexedDB, or service workers. Use the state protocol for
-small app-specific shared values and JavaScript memory for temporary values.
+The frame is same-origin with Kandev and canvas code is trusted with the
+viewing user's ordinary user-session authority. It can use `localStorage`,
+`sessionStorage`, IndexedDB, same-origin cookies, and the host DOM. Keep
+Kandev protocol requests relative and do not copy capability URLs or tokens.
+Use the state protocol for small app-specific shared values and JavaScript
+memory for temporary values. Capability URLs, release bindings, scope checks,
+and declared grants still govern every Kandev protocol operation.
 
 Network access uses exact HTTPS origins that a user approves. Wildcards,
 origin paths, query strings, credentials, and remote scripts are not allowed.
@@ -275,10 +279,12 @@ curated React, UI, and app-store surface.
   Host adapters consume the approval receipt/query surface; they do not derive
   authority from plugin IDs, package digests, or workspace state.
 
-An isolated web app has a separate browser boundary. Kandev loads it in a
-sandboxed iframe with an opaque origin. It cannot use the host DOM, cookies,
-host authentication headers, popups, top-level navigation, or a global Kandev
-JavaScript API. See [Security and trust](security.md#isolated-web-applications)
+An isolated web app has a separate iframe and sandbox boundary. Kandev loads it
+same-origin with the host, so its trusted source can use the viewing user's
+ordinary browser authority, including cookies, storage, and the host DOM. It
+still cannot open popups or navigate the top-level page, and it receives no
+global Kandev JavaScript API. Capability URLs and grants remain required for
+Kandev protocol operations. See [Security and trust](security.md#isolated-web-applications)
 for the runtime boundary.
 
 ## Storage decision table
@@ -288,7 +294,7 @@ for the runtime boundary.
 | Small JSON object owned by this plugin    | Host state: GetState, SetState, DeleteState, ListState               | instance, workspace, task, or agent; survives restart/upgrade and is included in Kandev state backups | capabilities.state: true; values are JSON objects, not bare scalars             |
 | Canvas app shared state                   | Relative `./_kandev/v1/state` protocol                              | Canvas instance; survives restart while the instance remains                 | `state` grant, store app-specific shared values, not duplicate task data       |
 | Per-user browser/plugin storage           | host.storage: get/set/delete/list/subscribe                          | instance, workspace, task, session, or repository, scoped per user                                    | capabilities.user_state: true; set/delete accept ifUnmodifiedSince and writerId |
-| Temporary canvas app value                | JavaScript memory inside the iframe                                  | Current document only                                                         | Opaque origin blocks browser storage and service workers                        |
+| Temporary canvas app value                | JavaScript memory inside the iframe                                  | Current document only                                                         | Use browser storage for user-scoped client data; keep shared app values in canvas state |
 | Operator configuration                    | Host.GetConfig and manifest config_schema                            | Plugin-owned settings; config changes restart an active subprocess                                    | Ungated GetConfig; secret fields arrive cleartext in the subprocess             |
 | Plugin-owned credentials                  | Host.GetSecret/SetSecret/DeleteSecret, or secret: true config fields | Encrypted Kandev vault, namespaced to this plugin                                                     | capabilities.secrets: true; never log values                                    |
 | Files, caches, or plugin-managed database | KANDEV_PLUGIN_DATA_DIR                                               | Shared across versions, removed on uninstall                                                          | Write only below the injected directory; own schema, locking, and migrations    |
@@ -920,6 +926,99 @@ The data-reader accessors return typed, paginated readers, for example
 next page. See `pkg/pluginsdk/data_types.go` for the full `Task`,
 `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`, `Repository`,
 `Session`, `Message`, and filter/page types.
+
+#### Task dependencies
+
+Every `Task` returned by `host.Tasks().Get`/`.List` carries a read-only
+dependency projection: `Blocked`, `BlockedReason`, `DependsOn`, `Blocks`,
+`DependsOnTruncated`, `BlocksTruncated`, and `StartWhenUnblocked`. `DependsOn`
+and `Blocks` are `[]TaskDependencyRef` (`ID`, `Title`, `State`, `Status`;
+`Status` is only ever set on a `DependsOn` entry, since a task cannot be
+"pending" or "resolved" against a task it blocks). Each list is capped at 512
+entries; the matching `*Truncated` flag reports whether more edges exist than
+were returned. A gRPC plugin sees no redaction: every edge end's `Title` and
+`State` are populated regardless of which workspace it belongs to, unlike the
+canvas surface described in [`canvases.md`](canvases.md), which blanks both
+fields for an edge end the caller's canvas scope does not directly admit: a
+workspace-scoped canvas admits an end sharing its workspace, a repository- or
+session-scoped canvas admits an end only when it is also returned as a
+directly readable task in the same response, and a task-scoped canvas admits
+none.
+
+If dependency derivation cannot produce a verdict for a task that a call
+does return, the host substitutes the withheld verdict rather than failing
+that call: `Blocked: true`, `BlockedReason: "unknown"`, empty
+`DependsOn`/`Blocks`, both truncation flags `false`, and
+`StartWhenUnblocked: false`. Treat this shape as "no answer," not as "task is
+actually blocked." Two distinct causes reach it: an internal read failure
+during derivation, or a task reached through `CreateTask`/`UpdateTask`/
+`MoveTask` by a caller holding `api_write:tasks` but not `api_read:tasks` (an
+independent capability those RPCs gate on writing, not reading). `List` and
+`Get` themselves never produce this verdict for a missing read capability:
+each fails the call outright with `PermissionDenied` before any task is
+returned, so accessor denial and a withheld verdict on a returned task are
+never the same signal. This is also distinct from the fan-out limit below:
+that refuses the whole call with `ResourceExhausted` rather than substituting
+a withheld verdict onto any task.
+
+Canvas event payloads do not carry the dependency projection: `Blocked`,
+`BlockedReason`, `DependsOn`, `Blocks`, the truncation flags, and
+`StartWhenUnblocked` are refetch-on-signal fields for the canvas surface.
+Native plugin `OnEvent` deliveries can carry the four dependency fields
+(`blocked`, `blocked_reason`, `depends_on`, and `blocks`) on dependency-related
+`task.updated` events. The truncation flags and `start_when_unblocked` still
+come from `host.Tasks().Get`/`.List`, so an event is never a complete
+replacement for a task read. A plugin that caches a task's dependency fields
+refetches them when: a
+`task.updated` event names that task or either end of one of its edges; a
+`task.dependencies_resolved` or `task.dependency_failed` event names that
+task; or a `task.state_changed` event names any task ID present in that
+task's cached `DependsOn` or `Blocks` list, since a predecessor or dependent
+simply advancing state is not itself one of the first three signals. A single
+`Get`/`List` response is not a transactional snapshot: with no surrounding
+lock, an edge can change while the read is being derived, so one response can
+show an edge asymmetrically (for example, a predecessor still listed as
+pending after it has already resolved). Treat what a response returns as the
+union of independently-read facts, and resolve staleness by refetching on the
+next matching signal rather than trusting any single response as
+authoritative.
+
+Reading dependencies adds no extra query per task; the host derives them for
+the whole page in one batched pass. That batch is bounded by a fixed limit on
+the number of distinct task IDs it will read across all edges on the page:
+whether an edge is expressed once or shared by many tasks, each distinct ID
+only counts once toward the limit. `ListTasks` and the plugin-owned
+task-tree preview RPC (`PreviewPluginOwnedTaskTree`) are both bound by this
+limit and fail the call with a `ResourceExhausted` error when a page (or, for
+the preview RPC, the tree itself) would cross it; the preview RPC accepts no
+page `limit` at all, so the only remedy is asking for a smaller tree. Flows
+that always return exactly one task, `GetTask` and the task-write RPCs
+(`CreateTask`, `UpdateTask`, `MoveTask`), can never exceed the limit and are
+exempt. A `ResourceExhausted` response is about the cost of deriving the
+answer, not about the size of the reply; it is never folded into the withheld
+verdict.
+
+`ListTasks`'s `Page.Limit` clamps only its upper bound: a limit above the
+host's page ceiling is lowered to that ceiling, and a limit at or below zero
+(including an unset, proto3-default zero) falls back to the host's default
+page size. That default is the largest page the endpoint will return on its
+own, so retrying a rejected call with a smaller explicit `Limit` (not with a
+zero or negative one) is the way to shrink a page that tripped the fan-out
+limit above.
+
+Declare a `min_kandev_version` manifest floor for the first Kandev release
+your plugin expects to carry these seven fields; a host older than that floor
+omits them from the wire message entirely (the SDK reports them as their zero
+values, indistinguishable from "not blocked, no edges"). This floor is a
+single host-wide capability check performed once at install time: it does
+not name `task-dependencies` or any other capability, unlike the
+capability-keyed `min_kandev_version` requirement on `api_read:messages`
+described above, which the host re-validates per declared capability. A dev
+or otherwise non-release build of the host always satisfies the floor check
+regardless of its actual age, so a plugin installed on such a build can still
+receive the same ambiguous zero-value bytes; do not rely on the floor check
+alone as proof the fields are populated when running against a non-release
+host.
 
 `host.Messages().List(ctx, MessageFilter{...}, Page{...})` reads historical
 conversation content (capability `api_read:messages`). Filter by `SessionIDs`,

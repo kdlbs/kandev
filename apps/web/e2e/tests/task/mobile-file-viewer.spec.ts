@@ -12,6 +12,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 import { selectMarkdownPreviewText } from "../../helpers/markdown-preview";
+import { waitForWorkspacePath } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 function createLongFileContent(lines = 500): string {
@@ -84,7 +85,7 @@ test.describe("Mobile file tree keyboard shortcuts", () => {
       taskTitle: "Mobile File Create Select All",
     });
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     await expect(session.fileTreeNode(filePath)).toBeVisible({ timeout: 15_000 });
 
     const directNewFile = testPage.getByRole("button", { name: "New file" });
@@ -138,7 +139,7 @@ test.describe("Mobile file viewer panel", () => {
     });
 
     // Navigate to the Files panel via the bottom nav
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
 
     // Wait for the file to appear in the browser tree
     const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${filePath}"]`);
@@ -168,7 +169,7 @@ test.describe("Mobile file viewer panel", () => {
       taskTitle: "Mobile FV Close",
     });
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
 
     const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${filePath}"]`);
     await expect(fileNode).toBeVisible({ timeout: 15_000 });
@@ -199,7 +200,7 @@ test.describe("Mobile file viewer panel", () => {
       options: { extension: "bin", content: Buffer.from([0x00, 0x01, 0x02, 0x03, 0xff, 0x10]) },
     });
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
 
     const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${filePath}"]`);
     await expect(fileNode).toBeVisible({ timeout: 15_000 });
@@ -228,7 +229,7 @@ test.describe("Mobile file viewer panel", () => {
       options: { extension: "bin", content: binary },
     });
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     await session.fileTreeNode(filePath).tap();
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 5_000 });
@@ -262,7 +263,7 @@ test.describe("Mobile file viewer panel", () => {
       taskTitle: "Mobile FV Upload Menu",
     });
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     const createMenu = testPage.getByTestId("files-create-menu");
     const triggerBox = await createMenu.boundingBox();
     expect(triggerBox?.height).toBeGreaterThanOrEqual(44);
@@ -298,7 +299,7 @@ test.describe("Mobile file viewer panel", () => {
       options: { extension: "ts", content: createLongFileContent(1_000) },
     });
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
 
     const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${filePath}"]`);
     await expect(fileNode).toBeVisible({ timeout: 15_000 });
@@ -391,7 +392,7 @@ test.describe("Mobile file viewer panel", () => {
       },
     });
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
 
     const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${filePath}"]`);
     await expect(fileNode).toBeVisible({ timeout: 15_000 });
@@ -427,7 +428,7 @@ test.describe("Mobile file viewer panel", () => {
     await testPage.getByRole("button", { name: "Update", exact: true }).tap();
     await expect(testPage.getByText("Updated mobile comment.")).toBeVisible({ timeout: 5_000 });
 
-    await testPage.getByRole("button", { name: "Chat" }).tap();
+    await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
     const fileName = filePath.split("/").pop() ?? filePath;
     await expect(session.activeChat().getByText(`${fileName} (1)`)).toBeVisible({
       timeout: 5_000,
@@ -459,7 +460,7 @@ test.describe("Mobile file viewer panel", () => {
       },
     });
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${filePath}"]`);
     await expect(fileNode).toBeVisible({ timeout: 15_000 });
     await fileNode.tap();
@@ -504,7 +505,7 @@ test.describe("Mobile file viewer panel", () => {
       options: { directory },
     });
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
 
     const dirNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${directory}"]`);
     await expect(dirNode).toBeVisible({ timeout: 15_000 });
@@ -521,13 +522,11 @@ test.describe("Mobile file viewer panel", () => {
     await expect(viewer.getByText(filePath)).toBeVisible();
   });
 
-  // A chat read/edit file link can target a line deep in a file. Tapping it sets
-  // a pending cursor position (use-file-editors), then on mobile the file opens
-  // through MobileFileViewerPanel → FileViewerContent (CodeMirror), which must
-  // consume that pending entry and scroll the target line into view. Regression
-  // guard for the mobile half of "open-and-scroll-to-line": before the fix
-  // CodeMirror ignored the pending map and the file opened pinned at the top.
-  test("tapping a chat read link scrolls the CodeMirror viewer to the target line", async ({
+  // @covers AC-UI-FILE-TREE-PATH-SCOPE-001.1
+  // @covers AC-UI-FILE-TREE-PATH-SCOPE-001.6
+  // An absolute workspace path from a read tool must use the same relative
+  // identity for the native viewer and its pending cursor position.
+  test("tapping an absolute workspace read link scrolls to the target line", async ({
     testPage,
     apiClient,
     seedData,
@@ -562,11 +561,11 @@ test.describe("Mobile file viewer panel", () => {
       },
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    const workspacePath = await waitForWorkspacePath(apiClient, task.id, task.session_id);
+    const absoluteFilePath = path.join(workspacePath, filePath);
 
-    // Seed a real read card pointing deep into the file. The chat read-message
-    // component sets the pending cursor position from `offset` before opening,
-    // keyed by this exact `file_path` — the same string the mobile viewer keys
-    // FileViewerContent on, so the consume matches.
+    // Seed the absolute path emitted by an agent tool. The opener must normalize
+    // it before keying the pending cursor and native viewer with the same path.
     const targetLine = 300;
     await apiClient.seedSessionMessage(task.session_id, {
       type: "tool_read",
@@ -576,7 +575,7 @@ test.describe("Mobile file viewer panel", () => {
         tool_call_id: "tc-chat-read-scroll",
         normalized: {
           read_file: {
-            file_path: filePath,
+            file_path: absoluteFilePath,
             offset: targetLine,
             limit: 20,
             output: { content: 'export const line_299 = "line 299";', line_count: 20 },
@@ -590,14 +589,16 @@ test.describe("Mobile file viewer panel", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
 
-    // FilePathButton renders the openable link with the seeded path as `title`.
+    // FilePathButton preserves the recorded path in its title while displaying
+    // the relative suffix.
     const chat = session.activeChat();
-    const fileLink = chat.locator(`button[title="${filePath}"]`);
+    const fileLink = chat.locator(`button[title="${absoluteFilePath}"]`);
     await expect(fileLink).toBeVisible({ timeout: 15_000 });
     await fileLink.tap();
 
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 10_000 });
+    await expect(viewer.getByText(filePath)).toBeVisible();
 
     const cmScroller = viewer.locator(".cm-scroller").first();
     await expect(cmScroller).toBeVisible();
@@ -625,7 +626,7 @@ test.describe("Mobile file viewer panel", () => {
   }) => {
     test.setTimeout(90_000);
 
-    const { filePath } = await setupMobileFileViewerTest({
+    const { session, filePath } = await setupMobileFileViewerTest({
       testPage,
       apiClient,
       seedData,
@@ -634,9 +635,8 @@ test.describe("Mobile file viewer panel", () => {
       options: { extension: "ts", content: createLongFileContent(500) },
     });
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
-    const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${filePath}"]`);
-    await expect(fileNode).toBeVisible({ timeout: 15_000 });
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
+    const fileNode = await session.fileTree.waitForFileTreeNode(filePath, 15_000);
     await fileNode.tap();
 
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");

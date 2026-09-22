@@ -44,6 +44,31 @@ const (
 	activationDispositionQueued     = "queued"
 )
 
+type sessionOpenRecoveryContextKey struct{}
+
+// sessionOpenRecoveryBlockedError carries a guarded ownership decision back to
+// LaunchSession. Passive inspection treats that decision as a successful
+// waiting response so the browser does not enter workspace recovery.
+type sessionOpenRecoveryBlockedError struct {
+	reason string
+}
+
+func (e *sessionOpenRecoveryBlockedError) Error() string {
+	return "session_open recovery blocked: " + e.reason
+}
+
+func withSessionOpenRecoveryContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, sessionOpenRecoveryContextKey{}, true)
+}
+
+func isSessionOpenRecoveryContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	active, _ := ctx.Value(sessionOpenRecoveryContextKey{}).(bool)
+	return active
+}
+
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
 	TaskID         string        `json:"task_id"`
@@ -81,6 +106,10 @@ type LaunchSessionRequest struct {
 	// kept off the wire protocol (`json:"-"`) — a client must not be able to
 	// suppress the upgrade and strand a passthrough session without a PTY.
 	DeferredStart bool `json:"-"`
+	// InitialCreatePrompt marks the one eligible, prompt-bearing explicit-step
+	// create flow. It is server-side provenance, so clients cannot turn the
+	// generic launch path into a workflow turn-start admission.
+	InitialCreatePrompt bool `json:"-"`
 	// InitialPromptPreview is supplied only by task creation after attachment claim.
 	InitialPromptPreview *models.InitialPromptPreview `json:"-"`
 	Attachments          []v1.MessageAttachment       `json:"attachments,omitempty"`
@@ -467,6 +496,9 @@ func (s *Service) shouldBlockAutoStart(ctx context.Context, req *LaunchSessionRe
 
 // launchStartCreated starts agent execution on an existing CREATED session.
 func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	if req.InitialCreatePrompt {
+		return s.launchInitialCreatePrompt(ctx, req)
+	}
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
 	execution, err := s.StartCreatedSession(
@@ -490,12 +522,23 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 // launchResume resumes a stopped session.
 func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
-	execution, err := s.ResumeTaskSessionWithOptions(ctx, req.TaskID, req.SessionID, executor.ResumeOptions{
+	resumeCtx := ctx
+	if req.ActivationSource == LaunchActivationSourceSessionOpen {
+		resumeCtx = withSessionOpenRecoveryContext(ctx)
+	}
+	execution, err := s.ResumeTaskSessionWithOptions(resumeCtx, req.TaskID, req.SessionID, executor.ResumeOptions{
 		AllowBranchReplacement:      req.AllowBranchReplacement,
 		AllowCompletedSessionResume: req.AllowCompletedSessionResume,
 		Origin:                      string(launchOriginForActivation(req)),
 	})
 	if err != nil {
+		var blocked *sessionOpenRecoveryBlockedError
+		if errors.As(err, &blocked) {
+			return s.sessionOpenRecoveryWaitingResponse(ctx, req, blocked.reason), nil
+		}
+		if req.ActivationSource == LaunchActivationSourceSessionOpen && errors.Is(err, ErrCeilingLaunchConflict) {
+			return s.sessionOpenRecoveryWaitingResponse(ctx, req, "session_capacity"), nil
+		}
 		return nil, err
 	}
 	if execution == nil {
@@ -507,6 +550,30 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		s.clearWorkflowParkingForSession(ctx, req.SessionID, parkingStamp)
 	}
 	return executionToLaunchResponse(req.TaskID, execution), nil
+}
+
+func (s *Service) sessionOpenRecoveryWaitingResponse(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+	reason string,
+) *LaunchSessionResponse {
+	var session *models.TaskSession
+	if s != nil && s.repo != nil && req != nil {
+		session, _ = s.repo.GetTaskSession(ctx, req.SessionID)
+	}
+	disposition := activationDispositionSuppressed
+	if reason == autoResumeBlockedLaunchQueued {
+		disposition = activationDispositionQueued
+	}
+	return &LaunchSessionResponse{
+		Success:               true,
+		TaskID:                req.TaskID,
+		SessionID:             req.SessionID,
+		State:                 sessionStateOrEmpty(session),
+		AgentProfileID:        sessionProfileOrEmpty(session),
+		ActivationDisposition: disposition,
+		ActivationReason:      reason,
+	}
 }
 
 func launchOriginForActivation(req *LaunchSessionRequest) launchOrigin {

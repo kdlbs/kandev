@@ -325,7 +325,7 @@ Choose **Settings > Executors > Kubernetes**. Only an administrator can create, 
 
 Opening a saved Kubernetes profile puts the shared cluster connection editor, connection test, and executor-wide active sessions before workload settings. The test uses current unsaved connection and profile values. Administrators edit both resources through one Save/Reset flow, while members see the same hierarchy read-only. Configured executor rows and task settings icons open the selected profile directly; the standalone connection route remains only for an executor with no profiles.
 
-Kubernetes Pod glyphs on Kanban cards and in task lists hydrate from the exact task/session status when they render, before any hover. Fine-pointer hover or keyboard focus shows a compact structured Pod summary; touch opens the same summary in a bottom Drawer without activating the task row. Duplicate indicators for the same session share the current read instead of issuing parallel requests.
+Kubernetes Pod glyphs on Kanban cards and in task lists hydrate from the exact task/session status when they render, before any hover. While the page is visible, mounted indicators refresh automatically every 90 seconds and retry failed reads. Fine-pointer hover or keyboard focus shows a compact structured Pod summary; touch opens the same summary in a bottom Drawer without activating the task row. Duplicate indicators for the same session share the current read instead of issuing parallel requests.
 
 Each executor fixes one namespace and connection configuration. Each profile supplies one strict `core/v1` `PodTemplate`, a main-container name, `linux/amd64` or `linux/arm64`, and one workspace mode:
 
@@ -441,6 +441,30 @@ The runtime preflights the selected agent command and reports an installation hi
 Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Terminal archive/delete stops run the profile cleanup script first; cleanup is best-effort, so a failure does not block controller teardown. Plain Stop and backend restart skip cleanup and preserve the task workspace for resume. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. Resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller and re-runs preparation.
 
 </details>
+
+### Reachability
+
+A background poller probes each active SSH executor's configured host on
+`executors.sshReachabilityIntervalSeconds` (default 60s; see
+[Configuration](configuration.md)) and records whether the TCP dial and SSH
+handshake succeeded. The result (reachable, unreachable with a failure
+reason, or unknown before the first probe) appears on the executor's
+**Settings > Executors > SSH** page, including the probed host, how long ago
+the last successful probe was (or that none has ever succeeded), and a manual
+**Probe now** action.
+
+If a task launches against a host currently recorded as unreachable, Kandev
+publishes a `session.launch.warning` event for the launched session. The task's
+chat panel shows an inline warning naming the host and the age of the last
+successful probe before the attempt proceeds. The gateway keeps the latest
+warning while the backend is running, so a later session subscriber receives
+it too. Workflow and dependency launches use the same event path.
+
+The probe deliberately does two things and no more: it reports what it
+observed, and it never blocks or delays a launch on that basis. It does not
+retry a failed connection immediately, and it does not move, reconfigure, or
+otherwise repair a host that has become unreachable or changed address;
+fixing the host or the connection settings remains an operator action.
 
 ## Lifecycle and cleanup
 

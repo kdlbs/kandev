@@ -101,7 +101,9 @@ func TestRegisterRoutes_RegistersEveryEndpoint(t *testing.T) {
 
 	want := map[string]string{
 		"GET /api/v1/workspaces/:wsId/config/export":          "",
+		"GET /api/v1/workspaces/:wsId/config/export/manifest": "",
 		"GET /api/v1/workspaces/:wsId/config/export/zip":      "",
+		"POST /api/v1/workspaces/:wsId/config/export/zip":     "",
 		"POST /api/v1/workspaces/:wsId/config/preview":        "",
 		"POST /api/v1/workspaces/:wsId/config/import":         "",
 		"GET /api/v1/workspaces/:wsId/config/sync/incoming":   "",
@@ -172,6 +174,45 @@ func TestHandler_ExportConfigZip_ServiceError(t *testing.T) {
 	if got := rec.Header().Get("Content-Type"); strings.HasPrefix(got, "application/zip") {
 		t.Errorf("error response should not claim to be a zip, got %q", got)
 	}
+}
+
+func TestHandler_ExportSelectedConfigZip(t *testing.T) {
+	router, env := newTestRouter(t)
+	seedAgent(t, env, testWorkspaceID, "ada")
+	manifest, err := env.svc.ExportManifest(context.Background(), testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ExportManifest: %v", err)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"revision": manifest.Revision,
+		"paths":    []string{manifest.Files[0].Path},
+	})
+	rec := do(t, router, http.MethodPost,
+		"/api/v1/workspaces/"+testWorkspaceID+"/config/export/zip", string(body))
+	assertStatus(t, rec, http.StatusOK)
+	entries := readZip(t, rec.Body)
+	if len(entries) != 1 {
+		t.Fatalf("selected archive entries = %d, want 1", len(entries))
+	}
+	if _, ok := entries[manifest.Files[0].Path]; !ok {
+		t.Fatalf("selected path %q missing from %v", manifest.Files[0].Path, entries)
+	}
+}
+
+func TestHandler_ExportSelectedConfigZipRejectsStaleRevision(t *testing.T) {
+	router, env := newTestRouter(t)
+	seedAgent(t, env, testWorkspaceID, "ada")
+	manifest, err := env.svc.ExportManifest(context.Background(), testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ExportManifest: %v", err)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"revision": "sha256:stale",
+		"paths":    []string{manifest.Files[0].Path},
+	})
+	rec := do(t, router, http.MethodPost,
+		"/api/v1/workspaces/"+testWorkspaceID+"/config/export/zip", string(body))
+	assertStatus(t, rec, http.StatusConflict)
 }
 
 func TestHandler_PreviewImport(t *testing.T) {

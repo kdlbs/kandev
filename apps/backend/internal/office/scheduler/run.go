@@ -4,12 +4,12 @@ package scheduler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -20,7 +20,6 @@ import (
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
-	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -42,15 +41,7 @@ var ErrRoutingNotSupported = errors.New("routing not supported by task starter")
 // model is the base profile's CLIFlags + AutoApprove booleans, not a
 // preset-by-name. Per-provider permission overrides would require
 // re-modelling that surface and are deferred.
-type RouteOverride struct {
-	ExecutionProfileID string
-	ProviderID         string
-	Model              string
-	Tier               string
-	Mode               string
-	Flags              []string
-	Env                map[string]string
-}
+type RouteOverride = service.RouteOverride
 
 // LaunchContext is an alias for service.LaunchContext so dispatch
 // callsites inside this package can spell the type without re-imports.
@@ -58,33 +49,31 @@ type RouteOverride struct {
 // See service.LaunchContext for field semantics.
 type LaunchContext = service.LaunchContext
 
-// Run reason constants.
+// Run reason constants. Aliases of shared's canonical declarations
+// (AC-OFFICE-BACKPRESSURE-001.8) — see shared/runreasons.go.
 const (
-	RunReasonTaskAssigned          = "task_assigned"
-	RunReasonTaskComment           = "task_comment"
-	RunReasonTaskBlockersResolved  = "task_blockers_resolved"
-	RunReasonTaskChildrenCompleted = "task_children_completed"
-	RunReasonApprovalResolved      = "approval_resolved"
-	RunReasonRoutineTrigger        = "routine_trigger"
-	// RunReasonHeartbeat aliases shared.RunReasonHeartbeat so this package's
-	// local constant and the shared idle-skip classifier cannot drift apart
-	// the way the un-aliased pair did before WO-46 (Review round 1, S2).
-	RunReasonHeartbeat   = shared.RunReasonHeartbeat
-	RunReasonBudgetAlert = "budget_alert"
-	RunReasonAgentError  = "agent_error"
+	RunReasonTaskAssigned          = shared.RunReasonTaskAssigned
+	RunReasonTaskComment           = shared.RunReasonTaskComment
+	RunReasonTaskBlockersResolved  = shared.RunReasonTaskBlockersResolved
+	RunReasonTaskChildrenCompleted = shared.RunReasonTaskChildrenCompleted
+	RunReasonApprovalResolved      = shared.RunReasonApprovalResolved
+	RunReasonRoutineTrigger        = shared.RunReasonRoutineTrigger
+	RunReasonHeartbeat             = shared.RunReasonHeartbeat
+	RunReasonBudgetAlert           = shared.RunReasonBudgetAlert
+	RunReasonAgentError            = shared.RunReasonAgentError
 
 	// Reactivity-pipeline reasons.
-	RunReasonTaskUnblocked         = "task_unblocked"            // status: blocked → not blocked
-	RunReasonTaskReopened          = "task_reopened"             // silent reopen (status only)
-	RunReasonTaskReopenedComment   = "task_reopened_via_comment" // user comment on closed task or resume:true
-	RunReasonTaskMentioned         = "task_mentioned"            // @mention in comment, additive to assignee wake
-	RunReasonStagePending          = "stage_pending"             // execution policy advanced to a new stage
-	RunReasonStageChangesRequested = "stage_changes_requested"   // reviewer asked for rework
+	RunReasonTaskUnblocked         = shared.RunReasonTaskUnblocked         // status: blocked → not blocked
+	RunReasonTaskReopened          = shared.RunReasonTaskReopened          // silent reopen (status only)
+	RunReasonTaskReopenedComment   = shared.RunReasonTaskReopenedComment   // user comment on closed task or resume:true
+	RunReasonTaskMentioned         = shared.RunReasonTaskMentioned         // @mention in comment, additive to assignee wake
+	RunReasonStagePending          = shared.RunReasonStagePending          // execution policy advanced to a new stage
+	RunReasonStageChangesRequested = shared.RunReasonStageChangesRequested // reviewer asked for rework
 
 	// Approval-flow reactivity reasons (B5).
-	RunReasonTaskReviewRequested  = "task_review_requested"  // task entered in_review; ping reviewers/approvers
-	RunReasonTaskChangesRequested = "task_changes_requested" // a reviewer/approver asked for changes
-	RunReasonTaskReadyToClose     = "task_ready_to_close"    // all approvers have approved; assignee may close
+	RunReasonTaskReviewRequested  = shared.RunReasonTaskReviewRequested  // task entered in_review; ping reviewers/approvers
+	RunReasonTaskChangesRequested = shared.RunReasonTaskChangesRequested // a reviewer/approver asked for changes
+	RunReasonTaskReadyToClose     = shared.RunReasonTaskReadyToClose     // all approvers have approved; assignee may close
 )
 
 // RunContext is the structured payload attached to every run the
@@ -161,6 +150,16 @@ const CoalesceWindowSeconds = 5
 // IdempotencyWindowHours is the deduplication window.
 const IdempotencyWindowHours = 24
 
+// AssignmentWakeAllowanceN and AssignmentWakeAllowanceWindow are the fixed
+// N and W of REQ-OFFICE-ASSIGN-RATE-001: at most N agent-initiated
+// assignment wakes admitted per task within any rolling window of duration
+// W. Fixed values of this capability rather than operator-configurable;
+// referenced by the tests rather than restated.
+const (
+	AssignmentWakeAllowanceN      = 5
+	AssignmentWakeAllowanceWindow = 10 * time.Minute
+)
+
 // TaskStarter launches agent sessions on behalf of the office scheduler.
 // Implemented by the orchestrator; the scheduler depends only on this interface.
 type TaskStarter interface {
@@ -194,7 +193,9 @@ type SchedulerService struct {
 	repo                    *sqlite.Repository
 	logger                  *logger.Logger
 	svc                     *service.Service
+	runsService             *runsservice.Service
 	taskStarter             TaskStarter
+	runSessionLauncher      service.RunSessionLauncher
 	resolver                *routing.Resolver
 	eb                      bus.EventBus
 	apiBaseURL              string
@@ -248,6 +249,11 @@ func (ss *SchedulerService) SetTaskStarter(ts TaskStarter) {
 	ss.taskStarter = ts
 }
 
+// SetRunSessionLauncher wires the Office-owned taskless launch seam.
+func (ss *SchedulerService) SetRunSessionLauncher(launcher service.RunSessionLauncher) {
+	ss.runSessionLauncher = launcher
+}
+
 // SetResolver wires the routing resolver. When set, dispatch goes through
 // dispatchWithRouting; when nil, the legacy concrete-profile path runs.
 func (ss *SchedulerService) SetResolver(r *routing.Resolver) {
@@ -259,6 +265,16 @@ func (ss *SchedulerService) SetResolver(r *routing.Resolver) {
 // the scheduler silent and tests don't need to stand up a bus.
 func (ss *SchedulerService) SetEventBus(eb bus.EventBus) {
 	ss.eb = eb
+}
+
+// SetRunsService wires the shared runs queue service (AC-CONSOLIDATION-001.6).
+// When set, QueueRun delegates its insert + publish + signal to it instead of
+// its own ss.repo.CreateRun, so this path gains causation resolution,
+// priority stamping, and the launch-safety refusal gates for free. Optional;
+// nil keeps the legacy inline path this package has always used, so existing
+// tests that never call this still pass.
+func (ss *SchedulerService) SetRunsService(svc *runsservice.Service) {
+	ss.runsService = svc
 }
 
 // Resolver returns the wired routing resolver (may be nil).
@@ -302,31 +318,42 @@ func (ss *SchedulerService) SetPauseGate(g shared.PauseGate) {
 	ss.pauseGate = g
 }
 
-// QueueRun enqueues a run request for an agent instance.
+// QueueRun enqueues a run request for an agent instance, attributed to the
+// system actor. It exists for shared.RunQueuer callers that predate the
+// actor contract (AC-OFFICE-RUN-CAUSATION-001.15) and have no actor to
+// declare; QueueRunCtx callers thread their RunContext's real actor
+// through queueRunAsActor instead.
 // It checks agent status, idempotency, and attempts coalescing before inserting.
 // Implements shared.RunQueuer.
 func (ss *SchedulerService) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
-) (runsservice.QueueOutcome, error) {
-	return ss.queueRun(ctx, agentInstanceID, reason, payload, idempotencyKey, "", "")
+) (shared.QueueOutcome, error) {
+	outcome, err := ss.queueRunAsActor(ctx, agentInstanceID, reason, payload, idempotencyKey, "", "", models.ActorKindSystem, "")
+	return outcome, err
 }
 
-// queueRun is QueueRun plus an optional completion-wave identity. A
-// non-empty waveKey (a) skips CoalesceRun — a wave-carrying request is
-// never coalesced in and a wave-carrying queued run is never coalesced
-// into — and (b) classifies CreateRun's idx_run_wake_wave violation as an
-// already-delivered wake rather than an error: this call site inserts
-// directly (not through runs/service), so ReportInsertResult's own
-// idx_run_idempotency-only classification doesn't cover it. A concurrent
-// duplicate of this same request can just as well lose the race on
-// idx_run_idempotency instead of idx_run_wake_wave — both keys identify the
-// identical operation for the identical row, so either violation means the
-// wake is already recorded and neither is an error, mirroring
-// runs/service.QueueRun's own two-way classification.
-func (ss *SchedulerService) queueRun(
+// queueRunAsActor is QueueRun's actor- and wave-aware core. actorKind/
+// actorID flow into the delegated runs/service causation resolution
+// (workspace, priority class, causation-depth and self-trigger refusal
+// gates) and, on the legacy inline fallback, into ClassifyPriority — so a
+// real actor gets the same priority treatment whether or not a runs
+// service is wired. A non-empty waveKey (a) skips CoalesceRun — a
+// wave-carrying request is never coalesced in and a wave-carrying queued
+// run is never coalesced into — and (b) classifies CreateRun's
+// idx_run_wake_wave violation as an already-delivered wake rather than an
+// error: the legacy inline fallback inserts directly (not through
+// runs/service), so ReportInsertResult's own idx_run_idempotency-only
+// classification doesn't cover it. A concurrent duplicate of this same
+// request can just as well lose the race on idx_run_idempotency instead of
+// idx_run_wake_wave — both keys identify the identical operation for the
+// identical row, so either violation means the wake is already recorded
+// and neither is an error, mirroring runs/service.QueueRun's own two-way
+// classification.
+func (ss *SchedulerService) queueRunAsActor(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey, waveKey, waveString string,
+	actorKind models.ActorKind, actorID string,
 ) (runsservice.QueueOutcome, error) {
 	agent, err := ss.guardAgentStatus(ctx, agentInstanceID)
 	if err != nil {
@@ -336,65 +363,64 @@ func (ss *SchedulerService) queueRun(
 		return runsservice.QueueOutcomeNone, err
 	}
 
-	if idempotencyKey != "" {
-		dup, err := ss.repo.CheckIdempotencyKey(ctx, idempotencyKey, IdempotencyWindowHours)
-		if err != nil {
-			return runsservice.QueueOutcomeNone, fmt.Errorf("idempotency check: %w", err)
-		}
-		if dup {
-			return runsservice.ReportWindowedDedup(runsservice.QueueSourceRuns, reason, idempotencyKey), nil
-		}
+	if ss.runsService == nil {
+		// AC-OFFICE-ENQUEUE-CONSOLIDATION-001.6: a delegating caller
+		// without the authoritative API available fails its enqueue and
+		// surfaces the error, rather than falling back to an insert of
+		// its own. A fallback insert would bypass causation resolution
+		// and the causation-depth/self-trigger refusal gates entirely —
+		// precisely the ungated path this requirement removes. Production
+		// always wires a runs service alongside the scheduler
+		// (backendapp.startSchedulingRuntime), so this is reachable only
+		// from a test that constructs a SchedulerService without calling
+		// SetRunsService.
+		return runsservice.QueueOutcomeNone, fmt.Errorf("queue run: no runs service configured")
 	}
 
-	if waveKey == "" {
-		coalesced, err := ss.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
-		if err != nil {
-			return runsservice.QueueOutcomeNone, fmt.Errorf("coalesce check: %w", err)
-		}
-		if coalesced {
-			ss.logger.Debug("run coalesced",
-				zap.String("agent", agentInstanceID),
-				zap.String("reason", reason))
-			return runsservice.QueueOutcomeCoalesced, nil
-		}
+	causingRunID, err := ss.resolveCausingRunID(ctx, actorKind, actorID)
+	if err != nil {
+		return runsservice.QueueOutcomeNone, err
 	}
 
-	var idemKeyPtr *string
-	if idempotencyKey != "" {
-		idemKeyPtr = &idempotencyKey
+	// The assignment allowance is scoped to the scheduler's mutation
+	// producer. Other producers do not carry actor_type=agent and therefore
+	// pass through this fail-open gate without consuming its allowance.
+	if refused := ss.checkAssignmentWakeAllowance(ctx, agentInstanceID, reason, payload); refused {
+		return runsservice.QueueOutcomeRateLimited, nil
 	}
-	req := &models.Run{
-		ID:             uuid.New().String(),
-		AgentProfileID: agentInstanceID,
+
+	return ss.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
 		Reason:         reason,
-		Payload:        payload,
-		Status:         RunStatusQueued,
-		CoalescedCount: 1,
-		IdempotencyKey: idemKeyPtr,
+		IdempotencyKey: idempotencyKey,
+		Payload:        service.PayloadWithAgent(payload, agentInstanceID),
+		ActorKind:      actorKind,
+		ActorID:        actorID,
+		CausingRunID:   causingRunID,
 		WakeWaveKey:    waveKey,
 		WakeWaveString: waveString,
-		RequestedAt:    time.Now().UTC(),
-	}
-	insertErr := ss.repo.CreateRun(ctx, req)
-	if waveKey != "" && runssqlite.IsWakeWaveUniqueViolation(insertErr) {
-		runsservice.ParentWakeDedupedTotal.Add(1)
-		ss.logger.Debug("run skipped (wave already woken)",
-			zap.String("wave_key", waveKey))
-		return runsservice.QueueOutcomeDeduped, nil
-	}
-	outcome, err := runsservice.ReportInsertResult(runsservice.QueueSourceRuns, reason, idempotencyKey, agentInstanceID, insertErr)
-	if err != nil {
-		return runsservice.QueueOutcomeNone, fmt.Errorf("enqueue run: %w", err)
-	}
-	if outcome == runsservice.QueueOutcomeDeduped {
-		return outcome, nil
-	}
+	})
+}
 
-	ss.logger.Info("run queued",
-		zap.String("id", req.ID),
-		zap.String("agent", agentInstanceID),
-		zap.String("reason", reason))
-	return runsservice.QueueOutcomeQueued, nil
+// resolveCausingRunID looks up the acting agent's own live claimed run,
+// so a reactivity-triggered wake (no explicit CausingRunID or task-
+// boundary carrier the way a workflow-engine action has) still inherits
+// the causation chain of whatever the actor was doing when it caused
+// this wake, instead of every such wake resolving as a fresh root
+// cause. Returns "" for a non-agent actor or an agent with no live
+// claimed run, in which case causation resolution roots the new run
+// exactly as it did before this lookup existed.
+func (ss *SchedulerService) resolveCausingRunID(ctx context.Context, actorKind models.ActorKind, actorID string) (string, error) {
+	if actorKind != models.ActorKindAgent || actorID == "" {
+		return "", nil
+	}
+	run, err := ss.repo.RunsRepository().GetClaimedRunForCausationAttribution(ctx, actorID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("resolve causing run: %w", err)
+	}
+	return run.ID, nil
 }
 
 // QueueRunCtx is the typed variant of QueueRun that takes a structured
@@ -404,6 +430,12 @@ func (ss *SchedulerService) queueRun(
 // falling back to a "{reason}:{taskID}:{agentID}" default that would be
 // permanently unique per (reason, task, agent) and silently swallow every
 // later legitimate occurrence for the same triple.
+//
+// Unlike QueueRun, this threads c's real actor (ActorType/ActorID) through
+// to causation resolution instead of defaulting to system
+// (AC-OFFICE-RUN-CAUSATION-001.15) — every QueueRunCtx call site (approval
+// resolution, reactivity) already knows the human or agent that caused the
+// wake; it was only ever discarded at this boundary.
 func (ss *SchedulerService) QueueRunCtx(
 	ctx context.Context, agentInstanceID string, c RunContext,
 ) (runsservice.QueueOutcome, error) {
@@ -411,7 +443,31 @@ func (ss *SchedulerService) QueueRunCtx(
 	if err != nil {
 		return runsservice.QueueOutcomeNone, fmt.Errorf("encode run context: %w", err)
 	}
-	return ss.queueRun(ctx, agentInstanceID, c.Reason, payload, c.IdempotencyKey, c.WaveKey, c.WaveString)
+	actorKind, actorID := actorFromRunContext(c)
+	return ss.queueRunAsActor(ctx, agentInstanceID, c.Reason, payload, c.IdempotencyKey, c.WaveKey, c.WaveString, actorKind, actorID)
+}
+
+// actorFromRunContext maps RunContext's loosely-typed ActorType string
+// ("user" | "agent" | "", set independently across many reactivity/
+// approval call sites) onto models.ActorKind, applying the same
+// fail-restrictive rule runs/service.normalizeActor applies for a
+// delegated request: an unrecognised ActorType, or an "agent" ActorType
+// with no ActorID, resolves to ActorKindSystem and is counted
+// (AC-OFFICE-RUN-CAUSATION-001.16) so a caller failing to declare its
+// actor stays visible. A "user" ActorType is never downgraded for a
+// missing ActorID — a browser-originated status/assignee change has none
+// to give — so it always resolves to ActorKindUser.
+func actorFromRunContext(c RunContext) (models.ActorKind, string) {
+	switch c.ActorType {
+	case "user":
+		return models.ActorKindUser, c.ActorID
+	case assignmentWakeActorTypeAgent:
+		if c.ActorID != "" {
+			return models.ActorKindAgent, c.ActorID
+		}
+	}
+	shared.LaunchActorMissingTotal.Add(shared.LaunchSafetyLabel("reason", c.Reason), 1)
+	return models.ActorKindSystem, ""
 }
 
 // encodeRunContext JSON-encodes c. When c.ExtraPayload is empty the output

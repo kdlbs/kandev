@@ -326,6 +326,7 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
 }) => {
   test.setTimeout(120_000);
 
+  const gateway = watchWs(testPage);
   const { session, taskId, sessionId } = await seedBusyQueueTask(testPage, apiClient, seedData);
   const chat = session.activeChat();
   const markerA = "mobile targeted A response";
@@ -365,7 +366,12 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
 
   await assertNoDocumentHorizontalOverflow(testPage);
 
+  const sendNowResponse = gateway.waitForResponse("message.queue.send_now");
   await rowSendNow.tap();
+  await sendNowResponse;
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count))
+    .toBe(2);
   await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
   await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText(markerA);
   await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText(markerC);

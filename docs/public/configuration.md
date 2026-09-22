@@ -147,10 +147,10 @@ The Docker socket is effectively root-equivalent on many hosts. Do not publish i
 
 ### Core agent service
 
-| YAML key               | Environment variable                              | Default     | Current behavior                                                 |
-| ---------------------- | ------------------------------------------------- | ----------- | ---------------------------------------------------------------- |
-| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `localhost` | Host of the core `agentctl` control server.                      |
-| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback. |
+| YAML key               | Environment variable                              | Default     | Current behavior                                                              |
+| ---------------------- | ------------------------------------------------- | ----------- | ---------------------------------------------------------------------------- |
+| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `127.0.0.1` | Host of the core `agentctl` control server. The literal avoids IPv6 loopback resolution variance. |
+| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback.            |
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
@@ -159,6 +159,7 @@ The launcher starts `agentctl`, performs a one-time nonce handshake, and supplie
 | YAML key                   | Environment variable              | Default | Current behavior                                                                |
 | -------------------------- | --------------------------------- | ------- | ------------------------------------------------------------------------------- |
 | `tasks.preparationTimeout` | `KANDEV_TASK_PREPARATION_TIMEOUT` | `10m`   | Positive Go duration for repository setup and executor-profile prepare scripts. |
+| `tasks.stallDetectionThreshold` | `KANDEV_TASK_STALL_DETECTION_THRESHOLD` | `2h` | Positive Go duration for the session reconciliation sweep's stall threshold. |
 
 `tasks.preparationTimeout` controls how long Kandev allows repository setup and
 executor-profile prepare scripts to run. The value uses Go duration syntax,
@@ -175,6 +176,24 @@ default, each launch-phase limit is `15m`. Preparation scripts use a separate
 context, so earlier work such as Sprite uploads does not reduce their full
 `10m` preparation budget. The environment variable overrides YAML. This is a
 startup setting, not a database or Settings value.
+
+`tasks.stallDetectionThreshold` controls the periodic session reconciliation
+sweep. When an unarchived task holds an active session with no live execution
+behind it and no session events or messages for longer than this threshold,
+Kandev emits a `task.stalled` event and logs a warning. After twice the
+threshold of silence, the sweep returns each classified interrupted session to
+`WAITING_FOR_INPUT` and preserves its conversation for recovery when you open
+the task. It abandons only the observed unfinished turn, without reporting a
+successful completion or advancing the workflow. Idle waiting sessions are
+excluded, and recovery runs only when every active session of the task is
+execution-less and past the grace window, so a live execution or idle sibling
+blocks recovery for the task rather than being swept along with it.
+The value is source-specific: an invalid YAML duration fails configuration
+parsing, while a zero or negative YAML duration is rejected at startup with
+`tasks.stallDetectionThreshold must be positive`. An invalid or non-positive
+environment value falls back to `2h`, and non-positive values from a profile
+default are ignored, leaving the `2h` default in effect. The environment
+variable overrides YAML, and changes require a backend restart.
 
 ### Capacity and managed-process startup settings
 
@@ -195,6 +214,7 @@ startup setting, not a database or Settings value.
 | `agentctl.detachedEventLimit` | `KANDEV_ACP_DETACHED_EVENT_LIMIT` | integer `1`-`10000`, `100` | Per-instance agent events retained while no backend is attached. An invalid or out-of-range environment value fails startup. |
 | `planning.coalesceWindowMs`          | `KANDEV_PLAN_COALESCE_WINDOW_MS`  | integer `>= 0`, `300000`          | Same-author plan revision coalescing window in milliseconds.                                                                                                                                                                                          |
 | `observability.otlpEndpoint`         | `OTEL_EXPORTER_OTLP_ENDPOINT`     | URL, empty                        | OTLP tracing endpoint. Treat the value and emitted spans as sensitive.                                                                                                                                                                                |
+| `executors.sshReachabilityIntervalSeconds` | `KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS` | integer `>= 0`, `60` | Interval between background SSH-executor reachability probes, in seconds. `0` disables the poller entirely; a probed executor then keeps its last recorded state rather than going stale. The effective cadence is otherwise clamped to `15`-`3600`: a value from `1` to `14` becomes `15`, and a value above `3600` becomes `3600`, each logged once at startup. Valid environment and YAML values use this clamp. An invalid environment value falls back to `60`; an invalid YAML value fails startup like any other typed catalog key. |
 | `office.schedulerTickMs`             | `KANDEV_OFFICE_SCHEDULER_TICK_MS` | positive integer, `5000`          | Office queued/retry run safety-net interval in milliseconds.                                                                                                                                                                                          |
 | `launcher.webPort`                   | `KANDEV_WEB_PORT`                 | automatic, `0`                    | Development web-server port. It is used with `dev` and ignored by embedded-asset launches.                                                                                                                                                            |
 | `launcher.healthTimeoutMs`           | `KANDEV_HEALTH_TIMEOUT_MS`        | positive integer, `45000`         | Launcher startup-health timeout in milliseconds. Development and E2E profiles use a longer default.                                                                                                                                                   |
@@ -334,6 +354,15 @@ details. A browser can connect to a desktop backend and use the HTTP folder
 picker; the browser's picker capability does not change the backend's
 discovery policy.
 
+If discovery cannot read a root, repository selectors keep repositories from
+successful roots available and retain their normal **Refresh repositories**
+action. Failed-root paths stay in structured backend logs and are not shown in
+selectors. A denied descendant does not require root reconnection. If a saved
+Desktop root itself fails, use **Reconnect** or **Remove**. Kandev does not
+create a missing clone directory during recovery.
+You can also enter an absolute repository path in **Add Local Repository** and
+select **Validate**; this explicit check is independent of discovery roots.
+
 ### Debug configuration
 
 | YAML key             | Environment variable         | Default | Current behavior                                                                            |
@@ -425,11 +454,12 @@ docker:
   volumeBasePath: "/var/lib/kandev/volumes" # compatibility-only today
 
 agent:
-  standaloneHost: "localhost"
+  standaloneHost: "127.0.0.1"
   standalonePort: 39429
 
 tasks:
   preparationTimeout: "10m"
+  stallDetectionThreshold: "2h"
 
 credentials:
   file: ""
@@ -601,6 +631,15 @@ overrides.
 | `agentctl.detachedEventLimit` | `KANDEV_ACP_DETACHED_EVENT_LIMIT` | `100` | Agent events retained per instance while no backend is attached. Accepts `1`-`10000`. Out-of-range or unparseable values fail startup. |
 | `planning.coalesceWindowMs`          | `KANDEV_PLAN_COALESCE_WINDOW_MS`  | `300000` | Non-negative milliseconds for same-author plan revision coalescing; invalid/negative uses five minutes.                                                                                                                                                                     |
 | `office.schedulerTickMs`             | `KANDEV_OFFICE_SCHEDULER_TICK_MS` |   `5000` | Positive integer safety-net interval for queued/retry run claiming. New-run signals are event-driven.                                                                                                                                                                       |
+| `office.maxConcurrentInstance`       | `KANDEV_OFFICE_MAX_CONCURRENT_INSTANCE` | `8` | Maximum concurrent runs for one Office agent instance. Invalid or non-positive values use the default. |
+| `office.maxConcurrentWorkspace`       | `KANDEV_OFFICE_MAX_CONCURRENT_WORKSPACE` | `4` | Maximum concurrent runs for one workspace. Invalid or non-positive values use the default. |
+| `office.workspaceBudgetPerHour`       | `KANDEV_OFFICE_WORKSPACE_BUDGET_PER_HOUR` | `120` | Maximum runs charged to one workspace in the rolling hourly budget. Invalid or non-positive values use the default. |
+| `office.routineBudgetPerHour`         | `KANDEV_OFFICE_ROUTINE_BUDGET_PER_HOUR` | `20` | Maximum runs charged to one routine in the rolling hourly budget. Invalid or non-positive values use the default. |
+| `office.promotionAgeMinutes`          | `KANDEV_OFFICE_PROMOTION_AGE_MINUTES` | `15` | Age in minutes after which a queued run receives priority promotion. Invalid or non-positive values use the default. |
+| `office.maxCausationDepth`            | `KANDEV_OFFICE_MAX_CAUSATION_DEPTH` | `8` | Maximum causation depth for a run. An enqueue beyond this depth is refused. Invalid or non-positive values use the default. |
+| `office.selfTriggerAllowance`         | `KANDEV_OFFICE_SELF_TRIGGER_ALLOWANCE` | `3` | Maximum self-triggered runs for one reason in the rolling hourly window. Invalid or non-positive values use the default. |
+| `office.selfTriggerTotalAllowance`   | `KANDEV_OFFICE_SELF_TRIGGER_TOTAL_ALLOWANCE` | `8` | Maximum self-triggered runs across all reasons in the rolling hourly window. Invalid or non-positive values use the default. |
+| `office.gateFailureThreshold`         | `KANDEV_OFFICE_GATE_FAILURE_THRESHOLD` | `3` | Consecutive launch-safety gate failures before the durable alert state is raised. Invalid or non-positive values use the default. |
 | `observability.otlpEndpoint`         | `OTEL_EXPORTER_OTLP_ENDPOINT`     |    unset | Enables OTLP/HTTP tracing for backend and agentctl spans; unset uses a no-op tracer.                                                                                                                                                                                        |
 
 Changing concurrency values trades process pressure against throughput and requires a restart. Under **Settings > Task Behavior > Message Queue**, an admin can save an install-wide capacity and independently control manual and automatic merging. The merge switches apply live and persist across restarts. `messageQueue.maxPerSession` resolves as environment, YAML, saved setting, then default; a non-negative YAML value or any valid environment value locks only capacity. A negative environment value means unlimited. See [Operations](operations.md#message-queue-settings) for capacity and automatic-fold behavior.

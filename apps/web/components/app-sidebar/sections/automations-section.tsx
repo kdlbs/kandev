@@ -142,9 +142,9 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
   // nothing reads as empty, and nobody opens it. Health summaries are the
   // heavier read and buy nothing until the rows themselves are on screen.
   const showing = !collapsed && expanded && !isMobile;
-  const listScope = collapsed ? undefined : (workspaceId ?? undefined);
+  const listScope = collapsed || isMobile ? undefined : (workspaceId ?? undefined);
   const summaryScope = showing ? (workspaceId ?? undefined) : undefined;
-  const { automations } = useWorkspaceAutomations(listScope);
+  const { automations } = useWorkspaceAutomations(listScope, { active: !isMobile });
   const { summaries, refresh } = useAutomationSummaries(summaryScope);
   useLiveRefresh(showing, refresh);
   const rows = buildAutomationRows(automations, summaries);

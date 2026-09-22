@@ -119,9 +119,11 @@ func (s *Service) webAppHost(binding webapp.CapabilityBinding) *pluginHost {
 			taskWriter:    s.taskWriter,
 			taskPRsDep:    s.taskPRSourceDep,
 			writeDeps:     s.writeDependencies,
+			log:           s.log,
 		}
 	}
 	host.pluginID = binding.PluginID
+	host.instanceID = binding.InstanceID
 	host.capabilities = webAppCapabilities(binding.Permissions)
 	return host
 }
@@ -238,11 +240,11 @@ func (s *Service) handleWebAppWorkflows(ctx context.Context, w http.ResponseWrit
 }
 
 func (s *Service) handleWebAppAction(w http.ResponseWriter, r *http.Request, binding webapp.CapabilityBinding, parts []string) {
-	if r.Method != http.MethodPost || len(parts) != 2 || !validWebAppKey(parts[1]) {
+	if r.Method != http.MethodPost || len(parts) != 3 || parts[1] != "actions" || !validWebAppKey(parts[2]) {
 		writeWebAppError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	if !webAppHasActionPermission(binding.Permissions, parts[1]) {
+	if !webAppHasActionPermission(binding.Permissions, parts[2]) {
 		writeWebAppError(w, http.StatusForbidden, "plugin_permission_denied")
 		return
 	}
@@ -338,6 +340,8 @@ func webAppProtocolStatus(err error) int {
 		return http.StatusConflict
 	case codes.Unimplemented:
 		return http.StatusNotImplemented
+	case codes.ResourceExhausted:
+		return http.StatusInternalServerError
 	default:
 		if errors.Is(err, context.DeadlineExceeded) {
 			return http.StatusGatewayTimeout

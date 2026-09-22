@@ -101,12 +101,22 @@ export function mergeTaskUpdate(
   nextTask: KanbanTask,
   payload: TaskEventPayload,
 ): KanbanTask {
-  if (!existing) return nextTask;
+  if (!existing) {
+    return hasPayloadField(payload, "interrupted")
+      ? { ...nextTask, interruptedGeneration: 1 }
+      : nextTask;
+  }
   if (isStaleTaskUpdate(existing, nextTask)) return existing;
   const merged = {
     ...nextTask,
     ...mergeTaskRepositoryFields(existing, nextTask),
   };
+  // A snapshot can observe the same boolean value before and after a live
+  // false -> true -> false marker episode. Count every explicit marker update
+  // so an in-flight snapshot cannot erase that newer generation.
+  merged.interruptedGeneration = hasPayloadField(payload, "interrupted")
+    ? (existing.interruptedGeneration ?? 0) + 1
+    : existing.interruptedGeneration;
   preserveOmittedField(existing, merged, payload, nextTask, {
     payloadKey: "parent_id",
     taskField: "parentTaskId",

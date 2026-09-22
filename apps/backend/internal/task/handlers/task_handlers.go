@@ -284,6 +284,11 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentCreate, h.wsCreateTaskPlanComment)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentUpdate, h.wsUpdateTaskPlanComment)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentDelete, h.wsDeleteTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackList, h.wsListTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackCreate, h.wsCreateTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackUpdate, h.wsUpdateTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackDelete, h.wsDeleteTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackClear, h.wsClearTaskPreviewFeedback)
 }
 
 // convertToServiceRepos converts dto.TaskRepositoryInput slice to service.TaskRepositoryInput slice.
@@ -291,6 +296,7 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 	result := make([]service.TaskRepositoryInput, len(repos))
 	for i, r := range repos {
 		result[i] = service.TaskRepositoryInput{
+			CheckoutOptions:    r.CheckoutOptions,
 			RepositoryID:       r.RepositoryID,
 			BaseBranch:         r.BaseBranch,
 			CheckoutBranch:     r.CheckoutBranch,

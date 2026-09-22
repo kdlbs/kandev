@@ -29,6 +29,9 @@ const priorTranscriptMessage = {
 
 const appStoreState = {
   connection: { status: "connected" },
+  kanbanMulti: { snapshots: {} },
+  kanban: { workflowId: null, tasks: [], steps: [] },
+  workflows: { items: [] },
   userSettings: {
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: false,
@@ -41,6 +44,7 @@ const appStoreState = {
   },
   agentProfiles: { items: [] },
   messages: { bySession: { [SESSION_ID]: [priorTranscriptMessage] } },
+  launchWarning: { bySessionId: {} },
 };
 
 const panelState = {

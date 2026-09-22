@@ -45,6 +45,11 @@ var metricReasons = map[string]struct{}{
 var (
 	runDedupTotal        = expvar.NewMap("office_run_dedup_total")
 	runDedupKeylessTotal = expvar.NewMap("office_run_dedup_keyless_total")
+	// assignmentRateLimitTotal counts REQ-OFFICE-ASSIGN-RATE-003 refusals
+	// and degraded admissions by a closed three-value "reason" label
+	// (allowance_exhausted, count_read_failed, task_unattributed) — never a
+	// task, agent, workspace, session or run identifier.
+	assignmentRateLimitTotal = expvar.NewMap("office_assignment_rate_limit_total")
 )
 
 // ParentWakeDedupedTotal counts a task_children_completed insert rejected by
@@ -55,11 +60,10 @@ var (
 // its error independently) so a producer-side dedupe is as visible as an
 // engine-routed one.
 //
-// Declared here rather than in internal/office/shared: that package started
-// importing internal/runs/service for RunQueuer's QueueOutcome return type,
-// so the reverse edge this counter used to need would be an import cycle.
-// office/scheduler already imports this package directly (for QueueOutcome),
-// so it reaches the counter the same way.
+// Declared here rather than in internal/office/shared because this counter is
+// owned by the runs queue. The office scheduler imports this package directly,
+// so both queue producers reach the same counter without another shared state
+// surface.
 var ParentWakeDedupedTotal = expvar.NewInt("parent_wake_deduped_total")
 
 // metricLabel builds a "k1=v1;k2=v2;..." label string for an expvar map key.
@@ -80,6 +84,14 @@ func incRunDedup(q QueueSource, reason, kind string) {
 
 func incRunDedupKeyless(reason string, cause KeylessCause) {
 	runDedupKeylessTotal.Add(metricLabel("reason", metricReason(reason), "cause", string(cause)), 1)
+}
+
+// incAssignmentRateLimit increments office_assignment_rate_limit_total for
+// one of the three fixed reason values dedup.go's Report* helpers pass —
+// never run through metricReason, since this label set is closed by this
+// capability itself rather than driven by agent-supplied input.
+func incAssignmentRateLimit(reason string) {
+	assignmentRateLimitTotal.Add(metricLabel("reason", reason), 1)
 }
 
 func metricReason(reason string) string {

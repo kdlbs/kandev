@@ -22,6 +22,15 @@ system_design:
 
 # Task 03: Expose queue status across task surfaces
 
+## Policy supersession, 2026-09-18
+
+The [revised conversation recovery package](../session-open-recovery-eligibility/plan.md)
+supersedes parked-session suppression and parking-note presentation in this
+historical package. Opening an earlier conversation now follows normal recovery.
+Keep queue identity, admission, callback, and reconciliation coverage. Replace
+old no-resume and parked-note assertions in the revised package's work orders.
+Historical results and outstanding PostgreSQL checks below are unchanged.
+
 ## Summary
 
 Deliver the bounded queue summary and its desktop/phone presentation as one
@@ -62,7 +71,7 @@ Excerpt of [the full plan previews](plan.md#ascii-ui-preview), requirement 003:
 ```text
 UI-01 Desktop
 Sidebar: [clock] Investigate issue  Queued
-Detail:  Queued: Luna. Waiting for session capacity
+Detail:  Queued: Luna. Waiting for global session capacity
          5 of 5. Checked just now. Queued since 21:15
          Starts automatically when capacity is available.
          [Astra] [Luna: Queued] [Plan]
@@ -72,7 +81,7 @@ UI-02 Phone
 Task drawer row: [clock] Investigate issue  Queued
 Task detail:
   Queued: Luna
-  Waiting for session capacity
+  Waiting for global session capacity
   5 of 5. Checked just now. Queued since 21:15
   Starts automatically.
   [Astra                         v]

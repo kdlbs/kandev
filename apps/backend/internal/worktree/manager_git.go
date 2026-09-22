@@ -413,7 +413,11 @@ func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
 func (m *Manager) newNonInteractiveGitCmd(ctx context.Context, repoPath string, args ...string) *exec.Cmd {
 	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repoPath
-	cmd.Env = subproc.PrepareGitEnvironment(os.Environ())
+	env := cmd.Env
+	if env == nil {
+		env = os.Environ()
+	}
+	cmd.Env = subproc.PrepareGitEnvironment(env)
 	// After the context cancels and the process is killed, child processes
 	// (e.g. credential helpers) may still hold stdout/stderr pipes open.
 	// WaitDelay bounds how long CombinedOutput waits for those pipes to close.

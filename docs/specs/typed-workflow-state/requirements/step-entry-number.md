@@ -141,4 +141,3 @@ One line per case; the cited AC is authoritative for the expected value.
     that no fixture reproduces, so there is nothing to assert against. This case
     exists so the requirement is discharged explicitly rather than by silence
     (002.6).
-

@@ -157,6 +157,8 @@ function makeFs(): DialogFormState {
     setDiscoverReposLoaded: () => {},
     selectedWorkflowId: null,
     setSelectedWorkflowId: () => {},
+    workflowAgentOverrides: {},
+    setWorkflowAgentOverrides: () => {},
     fetchedSteps: null,
     setFetchedSteps: () => {},
     isCreatingSession: false,

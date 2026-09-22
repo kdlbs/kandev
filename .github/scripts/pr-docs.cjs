@@ -256,6 +256,9 @@ function pathExemption(pathname) {
   if (pathname.startsWith('apps/web/e2e/')) {
     return 'web end-to-end test';
   }
+  if (/^\.github\/(?:workflows|scripts|actions)\//.test(pathname)) {
+    return 'CI infrastructure path';
+  }
 
   const basename = POSIX_PATH.basename(pathname);
   const extension = POSIX_PATH.extname(basename).slice(1).toLowerCase();

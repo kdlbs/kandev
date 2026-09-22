@@ -61,7 +61,7 @@ test.describe("compact desktop responsive layout", () => {
     await expect(testPage.getByTestId("dockview-task-layout")).toHaveCount(0);
     await expect(testPage.getByTestId("tablet-task-layout")).toHaveCount(0);
     await expect(testPage.getByTestId("app-sidebar")).toBeHidden();
-    await expect(testPage.getByTestId("mobile-session-menu")).toBeVisible();
+    await expect(testPage.getByTestId("mobile-task-picker-trigger")).toBeVisible();
     await expect(session.activeChat()).toBeVisible();
 
     await testPage.getByRole("button", { name: "Status", exact: true }).click();

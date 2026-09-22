@@ -64,7 +64,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 	if err != nil {
 		return nil, err
 	}
-	cfg := ia.InferenceConfig()
+	cfg := inferenceConfigForHostUtility(ia)
 	command, err := m.resolveInferenceCommand(ctx, profile.AgentID, ia, agents.Command{})
 	if err != nil {
 		return nil, err
@@ -195,7 +195,7 @@ func (m *Manager) resolveModelConfigFlight(
 	if err != nil {
 		return nil, err
 	}
-	cfg := ia.InferenceConfig()
+	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil || !cfg.Supported {
 		return nil, errors.New("inference config not available")
 	}
@@ -341,7 +341,7 @@ func (m *Manager) ExecutePromptWithMCP(
 	if err != nil {
 		return nil, err
 	}
-	cfg := ia.InferenceConfig()
+	cfg := inferenceConfigForHostUtility(ia)
 	command, err := m.resolveInferenceCommand(ctx, agentType, ia, agents.Command{})
 	if err != nil {
 		return nil, err

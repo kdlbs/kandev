@@ -37,12 +37,12 @@ test.describe("mobile: queued session ownership", () => {
       const queueStatus = mobileLayout.locator('[data-testid="task-launch-queue-status"]:visible');
       await expect(queueStatus).toBeVisible();
       await expect(queueStatus).toContainText("Queued");
-      await expect(queueStatus).toContainText("Waiting for session capacity");
+      await expect(queueStatus).toContainText("Waiting for global session capacity");
       await expect(queueStatus).toContainText("1 of 1");
       await expect(queueStatus).toContainText(scenario.destinationProfileName);
       await assertNoDocumentHorizontalOverflow(testPage, "queued launch mobile detail");
 
-      await mobileLayout.getByTestId("mobile-session-menu").tap();
+      await mobileLayout.getByTestId("mobile-task-picker-trigger").tap();
       const taskDrawer = testPage.getByRole("dialog", { name: "Tasks" });
       const taskRow = taskDrawer.getByTestId("sidebar-task-item").filter({
         hasText: scenario.taskTitle,

@@ -17,6 +17,19 @@ import (
 
 // CreateRoutineTrigger creates a new routine trigger.
 func (r *Repository) CreateRoutineTrigger(ctx context.Context, t *models.RoutineTrigger) error {
+	return r.insertRoutineTrigger(ctx, r.db, t)
+}
+
+// CreateRoutineTriggerTx is CreateRoutineTrigger scoped to a caller-owned
+// transaction, used by the coordinator-install path
+// (AC-OFFICE-COORDINATOR-INSTALL-001.4/.12) to create the canonical trigger
+// in the same transaction as the identity lookup and, when applicable, the
+// routine insert.
+func (r *Repository) CreateRoutineTriggerTx(ctx context.Context, tx *sqlx.Tx, t *models.RoutineTrigger) error {
+	return r.insertRoutineTrigger(ctx, tx, t)
+}
+
+func (r *Repository) insertRoutineTrigger(ctx context.Context, ext sqlx.ExtContext, t *models.RoutineTrigger) error {
 	if t.ID == "" {
 		t.ID = uuid.New().String()
 	}
@@ -24,7 +37,7 @@ func (r *Repository) CreateRoutineTrigger(ctx context.Context, t *models.Routine
 	t.CreatedAt = now
 	t.UpdatedAt = now
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err := ext.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO office_routine_triggers (
 			id, routine_id, kind, cron_expression, timezone,
 			public_id, signing_mode, secret, next_run_at, last_fired_at,
@@ -36,11 +49,12 @@ func (r *Repository) CreateRoutineTrigger(ctx context.Context, t *models.Routine
 	return err
 }
 
-// ListTriggersByRoutineID returns all triggers for a routine.
+// ListTriggersByRoutineID returns all triggers for a routine, in trigger
+// order (created_at ascending, ties broken by id ascending).
 func (r *Repository) ListTriggersByRoutineID(ctx context.Context, routineID string) ([]*models.RoutineTrigger, error) {
 	var triggers []*models.RoutineTrigger
 	err := r.ro.SelectContext(ctx, &triggers, r.ro.Rebind(
-		`SELECT * FROM office_routine_triggers WHERE routine_id = ? ORDER BY created_at`), routineID)
+		`SELECT * FROM office_routine_triggers WHERE routine_id = ? ORDER BY created_at, id`), routineID)
 	if err != nil {
 		return nil, err
 	}
@@ -48,6 +62,37 @@ func (r *Repository) ListTriggersByRoutineID(ctx context.Context, routineID stri
 		triggers = []*models.RoutineTrigger{}
 	}
 	return triggers, nil
+}
+
+// ListTriggersByRoutineIDs returns every named routine's triggers in one
+// batch query, each list in trigger order (created_at ascending, ties
+// broken by id ascending). A routine with no triggers is present in the
+// returned map with an empty (non-nil) slice.
+func (r *Repository) ListTriggersByRoutineIDs(
+	ctx context.Context, routineIDs []string,
+) (map[string][]*models.RoutineTrigger, error) {
+	result := make(map[string][]*models.RoutineTrigger, len(routineIDs))
+	for _, id := range routineIDs {
+		result[id] = []*models.RoutineTrigger{}
+	}
+	if len(routineIDs) == 0 {
+		return result, nil
+	}
+
+	query, args, err := sqlx.In(
+		`SELECT * FROM office_routine_triggers WHERE routine_id IN (?) ORDER BY created_at, id`, routineIDs)
+	if err != nil {
+		return nil, err
+	}
+	query = r.ro.Rebind(query)
+	var triggers []*models.RoutineTrigger
+	if err := r.ro.SelectContext(ctx, &triggers, query, args...); err != nil {
+		return nil, err
+	}
+	for _, t := range triggers {
+		result[t.RoutineID] = append(result[t.RoutineID], t)
+	}
+	return result, nil
 }
 
 // GetTriggerByPublicID returns a trigger by its public ID (for webhook lookup).
