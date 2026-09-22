@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-08-26
-last_updated: 2026-09-19
+last_updated: 2026-09-21
 ---
 
 # Agent-authored web-app canvases Requirements
@@ -77,6 +77,22 @@ the task, so that the interface matches the work.
 - **AC-CANVASES-AGENT-WEB-APPS-001.12:** Authoring instructions shall distinguish
   an active release, a release awaiting permission review, and an unsuccessful
   publish. Local files or a successful build shall not imply publication.
+- **AC-CANVASES-AGENT-WEB-APPS-001.13:** When a user returns after publication,
+  the task shall show eligible task canvases not previously presented in that
+  browser tab. This shall also work after reload or a missed publication event.
+  Eligible canvases have an active valid release or await permission review.
+  Draft-only, archived, disabled, removed, invalid, foreign-task, and workspace
+  canvases shall not open automatically.
+- **AC-CANVASES-AGENT-WEB-APPS-001.14:** Desktop shall add new canvas panels to
+  the main editor group and focus one new panel. Existing panels shall retain
+  their placement. Repeated discovery shall not duplicate panels or steal focus.
+- **AC-CANVASES-AGENT-WEB-APPS-001.15:** Closing a presented canvas shall prevent
+  automatic reopening in that browser tab, including after reload or publication
+  of another release. Manual reopening shall remain available.
+- **AC-CANVASES-AGENT-WEB-APPS-001.16:** On phones, automatic presentation shall
+  open one focused canvas route. Returning to the task shall not redirect to
+  that canvas again. Other eligible canvases shall remain accessible through
+  the existing picker.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-002: Durable source and releases
 
@@ -324,6 +340,7 @@ including missing references, lookup failures, and passthrough exclusions.
 
 ## Implementation plans
 
+- [Canvas runtime and task-entry recovery](../../../plans/canvas-runtime-entry-recovery/plan.md)
 - [Direct canvas creation and saved prompt](../../../plans/canvas-direct-creation/plan.md)
 
 ## Out of scope

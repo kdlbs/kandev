@@ -56,9 +56,10 @@ type KubernetesExecutor struct {
 	healthRetryDelay  time.Duration
 	launchTimingClock func() time.Time
 
-	mu       sync.Mutex
-	sessions map[string]*kubernetesSession
-	locks    map[string]*kubernetesInstanceLock
+	mu                   sync.Mutex
+	sessions             map[string]*kubernetesSession
+	locks                map[string]*kubernetesInstanceLock
+	pendingControlTokens map[string]string
 }
 
 type kubernetesInstanceLock struct {

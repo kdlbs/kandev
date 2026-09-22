@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/kandev/kandev/internal/secrets"
 	"testing"
+	"time"
 
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/task/models"
@@ -153,4 +154,78 @@ func TestKubernetesTaskPodStaleSessionCannotOverwriteRotatedToken(t *testing.T) 
 			require.Equal(t, rotated, got)
 		})
 	}
+}
+
+func TestKubernetesTaskPodRetriesRotatedTokenPersistence(t *testing.T) {
+	f := newTaskPodFixture(t)
+	a := f.launch(t, 1)
+	f.launch(t, 2)
+	id := getMetadataString(a.Metadata, MetadataKeyAuthTokenSecret)
+	store := &failingUpdateSecretStore{inMemorySecretStore: f.secretStore.(*inMemorySecretStore), failUpdateFor: id}
+	f.runtime.secretStore = store
+	f.control.reboot()
+	f.resources.mu.Lock()
+	f.resources.pod.Status.ContainerStatuses[0].RestartCount = 1
+	f.resources.mu.Unlock()
+	ctx := context.Background()
+	_, err := f.runtime.RefreshRemoteInstance(ctx, kubernetesRefreshInstance(a, taskPodRequest(1).Metadata))
+	require.ErrorContains(t, err, "injected secret update failure")
+	store.failUpdateFor = ""
+	f.restartBackend(t)
+	req := taskPodRequest(1)
+	req.PreviousExecutionID = a.InstanceID
+	req.Metadata = cloneKubernetesMetadata(a.Metadata)
+	_, err = f.runtime.CreateInstance(ctx, req)
+	require.NoError(t, err)
+	_, _, handshakes := f.control.snapshot()
+	require.Equal(t, 1, handshakes, "storage retry must preserve the single-use handshake result")
+	f.restartBackend(t)
+	f.launch(t, 3)
+	require.Len(t, f.resources.createdPods, 1)
+}
+
+// Reviewer-requested contract coverage: attaching a different session may overlap
+// deletion of the stopped session's remote agent without deleting shared storage.
+func TestKubernetesTaskPodConcurrentStopAndAttach(t *testing.T) {
+	f := newTaskPodFixture(t)
+	a := f.launch(t, 1)
+	f.launch(t, 2)
+	entered, release := make(chan struct{}), make(chan struct{})
+	f.control.beforeDelete = func() { close(entered); <-release }
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- f.runtime.StopInstance(ctx, a, true) }()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		close(release)
+		t.Fatal("stop did not reach remote deletion")
+	}
+	_, attachErr := f.runtime.CreateInstance(ctx, taskPodRequest(3))
+	close(release)
+	require.NoError(t, attachErr)
+	require.NoError(t, <-stopped)
+	_, active, _ := f.control.snapshot()
+	require.NotContains(t, active, "instance-1")
+	require.Contains(t, active, "instance-2")
+	require.Contains(t, active, "instance-3")
+	require.Len(t, f.resources.createdPods, 1)
+	require.Empty(t, f.resources.deletedPods)
+	require.Empty(t, f.resources.deletedPVCs)
+}
+
+func TestKubernetesTaskPodStopOutlivesCanceledCaller(t *testing.T) {
+	f := newTaskPodFixture(t)
+	a := f.launch(t, 1)
+	f.launch(t, 2)
+	f.resources.rejectCanceledGetContexts = true
+	f.secretStore.(*inMemorySecretStore).rejectCanceledCalls = true
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.NoError(t, f.runtime.StopInstance(ctx, a, true))
+	_, active, _ := f.control.snapshot()
+	require.NotContains(t, active, "instance-1")
+	require.Contains(t, active, "instance-2")
+	require.Empty(t, f.resources.deletedPods)
 }

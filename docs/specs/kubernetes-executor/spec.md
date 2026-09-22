@@ -199,7 +199,7 @@ or cluster-resource identity.
    agent subprocess.
 6. **Preserved:** ordinary stop or backend shutdown closes local forwarding but
    retains Pod/workspace for resume.
-7. **Cleaning:** terminal/forced cleanup validates exact identities, deletes
+7. **Cleaning:** task archive/delete cleanup validates exact identities, deletes
    the Pod, then deletes only a Kandev-created PVC.
 8. **Cleaned:** resources are absent and runtime inventory can be removed.
 

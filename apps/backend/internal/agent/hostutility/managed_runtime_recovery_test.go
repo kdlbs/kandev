@@ -19,6 +19,7 @@ import (
 // @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.6
 // @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.8
 func TestManagerProbeRecoversManagedRuntimeETarget(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	const version = "1.18.29"
 	agent := agents.NewOpenCodeACP()
 	var commands [][]string
@@ -98,6 +99,7 @@ func TestManagerProbeRecoversManagedRuntimeETarget(t *testing.T) {
 
 // @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.6
 func TestManagerProbeDoesNotRetryManagedRuntimeRecoveryTwice(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	agent := agents.NewOpenCodeACP()
 	var probes, repairs int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -138,6 +140,7 @@ func TestManagerProbeDoesNotRetryManagedRuntimeRecoveryTwice(t *testing.T) {
 
 // @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.6
 func TestManagedRuntimeProbeRecoveryStopsOnCancellation(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	agent := agents.NewOpenCodeACP()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		t.Error("cancelled recovery must not reach agentctl")
@@ -176,6 +179,7 @@ func TestManagedRuntimeProbeRecoveryStopsOnCancellation(t *testing.T) {
 }
 
 func TestResolveModelConfigRecoversManagedRuntimeETarget(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	const version = "1.18.29"
 	agent := agents.NewOpenCodeACP()
 	log := newTestLogger(t)
@@ -254,6 +258,7 @@ func TestResolveModelConfigRecoversManagedRuntimeETarget(t *testing.T) {
 }
 
 func TestManagedRuntimeRepairWaitsForConcurrentProbe(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	agent := agents.NewOpenCodeACP()
 	blockerStarted := make(chan struct{})
 	releaseBlocker := make(chan struct{})

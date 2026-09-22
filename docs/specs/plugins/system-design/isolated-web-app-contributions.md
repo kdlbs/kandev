@@ -6,7 +6,7 @@ system: plugins
 owners:
   - kandev
 created: 2026-08-26
-last_updated: 2026-09-19
+last_updated: 2026-09-21
 requirements:
   - REQ-PLUGINS-ISOLATED-WEB-APPS-001
   - REQ-PLUGINS-ISOLATED-WEB-APPS-002
@@ -623,8 +623,9 @@ Operators must exclude runtime responses from Cloudflare RUM and other
 injected scripts that violate policy. Do not allow remote analytics scripts
 or suppress document errors to conceal this problem.
 
-The UI layout, translated states, Retry action, and phone navigation stay the
-same. Test Ready, data, a permitted write, and an event through a real local
+See [response preservation](runtime-response-preservation.md).
+
+UI behavior stays unchanged. Test Ready, data, a permitted write, and an event through a real local
 cookie gate. Test missing cookies, reauthentication and Retry, invalid tokens,
 and unchanged package bytes. Record desktop and phone results separately.
 

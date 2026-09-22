@@ -96,6 +96,13 @@ change does not grant cross-task compute sharing when a parent/group environment
 cannot safely satisfy the task-owned pod boundary. Return typed unsupported reuse
 rather than silently provisioning a separate workspace.
 
+A consumed bootstrap handshake retains its issued token until encrypted canonical
+storage acknowledges it. If that update fails, an environment-derived encrypted
+recovery secret preserves the token across backend restart; attachment retries
+finish the canonical save and remove the recovery secret before proceeding.
+Request cancellation does not cancel the bounded credential persistence attempt.
+Task teardown also removes the recovery secret.
+
 ## Session termination and task cleanup
 
 Session stop/delete terminates only that agentctl instance and its local

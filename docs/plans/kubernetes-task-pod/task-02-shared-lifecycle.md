@@ -110,3 +110,7 @@ rebinding. The final regression reproduces stopping the same remote session with
 a new local execution ID and verifies immediate task cleanup. Exact task/session/
 environment/remote-instance matching closes its original local connection while
 leaving siblings intact. Final lifecycle race tests pass (8.512s); lint is clean.
+
+## PR remediation
+
+PR remediation adds typed not-found errors, encrypted credential recovery across backend restart, concurrent stop/attach coverage, and bounded cancellation-detached cleanup. Targeted race coverage passes; sibling credential trust/isolation remains a security-review decision.

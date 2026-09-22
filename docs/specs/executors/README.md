@@ -45,6 +45,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Kubernetes startup timing](requirements/kubernetes-startup-timing.md)
 - [Kubernetes retained compute visibility](requirements/kubernetes-retained-compute.md)
 - [SSH Session Transport Liveness](requirements/ssh-transport-liveness.md)
+- [SSH Host Reachability](requirements/ssh-reachability.md)
 
 ### System design
 
@@ -64,6 +65,8 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Kubernetes startup timing](system-design/kubernetes-startup-timing.md)
 - [Kubernetes retained compute visibility](system-design/kubernetes-retained-compute.md)
 - [SSH Session Transport Liveness](system-design/ssh-transport-liveness.md)
+- [SSH Host Reachability](system-design/ssh-reachability.md)
+- [SSH Host Reachability Surfaces](system-design/ssh-reachability-surfaces.md)
 
 ## Migration record
 
@@ -74,8 +77,8 @@ find current sources.
 The [Kubernetes executor foundation](../kubernetes-executor/spec.md) remains
 the shipped lifecycle contract. Kubernetes capability pairs extend it. The
 [task-pod requirements](requirements/kubernetes-task-pod.md) and
-[design](system-design/kubernetes-task-pod.md) propose task-owned compute and
-explicitly replace session ownership when implemented. Other foundation
+[design](system-design/kubernetes-task-pod.md) define task-owned compute and
+replace session ownership. Other foundation
 security, admission, and recovery guarantees remain applicable.
 
 ## Related systems

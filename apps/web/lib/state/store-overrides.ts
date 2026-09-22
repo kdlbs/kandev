@@ -53,6 +53,7 @@ export function buildStateOverrides(m: DefaultState) {
     sessionMode: m.sessionMode,
     userShells: m.userShells,
     prepareProgress: m.prepareProgress,
+    launchWarning: m.launchWarning,
     sessionTodos: m.sessionTodos,
     agentCapabilities: m.agentCapabilities,
     sessionModels: m.sessionModels,

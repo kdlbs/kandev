@@ -106,3 +106,7 @@ tests, public-doc validation (47 pages), specification catalog/linter, and
 `git diff --check` passed. Temporary Kind setup timeout edits were restored.
 Operator docs, foundation compatibility notes, ADR, backend guidance, requirements,
 and design now describe the implemented task-owned lifecycle.
+
+## PR remediation
+
+PR remediation caches canonical inventory and Pod probes per status request and corrects ownership guidance. Targeted status race coverage and three current frontend component tests pass. Kind evidence above remains historical; this remediation did not repeat Kind.

@@ -100,3 +100,7 @@ The regression failed with a foreign-key error and now passes on SQLite and
 PostgreSQL: physical inventory survives task deletion, normal launch claims
 reject deleted owners, and cleanup claims retain exact generation/revision
 fencing. Direct environment deletion remains guarded until remote cleanup.
+
+## PR remediation
+
+PR remediation adds task_environment_kubernetes to the required-table probe; SQLite conformance and previous-stable upgrade tests pass with race detection.

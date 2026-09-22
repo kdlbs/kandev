@@ -39,7 +39,7 @@ func (r *KubernetesExecutor) connectSharedKubernetesAgentctl(ctx context.Context
 	if isAgentctlAuthError(err) && req.BootstrapNonce != "" {
 		token, err = control.Handshake(ctx, req.BootstrapNonce)
 		if err == nil && r.secretStore != nil && secretID != "" {
-			err = r.secretStore.Update(ctx, secretID, &secrets.UpdateSecretRequest{Value: &token})
+			err = r.persistSharedKubernetesControlToken(ctx, secretID, token)
 		}
 		if err == nil {
 			response, created, err = getOrCreateSharedKubernetesInstance(ctx, control, req, remoteID)
@@ -74,7 +74,7 @@ func getOrCreateSharedKubernetesInstance(ctx context.Context, control *agentctl.
 		}
 		return response, false, nil
 	}
-	if err.Error() != fmt.Sprintf("instance %q not found", remoteID) {
+	if !errors.Is(err, agentctl.ErrInstanceNotFound) {
 		return nil, false, err
 	}
 	response, createErr := createOrReconcileKubernetesAgentctlInstance(ctx, control, request)
@@ -83,8 +83,23 @@ func getOrCreateSharedKubernetesInstance(ctx context.Context, control *agentctl.
 
 func (r *KubernetesExecutor) sharedKubernetesControlToken(ctx context.Context, req *ExecutorCreateRequest) (string, error) {
 	id := getMetadataString(req.Metadata, MetadataKeyAuthTokenSecret)
-	if r.secretStore != nil && id != "" {
-		return r.secretStore.Reveal(ctx, id)
+	if r.secretStore == nil || id == "" {
+		return req.AuthToken, nil
 	}
-	return req.AuthToken, nil
+	r.mu.Lock()
+	pending := r.pendingControlTokens[id]
+	r.mu.Unlock()
+	if pending == "" {
+		var err error
+		pending, err = r.secretStore.Reveal(ctx, kubernetesControlRecoverySecretID(id))
+		if err != nil && !errors.Is(err, secrets.ErrNotFound) {
+			return "", err
+		}
+	}
+	if pending != "" {
+		if err := r.persistSharedKubernetesControlToken(ctx, id, pending); err != nil {
+			return "", err
+		}
+	}
+	return r.secretStore.Reveal(ctx, id)
 }

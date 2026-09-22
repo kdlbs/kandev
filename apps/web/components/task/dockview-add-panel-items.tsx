@@ -34,7 +34,8 @@ import type { TaskMR } from "@/lib/types/gitlab";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useTaskCanvases } from "@/hooks/domains/task/use-task-canvases";
-import type { Canvas } from "@/lib/api/domains/canvas-api";
+import { activateCanvasPanel, isDiscoverableTaskCanvas } from "./dockview-canvas-activation";
+import { canvasPresentationUserId } from "@/lib/canvas-presentation-storage";
 import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import { RepositoryScriptsMenuItems } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
@@ -67,14 +68,6 @@ export const MENU_ICON_CLASS = "h-3.5 w-3.5 mr-1.5 shrink-0";
 export const MENU_ITEM_CLASS = "cursor-pointer text-xs";
 
 const PR_SUBMENU_TEST_ID = "add-panel-pr-submenu";
-// i18n-exempt: Dockview panel identity prefix, not user-facing copy.
-const CANVAS_PANEL_ID_PREFIX = "canvas:";
-const DISCOVERABLE_TASK_CANVAS_STATUSES = new Set(["active", "pending", "error"]);
-
-export function isDiscoverableTaskCanvas(canvas: Pick<Canvas, "status">): boolean {
-  return DISCOVERABLE_TASK_CANVAS_STATUSES.has(canvas.status);
-}
-
 type ReviewMenuIdentity = Pick<ReviewItemSummary, "providerId" | "reviewKey"> &
   Partial<Pick<ReviewItemSummary, "connectionScope" | "repositoryId" | "changeRequestNumber">>;
 
@@ -255,6 +248,7 @@ function PluginTaskPanelMenuItems({
 function TaskCanvasMenuItems({ groupId, taskId }: { groupId: string; taskId: string | null }) {
   const enabled = useFeature("canvases");
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const userId = useAppStore((state) => canvasPresentationUserId(state.auth));
   const canvases = useTaskCanvases(taskId, workspaceId, enabled).filter(isDiscoverableTaskCanvas);
   const api = useDockviewStore((s) => s.api);
 
@@ -266,12 +260,21 @@ function TaskCanvasMenuItems({ groupId, taskId }: { groupId: string; taskId: str
         <DropdownMenuItem
           key={canvas.id}
           onClick={() =>
-            api?.addPanel({
-              id: `${CANVAS_PANEL_ID_PREFIX}${canvas.id}`,
-              component: "canvas",
-              title: canvas.title,
-              params: { canvasId: canvas.id },
-              position: { referenceGroup: groupId },
+            api &&
+            activateCanvasPanel(api, canvas, groupId, {
+              focusExisting: true,
+              presentation:
+                userId && taskId
+                  ? {
+                      identity: {
+                        userId,
+                        workspaceId: canvas.workspace_id,
+                        taskId,
+                        canvasId: canvas.id,
+                      },
+                      reason: "manual",
+                    }
+                  : undefined,
             })
           }
           className={MENU_ITEM_CLASS}

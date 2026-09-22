@@ -84,7 +84,7 @@ adding a wake reason cannot quietly exempt it from the ceiling.
   `legacyRunReason*` block; (c) the run-reason constant block in
   `internal/office/shared/runreasons.go`; (d) the `WakeReason*` constant block
   in `internal/office/routing/types.go`, which declares three of
-  `AC-OFFICE-BUDGET-007.4`'s six unattended literals under a doc comment
+  `AC-OFFICE-BUDGET-007.4`'s seven unattended literals under a doc comment
   stating that its values must stay in sync with the scheduler constants;
   (e) the constant block in `internal/runs/commentkeys` declaring
   `TaskCommentReason`, a live run reason declared outside `internal/office`;
@@ -127,8 +127,13 @@ adding a wake reason cannot quietly exempt it from the ceiling.
   silently change a run's provenance.
 - **AC-OFFICE-BUDGET-007.4:** The explicit unattended list
   `AC-OFFICE-BUDGET-007.3` tests against shall be exactly: `agent_error`,
-  `budget_alert`, `heartbeat`, `routine_dispatch`, `routine_dispatch_cron`,
-  `routine_trigger`. It shall be maintained as an enumeration in its own right
+  `budget_alert`, `heartbeat`, `queue_run`, `routine_dispatch`,
+  `routine_dispatch_cron`, `routine_trigger`. `queue_run` is the workflow
+  engine's fallback reason for a `queue_run` action that configures no
+  explicit reason and whose triggering event carries no trigger name
+  (`internal/office/shared.RunReasonQueueRun`); its cause is generic by
+  construction, so it classifies as unattended rather than being assumed
+  attended. It shall be maintained as an enumeration in its own right
   and shall never be computed as the complement of `AC-OFFICE-BUDGET-007.2`'s
   allowlist. A derived list would make `AC-OFFICE-BUDGET-007.3`'s test a
   tautology that no newly added reason could ever fail, since every literal

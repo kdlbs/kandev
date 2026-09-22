@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KubernetesSessionsCard } from "./kubernetes-sessions-card";
@@ -30,6 +30,8 @@ describe("KubernetesSessionsCard", () => {
         .getAllByTestId("kubernetes-session-task-link")
         .map((link) => link.getAttribute("href")),
     ).toEqual(["/t/task-first", "/t/task-second"]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Show session details" })[0]);
+    expect(screen.getAllByTestId("kubernetes-session-details-row")).toHaveLength(1);
     state.sessions = state.sessions.slice(1);
     rendered.rerender(<KubernetesSessionsCard state={state} />);
     expect(screen.getAllByTestId("kubernetes-session-row")).toHaveLength(1);

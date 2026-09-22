@@ -48,3 +48,23 @@ type Checker interface {
 	Name() string
 	Category() string
 }
+
+// WorkflowSyncStatusProvider abstracts the workflow-sync service status
+// check. Implemented by *workflowsync.Service; the health package does not
+// import workflowsync directly to avoid a dependency cycle — every checker's
+// provider interface stays local to this package (see GitHubStatusProvider).
+type WorkflowSyncStatusProvider interface {
+	WorkflowSyncCircuitSummary(ctx context.Context) (WorkflowSyncCircuitSummary, error)
+}
+
+// WorkflowSyncCircuitSummary aggregates the auth/config circuit-breaker
+// state (internal/common/authcircuit) across every configured workflow-sync
+// target. It intentionally contains no workspace IDs, repository/project
+// identifiers, or error text — only bounded counts, so it is safe to expose
+// verbatim in a health response.
+type WorkflowSyncCircuitSummary struct {
+	Total         int
+	OpenAuth      int
+	OpenConfig    int
+	OpenTransient int
+}

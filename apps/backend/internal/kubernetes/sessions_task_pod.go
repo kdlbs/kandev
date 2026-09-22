@@ -17,7 +17,7 @@ func isTaskPodInventory(metadata map[string]interface{}) bool {
 }
 
 // Resolve physical inventory only after authorizing the session's owning task.
-func (h *Handler) canonicalTaskPodInventory(ctx context.Context, run *models.ExecutorRunning, session *models.TaskSession) (*models.ExecutorRunning, error) {
+func (h *Handler) canonicalTaskPodInventory(ctx context.Context, run *models.ExecutorRunning, session *models.TaskSession, cache *sessionStatusCache) (*models.ExecutorRunning, error) {
 	if !isTaskPodInventory(run.Metadata) {
 		return run, nil
 	}
@@ -27,7 +27,12 @@ func (h *Handler) canonicalTaskPodInventory(ctx context.Context, run *models.Exe
 	if !ok {
 		return run, errors.New("kubernetes environment store unavailable")
 	}
-	record, err := store.GetKubernetesEnvironment(ctx, session.TaskEnvironmentID)
+	cached, exists := cache.environments[session.TaskEnvironmentID]
+	if !exists {
+		cached.record, cached.err = store.GetKubernetesEnvironment(ctx, session.TaskEnvironmentID)
+		cache.environments[session.TaskEnvironmentID] = cached
+	}
+	record, err := cached.record, cached.err
 	if err != nil {
 		return run, err
 	}

@@ -60,7 +60,7 @@ func (r *KubernetesExecutor) destroyTaskEnvironment(ctx context.Context, env *mo
 	if err := r.deleteTaskKubernetesResources(ctx, record); err != nil {
 		return err
 	}
-	for _, id := range []string{record.ControlSecretID, record.BootstrapSecretID} {
+	for _, id := range []string{record.ControlSecretID, record.BootstrapSecretID, kubernetesControlRecoverySecretID(record.ControlSecretID)} {
 		if id == "" {
 			continue
 		}

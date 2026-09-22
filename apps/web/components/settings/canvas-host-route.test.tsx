@@ -99,6 +99,11 @@ vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mockPush }),
 }));
 
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({ auth: { mode: "disabled", user: null } }),
+}));
+
 import { CanvasHostRoute } from "./canvas-host-route";
 
 const canvas: Canvas = {

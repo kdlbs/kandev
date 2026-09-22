@@ -21,7 +21,7 @@ type sequenceTaskCreator struct {
 }
 
 func (f *sequenceTaskCreator) CreateOfficeTaskInWorkflow(
-	context.Context, string, string, string, string, string, string,
+	context.Context, string, string, string, string, string, string, string,
 ) (string, error) {
 	if f.next >= len(f.ids) {
 		return "task-overflow", nil

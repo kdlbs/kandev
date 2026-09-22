@@ -21,15 +21,19 @@ import (
 )
 
 type taskPodControl struct {
-	mu         sync.Mutex
-	active     map[string]agentctl.CreateInstanceRequest
-	created    []agentctl.CreateInstanceRequest
-	handshakes int
-	token      string
-	failID     string
+	mu           sync.Mutex
+	active       map[string]agentctl.CreateInstanceRequest
+	created      []agentctl.CreateInstanceRequest
+	handshakes   int
+	token        string
+	failID       string
+	beforeDelete func()
 }
 
 func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete && c.beforeDelete != nil {
+		c.beforeDelete()
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if r.URL.Path == "/health" {

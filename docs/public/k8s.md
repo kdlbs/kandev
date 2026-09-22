@@ -23,7 +23,7 @@ To run task sessions as Pods, follow [Configure the Kubernetes executor](#config
 
 [k8s-diagram]: ../../docs/screenshots/k8s.svg
 
-The control-plane Pod owns the persistent home and API identity. Task-session Pods are a separate, opt-in workload path with their own service-account permissions.
+The control-plane Pod owns the persistent home and API identity. Task Pods are a separate, opt-in workload path with their own service-account permissions.
 
 ## Architecture and limitations
 

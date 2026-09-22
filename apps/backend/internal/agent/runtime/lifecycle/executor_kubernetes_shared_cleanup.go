@@ -12,6 +12,8 @@ import (
 func (r *KubernetesExecutor) stopSharedKubernetesInstance(ctx context.Context, instance *ExecutorInstance) error {
 	unlock := r.lockInstance(instance.InstanceID)
 	defer unlock()
+	ctx, cancel := kubernetesDurableContext(ctx)
+	defer cancel()
 	session := r.closeSharedKubernetesSessions(instance)
 	if r.environmentStore == nil || r.secretStore == nil {
 		return errors.New("kubernetes task environment store is unavailable")
@@ -152,6 +154,8 @@ func (r *KubernetesExecutor) closeSharedKubernetesSessions(instance *ExecutorIns
 	if len(closing) == 0 {
 		return nil
 	}
+	// Every matching connection uses the same pod and executor configuration;
+	// any one supplies the fallback runtime client after its forward is closed.
 	return closing[0]
 }
 

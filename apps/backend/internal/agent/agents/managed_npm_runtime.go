@@ -2,6 +2,7 @@ package agents
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/managedruntime"
@@ -10,10 +11,16 @@ import (
 // ManagedNPMRuntimeSpec defines a built-in npm-distributed ACP runtime.
 // Package and ACPArgs must come from trusted agent metadata, never request
 // input, because update jobs execute them directly.
+//
+// NativeBinary optionally names a standalone CLI that ships the same ACP
+// interface as the npm package. When that binary is resolvable on PATH,
+// host-side launch, probe, refresh, and update commands use it consistently.
+// The managed npm runtime remains the fallback for containers and remotes.
 type ManagedNPMRuntimeSpec struct {
 	Package        string
 	DefaultVersion string
 	ACPArgs        []string
+	NativeBinary   string
 }
 
 // DefaultVersionOrPinned returns the reviewed default version, including the
@@ -58,9 +65,7 @@ func (s ManagedNPMRuntimeSpec) PackageSpec(version string) string {
 }
 
 // ExecutionCacheKey returns npm's deterministic _npx execution-tree key for
-// this trusted package spec. npm derives it from the full package string using
-// SHA-512 and the first 16 lowercase hexadecimal characters. The optional
-// argument uses the reviewed default when omitted.
+// this trusted package spec. The optional version uses the reviewed default.
 func (s ManagedNPMRuntimeSpec) ExecutionCacheKey(versions ...string) string {
 	return managedruntime.NpxExecutionCacheKey(s.PackageSpec(firstVersion(versions)))
 }
@@ -104,6 +109,52 @@ func (s ManagedNPMRuntimeSpec) CacheUpdateCommand(versions ...string) Command {
 		"-e",
 		"",
 	)
+}
+
+// NativeCommand returns the direct-binary launch command. Callers must gate it
+// on NativeBinaryOnPath so remotes and containers use the managed runtime.
+func (s ManagedNPMRuntimeSpec) NativeCommand() Command {
+	args := []string{s.NativeBinary}
+	args = append(args, s.ACPArgs...)
+	return NewCommand(args...)
+}
+
+// NativeBinaryOnPath reports whether the optional native binary is resolvable
+// from the host PATH.
+func (s ManagedNPMRuntimeSpec) NativeBinaryOnPath() bool {
+	if s.NativeBinary == "" {
+		return false
+	}
+	_, err := exec.LookPath(s.NativeBinary)
+	return err == nil
+}
+
+// NativeUpdateCommand updates the npm package that owns the native binary.
+// The optional version keeps exact-version updates on the same runtime.
+func (s ManagedNPMRuntimeSpec) NativeUpdateCommand(versions ...string) Command {
+	return NewCommand("npm", "install", "-g", s.PackageSpec(firstVersion(versions)))
+}
+
+// UpdateCommand selects the update recipe for the runtime that launches on
+// this host. Native binaries use the global npm install recipe; other hosts
+// keep the managed execution-cache update.
+func (s ManagedNPMRuntimeSpec) UpdateCommand(versions ...string) Command {
+	if s.NativeBinaryOnPath() {
+		return s.NativeUpdateCommand(versions...)
+	}
+	return s.CacheUpdateCommand(versions...)
+}
+
+// RefreshCommand selects the command used to probe the runtime after an
+// update. Native hosts probe the same binary that the update installs.
+func (s ManagedNPMRuntimeSpec) RefreshCommand(versions ...string) Command {
+	if s.NativeBinaryOnPath() {
+		return s.NativeCommand()
+	}
+	if len(versions) > 0 && versions[0] != "" {
+		return s.ACPCommand(versions[0])
+	}
+	return s.CachedACPCommand()
 }
 
 func firstVersion(versions []string) string {

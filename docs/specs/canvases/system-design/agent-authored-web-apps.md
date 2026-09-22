@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-08-26
-last_updated: 2026-09-19
+last_updated: 2026-09-21
 requirements:
   - REQ-CANVASES-AGENT-WEB-APPS-001
   - REQ-CANVASES-AGENT-WEB-APPS-002
@@ -567,6 +567,9 @@ Host chrome stays outside the iframe. Desktop chrome shows the title, runtime
 state, Edit, Promote for task canvases, Open full canvas, and an overflow menu.
 Release, permission, promotion, and disabled controls have pointer and keyboard
 help. The mobile action drawer shows equivalent descriptions without hover.
+
+Task-entry and reconnect discovery follow the
+[task-entry presentation design](task-entry-presentation.md).
 
 The Dockview canvas renderer provides a full-height flex boundary around the
 persistent portal. The shared host and iframe then fill the area below host

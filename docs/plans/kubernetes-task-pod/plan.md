@@ -112,6 +112,26 @@ retained task Pods without sessions stay distinct. Existing desktop table and
 mobile linked cards keep their composition and touch behavior. Targeted component
 coverage exercises both layouts; no new viewport interaction is introduced.
 
+## PR remediation
+
+Review fixes add typed agentctl not-found errors, request-scoped canonical
+inventory/Pod caching, required-table upgrade probes, and concurrent stop/attach
+coverage. Credential persistence recovery retains the issued token until its
+canonical encrypted record is saved, using an encrypted recovery secret across
+backend restart. Cleanup detaches cancellation with a one-minute budget. Updated backend guidance distinguishes
+physical environment ownership from per-session inventory.
+
+CI remediation also incorporates the current base and fills 32 missing Japanese
+SSH strings. The base's preview-feedback subscription requires an updated exact
+subscription count; no WebSocket production behavior changes for that fix.
+Post-fix verification: targeted lifecycle/status race regressions, the full
+agentctl race suite, SQLite store conformance and previous-stable upgrades pass.
+The WebSocket subscription regression passes 20 race-enabled runs. Full i18n
+checks and three current component tests pass; harness/spec checks pass.
+Remote CI/review completion remains pending. The security review identifies
+shared-UID credential access across siblings; resolution requires an explicit
+trust/isolation policy decision and is not claimed complete here.
+
 ## Risks
 
 Control authentication and bootstrap files currently assume one session; sharing

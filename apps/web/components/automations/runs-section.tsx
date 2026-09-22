@@ -21,6 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { IconChevronDown, IconChevronUp, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { useAutomationRuns } from "@/hooks/domains/settings/use-automation-runs";
 import { buildRunOutcomeReasonSuffix } from "@/lib/automation-run-reason";
+import { linkToTask } from "@/lib/links";
 import type { AutomationRun, RunStatus } from "@/lib/types/automation";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -326,7 +327,7 @@ export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
                     run={run}
                     deleting={deleting}
                     onDelete={deleteRun}
-                    onNavigate={(id) => router.push(`/tasks/${id}`)}
+                    onNavigate={(id) => router.push(linkToTask(id))}
                   />
                 ))
               )}

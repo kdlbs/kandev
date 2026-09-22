@@ -57,3 +57,21 @@ describe("ToolEditMessage write summary", () => {
     expect(html).not.toContain("line)");
   });
 });
+
+describe("ToolEditMessage file action", () => {
+  // @covers AC-UI-FILE-TREE-PATH-SCOPE-001.1
+  it("does not treat a workspace prefix collision as an in-workspace file", () => {
+    const comment = writeComment("Write utils.ts", "only line");
+    const metadata = comment.metadata as {
+      normalized: { modify_file: { file_path: string } };
+    };
+    metadata.normalized.modify_file.file_path = "/workspace-old/apps/web/lib/utils.ts";
+
+    const html = renderToStaticMarkup(
+      <ToolEditMessage comment={comment} worktreePath="/workspace" onOpenFile={() => undefined} />,
+    );
+
+    expect(html).toContain('title="Copy path"');
+    expect(html).not.toContain('title="Open file"');
+  });
+});

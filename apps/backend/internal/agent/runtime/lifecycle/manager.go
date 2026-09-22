@@ -250,6 +250,20 @@ type Manager struct {
 	// SkillDeployer hook. Nil → skill deploy is skipped.
 	agentProfileReader AgentProfileReader
 
+	// reachabilityReader resolves an ssh executor's stored reachability
+	// record for the launch-time session.launch.warning producer. Nil →
+	// no warning is ever published (feature not wired). See
+	// manager_launch_reachability_warning.go and SetSSHReachabilityWarningPolicy.
+	reachabilityReader ReachabilityReader
+	// reachabilityProbingEnabled mirrors whether the reachability poller's
+	// periodic sweep is on (interval != 0). When true, a stored unreachable
+	// record is always warning-eligible regardless of how old checked_at is.
+	reachabilityProbingEnabled bool
+	// reachabilityWarningWindowSeconds is 3x the reachability package's own
+	// default interval (not the configured/effective one), evaluated even
+	// with probing disabled per AC-EXECUTORS-SSH-REACHABILITY-001.28.
+	reachabilityWarningWindowSeconds int
+
 	// skillDeployer materialises per-profile skills + custom prompt before
 	// the agent process starts. Defaults to a no-op deployer; office wires
 	// its concrete implementation via SetSkillDeployer.

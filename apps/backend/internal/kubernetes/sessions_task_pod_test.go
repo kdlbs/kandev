@@ -14,9 +14,11 @@ import (
 type taskPodStatusRepository struct {
 	*fakeResourceRepository
 	environment *models.KubernetesEnvironment
+	reads       int
 }
 
 func (r *taskPodStatusRepository) GetKubernetesEnvironment(context.Context, string) (*models.KubernetesEnvironment, error) {
+	r.reads++
 	return r.environment, nil
 }
 
@@ -40,9 +42,15 @@ func TestSharedTaskPodStatusUsesCanonicalInventory(t *testing.T) {
 	handler := NewHandler(repo, &fakeAccessChecker{}, func(agentkubernetes.ExecutorConfig) (*agentkubernetes.Client, error) {
 		return &agentkubernetes.Client{Clientset: clientset}, nil
 	})
+	sibling := *run
+	sibling.ID, sibling.SessionID = "session-3", "session-3"
+	repo.runs = append(repo.runs, &sibling)
+	repo.sessions["session-3"] = kubernetesTaskSession("session-3", "task-1", "executor-1", "profile-1")
 	rows, err := handler.listSessions(context.Background(), "executor-1", SessionFilter{})
 	require.NoError(t, err)
-	require.Len(t, rows, 1)
+	require.Len(t, rows, 2)
+	require.Equal(t, 1, repo.reads)
+	require.Len(t, clientset.Actions(), 1, "probe shared Pod once per request")
 	require.Empty(t, rows[0].FailureReason)
 	require.Equal(t, "session-2", rows[0].SessionID)
 	require.Equal(t, "Running", rows[0].PodPhase)

@@ -1326,6 +1326,7 @@ func (s *Service) logTaskSessionStateWriteError(
 func (s *Service) transitionTaskSessionState(
 	ctx context.Context,
 	taskID, sessionID string,
+	expectedState *models.TaskSessionState,
 	nextState models.TaskSessionState,
 	errorMessage string,
 	onChanged func(),
@@ -1341,6 +1342,7 @@ func (s *Service) transitionTaskSessionState(
 					admittedCtx,
 					taskID,
 					sessionID,
+					expectedState,
 					nextState,
 					errorMessage,
 					onChanged,
@@ -1356,6 +1358,9 @@ func (s *Service) transitionTaskSessionState(
 	}
 	if session == nil {
 		return false, "", fmt.Errorf("get session before state transition: session %q is nil", sessionID)
+	}
+	if expectedState != nil && session.State != *expectedState {
+		return false, session.State, nil
 	}
 	if isTerminalSessionState(session.State) || session.State == nextState {
 		return false, session.State, nil
