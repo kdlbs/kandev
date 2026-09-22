@@ -100,6 +100,9 @@ export function sumTokenMetrics(rows: TokenMetricsInput[]): TokenUsageMetrics {
   for (const key of TOKEN_METRIC_KEYS) {
     if (missing[key]) result[key] = null;
   }
+  if (result.currency === "mixed") {
+    result.cost_subcents = null;
+  }
   result.effective_cost_per_million = calculateEffectiveRate({ ...result, coverage });
   return result;
 }
@@ -304,7 +307,7 @@ export function formatCost(
   currency: string,
   unavailable: string,
 ): string {
-  if (value === null || !Number.isFinite(value)) return unavailable;
+  if (value === null || !Number.isFinite(value) || currency === "mixed") return unavailable;
   const amount = value / 10_000;
   return formatCurrencyAmount(amount, currency);
 }
@@ -314,7 +317,7 @@ export function formatRate(
   currency: string,
   unavailable: string,
 ): string {
-  if (value === null || !Number.isFinite(value)) return unavailable;
+  if (value === null || !Number.isFinite(value) || currency === "mixed") return unavailable;
   return formatCurrencyAmount(value, currency);
 }
 

@@ -3,7 +3,8 @@ package sqlite
 import (
 	"context"
 	"fmt"
-	"strings"
+
+	"github.com/kandev/kandev/internal/db"
 )
 
 // ensureUsageSchema stores source-aware cumulative observations separately
@@ -114,8 +115,7 @@ CREATE INDEX IF NOT EXISTS idx_session_usage_buckets_session
 	// already present.
 	for _, table := range []string{"session_usage_measurements", "session_usage_buckets"} {
 		if _, alterErr := r.db.ExecContext(context.Background(), `ALTER TABLE `+table+` ADD COLUMN cost_coverage TEXT NOT NULL DEFAULT 'missing'`); alterErr != nil {
-			errorText := strings.ToLower(alterErr.Error())
-			if !strings.Contains(errorText, "duplicate column") && !strings.Contains(errorText, "already exists") {
+			if !db.IsDuplicateColumnError(alterErr) {
 				return fmt.Errorf("add cost coverage to %s: %w", table, alterErr)
 			}
 		}

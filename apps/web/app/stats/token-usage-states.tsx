@@ -55,9 +55,11 @@ export function TokenUsageError({ message, onRetry }: { message: string; onRetry
 export function TokenUsageEmpty({
   hasHistory,
   onAllTime,
+  pluginSettingsHref = "/settings/plugins",
 }: {
   hasHistory: boolean;
   onAllTime: () => void;
+  pluginSettingsHref?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -91,7 +93,7 @@ export function TokenUsageEmpty({
             size="sm"
             className="min-h-11 cursor-pointer md:min-h-0"
           >
-            <Link href="/settings/plugins">{t("stats:openPluginSettings")}</Link>
+            <Link href={pluginSettingsHref}>{t("stats:openPluginSettings")}</Link>
           </Button>
         )}
       </CardContent>

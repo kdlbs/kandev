@@ -32,5 +32,20 @@ test.describe("Stats on mobile", () => {
     await expect(testPage.getByRole("button", { name: "Copy Stats" })).toBeVisible({
       timeout: 15_000,
     });
+
+    const tokenUsageTab = testPage.getByRole("tab", { name: "Token Usage", exact: true });
+    await expect(tokenUsageTab).toBeVisible();
+    await tokenUsageTab.tap();
+    await expect(testPage).toHaveURL(/\/stats\/token-usage$/);
+    await expect(testPage.getByTestId("token-usage-topbar")).toBeVisible();
+    const actions = testPage.getByTestId("token-usage-topbar-actions");
+    const actionBox = await actions.boundingBox();
+    const viewport = testPage.viewportSize();
+    if (!actionBox || !viewport) throw new Error("token usage mobile topbar geometry unavailable");
+    expect(actionBox.x).toBeGreaterThanOrEqual(0);
+    expect(actionBox.x + actionBox.width).toBeLessThanOrEqual(viewport.width + 1);
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
+      await testPage.evaluate(() => document.documentElement.clientWidth),
+    );
   });
 });

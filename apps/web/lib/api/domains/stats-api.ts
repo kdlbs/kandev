@@ -88,7 +88,7 @@ function tokenUsageQueryString(
   const entries: Array<[string, string | undefined]> = [
     ["range", range],
     ["group", group],
-    ["include_undated", String(queryOptions?.includeUndated ?? true)],
+    ["include_undated", String(queryOptions?.includeUndated ?? range === "all")],
     ["timezone", queryOptions?.timezone],
     ["provider", queryOptions?.provider],
     ["sort", queryOptions?.sortBy],
