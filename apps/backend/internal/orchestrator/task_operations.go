@@ -3882,6 +3882,9 @@ func (s *Service) attemptColdResume(
 		return false, attemptErr
 	}
 	if launchErr != nil {
+		s.recordExactProfileLaunchReceipt(
+			resumeCtx, session.TaskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), launchErr,
+		)
 		if errors.Is(launchErr, executor.ErrExecutionAlreadyRunning) {
 			s.recoverAgentPromptStreamIfNeeded(resumeCtx, sessionID)
 			if readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID); readyErr != nil {
@@ -4077,6 +4080,9 @@ func (s *Service) startAgentOnPreparedWorkspace(
 		ExecutorID:             session.ExecutorID,
 		StartAgent:             true,
 	}); err != nil {
+		s.recordExactProfileLaunchReceipt(
+			launchCtx, session.TaskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err,
+		)
 		if execution != nil && resumeAttempt != nil {
 			resumeAttempt.setExecutionID(execution.AgentExecutionID)
 		}

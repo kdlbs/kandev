@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -40,6 +42,10 @@ func TestEnsureSessionRunningColdResumeCarriesExactProfile(t *testing.T) {
 	require.Equal(t, "gpt-exact", launchRequest.ExactProfileModel)
 	require.Equal(t, revision.UnixNano(), launchRequest.ExactProfileRevision)
 	exactProfileRecoveryBinding(t, repo, revision)
+	receipt, err := repo.GetExactProfileLaunchReceipt(ctx, "task1", "session1")
+	require.NoError(t, err)
+	require.Equal(t, models.ExactProfileLaunchOutcomeFailedClosed, receipt.Outcome)
+	require.False(t, receipt.InferenceStarted)
 }
 
 func TestEnsureSessionRunningColdResumeRejectsStaleExactProfileBeforeExecutor(t *testing.T) {
@@ -115,6 +121,30 @@ func TestEnsureSessionRunningPreparedWorkspaceRejectsStaleExactProfileBeforeStar
 	require.False(t, started)
 }
 
+func TestEnsureSessionRunningPreparedWorkspaceLaunchFailureRecordsExactReceipt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	revision := exactProfileRecoveryAssignment(t, repo)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-prepared")
+	agentManager := &mockAgentManager{
+		resolveProfileInfo: exactProfileRecoveryInfo(revision),
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, errExactProfileRecoveryStop
+		},
+	}
+	svc := exactProfileRecoveryService(repo, agentManager)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+
+	err = svc.ensureSessionRunning(ctx, session.ID, session, launchOriginManual)
+	require.Error(t, err)
+	receipt, err := repo.GetExactProfileLaunchReceipt(ctx, "task1", "session1")
+	require.NoError(t, err)
+	require.Equal(t, models.ExactProfileLaunchOutcomeFailedClosed, receipt.Outcome)
+	require.False(t, receipt.InferenceStarted)
+}
+
 func TestExactProfileStartFailureIgnoresStaleExecution(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -142,6 +172,45 @@ func TestExactProfileStartFailureIgnoresStaleExecution(t *testing.T) {
 	receipt, err := repo.GetExactProfileLaunchReceipt(ctx, "task1", "session1")
 	require.NoError(t, err)
 	require.Equal(t, "successor failure", receipt.FailureReason)
+}
+
+func TestExactPreparedLaunchBypassesStaleDynamicRoute(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	revision := exactProfileRecoveryAssignment(t, repo)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile-exact"
+	session.ExecutionProfileID = "profile-stale"
+	session.RouteGeneration = 3
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.SaveRouteState(ctx, dynamicruntime.RouteState{
+		SessionID: "session1", LogicalProfileID: "profile-old", ExecutionProfileID: "profile-stale",
+		Generation: 3, Status: dynamicRouteStatusActive, UpdatedAt: time.Now().UTC(),
+	}))
+
+	var launchedProfile string
+	agentManager := &mockAgentManager{
+		resolveProfileInfo: exactProfileRecoveryInfo(revision),
+		launchAgentFunc: func(_ context.Context, request *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchedProfile = request.AgentProfileID
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-exact"}, nil
+		},
+	}
+	svc := exactProfileRecoveryService(repo, agentManager)
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(
+		nil, dynamicruntime.NewEngine(dynamicruntime.WithStateLoader(repo)), false,
+	))
+	task, err := svc.scheduler.GetTask(ctx, "task1")
+	require.NoError(t, err)
+
+	_, err = svc.launchPreparedSessionWithDynamicFallback(ctx, task, "session1", executor.LaunchOptions{
+		AgentProfileID: "profile-exact", ExactProfile: true, ExactProfileGeneration: 1,
+		ExactProfileRevision: revision.UnixNano(), ExactProfileModel: "gpt-exact", StartAgent: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "profile-exact", launchedProfile)
 }
 
 func exactProfileRecoveryAssignment(t *testing.T, repo *sqliterepo.Repository) time.Time {
