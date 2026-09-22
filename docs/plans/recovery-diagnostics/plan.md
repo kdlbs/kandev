@@ -1,6 +1,6 @@
 ---
 created: 2026-09-22
-status: draft
+status: complete
 requirements:
   - REQ-WORKSPACES-WORKTREE-BASE-REFRESH-001
   - REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-001
@@ -19,7 +19,7 @@ legacy_specs: []
 Improve evidence for failed Git refresh and PR discovery. Remove warnings for
 intentional setup-script omissions. Execute three work orders sequentially.
 Each work order has an independent result. The order prioritizes lost failure
-evidence before warning cleanup. Implementation requires a later explicit request.
+evidence before warning cleanup.
 
 ## Evidence and requirement conformance
 
@@ -78,8 +78,7 @@ The paired designs define fields, cancellation, and final-outcome semantics.
 
 No new ADR is needed. Existing credential exclusion and refresh decisions remain
 authoritative, including the local-first and required-refresh ADRs linked by the
-workspace design. No public documentation changes are needed for this design
-package. Implementation must revisit docs impact if its scope changes.
+workspace design. No public documentation changes are needed for this change.
 
 ## Tests
 
@@ -104,14 +103,14 @@ regressions; this package does not reopen the refresh decisions.
 
 ## Work orders
 
-- [ ] [Task 01: Explain Git refresh failures](task-01-git-diagnostics.md)
-- [ ] [Task 02: Distinguish PR lookup outcomes](task-02-pr-diagnostics.md)
-- [ ] [Task 03: Quiet empty setup scripts](task-03-setup-log-severity.md)
+- [x] [Task 01: Explain Git refresh failures](task-01-git-diagnostics.md)
+- [x] [Task 02: Distinguish PR lookup outcomes](task-02-pr-diagnostics.md)
+- [x] [Task 03: Quiet empty setup scripts](task-03-setup-log-severity.md)
 
 ## Verification results
 
-Implementation: pending. No production or permanent test changes in this package.
-Design validation passed on September 22, 2026:
+Implementation complete on September 22, 2026. Design validation passed before
+implementation:
 
 - Catalog validation: 299 decisions and 1,108 specifications.
 - Specification linter tests: 36 passed.
@@ -119,7 +118,20 @@ Design validation passed on September 22, 2026:
 - Scoped diff whitespace check: passed.
 - Scoped status inspection: six specification edits and four new plan files.
 
-These results validate the design artifacts, not the planned code changes.
+Implementation verification passed for every work order, including targeted
+race checks, and `go build ./...` passed. Targeted `golangci-lint` for all four
+affected backend packages passed with zero issues. Specification catalog
+validation and full specification lint also passed. A repository-wide
+`go test ./... -count=1` run reached the changed packages successfully but exited non-zero on unrelated
+environment-sensitive failures in process probing, home-config discovery,
+websocket subscription counting, GitHub fixture setup, launcher restart tests,
+and executor timing.
+
+The review remediation then corrected provider deadline handling in PR
+discovery and the pull fast-forward diagnostic classifier, and added focused
+regression fixtures. Builds and tests were not rerun for that remediation per
+the review instruction. The verification results above therefore apply to the
+pre-remediation implementation state.
 
 Each work order supplies exact Go checks, rooted at the repository root.
 Final package checks:

@@ -1,7 +1,7 @@
 ---
 id: "03-setup-log-severity"
 title: "Quiet empty setup scripts"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -82,4 +82,16 @@ Package logger replacement needs serial tests and cleanup.
 
 ## Results
 
-Pending. No implementation or test execution during the design turn.
+Changed the intentional comment-only setup omission log from WARN to DEBUG.
+Resolution remains empty for default, explicit, blank, and shebang-only scripts;
+executable scripts remain executable. The observer regression confirms identity
+fields remain present and script contents remain absent.
+
+The warning assertion failed before the production change because the existing
+log level was WARN. Verification passed:
+
+```text
+go test ./internal/agent/runtime/lifecycle -run 'Test(ResolvePreparerSetupScript|IsScriptEffectivelyEmpty|.*SetupScript.*)' -count=1
+go test -race ./internal/agent/runtime/lifecycle -run 'TestResolvePreparerSetupScriptDiagnosticSeverity' -count=1
+git diff --check
+```

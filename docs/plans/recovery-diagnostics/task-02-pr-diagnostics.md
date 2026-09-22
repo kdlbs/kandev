@@ -1,7 +1,7 @@
 ---
 id: "02-pr-diagnostics"
 title: "Distinguish PR lookup outcomes"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -101,4 +101,29 @@ Error and empty results can alternate. Historical errors must not override later
 
 ## Results
 
-Pending. No implementation or test execution during the design turn.
+Implemented a bounded exported GitHub discovery classifier and separated
+successful empty lookups, provider failures, found PRs, and cancellation in
+post-push and existing-watch paths. Failed provider attempts now log only the
+workspace, task, repository identity, branch, attempt, and safe category.
+Empty attempts and retry exhaustion are debug logs with outcome counts. The
+existing association and watch reuse paths remain unchanged after a found PR.
+
+The first regression run failed at compile time because the retry wait seam was
+not yet present. After implementation, verification passed:
+
+```text
+go test ./internal/orchestrator -run 'Test(PushDiscoveryDiagnostics|ExistingWatchDiscoveryDiagnostics|DetectPushAndAssociatePR|GitHubPushAssociation|PushAssociation|ResolvePRWatchBranchForWatch)' -count=1
+go test -race ./internal/orchestrator -run 'Test(PushDiscoveryDiagnostics|ExistingWatchDiscoveryDiagnostics)' -count=1
+go test ./internal/github -run 'Test(ClassifyPRDiscoveryError|PRDiscovery)' -count=1
+git diff --check
+```
+
+## Review remediation
+
+PR discovery now uses the caller context state to decide whether to stop. A
+live caller treats wrapped provider deadlines and cancellations as failed
+attempts, so post-push retries and existing-watch diagnostics remain active.
+Focused coverage covers wrapped provider deadlines in both paths and retains
+actual caller-cancellation coverage. Builds and tests were not rerun for this
+review remediation, so the verification above describes the pre-remediation
+implementation state.

@@ -1,7 +1,7 @@
 ---
 id: "01-git-diagnostics"
 title: "Explain Git refresh failures"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -98,4 +98,29 @@ Git text is not a stable API. Keep diagnostic classification separate from polic
 
 ## Results
 
-Pending. No implementation or test execution during the design turn.
+Implemented credential-safe diagnostic classification and emission for base
+branch fetch and pull failures. The diagnostic fields preserve the existing
+refresh reason and policy decisions, while fixed explanations and optional
+exit codes keep raw Git output out of logs, returned errors, and progress.
+
+The new regression suite covers authentication, SSH key and host failures,
+DNS, connection, TLS, missing refs, non-fast-forward updates, repository
+access, lock contention, unknown output, timeout, cancellation, fetch and
+pull emission, and required-refresh policy preservation. The first emission
+test failed before the production change because no diagnostic log existed.
+
+Verification passed:
+
+```text
+go test ./internal/worktree -count=1
+go test -race ./internal/worktree -run 'Test(RefreshDiagnostic|BaseRefreshDiagnostic|RefreshDiagnosticsPreservePolicy)' -count=1
+git diff --check
+```
+
+## Review remediation
+
+The classifier now recognizes Git's pull fast-forward refusal, uses local
+branch wording for that outcome, and leaves tag-clobber output unknown. Fetch
+and pull fixtures cover the real failure forms. Builds and tests were not
+rerun for this review remediation, so the verification above describes the
+pre-remediation implementation state.
