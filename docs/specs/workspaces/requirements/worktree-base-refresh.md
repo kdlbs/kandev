@@ -82,6 +82,13 @@ local branches without publishing them first.
   classification. Authentication, network, timeout, cancellation, divergent,
   uncertain, and other unproven failures remain fatal for pull-request tasks.
 
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.14:** When a base refresh fails,
+  backend diagnostics shall identify the repository, operation, branch, and
+  failure category. Known causes shall have a fixed diagnostic explanation.
+  Unknown causes shall remain explicitly unknown. Diagnostics shall exclude
+  credentials, remote URLs, and raw command output. Existing refresh and
+  fallback decisions shall remain unchanged.
+
 ## Compatibility
 
 This requirement replaces the universal fail-closed refresh behavior from
