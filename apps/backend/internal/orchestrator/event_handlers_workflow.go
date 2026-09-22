@@ -2971,6 +2971,20 @@ func (s *Service) persistManualMoveLifecycleCompletion(
 	if expectedFromStepID == "" || expectedOccurrenceID == "" {
 		return s.persistManualMoveLifecycleCompletionLegacy(ctx, taskID)
 	}
+	// Older admitted moves persist only the source step. They predate the
+	// occurrence fence and must keep using the legacy completion path; treating
+	// their absent occurrence as a stale CAS miss strands the feeder barrier.
+	current, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to inspect manual move lifecycle marker before completion",
+			zap.String("task_id", taskID), zap.Error(err))
+		return false
+	}
+	if current != nil && manualMoveLifecyclePending(current) &&
+		manualMoveLifecycleSourceStep(current) == expectedFromStepID &&
+		manualMoveLifecycleOccurrence(current) == "" {
+		return s.persistManualMoveLifecycleCompletionLegacy(ctx, taskID)
+	}
 	completer, ok := s.repo.(manualMoveLifecycleCompleter)
 	if !ok {
 		return s.persistManualMoveLifecycleCompletionLegacy(ctx, taskID)
