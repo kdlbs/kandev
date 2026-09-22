@@ -5,12 +5,13 @@ test("sidebar shows archive progress before removal and recovers on failure", as
   testPage,
   apiClient,
   seedData,
-}, testInfo) => {
+  prCapture,
+}) => {
   await checkImmediateArchive({
     page: testPage,
     api: apiClient,
     seed: seedData,
     mobile: false,
-    screenshotPath: testInfo.outputPath("pending-archive.png"),
+    prCapture,
   });
 });
