@@ -182,7 +182,7 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 	tp.AutoMergeObservedAt = autoMergeObservedAt
 	tp.WorkflowAttention = nextWorkflowAttention
 	tp.WorkflowAttentionJSON = marshalWorkflowAttention(nextWorkflowAttention)
-	now := time.Now().UTC()
+	now := s.now()
 	tp.LastSyncedAt = &now
 
 	// AC-18: publish must reflect the row as stored, not this call's
@@ -328,11 +328,26 @@ func (s *Service) reconcileTaskUnwatchedPRs(
 // non-terminal PR rows for every stale task in one pass, so the background
 // workspace refresh can fan both into a single batched call each.
 func (s *Service) collectStaleWorkspaceSyncTargets(
-	ctx context.Context, staleTasks map[string]struct{},
+	ctx context.Context, workspaceID string, staleTasks map[string]struct{},
 ) ([]*PRWatch, []*TaskPR) {
 	var allWatches []*PRWatch
 	var pending []*TaskPR
 	now := time.Now().UTC()
+	seenWatches := make(map[string]struct{})
+	appendWatch := func(watch *PRWatch) {
+		if watch == nil {
+			return
+		}
+		key := watch.ID
+		if key == "" {
+			key = watch.WorkspaceID + "\x00" + watch.TaskID + "\x00" + watch.RepositoryID + "\x00" + watch.Owner + "\x00" + watch.Repo + "\x00" + watch.Branch + "\x00" + fmt.Sprint(watch.PRNumber)
+		}
+		if _, ok := seenWatches[key]; ok {
+			return
+		}
+		seenWatches[key] = struct{}{}
+		allWatches = append(allWatches, watch)
+	}
 	for taskID := range staleTasks {
 		watches, err := s.store.ListPRWatchesByTask(ctx, taskID)
 		if err != nil {
@@ -340,7 +355,9 @@ func (s *Service) collectStaleWorkspaceSyncTargets(
 				zap.String("task_id", taskID), zap.Error(err))
 			continue
 		}
-		allWatches = append(allWatches, watches...)
+		for _, watch := range watches {
+			appendWatch(watch)
+		}
 		rows, err := s.store.ListTaskPRsByTask(ctx, taskID)
 		if err != nil {
 			s.logger.Debug("list task PRs for refresh failed",
@@ -348,6 +365,20 @@ func (s *Service) collectStaleWorkspaceSyncTargets(
 			continue
 		}
 		pending = append(pending, unwatchedTaskPRs(rows, watches, now)...)
+	}
+	// Searching watches can be absent from the task-PR projection or can have
+	// a fresh cached row while still needing their adaptive discovery check.
+	// Load them from the active workspace inventory so passive page refreshes
+	// cannot bypass the schedule through the PR freshness window.
+	activeWatches, err := s.store.ListActivePRWatchesForWorkspace(ctx, workspaceID)
+	if err != nil {
+		s.logger.Debug("list active PR watches for adaptive refresh failed", zap.Error(err))
+	} else {
+		for _, watch := range activeWatches {
+			if watch != nil && watch.PRNumber == 0 {
+				appendWatch(watch)
+			}
+		}
 	}
 	return allWatches, pending
 }

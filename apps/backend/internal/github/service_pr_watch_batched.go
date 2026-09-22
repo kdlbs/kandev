@@ -49,6 +49,12 @@ func (s *Service) SyncWatchesBatched(ctx context.Context, watches []*PRWatch) ([
 func (s *Service) SyncWorkspaceWatchesBatched(
 	ctx context.Context, workspaceID string, watches []*PRWatch,
 ) ([]PRWatchSyncResult, error) {
+	return s.syncWorkspaceWatchesBatched(ctx, workspaceID, watches, false)
+}
+
+func (s *Service) syncWorkspaceWatchesBatched(
+	ctx context.Context, workspaceID string, watches []*PRWatch, explicitRefresh bool,
+) ([]PRWatchSyncResult, error) {
 	if len(watches) == 0 {
 		return nil, nil
 	}
@@ -67,6 +73,9 @@ func (s *Service) SyncWorkspaceWatchesBatched(
 	credentialGeneration := int64(0)
 	if resolved.credential != nil {
 		credentialGeneration = resolved.credential.CredentialGeneration
+	}
+	if explicitRefresh {
+		s.invalidateWorkflowAttentionForWatches(resolved.CacheScope, watches)
 	}
 	return s.syncWatchesBatchedWithClient(
 		ctx, resolved.Client, resolved.CacheScope, workspaceID, credentialGeneration, watches,
@@ -435,10 +444,7 @@ func (s *Service) enrichBatchedWorkflowAttentionGroup(
 	}
 	defer func() { <-sem }()
 
-	key := workflowAttentionBatchKey(cacheScope, group.owner, group.repo, group.headSHA)
-	value, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
-		return client.ListWorkflowRuns(ctx, group.owner, group.repo, group.headSHA)
-	})
+	runs, err := s.cachedWorkflowRuns(ctx, client, cacheScope, group.owner, group.repo, group.headSHA)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Debug("workflow attention read unavailable",
@@ -447,16 +453,11 @@ func (s *Service) enrichBatchedWorkflowAttentionGroup(
 		markBatchedWorkflowAttentionUnknown(group)
 		return
 	}
-	runs, ok := value.([]WorkflowRun)
-	if !ok {
-		markBatchedWorkflowAttentionUnknown(group)
-		return
-	}
-	s.applyBatchedWorkflowAttention(ctx, client, group, runs)
+	s.applyBatchedWorkflowAttention(ctx, client, cacheScope, group, runs)
 }
 
 func (s *Service) applyBatchedWorkflowAttention(
-	ctx context.Context, client Client, group *workflowAttentionStatusGroup, runs []WorkflowRun,
+	ctx context.Context, client Client, cacheScope string, group *workflowAttentionStatusGroup, runs []WorkflowRun,
 ) {
 	jobs := make(map[workflowJobKey]struct {
 		value []WorkflowJob
@@ -467,7 +468,9 @@ func (s *Service) applyBatchedWorkflowAttention(
 		if cached, found := jobs[jobKey]; found {
 			return cached.value, cached.err
 		}
-		value, readErr := client.ListWorkflowRunJobs(jobCtx, group.owner, group.repo, runID, attempt)
+		value, readErr := s.cachedWorkflowJobs(
+			jobCtx, client, cacheScope, group.owner, group.repo, runID, attempt, true,
+		)
 		jobs[jobKey] = struct {
 			value []WorkflowJob
 			err   error
@@ -486,7 +489,7 @@ func (s *Service) applyBatchedWorkflowAttention(
 }
 
 func workflowAttentionBatchKey(cacheScope, owner, repo, headSHA string) string {
-	return scopedCacheKey(cacheScope, fmt.Sprintf("workflow-attention:%s/%s@%s", strings.ToLower(owner), strings.ToLower(repo), headSHA))
+	return workflowRunsCacheKey(cacheScope, owner, repo, headSHA)
 }
 
 // batchedWatchStatuses is the shared, read-only result of one batched fetch.

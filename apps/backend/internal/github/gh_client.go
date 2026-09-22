@@ -51,10 +51,16 @@ func (c *GHClient) WithRateTracker(t *RateTracker) *GHClient {
 	return c
 }
 
+// RateResource reports the bucket used by gh subcommands such as `gh pr view`
+// and `gh issue view`. The CLI implements these reads through GraphQL.
+func (c *GHClient) RateResource() Resource {
+	return ResourceGraphQL
+}
+
 // reGHRateLimit matches the prose gh prints when a request hit a primary or
 // secondary rate limit. The exact text varies by gh version and locale, but
 // "rate limit" / "API rate limit" appear consistently.
-var ghRateLimitMarkers = []string{"rate limit", "abuse detection"}
+var ghRateLimitMarkers = []string{"rate limit", "abuse detection", "too many requests", "secondary limit"}
 
 func ghStderrIndicatesRateLimit(stderr string) bool {
 	if stderr == "" {
@@ -1370,6 +1376,13 @@ func (c *GHClient) runGH(ctx context.Context, stdin []byte, args ...string) (str
 			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), execCtxErr)
 		}
 		c.inspectRateStderr(args, stderr.String())
+		if ghStderrIndicatesRateLimit(stderr.String()) {
+			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), &GitHubAPIError{
+				StatusCode: http.StatusTooManyRequests,
+				Endpoint:   "gh " + strings.Join(args, " "),
+				Body:       strings.TrimSpace(stderr.String()),
+			})
+		}
 		return stdout.String(), fmt.Errorf("gh %s: %w: %s", firstArg(args), runErr, stderr.String())
 	}
 	return stdout.String(), nil

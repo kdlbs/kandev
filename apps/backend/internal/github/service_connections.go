@@ -421,7 +421,7 @@ func (s *Service) invalidateWorkspaceCredential(workspaceID string) {
 func (s *Service) clearAuthCaches() {
 	for _, cache := range []*ttlCache{
 		s.searchCache, s.prStatusCache, s.prFeedbackCache, s.mergeMethodsCache,
-		s.accessibleReposCache, s.repoErrorCache,
+		s.accessibleReposCache, s.repoErrorCache, s.workflowRunsCache, s.workflowJobsCache,
 	} {
 		if cache != nil {
 			cache.clear()

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"runtime"
 	"strings"
 	"sync"
@@ -751,7 +752,13 @@ type graphQLMockClient struct {
 	// onExecute, if set, is called at the top of every ExecuteGraphQL before
 	// canned responses are consumed. Used by the singleflight coalescing
 	// test to block the first in-flight call while a second one races.
-	onExecute func()
+	onExecute   func()
+	statusCalls int
+}
+
+func (m *graphQLMockClient) GetPRStatus(ctx context.Context, owner, repo string, number int) (*PRStatus, error) {
+	m.statusCalls++
+	return m.MockClient.GetPRStatus(ctx, owner, repo, number)
 }
 
 func (m *graphQLMockClient) ExecuteGraphQL(_ context.Context, query string, _ map[string]any, out any) error {
@@ -827,7 +834,7 @@ func TestTryBatchedPRWatchCheck_NumberedWatch_AppliesStatus(t *testing.T) {
 		t.Fatalf("create task PR: %v", err)
 	}
 
-	if !poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if !batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Fatalf("expected batched path to succeed")
 	}
 
@@ -1095,7 +1102,7 @@ func TestPollerFallbackAfterUnavailableBatchDoesNotPauseDiscovery(t *testing.T) 
 		URL: "https://x/52", BaseBranch: "main",
 	})
 	client.branchErr = errors.New("graphql transport unavailable")
-	if poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Fatal("unavailable batch unexpectedly succeeded")
 	}
 	// The poller's per-watch fallback must be able to acquire the released
@@ -1186,7 +1193,7 @@ func TestTryBatchedPRWatchCheck_PersistsExactReviewThreadCount(t *testing.T) {
 		t.Fatalf("create task PR: %v", err)
 	}
 
-	if !poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if !batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Fatal("expected batched path to succeed")
 	}
 
@@ -1225,7 +1232,7 @@ func TestTryBatchedPRWatchCheck_PreservesReviewThreadCountOnPaginationFailure(t 
 		t.Fatalf("create task PR: %v", err)
 	}
 
-	if poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Fatal("expected batched path to fail")
 	}
 	updated, err := store.GetTaskPR(ctx, "t1")
@@ -1293,7 +1300,7 @@ func TestTryBatchedPRWatchCheck_PublishesOnPRFeedbackWatermarkChange(t *testing.
 		t.Fatalf("create task PR: %v", err)
 	}
 
-	if !poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if !batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Fatalf("expected batched path to succeed")
 	}
 	select {
@@ -1448,7 +1455,7 @@ func TestTryBatchedPRWatchCheck_SearchingWatch_DetectsPR(t *testing.T) {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
-	if !poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if !batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Fatalf("expected batched path to succeed")
 	}
 
@@ -1471,9 +1478,205 @@ func TestTryBatchedPRWatchCheck_FallsBackOnUnsupportedClient(t *testing.T) {
 	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
-	if poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Errorf("expected false when client does not implement GraphQLExecutor")
 	}
+}
+
+func batchedPRWatchCompleted(outcomes []prWatchWorkspaceBatchOutcome) bool {
+	if len(outcomes) == 0 {
+		return false
+	}
+	for _, outcome := range outcomes {
+		if outcome.state != prWatchBatchCompleted {
+			return false
+		}
+	}
+	return true
+}
+
+type fallbackProbeClient struct {
+	Client
+	mu       sync.Mutex
+	findErr  error
+	branches []string
+}
+
+func (c *fallbackProbeClient) FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error) {
+	c.mu.Lock()
+	c.branches = append(c.branches, branch)
+	err := c.findErr
+	c.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return c.Client.FindPRByBranch(ctx, owner, repo, branch)
+}
+
+func (c *fallbackProbeClient) fallbackBranches() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.branches...)
+}
+
+func TestPRWatchFallbackBudgetAndFairness(t *testing.T) {
+	poller, service, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	unsupported := &fallbackProbeClient{Client: NewMockClient()}
+	transientGraphQL := &graphQLMockClient{
+		MockClient: NewMockClient(),
+		branchErr:  errors.New("graphql transport unavailable"),
+	}
+	transient := &fallbackProbeClient{Client: transientGraphQL}
+	successful := &graphQLMockClient{
+		MockClient: NewMockClient(),
+		prResponses: []string{
+			`{"data":{"repo0":{"pr0":{"state":"OPEN","title":"batched","url":"https://x/42","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefName":"feat","baseRefName":"main","headRefOid":"abc","author":{"login":"alice"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","reviews":{"nodes":[]},"reviewRequests":{"totalCount":0},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}`,
+			`{"data":{"repo0":{"pr0":{"state":"OPEN","title":"batched","url":"https://x/42","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefName":"feat","baseRefName":"main","headRefOid":"abc","author":{"login":"alice"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","reviews":{"nodes":[]},"reviewRequests":{"totalCount":0},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}`,
+		},
+	}
+
+	service.resolver = NewCredentialResolver(testConnectionReader{workspaces: map[string]*WorkspaceConnection{
+		"workspace-a": {WorkspaceID: "workspace-a", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost, Login: "a", Status: ConnectionStatusActive, CredentialGeneration: 1},
+		"workspace-b": {WorkspaceID: "workspace-b", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost, Login: "b", Status: ConnectionStatusActive, CredentialGeneration: 1},
+		"workspace-c": {WorkspaceID: "workspace-c", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost, Login: "c", Status: ConnectionStatusActive, CredentialGeneration: 1},
+	}}, nil)
+	service.resolver.SetAutomationProvider(workspaceAutomationCredentialProvider{clients: map[string]Client{
+		"workspace-a": unsupported,
+		"workspace-b": transient,
+		"workspace-c": successful,
+	}})
+
+	for _, workspaceID := range []string{"workspace-a", "workspace-b"} {
+		for index := 0; index < 6; index++ {
+			taskID := fmt.Sprintf("%s-task-%d", workspaceID, index)
+			seedTask(t, store, taskID, false)
+			if err := store.CreatePRWatch(ctx, &PRWatch{
+				WorkspaceID: workspaceID,
+				SessionID:   taskID + "-session",
+				TaskID:      taskID,
+				Owner:       "o",
+				Repo:        "r",
+				Branch:      fmt.Sprintf("%s-branch-%d", workspaceID, index),
+			}); err != nil {
+				t.Fatalf("create %s watch %d: %v", workspaceID, index, err)
+			}
+		}
+	}
+	seedTask(t, store, "workspace-c-task", false)
+	if err := store.CreatePRWatch(ctx, &PRWatch{
+		WorkspaceID: "workspace-c", SessionID: "workspace-c-session", TaskID: "workspace-c-task",
+		Owner: "o", Repo: "r", PRNumber: 42, Branch: "feat", LastCheckStatus: "pending",
+	}); err != nil {
+		t.Fatalf("create successful workspace watch: %v", err)
+	}
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "workspace-c-task", Owner: "o", Repo: "r", PRNumber: 42, State: "open",
+	}); err != nil {
+		t.Fatalf("create successful workspace task PR: %v", err)
+	}
+
+	eventsSeen := 0
+	if _, err := poller.eventBus.Subscribe(events.GitHubPRFeedback, func(context.Context, *bus.Event) error {
+		eventsSeen++
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe PR feedback: %v", err)
+	}
+
+	poller.checkPRWatches(ctx)
+	firstUnsupported := unsupported.fallbackBranches()
+	firstTransient := transient.fallbackBranches()
+	if len(firstUnsupported) > 5 || len(firstTransient) > 5 || len(firstUnsupported)+len(firstTransient) > 10 {
+		t.Fatalf("first fallback cycle exceeded budget: unsupported=%d transient=%d", len(firstUnsupported), len(firstTransient))
+	}
+	if len(firstUnsupported) == 0 || len(firstTransient) == 0 {
+		t.Fatalf("first fallback cycle starved a workspace: unsupported=%d transient=%d", len(firstUnsupported), len(firstTransient))
+	}
+	if successful.statusCalls != 0 {
+		t.Fatalf("successful batched workspace repeated through fallback: status calls=%d", successful.statusCalls)
+	}
+	if eventsSeen != 1 {
+		t.Fatalf("successful batched workspace events=%d, want 1", eventsSeen)
+	}
+
+	poller.checkPRWatches(ctx)
+	secondUnsupported := unsupported.fallbackBranches()
+	secondTransient := transient.fallbackBranches()
+	if len(secondUnsupported) > 10 || len(secondTransient) > 10 || len(secondUnsupported)+len(secondTransient) > 20 {
+		t.Fatalf("second fallback cycles exceeded cumulative budget: unsupported=%d transient=%d", len(secondUnsupported), len(secondTransient))
+	}
+	if !containsFallbackBranch(secondUnsupported, "workspace-a-branch-5") || !containsFallbackBranch(secondTransient, "workspace-b-branch-5") {
+		t.Fatalf("fallback target rotation starved the last target: unsupported=%v transient=%v", secondUnsupported, secondTransient)
+	}
+	if successful.statusCalls != 0 {
+		t.Fatalf("successful batched workspace repeated through fallback on second cycle: status calls=%d", successful.statusCalls)
+	}
+	if eventsSeen != 1 {
+		t.Fatalf("successful batched workspace events=%d after second cycle, want the original event only", eventsSeen)
+	}
+}
+
+func containsFallbackBranch(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func seedSearchingFallbackWatches(t *testing.T, store *Store, count int) []*PRWatch {
+	t.Helper()
+	ctx := context.Background()
+	watches := make([]*PRWatch, 0, count)
+	for index := 0; index < count; index++ {
+		taskID := fmt.Sprintf("fallback-task-%d", index)
+		seedTask(t, store, taskID, false)
+		watch := withTestWorkspace(&PRWatch{
+			SessionID: fmt.Sprintf("fallback-session-%d", index),
+			TaskID:    taskID,
+			Owner:     "o",
+			Repo:      "r",
+			Branch:    fmt.Sprintf("fallback-branch-%d", index),
+		})
+		if err := store.CreatePRWatch(ctx, watch); err != nil {
+			t.Fatalf("create fallback watch %d: %v", index, err)
+		}
+		watches = append(watches, watch)
+	}
+	return watches
+}
+
+func TestPRWatchFallbackStopsOnRateLimitAndCancellation(t *testing.T) {
+	t.Run("rate limit stops workspace", func(t *testing.T) {
+		poller, service, _, store := setupPollerTest(t)
+		rateClient := &fallbackProbeClient{
+			Client:  NewMockClient(),
+			findErr: rateLimitAPIError(429, "secondary limit"),
+		}
+		configureTestWorkspaceAuth(t, service, rateClient, testWorkspaceID)
+
+		poller.runPRWatchFallback(context.Background(), seedSearchingFallbackWatches(t, store, 3))
+		if got := len(rateClient.fallbackBranches()); got != 1 {
+			t.Fatalf("rate-limited fallback calls = %d, want one affected workspace probe", got)
+		}
+	})
+
+	t.Run("cancellation stops the cycle", func(t *testing.T) {
+		poller, service, _, store := setupPollerTest(t)
+		cancelClient := &fallbackProbeClient{
+			Client:  NewMockClient(),
+			findErr: context.Canceled,
+		}
+		configureTestWorkspaceAuth(t, service, cancelClient, testWorkspaceID)
+
+		poller.runPRWatchFallback(context.Background(), seedSearchingFallbackWatches(t, store, 3))
+		if got := len(cancelClient.fallbackBranches()); got != 1 {
+			t.Fatalf("cancelled fallback calls = %d, want one probe before cycle stop", got)
+		}
+	})
 }
 
 // TestSyncWatchesBatched_ManyWatches_TwoGraphQLCalls is the regression test
@@ -1681,6 +1884,10 @@ func TestRefreshStaleWorkspaceWatches_CoalescesConcurrentCalls(t *testing.T) {
 	}
 
 	// A fresh refresh must start (key was cleared in the defer).
+	// The adaptive selector still honors the one-minute fast tier after the
+	// first empty search, so move the injected service clock past that due
+	// boundary before asserting a later refresh can run.
+	svc.SetClock(func() time.Time { return time.Now().UTC().Add(searchFastPollInterval) })
 	release2 := make(chan struct{})
 	gh.onExecute = func() {
 		started <- struct{}{}

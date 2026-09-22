@@ -3,20 +3,25 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 )
 
 const (
-	defaultPRPollInterval     = 1 * time.Minute
-	defaultReviewPollInterval = 5 * time.Minute
-	defaultIssuePollInterval  = 5 * time.Minute
+	defaultPRPollInterval          = 1 * time.Minute
+	defaultReviewPollInterval      = 5 * time.Minute
+	defaultIssuePollInterval       = 5 * time.Minute
+	prWatchFallbackWorkspaceBudget = 5
+	prWatchFallbackCycleBudget     = 10
 	// rateLimitedSleepCap bounds the rate-limit sleep so a misreported reset
 	// (e.g. far-future reset_at after a CLI failure) cannot wedge the loop.
 	rateLimitedSleepCap = 10 * time.Minute
@@ -98,14 +103,20 @@ type repositoryTaskBranchProvider interface {
 
 // Poller runs background loops for PR monitoring and review queue checking.
 type Poller struct {
-	service            *Service
-	eventBus           bus.EventBus
-	logger             *logger.Logger
-	taskBranchProvider TaskBranchProvider
+	service              *Service
+	eventBus             bus.EventBus
+	logger               *logger.Logger
+	taskBranchProvider   TaskBranchProvider
+	taskActivityProvider TaskActivityProvider
+	clock                func() time.Time
 
 	// circuits tracks per-workspace auth/config backoff for the PR-monitor
 	// loop only (see poller_circuit.go). Safe for concurrent use; never nil.
 	circuits *pollerCircuits
+
+	fallbackMu              sync.Mutex
+	fallbackWorkspaceCursor int
+	fallbackTargetCursors   map[string]int
 
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
@@ -115,10 +126,12 @@ type Poller struct {
 // NewPoller creates a new background poller.
 func NewPoller(svc *Service, eventBus bus.EventBus, log *logger.Logger) *Poller {
 	return &Poller{
-		service:  svc,
-		eventBus: eventBus,
-		logger:   log,
-		circuits: newPollerCircuits(),
+		service:               svc,
+		eventBus:              eventBus,
+		logger:                log,
+		circuits:              newPollerCircuits(),
+		fallbackTargetCursors: make(map[string]int),
+		clock:                 time.Now,
 	}
 }
 
@@ -198,18 +211,17 @@ func (p *Poller) checkPRWatches(ctx context.Context) {
 	if len(watches) == 0 {
 		return
 	}
-
-	// Try the batched GraphQL path first — collapses N HTTP requests into a
-	// handful of multi-aliased GraphQL calls. On error or unsupported client
-	// (e.g. NoopClient), fall back to per-watch checks so one bad poll cycle
-	// doesn't lose state.
-	if p.tryBatchedPRWatchCheck(ctx, watches) {
+	watches = p.selectDuePRWatches(ctx, watches)
+	if len(watches) == 0 {
 		return
 	}
-	watches = p.filterOpenCircuitWatches(ctx, watches)
-	for _, watch := range watches {
-		p.checkSinglePRWatch(ctx, watch)
-	}
+
+	// Try the batched GraphQL path first. Each workspace reports whether its
+	// watches completed, were deferred by a provider gate, or may use the
+	// bounded REST fallback. A failed workspace must not replay successful
+	// batches from its siblings.
+	outcomes := p.tryBatchedPRWatchCheck(ctx, watches)
+	p.runPRWatchFallback(ctx, fallbackEligiblePRWatches(outcomes))
 }
 
 // filterOpenCircuitWatches refreshes each present workspace's credential
@@ -259,39 +271,90 @@ func (p *Poller) refreshWorkspaceCircuitFingerprint(ctx context.Context, workspa
 	}
 }
 
+type prWatchBatchOutcomeState string
+
+const (
+	prWatchBatchCompleted        prWatchBatchOutcomeState = "completed"
+	prWatchBatchDeferred         prWatchBatchOutcomeState = "deferred"
+	prWatchBatchFallbackEligible prWatchBatchOutcomeState = "fallback_eligible"
+)
+
+type prWatchWorkspaceBatchOutcome struct {
+	workspaceID string
+	watches     []*PRWatch
+	state       prWatchBatchOutcomeState
+	results     []PRWatchSyncResult
+}
+
 // tryBatchedPRWatchCheck runs the batched GraphQL flow for the supplied
-// watches via the shared Service.SyncWatchesBatched seam. Returns true
-// when the path succeeded so the caller can skip the per-watch fallback.
+// watches via the shared Service.SyncWatchesBatched seam. It returns one
+// outcome per workspace so a fallback can be bounded and scoped.
 // The poller's only extra responsibility on top of the service apply is
 // publishing PRFeedback events for status changes and merge/close events
 // (the on-demand sync path intentionally doesn't publish these).
-func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch) bool {
+func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch) []prWatchWorkspaceBatchOutcome {
 	byWorkspace := make(map[string][]*PRWatch)
 	for _, watch := range watches {
 		if watch == nil || watch.WorkspaceID == "" {
 			p.logger.Warn("PR watch is missing workspace ownership", zap.String("watch_id", watchID(watch)))
-			return false
+			return []prWatchWorkspaceBatchOutcome{{watches: watches, state: prWatchBatchDeferred}}
 		}
 		byWorkspace[watch.WorkspaceID] = append(byWorkspace[watch.WorkspaceID], watch)
 	}
-	results := make([]PRWatchSyncResult, 0, len(watches))
-	for workspaceID, workspaceWatches := range byWorkspace {
+	workspaceIDs := make([]string, 0, len(byWorkspace))
+	for workspaceID := range byWorkspace {
+		workspaceIDs = append(workspaceIDs, workspaceID)
+	}
+	sort.Strings(workspaceIDs)
+	outcomes := make([]prWatchWorkspaceBatchOutcome, 0, len(workspaceIDs))
+	for _, workspaceID := range workspaceIDs {
+		workspaceWatches := byWorkspace[workspaceID]
 		incCanonicalPollRequests(len(workspaceWatches))
 		workspaceResults, err := p.service.SyncWorkspaceWatchesBatched(ctx, workspaceID, workspaceWatches)
 		// A client without GraphQL support deliberately falls back to the
 		// per-watch REST path below. It is not an authentication failure, so
 		// it must not open the workspace circuit and filter that fallback out.
 		if errors.Is(err, errGraphQLUnsupported) {
-			return false
+			outcomes = append(outcomes, prWatchWorkspaceBatchOutcome{
+				workspaceID: workspaceID,
+				watches:     workspaceWatches,
+				state:       prWatchBatchFallbackEligible,
+			})
+			continue
 		}
 		p.circuits.recordOutcome(workspaceID, classifyPollErr(err), time.Now().UTC())
 		if err != nil {
 			p.logger.Debug("batched PR watch check failed",
 				zap.String("workspace_id", workspaceID), zap.Error(err))
-			return false
+			state := prWatchBatchDeferred
+			if prWatchBatchFallbackAllowed(err) {
+				state = prWatchBatchFallbackEligible
+			}
+			outcomes = append(outcomes, prWatchWorkspaceBatchOutcome{
+				workspaceID: workspaceID,
+				watches:     workspaceWatches,
+				state:       state,
+			})
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+				break
+			}
+			continue
 		}
-		results = append(results, workspaceResults...)
+		outcomes = append(outcomes, prWatchWorkspaceBatchOutcome{
+			workspaceID: workspaceID,
+			watches:     workspaceWatches,
+			state:       prWatchBatchCompleted,
+			results:     workspaceResults,
+		})
+		p.publishBatchedPRWatchResults(ctx, workspaceResults)
+		if ctx.Err() != nil {
+			break
+		}
 	}
+	return outcomes
+}
+
+func (p *Poller) publishBatchedPRWatchResults(ctx context.Context, results []PRWatchSyncResult) {
 	for _, r := range results {
 		if !r.Found || r.Status == nil {
 			continue
@@ -322,7 +385,139 @@ func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch)
 			p.publishPRStatusEvent(ctx, r.Watch, effectiveTaskID, r.Status)
 		}
 	}
-	return true
+}
+
+func fallbackEligiblePRWatches(outcomes []prWatchWorkspaceBatchOutcome) []*PRWatch {
+	var watches []*PRWatch
+	for _, outcome := range outcomes {
+		if outcome.state == prWatchBatchFallbackEligible {
+			watches = append(watches, outcome.watches...)
+		}
+	}
+	return watches
+}
+
+func prWatchBatchFallbackAllowed(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	category := classifyPRDiscoveryError(err)
+	if category == PRDiscoveryHealthRateLimited || category == PRDiscoveryHealthInvalidQuery {
+		return false
+	}
+	switch classifyPollErr(err) {
+	case authcircuit.FailureClassAuth, authcircuit.FailureClassConfig:
+		return false
+	default:
+		return true
+	}
+}
+
+func (p *Poller) runPRWatchFallback(ctx context.Context, watches []*PRWatch) {
+	selected := p.selectPRWatchFallbackTargets(watches)
+	stopped := make(map[string]bool)
+	for _, watch := range selected {
+		if ctx.Err() != nil {
+			return
+		}
+		if watch == nil || stopped[watch.WorkspaceID] {
+			continue
+		}
+		err := p.checkSinglePRWatchWithError(ctx, watch)
+		if err == nil {
+			continue
+		}
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+		if prWatchFallbackShouldStopWorkspace(err) {
+			stopped[watch.WorkspaceID] = true
+		}
+	}
+}
+
+func (p *Poller) selectPRWatchFallbackTargets(watches []*PRWatch) []*PRWatch {
+	byWorkspace := make(map[string][]*PRWatch)
+	for _, watch := range watches {
+		if watch != nil {
+			byWorkspace[watch.WorkspaceID] = append(byWorkspace[watch.WorkspaceID], watch)
+		}
+	}
+	workspaceIDs := make([]string, 0, len(byWorkspace))
+	for workspaceID, workspaceWatches := range byWorkspace {
+		sort.SliceStable(workspaceWatches, func(i, j int) bool {
+			return prWatchFallbackTargetKey(workspaceWatches[i]) < prWatchFallbackTargetKey(workspaceWatches[j])
+		})
+		workspaceIDs = append(workspaceIDs, workspaceID)
+	}
+	if len(workspaceIDs) == 0 {
+		return nil
+	}
+	sort.Strings(workspaceIDs)
+
+	p.fallbackMu.Lock()
+	defer p.fallbackMu.Unlock()
+	if p.fallbackTargetCursors == nil {
+		p.fallbackTargetCursors = make(map[string]int)
+	}
+	start := p.fallbackWorkspaceCursor % len(workspaceIDs)
+	selected := make([]*PRWatch, 0, minInt(prWatchFallbackCycleBudget, len(watches)))
+	selectedByWorkspace := make(map[string]int, len(workspaceIDs))
+	for len(selected) < prWatchFallbackCycleBudget {
+		added := false
+		for offset := 0; offset < len(workspaceIDs) && len(selected) < prWatchFallbackCycleBudget; offset++ {
+			workspaceID := workspaceIDs[(start+offset)%len(workspaceIDs)]
+			group := byWorkspace[workspaceID]
+			count := selectedByWorkspace[workspaceID]
+			if count >= prWatchFallbackWorkspaceBudget || count >= len(group) {
+				continue
+			}
+			cursor := p.fallbackTargetCursors[workspaceID] % len(group)
+			selected = append(selected, group[(cursor+count)%len(group)])
+			selectedByWorkspace[workspaceID] = count + 1
+			added = true
+		}
+		if !added {
+			break
+		}
+	}
+	for workspaceID, count := range selectedByWorkspace {
+		group := byWorkspace[workspaceID]
+		cursor := p.fallbackTargetCursors[workspaceID] % len(group)
+		p.fallbackTargetCursors[workspaceID] = (cursor + count) % len(group)
+	}
+	p.fallbackWorkspaceCursor = (start + 1) % len(workspaceIDs)
+	return selected
+}
+
+func prWatchFallbackTargetKey(watch *PRWatch) string {
+	if watch == nil {
+		return ""
+	}
+	return watch.Owner + "\x00" + watch.Repo + "\x00" + watch.Branch + "\x00" + fmt.Sprintf("%010d", watch.PRNumber) + "\x00" + watch.ID
+}
+
+func prWatchFallbackShouldStopWorkspace(err error) bool {
+	if err == nil {
+		return false
+	}
+	category := classifyPRDiscoveryError(err)
+	if category == PRDiscoveryHealthRateLimited || category == PRDiscoveryHealthInvalidQuery {
+		return true
+	}
+	switch classifyPollErr(err) {
+	case authcircuit.FailureClassAuth, authcircuit.FailureClassConfig:
+		return true
+	default:
+		return false
+	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func watchID(watch *PRWatch) string {
@@ -347,11 +542,14 @@ func splitPRWatches(watches []*PRWatch) (numbered, searching []*PRWatch) {
 }
 
 func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
+	_ = p.checkSinglePRWatchWithError(ctx, watch)
+}
+
+func (p *Poller) checkSinglePRWatchWithError(ctx context.Context, watch *PRWatch) error {
 	incCanonicalPollRequests(1)
 	// PRWatch with pr_number=0 means we're still searching for a PR on this branch.
 	if watch.PRNumber == 0 {
-		p.detectPRForWatch(ctx, watch)
-		return
+		return p.detectPRForWatchWithError(ctx, watch)
 	}
 
 	status, hasNew, err := p.service.CheckPRWatchForWorkspace(ctx, watch)
@@ -359,10 +557,10 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 	if err != nil {
 		p.logger.Debug("failed to check PR watch",
 			zap.String("id", watch.ID), zap.Error(err))
-		return
+		return err
 	}
 	if status == nil {
-		return
+		return nil
 	}
 
 	// A numbered watch found its PR before this fix existed (or before the
@@ -380,7 +578,7 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 	if syncErr := p.service.SyncTaskPR(ctx, effectiveTaskID, status); syncErr != nil {
 		p.logger.Error("failed to sync task PR",
 			zap.String("task_id", effectiveTaskID), zap.Error(syncErr))
-		return // Keep watch so the next cycle can retry
+		return nil // Keep watch so the next cycle can retry
 	}
 	// When the tracked PR is merged or closed, reset the watch back to the
 	// "searching" state (pr_number=0) rather than deleting it. This lets the
@@ -395,10 +593,10 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 		if holdErr != nil {
 			p.logger.Warn("failed to check terminal PR automation",
 				zap.String("task_id", effectiveTaskID), zap.Error(holdErr))
-			return
+			return nil
 		}
 		if hold {
-			return
+			return nil
 		}
 		if resetErr := p.service.store.UpdatePRWatchPRNumber(ctx, watch.ID, 0); resetErr != nil {
 			p.logger.Error("failed to reset completed PR watch",
@@ -409,23 +607,28 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 				zap.String("state", status.PR.State),
 				zap.Int("pr_number", watch.PRNumber))
 		}
-		return
+		return nil
 	}
 
 	if !hasNew {
-		return
+		return nil
 	}
 
 	p.publishPRStatusEvent(ctx, watch, effectiveTaskID, status)
+	return nil
 }
 
 // detectPRForWatch searches GitHub for a PR on the watch's branch.
 // If found, updates the watch with the PR number and creates the TaskPR association.
 func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
+	_ = p.detectPRForWatchWithError(ctx, watch)
+}
+
+func (p *Poller) detectPRForWatchWithError(ctx context.Context, watch *PRWatch) error {
 	if watch == nil || watch.WorkspaceID == "" {
 		p.logger.Warn("cannot detect PR for watch without workspace ownership",
 			zap.String("watch_id", watchID(watch)))
-		return
+		return ErrGitHubWorkspaceRequired
 	}
 
 	pr, err := p.service.findPRByBranchForWatch(ctx, watch)
@@ -435,7 +638,7 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 			zap.String("watch_id", watch.ID),
 			zap.String("branch", watch.Branch),
 			zap.Error(err))
-		return
+		return err
 	}
 
 	// Update last_checked_at regardless of result
@@ -443,7 +646,7 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 	_ = p.service.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, "", "")
 
 	if pr == nil {
-		return
+		return nil
 	}
 
 	if rebindErr := p.service.rebindPRWatchRepository(ctx, watch, pr); rebindErr != nil {
@@ -451,7 +654,7 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 			zap.String("watch_id", watch.ID),
 			zap.Int("pr_number", pr.Number),
 			zap.Error(rebindErr))
-		return
+		return nil
 	}
 
 	// Found a PR — update the watch and create association
@@ -460,7 +663,7 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 			zap.String("watch_id", watch.ID),
 			zap.Int("pr_number", pr.Number),
 			zap.Error(updateErr))
-		return
+		return nil
 	}
 
 	if _, assocErr := p.service.associatePRWithTaskForSession(
@@ -471,13 +674,14 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 			zap.String("task_id", watch.TaskID),
 			zap.Int("pr_number", pr.Number),
 			zap.Error(assocErr))
-		return
+		return nil
 	}
 
 	p.logger.Info("detected PR for session branch",
 		zap.String("watch_id", watch.ID),
 		zap.String("branch", watch.Branch),
 		zap.Int("pr_number", pr.Number))
+	return nil
 }
 
 func (p *Poller) publishPRStatusEvent(ctx context.Context, watch *PRWatch, taskID string, status *PRStatus) {
@@ -502,6 +706,22 @@ func (p *Poller) publishPRStatusEvent(ctx context.Context, watch *PRWatch, taskI
 // SetTaskBranchProvider sets the provider used for watch reconciliation.
 func (p *Poller) SetTaskBranchProvider(provider TaskBranchProvider) {
 	p.taskBranchProvider = provider
+}
+
+// SetTaskActivityProvider wires the persisted task activity projection used
+// by adaptive searching-watch admission.
+func (p *Poller) SetTaskActivityProvider(provider TaskActivityProvider) {
+	p.taskActivityProvider = provider
+}
+
+// SetClock installs the scheduler clock. Production uses time.Now; tests can
+// use a fixed clock to prove interval boundaries without sleeping.
+func (p *Poller) SetClock(clock func() time.Time) {
+	if clock == nil {
+		p.clock = time.Now
+		return
+	}
+	p.clock = clock
 }
 
 // reconcileWatches ensures PR watches exist for all tasks that need them,
@@ -656,6 +876,9 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 		if cleaned, err := p.service.CleanupMergedReviewTasks(ctx, watch); err != nil {
 			p.logCleanupError("failed to cleanup merged review tasks", err,
 				zap.String("watch_id", watch.ID))
+			if cleanupBatchShouldStop(err) {
+				return
+			}
 		} else if cleaned > 0 {
 			p.logger.Info("cleaned up merged review tasks",
 				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))
@@ -749,6 +972,9 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 		if cleaned, err := p.service.CleanupClosedIssueTasks(ctx, watch); err != nil {
 			p.logger.Warn("failed to cleanup closed issue tasks",
 				zap.String("watch_id", watch.ID), zap.Error(err))
+			if cleanupBatchShouldStop(err) {
+				return
+			}
 		} else if cleaned > 0 {
 			p.logger.Info("cleaned up closed issue tasks",
 				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))

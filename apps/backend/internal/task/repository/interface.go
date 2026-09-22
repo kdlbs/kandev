@@ -249,6 +249,12 @@ type TaskActivityRepository interface {
 	LoadTaskLastActivity(ctx context.Context, taskIDs []string) (map[string]time.Time, error)
 }
 
+// PRWatchTaskActivityRepository loads the bounded activity projection for a
+// bulk set of task IDs.
+type PRWatchTaskActivityRepository interface {
+	LoadPRWatchTaskActivity(ctx context.Context, taskIDs []string) (map[string]models.PRWatchTaskActivity, error)
+}
+
 // TaskRepoRepository handles the task↔repository junction table (models.TaskRepository rows).
 // Named TaskRepoRepository to reduce reader confusion with the TaskRepository sub-interface above.
 type TaskRepoRepository interface {
