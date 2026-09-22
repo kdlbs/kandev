@@ -65,11 +65,6 @@ import { NeedsYouInboxRoute } from "./needs-you-inbox-route";
 import { AuthRouteRedirect, RouteLoading } from "./spa-route-chrome";
 import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
 import { generateUUID } from "@/lib/utils";
-import { useTranslation } from "react-i18next";
-import { CanvasHostRoute } from "@/components/settings/canvas-host-route";
-import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
-import { WorkspaceCanvasesPage } from "@/components/settings/workspace-canvases-page";
-import { WorkspaceSettingsShell } from "@/components/settings/workspaces/workspace-settings-shell";
 import { resolveTopLevelRoute } from "./spa-top-level-routes";
 
 const OfficeRoutes = lazy(() =>
