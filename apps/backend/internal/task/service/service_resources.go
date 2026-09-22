@@ -1943,6 +1943,9 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 }
 
 func (s *Service) hasExecutorRunningInventory(ctx context.Context, executorID string) (bool, error) {
+	if retained, err := s.hasKubernetesEnvironmentInventory(ctx, executorID); err != nil || retained {
+		return retained, err
+	}
 	running, err := s.executors.ListExecutorsRunning(ctx)
 	if err != nil {
 		return false, err

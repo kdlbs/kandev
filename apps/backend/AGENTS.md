@@ -72,7 +72,7 @@ apps/backend/
 │   │   └── secretadapter/ # Upsert-style adapter over secrets.SecretStore
 │   ├── i18n/             # Localization for backend-rendered browser/share artifacts
 │   ├── jira/             # Jira/Atlassian Cloud integration (config, REST client, poller)
-│   ├── kubernetes/       # Kubernetes diagnostics and exact recorded-session status API
+│   ├── kubernetes/       # Task-owned Pod/PVC diagnostics; session stop preserves compute. See docs/specs/executors/system-design/kubernetes-task-pod.md for ownership, credentials, and recovery invariants.
 │   ├── linear/           # Linear integration (config, GraphQL client, poller)
 │   ├── lsp/              # LSP server
 │   ├── mcp/              # MCP protocol support

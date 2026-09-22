@@ -9,9 +9,38 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: responsive.isMobile }),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  responsive.isMobile = false;
+});
 
 describe("KubernetesSessionsCard", () => {
+  it("keeps retained pods without sessions distinct on both layouts", () => {
+    responsive.isMobile = false;
+    const state = sessionsState();
+    state.sessions = ["task-first", "task-second"].map((task) => ({
+      ...state.sessions[0],
+      task_id: task,
+      session_id: "",
+      pod_name: task,
+    }));
+    const rendered = render(<KubernetesSessionsCard state={state} />);
+    expect(
+      screen
+        .getAllByTestId("kubernetes-session-task-link")
+        .map((link) => link.getAttribute("href")),
+    ).toEqual(["/t/task-first", "/t/task-second"]);
+    state.sessions = state.sessions.slice(1);
+    rendered.rerender(<KubernetesSessionsCard state={state} />);
+    expect(screen.getAllByTestId("kubernetes-session-row")).toHaveLength(1);
+    responsive.isMobile = true;
+    rendered.rerender(<KubernetesSessionsCard state={state} />);
+    expect(screen.getByTestId("kubernetes-session-task-link").getAttribute("href")).toBe(
+      "/t/task-second",
+    );
+    expect(screen.getByTestId("kubernetes-mobile-session-list").textContent).toContain("Retained");
+  });
+
   it("shows retained state and main-container requests on both layouts", () => {
     const state = sessionsState();
     const rendered = render(<KubernetesSessionsCard state={state} />);

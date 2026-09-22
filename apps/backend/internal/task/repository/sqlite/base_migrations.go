@@ -430,6 +430,10 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		return fmt.Errorf("required task migration: %w", err)
 	}
 
+	if _, err := r.db.ExecContext(ctx, kubernetesEnvironmentSchemaDDL); err != nil {
+		return fmt.Errorf("create Kubernetes environment inventory: %w", err)
+	}
+
 	return nil
 }
 

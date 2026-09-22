@@ -7,6 +7,12 @@ owner: Kandev
 
 # Kubernetes Executor
 
+## Ownership transition
+
+This file records the Kubernetes foundation. The
+[task-pod contract](../executors/requirements/kubernetes-task-pod.md) and
+[design](../executors/system-design/kubernetes-task-pod.md) own the task-shared Pod lifecycle; the remaining foundation stays in force.
+
 ## Why
 
 Teams that already operate Kubernetes need Kandev sessions to run inside their
@@ -25,7 +31,7 @@ first-class Pod with an administrator-reviewed workload template.
 - Administrators can create Kubernetes profiles from one strict
   `core/v1 PodTemplate` YAML document. The profile chooses the main container,
   Linux architecture, and workspace storage policy.
-- One task session maps to one Pod. Kandev starts its existing `agentctl`
+- One task maps to one Pod shared by its independent sessions. Kandev starts its existing `agentctl`
   control process in the designated container and reaches it through a
   loopback-only Kubernetes port-forward.
 - The template can define images, sidecars, init containers, resource and
@@ -36,11 +42,11 @@ first-class Pod with an administrator-reviewed workload template.
   `kandev-workspace` mount at exactly `/workspace`; admission must preserve
   its recipient and shape. Runtime/auth mounts and init/ephemeral containers
   remain excluded. See [workspace grants](../executors/system-design/kubernetes-docker-workloads.md).
-- Profiles support a Kandev-managed per-session PVC, a Pod-scoped `emptyDir`,
+- Profiles support a Kandev-managed per-task PVC, a Pod-scoped `emptyDir`,
   or an existing namespaced PVC. Kandev never deletes an existing PVC.
 - Ordinary Stop and backend shutdown preserve the Pod and workspace for
-  resume. Archive, delete, and explicit force cleanup remove only resources
-  proven to belong to the recorded session.
+  resume. Session stop/delete removes only its agentctl instance. Task archive/delete
+  removes only resources proven to belong to the canonical task environment.
 - Members can discover and use administrator-configured Kubernetes profiles.
   They cannot create, edit, delete, or test Kubernetes executor/profile
   configuration.
@@ -356,7 +362,7 @@ identity check or inventory lookup stops cleanup without deleting anything.
   sessions, autoscaling, and pooled/multi-cluster scheduling.
 - Cross-namespace profiles inside one executor.
 - Windows Pods and automatic node-architecture discovery.
-- Sharing one Pod or one managed PVC among concurrent sessions.
+- Sharing one Pod or one managed PVC among different tasks.
 - Live mutation of running Pods after profile edits.
 - Raw kubeconfig storage in executor JSON or the current user-scoped secret
   store.

@@ -822,6 +822,7 @@ func (m *Manager) SetPreparerRegistry(registry *PreparerRegistry) {
 // SetSecretStore sets the secret store for encrypting runtime auth tokens.
 func (m *Manager) SetSecretStore(store secrets.SecretStore) {
 	m.secretStore = store
+	m.wireKubernetesEnvironmentStore()
 }
 
 // SetAgentProfileReader wires the reader the launch-prep SkillDeployer uses

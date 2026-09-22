@@ -112,7 +112,7 @@ func (h *Handler) listSessions(
 			rows = append(rows, row)
 		}
 	}
-	return rows, nil
+	return h.appendRetainedTaskPods(ctx, client, executorID, filter, rows)
 }
 
 func (f SessionFilter) matches(run *models.ExecutorRunning) bool {
@@ -188,8 +188,13 @@ func (h *Handler) sessionRow(
 		}
 		return SessionRow{}, false, err
 	}
+	run, inventoryErr := h.canonicalTaskPodInventory(ctx, run, session)
 	row := newInventorySessionRow(run)
 	row.SessionState = projectedTaskSessionState(session.State)
+	if inventoryErr != nil {
+		row.FailureReason = "Kubernetes task inventory is unavailable"
+		return row, true, nil
+	}
 	if inventoryFailure := validateSessionInventory(run, executorID, row); inventoryFailure != "" {
 		row.FailureReason = inventoryFailure
 		return row, true, nil
@@ -233,7 +238,7 @@ func validateSessionInventory(
 	identity, validIdentity := recordedResourceIdentity(run.Metadata)
 	if !validIdentity || run.ID != run.SessionID || run.ExecutorID != executorID ||
 		identity.ExecutorID != executorID || identity.TaskID != run.TaskID ||
-		identity.SessionID != run.SessionID || metadataString(run.Metadata, metadataNamespace) == "" ||
+		(!isTaskPodInventory(run.Metadata) && identity.SessionID != run.SessionID) || metadataString(run.Metadata, metadataNamespace) == "" ||
 		row.PodName == "" || metadataString(run.Metadata, metadataPodUID) == "" ||
 		metadataString(run.Metadata, metadataMainContainer) == "" || row.WorkspaceKind == "" {
 		return "Kubernetes runtime inventory is incomplete"
@@ -274,6 +279,7 @@ func matchesSessionIdentity(pod *corev1.Pod, run *models.ExecutorRunning) bool {
 
 func recordedResourceIdentity(metadata map[string]interface{}) (agentkubernetes.ResourceIdentity, bool) {
 	identity := agentkubernetes.ResourceIdentity{
+		TaskOwned:     metadataString(metadata, agentkubernetes.MetadataKeyOwnershipVersion) == agentkubernetes.TaskOwnershipVersion,
 		ExecutorID:    metadataString(metadata, metadataResourceExecutor),
 		ProfileID:     metadataString(metadata, metadataResourceProfile),
 		InstanceID:    metadataString(metadata, metadataResourceInstance),

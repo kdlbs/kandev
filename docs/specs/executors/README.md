@@ -72,9 +72,11 @@ canonical requirement and system-design documents. Use the catalog command to
 find current sources.
 
 The [Kubernetes executor foundation](../kubernetes-executor/spec.md) remains
-the current lifecycle contract. The three Kubernetes pairs own additive
-presets, launch diagnostics, and retained-compute visibility. They do not
-replace the foundation's resource ownership, recovery, or cleanup rules.
+the shipped lifecycle contract. Kubernetes capability pairs extend it. The
+[task-pod requirements](requirements/kubernetes-task-pod.md) and
+[design](system-design/kubernetes-task-pod.md) propose task-owned compute and
+explicitly replace session ownership when implemented. Other foundation
+security, admission, and recovery guarantees remain applicable.
 
 ## Related systems
 
