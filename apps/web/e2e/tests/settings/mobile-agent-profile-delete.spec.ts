@@ -30,7 +30,10 @@ test.describe("Agent profile deletion on mobile", () => {
     await expect(row).toBeVisible({ timeout: 15_000 });
     const trigger = row.getByTestId(`profile-actions-menu-${profile.id}`);
     await trigger.tap();
-    await testPage.getByTestId(`delete-profile-${profile.id}`).tap();
+    const menu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
+    await expect(menu).toBeVisible();
+    await waitForFiniteAnimations(menu);
+    await menu.getByTestId(`delete-profile-${profile.id}`).tap();
 
     const confirmation = testPage.getByRole("dialog", { name: "Delete agent profile?" });
     await expect(confirmation).toBeVisible();

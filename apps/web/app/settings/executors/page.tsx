@@ -116,6 +116,7 @@ function ProfileCard({
   return (
     <Card
       className="group cursor-pointer transition-colors hover:bg-muted/50"
+      data-testid={`executor-profile-card-${profile.id}`}
       onClick={() => router.push(executorProfileSettingsPath(profile.id))}
     >
       <CardContent className="flex items-center gap-3 p-4">
@@ -274,7 +275,7 @@ export default function ExecutorsHubPage() {
       {!canManageKubernetes && <KubernetesReadOnlyNotice />}
       {allProfiles.length > 0 && (
         <SettingsGroup title={t("executors:profiles")} contentClassName="space-y-4 divide-y-0">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {allProfiles.map((profile) => (
               <ProfileCard
                 key={profile.id}
