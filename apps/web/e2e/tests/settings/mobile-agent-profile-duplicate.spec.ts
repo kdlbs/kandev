@@ -49,10 +49,11 @@ test.describe("Mobile agent profile duplicate", () => {
       await trigger.tap();
       const duplicate = testPage.getByTestId(`duplicate-profile-${profile.id}`);
       await expect(duplicate).toBeVisible({ timeout: 15_000 });
-      const menu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      const menu = testPage.locator('[data-slot="dropdown-menu-content"]:visible');
       await expect(menu).toBeVisible();
       await waitForFiniteAnimations(menu);
-      await duplicate.tap();
+      await menu.getByTestId(`duplicate-profile-${profile.id}`).tap();
 
       // The copy appears as its own row without a reload.
       await expect
