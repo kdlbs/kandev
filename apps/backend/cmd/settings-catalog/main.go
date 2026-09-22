@@ -115,6 +115,12 @@ func mutableFieldInventory() map[string][]string {
 		// standalone user-settings catalog field.
 		"sidebar_view_state": {},
 	})
+	for index, fieldPath := range userFields {
+		if fieldPath == "sidebar_layout_state" {
+			// The request envelope updates the persisted workspace map atomically.
+			userFields[index] = "sidebar_layouts_by_workspace"
+		}
+	}
 	// sidebar_task_colors is the public patch alias. The DTO stores its
 	// normalized form as sidebar_task_color_patch before calling the service.
 	userFields = append(userFields, "sidebar_task_colors")

@@ -44,14 +44,13 @@ afterEach(() => {
 });
 
 describe("WebAppFrame startup", () => {
-  it("uses an opaque sandbox and does not send host capabilities to the iframe", () => {
+  it("uses the trusted same-origin sandbox without adding host permissions", () => {
     render(
       <WebAppFrame runtimeUrl="/api/v1/plugins/web-apps/runtime/capability/" title="Task board" />,
     );
 
     const frame = screen.getByTitle("Task board");
-    expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
-    expect(frame.getAttribute("allow-same-origin")).toBeNull();
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-forms allow-same-origin");
     expect(frame.getAttribute("allow")).toBeNull();
     expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(frame.getAttribute("src")).toContain("/api/v1/plugins/web-apps/runtime/");

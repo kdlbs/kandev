@@ -42,9 +42,12 @@ manifest, and do not request permissions outside the policy.
   in memory instead of storing a second copy of domain records.
 - Store only small application-specific shared values in instance state. Keep
   temporary input in memory and use conditional revisions for writes.
-- The canvas has an opaque origin. Do not use browser storage, service workers,
-  origin-wide cookies, host URLs, or authorization headers.
-- Avoid secrets in source, URLs, query strings, logs, and client state.
+- The canvas runs in a trusted same-origin iframe. Treat its source as trusted
+  user-session code: it can use same-origin browser storage and cookies and can
+  access the host DOM. It has the viewing user's ordinary API authority.
+- Keep Kandev protocol requests relative and do not copy capability URLs or
+  tokens into source, URLs, query strings, logs, or client state. Same-origin
+  cookies do not replace capability validation or the grants on protocol routes.
 - Render loading, empty, error, and retry states. Keep destructive actions
   explicit and explain their result.
 - Use accessible labels, keyboard operation, visible focus, and touch targets.
@@ -97,7 +100,7 @@ Read a supporting reference only when its topic is needed:
 - `references/manifest.md` for the full manifest shape and validation rules.
 - `references/data-and-state.md` for domain data and instance state.
 - `references/events-and-recovery.md` for events, reconnect, and retries.
-- `references/security.md` for opaque-origin and source safety rules.
+- `references/security.md` for same-origin trust and source safety rules.
 - `references/ui-patterns.md` for responsive and accessible UI patterns.
 
 ## Distribution checklist

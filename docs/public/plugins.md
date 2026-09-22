@@ -323,11 +323,12 @@ disk on its first restart after upgrading to this version.
   a failing bundle or `initialize` is caught and never breaks boot; slot
   components render behind error boundaries. Hard sandboxing (a worker or
   realm boundary) is explicit future work: see below.
-- **Isolated web apps use a separate browser boundary.** Kandev serves their
-  packaged files in a sandboxed iframe with an opaque origin. The app receives
-  only reviewed Kandev capabilities and exact HTTPS network origins. It cannot
-  use the host DOM, cookies, host authentication headers, or an injected
-  JavaScript API. See [Security and trust](security.md#isolated-web-applications).
+- **Isolated web apps use a sandboxed iframe boundary.** Kandev serves their
+  packaged files same-origin with the host and trusts the source with the
+  viewing user's ordinary browser authority, including cookies, storage, and
+  host DOM access. Kandev protocol routes still expose only the reviewed
+  capabilities and exact HTTPS network origins declared for the canvas. There
+  is no injected JavaScript API. See [Security and trust](security.md#isolated-web-applications).
 - **Package integrity is always checked; signing is optional.** See
   "Signed vs. unsigned packages" above.
 - **Curated marketplace, no auto-install.** The [Plugin

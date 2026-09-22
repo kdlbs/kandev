@@ -87,6 +87,30 @@ type Service struct {
 	// Wired post-construction via SetRepositoryLookup. When nil (e.g. unit
 	// tests), the binding is accepted as-is and default-branch fill is skipped.
 	repoLookup RepositoryLookup
+	// workspaceAuthorizer is the per-user workspace access boundary, wired
+	// post-construction via SetWorkspaceAuthorizer. Nil (unit tests, auth
+	// disabled) means unscoped — every workspace is visible, as before auth.
+	workspaceAuthorizer func(context.Context, string) error
+}
+
+// SetWorkspaceAuthorizer installs the per-user workspace access boundary
+// applied to ListAllIssueWatches. Wired to taskSvc.AuthorizeWorkspaceAccess so
+// an unscoped list (workspace_id omitted) returns only the caller's own
+// workspaces' watches.
+func (s *Service) SetWorkspaceAuthorizer(authorizer func(context.Context, string) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspaceAuthorizer = authorizer
+}
+
+func (s *Service) authorizeWorkspaceAccess(ctx context.Context, workspaceID string) error {
+	s.mu.Lock()
+	authorizer := s.workspaceAuthorizer
+	s.mu.Unlock()
+	if authorizer == nil {
+		return nil
+	}
+	return authorizer(ctx, workspaceID)
 }
 
 // SetTaskDeleter wires the cascade-delete dependency used by ResetIssueWatch.
@@ -477,8 +501,14 @@ func (s *Service) ListProjects(ctx context.Context, workspaceID, instanceID stri
 	return client.ListProjects(ctx)
 }
 
-// SearchIssues runs a filtered search against one instance's client.
+// SearchIssues runs a filtered search against one instance's client. The
+// lookback is validated here because browse requests do not pass through the
+// issue-watch write validation path.
 func (s *Service) SearchIssues(ctx context.Context, workspaceID, instanceID string, filter SearchFilter, cursor string) (*SearchResult, error) {
+	filter.StatsPeriod = strings.TrimSpace(filter.StatsPeriod)
+	if err := validateFilterStatsPeriod(filter); err != nil {
+		return nil, err
+	}
 	client, err := s.browseClient(ctx, workspaceID, instanceID)
 	if err != nil {
 		return nil, err

@@ -21,7 +21,7 @@ and task-owned deferred record. It does not replace either queue or change WIP a
 
 | Requirement | Sections |
 | --- | --- |
-| REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001 | Inspection intent; Durable workflow parking |
+| REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001 | Inspection intent; Conversation recovery and workflow stop history |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002 | Deferred entry ownership; Task reconciliation |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-003 | Queue projection; Desktop and mobile surfaces; Failure and observability |
 | REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001 | Replay and reconciliation locking |
@@ -52,8 +52,9 @@ was omitted or false. Internal workflow and peer-message paths retain their
 existing explicit origins; do not mark all automatic work as passive inspection.
 
 Add `auto_resume_allowed` and `auto_resume_blocked_reason` to session status.
-Reasons are closed values: `workflow_parked`, `launch_queued`, or
-`ownership_unavailable`; absence means no new ownership restriction. Keep
+Keep `launch_queued` and `ownership_unavailable` for pending launch restrictions.
+Stop emitting `workflow_parked`; tolerate older payloads during compatibility handling.
+Absence means no pending launch restriction. Keep
 `is_resumable` for explicit recovery. Populate this through one orchestrator
 eligibility helper shared by status, launch, and open-time ensure paths.
 
@@ -71,40 +72,64 @@ successful no-execution disposition, proposed `activation_disposition:
 not launch success or an error that triggers workspace/fresh fallback.
 Transport errors stay errors. Preserve request-generation guards on late responses.
 
-For an ordinary recoverable session without parking or pending work, retain the
+For a recoverable conversation, including a workflow-stopped predecessor, retain the
 preference behavior and use automatic ceiling admission. If it is deferred,
 retain inspection source in its replay payload and revalidate eligibility on retry.
 If a task already has a different accepted launch, inspection cannot replace it
-or add a conflicting resume record. It returns the existing queued disposition.
+or add a conflicting resume record. An admitted sibling recovery can proceed.
+A capacity refusal preserves the accepted record and returns the existing queued
+disposition without pretending the selected sibling started.
 
-## Durable workflow parking
+## Conversation recovery and workflow stop history
 
-Add a typed `workflow_parking` session metadata value with `stamp`,
-`parked_at`, and source entry identity where available. Record it even when no
-runtime execution exists. This is current policy, not evidence of background work.
-Do not reuse `parked_on_background_work` or clear the stop-intent tombstone.
+Follow [the session-open decision](../../../decisions/2026-09-18-session-open-resumes-conversation.md)
+and AC 001.9/003.10. Opening an earlier conversation is sufficient to request
+normal automatic recovery. No primary-role or committed-route exception is needed
+solely because the conversation was stopped by a workflow switch.
 
-Write parking with the parked session transition under the existing lifecycle
-guard and a conditional repository operation. A failed transition must not leave
-an unowned parking marker. Clear only the matching stamp when explicit execution
-is accepted or a workflow entry commits that session as recipient. No mark is
-cleared on a status read, focus, denied admission, or transient launch failure.
-Coordinate clear with the launch claim so failed attempts leave the conversation
-protected from subsequent passive recovery. A later park supersedes an older clear.
+Remove `workflow_parking` and workflow-switch stop-intent checks from
+`autoResumeEligibility`. Neither valid, consumed, unconsumed, nor malformed
+legacy parking data grants or denies recovery. Task/session authorization,
+archive, terminal state, error recovery, and actual pending launch ownership
+remain separate checks. Do not infer a new prompt from session opening.
 
-Existing parked tasks may lack this marker. During status/launch eligibility,
-recognize an execution-stamped workflow stop intent (including consumed state)
-only with non-primary source identity and no newer authorized activation/route.
-Inspect durable session execution timestamps and the committed workflow route;
-do not equate any WAITING_FOR_INPUT session with parking. If legacy evidence is
-ambiguous, deny passive execution with `ownership_unavailable`. Reading remains
-possible, and explicit recovery or an authoritative workflow selection resolves
-the ambiguity. Never fabricate queue work for an uncertain predecessor.
+Keep execution-stamped stop-intent parsing and consumed tombstones in the
+callback path. They reject delayed events for the old execution. Removing
+parking as an activation restriction does not remove event correlation.
+Inspect every `workflow_parking` consumer and producer. Remove policy-only
+helpers and writes when unused; retain any code with a demonstrated independent
+lifecycle purpose. Existing metadata remains inert without a schema migration
+or destructive backfill. Do not remove background-work or Office parking.
 
-Keep metadata parsing in task models and conditional writes in the task
-repository, with SQLite/PostgreSQL conformance coverage. No new state enum or
-database column is required. Tests must include parking without a runtime,
-consumed tombstones, later reuse, explicit follow-up, restart, and stale clears.
+The shared eligibility predicate still handles deferred launch metadata. Absent,
+null, or empty objects represent no pending launch. `stripCeilingRecordKeys`
+produces empty objects after settlement. Preserve nonempty-record validation;
+do not weaken the replay parser to fix status inspection.
+
+A queued destination remains owned by its accepted launch. Opening it cannot
+create another resume. A different selected session can recover with available
+capacity, without primary promotion, route changes, or destination prompt delivery.
+If capacity is full, preserve the existing deferred record. Do not overwrite it
+with the selected sibling's automatic resume. Existing retry and queue mechanisms
+remain authoritative; no second task queue or hidden polling loop is introduced.
+
+Status and launch must agree about these rules. Recheck actual queue ownership
+at guarded admission after an allowed status response. New parking metadata alone
+cannot cancel that permission; a conflicting accepted launch still can.
+Keep the lock order and claim fences described below. No runtime call occurs
+under task admission.
+
+The browser retains `activation_source=session_open`, preference handling, and
+ordinary recovery states. Remove `ParkedSessionNote`, its marker projection, and
+its use in `task-chat-panel.tsx`. Remove the unused `parkedSessionNote` locale key
+from all catalogs and update affected tests. Do not replace it with another
+banner, chip, tooltip, disabled composer, or hidden recovery requirement.
+The genuine `TaskLaunchQueueStatus` surface remains task-scoped.
+
+Desktop keeps its session tabs above chat. Phone keeps its existing session
+picker and one conversation scroll area. Both show ordinary recovery after open.
+Test provider readiness independently of workspace-only readiness. Recovery must
+preserve context without resending an interrupted or settled workflow prompt.
 
 ## Deferred entry ownership
 
@@ -148,7 +173,7 @@ CREATED row with no accepted launch is not sufficient. Read errors fail closed.
 Guard the write against the observed queue/route identity so a concurrent enqueue
 cannot lose to an older REVIEW writer. Preserve explicit terminal task actions.
 
-When a user explicitly runs the parked sibling, retain queue status alongside
+When a sibling resumes on open or explicitly runs, retain queue status alongside
 IN_PROGRESS; settling that sibling restores SCHEDULING. Do not promote it to
 primary or run destination entry actions. Keep existing completion-follow-up,
 Office, cancellation, and runtime-publication ordering protections.
@@ -276,14 +301,15 @@ existing background-work indicators remain intact. No ordinal position is shown.
 Share a queue view model and task-scoped status component. Desktop `TaskSwitcher`
 rows show Queued text with an existing clock/status icon. Task details place the
 status above conversation content, independently of selected session and transcript
-scroll. Show a separate parked note for the selected predecessor. The destination's
+scroll. Do not show a parking-specific note for the selected conversation. The destination's
 CREATED start/recovery affordance yields to queued status while accepted work exists.
 
 Use the existing `SessionTaskSwitcherSheet` phone drawer and
 `session-mobile-layout.tsx` dedicated composition. Place a compact task queue
 region above `MobileSessionsPicker`, outside the chat scroll. The navigator row
 shows the same Queued label. Long names wrap in details and truncate in rows.
-The user can inspect Astra while Luna remains named in the task queue region.
+The user can open Astra while Luna remains named in the task queue region.
+Astra follows normal recovery without taking over Luna's workflow ownership.
 
 This is persistent status, so do not add a second drawer or global dashboard.
 Keep the existing fixed header/navigation, one chat scroll owner, dynamic viewport,
@@ -293,9 +319,47 @@ uses restrained polite announcements for state changes, and never announces ever
 capacity sample. All new copy uses five-language i18n and the Traditional Chinese
 generation command. Previews and viewport assertions live in the work orders.
 
+## Limit scope and configuration navigation
+
+The [opt-in ceiling package](../../../plans/session-ceiling-opt-in/plan.md)
+extends the existing live status with explicit limit scope and Settings links
+(AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.8-.9). It does not create another queue.
+
+`components/task/launch-queue-status.tsx` renders "Global session limit" and
+"Across all workspaces" for `reason: session_capacity`, retaining the selected
+destination, sessions-in-use observation, freshness, and retry status. Its
+configuration link targets
+`/settings/preferences/task-behavior#setting-session-capacity`, the target
+registered by the agent-owned Settings work order. Use ordinary internal
+navigation, not an execution or task mutation. Members can inspect the setting
+but existing permissions prevent writes. Environment-managed settings explain
+the lock on arrival; the banner never implies that a link bypasses it.
+
+Ownership-unavailable and replay-error reasons retain their specific explanation;
+do not rename them as capacity refusals. An old count can remain labelled stale,
+but the global scope is known from the queue kind even without a count. When a
+live setting changes, use the existing controller observation and task summary
+refresh path. Wake replay on expansion and refresh observations on every applied
+change. Do not clear queue ownership just because the effective limit is zero
+or its count has room; retain "Retry pending" until confirmed dispatch.
+
+Task details also render the separate WIP queue explanation from the
+[WIP design](wip-limit-pull-system.md#limit-updates-and-queue-explanations).
+Use task-level composition above conversation content so a WIP task without a
+session can expose its reason. Do not put a WIP record into `launch_queue` or
+give it the selected-session semantics of global deferral. If independent queue
+records legitimately coexist, render their reasons separately with their own
+links. Derive neither queue from English message text.
+
+The existing desktop task status region and dedicated phone task layout remain
+the surfaces. Links wrap below reason/count text and have at least 44px touch
+hit areas. They do not add a scroll owner or require a hover disclosure. Follow
+the existing navigation/back behavior; returning to the task remains passive
+inspection. Localize labels and link text in all five catalogs.
+
 ## Failure and observability
 
-Emit structured, bounded reason codes for suppressed inspection, queued replay,
+Emit structured, bounded reason codes for suppressed duplicate launch, queued replay,
 stale-entry disposition, and protected state reconciliation. Include task,
 session, entry, and execution IDs in logs only, with no prompt content.
 Do not create lifecycle-only turns merely to announce a suppressed inspection.
@@ -308,6 +372,7 @@ or claim its cause without a failing regression.
 
 ## Related records
 
-- [Passive inspection decision](../../../decisions/2026-09-16-passive-session-inspection.md)
+- [Conversation recovery decision](../../../decisions/2026-09-18-session-open-resumes-conversation.md)
+- [Historical passive inspection decision](../../../decisions/2026-09-16-passive-session-inspection.md)
 - [Runtime state publication](runtime-state-publication-order.md)
 - [Implementation package](../../../plans/queued-session-ownership/plan.md)

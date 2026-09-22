@@ -67,6 +67,20 @@ describe("normalizeRoutine", () => {
     expect(routine.lastRunAt).toBeUndefined();
   });
 
+  it("normalizes schedule state metadata from the list response", () => {
+    expect(
+      normalizeRoutine({
+        schedule_state: "trigger_invalid",
+        unarmed_cron_triggers: [
+          { trigger_id: "trigger-1", reasons: ["not_schedulable", "unknown"] },
+        ],
+      }),
+    ).toMatchObject({
+      scheduleState: "trigger_invalid",
+      unarmedCronTriggers: [{ triggerId: "trigger-1", reasons: ["not_schedulable"] }],
+    });
+  });
+
   it("produces an empty object for task_template when absent, null, or malformed", () => {
     expect(normalizeRoutine({}).taskTemplate).toEqual({});
     expect(normalizeRoutine({ task_template: null }).taskTemplate).toEqual({});

@@ -6,6 +6,7 @@ import { InboxTabStrip } from "./inbox-tab-strip";
 import type { InboxTab } from "@/lib/failed-inbox/inbox-tab";
 
 const FAILED_BADGE_TESTID = "inbox-tab-failed-badge";
+const HISTORY_BADGE_TESTID = "inbox-tab-history-badge";
 
 function renderStrip(
   overrides: Partial<{
@@ -15,6 +16,7 @@ function renderStrip(
     needsYouHasMore: boolean;
     failedCount: number | undefined;
     failedTruncated: boolean;
+    historyCount: number;
     children?: ReactNode;
   }> = {},
 ) {
@@ -26,6 +28,7 @@ function renderStrip(
       needsYouHasMore={false}
       failedCount={undefined}
       failedTruncated={false}
+      historyCount={0}
       {...overrides}
     />,
   );
@@ -34,12 +37,13 @@ function renderStrip(
 afterEach(() => cleanup());
 
 describe("InboxTabStrip", () => {
-  it("renders exactly two tabs, Needs you then Failed (AC .1)", () => {
+  it("renders exactly three tabs, Needs you, Failed, then History (AC .1)", () => {
     renderStrip();
     const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(2);
+    expect(tabs).toHaveLength(3);
     expect(tabs[0].textContent).toContain("Needs you");
     expect(tabs[1].textContent).toContain("Failed");
+    expect(tabs[2].textContent).toContain("History");
   });
 
   it("calls onSelectTab with the clicked tab's value", () => {
@@ -73,6 +77,16 @@ describe("InboxTabStrip", () => {
   it("stays visible while the other tab is selected (AC .16)", () => {
     renderStrip({ selectedTab: "failed", failedCount: 2 });
     expect(screen.getByTestId(FAILED_BADGE_TESTID)).not.toBeNull();
+  });
+
+  it("renders no history badge when the count is zero (AC .16)", () => {
+    renderStrip({ historyCount: 0 });
+    expect(screen.queryByTestId(HISTORY_BADGE_TESTID)).toBeNull();
+  });
+
+  it("renders the history badge once a non-zero count is known", () => {
+    renderStrip({ historyCount: 3 });
+    expect(screen.getByTestId(HISTORY_BADGE_TESTID).textContent).toBe("3");
   });
 
   it("carries a coarse-pointer/mobile 44px touch-target floor on every tab trigger", () => {

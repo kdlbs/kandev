@@ -36,6 +36,7 @@ import (
 	systempersistence "github.com/kandev/kandev/internal/system/persistence"
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/restart"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	"github.com/kandev/kandev/internal/system/sleepinhibition"
 	"github.com/kandev/kandev/internal/system/storage"
@@ -62,16 +63,18 @@ type BuildInfo struct {
 // TaskSessions is the authoritative session reader used by the install-wide
 // sleep-inhibition service.
 type Wiring struct {
-	OrchestratorShutdown func()
-	DatabaseQuiesce      func() error
-	RestoreQuiesce       func() error
-	SystemSettings       *systemsettings.Store
-	RequiredStores       *requiredstores.Tracker
-	PersistenceHealth    *requiredstores.Health
-	MessageQueue         queuesettings.Target
-	MessageQueueConfig   queuesettings.Configuration
-	TaskSessions         sleepinhibition.SessionReader
-	ToolPayloadChanged   func(context.Context, []string)
+	OrchestratorShutdown       func()
+	DatabaseQuiesce            func() error
+	RestoreQuiesce             func() error
+	SystemSettings             *systemsettings.Store
+	RequiredStores             *requiredstores.Tracker
+	PersistenceHealth          *requiredstores.Health
+	MessageQueue               queuesettings.Target
+	MessageQueueConfig         queuesettings.Configuration
+	SessionCapacity            sessioncapacity.Target
+	SessionCapacityEnvironment sessioncapacity.Environment
+	TaskSessions               sleepinhibition.SessionReader
+	ToolPayloadChanged         func(context.Context, []string)
 }
 
 // Service exposes the composed system sub-services. Each field is
@@ -88,6 +91,7 @@ type Service struct {
 	FrontendErrors  *frontenderrors.Service
 	Metrics         *metrics.Service
 	MessageQueue    *queuesettings.Service
+	SessionCapacity *sessioncapacity.Service
 	SleepInhibition *sleepinhibition.Service
 	Updates         *updates.Service
 	Restart         restart.Manager
@@ -148,6 +152,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	}
 	var metricsSvc *metrics.Service
 	var queueSettingsSvc *queuesettings.Service
+	var sessionCapacitySvc *sessioncapacity.Service
 	var sleepInhibitionSvc *sleepinhibition.Service
 	updatesOpts := []updates.Option{updates.WithHomeDir(homeDir), updates.WithJobs(tracker)}
 	if settingsStore != nil {
@@ -157,6 +162,12 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 			queueSettingsSvc = queuesettings.NewService(
 				queuesettings.NewStore(settingsStore), wiring.MessageQueue, nil, log,
 				wiring.MessageQueueConfig,
+			)
+		}
+		if wiring.SessionCapacity != nil {
+			sessionCapacitySvc = sessioncapacity.NewService(
+				sessioncapacity.NewStore(settingsStore), wiring.SessionCapacity,
+				wiring.SessionCapacityEnvironment, log,
 			)
 		}
 		if wiring.TaskSessions != nil {
@@ -198,6 +209,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		FrontendErrors:  frontenderrors.New(log, nil),
 		Metrics:         metricsSvc,
 		MessageQueue:    queueSettingsSvc,
+		SessionCapacity: sessionCapacitySvc,
 		SleepInhibition: sleepInhibitionSvc,
 		Updates:         updatesSvc,
 		Restart:         restart.NewManagerFromEnv(),
@@ -254,6 +266,9 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	}
 	if s.MessageQueue != nil {
 		queuesettings.RegisterRoutes(g, admin, s.MessageQueue)
+	}
+	if s.SessionCapacity != nil {
+		sessioncapacity.RegisterRoutes(g, admin, s.SessionCapacity)
 	}
 	if s.SleepInhibition != nil {
 		sleepinhibition.RegisterRoutes(g, admin, s.SleepInhibition)

@@ -37,6 +37,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
 	"github.com/kandev/kandev/internal/system/queuesettings"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -57,6 +58,7 @@ const (
 const defaultEventNamespace = "default"
 
 func provideOrchestrator(
+	ctx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
 	pool *db.Pool,
@@ -73,6 +75,7 @@ func provideOrchestrator(
 	githubSvc *githubpkg.Service,
 	gitCredentialBroker *gitcredentials.Broker,
 	settingsStore *systemsettings.Store,
+	sessionCapacityEnvironment sessioncapacity.Environment,
 	trackers ...*requiredstores.Tracker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
@@ -89,6 +92,17 @@ func provideOrchestrator(
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
 	serviceCfg.OfficeSessionIdentity =
 		cfg != nil && cfg.Features.OfficeSessionIdentity
+	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
+		settingsStore, sessionCapacityEnvironment, log,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve session capacity settings: %w", err)
+	}
+	serviceCfg.SessionCapacity = effectiveSessionCapacity(sessionCapacityResolution)
+	log.Info("Session capacity initialized",
+		zap.Int("ceiling", serviceCfg.SessionCapacity),
+		zap.String("source", string(sessionCapacityResolution.Effective.Source)),
+		zap.Bool("enabled", sessionCapacityResolution.Effective.Enabled))
 	namespace := resolveEventNamespace(cfg)
 	serviceCfg.QueueGroup = "orchestrator." + namespace
 	busMode := "memory"
@@ -103,7 +117,7 @@ func provideOrchestrator(
 
 	queueRepo, err := messagequeue.NewSQLiteRepository(pool.Writer(), pool.Reader())
 	if len(trackers) > 0 && trackers[0] != nil {
-		if recordErr := recordRequiredStore(trackers[0], "message-queue", err); recordErr != nil {
+		if recordErr := recordRequiredStore(ctx, trackers[0], "message-queue", err); recordErr != nil {
 			return nil, nil, fmt.Errorf("message queue store: %w", recordErr)
 		}
 	}
@@ -156,6 +170,14 @@ func provideOrchestrator(
 	// Runtime-aware liveness lets durable cleanup treat a not-found stop for a
 	// confirmed-dead local runtime as already stopped instead of retrying forever.
 	taskSvc.SetRowLivenessProber(agentManagerClient)
+	// The orphan-session sweep preserves stale STARTING/RUNNING sessions when no
+	// live in-memory execution backs them, so the conversation can recover on
+	// task focus after a backend restart.
+	taskSvc.SetExecutionLivenessChecker(agentManagerClient)
+	// The session reconciliation sweep's active-task pass (stall detection and
+	// orphaned-session healing) verifies "no live execution" against the agent
+	// runtime's in-memory execution store through this registry.
+	taskSvc.SetSessionExecutionRegistry(agentManagerClient)
 	taskSvc.SetContextWindowResetter(orchestratorSvc.ResetContextWindow)
 	taskSvc.SetGitArchiveCapture(orchestratorSvc)
 	// Automation runs keep their worktrees so they stay repliable, which makes
@@ -435,6 +457,37 @@ func queueConfiguration(cfg *config.Config) queuesettings.Configuration {
 		return queuesettings.Configuration{}
 	}
 	return queuesettings.Configuration{Value: cfg.MessageQueue.MaxPerSession, Present: true}
+}
+
+func resolveSessionCapacityWithStore(
+	settingsStore *systemsettings.Store,
+	environment sessioncapacity.Environment,
+	log *logger.Logger,
+) (sessioncapacity.Resolution, error) {
+	var configured *sessioncapacity.Settings
+	if settingsStore != nil {
+		loaded, err := sessioncapacity.NewStore(settingsStore).Load(context.Background())
+		if err != nil {
+			return sessioncapacity.Resolution{}, err
+		}
+		configured = loaded
+	}
+	resolution, err := sessioncapacity.Resolve(configured, environment)
+	if err != nil {
+		return sessioncapacity.Resolution{}, err
+	}
+	if resolution.InvalidEnvironment && log != nil {
+		log.Warn("Ignoring invalid session capacity environment value",
+			zap.String("environment_variable", sessioncapacity.EnvironmentVariable))
+	}
+	return resolution, nil
+}
+
+func effectiveSessionCapacity(resolution sessioncapacity.Resolution) int {
+	if !resolution.Effective.Enabled {
+		return 0
+	}
+	return resolution.Effective.MaxSessions
 }
 
 func resolveEventNamespace(cfg *config.Config) string {
@@ -1177,10 +1230,6 @@ func (a *repositoryResolverAdapter) persistDetectedDefaultBranch(
 	// later write succeeds — and this call site retries with the same
 	// detected value on every future invocation, so a rejection driven by
 	// validation (as opposed to a transient DB error) will repeat forever.
-	// Review round 3, finding #4: this used to log at Warn and nothing
-	// else, making that permanent degradation invisible. Error level plus
-	// the dedicated counter make it observable the same way ancestry/write
-	// failures already are in internal/delivery/metrics.go.
 	if _, err := a.taskSvc.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{
 		DefaultBranch: &detected,
 	}); err != nil {

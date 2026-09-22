@@ -8,6 +8,7 @@ import Link from "@/components/routing/app-link";
 import { PageTopbar } from "@/components/page-topbar";
 import { useAppStore } from "@/components/state-provider";
 import { useRouter } from "@/lib/routing/client-router";
+import { linkToTask } from "@/lib/links";
 import { cn } from "@/lib/utils";
 import type { WorkspaceAutomationRun } from "@/lib/types/automation";
 import { buildAgenda, STATE_DOT_CLASS } from "./automation-rows";
@@ -231,7 +232,7 @@ export function RunsListPage({ workspaceId }: { workspaceId?: string }) {
               <RecentRuns
                 runs={runsState.runs}
                 loading={loading}
-                onOpen={(taskId) => router.push(`/tasks/${taskId}`)}
+                onOpen={(taskId) => router.push(linkToTask(taskId))}
               />
             </>
           )}

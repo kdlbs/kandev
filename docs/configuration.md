@@ -87,7 +87,7 @@ docker:
   volumeBasePath: ""       # empty = /var/lib/kandev/volumes (Linux/macOS)
 
 agent:
-  standaloneHost: "localhost"
+  standaloneHost: "127.0.0.1"
   standalonePort: 39429    # agentctl control port
 
 auth:

@@ -23,7 +23,8 @@
       "task": {
         "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。您的訊息會保留。",
         "proxy": "代理伺服器",
-        "pathBasedProxyWorksForApis": "路徑型代理伺服器。適用於 API，但可能導致預期由 / 提供服務的 Web 應用程式無法正常運作。"
+        "pathBasedProxyWorksForApis": "路徑型代理伺服器。適用於 API，但可能導致預期由 / 提供服務的 Web 應用程式無法正常運作。",
+        "checkoutOptions.providerUnsupported": "高階檢出選項目前適用於 GitHub 儲存庫。"
       },
       "workspaces": {
         "failedToSaveRepository": "無法儲存此儲存庫"
@@ -38,6 +39,13 @@
       "executors": {
         "containerNetworksDescription": "選擇此設定檔的任務容器所連線的 Docker 網路。",
         "primaryNetworkMustPublishPorts": "主網路承載已發布的 agentctl 連接埠，因此必須是可發布連接埠的網路。請改為在下方連線 macvlan 或 ipvlan 網路。"
+      },
+      "office": {
+        "exportConfigurationChanged": "設定已變更。請重新載入預覽後再下載。",
+        "selectAWorkspaceToExport": "選擇工作區以匯出。"
+      },
+      "inboxHistory": {
+        "truncatedNotice": "還有更多歷史問題可查看。"
       }
     },
     "zh-hk": {
@@ -77,6 +85,10 @@
         "gatewayPriority": "閘道優先順序",
         "gatewayPriorityNote": "閘道優先順序最高的連接提供容器的預設路由。將所有優先順序留空可保留 Docker 自身的選擇。",
         "primaryNetworkMustPublishPorts": "主網絡承載已發佈的 agentctl 連接埠，因此必須是可發佈連接埠的網絡。請改為在下方連接 macvlan 或 ipvlan 網絡。"
+      },
+      "office": {
+        "exportConfigurationChanged": "設定已變更。請重新載入預覽後再下載。",
+        "selectAWorkspaceToExport": "選擇工作區以匯出。"
       }
     }
   },

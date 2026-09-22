@@ -145,6 +145,34 @@ func TestRecordWorkflowSourceBindingIgnoresDelayedEntryAfterTaskMoves(t *testing
 	require.Equal(t, fixture.current.ID, binding.SessionID)
 }
 
+func TestWorkflowSessionTargetUsesTaskEffectiveSourceProfile(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	overrides, err := models.NewWorkflowAgentOverrides("wf1", []models.WorkflowAgentOverrideBinding{
+		{StepID: "step-a", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b"},
+	})
+	require.NoError(t, err)
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	task.WorkflowAgentOverrides = overrides
+	require.NoError(t, fixture.repo.UpdateTask(ctx, task))
+
+	source := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", Position: 0, AgentProfileID: "profile-a"}
+	target := &wfmodels.WorkflowStep{
+		ID: "step-review", WorkflowID: "wf1", Position: 1,
+		SessionTarget: &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetStep, StepID: source.ID},
+	}
+	fixture.stepGetter.steps[source.ID] = source
+	session := &models.TaskSession{ID: "session-b", TaskID: "t1", AgentProfileID: "profile-b"}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, session))
+	require.NoError(t, fixture.svc.recordWorkflowSourceBinding(ctx, "t1", source, session))
+
+	resolution, err := fixture.svc.resolveWorkflowSessionTarget(ctx, "t1", target)
+	require.NoError(t, err)
+	require.Equal(t, session.ID, resolution.session.ID)
+	require.Equal(t, "profile-b", resolution.profileID)
+}
+
 func TestRecordWorkflowSourceBindingDoesNotOverwriteRevisitedSourceEntry(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
@@ -432,6 +460,42 @@ func TestWorkflowRouteRetryRecoversAfterLegacyCommitMetadataFailure(t *testing.T
 	require.Equal(t, workflowSessionRouteCommitted, committed.Phase)
 }
 
+func TestPromoteWorkflowSessionRouteUsesNonterminalGuardOnLegacyRepositories(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	destination := &models.TaskSession{
+		ID:             "workflow-terminal-destination",
+		TaskID:         "t1",
+		AgentProfileID: "profile-a",
+		State:          models.TaskSessionStateCompleted,
+	}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, destination))
+	route := models.WorkflowSessionRoute{
+		OperationID:       "workflow-route-terminal-destination",
+		DestinationStepID: "step-review",
+		EntryIdentity:     "entry:00000000000000000031",
+		TargetKind:        string(wfmodels.WorkflowSessionTargetInitial),
+		AgentProfileID:    "profile-a",
+		DestinationID:     destination.ID,
+		Phase:             workflowSessionRoutePrepared,
+	}
+	require.NoError(t, fixture.repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyWorkflowSessionRoute, route))
+
+	fixture.svc.repo = &failWorkflowRouteMetadataRepo{repoStore: fixture.repo}
+	promoted, err := fixture.svc.promoteWorkflowSessionRoute(ctx, "t1", destination, &route)
+	require.NoError(t, err)
+	require.False(t, promoted)
+
+	updatedDestination, err := fixture.repo.GetTaskSession(ctx, destination.ID)
+	require.NoError(t, err)
+	require.False(t, updatedDestination.IsPrimary)
+	updatedTask, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	updatedRoute, ok := models.LoadWorkflowSessionRoute(updatedTask.Metadata)
+	require.True(t, ok)
+	require.Equal(t, workflowSessionRoutePrepared, updatedRoute.Phase)
+}
+
 func TestPromoteWorkflowSessionRouteClearsSelectedDestinationParkingOnly(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
@@ -490,6 +554,37 @@ func TestPromoteWorkflowSessionRouteClearsSelectedDestinationParkingOnly(t *test
 	parking, sourceStillParked := models.LoadWorkflowParking(source.Metadata)
 	require.True(t, sourceStillParked)
 	require.Equal(t, sourceParking.Stamp, parking.Stamp, "promotion cleared the source marker instead of destination")
+}
+
+func TestReuseResolvedWorkflowSessionCommitsRouteForCurrentSession(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	route := &models.WorkflowSessionRoute{
+		OperationID:       "workflow-route-current-session",
+		DestinationStepID: "step-review",
+		EntryIdentity:     "entry:00000000000000000022",
+		TargetKind:        string(wfmodels.WorkflowSessionTargetInitial),
+		AgentProfileID:    fixture.current.AgentProfileID,
+	}
+
+	reused, switched, err := fixture.svc.reuseResolvedWorkflowSession(
+		ctx,
+		"t1",
+		fixture.current,
+		fixture.current,
+		route,
+		models.WorkflowProfileSessionEndPolicyPark,
+	)
+	require.NoError(t, err)
+	require.False(t, switched)
+	require.Equal(t, fixture.current.ID, reused.ID)
+
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	committed, ok := models.LoadWorkflowSessionRoute(task.Metadata)
+	require.True(t, ok)
+	require.Equal(t, workflowSessionRouteCommitted, committed.Phase)
+	require.Equal(t, fixture.current.ID, committed.DestinationID)
 }
 
 func fixtureSessionState(t *testing.T, repo interface {

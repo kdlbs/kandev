@@ -87,6 +87,14 @@ type InferenceAgent interface {
 	InferenceConfig() *InferenceConfig
 }
 
+// HostUtilityInferenceAgent is an optional capability for agents whose host
+// utility command differs from the command used by a task executor. The
+// default InferenceConfig remains executor-safe; host utility callers can use
+// this capability when they run on the backend host.
+type HostUtilityInferenceAgent interface {
+	HostUtilityInferenceConfig() *InferenceConfig
+}
+
 // ManagedNPMRuntimeAgent is an optional capability for built-in agents whose
 // ACP runtime is resolved through npm. Package names and ACP arguments are
 // defined by the agent implementation rather than caller-provided input.

@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -152,6 +153,20 @@ func resolveDockerPrepareScript(req *ExecutorCreateRequest, executorType string)
 	if script == "" {
 		return "", nil
 	}
+	options, err := primaryCheckoutOptions(req.Metadata)
+	if err != nil {
+		return "", err
+	}
+	script, err = checkoutOptionsPrepareScript(script, options)
+	if err != nil {
+		return "", err
+	}
+	// A sparse checkout has to finish before the repository setup script runs,
+	// so the placeholder moves to the tail below rather than staying inline.
+	deferSetup := options != nil && len(options.SparseDirectories) > 0
+	if deferSetup {
+		script = strings.Replace(script, "{{repository.setup_script}}", "", 1)
+	}
 	script = withBranchCheckout(req, script)
 	if binding, ok := req.RemoteContributions[""]; ok {
 		contributionScript, err := scriptengine.RemoteContributionSetupScript(&binding)
@@ -160,12 +175,17 @@ func resolveDockerPrepareScript(req *ExecutorCreateRequest, executorType string)
 		}
 		script += contributionScript
 	}
+	script += checkoutOptionsValidationScript(options)
 	if destination, ok := req.ContributionDestinations[""]; ok {
 		destinationScript, err := scriptengine.ContributionDestinationSetupScript(&destination)
 		if err != nil {
 			return "", err
 		}
 		script += destinationScript
+	}
+
+	if deferSetup {
+		script += "\n" + selectedCheckoutCredentialScrubScript(req.Metadata) + "\n{{repository.setup_script}}\n"
 	}
 
 	// Placeholder resolution uses in-container paths, which are the same on

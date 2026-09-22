@@ -47,6 +47,7 @@ import type {
 } from "./task-page-content";
 import { useTranslation } from "react-i18next";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
+import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
 
 export type TaskPageInnerProps = {
   task: Task | null;
@@ -70,6 +71,7 @@ export type TaskPageInnerProps = {
   ensureSession: UseEnsureTaskSessionResult;
   onTaskUnarchived: (taskId: string) => void;
   taskCanvases?: Canvas[];
+  taskCanvasesStatus?: TaskCanvasesLoadStatus;
 };
 
 type RemoteExecutorStatus = {
@@ -168,6 +170,7 @@ function buildTaskLayoutProps(params: {
   initialLayout?: string | null;
   onTaskUnarchived: (taskId: string) => void;
   taskCanvases?: Canvas[];
+  taskCanvasesStatus?: TaskCanvasesLoadStatus;
 }) {
   const { taskProps, repository, effectiveSessionId, initialScripts, initialTerminals } = params;
   return {
@@ -180,7 +183,8 @@ function buildTaskLayoutProps(params: {
     initialTerminals,
     defaultLayouts: params.defaultLayouts,
     initialLayout: params.initialLayout,
-    taskCanvases: params.taskCanvases ?? [],
+    taskCanvases: params.taskCanvases,
+    taskCanvasesStatus: params.taskCanvasesStatus,
     taskTitle: taskProps.taskTitle,
     repositoryLabel: taskProps.repositoryLabel,
     baseBranch: taskProps.baseBranch,
@@ -307,6 +311,7 @@ function useTaskPageDerivedProps({
   officeTaskHref,
   onTaskUnarchived,
   taskCanvases,
+  taskCanvasesStatus,
 }: TaskPageInnerProps) {
   const workspaceRepositories = useAppStore((state) =>
     selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
@@ -355,6 +360,7 @@ function useTaskPageDerivedProps({
     initialLayout,
     onTaskUnarchived,
     taskCanvases,
+    taskCanvasesStatus,
   });
 
   return { taskProps, debugEntries, topBarProps, layoutProps };

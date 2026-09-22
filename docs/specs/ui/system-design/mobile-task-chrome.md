@@ -34,7 +34,7 @@ chrome.
 The same top bar also renders `GitActionsDropdown` on every phone panel. Its
 commit, change-request, pull, push, rebase, merge, and contribution-recovery
 commands duplicate capabilities already owned by `MobileChangesPanel`. The
-task drawer opened by `mobile-session-menu` already exposes task actions,
+shared app menu and title-triggered task picker expose task-row actions,
 including **Move to**, so replacing the Git ellipsis with another task menu
 would create a second path to the same commands.
 
@@ -42,10 +42,10 @@ would create a second path to the same commands.
 
 - `apps/web/components/task/mobile/session-mobile-top-bar.tsx` keeps task title,
   repository/branch summary, applicable status/plugin controls, approval, and
-  the task-drawer trigger. It stops mounting layout and Git action surfaces.
-  The retained task-drawer trigger becomes a 44-by-44 CSS-pixel touch target.
+  the shared app-navigation trigger and title-triggered task picker. It does not
+  mount layout or Git action surfaces. Phone triggers retain 44px touch targets.
 - `apps/web/components/task/mobile/session-task-switcher-sheet.tsx` remains the
-  only phone top-chrome path to the task list and its row-level actions.
+  shared task-list and row-action owner for embedded Tasks and the title picker.
 - `apps/web/components/task/mobile/mobile-changes-panel.tsx` continues to
   compose the shared `ChangesPanelHeader` and `ChangesPanelBody`. Those shared
   components retain commit, push, change-request, pull, rebase, merge, and
@@ -68,13 +68,14 @@ not retain action ownership.
 
 ### Task action
 
-1. User taps retained hamburger control.
-2. `SessionTaskSwitcherSheet` opens its existing inset bottom drawer.
+1. User taps the hamburger to open shared app navigation and its embedded Tasks
+   section, or taps the task title to open the separate inset task picker.
+2. The existing task list presents saved views, filters, and task rows.
 3. User opens active task row's visible action menu.
 4. Existing `TaskMoveContextMenuItems` moves the task to another permitted
    workflow step.
 
-No new top-bar overflow, picker, state, or mutation path is introduced.
+Both entries reuse the same task-row actions and mutation path.
 
 ### Git action
 
@@ -143,3 +144,19 @@ phone panel preference and desktop/tablet layout state remain unchanged.
 - [Remote contribution tasks](../../tasks/system-design/remote-contribution-tasks.md)
 - [Remote contribution head drift](../../../decisions/2026-08-10-remote-contribution-head-drift.md)
 - [Local-first contribution replacement](../../../decisions/2026-08-12-local-first-contribution-replacement.md)
+
+## Navigation entry points
+
+The [unified phone navigation package](../../../plans/unified-mobile-navigation/plan.md)
+changes the hamburger to app navigation and the task-title button to the existing
+task picker. Its [design](../system-design/unified-mobile-navigation.md)
+owns that entry-point change; existing task actions, saved-view controller
+lifetime, history, and desktop/tablet guarantees here remain compatibility
+requirements. Historical hamburger descriptions above describe the preceding composition;
+the unified navigation design defines the current entry points.
+
+The September 2026 revision embeds the collapsible Tasks sidebar directly in
+the shared phone menu, replacing the Task views action and dedicated pinned
+shortcuts. Kanban/Threads/List title dropdowns open display options; Threads
+saved-view editing remains inside that surface. See REQ-UI-MOBILE-MENU-004/005
+in the unified navigation requirements for the current composition.

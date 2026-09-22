@@ -148,10 +148,10 @@ The Docker socket is effectively root-equivalent on many hosts. Do not publish i
 
 ### Core agent service
 
-| YAML key               | Environment variable                              | Default     | Current behavior                                                 |
-| ---------------------- | ------------------------------------------------- | ----------- | ---------------------------------------------------------------- |
-| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `localhost` | Host of the core `agentctl` control server.                      |
-| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback. |
+| YAML key               | Environment variable                              | Default     | Current behavior                                                              |
+| ---------------------- | ------------------------------------------------- | ----------- | ---------------------------------------------------------------------------- |
+| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `127.0.0.1` | Host of the core `agentctl` control server. The literal avoids IPv6 loopback resolution variance. |
+| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback.            |
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
@@ -160,6 +160,7 @@ The launcher starts `agentctl`, performs a one-time nonce handshake, and supplie
 | YAML key                   | Environment variable              | Default | Current behavior                                                                |
 | -------------------------- | --------------------------------- | ------- | ------------------------------------------------------------------------------- |
 | `tasks.preparationTimeout` | `KANDEV_TASK_PREPARATION_TIMEOUT` | `10m`   | Positive Go duration for repository setup and executor-profile prepare scripts. |
+| `tasks.stallDetectionThreshold` | `KANDEV_TASK_STALL_DETECTION_THRESHOLD` | `2h` | Positive Go duration for the session reconciliation sweep's stall threshold. |
 
 `tasks.preparationTimeout` controls how long Kandev allows repository setup and
 executor-profile prepare scripts to run. The value uses Go duration syntax,
@@ -176,6 +177,24 @@ default, each launch-phase limit is `15m`. Preparation scripts use a separate
 context, so earlier work such as Sprite uploads does not reduce their full
 `10m` preparation budget. The environment variable overrides YAML. This is a
 startup setting, not a database or Settings value.
+
+`tasks.stallDetectionThreshold` controls the periodic session reconciliation
+sweep. When an unarchived task holds an active session with no live execution
+behind it and no session events or messages for longer than this threshold,
+Kandev emits a `task.stalled` event and logs a warning. After twice the
+threshold of silence, the sweep returns each classified interrupted session to
+`WAITING_FOR_INPUT` and preserves its conversation for recovery when you open
+the task. It abandons only the observed unfinished turn, without reporting a
+successful completion or advancing the workflow. Idle waiting sessions are
+excluded, and recovery runs only when every active session of the task is
+execution-less and past the grace window, so a live execution or idle sibling
+blocks recovery for the task rather than being swept along with it.
+The value is source-specific: an invalid YAML duration fails configuration
+parsing, while a zero or negative YAML duration is rejected at startup with
+`tasks.stallDetectionThreshold must be positive`. An invalid or non-positive
+environment value falls back to `2h`, and non-positive values from a profile
+default are ignored, leaving the `2h` default in effect. The environment
+variable overrides YAML, and changes require a backend restart.
 
 ### Capacity and managed-process startup settings
 
@@ -434,11 +453,12 @@ docker:
   volumeBasePath: "/var/lib/kandev/volumes" # compatibility-only today
 
 agent:
-  standaloneHost: "localhost"
+  standaloneHost: "127.0.0.1"
   standalonePort: 39429
 
 tasks:
   preparationTimeout: "10m"
+  stallDetectionThreshold: "2h"
 
 credentials:
   file: ""

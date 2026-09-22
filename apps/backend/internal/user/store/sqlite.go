@@ -646,6 +646,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"saved_layouts":                            savedLayouts,
 		"sidebar_views":                            sidebarViews,
 		"sidebar_views_by_workspace":               settings.SidebarViewsByWorkspace,
+		"sidebar_layouts_by_workspace":             settings.SidebarLayoutsByWorkspace,
 		"sidebar_workspace_version":                settings.SidebarWorkspaceVersion,
 		"sidebar_active_view_id":                   settings.SidebarActiveViewID,
 		"sidebar_draft":                            settings.SidebarDraft,
@@ -751,6 +752,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		LspServerConfigs:                  map[string]map[string]interface{}{},
 		LspStatusLocation:                 models.LspStatusLocationToolbar,
 		SavedLayouts:                      []models.SavedLayout{},
+		SidebarLayoutsByWorkspace:         map[string]models.SidebarLayout{},
 		ChatSubmitKey:                     "cmd_enter",
 		KeyboardShortcuts:                 map[string]interface{}{},
 		TerminalLinkBehavior:              "new_tab",
@@ -835,6 +837,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LspStatusLocation                 string                                  `json:"lsp_status_location"`
 		SavedLayouts                      []models.SavedLayout                    `json:"saved_layouts"`
 		SidebarViewsByWorkspace           map[string]models.SidebarWorkspaceState `json:"sidebar_views_by_workspace"`
+		SidebarLayoutsByWorkspace         map[string]models.SidebarLayout         `json:"sidebar_layouts_by_workspace"`
 		SidebarWorkspaceVersion           int                                     `json:"sidebar_workspace_version"`
 		SidebarViews                      json.RawMessage                         `json:"sidebar_views"`
 		SidebarActiveViewID               json.RawMessage                         `json:"sidebar_active_view_id"`
@@ -972,6 +975,10 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		}
 	}
 	settings.SidebarViewsByWorkspace = payload.SidebarViewsByWorkspace
+	settings.SidebarLayoutsByWorkspace = payload.SidebarLayoutsByWorkspace
+	if settings.SidebarLayoutsByWorkspace == nil {
+		settings.SidebarLayoutsByWorkspace = map[string]models.SidebarLayout{}
+	}
 	settings.SidebarWorkspaceVersion = payload.SidebarWorkspaceVersion
 	settings.SidebarDraft = payload.SidebarDraft
 	if len(payload.ThreadViews) > 0 {

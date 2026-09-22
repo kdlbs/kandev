@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-08-26
-last_updated: 2026-09-10
+last_updated: 2026-09-21
 ---
 
 # Agent-authored web-app canvases Requirements
@@ -18,8 +18,8 @@ user can promote a useful task canvas to its workspace. A workspace canvas
 appears in workspace navigation and can use workspace-scoped data.
 
 The Canvases system owns the canvas scope, source lineage, release selection,
-promotion, editing flow, and discovery. The Plugins system owns the isolated
-web-application runtime and its data contract.
+promotion, editing flow, and discovery. The Plugins system owns the web-application
+runtime and its data contract.
 
 ## Terminology
 
@@ -77,6 +77,22 @@ the task, so that the interface matches the work.
 - **AC-CANVASES-AGENT-WEB-APPS-001.12:** Authoring instructions shall distinguish
   an active release, a release awaiting permission review, and an unsuccessful
   publish. Local files or a successful build shall not imply publication.
+- **AC-CANVASES-AGENT-WEB-APPS-001.13:** When a user returns after publication,
+  the task shall show eligible task canvases not previously presented in that
+  browser tab. This shall also work after reload or a missed publication event.
+  Eligible canvases have an active valid release or await permission review.
+  Draft-only, archived, disabled, removed, invalid, foreign-task, and workspace
+  canvases shall not open automatically.
+- **AC-CANVASES-AGENT-WEB-APPS-001.14:** Desktop shall add new canvas panels to
+  the main editor group and focus one new panel. Existing panels shall retain
+  their placement. Repeated discovery shall not duplicate panels or steal focus.
+- **AC-CANVASES-AGENT-WEB-APPS-001.15:** Closing a presented canvas shall prevent
+  automatic reopening in that browser tab, including after reload or publication
+  of another release. Manual reopening shall remain available.
+- **AC-CANVASES-AGENT-WEB-APPS-001.16:** On phones, automatic presentation shall
+  open one focused canvas route. Returning to the task shall not redirect to
+  that canvas again. Other eligible canvases shall remain accessible through
+  the existing picker.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-002: Durable source and releases
 
@@ -209,6 +225,16 @@ canvas through native Kandev navigation.
   both permissions and its actions without scrolling at 1280 by 720 CSS pixels.
   Longer reviews shall keep actions reachable at 390 by 844 CSS pixels.
 
+- **AC-CANVASES-AGENT-WEB-APPS-006.10:** An embedded canvas shall have one
+  host action toolbar aligned with other task panels under the shared
+  [panel toolbar contract](../../ui/requirements/panel-toolbars.md).
+  A standalone canvas shall retain one page navigation/action header.
+- **AC-CANVASES-AGENT-WEB-APPS-006.11:** Neither presentation shall add a
+  separate status-only toolbar. Loading and blocking errors shall appear once
+  in the body, with recovery actions. Ready shall show the application and an
+  accessible status announcement. Nonblocking offline state may appear inline
+  in the existing header while retaining the application.
+
 ### REQ-CANVASES-AGENT-WEB-APPS-007: Visible runtime and release state
 
 **Intent:** A user can understand whether the canvas is loading, offline,
@@ -314,6 +340,7 @@ including missing references, lookup failures, and passthrough exclusions.
 
 ## Implementation plans
 
+- [Canvas runtime and task-entry recovery](../../../plans/canvas-runtime-entry-recovery/plan.md)
 - [Direct canvas creation and saved prompt](../../../plans/canvas-direct-creation/plan.md)
 
 ## Out of scope

@@ -12,8 +12,7 @@ test("phone task views restore their workspace collection", async ({
   const mobile = new MobileKanbanPage(testPage);
   await mobile.goto();
   await mobile.mobileMenuButton.tap();
-  await mobile.menuCard.getByRole("button", { name: "Task views", exact: true }).tap();
-  const drawer = testPage.getByRole("dialog", { name: "Tasks", exact: true });
+  const drawer = mobile.menuCard;
   await drawer.getByTestId("sidebar-new-view").tap();
   const editor = testPage.getByTestId("sidebar-filter-popover");
   await editor.getByTestId("view-rename-input").fill("Phone A view");
@@ -34,7 +33,6 @@ test("phone task views restore their workspace collection", async ({
   await testPage.getByTestId("mobile-workspace-trigger").tap();
   await testPage.getByTestId(`mobile-workspace-item-${other.id}`).tap();
   await mobile.mobileMenuButton.tap();
-  await mobile.menuCard.getByRole("button", { name: "Task views", exact: true }).tap();
   await expect(drawer.getByTestId("sidebar-view-chip")).toHaveCount(1);
   await expect(drawer.getByTestId("sidebar-view-chip")).toContainText("All tasks");
   await drawer.getByTestId("sidebar-new-view").tap();
@@ -52,7 +50,6 @@ test("phone task views restore their workspace collection", async ({
   await testPage.getByTestId("mobile-workspace-trigger").tap();
   await testPage.getByTestId(`mobile-workspace-item-${seedData.workspaceId}`).tap();
   await mobile.mobileMenuButton.tap();
-  await mobile.menuCard.getByRole("button", { name: "Task views", exact: true }).tap();
   await expect(
     drawer.getByTestId("sidebar-view-chip").filter({ hasText: "Phone A view" }),
   ).toHaveAttribute("data-active", "true");

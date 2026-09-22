@@ -164,7 +164,7 @@ test.describe("Prompt history panel on mobile", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    const panelsButton = testPage.getByRole("button", { name: "Panels" });
+    const panelsButton = testPage.getByRole("button", { name: "Panels", exact: true });
     await expect(panelsButton).toBeVisible({ timeout: 15_000 });
     expect((await panelsButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await panelsButton.tap();
@@ -215,7 +215,7 @@ test.describe("Prompt history panel on mobile", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    const panelsButton = testPage.getByRole("button", { name: "Panels" });
+    const panelsButton = testPage.getByRole("button", { name: "Panels", exact: true });
     await expect(panelsButton).toBeVisible({ timeout: 15_000 });
     await panelsButton.tap();
     const historyOption = testPage.getByTestId("mobile-prompt-history-option");
@@ -382,7 +382,7 @@ test.describe("Prompt history panel on mobile", () => {
     await testPage.goto(`/t/${taskId}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    const panelsButton = testPage.getByRole("button", { name: "Panels" });
+    const panelsButton = testPage.getByRole("button", { name: "Panels", exact: true });
     await panelsButton.tap();
     await testPage.getByTestId("mobile-prompt-history-option").tap();
     const panel = testPage.getByTestId("prompt-history-panel");

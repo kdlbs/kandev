@@ -98,3 +98,10 @@ identities use an explicit prefix, bind the first callback execution
 atomically, and fail closed for untagged or compacted callbacks. Dynamic launch
 callbacks preserve their originating resume context instead of borrowing the
 current replacement identity.
+
+## Accepted-turn cancellation successor
+
+The [resumed turn cancellation package](../resumed-turn-cancellation/plan.md)
+corrects startup authority that remains active after prompt acceptance.
+It adds process-survival and follow-up assertions to the existing cancellation coverage.
+This completed record and its verification results remain historical evidence.

@@ -39,7 +39,7 @@ test.describe("Mobile sidebar — nested subtasks", () => {
 
     // Open the task switcher sheet from the mobile session top bar. Scope all
     // assertions to the sheet — task titles also appear in the session header.
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const sheet = testPage.getByRole("dialog");
 
     // All three levels are listed in the sheet.

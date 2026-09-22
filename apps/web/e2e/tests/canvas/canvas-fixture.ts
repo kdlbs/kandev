@@ -59,8 +59,11 @@ export async function expectCanvasFrameFillsHost(page: Page): Promise<void> {
           const hostRect = host.getBoundingClientRect();
           const headerRect = header.getBoundingClientRect();
           const frameRect = frame.getBoundingClientRect();
+          const headerIsInsideHost = host.contains(header);
           const heightMatches =
-            Math.abs(frameRect.height - (hostRect.height - headerRect.height)) <= 2;
+            Math.abs(
+              frameRect.height - (hostRect.height - (headerIsInsideHost ? headerRect.height : 0)),
+            ) <= 2;
           const widthMatches = Math.abs(frameRect.width - hostRect.width) <= 2;
           const documentFits = document.documentElement.scrollWidth <= window.innerWidth;
           return heightMatches && widthMatches && documentFits;
@@ -255,6 +258,7 @@ function canvasFixtureScript(canvas: CanvasRecord): string {
   let lastEventId = "";
   let streamController;
   let streamReader;
+  let streamCompletion = Promise.resolve();
 
   const renderAppearance = () => {
     const root = document.documentElement;
@@ -316,34 +320,45 @@ function canvasFixtureScript(canvas: CanvasRecord): string {
 
   const connectEvents = async (cursor = "") => {
     if (streamController) streamController.abort();
+    await streamCompletion;
     const controller = new AbortController();
     streamController = controller;
     text("canvas-fixture-sse-status", "connecting");
-    try {
-      const response = await fetch("./_kandev/v1/events", {
-        headers: cursor ? { "Last-Event-ID": cursor } : {},
-        signal: controller.signal,
-      });
-      if (!response.ok || !response.body) throw new Error("event stream unavailable");
-      text("canvas-fixture-sse-status", "connected");
-      streamReader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const result = await streamReader.read();
-        if (result.done) break;
-        buffer += decoder.decode(result.value, { stream: true });
-        let boundary = buffer.indexOf("\n\n");
-        while (boundary >= 0) {
-          const block = buffer.slice(0, boundary);
-          buffer = buffer.slice(boundary + 2);
-          if (block.trim()) parseEvent(block);
-          boundary = buffer.indexOf("\n\n");
+    const connection = (async () => {
+      try {
+        let response;
+        for (let attempt = 0; ; attempt += 1) {
+          response = await fetch("./_kandev/v1/events", {
+            headers: cursor ? { "Last-Event-ID": cursor } : {},
+            signal: controller.signal,
+          });
+          if (response.status !== 429 || attempt >= 31) break;
+          await response.text();
+          await new Promise((resolve) => setTimeout(resolve, Math.min(250, 50 * (attempt + 1))));
         }
+        if (!response.ok || !response.body) throw new Error("event stream unavailable");
+        text("canvas-fixture-sse-status", "connected");
+        streamReader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const result = await streamReader.read();
+          if (result.done) break;
+          buffer += decoder.decode(result.value, { stream: true });
+          let boundary = buffer.indexOf("\n\n");
+          while (boundary >= 0) {
+            const block = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            if (block.trim()) parseEvent(block);
+            boundary = buffer.indexOf("\n\n");
+          }
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) text("canvas-fixture-sse-status", "disconnected");
       }
-    } catch (error) {
-      if (!controller.signal.aborted) text("canvas-fixture-sse-status", "disconnected");
-    }
+    })();
+    streamCompletion = connection;
+    await connection;
   };
 
   document.querySelector('[data-testid="canvas-fixture-continue"]')?.addEventListener("click", async () => {

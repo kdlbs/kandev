@@ -23,6 +23,8 @@ The override persists while the label is present and affects only this check.
 
 The exact `plugin-registry/plugins.yaml` source is exempt when it is the only non-documentation path changed. The exemption does not include other files under `plugin-registry/`; a pull request that also changes any non-exempt path still requires linked delivery context.
 
+CI infrastructure paths under `.github/workflows/**`, `.github/scripts/**`, and `.github/actions/**` are exempt because they change the delivery pipeline, not shipped product behavior, and are already governed by workflow contract tests. The exemption is directory-scoped; it does not cover configuration, keys, or other files under `.github/`, nor workflows, scripts, or actions outside `.github/`. A pull request that also changes any non-exempt path still requires linked delivery context.
+
 Harness configuration and definitions are exempt when they use the repository's recognized harness formats: Codex agent or config TOML, Claude settings JSON, or Cursor rule MDC. Markdown harness files are covered by the general Markdown exemption. This avoids requiring delivery records for contributor tooling changes while keeping arbitrary JSON, YAML, and other files subject to normal evaluation.
 
 CI owns this policy. It does not require use of a particular agent or prove that plans were committed before code.

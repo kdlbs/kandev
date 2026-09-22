@@ -3,6 +3,8 @@
 import { IconClockHour4 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import Link from "@/components/routing/app-link";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { useOptionalAppStore } from "@/components/state-provider";
 import { formatRelativeTime } from "@/lib/utils";
 import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
@@ -18,7 +20,7 @@ function reasonLabel(
 ): string {
   switch (reason) {
     case "session_capacity":
-      return t("task:launchQueueWaitingCapacity");
+      return t("task:launchQueueWaitingGlobalCapacity");
     case "ownership_unavailable":
       return t("task:launchQueueOwnershipUnavailable");
     case "replay_error":
@@ -134,6 +136,25 @@ function LaunchQueueStatusContent({
           <p className="min-w-0 break-words text-muted-foreground">
             {reasonLabel(view.reason, view.retrying, t)}
           </p>
+          {view.reason === "session_capacity" && (
+            <>
+              <p className="min-w-0 break-words text-muted-foreground">
+                {t("task:launchQueueGlobalScope")}
+              </p>
+              <p className="min-w-0 break-words text-muted-foreground">
+                {t("task:launchQueueGlobalScopeHelp")}
+              </p>
+              <Link
+                href="/settings/preferences/task-behavior#setting-session-capacity"
+                data-testid="launch-queue-session-capacity-link"
+                className={settingsActionClassName(
+                  "mt-1 inline-flex max-w-full whitespace-normal text-left leading-tight",
+                )}
+              >
+                {t("task:launchQueueConfigureCapacity")}
+              </Link>
+            </>
+          )}
           <p className="min-w-0 break-words tabular-nums text-muted-foreground">
             {capacityLabel(view, isConnected, t)}
           </p>

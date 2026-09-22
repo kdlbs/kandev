@@ -18,6 +18,10 @@ vi.mock("react-i18next", () => ({
         "task:launchQueueIndicator": "Automatic launch queued",
         "task:launchQueueDestination": `Destination: ${values.destination ?? ""}`,
         "task:launchQueueWaitingCapacity": "Waiting for session capacity.",
+        "task:launchQueueWaitingGlobalCapacity": "Waiting for global session capacity.",
+        "task:launchQueueGlobalScope": "Global session limit",
+        "task:launchQueueGlobalScopeHelp": "All workspaces",
+        "task:launchQueueConfigureCapacity": "Configure global session limit",
         "task:launchQueueOwnershipUnavailable": "Launch ownership is unavailable.",
         "task:launchQueueReplayError": "The queued launch needs attention.",
         "task:launchQueueReplayErrorStopped": "The queued launch needs attention.",
@@ -52,6 +56,7 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/lib/utils", () => ({
+  cn: (...values: unknown[]) => values.filter(Boolean).join(" "),
   formatRelativeTime: (value: string) => (value ? "just now" : ""),
 }));
 
@@ -101,6 +106,11 @@ describe("LaunchQueueStatus", () => {
     expect(screen.getByTestId("task-launch-queue-live-status").getAttribute("role")).toBe("status");
     expect(screen.getByText("Destination: Luna")).toBeTruthy();
     expect(screen.getByText(/5 of 5 sessions in use/)).toBeTruthy();
+    expect(screen.getByText("Global session limit")).toBeTruthy();
+    expect(screen.getByText("All workspaces")).toBeTruthy();
+    expect(screen.getByTestId("launch-queue-session-capacity-link").getAttribute("href")).toBe(
+      "/settings/preferences/task-behavior#setting-session-capacity",
+    );
     expect(screen.getByText(/retry automatically/)).toBeTruthy();
     expect(screen.queryByText(/position|ETA/i)).toBeNull();
   });
@@ -162,6 +172,7 @@ describe("LaunchQueueStatus retry copy", () => {
     expect(screen.getByText("The queued launch needs attention.")).toBeTruthy();
     expect(screen.getByText("Automatic retry stopped.")).toBeTruthy();
     expect(screen.queryByText(/will retry/)).toBeNull();
+    expect(screen.queryByTestId("launch-queue-session-capacity-link")).toBeNull();
   });
 });
 

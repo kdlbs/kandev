@@ -1,6 +1,6 @@
 ---
 created: 2026-09-10
-updated: 2026-09-16
+updated: 2026-09-21
 status: done
 requirements:
   - REQ-CI-PR-DOCS-001
@@ -65,6 +65,7 @@ Live smoke tests and required-check activation are deployment steps, not complet
 - [x] [Task 02: Report pull request coverage](task-02-pr-workflow.md)
 - [x] [Task 03: Support merge queue coverage](task-03-queue-coverage.md)
 - [x] [Task 04: Exempt the canonical plugin registry source](task-04-exempt-plugin-registry-source.md)
+- [x] [Task 05: Exempt CI infrastructure paths](task-05-exempt-ci-paths.md)
 
 Execute sequentially. No subagents are authorized.
 
@@ -112,6 +113,26 @@ for any pull request that combines the exempt source with a non-exempt path.
 Task 04 verification completed on 2026-09-16:
 
 - 77 validator tests, 7 workflow contract tests, and 9 action-pinning tests passed.
+- All 24 workflow files passed action-pinning lint.
+- `zizmor .github/workflows/pr-docs.yml` reported no findings.
+- The specification catalog and linter passed; `git diff --check` passed.
+
+## Amendment: CI infrastructure paths
+
+The original four work orders remain complete. This amendment exempts the CI
+infrastructure paths `.github/workflows/**`, `.github/scripts/**`, and
+`.github/actions/**` from requiring a delivery package. CI pipeline changes do
+not ship product behavior and are already covered by workflow contract tests,
+so requiring delivery context for them adds process without design value. The
+exemption is directory-scoped; workflows, scripts, or actions outside `.github/`
+still require coverage.
+
+Task 05 implements the exemption and updates the path classifier tests,
+requirement, system design, decision record, and plan.
+
+Task 05 verification completed on 2026-09-21:
+
+- 80 validator tests, 7 workflow contract tests, and 9 action-pinning tests passed.
 - All 24 workflow files passed action-pinning lint.
 - `zizmor .github/workflows/pr-docs.yml` reported no findings.
 - The specification catalog and linter passed; `git diff --check` passed.

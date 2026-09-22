@@ -38,7 +38,7 @@ test.describe("Queued session ownership", () => {
       const queueStatus = testPage.locator('[data-testid="task-launch-queue-status"]:visible');
       await expect(queueStatus).toBeVisible();
       await expect(queueStatus).toContainText("Queued");
-      await expect(queueStatus).toContainText("Waiting for session capacity");
+      await expect(queueStatus).toContainText("Waiting for global session capacity");
       await expect(queueStatus).toContainText("1 of 1");
       await expect(queueStatus).toContainText(scenario.destinationProfileName);
       await expect(

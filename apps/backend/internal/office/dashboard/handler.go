@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/configloader"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -307,6 +308,10 @@ func (h *Handler) getAgentRunDetail(c *gin.Context) {
 // -- Task search --
 
 func (h *Handler) searchTasks(c *gin.Context) {
+	if rejectAgentTaskReader(c) {
+		return
+	}
+
 	wsID := c.Param("wsId")
 	query := c.Query("q")
 
@@ -359,7 +364,30 @@ func (h *Handler) searchTasks(c *gin.Context) {
 
 // -- Tasks --
 
+// rejectAgentTaskReader answers true (after writing a 403 response) for an
+// agent JWT caller on a dashboard task-read route. Every such route sits
+// under the same Office group and inherits only AgentAuthMiddleware (token
+// and workspace-claim validation, no capability check and no runtime audit
+// event) — so without this guard an agent whose capability snapshot lacks
+// list_tasks, or a taskless run with no board-read grant at all, could reach
+// the workspace's task list here regardless of what the capability-checked,
+// audited GET /runtime/tasks endpoint would have said. Mirrors the existing
+// createComment agent-caller guard in this same file.
+func rejectAgentTaskReader(c *gin.Context) bool {
+	if agents.CallerFromContext(c) == nil {
+		return false
+	}
+	c.JSON(http.StatusForbidden, gin.H{
+		"error": "agent callers must use the runtime tasks endpoint",
+	})
+	return true
+}
+
 func (h *Handler) listTasks(c *gin.Context) {
+	if rejectAgentTaskReader(c) {
+		return
+	}
+
 	ctx := c.Request.Context()
 	wsID := c.Param("wsId")
 

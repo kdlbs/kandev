@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/gitbootstrap"
+	"github.com/kandev/kandev/internal/gitcheckout"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/worktree/copyfiles"
 )
@@ -103,11 +104,21 @@ func classifyRemoteDefaultError(output string, runErr error) error {
 // then by WorktreeID if provided (for session resumption).
 // Only creates a new worktree if none exists for the session.
 func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, error) {
+	var scopeErr error
+	ctx, scopeErr = withCheckoutOptions(ctx, req)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	req.CheckoutOptions = scopedCheckout(ctx).options
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
 	if req.ReuseRequired {
-		return m.reuseRequiredWorktree(ctx, req)
+		wt, err := m.reuseRequiredWorktree(ctx, req)
+		if err == nil {
+			err = gitcheckout.Check(wt.Path, req.CheckoutOptions)
+		}
+		return wt, err
 	}
 
 	// Reject invalid explicit slugs up-front. If either slug is non-empty but
@@ -122,6 +133,9 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 
 	if wt, handled, err := m.tryReuseExisting(ctx, req); handled {
 		if err == nil && wt != nil {
+			if err = gitcheckout.Check(wt.Path, req.CheckoutOptions); err != nil {
+				return nil, err
+			}
 			err = m.configureContributionDestination(ctx, req.RepositoryPath, wt.Path, wt.Branch, req.ContributionDestination)
 		}
 		return wt, err
@@ -1387,14 +1401,14 @@ func (m *Manager) gitAddWorktreeExistingAtRef(ctx context.Context, repoPath, bra
 
 func (m *Manager) gitAddWorktreeExistingLocked(ctx context.Context, repoPath, branchName, worktreePath, startPoint string) (string, error) {
 	worktreeID := uuid.New().String()
-	usesGitCrypt := m.usesGitCrypt(repoPath)
+	usesGitCrypt := m.usesGitCryptContext(ctx, repoPath)
 
 	// Build worktree add command
 	args := []string{"worktree", "add"}
 	if startPoint != "" {
 		args = append(args, "-B", branchName)
 	}
-	if usesGitCrypt {
+	if usesGitCrypt || hasSparseCheckout(ctx) {
 		args = append(args, "--no-checkout")
 	}
 	args = append(args, worktreePath)
@@ -1408,13 +1422,8 @@ func (m *Manager) gitAddWorktreeExistingLocked(ctx context.Context, repoPath, br
 	cmd.Dir = repoPath
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err == nil {
-		if usesGitCrypt {
-			if unlockErr := m.unlockGitCryptAndCheckout(ctx, worktreePath); unlockErr != nil {
-				_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
-				return "", unlockErr
-			}
-		} else {
-			m.initSubmodules(ctx, worktreePath)
+		if err := m.finishWorktreeCheckout(ctx, repoPath, worktreePath, usesGitCrypt); err != nil {
+			return "", err
 		}
 		return worktreeID, nil
 	}
@@ -1452,7 +1461,7 @@ func (m *Manager) retryWorktreeExisting(ctx context.Context, repoPath, branchNam
 	if startPoint != "" {
 		args = append(args, "-B", branchName)
 	}
-	if usesGitCrypt {
+	if usesGitCrypt || hasSparseCheckout(ctx) {
 		args = append(args, "--no-checkout")
 	}
 	args = append(args, worktreePath)
@@ -1475,13 +1484,8 @@ func (m *Manager) retryWorktreeExisting(ctx context.Context, repoPath, branchNam
 		return "", ClassifyGitError(retryOutStr, retryErr)
 	}
 
-	if usesGitCrypt {
-		if err := m.unlockGitCryptAndCheckout(ctx, worktreePath); err != nil {
-			_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
-			return "", err
-		}
-	} else {
-		m.initSubmodules(ctx, worktreePath)
+	if err := m.finishWorktreeCheckout(ctx, repoPath, worktreePath, usesGitCrypt); err != nil {
+		return "", err
 	}
 
 	m.logger.Info("recovered from stale worktree checkout", zap.String("branch", branchName))
@@ -1745,14 +1749,14 @@ func (m *Manager) gitAddWorktree(ctx context.Context, repoPath, branchName, work
 
 func (m *Manager) gitAddWorktreeLocked(ctx context.Context, repoPath, branchName, worktreePath, baseRef string) (string, error) {
 	worktreeID := uuid.New().String()
-	usesGitCrypt := m.usesGitCrypt(repoPath)
+	usesGitCrypt := m.usesGitCryptContext(ctx, repoPath)
 	addSnapshot, err := m.createNewBranchRef(ctx, repoPath, branchName, baseRef)
 	if err != nil {
 		return "", err
 	}
 
 	args := []string{"worktree", "add"}
-	if usesGitCrypt {
+	if usesGitCrypt || hasSparseCheckout(ctx) {
 		args = append(args, "--no-checkout")
 	}
 	args = append(args, worktreePath, branchName)
@@ -1776,13 +1780,9 @@ func (m *Manager) gitAddWorktreeLocked(ctx context.Context, repoPath, branchName
 	}
 
 	// If we used --no-checkout, we need to unlock git-crypt and checkout
-	if usesGitCrypt {
-		if err := m.unlockGitCryptAndCheckout(ctx, worktreePath); err != nil {
-			m.rollbackFailedNewBranchAdd(ctx, repoPath, branchName, worktreePath, addSnapshot)
-			return "", err
-		}
-	} else {
-		m.initSubmodules(ctx, worktreePath)
+	if err := m.finishWorktreeCheckout(ctx, repoPath, worktreePath, usesGitCrypt); err != nil {
+		m.rollbackFailedNewBranchAdd(ctx, repoPath, branchName, worktreePath, addSnapshot)
+		return "", err
 	}
 
 	return worktreeID, nil
@@ -1836,12 +1836,12 @@ func (m *Manager) gitAddWorktreeForRecreate(ctx context.Context, repoPath, branc
 }
 
 func (m *Manager) gitAddWorktreeForRecreateLocked(ctx context.Context, repoPath, branch, worktreePath, startPoint string) (bool, error) {
-	usesGitCrypt := m.usesGitCrypt(repoPath)
+	usesGitCrypt := m.usesGitCryptContext(ctx, repoPath)
 	args := []string{"worktree", "add"}
 	if startPoint != "" {
 		args = append(args, "-B", branch)
 	}
-	if usesGitCrypt {
+	if usesGitCrypt || hasSparseCheckout(ctx) {
 		args = append(args, "--no-checkout")
 	}
 	args = append(args, worktreePath)
@@ -2175,14 +2175,8 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		return nil, err
 	}
 
-	// If using git-crypt, unlock and checkout
-	if usesGitCrypt {
-		if err := m.unlockGitCryptAndCheckout(ctx, worktreePath); err != nil {
-			_ = m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath)
-			return nil, err
-		}
-	} else {
-		m.initSubmodules(ctx, worktreePath)
+	if err := m.finishWorktreeCheckout(ctx, req.RepositoryPath, worktreePath, usesGitCrypt); err != nil {
+		return nil, err
 	}
 	if contributionRemote != "" {
 		if err := m.setUpstreamIfExistsRemote(ctx, worktreePath, existing.Branch, contributionRemote, req.RemoteContribution.HeadBranch); err != nil {

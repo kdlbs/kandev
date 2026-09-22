@@ -817,6 +817,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		writeDeps:           s.writeDependencies,
 		interactionDeps:     s.interactionResponderDep,
 		agentConversations:  s.agentConversationDeps,
+		log:                 s.log,
 	}
 }
 
