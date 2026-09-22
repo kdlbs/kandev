@@ -159,7 +159,7 @@ export function WorkflowCycleGuardDialog({
       onOpenChange={(open) => !open && !confirming.current && onCancel()}
     >
       <AlertDialogContent
-        className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-2xl"
+        className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-4xl"
         enterConfirms={!isBlocking}
         data-testid="workflow-cycle-guard-dialog"
       >

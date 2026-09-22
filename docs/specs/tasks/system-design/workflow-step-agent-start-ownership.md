@@ -8,6 +8,7 @@ requirements:
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006
+  - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007
 ---
 
 # Workflow Step Agent Start Ownership System Design
@@ -30,6 +31,7 @@ The design preserves runtime configuration through the existing reset contract. 
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004` | [Creation destination routing](#creation-destination-routing) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005` | [Asynchronous launch prompt preservation](#asynchronous-launch-prompt-preservation) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006` | [Initial creation prompt admission](#initial-creation-prompt-admission) |
+| `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007` | [Workflow editor prompt default](#workflow-editor-prompt-default) |
 
 ## Components and responsibilities
 
@@ -412,6 +414,38 @@ Use controlled startup barriers to prove preservation after the launch call alre
 Cover duplicate callbacks, replacement execution, same-execution successor turn, terminal races, and dynamic fallback ownership.
 Exercise real queue persistence and the service recovery-to-boot-ready-to-dispatch path.
 Verify one transcript row, one delivered prompt, preserved metadata, paused queues, and restart after queue persistence.
+
+## Workflow editor prompt default
+
+`StepConfigPanel` owns the local prompt value, the editable `WorkflowStep`
+draft, and the update callback. It therefore owns the empty-to-non-empty
+transition that applies the automatic-start default. `StepPromptSection` routes
+editor changes and prompt-template selections through the same prompt-change
+callback so every authoring path has identical behavior.
+
+A pure workflow-editor helper compares the previous local prompt, the next
+prompt, and the current step entry actions. It adds one `auto_start_agent`
+action only when the previous prompt is empty, the next prompt is non-empty,
+and the action is absent. It preserves every other entry action and never adds
+a duplicate.
+
+When the helper adds the action, `StepConfigPanel` publishes the prompt and the
+updated entry actions in one draft update. The Auto-start agent checkbox then
+reflects the default immediately. Later prompt edits update the same draft
+without changing entry actions. The workflow settings save boundary persists
+both fields through the existing step update contract.
+
+The helper does not run on component mount. An existing non-empty prompt is not
+migrated merely because the editor renders or another setting changes. Once a
+prompt is non-empty, later edits do not add the action again, so an explicit
+user disable remains effective. Clearing the prompt does not remove any entry
+action; a later empty-to-non-empty transition applies the default again.
+
+The missing-auto-start warning and its locale entry are removed. The existing
+prompt usage hint continues to explain that a step prompt replaces the task
+description unless it contains `{{task_prompt}}`. Desktop and mobile share the
+same workflow card, callback, and draft state, with the card retaining its
+single scroll owner and existing containment behavior.
 
 ## Observability
 
