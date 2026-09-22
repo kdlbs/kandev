@@ -281,7 +281,16 @@ func TestWSSyncTaskPRPassiveKeepsActionsCache(t *testing.T) {
 	}
 	scope := testAutomationScope(t, svc, testWorkspaceID)
 	key := workflowRunsCacheKey(scope, "owner", "repo", "head-ws-actions")
+	resolved, err := svc.resolveAutomationClient(ctx, testWorkspaceID, "", "")
+	if err != nil {
+		t.Fatalf("resolve workspace client: %v", err)
+	}
+	personalScope := resolved.cacheScopeForPurpose(CredentialPurposePersonalRead)
+	personalKey := workflowRunsCacheKey(personalScope, "owner", "repo", "head-ws-actions")
 	svc.workflowRunsCache.setWithTTL(key, []WorkflowRun{{
+		ID: 1, RunAttempt: 1, Status: workflowStatusCompleted, Conclusion: "success",
+	}}, workflowAttentionLongTTL)
+	svc.workflowRunsCache.setWithTTL(personalKey, []WorkflowRun{{
 		ID: 1, RunAttempt: 1, Status: workflowStatusCompleted, Conclusion: "success",
 	}}, workflowAttentionLongTTL)
 	gh.ReplaceWorkflowRuns("owner", "repo", "head-ws-actions", []WorkflowRun{{
@@ -303,6 +312,9 @@ func TestWSSyncTaskPRPassiveKeepsActionsCache(t *testing.T) {
 	if !ok || passiveValue.([]WorkflowRun)[0].ID != 1 {
 		t.Fatal("passive task sync invalidated completed Actions cache")
 	}
+	if personalValue, ok := svc.workflowRunsCache.get(personalKey); !ok || personalValue.([]WorkflowRun)[0].ID != 1 {
+		t.Fatal("passive task sync invalidated the personal-read Actions cache")
+	}
 
 	explicit, err := ws.NewRequest("explicit-actions", ws.ActionGitHubTaskPRSync, map[string]any{
 		"task_id":          "task-ws-actions",
@@ -317,6 +329,9 @@ func TestWSSyncTaskPRPassiveKeepsActionsCache(t *testing.T) {
 	explicitValue, ok := svc.workflowRunsCache.get(key)
 	if !ok || explicitValue.([]WorkflowRun)[0].ID != 2 {
 		t.Fatalf("explicit task refresh did not replace the Actions cache: %#v", explicitValue)
+	}
+	if _, ok := svc.workflowRunsCache.get(personalKey); ok {
+		t.Fatal("explicit task refresh left the personal-read Actions cache populated")
 	}
 	svc.Stop()
 }

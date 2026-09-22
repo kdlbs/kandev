@@ -266,11 +266,11 @@ jobs:
       - name: Run golangci-lint
         # golangci-lint is preinstalled in the kandev-ci image; invoke it
         # directly instead of going through `golangci/golangci-lint-action`,
-        # which would re-download its own binary on every run. `--timeout=5m`
-        # matches the action's previous implicit default (the binary's own
-        # default is 1m, which can trip on cold caches).
+        # which would re-download its own binary on every run. Ten minutes
+        # keeps cold module and analyzer caches from turning a clean lint into
+        # a timeout.
         shell: bash
-        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=5m
+        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=10m
 
   test_shards:
     name: Backend Tests (${{ matrix.shard }}/2)

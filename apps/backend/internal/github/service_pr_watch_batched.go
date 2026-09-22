@@ -77,7 +77,7 @@ func (s *Service) syncWorkspaceWatchesBatched(
 		credentialGeneration = resolved.credential.CredentialGeneration
 	}
 	if explicitRefresh {
-		s.invalidateWorkflowAttentionForWatches(resolved.CacheScope, watches)
+		s.invalidateWorkflowAttentionForResolvedWatches(resolved, watches)
 	}
 	return s.syncWatchesBatchedWithClient(
 		ctx, resolved.Client, resolved.CacheScope, workspaceID, credentialGeneration, watches, explicitRefresh,

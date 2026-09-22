@@ -2112,7 +2112,9 @@ func (s *Service) triggerPRStatusSyncWithOptions(
 		return nil, err
 	}
 	if explicitRefresh {
-		s.invalidateWorkflowAttentionForPR(resolved.CacheScope, watch.Owner, watch.Repo, watch.PRNumber, "")
+		s.invalidateWorkflowAttentionForResolvedPR(
+			resolved, watch.Owner, watch.Repo, watch.PRNumber, "",
+		)
 	}
 	if !explicitRefresh {
 		if tp, _ := s.loadTaskPRForWatch(ctx, taskID, watch); tp != nil && tp.LastSyncedAt != nil {

@@ -169,11 +169,35 @@ func (s *Service) invalidateWorkflowAttentionForPR(
 	}
 }
 
-func (s *Service) invalidateWorkflowAttentionForWatches(cacheScope string, watches []*PRWatch) {
+// invalidateWorkflowAttentionForResolvedPR clears the automation namespace
+// and the personal-read namespace for the same resolved credential. The
+// status synchronizer uses the former, while the feedback endpoint uses the
+// latter, so an explicit refresh must invalidate both views together.
+func (s *Service) invalidateWorkflowAttentionForResolvedPR(
+	resolved *resolvedServiceClient, owner, repo string, number int, headSHA string,
+) {
+	if resolved == nil {
+		return
+	}
+	s.invalidateWorkflowAttentionForPR(resolved.CacheScope, owner, repo, number, headSHA)
+	personalScope := resolved.cacheScopeForPurpose(CredentialPurposePersonalRead)
+	if personalScope != "" && personalScope != resolved.CacheScope {
+		s.invalidateWorkflowAttentionForPR(personalScope, owner, repo, number, headSHA)
+	}
+}
+
+func (s *Service) invalidateWorkflowAttentionForResolvedWatches(
+	resolved *resolvedServiceClient, watches []*PRWatch,
+) {
+	if resolved == nil {
+		return
+	}
 	for _, watch := range watches {
 		if watch == nil {
 			continue
 		}
-		s.invalidateWorkflowAttentionForPR(cacheScope, watch.Owner, watch.Repo, watch.PRNumber, "")
+		s.invalidateWorkflowAttentionForResolvedPR(
+			resolved, watch.Owner, watch.Repo, watch.PRNumber, "",
+		)
 	}
 }
