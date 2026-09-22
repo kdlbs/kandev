@@ -231,7 +231,7 @@ function TaskCreateWorkflowAgentOverridesSection({
 
 type AdvancedSettingsContentProps = Omit<
   TaskCreateAdvancedSettingsProps,
-  "isCreateMode" | "isTaskStarted"
+  "isCreateMode" | "isTaskStarted" | keyof TaskCreateParentWorkspaceSettingProps
 >;
 
 function TaskCreateAdvancedSettingsContent({
@@ -383,6 +383,7 @@ export function TaskCreateAdvancedSettings({
           onWorkflowAgentOverrideChange={onWorkflowAgentOverrideChange}
           onResetWorkflowAgentOverrides={onResetWorkflowAgentOverrides}
           onRetryWorkflowAgentOverrides={onRetryWorkflowAgentOverrides}
+        />
         <TaskCreateParentWorkspaceSetting
           initialWorkspaceLayout={initialWorkspaceLayout}
           onInitialWorkspaceLayoutChange={onInitialWorkspaceLayoutChange}

@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+/* eslint-disable max-lines -- related dialog state regressions share one focused fixture. */
+
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { computeDialogDefaultStepId } from "./task-create-dialog-defaults";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
@@ -227,6 +229,7 @@ describe("useDialogFormState — workspace changes", () => {
 
     await waitFor(() => expect(result.current.workflowAgentOverrides).toEqual({}));
   });
+});
 
 describe("useDialogFormState — initial workspace layout", () => {
   it("defaults to repository and resets an opt-in when the dialog reopens", () => {

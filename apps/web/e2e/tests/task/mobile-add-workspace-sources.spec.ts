@@ -1,4 +1,3 @@
-import { waitForFiniteAnimations } from "../../helpers/animations";
 import { mockFolderAvailability } from "../../helpers/open-task-folder";
 import { expect, test } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";

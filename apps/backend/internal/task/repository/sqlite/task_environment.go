@@ -658,6 +658,7 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 	}
 	if incoming.WorktreeIntegrationRef != "" || incoming.WorktreeID == "" || replacePhysical {
 		row.WorktreeIntegrationRef = incoming.WorktreeIntegrationRef
+	}
 	if replacePhysical || incoming.WorkspaceRelativePath != "" {
 		row.WorkspaceRelativePath = incoming.WorkspaceRelativePath
 	}

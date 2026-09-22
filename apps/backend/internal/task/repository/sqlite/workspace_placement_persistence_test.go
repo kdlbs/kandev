@@ -246,10 +246,10 @@ func TestWorkspacePlacementLegacyRowsDefaultEmptyAfterMigrationReplay(t *testing
 			t.Fatalf("drop workspace placement column with %q: %v", statement, err)
 		}
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(ctx); err != nil {
 		t.Fatalf("replay workspace placement migrations: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(ctx); err != nil {
 		t.Fatalf("replay workspace placement migrations second time: %v", err)
 	}
 	assertWorkspacePlacementLegacyDefaults(t, repo)

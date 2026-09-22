@@ -206,8 +206,6 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		StartAgent:                  req.StartAgent,
 		ParentID:                    req.ParentID,
 		InitialWorkspaceLayout:      req.InitialWorkspaceLayout,
-		ExecutorID:                  req.ExecutorID,
-		ExecutorProfileID:           req.ExecutorProfileID,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))

@@ -286,7 +286,7 @@ func (m *workspaceSourceMaterializer) materializeWorktreeSources(ctx context.Con
 			if m.branches == nil {
 				return nil, nil, fmt.Errorf("worktree repository materializer is unavailable")
 			}
-			materialization, err := m.branches.materializeUnfinalized(ctx, taskID, source.Repository.ID)
+			materialization, err := m.branches.materializeUnfinalized(ctx, taskID, source.Repository.ID, nil)
 			if err != nil {
 				return created, materializations, err
 			}

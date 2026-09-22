@@ -135,16 +135,16 @@ type RepositoryCheckoutOptions struct {
 
 // TaskRepository represents a repository associated with a task
 type TaskRepository struct {
-	CheckoutOptions *RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
-	ID              string                     `json:"id"`
-	TaskID          string                     `json:"task_id"`
-	RepositoryID    string                     `json:"repository_id"`
-	WorkspaceRelativePath string                 `json:"workspace_relative_path,omitempty"`
-	BaseBranch      string                     `json:"base_branch"`
-	Position        int                        `json:"position"`
-	Metadata        map[string]interface{}     `json:"metadata,omitempty"`
-	CreatedAt       time.Time                  `json:"created_at"`
-	UpdatedAt       time.Time                  `json:"updated_at"`
+	CheckoutOptions       *RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
+	ID                    string                     `json:"id"`
+	TaskID                string                     `json:"task_id"`
+	RepositoryID          string                     `json:"repository_id"`
+	WorkspaceRelativePath string                     `json:"workspace_relative_path,omitempty"`
+	BaseBranch            string                     `json:"base_branch"`
+	Position              int                        `json:"position"`
+	Metadata              map[string]interface{}     `json:"metadata,omitempty"`
+	CreatedAt             time.Time                  `json:"created_at"`
+	UpdatedAt             time.Time                  `json:"updated_at"`
 }
 
 // TaskWorkspaceFolder represents a non-Git folder associated with a task.

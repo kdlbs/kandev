@@ -1477,11 +1477,11 @@ func IsAutomationTaskOrigin(origin string) bool {
 
 // Task represents a task in the database
 type Task struct {
-	ID             string `json:"id"`
-	WorkspaceID    string `json:"workspace_id"`
+	ID                     string `json:"id"`
+	WorkspaceID            string `json:"workspace_id"`
 	InitialWorkspaceLayout string `json:"initial_workspace_layout,omitempty"`
-	WorkflowID     string `json:"workflow_id"`
-	WorkflowStepID string `json:"workflow_step_id"`
+	WorkflowID             string `json:"workflow_id"`
+	WorkflowStepID         string `json:"workflow_step_id"`
 	// WorkflowAgentOverrides is scoped to WorkflowID and expands the grouped
 	// create choice into fixed step bindings. It is nil for ordinary tasks.
 	WorkflowAgentOverrides *WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
@@ -3561,16 +3561,16 @@ func (t *Task) ToAPI() *v1.Task {
 	var repositories []v1.TaskRepository
 	for _, repo := range t.Repositories {
 		repositories = append(repositories, v1.TaskRepository{
-			CheckoutOptions: PublicRepositoryCheckoutOptions(repo.Metadata),
-			ID:              repo.ID,
-			TaskID:          repo.TaskID,
-			RepositoryID:    repo.RepositoryID,
-			BaseBranch:      repo.BaseBranch,
+			CheckoutOptions:       PublicRepositoryCheckoutOptions(repo.Metadata),
+			ID:                    repo.ID,
+			TaskID:                repo.TaskID,
+			RepositoryID:          repo.RepositoryID,
+			BaseBranch:            repo.BaseBranch,
 			WorkspaceRelativePath: repo.WorkspaceRelativePath,
-			Position:        repo.Position,
-			Metadata:        repo.Metadata,
-			CreatedAt:       repo.CreatedAt,
-			UpdatedAt:       repo.UpdatedAt,
+			Position:              repo.Position,
+			Metadata:              repo.Metadata,
+			CreatedAt:             repo.CreatedAt,
+			UpdatedAt:             repo.UpdatedAt,
 		})
 	}
 

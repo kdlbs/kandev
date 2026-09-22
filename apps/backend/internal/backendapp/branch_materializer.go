@@ -206,7 +206,7 @@ func (b *branchMaterializer) resolveMaterializationEnvironment(
 	if err != nil || env == nil {
 		return env, err
 	}
-	if session == nil || session.TaskEnvironmentID != env.ID {
+	if session == nil || (session.TaskEnvironmentID != "" && session.TaskEnvironmentID != env.ID) {
 		return nil, fmt.Errorf("%w: selected session is not bound to task environment %s", models.ErrWorkspaceReuseUnsafe, env.ID)
 	}
 	if err := b.validateMaterializationEnvironmentOwner(ctx, taskID, env); err != nil {
@@ -276,7 +276,7 @@ func (b *branchMaterializer) verifyMaterializationTarget(
 	if err != nil {
 		return err
 	}
-	if current == nil || current.ID != sessionID || current.TaskEnvironmentID != environmentID {
+	if current == nil || current.ID != sessionID || (current.TaskEnvironmentID != "" && current.TaskEnvironmentID != environmentID) {
 		return fmt.Errorf("%w: branch materialization session binding changed", models.ErrWorkspaceReuseUnsafe)
 	}
 	return nil

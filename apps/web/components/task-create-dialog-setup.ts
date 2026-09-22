@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable max-lines -- the setup module owns the task dialog's complete hook and submit wiring. */
+
 import { FormEvent, useCallback, useState } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
@@ -150,8 +152,8 @@ type SubmitWiringArgs = {
   editDependencies: ReturnType<typeof useTaskEditDialogDependencies>;
   refreshBranchPolicies: () => Promise<void>;
   preserveQueuedLastUsedOnClose: () => void;
-	workflowAgentOverridesBlockedReason?: string;
-	initialWorkspaceLayout: InitialWorkspaceLayout | undefined;
+  workflowAgentOverridesBlockedReason?: string;
+  initialWorkspaceLayout: InitialWorkspaceLayout | undefined;
 };
 
 function useSubmitHandlersWiring({
@@ -166,8 +168,8 @@ function useSubmitHandlersWiring({
   editDependencies,
   refreshBranchPolicies,
   preserveQueuedLastUsedOnClose,
-	workflowAgentOverridesBlockedReason,
-	initialWorkspaceLayout,
+  workflowAgentOverridesBlockedReason,
+  initialWorkspaceLayout,
 }: SubmitWiringArgs) {
   const {
     workspaceId,
@@ -453,6 +455,7 @@ function resolveInitialWorkspaceLayoutForDialog(
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- the setup hook preserves one ordered wiring boundary for the dialog.
 export function useTaskCreateDialogSetup(
   props: TaskCreateDialogProps,
   options: { preserveQueuedLastUsedOnClose?: () => void } = {},
@@ -487,14 +490,8 @@ export function useTaskCreateDialogSetup(
   );
   const sessionRepoName = useSessionRepoName(isSessionMode);
   const data = useDialogSetupData(resolvedProps, fs);
-  const {
-    repositories,
-    userSettingsLoaded,
-    computed,
-    repositoryLocalPath,
-    refreshBranchPolicies,
-    savedBaseSubmitBlockedReason,
-  } = data;
+  const { computed, repositoryLocalPath, refreshBranchPolicies, savedBaseSubmitBlockedReason } =
+    data;
   const workflowAgentOverrideValidation = resolveWorkflowAgentOverrideValidation(
     mode,
     workspaceId,

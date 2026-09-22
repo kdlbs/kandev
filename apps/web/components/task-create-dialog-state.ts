@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable max-lines -- the state module owns the task creation form lifecycle and projections. */
+
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import type { InitialWorkspaceLayout, LocalRepository, TaskPriority } from "@/lib/types/http";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";

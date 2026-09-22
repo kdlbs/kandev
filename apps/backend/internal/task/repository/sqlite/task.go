@@ -435,7 +435,7 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO tasks (id, workspace_id, initial_workspace_layout, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), task.ID, task.WorkspaceID, task.InitialWorkspaceLayout, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
 	if err != nil {
 		if isExternalIDUniqueViolation(err) {

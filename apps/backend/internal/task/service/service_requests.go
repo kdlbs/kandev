@@ -122,9 +122,7 @@ type CreateTaskRequest struct {
 	// Executor selection is supplied by authenticated API adapters for creation
 	// time layout validation. These fields are internal to the service request;
 	// the public JSON shape belongs to the adapters.
-	ExecutorID        string `json:"-"`
-	ExecutorProfileID string `json:"-"`
-	ExecutorType      string `json:"-"`
+	ExecutorType string `json:"-"`
 	// WorkspacePolicy carries the effective policy resolved by an API adapter.
 	// When omitted, CreateTask derives child defaults from the persisted parent.
 	WorkspacePolicy *WorkspacePolicy `json:"-"`
