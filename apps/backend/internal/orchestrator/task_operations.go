@@ -655,6 +655,15 @@ func (s *Service) startCreatedSession(
 
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
+	exactProfile := false
+	var exactAssignment *ExactProfileLaunchDecision
+	if exact, err := s.resolveExactProfileAssignment(ctx, taskID); err != nil {
+		return nil, err
+	} else if exact != nil {
+		exactAssignment = exact
+		agentProfileID = exact.AgentProfileID
+		exactProfile = true
+	}
 
 	s.logger.Debug("starting created session",
 		zap.String("task_id", taskID),
@@ -719,9 +728,11 @@ func (s *Service) startCreatedSession(
 	// inherits the workflow's default agent. resolveEffectiveAgentProfile keeps
 	// the caller profile only when neither a step override nor a workflow
 	// default applies; either of those overrides a non-empty caller.
-	effectiveProfileID, err = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
-	if err != nil {
-		return nil, err
+	if !exactProfile {
+		effectiveProfileID, err = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if effectiveProfileID == "" {
@@ -731,6 +742,9 @@ func (s *Service) startCreatedSession(
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, effectiveProfileID); err != nil {
 			return nil, err
 		}
+	}
+	if err := s.persistExactProfileSessionBinding(ctx, session, exactAssignment); err != nil {
+		return nil, err
 	}
 
 	// If the workflow step overrode the profile, update the session record in DB
@@ -935,13 +949,17 @@ func (s *Service) startCreatedSession(
 		}()
 	}
 	launchOptions := executor.LaunchOptions{
-		AgentProfileID: effectiveProfileID,
-		ExecutorID:     executorID,
-		Prompt:         effectivePrompt,
-		StartAgent:     true,
-		McpMode:        mcpMode,
-		Attachments:    attachments,
-		TurnID:         initialTurnID,
+		AgentProfileID:         effectiveProfileID,
+		ExactProfile:           exactProfile,
+		ExactProfileGeneration: exactAssignmentGeneration(exactAssignment),
+		ExactProfileRevision:   exactAssignmentRevision(exactAssignment),
+		ExactProfileModel:      exactProfileModel(exactAssignment),
+		ExecutorID:             executorID,
+		Prompt:                 effectivePrompt,
+		StartAgent:             true,
+		McpMode:                mcpMode,
+		Attachments:            attachments,
+		TurnID:                 initialTurnID,
 	}
 	if options.initialCreatePrompt && session.IsPassthrough {
 		launchOptions.OnExecutionAdmitted = func(executionID string) {
@@ -950,6 +968,7 @@ func (s *Service) startCreatedSession(
 	}
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
 	if err != nil {
+		s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err)
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.
 		if initialTurnCreated {
@@ -957,6 +976,14 @@ func (s *Service) startCreatedSession(
 		}
 		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
 	}
+	launchedSession, loadErr := s.repo.GetTaskSession(ctx, execution.SessionID)
+	if loadErr != nil {
+		return nil, loadErr
+	}
+	if err := s.persistExactProfileSessionBinding(ctx, launchedSession, exactAssignment); err != nil {
+		return nil, err
+	}
+	s.recordExactProfileLaunchReceipt(ctx, taskID, execution.SessionID, exactAssignment, exactProfileModel(exactAssignment), nil)
 
 	// Record the initial user message and set plan mode metadata after launch.
 	// Note: we do NOT set session state here — the executor sets it to STARTING,
@@ -2967,6 +2994,13 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
+	exactAssignment, err := s.resolveExactProfileAssignment(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.persistExactProfileSessionBinding(ctx, session, exactAssignment); err != nil {
+		return nil, err
+	}
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, entryBinding); err != nil {
 		return nil, err
 	}
@@ -3175,6 +3209,7 @@ func (s *Service) resumeTaskSessionWithContinuation(
 				return nil, attemptErr
 			}
 			persistBranchRecovery()
+			s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err)
 			return nil, decorateResumeFailure(err)
 		}
 	}
