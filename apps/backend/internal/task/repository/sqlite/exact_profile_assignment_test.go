@@ -137,6 +137,7 @@ func TestExactProfileAttemptBindingGuardsReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: "bound-session", ExecutionID: "execution-1", AttemptID: "attempt-1", SessionIncarnationID: "incarnation-1", AgentProfileID: assignment.AgentProfileID, ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
+	createExactProfileAttemptSession(t, repo, binding)
 	receipt := &models.ExactProfileLaunchReceipt{TaskID: binding.TaskID, SessionID: binding.SessionID, AgentProfileID: binding.AgentProfileID, ProfileRevision: binding.ProfileRevision, Generation: binding.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
 	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(t.Context(), binding, receipt); changed || !errors.Is(err, models.ErrExactProfileAssignmentGeneration) {
 		t.Fatalf("missing binding changed=%v err=%v", changed, err)
@@ -154,6 +155,101 @@ func TestExactProfileAttemptBindingGuardsReceipt(t *testing.T) {
 	stale.AttemptID = "attempt-old"
 	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(t.Context(), &stale, receipt); changed || !errors.Is(err, models.ErrExactProfileAssignmentGeneration) {
 		t.Fatalf("stale binding changed=%v err=%v", changed, err)
+	}
+}
+
+func TestExactProfileAttemptRejectsSupersededAssignment(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	if _, err := repo.AssignExactProfileAssignment(t.Context(), assignment); err != nil {
+		t.Fatal(err)
+	}
+	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: "superseded-session", ExecutionID: "execution-old", AttemptID: "attempt-old", SessionIncarnationID: "incarnation-old", AgentProfileID: assignment.AgentProfileID, ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
+	createExactProfileAttemptSession(t, repo, binding)
+	if _, err := repo.BindExactProfileLaunchAttempt(t.Context(), binding); err != nil {
+		t.Fatal(err)
+	}
+	next := *assignment
+	next.Generation++
+	next.ProfileRevision = next.ProfileRevision.Add(time.Second)
+	if _, err := repo.AssignExactProfileAssignment(t.Context(), &next); err != nil {
+		t.Fatal(err)
+	}
+	receipt := &models.ExactProfileLaunchReceipt{TaskID: binding.TaskID, SessionID: binding.SessionID, AgentProfileID: binding.AgentProfileID, ProfileRevision: binding.ProfileRevision, Generation: binding.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
+	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(t.Context(), binding, receipt); changed || !errors.Is(err, models.ErrExactProfileAssignmentGeneration) {
+		t.Fatalf("superseded receipt changed=%v err=%v", changed, err)
+	}
+}
+
+func TestExactProfileAttemptRejectsSupersededSessionAndAdmitsSuccessor(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	if _, err := repo.AssignExactProfileAssignment(t.Context(), assignment); err != nil {
+		t.Fatal(err)
+	}
+	old := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: "successor-session", ExecutionID: "execution-old", AttemptID: "attempt-old", SessionIncarnationID: "incarnation-old", AgentProfileID: assignment.AgentProfileID, ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
+	createExactProfileAttemptSession(t, repo, old)
+	if _, err := repo.BindExactProfileLaunchAttempt(t.Context(), old); err != nil {
+		t.Fatal(err)
+	}
+	nextAssignment := *assignment
+	nextAssignment.Generation++
+	nextAssignment.ProfileRevision = nextAssignment.ProfileRevision.Add(time.Second)
+	if _, err := repo.AssignExactProfileAssignment(t.Context(), &nextAssignment); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.db.Exec(`UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?`, "incarnation-successor", old.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	successor := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: old.SessionID, ExecutionID: "execution-successor", AttemptID: "attempt-successor", SessionIncarnationID: "incarnation-successor", AgentProfileID: nextAssignment.AgentProfileID, ProfileRevision: nextAssignment.ProfileRevision, Generation: nextAssignment.Generation, ExpectedPrior: old}
+	if changed, err := repo.BindExactProfileLaunchAttempt(t.Context(), successor); err != nil || !changed {
+		t.Fatalf("replace binding = (%v, %v)", changed, err)
+	}
+	oldReceipt := &models.ExactProfileLaunchReceipt{TaskID: old.TaskID, SessionID: old.SessionID, AgentProfileID: old.AgentProfileID, ProfileRevision: old.ProfileRevision, Generation: old.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
+	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(t.Context(), old, oldReceipt); changed || !errors.Is(err, models.ErrExactProfileAssignmentGeneration) {
+		t.Fatalf("old receipt = (%v, %v)", changed, err)
+	}
+	successorReceipt := &models.ExactProfileLaunchReceipt{TaskID: successor.TaskID, SessionID: successor.SessionID, AgentProfileID: successor.AgentProfileID, ProfileRevision: successor.ProfileRevision, Generation: successor.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
+	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(t.Context(), successor, successorReceipt); err != nil || !changed {
+		t.Fatalf("successor receipt = (%v, %v)", changed, err)
+	}
+}
+
+func TestExactProfileAttemptBindingRequiresCurrentAssignmentSessionAndCAS(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	if _, err := repo.AssignExactProfileAssignment(t.Context(), assignment); err != nil {
+		t.Fatal(err)
+	}
+	missingSession := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: "missing", ExecutionID: "execution", AttemptID: "attempt", SessionIncarnationID: "incarnation", AgentProfileID: assignment.AgentProfileID, ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
+	if changed, err := repo.BindExactProfileLaunchAttempt(t.Context(), missingSession); changed || !errors.Is(err, models.ErrExactProfileAssignmentGeneration) {
+		t.Fatalf("missing session bind = (%v, %v)", changed, err)
+	}
+	current := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: "cas-session", ExecutionID: "execution-current", AttemptID: "attempt-current", SessionIncarnationID: "incarnation-current", AgentProfileID: assignment.AgentProfileID, ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
+	createExactProfileAttemptSession(t, repo, current)
+	missingAssignment := *current
+	missingAssignment.AgentProfileID = "profile-missing"
+	if changed, err := repo.BindExactProfileLaunchAttempt(t.Context(), &missingAssignment); changed || !errors.Is(err, models.ErrExactProfileAssignmentGeneration) {
+		t.Fatalf("missing assignment bind = (%v, %v)", changed, err)
+	}
+	if _, err := repo.BindExactProfileLaunchAttempt(t.Context(), current); err != nil {
+		t.Fatal(err)
+	}
+	forged := *current
+	forged.ExecutionID = "execution-forged"
+	forged.AttemptID = "attempt-forged"
+	if changed, err := repo.BindExactProfileLaunchAttempt(t.Context(), &forged); changed || !errors.Is(err, models.ErrExactProfileAssignmentGeneration) {
+		t.Fatalf("replacement without CAS = (%v, %v)", changed, err)
+	}
+	wrongPrior := *current
+	wrongPrior.AttemptID = "wrong-prior"
+	forged.ExpectedPrior = &wrongPrior
+	if changed, err := repo.BindExactProfileLaunchAttempt(t.Context(), &forged); changed || !errors.Is(err, models.ErrExactProfileAssignmentGeneration) {
+		t.Fatalf("replacement with forged CAS = (%v, %v)", changed, err)
+	}
+}
+
+func createExactProfileAttemptSession(t *testing.T, repo *Repository, binding *models.ExactProfileLaunchAttemptBinding) {
+	t.Helper()
+	if err := repo.CreateTaskSession(t.Context(), &models.TaskSession{ID: binding.SessionID, TaskID: binding.TaskID, QueueIncarnationID: binding.SessionIncarnationID, State: models.TaskSessionStateCreated}); err != nil {
+		t.Fatal(err)
 	}
 }
 

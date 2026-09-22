@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -347,22 +348,58 @@ func (r *Repository) RecordExactProfileLaunchReceipt(ctx context.Context, receip
 }
 
 func (r *Repository) BindExactProfileLaunchAttempt(ctx context.Context, binding *models.ExactProfileLaunchAttemptBinding) (bool, error) {
-	if binding == nil || binding.TaskID == "" || binding.SessionID == "" || binding.ExecutionID == "" || binding.AttemptID == "" || binding.SessionIncarnationID == "" || binding.AgentProfileID == "" || binding.ProfileRevision.IsZero() || binding.Generation < 1 {
+	if !validExactProfileLaunchAttemptBinding(binding) {
 		return false, models.ErrExactProfileAssignmentInvalidInput
 	}
 	if binding.CreatedAt.IsZero() {
 		binding.CreatedAt = r.exactProfileAssignmentNow()
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`INSERT INTO task_exact_profile_launch_attempt_bindings (task_id, session_id, execution_id, attempt_id, session_incarnation_id, agent_profile_id, profile_revision_nanos, generation, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id, session_id) DO NOTHING`), binding.TaskID, binding.SessionID, binding.ExecutionID, binding.AttemptID, binding.SessionIncarnationID, binding.AgentProfileID, binding.ProfileRevision.UnixNano(), binding.Generation, binding.CreatedAt)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("bind exact profile launch attempt: %w", err)
+		return false, fmt.Errorf("begin exact profile launch attempt: %w", err)
 	}
-	rows, err := result.RowsAffected()
-	return rows == 1, err
+	defer func() { _ = tx.Rollback() }()
+	if err := r.validateExactProfileLaunchAttemptCurrentTx(ctx, tx, binding); err != nil {
+		return false, err
+	}
+	var current models.ExactProfileLaunchAttemptBinding
+	var revisionNanos int64
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT task_id, session_id, execution_id, attempt_id, session_incarnation_id, agent_profile_id, profile_revision_nanos, generation, created_at FROM task_exact_profile_launch_attempt_bindings WHERE task_id=? AND session_id=?`), binding.TaskID, binding.SessionID).Scan(&current.TaskID, &current.SessionID, &current.ExecutionID, &current.AttemptID, &current.SessionIncarnationID, &current.AgentProfileID, &revisionNanos, &current.Generation, &current.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		if binding.ExpectedPrior != nil {
+			return false, models.ErrExactProfileAssignmentGeneration
+		}
+		_, err = tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO task_exact_profile_launch_attempt_bindings (task_id, session_id, execution_id, attempt_id, session_incarnation_id, agent_profile_id, profile_revision_nanos, generation, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`), binding.TaskID, binding.SessionID, binding.ExecutionID, binding.AttemptID, binding.SessionIncarnationID, binding.AgentProfileID, binding.ProfileRevision.UnixNano(), binding.Generation, binding.CreatedAt)
+		if err != nil {
+			return false, fmt.Errorf("insert exact profile launch attempt: %w", err)
+		}
+	} else if err != nil {
+		return false, fmt.Errorf("load exact profile launch attempt: %w", err)
+	} else {
+		current.ProfileRevision = time.Unix(0, revisionNanos).UTC()
+		if binding.ExpectedPrior == nil || !exactProfileLaunchAttemptBindingsEqual(&current, binding.ExpectedPrior) {
+			return false, models.ErrExactProfileAssignmentGeneration
+		}
+		result, execErr := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_exact_profile_launch_attempt_bindings SET execution_id=?, attempt_id=?, session_incarnation_id=?, agent_profile_id=?, profile_revision_nanos=?, generation=?, created_at=? WHERE task_id=? AND session_id=? AND execution_id=? AND attempt_id=? AND session_incarnation_id=? AND agent_profile_id=? AND profile_revision_nanos=? AND generation=?`), binding.ExecutionID, binding.AttemptID, binding.SessionIncarnationID, binding.AgentProfileID, binding.ProfileRevision.UnixNano(), binding.Generation, binding.CreatedAt, binding.TaskID, binding.SessionID, current.ExecutionID, current.AttemptID, current.SessionIncarnationID, current.AgentProfileID, current.ProfileRevision.UnixNano(), current.Generation)
+		if execErr != nil {
+			return false, fmt.Errorf("replace exact profile launch attempt: %w", execErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return false, rowsErr
+		}
+		if rows != 1 {
+			return false, models.ErrExactProfileAssignmentGeneration
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit exact profile launch attempt: %w", err)
+	}
+	return true, nil
 }
 
 func (r *Repository) RecordExactProfileLaunchReceiptForAttempt(ctx context.Context, binding *models.ExactProfileLaunchAttemptBinding, receipt *models.ExactProfileLaunchReceipt) (bool, error) {
-	if binding == nil || receipt == nil {
+	if !validExactProfileLaunchAttemptBinding(binding) || receipt == nil {
 		return false, models.ErrExactProfileAssignmentInvalidInput
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
@@ -376,6 +413,9 @@ func (r *Repository) RecordExactProfileLaunchReceiptForAttempt(ctx context.Conte
 		return false, models.ErrExactProfileAssignmentGeneration
 	}
 	if err != nil {
+		return false, err
+	}
+	if err := r.validateExactProfileLaunchAttemptCurrentTx(ctx, tx, binding); err != nil {
 		return false, err
 	}
 	if receipt.TaskID != binding.TaskID || receipt.SessionID != binding.SessionID || receipt.AgentProfileID != binding.AgentProfileID || receipt.Generation != binding.Generation || !receipt.ProfileRevision.Equal(binding.ProfileRevision) {
@@ -393,6 +433,33 @@ func (r *Repository) RecordExactProfileLaunchReceiptForAttempt(ctx context.Conte
 		return false, err
 	}
 	return rows == 1, tx.Commit()
+}
+
+func validExactProfileLaunchAttemptBinding(binding *models.ExactProfileLaunchAttemptBinding) bool {
+	return binding != nil && binding.TaskID != "" && binding.SessionID != "" && binding.ExecutionID != "" && binding.AttemptID != "" && binding.SessionIncarnationID != "" && binding.AgentProfileID != "" && !binding.ProfileRevision.IsZero() && binding.Generation > 0
+}
+
+func exactProfileLaunchAttemptBindingsEqual(left, right *models.ExactProfileLaunchAttemptBinding) bool {
+	return left != nil && right != nil && left.TaskID == right.TaskID && left.SessionID == right.SessionID && left.ExecutionID == right.ExecutionID && left.AttemptID == right.AttemptID && left.SessionIncarnationID == right.SessionIncarnationID && left.AgentProfileID == right.AgentProfileID && left.ProfileRevision.Equal(right.ProfileRevision) && left.Generation == right.Generation
+}
+
+func (r *Repository) validateExactProfileLaunchAttemptCurrentTx(ctx context.Context, tx *sqlx.Tx, binding *models.ExactProfileLaunchAttemptBinding) error {
+	var found int
+	err := tx.GetContext(ctx, &found, r.db.Rebind(`SELECT 1 FROM task_exact_profile_assignments WHERE task_id=? AND agent_profile_id=? AND profile_revision=? AND generation=? AND active=?`), binding.TaskID, binding.AgentProfileID, binding.ProfileRevision, binding.Generation, dialect.BoolToInt(true))
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.ErrExactProfileAssignmentGeneration
+	}
+	if err != nil {
+		return fmt.Errorf("load current exact profile assignment: %w", err)
+	}
+	err = tx.GetContext(ctx, &found, r.db.Rebind(`SELECT 1 FROM task_sessions WHERE id=? AND task_id=? AND queue_incarnation_id=?`), binding.SessionID, binding.TaskID, binding.SessionIncarnationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.ErrExactProfileAssignmentGeneration
+	}
+	if err != nil {
+		return fmt.Errorf("load current exact profile session: %w", err)
+	}
+	return nil
 }
 
 // GetExactProfileLaunchReceipt loads the launch receipt for one session. A

@@ -59,4 +59,7 @@ type ExactProfileLaunchAttemptBinding struct {
 	ProfileRevision                                                                 time.Time
 	Generation                                                                      int64
 	CreatedAt                                                                       time.Time
+	// ExpectedPrior is an in-memory CAS token. A replacement is allowed only
+	// when the durable binding still equals this complete immutable tuple.
+	ExpectedPrior *ExactProfileLaunchAttemptBinding
 }
