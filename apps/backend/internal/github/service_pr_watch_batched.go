@@ -27,6 +27,8 @@ type PRWatchSyncResult struct {
 	DiscoveryResolved bool
 }
 
+const prSyncExplicitRefreshKeySuffix = "|explicit-refresh"
+
 // SyncWatchesBatched runs the batched GraphQL queries for the supplied
 // watches and applies the resulting DB updates: timestamps, task PR sync,
 // watch PR-number promotion on detection, watch reset on merge/close.
@@ -41,7 +43,7 @@ type PRWatchSyncResult struct {
 // TriggerPRSyncAll / ListWorkspaceTaskPRs background refresh share, so a
 // 40-watch workspace fans out to ~2 gh subprocess calls instead of 40.
 func (s *Service) SyncWatchesBatched(ctx context.Context, watches []*PRWatch) ([]PRWatchSyncResult, error) {
-	return s.syncWatchesBatchedWithClient(ctx, s.client, "legacy", "", 0, watches)
+	return s.syncWatchesBatchedWithClient(ctx, s.client, "legacy", "", 0, watches, false)
 }
 
 // SyncWorkspaceWatchesBatched resolves one automation credential and rejects
@@ -78,7 +80,7 @@ func (s *Service) syncWorkspaceWatchesBatched(
 		s.invalidateWorkflowAttentionForWatches(resolved.CacheScope, watches)
 	}
 	return s.syncWatchesBatchedWithClient(
-		ctx, resolved.Client, resolved.CacheScope, workspaceID, credentialGeneration, watches,
+		ctx, resolved.Client, resolved.CacheScope, workspaceID, credentialGeneration, watches, explicitRefresh,
 	)
 }
 
@@ -92,7 +94,8 @@ type prWatchBatchGroup struct {
 }
 
 func (s *Service) syncWatchesBatchedWithClient(
-	ctx context.Context, client Client, cacheScope, workspaceID string, credentialGeneration int64, watches []*PRWatch,
+	ctx context.Context, client Client, cacheScope, workspaceID string, credentialGeneration int64,
+	watches []*PRWatch, explicitRefresh bool,
 ) ([]PRWatchSyncResult, error) {
 	if len(watches) == 0 {
 		return nil, nil
@@ -133,8 +136,8 @@ func (s *Service) syncWatchesBatchedWithClient(
 		for _, watch := range group.watches[1:] {
 			s.trackPRDiscoveryWatchConsumer(workspaceID, cacheScope, credentialGeneration, watch)
 		}
-		attempt, ok := s.beginPRDiscoveryWatch(
-			workspaceID, cacheScope, credentialGeneration, group.representative,
+		attempt, ok := s.beginPRDiscoveryWatchWithOptions(
+			workspaceID, cacheScope, credentialGeneration, group.representative, explicitRefresh,
 		)
 		if !ok {
 			continue
@@ -157,7 +160,9 @@ func (s *Service) syncWatchesBatchedWithClient(
 	var statuses *batchedWatchStatuses
 	if len(leaderGroups) > 0 {
 		numbered, searching := splitPRWatches(admitted)
-		statuses, err = s.fetchBatchedWatchStatuses(ctx, client, exec, cacheScope, numbered, searching)
+		statuses, err = s.fetchBatchedWatchStatuses(
+			ctx, client, exec, cacheScope, numbered, searching, explicitRefresh,
+		)
 		if err != nil {
 			if s.handleBatchedDiscoveryFetchError(
 				workspaceID, cacheScope, credentialGeneration, leaderGroups, admitted, numbered, searching, err,
@@ -525,9 +530,13 @@ type batchedWatchStatuses struct {
 // GetPRFeedback / GetPRStatus. The leader's deadline is preserved so
 // the fetch can't outlive the request budget.
 func (s *Service) fetchBatchedWatchStatuses(
-	ctx context.Context, client Client, exec GraphQLExecutor, cacheScope string, numbered, searching []*PRWatch,
+	ctx context.Context, client Client, exec GraphQLExecutor, cacheScope string,
+	numbered, searching []*PRWatch, explicitRefresh bool,
 ) (*batchedWatchStatuses, error) {
 	key := scopedCacheKey(cacheScope, batchedFetchSingleflightKey(numbered, searching))
+	if explicitRefresh {
+		key += prSyncExplicitRefreshKeySuffix
+	}
 	fetchCtx, cancelFetch := derivedFetchContext(ctx)
 	defer cancelFetch()
 	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {

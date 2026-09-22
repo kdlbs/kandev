@@ -1946,6 +1946,9 @@ func (s *Service) triggerPRDetectionWithOptions(
 	// two never collide. singleflight only blocks same-key calls, so the nested
 	// triggerPRStatusSync (different key) below cannot deadlock.
 	key := scopedCacheKey(resolved.CacheScope, "pr-detect:"+watch.ID)
+	if explicitRefresh {
+		key += prSyncExplicitRefreshKeySuffix
+	}
 	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
 		return s.detectPRForWatchOnce(ctx, resolved, watch, taskID, explicitRefresh)
 	})
@@ -1992,8 +1995,8 @@ func (s *Service) detectPRForWatchOnce(
 	if resolved.credential != nil {
 		credentialGeneration = resolved.credential.CredentialGeneration
 	}
-	attempt, admitted := s.beginPRDiscoveryWatch(
-		watch.WorkspaceID, resolved.CacheScope, credentialGeneration, watch,
+	attempt, admitted := s.beginPRDiscoveryWatchWithOptions(
+		watch.WorkspaceID, resolved.CacheScope, credentialGeneration, watch, explicitRefresh,
 	)
 	if !admitted {
 		effectiveTaskID := s.reconcileTaskPROwnership(ctx, watch.SessionID, watch.TaskID, watch.RepositoryID, watch.PRNumber)
@@ -2149,7 +2152,7 @@ func (s *Service) runPRStatusSync(
 ) (*TaskPR, error) {
 	key := scopedCacheKey(resolved.CacheScope, fmt.Sprintf("%s/%s/%d", watch.Owner, watch.Repo, watch.PRNumber))
 	if explicitRefresh {
-		key += "|explicit-refresh"
+		key += prSyncExplicitRefreshKeySuffix
 	}
 	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -140,7 +140,9 @@ and stale-task refreshes bypass it.
 The task WebSocket sync boundary now carries an explicit refresh bit. Automatic
 subscription, reconnect, and retry requests use passive due admission, while a
 user refresh bypasses idle admission and still obeys quota and authentication
-gates. Added deterministic scheduler, repository-query, production-shaped
+gates. An explicit refresh supersedes an active passive provider attempt rather
+than reusing its result; concurrent explicit refreshes still share provider
+work, and discovery retry deadlines remain authoritative. Added deterministic scheduler, repository-query, production-shaped
 handler, and passive/explicit refresh regressions. Verification passed:
 
 ```bash

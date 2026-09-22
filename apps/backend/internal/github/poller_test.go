@@ -743,6 +743,7 @@ func TestRefreshStaleBranches_SkipsWhenResolverReturnsEmpty(t *testing.T) {
 // exercise the batched poll path without hitting the network.
 type graphQLMockClient struct {
 	*MockClient
+	mu              sync.Mutex
 	prResponses     []string // FIFO; one entry consumed per ExecuteGraphQL call carrying "Batch"
 	branchResponses []string // FIFO; consumed for "Branches" queries
 	prErr           error    // returned for the next "Batch" call
@@ -765,6 +766,8 @@ func (m *graphQLMockClient) ExecuteGraphQL(_ context.Context, query string, _ ma
 	if m.onExecute != nil {
 		m.onExecute()
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if strings.Contains(query, "query Branches") {
 		m.branchQueries = append(m.branchQueries, query)
 		if m.branchErr != nil {

@@ -203,6 +203,11 @@ Passive task/page refresh must use the same admission rule or it defeats the
 background savings. Explicit user refresh bypasses only idle admission, never
 quota or auth gates. Preserve `PRSyncFreshnessWindow` at 30 seconds for existing
 sync consumers and keep the distinction between automatic and explicit reads.
+If a passive provider attempt is already active, an explicit refresh starts a
+new admitted attempt instead of joining the passive result. The superseded
+attempt cannot publish its result, and concurrent explicit refreshes share the
+explicit batch singleflight key. A retry deadline from an authentication,
+rate-limit, or invalid-query failure remains authoritative.
 When a passive workspace read finds no stale task, admit workspace discovery
 reads at most once per minute. A newly created or reset watch clears that
 cooldown, and stale-task refreshes bypass it.

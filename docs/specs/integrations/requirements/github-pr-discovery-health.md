@@ -71,7 +71,7 @@ and provider status. Task and UI systems consume its results.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.1:** Searching watches shall use a 1-minute interval while their task runs or has less than 2 hours of inactivity. They shall use 15 minutes from 2 hours to less than 24 hours, then 30 minutes.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.2:** Task execution, task conversation activity, or an observed branch commit or push shall restore fast discovery. A new watch shall receive an initial attempt on the next poll tick.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.3:** Idle discovery shall not stop permanently. A PR opened externally on an unchanged branch shall remain discoverable. Known PRs shall retain their 1-minute background cadence.
-- **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.4:** Explicit PR refresh shall bypass the idle schedule but obey existing rate-limit and authentication admission. Passive frontend refreshes shall obey the idle schedule for searching targets.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.4:** Explicit PR refresh shall bypass the idle schedule but obey existing rate-limit and authentication admission. Passive frontend refreshes shall obey the idle schedule for searching targets. An explicit refresh shall not reuse the result of an active passive provider attempt.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.5:** Poll attempts and provider status writes shall not count as task activity. Shared targets shall use the fastest eligible member's schedule. Archived and deleted members shall not accelerate it.
 
 ### REQ-INTEGRATIONS-GITHUB-PR-POLLING-002: Bounded batch fallback
