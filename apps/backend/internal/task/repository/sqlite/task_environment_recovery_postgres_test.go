@@ -26,9 +26,6 @@ func TestPostgresTaskEnvironmentRecoveryClaimReplayBlocksLiveConsumers(t *testin
 		}},
 		{name: "attached consumer turn", seed: func(t *testing.T, repo *Repository, taskID, _ string, environmentID string) {
 			now := time.Now().UTC()
-			if err := repo.CreateTaskSession(t.Context(), &models.TaskSession{ID: "session-live-consumer-pg", TaskID: taskID, TaskEnvironmentID: environmentID, QueueIncarnationID: "incarnation-live-consumer-pg", State: models.TaskSessionStateWaitingForInput, StartedAt: now, UpdatedAt: now}); err != nil {
-				t.Fatalf("seed consumer: %v", err)
-			}
 			if _, err := repo.db.ExecContext(t.Context(), repo.db.Rebind(`INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`), "turn-live-consumer-pg", "session-live-consumer-pg", taskID, now, now, now); err != nil {
 				t.Fatalf("seed consumer turn: %v", err)
 			}
@@ -40,6 +37,11 @@ func TestPostgresTaskEnvironmentRecoveryClaimReplayBlocksLiveConsumers(t *testin
 			seedRecoveryClaimEnvironment(t, repoA, taskID, environmentID)
 			if err := repoA.CreateTaskSession(t.Context(), &models.TaskSession{ID: sessionID, TaskID: taskID, TaskEnvironmentID: environmentID, State: models.TaskSessionStateCreated}); err != nil {
 				t.Fatalf("create requester: %v", err)
+			}
+			if test.name == "attached consumer turn" {
+				if err := repoA.CreateTaskSession(t.Context(), &models.TaskSession{ID: "session-live-consumer-pg", TaskID: taskID, TaskEnvironmentID: environmentID, QueueIncarnationID: "incarnation-live-consumer-pg", State: models.TaskSessionStateWaitingForInput}); err != nil {
+					t.Fatalf("create inactive consumer: %v", err)
+				}
 			}
 			request := recoveryClaimRequest(t, repoA, environmentID, taskID, sessionID, "operation-live-replay-pg", 1)
 			claim, err := repoA.AcquireTaskEnvironmentRecoveryClaim(t.Context(), request)
@@ -53,13 +55,13 @@ func TestPostgresTaskEnvironmentRecoveryClaimReplayBlocksLiveConsumers(t *testin
 			before := snapshotPostgresRecoveryClaim(t, repoA, sessionID, environmentID)
 			replayed, err := repoA.AcquireTaskEnvironmentRecoveryClaim(t.Context(), request)
 			if test.seed == nil {
-				if err != nil || !reflect.DeepEqual(replayed, claim) {
+				if err != nil || !samePostgresRecoveryClaim(replayed, claim) {
 					t.Fatalf("prelaunch replay = (%+v, %v), want unchanged claim", replayed, err)
 				}
 			} else if !errors.Is(err, recoveryclaim.ErrBusy) || replayed != nil {
 				t.Fatalf("live replay = (%+v, %v), want (nil, ErrBusy)", replayed, err)
 			}
-			if after := snapshotPostgresRecoveryClaim(t, repoA, sessionID, environmentID); !reflect.DeepEqual(after, before) {
+			if after := snapshotPostgresRecoveryClaim(t, repoA, sessionID, environmentID); !samePostgresRecoveryClaimSnapshot(after, before) {
 				t.Fatalf("claim changed: got %#v want %#v", after, before)
 			}
 		})
@@ -147,7 +149,7 @@ func TestPostgresTaskEnvironmentRecoveryClaimInheritedAuthorization(t *testing.T
 				t.Fatalf("authorized acquire: %v", err)
 			}
 			t.Cleanup(func() { _ = repoA.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim) })
-			if replayed, err := repoA.AcquireTaskEnvironmentRecoveryClaim(ctx, request); err != nil || !reflect.DeepEqual(replayed, claim) {
+			if replayed, err := repoA.AcquireTaskEnvironmentRecoveryClaim(ctx, request); err != nil || !samePostgresRecoveryClaim(replayed, claim) {
 				t.Fatalf("authorized replay = (%+v, %v), want unchanged", replayed, err)
 			}
 		})
@@ -191,9 +193,65 @@ func TestPostgresTaskEnvironmentRecoveryClaimSharedGroupAuthorization(t *testing
 		t.Fatalf("shared group acquire: %v", err)
 	}
 	t.Cleanup(func() { _ = repoA.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim) })
-	if replayed, err := repoA.AcquireTaskEnvironmentRecoveryClaim(ctx, request); err != nil || !reflect.DeepEqual(replayed, claim) {
+	if replayed, err := repoA.AcquireTaskEnvironmentRecoveryClaim(ctx, request); err != nil || !samePostgresRecoveryClaim(replayed, claim) {
 		t.Fatalf("shared group replay = (%+v, %v), want unchanged", replayed, err)
 	}
+}
+
+func samePostgresRecoveryClaim(left, right *models.TaskEnvironmentRecoveryClaim) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	leftCopy, rightCopy := *left, *right
+	leftCopy.CreatedAt = postgresTimestamp(leftCopy.CreatedAt)
+	leftCopy.UpdatedAt = postgresTimestamp(leftCopy.UpdatedAt)
+	rightCopy.CreatedAt = postgresTimestamp(rightCopy.CreatedAt)
+	rightCopy.UpdatedAt = postgresTimestamp(rightCopy.UpdatedAt)
+	return reflect.DeepEqual(leftCopy, rightCopy)
+}
+
+func samePostgresRecoveryClaimSnapshot(left, right recoveryClaimSnapshot) bool {
+	return samePostgresTaskSession(left.Session, right.Session) &&
+		samePostgresTaskEnvironment(left.Environment, right.Environment) &&
+		samePostgresRecoveryClaim(left.Claim, right.Claim)
+}
+
+func samePostgresTaskSession(left, right *models.TaskSession) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	leftCopy, rightCopy := *left, *right
+	leftCopy.StartedAt = postgresTimestamp(leftCopy.StartedAt)
+	leftCopy.UpdatedAt = postgresTimestamp(leftCopy.UpdatedAt)
+	rightCopy.StartedAt = postgresTimestamp(rightCopy.StartedAt)
+	rightCopy.UpdatedAt = postgresTimestamp(rightCopy.UpdatedAt)
+	leftCopy.CompletedAt = postgresTimestampPointer(leftCopy.CompletedAt)
+	rightCopy.CompletedAt = postgresTimestampPointer(rightCopy.CompletedAt)
+	return reflect.DeepEqual(leftCopy, rightCopy)
+}
+
+func samePostgresTaskEnvironment(left, right *models.TaskEnvironment) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	leftCopy, rightCopy := *left, *right
+	leftCopy.CreatedAt = postgresTimestamp(leftCopy.CreatedAt)
+	leftCopy.UpdatedAt = postgresTimestamp(leftCopy.UpdatedAt)
+	rightCopy.CreatedAt = postgresTimestamp(rightCopy.CreatedAt)
+	rightCopy.UpdatedAt = postgresTimestamp(rightCopy.UpdatedAt)
+	return reflect.DeepEqual(leftCopy, rightCopy)
+}
+
+func postgresTimestamp(value time.Time) time.Time {
+	return value.UTC().Truncate(time.Microsecond)
+}
+
+func postgresTimestampPointer(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	normalized := postgresTimestamp(*value)
+	return &normalized
 }
 
 func TestPostgresTaskEnvironmentRecoveryClaimRejectsReplayedSessionIncarnation(t *testing.T) {
