@@ -505,19 +505,22 @@
         "apps/backend/internal/automation/service.go",
         "apps/backend/internal/automation/webhook.go",
         "apps/backend/internal/automation/webhook_filters.go",
-        "apps/backend/internal/mcp/server/server.go"
+        "apps/backend/internal/mcp/server/server.go",
+        "apps/backend/internal/mcp/server/config_automation_handlers.go"
       ],
       "tests": [
         "apps/backend/internal/automation/service_test.go",
         "apps/backend/internal/automation/webhook_test.go",
         "apps/backend/internal/automation/webhook_filters_test.go",
-        "apps/backend/internal/mcp/server/server_test.go"
+        "apps/backend/internal/mcp/server/server_test.go",
+        "apps/backend/internal/mcp/server/config_automation_integration_test.go"
       ],
       "settingsRoutes": [
         "/settings/automations",
         "/settings/external-mcp"
       ],
       "mcpTools": [
+        "create_automation_kandev",
         "get_mcp_config_kandev",
         "update_mcp_config_kandev",
         "list_shared_prompts_kandev",
@@ -541,13 +544,28 @@
         "apps/web/src/settings-routes.tsx",
         "apps/web/components/settings/settings-index.tsx",
         "apps/web/components/settings/general-settings.tsx",
-        "apps/web/components/settings/layouts/layout-settings.tsx"
+        "apps/web/components/settings/layouts/layout-settings.tsx",
+        "apps/backend/internal/user/service/sidebar_layouts.go",
+        "apps/web/components/settings/sidebar-layout-editor.tsx",
+        "apps/web/hooks/domains/sidebar/use-sidebar-layout-navigation.ts",
+        "docs/public/use-kandev.md"
       ],
       "tests": [
         "apps/web/src/settings-routes.test.ts",
         "apps/web/components/settings/settings-index.test.tsx",
         "apps/web/components/settings/terminal-settings.test.ts",
-        "apps/web/lib/layout/layout-profiles.test.ts"
+        "apps/web/lib/layout/layout-profiles.test.ts",
+        "apps/backend/internal/user/service/sidebar_layout_test.go",
+        "apps/web/components/settings/sidebar-layout-editor.test.tsx",
+        "apps/web/components/app-sidebar/shortcut-section.test.tsx",
+        "apps/web/hooks/domains/sidebar/use-shortcut-activity.test.ts",
+        "apps/web/lib/sidebar/layout-operations.test.ts",
+        "apps/web/hooks/domains/sidebar/use-sidebar-shortcut-catalog.test.ts",
+        "apps/web/components/runs/use-workspace-automations.test.ts",
+        "apps/web/components/navigation/app-nav-sheet.test.tsx",
+        "apps/web/e2e/tests/automations-sidebar.spec.ts",
+        "apps/web/e2e/tests/settings/sidebar-customization.spec.ts",
+        "apps/web/e2e/tests/settings/mobile-sidebar-customization.spec.ts"
       ],
       "settingsRoutes": [
         "/settings",
@@ -558,6 +576,7 @@
         "/settings/preferences/notifications",
         "/settings/preferences/task-behavior",
         "/settings/preferences/terminal-editors",
+        "/settings/sidebar",
         "/settings/secrets",
         "/settings/general",
         "/settings/general/appearance",

@@ -59,6 +59,11 @@ type Config struct {
 // TasksConfig contains task lifecycle startup limits.
 type TasksConfig struct {
 	PreparationTimeout time.Duration `mapstructure:"preparationTimeout"`
+	// StallDetectionThreshold is the event-silence window after which the
+	// session reconciliation sweep classifies an active session with no live
+	// execution as stalled (issue #3712). The orphaned-session healing grace
+	// window is twice this value.
+	StallDetectionThreshold time.Duration `mapstructure:"stallDetectionThreshold"`
 }
 
 // CredentialsConfig contains operator-managed credential file settings.
@@ -587,7 +592,7 @@ type DebugConfig struct {
 // The Standalone runtime (agentctl) always runs as a core service.
 // Docker runtime is available when docker.enabled=true.
 type AgentConfig struct {
-	// StandaloneHost is the host where standalone agentctl is running (default: localhost)
+	// StandaloneHost is the host where standalone agentctl is running (default: 127.0.0.1)
 	StandaloneHost string `mapstructure:"standaloneHost"`
 
 	// StandalonePort is the control port for standalone agentctl (default: 39429)
@@ -691,7 +696,17 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docker.volumeBasePath", defaultDockerVolumePath())
 
 	// Agent defaults (runtime selection is now per-task based on executor type)
-	v.SetDefault("agent.standaloneHost", "localhost")
+	//
+	// 127.0.0.1 instead of "localhost": localhost resolution can select an IPv6
+	// loopback address before an IPv4 address. The explicit IPv4 loopback avoids
+	// address-resolution variance when host utility health checks run against
+	// agentctl bound IPv4-only and fail with
+	// "dial tcp [::1]:41001: connect: connection refused" whenever agentctl is
+	// bound IPv4-only (e.g. auth-disabled loopback binds), spinning the
+	// "host utility instance unhealthy; recreating" loop. The loopback
+	// address is explicit and unambiguous; operators with a non-loopback
+	// control plane can still override via KANDEV_AGENT_STANDALONE_HOST.
+	v.SetDefault("agent.standaloneHost", "127.0.0.1")
 	v.SetDefault("agent.standalonePort", ports.AgentCtl)
 
 	// Auth defaults. auth.cookieName defaults to empty on purpose: the auth

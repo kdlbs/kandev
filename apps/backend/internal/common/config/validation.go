@@ -10,6 +10,7 @@ import (
 func validateStartupSettings(cfg *Config) error {
 	errs := validateTrustedProxies(cfg)
 	errs = append(errs, configuredValidation(cfg, "tasks.preparationTimeout", cfg.Tasks.PreparationTimeout <= 0, "tasks.preparationTimeout must be positive")...)
+	errs = append(errs, configuredValidation(cfg, "tasks.stallDetectionThreshold", cfg.Tasks.StallDetectionThreshold <= 0, "tasks.stallDetectionThreshold must be positive")...)
 	errs = append(errs, configuredValidation(cfg, "limits.ghMaxConcurrent", cfg.Limits.GHMaxConcurrent <= 0, "limits.ghMaxConcurrent must be positive")...)
 	errs = append(errs, configuredValidation(cfg, "limits.gitMaxConcurrent", cfg.Limits.GitMaxConcurrent <= 0, "limits.gitMaxConcurrent must be positive")...)
 	errs = append(errs, configuredValidation(cfg, "limits.lspMaxConnections", cfg.Limits.LSPMaxConnections <= 0, "limits.lspMaxConnections must be positive")...)

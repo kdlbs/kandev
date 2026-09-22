@@ -32,6 +32,8 @@ Keep existing recovery actions, queue policy, failure projection, and executor c
 - Add the private attempt envelope and retire it on success or synchronous rejection.
 - Bind task, session, execution evidence, turn, workflow entry, and final dynamic attempt ownership.
 - Persist raw queue-form input once through the accepted failure path, without immediate auto-resume scheduling.
+- Retry queue admission once while the same attempt owns the preservation
+  claim; keep the launch error visible after a failed retry.
 - Retain recorded-message identity, attachment ownership, references, handoff, origin, and plan mode.
 - Add all tests named in the plan, including failure-to-recovery service coverage.
 
@@ -44,6 +46,9 @@ New UI, public APIs, migrations, provider retries, and the existing post-start t
 1. An asynchronous failure after successful launch return preserves the exact input and recovery delivers it once with one transcript row.
 2. Stale, duplicate, terminal, archived, deleted, and superseded-entry callbacks cannot enqueue input or affect successor work.
 3. Error projection, paused queues, synchronous failures, dynamic fallback, and success retain their established behavior.
+4. A transient queue insertion error retries without losing prompt metadata or
+   scheduling an automatic resume; a second failure keeps the original launch
+   error visible.
 
 ## Regression procedure
 
@@ -62,7 +67,8 @@ Exercise duplicate callback delivery and a failure before launch return.
 Race replacement execution, same-execution successor turn, cancellation, completion, archive, deletion, and a later workflow entry.
 Exercise a dynamic fallback candidate followed by success and a final failed candidate.
 Cover combined handoff, attachment-only input, entity references, plan mode, and failed original message persistence.
-Cover queue-full/write errors, a paused queue, and reopening the queue repository after preservation.
+Cover queue-full/write errors, one transient insertion retry, a paused queue,
+and reopening the queue repository after preservation.
 Verify no replay from successful startup or post-start prompt failure.
 
 ## Verification
@@ -142,6 +148,10 @@ entry before capture. Queue drains retain reserved entries when session
 metadata reads fail, and recovery uses launch-time effective-input and
 config-mode metadata rather than reclassifying a mode-only prompt from the
 mutable session projection.
+
+Queue persistence now retries once while the attempt claim remains owned. The
+retry keeps the original launch error as the recovery signal and does not start
+an automatic replacement.
 
 Verification passed:
 

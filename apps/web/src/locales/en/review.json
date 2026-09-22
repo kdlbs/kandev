@@ -93,5 +93,8 @@
   "severityBlocker": "Blocker",
   "severityMajor": "Major",
   "severityMinor": "Minor",
-  "severityNit": "Nit"
+  "severityNit": "Nit",
+  "commentOnFile": "Comment on file",
+  "fileComment": "File comment",
+  "fileComments": "File comments"
 }

@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-05
-updated: 2026-09-17
+updated: 2026-09-18
 owners:
   - Kandev
 ---
@@ -113,12 +113,39 @@ This draft extension addresses [issue #3753](https://github.com/kdlbs/kandev/iss
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.4:** Prompt preservation shall retain the existing launch-error classification and recovery actions.
   It shall not initiate another launch from the failure callback or turn permanent rejection into an automatic retry loop.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.5:** After successful queue persistence, the preserved prompt shall survive a backend restart.
-  If persistence fails, the launch error shall remain visible and diagnostics shall identify the preservation failure without exposing prompt content.
+  If queue admission fails, the same launch attempt shall retry once while it
+  still owns the preservation claim. After that retry fails, the launch error
+  shall remain visible and diagnostics shall identify the preservation failure
+  without exposing prompt content.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.6:** Successful starts and synchronous permanent rejections shall not create asynchronous recovery entries.
   Existing synchronous busy-error recovery shall retain its current behavior.
 
 This extension excludes a backend crash before the asynchronous failure callback persists the prompt.
 It also excludes replay after ambiguous provider acceptance, automatic repair of historical orphaned messages, and new recovery controls.
+
+### REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006: Initial user prompt on an explicit step
+
+**Intent:** Apply the selected step's user-message transition before an immediate creation prompt reaches the agent.
+This draft extension addresses [issue #3804](https://github.com/kdlbs/kandev/issues/3804).
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006.1:** When REST or MCP creation requests an immediate start with an explicit step and non-empty prompt, its `on_turn_start` transition shall precede prompt delivery.
+  Initial placement shall still use the explicit step. The configured transition determines the subsequent step.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006.2:** The first prompt shall use the resulting step, session, profile, and applicable session settings.
+  Destination automatic start shall not send a competing prompt. The initial input shall retain existing prompt-composition and attachment behavior.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006.3:** One initial user prompt shall evaluate the trigger once, including queue delivery and passthrough running notifications.
+  A later user turn shall retain ordinary trigger behavior.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006.4:** When the transition queues the task for WIP admission, the initial prompt shall wait for admission.
+  It shall remain available for delivery without a second user message or repeated transition.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006.5:** Creation without an explicit step shall retain automatic destination selection.
+  Creation without immediate start or non-empty text shall not gain an additional trigger from this change.
+  Workflow automatic starts and ordinary message submission shall not gain an additional trigger.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006.6:** If turn-start processing or destination-session resolution fails, the creation prompt shall not launch against stale state.
+  Existing task/session error handling shall expose the failed start. Existing terminal-state and creation-settlement guards shall remain effective.
+
+The extension covers immediate REST and MCP dispatch. Dependency-deferred creation, historical stuck tasks, and changes to workflow action semantics are excluded.
+The [initial creation prompt package](../../../plans/task-create-initial-turn-start/plan.md) owns implementation and regression evidence.
 
 ## Migrated source detail
 

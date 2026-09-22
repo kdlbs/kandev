@@ -727,8 +727,44 @@ func taskIDFromPayload(payload string) (taskID string, invalidTaskID bool) {
 	return s, false
 }
 
-// ClaimNextEligibleRun is implemented in claim.go, which also holds
-// its ceiling/budget gate evaluation and launch-ledger append.
+// CountAgentInitiatedAssignmentWakes counts runs for taskID with the given
+// reason whose stored payload carries actor_type "agent" and whose
+// requested_at falls in the half-open interval (windowStart,
+// evaluationInstant], exclusive of its old edge and inclusive of its new
+// one. The inclusive upper bound keeps a future-dated row (clock skew
+// across writers under Postgres) from counting indefinitely instead of
+// aging out with the window it actually belongs to. Deliberately carries
+// no status filter: "admitted" is defined as "a runs row was inserted",
+// so a run that has since completed still holds its allowance slot until
+// the window passes. taskID must already be known non-empty; callers
+// with an unattributable task must not reach this method.
+func (r *Repository) CountAgentInitiatedAssignmentWakes(
+	ctx context.Context, taskID, reason string, windowStart, evaluationInstant time.Time,
+) (int, error) {
+	driver := r.ro.DriverName()
+	taskExtract := dialect.JSONExtract(driver, "payload", "task_id")
+	actorExtract := dialect.JSONExtract(driver, "payload", "actor_type")
+	// Guard the stored task_id's JSON type the same way CoalesceRun does:
+	// Postgres's ->> converts a stored JSON number to text before
+	// comparison, so an untyped payload with e.g. {"task_id":42} could
+	// otherwise textually match taskID and join another task's allowance.
+	query := fmt.Sprintf(`
+		SELECT COUNT(*) FROM runs
+		WHERE reason = ?
+		  AND %s
+		  AND %s = ?
+		  AND %s = ?
+		  AND requested_at > ?
+		  AND requested_at <= ?
+	`, dialect.JSONTypeIsString(driver, "payload", "task_id"), taskExtract, actorExtract)
+	var count int
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query),
+		reason, taskID, "agent", windowStart, evaluationInstant).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
 
 // ScheduleRetry resets a run to queued with an incremented retry count
 // and a scheduled retry time. Re-stamps priority_class to recovery
@@ -931,9 +967,9 @@ func (r *Repository) GetRunWithCosts(
 			COALESCE(SUM(tokens_cached_in), 0) AS cached_tokens,
 			COALESCE(SUM(cost_subcents), 0)    AS cost_subcents
 		FROM office_cost_events
-		WHERE task_id != ''
-		  AND task_id = COALESCE(json_extract(?, '$.task_id'), '')
-	`), run.Payload).StructScan(&rollup)
+		WHERE (task_id != '' AND task_id = COALESCE(json_extract(?, '$.task_id'), ''))
+          OR (task_id = '' AND session_id IN (SELECT id FROM office_run_sessions WHERE run_id = ?))
+	`), run.Payload, run.ID).StructScan(&rollup)
 	if err != nil {
 		return &run, &RunCostRollup{}, nil
 	}

@@ -613,18 +613,32 @@ func (e *Executor) transitionSessionState(
 	state models.TaskSessionState,
 	errorMessage string,
 ) (bool, models.TaskSessionState, error) {
-	return e.transitionSessionStateWithHook(ctx, taskID, sessionID, state, errorMessage, nil)
+	return e.transitionSessionStateWithHook(ctx, taskID, sessionID, nil, state, errorMessage, nil)
+}
+
+func (e *Executor) transitionSessionStateFrom(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedState, state models.TaskSessionState,
+	errorMessage string,
+) (bool, models.TaskSessionState, error) {
+	return e.transitionSessionStateWithHook(
+		ctx, taskID, sessionID, &expectedState, state, errorMessage, nil,
+	)
 }
 
 func (e *Executor) transitionSessionStateWithHook(
 	ctx context.Context,
 	taskID, sessionID string,
+	expectedState *models.TaskSessionState,
 	state models.TaskSessionState,
 	errorMessage string,
 	onChanged func(),
 ) (bool, models.TaskSessionState, error) {
 	if e.onSessionStateTransition != nil {
-		return e.onSessionStateTransition(ctx, taskID, sessionID, state, errorMessage, onChanged)
+		return e.onSessionStateTransition(
+			ctx, taskID, sessionID, expectedState, state, errorMessage, onChanged,
+		)
 	}
 
 	current, err := e.repo.GetTaskSession(ctx, sessionID)
@@ -633,6 +647,9 @@ func (e *Executor) transitionSessionStateWithHook(
 	}
 	if current == nil {
 		return false, "", fmt.Errorf("get session before state transition: session %q is nil", sessionID)
+	}
+	if expectedState != nil && current.State != *expectedState {
+		return false, current.State, nil
 	}
 	if isStopTerminalSessionState(current.State) || current.State == state {
 		return false, current.State, nil
@@ -1668,7 +1685,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, fmt.Errorf("check runtime inventory for session %q: %w", sessionID, hasRunningErr)
 	}
 	if hasRunning {
-		result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(launchCtx, task, session, prompt, startAgent, opts.McpMode, req, opts.TurnID)
+		result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(launchCtx, task, session, prompt, startAgent, opts.McpMode, req, opts.OnExecutionAdmitted, opts.TurnID)
 		if !errors.Is(existingErr, ErrStaleExecution) && !errors.Is(existingErr, ErrAgentCommandMissing) {
 			if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
 				return nil, errors.Join(existingErr, fmt.Errorf("release worktree recovery admission: %w", releaseErr))
@@ -1705,6 +1722,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
 		repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
 		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+	}
+	if startAgent && opts.OnExecutionAdmitted != nil {
+		opts.OnExecutionAdmitted(resp.AgentExecutionID)
 	}
 
 	// Capture the current HEAD commit as the base commit for this session asynchronously.
@@ -1938,7 +1958,7 @@ func (e *Executor) transitionLaunchFailure(
 		}
 	}
 	changed, _, updateErr := e.transitionSessionStateWithHook(
-		failCtx, taskID, sessionID, models.TaskSessionStateFailed, safeErr.Error(), onChanged,
+		failCtx, taskID, sessionID, nil, models.TaskSessionStateFailed, safeErr.Error(), onChanged,
 	)
 	if updateErr != nil {
 		e.logger.Warn("failed to mark session as failed after launch error",
@@ -2197,6 +2217,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			CheckoutBranch:             info.CheckoutBranch,
 			PRNumber:                   info.PRNumber,
 			RemoteContribution:         info.RemoteContribution,
+			CheckoutOptions:            info.CheckoutOptions,
 			ContributionDestination:    info.ContributionDestination,
 			ComparisonTarget:           info.ComparisonTarget,
 			WorktreeBranchPrefix:       info.WorktreeBranchPrefix,
@@ -2271,6 +2292,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.PRNumber = repoInfo.PRNumber
 		req.RemoteContribution = repoInfo.RemoteContribution
+		req.CheckoutOptions = repoInfo.CheckoutOptions
 		req.ContributionDestination = repoInfo.ContributionDestination
 		req.ComparisonTarget = repoInfo.ComparisonTarget
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
@@ -2364,7 +2386,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		SessionID:   session.ID,
 		Env:         cloneStringMap(env),
 	}
-	return e.startAgentOnExistingWorkspaceWithRequest(ctx, task, session, prompt, startAgent, mcpMode, request, turnIDs...)
+	return e.startAgentOnExistingWorkspaceWithRequest(ctx, task, session, prompt, startAgent, mcpMode, request, nil, turnIDs...)
 }
 
 func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
@@ -2375,6 +2397,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	startAgent bool,
 	mcpMode string,
 	request *LaunchAgentRequest,
+	onExecutionAdmitted func(string),
 	turnIDs ...string,
 ) (*TaskExecution, error) {
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
@@ -2448,6 +2471,9 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 		SessionState:     v1.TaskSessionStateStarting,
 		LastUpdate:       now,
 		SessionID:        session.ID,
+	}
+	if onExecutionAdmitted != nil {
+		onExecutionAdmitted(executionID)
 	}
 
 	// Start the agent process asynchronously

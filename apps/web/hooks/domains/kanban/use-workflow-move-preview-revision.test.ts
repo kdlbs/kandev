@@ -339,6 +339,47 @@ it("tracks profile mode and options through profile events without global versio
   );
 });
 
+it("tracks a bound replacement profile before the destination session exists", () => {
+  resetState();
+  state.kanban.tasks[0]!.workflowAgentOverrides = {
+    workflow_id: WORKFLOW_ID,
+    steps: [
+      {
+        step_id: "step-2",
+        source_profile_id: "profile-1",
+        replacement_profile_id: "profile-replacement",
+      },
+    ],
+  };
+  state.agentProfiles.items = [
+    {
+      id: "profile-1",
+      label: "Luna",
+      agent_id: "agent-1",
+      agent_name: "luna",
+      cli_passthrough: false,
+      model: "gpt-5.6-luna",
+    },
+    {
+      id: "profile-replacement",
+      label: "Terra",
+      agent_id: "agent-2",
+      agent_name: "terra",
+      cli_passthrough: false,
+      model: "gpt-5.6-terra",
+    },
+  ];
+
+  const first = getWorkflowMovePreviewRevision(state as AppState, TASK_ID, WORKFLOW_ID, "step-2");
+  const parsed = JSON.parse(first) as { profiles: Array<{ id: string; model?: string }> };
+  expect(parsed.profiles.some(({ id }) => id === "profile-replacement")).toBe(true);
+
+  state.agentProfiles.items[1]!.model = "gpt-5.6-terra-updated";
+  expect(
+    getWorkflowMovePreviewRevision(state as AppState, TASK_ID, WORKFLOW_ID, "step-2"),
+  ).not.toBe(first);
+});
+
 it("tracks the initial-target profile after the original session is missing", () => {
   resetState();
   state.kanban.tasks[0]!.metadata = {

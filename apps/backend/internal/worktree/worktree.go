@@ -161,6 +161,7 @@ type Worktree struct {
 
 // CreateRequest contains the parameters for creating a new worktree.
 type CreateRequest struct {
+	CheckoutOptions *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
 	// TaskID is the unique task identifier (required).
 	TaskID string
 
@@ -319,6 +320,9 @@ type CreateRequest struct {
 	// Transient per Create; never persisted on the Worktree record, so
 	// secrets stay out of the DB.
 	ScriptEnv map[string]string
+
+	// CheckoutEnv contains only managed Git credentials and their scoped configuration.
+	CheckoutEnv map[string]string
 
 	// OnSyncProgress receives progress updates for pre-worktree branch sync.
 	OnSyncProgress SyncProgressCallback

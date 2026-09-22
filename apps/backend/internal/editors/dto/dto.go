@@ -22,7 +22,8 @@ type EditorDTO struct {
 }
 
 type EditorsResponse struct {
-	Editors []EditorDTO `json:"editors"`
+	FolderOpeningAvailable bool        `json:"folder_opening_available"`
+	Editors                []EditorDTO `json:"editors"`
 }
 
 type OpenEditorRequest struct {

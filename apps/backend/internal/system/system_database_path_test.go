@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/system/jobs"
 )
 
@@ -124,6 +125,7 @@ func TestProvideMarksPersistenceUnavailableForFactoryReset(t *testing.T) {
 
 	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
 		ID: "settings", OwnerPackage: "internal/system/settings", RequiredTables: []string{"settings"},
+		Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)
@@ -169,6 +171,7 @@ func TestProvideMarksPersistenceUnavailableForRestore(t *testing.T) {
 
 	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
 		ID: "settings", OwnerPackage: "internal/system/settings", RequiredTables: []string{"settings"},
+		Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)

@@ -37,10 +37,17 @@ type AgentExecution struct {
 	// RunID identifies the Office run that launched this execution. It is
 	// retained after runtime environment cleanup so delayed stop events can
 	// still be attributed to the correct run.
-	RunID             string
+	RunID        string
+	RunSessionID string
+	RunAttempt   int
+	Owner        ExecutionOwner
+	// OwnerAdmission is retained with the execution so the registration gate
+	// uses the same durable owner authority as the pre-allocation gate.
+	OwnerAdmission    OwnerAdmission
 	TaskID            string
 	SessionID         string
 	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
+	WorkspaceID       string
 	// AgentProfileID is the concrete profile used by the running CLI. The
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.
@@ -339,6 +346,44 @@ type AgentExecution struct {
 	// callback cannot validate one generation and mutate another after the
 	// validation lock is released.
 	startupCallbackMu sync.RWMutex
+}
+
+// OwnerSnapshot returns the immutable durable owner carried by this
+// execution. The value is copied so restart reconciliation cannot mutate the
+// lifecycle store through a runtime observation.
+func (e *AgentExecution) OwnerSnapshot() ExecutionOwner {
+	if e == nil {
+		return ExecutionOwner{}
+	}
+	return e.Owner
+}
+
+// ExecutionOwnerKind identifies the durable coordinator that owns a runtime
+// execution. Task and run owners have different admission and event rules.
+type ExecutionOwnerKind string
+
+const (
+	ExecutionOwnerTask ExecutionOwnerKind = "task"
+	ExecutionOwnerRun  ExecutionOwnerKind = "run"
+)
+
+// ExecutionOwner is immutable identity carried through launch and lifecycle
+// callbacks. Run-owned executions never need a synthetic task ID.
+type ExecutionOwner struct {
+	Kind           ExecutionOwnerKind
+	WorkspaceID    string
+	TaskID         string
+	SessionID      string
+	RunID          string
+	RunSessionID   string
+	Attempt        int
+	AgentProfileID string
+}
+
+// OwnerAdmission is supplied by the durable owner (for example Office) and
+// must fail closed when the owner is missing, stale, paused or unreadable.
+type OwnerAdmission interface {
+	AdmitExecution(ctx context.Context, owner ExecutionOwner) error
 }
 
 func (e *AgentExecution) isSessionInitialized() bool {
@@ -1070,6 +1115,7 @@ type RepoLaunchSpec struct {
 	CheckoutBranch     string
 	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution *models.RemoteContribution
+	CheckoutOptions    *models.RepositoryCheckoutOptions
 	WorktreeID         string // Existing worktree ID to reuse (skip creation if set)
 	// AllowBranchReplacement permits the explicit new-branch recovery action for
 	// this repository while retaining its environment record.
@@ -1203,6 +1249,8 @@ type LaunchRequest struct {
 	McpMode             string            // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	McpProviders        []string          // Normalized provider capabilities attached to the task
 	McpProfile          *mcpprofile.Context
+	Owner               ExecutionOwner
+	OwnerAdmission      OwnerAdmission
 
 	// Environment preparation
 	SetupScript string // Setup script to run before agent starts
@@ -1226,6 +1274,7 @@ type LaunchRequest struct {
 	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution     *models.RemoteContribution
+	CheckoutOptions        *models.RepositoryCheckoutOptions
 	ComparisonTarget       *models.ComparisonTarget
 	WorktreeBranchPrefix   string // Branch prefix for worktree branches
 	WorktreeBranchTemplate string // Branch name template for worktree branches
@@ -1281,6 +1330,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		CheckoutBranch:             r.CheckoutBranch,
 		PRNumber:                   r.PRNumber,
 		RemoteContribution:         r.RemoteContribution,
+		CheckoutOptions:            r.CheckoutOptions,
 		ComparisonTarget:           r.ComparisonTarget,
 		ContributionDestination:    r.ContributionDestination,
 		WorktreeID:                 r.WorktreeID,

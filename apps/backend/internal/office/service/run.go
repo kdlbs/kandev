@@ -89,7 +89,7 @@ func (s *Service) QueueRun(
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) (shared.QueueOutcome, error) {
 	outcome, err := s.QueueRunWithActor(ctx, agentInstanceID, reason, payload, idempotencyKey, models.ActorKindSystem, "", "")
-	return shared.QueueOutcome(outcome), err
+	return outcome, err
 }
 
 // QueueRunWithActor enqueues a run request for an agent instance.

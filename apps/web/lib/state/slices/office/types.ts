@@ -112,9 +112,12 @@ export type ActivityEntry = {
   workspaceId: string;
   actorType: "user" | "agent" | "system";
   actorId: string;
+  actorName?: string;
   action: string;
   targetType?: string;
   targetId?: string;
+  targetName?: string;
+  targetIdentifier?: string;
   details?: Record<string, unknown>;
   runId?: string;
   sessionId?: string;

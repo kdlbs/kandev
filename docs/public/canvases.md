@@ -57,12 +57,18 @@ A task canvas belongs to one task. A workspace canvas appears in workspace navig
 
 The app uses relative requests such as `./_kandev/v1/data/tasks` and `./_kandev/v1/state`. Kandev remains the source of truth for task, workflow, and message data. Canvas state stores app-specific shared state. It does not replace Kandev domain data.
 
-The host shows canvas controls outside the app frame. The app runs in a sandboxed iframe with an opaque browser origin:
+A task read includes a read-only summary of that task's dependencies: whether it is blocked, and which tasks it depends on or blocks. Events never carry this summary, so a canvas that displays it refetches the task rather than reading the summary out of the event stream: on a `task.updated`, `task.dependencies_resolved`, or `task.dependency_failed` event for that task or one of its edges, or on a `task.state_changed` event for any task in its cached dependency lists (a predecessor or dependent simply advancing state is not one of the first three events). Kandev refuses an oversized read rather than truncating it silently; the authoring reference has the exact fields and limits.
+
+The host shows canvas controls outside the app frame. The app runs in a
+sandboxed same-origin iframe. Canvas source is trusted with the viewing user's
+ordinary user-session authority:
 
 - The frame allows packaged scripts and forms.
-- The app cannot use the host DOM, cookies, host authentication headers, popups, or top-level navigation.
-- `localStorage`, `sessionStorage`, IndexedDB, and service workers are not available.
+- The app can use same-origin browser storage and cookies and can access the host DOM.
+- The app still cannot open popups or navigate the top-level page.
 - Use Kandev instance state for small shared values. Keep temporary values in memory.
+- Relative Kandev protocol routes still require the capability URL, release binding,
+  scope checks, and declared grants. A browser cookie does not replace those checks.
 - External network access uses exact HTTPS origins that a user approved.
 - Remote scripts are not allowed. Scripts and styles must come from the package.
 
@@ -100,6 +106,18 @@ runtime binding and startup attempt. This check confirms document and context
 startup; it does not certify application business health.
 
 Kandev calculates effective access from the package declaration, instance grant, trusted task or workspace scope, and current caller authorization. A release receives only the intersection of those permissions. See [Security and trust](security.md#isolated-web-applications) for the security boundary.
+
+### Return to a task after publication
+
+When you return to a task, Kandev checks the current task canvas inventory. It can show an eligible canvas published while the task page was closed, reloaded, or disconnected. Kandev remembers a canvas that was already presented in the current browser tab, including a canvas that you closed. Use the existing task panel or phone canvas picker to open it again.
+
+On a phone, Kandev opens one new canvas route at a time. Use Back to return to the task. The route does not open again until a new browser tab offers it.
+
+### Reverse proxy requirements
+
+Keep the runtime document, packaged assets, and host bootstrap responses unmodified. The responses include `Cache-Control: no-store, no-transform`. Exclude the runtime path `/api/v1/plugins/web-apps/runtime/` from analytics injection, HTML rewriting, and similar response transforms. Keep the existing content security policy and capability checks.
+
+If a proxy strips or ignores `no-transform`, canvas startup can fail with **Canvas unavailable** and **Try again**. Restore the proxy rule, then select **Try again**. Republish only when the release itself changed.
 
 ## Promote a task canvas
 
@@ -220,6 +238,6 @@ Direct file and direct-link sharing does not require registry admission.
 - [Plugin manifest reference](plugins-manifest.md#isolated-web-applications) defines the `ui.web_apps` manifest fields.
 - [Authoring a plugin](plugins-authoring.md#build-an-isolated-web-application) explains package authoring without an injected JavaScript API.
 - [Configuration](configuration.md#runtime-feature-toggles) explains the feature flag and restart rule.
-- [Security and trust](security.md#isolated-web-applications) explains sandboxing, capabilities, network access, and opaque storage.
+- [Security and trust](security.md#isolated-web-applications) explains sandboxing, same-origin trust, capabilities, and network access.
 - [Operations](operations.md#canvas-artifacts-and-recovery) explains the database and artifact backup boundary.
 - [Feature status](feature-status.md) records the public support status.

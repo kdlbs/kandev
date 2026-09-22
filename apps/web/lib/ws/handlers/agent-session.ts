@@ -458,6 +458,7 @@ function syncEnvFromAgentctlPayload(
     ...getAgentctlWorktreeFields(payload, isSibling),
     workspace_path: payload.workspace_path ?? payload.task_workspace_path ?? payload.worktree_path,
   });
+  store.getState().reconcileWorkflowSessionFocus?.(taskId);
 }
 
 /** Builds the partial-session patch applied for an agentctl_ready event.
@@ -858,6 +859,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
   return {
     "message.queue.status_changed": (message) =>
       handleQueueStatusChangedMessage(store, message.payload),
+    // eslint-disable-next-line complexity -- ordered session reconciliation keeps stale-event guards together
     "session.state_changed": (message) => {
       const payload = message.payload;
       if (!payload?.task_id) return;
@@ -900,6 +902,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         updatedAt: payload.updated_at,
       });
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
+      store.getState().reconcileWorkflowSessionFocus?.(taskId);
       syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
       extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);

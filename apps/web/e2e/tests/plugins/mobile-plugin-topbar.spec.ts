@@ -1,4 +1,5 @@
 import path from "node:path";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import {
@@ -68,13 +69,14 @@ test.describe("Mobile listing menu actions", () => {
       await testPage.goto(route);
       await expect(testPage.getByTestId("mobile-topbar-action-strip")).toHaveCount(0);
       await expect(testPage.getByTestId("app-status-metrics")).toHaveCount(0);
-      await testPage.getByTestId("mobile-topbar-menu").tap();
+      await testPage.getByTestId("app-nav-trigger").tap();
       const menu = testPage.getByRole("dialog", { name: "Menu", exact: true });
       const plugin = menu.locator("#hello-main-top-bar");
       const metrics = menu.getByTestId("app-status-metrics");
       await expect(plugin).toHaveAccessibleName(`Hello ${pluginPage}`);
       await expect(metrics).toBeVisible();
       await expect(metrics.getByLabel(/^CPU /)).toBeVisible();
+      await waitForFiniteAnimations(menu);
       for (const target of [
         plugin,
         menu.getByTestId("mobile-quick-chat-button"),
@@ -89,15 +91,16 @@ test.describe("Mobile listing menu actions", () => {
       expect(icon.width).toBeCloseTo(16, 0);
       expect(icon.height).toBeCloseTo(16, 0);
       await assertNoDocumentHorizontalOverflow(testPage, `menu tools on ${route}`);
+      await expect(menu.getByRole("textbox")).toHaveCount(0);
+      await testPage.keyboard.press("Escape");
       if (route !== "/threads") {
-        await expect(menu.getByRole("textbox")).toHaveCount(0);
-        await menu.getByTestId("mobile-search-toggle").tap();
+        await testPage.getByTestId("mobile-topbar-page-context").tap();
+        const options = testPage.getByRole("dialog", { name: "View options", exact: true });
+        await options.getByTestId("mobile-search-toggle").tap();
         const search = testPage.getByTestId("mobile-search-bar");
         await expect(menu).toHaveCount(0);
         await expect(search.getByRole("textbox")).toBeFocused();
         await assertNoDocumentHorizontalOverflow(testPage, "phone search");
-      } else {
-        await testPage.keyboard.press("Escape");
       }
       await expect(testPage.getByTestId("app-status-metrics")).toHaveCount(0);
     }

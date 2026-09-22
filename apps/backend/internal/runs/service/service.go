@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
@@ -56,21 +57,16 @@ type RunQueueAdapter interface {
 	QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutcome, error)
 }
 
-// QueueOutcome reports what QueueRun actually did with a request. A
-// duplicated declaration lives in internal/workflow/engine (see that
-// package's RunQueueAdapter doc); both MUST match.
-type QueueOutcome string
+// QueueOutcome is the shared queue contract used by office producers and the
+// runs service. The workflow engine keeps its adapter-local declaration to
+// avoid importing the office package; its values remain wire-compatible.
+type QueueOutcome = shared.QueueOutcome
 
 const (
-	// QueueOutcomeQueued means a new runs row was inserted.
-	QueueOutcomeQueued QueueOutcome = "queued"
-	// QueueOutcomeDeduped means an existing row with the same IdempotencyKey
-	// already exists in the durable idempotency index, so nothing was inserted.
-	QueueOutcomeDeduped QueueOutcome = "deduped"
-	// QueueOutcomeCoalesced means the request was merged into an existing
-	// queued row for the same agent, reason, and task bucket within the
-	// coalescing window, so nothing new was inserted.
-	QueueOutcomeCoalesced QueueOutcome = "coalesced"
+	QueueOutcomeQueued      = shared.QueueOutcomeQueued
+	QueueOutcomeDeduped     = shared.QueueOutcomeDeduped
+	QueueOutcomeCoalesced   = shared.QueueOutcomeCoalesced
+	QueueOutcomeRateLimited = shared.QueueOutcomeRateLimited
 )
 
 // QueueRunRequest carries everything the queue needs to insert a row.

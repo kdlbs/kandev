@@ -115,6 +115,7 @@ var startupCatalog = []CatalogEntry{
 	{Key: officeGateFailureThresholdKey, EnvVars: []string{"KANDEV_OFFICE_GATE_FAILURE_THRESHOLD"}, Owner: "office", Default: "3"},
 	{Key: "githubCredentialBroker.publicBaseUrl", EnvVars: []string{"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL"}, Owner: "github credential broker", Default: ""},
 	{Key: "tasks.preparationTimeout", EnvVars: []string{"KANDEV_TASK_PREPARATION_TIMEOUT"}, Owner: "task lifecycle", Default: "10m"},
+	{Key: "tasks.stallDetectionThreshold", EnvVars: []string{"KANDEV_TASK_STALL_DETECTION_THRESHOLD"}, Owner: "task lifecycle", Default: "2h"},
 	{Key: "credentials.file", EnvVars: []string{"KANDEV_CREDENTIALS_FILE"}, Owner: "credentials", Default: ""},
 	{Key: "limits.ghMaxConcurrent", EnvVars: []string{"KANDEV_GH_MAX_CONCURRENT"}, Owner: "subprocess admission", Default: "8"},
 	{Key: "limits.gitMaxConcurrent", EnvVars: []string{"KANDEV_GIT_MAX_CONCURRENT"}, Owner: "subprocess admission", Default: "12"},

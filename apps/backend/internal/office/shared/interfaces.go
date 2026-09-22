@@ -63,14 +63,10 @@ type AgentWriter interface {
 	UpdateAgentStatusFields(ctx context.Context, agentID, status, pauseReason string) error
 }
 
-// QueueOutcome reports what a RunQueuer.QueueRun call actually did. It
-// deliberately duplicates internal/runs/service.QueueOutcome (and
-// internal/workflow/engine.QueueOutcome) as its own independent string type
-// and constants rather than importing runs/service: that package already
-// imports office/shared (for the launch-safety counters and
-// ClassifyPriority causation.go depends on), so a shared->runsservice
-// import here would be an import cycle. TestQueueOutcomeMatchesRunsService
-// pins the two declarations to identical values.
+// QueueOutcome reports what a RunQueuer.QueueRun call actually did. This is
+// the neutral queue contract shared by office producers and the runs service.
+// The runs service aliases this type so callers can compare outcomes across
+// the two package boundaries without maintaining duplicate declarations.
 type QueueOutcome string
 
 const (
@@ -85,6 +81,10 @@ const (
 	// QueueOutcomeNone means no enqueue was attempted, or the attempt
 	// returned an error before any outcome was determined.
 	QueueOutcomeNone QueueOutcome = ""
+	// QueueOutcomeRateLimited means an agent-initiated assignment wake was
+	// refused because its task allowance was exhausted. No row was inserted
+	// and no existing row was merged.
+	QueueOutcomeRateLimited QueueOutcome = "rate_limited"
 )
 
 // RunQueuer enqueues run requests for agent instances.

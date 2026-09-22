@@ -172,6 +172,22 @@ requiring its profile to be known when the workflow is authored.
   prevent combining it with an explicit session target. Choosing a target shall
   not silently discard existing conditional rules.
 
+### REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-003: Focus the recipient after a manual step move
+
+**Intent:** Show the conversation selected by the step that the user enters.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-003.1:** After a user moves the open task to a step, Kandev shall select that entry's committed recipient. This applies to new and reused conversations, including a destination with the same profile. A session pin established before the move shall not prevent this selection.
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-003.2:** Desktop shall activate the recipient's conversation tab. Phone shall show its chat and selected session in the session picker. Selecting the session shall not send another prompt or start another execution.
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-003.3:** A later manual session selection, task departure, closed preview, or newer move shall cancel the earlier pending focus. Returning to the same task shall not restore that intent. Background transitions shall retain their existing selection policy.
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-003.4:** Delayed, repeated, and reordered updates shall focus the matching recipient at most once. An unrelated session, stale entry, foreign session, or prepared route shall not qualify. Missing or ambiguous identity shall preserve the current view.
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-003.5:** A failed move shall preserve the selected conversation and show the existing error. A queued entry without a committed recipient shall preserve selection until its recipient becomes available, subject to criterion 003.3. A step with no recipient shall not create one for navigation.
+
+## Implementation plans
+
+- [Manual workflow session focus](../../../plans/workflow-session-focus/plan.md)
+
 ## Example
 
 A task starts with Sol, which the user selects at task creation. Plan parks

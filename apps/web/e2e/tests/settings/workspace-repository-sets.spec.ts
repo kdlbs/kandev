@@ -87,8 +87,9 @@ test.describe("Workspace repository sets settings", () => {
     await expect(dropdown.getByPlaceholder("Search branches...")).toBeVisible();
     await expect(dropdown.getByText("Branches")).toBeVisible();
     await expect(dropdown.getByRole("option", { name: /^main local/ })).toBeVisible();
-    await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
-    await expect(dropdown.getByText("origin", { exact: true })).toBeVisible();
+    const remoteMainOption = dropdown.getByRole("option", { name: /^origin\/main origin/ });
+    await expect(remoteMainOption).toBeVisible();
+    await expect(remoteMainOption.getByText("origin", { exact: true })).toBeVisible();
 
     const branchList = dropdown.getByRole("listbox");
     await branchList.hover();

@@ -92,10 +92,57 @@ test('recognized harness configuration paths are exempt', () => {
   ]);
 });
 
+// @covers AC-CI-PR-DOCS-001.8
+test('CI infrastructure paths under .github are exempt', () => {
+  const result = validator.classifyChangedFiles([
+    { filename: '.github/workflows/release.yml', status: 'modified' },
+    { filename: '.github/scripts/pr-walkthrough-workflow-contract_test.py', status: 'modified' },
+    { filename: '.github/actions/setup-opencode/action.yml', status: 'modified' },
+  ]);
+
+  assert.equal(result.requiresCoverage, false);
+  assert.deepEqual(result.triggeringPaths, []);
+  assert.deepEqual(result.exemptPaths, [
+    '.github/workflows/release.yml',
+    '.github/scripts/pr-walkthrough-workflow-contract_test.py',
+    '.github/actions/setup-opencode/action.yml',
+  ]);
+});
+
+// @covers AC-CI-PR-DOCS-001.8
+test('a CI path combined with a non-exempt path still requires coverage', () => {
+  const result = validator.classifyChangedFiles([
+    { filename: '.github/workflows/release.yml', status: 'modified' },
+    { filename: 'apps/backend/runtime.go', status: 'modified' },
+  ]);
+
+  assert.equal(result.requiresCoverage, true);
+  assert.deepEqual(result.exemptPaths, ['.github/workflows/release.yml']);
+  assert.deepEqual(result.triggeringPaths, ['apps/backend/runtime.go']);
+});
+
+// @covers AC-CI-PR-DOCS-001.8
+test('non-CI files under .github and CI paths outside .github require coverage', () => {
+  const result = validator.classifyChangedFiles([
+    { filename: '.github/dependabot.yml', status: 'modified' },
+    { filename: '.github/release-signing-key.asc', status: 'modified' },
+    { filename: 'scripts/build.sh', status: 'modified' },
+    { filename: 'workflows/ci.yml', status: 'modified' },
+  ]);
+
+  assert.equal(result.requiresCoverage, true);
+  assert.deepEqual(result.exemptPaths, []);
+  assert.deepEqual(result.triggeringPaths, [
+    '.github/dependabot.yml',
+    '.github/release-signing-key.asc',
+    'scripts/build.sh',
+    'workflows/ci.yml',
+  ]);
+});
+
 // @covers AC-CI-PR-DOCS-001.3
 test('shipped files and unsupported test-like paths require coverage', () => {
   const result = validator.classifyChangedFiles([
-    { filename: '.github/workflows/release.yml', status: 'modified' },
     { filename: 'apps/web/package.json', status: 'modified' },
     { filename: 'apps/web/lib/fixture.test.json', status: 'modified' },
     { filename: 'apps/backend/worker_test.go.txt', status: 'modified' },
@@ -106,7 +153,6 @@ test('shipped files and unsupported test-like paths require coverage', () => {
 
   assert.equal(result.requiresCoverage, true);
   assert.deepEqual(result.triggeringPaths, [
-    '.github/workflows/release.yml',
     'apps/web/package.json',
     'apps/web/lib/fixture.test.json',
     'apps/backend/worker_test.go.txt',

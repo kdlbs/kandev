@@ -159,6 +159,7 @@ func (s *Service) parkSessionForProfileSwitchClaimLocked(
 		ctx,
 		taskID,
 		currentSession.ID,
+		nil,
 		models.TaskSessionStateWaitingForInput,
 		"",
 		nil,

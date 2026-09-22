@@ -6,6 +6,8 @@ import (
 
 	"go.uber.org/zap"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/office/models"
 	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 )
 
@@ -34,6 +36,7 @@ type SweepResult struct {
 // into the single `failures` count, not just sub-step (d)'s.
 func (s *Service) runHaltSweep(ctx context.Context, workspaceID string) SweepResult {
 	var result SweepResult
+	s.cancelRunSessions(ctx, workspaceID, &result)
 
 	runs, err := s.repo.ListInflightRunsForWorkspace(ctx, workspaceID)
 	if err != nil {
@@ -94,6 +97,45 @@ func (s *Service) runHaltSweep(ctx context.Context, workspaceID string) SweepRes
 
 	s.cancelTaskExecutions(ctx, taskIDSet, &result)
 	return result
+}
+
+func (s *Service) cancelRunSessions(ctx context.Context, workspaceID string, result *SweepResult) {
+	sessions, err := s.repo.ListLiveRunSessionsForWorkspace(ctx, workspaceID)
+	if err != nil {
+		s.logger.Warn("halt sweep: list live run sessions failed", zap.String("workspace_id", workspaceID), zap.Error(err))
+		result.Failures++
+		return
+	}
+	for _, session := range sessions {
+		if _, err := s.repo.RequestRunSessionCancellation(ctx, session.ID); err != nil {
+			result.Failures++
+			s.logger.Warn("halt sweep: mark run session cancelled failed", zap.String("run_session_id", session.ID), zap.Error(err))
+			continue
+		}
+		if s.runStopper == nil {
+			result.Failures++
+			s.logger.Warn("halt sweep: run execution stopper unavailable", zap.String("run_session_id", session.ID))
+			continue
+		}
+		err := s.runStopper.Stop(ctx, session.ExecutionID, haltSweepCancelReason)
+		switch {
+		case err == nil:
+			result.ExecutionsCancelled++
+			if _, finishErr := s.repo.FinishRunSession(ctx, session.ID, models.RunSessionStateCancelled, haltSweepCancelReason); finishErr != nil {
+				result.Failures++
+				s.logger.Warn("halt sweep: finish run session cancellation failed", zap.String("run_session_id", session.ID), zap.Error(finishErr))
+			}
+		case errors.Is(err, orchestratorexecutor.ErrExecutionNotFound), errors.Is(err, runtimeapi.ErrNotFound):
+			result.ExecutionsNotRunning++
+			if _, finishErr := s.repo.FinishRunSession(ctx, session.ID, models.RunSessionStateInterrupted, "runtime execution not found"); finishErr != nil {
+				result.Failures++
+				s.logger.Warn("halt sweep: mark missing run session interrupted failed", zap.String("run_session_id", session.ID), zap.Error(finishErr))
+			}
+		default:
+			result.Failures++
+			s.logger.Warn("halt sweep: stop run execution failed", zap.String("run_session_id", session.ID), zap.Error(err))
+		}
+	}
 }
 
 // cancelTaskExecutions requests cancellation for the deduplicated task id

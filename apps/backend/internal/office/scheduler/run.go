@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -40,15 +41,7 @@ var ErrRoutingNotSupported = errors.New("routing not supported by task starter")
 // model is the base profile's CLIFlags + AutoApprove booleans, not a
 // preset-by-name. Per-provider permission overrides would require
 // re-modelling that surface and are deferred.
-type RouteOverride struct {
-	ExecutionProfileID string
-	ProviderID         string
-	Model              string
-	Tier               string
-	Mode               string
-	Flags              []string
-	Env                map[string]string
-}
+type RouteOverride = service.RouteOverride
 
 // LaunchContext is an alias for service.LaunchContext so dispatch
 // callsites inside this package can spell the type without re-imports.
@@ -157,6 +150,16 @@ const CoalesceWindowSeconds = 5
 // IdempotencyWindowHours is the deduplication window.
 const IdempotencyWindowHours = 24
 
+// AssignmentWakeAllowanceN and AssignmentWakeAllowanceWindow are the fixed
+// N and W of REQ-OFFICE-ASSIGN-RATE-001: at most N agent-initiated
+// assignment wakes admitted per task within any rolling window of duration
+// W. Fixed values of this capability rather than operator-configurable;
+// referenced by the tests rather than restated.
+const (
+	AssignmentWakeAllowanceN      = 5
+	AssignmentWakeAllowanceWindow = 10 * time.Minute
+)
+
 // TaskStarter launches agent sessions on behalf of the office scheduler.
 // Implemented by the orchestrator; the scheduler depends only on this interface.
 type TaskStarter interface {
@@ -192,6 +195,7 @@ type SchedulerService struct {
 	svc                     *service.Service
 	runsService             *runsservice.Service
 	taskStarter             TaskStarter
+	runSessionLauncher      service.RunSessionLauncher
 	resolver                *routing.Resolver
 	eb                      bus.EventBus
 	apiBaseURL              string
@@ -243,6 +247,11 @@ func NewSchedulerService(
 // SetTaskStarter wires the orchestrator task starter.
 func (ss *SchedulerService) SetTaskStarter(ts TaskStarter) {
 	ss.taskStarter = ts
+}
+
+// SetRunSessionLauncher wires the Office-owned taskless launch seam.
+func (ss *SchedulerService) SetRunSessionLauncher(launcher service.RunSessionLauncher) {
+	ss.runSessionLauncher = launcher
 }
 
 // SetResolver wires the routing resolver. When set, dispatch goes through
@@ -321,7 +330,7 @@ func (ss *SchedulerService) QueueRun(
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) (shared.QueueOutcome, error) {
 	outcome, err := ss.queueRunAsActor(ctx, agentInstanceID, reason, payload, idempotencyKey, "", "", models.ActorKindSystem, "")
-	return shared.QueueOutcome(outcome), err
+	return outcome, err
 }
 
 // queueRunAsActor is QueueRun's actor- and wave-aware core. actorKind/
@@ -372,6 +381,14 @@ func (ss *SchedulerService) queueRunAsActor(
 	if err != nil {
 		return runsservice.QueueOutcomeNone, err
 	}
+
+	// The assignment allowance is scoped to the scheduler's mutation
+	// producer. Other producers do not carry actor_type=agent and therefore
+	// pass through this fail-open gate without consuming its allowance.
+	if refused := ss.checkAssignmentWakeAllowance(ctx, agentInstanceID, reason, payload); refused {
+		return runsservice.QueueOutcomeRateLimited, nil
+	}
+
 	return ss.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
 		Reason:         reason,
 		IdempotencyKey: idempotencyKey,
@@ -444,7 +461,7 @@ func actorFromRunContext(c RunContext) (models.ActorKind, string) {
 	switch c.ActorType {
 	case "user":
 		return models.ActorKindUser, c.ActorID
-	case "agent":
+	case assignmentWakeActorTypeAgent:
 		if c.ActorID != "" {
 			return models.ActorKindAgent, c.ActorID
 		}

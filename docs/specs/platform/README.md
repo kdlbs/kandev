@@ -15,6 +15,9 @@ The platform system owns cross-cutting runtime services, configuration,
 observability, notifications, localization, lifecycle safety, and shared
 operational guarantees.
 
+Repository validation performance, including local commit checks and shared CI
+execution, belongs here. The CI system retains hosted workflow trust policy.
+
 Shared read-capacity protection and aggregate reporting availability belong here.
 Domain systems retain ownership of source records and workspace context identity.
 
@@ -41,6 +44,7 @@ retains ownership of its values, validation, authority, and persistence.
 - [CI performance](requirements/ci-performance.md)
 
 - [Startup lifecycle](requirements/startup-lifecycle.md)
+- [Startup progress visibility](requirements/startup-progress-visibility.md)
 
 - [Agent-accessible Kandev settings](requirements/agent-settings-parity.md)
 
@@ -91,6 +95,7 @@ retains ownership of its values, validation, authority, and persistence.
 - [CI performance](system-design/ci-performance.md)
 
 - [Startup lifecycle](system-design/startup-lifecycle.md)
+- [Startup progress visibility](system-design/startup-progress-visibility.md)
 
 - [Agent-accessible Kandev settings](system-design/agent-settings-parity.md)
 - [Core settings domain adoption](system-design/agent-settings-domains.md)
