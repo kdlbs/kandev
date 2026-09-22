@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -422,7 +423,10 @@ type reconnectControlClient interface {
 // the agent instance, transparently re-handshakes on a 401, and returns the
 // resolved instance endpoint for the user-facing client.
 func (r *DockerExecutor) bringupAgentctl(ctx context.Context, dockerClient *docker.Client, containerID, containerIP string, req *ExecutorCreateRequest) (reconnectAgentctlConn, error) {
-	controlHost, controlPort := r.resolveEndpoint(ctx, dockerClient, containerID, AgentCtlPort, containerIP)
+	controlHost, controlPort, err := r.resolveEndpoint(ctx, dockerClient, containerID, AgentCtlPort, containerIP)
+	if err != nil {
+		return reconnectAgentctlConn{}, err
+	}
 	ctl := agentctl.NewControlClient(controlHost, controlPort, r.logger,
 		agentctl.WithControlAuthToken(req.AuthToken))
 	if err := r.waitForAgentctlHealth(ctx, ctl); err != nil {
@@ -443,7 +447,10 @@ func (r *DockerExecutor) bringupAgentctl(ctx context.Context, dockerClient *dock
 	if err != nil {
 		return reconnectAgentctlConn{}, fmt.Errorf("failed to find instance in container %s: %w", containerID, err)
 	}
-	instanceHost, resolvedInstancePort := r.resolveEndpoint(ctx, dockerClient, containerID, instancePort, containerIP)
+	instanceHost, resolvedInstancePort, err := r.resolveEndpoint(ctx, dockerClient, containerID, instancePort, containerIP)
+	if err != nil {
+		return reconnectAgentctlConn{}, err
+	}
 	return reconnectAgentctlConn{
 		instanceHost:   instanceHost,
 		instancePort:   resolvedInstancePort,
@@ -452,13 +459,18 @@ func (r *DockerExecutor) bringupAgentctl(ctx context.Context, dockerClient *dock
 	}, nil
 }
 
+var errContainerEndpointResolution = errors.New("container endpoint resolution failed")
+
 // resolveEndpoint routes reconnect endpoint lookups through the configured
-// resolver, falling back to the direct published-port read.
+// resolver. Local Docker retains its container-IP fallback; a configured
+// remote resolver must surface failures because its container IP is not
+// reachable from the backend.
 func (r *DockerExecutor) resolveEndpoint(
 	ctx context.Context, dockerClient hostPortLookup, containerID string, containerPort int, containerIP string,
-) (string, int) {
+) (string, int, error) {
 	if r.endpoints == nil {
-		return resolveDockerEndpoint(ctx, dockerClient, containerID, containerPort, containerIP, r.logger)
+		host, port := resolveDockerEndpoint(ctx, dockerClient, containerID, containerPort, containerIP, r.logger)
+		return host, port, nil
 	}
 	host, port, err := r.endpoints.Resolve(ctx, containerID, containerPort, containerIP)
 	if err != nil {
@@ -466,9 +478,9 @@ func (r *DockerExecutor) resolveEndpoint(
 			zap.String("container_id", containerID),
 			zap.Int("container_port", containerPort),
 			zap.Error(err))
-		return containerIP, containerPort
+		return "", 0, fmt.Errorf("%w: %w", errContainerEndpointResolution, err)
 	}
-	return host, port
+	return host, port, nil
 }
 
 func reconnectInstanceID(req *ExecutorCreateRequest, previousExecutionID string) string {
@@ -527,8 +539,11 @@ func (r *DockerExecutor) findExistingInstance(
 	instance, err := ctl.GetInstance(ctx, prevExecutionID)
 	if err == nil && instance != nil && instance.Port > 0 {
 		if hasManagedGitHubBrokerEnv(req.Env) {
-			instanceHost, instancePort := r.resolveEndpoint(
+			instanceHost, instancePort, resolveErr := r.resolveEndpoint(
 				ctx, dockerClient, containerID, instance.Port, containerIP)
+			if resolveErr != nil {
+				return 0, false, resolveErr
+			}
 			client := agentctl.NewClient(instanceHost, instancePort, r.logger,
 				agentctl.WithAuthToken(authToken))
 			defer client.Close()
@@ -541,7 +556,10 @@ func (r *DockerExecutor) findExistingInstance(
 			return createReconnectInstance(ctx, ctl, req, prevExecutionID)
 		}
 		// Instance exists, check if agent subprocess is running
-		instanceHost, instancePort := r.resolveEndpoint(ctx, dockerClient, containerID, instance.Port, containerIP)
+		instanceHost, instancePort, resolveErr := r.resolveEndpoint(ctx, dockerClient, containerID, instance.Port, containerIP)
+		if resolveErr != nil {
+			return 0, false, resolveErr
+		}
 		client := agentctl.NewClient(instanceHost, instancePort, r.logger,
 			agentctl.WithAuthToken(authToken))
 		status, statusErr := client.GetStatus(ctx)

@@ -104,13 +104,45 @@ func TestRemoteInputsDeliverHelperAndCredentials(t *testing.T) {
 	require.Equal(t, int64(0o755), helper.mode)
 	require.Equal(t, "AGENTCTL-ELF", helper.body)
 
-	target := NewCommandBuilder().GetSessionDirTarget(agent)
-	require.NotEmpty(t, target, "this agent must declare a session dir target for the test to mean anything")
-	wantCred := strings.TrimPrefix(target, "/") + "/.credential-agent/creds.json"
+	wantCred := "root/.credential-agent/creds.json"
 	cred, ok := entryByName(entries, wantCred)
 	require.True(t, ok, "credential not delivered at %q; entries = %v", wantCred, entries)
 	require.Equal(t, `{"token":"local"}`, cred.body)
 	require.Equal(t, int64(credentialFileMode), cred.mode)
+}
+
+// TestRemoteInputsMatchCodexContainerLayout uses the shipped Codex definition
+// to keep remote delivery byte-for-byte aligned with the local Docker session
+// root. SessionDirTarget is the mount target, while credential and portable
+// config paths remain relative to the container home.
+func TestRemoteInputsMatchCodexContainerLayout(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "auth.json"), []byte(`{"token":"codex"}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(`model = "gpt"`), 0o600))
+
+	writer := &recordingArchiveWriter{}
+	inputs := newRemoteInputsForTest(t, writer)
+	require.NoError(t, inputs.DeliverLaunchInputs(context.Background(), "cid-codex", ContainerConfig{
+		AgentConfig: agents.NewCodexACP(),
+		InstanceID:  "0123456789abcdef",
+		Metadata: map[string]interface{}{
+			MetadataKeyAgentConfigBundles: `["codex.config"]`,
+		},
+	}))
+
+	entries := writer.entries(t)
+	auth, ok := entryByName(entries, "root/.codex/auth.json")
+	require.True(t, ok, "Codex auth missing from its container path; entries = %v", entries)
+	require.Equal(t, `{"token":"codex"}`, auth.body)
+	config, ok := entryByName(entries, "root/.codex/config.toml")
+	require.True(t, ok, "Codex config missing from its container path; entries = %v", entries)
+	require.Equal(t, `model = "gpt"`, config.body)
+	_, nestedAuth := entryByName(entries, "root/.codex/.codex/auth.json")
+	require.False(t, nestedAuth, "Codex auth was nested one directory below the mounted session path")
+	_, nestedConfig := entryByName(entries, "root/.codex/.codex/config.toml")
+	require.False(t, nestedConfig, "Codex config was nested one directory below the mounted session path")
 }
 
 // TestRemoteInputsNeverNameTheRemoteHome is the regression guard for the

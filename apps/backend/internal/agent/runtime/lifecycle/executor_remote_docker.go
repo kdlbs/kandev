@@ -35,7 +35,7 @@ type RemoteDockerExecutor struct {
 	connect func(context.Context, *ExecutorCreateRequest) (*remoteDockerSession, error)
 	// reconnect adopts a container the request already names, so a resume
 	// reattaches to the preserved workspace instead of launching a new one.
-	reconnect func(context.Context, *remoteDockerSession, *ExecutorCreateRequest) (*ExecutorInstance, bool)
+	reconnect func(context.Context, *remoteDockerSession, *ExecutorCreateRequest) (*ExecutorInstance, error)
 	// launch provisions a fresh container.
 	launch func(context.Context, *remoteDockerSession, *ExecutorCreateRequest) (*ExecutorInstance, error)
 	// watchTransport starts the keepalive watchdog for a live session.
@@ -57,15 +57,31 @@ type remoteDockerSession struct {
 	// host's filesystem.
 	inputs   *remoteContainerInputs
 	platform SSHRemotePlatform
-	watchdog *sshKeepaliveWatchdog
+
+	watchdogMu sync.Mutex
+	watchdog   *sshKeepaliveWatchdog
+	closed     bool
 }
 
 func (s *remoteDockerSession) close() error {
+	return s.closeWithWatchdogLoop(true, nil)
+}
+
+// closeFromWatchdogLoop is called by the watchdog's loss callback. The
+// callback already owns the loop goroutine, so it closes the transport first
+// and waits only for the probe goroutine; runLoop closes loopDone when the
+// callback returns.
+func (s *remoteDockerSession) closeFromWatchdogLoop(watchdog *sshKeepaliveWatchdog) error {
+	return s.closeWithWatchdogLoop(false, watchdog)
+}
+
+func (s *remoteDockerSession) closeWithWatchdogLoop(
+	awaitLoop bool, expectedWatchdog *sshKeepaliveWatchdog,
+) error {
 	var firstErr error
-	if s.watchdog != nil {
-		s.watchdog.stopAndAwaitLoop()
-		s.watchdog.awaitProbeExit()
-		s.watchdog = nil
+	watchdog := s.takeWatchdog(expectedWatchdog)
+	if watchdog != nil && awaitLoop {
+		watchdog.stopAndAwaitLoop()
 	}
 	if s.endpoints != nil {
 		if err := s.endpoints.Close(); err != nil {
@@ -82,7 +98,32 @@ func (s *remoteDockerSession) close() error {
 			firstErr = err
 		}
 	}
+	if watchdog != nil {
+		watchdog.awaitProbeExit()
+	}
 	return firstErr
+}
+
+func (s *remoteDockerSession) setWatchdog(watchdog *sshKeepaliveWatchdog) bool {
+	s.watchdogMu.Lock()
+	defer s.watchdogMu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.watchdog = watchdog
+	return true
+}
+
+func (s *remoteDockerSession) takeWatchdog(expected *sshKeepaliveWatchdog) *sshKeepaliveWatchdog {
+	s.watchdogMu.Lock()
+	defer s.watchdogMu.Unlock()
+	s.closed = true
+	if expected != nil && s.watchdog != expected {
+		return nil
+	}
+	watchdog := s.watchdog
+	s.watchdog = nil
+	return watchdog
 }
 
 // NewRemoteDockerExecutor creates the remote Docker runtime. Connections are
@@ -255,11 +296,25 @@ func (r *RemoteDockerExecutor) CreateInstance(ctx context.Context, req *Executor
 	// A resume names the container it left behind. Reattaching keeps the
 	// workspace the user expects; launching a second container would abandon
 	// it on the remote host.
-	if instance, ok := r.reconnect(ctx, session, req); ok {
+	instance, reconnectErr := r.reconnect(ctx, session, req)
+	if reconnectErr != nil {
+		r.releaseSession(req.InstanceID)
+		if req.WorkspaceReuseRequired {
+			return nil, fmt.Errorf("%w: existing remote Docker workspace could not be attached: %w",
+				models.ErrWorkspaceReuseUnsafe, reconnectErr)
+		}
+		return nil, reconnectErr
+	}
+	if instance != nil {
 		return instance, nil
 	}
+	if req.WorkspaceReuseRequired {
+		r.releaseSession(req.InstanceID)
+		return nil, fmt.Errorf("%w: existing remote Docker workspace could not be attached",
+			models.ErrWorkspaceReuseUnsafe)
+	}
 
-	instance, err := r.launch(ctx, session, req)
+	instance, err = r.launch(ctx, session, req)
 	if err != nil {
 		r.releaseSession(req.InstanceID)
 		return nil, err
@@ -293,20 +348,23 @@ func (r *RemoteDockerExecutor) launchFresh(
 // endpoints it reports are backend loopback rather than the remote host's.
 func (r *RemoteDockerExecutor) reconnectToContainer(
 	ctx context.Context, session *remoteDockerSession, req *ExecutorCreateRequest,
-) (*ExecutorInstance, bool) {
+) (*ExecutorInstance, error) {
 	if getMetadataString(req.Metadata, MetadataKeyContainerID) == "" && req.PreviousExecutionID == "" {
-		return nil, false
+		return nil, nil
 	}
 
 	delegate := r.reconnectDelegate(session)
 	instance, err := delegate.reconnectToContainer(ctx, session.dockerClient, req)
 	if err != nil {
+		if errors.Is(err, errContainerEndpointResolution) {
+			return nil, err
+		}
 		r.logger.Info("remote docker: could not reconnect, launching fresh",
 			zap.String("instance_id", req.InstanceID), zap.Error(err))
-		return nil, false
+		return nil, nil
 	}
 	instance.RuntimeName = r.Name()
-	return instance, true
+	return instance, nil
 }
 
 // reconnectDelegate builds the Docker executor that adopts a preserved
@@ -334,28 +392,60 @@ func (r *RemoteDockerExecutor) startTransportWatchdog(instanceID string, session
 	if !sshKeepaliveTuningValid(interval, deadline) {
 		return
 	}
-	session.watchdog = startSSHKeepaliveWatchdog(session.sshClient, interval, deadline, time.Now(), nil,
+	watchdogReady := make(chan *sshKeepaliveWatchdog, 1)
+	watchdog := startSSHKeepaliveWatchdog(session.sshClient, interval, deadline, time.Now(), nil,
 		func(reason string, silence time.Duration) {
+			watchdog := <-watchdogReady
 			r.logger.Warn("remote docker: transport lost",
 				zap.String("instance_id", instanceID),
 				zap.String("reason", reason),
 				zap.Duration("silence", silence))
-			r.releaseSession(instanceID)
+			r.releaseSessionFromWatchdog(instanceID, session, watchdog)
 		},
 	)
+	attached := session.setWatchdog(watchdog)
+	watchdogReady <- watchdog
+	if !attached {
+		watchdog.stopAndAwaitLoop()
+		watchdog.awaitProbeExit()
+	}
 }
 
 func (r *RemoteDockerExecutor) releaseSession(instanceID string) {
-	r.mu.Lock()
-	session := r.sessions[instanceID]
-	delete(r.sessions, instanceID)
-	r.mu.Unlock()
+	r.releaseSessionIfCurrent(instanceID, nil)
+}
+
+func (r *RemoteDockerExecutor) releaseSessionIfCurrent(instanceID string, expected *remoteDockerSession) {
+	session := r.takeSession(instanceID, expected)
 	if session != nil {
 		if err := session.close(); err != nil {
 			r.logger.Warn("failed to release remote docker session",
 				zap.String("instance_id", instanceID), zap.Error(err))
 		}
 	}
+}
+
+func (r *RemoteDockerExecutor) releaseSessionFromWatchdog(
+	instanceID string, expected *remoteDockerSession, watchdog *sshKeepaliveWatchdog,
+) {
+	session := r.takeSession(instanceID, expected)
+	if session != nil {
+		if err := session.closeFromWatchdogLoop(watchdog); err != nil {
+			r.logger.Warn("failed to release lost remote docker session",
+				zap.String("instance_id", instanceID), zap.Error(err))
+		}
+	}
+}
+
+func (r *RemoteDockerExecutor) takeSession(instanceID string, expected *remoteDockerSession) *remoteDockerSession {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session := r.sessions[instanceID]
+	if expected != nil && session != expected {
+		return nil
+	}
+	delete(r.sessions, instanceID)
+	return session
 }
 
 // remoteKandevHomeDir is the Kandev root on the remote host.

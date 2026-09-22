@@ -2,8 +2,11 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func remoteDockerRequest(instanceID string, metadata map[string]interface{}) *ExecutorCreateRequest {
@@ -80,12 +83,12 @@ func TestRemoteDockerReconnectsToAPreservedContainer(t *testing.T) {
 		launched++
 		return &ExecutorInstance{InstanceID: "instance-1", ContainerID: "fresh"}, nil
 	}
-	exec.reconnect = func(_ context.Context, _ *remoteDockerSession, req *ExecutorCreateRequest) (*ExecutorInstance, bool) {
+	exec.reconnect = func(_ context.Context, _ *remoteDockerSession, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 		if getMetadataString(req.Metadata, MetadataKeyContainerID) == "" {
-			return nil, false
+			return nil, nil
 		}
 		reconnected++
-		return &ExecutorInstance{InstanceID: req.InstanceID, ContainerID: "preserved"}, true
+		return &ExecutorInstance{InstanceID: req.InstanceID, ContainerID: "preserved"}, nil
 	}
 
 	fresh, err := exec.CreateInstance(context.Background(), remoteDockerRequest("instance-1", nil))
@@ -109,6 +112,57 @@ func TestRemoteDockerReconnectsToAPreservedContainer(t *testing.T) {
 	}
 	if reconnected != 1 {
 		t.Fatalf("reconnect ran %d time(s), want 1", reconnected)
+	}
+}
+
+func TestRemoteDockerWorkspaceReuseFailureDoesNotLaunchAReplacement(t *testing.T) {
+	exec := NewRemoteDockerExecutor(dialerTestLogger(t))
+	launched := 0
+	exec.connect = func(context.Context, *ExecutorCreateRequest) (*remoteDockerSession, error) {
+		return &remoteDockerSession{}, nil
+	}
+	exec.reconnect = func(context.Context, *remoteDockerSession, *ExecutorCreateRequest) (*ExecutorInstance, error) {
+		return nil, nil
+	}
+	exec.launch = func(context.Context, *remoteDockerSession, *ExecutorCreateRequest) (*ExecutorInstance, error) {
+		launched++
+		return &ExecutorInstance{InstanceID: "instance-1", ContainerID: "replacement"}, nil
+	}
+	exec.watchTransport = func(string, *remoteDockerSession) {}
+
+	req := remoteDockerRequest("instance-1", map[string]interface{}{MetadataKeyContainerID: "preserved"})
+	req.WorkspaceReuseRequired = true
+	_, err := exec.CreateInstance(context.Background(), req)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("CreateInstance() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if launched != 0 {
+		t.Fatalf("workspace reuse failure launched %d replacement container(s), want 0", launched)
+	}
+}
+
+func TestRemoteDockerReconnectEndpointFailureDoesNotLaunchAReplacement(t *testing.T) {
+	exec := NewRemoteDockerExecutor(dialerTestLogger(t))
+	launched := 0
+	exec.connect = func(context.Context, *ExecutorCreateRequest) (*remoteDockerSession, error) {
+		return &remoteDockerSession{}, nil
+	}
+	exec.reconnect = func(context.Context, *remoteDockerSession, *ExecutorCreateRequest) (*ExecutorInstance, error) {
+		return nil, errContainerEndpointResolution
+	}
+	exec.launch = func(context.Context, *remoteDockerSession, *ExecutorCreateRequest) (*ExecutorInstance, error) {
+		launched++
+		return &ExecutorInstance{InstanceID: "instance-1", ContainerID: "replacement"}, nil
+	}
+	exec.watchTransport = func(string, *remoteDockerSession) {}
+
+	_, err := exec.CreateInstance(context.Background(), remoteDockerRequest("instance-1",
+		map[string]interface{}{MetadataKeyContainerID: "preserved"}))
+	if !errors.Is(err, errContainerEndpointResolution) {
+		t.Fatalf("CreateInstance() error = %v, want endpoint resolution error", err)
+	}
+	if launched != 0 {
+		t.Fatalf("endpoint resolution failure launched %d replacement container(s), want 0", launched)
 	}
 }
 

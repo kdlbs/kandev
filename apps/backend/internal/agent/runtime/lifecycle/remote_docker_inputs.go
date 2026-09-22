@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"runtime"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -159,7 +161,13 @@ func (r *remoteContainerInputs) addAgentSession(ctx context.Context, up *tarFile
 		return
 	}
 
-	if err := seedAgentSessionArchive(ctx, up, config.AgentConfig, target,
+	home, err := containerHomeForSession(config.AgentConfig, target)
+	if err != nil {
+		r.logger.Warn("remote docker: could not resolve the container home for agent credentials (continuing)",
+			zap.String("instance_id", config.InstanceID), zap.Error(err))
+		return
+	}
+	if err := seedAgentSessionArchive(ctx, up, config.AgentConfig, home,
 		selectedPortableConfigBundleIDs(config.Metadata), r.logger,
 		func(warnings []PortableConfigWarning) {
 			reportPortableConfigWarnings(config.OnProgress, warnings)
@@ -167,6 +175,35 @@ func (r *remoteContainerInputs) addAgentSession(ctx context.Context, up *tarFile
 		r.logger.Warn("remote docker: failed to seed agent credentials (continuing)",
 			zap.String("instance_id", config.InstanceID), zap.Error(err))
 	}
+}
+
+// containerHomeForSession reverses the agent's {home}-based session template
+// against its in-container mount target. Credential and portable-config paths
+// are home-relative even when the mounted session directory is a nested
+// dot-directory such as /root/.codex.
+func containerHomeForSession(ag agents.Agent, sessionDirTarget string) (string, error) {
+	if ag == nil || ag.Runtime() == nil {
+		return "", fmt.Errorf("remote docker: agent runtime is required")
+	}
+	template := path.Clean(ag.Runtime().SessionConfig.SessionDirTemplate)
+	target := path.Clean(sessionDirTarget)
+	if template == "{home}" {
+		return target, nil
+	}
+	const homePrefix = "{home}/"
+	if !strings.HasPrefix(template, homePrefix) {
+		return "", fmt.Errorf("remote docker: unsupported session dir template %q", template)
+	}
+	relative := strings.TrimPrefix(template, homePrefix)
+	suffix := "/" + relative
+	if !strings.HasSuffix(target, suffix) {
+		return "", fmt.Errorf("remote docker: session target %q does not match template %q", target, template)
+	}
+	home := strings.TrimSuffix(target, suffix)
+	if home == "" {
+		home = "/"
+	}
+	return home, nil
 }
 
 func (r *remoteContainerInputs) deliver(ctx context.Context, containerID string, up *tarFileUploader) error {
@@ -192,7 +229,7 @@ func seedAgentSessionArchive(
 	ctx context.Context,
 	up *tarFileUploader,
 	ag agents.Agent,
-	sessionDirTarget string,
+	targetHomeDir string,
 	selectedBundleIDs []string,
 	log *logger.Logger,
 	onWarnings func([]PortableConfigWarning),
@@ -200,8 +237,8 @@ func seedAgentSessionArchive(
 	if ag == nil {
 		return nil
 	}
-	if sessionDirTarget == "" {
-		return fmt.Errorf("remote docker: session dir target is required to seed agent credentials")
+	if targetHomeDir == "" {
+		return fmt.Errorf("remote docker: target home is required to seed agent credentials")
 	}
 
 	var authErr error
@@ -210,12 +247,12 @@ func seedAgentSessionArchive(
 		// which of the agent's declared source lists applies.
 		methods := authMethodsForHost(auth.Methods, runtime.GOOS)
 		if len(methods) > 0 {
-			authErr = UploadCredentialFiles(ctx, up, methods, sessionDirTarget, log)
+			authErr = UploadCredentialFiles(ctx, up, methods, targetHomeDir, log)
 		}
 	}
 
 	if len(selectedBundleIDs) > 0 {
-		warnings := UploadPortableConfigBundles(ctx, up, ag, selectedBundleIDs, sessionDirTarget, log)
+		warnings := UploadPortableConfigBundles(ctx, up, ag, selectedBundleIDs, targetHomeDir, log)
 		if onWarnings != nil {
 			onWarnings(warnings)
 		}
