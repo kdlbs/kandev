@@ -344,9 +344,9 @@ func TestRunAgentProcessAsync_ObservesStartingSiblingsBeforeProcessStart(t *test
 	if startedBeforeObservation != 0 {
 		t.Fatalf("agent process started before co-residency observation for %d session(s): %v", startedBeforeObservation, startedWithoutObservation)
 	}
-	// The expvar is process-global, so unrelated asynchronous observations can
-	// increment it while this integration test is running. The exact warning
-	// count above scopes the two observations under test.
+	// The expvar is process-global and other asynchronous launch tests can
+	// finish between the before and after reads. The per-session warnings above
+	// prove this test observed both starts; the metric only needs to include them.
 	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after < before+2 {
 		t.Fatalf("admitted[launch] counter = %d, want at least %d", after, before+2)
 	}
