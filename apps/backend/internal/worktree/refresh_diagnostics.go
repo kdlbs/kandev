@@ -81,6 +81,7 @@ func classifyRefreshDiagnosticOutput(output string) (string, string) {
 	case strings.Contains(lower, "index.lock"),
 		strings.Contains(lower, "cannot lock ref"),
 		strings.Contains(lower, "another git process seems to be running"),
+		// Require both fragments so a generic "unable to create" error stays unknown.
 		strings.Contains(lower, "unable to create") && strings.Contains(lower, "lock"):
 		return refreshDiagnosticLock, "Git could not acquire the repository lock."
 	case strings.Contains(lower, "repository not found"),

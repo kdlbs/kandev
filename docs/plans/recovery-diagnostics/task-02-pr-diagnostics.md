@@ -126,4 +126,17 @@ attempts, so post-push retries and existing-watch diagnostics remain active.
 Focused coverage covers wrapped provider deadlines in both paths and retains
 actual caller-cancellation coverage. Builds and tests were not rerun for this
 review remediation, so the verification above describes the pre-remediation
-implementation state.
+implementation state at that time.
+
+## PR fixup verification
+
+The focused orchestrator and GitHub regression commands passed after the review
+fixes, and the base-relative backend lint completed with zero issues:
+
+```text
+go test ./internal/orchestrator -run 'Test(PushDiscoveryDiagnostics|ExistingWatchDiscoveryDiagnostics|DetectPushAndAssociatePR|GitHubPushAssociation|PushAssociation|ResolvePRWatchBranchForWatch)' -count=1
+go test ./internal/github -run 'Test(ClassifyPRDiscoveryError|PRDiscovery)' -count=1
+golangci-lint run ./... --new-from-rev='195530e5766abf7f44f08e2d5ad436b22c28d748' --timeout=5m
+```
+
+The full backend build and test suites remain unrun locally.

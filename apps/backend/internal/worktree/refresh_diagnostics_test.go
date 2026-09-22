@@ -205,11 +205,16 @@ esac
 				t.Fatal("diagnostic detail is empty")
 			}
 			for _, entry := range logs.All() {
-				if strings.Contains(entry.Message, tt.secret) || strings.Contains(entry.Message, "https://token:") {
+				if strings.Contains(entry.Message, "https://token:") ||
+					(tt.secret != "" && strings.Contains(entry.Message, tt.secret)) {
 					t.Fatalf("log message contains secret material: %q", entry.Message)
 				}
 				for key, value := range entry.ContextMap() {
-					if strings.Contains(key, tt.secret) || strings.Contains(key, "https://token:") || strings.Contains(fmt.Sprint(value), tt.secret) {
+					rendered := fmt.Sprint(value)
+					if strings.Contains(key, "https://token:") ||
+						strings.Contains(rendered, "https://token:") ||
+						(tt.secret != "" &&
+							(strings.Contains(key, tt.secret) || strings.Contains(rendered, tt.secret))) {
 						t.Fatalf("log field %q contains secret material: %v", key, value)
 					}
 				}

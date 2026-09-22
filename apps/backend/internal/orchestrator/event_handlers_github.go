@@ -804,7 +804,26 @@ func (s *Service) detectPushAndAssociatePRWithIdentity(
 		return
 	}
 
-	// Try to find a PR immediately, then retry after delays.
+	foundPR := s.discoverPRAfterPush(ctx, workspaceID, sessionID, taskID, identity, branch)
+	if foundPR == nil {
+		return
+	}
+	s.logger.Info("PR found after push, associating with task",
+		zap.String("session_id", sessionID),
+		zap.String("task_id", taskID),
+		zap.String("repository_name", repositoryName),
+		zap.Int("pr_number", foundPR.Number),
+		zap.String("branch", branch))
+	s.associatePRFromPushScoped(ctx, workspaceID, sessionID, taskID, identity.owner, identity.name, identity.repositoryID, branch, foundPR)
+}
+
+func (s *Service) discoverPRAfterPush(
+	ctx context.Context,
+	workspaceID, sessionID, taskID string,
+	identity pushRepositoryIdentity,
+	branch string,
+) *github.PR {
+	const prDiscoveryOutcomeFailed = "failed"
 	delays := []time.Duration{0, 30 * time.Second, 60 * time.Second}
 	attemptCount := 0
 	errorCount := 0
@@ -813,28 +832,28 @@ func (s *Service) detectPushAndAssociatePRWithIdentity(
 	for attempt, delay := range delays {
 		if delay > 0 {
 			if !s.waitForPRDiscoveryRetry(ctx, delay) {
-				return
+				return nil
 			}
-			// Re-check if a watch was created in the meantime (e.g. by CreatePR callback)
+			// Re-check if a watch was created in the meantime (e.g. by CreatePR callback).
 			if ex, err := s.githubService.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, identity.repositoryID, branch); prDiscoveryContextCanceled(ctx) {
-				return
+				return nil
 			} else if err == nil && ex != nil {
-				return
+				return nil
 			}
 		}
 		if prDiscoveryContextCanceled(ctx) {
-			return
+			return nil
 		}
 		attemptCount++
 		foundPR, findErr := s.githubService.FindPRByBranchForWorkspace(
 			ctx, workspaceID, identity.owner, identity.name, branch,
 		)
 		if prDiscoveryContextCanceled(ctx) {
-			return
+			return nil
 		}
 		if findErr != nil {
 			errorCount++
-			lastOutcome = agentEventFailed
+			lastOutcome = prDiscoveryOutcomeFailed
 			s.logger.Warn("PR discovery lookup failed after push",
 				zap.String("operation", "post_push_branch_lookup"),
 				zap.String("workspace_id", workspaceID),
@@ -864,15 +883,20 @@ func (s *Service) detectPushAndAssociatePRWithIdentity(
 				zap.Duration("delay", delay))
 			continue
 		}
-		s.logger.Info("PR found after push, associating with task",
-			zap.String("session_id", sessionID),
-			zap.String("task_id", taskID),
-			zap.String("repository_name", repositoryName),
-			zap.Int("pr_number", foundPR.Number),
-			zap.String("branch", branch))
-		s.associatePRFromPushScoped(ctx, workspaceID, sessionID, taskID, identity.owner, identity.name, identity.repositoryID, branch, foundPR)
-		return
+		return foundPR
 	}
+	s.logPRDiscoveryExhausted(workspaceID, sessionID, taskID, identity, branch,
+		attemptCount, errorCount, emptyCount, lastOutcome)
+	return nil
+}
+
+func (s *Service) logPRDiscoveryExhausted(
+	workspaceID, sessionID, taskID string,
+	identity pushRepositoryIdentity,
+	branch string,
+	attemptCount, errorCount, emptyCount int,
+	lastOutcome string,
+) {
 	s.logger.Debug("exhausted all retries, no PR found after push",
 		zap.String("operation", "post_push_branch_lookup"),
 		zap.String("workspace_id", workspaceID),

@@ -356,6 +356,9 @@ func TestExistingWatchDiscoveryDiagnostics(t *testing.T) {
 			if logs.FilterMessage("no PR found for existing watch").Len() > 0 && tt.lookup.err != nil {
 				t.Fatalf("failed existing-watch lookup was logged as empty: %v", logs.All())
 			}
+			if tt.lookup.err == nil && tt.lookup.pr == nil && logs.FilterMessage("no PR found for existing watch").Len() != 1 {
+				t.Fatalf("empty existing-watch result did not emit debug log: %v", logs.All())
+			}
 			assertPushDiagnosticLogsContainNoRawError(t, logs, "watch-secret")
 		})
 	}

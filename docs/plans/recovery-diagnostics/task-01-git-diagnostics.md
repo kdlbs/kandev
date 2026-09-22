@@ -123,4 +123,15 @@ The classifier now recognizes Git's pull fast-forward refusal, uses local
 branch wording for that outcome, and leaves tag-clobber output unknown. Fetch
 and pull fixtures cover the real failure forms. Builds and tests were not
 rerun for this review remediation, so the verification above describes the
-pre-remediation implementation state.
+pre-remediation implementation state at that time.
+
+## PR fixup verification
+
+The focused worktree regression passed after the review fixes:
+
+```text
+go test ./internal/worktree -run 'Test(RefreshDiagnostic|BaseRefreshDiagnostic|RefreshDiagnosticsPreservePolicy)' -count=1
+golangci-lint run ./... --new-from-rev='195530e5766abf7f44f08e2d5ad436b22c28d748' --timeout=5m
+```
+
+The full backend build and test suites remain unrun locally.
