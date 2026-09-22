@@ -295,7 +295,6 @@ func TestRunAgentProcessAsync_ObservesStartingSiblingsBeforeProcessStart(t *test
 		}, nil
 	}
 
-	before := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch)
 	var managerMu sync.Mutex
 	startedWithoutObservation := make(map[string]int)
 	started := make(chan string, 2)
