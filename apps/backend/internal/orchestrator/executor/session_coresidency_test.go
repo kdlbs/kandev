@@ -226,7 +226,8 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 }
 
 // TestResumeSession_ObservesWorkingSiblingOnAgentStart pins the wiring
-// half of AC-004.1 for resume process startup.
+// half of AC-004.1 for the resume seam. The process-start callback
+// synchronizes the assertion after the observation seam has run.
 func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
