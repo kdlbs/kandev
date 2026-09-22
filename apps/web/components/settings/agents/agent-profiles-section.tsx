@@ -82,9 +82,20 @@ function ProfileRowActions({
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const pendingDelete = useRef(false);
+  const [open, setOpen] = useState(false);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger
+        asChild
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
         <Button
           ref={deleteAnchorRef}
           variant="ghost"
@@ -92,8 +103,6 @@ function ProfileRowActions({
           className={settingsActionClassName("cursor-pointer")}
           aria-label={t("agents:profileActions")}
           data-testid={`profile-actions-menu-${profile.id}`}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
         >
           <IconDotsVertical className="h-4 w-4" />
         </Button>
