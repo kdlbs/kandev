@@ -141,6 +141,38 @@ func TestRemoteDockerWorkspaceReuseFailureDoesNotLaunchAReplacement(t *testing.T
 	}
 }
 
+func TestRemoteDockerWorkspaceReuseReconnectErrorDoesNotLaunchAReplacement(t *testing.T) {
+	exec := NewRemoteDockerExecutor(dialerTestLogger(t))
+	launched := 0
+	exec.connect = func(context.Context, *ExecutorCreateRequest) (*remoteDockerSession, error) {
+		return &remoteDockerSession{}, nil
+	}
+	exec.reconnect = func(context.Context, *remoteDockerSession, *ExecutorCreateRequest) (*ExecutorInstance, error) {
+		return nil, errContainerEndpointResolution
+	}
+	exec.launch = func(context.Context, *remoteDockerSession, *ExecutorCreateRequest) (*ExecutorInstance, error) {
+		launched++
+		return &ExecutorInstance{InstanceID: "instance-1", ContainerID: "replacement"}, nil
+	}
+	exec.watchTransport = func(string, *remoteDockerSession) {}
+
+	req := remoteDockerRequest("instance-1", map[string]interface{}{MetadataKeyContainerID: "preserved"})
+	req.WorkspaceReuseRequired = true
+	_, err := exec.CreateInstance(context.Background(), req)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("CreateInstance() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if !errors.Is(err, errContainerEndpointResolution) {
+		t.Fatalf("CreateInstance() error = %v, want the reconnect cause preserved", err)
+	}
+	if launched != 0 {
+		t.Fatalf("workspace reuse reconnect error launched %d replacement container(s), want 0", launched)
+	}
+	if len(exec.sessions) != 0 {
+		t.Fatalf("workspace reuse reconnect error retained %d session(s), want 0", len(exec.sessions))
+	}
+}
+
 func TestRemoteDockerReconnectEndpointFailureDoesNotLaunchAReplacement(t *testing.T) {
 	exec := NewRemoteDockerExecutor(dialerTestLogger(t))
 	launched := 0
