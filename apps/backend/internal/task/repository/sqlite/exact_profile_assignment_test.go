@@ -34,6 +34,9 @@ func TestExactProfileAssignmentSchemaExists(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("exact profile assignment table is missing: %v", err)
 	}
+	if err := db.Get(&tableName, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'task_exact_profile_launch_attempt_bindings'`); err != nil {
+		t.Fatalf("exact profile launch attempt binding table is missing: %v", err)
+	}
 }
 
 func TestUpsertExactProfileAssignmentGuardsGeneration(t *testing.T) {

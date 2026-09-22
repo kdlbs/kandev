@@ -51,3 +51,12 @@ type ExactProfileLaunchReceipt struct {
 	SubstitutionDone bool
 	CreatedAt        time.Time
 }
+
+// ExactProfileLaunchAttemptBinding is the immutable internal identity admitted
+// before process start. Legacy sessions have no row until a new exact launch.
+type ExactProfileLaunchAttemptBinding struct {
+	TaskID, SessionID, ExecutionID, AttemptID, SessionIncarnationID, AgentProfileID string
+	ProfileRevision                                                                 time.Time
+	Generation                                                                      int64
+	CreatedAt                                                                       time.Time
+}

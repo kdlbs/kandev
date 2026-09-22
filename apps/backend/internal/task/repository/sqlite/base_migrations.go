@@ -806,6 +806,13 @@ func (r *Repository) ensureTaskExactProfileSchema() error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_task_exact_profile_receipts_generation
 			ON task_exact_profile_launch_receipts(task_id, generation);
+		CREATE TABLE IF NOT EXISTS task_exact_profile_launch_attempt_bindings (
+			task_id TEXT NOT NULL, session_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+			attempt_id TEXT NOT NULL, session_incarnation_id TEXT NOT NULL,
+			agent_profile_id TEXT NOT NULL, profile_revision_nanos BIGINT NOT NULL,
+			generation BIGINT NOT NULL, created_at TIMESTAMP NOT NULL,
+			PRIMARY KEY (task_id, session_id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		);
 	`); err != nil {
 		return fmt.Errorf("create exact task profile schema: %w", err)
 	}
