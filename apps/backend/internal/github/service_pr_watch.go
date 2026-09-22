@@ -986,7 +986,7 @@ func (s *Service) refreshStaleWorkspaceWatches(workspaceID string, staleTasks ma
 		// one batched call for the whole workspace; once a row reaches a
 		// terminal state it drops out of this set permanently.
 		if len(unwatched) > 0 {
-			s.syncUnwatchedTaskPRs(syncCtx, unwatched, workspaceID)
+			s.syncUnwatchedTaskPRs(syncCtx, unwatched, workspaceID, false)
 		}
 		if len(allWatches) == 0 {
 			return
@@ -1795,7 +1795,7 @@ func (s *Service) triggerPRSyncAllPermanent(
 		// sync path at all, so reconcile them here rather than returning the
 		// stored snapshot verbatim. Empty slice if none. permanent=false (the
 		// task can still acquire a watch later via push detection).
-		existing, listErr := s.reconcileTaskUnwatchedPRs(ctx, taskID, nil)
+		existing, listErr := s.reconcileTaskUnwatchedPRs(ctx, taskID, nil, explicitRefresh)
 		if listErr != nil {
 			return nil, false, listErr
 		}
@@ -1810,7 +1810,7 @@ func (s *Service) triggerPRSyncAllPermanent(
 	// PRs the task linked from an earlier branch are no longer covered by any
 	// watch — the loop above cannot see them, and without this they keep their
 	// last-observed state (open, green, mergeable) forever.
-	if reconciled, listErr := s.reconcileTaskUnwatchedPRs(ctx, taskID, allWatches); listErr != nil {
+	if reconciled, listErr := s.reconcileTaskUnwatchedPRs(ctx, taskID, allWatches, explicitRefresh); listErr != nil {
 		s.logger.Debug("unwatched task PR reconciliation failed",
 			zap.String("task_id", taskID), zap.Error(listErr))
 	} else {
