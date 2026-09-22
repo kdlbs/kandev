@@ -1023,5 +1023,9 @@
   "failedToLoadRouteAttempts": "ルート試行の読み込み失敗",
   "failedToLoadRoutingConfig": "ルーティング設定の読み込み失敗",
   "failedToLoadRoutingPreview": "ルーティングプレビューの読み込み失敗",
-  "failedToLoadTaskQuorum": "タスククオーラムの読み込み失敗"
+  "failedToLoadTaskQuorum": "タスククオーラムの読み込み失敗",
+  "openSessionRecovery": "セッション復旧を開く",
+  "sessionRecoveryDescription": "この実行はセッションが復旧されるまで保留されています。Kandev はプロンプトを自動的に再送信しません。",
+  "sessionRecoveryReason": "理由: {{reason}}",
+  "sessionRecoveryRequired": "セッションの復旧が必要"
 }

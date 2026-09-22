@@ -2429,5 +2429,9 @@
   "changeWorkflowObservedSuccess": "タスクを再読み込みし、ワークフローの変更を確認しました。",
   "changeWorkflow": "ワークフローを変更...",
   "changeWorkflowForSelectedTasks": "選択したタスクのワークフローを変更",
-  "changeWorkflowRefreshTask": "タスクを再読み込み"
+  "changeWorkflowRefreshTask": "タスクを再読み込み",
+  "continueFromHistory": "保存済み履歴から続行",
+  "durableDeliveryUncertain": "配信が中断されました。プロンプトの結果は不明です。",
+  "retryConnection": "接続を再試行",
+  "retryingConnection": "接続を再試行中..."
 }

@@ -47,6 +47,13 @@ export type SessionStoppedBannerProps = {
   recoveryActions?: SessionRecoveryActions;
 };
 
+type StoppedRecoveryAction = {
+  label: string;
+  onClick: () => void;
+  testId: string;
+  disabled: boolean;
+};
+
 function StoppedRecoveryFeedback({
   workspaceId,
   recoveryError,
@@ -95,7 +102,7 @@ function StoppedRecoveryFeedback({
     testId: "recovery-new-branch-button",
     disabled: busyAction !== null,
   };
-  let primaryAction = restoreAction;
+  let primaryAction: StoppedRecoveryAction | undefined = restoreAction;
   if (branchDetails) primaryAction = newBranchAction;
   if (continuationDetails) primaryAction = continuationAction;
   const secondaryAction = continuationDetails || branchDetails ? restoreAction : undefined;

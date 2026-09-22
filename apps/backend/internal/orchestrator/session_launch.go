@@ -1218,7 +1218,7 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 		return nil, normalizeRecoverSessionError(err)
 	}
 	if _, err := s.promptTask(
-		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true,
+		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true, launchOriginManual,
 		promptTaskOptions{
 			recoveryAction:             action,
 			preservePromptContext:      true,

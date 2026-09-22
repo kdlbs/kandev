@@ -42,10 +42,12 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 			name: "missing rollout for a different session",
 			message: `load session failed: failed to load session: {"code":-32603,"message":"Internal error",` +
 				`"data":{"details":"no rollout found for thread id another-session"}}`,
+			reason: RestoreReasonUnknown,
 		},
 		{
 			name:    "unstructured missing rollout phrase",
 			message: "internal error: no rollout found for thread id saved-session",
+			reason:  RestoreReasonUnknown,
 		},
 	}
 
