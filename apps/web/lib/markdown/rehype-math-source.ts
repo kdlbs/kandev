@@ -3,7 +3,13 @@ type RehypeNode = {
   tagName?: string;
   properties?: Record<string, unknown>;
   children?: RehypeNode[];
-  position?: unknown;
+  position?: RehypePosition;
+};
+
+type RehypePosition = {
+  start: { line: number; column: number; offset?: number };
+  end: { line: number; column: number; offset?: number };
+  indent?: number[];
 };
 
 const MATH_SOURCE_CLASS = "markdown-math-source";
@@ -19,6 +25,7 @@ function isDisplayMathPre(node: RehypeNode): boolean {
   const code = node.children?.[0];
   return (
     node.tagName === "pre" &&
+    node.children?.length === 1 &&
     code?.tagName === "code" &&
     (hasClass(code, "language-math") || hasClass(code, "math-display"))
   );

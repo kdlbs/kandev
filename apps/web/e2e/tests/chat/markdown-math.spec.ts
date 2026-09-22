@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForAgentMessage } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
 
@@ -28,6 +29,9 @@ async function openScriptedTask(
       repository_ids: [seedData.repositoryId],
     },
   );
+
+  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+  await waitForAgentMessage(apiClient, task.session_id, content.split("\n", 1)[0]);
 
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
@@ -86,7 +90,7 @@ test.describe("Markdown math", () => {
 
       await expect(testPage.locator("html")).toHaveClass(new RegExp(`(^|\\s)${theme}(\\s|$)`));
       const chat = session.activeChat();
-      await expect(chat.locator(".katex").first()).toBeVisible({ timeout: 30_000 });
+      await expect(chat.locator(".katex").first()).toBeVisible();
       await expect(chat.locator(".katex-display")).toHaveCount(2);
       await expect(chat.locator("math").first()).toBeVisible();
       await expect(chat.getByText("Cost: $100 and $200", { exact: true })).toBeVisible();

@@ -1127,7 +1127,6 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   overflow-y: hidden;
   padding: 0.125rem 0.25rem;
   text-align: left;
-  -webkit-overflow-scrolling: touch;
 }
 
 .katex-display > .katex {

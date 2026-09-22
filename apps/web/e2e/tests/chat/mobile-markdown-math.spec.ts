@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForAgentMessage } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
 
@@ -71,13 +72,16 @@ test.describe("mobile: Markdown math", () => {
       },
     );
 
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    await waitForAgentMessage(apiClient, task.session_id, "Inline:");
+
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
     const chat = session.activeChat();
     const display = chat.locator(".katex-display");
-    await expect(display).toBeVisible({ timeout: 30_000 });
+    await expect(display).toBeVisible();
     await expect(chat.locator(".katex").first()).toBeVisible();
 
     const scrollMetrics = await display.evaluate((element) => {
