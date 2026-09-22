@@ -104,7 +104,7 @@ func TestCoordinatorHandoffRepositoryRollbackRestoresPredecessor(t *testing.T) {
 	require.ErrorIs(t, err, models.ErrCoordinatorHandoffConflict)
 }
 
-func newCoordinatorHandoffFixture(t *testing.T) (*Service, *tasksqlite.Repository, *messagequeue.Service) {
+func newCoordinatorHandoffFixture(t *testing.T, withReceipt ...bool) (*Service, *tasksqlite.Repository, *messagequeue.Service) {
 	t.Helper()
 	dbConn, err := dbutil.OpenSQLite(filepath.Join(t.TempDir(), "coordinator-handoff.db"))
 	require.NoError(t, err)
@@ -133,6 +133,9 @@ func newCoordinatorHandoffFixture(t *testing.T) (*Service, *tasksqlite.Repositor
 		ProfileRevision: now, Generation: 1,
 	})
 	require.NoError(t, err)
+	if len(withReceipt) > 0 && !withReceipt[0] {
+		return &Service{repo: repo, messageQueue: queue}, repo, queue
+	}
 	_, err = repo.RecordExactProfileLaunchReceipt(context.Background(), &models.ExactProfileLaunchReceipt{
 		TaskID: "task", SessionID: "session-new", AgentProfileID: "profile-cheap",
 		ProfileRevision: now, Generation: 1, Model: "gpt-5.6-terra",
@@ -140,6 +143,20 @@ func newCoordinatorHandoffFixture(t *testing.T) (*Service, *tasksqlite.Repositor
 	})
 	require.NoError(t, err)
 	return &Service{repo: repo, messageQueue: queue}, repo, queue
+}
+
+func TestHandoffCoordinatorPrimaryRejectsBootReadyWithoutInferenceReceipt(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, queue := newCoordinatorHandoffFixture(t, false)
+	queued, err := queue.QueueMessage(ctx, "session-old", "task", "retain", "", messagequeue.QueuedByUser, false, nil)
+	require.NoError(t, err)
+	_, err = svc.HandoffCoordinatorPrimary(ctx, coordinatorHandoffFixtureRequest("boot-ready-no-inference"))
+	require.ErrorIs(t, err, ErrCoordinatorSuccessorModel)
+	primary, err := repo.GetPrimarySessionByTaskID(ctx, "task")
+	require.NoError(t, err)
+	require.Equal(t, "session-old", primary.ID)
+	require.Empty(t, queue.GetStatus(ctx, "session-new").Entries)
+	require.Equal(t, []string{queued.ID}, []string{queue.GetStatus(ctx, "session-old").Entries[0].ID})
 }
 
 func coordinatorHandoffFixtureRequest(operationID string) CoordinatorHandoffRequest {
