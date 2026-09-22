@@ -29,9 +29,16 @@ describe("TaskItemTrailing relative time", () => {
     expect(relativeTime.querySelector(".sr-only")?.textContent).toBe("2 days ago");
     expect(relativeTime.getAttribute("aria-label")).toBeNull();
     expect(relativeTime.getAttribute("title")).toBe("2 days ago");
-    expect(relativeTime.className).toContain("w-11");
     expect(relativeTime.className).toContain("text-right");
     expect(relativeTime.className).toContain("tabular-nums");
+    expect(relativeTime.className).toContain("whitespace-nowrap");
+    expect(relativeTime.className).toContain("[@media(min-width:640px)_and_(pointer:fine)]:w-auto");
+    expect(relativeTime.parentElement?.className).toContain(
+      "[@media(min-width:640px)_and_(pointer:fine)]:w-fit",
+    );
+    expect(relativeTime.parentElement?.className).toContain(
+      "[@media(min-width:640px)_and_(pointer:fine)]:min-w-6",
+    );
     expect(relativeTime.parentElement?.className).toContain("[@media(max-width:639px)]:w-auto");
   });
 

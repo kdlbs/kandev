@@ -1,7 +1,7 @@
 ---
 id: "01-reclaim-title-width"
 title: "Reclaim desktop title width"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -47,7 +47,7 @@ See [combined preview](plan.md#ascii-ui-preview).
 UI-01 Desktop sidebar, long title
 Before: [state] Long title... [PR] [unused   2h]
 After:  [state] Longer title text... [PR] [2h]
-Hover:  [state] Longer title text... [PR] [...] 
+Hover:  [state] Longer title text... [PR] [...]
 Short:  [state] Short title [PR]          [2h]
 
 UI-02 Phone task picker, inset bottom drawer
@@ -114,4 +114,46 @@ sequential
 
 ## Results
 
-Pending.
+Implemented content-sized desktop time slots with a 24px minimum on fine-pointer
+layouts at 640px and wider. The hidden time keeps its intrinsic width, so hover,
+focus, and menu states do not move the title or PR badge. Phone layouts retain the
+44px time and action composition. The obsolete equal desktop time-width assertion
+was removed.
+
+A review follow-up scoped `justify-end` to the desktop fine-pointer wrapper. The
+desktop E2E now fixes the page time relative to the task update timestamp so the
+visual token is deterministically `2h` and narrower than the 24px slot. Before
+the follow-up fix, its right edge was 11.765625px short of the slot edge; after
+the fix, the 1px geometry assertion passes. The mobile layout remains unchanged.
+
+The first rendered desktop check failed as intended: the slot measured 44px where
+the action minimum was 24px. After the implementation, the focused geometry check
+passed. Desktop coverage also checks short and long titles with and without PRs,
+details on/off, expanded sidebar width, localized tokens, and stable interaction
+geometry. The mobile check confirms visible 44px controls, containment, separation,
+navigation, and no horizontal overflow.
+
+Verification results:
+
+- `pnpm exec vitest run components/task/task-item-trailing.test.tsx components/task/task-item-compact-layout.test.tsx` — passed, 2 files and 8 tests.
+- `pnpm run typecheck` — passed.
+- `pnpm exec eslint components/task/task-item-trailing.tsx components/task/task-item-trailing.test.tsx e2e/tests/task/sidebar-title-width.spec.ts e2e/tests/task/mobile-sidebar-views.spec.ts e2e/tests/task/sidebar-filter.spec.ts` — passed.
+- `make build-web` — passed.
+- `pnpm e2e:run --no-build tests/task/sidebar-title-width.spec.ts` — passed, 2 tests.
+- `pnpm e2e:run --no-build tests/task/sidebar-title-width.spec.ts tests/task/sidebar-filter.spec.ts -- --grep "title width|task row presentation"` — the sidebar-filter presentation test passed; the title interaction assertion was corrected and the complete sidebar-title-width file passed in the command above.
+- `pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-sidebar-views.spec.ts -- --grep "task row settings|title width"` — passed, 1 test.
+- `CAPTURE_PR_ASSETS=true pnpm e2e:run --host --no-build tests/task/sidebar-title-width.spec.ts -- --grep "title width follows"` — passed, 1 test; the desktop capture was inspected.
+- `CAPTURE_PR_ASSETS=true pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-sidebar-views.spec.ts -- --grep "task row settings"` — passed, 1 test; the phone capture was inspected.
+- `python3 scripts/list-docs.py validate` — passed, 299 decisions and 1108 specifications.
+- `python3 scripts/lint-spec-files.py --all` — passed.
+- `git diff --check` — passed.
+
+Post-review verification against the final production build:
+
+- `make build-web` — passed.
+- `pnpm run typecheck` — passed.
+- `pnpm exec eslint components/task/task-item-trailing.tsx components/task/task-item-trailing.test.tsx e2e/tests/task/sidebar-title-width.spec.ts e2e/tests/task/mobile-sidebar-views.spec.ts e2e/tests/task/sidebar-filter.spec.ts` — passed.
+- `pnpm exec vitest run components/task/task-item-trailing.test.tsx components/task/task-item-compact-layout.test.tsx` — passed, 2 files and 8 tests.
+- `pnpm e2e:run --host --no-build tests/task/sidebar-title-width.spec.ts` — passed, 2 tests, including the `2h` right-edge assertion and localized-token breakpoints.
+- `pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-sidebar-views.spec.ts -- --grep "task row settings|title width"` — passed, 1 test.
+- `git diff --check` — passed after the review follow-up.

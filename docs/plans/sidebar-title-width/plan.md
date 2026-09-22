@@ -1,6 +1,6 @@
 ---
 created: 2026-09-22
-status: draft
+status: complete
 requirements:
   - REQ-UI-SIDEBAR-TASK-ROW-PRESENTATION-001
 system_design:
@@ -66,7 +66,7 @@ delivery; its results remain historical. This package supersedes only that sizin
 UI-01 Desktop sidebar, long title
 Before: [state] Long title... [PR] [unused   2h]
 After:  [state] Longer title text... [PR] [2h]
-Hover:  [state] Longer title text... [PR] [...] 
+Hover:  [state] Longer title text... [PR] [...]
 Short:  [state] Short title [PR]          [2h]
 
 UI-02 Phone task picker, inset bottom drawer
@@ -110,7 +110,7 @@ Compare rendered desktop and phone screenshots with UI-01/UI-02.
 
 ## Work orders
 
-- [ ] [Task 01: Reclaim desktop title width](task-01-reclaim-title-width.md)
+- [x] [Task 01: Reclaim desktop title width](task-01-reclaim-title-width.md)
 
 One wave, sequential execution, no dependencies.
 
@@ -131,7 +131,9 @@ git diff --check
 
 ## Verification results
 
-Implementation checks pending. This turn creates the design package only.
+Task 01 is complete. Component, rendered desktop, and mobile geometry checks passed;
+the web build, typecheck, lint, specification validation, and whitespace check passed.
+The desktop and phone captures were inspected against UI-01 and UI-02.
 
 ## Risks
 
