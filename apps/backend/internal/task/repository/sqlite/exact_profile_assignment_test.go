@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -36,6 +37,28 @@ func TestExactProfileAssignmentSchemaExists(t *testing.T) {
 	}
 	if err := db.Get(&tableName, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'task_exact_profile_launch_attempt_bindings'`); err != nil {
 		t.Fatalf("exact profile launch attempt binding table is missing: %v", err)
+	}
+	rows, err := db.Queryx(`PRAGMA table_info(task_exact_profile_launch_attempt_bindings)`)
+	if err != nil {
+		t.Fatalf("binding table info: %v", err)
+	}
+	defer rows.Close()
+	type column struct {
+		Name, Type  string
+		NotNull, PK int
+	}
+	var got []column
+	for rows.Next() {
+		var c column
+		var cid, def any
+		if err := rows.Scan(&cid, &c.Name, &c.Type, &c.NotNull, &def, &c.PK); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, c)
+	}
+	want := []column{{"task_id", "TEXT", 1, 1}, {"session_id", "TEXT", 1, 2}, {"execution_id", "TEXT", 1, 0}, {"attempt_id", "TEXT", 1, 0}, {"session_incarnation_id", "TEXT", 1, 0}, {"agent_profile_id", "TEXT", 1, 0}, {"profile_revision_nanos", "BIGINT", 1, 0}, {"generation", "BIGINT", 1, 0}, {"created_at", "TIMESTAMP", 1, 0}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("binding columns = %#v, want %#v", got, want)
 	}
 }
 
