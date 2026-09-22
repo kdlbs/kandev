@@ -525,6 +525,9 @@ func TestGetFileTree_RejectsAbsolutePathBeforeFilesystemAccess(t *testing.T) {
 }
 
 func TestGetFileTree_AllowsLiteralColonInRelativePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not permit literal colons in path components")
+	}
 	workspace := t.TempDir()
 	directory := filepath.Join(workspace, "config:dev")
 	if err := os.Mkdir(directory, 0o755); err != nil {

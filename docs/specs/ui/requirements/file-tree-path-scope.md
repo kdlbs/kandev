@@ -22,8 +22,8 @@ boundary for tree reads. Its separate read-only absolute-file content contract r
 ## Terminology
 
 - **Workspace file path:** A normalized path relative to the active task workspace root, using `/`
-  separators and containing no parent traversal. Literal colons remain valid path characters unless
-  the value has an absolute URI or Windows drive form.
+  separators and containing no parent traversal. Literal colons that the task host can represent
+  remain valid path characters unless the value has an absolute URI or Windows drive form.
 - **Workspace absolute alias:** An absolute path contained beneath the active task workspace root
   on a complete path-segment boundary.
 - **External absolute path:** An absolute path outside the active task workspace. It can be opened
@@ -77,8 +77,9 @@ invalid directory requests.
 - **GIVEN** stored expansion entries `src`, `src/components`, and `/home/user/project`, **WHEN** the
   Files tree restores, **THEN** it restores the two valid entries and removes the absolute entry
   without requesting it.
-- **GIVEN** the relative directory `config:dev`, **WHEN** the user expands or refreshes it, **THEN**
-  the Files tree requests `config:dev` without treating the literal colon as a URI scheme.
+- **GIVEN** the relative directory `config:dev` in a POSIX task workspace, **WHEN** the user expands
+  or refreshes it, **THEN** the Files tree requests `config:dev` without treating the literal colon
+  as a URI scheme.
 - **GIVEN** a direct `workspace.tree.get` request with `/home/user/project`, **WHEN** the backend
   validates it, **THEN** it returns a validation response without constructing
   `<workspace-root>/home/user/project`, calling `stat`, or emitting an ERROR log.

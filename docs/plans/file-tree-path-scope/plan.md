@@ -179,4 +179,6 @@ that fail on this host; the affected `TestGetFileTree` tests pass independently.
 
 Post-review verification passed the six-file focused frontend suite with 78 tests, typecheck,
 changed-file ESLint, the workspace-path and handler Go tests, backend lint, all specification
-validators, and the focused desktop and phone Playwright scenarios.
+validators, and the focused desktop and phone Playwright scenarios. The real colon-directory tree
+fixture runs on POSIX because Windows does not permit colons in path components; pure validation
+coverage remains cross-platform.

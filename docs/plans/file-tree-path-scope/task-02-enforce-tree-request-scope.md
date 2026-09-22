@@ -165,8 +165,8 @@ Validation passed:
 - `go test ./internal/common/workspacepath -count=1` passed.
 - Focused `TestGetFileTree` and `TestWorkspaceFileHandlers.*Tree` runs passed.
 - The complete handler package passed, and `make -C apps/backend lint` reported zero issues.
-- Post-review coverage passed a real frontend refresh and agentctl tree read for `config:dev`, plus
-  the focused Go packages and backend lint.
+- Post-review coverage passed a real frontend refresh and POSIX agentctl tree read for `config:dev`,
+  plus cross-platform validator cases, the focused Go packages, and backend lint.
 - The full process package reached two unchanged runner-fixture timing failures on this host:
   `TestProcessRunnerCapturesOutput` and `TestProcessRunnerStopLogsSignalAttempts`. The branch has no
   changes to those tests or their production code; both fail identically when run alone.

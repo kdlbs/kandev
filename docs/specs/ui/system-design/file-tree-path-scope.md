@@ -67,6 +67,9 @@ URIs remain case-sensitive. A sibling whose prefix happens to share the workspac
 contained. The empty string is valid only as the tree root. A relative tree path rejects empty
 segments introduced by a leading slash, `.` and `..` segments, absolute URI forms, and Windows
 drive roots. Literal colons in otherwise canonical relative segments remain valid.
+The host filesystem can still reject names it cannot represent; the real `config:dev` tree fixture
+therefore runs on POSIX, while the pure frontend and Go validators cover the path contract on every
+platform.
 
 The helper does not rewrite a legitimate external absolute file into a task-relative lookalike.
 That path continues to the read-only content endpoint unchanged and remains ineligible for the tree.
