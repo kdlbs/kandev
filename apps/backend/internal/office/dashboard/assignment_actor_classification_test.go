@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/scheduler"
 	officeservice "github.com/kandev/kandev/internal/office/service"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // wireRealReactivity replaces the dashboard-side reactivity stub with the
@@ -23,6 +24,7 @@ func wireRealReactivity(t *testing.T, deps *testDeps) {
 	}
 	svc := officeservice.NewService(officeservice.ServiceOptions{Repo: deps.repo, Logger: log})
 	ss := scheduler.NewSchedulerService(deps.repo, log, svc)
+	ss.SetRunsService(runsservice.New(deps.repo.RunsRepository(), nil, log, nil))
 	deps.svc.SetReactivityApplier(scheduler.NewDashboardReactivityAdapter(ss))
 }
 
