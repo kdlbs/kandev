@@ -8,6 +8,7 @@ import {
   restoreSessionCapacitySettings,
   SESSION_CAPACITY_SETTINGS_PATH,
 } from "../../helpers/session-capacity-settings";
+import { openTaskBehaviorRuntime } from "../../helpers/settings-composition";
 
 test.describe.serial("Session capacity task behavior settings", () => {
   let baseline: SessionCapacitySettingsValue | undefined;
@@ -40,6 +41,7 @@ test.describe.serial("Session capacity task behavior settings", () => {
     await expect(testPage).toHaveURL(
       /\/settings\/preferences\/task-behavior#setting-session-capacity$/,
     );
+    await openTaskBehaviorRuntime(testPage);
     await expect(
       testPage.locator('[data-settings-target="setting-session-capacity"]'),
     ).toHaveAttribute("data-settings-target-highlight", "true");
@@ -55,6 +57,7 @@ test.describe.serial("Session capacity task behavior settings", () => {
     await toggle.click();
     const maximum = card.getByTestId("session-capacity-maximum");
     await expect(maximum).toHaveValue(String(baseline.max_sessions));
+    await expect(maximum).toHaveAttribute("aria-describedby", "session-capacity-maximum-help");
     await maximum.fill("1");
     await testPage
       .getByTestId("settings-floating-save")
@@ -80,6 +83,7 @@ test.describe.serial("Session capacity task behavior settings", () => {
     await expect(card.getByTestId("session-capacity-source")).toHaveText("Saved setting");
 
     await testPage.reload();
+    await openTaskBehaviorRuntime(testPage);
     await expect(card.getByTestId("session-capacity-enabled")).toHaveAttribute(
       "aria-checked",
       "true",
@@ -99,6 +103,7 @@ test.describe.serial("Session capacity task behavior settings", () => {
     expect((await secondSave).status()).toBe(200);
     await expect(card.getByTestId("session-capacity-effective-value")).toHaveText("2");
 
+    await openTaskBehaviorRuntime(testPage);
     await card.getByTestId("session-capacity-enabled").click();
     const disableSave = testPage.waitForResponse(
       (response) =>
@@ -111,6 +116,7 @@ test.describe.serial("Session capacity task behavior settings", () => {
       .click();
     expect((await disableSave).status()).toBe(200);
     await testPage.reload();
+    await openTaskBehaviorRuntime(testPage);
     await expect(card.getByTestId("session-capacity-enabled")).toHaveAttribute(
       "aria-checked",
       "false",
@@ -146,6 +152,7 @@ test.describe.serial("Session capacity task behavior settings", () => {
     });
 
     await testPage.goto("/settings/preferences/task-behavior");
+    await openTaskBehaviorRuntime(testPage);
     const card = testPage.getByTestId("session-capacity-settings");
     await expect(card.getByTestId("session-capacity-enabled")).toBeDisabled();
     await expect(card.getByTestId("session-capacity-maximum")).toBeDisabled();

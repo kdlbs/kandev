@@ -2101,6 +2101,7 @@
   "cleanupSingleSprites": "該任務的 Sprites 雲沙箱將被銷燬。其中所有未提交的工作都會丟失。",
   "cleanupSingleSsh": "遠端主機上的任務目錄將被移除。",
   "cleanupSingleSshNote": "盡力移除，可能無法完成。你的本地儲存庫不會被改動。",
+  "cleanupInheritedParentWorkspaceNote": "此任務與父任務共享工作區。父任務的 worktree、分支和檔案不會受到影響。",
   "cleanupSingleWorktree": "該任務的 git worktree 及其分支將被刪除。",
   "cleanupSingleWorktreeNote": "你的主儲存庫和其他分支不受影響。",
   "composerPlaceholderBusy": "為代理程式排隊指令…",

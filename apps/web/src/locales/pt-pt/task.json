@@ -2101,6 +2101,7 @@
   "cleanupSingleSprites": "A sandbox na cloud Sprites desta tarefa será destruída. Todo o trabalho não commitado lá dentro será perdido.",
   "cleanupSingleSsh": "O diretório da tarefa no anfitrião remoto será removido.",
   "cleanupSingleSshNote": "A remoção é uma tentativa e pode não ser concluída. O seu repositório local não é tocado.",
+  "cleanupInheritedParentWorkspaceNote": "Esta tarefa partilha o espaço de trabalho da tarefa principal. O worktree, o ramo e os ficheiros da tarefa principal não serão tocados.",
   "cleanupSingleWorktree": "O worktree git da tarefa e o seu ramo serão eliminados.",
   "cleanupSingleWorktreeNote": "O seu repositório principal e os outros ramos não são afetados.",
   "composerPlaceholderBusy": "Colocar instruções na fila para o agente...",

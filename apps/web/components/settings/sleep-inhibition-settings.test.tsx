@@ -34,7 +34,7 @@ function response(
   return { settings: { enabled }, status };
 }
 
-function renderSettings() {
+function renderSettings(options: { onAttentionChange?: (needsAttention: boolean) => void } = {}) {
   return render(
     <StateProvider
       initialState={{
@@ -54,7 +54,7 @@ function renderSettings() {
         },
       }}
     >
-      <SleepInhibitionSettings />
+      <SleepInhibitionSettings {...options} />
     </StateProvider>,
   );
 }
@@ -78,7 +78,7 @@ describe("SleepInhibitionSettings", () => {
     renderSettings();
 
     const infoButton = await screen.findByRole("button", {
-      name: "How host sleep prevention works",
+      name: "About Prevent idle system sleep",
     });
     fireEvent.focus(infoButton);
 
@@ -140,6 +140,19 @@ describe("SleepInhibitionSettings", () => {
 
     expect(screen.getByText("Failed to save host sleep settings.")).toBeTruthy();
     expect(saveContributor?.isDirty).toBe(true);
+  });
+
+  it("reports load attention and clears it after a successful retry", async () => {
+    fetchSettingsMock.mockRejectedValueOnce(new Error("offline"));
+    const onAttentionChange = vi.fn();
+    renderSettings({ onAttentionChange });
+
+    await waitFor(() => expect(onAttentionChange).toHaveBeenCalledWith(true));
+
+    fetchSettingsMock.mockResolvedValueOnce(response());
+    fireEvent.click(await screen.findByRole("button", { name: /retry/i }));
+
+    await waitFor(() => expect(onAttentionChange).toHaveBeenCalledWith(false));
   });
 
   it("refreshes runtime status without replacing an unsaved draft", async () => {

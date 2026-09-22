@@ -6,6 +6,7 @@ import {
   MarkdownFileLinkContext,
   MarkdownTaskContext,
   markdownComponents,
+  rehypePlugins,
   remarkPlugins,
   type MarkdownFileLinkContextValue,
 } from "@/components/shared/markdown-components";
@@ -78,7 +79,7 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
       <MarkdownFileLinkContext.Provider value={fileLinkContext}>
         <ReactMarkdown
           remarkPlugins={remarkPlugins}
-          rehypePlugins={motionPlugins}
+          rehypePlugins={[...rehypePlugins, ...motionPlugins]}
           components={resolvedComponents}
         >
           {normalized}
