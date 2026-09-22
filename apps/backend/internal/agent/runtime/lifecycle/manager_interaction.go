@@ -425,6 +425,13 @@ func (m *Manager) escalateStuckCancel(
 		client, release = execution.AcquireAgentCtlClient()
 		defer release()
 	}
+	promptGeneration := execution.promptGenerationSnapshot()
+	if promptGeneration != 0 {
+		// The agentctl stream can close after the local cancellation release.
+		// Record the generation before signaling the waiter so the disconnect
+		// callback preserves this reusable execution instead of marking it failed.
+		execution.cancelEscalatedPromptGeneration.Store(promptGeneration)
+	}
 	m.logger.Warn("timed out waiting for in-flight prompt to finish after cancel; escalating",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))

@@ -104,6 +104,7 @@ func TestInboxAcceptsReplayWithReconstructedLifecycleFields(t *testing.T) {
 	originalPayload, err := json.Marshal(streams.AgentEvent{
 		Type:               streams.EventTypeMessageChunk,
 		Text:               "hello",
+		ControlTurnID:      7,
 		PromptGeneration:   1,
 		TurnID:             "turn-original",
 		CanonicalMessageID: "message-original",
@@ -127,6 +128,7 @@ func TestInboxAcceptsReplayWithReconstructedLifecycleFields(t *testing.T) {
 	replayedPayload, err := json.Marshal(streams.AgentEvent{
 		Type:                   streams.EventTypeMessageChunk,
 		Text:                   "hello",
+		ControlTurnID:          0,
 		PromptGeneration:       1,
 		TurnID:                 "turn-reconstructed",
 		CanonicalMessageID:     "message-reconstructed",

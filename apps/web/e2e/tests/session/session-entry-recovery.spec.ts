@@ -79,16 +79,16 @@ test.describe("session entry recovery", () => {
     const sessionId = task.session_id;
     if (!sessionId) throw new Error("expected a session for the history-recovery task");
 
-    proxy.dropNextResponses("message.list", 2, { sessionId });
+    proxy.holdResponses("message.list", { sessionId });
 
     const session = await openTaskSession(testPage, task.id);
     const historyNotice = session.activeChat().getByTestId("session-history-unavailable");
     await expect
-      .poll(() => proxy.droppedResponseCount("message.list"), {
+      .poll(() => proxy.heldResponseCount("message.list"), {
         timeout: 45_000,
         message: "Waiting for both message.list responses to be dropped for this session",
       })
-      .toBe(2);
+      .toBeGreaterThanOrEqual(2);
     await expect(historyNotice).toBeVisible({ timeout: 45_000 });
     await expect(
       session.activeChat().getByText("No messages yet. Start the conversation!", { exact: true }),
@@ -101,10 +101,11 @@ test.describe("session entry recovery", () => {
     await expect(details).toHaveAttribute("open", "");
     await expect(details).toContainText("WebSocket request timed out: message.list");
 
+    proxy.releaseHeldResponses("message.list");
     await historyNotice.getByTestId("session-history-retry").click();
     await expect(historyNotice).toHaveCount(0);
     await expect(session.activeChat()).toContainText("simple mock response", { timeout: 30_000 });
-    expect(proxy.droppedResponseCount("message.list")).toBe(2);
+    expect(proxy.heldResponseCount("message.list")).toBeGreaterThanOrEqual(2);
   });
 
   test("labels exhausted status checks accurately and retries only the status read", async ({

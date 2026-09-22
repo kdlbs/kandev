@@ -19,6 +19,10 @@ type DropRule = {
   sessionId?: string;
 };
 
+type HoldRule = {
+  sessionId?: string;
+};
+
 type RejectRule = {
   message: string;
   sessionId?: string;
@@ -43,6 +47,9 @@ export type SessionEntryRecoveryProxy = {
   delayedResponseCount: (action: string) => number;
   droppedResponseCount: (action: string) => number;
   rejectedResponseCount: (action: string) => number;
+  holdResponses: (action: string, scope?: { sessionId?: string }) => void;
+  releaseHeldResponses: (action: string) => void;
+  heldResponseCount: (action: string) => number;
 };
 
 function parseFrame(value: string): WireFrame | null {
@@ -105,6 +112,18 @@ function consumeRejectRule(
   return context.rejectionMessage;
 }
 
+function consumeHoldRule(
+  context: RequestContext | undefined,
+  holdRules: Map<string, HoldRule>,
+  heldCounts: Map<string, number>,
+): boolean {
+  if (!context) return false;
+  const rule = holdRules.get(context.action);
+  if (!rule || (rule.sessionId && context.sessionId !== rule.sessionId)) return false;
+  heldCounts.set(context.action, (heldCounts.get(context.action) ?? 0) + 1);
+  return true;
+}
+
 function consumeDelayRule(
   action: string | undefined,
   message: string,
@@ -125,7 +144,7 @@ function consumeDelayRule(
 }
 
 /**
- * Fail, delay, or drop selected gateway responses while forwarding every other
+ * Fail, delay, drop, or hold selected gateway responses while forwarding every other
  * frame. Rules correlate replies by request id, so the test never relies on
  * action-only or payload timing and does not inspect message contents.
  */
@@ -135,9 +154,11 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
   const delayedCounts = new Map<string, number>();
   const droppedCounts = new Map<string, number>();
   const rejectedCounts = new Map<string, number>();
+  const heldCounts = new Map<string, number>();
   const rules = new Map<string, DelayRule>();
   const dropRules = new Map<string, DropRule>();
   const rejectRules = new Map<string, RejectRule>();
+  const holdRules = new Map<string, HoldRule>();
 
   await page.routeWebSocket(/\/ws$/, (ws) => {
     const server = ws.connectToServer();
@@ -198,6 +219,7 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
             );
             continue;
           }
+          if (consumeHoldRule(context, holdRules, heldCounts)) continue;
           if (consumeDropRule(context, dropRules, droppedCounts)) continue;
           if (consumeDelayRule(context?.action, trimmed, rules, delayedCounts, ws.send.bind(ws)))
             continue;
@@ -227,6 +249,13 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
     delayedResponseCount: (action) => delayedCounts.get(action) ?? 0,
     droppedResponseCount: (action) => droppedCounts.get(action) ?? 0,
     rejectedResponseCount: (action) => rejectedCounts.get(action) ?? 0,
+    holdResponses: (action, scope) => {
+      holdRules.set(action, { sessionId: scope?.sessionId });
+    },
+    releaseHeldResponses: (action) => {
+      holdRules.delete(action);
+    },
+    heldResponseCount: (action) => heldCounts.get(action) ?? 0,
   };
 }
 

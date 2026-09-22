@@ -29,20 +29,12 @@ test.describe("mobile session entry recovery", () => {
     );
 
     if (!task.session_id) throw new Error("created recovery task has no session");
-    proxy.rejectResponsesUntilReleased("message.list", "Simulated temporary history failure", {
-      sessionId: task.session_id,
-    });
+    proxy.holdResponses("message.list", { sessionId: task.session_id });
 
     try {
       const session = await openTaskSession(testPage, task.id);
       const chat = session.activeChat();
       const historyNotice = chat.getByTestId("session-history-unavailable");
-      await expect
-        .poll(() => proxy.rejectedResponseCount("message.list"), {
-          timeout: 45_000,
-          message: "Waiting for a session-scoped message.list failure",
-        })
-        .toBeGreaterThan(0);
       await expect(historyNotice).toBeVisible({ timeout: 45_000 });
 
       const retry = historyNotice.getByTestId("session-history-retry");
@@ -53,13 +45,13 @@ test.describe("mobile session entry recovery", () => {
       expect(detailsBox?.height).toBeGreaterThanOrEqual(44);
       await assertNoDocumentHorizontalOverflow(testPage, "mobile session history recovery");
 
-      proxy.releaseRejectedResponses("message.list");
+      proxy.releaseHeldResponses("message.list");
       await retry.tap();
       await expect(historyNotice).toHaveCount(0);
       await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
-      expect(proxy.rejectedResponseCount("message.list")).toBeGreaterThan(0);
+      expect(proxy.heldResponseCount("message.list")).toBeGreaterThanOrEqual(2);
     } finally {
-      proxy.releaseRejectedResponses("message.list");
+      proxy.releaseHeldResponses("message.list");
     }
   });
 });

@@ -17,7 +17,28 @@ func (e *AgentExecution) clearProtocolMessageCorrelationLocked() {
 }
 
 func (e *AgentExecution) trackResponseAttemptMessageLocked(messageID string) {
+	if messageID == "" {
+		return
+	}
+	for _, trackedID := range e.responseAttemptMessageIDs {
+		if trackedID == messageID {
+			return
+		}
+	}
 	e.responseAttemptMessageIDs = append(e.responseAttemptMessageIDs, messageID)
+}
+
+// trackCanonicalResponseAttemptMessage records the stable message ID before a
+// projected stream chunk is published. Canonical chunks skip the legacy
+// protocol correlation path, but an abandoned provider attempt still owns
+// their first projected records and must retract them on reset.
+func trackCanonicalResponseAttemptMessage(execution *AgentExecution, messageID string, isAppend bool) {
+	if execution == nil || messageID == "" || isAppend {
+		return
+	}
+	execution.messageMu.Lock()
+	execution.trackResponseAttemptMessageLocked(messageID)
+	execution.messageMu.Unlock()
 }
 
 func (e *AgentExecution) commitResponseAttemptLocked() {

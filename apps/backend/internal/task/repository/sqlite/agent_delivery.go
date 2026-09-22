@@ -571,8 +571,9 @@ func sameAgentDeliveryEvent(stored, incoming *models.AgentDeliveryEvent) bool {
 // sameAgentDeliveryPayload compares the transport event content while
 // tolerating lifecycle fields that are reconstructed by the backend consumer.
 // A replayed agentctl event can be delivered to a fresh lifecycle execution;
-// its current turn and canonical message IDs are not part of the retained
-// transport identity and can therefore differ from the original projection.
+// its current turn, control-server outcome stamp, and canonical message IDs
+// are not part of the retained transport identity and can therefore differ
+// from the original projection.
 // All adapter-owned content remains strict, so a changed event at the same
 // stream sequence is still rejected.
 func sameAgentDeliveryPayload(stored, incoming []byte) bool {
@@ -600,6 +601,7 @@ func sameAgentDeliveryPayload(stored, incoming []byte) bool {
 }
 
 func stripLifecycleDeliveryFields(event *streams.AgentEvent) {
+	event.ControlTurnID = 0
 	event.TurnID = ""
 	event.CanonicalMessageID = ""
 	event.CanonicalProjection = false
