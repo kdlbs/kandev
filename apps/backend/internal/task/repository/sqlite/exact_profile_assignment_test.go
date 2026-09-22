@@ -95,6 +95,31 @@ func TestExactProfileBindingSchemaReopenLeavesLegacySessionsUnbound(t *testing.T
 	}
 }
 
+func TestExactProfileBindingSchemaUpgradesPriorExactSchema(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	if _, err := repo.db.Exec(`DROP TABLE task_exact_profile_launch_attempt_bindings`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AssignExactProfileAssignment(t.Context(), assignment); err != nil {
+		t.Fatal(err)
+	}
+	receipt := &models.ExactProfileLaunchReceipt{TaskID: assignment.TaskID, SessionID: "prior-session", AgentProfileID: assignment.AgentProfileID, Generation: assignment.Generation, ProfileRevision: assignment.ProfileRevision, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
+	if _, err := repo.RecordExactProfileLaunchReceipt(t.Context(), receipt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewWithDB(repo.db, repo.ro, nil); err != nil {
+		t.Fatalf("upgrade prior exact schema: %v", err)
+	}
+	var bindings int
+	if err := repo.db.GetContext(t.Context(), &bindings, `SELECT COUNT(*) FROM task_exact_profile_launch_attempt_bindings`); err != nil || bindings != 0 {
+		t.Fatalf("upgraded bindings=%d err=%v", bindings, err)
+	}
+	stored, err := repo.GetExactProfileLaunchReceipt(t.Context(), assignment.TaskID, receipt.SessionID)
+	if err != nil || stored == nil || stored.Outcome != receipt.Outcome {
+		t.Fatalf("preserved prior receipt=%#v err=%v", stored, err)
+	}
+}
+
 func TestUpsertExactProfileAssignmentGuardsGeneration(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "exact-profile-assignment-generation.db")
 	dbConn, err := dbutil.OpenSQLite(dbPath)
