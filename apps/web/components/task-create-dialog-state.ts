@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- task-create form state owns one complete reset and hydration contract. */
+
 "use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";

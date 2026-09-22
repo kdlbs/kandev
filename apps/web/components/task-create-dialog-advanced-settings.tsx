@@ -322,9 +322,47 @@ function TaskCreateWorkflowAgentOverridesSection({
   );
 }
 
+type NormalizedAdvancedSettingsProps = Required<TaskCreateAdvancedSettingsProps>;
+
+function valueOrDefault<T>(value: T | undefined, fallback: T): T {
+  return value ?? fallback;
+}
+
+function normalizeAdvancedSettingsProps(
+  props: TaskCreateAdvancedSettingsProps,
+): NormalizedAdvancedSettingsProps {
+  return {
+    ...props,
+    isEditMode: valueOrDefault(props.isEditMode, false),
+    dependenciesDisabled: valueOrDefault(props.dependenciesDisabled, false),
+    workflowAgentOverrideRows: valueOrDefault(props.workflowAgentOverrideRows, []),
+    workflowAgentOverrideOptions: valueOrDefault(props.workflowAgentOverrideOptions, []),
+    workflowAgentOverridesLoading: valueOrDefault(props.workflowAgentOverridesLoading, false),
+    workflowAgentOverridesInvalid: valueOrDefault(props.workflowAgentOverridesInvalid, false),
+    workflowAgentOverridesError: valueOrDefault(props.workflowAgentOverridesError, false),
+    onWorkflowAgentOverrideChange: valueOrDefault(
+      props.onWorkflowAgentOverrideChange,
+      () => undefined,
+    ),
+    onResetWorkflowAgentOverrides: valueOrDefault(
+      props.onResetWorkflowAgentOverrides,
+      () => undefined,
+    ),
+    onRetryWorkflowAgentOverrides: valueOrDefault(
+      props.onRetryWorkflowAgentOverrides,
+      () => undefined,
+    ),
+    mcpDefinitions: valueOrDefault(props.mcpDefinitions, []),
+    mcpDefinitionsLoading: valueOrDefault(props.mcpDefinitionsLoading, false),
+    mcpSelectionIds: valueOrDefault(props.mcpSelectionIds, []),
+    onMcpSelectionIdsChange: valueOrDefault(props.onMcpSelectionIdsChange, () => undefined),
+    mcpInheritedSelections: valueOrDefault(props.mcpInheritedSelections, []),
+  };
+}
+
 type AdvancedSettingsContentProps = Omit<
-  TaskCreateAdvancedSettingsProps,
-  "isCreateMode" | "isTaskStarted"
+  NormalizedAdvancedSettingsProps,
+  "isCreateMode" | "isEditMode" | "isTaskStarted"
 >;
 
 function TaskCreateAdvancedSettingsContent({
@@ -333,21 +371,20 @@ function TaskCreateAdvancedSettingsContent({
   priority,
   onPriorityChange,
   dependenciesDisabled,
-  workflowAgentOverrideRows = [],
-  workflowAgentOverrideOptions = [],
-  workflowAgentOverridesLoading = false,
-  workflowAgentOverridesInvalid = false,
-  workflowAgentOverridesError = false,
-  onWorkflowAgentOverrideChange = () => undefined,
-  onResetWorkflowAgentOverrides = () => undefined,
-  onRetryWorkflowAgentOverrides = () => undefined,
-  mcpDefinitions = [],
-  mcpDefinitionsLoading = false,
-  mcpSelectionIds = [],
-  onMcpSelectionIdsChange = () => undefined,
-  mcpInheritedSelections = [],
+  workflowAgentOverrideRows,
+  workflowAgentOverrideOptions,
+  workflowAgentOverridesLoading,
+  workflowAgentOverridesInvalid,
+  workflowAgentOverridesError,
+  onWorkflowAgentOverrideChange,
+  onResetWorkflowAgentOverrides,
+  onRetryWorkflowAgentOverrides,
+  mcpDefinitions,
+  mcpDefinitionsLoading,
+  mcpSelectionIds,
+  onMcpSelectionIdsChange,
+  mcpInheritedSelections,
 }: AdvancedSettingsContentProps) {
-  const { t } = useTranslation();
   const hasWorkflowAgentOverrides =
     workflowAgentOverridesLoading ||
     workflowAgentOverridesError ||
@@ -395,29 +432,30 @@ function TaskCreateAdvancedSettingsContent({
   );
 }
 
-export function TaskCreateAdvancedSettings({
-  isCreateMode,
-  isEditMode = false,
-  isTaskStarted,
-  blockedBy,
-  onBlockedByChange,
-  priority,
-  onPriorityChange,
-  dependenciesDisabled,
-  workflowAgentOverrideRows = [],
-  workflowAgentOverrideOptions = [],
-  workflowAgentOverridesLoading = false,
-  workflowAgentOverridesInvalid = false,
-  workflowAgentOverridesError = false,
-  onWorkflowAgentOverrideChange = () => undefined,
-  onResetWorkflowAgentOverrides = () => undefined,
-  onRetryWorkflowAgentOverrides = () => undefined,
-  mcpDefinitions = [],
-  mcpDefinitionsLoading = false,
-  mcpSelectionIds = [],
-  onMcpSelectionIdsChange = () => undefined,
-  mcpInheritedSelections = [],
-}: TaskCreateAdvancedSettingsProps) {
+export function TaskCreateAdvancedSettings(props: TaskCreateAdvancedSettingsProps) {
+  const {
+    isCreateMode,
+    isEditMode,
+    isTaskStarted,
+    blockedBy,
+    onBlockedByChange,
+    priority,
+    onPriorityChange,
+    dependenciesDisabled,
+    workflowAgentOverrideRows,
+    workflowAgentOverrideOptions,
+    workflowAgentOverridesLoading,
+    workflowAgentOverridesInvalid,
+    workflowAgentOverridesError,
+    onWorkflowAgentOverrideChange,
+    onResetWorkflowAgentOverrides,
+    onRetryWorkflowAgentOverrides,
+    mcpDefinitions,
+    mcpDefinitionsLoading,
+    mcpSelectionIds,
+    onMcpSelectionIdsChange,
+    mcpInheritedSelections,
+  } = normalizeAdvancedSettingsProps(props);
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 

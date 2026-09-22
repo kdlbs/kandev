@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useState } from "react";
+import { FormEvent, useCallback } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import type { Repository } from "@/lib/types/http";
@@ -13,9 +13,6 @@ import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useTaskSubmitHandlers } from "@/components/task-create-dialog-submit";
 import { useToast } from "@/components/toast-provider";
-import { useRepositorySets } from "@/hooks/domains/workspace/use-repository-sets";
-import { useApplyRepositorySet } from "@/components/task-create-dialog-repository-sets-apply";
-import { selectedRepositoryIdsForSet } from "@/components/task-create-dialog-repository-sets";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   useDialogFormState,
@@ -39,6 +36,7 @@ import {
   buildWorkflowAgentOverrideValidation,
   type WorkflowAgentOverrideValidation,
 } from "@/components/task-create-dialog-workflow-agent-override-validation";
+import { useRepositorySetsForTaskCreateDialog } from "@/components/task-create-dialog-repository-sets-setup";
 
 // Catalog key: module scope, so it is resolved at the call site.
 const PROMPT_INSERTED_MESSAGE_KEY = "task:enhancedPromptInserted";
@@ -448,16 +446,7 @@ function useMCPSetupForDialog(
   });
 }
 
-function useRepositorySetsForSetup(
-  props: TaskCreateDialogProps,
-  fs: DialogFormState,
-  repositories: Repository[],
-  computed: ReturnType<typeof useTaskCreateDialogData>["computed"],
-  userSettingsLoaded: boolean,
-) {
-  return useDialogRepositorySets(props, fs, repositories, computed, userSettingsLoaded);
-}
-
+// eslint-disable-next-line max-lines-per-function -- the setup hook keeps the dialog's hook order and returned wiring together.
 export function useTaskCreateDialogSetup(
   props: TaskCreateDialogProps,
   options: { preserveQueuedLastUsedOnClose?: () => void } = {},
@@ -534,7 +523,7 @@ export function useTaskCreateDialogSetup(
   const handleJiraImport = useJiraImportHandler(fs, data.handlers.handleTaskNameChange);
   const handleLinearImport = useLinearImportHandler(fs, data.handlers.handleTaskNameChange);
   const freshBranchAvailable = canUseFreshBranch(fs, computed.isLocalExecutor);
-  const repositorySets = useRepositorySetsForSetup(
+  const repositorySets = useRepositorySetsForTaskCreateDialog(
     resolvedProps,
     fs,
     repositories,
@@ -565,87 +554,6 @@ export function useTaskCreateDialogSetup(
     mcpDefinitions: mcp.definitions,
     mcpDefinitionsLoading: mcp.definitionsLoading,
     mcpInheritedSelections: mcp.inheritedSelections,
-  };
-}
-
-function useDialogRepositorySets(
-  resolvedProps: TaskCreateDialogProps,
-  fs: DialogFormState,
-  repositories: Repository[],
-  computed: ReturnType<typeof useTaskCreateDialogData>["computed"],
-  userSettingsLoaded: boolean,
-) {
-  return useRepositorySetsForDialog({
-    workspaceId: resolvedProps.workspaceId ?? null,
-    open: resolvedProps.open,
-    rows: fs.repositories,
-    repositories,
-    setRepositories: fs.setRepositories,
-    setRepositoriesDirty: fs.setRepositoriesDirty,
-    userSettingsLoaded,
-    isLocalExecutor: computed.isLocalExecutor,
-    freshBranchEnabled: fs.freshBranchEnabled,
-  });
-}
-
-type RepositorySetsForDialogArgs = {
-  workspaceId: string | null;
-  open: boolean;
-  rows: DialogFormState["repositories"];
-  repositories: Repository[];
-  setRepositories: DialogFormState["setRepositories"];
-  setRepositoriesDirty: DialogFormState["setRepositoriesDirty"];
-  userSettingsLoaded: boolean;
-  isLocalExecutor: boolean;
-  freshBranchEnabled: boolean;
-};
-
-/**
- * Assembles the repository-set props the picker needs: the workspace's sets, why
- * applying one is unavailable, and the apply handler.
- *
- * Gated on `userSettingsLoaded` because the repository auto-select effect writes
- * rows again once user settings arrive; offering the control before then lets a
- * user apply a set that autopick immediately overwrites.
- */
-function useRepositorySetsForDialog({
-  workspaceId,
-  open,
-  rows,
-  repositories,
-  setRepositories,
-  setRepositoriesDirty,
-  userSettingsLoaded,
-  isLocalExecutor,
-  freshBranchEnabled,
-}: RepositorySetsForDialogArgs) {
-  const { sets } = useRepositorySets(workspaceId, open);
-  const onApply = useApplyRepositorySet({
-    rows,
-    repositories,
-    setRepositories,
-    setRepositoriesDirty,
-  });
-  const [saveOpen, setSaveOpen] = useState(false);
-  // Offer "Save as set" only when there is a workspace-repository selection worth
-  // saving, so the action is never a dead end.
-  const canSave = Boolean(workspaceId) && selectedRepositoryIdsForSet(rows).length > 0;
-  if (!userSettingsLoaded) return undefined;
-  return {
-    sets,
-    onApply,
-    save:
-      canSave && workspaceId
-        ? {
-            workspaceId,
-            rows,
-            repositories,
-            isLocalExecutor,
-            freshBranchEnabled,
-            open: saveOpen,
-            setOpen: setSaveOpen,
-          }
-        : null,
   };
 }
 

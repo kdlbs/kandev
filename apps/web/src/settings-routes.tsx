@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- the settings route table is one public dispatch boundary. */
+
 import { useEffect, useRef, type ReactNode } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
