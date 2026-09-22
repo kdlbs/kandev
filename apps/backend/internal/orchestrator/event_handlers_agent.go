@@ -601,10 +601,6 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	} else {
 		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
 	}
-	if exact, err := s.resolveExactProfileAssignment(ctx, data.TaskID); err == nil && exact != nil &&
-		session.ExactProfileGeneration == exact.Generation && session.ExactProfileRevision == exact.Revision {
-		s.recordExactProfileLaunchReceipt(ctx, data.TaskID, data.SessionID, exact, exact.Model, nil)
-	}
 	// Drain any orphaned queued message. handleAgentReady drains on turn-end,
 	// but a session that crashed mid-turn (or never started its first turn)
 	// won't fire agent.ready — leaving e.g. workflow auto-start prompts stuck

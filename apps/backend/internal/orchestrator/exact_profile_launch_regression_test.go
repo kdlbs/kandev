@@ -144,8 +144,8 @@ func TestStartCreatedSession_PersistsExactBindingOnWorkflowRedirect(t *testing.T
 	}
 	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "task1", SessionID: "session-redirected", AgentExecutionID: "exec-redirected"})
 	receipt, err := repo.GetExactProfileLaunchReceipt(ctx, "task1", "session-redirected")
-	if err != nil || receipt == nil || receipt.Outcome != models.ExactProfileLaunchOutcomeApplied || !receipt.InferenceStarted {
-		t.Fatalf("receipt after boot = (%#v, %v), want applied inference receipt", receipt, err)
+	if err != nil || receipt != nil {
+		t.Fatalf("receipt after boot = (%#v, %v), want none before correlated inference progress", receipt, err)
 	}
 }
 
