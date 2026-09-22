@@ -83,14 +83,21 @@ func TestExactProfileBindingSchemaReopenLeavesLegacySessionsUnbound(t *testing.T
 	if _, err := repo.RecordExactProfileLaunchReceipt(t.Context(), &models.ExactProfileLaunchReceipt{TaskID: assignment.TaskID, SessionID: "legacy-session", AgentProfileID: assignment.AgentProfileID, Generation: assignment.Generation, ProfileRevision: assignment.ProfileRevision, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}); err != nil {
 		t.Fatal(err)
 	}
+	reopened, err := NewWithDB(repo.db, repo.ro, nil)
+	if err != nil {
+		t.Fatalf("reopen exact schema: %v", err)
+	}
 	var bindings int
-	if err := repo.db.GetContext(t.Context(), &bindings, `SELECT COUNT(*) FROM task_exact_profile_launch_attempt_bindings WHERE task_id = ?`, assignment.TaskID); err != nil {
+	if err := reopened.db.GetContext(t.Context(), &bindings, `SELECT COUNT(*) FROM task_exact_profile_launch_attempt_bindings WHERE task_id = ?`, assignment.TaskID); err != nil {
 		t.Fatal(err)
 	}
 	if bindings != 0 {
 		t.Fatalf("legacy launch bindings = %d, want 0", bindings)
 	}
-	if receipt, err := repo.GetExactProfileLaunchReceipt(t.Context(), assignment.TaskID, "legacy-session"); err != nil || receipt == nil {
+	if storedAssignment, err := reopened.GetExactProfileAssignment(t.Context(), assignment.TaskID); err != nil || !exactProfileAssignmentsEqual(storedAssignment, assignment) {
+		t.Fatalf("legacy assignment=%#v err=%v", storedAssignment, err)
+	}
+	if receipt, err := reopened.GetExactProfileLaunchReceipt(t.Context(), assignment.TaskID, "legacy-session"); err != nil || receipt == nil {
 		t.Fatalf("legacy receipt = %#v, err=%v", receipt, err)
 	}
 }
@@ -117,6 +124,10 @@ func TestExactProfileBindingSchemaUpgradesPriorExactSchema(t *testing.T) {
 	stored, err := repo.GetExactProfileLaunchReceipt(t.Context(), assignment.TaskID, receipt.SessionID)
 	if err != nil || stored == nil || stored.Outcome != receipt.Outcome {
 		t.Fatalf("preserved prior receipt=%#v err=%v", stored, err)
+	}
+	storedAssignment, err := repo.GetExactProfileAssignment(t.Context(), assignment.TaskID)
+	if err != nil || !exactProfileAssignmentsEqual(storedAssignment, assignment) {
+		t.Fatalf("preserved prior assignment=%#v err=%v", storedAssignment, err)
 	}
 }
 
