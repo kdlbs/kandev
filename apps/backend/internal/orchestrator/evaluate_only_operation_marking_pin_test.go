@@ -32,7 +32,7 @@ import (
 var registeredEvaluateOnlyOperationMarkingSites = []string{
 	"internal/orchestrator/Service.dispatchKanbanAgentErrorTrigger",
 	"internal/orchestrator/Service.processOnTurnCompleteViaEngineWithCause",
-	"internal/orchestrator/Service.processOnTurnStartViaEngine",
+	"internal/orchestrator/Service.processOnTurnStartViaEngineResult",
 	// evaluateChildrenCompleted sets DeferOperationMark: true (added by
 	// #3447), not this spec's OperationMarkDeferred output flag. Its caller,
 	// processOnChildrenCompleted, marks the operation itself via
