@@ -19,6 +19,7 @@ import type { TaskPriority } from "@/lib/types/http";
 import { TaskManagementMenu, type TaskManagementMenuProps } from "./task-management-menu";
 import { TaskManagementDrawer, TaskManagementSheet } from "./task-management-drawer";
 import { TaskArchiveConfirmation } from "./task-archive-confirmation";
+import { cleanupSharesParentWorkspace } from "./task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import { useSidebarTaskLinking } from "./task-session-sidebar-task-linking";
@@ -215,6 +216,7 @@ function ManagementConfirmations({
         taskId={task.id}
         taskTitle={task.title}
         executorType={task.remoteExecutorType}
+        sharesParentWorkspace={cleanupSharesParentWorkspace(task.workspaceMode)}
         isDeleting={mutations.disabled}
         onCloseAutoFocus={onCloseAutoFocus}
         confirmTestId="thread-delete-confirm"
