@@ -597,7 +597,7 @@ jobs:
       packages: read
     # Allow the full race-enabled persistence suite twenty minutes per package,
     # plus time for the service, cold compilation, and job cleanup.
-    timeout-minutes: 30
+    timeout-minutes: 40
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     services:
       postgres:
