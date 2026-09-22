@@ -2363,5 +2363,15 @@
   "checkoutOptions.credentialsUnsupported": "高度なチェックアウトオプションには、Kandev 管理の Git 認証情報を使って。",
   "toolPayloadRemovedAt": "ツール詳細は {{date}} に削除済み。",
   "toolPayloadRemoved": "ツール詳細は削除済み。",
-  "openTaskSwitcherFor": "タスク切替を開く: {{title}}"
+  "openTaskSwitcherFor": "タスク切替を開く: {{title}}",
+  "launchWarningTitle": "SSH ホストに到達できない可能性があります",
+  "launchWarningHost": "プローブしたホスト: {{host}}",
+  "launchWarningLastSuccess": "最後の成功: {{age}}",
+  "launchWarningNeverSucceeded": "このホストで成功したプローブはまだ記録されていません。",
+  "launchWarningReasonConfig": "最後の試行は接続設定が無効だったため失敗しました。",
+  "launchWarningReasonTimeout": "最後の試行はタイムアウトしました。",
+  "launchWarningReasonHostKey": "最後の試行はホストキーが固定フィンガープリントと一致しなかったため失敗しました。",
+  "launchWarningReasonAuth": "最後の試行は認証に失敗しました。",
+  "launchWarningReasonNetwork": "最後の試行はネットワークエラーで失敗しました。",
+  "launchWarningReasonUnknown": "最後の試行は不明な理由で失敗しました。"
 }
