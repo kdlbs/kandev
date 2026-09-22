@@ -30,6 +30,7 @@ const (
 	usageGroupMonthly      = "monthly"
 	usageMixedValue        = "mixed"
 	usageWorkFallback      = "task"
+	usageSourceNative      = "native"
 )
 
 var ErrInvalidSessionUsage = errors.New("invalid session usage batch")
@@ -1489,10 +1490,10 @@ func usageTokenCandidateBetter(candidate, current models.SessionUsageMeasurement
 	if tokenCompletenessRank(candidate) != tokenCompletenessRank(current) {
 		return tokenCompletenessRank(candidate) > tokenCompletenessRank(current)
 	}
-	if candidate.Source == "native" && current.Source != "native" {
+	if candidate.Source == usageSourceNative && current.Source != usageSourceNative {
 		return true
 	}
-	if current.Source == "native" && candidate.Source != "native" {
+	if current.Source == usageSourceNative && candidate.Source != usageSourceNative {
 		return false
 	}
 	if candidate.Stale != current.Stale {
@@ -1554,10 +1555,10 @@ func usageCandidateBetter(candidate, current models.SessionUsageMeasurement) boo
 	if usageCostCandidateBetter(current, candidate) {
 		return false
 	}
-	if candidate.Source == "native" && current.Source != "native" {
+	if candidate.Source == usageSourceNative && current.Source != usageSourceNative {
 		return true
 	}
-	if current.Source == "native" && candidate.Source != "native" {
+	if current.Source == usageSourceNative && candidate.Source != usageSourceNative {
 		return false
 	}
 	if candidate.Stale != current.Stale {
@@ -1912,7 +1913,7 @@ func (r *Repository) nativeUsageContributions(ctx context.Context, filter models
 		}
 		item := models.SessionUsageMeasurement{
 			WorkspaceID: filter.WorkspaceID, TaskID: taskID, SessionID: sessionID,
-			Source: "native", SourceRecordID: "native:" + eventID,
+			Source: usageSourceNative, SourceRecordID: "native:" + eventID,
 			UsageIdentity: "native:" + eventID,
 			Model:         model, Provider: provider, ObservedAt: occurredAt, CollectedAt: createdAt,
 			InputTokens: models.Int64(input), OutputTokens: nullableIntPtr(output),
