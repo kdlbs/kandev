@@ -1,6 +1,6 @@
 ---
 created: 2026-09-22
-status: draft
+status: implemented
 requirements:
   - REQ-PLUGINS-WORKFLOW-HISTORY-001
   - REQ-PLUGINS-WORKFLOW-HISTORY-002
@@ -202,8 +202,8 @@ Phone: same content in one full-height, safe-area-aware scroll surface
   project `mobile-chrome`: select workflow/task, switch Steps/Trail, inspect a
   return, retry an error, and assert touch targets and no horizontal overflow
   (`003.2`, `.3`, `.5`, `.6`).
-- `apps/web/e2e/tests/canvas/canvas-host-rename.spec.ts`, projects
-  `chromium` and `mobile-chrome`: rename from task and workspace hosts; check
+- `apps/web/e2e/tests/canvas/canvas-host-rename.spec.ts` and
+  `mobile-canvas-host-rename.spec.ts`: rename from task hosts; check
   picker/navigation, validation, and no iframe remount.
 - Extend `canvas-sharing.spec.ts` and `mobile-canvas-sharing.spec.ts`:
   active-release defaults, one missing license, editable details, stale
@@ -211,15 +211,20 @@ Phone: same content in one full-height, safe-area-aware scroll surface
 
 ## Work orders
 
-- [ ] [Task 01: Read recorded moves and route groups](task-01-transition-reads.md)
-- [ ] [Task 02: Expose scoped Host and canvas reads](task-02-host-api.md)
-- [ ] [Task 03: Publish the live workflow canvas](task-03-live-canvas.md)
-- [ ] [Task 04: Rename a canvas from host chrome](task-04-canvas-rename.md)
-- [ ] [Task 05: Simplify reviewed canvas sharing](task-05-quick-sharing.md)
+- [x] [Task 01: Read recorded moves and route groups](task-01-transition-reads.md)
+- [x] [Task 02: Expose scoped Host and canvas reads](task-02-host-api.md)
+- [x] [Task 03: Publish the live workflow canvas](task-03-live-canvas.md)
+- [x] [Task 04: Rename a canvas from host chrome](task-04-canvas-rename.md)
+- [x] [Task 05: Simplify reviewed canvas sharing](task-05-quick-sharing.md)
 
 ## Verification results
 
-Pending implementation.
+All five work orders are complete. The final task-local canvas release is
+`682a8c38-45ff-46a0-87ad-6270e73d4c91` (`1.1.1`), valid and active in
+task scope. Exact-source Playwright smoke covered task, workspace phone,
+older-host, and sound opt-in states. Focused backend tests, frontend unit tests,
+typecheck, lint, localization checks, public-doc validation, and desktop/phone
+canvas E2E passed. Workspace promotion remains a user-controlled action.
 
 ## Risks
 

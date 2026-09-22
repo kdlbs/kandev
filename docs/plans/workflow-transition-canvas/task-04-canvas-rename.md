@@ -1,7 +1,7 @@
 ---
 id: "04-canvas-rename"
 title: "Rename a canvas from host chrome"
-status: pending
+status: done
 wave: 4
 depends_on:
   - "03-live-canvas"
@@ -87,4 +87,7 @@ management checks; the rename contract itself does not depend on its data API.
 
 ## Results
 
-Pending.
+Added conditional title update, owner-authorized HTTP PATCH, safe
+`canvas.updated` event, and desktop/phone host editors. The host refreshes
+metadata without replacing the iframe. Canvas/backend tests, typecheck,
+localization checks, focused unit tests, and desktop/phone rename E2E passed.

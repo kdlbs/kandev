@@ -1,7 +1,7 @@
 ---
 id: "01-transition-reads"
 title: "Read recorded moves and route groups"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -84,4 +84,15 @@ destination indexes. Query plans and parity tests must cover that path.
 
 ## Results
 
-Pending.
+Implemented task-ID cursor reads and workspace route grouping over the
+retained ledger. Added task-ID, source-workflow, and destination-workflow
+indexes. SQLite and Postgres schema replay share the same indexes; the
+Postgres query test is gated on `KANDEV_TEST_POSTGRES_DSN`.
+
+Passed after the final schema edit:
+
+```text
+go test ./internal/task/repository/sqlite ./internal/task/service ./internal/persistence/storeconformance/...
+```
+
+Postgres runtime parity was skipped locally because no DSN is configured.

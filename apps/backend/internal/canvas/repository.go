@@ -455,6 +455,22 @@ func (r *Repository) DeleteTx(ctx context.Context, tx *sqlx.Tx, id string) error
 	return nil
 }
 
+// Rename changes only the mutable canvas title. A removed row cannot be recreated.
+func (r *Repository) Rename(ctx context.Context, id, title string, updatedAt time.Time) error {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE canvas_lifecycle_metadata SET title = ?, updated_at = ? WHERE id = ?`), title, updatedAt.UTC().Format(time.RFC3339Nano), id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrCanvasNotFound
+	}
+	return nil
+}
+
 // Promote records the human-owned provenance and clears the current task
 // relationship. The instance scope/grants are changed by the plugin
 // instance store immediately before this metadata transaction.

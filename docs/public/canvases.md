@@ -59,6 +59,16 @@ The app uses relative requests such as `./_kandev/v1/data/tasks` and `./_kandev/
 
 A task read includes a read-only summary of that task's dependencies: whether it is blocked, and which tasks it depends on or blocks. Events never carry this summary, so a canvas that displays it refetches the task rather than reading the summary out of the event stream: on a `task.updated`, `task.dependencies_resolved`, or `task.dependency_failed` event for that task or one of its edges, or on a `task.state_changed` event for any task in its cached dependency lists (a predecessor or dependent simply advancing state is not one of the first three events). Kandev refuses an oversized read rather than truncating it silently; the authoring reference has the exact fields and limits.
 
+To show recorded workflow movement, read
+`./_kandev/v1/data/tasks/{task_id}/step-transitions`. It returns retained
+moves newest first and preserves the IDs of removed steps. A task canvas can
+read only its own task. After you promote a canvas to workspace scope, it can
+also read `./_kandev/v1/data/workflows/{workflow_id}/transition-groups` when
+the release has both task and workflow read grants. These groups count
+historical routes, including archived tasks. Use the task list for current
+task counts. [Plugin authoring](plugins-authoring.md) covers the browser and
+backend Host readers.
+
 The host shows canvas controls outside the app frame. The app runs in a
 sandboxed same-origin iframe. Canvas source is trusted with the viewing user's
 ordinary user-session authority:
@@ -194,6 +204,10 @@ Kandev allows up to 100 workspace canvas instances across scopes. Archived canva
 
 On desktop, workspace canvases use the workspace Canvases area. On phones, Kandev opens a full-height canvas route and keeps canvas controls in an inset bottom drawer.
 
+To change the name shown in Kandev, choose **Rename canvas** beside the host
+toolbar title or in the phone actions drawer. Saving changes the canvas name in
+navigation and task pickers. It does not republish or rename the release package.
+
 ## Share and install a canvas
 
 Canvas sharing is manual and release-bound. It does not capture screenshots or
@@ -202,9 +216,11 @@ to the canvas package.
 
 1. Open the canvas host or the workspace canvas list.
 2. Choose **Share canvas**.
-3. Review the active release, package identity, file inventory, and archive
-   sizes.
-4. Choose **Prepare downloads**, then download the bundle or source archive.
+3. Check the active release and fill any required gaps, such as the license.
+   Kandev fills known package details from the release; expand **Package
+   details** to review or edit them. It does not choose a license for you.
+4. Choose **Prepare downloads** and review the file inventory, archive sizes,
+   and private-content reminder. Then download the bundle or source archive.
 5. Check the downloaded files for private content before sharing them.
 
 The bundle is an installable `.tar.gz`. The source download is a ZIP of the
@@ -212,6 +228,13 @@ retained project when the release uses project source mode. The preparation is
 temporary and expires after 15 minutes. A release change, lost authorization,
 expiry, or cancellation requires a new preparation. Kandev does not change the
 running canvas while it prepares these files.
+
+For an authorized browser client, `GET /api/v1/canvases/{id}/export-defaults`
+returns the active release ID, editable package metadata, and the names of
+missing required fields. The client must send that release ID as
+`expected_release_id` to `POST /api/v1/canvases/{id}/exports`. A release change
+requires fresh defaults and preparation. `PATCH /api/v1/canvases/{id}` with a
+`title` changes only the canvas instance name.
 
 Recipients can install a bundle from **Settings > Plugins > Canvases** by
 uploading the file or entering an HTTPS direct link. A registry entry provides

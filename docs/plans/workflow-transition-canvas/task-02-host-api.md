@@ -1,7 +1,7 @@
 ---
 id: "02-host-api"
 title: "Expose scoped Host and canvas reads"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-transition-reads"
@@ -94,4 +94,17 @@ only a resource grant but misses canvas scope could expose other tasks' moves.
 
 ## Results
 
-Pending.
+Added task-history and workflow-group RPCs to protocol v1, generated stubs,
+the optional SDK Host extension, the real Host adapter, and scoped canvas
+browser routes. Browser tests cover task-scope refusal, missing grants,
+foreign workflows, and workflows beyond the first list page. The bundled
+browser reference and public canvas/plugin guides document both routes.
+
+Passed after the final implementation edit:
+
+```text
+make -C apps/backend proto
+(cd apps/backend && go test ./internal/plugins ./pkg/pluginsdk ./internal/mcp/canvasskill)
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+```

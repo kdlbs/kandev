@@ -59,10 +59,12 @@ workspace.
 | --- | --- | --- | --- |
 | GET | `./_kandev/v1/data/tasks` | `api_read:tasks` | List tasks |
 | GET | `./_kandev/v1/data/tasks/{task_id}` | `api_read:tasks` | Read one task |
+| GET | `./_kandev/v1/data/tasks/{task_id}/step-transitions` | `api_read:tasks` | Read recorded task moves |
 | PATCH | `./_kandev/v1/data/tasks/{task_id}` | `api_write:tasks` | Update a task |
 | POST | `./_kandev/v1/data/tasks/{task_id}/messages` | `api_write:messages` | Send a task message |
 | GET | `./_kandev/v1/data/workflows` | `api_read:workflows` | List workflows |
 | GET | `./_kandev/v1/data/workflows/{workflow_id}/steps` | `api_read:workflows` | Read workflow steps |
+| GET | `./_kandev/v1/data/workflows/{workflow_id}/transition-groups` | `api_read:tasks` and `api_read:workflows`; workspace canvas only | Read recorded workflow route counts |
 
 The task-list query accepts `cursor`, `limit`, `include_archived`,
 `workflow_id`, `state`, and `parent_id`. `workflow_id` and `state` can be
@@ -119,6 +121,20 @@ A workflow object contains `id`, `workspace_id`, `name`, `description`,
 `id`, `workflow_id`, `name`, `position`, `stage_type`, `color`,
 `is_start_step`, `wip_limit`, `agent_profile_id`, and
 `on_enter_action_types`.
+
+The task transition route returns rows newest first, with `id` as a decimal
+string, nullable `from_workflow_id`, `from_workflow_step_id`,
+`to_workflow_id`, and `to_workflow_step_id`, `trigger`, and RFC3339
+`occurred_at`. It omits actor and session identity. The opaque `cursor`
+continues by ledger ID; it is bound to the requested task. Empty history
+means no retained move was recorded, not that the task never moved.
+
+The workflow transition-group route returns `kind` (`within`, `entry`, or
+`exit`), nullable `from_step_id` and `to_step_id`, and `count`. It includes
+archived tasks and removed step IDs, but not deleted tasks. Its opaque cursor
+orders groups by kind and step IDs. Both routes use the collection envelope
+and the 1..200 `limit` rule above. A task canvas cannot request workflow-wide
+groups; promotion to workspace scope is a user action, not a fallback.
 
 ## Writes and workflow movement
 

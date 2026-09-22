@@ -1,7 +1,7 @@
 ---
 id: "05-quick-sharing"
 title: "Simplify reviewed canvas sharing"
-status: pending
+status: done
 wave: 5
 depends_on:
   - "04-canvas-rename"
@@ -46,7 +46,7 @@ relaxing the distribution validator or download reauthorization.
 
 ## Acceptance
 
-1. The example canvas opens Share with its package ID, `1.0.0`, description,
+1. The example canvas opens Share with its package ID, current release version, description,
    and manifest author already present. License is the only author decision
    if the server supplies a valid compatibility minimum.
 2. Filling the remaining gaps permits one Prepare action, then shows the
@@ -96,4 +96,9 @@ touch shared host API files.
 
 ## Results
 
-Pending.
+Restored safe release metadata in host responses and added authorized,
+release-bound export defaults with server-owned compatibility floor `0.95.0`.
+Share presents missing fields first, keeps package details editable, and
+retains reviewed inventory and separate downloads. Canvas/backend tests,
+typecheck, localization checks, focused unit tests, and desktop/phone sharing
+E2E passed.

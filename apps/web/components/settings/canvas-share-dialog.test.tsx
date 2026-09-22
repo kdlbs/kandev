@@ -1,10 +1,15 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import type { ExportReview } from "@/lib/api/domains/canvas-distribution-api";
 
 const prepare = vi.fn();
+const getDefaults = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/api/domains/canvas-distribution-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/canvas-distribution-api")>()),
+  getCanvasExportDefaults: getDefaults,
+}));
 const share = {
   review: null as ExportReview | null,
   loading: false,
@@ -52,6 +57,8 @@ import { CanvasShareDialog } from "./canvas-share-dialog";
 
 afterEach(() => cleanup());
 
+const PACKAGE_ID = "canvas-one";
+
 const canvas: Canvas = {
   id: "canvas-1",
   plugin_instance_id: "instance-1",
@@ -65,7 +72,7 @@ const canvas: Canvas = {
   active_release: {
     id: "release-1",
     validation_status: "valid",
-    package_id: "canvas-one",
+    package_id: PACKAGE_ID,
     version: "1.0.0",
     display_name: "Canvas One",
     description: "A portable canvas",
@@ -76,6 +83,19 @@ const canvas: Canvas = {
 } as Canvas;
 
 beforeEach(() => {
+  getDefaults.mockReset().mockResolvedValue({
+    expected_release_id: "release-1",
+    metadata: {
+      package_id: PACKAGE_ID,
+      version: "1.0.0",
+      display_name: "Canvas One",
+      description: "A portable canvas",
+      author: "Author",
+      source_mode: "static",
+      min_kandev_version: "0.94.0",
+    },
+    missing_required: ["license"],
+  });
   prepare.mockReset().mockResolvedValue(null);
   share.cancel.mockReset();
   share.reset.mockReset();
@@ -85,23 +105,26 @@ beforeEach(() => {
 });
 
 describe("CanvasShareDialog", () => {
-  it("submits editable distribution metadata, including a user supplied license", () => {
+  it("submits release defaults with an explicit user supplied license", async () => {
     render(<CanvasShareDialog canvas={canvas} open onOpenChange={vi.fn()} />);
 
-    fireEvent.change(screen.getByLabelText("canvases:license"), {
+    const gaps = await screen.findByTestId("canvas-share-required-gaps");
+    fireEvent.change(within(gaps).getByLabelText("canvases:license"), {
       target: { value: "MIT" },
     });
     fireEvent.click(screen.getByRole("button", { name: "canvases:prepareDownloads" }));
 
-    expect(prepare).toHaveBeenCalledWith(
-      expect.objectContaining({
-        package_id: "canvas-one",
-        version: "1.0.0",
-        author: "Author",
-        license: "MIT",
-        source_mode: "static",
-        min_kandev_version: "0.94.0",
-      }),
+    await waitFor(() =>
+      expect(prepare).toHaveBeenCalledWith(
+        expect.objectContaining({
+          package_id: PACKAGE_ID,
+          version: "1.0.0",
+          author: "Author",
+          license: "MIT",
+          source_mode: "static",
+          min_kandev_version: "0.94.0",
+        }),
+      ),
     );
   });
 
@@ -111,7 +134,7 @@ describe("CanvasShareDialog", () => {
       canvas_id: "canvas-1",
       workspace_id: "workspace-1",
       release_id: "release-1",
-      metadata: { package_id: "canvas-one", version: "1.0.0" },
+      metadata: { package_id: PACKAGE_ID, version: "1.0.0" },
       sha256: "digest",
       files: [{ path: "assets/logo.svg", bytes: 12 }],
       bundle_bytes: 20,
@@ -130,5 +153,21 @@ describe("CanvasShareDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "canvases:downloadSource" }));
     expect(share.download).toHaveBeenNthCalledWith(1, "bundle");
     expect(share.download).toHaveBeenNthCalledWith(2, "source");
+  });
+
+  it("blocks preparation until release defaults load and offers retry on failure", async () => {
+    getDefaults.mockRejectedValueOnce(new Error("offline"));
+    render(<CanvasShareDialog canvas={canvas} open onOpenChange={vi.fn()} />);
+    await screen.findByRole("alert");
+    expect(
+      (screen.getByRole("button", { name: "canvases:prepareDownloads" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "canvases:retry" }));
+    await screen.findByTestId("canvas-share-package-details");
+    expect(
+      (screen.getByRole("button", { name: "canvases:prepareDownloads" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
   });
 });

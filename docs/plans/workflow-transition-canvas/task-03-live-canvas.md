@@ -1,7 +1,7 @@
 ---
 id: "03-live-canvas"
 title: "Publish the live workflow canvas"
-status: pending
+status: done
 wave: 3
 depends_on:
   - "02-host-api"
@@ -82,7 +82,7 @@ These are structural requirements for `AC-PLUGINS-WORKFLOW-HISTORY-003.2`,
 
 ```bash
 node --check .kandev/canvases/65d40cfb-7bd3-407a-beb7-be78a551e62a/script.js
-node apps/web/e2e/tests/canvas/workflow-canvas-source-smoke.cjs .kandev/canvases/65d40cfb-7bd3-407a-beb7-be78a551e62a
+node apps/web/e2e/tests/canvas/workflow-canvas-source-smoke.mjs .kandev/canvases/65d40cfb-7bd3-407a-beb7-be78a551e62a
 make -C apps/backend build
 (cd apps/web && pnpm run build:e2e)
 make -C apps/backend e2e-plugin-package
@@ -102,7 +102,7 @@ does not promote the canvas; the user controls workspace scope.
 - `.kandev/canvases/65d40cfb-7bd3-407a-beb7-be78a551e62a/styles.css`
 - `apps/web/e2e/tests/canvas/workflow-transition-history.spec.ts`
 - `apps/web/e2e/tests/canvas/mobile-workflow-transition-history.spec.ts`
-- `apps/web/e2e/tests/canvas/workflow-canvas-source-smoke.cjs`
+- `apps/web/e2e/tests/canvas/workflow-canvas-source-smoke.mjs`
 
 ## Dependencies
 
@@ -127,4 +127,12 @@ change needs explicit user promotion and possibly grant review.
 
 ## Results
 
-Pending.
+The exact task-local source passed `node --check` and
+`workflow-canvas-source-smoke.mjs` for task, phone workspace, older-host,
+and opt-in sound states. The backend build, web E2E build, fixture packaging, desktop and phone
+transition-route E2E tests passed. Published canvas
+`65d40cfb-7bd3-407a-beb7-be78a551e62a` release
+`682a8c38-45ff-46a0-87ad-6270e73d4c91` (`1.1.1`); it is valid and active
+in task scope with no permission review. Workspace scope still awaits
+user-controlled promotion. The current running host may show the older-host
+state until this PR is deployed.

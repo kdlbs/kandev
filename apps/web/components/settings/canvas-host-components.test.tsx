@@ -145,6 +145,7 @@ describe("canvas host action guidance", () => {
         onPromote={vi.fn()}
         onReleases={vi.fn()}
         onShare={vi.fn()}
+        onRename={vi.fn()}
         onSelectCanvas={vi.fn()}
         editing={false}
       />,

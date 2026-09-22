@@ -141,6 +141,16 @@ Use `./_kandev/v1/events` for the event stream. Keep all protocol paths
 relative so the same package works in task and workspace scope. Do not copy a
 capability URL from the host into the app.
 
+For recorded workflow movement, the browser can GET
+`./_kandev/v1/data/tasks/{task_id}/step-transitions` with
+`api_read:tasks`. A workspace canvas can GET
+`./_kandev/v1/data/workflows/{workflow_id}/transition-groups` with both
+`api_read:tasks` and `api_read:workflows`. The latter is denied to a task
+canvas until the user promotes it. Both return bounded `{items,page_info}`
+pages; use the opaque `next_cursor` to continue. The equivalent optional
+backend Host extension is `pluginsdk.TransitionHistory(host)`. It exposes
+`ListTask` and `ListWorkflowGroups` with the same fields and grants.
+
 Kandev injects a reserved startup bootstrap into the packaged entry document.
 It runs before authored scripts, reports an initial document error when one is
 observed, and checks `./_kandev/v1/context` after the document loads. The host

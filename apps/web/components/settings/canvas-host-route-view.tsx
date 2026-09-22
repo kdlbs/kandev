@@ -1,6 +1,9 @@
 "use client";
 
 import { CanvasShareDialog } from "./canvas-share-dialog";
+import { CanvasRenameDialog } from "./canvas-rename-dialog";
+import { Button } from "@kandev/ui/button";
+import { IconPencil } from "@tabler/icons-react";
 import { CanvasHostFrame } from "./canvas-host-frame";
 import { useTranslation } from "react-i18next";
 import {
@@ -29,15 +32,18 @@ type CanvasHostRouteViewProps = {
   promotionOpen: boolean;
   releasesOpen: boolean;
   shareOpen: boolean;
+  renameOpen: boolean;
   editing: boolean;
   setMenuOpen: (open: boolean) => void;
   setPromotionOpen: (open: boolean) => void;
   setReleasesOpen: (open: boolean) => void;
   setShareOpen: (open: boolean) => void;
+  setRenameOpen: (open: boolean) => void;
   onEdit: () => void;
   onPromote: () => void;
   onReleases: () => void;
   onShare: () => void;
+  onRename: () => void;
   onSelectCanvas: (canvas: Canvas) => void;
   onRuntimeReady: () => void;
   onRuntimeError: () => void;
@@ -54,6 +60,8 @@ function CanvasHostRouteDialogs({
   setReleasesOpen,
   shareOpen,
   setShareOpen,
+  renameOpen,
+  setRenameOpen,
   onPromotionCompleted,
   onChanged,
 }: Pick<
@@ -65,6 +73,8 @@ function CanvasHostRouteDialogs({
   | "setReleasesOpen"
   | "shareOpen"
   | "setShareOpen"
+  | "renameOpen"
+  | "setRenameOpen"
   | "onPromotionCompleted"
   | "onChanged"
 >) {
@@ -80,6 +90,12 @@ function CanvasHostRouteDialogs({
         onChanged={onChanged}
       />
       <CanvasShareDialog canvas={canvas} open={shareOpen} onOpenChange={setShareOpen} />
+      <CanvasRenameDialog
+        canvas={canvas}
+        open={renameOpen}
+        onOpenChange={setRenameOpen}
+        onRenamed={onChanged}
+      />
     </>
   );
 }
@@ -119,6 +135,7 @@ function CanvasHostRouteMobileActions({
   onPromote,
   onReleases,
   onShare,
+  onRename,
   editing,
   hostCanvases,
   onSelectCanvas,
@@ -131,6 +148,7 @@ function CanvasHostRouteMobileActions({
   | "onPromote"
   | "onReleases"
   | "onShare"
+  | "onRename"
   | "editing"
   | "onSelectCanvas"
 > & { hostCanvases: Canvas[] }) {
@@ -143,6 +161,7 @@ function CanvasHostRouteMobileActions({
       onPromote={onPromote}
       onReleases={onReleases}
       onShare={onShare}
+      onRename={onRename}
       editing={editing}
       canvases={hostCanvases}
       onSelectCanvas={onSelectCanvas}
@@ -181,6 +200,19 @@ export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
   const { t } = useTranslation();
   const title = canvas?.title || t("canvases:canvas");
   const desktopActions = createCanvasDesktopActions(canvas, props);
+  const renameAction = canvas ? (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="min-h-11 min-w-11"
+      aria-label={t("canvases:renameCanvas")}
+      title={t("canvases:renameCanvas")}
+      onClick={props.onRename}
+      data-testid="canvas-rename-action"
+    >
+      <IconPencil className="size-4" />
+    </Button>
+  ) : null;
   const mobileActionsButton = isMobile ? (
     <CanvasMobileActionsButton menuOpen={menuOpen} onOpenActions={() => setMenuOpen(true)} />
   ) : null;
@@ -205,6 +237,7 @@ export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
       onPromote={props.onPromote}
       onReleases={props.onReleases}
       onShare={props.onShare}
+      onRename={props.onRename}
       editing={props.editing}
       hostCanvases={props.hostCanvases}
       onSelectCanvas={props.onSelectCanvas}
@@ -219,6 +252,8 @@ export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
       setReleasesOpen={props.setReleasesOpen}
       shareOpen={props.shareOpen}
       setShareOpen={props.setShareOpen}
+      renameOpen={props.renameOpen}
+      setRenameOpen={props.setRenameOpen}
       onPromotionCompleted={props.onPromotionCompleted}
       onChanged={props.onChanged}
     />
@@ -232,6 +267,7 @@ export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
       menuOpen={menuOpen}
       setMenuOpen={setMenuOpen}
       desktopActions={desktopActions.actions}
+      renameAction={renameAction}
       desktopOverflowActions={desktopActions.overflowActions}
       desktopOverflowMenuItems={desktopActions.overflowMenuItems}
       desktopOverflowPrimaryAction={desktopActions.overflowPrimaryAction}

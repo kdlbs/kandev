@@ -207,19 +207,22 @@ type transactionalPluginInstanceStore interface {
 // It never carries source files, application state, package bodies, or runtime
 // capabilities.
 type LifecycleEvent struct {
-	Type                string `json:"type"`
-	CanvasID            string `json:"canvas_id"`
-	PluginInstanceID    string `json:"plugin_instance_id"`
-	WorkspaceID         string `json:"workspace_id"`
-	TaskID              string `json:"task_id,omitempty"`
-	ScopeKind           string `json:"scope_kind"`
-	Status              string `json:"status"`
-	ActiveReleaseID     string `json:"active_release_id,omitempty"`
-	ActiveReleaseStatus string `json:"active_release_status,omitempty"`
+	Type                string    `json:"type"`
+	Title               string    `json:"title,omitempty"`
+	UpdatedAt           time.Time `json:"updated_at,omitempty"`
+	CanvasID            string    `json:"canvas_id"`
+	PluginInstanceID    string    `json:"plugin_instance_id"`
+	WorkspaceID         string    `json:"workspace_id"`
+	TaskID              string    `json:"task_id,omitempty"`
+	ScopeKind           string    `json:"scope_kind"`
+	Status              string    `json:"status"`
+	ActiveReleaseID     string    `json:"active_release_id,omitempty"`
+	ActiveReleaseStatus string    `json:"active_release_status,omitempty"`
 }
 
 const (
 	EventCreated                   = "canvas.created"
+	EventUpdated                   = "canvas.updated"
 	EventReleaseActivated          = "canvas.release.activated"
 	EventReleasePermissionRequired = "canvas.release.permission_required"
 	EventPromoted                  = "canvas.promoted"

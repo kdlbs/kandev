@@ -365,6 +365,7 @@ func registerCanvasRoutes(p routeParams) {
 	p.router.GET("/api/v1/canvases/workspaces/:workspaceID", h.listWorkspace)
 	registerCanvasDistributionRoutes(p.router, h)
 	p.router.GET("/api/v1/canvases/:canvasID", h.get)
+	p.router.PATCH("/api/v1/canvases/:canvasID", h.rename)
 	p.router.GET("/api/v1/canvases/:canvasID/releases", h.releases)
 	p.router.GET("/api/v1/canvases/:canvasID/promotion-preview", h.promotionPreview)
 	p.router.POST("/api/v1/canvases/:canvasID/promotion", h.promote)
@@ -406,6 +407,15 @@ type canvasHTTPResponse struct {
 
 type canvasReleaseResponse struct {
 	ID                 string                           `json:"id"`
+	PackageID          string                           `json:"package_id,omitempty"`
+	Version            string                           `json:"version,omitempty"`
+	DisplayName        string                           `json:"display_name,omitempty"`
+	Description        string                           `json:"description,omitempty"`
+	Author             string                           `json:"author,omitempty"`
+	License            string                           `json:"license,omitempty"`
+	SourceMode         string                           `json:"source_mode,omitempty"`
+	MinKandevVersion   string                           `json:"min_kandev_version,omitempty"`
+	RepoURL            string                           `json:"repo_url,omitempty"`
 	PackageDigest      string                           `json:"package_digest,omitempty"`
 	ValidationStatus   string                           `json:"validation_status"`
 	ValidationError    string                           `json:"validation_error,omitempty"`
@@ -518,6 +528,30 @@ func (h *canvasHTTPHandler) get(c *gin.Context) {
 	writeCanvasJSON(c, http.StatusOK, response)
 }
 
+func (h *canvasHTTPHandler) rename(c *gin.Context) {
+	item, err := h.canvases.Get(c.Request.Context(), c.Param("canvasID"))
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	if !h.authorizeWorkspace(c, item.WorkspaceID) {
+		return
+	}
+	var request struct {
+		Title string `json:"title"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeCanvasError(c, http.StatusBadRequest, "invalid_request", nil)
+		return
+	}
+	updated, err := h.canvases.Rename(c.Request.Context(), item.ID, request.Title)
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	writeCanvasJSON(c, http.StatusOK, canvasResponse(*updated))
+}
+
 func (h *canvasHTTPHandler) releases(c *gin.Context) {
 	canvas, err := h.canvases.Get(c.Request.Context(), c.Param("canvasID"))
 	if err != nil {
@@ -553,16 +587,7 @@ func (h *canvasHTTPHandler) releases(c *gin.Context) {
 }
 
 func releaseResponse(release instances.Release, scope string, grants []instances.Grant) canvasReleaseResponse {
-	permissions := canvasservice.ReleasePermissionSummary(release)
-	return canvasReleaseResponse{
-		ID: release.ID, PackageDigest: release.PackageDigest,
-		ValidationStatus: release.ValidationStatus, ValidationError: release.ValidationError,
-		Permissions: &permissions, MissingPermissions: canvasservice.MissingPermissionKeys(permissions, scope, grants),
-		PermissionDigest: canvasservice.PermissionDigest(release), SourceActorKind: release.SourceActorKind,
-		SourceUserID: release.SourceUserID, SourceTaskID: release.SourceTaskID,
-		SourceSessionID: release.SourceSessionID, ProtocolVersion: release.ProtocolVersion,
-		CreatedAt: release.CreatedAt,
-	}
+	return *releaseResponseFromMetadata(canvasservice.ReleaseMetadataForHTTP(release, scope, grants))
 }
 
 func releaseResponseFromMetadata(value *canvasservice.ReleaseMetadata) *canvasReleaseResponse {
@@ -571,6 +596,9 @@ func releaseResponseFromMetadata(value *canvasservice.ReleaseMetadata) *canvasRe
 	}
 	return &canvasReleaseResponse{
 		ID: value.ID, PackageDigest: value.PackageDigest, ValidationStatus: value.ValidationStatus,
+		PackageID: value.PackageID, Version: value.Version, DisplayName: value.DisplayName,
+		Description: value.Description, Author: value.Author, License: value.License,
+		SourceMode: value.SourceMode, MinKandevVersion: value.MinKandevVersion, RepoURL: value.RepoURL,
 		ValidationError: value.ValidationError, Permissions: value.Permissions,
 		MissingPermissions: value.MissingPermissions, PermissionDigest: value.PermissionDigest,
 		SourceActorKind: value.SourceActorKind, SourceUserID: value.SourceUserID,
