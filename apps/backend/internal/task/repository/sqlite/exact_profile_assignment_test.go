@@ -60,6 +60,39 @@ func TestExactProfileAssignmentSchemaExists(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("binding columns = %#v, want %#v", got, want)
 	}
+	fkRows, err := db.Queryx(`PRAGMA foreign_key_list(task_exact_profile_launch_attempt_bindings)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fkRows.Close()
+	if !fkRows.Next() {
+		t.Fatal("binding foreign key missing")
+	}
+	var id, seq int
+	var table, from, to, onUpdate, onDelete, match string
+	if err := fkRows.Scan(&id, &seq, &table, &from, &to, &onUpdate, &onDelete, &match); err != nil || table != "tasks" || from != "task_id" || to != "id" || onDelete != "CASCADE" {
+		t.Fatalf("binding foreign key=%s/%s/%s/%s err=%v", table, from, to, onDelete, err)
+	}
+}
+
+func TestExactProfileBindingSchemaReopenLeavesLegacySessionsUnbound(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	if _, err := repo.AssignExactProfileAssignment(t.Context(), assignment); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.RecordExactProfileLaunchReceipt(t.Context(), &models.ExactProfileLaunchReceipt{TaskID: assignment.TaskID, SessionID: "legacy-session", AgentProfileID: assignment.AgentProfileID, Generation: assignment.Generation, ProfileRevision: assignment.ProfileRevision, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}); err != nil {
+		t.Fatal(err)
+	}
+	var bindings int
+	if err := repo.db.GetContext(t.Context(), &bindings, `SELECT COUNT(*) FROM task_exact_profile_launch_attempt_bindings WHERE task_id = ?`, assignment.TaskID); err != nil {
+		t.Fatal(err)
+	}
+	if bindings != 0 {
+		t.Fatalf("legacy launch bindings = %d, want 0", bindings)
+	}
+	if receipt, err := repo.GetExactProfileLaunchReceipt(t.Context(), assignment.TaskID, "legacy-session"); err != nil || receipt == nil {
+		t.Fatalf("legacy receipt = %#v, err=%v", receipt, err)
+	}
 }
 
 func TestUpsertExactProfileAssignmentGuardsGeneration(t *testing.T) {
