@@ -4,7 +4,7 @@
  * same workspace action with a touch-sized target.
  */
 import { expect, test } from "../../fixtures/test-base";
-import { expectTouchControl } from "../../helpers/control-sizing";
+import { expectTouchSquareControl } from "../../helpers/control-sizing";
 import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
@@ -32,10 +32,7 @@ test.describe("Mobile plugin workspace actions", () => {
     await expect(slot).toHaveAttribute("data-workspace-id", seedData.workspaceId);
     await expect(slot).toHaveAttribute("data-presentation", "mobile");
 
-    const box = await slot.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.width + 0.01).toBeGreaterThanOrEqual(44);
-    await expectTouchControl(slot);
+    await expectTouchSquareControl(slot);
 
     await slot.tap();
     await expect(slot).toHaveAttribute("data-clicked", "true");

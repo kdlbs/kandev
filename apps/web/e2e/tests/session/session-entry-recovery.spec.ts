@@ -77,7 +77,7 @@ test.describe("session entry recovery", () => {
     const proxy = await routeSessionEntryRecovery(testPage);
     const task = await createEntryTask(apiClient, seedData, `History recovery ${Date.now()}`);
 
-    proxy.dropNextResponses("message.list", 2);
+    proxy.holdResponses("message.list");
 
     const session = await openTaskSession(testPage, task.id);
     const historyNotice = session.activeChat().getByTestId("session-history-unavailable");
@@ -93,10 +93,11 @@ test.describe("session entry recovery", () => {
     await expect(details).toHaveAttribute("open", "");
     await expect(details).toContainText("WebSocket request timed out: message.list");
 
+    proxy.releaseHeldResponses("message.list");
     await historyNotice.getByTestId("session-history-retry").click();
     await expect(historyNotice).toHaveCount(0);
     await expect(session.activeChat()).toContainText("simple mock response", { timeout: 30_000 });
-    expect(proxy.droppedResponseCount("message.list")).toBe(2);
+    expect(proxy.heldResponseCount("message.list")).toBeGreaterThanOrEqual(2);
   });
 
   test("labels exhausted status checks accurately and retries only the status read", async ({

@@ -130,6 +130,11 @@ type AgentExecution struct {
 	// completion's attribution while its stream frame is in flight.
 	promptTurnID      string
 	promptLifecycleMu sync.Mutex
+	// cancelEscalatedPromptGeneration identifies a prompt whose cancellation
+	// released the execution locally before the agentctl stream closed. The
+	// resulting disconnect is expected teardown and must not replace the
+	// reusable execution with a failed one.
+	cancelEscalatedPromptGeneration atomic.Uint64
 
 	// recoveryAppliedControlTurnID is the control-server-assigned turn
 	// identifier (streams.AgentEvent.ControlTurnID) of a retained turn

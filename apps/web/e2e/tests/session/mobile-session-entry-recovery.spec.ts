@@ -31,7 +31,7 @@ test.describe("mobile session entry recovery", () => {
     );
 
     if (!task.session_id) throw new Error("created recovery task has no session");
-    proxy.dropNextResponses("message.list", 2, { sessionId: task.session_id });
+    proxy.holdResponses("message.list", { sessionId: task.session_id });
 
     const session = await openTaskSession(testPage, task.id);
     const chat = session.activeChat();
@@ -46,9 +46,10 @@ test.describe("mobile session entry recovery", () => {
     expect(detailsBox?.height).toBeGreaterThanOrEqual(44);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile session history recovery");
 
+    proxy.releaseHeldResponses("message.list");
     await retry.click();
     await expect(historyNotice).toHaveCount(0);
     await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
-    expect(proxy.droppedResponseCount("message.list")).toBe(2);
+    expect(proxy.heldResponseCount("message.list")).toBeGreaterThanOrEqual(2);
   });
 });
