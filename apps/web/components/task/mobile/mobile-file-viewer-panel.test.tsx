@@ -31,9 +31,6 @@ const MOBILE_MARKDOWN_PREVIEW_MODE_TEST_ID = "mobile-markdown-mode-preview";
 const TRUE_VALUE = true;
 const SELECTED_ATTRIBUTE = String(TRUE_VALUE);
 const EDITABLE_ATTRIBUTE = "data-editable";
-const FILE_CONTENT_TEST_ID = "file-content";
-const REPORT_PATH = "reports/index.html";
-const REPORT_CONTENT = "<h1>Report</h1>";
 
 const htmlPreview = vi.hoisted(() => ({
   isPublishing: false,
@@ -70,9 +67,7 @@ const state = {
   connection: { status: "disconnected" },
 };
 const storeApi = { getState: () => state };
-const README_CONTENT = "# README";
 const REPORT_CONTENT = "<h1>Report</h1>";
-const README_PATH = "README.md";
 const REPORT_PATH = "reports/index.html";
 const FILE_CONTENT_TEST_ID = "file-content";
 
