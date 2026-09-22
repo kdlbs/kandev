@@ -16,6 +16,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/analytics/models"
+	"github.com/kandev/kandev/internal/db"
 )
 
 const (
@@ -1852,17 +1853,8 @@ func appendNativeUsageFilters(query string, args []any, filter models.SessionUsa
 }
 
 func (r *Repository) tableExists(ctx context.Context, table string) bool {
-	var found bool
-	if r.ro.DriverName() == "pgx" {
-		if err := r.ro.GetContext(ctx, &found, `SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = $1)`, table); err != nil {
-			return false
-		}
-		return found
-	}
-	if err := r.ro.GetContext(ctx, &found, r.ro.Rebind(`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)`), table); err != nil {
-		return false
-	}
-	return found
+	found, err := db.TableExistsContext(ctx, r.ro, table)
+	return err == nil && found
 }
 
 func (r *Repository) nativeUsageContributions(ctx context.Context, filter models.SessionUsageFilter) ([]usageContribution, error) {
