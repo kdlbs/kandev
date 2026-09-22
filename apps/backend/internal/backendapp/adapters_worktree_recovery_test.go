@@ -1,3 +1,4 @@
+//revive:disable:file-length-limit // Real-store lifecycle recovery cases share one fixture vocabulary.
 package backendapp
 
 import (
@@ -546,11 +547,185 @@ func TestLifecycleAdapterWorktreeRecoveryRejectsMismatchedRequester(t *testing.T
 	}
 }
 
+func TestLifecycleAdapterInitialWorktreeMaterializationAllowsCurrentCreatingEnvironment(t *testing.T) {
+	ctx := context.Background()
+	const (
+		workspaceID   = "workspace-lifecycle-initial-materialization"
+		taskID        = "task-lifecycle-initial-materialization"
+		sessionID     = "session-lifecycle-initial-materialization"
+		environmentID = "environment-lifecycle-initial-materialization"
+		frontendID    = "repository-lifecycle-initial-materialization-frontend"
+		backendID     = "repository-lifecycle-initial-materialization-backend"
+		executorID    = "executor-lifecycle-initial-materialization"
+	)
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "recovery.db"))
+	if err != nil {
+		t.Fatalf("open SQLite: %v", err)
+	}
+	sqliteDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqliteDB.Close() })
+	taskRepo, err := tasksqlite.NewWithDB(sqliteDB, sqliteDB, nil)
+	if err != nil {
+		t.Fatalf("new task repository: %v", err)
+	}
+	store, err := worktree.NewSQLiteStore(sqliteDB, sqliteDB)
+	if err != nil {
+		t.Fatalf("new worktree store: %v", err)
+	}
+	log := newTestLogger()
+	tasksPath := filepath.Join(t.TempDir(), "tasks")
+	worktreeManager, err := worktree.NewManager(worktree.Config{Enabled: true, TasksBasePath: tasksPath, BranchPrefix: "kandev/"}, store, log)
+	if err != nil {
+		t.Fatalf("new worktree manager: %v", err)
+	}
+	frontendPath := lifecycleRecoveryGitRepository(t, "frontend")
+	backendPath := lifecycleRecoveryGitRepository(t, "backend")
+	taskRoot := filepath.Join(tasksPath, "recovery")
+	seedLifecycleRecoveryStore(t, ctx, taskRepo, lifecycleRecoverySeed{
+		workspaceID: workspaceID, taskID: taskID, sessionID: sessionID, environmentID: environmentID,
+		frontendRepositoryID: frontendID, backendRepositoryID: backendID, executorID: executorID,
+		incarnationID: "incarnation-lifecycle-initial-materialization", frontendRepositoryPath: frontendPath,
+		backendRepositoryPath: backendPath, taskRoot: taskRoot, frontendOriginalPath: filepath.Join(taskRoot, "frontend"),
+		backendOriginalPath: filepath.Join(taskRoot, "backend"), frontendSlotEmpty: true, backendSlotEmpty: true,
+		environmentStatus: models.TaskEnvironmentStatusCreating, materializationSessionID: sessionID, sessionState: models.TaskSessionStateCreated,
+	})
+	agentsRegistry := registry.NewRegistry(log)
+	agent := agents.NewMockAgentWithID("mock-agent", "Mock", "Mock")
+	agent.SetEnabled(true)
+	if err := agentsRegistry.Register(agent); err != nil {
+		t.Fatalf("register agent: %v", err)
+	}
+	runtime := &capturingWorktreeRuntime{}
+	runtimes := lifecycle.NewExecutorRegistry(log)
+	runtimes.Register(runtime)
+	events := bus.NewMemoryEventBus(log)
+	t.Cleanup(events.Close)
+	manager := lifecycle.NewManager(agentsRegistry, events, runtimes, nil, nil, nil, lifecycle.ExecutorFallbackWarn, "", log)
+	t.Cleanup(func() { _ = manager.Stop() })
+	preparers := lifecycle.NewPreparerRegistry(log)
+	manager.SetPreparerRegistry(preparers)
+	manager.SetWorktreeManager(worktreeManager)
+	executor := orchestratorexecutor.NewExecutor(newLifecycleAdapter(manager, agentsRegistry, log), taskRepo, log, orchestratorexecutor.ExecutorConfig{})
+	executor.SetSelectedWorktreeRecoveryAdmission(worktreeManager.AdmitRecovery)
+	task, err := taskRepo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if _, err := executor.LaunchPreparedSession(ctx, task.ToAPI(), sessionID, orchestratorexecutor.LaunchOptions{StartAgent: true}); !errors.Is(err, errWorktreeRuntimeCaptured) {
+		t.Fatalf("LaunchPreparedSession error = %v, want runtime capture", err)
+	}
+	if runtime.calls != 1 || runtime.req == nil || runtime.req.WorkspacePath != taskRoot {
+		t.Fatalf("runtime = calls %d request %+v, want one initial materialization at %q", runtime.calls, runtime.req, taskRoot)
+	}
+	worktrees, err := store.GetWorktreesByTaskID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("get materialized worktrees: %v", err)
+	}
+	if len(worktrees) != 2 {
+		t.Fatalf("materialized worktrees = %+v, want both repositories", worktrees)
+	}
+	for _, recovered := range worktrees {
+		if !worktreeManager.IsValid(recovered.Path) {
+			t.Fatalf("materialized worktree = %+v, want valid checkout", recovered)
+		}
+	}
+}
+
+func TestLifecycleAdapterRejectsExistingEnvironmentWithoutWorktreeIdentity(t *testing.T) {
+	ctx := context.Background()
+	const (
+		workspaceID   = "workspace-lifecycle-existing-missing-identity"
+		taskID        = "task-lifecycle-existing-missing-identity"
+		sessionID     = "session-lifecycle-existing-missing-identity"
+		environmentID = "environment-lifecycle-existing-missing-identity"
+		frontendID    = "repository-lifecycle-existing-missing-identity-frontend"
+		backendID     = "repository-lifecycle-existing-missing-identity-backend"
+		executorID    = "executor-lifecycle-existing-missing-identity"
+	)
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "recovery.db"))
+	if err != nil {
+		t.Fatalf("open SQLite: %v", err)
+	}
+	sqliteDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqliteDB.Close() })
+	taskRepo, err := tasksqlite.NewWithDB(sqliteDB, sqliteDB, nil)
+	if err != nil {
+		t.Fatalf("new task repository: %v", err)
+	}
+	store, err := worktree.NewSQLiteStore(sqliteDB, sqliteDB)
+	if err != nil {
+		t.Fatalf("new worktree store: %v", err)
+	}
+	log := newTestLogger()
+	tasksPath := filepath.Join(t.TempDir(), "tasks")
+	worktreeManager, err := worktree.NewManager(worktree.Config{Enabled: true, TasksBasePath: tasksPath, BranchPrefix: "kandev/"}, store, log)
+	if err != nil {
+		t.Fatalf("new worktree manager: %v", err)
+	}
+	frontendPath := lifecycleRecoveryGitRepository(t, "frontend")
+	backendPath := lifecycleRecoveryGitRepository(t, "backend")
+	taskRoot := filepath.Join(tasksPath, "recovery")
+	seedLifecycleRecoveryStore(t, ctx, taskRepo, lifecycleRecoverySeed{
+		workspaceID: workspaceID, taskID: taskID, sessionID: sessionID, environmentID: environmentID,
+		frontendRepositoryID: frontendID, backendRepositoryID: backendID, executorID: executorID,
+		incarnationID: "incarnation-lifecycle-existing-missing-identity", frontendRepositoryPath: frontendPath,
+		backendRepositoryPath: backendPath, taskRoot: taskRoot, frontendOriginalPath: filepath.Join(taskRoot, "frontend"),
+		backendOriginalPath: filepath.Join(taskRoot, "backend"), frontendSlotEmpty: true, backendSlotEmpty: true,
+		environmentStatus: models.TaskEnvironmentStatusReady, sessionState: models.TaskSessionStateCreated,
+	})
+	agentsRegistry := registry.NewRegistry(log)
+	agent := agents.NewMockAgentWithID("mock-agent", "Mock", "Mock")
+	agent.SetEnabled(true)
+	if err := agentsRegistry.Register(agent); err != nil {
+		t.Fatalf("register agent: %v", err)
+	}
+	runtime := &capturingWorktreeRuntime{}
+	runtimes := lifecycle.NewExecutorRegistry(log)
+	runtimes.Register(runtime)
+	events := bus.NewMemoryEventBus(log)
+	t.Cleanup(events.Close)
+	manager := lifecycle.NewManager(agentsRegistry, events, runtimes, nil, nil, nil, lifecycle.ExecutorFallbackWarn, "", log)
+	t.Cleanup(func() { _ = manager.Stop() })
+	preparers := lifecycle.NewPreparerRegistry(log)
+	manager.SetPreparerRegistry(preparers)
+	manager.SetWorktreeManager(worktreeManager)
+	executor := orchestratorexecutor.NewExecutor(newLifecycleAdapter(manager, agentsRegistry, log), taskRepo, log, orchestratorexecutor.ExecutorConfig{})
+	executor.SetSelectedWorktreeRecoveryAdmission(worktreeManager.AdmitRecovery)
+	task, err := taskRepo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if _, err := executor.LaunchPreparedSession(ctx, task.ToAPI(), sessionID, orchestratorexecutor.LaunchOptions{StartAgent: true}); err == nil || !strings.Contains(err.Error(), "durable worktree identity") {
+		t.Fatalf("LaunchPreparedSession error = %v, want missing durable worktree identity refusal", err)
+	}
+	if runtime.calls != 0 {
+		t.Fatalf("runtime calls = %d, want 0", runtime.calls)
+	}
+	worktrees, err := store.GetWorktreesByTaskID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("get worktrees: %v", err)
+	}
+	if len(worktrees) != 0 {
+		t.Fatalf("worktrees = %+v, want no preparer mutation", worktrees)
+	}
+	var claims int
+	if err := sqliteDB.GetContext(ctx, &claims, `SELECT COUNT(*) FROM task_environment_recovery_claims WHERE task_environment_id = ?`, environmentID); err != nil {
+		t.Fatalf("count recovery claims: %v", err)
+	}
+	if claims != 0 {
+		t.Fatalf("recovery claims = %d, want 0", claims)
+	}
+}
+
 type lifecycleRecoverySeed struct {
 	workspaceID, taskID, sessionID, environmentID, executorID, incarnationID                           string
 	frontendRepositoryID, backendRepositoryID, frontendWorktreeID, backendWorktreeID                   string
 	frontendRepositoryPath, backendRepositoryPath, taskRoot, frontendOriginalPath, backendOriginalPath string
 	backendSlotEmpty                                                                                   bool
+	environmentStatus                                                                                  models.TaskEnvironmentStatus
+	materializationSessionID                                                                           string
+	frontendSlotEmpty                                                                                  bool
+	sessionState                                                                                       models.TaskSessionState
 }
 
 func seedLifecycleRecoveryStore(t *testing.T, ctx context.Context, repo *tasksqlite.Repository, seed lifecycleRecoverySeed) {
@@ -579,7 +754,11 @@ func seedLifecycleRecoveryStore(t *testing.T, ctx context.Context, repo *tasksql
 		},
 		func() error { return repo.CreateTaskEnvironment(ctx, lifecycleRecoveryEnvironment(seed)) },
 		func() error {
-			return repo.CreateTaskSession(ctx, &models.TaskSession{ID: seed.sessionID, TaskID: seed.taskID, QueueIncarnationID: seed.incarnationID, TaskEnvironmentID: seed.environmentID, ExecutorID: seed.executorID, RepositoryID: seed.frontendRepositoryID, AgentProfileID: "mock-agent", BaseBranch: "main", State: models.TaskSessionStateCancelled})
+			state := seed.sessionState
+			if state == "" {
+				state = models.TaskSessionStateCancelled
+			}
+			return repo.CreateTaskSession(ctx, &models.TaskSession{ID: seed.sessionID, TaskID: seed.taskID, QueueIncarnationID: seed.incarnationID, TaskEnvironmentID: seed.environmentID, ExecutorID: seed.executorID, RepositoryID: seed.frontendRepositoryID, AgentProfileID: "mock-agent", BaseBranch: "main", State: state})
 		},
 	} {
 		if err := create(); err != nil {
@@ -589,13 +768,23 @@ func seedLifecycleRecoveryStore(t *testing.T, ctx context.Context, repo *tasksql
 }
 
 func lifecycleRecoveryEnvironment(seed lifecycleRecoverySeed) *models.TaskEnvironment {
+	status := seed.environmentStatus
+	if status == "" {
+		status = models.TaskEnvironmentStatusReady
+	}
+	frontend := &models.TaskEnvironmentRepo{ID: "environment-repository-frontend-" + seed.taskID, RepositoryID: seed.frontendRepositoryID, Position: 0, BranchSlug: "main", Status: "active"}
+	if !seed.frontendSlotEmpty {
+		frontend.WorktreeID = seed.frontendWorktreeID
+		frontend.WorktreePath = seed.frontendOriginalPath
+		frontend.WorktreeBranch = "feature/recovery"
+	}
 	backend := &models.TaskEnvironmentRepo{ID: "environment-repository-backend-" + seed.taskID, RepositoryID: seed.backendRepositoryID, Position: 1, BranchSlug: "main", Status: "active"}
 	if !seed.backendSlotEmpty {
 		backend.WorktreeID = seed.backendWorktreeID
 		backend.WorktreePath = seed.backendOriginalPath
 		backend.WorktreeBranch = "feature/recovery"
 	}
-	return &models.TaskEnvironment{ID: seed.environmentID, TaskID: seed.taskID, OwnershipGeneration: 1, ExecutorID: seed.executorID, ExecutorType: string(models.ExecutorTypeWorktree), Status: models.TaskEnvironmentStatusReady, WorkspacePath: seed.taskRoot, TaskDirName: "recovery", Repos: []*models.TaskEnvironmentRepo{{ID: "environment-repository-frontend-" + seed.taskID, RepositoryID: seed.frontendRepositoryID, Position: 0, BranchSlug: "main", WorktreeID: seed.frontendWorktreeID, WorktreePath: seed.frontendOriginalPath, WorktreeBranch: "feature/recovery", Status: "active"}, backend}}
+	return &models.TaskEnvironment{ID: seed.environmentID, TaskID: seed.taskID, OwnershipGeneration: 1, ExecutorID: seed.executorID, ExecutorType: string(models.ExecutorTypeWorktree), Status: status, MaterializationSessionID: seed.materializationSessionID, WorkspacePath: seed.taskRoot, TaskDirName: "recovery", Repos: []*models.TaskEnvironmentRepo{frontend, backend}}
 }
 
 func lifecycleRecoveryGitRepository(t *testing.T, name string) string {
