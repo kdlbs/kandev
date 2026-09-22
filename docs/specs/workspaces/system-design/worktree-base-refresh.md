@@ -37,6 +37,7 @@ change Git commands that an agent runs after launch.
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.11` | [Pull-request base reconciliation](#pull-request-base-reconciliation) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.12` | [Pull-request base reconciliation](#pull-request-base-reconciliation) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13` | [Missing-base fallback](#missing-base-fallback) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.14` | [Safe refresh diagnostics](#safe-refresh-diagnostics) |
 
 ## Components and responsibilities
 
@@ -210,6 +211,39 @@ Local fallback reports completion with a warning, not a launch error.
 
 Structured logs record repository identity, refresh route, failure class, and
 selected fallback ref. Logs exclude credential material and raw remote URLs.
+
+### Safe refresh diagnostics
+
+AC .14 extends the existing observability contract. `manager_git.go` captures
+combined command output, but failure paths retain only coarse reasons or an
+exit status. Inspect that output in memory and emit fixed diagnostic values.
+Do not append raw output to logs, returned errors, or progress events.
+
+Keep the existing policy `reason` separate from a diagnostic-only
+`diagnostic_code`. Add an allow-listed classifier in
+`internal/worktree/refresh_diagnostics.go`. It recognizes authentication,
+SSH public-key rejection, SSH host verification, DNS, connection failure,
+TLS verification, missing remote ref, non-fast-forward rejection, repository
+access failure, and lock contention. Unknown output maps to `unknown`.
+Context cancellation and execution timeout take precedence over text matches.
+Each code maps to a fixed English explanation. No explanation includes
+substrings from Git output. Repository access failure does not assert that
+credentials are invalid, and lock contention does not assert a stale lock.
+
+Emit one structured diagnostic per failed fetch or pull with `operation`,
+`repository_path`, `branch`, `reason`, `diagnostic_code`, `detail`, and an exit
+code when available. The local repository path identifies the checkout without
+reading its remote URL. Existing failure or fallback logs can carry these fields
+instead of adding a duplicate diagnostic. Cover both required and best-effort
+paths, including a failed configured fallback branch.
+
+Classification is observational. Do not feed new diagnostic categories into
+missing-base fallback eligibility or alter `syncFailureCause` identities.
+Preserve context errors and current progress/error payloads. Correct the
+`syncFailureCause` comment that implies raw output reaches internal logs.
+No new logging configuration, subprocess, retry, or persistence is required.
+
+Delivery: [Recovery diagnostic fixes](../../../plans/recovery-diagnostics/plan.md).
 
 ## Related decisions
 

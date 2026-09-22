@@ -149,6 +149,37 @@ They must assert the phone drawer, not a tooltip opened by a simulated tap.
 No live task is repaired by this package. After deployment, normal discovery
 can link eligible PRs. Waiting for quota reset cannot repair invalid code.
 
+## Post-push diagnostic outcomes
+
+Discovery ACs .3 and .5 also cover `event_handlers_github.go` in the
+orchestrator. `detectPushAndAssociatePRWithIdentity` currently merges provider
+errors and empty results. `searchPRForExistingWatch` silently discards lookup
+errors. Both paths must distinguish `found`, `empty`, `failed`, and `canceled`.
+
+For a failed lookup, log a warning with the operation, workspace, task, session,
+resolved repository ID, owner, repository name, branch, and safe category.
+Reuse `classifyPRDiscoveryError` through a narrow exported classifier in the
+GitHub package. Do not log `err.Error()`, response bodies, or request URLs.
+Retain `invalid_query`, `rate_limited`, and `unavailable` as categories.
+Do not invent an authentication diagnosis from an unclassified error.
+
+Each successful empty lookup is debug-level evidence. At retry exhaustion,
+report attempt, error, and empty counts plus the last outcome at debug level.
+Failed attempts already have warnings. An empty result after an error records
+an empty final outcome. A found result follows the existing association path.
+Cancellation returns without a failure or exhausted-retry warning.
+
+Keep the production retry schedule, service admission, watch identity,
+association ownership, and health recovery rules unchanged. Factor a private
+retry runner with an injected wait function if needed for deterministic tests.
+Production waits remain context-aware with delays of zero, 30, and 60 seconds.
+Tests exercise the runner through the orchestration entry point without sleeps.
+No public status fields or frontend changes are necessary.
+
+Delivery: [Recovery diagnostic fixes](../../../plans/recovery-diagnostics/plan.md).
+The completed discovery-health and watch-reconciliation packages retain their
+historical scope and results.
+
 ## References
 
 - [GitHub Repository schema](https://docs.github.com/en/graphql/reference/objects#repository)

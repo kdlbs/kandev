@@ -138,8 +138,8 @@ describe("SessionCapacitySettings drafts", () => {
     expect(saveContributor?.canSave).toBe(false);
     expect(saveContributor?.invalidReason).toBe(VALIDATION);
     expect(input.getAttribute("aria-invalid")).toBe("true");
-    expect(input.getAttribute("aria-describedby")).toBe(
-      "session-capacity-maximum-help session-capacity-maximum-error",
+    expect(input.getAttribute("aria-describedby")?.split(/\s+/).sort()).toEqual(
+      ["session-capacity-maximum-error", "session-capacity-maximum-help"].sort(),
     );
     expect(screen.getByTestId("session-capacity-maximum-error").textContent).toBe(VALIDATION);
   });

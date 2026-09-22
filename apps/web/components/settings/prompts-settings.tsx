@@ -9,6 +9,7 @@ import { Input } from "@kandev/ui/input";
 import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
 import { PromptRowActions } from "@/components/settings/prompt-row-actions";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import { useToast } from "@/components/toast-provider";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
@@ -508,11 +509,10 @@ export function PromptsSettings() {
           place.
         </Trans>
       </div>
-      <div className="space-y-6 mt-4">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm font-medium text-foreground">
-            {t("settings:promptsCustomHeading")}
-          </div>
+      <SettingsGroup
+        title={t("settings:promptsCustomHeading")}
+        contentClassName="space-y-6 divide-y-0"
+        action={
           <Button
             onClick={startCreate}
             disabled={isBusy || isEditing || showCreate}
@@ -521,8 +521,8 @@ export function PromptsSettings() {
           >
             {t("settings:promptAdd")}
           </Button>
-        </div>
-
+        }
+      >
         {showCreate && (
           <PromptCreateForm
             formState={formState}
@@ -551,7 +551,7 @@ export function PromptsSettings() {
             deleteTargetId={deleteTarget?.id ?? null}
           />
         </div>
-      </div>
+      </SettingsGroup>
     </SettingsPageTemplate>
   );
 }
