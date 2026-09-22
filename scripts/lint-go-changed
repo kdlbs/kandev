@@ -2,7 +2,8 @@
 # Pre-commit supplies repository-relative Go filenames. Lint their complete
 # packages for type information; CI owns the full-backend scan.
 set -euo pipefail
-unset GIT_DIR GIT_WORK_TREE
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE \
+	GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 

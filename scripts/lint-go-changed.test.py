@@ -151,6 +151,28 @@ class ChangedGoLintTest(unittest.TestCase):
         self.assertIn("base ref does not resolve locally", result.stdout)
         self.assertEqual(self.lint_calls(), [])
 
+    def test_ignores_inherited_repository_environment(self):
+        env = {
+            **self.env,
+            "GIT_DIR": str(self.repo / "foreign.git"),
+            "GIT_WORK_TREE": str(self.repo / "foreign-worktree"),
+            "GIT_COMMON_DIR": str(self.repo / "foreign-common"),
+            "GIT_INDEX_FILE": str(self.repo / "foreign-index"),
+            "GIT_OBJECT_DIRECTORY": str(self.repo / "foreign-objects"),
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(self.repo / "foreign-alternates"),
+        }
+
+        result = subprocess.run(
+            ["bash", "scripts/lint-go-changed", "apps/backend/internal/first/one.go"],
+            cwd=self.repo, env=env, text=True, capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.lint_calls(), [{
+            "cwd": str(self.repo / "apps/backend"),
+            "args": ["run", "./internal/first", f"--new-from-rev={self.base}", "--timeout=5m"],
+        }])
+
 
 if __name__ == "__main__":
     unittest.main()

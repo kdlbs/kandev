@@ -15,6 +15,9 @@ The platform system owns cross-cutting runtime services, configuration,
 observability, notifications, localization, lifecycle safety, and shared
 operational guarantees.
 
+Repository validation performance, including local commit checks and shared CI
+execution, belongs here. The CI system retains hosted workflow trust policy.
+
 Shared read-capacity protection and aggregate reporting availability belong here.
 Domain systems retain ownership of source records and workspace context identity.
 
