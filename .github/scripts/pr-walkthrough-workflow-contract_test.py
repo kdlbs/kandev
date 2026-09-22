@@ -392,6 +392,16 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(value, workflow_header)
         self.assertIn(
+            "github.event.pull_request.head.repo.full_name == github.repository && "
+            "(github.event.action == 'opened' || "
+            "github.event.action == 'reopened' || "
+            "github.event.action == 'ready_for_review' || "
+            "github.event.action == 'synchronize' || "
+            "(github.event.action == 'labeled' && "
+            "github.event.label.name == 'generate-pr-walkthrough'))",
+            workflow_header,
+        )
+        self.assertIn(
             "github.event.pull_request.head.repo.full_name != github.repository && "
             "( (github.event.action == 'labeled' && "
             "github.event.label.name == 'safe-to-review') || "
