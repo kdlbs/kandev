@@ -93,6 +93,7 @@ func TestStartCreatedSession_PersistsExactBindingOnWorkflowRedirect(t *testing.T
 	}
 
 	var launchedSessionID string
+	var launchReturned bool
 	agentMgr := &mockAgentManager{
 		resolveProfileInfo: &executor.AgentProfileInfo{
 			ProfileID:   "profile-exact",
@@ -103,6 +104,7 @@ func TestStartCreatedSession_PersistsExactBindingOnWorkflowRedirect(t *testing.T
 		},
 		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 			launchedSessionID = req.SessionID
+			launchReturned = true
 			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-redirected"}, nil
 		},
 	}
@@ -136,6 +138,9 @@ func TestStartCreatedSession_PersistsExactBindingOnWorkflowRedirect(t *testing.T
 	}
 	if receipt, err := repo.GetExactProfileLaunchReceipt(ctx, "task1", "session-redirected"); err != nil || receipt != nil {
 		t.Fatalf("receipt before boot = (%#v, %v), want none", receipt, err)
+	}
+	if !launchReturned {
+		t.Fatal("launch did not reach asynchronous boundary")
 	}
 	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "task1", SessionID: "session-redirected", AgentExecutionID: "exec-redirected"})
 	receipt, err := repo.GetExactProfileLaunchReceipt(ctx, "task1", "session-redirected")
@@ -205,6 +210,9 @@ func TestResumeTaskSession_RecordsFailedClosedReceiptWhenPromptReadinessFails(t 
 			Model:       "gpt-exact",
 		},
 		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			if !req.ExactProfile || req.ExactProfileModel != "gpt-exact" || req.ExactProfileRevision != revision.UnixNano() {
+				t.Errorf("resume exact request = (%t, %q, %d), want (true, gpt-exact, %d)", req.ExactProfile, req.ExactProfileModel, req.ExactProfileRevision, revision.UnixNano())
+			}
 			go func(sessionID string) {
 				ticker := time.NewTicker(5 * time.Millisecond)
 				defer ticker.Stop()
