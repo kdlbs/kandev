@@ -69,7 +69,7 @@ Only finite, nonnegative numbers are eligible. Missing or invalid fields have no
 Explicit zero is a measurement. Do not convert absent values to zero for sorting or display.
 Status gates take precedence over stale numeric fields in unavailable or not-applicable responses.
 Keep existing detail text, source progress, ownership warnings, and action handlers.
-Expose the existing system-temporary partial status in its header beside the measured size.
+Expose the existing system-temporary partial status in its header beside the row title.
 
 ## Ordering and scale
 
@@ -97,7 +97,7 @@ It is not Total counted or disk capacity. Existing overlap rules in `storage-tot
 Keep the existing Accordion and full-row trigger, including its chevron and keyboard behavior.
 Use a flexible desktop header with label, rounded track, size, then chevron.
 Use existing theme tokens for the muted track and one consistent fill.
-Use amber status text or a badge for partial measurements, without encoding size thresholds.
+Use amber status text or a badge beside the row title for partial measurements, without encoding size thresholds.
 Keep existing action buttons inside expanded content.
 
 Render bars as decorative spans with `aria-hidden="true"`.

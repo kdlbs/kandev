@@ -103,7 +103,11 @@ describe("StorageOverviewCard relative bars", () => {
     expect(screen.getByTestId(WORKSPACES_BAR_FILL_TEST_ID).getAttribute("style")).toBe(
       "width: 100%;",
     );
-    expect(screen.getByTestId(SYSTEM_TEMPORARY_TRIGGER_TEST_ID).textContent).toContain("Partial");
+    const partialBadge = screen.getByTestId(`${SYSTEM_TEMPORARY_RESOURCE_TEST_ID}-partial`);
+    const systemTemporaryTitle = screen.getByTestId(`${SYSTEM_TEMPORARY_RESOURCE_TEST_ID}-title`);
+    const systemTemporaryValue = screen.getByTestId("storage-analysis-source-system_temporary");
+    expect(systemTemporaryTitle.contains(partialBadge)).toBe(true);
+    expect(systemTemporaryValue.contains(partialBadge)).toBe(false);
     expect(screen.getByTestId(SYSTEM_TEMPORARY_BAR_FILL_TEST_ID).getAttribute("style")).toBe(
       "width: 50%;",
     );

@@ -141,18 +141,27 @@ function ResourceRow({
         data-storage-focus-id="trigger"
       >
         <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 md:grid md:grid-cols-[minmax(0,1fr)_minmax(8rem,16rem)_auto] md:items-center md:gap-3">
-          <span className="min-w-0 flex-1 break-words text-sm">{resource.label}</span>
+          <span
+            className="flex min-w-0 flex-1 flex-wrap items-center gap-2 break-words text-sm"
+            data-testid={`storage-resource-${resource.id}-title`}
+          >
+            <span className="min-w-0 break-words">{resource.label}</span>
+            {resource.partial && (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-normal"
+                data-testid={`storage-resource-${resource.id}-partial`}
+              >
+                {t("system:storageSystemTemporaryPartial")}
+              </Badge>
+            )}
+          </span>
           <ResourceBar resource={resource} />
           <span
             className="flex shrink-0 items-center gap-2 text-xs font-normal text-muted-foreground"
             data-testid={resource.source ? `storage-analysis-source-${resource.source}` : undefined}
           >
             {resource.value}
-            {resource.partial && (
-              <Badge variant="outline" className="text-[10px] font-normal">
-                {t("system:storageSystemTemporaryPartial")}
-              </Badge>
-            )}
           </span>
         </span>
       </AccordionTrigger>

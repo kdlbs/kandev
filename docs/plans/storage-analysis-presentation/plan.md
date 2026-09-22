@@ -94,8 +94,7 @@ Bars compare category sizes. Categories can overlap.
 
 Task workspaces          [####################]  68.71 GB  v
 -----------------------------------------------------------
-System temporary folders [###############.....]  51.08 GB  ^
-  Partial
+System temporary folders [Partial] [###############.....]  51.08 GB  ^
   Read-only. This footprint can overlap counted categories.
   /tmp: 51.08 GB | Partial | 1,015 entries skipped
   Scan timed out. Showing partial usage.
@@ -122,8 +121,8 @@ Categories can overlap.
 Task workspaces          68.71 GB  v
 [##############################]
 -----------------------------------
-System temporary folders          ^
-51.08 GB | Partial
+System temporary folders [Partial] ^
+51.08 GB
 [######################........]
   Read-only. This footprint can
   overlap counted categories.
