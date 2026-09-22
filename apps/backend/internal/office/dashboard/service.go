@@ -562,6 +562,20 @@ func (s *DashboardService) SetProjectBudgetEvaluator(e ProjectBudgetEvaluator) {
 	s.projectBudget = e
 }
 
+// LogActivityWithRun passes through to the wired activity logger. A no-op
+// when no logger is wired. Exposed so MCP handlers (which only hold a
+// *DashboardService reference, not the underlying office service) can log
+// activity rows attributed to a run.
+func (s *DashboardService) LogActivityWithRun(
+	ctx context.Context,
+	workspaceID, actorType, actorID, action, targetType, targetID, details, runID, sessionID string,
+) {
+	if s.activity == nil {
+		return
+	}
+	s.activity.LogActivityWithRun(ctx, workspaceID, actorType, actorID, action, targetType, targetID, details, runID, sessionID)
+}
+
 // LogTaskStateChange records a task state transition for Office tasks before
 // the task service publishes its state-change notification. This keeps the
 // activity-backed timeline durable before clients refetch the task detail.

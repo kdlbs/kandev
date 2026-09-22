@@ -511,6 +511,22 @@ type Run struct {
 	// RequestedTier is the tier the resolver consumed (override > workspace
 	// default) when the run was first dispatched.
 	RequestedTier *string `json:"requested_tier,omitempty" db:"requested_tier"`
+	// Causation chain identity (REQ-OFFICE-RUN-CAUSATION-001).
+	// ChainCausationID is the root run's own ID; empty means the legacy
+	// pre-capability marker, read by AC-OFFICE-RUN-CAUSATION-001.6 as a
+	// root at depth 0. Distinct from CausationID below
+	// (REQ-OFFICE-LOOP-LIVENESS-002), an unrelated wakeup-request
+	// correlation that reached for the same name independently.
+	ChainCausationID string        `json:"chain_causation_id" db:"chain_causation_id"`
+	ParentRunID      string        `json:"parent_run_id" db:"parent_run_id"`
+	CausationDepth   int           `json:"causation_depth" db:"causation_depth"`
+	PriorityClass    PriorityClass `json:"priority_class" db:"priority_class"`
+	HumanRooted      bool          `json:"human_rooted" db:"human_rooted"`
+	RoutineID        string        `json:"routine_id" db:"routine_id"`
+	ActorKind        ActorKind     `json:"actor_kind" db:"actor_kind"`
+	ActorID          string        `json:"actor_id" db:"actor_id"`
+	WorkspaceID      string        `json:"workspace_id" db:"workspace_id"`
+
 	// ResolvedExecutionProfileID/ProviderID/Model identify the candidate
 	// that actually launched; empty until a launch succeeds. Provider and
 	// model are audit snapshots derived from the concrete profile.

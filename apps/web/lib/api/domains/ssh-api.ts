@@ -6,6 +6,7 @@ import type {
   SSHAgentReadinessResponse,
   SSHProbeShellsResponse,
   SSHIdentitiesResponse,
+  SSHReachabilityRecord,
 } from "@/lib/types/http-ssh";
 
 export async function testSSHConnection(
@@ -83,4 +84,37 @@ export async function listSSHIdentities(
   options?: ApiRequestOptions,
 ): Promise<SSHIdentitiesResponse> {
   return fetchJson<SSHIdentitiesResponse>("/api/v1/ssh/identities", options);
+}
+
+export async function getSSHReachability(
+  options?: ApiRequestOptions,
+): Promise<SSHReachabilityRecord[]> {
+  return fetchJson<SSHReachabilityRecord[]>("/api/v1/ssh/reachability", options);
+}
+
+export async function getSSHExecutorReachability(
+  executorId: string,
+  options?: ApiRequestOptions,
+): Promise<SSHReachabilityRecord> {
+  return fetchJson<SSHReachabilityRecord>(
+    `/api/v1/ssh/executors/${encodeURIComponent(executorId)}/reachability`,
+    options,
+  );
+}
+
+export async function probeSSHExecutorReachability(
+  executorId: string,
+  options?: ApiRequestOptions,
+): Promise<SSHReachabilityRecord> {
+  return fetchJson<SSHReachabilityRecord>(
+    `/api/v1/ssh/executors/${encodeURIComponent(executorId)}/reachability/probe`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        headers: { ...(options?.init?.headers ?? {}), "Content-Type": "application/json" },
+      },
+    },
+  );
 }

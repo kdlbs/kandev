@@ -68,6 +68,12 @@ type PlanService struct {
 	// workflowStepGetter resolves the task's current workflow step for the
 	// write-time stamp. Nil is safe: stamped fields stay empty.
 	workflowStepGetter PlanWorkflowStepGetter
+	previewCleaner     interface {
+		DeleteDescriptors(context.Context, []*models.TaskMessageAttachment) error
+	}
+	previewScreenshotValidator interface {
+		ValidatePreviewScreenshot(context.Context, string, string, string, string) error
+	}
 }
 
 // NewPlanService creates a new task plan service. The concrete repository
@@ -99,6 +105,22 @@ func (s *PlanService) SetTaskAuthorizer(fn func(ctx context.Context, taskID stri
 // keeps every existing caller working with the stamp fields left empty.
 func (s *PlanService) SetWorkflowStepGetter(getter PlanWorkflowStepGetter) {
 	s.workflowStepGetter = getter
+}
+
+// SetPreviewAttachmentCleaner removes screenshot bytes after their task-owned
+// feedback claim has been durably released.
+func (s *PlanService) SetPreviewAttachmentCleaner(cleaner interface {
+	DeleteDescriptors(context.Context, []*models.TaskMessageAttachment) error
+}) {
+	s.previewCleaner = cleaner
+}
+
+// SetPreviewScreenshotValidator wires the private-byte validation that runs
+// before a staged screenshot is claimed by task feedback.
+func (s *PlanService) SetPreviewScreenshotValidator(validator interface {
+	ValidatePreviewScreenshot(context.Context, string, string, string, string) error
+}) {
+	s.previewScreenshotValidator = validator
 }
 
 func (s *PlanService) authorize(ctx context.Context, taskID string) error {

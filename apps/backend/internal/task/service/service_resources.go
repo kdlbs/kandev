@@ -1835,7 +1835,17 @@ func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest
 		return nil, err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorCreated, executor)
+	s.notifyExecutorSaved(ctx, nil, executor)
 	return executor, nil
+}
+
+// notifyExecutorSaved forwards a committed executor create/update to the
+// wired ExecutorSaveObserver, if any. before is nil on create.
+func (s *Service) notifyExecutorSaved(ctx context.Context, before, after *models.Executor) {
+	if s.executorSaveObserver == nil {
+		return
+	}
+	s.executorSaveObserver.OnExecutorSaved(ctx, before, after)
 }
 
 func (s *Service) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
@@ -1872,12 +1882,14 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	if err := s.guardRetainedRemoteDockerConnection(ctx, executor, req); err != nil {
 		return nil, err
 	}
+	before := *executor
 	applyExecutorUpdates(executor, req)
 	executor.UpdatedAt = time.Now().UTC()
 	if err := s.executors.UpdateExecutor(ctx, executor); err != nil {
 		return nil, err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorUpdated, executor)
+	s.notifyExecutorSaved(ctx, &before, executor)
 	return executor, nil
 }
 

@@ -313,13 +313,26 @@ type WorkspaceCreator interface {
 // interface to avoid a direct import of the task package.
 type TaskCreator interface {
 	CreateOfficeTask(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (taskID string, err error)
-	CreateOfficeTaskAsAgent(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (taskID string, err error)
+	// CreateOfficeTaskAsAgent's metadata carries the task-boundary causation
+	// carrier set (AC-OFFICE-RUN-CAUSATION-001.18) when the caller resolved
+	// one; nil when there is none to persist (e.g. no causing run).
+	CreateOfficeTaskAsAgent(
+		ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string,
+		metadata map[string]interface{},
+	) (taskID string, err error)
 }
 
 // SubtaskCreator creates child tasks in the kanban system.
 // Implemented by the production task adapter; optional in older tests.
+//
+// metadata carries the task-boundary causation carrier
+// (AC-OFFICE-RUN-CAUSATION-001.5/.18) when the caller resolved one; nil
+// for a caller with nothing to carry.
 type SubtaskCreator interface {
-	CreateOfficeSubtask(ctx context.Context, parentTaskID, assigneeAgentID, title, description string) (taskID string, err error)
+	CreateOfficeSubtask(
+		ctx context.Context, parentTaskID, assigneeAgentID, title, description string,
+		metadata map[string]interface{},
+	) (taskID string, err error)
 }
 
 // TaskPRLink is the minimal projection of a github_task_prs row needed to
@@ -635,8 +648,19 @@ const defaultWorkspaceName = "default"
 // CreateOfficeTaskAsAgent checks can_create_tasks for the given caller before
 // delegating to the TaskCreator. Passing callerAgentID="" skips the check
 // (for internal/admin callers).
+//
+// causingRunID names the run this task creation happened inside (empty
+// when there is none, e.g. an internal/admin caller). When set, it is
+// resolved into the task-boundary causation carrier set
+// (AC-OFFICE-RUN-CAUSATION-001.5/.18) and persisted on the new task's
+// metadata. An unreadable causingRunID is not a task-creation failure —
+// the carrier is dropped and the task is still created; a run later
+// queued because of it simply finds no carrier and roots as usual
+// (AC-OFFICE-RUN-CAUSATION-001.10's per-value fallback already covers an
+// absent carrier).
 func (s *Service) CreateOfficeTaskAsAgent(
 	ctx context.Context, callerAgentID, workspaceID, projectID, assigneeAgentID, title, description string,
+	causingRunID string,
 ) (string, error) {
 	if err := s.requireTaskCreatePermission(ctx, callerAgentID); err != nil {
 		return "", err
@@ -644,13 +668,26 @@ func (s *Service) CreateOfficeTaskAsAgent(
 	if s.taskCreator == nil {
 		return "", fmt.Errorf("task creator not configured")
 	}
-	return s.taskCreator.CreateOfficeTaskAsAgent(ctx, workspaceID, projectID, assigneeAgentID, title, description)
+	var metadata map[string]interface{}
+	if causingRunID != "" {
+		if run, err := s.repo.GetRun(ctx, causingRunID); err == nil {
+			metadata = carrierMetadataFromRunForAgent(run, callerAgentID)
+		}
+	}
+	return s.taskCreator.CreateOfficeTaskAsAgent(ctx, workspaceID, projectID, assigneeAgentID, title, description, metadata)
 }
 
 // CreateOfficeSubtaskAsAgent checks can_create_tasks for the caller before
 // creating a child task under parentTaskID.
+//
+// causingRunID names the run this subtask creation happened inside (empty
+// when there is none). Resolved into the task-boundary causation carrier
+// set exactly like CreateOfficeTaskAsAgent's root-task path
+// (AC-OFFICE-RUN-CAUSATION-001.5/.18): an agent creating a subtask through
+// a runtime action is an Office trigger the same as creating a root task.
 func (s *Service) CreateOfficeSubtaskAsAgent(
 	ctx context.Context, callerAgentID, parentTaskID, assigneeAgentID, title, description string,
+	causingRunID string,
 ) (string, error) {
 	if err := s.requireTaskCreatePermission(ctx, callerAgentID); err != nil {
 		return "", err
@@ -662,7 +699,13 @@ func (s *Service) CreateOfficeSubtaskAsAgent(
 	if !ok {
 		return "", fmt.Errorf("subtask creator not configured")
 	}
-	return creator.CreateOfficeSubtask(ctx, parentTaskID, assigneeAgentID, title, description)
+	var metadata map[string]interface{}
+	if causingRunID != "" {
+		if run, err := s.repo.GetRun(ctx, causingRunID); err == nil {
+			metadata = carrierMetadataFromRunForAgent(run, callerAgentID)
+		}
+	}
+	return creator.CreateOfficeSubtask(ctx, parentTaskID, assigneeAgentID, title, description, metadata)
 }
 
 // GetTaskWorkspaceID returns the workspace that owns a task for runtime scope validation.
