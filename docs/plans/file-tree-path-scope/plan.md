@@ -151,8 +151,10 @@ the Files-tree boundaries and adds the backend defense in depth.
   refresh need their own guards.
 - Backend validation only in the WebSocket handler leaves direct agentctl HTTP callers exposed.
   Validate again at `WorkspaceTracker.GetFileTree`.
-- Windows drive paths need case-insensitive root containment, while POSIX paths remain
-  case-sensitive.
+- Windows drive, UNC, and Windows file URI paths need case-insensitive root containment, while POSIX
+  paths remain case-sensitive.
+- URI detection must distinguish absolute URI forms from repository-relative names containing
+  literal colons, including `config:dev`.
 
 ## Package handoff
 
@@ -166,7 +168,15 @@ Implemented both work orders. Tool-originated workspace aliases now become canon
 editor identities before cursor state is written. Reveal, restore, refresh, the WebSocket handler,
 and agentctl all reject invalid tree identities before issuing or executing a tree request.
 
+PR review aligned UNC and Windows file URI containment with existing LSP case semantics, preserved
+literal colons in canonical relative tree paths, shared the E2E workspace polling helper, and made
+the agentctl regression assert the exported validation sentinel.
+
 Validation completed with 90 focused frontend tests, frontend typecheck and changed-file lint,
 focused backend tree and handler tests, backend lint, and one desktop plus one phone Playwright
 scenario. The broad process package also exposed two unchanged process-runner fixture timing tests
 that fail on this host; the affected `TestGetFileTree` tests pass independently.
+
+Post-review verification passed the six-file focused frontend suite with 78 tests, typecheck,
+changed-file ESLint, the workspace-path and handler Go tests, backend lint, all specification
+validators, and the focused desktop and phone Playwright scenarios.

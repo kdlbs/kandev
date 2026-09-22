@@ -61,11 +61,12 @@ The frontend path helper returns one of these outcomes:
 | `/opt/reference.md`         | `/workspace`   | unchanged absolute path | no            |
 | `../sibling/app.ts`         | `/workspace`   | unchanged invalid path  | no            |
 
-Containment uses a complete path segment, normalizes `\` to `/`, and compares Windows drive paths
-case-insensitively. A sibling whose prefix happens to share the workspace root string is not
+Containment uses a complete path segment, normalizes `\` to `/`, and compares Windows drive, UNC,
+drive-file-URI, and hosted-file-URI paths case-insensitively. POSIX paths and hostless non-drive file
+URIs remain case-sensitive. A sibling whose prefix happens to share the workspace root string is not
 contained. The empty string is valid only as the tree root. A relative tree path rejects empty
-segments introduced by a leading slash, `.` and `..` segments, file URI syntax, and Windows drive
-roots.
+segments introduced by a leading slash, `.` and `..` segments, absolute URI forms, and Windows
+drive roots. Literal colons in otherwise canonical relative segments remain valid.
 
 The helper does not rewrite a legitimate external absolute file into a task-relative lookalike.
 That path continues to the read-only content endpoint unchanged and remains ineligible for the tree.
@@ -162,8 +163,9 @@ desktop and phone openers diverge.
 
 ## Verification
 
-- Pure helper tests cover POSIX paths, Windows drive paths, segment-boundary prefix collisions,
-  separator normalization, external absolutes, file URIs, and traversal.
+- Pure helper tests cover POSIX paths, Windows drive and UNC paths, segment-boundary prefix
+  collisions, separator normalization, external absolutes, Windows and POSIX file URI casing,
+  literal colons, and traversal.
 - `useOpenFileAtLine` tests first reproduce the defect by expecting `/workspace/src/app.ts` to open
   and scroll as `src/app.ts`; this assertion fails before the production change. They also prove an
   external absolute path remains unchanged.

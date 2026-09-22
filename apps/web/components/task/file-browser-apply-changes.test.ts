@@ -171,6 +171,20 @@ it("skips invalid expanded paths during a generic refresh", async () => {
   ]);
 });
 
+it("refreshes an expanded path containing a literal colon", async () => {
+  mockEmptyTree();
+  applyFileChanges({
+    client: client(),
+    sessionId: SESSION_ID,
+    expandedPaths: new Set(["config:dev"]),
+    changes: [{ path: "", operation: REFRESH_OP }],
+    setTree: vi.fn(),
+    setLoadState: vi.fn(),
+  });
+  await new Promise<void>((r) => setTimeout(r, 0));
+  expect(requestFileTreeMock.mock.calls.map((c) => c[2]).sort()).toEqual(["", "config:dev"]);
+});
+
 it("ignores a specific change with an invalid path", async () => {
   mockEmptyTree();
   applyFileChanges({

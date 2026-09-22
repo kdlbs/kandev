@@ -22,7 +22,8 @@ boundary for tree reads. Its separate read-only absolute-file content contract r
 ## Terminology
 
 - **Workspace file path:** A normalized path relative to the active task workspace root, using `/`
-  separators and containing no parent traversal.
+  separators and containing no parent traversal. Literal colons remain valid path characters unless
+  the value has an absolute URI or Windows drive form.
 - **Workspace absolute alias:** An absolute path contained beneath the active task workspace root
   on a complete path-segment boundary.
 - **External absolute path:** An absolute path outside the active task workspace. It can be opened
@@ -52,8 +53,9 @@ invalid directory requests.
   available.
 - **AC-UI-FILE-TREE-PATH-SCOPE-001.3:** Every tree request derived from active-file reveal,
   persisted expansion, or a workspace refresh shall use either the empty root path or a normalized
-  workspace file path. Absolute paths, URI-shaped paths, and paths containing parent traversal shall
-  not cross the frontend tree-request boundary.
+  workspace file path. Absolute filesystem paths, absolute URI forms, Windows drive prefixes, and
+  paths containing parent traversal shall not cross the frontend tree-request boundary. A literal
+  colon in an otherwise canonical relative path shall remain valid.
 - **AC-UI-FILE-TREE-PATH-SCOPE-001.4:** When stored expansion state contains an invalid tree path,
   the Files tree shall discard that path and its derived ancestors before hydration or refresh,
   while retaining valid expanded paths for the same task environment.
@@ -75,6 +77,8 @@ invalid directory requests.
 - **GIVEN** stored expansion entries `src`, `src/components`, and `/home/user/project`, **WHEN** the
   Files tree restores, **THEN** it restores the two valid entries and removes the absolute entry
   without requesting it.
+- **GIVEN** the relative directory `config:dev`, **WHEN** the user expands or refreshes it, **THEN**
+  the Files tree requests `config:dev` without treating the literal colon as a URI scheme.
 - **GIVEN** a direct `workspace.tree.get` request with `/home/user/project`, **WHEN** the backend
   validates it, **THEN** it returns a validation response without constructing
   `<workspace-root>/home/user/project`, calling `stat`, or emitting an ERROR log.

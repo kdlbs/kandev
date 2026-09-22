@@ -22,7 +22,7 @@ func ValidateTreePath(requested string) error {
 		pathpkg.IsAbs(filepath.ToSlash(requested)) ||
 		filepath.VolumeName(requested) != "" ||
 		hasWindowsDrivePrefix(requested) ||
-		hasURIScheme(requested) {
+		hasAbsoluteURIForm(requested) {
 		return ErrTreePathNotRelative
 	}
 	cleaned := pathpkg.Clean(requested)
@@ -32,7 +32,7 @@ func ValidateTreePath(requested string) error {
 	return nil
 }
 
-func hasURIScheme(path string) bool {
+func hasAbsoluteURIForm(path string) bool {
 	colon := strings.IndexByte(path, ':')
 	if colon <= 0 || !isASCIILetter(path[0]) {
 		return false
@@ -43,7 +43,9 @@ func hasURIScheme(path string) bool {
 			return false
 		}
 	}
-	return true
+	remainder := path[colon+1:]
+	return strings.HasPrefix(remainder, "//") ||
+		strings.EqualFold(path[:colon], "file") && strings.HasPrefix(remainder, "/")
 }
 
 func hasWindowsDrivePrefix(path string) bool {

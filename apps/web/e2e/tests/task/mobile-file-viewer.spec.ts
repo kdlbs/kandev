@@ -12,6 +12,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 import { selectMarkdownPreviewText } from "../../helpers/markdown-preview";
+import { waitForWorkspacePath } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 function createLongFileContent(lines = 500): string {
@@ -19,25 +20,6 @@ function createLongFileContent(lines = 500): string {
     { length: lines },
     (_, index) => `export const line_${index} = "line ${index}";`,
   ).join("\n");
-}
-
-async function waitForWorkspacePath(
-  apiClient: ApiClient,
-  taskId: string,
-  sessionId: string,
-): Promise<string> {
-  await expect
-    .poll(async () => {
-      const { sessions } = await apiClient.listTaskSessions(taskId);
-      const session = sessions.find((candidate) => candidate.id === sessionId);
-      return session?.workspace_path ?? session?.worktree_path ?? "";
-    })
-    .toMatch(/\S/);
-  const { sessions } = await apiClient.listTaskSessions(taskId);
-  const session = sessions.find((candidate) => candidate.id === sessionId);
-  const workspacePath = session?.workspace_path ?? session?.worktree_path;
-  if (!workspacePath) throw new Error("task workspace path is unavailable");
-  return workspacePath;
 }
 
 async function setupMobileFileViewerTest({

@@ -26,7 +26,8 @@ enforce the same tree contract before backend execution lookup and filesystem ac
 
 ## In scope
 
-- Return early from active-file reveal for absolute, URI-shaped, or traversing paths.
+- Return early from active-file reveal for absolute, absolute-URI, or traversing paths while
+  preserving literal colons in canonical relative names.
 - Sanitize restored expansion entries before deriving ancestors and retain valid siblings.
 - Filter refresh fan-out and specific change paths before calling `requestFileTree`.
 - Reject invalid tree paths in the WebSocket handler as validation failures without acquiring an
@@ -154,12 +155,18 @@ generic refresh fan-out, and specific file-change refreshes. A shared Go validat
 same invalid identities before WebSocket execution lookup and before agentctl joins or stats a
 filesystem path. Validation failures produce no operational ERROR log.
 
+PR review narrowed URI detection to absolute URI forms so repository-relative names such as
+`config:dev` remain valid in both frontend and backend validation. The agentctl regression now
+asserts the exported validation sentinel with `errors.Is`.
+
 Validation passed:
 
 - The combined focused frontend suite passed 90 tests across eight files.
 - `go test ./internal/common/workspacepath -count=1` passed.
 - Focused `TestGetFileTree` and `TestWorkspaceFileHandlers.*Tree` runs passed.
 - The complete handler package passed, and `make -C apps/backend lint` reported zero issues.
+- Post-review coverage passed a real frontend refresh and agentctl tree read for `config:dev`, plus
+  the focused Go packages and backend lint.
 - The full process package reached two unchanged runner-fixture timing failures on this host:
   `TestProcessRunnerCapturesOutput` and `TestProcessRunnerStopLogsSignalAttempts`. The branch has no
   changes to those tests or their production code; both fail identically when run alone.

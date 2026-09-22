@@ -3,7 +3,7 @@ package workspacepath
 import "testing"
 
 func TestValidateTreePath(t *testing.T) {
-	for _, path := range []string{"", "src", "src/components", ".codex/agents"} {
+	for _, path := range []string{"", "src", "src/components", ".codex/agents", "config:dev", "dir/.env:"} {
 		t.Run("valid_"+path, func(t *testing.T) {
 			if err := ValidateTreePath(path); err != nil {
 				t.Fatalf("ValidateTreePath(%q) = %v, want nil", path, err)

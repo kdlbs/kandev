@@ -25,8 +25,8 @@ state is written, while leaving external absolute content reads unchanged.
 ## In scope
 
 - Add the shared frontend workspace-path classifier and normalizer.
-- Handle POSIX and Windows roots, separator normalization, drive-letter case, and complete-segment
-  containment.
+- Handle POSIX and Windows roots, separator normalization, drive, UNC, and Windows file URI casing,
+  and complete-segment containment.
 - Normalize read and edit tool opens inside `useOpenFileAtLine` before every editor and cursor call.
 - Use the same containment decision for the edit-card open affordance instead of raw string prefix
   matching.
@@ -130,6 +130,10 @@ Implemented the shared path classifier and normalized workspace-contained read a
 editor, pending-cursor, and scroll state is written. The edit-card containment check and LSP alias
 conversion now use the same segment-aware helper. External absolute paths remain unchanged.
 
+PR review extended the Windows comparison rule to UNC paths, drive file URIs, and hosted file URIs,
+matching the existing LSP identity semantics. The duplicated desktop and phone workspace polling
+helper now lives in the shared E2E session helper.
+
 Validation passed:
 
 - Four focused unit files passed with 56 tests.
@@ -137,3 +141,5 @@ Validation passed:
 - The Chromium desktop regression passed with one test and observed only relative tree requests.
 - The Pixel 5 phone regression passed with one test and reached the requested line in the existing
   native viewer.
+- Post-review verification passed the six-file focused frontend suite with 78 tests, frontend
+  typecheck and changed-file ESLint, and both focused Playwright scenarios.

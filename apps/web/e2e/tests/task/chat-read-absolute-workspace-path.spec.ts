@@ -1,8 +1,8 @@
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
+import { waitForWorkspacePath } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 function observeFileTreeRequestPaths(page: Page): string[] {
@@ -25,25 +25,6 @@ function observeFileTreeRequestPaths(page: Page): string[] {
     });
   });
   return paths;
-}
-
-async function waitForWorkspacePath(
-  apiClient: ApiClient,
-  taskId: string,
-  sessionId: string,
-): Promise<string> {
-  await expect
-    .poll(async () => {
-      const { sessions } = await apiClient.listTaskSessions(taskId);
-      const session = sessions.find((candidate) => candidate.id === sessionId);
-      return session?.workspace_path ?? session?.worktree_path ?? "";
-    })
-    .toMatch(/\S/);
-  const { sessions } = await apiClient.listTaskSessions(taskId);
-  const session = sessions.find((candidate) => candidate.id === sessionId);
-  const workspacePath = session?.workspace_path ?? session?.worktree_path;
-  if (!workspacePath) throw new Error("task workspace path is unavailable");
-  return workspacePath;
 }
 
 test.describe("Absolute workspace read links", () => {

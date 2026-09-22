@@ -21,6 +21,20 @@ describe("workspaceRelativeFilePath", () => {
     ],
     ["Windows drive root", String.raw`C:\src\app.ts`, "c:\\", RELATIVE_WORKSPACE_FILE],
     ["file URI", "file:///workspace/src/app.ts", "file:///workspace", RELATIVE_WORKSPACE_FILE],
+    ["file URI root", "file:///src/app.ts", "file:///", RELATIVE_WORKSPACE_FILE],
+    ["Windows file URI", "file:///c:/workspace/SRC/App.ts", "file:///C:/Workspace", "SRC/App.ts"],
+    [
+      "UNC path",
+      String.raw`\\BUILD-SERVER\WORK\src\app.ts`,
+      String.raw`\\build-server\work`,
+      RELATIVE_WORKSPACE_FILE,
+    ],
+    [
+      "UNC file URI",
+      "file://BUILD-SERVER/WORK/src/app.ts",
+      "file://build-server/work",
+      RELATIVE_WORKSPACE_FILE,
+    ],
   ])("resolves a contained %s", (_label, filePath, workspaceRoot, expected) => {
     expect(workspaceRelativeFilePath(filePath, workspaceRoot)).toBe(expected);
   });
@@ -29,6 +43,7 @@ describe("workspaceRelativeFilePath", () => {
     ["prefix collision", "/workspace-old/src/app.ts", POSIX_WORKSPACE_ROOT],
     ["external absolute", "/opt/reference.md", POSIX_WORKSPACE_ROOT],
     ["absolute traversal", "/workspace/../outside/app.ts", POSIX_WORKSPACE_ROOT],
+    ["case-distinct POSIX file URI", "file:///Workspace/src/app.ts", "file:///workspace"],
     ["missing root", POSIX_WORKSPACE_FILE, null],
   ])("rejects a %s", (_label, filePath, workspaceRoot) => {
     expect(workspaceRelativeFilePath(filePath, workspaceRoot)).toBeNull();
@@ -50,7 +65,7 @@ describe("normalizeWorkspaceFilePath", () => {
 });
 
 describe("isWorkspaceTreePath", () => {
-  it.each(["", "src", "src/components", ".codex/agents"])(
+  it.each(["", "src", "src/components", ".codex/agents", "config:dev", "dir/.env:"])(
     "accepts the workspace-relative tree path %j",
     (path) => {
       expect(isWorkspaceTreePath(path)).toBe(true);
