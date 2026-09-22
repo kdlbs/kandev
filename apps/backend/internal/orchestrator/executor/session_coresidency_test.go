@@ -149,12 +149,11 @@ func TestObserveSessionCoresidency_SiblingReadFailureRecordsSkipNotAbsence(t *te
 }
 
 // TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart pins the
-// wiring half of AC-004.1: LaunchPreparedSession calls the observation
-// before the agent process starts, for a real launch that otherwise
-// succeeds, not just the extracted helper. Ordering is enforced by
-// production code structure, not a synchronized assertion here.
+// wiring half of AC-004.1: a real launch observes co-residency immediately
+// before its agent process starts, not just through the extracted helper.
 func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	repo := newMockRepository()
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateScheduling}
 	repo.sessions["session-123"] = &models.TaskSession{
 		ID:             "session-123",
 		TaskID:         "task-123",
@@ -170,12 +169,17 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewFromZap: %v", err)
 	}
+	processStarted := make(chan struct{}, 1)
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			return &LaunchAgentResponse{
 				AgentExecutionID: "exec-123",
 				ContainerID:      "container-123",
 			}, nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			processStarted <- struct{}{}
+			return nil
 		},
 	}
 	executor := NewExecutor(agentManager, repo, log, ExecutorConfig{ShellPrefs: &mockShellPrefs{}})
@@ -196,6 +200,11 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("LaunchPreparedSession failed: %v", err)
 	}
+	select {
+	case <-processStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the agent process to start")
+	}
 
 	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after != before+1 {
 		t.Fatalf("admitted[launch] counter = %d, want %d", after, before+1)
@@ -211,8 +220,8 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 }
 
 // TestResumeSession_ObservesWorkingSiblingOnAgentStart pins the wiring
-// half of AC-004.1 for the resume seam. Ordering is enforced by
-// production code structure, not a synchronized assertion here.
+// half of AC-004.1 for the resume seam and waits for the process-start
+// boundary so the asynchronous observation is deterministic.
 func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
@@ -226,9 +235,14 @@ func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFromZap: %v", err)
 	}
+	processStarted := make(chan struct{}, 1)
 	agentMgr := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			return &LaunchAgentResponse{AgentExecutionID: "exec-new"}, nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			processStarted <- struct{}{}
+			return nil
 		},
 	}
 	exec := NewExecutor(agentMgr, repo, log, ExecutorConfig{ShellPrefs: &mockShellPrefs{}})
@@ -237,6 +251,11 @@ func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 
 	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
 		t.Fatalf("ResumeSession: %v", err)
+	}
+	select {
+	case <-processStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the agent process to start")
 	}
 
 	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume); after != before+1 {
