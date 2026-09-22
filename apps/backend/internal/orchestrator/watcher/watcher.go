@@ -36,6 +36,7 @@ type AgentEventData struct {
 	SessionID          string                   `json:"session_id"`
 	TaskEnvironmentID  string                   `json:"task_environment_id,omitempty"`
 	AgentExecutionID   string                   `json:"agent_execution_id"`
+	TurnID             string                   `json:"turn_id,omitempty"`
 	AgentID            string                   `json:"agent_id,omitempty"`
 	AgentProfileID     string                   `json:"agent_profile_id"`
 	ExecutionProfileID string                   `json:"execution_profile_id,omitempty"`
@@ -97,18 +98,19 @@ type GitEventData = lifecycle.GitEventPayload
 
 // TaskMovedEventData contains data from task.moved events (manual step changes).
 type TaskMovedEventData struct {
-	TaskID           string     `json:"task_id"`
-	StepTransitionID int64      `json:"step_transition_id,omitempty"`
-	MoveID           string     `json:"move_id,omitempty"`
-	FromStepID       string     `json:"from_step_id"`
-	ToStepID         string     `json:"to_step_id"`
-	SessionID        string     `json:"session_id"`
-	WorkflowID       string     `json:"workflow_id"`
-	TaskDescription  string     `json:"task_description"`
-	WIPAdmitted      bool       `json:"wip_admitted"`
-	QueuedForStepID  string     `json:"queued_for_step_id,omitempty"`
-	QueuedAt         *time.Time `json:"queued_at,omitempty"`
-	QueuePromotion   bool       `json:"queue_promotion,omitempty"`
+	TaskID                   string     `json:"task_id"`
+	StepTransitionID         int64      `json:"step_transition_id,omitempty"`
+	MoveID                   string     `json:"move_id,omitempty"`
+	WorkflowStepOccurrenceID string     `json:"workflow_step_occurrence_id,omitempty"`
+	FromStepID               string     `json:"from_step_id"`
+	ToStepID                 string     `json:"to_step_id"`
+	SessionID                string     `json:"session_id"`
+	WorkflowID               string     `json:"workflow_id"`
+	TaskDescription          string     `json:"task_description"`
+	WIPAdmitted              bool       `json:"wip_admitted"`
+	QueuedForStepID          string     `json:"queued_for_step_id,omitempty"`
+	QueuedAt                 *time.Time `json:"queued_at,omitempty"`
+	QueuePromotion           bool       `json:"queue_promotion,omitempty"`
 }
 
 // ContextWindowData contains data from context window events

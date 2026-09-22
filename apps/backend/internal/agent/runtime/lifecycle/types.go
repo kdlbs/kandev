@@ -770,6 +770,20 @@ func (e *AgentExecution) setPromptTurnID(turnID string) {
 	e.promptLifecycleMu.Unlock()
 }
 
+// clearPassthroughInitialPromptForProcess releases the startup readiness gate
+// only for the process that received input. A replacement process may already
+// own a new gate, so an old write must not clear that replacement's marker.
+func (e *AgentExecution) clearPassthroughInitialPromptForProcess(processID string) {
+	if e == nil || processID == "" {
+		return
+	}
+	e.passthroughLifecycleMu.Lock()
+	if e.PassthroughProcessID == processID && e.passthroughInitialPromptProcessID == processID {
+		e.passthroughInitialPromptProcessID = ""
+	}
+	e.passthroughLifecycleMu.Unlock()
+}
+
 // currentAgentCtlClient returns the unpinned client snapshot. Callers must
 // already hold agentctlLifecycleMu or be implementing the scoped lease.
 func (ae *AgentExecution) currentAgentCtlClient() *agentctl.Client {

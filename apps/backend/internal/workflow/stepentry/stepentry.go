@@ -9,7 +9,7 @@
 // Only clear_decisions and queue_run_for_each_participant are marker-bearing
 // (carry a step-entry marker and an allocated position). queue_run and
 // run_code_review are ledger-owned but not marker-bearing — see
-// ownershipTable's doc comment for the full ten-kind classification.
+// ownershipTable's doc comment for the full eleven-kind classification.
 package stepentry
 
 import (
@@ -159,6 +159,7 @@ var ownershipTable = map[string]Ownership{
 	string(wfmodels.OnEnterResetAgentContext):          {Dispatcher: DispatcherMarker, MarkerBearing: false},
 	string(wfmodels.OnEnterSetSessionMode):             {Dispatcher: DispatcherMarker, MarkerBearing: false},
 	string(wfmodels.OnEnterConfigureSession):           {Dispatcher: DispatcherMarker, MarkerBearing: false},
+	string(wfmodels.OnEnterRunScript):                  {Dispatcher: DispatcherMarker, MarkerBearing: false},
 }
 
 // Owner returns the declared ownership for kind and false when kind is not
@@ -206,16 +207,21 @@ func KnownKinds(dispatcher Dispatcher) []string {
 }
 
 // BuildPendingAllocation inspects a step's on_enter declaration and returns
-// the PendingAllocation the write site should allocate, plus false when the
-// step declares no engine-owned on_enter actions (nothing to allocate).
+// the PendingAllocation the write site should allocate. Script-only entries
+// still need a durable entry identity for their occurrence key, even though
+// their action position is not dispatched by DispatchStepEntry.
 func BuildPendingAllocation(stepID string, actions []wfmodels.OnEnterAction) (PendingAllocation, bool) {
 	positions := make([]EnginePosition, 0, len(actions))
+	needsEntryIdentity := false
 	for i, action := range actions {
 		if IsMarkerBearing(action.Type) {
 			positions = append(positions, EnginePosition{Position: i, Kind: string(action.Type)})
 		}
+		if action.Type == wfmodels.OnEnterRunScript {
+			needsEntryIdentity = true
+		}
 	}
-	if len(positions) == 0 {
+	if len(positions) == 0 && !needsEntryIdentity {
 		return PendingAllocation{}, false
 	}
 	return PendingAllocation{

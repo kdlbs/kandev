@@ -234,6 +234,7 @@ func (h *TerminalHandler) writeToReadyPty(
 		processID = h.discoverProcessBySession(sessionID, processID, interactiveRunner)
 		return processID, directOutputSet
 	}
+	h.lifecycleMgr.MarkPassthroughInputDelivered(sessionID, processID)
 	// Detect Enter key (user submitted input) - notify lifecycle manager
 	h.detectInputSubmission(sessionID, data)
 	return processID, directOutputSet
@@ -273,6 +274,7 @@ func (h *TerminalHandler) writeToUnreadyPty(
 			zap.Error(err))
 		return processID, directOutputSet
 	}
+	h.lifecycleMgr.MarkPassthroughInputDelivered(sessionID, processID)
 	h.detectInputSubmission(sessionID, data)
 	return processID, directOutputSet
 }

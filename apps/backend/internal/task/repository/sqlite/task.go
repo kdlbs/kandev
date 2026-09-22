@@ -1824,6 +1824,7 @@ func (r *Repository) RemoveTaskMetadataKeyIfValue(
 	var query string
 	var args []interface{}
 	if dialect.IsPostgres(r.db.DriverName()) {
+		//nolint:dupword // repeated PostgreSQL path expressions are required by the atomic predicate.
 		query = `
 			UPDATE tasks
 			SET metadata = (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END #- ARRAY[?]::text[])::text, updated_at = ?
@@ -1899,6 +1900,82 @@ func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Cont
 			taskID,
 			jsonPath(models.MetaKeyManualMoveLifecycleCompleted),
 			completedAt,
+		}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
+// CompleteManualMoveLifecycleIfCurrent atomically completes one manual-move
+// lifecycle generation. A delayed lifecycle callback must not mark a newer
+// move complete after that move has replaced the pending descriptor.
+//
+//nolint:dupword // repeated PostgreSQL path expressions are required by the atomic predicate.
+func (r *Repository) CompleteManualMoveLifecycleIfCurrent(
+	ctx context.Context,
+	taskID, fromStepID, occurrenceID string,
+) (bool, error) {
+	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(fromStepID) == "" || strings.TrimSpace(occurrenceID) == "" {
+		return false, nil
+	}
+
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE tasks
+			SET metadata = jsonb_set(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END
+				  #- ARRAY[?]::text[],
+				ARRAY[?]::text[],
+				'true'::jsonb,
+				true
+			)::text, updated_at = ?
+			WHERE id = ?
+			  AND jsonb_extract_path_text(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+				?, 'from_step_id'
+			  ) = ?
+			  AND jsonb_extract_path_text(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+				?, 'occurrence_id'
+			  ) = ?
+		`
+		args = []interface{}{
+			models.MetaKeyManualMoveLifecyclePending,
+			models.MetaKeyManualMoveLifecycleCompleted,
+			r.nowUTC(),
+			taskID,
+			models.MetaKeyManualMoveLifecyclePending,
+			fromStepID,
+			models.MetaKeyManualMoveLifecyclePending,
+			occurrenceID,
+		}
+	} else {
+		pendingPath := jsonPath(models.MetaKeyManualMoveLifecyclePending)
+		query = `
+			UPDATE tasks
+			SET metadata = json_set(
+				json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?),
+				?, json('true')
+			), updated_at = ?
+			WHERE id = ?
+			  AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = ?
+			  AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = ?
+		`
+		args = []interface{}{
+			pendingPath,
+			jsonPath(models.MetaKeyManualMoveLifecycleCompleted),
+			r.nowUTC(),
+			taskID,
+			pendingPath + ".from_step_id",
+			fromStepID,
+			pendingPath + ".occurrence_id",
+			occurrenceID,
 		}
 	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)

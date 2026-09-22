@@ -180,8 +180,10 @@ func TestRefreshStaleWorkspaceWatches_HealsUnwatchedRow(t *testing.T) {
 	if watchedUpdate.PRNumber != 1299 {
 		t.Fatalf("second background update PR = %d, want watched PR 1299", watchedUpdate.PRNumber)
 	}
-	// Drain the goroutine before the in-memory DB closes. Both observable writes
-	// have completed, so Stop has no database operation left to cancel.
+	// The numbered-watch association publishes before the remainder of its sync
+	// completes. Drain the owning goroutine before Stop cancels its context, so
+	// the final SyncTaskPR write cannot lose the in-memory schema.
+	svc.bgWG.Wait()
 	svc.Stop()
 
 	got, err := store.GetTaskPRByRepoAndNumber(ctx, "task-1", "repo-1", 1293)

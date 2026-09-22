@@ -280,6 +280,7 @@ func TestAgentEventHandling(t *testing.T) {
 		event := bus.NewEvent(events.AgentCompleted, "test", map[string]interface{}{
 			"task_id":            "task-123",
 			"agent_execution_id": "agent-456",
+			"turn_id":            "turn-789",
 			"agent_type":         "test-agent",
 			"exit_code":          exitCode,
 		})
@@ -299,6 +300,9 @@ func TestAgentEventHandling(t *testing.T) {
 		}
 		if receivedData.AgentExecutionID != "agent-456" {
 			t.Errorf("expected agent_execution_id = 'agent-456', got %s", receivedData.AgentExecutionID)
+		}
+		if receivedData.TurnID != "turn-789" {
+			t.Errorf("expected turn_id = 'turn-789', got %s", receivedData.TurnID)
 		}
 	})
 }

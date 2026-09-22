@@ -102,6 +102,18 @@ func (m *Manager) MarkPassthroughRunning(sessionID string) error {
 	return nil
 }
 
+// MarkPassthroughInputDelivered releases the startup readiness gate after
+// input has reached the PTY. Context-reset replacements use that gate until
+// their first real prompt, so their startup idle signal cannot complete the
+// workflow turn that is about to be written.
+func (m *Manager) MarkPassthroughInputDelivered(sessionID, processID string) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return
+	}
+	execution.clearPassthroughInitialPromptForProcess(processID)
+}
+
 // WritePassthroughStdin writes data to the agent process stdin in passthrough mode.
 // Returns an error if the session is not in passthrough mode or if writing fails.
 // Note: For terminal handler input, use MarkPassthroughRunning directly since
@@ -123,9 +135,11 @@ func (m *Manager) WritePassthroughStdin(ctx context.Context, sessionID string, d
 	}
 
 	// Write to stdin
-	if err := interactiveRunner.WriteStdin(execution.PassthroughProcessID, data); err != nil {
+	processID := execution.PassthroughProcessID
+	if err := interactiveRunner.WriteStdin(processID, data); err != nil {
 		return err
 	}
+	execution.clearPassthroughInitialPromptForProcess(processID)
 
 	return nil
 }
@@ -996,7 +1010,9 @@ func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *Agen
 	execution.PassthroughProcessID = processInfo.ID
 	execution.PassthroughStartedAt = time.Now()
 	execution.passthroughLaunchUsedResume = false
-	execution.passthroughInitialPromptProcessID = ""
+	// The replacement starts without a prompt. Suppress its first idle signal
+	// until workflow or terminal input releases this startup boundary.
+	execution.passthroughInitialPromptProcessID = processInfo.ID
 
 	m.logger.Info("passthrough process restarted with fresh context",
 		zap.String("execution_id", execution.ID),

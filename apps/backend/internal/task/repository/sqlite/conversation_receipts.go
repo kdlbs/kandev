@@ -157,6 +157,7 @@ func (r *Repository) populateConversationMessageReceipt(
 func (r *Repository) readConversationMessageTx(ctx context.Context, tx *sqlx.Tx, messageID string) (*models.Message, error) {
 	message := &models.Message{}
 	var requestsInput int
+	var turnID sql.NullString
 	var messageType string
 	var metadataJSON string
 	err := tx.QueryRowxContext(ctx, tx.Rebind(`
@@ -165,7 +166,7 @@ func (r *Repository) readConversationMessageTx(ctx context.Context, tx *sqlx.Tx,
 		       CASE WHEN author_type = 'user' THEN prompt_seq ELSE 0 END
 		FROM task_session_messages WHERE id = ?
 	`), messageID).Scan(
-		&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID,
+		&message.ID, &message.TaskSessionID, &message.TaskID, &turnID,
 		&message.AuthorType, &message.AuthorID, &message.Content, &requestsInput,
 		&messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt,
 		&message.PromptIndex,
@@ -173,6 +174,7 @@ func (r *Repository) readConversationMessageTx(ctx context.Context, tx *sqlx.Tx,
 	if err != nil {
 		return nil, err
 	}
+	message.TurnID = turnID.String
 	message.RequestsInput = requestsInput == 1
 	message.Type = models.MessageType(messageType)
 	if metadataJSON != "" && metadataJSON != "{}" {

@@ -93,6 +93,7 @@ test.describe("mobile: cancelled turn completion", () => {
     await settings.goto(seedData.workspaceId);
     const reloadedCard = await settings.findWorkflowCard("Mobile Cancel Completion");
     const reloadedPanel = await settings.selectStep(reloadedCard, "Working", true);
+    await reloadedPanel.getByTestId("workflow-editor-tab-policies").tap();
     await expect(
       reloadedPanel.getByRole("checkbox", {
         name: "Run completion actions when a turn is cancelled",

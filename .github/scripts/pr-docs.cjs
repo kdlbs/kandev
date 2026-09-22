@@ -1674,30 +1674,47 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
           verifiedRequirementIds.add(requirementId);
         }
       }
+      const changedRequirementIds = new Set();
+      for (const requirementId of referencedRequirementIds) {
+        const definitions = requirementDefinitions(contents, requirementId, system);
+        if (definitions.some(definition => requirementPaths.has(definition.pathname))) {
+          changedRequirementIds.add(requirementId);
+        }
+      }
       const unresolvedRequirementIds = [];
       if (typeof client.searchCode === 'function') {
-        for (const requirementId of referencedRequirementIds) {
-          if (verifiedRequirementIds.has(requirementId)) {
-            continue;
+        try {
+          for (const requirementId of referencedRequirementIds) {
+            if (verifiedRequirementIds.has(requirementId)) {
+              continue;
+            }
+            const searchKey = JSON.stringify([requirementDirectory, requirementId]);
+            if (!requirementSearches.has(searchKey)) {
+              requirementSearches.set(
+                searchKey,
+                await client.searchCode(requirementId, requirementDirectory),
+              );
+            }
+            const matches = requirementSearches.get(searchKey);
+            if (matches.length === 0) {
+              unresolvedRequirementIds.push(requirementId);
+            }
+            for (const pathname of matches) {
+              requirementPaths.add(pathname);
+            }
           }
-          const searchKey = JSON.stringify([requirementDirectory, requirementId]);
-          if (!requirementSearches.has(searchKey)) {
-            requirementSearches.set(
-              searchKey,
-              await client.searchCode(requirementId, requirementDirectory),
-            );
-          }
-          const matches = requirementSearches.get(searchKey);
-          if (matches.length === 0) {
-            unresolvedRequirementIds.push(requirementId);
-          }
-          for (const pathname of matches) {
-            requirementPaths.add(pathname);
+        } catch (error) {
+          if (referencedRequirementIds.some(requirementId =>
+            !verifiedRequirementIds.has(requirementId) && !changedRequirementIds.has(requirementId)
+          )) {
+            throw error;
           }
         }
       } else {
         unresolvedRequirementIds.push(
-          ...referencedRequirementIds.filter(requirementId => !verifiedRequirementIds.has(requirementId)),
+          ...referencedRequirementIds.filter(requirementId =>
+            !verifiedRequirementIds.has(requirementId) && !changedRequirementIds.has(requirementId)
+          ),
         );
       }
       if (unresolvedRequirementIds.length > 0 && typeof client.listDirectory === 'function') {

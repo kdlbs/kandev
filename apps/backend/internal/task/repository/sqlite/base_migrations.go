@@ -367,6 +367,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// compatible with databases whose workflow repository has not replayed its
 	// own migrations yet, same as the columns above.
 	_ = r.migrate.Apply("workflow_steps.order_revision", `ALTER TABLE workflow_steps ADD COLUMN order_revision INTEGER NOT NULL DEFAULT 0`)
+	if err := r.migrate.Apply("workflow_script_runs.workflow_step_name", `ALTER TABLE workflow_script_runs ADD COLUMN workflow_step_name TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 
 	// Slack-style unread divider: the read cursor a session advances to the
 	// latest message id whenever it becomes the visible chat panel. The
@@ -437,6 +440,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// explicit maintenance pass to prune.
 	r.migrateMessagePayloadStorage()
 	if err := r.migrateGitSnapshotContentDigest(); err != nil {
+		return err
+	}
+	if err := r.migrateTaskSessionMessagesTurnNullable(); err != nil {
 		return err
 	}
 
