@@ -1618,6 +1618,38 @@ func TestPRWatchFallbackBudgetAndFairness(t *testing.T) {
 	}
 }
 
+func TestPRWatchFallbackDeduplicatesSharedTargetsAndFansOut(t *testing.T) {
+	poller, service, _, store := setupPollerTest(t)
+	client := &fallbackProbeClient{Client: NewMockClient()}
+	configureTestWorkspaceAuth(t, service, client, testWorkspaceID)
+	watches := seedSearchingFallbackWatches(t, store, 5)
+	watches[1].Branch = watches[0].Branch
+
+	poller.runPRWatchFallback(context.Background(), watches)
+	branches := client.fallbackBranches()
+	if len(branches) != 4 {
+		t.Fatalf("fallback calls = %d, want one per unique target", len(branches))
+	}
+	sharedCalls := 0
+	for _, branch := range branches {
+		if branch == watches[0].Branch {
+			sharedCalls++
+		}
+	}
+	if sharedCalls != 1 {
+		t.Fatalf("shared target calls = %d, want one", sharedCalls)
+	}
+	for _, watch := range watches {
+		updated, err := store.GetPRWatch(context.Background(), watch.ID)
+		if err != nil {
+			t.Fatalf("get watch %q: %v", watch.ID, err)
+		}
+		if updated == nil || updated.LastCheckedAt == nil {
+			t.Fatalf("watch %q did not receive the shared fallback result", watch.ID)
+		}
+	}
+}
+
 func containsFallbackBranch(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

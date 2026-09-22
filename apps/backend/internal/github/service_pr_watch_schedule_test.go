@@ -52,6 +52,50 @@ func TestPassiveWorkspaceRefreshHonorsAdaptiveSchedule(t *testing.T) {
 	svc.Stop()
 }
 
+func TestPassiveWorkspaceRefreshCooldownSkipsRepeatedWorkspaceReads(t *testing.T) {
+	_, svc, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	svc.SetClock(func() time.Time { return now })
+	seedTask(t, store, "task-passive-cooldown", false)
+	if _, err := svc.CreatePRWatchForWorkspace(
+		ctx, testWorkspaceID, "session-passive-cooldown", "task-passive-cooldown", "repo-1",
+		"owner", "repo", 0, "feature/passive-cooldown",
+	); err != nil {
+		t.Fatalf("create passive watch: %v", err)
+	}
+	gh.branchResponses = []string{
+		`{"data":{"b0":{"pullRequests":{"nodes":[]}}}}`,
+		`{"data":{"b0":{"pullRequests":{"nodes":[]}}}}`,
+	}
+
+	if _, err := svc.ListWorkspaceTaskPRs(ctx, testWorkspaceID); err != nil {
+		t.Fatalf("first passive workspace read: %v", err)
+	}
+	waitForPassiveWorkspaceRefresh(t, svc, testWorkspaceID)
+	if got := len(gh.branchQueries); got != 1 {
+		t.Fatalf("first passive refresh queries = %d, want 1", got)
+	}
+
+	if _, err := svc.ListWorkspaceTaskPRs(ctx, testWorkspaceID); err != nil {
+		t.Fatalf("second passive workspace read: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := len(gh.branchQueries); got != 1 {
+		t.Fatalf("cooldown allowed repeated passive refresh queries = %d, want 1", got)
+	}
+
+	svc.SetClock(func() time.Time { return now.Add(2 * searchFastPollInterval) })
+	if _, err := svc.ListWorkspaceTaskPRs(ctx, testWorkspaceID); err != nil {
+		t.Fatalf("due passive workspace read: %v", err)
+	}
+	waitForPassiveWorkspaceRefresh(t, svc, testWorkspaceID)
+	if got := len(gh.branchQueries); got != 2 {
+		t.Fatalf("passive refresh after cooldown queries = %d, want 2", got)
+	}
+	svc.Stop()
+}
+
 func TestExplicitPRRefreshBypassesAdaptiveIdleSchedule(t *testing.T) {
 	_, svc, gh, store := setupBatchedPollerTest(t)
 	ctx := context.Background()

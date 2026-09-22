@@ -340,6 +340,23 @@ func TestCleanupBatchStopsWhenWorkspaceCoreTrackerIsExhausted(t *testing.T) {
 	}
 }
 
+func TestCleanupBatchAdmissionReopensAfterRateLimitReset(t *testing.T) {
+	tracker := NewRateTracker(nil, nil)
+	tracker.Record(RateSnapshot{
+		Resource: ResourceCore, Remaining: 0, Limit: 5000,
+		ResetAt: time.Now().Add(time.Hour), UpdatedAt: time.Now().UTC(),
+	})
+	tracker.mu.Lock()
+	snapshot := tracker.snapshots[ResourceCore]
+	snapshot.ResetAt = time.Now().Add(-time.Second)
+	tracker.snapshots[ResourceCore] = snapshot
+	tracker.mu.Unlock()
+
+	if err := cleanupBatchAdmission(context.Background(), NewMockClient(), tracker, CleanupPolicyAlways); err != nil {
+		t.Fatalf("cleanup admission after reset = %v, want nil", err)
+	}
+}
+
 func TestCleanupBatchStopsForGHCLIWrappedGraphQLRateLimit(t *testing.T) {
 	_, svc, _, store := setupPollerTest(t)
 	client := &cleanupGHCLIClient{

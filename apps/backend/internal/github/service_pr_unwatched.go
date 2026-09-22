@@ -332,7 +332,7 @@ func (s *Service) collectStaleWorkspaceSyncTargets(
 ) ([]*PRWatch, []*TaskPR) {
 	var allWatches []*PRWatch
 	var pending []*TaskPR
-	now := time.Now().UTC()
+	now := s.now()
 	seenWatches := make(map[string]struct{})
 	appendWatch := func(watch *PRWatch) {
 		if watch == nil {

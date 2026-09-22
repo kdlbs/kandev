@@ -133,6 +133,41 @@ func TestPassiveFallbackOrdinaryErrorContinuesWithinBudget(t *testing.T) {
 	}
 }
 
+func TestPassiveFallbackDeduplicatesSharedTargetsAndFansOut(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	client := &fallbackProbeClient{Client: NewMockClient()}
+	configureTestWorkspaceAuth(t, svc, client, testWorkspaceID)
+	watches := seedSearchingFallbackWatches(t, store, 5)
+	watches[1].Branch = watches[0].Branch
+
+	if err := svc.refreshWatchesPerWatch(context.Background(), testWorkspaceID, watches); err != nil {
+		t.Fatalf("passive fallback error = %v", err)
+	}
+	branches := client.fallbackBranches()
+	if len(branches) != 4 {
+		t.Fatalf("passive fallback calls = %d, want one per unique target", len(branches))
+	}
+	sharedCalls := 0
+	for _, branch := range branches {
+		if branch == watches[0].Branch {
+			sharedCalls++
+		}
+	}
+	if sharedCalls != 1 {
+		t.Fatalf("passive shared target calls = %d, want one", sharedCalls)
+	}
+	for _, watch := range watches {
+		updated, err := store.GetPRWatch(ctx, watch.ID)
+		if err != nil {
+			t.Fatalf("get watch %q: %v", watch.ID, err)
+		}
+		if updated == nil || updated.LastCheckedAt == nil {
+			t.Fatalf("watch %q did not receive the shared fallback result", watch.ID)
+		}
+	}
+}
+
 func TestPassiveWorkspaceFallbackBoundsTargetsAndStopsAfterFirstRateLimit(t *testing.T) {
 	_, svc, _, store := setupBatchedPollerTest(t)
 	client := &passiveFallbackGraphQLClient{

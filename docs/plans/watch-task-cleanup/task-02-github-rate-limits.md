@@ -104,5 +104,8 @@ orphan sweep after a stop-worthy cleanup error. Added service and poller
 regressions for wrapped errors, tracker exhaustion, CLI-shaped rate limits,
 cancellation, partial counts, ordinary 403 continuation, and later retry
 recovery.
+Cleanup admission also reopens automatically once the tracked resource reset
+deadline has passed, even when no intervening provider call refreshed the
+tracker.
 
 Verification: `go test ./internal/github -count=1` passed.

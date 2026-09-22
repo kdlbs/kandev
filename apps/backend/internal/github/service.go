@@ -142,6 +142,7 @@ type Service struct {
 	taskIssueStore              TaskIssueStore
 	workspaceGroupOwnerResolver WorkspaceGroupOwnerResolver
 	taskActivityProvider        TaskActivityProvider
+	clockMu                     sync.RWMutex
 	clock                       func() time.Time
 	// cascadeTaskDeleter is the cascade-delete entry point used by the
 	// watch reset flow. It is distinct from taskDeleter (which only deletes
@@ -194,10 +195,16 @@ type Service struct {
 	// a batch outage cannot turn a single background tick into an unbounded CLI
 	// fan-out.
 	passiveFallbackMu            sync.Mutex
-	passiveFallbackWindow        int64
+	passiveFallbackWindowStart   time.Time
 	passiveFallbackGlobalUsed    int
 	passiveFallbackWorkspaceUsed map[string]int
 	passiveFallbackTargetCursors map[string]int
+
+	// passiveWorkspaceRefreshAt suppresses repeated workspace reads that find
+	// no due watch. Stale-task refreshes bypass this admission and remain
+	// independent of the passive cooldown.
+	passiveWorkspaceRefreshMu sync.Mutex
+	passiveWorkspaceRefreshAt map[string]time.Time
 
 	// stopCtx / stopCancel / bgWG own the lifecycle of background goroutines
 	// the service spawns lazily (currently refreshStaleWorkspaceWatches).
@@ -255,6 +262,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		cleanupFailureCounts:         make(map[string]int),
 		passiveFallbackWorkspaceUsed: make(map[string]int),
 		passiveFallbackTargetCursors: make(map[string]int),
+		passiveWorkspaceRefreshAt:    make(map[string]time.Time),
 		appRegistrationRuntimes:      make(map[string]*githubAppRuntime),
 		stopCtx:                      stopCtx,
 		stopCancel:                   stopCancel,
@@ -368,6 +376,8 @@ func (s *Service) SetTaskActivityProvider(provider TaskActivityProvider) {
 // SetClock installs the service clock used by passive refresh admission.
 // Production uses time.Now; tests can use a fixed clock.
 func (s *Service) SetClock(clock func() time.Time) {
+	s.clockMu.Lock()
+	defer s.clockMu.Unlock()
 	if clock == nil {
 		s.clock = time.Now
 		return

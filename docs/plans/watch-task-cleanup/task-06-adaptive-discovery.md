@@ -129,8 +129,13 @@ Added a bulk task-activity projection and backend adapter. The projection uses
 human conversation, agent execution, session state, and observed branch
 activity, while excluding generic task timestamps, lifecycle messages, and
 live-monitor snapshots. Shared discovery targets use the fastest eligible
-watch. Passive refresh and its bounded per-watch fallback honor due admission;
+watch, while numbered and searching watches sharing a branch keep separate due
+admission. Passive refresh and its bounded per-watch fallback honor due admission;
 explicit refresh remains immediate.
+
+Passive workspace reads also use a one-minute per-workspace admission cooldown
+when no stale task requires refresh. New or reset watches clear that cooldown,
+and stale-task refreshes bypass it.
 
 The task WebSocket sync boundary now carries an explicit refresh bit. Automatic
 subscription, reconnect, and retry requests use passive due admission, while a

@@ -77,6 +77,7 @@ func (s *Service) createPRWatch(
 	if err := s.store.CreatePRWatch(ctx, w); err != nil {
 		return nil, fmt.Errorf("create PR watch: %w", err)
 	}
+	s.resetPassiveWorkspaceRefreshAdmission(workspaceID)
 	s.logger.Info("created PR watch",
 		zap.String("session_id", sessionID),
 		zap.String("repository_id", repositoryID),
@@ -181,6 +182,9 @@ func (s *Service) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch
 	if err := s.store.UpdatePRWatchBranchIfSearching(ctx, id, branch); err != nil {
 		return err
 	}
+	if watch != nil {
+		s.resetPassiveWorkspaceRefreshAdmission(watch.WorkspaceID)
+	}
 	s.removePRDiscoveryWatchConsumer(watch)
 	return nil
 }
@@ -222,6 +226,9 @@ func (s *Service) ResetPRWatch(ctx context.Context, id, branch string) error {
 	if err := s.store.ResetPRWatch(ctx, id, branch); err != nil {
 		return err
 	}
+	if watch != nil {
+		s.resetPassiveWorkspaceRefreshAdmission(watch.WorkspaceID)
+	}
 	s.removePRDiscoveryWatchConsumer(watch)
 	return nil
 }
@@ -258,18 +265,26 @@ func (s *Service) checkPRWatchWithClient(
 		return nil, false, err
 	}
 
-	// Check for check status or review state changes
-	hasNew := status.ChecksState != watch.LastCheckStatus || status.ReviewState != watch.LastReviewState
-	commentAt := prWatchFeedbackWatermark(watch, status)
-	hasNew = hasNew || prWatchFeedbackUpdatedSinceWatch(watch, status)
-
-	// Update watch timestamps
-	now := time.Now().UTC()
-	if err := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, commentAt, status.ChecksState, status.ReviewState); err != nil {
-		s.logSyncError("failed to update PR watch timestamps", err, zap.String("id", watch.ID))
+	hasNew, updateErr := s.applyPRWatchStatus(ctx, watch, status)
+	if updateErr != nil {
+		s.logSyncError("failed to update PR watch timestamps", updateErr, zap.String("id", watch.ID))
 	}
 
 	return status, hasNew, nil
+}
+
+func (s *Service) applyPRWatchStatus(
+	ctx context.Context, watch *PRWatch, status *PRStatus,
+) (bool, error) {
+	if watch == nil || status == nil {
+		return false, nil
+	}
+	hasNew := status.ChecksState != watch.LastCheckStatus || status.ReviewState != watch.LastReviewState
+	commentAt := prWatchFeedbackWatermark(watch, status)
+	hasNew = hasNew || prWatchFeedbackUpdatedSinceWatch(watch, status)
+	now := time.Now().UTC()
+	err := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, commentAt, status.ChecksState, status.ReviewState)
+	return hasNew, err
 }
 
 // logSyncError logs a PR-watch synchronization failure at ERROR, except when
@@ -366,6 +381,7 @@ func (s *Service) ensurePRWatch(
 	if err := s.store.CreatePRWatch(ctx, w); err != nil {
 		return nil, fmt.Errorf("ensure PR watch: %w", err)
 	}
+	s.resetPassiveWorkspaceRefreshAdmission(workspaceID)
 	s.logger.Info("created PR watch for task (will search for PR)",
 		zap.String("session_id", sessionID),
 		zap.String("task_id", taskID),
@@ -892,13 +908,15 @@ func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) 
 		}
 	}
 	refreshNeeded := len(staleTasks) > 0
-	if activeWatches, watchErr := s.store.ListActivePRWatchesForWorkspace(ctx, workspaceID); watchErr != nil {
-		s.logger.Debug("list active PR watches for passive refresh failed", zap.Error(watchErr))
-	} else {
-		for _, watch := range activeWatches {
-			if watch != nil && watch.PRNumber == 0 {
-				refreshNeeded = true
-				break
+	if refreshNeeded || s.admitPassiveWorkspaceRefresh(workspaceID, s.now()) {
+		if activeWatches, watchErr := s.store.ListActivePRWatchesForWorkspace(ctx, workspaceID); watchErr != nil {
+			s.logger.Debug("list active PR watches for passive refresh failed", zap.Error(watchErr))
+		} else {
+			for _, watch := range activeWatches {
+				if watch != nil && watch.PRNumber == 0 {
+					refreshNeeded = true
+					break
+				}
 			}
 		}
 	}
@@ -906,6 +924,32 @@ func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) 
 		s.refreshStaleWorkspaceWatches(workspaceID, staleTasks)
 	}
 	return result, nil
+}
+
+func (s *Service) admitPassiveWorkspaceRefresh(workspaceID string, now time.Time) bool {
+	if s == nil || strings.TrimSpace(workspaceID) == "" {
+		return false
+	}
+	s.passiveWorkspaceRefreshMu.Lock()
+	defer s.passiveWorkspaceRefreshMu.Unlock()
+	if last, ok := s.passiveWorkspaceRefreshAt[workspaceID]; ok && !now.Before(last) &&
+		now.Sub(last) < searchFastPollInterval {
+		return false
+	}
+	if s.passiveWorkspaceRefreshAt == nil {
+		s.passiveWorkspaceRefreshAt = make(map[string]time.Time)
+	}
+	s.passiveWorkspaceRefreshAt[workspaceID] = now
+	return true
+}
+
+func (s *Service) resetPassiveWorkspaceRefreshAdmission(workspaceID string) {
+	if s == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	s.passiveWorkspaceRefreshMu.Lock()
+	delete(s.passiveWorkspaceRefreshAt, workspaceID)
+	s.passiveWorkspaceRefreshMu.Unlock()
 }
 
 // refreshStaleWorkspaceWatches fans in all stale watches across the stale
@@ -1007,6 +1051,7 @@ func (s *Service) refreshStaleTasksPerTask(ctx context.Context, staleTasks map[s
 // into an immediate provider call through TriggerPRSyncAll.
 func (s *Service) refreshWatchesPerWatch(ctx context.Context, workspaceID string, watches []*PRWatch) error {
 	selected := s.selectPassiveFallbackTargets(workspaceID, watches)
+	groups := groupPRWatchFallbackTargets(watches)
 	// The target budget is deliberately admitted before this loop. Running the
 	// small set serially makes the stop rule precise: a rate/auth failure never
 	// has more than the current provider call in flight when the remaining
@@ -1015,12 +1060,7 @@ func (s *Service) refreshWatchesPerWatch(ctx context.Context, workspaceID string
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		var err error
-		if watch.PRNumber == 0 {
-			_, err = s.triggerPRDetection(ctx, watch, watch.TaskID)
-		} else {
-			_, err = s.triggerPRStatusSync(ctx, watch, watch.TaskID)
-		}
+		err := s.refreshPassiveFallbackTarget(ctx, groups[prWatchFallbackTargetKey(watch)])
 		if err == nil {
 			continue
 		}
@@ -1033,15 +1073,155 @@ func (s *Service) refreshWatchesPerWatch(ctx context.Context, workspaceID string
 	return nil
 }
 
+func (s *Service) refreshPassiveFallbackTarget(ctx context.Context, watches []*PRWatch) error {
+	if len(watches) == 0 || watches[0] == nil {
+		return nil
+	}
+	representative := watches[0]
+	var snapshot *TaskPR
+	var err error
+	if representative.PRNumber == 0 {
+		snapshot, err = s.triggerPRDetection(ctx, representative, representative.TaskID)
+	} else {
+		snapshot, err = s.triggerPRStatusSync(ctx, representative, representative.TaskID)
+	}
+	if err != nil {
+		return err
+	}
+	for _, watch := range watches[1:] {
+		if err := s.applyPassiveFallbackSnapshot(ctx, watch, snapshot); err != nil {
+			s.logger.Debug("background PR watch fallback apply failed",
+				zap.String("watch_id", watch.ID), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+func (s *Service) applyPassiveFallbackSnapshot(ctx context.Context, watch *PRWatch, snapshot *TaskPR) error {
+	if watch == nil {
+		return nil
+	}
+	if snapshot == nil {
+		return s.store.UpdatePRWatchTimestamps(ctx, watch.ID, time.Now().UTC(), nil, "", "")
+	}
+	status := prStatusFromTaskPRSnapshot(snapshot)
+	effectiveTaskID := s.reconcileTaskPROwnership(ctx, watch.SessionID, watch.TaskID, watch.RepositoryID, watch.PRNumber)
+	if watch.PRNumber == 0 {
+		if err := s.rebindPRWatchRepository(ctx, watch, status.PR); err != nil {
+			return err
+		}
+		watch.PRNumber = status.PR.Number
+		if err := s.store.UpdatePRWatchPRNumber(ctx, watch.ID, status.PR.Number); err != nil {
+			return err
+		}
+	}
+	existing, err := s.loadTaskPRForWatch(ctx, effectiveTaskID, watch)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		if _, err := s.associatePRWithTaskForSession(
+			ctx, watch.WorkspaceID, watch.SessionID, watch.TaskID, watch.RepositoryID, status.PR,
+			false, false, TaskPRSourceWatch,
+		); err != nil {
+			return err
+		}
+	}
+	if _, err := s.applyPRWatchStatus(ctx, watch, status); err != nil {
+		return err
+	}
+	if err := s.SyncTaskPR(ctx, effectiveTaskID, status); err != nil {
+		return err
+	}
+	if status.PR.State == prStateMerged || status.PR.State == prStateClosed {
+		hold, err := s.ShouldHoldTerminalPRWatch(ctx, effectiveTaskID, watch.RepositoryID, watch.PRNumber, status.PR.State)
+		if err != nil {
+			return err
+		}
+		if !hold {
+			return s.store.UpdatePRWatchPRNumber(ctx, watch.ID, 0)
+		}
+	}
+	return nil
+}
+
+func prStatusFromTaskPRSnapshot(snapshot *TaskPR) *PRStatus {
+	pr := &PR{
+		Number:                                snapshot.PRNumber,
+		Title:                                 snapshot.PRTitle,
+		URL:                                   snapshot.PRURL,
+		State:                                 snapshot.State,
+		HeadBranch:                            snapshot.HeadBranch,
+		HeadSHA:                               snapshot.HeadSHA,
+		BaseBranch:                            snapshot.BaseBranch,
+		AuthorLogin:                           snapshot.AuthorLogin,
+		RepoOwner:                             snapshot.Owner,
+		RepoName:                              snapshot.Repo,
+		MergeableState:                        snapshot.MergeableState,
+		MergeQueueState:                       snapshot.MergeQueueState,
+		MergeQueuePosition:                    snapshot.MergeQueuePosition,
+		MergeQueueEntryID:                     snapshot.MergeQueueEntryID,
+		MergeQueueEntryHeadSHA:                snapshot.MergeQueueEntryHeadSHA,
+		MergeQueueEstimatedTimeToMergeSeconds: snapshot.MergeQueueEstimatedTimeToMergeSeconds,
+		MergeQueueLastRemovalID:               snapshot.MergeQueueLastRemovalID,
+		MergeQueueLastRemovedAt:               snapshot.MergeQueueLastRemovedAt,
+		MergeQueueLastRemovalReason:           snapshot.MergeQueueLastRemovalReason,
+		MergeQueueLastRemovalBeforeSHA:        snapshot.MergeQueueLastRemovalBeforeSHA,
+		Additions:                             snapshot.Additions,
+		Deletions:                             snapshot.Deletions,
+		CreatedAt:                             snapshot.CreatedAt,
+		MergedAt:                              snapshot.MergedAt,
+		ClosedAt:                              snapshot.ClosedAt,
+	}
+	if snapshot.IsDraft != nil {
+		pr.Draft = *snapshot.IsDraft
+		pr.IsDraftObserved = true
+	}
+	return &PRStatus{
+		PR:                                    pr,
+		WorkflowAttention:                     snapshot.WorkflowAttention,
+		ReviewState:                           snapshot.ReviewState,
+		ChecksState:                           snapshot.ChecksState,
+		MergeableState:                        snapshot.MergeableState,
+		MergeQueueState:                       snapshot.MergeQueueState,
+		MergeQueuePosition:                    snapshot.MergeQueuePosition,
+		MergeQueueEntryID:                     snapshot.MergeQueueEntryID,
+		MergeQueueEntryHeadSHA:                snapshot.MergeQueueEntryHeadSHA,
+		MergeQueueEstimatedTimeToMergeSeconds: snapshot.MergeQueueEstimatedTimeToMergeSeconds,
+		MergeQueueLastRemovalID:               snapshot.MergeQueueLastRemovalID,
+		MergeQueueLastRemovedAt:               snapshot.MergeQueueLastRemovedAt,
+		MergeQueueLastRemovalReason:           snapshot.MergeQueueLastRemovalReason,
+		MergeQueueLastRemovalBeforeSHA:        snapshot.MergeQueueLastRemovalBeforeSHA,
+		ReviewCount:                           snapshot.ReviewCount,
+		PendingReviewCount:                    snapshot.PendingReviewCount,
+		RequiredReviews:                       snapshot.RequiredReviews,
+		ChecksTotal:                           snapshot.ChecksTotal,
+		ChecksPassing:                         snapshot.ChecksPassing,
+		ChecksPopulated:                       true,
+		ReviewCountsPopulated:                 true,
+		UnresolvedReviewThreads:               snapshot.UnresolvedReviewThreads,
+		UnresolvedReviewThreadsPopulated:      true,
+		OutcomeFieldsPopulated:                snapshot.IsDraft != nil || snapshot.ChangedFiles != nil || snapshot.MergedByLogin != nil,
+		WorkflowAttentionPopulated:            snapshot.WorkflowAttention != nil,
+	}
+}
+
 func (s *Service) selectPassiveFallbackTargets(workspaceID string, watches []*PRWatch) []*PRWatch {
 	if len(watches) == 0 || workspaceID == "" {
 		return nil
 	}
-	ordered := make([]*PRWatch, 0, len(watches))
+	byTarget := make(map[string]*PRWatch, len(watches))
 	for _, watch := range watches {
 		if watch != nil {
-			ordered = append(ordered, watch)
+			key := prWatchFallbackTargetKey(watch)
+			if _, exists := byTarget[key]; !exists {
+				byTarget[key] = watch
+			}
 		}
+	}
+	ordered := make([]*PRWatch, 0, len(byTarget))
+	for _, watch := range byTarget {
+		ordered = append(ordered, watch)
 	}
 	if len(ordered) == 0 {
 		return nil
@@ -1050,11 +1230,12 @@ func (s *Service) selectPassiveFallbackTargets(workspaceID string, watches []*PR
 		return prWatchFallbackTargetKey(ordered[i]) < prWatchFallbackTargetKey(ordered[j])
 	})
 
-	window := s.now().Unix() / int64(time.Minute/time.Second)
+	now := s.now()
 	s.passiveFallbackMu.Lock()
 	defer s.passiveFallbackMu.Unlock()
-	if s.passiveFallbackWindow != window {
-		s.passiveFallbackWindow = window
+	if s.passiveFallbackWindowStart.IsZero() || now.Before(s.passiveFallbackWindowStart) ||
+		now.Sub(s.passiveFallbackWindowStart) >= time.Minute {
+		s.passiveFallbackWindowStart = now
 		s.passiveFallbackGlobalUsed = 0
 		s.passiveFallbackWorkspaceUsed = make(map[string]int)
 	}
@@ -1642,7 +1823,6 @@ func (s *Service) triggerPRSyncAllPermanent(
 // per-watch" body of triggerPRSyncAllPermanent. Split out so the
 // permanent-flag computation can wrap the result without duplicating
 // the batched / fallback branches inline.
-
 func (s *Service) runBatchedOrPerWatchSync(
 	ctx context.Context, taskID string, watches []*PRWatch, explicitRefresh bool,
 ) ([]*TaskPR, error) {

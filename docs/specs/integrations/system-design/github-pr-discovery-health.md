@@ -197,10 +197,15 @@ Reconciliation of an unchanged watch must preserve its age and last check.
 
 Group equivalent discovery targets before admission. Any active member selects
 the 1-minute schedule for that target; do not duplicate the provider query.
+Numbered targets and searching targets remain separate groups even when they
+share a repository and branch, because their polling cadences differ.
 Passive task/page refresh must use the same admission rule or it defeats the
 background savings. Explicit user refresh bypasses only idle admission, never
 quota or auth gates. Preserve `PRSyncFreshnessWindow` at 30 seconds for existing
 sync consumers and keep the distinction between automatic and explicit reads.
+When a passive workspace read finds no stale task, admit workspace discovery
+reads at most once per minute. A newly created or reset watch clears that
+cooldown, and stale-task refreshes bypass it.
 
 ## Bounded fallback
 
@@ -214,9 +219,12 @@ Allow 5 fallback target checks per workspace, capped at 10 per cycle globally.
 Apply this limit to unsupported-GraphQL clients too. Rotate workspace and target
 selection between cycles so fixed ordering cannot starve later targets.
 These are target-check limits, not HTTP-request limits: a check may paginate
-or fetch several resources. Stop a workspace on the first auth/rate error and
-check cancellation before each target. Never retry successful batches via REST.
+or fetch several resources. Stop a workspace on the first authentication,
+configuration, rate-limit, or invalid-query error and check cancellation before
+each target. Never retry successful batches via REST.
 Do not mark deferred targets as successfully checked.
+Deduplicate equivalent watches before consuming either budget and apply one
+fallback result to every watch in the selected target group.
 
 Retain existing failure schedules: discovery retry starts at 1 minute and caps
 at 15 minutes; auth/config circuits start at 2 minutes and cap at 6 hours with

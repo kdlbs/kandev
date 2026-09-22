@@ -164,6 +164,24 @@ func TestSearchingWatchAdaptiveScheduleSharedTargets(t *testing.T) {
 	}
 }
 
+func TestSearchingWatchAdaptiveScheduleSeparatesNumberedTarget(t *testing.T) {
+	now := time.Date(2026, time.September, 22, 12, 0, 0, 0, time.UTC)
+	provider := &scheduleActivityProvider{activities: map[string]PRWatchTaskActivity{
+		"searching-task": {LastActivityAt: now.Add(-24 * time.Hour)},
+	}}
+	poller := &Poller{taskActivityProvider: provider, clock: func() time.Time { return now }}
+
+	numbered := scheduleWatch("numbered-task", 42, timePtr(now.Add(-time.Minute)), now.Add(-time.Hour))
+	numbered.Owner, numbered.Repo, numbered.Branch = "owner", "repo", "shared"
+	searching := scheduleWatch("searching-task", 0, timePtr(now.Add(-time.Minute)), now.Add(-24*time.Hour))
+	searching.Owner, searching.Repo, searching.Branch = "owner", "repo", "shared"
+
+	got := poller.selectDuePRWatches(context.Background(), []*PRWatch{searching, numbered})
+	if len(got) != 1 || got[0] != numbered {
+		t.Fatalf("due watches = %#v, want only numbered watch", got)
+	}
+}
+
 func TestSearchingWatchAdaptiveScheduleActivityAndRestart(t *testing.T) {
 	now := time.Date(2026, time.September, 22, 12, 0, 0, 0, time.UTC)
 	watch := scheduleWatch("task-1", 0, timePtr(now.Add(-10*time.Minute)), now.Add(-48*time.Hour))

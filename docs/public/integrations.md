@@ -357,7 +357,9 @@ If a current pull-request head has a GitHub Actions workflow that requires maint
 Kandev refreshes GitHub Actions observations for empty, running, changing, or
 attention-required results within 30 seconds. Nonempty completed results with
 no attention requirement remain cached for up to five minutes. The cache is
-scoped to the selected credential, repository, head SHA, and workflow attempt.
+Run observations are scoped to the selected credential, repository, and head
+SHA. Job observations are scoped to the selected credential, repository, run
+ID, and workflow attempt.
 An explicit pull request refresh clears the relevant observation immediately.
 Reruns on the same SHA appear after the completed-result cache expires or after
 an explicit refresh. Provider errors are retried and are not stored as an

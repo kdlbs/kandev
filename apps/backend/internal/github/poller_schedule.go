@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -169,7 +170,11 @@ func prWatchDiscoveryTargetKey(watch *PRWatch) string {
 	if watch == nil {
 		return ""
 	}
-	return watch.WorkspaceID + "\x00" + watch.Owner + "\x00" + watch.Repo + "\x00" + watch.Branch
+	mode := "search"
+	if watch.PRNumber != 0 {
+		mode = "pr:" + strconv.Itoa(watch.PRNumber)
+	}
+	return watch.WorkspaceID + "\x00" + mode + "\x00" + watch.Owner + "\x00" + watch.Repo + "\x00" + watch.Branch
 }
 
 func (p *Poller) now() time.Time {
@@ -180,8 +185,14 @@ func (p *Poller) now() time.Time {
 }
 
 func (s *Service) now() time.Time {
-	if s != nil && s.clock != nil {
-		return s.clock().UTC()
+	if s == nil {
+		return time.Now().UTC()
+	}
+	s.clockMu.RLock()
+	clock := s.clock
+	s.clockMu.RUnlock()
+	if clock != nil {
+		return clock().UTC()
 	}
 	return time.Now().UTC()
 }

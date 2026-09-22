@@ -17,7 +17,7 @@ func cleanupBatchAdmission(ctx context.Context, client Client, tracker *RateTrac
 		return nil
 	}
 	resource := cleanupRateResource(client)
-	if !tracker.IsExhausted(resource) {
+	if tracker.WaitDuration(resource) <= 0 {
 		return nil
 	}
 	return &GitHubAPIError{
@@ -421,10 +421,7 @@ func (s *Service) reviewApprovalCleanupReason(
 	}
 	user, userErr := client.GetAuthenticatedUser(ctx)
 	if userErr != nil {
-		if cleanupBatchShouldStop(userErr) {
-			return "", userErr
-		}
-		return "", nil
+		return "", userErr
 	}
 	for _, review := range reviews {
 		if review.State == reviewStateApproved && review.Author == user {

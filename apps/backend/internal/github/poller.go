@@ -297,7 +297,7 @@ func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch)
 	for _, watch := range watches {
 		if watch == nil || watch.WorkspaceID == "" {
 			p.logger.Warn("PR watch is missing workspace ownership", zap.String("watch_id", watchID(watch)))
-			return []prWatchWorkspaceBatchOutcome{{watches: watches, state: prWatchBatchDeferred}}
+			continue
 		}
 		byWorkspace[watch.WorkspaceID] = append(byWorkspace[watch.WorkspaceID], watch)
 	}
@@ -415,6 +415,7 @@ func prWatchBatchFallbackAllowed(err error) bool {
 
 func (p *Poller) runPRWatchFallback(ctx context.Context, watches []*PRWatch) {
 	selected := p.selectPRWatchFallbackTargets(watches)
+	groups := groupPRWatchFallbackTargets(watches)
 	stopped := make(map[string]bool)
 	for _, watch := range selected {
 		if ctx.Err() != nil {
@@ -423,7 +424,7 @@ func (p *Poller) runPRWatchFallback(ctx context.Context, watches []*PRWatch) {
 		if watch == nil || stopped[watch.WorkspaceID] {
 			continue
 		}
-		err := p.checkSinglePRWatchWithError(ctx, watch)
+		err := p.checkPRWatchGroupWithError(ctx, groups[prWatchFallbackTargetKey(watch)])
 		if err == nil {
 			continue
 		}
@@ -436,24 +437,55 @@ func (p *Poller) runPRWatchFallback(ctx context.Context, watches []*PRWatch) {
 	}
 }
 
-func (p *Poller) selectPRWatchFallbackTargets(watches []*PRWatch) []*PRWatch {
-	byWorkspace := make(map[string][]*PRWatch)
+func groupPRWatchFallbackTargets(watches []*PRWatch) map[string][]*PRWatch {
+	groups := make(map[string][]*PRWatch, len(watches))
+	for _, watch := range watches {
+		if watch == nil {
+			continue
+		}
+		key := prWatchFallbackTargetKey(watch)
+		groups[key] = append(groups[key], watch)
+	}
+	return groups
+}
+
+func deduplicatePRWatchFallbackTargets(watches []*PRWatch) (map[string][]*PRWatch, []string) {
+	byWorkspace := make(map[string]map[string]*PRWatch)
 	for _, watch := range watches {
 		if watch != nil {
-			byWorkspace[watch.WorkspaceID] = append(byWorkspace[watch.WorkspaceID], watch)
+			workspaceTargets := byWorkspace[watch.WorkspaceID]
+			if workspaceTargets == nil {
+				workspaceTargets = make(map[string]*PRWatch)
+				byWorkspace[watch.WorkspaceID] = workspaceTargets
+			}
+			key := prWatchFallbackTargetKey(watch)
+			if _, exists := workspaceTargets[key]; !exists {
+				workspaceTargets[key] = watch
+			}
 		}
 	}
 	workspaceIDs := make([]string, 0, len(byWorkspace))
-	for workspaceID, workspaceWatches := range byWorkspace {
+	workspaceGroups := make(map[string][]*PRWatch, len(byWorkspace))
+	for workspaceID, targetWatches := range byWorkspace {
+		workspaceWatches := make([]*PRWatch, 0, len(targetWatches))
+		for _, watch := range targetWatches {
+			workspaceWatches = append(workspaceWatches, watch)
+		}
 		sort.SliceStable(workspaceWatches, func(i, j int) bool {
 			return prWatchFallbackTargetKey(workspaceWatches[i]) < prWatchFallbackTargetKey(workspaceWatches[j])
 		})
+		workspaceGroups[workspaceID] = workspaceWatches
 		workspaceIDs = append(workspaceIDs, workspaceID)
 	}
+	sort.Strings(workspaceIDs)
+	return workspaceGroups, workspaceIDs
+}
+
+func (p *Poller) selectPRWatchFallbackTargets(watches []*PRWatch) []*PRWatch {
+	workspaceGroups, workspaceIDs := deduplicatePRWatchFallbackTargets(watches)
 	if len(workspaceIDs) == 0 {
 		return nil
 	}
-	sort.Strings(workspaceIDs)
 
 	p.fallbackMu.Lock()
 	defer p.fallbackMu.Unlock()
@@ -467,7 +499,7 @@ func (p *Poller) selectPRWatchFallbackTargets(watches []*PRWatch) []*PRWatch {
 		added := false
 		for offset := 0; offset < len(workspaceIDs) && len(selected) < prWatchFallbackCycleBudget; offset++ {
 			workspaceID := workspaceIDs[(start+offset)%len(workspaceIDs)]
-			group := byWorkspace[workspaceID]
+			group := workspaceGroups[workspaceID]
 			count := selectedByWorkspace[workspaceID]
 			if count >= prWatchFallbackWorkspaceBudget || count >= len(group) {
 				continue
@@ -482,7 +514,7 @@ func (p *Poller) selectPRWatchFallbackTargets(watches []*PRWatch) []*PRWatch {
 		}
 	}
 	for workspaceID, count := range selectedByWorkspace {
-		group := byWorkspace[workspaceID]
+		group := workspaceGroups[workspaceID]
 		cursor := p.fallbackTargetCursors[workspaceID] % len(group)
 		p.fallbackTargetCursors[workspaceID] = (cursor + count) % len(group)
 	}
@@ -494,7 +526,7 @@ func prWatchFallbackTargetKey(watch *PRWatch) string {
 	if watch == nil {
 		return ""
 	}
-	return watch.Owner + "\x00" + watch.Repo + "\x00" + watch.Branch + "\x00" + fmt.Sprintf("%010d", watch.PRNumber) + "\x00" + watch.ID
+	return watch.WorkspaceID + "\x00" + watch.Owner + "\x00" + watch.Repo + "\x00" + watch.Branch + "\x00" + fmt.Sprintf("%010d", watch.PRNumber)
 }
 
 func prWatchFallbackShouldStopWorkspace(err error) bool {
@@ -562,6 +594,15 @@ func (p *Poller) checkSinglePRWatchWithError(ctx context.Context, watch *PRWatch
 	if status == nil {
 		return nil
 	}
+	return p.applyPRStatusForWatch(ctx, watch, status, hasNew)
+}
+
+func (p *Poller) applyPRStatusForWatch(
+	ctx context.Context, watch *PRWatch, status *PRStatus, hasNew bool,
+) error {
+	if watch == nil || status == nil {
+		return nil
+	}
 
 	// A numbered watch found its PR before this fix existed (or before the
 	// discovering session's own group redirect took effect) keeps the
@@ -618,6 +659,48 @@ func (p *Poller) checkSinglePRWatchWithError(ctx context.Context, watch *PRWatch
 	return nil
 }
 
+func (p *Poller) checkPRWatchGroupWithError(ctx context.Context, watches []*PRWatch) error {
+	if len(watches) == 0 || watches[0] == nil {
+		return nil
+	}
+	representative := watches[0]
+	incCanonicalPollRequests(1)
+	if representative.PRNumber == 0 {
+		pr, err := p.service.findPRByBranchForWatch(ctx, representative)
+		p.circuits.recordOutcome(representative.WorkspaceID, classifyPollErr(err), time.Now().UTC())
+		if err != nil {
+			p.logger.Debug("failed to search for shared PR watch target",
+				zap.String("watch_id", representative.ID), zap.Error(err))
+			return err
+		}
+		for _, watch := range watches {
+			p.applyDetectedPR(ctx, watch, pr)
+		}
+		return nil
+	}
+
+	status, hasNew, err := p.service.CheckPRWatchForWorkspace(ctx, representative)
+	p.circuits.recordOutcome(representative.WorkspaceID, classifyPollErr(err), time.Now().UTC())
+	if err != nil {
+		p.logger.Debug("failed to check shared PR watch target",
+			zap.String("watch_id", representative.ID), zap.Error(err))
+		return err
+	}
+	if status == nil {
+		return nil
+	}
+	for index, watch := range watches {
+		watchHasNew := hasNew
+		if index > 0 {
+			watchHasNew, _ = p.service.applyPRWatchStatus(ctx, watch, status)
+		}
+		if err := p.applyPRStatusForWatch(ctx, watch, status, watchHasNew); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // detectPRForWatch searches GitHub for a PR on the watch's branch.
 // If found, updates the watch with the PR number and creates the TaskPR association.
 func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
@@ -640,13 +723,17 @@ func (p *Poller) detectPRForWatchWithError(ctx context.Context, watch *PRWatch) 
 			zap.Error(err))
 		return err
 	}
+	p.applyDetectedPR(ctx, watch, pr)
+	return nil
+}
 
+func (p *Poller) applyDetectedPR(ctx context.Context, watch *PRWatch, pr *PR) {
 	// Update last_checked_at regardless of result
 	now := time.Now().UTC()
 	_ = p.service.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, "", "")
 
 	if pr == nil {
-		return nil
+		return
 	}
 
 	if rebindErr := p.service.rebindPRWatchRepository(ctx, watch, pr); rebindErr != nil {
@@ -654,7 +741,7 @@ func (p *Poller) detectPRForWatchWithError(ctx context.Context, watch *PRWatch) 
 			zap.String("watch_id", watch.ID),
 			zap.Int("pr_number", pr.Number),
 			zap.Error(rebindErr))
-		return nil
+		return
 	}
 
 	// Found a PR — update the watch and create association
@@ -663,7 +750,7 @@ func (p *Poller) detectPRForWatchWithError(ctx context.Context, watch *PRWatch) 
 			zap.String("watch_id", watch.ID),
 			zap.Int("pr_number", pr.Number),
 			zap.Error(updateErr))
-		return nil
+		return
 	}
 
 	if _, assocErr := p.service.associatePRWithTaskForSession(
@@ -674,14 +761,13 @@ func (p *Poller) detectPRForWatchWithError(ctx context.Context, watch *PRWatch) 
 			zap.String("task_id", watch.TaskID),
 			zap.Int("pr_number", pr.Number),
 			zap.Error(assocErr))
-		return nil
+		return
 	}
 
 	p.logger.Info("detected PR for session branch",
 		zap.String("watch_id", watch.ID),
 		zap.String("branch", watch.Branch),
 		zap.Int("pr_number", pr.Number))
-	return nil
 }
 
 func (p *Poller) publishPRStatusEvent(ctx context.Context, watch *PRWatch, taskID string, status *PRStatus) {

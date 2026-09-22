@@ -87,6 +87,9 @@ Keep existing client rate tracking and reset behavior. A later poll retries
 normally. Emit one batch-level error through existing caller logging instead
 of one new failure for each unvisited row. Unvisited rows do not increment
 failure counters.
+Cleanup admission evaluates the current reset deadline, so an exhausted
+resource becomes eligible again after reset even if no provider call refreshes
+the tracker in between sweeps.
 
 ## Minimal review cleanup lookup
 

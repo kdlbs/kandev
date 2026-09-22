@@ -96,6 +96,9 @@ workspace and ten-target scheduling-window budgets with fair target rotation;
 it classifies batch failures before fallback and runs fallback checks
 sequentially so an authentication or rate-limit error leaves no unscheduled
 tail of calls for that workspace.
+Equivalent workspace targets are deduplicated before workspace and global
+budgets are admitted, and one fallback result is applied to every watch in the
+target group.
 
 Added deterministic coverage for mixed workspaces, successful event
 publication, unsupported and transient clients, target rotation, fallback
