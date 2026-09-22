@@ -91,7 +91,7 @@ test.describe("Task MCP selection on mobile", () => {
     await dialog.getByTestId("task-title-input").fill(taskTitle);
     await dialog.getByTestId("task-description-input").fill("Persist the mobile MCP selection.");
     await expect(dialog.getByTestId("submit-start-agent")).toBeEnabled({ timeout: 30_000 });
-    await dialog.getByTestId("mobile-submit-create-without-agent").tap();
+    await dialog.getByTestId("mobile-create-without-agent").tap();
 
     await expect(dialog).not.toBeVisible({ timeout: 15_000 });
     const findCreatedTask = async () => {

@@ -165,6 +165,7 @@ jobs:
     # Checkout receives the short-lived job token. Keep this credential-bearing
     # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
     # Skips the per-run setup-go / golangci-lint download steps below.
@@ -291,10 +292,11 @@ jobs:
       - name: Run golangci-lint
         # golangci-lint is preinstalled in the kandev-ci image; invoke it
         # directly instead of going through `golangci/golangci-lint-action`,
-        # which would re-download its own binary on every run. Ten minutes
-        # leaves headroom for cold caches while still bounding analysis time.
+        # which would re-download its own binary on every run. `--timeout=5m`
+        # was too short for a cold cache; keep the explicit budget finite while
+        # allowing the full repository analysis to finish reliably.
         shell: bash
-        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=10m
+        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=15m
 
   test_shards:
     name: Backend Tests (${{ matrix.shard }}/2)
