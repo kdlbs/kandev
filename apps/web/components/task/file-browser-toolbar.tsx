@@ -283,7 +283,7 @@ function CreateMenu({
               type="button"
               aria-label={t("task:addToWorkspace")}
               data-testid="files-create-menu"
-              className="inline-flex size-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer sm:size-8"
+              className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer max-md:size-11 [@media(pointer:coarse)]:size-11"
             >
               <IconPlus className="h-3.5 w-3.5" />
             </button>
