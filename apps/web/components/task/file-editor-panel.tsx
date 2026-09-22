@@ -572,6 +572,7 @@ function LoadedFileEditorPanel({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- coordinates the loaded file panel lifecycle.
 export const FileEditorPanel = memo(function FileEditorPanel({
   panelId,
   params,

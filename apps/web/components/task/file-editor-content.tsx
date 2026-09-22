@@ -38,6 +38,7 @@ export type FileEditorContentProps = {
   onDownload?: () => void;
 };
 
+// eslint-disable-next-line complexity -- selects the compatible preview and editor surface.
 export const FileEditorContent = memo(function FileEditorContent(props: FileEditorContentProps) {
   const provider = useEditorProvider("code-editor");
   const [htmlPreviewIdentity, setHtmlPreviewIdentity] = useState<string | null>(null);
@@ -69,8 +70,8 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
   }, [htmlPreview.url, openBrowserPanel]);
 
   if (
-    ((props.renderedPreview && props.previewKind === "markdown" && props.onTogglePreview) ||
-      (props.markdownPreview && props.onToggleMarkdownPreview))
+    (props.renderedPreview && props.previewKind === "markdown" && props.onTogglePreview) ||
+    (props.markdownPreview && props.onToggleMarkdownPreview)
   ) {
     return (
       <MarkdownPreviewContent

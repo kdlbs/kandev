@@ -18,6 +18,7 @@ import type { HtmlPreviewPublishState } from "@/hooks/use-html-preview-publisher
 
 export type MobileViewerKind = "image" | "binary" | "text";
 
+// eslint-disable-next-line max-lines-per-function -- keeps the mobile file surface dispatch together.
 export function MobileViewerBody({
   file,
   viewerKind,
@@ -107,17 +108,15 @@ export function MobileViewerBody({
           onTogglePreview={onTogglePreview}
         />
       )}
-      {viewerKind === "text" &&
-        !markdownFile &&
-        !(renderedPreview && previewKind === "html") && (
-          <FileViewerContent
-            path={file.path}
-            repo={file.repo}
-            content={draftContent}
-            sessionId={sessionId ?? undefined}
-            editable={false}
-          />
-        )}
+      {viewerKind === "text" && !markdownFile && !(renderedPreview && previewKind === "html") && (
+        <FileViewerContent
+          path={file.path}
+          repo={file.repo}
+          content={draftContent}
+          sessionId={sessionId ?? undefined}
+          editable={false}
+        />
+      )}
     </div>
   );
 }

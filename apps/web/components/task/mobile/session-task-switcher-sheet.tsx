@@ -380,6 +380,7 @@ function PortForwardingTaskAction({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- composes the single mobile task-switcher surface.
 export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   open,
   onOpenChange,

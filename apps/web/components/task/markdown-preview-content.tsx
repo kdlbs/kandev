@@ -429,6 +429,7 @@ export function MarkdownPreviewRenderer({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- keeps preview comments and scroll ownership together.
 export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   path,
   isSymlink,

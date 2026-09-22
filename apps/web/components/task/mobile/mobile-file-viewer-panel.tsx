@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- owns the complete mobile file viewer lifecycle. */
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -12,7 +14,6 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { PanelBody, PanelRoot } from "../panel-primitives";
-import { HtmlPreviewContent } from "../html-preview-content";
 import { FileViewerDownloadButton } from "../file-viewer-header";
 import { MobileViewerBody, type MobileViewerKind } from "./mobile-markdown-viewer-body";
 import {
@@ -142,7 +143,7 @@ function MobileMarkdownModeControls({
   );
 }
 
-// eslint-disable-next-line max-lines-per-function -- keeps the fixed mobile header and its touch actions together.
+// eslint-disable-next-line max-lines-per-function, complexity -- keeps the fixed mobile header and its touch actions together.
 function MobileFileViewerHeader({
   file,
   fileStatus,
@@ -498,6 +499,7 @@ function useMobileFileViewerActions({
   return { openLinkedFile, handleOpenLink, handleKeyDown };
 }
 
+// eslint-disable-next-line max-lines-per-function -- coordinates one mobile viewer lifecycle.
 export function MobileFileViewerPanel({
   file,
   sessionId,
@@ -535,9 +537,7 @@ export function MobileFileViewerPanel({
   const initialLegacyMarkdownPreview =
     initialMarkdownPreview ??
     (initialRenderedPreview && previewKind === "markdown" ? true : undefined);
-  const [renderedPreview, setRenderedPreview] = useState(
-    false,
-  );
+  const [renderedPreview, setRenderedPreview] = useState(false);
   if (lastFileIdentity !== fileIdentity) {
     setLastFileIdentity(fileIdentity);
     setRenderedPreview(false);

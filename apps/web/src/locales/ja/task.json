@@ -2708,5 +2708,9 @@
   "sortOldestFirst": "古い順",
   "sortAscending": "昇順",
   "sortMatchingFirst": "一致する項目を優先",
-  "sortRuleColor": "並べ替え項目 {{position}} の色"
+  "sortRuleColor": "並べ替え項目 {{position}} の色",
+  "markdownModes": "Markdownモード",
+  "markdownModePreview": "プレビュー",
+  "markdownModeEdit": "編集",
+  "markdownModeSource": "ソース"
 }

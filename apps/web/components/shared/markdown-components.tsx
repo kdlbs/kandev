@@ -18,6 +18,7 @@ import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { remarkMathCompat } from "@/lib/markdown/remark-math-compat";
 import {
   resolveMarkdownFileTarget,
+  type MarkdownFileTarget,
   type MarkdownFileRootAlias,
 } from "@/lib/markdown/file-link-target";
 
@@ -203,6 +204,56 @@ type MarkdownLinkProps = {
   children?: ReactNode;
 };
 
+function resolveMarkdownAnchorFilePath(
+  target: MarkdownFileTarget | null,
+  relativeFilePath: string | null,
+): string | null {
+  if (target?.kind === "blocked") return null;
+  if (target?.kind === "file") return target.path;
+  return relativeFilePath;
+}
+
+function isInternalMarkdownAnchor(
+  href: string | undefined,
+  target: MarkdownFileTarget | null,
+  relativeFilePath: string | null,
+): boolean {
+  return (
+    !!target ||
+    !!relativeFilePath ||
+    (href?.startsWith("/") === true && !href.startsWith("//")) ||
+    href?.startsWith("#") === true
+  );
+}
+
+function createMarkdownAnchorClickHandler({
+  href,
+  target,
+  relativeFilePath,
+  filePath,
+  onOpenLink,
+  openFile,
+}: {
+  href?: string;
+  target: MarkdownFileTarget | null;
+  relativeFilePath: string | null;
+  filePath: string | null;
+  onOpenLink?: (url: string) => boolean | void;
+  openFile: (path: string) => void;
+}): ((event: MouseEvent<HTMLAnchorElement>) => void) | undefined {
+  if (onOpenLink && href && !href.startsWith("#")) {
+    return (event) => {
+      if (onOpenLink(href) === false) return;
+      event.preventDefault();
+    };
+  }
+  if (!target && !relativeFilePath) return undefined;
+  return (event) => {
+    event.preventDefault();
+    if (filePath) openFile(filePath);
+  };
+}
+
 function MarkdownFileAnchor({
   href,
   children,
@@ -223,31 +274,17 @@ function MarkdownFileAnchor({
     fileRootAliases,
   });
   const relativeFilePath = resolveMarkdownFileHref(href, worktreePath, currentFilePath);
-  const filePath =
-    target?.kind === "blocked"
-      ? null
-      : target?.kind === "file"
-        ? target.path
-        : relativeFilePath;
+  const filePath = resolveMarkdownAnchorFilePath(target, relativeFilePath);
   const isBlocked = target?.kind === "blocked";
-  const isInternal =
-    !!target ||
-    !!relativeFilePath ||
-    (href?.startsWith("/") && !href.startsWith("//")) ||
-    href?.startsWith("#");
-
-  let handleClick: ((event: MouseEvent<HTMLAnchorElement>) => void) | undefined;
-  if (onOpenLink && href && !href.startsWith("#")) {
-    handleClick = (event) => {
-      if (onOpenLink(href) === false) return;
-      event.preventDefault();
-    };
-  } else if (target || relativeFilePath) {
-    handleClick = (event) => {
-      event.preventDefault();
-      if (filePath) openFile(filePath);
-    };
-  }
+  const isInternal = isInternalMarkdownAnchor(href, target, relativeFilePath);
+  const handleClick = createMarkdownAnchorClickHandler({
+    href,
+    target,
+    relativeFilePath,
+    filePath,
+    onOpenLink,
+    openFile,
+  });
 
   return (
     <a

@@ -46,7 +46,6 @@ function MarkdownFileTabContent({
   onFileChange,
   onFileSave,
   onFileDelete,
-  onTogglePreview,
   onMarkdownModeChange,
   onOpenFile,
   workspacePath,
