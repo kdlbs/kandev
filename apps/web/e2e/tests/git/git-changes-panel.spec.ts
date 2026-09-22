@@ -2983,6 +2983,7 @@ test.describe("Git Changes Panel", () => {
         title: "Local ahead contribution",
         state: "open",
         head_branch: "feature/local-ahead",
+        head_sha: providerHead,
         base_branch: "main",
         author_login: "local-ahead-author",
         repo_owner: "testorg",
@@ -3006,6 +3007,7 @@ test.describe("Git Changes Panel", () => {
       pr_url: "https://github.com/testorg/testrepo/pull/903",
       pr_title: "Local ahead contribution",
       head_branch: "feature/local-ahead",
+      head_sha: providerHead,
       base_branch: "main",
       author_login: "local-ahead-author",
     });
