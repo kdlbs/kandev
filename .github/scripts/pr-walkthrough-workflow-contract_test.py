@@ -346,12 +346,59 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
 
     def test_walkthrough_runs_are_serialized_for_the_entire_pr_pipeline(self) -> None:
         workflow_header = self.workflow.split("jobs:", 1)[0]
+        normalized_header = " ".join(workflow_header.split())
         self.assertIn("concurrency:", workflow_header)
-        self.assertIn("group: pr-walkthrough-${{ github.event.pull_request.number }}", workflow_header)
+        self.assertIn(
+            "group: >- pr-walkthrough-${{ github.event.pull_request.number }}${{",
+            normalized_header,
+        )
         self.assertIn("cancel-in-progress: true", workflow_header)
         self.assertNotIn("concurrency:", self.generation)
         self.assertIn("concurrency:", self.same_repo_review)
         self.assertIn("concurrency:", self.fork_review)
+
+    # @covers AC-CI-PR-WALK-003.5, AC-CI-PR-FAIL-005.1
+    def test_walkthrough_concurrency_isolates_ineligible_label_events(self) -> None:
+        workflow_header = " ".join(self.workflow.split("jobs:", 1)[0].split())
+        for value in (
+            "group: >- pr-walkthrough-${{ github.event.pull_request.number }}${{",
+            "github.event.action == 'labeled'",
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            "github.event.pull_request.head.repo.full_name != github.repository",
+            "github.event.label.name == 'generate-pr-walkthrough'",
+            "github.event.label.name == 'safe-to-review'",
+            "&& '-ineligible' || ''",
+        ):
+            self.assertIn(value, workflow_header)
+        self.assertIn("cancel-in-progress: true", workflow_header)
+
+    # @covers AC-CI-PR-WALK-003.5, AC-CI-PR-FAIL-005.1
+    def test_walkthrough_concurrency_matches_the_full_generation_gate(self) -> None:
+        workflow_header = " ".join(self.workflow.split("jobs:", 1)[0].split())
+        for value in (
+            "vars.PR_WALKTHROUGH_ENABLED != 'true'",
+            "github.event_name != 'pull_request_target'",
+            "github.event.pull_request.draft != false",
+            "github.event.action == 'opened'",
+            "github.event.action == 'reopened'",
+            "github.event.action == 'ready_for_review'",
+            "github.event.action == 'synchronize'",
+            "github.event.action == 'labeled' && github.event.label.name == 'generate-pr-walkthrough'",
+            "github.event.action == 'labeled' && github.event.label.name == 'safe-to-review'",
+            "github.event.action != 'labeled'",
+            "contains(github.event.pull_request.labels.*.name, 'safe-to-review')",
+            "vars.CLAUDE_REVIEW_ALLOWLIST != ''",
+            "contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)",
+        ):
+            self.assertIn(value, workflow_header)
+        self.assertIn(
+            "github.event.pull_request.head.repo.full_name != github.repository && "
+            "( (github.event.action == 'labeled' && "
+            "github.event.label.name == 'safe-to-review') || "
+            "(github.event.action != 'labeled' && (",
+            workflow_header,
+        )
+        self.assertIn("!(", workflow_header)
 
     def test_walkthrough_label_does_not_run_the_normal_code_review(self) -> None:
         self.assertIn("github.event.action != 'labeled'", self.same_repo_review)
