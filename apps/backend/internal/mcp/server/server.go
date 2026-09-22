@@ -1090,6 +1090,8 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		// Dependency edges are manageable wherever a task can be created.
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
+		{name: "canonical-coordinator-exact-profile", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityExactTaskProfileAssignment)), register: func(s *Server) { s.registerAssignExactTaskProfileTool() }},
+		{name: "canonical-coordinator-session-handoff", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityCoordinatorSessionHandoff)), register: func(s *Server) { s.registerCoordinatorHandoffTool() }},
 		{name: "task-pr-links", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool {
 			return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) ||
 				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
@@ -1557,7 +1559,7 @@ func (s *Server) registerSpawnSessionTool() {
 func (s *Server) registerListTaskSessionsTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_task_sessions_kandev",
-			mcp.WithDescription(`List a task's sessions, newest first. Use the returned session_id with get_task_conversation_kandev or message_task_kandev; those tools otherwise use the primary session. Entries include name, state, is_primary, is_current, agent_profile_id, and timestamps.`),
+			mcp.WithDescription(`List a task's sessions, newest first. Use the returned session_id with get_task_conversation_kandev or message_task_kandev; those tools otherwise use the primary session. Entries include name, state, is_primary, is_current, agent_profile_id, and timestamps. When listing its own task, the canonical Coordinator also receives queue_incarnation_id plus a bounded exact_profile launch receipt with the applied profile generation/revision, actual model, inference/substitution flags, and model_verified.`),
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithIdempotentHintAnnotation(true),

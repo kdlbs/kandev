@@ -1961,7 +1961,12 @@ type TaskSession struct {
 	TokensIn       int64 `json:"tokens_in"`
 	TokensCachedIn int64 `json:"tokens_cached_in"`
 	TokensOut      int64 `json:"tokens_out"`
+
+	ExactProfileGeneration int64 `json:"exact_profile_generation,omitempty"`
+	ExactProfileRevision   int64 `json:"exact_profile_revision,omitempty"`
 }
+
+const TaskSessionRouteStateCoordinatorHandoffFenced = "coordinator_handoff_fenced"
 
 // ActiveSessionCancellationCandidate is the compare-and-set snapshot used by
 // the active-session stall healer. An empty ExpectedTurnID means that no turn

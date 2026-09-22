@@ -20,7 +20,7 @@ import (
 func (r *sqliteRepository) ListPendingMoves(ctx context.Context) ([]PendingMoveRecord, error) {
 	rows, err := r.ro.QueryxContext(ctx, `
 		SELECT session_id, move_id, session_incarnation_id, task_id, workflow_id,
-		       workflow_step_id, step_position, queued_at, actor, sender_session_id
+		       workflow_step_id, step_position, queued_at, actor, sender_session_id, exact_profile_generation
 		FROM pending_moves
 	`)
 	if err != nil {
@@ -35,25 +35,27 @@ func (r *sqliteRepository) ListPendingMoves(ctx context.Context) ([]PendingMoveR
 			position                                                                    int
 			queuedAt                                                                    time.Time
 			actor, senderSessionID                                                      string
+			exactProfileGeneration                                                      int64
 		)
 		if err := rows.Scan(
 			&sessionID, &moveID, &sessionIncarnationID, &taskID, &workflowID,
-			&workflowStepID, &position, &queuedAt, &actor, &senderSessionID,
+			&workflowStepID, &position, &queuedAt, &actor, &senderSessionID, &exactProfileGeneration,
 		); err != nil {
 			return nil, fmt.Errorf("scan pending move: %w", err)
 		}
 		records = append(records, PendingMoveRecord{
 			SessionID: sessionID,
 			Move: PendingMove{
-				MoveID:               moveID,
-				SessionIncarnationID: sessionIncarnationID,
-				TaskID:               taskID,
-				WorkflowID:           workflowID,
-				WorkflowStepID:       workflowStepID,
-				Position:             position,
-				QueuedAt:             queuedAt,
-				Actor:                actor,
-				SenderSessionID:      senderSessionID,
+				MoveID:                 moveID,
+				SessionIncarnationID:   sessionIncarnationID,
+				TaskID:                 taskID,
+				WorkflowID:             workflowID,
+				WorkflowStepID:         workflowStepID,
+				Position:               position,
+				QueuedAt:               queuedAt,
+				Actor:                  actor,
+				SenderSessionID:        senderSessionID,
+				ExactProfileGeneration: exactProfileGeneration,
 			},
 		})
 	}

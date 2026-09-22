@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
@@ -129,6 +130,48 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 	assert.Equal(t, "mcp.delete_task", ws.ActionMCPDeleteTask)
 	assert.Equal(t, "mcp.archive_task", ws.ActionMCPArchiveTask)
 	assert.Equal(t, "mcp.update_task_state", ws.ActionMCPUpdateTaskState)
+	assert.Equal(t, "mcp.assign_exact_task_profile", ws.ActionMCPAssignExactTaskProfile)
+	assert.Equal(t, "mcp.handoff_coordinator_primary", ws.ActionMCPHandoffCoordinatorPrimary)
+}
+
+func TestCoordinatorHandoffToolRequiresCanonicalCapability(t *testing.T) {
+	backend := &testBackend{}
+	task := New(backend, "session", "task", 10005, newTestLogger(t), "", false, ModeTask)
+	assert.NotContains(t, task.mcpServer.ListTools(), "handoff_coordinator_primary_kandev")
+
+	coordinator := NewWithProfile(backend, "session", "task", 10005, newTestLogger(t), "", false,
+		mcpprofile.New(mcpprofile.SurfaceKanbanTask,
+			[]mcpprofile.Capability{mcpprofile.CapabilityCoordinatorSessionHandoff}, nil))
+	assert.Contains(t, coordinator.mcpServer.ListTools(), "handoff_coordinator_primary_kandev")
+	properties := toolInputProperties(t, coordinator, "handoff_coordinator_primary_kandev")
+	for _, field := range []string{"task_id", "predecessor_session_id", "successor_session_id",
+		"predecessor_queue_incarnation_id", "successor_queue_incarnation_id",
+		"expected_agent_profile_id", "expected_model", "operation_id"} {
+		assert.Contains(t, properties, field)
+	}
+}
+
+func TestAssignExactTaskProfileToolRequiresConfigOrCoordinatorCapability(t *testing.T) {
+	backend := &testBackend{}
+	config := New(backend, "test-session", "", 10005, newTestLogger(t), "", false, ModeConfig)
+	external := New(backend, "test-session", "", 10005, newTestLogger(t), "", false, ModeExternal)
+	task := New(backend, "test-session", "", 10005, newTestLogger(t), "", false, ModeTask)
+
+	assert.Contains(t, config.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
+	assert.Contains(t, external.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
+	assert.NotContains(t, task.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
+
+	coordinator := NewWithProfile(backend, "session", "task", 10005, newTestLogger(t), "", false,
+		mcpprofile.New(mcpprofile.SurfaceKanbanTask,
+			[]mcpprofile.Capability{mcpprofile.CapabilityExactTaskProfileAssignment}, nil))
+	assert.Contains(t, coordinator.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
+	properties := toolInputProperties(t, coordinator, "assign_exact_task_profile_kandev")
+	for _, field := range []string{
+		"task_id", "agent_profile_id", "expected_model", "expected_task_state",
+		"expected_workflow_step_id", "target_workflow_step_id", "expected_assignment_generation",
+	} {
+		assert.Contains(t, properties, field)
+	}
 }
 
 // --- Workflow handler tests ---

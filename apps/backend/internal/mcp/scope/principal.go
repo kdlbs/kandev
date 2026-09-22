@@ -18,6 +18,7 @@ type Principal struct {
 	CallerTaskID    string
 	CallerSessionID string
 	Surface         mcpprofile.Surface
+	HandoffFenced   bool
 }
 
 func (p Principal) IsAutomation() bool {
@@ -49,7 +50,8 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.validatePrincipalSession(ctx, taskID, sessionID); err != nil {
+	session, err := r.validatePrincipalSession(ctx, taskID, sessionID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -68,6 +70,7 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 		CallerTaskID:    taskID,
 		CallerSessionID: sessionID,
 		Surface:         surface,
+		HandoffFenced:   session != nil && session.RouteState == models.TaskSessionRouteStateCoordinatorHandoffFenced,
 	}), nil
 }
 
@@ -82,21 +85,21 @@ func (r *Resolver) resolvePrincipalTask(ctx context.Context, taskID string) (*mo
 	return task, nil
 }
 
-func (r *Resolver) validatePrincipalSession(ctx context.Context, taskID, sessionID string) error {
+func (r *Resolver) validatePrincipalSession(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
 	lookup, ok := r.tasks.(interface {
 		GetTaskSession(context.Context, string) (*models.TaskSession, error)
 	})
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	session, err := lookup.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("resolve MCP principal session %s: %w", sessionID, err)
+		return nil, fmt.Errorf("resolve MCP principal session %s: %w", sessionID, err)
 	}
 	if session == nil || session.TaskID != taskID {
-		return fmt.Errorf("resolve MCP principal: session %s does not belong to task %s", sessionID, taskID)
+		return nil, fmt.Errorf("resolve MCP principal: session %s does not belong to task %s", sessionID, taskID)
 	}
-	return nil
+	return session, nil
 }
 
 func (r *Resolver) resolvePrincipalWorkspace(ctx context.Context, task *models.Task) (string, error) {

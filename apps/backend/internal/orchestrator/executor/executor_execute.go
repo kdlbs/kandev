@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -98,6 +99,12 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	}
 	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
+	}
+	if surface == mcpprofile.SurfaceKanbanTask && mcpscope.IsCanonicalCoordinatorTask(ctx, task, e.repo) {
+		capabilities = append(capabilities,
+			mcpprofile.CapabilityExactTaskProfileAssignment,
+			mcpprofile.CapabilityCoordinatorSessionHandoff,
+		)
 	}
 	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
 }
@@ -1548,6 +1555,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		session.ExecutorID = execCfg.ExecutorID
 	}
 	req.OfficeAgentProfileID = opts.OfficeAgentProfileID
+	req.ExactProfile = opts.ExactProfile
+	req.ExactProfileModel = opts.ExactProfileModel
+	req.ExactProfileRevision = opts.ExactProfileRevision
 	req.TurnID = opts.TurnID
 	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {
 		req.OfficeAgentProfileID = session.AgentProfileID

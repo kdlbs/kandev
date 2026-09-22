@@ -1218,7 +1218,7 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 	// External configuration tools include the five compact settings tools.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 47, len(tools))
+	assert.Equal(t, 48, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 
