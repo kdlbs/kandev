@@ -4,6 +4,7 @@ system: ui
 requirements:
   - REQ-UI-MOBILE-TASK-CHROME-001
 created: 2026-08-24
+updated: 2026-09-22
 owners:
   - Kandev
 ---
@@ -15,8 +16,10 @@ owners:
 This design removes two phone-only top-bar entry points whose scope is owned
 elsewhere: saved desktop layouts and general Git operations. It keeps task
 movement in the existing task drawer and Git operations in the existing Changes
-surface. No backend, store, persistence, permission, or responsive-routing
-contract changes.
+surface. It also moves plugin-provided session status and actions from the fixed
+phone header into the shared app menu while retaining their inline tablet and
+desktop presentation. No backend, store, persistence, permission, or
+responsive-routing contract changes.
 
 ## Requirement mapping
 
@@ -38,12 +41,39 @@ shared app menu and title-triggered task picker expose task-row actions,
 including **Move to**, so replacing the Git ellipsis with another task menu
 would create a second path to the same commands.
 
+`SessionMobileTopBar` still renders every `chat-top-bar` plugin registration
+inside a non-shrinking action cluster. The slot accepts an unbounded number of
+opaque plugin components and does not tell them whether the host is the desktop
+top bar or the phone surface. Multiple compact contributions can therefore
+consume most of a phone header even without causing document overflow, leaving
+the title and branch summary technically present but no longer useful. The
+listing header already avoids this failure by putting `main-top-bar`
+contributions in the shared phone menu and passing an explicit presentation.
+
 ## Components and responsibilities
 
 - `apps/web/components/task/mobile/session-mobile-top-bar.tsx` keeps task title,
-  repository/branch summary, applicable status/plugin controls, approval, and
-  the shared app-navigation trigger and title-triggered task picker. It does not
-  mount layout or Git action surfaces. Phone triggers retain 44px touch targets.
+  repository/branch summary, applicable first-party status controls, approval,
+  and the shared app-navigation trigger and title-triggered task picker. It does
+  not mount layout, Git action, or plugin contribution surfaces inline. It passes
+  the current task plugin contribution into the app menu instead. Phone triggers
+  retain 44px touch targets.
+- `apps/web/components/task/task-top-bar-plugin-actions.tsx` uses the public
+  `ChatTopBarSlotProps` contract. It keeps desktop rendering unchanged and adds a
+  mobile presentation that wraps contributions, constrains direct children to
+  the available menu width, and applies the phone minimum target to host buttons.
+  A reactive registration-presence hook prevents an empty Plugins section.
+- `apps/web/components/navigation/app-nav-sheet.tsx` and
+  `apps/web/components/navigation/app-nav-sections.tsx` accept optional
+  page-scoped plugin content. `MobilePluginNavSection` renders that content and
+  plugin navigation destinations under one localized **Plugins** heading after
+  workspace actions and Automations and before Integrations. Arbitrary plugin
+  interaction does not dismiss the menu; plugin links retain normal dismissal.
+- `apps/packages/plugin-sdk/src/index.ts` exports `ChatTopBarSlotProps` with a
+  `presentation: "desktop" | "mobile"` field. The mobile value means the
+  contribution is mounted in the shared phone menu; the desktop value means the
+  contribution remains inline in the task top bar. Existing task, workspace,
+  active-session, and session-list fields remain unchanged.
 - `apps/web/components/task/mobile/session-task-switcher-sheet.tsx` remains the
   shared task-list and row-action owner for embedded Tasks and the title picker.
 - `apps/web/components/task/mobile/mobile-changes-panel.tsx` continues to
@@ -77,6 +107,21 @@ not retain action ownership.
 
 Both entries reuse the same task-row actions and mutation path.
 
+### Plugin contribution
+
+1. On tablet or desktop, `TaskTopBarPluginActions` passes
+   `presentation: "desktop"` and renders each `chat-top-bar` registration in the
+   existing inline cluster.
+2. On a phone, the persistent header renders only its first-party controls and
+   shared app-navigation trigger. The reactive slot-presence check supplies the
+   plugin contribution to `AppNavSheet` only while registrations exist.
+3. The user opens the hamburger menu and reaches the contribution in the shared
+   **Plugins** section. `TaskTopBarPluginActions` passes
+   `presentation: "mobile"` with the same task and session identity.
+4. The menu's single vertical scroll owner contains wrapping contributions and
+   plugin navigation rows. Plugin-owned controls keep their own interaction and
+   disclosure state; selecting a plugin navigation link closes the menu.
+
 ### Git action
 
 1. User selects **Changes** from existing phone bottom navigation.
@@ -92,39 +137,48 @@ state or operation semantics.
 ## Mobile design contract
 
 - **Desktop outcome and mobile entry point:** Desktop and tablet top bars remain
-  unchanged. Phone task actions enter through the hamburger task drawer; Git
-  actions enter through bottom-navigation **Changes**.
+  unchanged. Phone task and plugin contributions enter through the hamburger
+  menu; Git actions enter through bottom-navigation **Changes**.
 - **Nearest shipped exemplars:** `SessionTaskSwitcherSheet` contributes the
-  inset task drawer and visible task-row actions. `MobileChangesPanel`
+  inset task drawer and visible task-row actions. The listing
+  `MainTopBarPluginActions` mobile presentation contributes menu placement,
+  explicit presentation context, wrapping, and touch geometry. `MobileChangesPanel`
   contributes the focused, one-dimensional Git surface and its single internal
   scroll owner.
 - **Information hierarchy and primary action:** Task identity remains first,
-  followed by contextual status/actions and one task-navigation control.
-  Neither layout management nor Git operations compete with the active panel.
-- **Presentation choice and rationale:** No replacement surface is added.
-  Task choices remain in the existing drawer because they are short contextual
-  navigation/actions. Dense Git content remains in Changes because it needs
-  repository, file, commit, and remote-state context.
+  followed by essential first-party status/actions and one app-navigation
+  control. Optional plugin status/actions move into the existing Plugins group.
+  Layout management and Git operations do not compete with the active panel.
+- **Presentation choice and rationale:** No replacement surface is added. Task
+  choices and optional plugin contributions share the existing drawer because
+  they are temporary contextual navigation, status, and actions. Dense Git
+  content remains in Changes because it needs repository, file, commit, and
+  remote-state context.
 - **Scroll, viewport, safe area, and touch:** Existing fixed top bar,
   `h-dvh` workbench, panel scroll owner, bottom navigation, drawer safe area,
-  and menu containment remain. Removing two controls reduces crowding. The
-  retained task-drawer trigger has a 44-by-44 CSS-pixel hit target. Standalone
-  Changes recovery controls and their dialog actions retain 44 CSS-pixel touch
-  targets through the full phone range below `md`.
-- **Shared state and logic:** Phone and desktop continue to share task and Git
-  state, mutations, eligibility, and feedback. Only phone composition loses
-  duplicate entry points.
-- **Mobile Playwright proof:** Tests assert both removed triggers are absent,
-  the retained task drawer remains contained and can move the active task, Git
-  operations complete through Changes, long titles do not overlap actions, and
-  document horizontal overflow stays absent. Remote recovery geometry is also
-  verified at 700 CSS pixels, between the `sm` and `md` breakpoints.
+  and menu containment remain. Removing fixed plugin content protects the task
+  identity width. The retained app-menu trigger has a 44-by-44 CSS-pixel hit
+  target; plugin controls in the menu have at least a 44 CSS-pixel active target.
+  Standalone Changes recovery controls and their dialog actions retain 44
+  CSS-pixel touch targets through the full phone range below `md`.
+- **Shared state and logic:** Phone and desktop share task, session, plugin, and
+  Git state, mutations, eligibility, and feedback. Only the phone plugin
+  presentation and placement differ.
+- **Mobile Playwright proof:** Tests install a real fixture plugin, create a
+  long-title task, and assert that plugin contributions are absent from the
+  persistent header, present in the menu with mobile context and touch geometry,
+  contained with multiple contributions, and leave no document horizontal
+  overflow. Existing tests continue to prove the removed layout/Git triggers,
+  task movement, Changes actions, and remote recovery at 700 CSS pixels.
 
 ## Failure and recovery
 
 - Missing or loading session Git data leaves Changes controls in their existing
   loading/disabled state; it does not reintroduce a top-bar action.
 - Archived tasks keep existing read-only presentation and task navigation.
+- A plugin render failure remains isolated by `PluginErrorBoundary`; removing or
+  disabling the last `chat-top-bar` registration removes the menu contribution
+  and does not leave an empty Plugins section unless plugin navigation rows exist.
 - Remote-contribution drift continues to fail closed through shared Changes
   action policy and exact confirmation/lease behavior.
 - If optional task-list data is still hydrating, the existing task drawer owns
@@ -132,9 +186,11 @@ state or operation semantics.
 
 ## Persistence and compatibility
 
-No persisted layout, task, session, or user-setting value changes. Removing the
-phone selector does not delete saved layouts or alter desktop defaults. Existing
-phone panel preference and desktop/tablet layout state remain unchanged.
+No persisted layout, task, session, or user-setting value changes. Adding the
+`presentation` field is backward compatible for existing structural slot
+consumers. Removing the phone selector does not delete saved layouts or alter
+desktop defaults. Existing phone panel preference and desktop/tablet layout
+state remain unchanged.
 
 ## Related specifications and decisions
 

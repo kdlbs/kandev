@@ -10,7 +10,10 @@ import { LineStat } from "@/components/diff-stat";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import type { FileInfo } from "@/lib/state/slices";
-import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
+import {
+  TaskTopBarPluginActions,
+  useHasTaskTopBarPluginActions,
+} from "@/components/task/task-top-bar-plugin-actions";
 import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
@@ -225,19 +228,23 @@ function MobileTopBarActions({
   onTaskUnarchived,
   onTaskPickerClick,
 }: MobileTopBarActionsProps) {
+  const hasPluginActions = useHasTaskTopBarPluginActions();
+  const pluginActions =
+    !isArchived && hasPluginActions ? (
+      <TaskTopBarPluginActions
+        sessionId={sessionId ?? null}
+        taskId={taskId ?? null}
+        taskTitle={taskTitle}
+        workspaceId={workspaceId ?? null}
+        presentation="mobile"
+      />
+    ) : undefined;
+
   return (
     <div className="flex shrink-0 items-center gap-1" data-testid="mobile-topbar-actions">
       <MRTopbarButton compact mobile />
       {isArchived && <TaskUnarchiveButton taskId={taskId} onUnarchived={onTaskUnarchived} mobile />}
       {!isArchived && <PortForwardButton sessionId={sessionId} />}
-      {!isArchived && (
-        <TaskTopBarPluginActions
-          sessionId={sessionId ?? null}
-          taskId={taskId ?? null}
-          taskTitle={taskTitle}
-          workspaceId={workspaceId ?? null}
-        />
-      )}
       {isRemoteExecutor && (
         <MobileRemoteExecutorIndicator
           taskId={taskId}
@@ -251,7 +258,7 @@ function MobileTopBarActions({
         />
       )}
       {showApproveButton && onApprove && <ApproveButton onApprove={onApprove} />}
-      <AppNavSheet onOpenTaskViews={onTaskPickerClick} />
+      <AppNavSheet onOpenTaskViews={onTaskPickerClick} pluginActions={pluginActions} />
     </div>
   );
 }

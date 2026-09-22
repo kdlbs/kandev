@@ -630,8 +630,8 @@ to strings, but an unmounted name renders nowhere.
 | task-create-input-actions | Task creation composer toolbar                                                             | PluginComposerSlotProps                                          |
 | new-session-input-actions | New-session composer toolbar                                                               | PluginComposerSlotProps                                          |
 | chat-submit-decoration    | Layer over the composer's send button                                                      | ChatSubmitDecorationSlotProps                                    |
-| chat-top-bar              | Session top bar                                                                            | { taskId, taskTitle?, workspaceId, activeSessionId, sessionIds } |
-| main-top-bar              | Home/Kanban/Tasks top bar                                                                  | { workspaceId, workspaceLabel?, currentPage }                    |
+| chat-top-bar              | Session top bar or phone Plugins menu                                                      | ChatTopBarSlotProps                                              |
+| main-top-bar              | Home/Kanban/Tasks top bar                                                                  | MainTopBarSlotProps                                              |
 | app-status-bar-left       | Left side of desktop status bar or mobile status drawer                                    | AppStatusBarSlotProps                                            |
 | app-status-bar-right      | Right side of desktop status bar or mobile status drawer                                   | AppStatusBarSlotProps                                            |
 | plugin-settings           | Top of this plugin's Settings > Plugins page                                               | { pluginId, status }; owner-scoped to the plugin being viewed    |
@@ -1872,8 +1872,8 @@ plugins at once. Available slots:
 | `task-create-input-actions` | Task creation composer toolbar                                                                         | `PluginComposerSlotProps`                                         |
 | `new-session-input-actions` | New-session composer toolbar                                                                           | `PluginComposerSlotProps`                                         |
 | `chat-submit-decoration`    | Layer over the chat composer's send button, for adornments that belong on the send affordance itself   | `ChatSubmitDecorationSlotProps`                                   |
-| `chat-top-bar`              | Session top bar, beside the CPU/DB metrics and the document/editor/debug controls                      | `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }` |
-| `main-top-bar`              | Default app top bar (Home / Kanban / Tasks), beside the CPU/DB metrics and the view/display controls   | `{ workspaceId, workspaceLabel, currentPage }`                    |
+| `chat-top-bar`              | Session top bar on desktop; shared Plugins menu section on phones                                      | `ChatTopBarSlotProps`                                             |
+| `main-top-bar`              | Default app top bar (Home / Kanban / Tasks), beside the CPU/DB metrics and the view/display controls   | `MainTopBarSlotProps`                                             |
 | `app-status-bar-left`       | Default-left item in the global status surface                                                         | `AppStatusBarSlotProps`                                           |
 | `app-status-bar-right`      | Default-right item in the global status surface                                                        | `AppStatusBarSlotProps`                                           |
 | `plugin-settings`           | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }`                                            |
@@ -1981,24 +1981,32 @@ example.
 ### Session top bar
 
 Register a `chat-top-bar` component to surface at-a-glance status in the
-session top bar, beside first-party document/editor/debug controls. The host passes the current context as
-`slotProps`:
+session top bar. Import its context from the public SDK:
 
 ```ts
-type ChatTopBarSlotProps = {
+import type { ChatTopBarSlotProps } from "@kandev/plugin-sdk";
+
+// The exported type contains:
+type Context = {
   taskId: string | null;
   taskTitle?: string;
   workspaceId: string | null;
   activeSessionId: string | null; // session the top bar is bound to
   sessionIds: string[]; // every kandev session id on the task
+  presentation: "desktop" | "mobile";
 };
 ```
 
 Like `chat-input-actions`, both the active session and the full `sessionIds`
 list are provided (see the note above about resolving kandev session ids to
-ACP transcript ids server-side). The top bar is a compact horizontal strip, so
-keep contributions to small badges or `h-7` buttons that match the native
-metric chips.
+ACP transcript ids server-side). With `presentation: "desktop"`, the contribution
+is inline beside first-party document/editor/debug controls, so keep it to a
+small badge or `h-7` button that matches the native metric chips. With
+`presentation: "mobile"`, the contribution is in the shared menu's **Plugins**
+section. The host wraps multiple contributions inside the menu width and gives
+`host.ui.Button` controls a minimum 44px touch target. Plugin controls retain
+their own interaction and disclosure state; arbitrary interaction does not
+dismiss the menu.
 
 ```js
 // inside initialize(registry, host):

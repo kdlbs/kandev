@@ -124,6 +124,8 @@ type AppNavSectionsProps = {
   omitDestinations?: string[];
   /** Optional workspace-scoped plugin actions for the current phone surface. */
   workspaceActions?: ReactNode;
+  /** Optional page-scoped controls rendered with plugin destinations. */
+  pluginActions?: ReactNode;
   afterPrimary?: ReactNode;
   quickActions?: ReactNode;
   phoneNavigation?: boolean;
@@ -141,6 +143,7 @@ export function AppNavSections({
   omitSections = [],
   omitDestinations = [],
   workspaceActions,
+  pluginActions,
   afterPrimary,
   quickActions,
   phoneNavigation = false,
@@ -181,8 +184,12 @@ export function AppNavSections({
       )}
       {afterPrimary}
       {workspaceActions}
-      {!hasSavedSidebarLayout && !omit.has("plugins") && (
-        <MobilePluginNavSection onNavigate={onNavigate} />
+      {!omit.has("plugins") && (
+        <MobilePluginNavSection
+          actions={pluginActions}
+          includeDestinations={!hasSavedSidebarLayout}
+          onNavigate={onNavigate}
+        />
       )}
       {!hasSavedSidebarLayout && !omit.has("integrations") && (
         <MobileIntegrationsSection

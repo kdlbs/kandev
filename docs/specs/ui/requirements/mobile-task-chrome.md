@@ -2,6 +2,7 @@
 status: active
 system: ui
 created: 2026-08-24
+updated: 2026-09-22
 owners:
   - Kandev
 ---
@@ -13,7 +14,9 @@ owners:
 Phone users need a compact task header whose controls match the scope of the
 surface. Desktop Dockview layout management does not apply to the dedicated
 phone task composition, Git operations belong with Changes, and task-level
-actions already have a discoverable entry through the task drawer.
+actions already have a discoverable entry through the task drawer. Optional
+plugin status and actions belong in the shared phone menu so they cannot consume
+the task identity region.
 
 ## Terminology
 
@@ -43,6 +46,7 @@ viewport.
 - **AC-UI-MOBILE-TASK-CHROME-001.4:** When a phone user selects Changes, applicable commit, push, change-request creation, pull, rebase, merge, and remote-contribution recovery actions shall remain reachable through the existing Changes controls and safety flows. Standalone recovery controls and their confirmation actions shall retain at least a 44 CSS-pixel hit target throughout the phone breakpoint below `md`.
 - **AC-UI-MOBILE-TASK-CHROME-001.5:** When the phone task title is long, the top bar shall keep its retained actions inside the viewport, avoid document-level horizontal overflow, and provide at least a 44-by-44 CSS-pixel hit target for the task-drawer entry.
 - **AC-UI-MOBILE-TASK-CHROME-001.6:** When the same task renders on tablet or desktop, existing task-top-bar and Dockview layout-profile behavior shall remain unchanged.
+- **AC-UI-MOBILE-TASK-CHROME-001.7:** When one or more plugins contribute session top-bar status or actions, the phone task header shall keep those contributions out of its persistent row and expose them in the shared phone menu's Plugins section. The menu shall preserve current task, workspace, active-session, and task-session context, identify its presentation as mobile, keep multiple or long contributions inside the menu viewport, and provide at least a 44 CSS-pixel active target for plugin controls. Tablet and desktop shall retain the inline top-bar presentation.
 
 ## Out of scope
 
@@ -52,7 +56,8 @@ viewport.
 - Removing layout profiles from desktop Dockview or from Settings.
 - Changing backend task movement, Git operations, APIs, persistence, or
   permissions.
-- Removing or reorganizing other phone task-top-bar actions.
+- Removing or reorganizing first-party phone task-top-bar actions other than
+  the plugin contribution placement defined above.
 
 ## Navigation entry points
 
@@ -69,3 +74,7 @@ the shared phone menu, replacing the Task views action and dedicated pinned
 shortcuts. Kanban/Threads/List title dropdowns open display options; Threads
 saved-view editing remains inside that surface. See REQ-UI-MOBILE-MENU-004/005
 in the unified navigation requirements for the current composition.
+
+## Implementation plans
+
+- [Mobile task plugin menu](../../../plans/mobile-task-plugin-menu/plan.md)
