@@ -158,7 +158,8 @@ state or operation semantics.
   `h-dvh` workbench, panel scroll owner, bottom navigation, drawer safe area,
   and menu containment remain. Removing fixed plugin content protects the task
   identity width. The retained app-menu trigger has a 44-by-44 CSS-pixel hit
-  target; plugin controls in the menu have at least a 44 CSS-pixel active target.
+  target; plugin controls created with `host.ui.Button` have at least a 44
+  CSS-pixel active target in the menu.
   Standalone Changes recovery controls and their dialog actions retain 44
   CSS-pixel touch targets through the full phone range below `md`.
 - **Shared state and logic:** Phone and desktop share task, session, plugin, and

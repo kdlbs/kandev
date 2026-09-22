@@ -164,4 +164,7 @@ None.
 - Managed production-build mobile E2E: 2 tests passed with the packaged plugin.
 - Both synthetic PR screenshots are present in the capture manifest and were
   visually checked.
+- Review fixup scoped the 44px guarantee to `host.ui.Button`, corrected the
+  documented phone placement for `main-top-bar`, and reran the managed mobile
+  E2E scenarios successfully after updating the fixture action.
 - Public-doc and specification validation passed; final diff checks passed.

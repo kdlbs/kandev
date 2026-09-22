@@ -1036,10 +1036,10 @@ interface PluginRegistry {
   // document/editor/debug controls on desktop) and forwards
   // `ChatTopBarSlotProps`: `{ taskId, taskTitle, workspaceId,
   // activeSessionId, sessionIds, presentation }`. On a phone, presentation is
-  // "mobile" and contributions live inside the shared Plugins menu section
-  // with 44px touch targets. Arbitrary plugin interaction does not dismiss the
-  // menu. Both presentations carry the active session plus every kandev
-  // session id on the task.
+  // "mobile" and contributions live inside the shared Plugins menu section.
+  // The host gives `host.ui.Button` controls a 44px touch target. Arbitrary
+  // plugin interaction does not dismiss the menu. Both presentations carry
+  // the active session plus every kandev session id on the task.
   // "main-top-bar" renders status/actions in the default app top bar on the
   // Home / Kanban / Tasks views (beside the CPU/DB metrics and the view/display
   // controls) and forwards `{ workspaceId, workspaceLabel, currentPage,

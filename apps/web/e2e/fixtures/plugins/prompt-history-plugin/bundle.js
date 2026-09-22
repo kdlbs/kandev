@@ -311,6 +311,7 @@
           {
             type: "button",
             variant: "outline",
+            className: "cursor-pointer",
             "data-testid": "e2e-chat-top-bar-action",
             "data-presentation": slotProps.presentation || "unknown",
             "data-activated": active ? "true" : "false",

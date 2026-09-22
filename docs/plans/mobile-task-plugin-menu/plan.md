@@ -159,9 +159,10 @@ Target opened shared menu:
 
 Structural requirements: the phone header keeps task identity as the flexible
 region; the hamburger remains fixed and touch reachable; plugin contributions
-share one Plugins section, wrap within its width, and expose 44px controls. The
-exact spacing, labels inside plugin-owned components, and number of first-party
-header controls remain governed by current design tokens and availability.
+share one Plugins section, wrap within its width, and give `host.ui.Button`
+controls a 44px active target. The exact spacing, labels inside plugin-owned
+components, and number of first-party header controls remain governed by current
+design tokens and availability.
 
 Tablet and desktop keep the current inline task top bar:
 
@@ -212,11 +213,11 @@ This preview maps to `AC-UI-MOBILE-TASK-CHROME-001.5`, `.6`, and `.7`.
 - Plugin SDK and web TypeScript checks passed; targeted ESLint completed with
   zero warnings.
 - Managed `mobile-chrome` Playwright run: 2 tests passed against the packaged
-  fixture, including long-title geometry, context, 44px control size,
+  fixture, including long-title geometry, context, 44px host-button size,
   activation, focus return, and horizontal-overflow assertions.
 - PR capture manifest contains the validated synthetic header and menu PNGs.
-- Public-doc validation passed 62 tests and 47 published pages; specification
-  indexing and lint passed 294 decisions and 1,075 specifications.
+- Public-doc validation passed 70 tests and 47 published pages; specification
+  indexing and lint passed 299 decisions and 1,108 specifications.
 
 ## Risks
 
