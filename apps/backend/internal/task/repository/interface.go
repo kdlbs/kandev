@@ -239,6 +239,8 @@ type ExactProfileAssignmentRepository interface {
 // ExactProfileLaunchReceiptRepository persists and reads the per-session exact
 // launch receipt.
 type ExactProfileLaunchReceiptRepository interface {
+	BindExactProfileLaunchAttempt(context.Context, *models.ExactProfileLaunchAttemptBinding) (bool, error)
+	RecordExactProfileLaunchReceiptForAttempt(context.Context, *models.ExactProfileLaunchAttemptBinding, *models.ExactProfileLaunchReceipt) (bool, error)
 	// RecordExactProfileLaunchReceipt writes the launch outcome for one session.
 	// It is idempotent per (task, session): a repeated call with the same
 	// session returns false without overwriting the original receipt.

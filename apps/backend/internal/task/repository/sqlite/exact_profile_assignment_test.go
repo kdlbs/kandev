@@ -120,6 +120,32 @@ func TestExactProfileBindingSchemaUpgradesPriorExactSchema(t *testing.T) {
 	}
 }
 
+func TestExactProfileAttemptBindingGuardsReceipt(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	if _, err := repo.AssignExactProfileAssignment(t.Context(), assignment); err != nil {
+		t.Fatal(err)
+	}
+	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: "bound-session", ExecutionID: "execution-1", AttemptID: "attempt-1", SessionIncarnationID: "incarnation-1", AgentProfileID: assignment.AgentProfileID, ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
+	receipt := &models.ExactProfileLaunchReceipt{TaskID: binding.TaskID, SessionID: binding.SessionID, AgentProfileID: binding.AgentProfileID, ProfileRevision: binding.ProfileRevision, Generation: binding.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
+	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(t.Context(), binding, receipt); changed || !errors.Is(err, models.ErrExactProfileAssignmentGeneration) {
+		t.Fatalf("missing binding changed=%v err=%v", changed, err)
+	}
+	if _, err := repo.BindExactProfileLaunchAttempt(t.Context(), binding); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(t.Context(), binding, receipt); err != nil || !changed {
+		t.Fatalf("current receipt changed=%v err=%v", changed, err)
+	}
+	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(t.Context(), binding, receipt); err != nil || changed {
+		t.Fatalf("replay changed=%v err=%v", changed, err)
+	}
+	stale := *binding
+	stale.AttemptID = "attempt-old"
+	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(t.Context(), &stale, receipt); changed || !errors.Is(err, models.ErrExactProfileAssignmentGeneration) {
+		t.Fatalf("stale binding changed=%v err=%v", changed, err)
+	}
+}
+
 func TestUpsertExactProfileAssignmentGuardsGeneration(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "exact-profile-assignment-generation.db")
 	dbConn, err := dbutil.OpenSQLite(dbPath)
