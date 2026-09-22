@@ -42,6 +42,9 @@ func TestPostgresTaskEnvironmentRecoveryClaimReplayBlocksLiveConsumers(t *testin
 				if err := repoA.CreateTaskSession(t.Context(), &models.TaskSession{ID: "session-live-consumer-pg", TaskID: taskID, TaskEnvironmentID: environmentID, QueueIncarnationID: "incarnation-live-consumer-pg", State: models.TaskSessionStateWaitingForInput}); err != nil {
 					t.Fatalf("create inactive consumer: %v", err)
 				}
+				if err := repoA.UpsertExecutorRunning(t.Context(), &models.ExecutorRunning{ID: "session-live-consumer-pg", SessionID: "session-live-consumer-pg", TaskID: taskID, ExecutorID: "executor-live-consumer-pg", Status: models.ExecutorRunningStatusStopped}); err != nil {
+					t.Fatalf("create stopped consumer executor: %v", err)
+				}
 			}
 			request := recoveryClaimRequest(t, repoA, environmentID, taskID, sessionID, "operation-live-replay-pg", 1)
 			claim, err := repoA.AcquireTaskEnvironmentRecoveryClaim(t.Context(), request)
