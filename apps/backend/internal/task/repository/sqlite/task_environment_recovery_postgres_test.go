@@ -103,6 +103,99 @@ func TestPostgresTaskEnvironmentRecoveryClaimLegacyIncarnationMigrationFailsClos
 	}
 }
 
+func TestPostgresTaskEnvironmentRecoveryClaimInheritedAuthorization(t *testing.T) {
+	for _, test := range []struct {
+		name, requesterWorkspace, parentID string
+		wantErr                            error
+	}{
+		{name: "authorized child", requesterWorkspace: "workspace-authorized-pg", parentID: "task-owner-pg"},
+		{name: "unrelated task", requesterWorkspace: "workspace-authorized-pg", wantErr: recoveryclaim.ErrClaimMismatch},
+		{name: "cross workspace child", requesterWorkspace: "workspace-other-pg", parentID: "task-owner-pg", wantErr: recoveryclaim.ErrClaimMismatch},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repoA, repoB, _ := newTaskPostgresRepoPair(t)
+			ctx := t.Context()
+			if err := repoA.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-authorized-pg", Name: "Authorized"}); err != nil {
+				t.Fatal(err)
+			}
+			if test.requesterWorkspace != "workspace-authorized-pg" {
+				if err := repoA.CreateWorkspace(ctx, &models.Workspace{ID: test.requesterWorkspace, Name: "Other"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := repoA.CreateTask(ctx, &models.Task{ID: "task-owner-pg", WorkspaceID: "workspace-authorized-pg", Title: "Owner"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repoA.CreateTask(ctx, &models.Task{ID: "task-requester-pg", WorkspaceID: test.requesterWorkspace, ParentID: test.parentID, Title: "Requester", Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repoA.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: "environment-authorized-pg", TaskID: "task-owner-pg", ExecutorType: string(models.ExecutorTypeWorktree), Status: models.TaskEnvironmentStatusCreating, OwnershipGeneration: 1}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repoA.CreateTaskSession(ctx, &models.TaskSession{ID: "session-authorized-pg", TaskID: "task-requester-pg", TaskEnvironmentID: "environment-authorized-pg", QueueIncarnationID: "incarnation-authorized-pg", State: models.TaskSessionStateCreated}); err != nil {
+				t.Fatal(err)
+			}
+			request := recoveryClaimRequest(t, repoA, "environment-authorized-pg", "task-owner-pg", "session-authorized-pg", "operation-"+test.name, 1)
+			claim, err := repoB.AcquireTaskEnvironmentRecoveryClaim(ctx, request)
+			if test.wantErr != nil {
+				if !errors.Is(err, test.wantErr) || claim != nil {
+					t.Fatalf("acquire = (%+v, %v), want (nil, %v)", claim, err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("authorized acquire: %v", err)
+			}
+			t.Cleanup(func() { _ = repoA.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim) })
+			if replayed, err := repoA.AcquireTaskEnvironmentRecoveryClaim(ctx, request); err != nil || !reflect.DeepEqual(replayed, claim) {
+				t.Fatalf("authorized replay = (%+v, %v), want unchanged", replayed, err)
+			}
+		})
+	}
+}
+
+func TestPostgresTaskEnvironmentRecoveryClaimSharedGroupAuthorization(t *testing.T) {
+	repoA, repoB, _ := newTaskPostgresRepoPair(t)
+	ctx := t.Context()
+	for _, statement := range []string{
+		`CREATE TABLE task_workspace_groups (id TEXT PRIMARY KEY, owner_task_id TEXT NOT NULL, materialized_environment_id TEXT NOT NULL DEFAULT '')`,
+		`CREATE TABLE task_workspace_group_members (workspace_group_id TEXT NOT NULL, task_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member', released_at TIMESTAMP, created_at TIMESTAMP NOT NULL, PRIMARY KEY (workspace_group_id, task_id))`,
+	} {
+		if _, err := repoA.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("create workspace group table: %v", err)
+		}
+	}
+	if err := repoA.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-group-pg", Name: "Group"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range []*models.Task{{ID: "task-group-owner-pg", WorkspaceID: "workspace-group-pg", Title: "Owner"}, {ID: "task-group-member-pg", WorkspaceID: "workspace-group-pg", Title: "Member", Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "shared_group"}}}} {
+		if err := repoA.CreateTask(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repoA.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: "environment-group-pg", TaskID: "task-group-owner-pg", ExecutorType: string(models.ExecutorTypeWorktree), Status: models.TaskEnvironmentStatusCreating, OwnershipGeneration: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repoA.db.ExecContext(ctx, repoA.db.Rebind(`INSERT INTO task_workspace_groups (id, owner_task_id, materialized_environment_id) VALUES (?, ?, ?)`), "group-pg", "task-group-owner-pg", "environment-group-pg"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repoA.db.ExecContext(ctx, repoA.db.Rebind(`INSERT INTO task_workspace_group_members (workspace_group_id, task_id, created_at) VALUES (?, ?, ?)`), "group-pg", "task-group-member-pg", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := repoA.CreateTaskSession(ctx, &models.TaskSession{ID: "session-group-pg", TaskID: "task-group-member-pg", TaskEnvironmentID: "environment-group-pg", QueueIncarnationID: "incarnation-group-pg", State: models.TaskSessionStateCreated}); err != nil {
+		t.Fatal(err)
+	}
+	request := recoveryClaimRequest(t, repoA, "environment-group-pg", "task-group-owner-pg", "session-group-pg", "operation-group-pg", 1)
+	claim, err := repoB.AcquireTaskEnvironmentRecoveryClaim(ctx, request)
+	if err != nil {
+		t.Fatalf("shared group acquire: %v", err)
+	}
+	t.Cleanup(func() { _ = repoA.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim) })
+	if replayed, err := repoA.AcquireTaskEnvironmentRecoveryClaim(ctx, request); err != nil || !reflect.DeepEqual(replayed, claim) {
+		t.Fatalf("shared group replay = (%+v, %v), want unchanged", replayed, err)
+	}
+}
+
 func TestPostgresTaskEnvironmentRecoveryClaimRejectsReplayedSessionIncarnation(t *testing.T) {
 	repoA, repoB, _ := newTaskPostgresRepoPair(t)
 	ctx := context.Background()
