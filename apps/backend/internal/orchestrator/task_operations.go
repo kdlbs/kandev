@@ -6181,10 +6181,14 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 
 type promptTaskOptions struct {
 	internalContinuation bool
-	claimEntryID         string
-	lifecyclePrompt      bool
-	afterClaim           func() error
-	afterDispatch        func() error
+	// recoveryAction is populated only by the explicit context-continuation
+	// path. It allows the already-authorized prompt to cross the recovery block
+	// without reopening the ordinary launch gate.
+	recoveryAction  string
+	claimEntryID    string
+	lifecyclePrompt bool
+	afterClaim      func() error
+	afterDispatch   func() error
 	// beforeDispatch runs once before the final dispatch admission boundary.
 	beforeDispatch func() error
 	// afterDispatchAdmission runs once after final dispatch admission succeeds
@@ -6387,8 +6391,10 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if err := s.validatePromptTaskPreconditions(sessionID, options.resumeAttempt); err != nil {
 		return nil, err
 	}
-	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
-		return nil, err
+	if options.recoveryAction == "" {
+		if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
+			return nil, err
+		}
 	}
 
 	session, foregroundClaim, err := s.prepareSessionAndForegroundClaimForPrompt(ctx, taskID, sessionID, options)
@@ -7377,7 +7383,8 @@ func (s *Service) claimDispatchAndAcquireGuard(
 		options.reserveTurnUntilDispatch, options.promptDispatchRecovery,
 		options.afterClaim, foregroundClaim, options.expectedCurrentTurnID,
 		options.requireNonterminalSession, resumeAttempt, admissionGuard,
-		options.cancellationFence, options.allowRouteActionPrompt, options.expectedSessionIdentity,
+		options.cancellationFence, options.allowRouteActionPrompt,
+		options.recoveryAction != "", options.expectedSessionIdentity,
 	)
 	if err != nil {
 		if errors.Is(err, ErrResumeAttemptCancelled) {
@@ -7983,7 +7990,7 @@ func (s *Service) claimPromptDispatch(
 	return s.claimPromptDispatchWithResumeAttempt(
 		ctx, taskID, sessionID, claimEntryID, lifecyclePrompt,
 		reserveTurnUntilDispatch, promptDispatchRecovery, afterClaim, foregroundClaim,
-		expectedCurrentTurnID, requireNonterminalSession, nil, nil, nil, false, expectedIdentities...,
+		expectedCurrentTurnID, requireNonterminalSession, nil, nil, nil, false, false, expectedIdentities...,
 	)
 }
 
@@ -8001,6 +8008,7 @@ func (s *Service) claimPromptDispatchWithResumeAttempt(
 	admissionGuard *lockedCancelInFlightGuard,
 	cancellationFence *promptCancellationFence,
 	allowRouteActionPrompt bool,
+	bypassRecoveryBlock bool,
 	expectedIdentities ...*messagequeue.QueueSessionIdentity,
 ) (*models.TaskSession, promptClaimRollback, error) {
 	claimCtx := ctx
@@ -8022,6 +8030,9 @@ func (s *Service) claimPromptDispatchWithResumeAttempt(
 	claimArgs := []interface{}{expectedIdentity, afterClaim}
 	if cancellationFence != nil {
 		claimArgs = append(claimArgs, cancellationFence)
+	}
+	if bypassRecoveryBlock {
+		claimArgs = append(claimArgs, true)
 	}
 	if admissionGuard != nil {
 		claimArgs = append(claimArgs, admissionGuard)
@@ -8466,12 +8477,13 @@ func (s *Service) claimSessionRunningForPrompt(
 	optionalClaimArgs ...interface{},
 ) (*models.TaskSession, models.TaskSessionState, string, bool, *models.Turn, func(), error) {
 	var (
-		afterClaim        func() error
-		expectedIdentity  *messagequeue.QueueSessionIdentity
-		startupAttempt    *resumeAttempt
-		admissionGuard    *lockedCancelInFlightGuard
-		cancellationFence *promptCancellationFence
-		allowRouteAction  bool
+		afterClaim          func() error
+		expectedIdentity    *messagequeue.QueueSessionIdentity
+		startupAttempt      *resumeAttempt
+		admissionGuard      *lockedCancelInFlightGuard
+		cancellationFence   *promptCancellationFence
+		allowRouteAction    bool
+		bypassRecoveryBlock bool
 	)
 	for _, arg := range optionalClaimArgs {
 		switch value := arg.(type) {
@@ -8487,6 +8499,8 @@ func (s *Service) claimSessionRunningForPrompt(
 			allowRouteAction = true
 		case *promptCancellationFence:
 			cancellationFence = value
+		case bool:
+			bypassRecoveryBlock = value
 		}
 	}
 	if admissionGuard == nil {
@@ -8570,8 +8584,10 @@ func (s *Service) claimSessionRunningForPrompt(
 	); promptErr != nil {
 		return nil, "", "", false, nil, nil, promptErr
 	}
-	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
-		return nil, "", "", false, nil, nil, err
+	if !bypassRecoveryBlock {
+		if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
+			return nil, "", "", false, nil, nil, err
+		}
 	}
 	previousState := freshSession.State
 	switch {

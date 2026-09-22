@@ -2621,5 +2621,9 @@
   "gitDiffUnavailable": "差分を利用できません",
   "gitStatusAutomaticRetry": "変更を更新できませんでした。自動で再試行します。",
   "gitStatusShowingLastAvailable": "利用可能な最新の変更を表示しています。",
-  "gitStatusRetry": "再試行"
+  "gitStatusRetry": "再試行",
+  "continueFromHistory": "保存済み履歴から続行",
+  "durableDeliveryUncertain": "配信が中断されました。プロンプトの結果は不明です。",
+  "retryConnection": "接続を再試行",
+  "retryingConnection": "接続を再試行中..."
 }

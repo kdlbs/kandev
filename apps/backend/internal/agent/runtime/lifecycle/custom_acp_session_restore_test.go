@@ -66,6 +66,7 @@ func launchCustomACPWithStoredSession(t *testing.T, loadReply func(ws.Message) *
 	})
 	result, err := sessionManager.InitializeSession(
 		context.Background(),
+		nil,
 		client,
 		agentConfig,
 		customACPStoredSessionID,
