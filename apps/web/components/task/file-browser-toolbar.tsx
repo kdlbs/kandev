@@ -336,10 +336,7 @@ function WorkspaceActionsMenu({
   onOpenFolder,
   isOpeningFolder,
   isFolderDisabled,
-}: Pick<
-  FileBrowserToolbarProps,
-  "onOpenFolder" | "isOpeningFolder" | "isFolderDisabled"
->) {
+}: Pick<FileBrowserToolbarProps, "onOpenFolder" | "isOpeningFolder" | "isFolderDisabled">) {
   const { t } = useTranslation();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const openFolderAfterCloseRef = useRef(false);

@@ -614,12 +614,12 @@ export type SubmitHandlersDeps = {
   workspacePath: string;
   /** Priority to submit with the created task. Defaults to `medium`. */
   priority: TaskPriority;
-	/** Task-only replacements for fixed workflow step agent profiles. */
-	workflowAgentOverrides: Record<string, string>;
-	/** Create-mode validation shared by the footer and every submit entry point. */
-	workflowAgentOverridesBlockedReason?: string;
-	/** Initial working-directory layout after capability validation. */
-	initialWorkspaceLayout?: InitialWorkspaceLayout;
+  /** Task-only replacements for fixed workflow step agent profiles. */
+  workflowAgentOverrides: Record<string, string>;
+  /** Create-mode validation shared by the footer and every submit entry point. */
+  workflowAgentOverridesBlockedReason?: string;
+  /** Initial working-directory layout after capability validation. */
+  initialWorkspaceLayout?: InitialWorkspaceLayout;
   /**
    * Optional async transform applied to the trimmed description before the
    * API payload is built. Used by feature wrappers (e.g. Improve Kandev) to

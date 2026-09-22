@@ -222,9 +222,9 @@ export type BuildCreatePayloadArgs = {
   /** Task IDs this task must wait for. */
   blockedBy?: string[];
   priority?: TaskPriority;
-	/** Task-only replacements for fixed workflow step agent profiles. */
-	workflowAgentOverrides?: Record<string, string>;
-	initialWorkspaceLayout?: InitialWorkspaceLayout;
+  /** Task-only replacements for fixed workflow step agent profiles. */
+  workflowAgentOverrides?: Record<string, string>;
+  initialWorkspaceLayout?: InitialWorkspaceLayout;
 };
 
 function optionalString(value?: string): string | undefined {
