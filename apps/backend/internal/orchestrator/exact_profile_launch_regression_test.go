@@ -273,3 +273,57 @@ func TestResumeTaskSession_RecordsFailedClosedReceiptWhenPromptReadinessFails(t 
 		t.Fatal("failed-closed receipt is missing its failure reason")
 	}
 }
+
+func TestStartCreatedSessionAsyncStartFailureRecordsFailedClosedExactReceipt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	revision := exactProfileRecoveryAssignment(t, repo)
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID: "task1", WorkspaceID: "ws1", Title: "Test Task", Description: "start", State: v1.TaskStateInProgress,
+	}
+	agentManager := &mockAgentManager{
+		resolveProfileInfo: exactProfileRecoveryInfo(revision),
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-failing"}, nil
+		},
+		startAgentProcessErr: errors.New("delayed initial prompt startup failure"),
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
+	svc.executor.SetOnAgentStartFailed(svc.handleAgentStartFailed)
+
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile-exact", "start", true, false, false, nil, nil)
+	if err != nil {
+		t.Fatalf("StartCreatedSession: %v", err)
+	}
+	receipt := waitForExactProfileReceipt(t, repo, "task1", "session1")
+	if receipt.Outcome != models.ExactProfileLaunchOutcomeFailedClosed || receipt.InferenceStarted {
+		t.Fatalf("async failure receipt = %#v, want failed_closed without inference", receipt)
+	}
+	if receipt.FailureReason == "" {
+		t.Fatal("async failure receipt is missing the failure reason")
+	}
+}
+
+func waitForExactProfileReceipt(
+	t *testing.T,
+	repo *sqliterepo.Repository,
+	taskID, sessionID string,
+) *models.ExactProfileLaunchReceipt {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		receipt, err := repo.GetExactProfileLaunchReceipt(context.Background(), taskID, sessionID)
+		if err != nil {
+			t.Fatalf("get exact launch receipt: %v", err)
+		}
+		if receipt != nil {
+			return receipt
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("timed out waiting for asynchronous exact launch receipt")
+	return nil
+}

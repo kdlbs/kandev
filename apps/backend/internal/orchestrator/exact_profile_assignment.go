@@ -238,6 +238,41 @@ func (s *Service) recordExactProfileLaunchReceipt(
 	}
 }
 
+// recordExactProfileStartFailure records the first exact-profile outcome only
+// when the asynchronous process failure still belongs to the current session
+// binding and execution. A delayed predecessor failure must not replace a
+// successor's receipt.
+func (s *Service) recordExactProfileStartFailure(
+	ctx context.Context,
+	taskID, sessionID, executionID string,
+	launchErr error,
+) {
+	if launchErr == nil || sessionID == "" || executionID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.TaskID != taskID {
+		return
+	}
+	if session.AgentExecutionID != "" && session.AgentExecutionID != executionID {
+		return
+	}
+	if s.agentManager != nil {
+		currentExecutionID, lookupErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+		if lookupErr == nil && currentExecutionID != "" && currentExecutionID != executionID {
+			return
+		}
+	}
+	exact, err := s.resolveExactProfileAssignment(ctx, taskID)
+	if err != nil || exact == nil ||
+		session.AgentProfileID != exact.AgentProfileID ||
+		session.ExactProfileGeneration != exact.Generation ||
+		session.ExactProfileRevision != exact.Revision {
+		return
+	}
+	s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exact, exact.Model, launchErr)
+}
+
 func exactProfileModel(exact *ExactProfileLaunchDecision) string {
 	if exact == nil {
 		return ""

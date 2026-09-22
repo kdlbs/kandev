@@ -115,6 +115,35 @@ func TestEnsureSessionRunningPreparedWorkspaceRejectsStaleExactProfileBeforeStar
 	require.False(t, started)
 }
 
+func TestExactProfileStartFailureIgnoresStaleExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	revision := exactProfileRecoveryAssignment(t, repo)
+	agentManager := &mockAgentManager{
+		resolveProfileInfo: exactProfileRecoveryInfo(revision),
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "exec-successor", nil
+		},
+	}
+	svc := exactProfileRecoveryService(repo, agentManager)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	_, err = svc.resolveAndBindExactProfileAssignment(ctx, "task1", session)
+	require.NoError(t, err)
+	_, err = repo.RecordExactProfileLaunchReceipt(ctx, &models.ExactProfileLaunchReceipt{
+		TaskID: "task1", SessionID: "session1", AgentProfileID: "profile-exact",
+		Generation: 1, ProfileRevision: revision, Model: "gpt-exact",
+		Outcome: models.ExactProfileLaunchOutcomeFailedClosed, FailureReason: "successor failure",
+	})
+	require.NoError(t, err)
+
+	svc.recordExactProfileStartFailure(ctx, "task1", "session1", "exec-predecessor", errExactProfileRecoveryStop)
+	receipt, err := repo.GetExactProfileLaunchReceipt(ctx, "task1", "session1")
+	require.NoError(t, err)
+	require.Equal(t, "successor failure", receipt.FailureReason)
+}
+
 func exactProfileRecoveryAssignment(t *testing.T, repo *sqliterepo.Repository) time.Time {
 	t.Helper()
 	task, err := repo.GetTask(context.Background(), "task1")

@@ -3214,7 +3214,6 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		return nil, attemptErr
 	}
 	execution.SessionState = v1.TaskSessionState(readySession.State)
-	s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), nil)
 	seam4Res.consume()
 	persistBranchRecovery()
 

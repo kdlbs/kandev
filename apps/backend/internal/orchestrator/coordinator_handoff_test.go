@@ -159,6 +159,27 @@ func TestHandoffCoordinatorPrimaryRejectsBootReadyWithoutInferenceReceipt(t *tes
 	require.Equal(t, []string{queued.ID}, []string{queue.GetStatus(ctx, "session-old").Entries[0].ID})
 }
 
+func TestHandoffCoordinatorPrimaryRejectsFailedClosedReceipt(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, queue := newCoordinatorHandoffFixture(t, false)
+	_, err := repo.RecordExactProfileLaunchReceipt(ctx, &models.ExactProfileLaunchReceipt{
+		TaskID: "task", SessionID: "session-new", AgentProfileID: "profile-cheap",
+		Generation: 1, ProfileRevision: time.Unix(1_726_500_000, 0).UTC(), Model: "gpt-5.6-terra",
+		Outcome: models.ExactProfileLaunchOutcomeFailedClosed, FailureReason: "startup failed",
+	})
+	require.NoError(t, err)
+	queued, err := queue.QueueMessage(ctx, "session-old", "task", "retain", "", messagequeue.QueuedByUser, false, nil)
+	require.NoError(t, err)
+
+	_, err = svc.HandoffCoordinatorPrimary(ctx, coordinatorHandoffFixtureRequest("failed-closed"))
+	require.ErrorIs(t, err, ErrCoordinatorSuccessorModel)
+	primary, err := repo.GetPrimarySessionByTaskID(ctx, "task")
+	require.NoError(t, err)
+	require.Equal(t, "session-old", primary.ID)
+	require.Empty(t, queue.GetStatus(ctx, "session-new").Entries)
+	require.Equal(t, []string{queued.ID}, []string{queue.GetStatus(ctx, "session-old").Entries[0].ID})
+}
+
 func coordinatorHandoffFixtureRequest(operationID string) CoordinatorHandoffRequest {
 	return CoordinatorHandoffRequest{
 		TaskID: "task", PredecessorSessionID: "session-old", SuccessorSessionID: "session-new",
