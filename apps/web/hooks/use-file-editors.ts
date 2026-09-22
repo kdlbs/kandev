@@ -103,24 +103,28 @@ function buildPersistedTabs(
   const previewParams = preview?.params as Record<string, unknown> | undefined;
   const previewItemId = (previewParams?.previewItemId ?? null) as string | null;
   const isPromoted = previewParams?.promoted === true;
-  return Array.from(openFiles.values()).flatMap(({ path, name, repo, renderedPreview, markdownMode }) => {
-    const itemId = buildRepoScopedItemId(path, repo);
-    const isPinned = !!api?.getPanel(`file:${itemId}`);
-    const isPreview = !isPinned && itemId === previewItemId;
-    if (!isPinned && !isPreview) return [];
-    // Promoted previews persist as pinned so edits survive refresh
-    const persistAsPinned = isPinned || (isPreview && isPromoted);
-    return [
-      {
-        path,
-        name,
-        ...(repo ? { repo } : {}),
-        ...(getFilePreviewKind(path) === "markdown" && renderedPreview ? { renderedPreview } : {}),
-        ...(markdownMode ? { markdownMode } : {}),
-        pinned: persistAsPinned,
-      },
-    ];
-  });
+  return Array.from(openFiles.values()).flatMap(
+    ({ path, name, repo, renderedPreview, markdownMode }) => {
+      const itemId = buildRepoScopedItemId(path, repo);
+      const isPinned = !!api?.getPanel(`file:${itemId}`);
+      const isPreview = !isPinned && itemId === previewItemId;
+      if (!isPinned && !isPreview) return [];
+      // Promoted previews persist as pinned so edits survive refresh
+      const persistAsPinned = isPinned || (isPreview && isPromoted);
+      return [
+        {
+          path,
+          name,
+          ...(repo ? { repo } : {}),
+          ...(getFilePreviewKind(path) === "markdown" && renderedPreview
+            ? { renderedPreview }
+            : {}),
+          ...(markdownMode ? { markdownMode } : {}),
+          pinned: persistAsPinned,
+        },
+      ];
+    },
+  );
 }
 
 type RestoreTabsParams = {

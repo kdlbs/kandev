@@ -55,8 +55,8 @@ const mocks = vi.hoisted(() => {
     routerReplace: vi.fn(),
     archiveAndSwitch: vi.fn(),
     deleteTaskById: vi.fn(),
-    runTaskRemoval: vi.fn(
-      async (_kind: string, operation: { mutate: () => Promise<unknown> }) => operation.mutate(),
+    runTaskRemoval: vi.fn(async (_kind: string, operation: { mutate: () => Promise<unknown> }) =>
+      operation.mutate(),
     ),
     removeTaskFromBoard: vi.fn(),
     navigationRequest: vi.fn(),
@@ -140,8 +140,8 @@ function resetMocks() {
   mocks.deleteTaskById.mockReset().mockResolvedValue(undefined);
   mocks.runTaskRemoval
     .mockReset()
-    .mockImplementation(
-      async (_kind: string, operation: { mutate: () => Promise<unknown> }) => operation.mutate(),
+    .mockImplementation(async (_kind: string, operation: { mutate: () => Promise<unknown> }) =>
+      operation.mutate(),
     );
   mocks.removeTaskFromBoard.mockReset().mockResolvedValue(undefined);
   mocks.store.setState.mockClear();
