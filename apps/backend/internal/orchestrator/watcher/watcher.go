@@ -42,6 +42,7 @@ type AgentEventData struct {
 	OwnerKind               string                              `json:"owner_kind,omitempty"`
 	TaskEnvironmentID       string                              `json:"task_environment_id,omitempty"`
 	AgentExecutionID        string                              `json:"agent_execution_id"`
+	TurnID                  string                              `json:"turn_id,omitempty"`
 	AgentID                 string                              `json:"agent_id,omitempty"`
 	AgentProfileID          string                              `json:"agent_profile_id"`
 	ExecutionProfileID      string                              `json:"execution_profile_id,omitempty"`

@@ -106,6 +106,10 @@ type manualMoveLifecycleMarkerCleaner interface {
 	ClearManualMoveLifecycleMarkersIfCompleted(context.Context, string, time.Time) (bool, error)
 }
 
+type manualMoveLifecycleCompleter interface {
+	CompleteManualMoveLifecycleIfCurrent(context.Context, string, string, string) (bool, error)
+}
+
 type taskMetadataKeySetter interface {
 	SetTaskMetadataKey(context.Context, string, string, interface{}) error
 }
@@ -881,7 +885,7 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 			return
 		}
 		if manualBarrier {
-			if s.persistManualMoveLifecycleCompletion(ctx, task.ID) {
+			if s.persistManualMoveLifecycleCompletion(ctx, task.ID, manualMoveLifecycleSourceStep(task), manualMoveLifecycleOccurrence(task)) {
 				s.continueManualMoveLifecycle(ctx, task.ID)
 			}
 			return
@@ -1651,7 +1655,7 @@ func (s *Service) recoverManualMoveLifecycle(ctx context.Context, task *models.T
 		return false
 	}
 	if session == nil {
-		if !s.persistManualMoveLifecycleCompletion(ctx, task.ID) {
+		if !s.persistManualMoveLifecycleCompletion(ctx, task.ID, sourceStepID, manualMoveLifecycleOccurrence(task)) {
 			return false
 		}
 		s.continueManualMoveLifecycle(ctx, task.ID)
@@ -2960,7 +2964,38 @@ func (s *Service) clearManualMoveLifecyclePending(ctx context.Context, taskID st
 	}
 }
 
-func (s *Service) persistManualMoveLifecycleCompletion(ctx context.Context, taskID string) bool {
+func (s *Service) persistManualMoveLifecycleCompletion(
+	ctx context.Context,
+	taskID, expectedFromStepID, expectedOccurrenceID string,
+) bool {
+	if expectedFromStepID == "" || expectedOccurrenceID == "" {
+		return s.persistManualMoveLifecycleCompletionLegacy(ctx, taskID)
+	}
+	completer, ok := s.repo.(manualMoveLifecycleCompleter)
+	if !ok {
+		return s.persistManualMoveLifecycleCompletionLegacy(ctx, taskID)
+	}
+	completed, err := completer.CompleteManualMoveLifecycleIfCurrent(
+		ctx, taskID, expectedFromStepID, expectedOccurrenceID,
+	)
+	if err != nil {
+		s.logger.Warn("failed to persist current manual move lifecycle completion",
+			zap.String("task_id", taskID),
+			zap.String("from_step_id", expectedFromStepID),
+			zap.String("occurrence_id", expectedOccurrenceID),
+			zap.Error(err))
+		return false
+	}
+	if !completed {
+		s.logger.Debug("skipped stale manual move lifecycle completion",
+			zap.String("task_id", taskID),
+			zap.String("from_step_id", expectedFromStepID),
+			zap.String("occurrence_id", expectedOccurrenceID))
+	}
+	return completed
+}
+
+func (s *Service) persistManualMoveLifecycleCompletionLegacy(ctx context.Context, taskID string) bool {
 	setter, ok := s.repo.(taskMetadataKeySetter)
 	if !ok {
 		s.logger.Warn("manual move lifecycle completion cannot be persisted",
@@ -3077,7 +3112,7 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 			zap.String("to_step_id", toStepID), zap.Error(lifecycleErr))
 		return
 	}
-	if !s.persistManualMoveLifecycleCompletion(ctx, taskID) {
+	if !s.persistManualMoveLifecycleCompletion(ctx, taskID, fromStepID, occurrenceID) {
 		return
 	}
 	s.continueManualMoveLifecycle(ctx, taskID)
@@ -6029,6 +6064,9 @@ func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, conte
 // state. The ready-event path uses this after preparing the running state so it
 // can publish the captured event after releasing the session guard.
 func (s *Service) writePassthroughPrompt(ctx context.Context, sessionID, content string) error {
+	if err := s.startPassthroughPromptTurn(ctx, sessionID); err != nil {
+		return err
+	}
 	pt, cfgErr := s.agentManager.ResolvePassthroughConfig(ctx, sessionID)
 	if cfgErr != nil {
 		s.logger.Warn("failed to resolve passthrough config; refusing unsafe prompt write",
@@ -6055,6 +6093,29 @@ func (s *Service) writePassthroughPrompt(ctx context.Context, sessionID, content
 			return fmt.Errorf("write to passthrough stdin: %w", err)
 		}
 	}
+	return nil
+}
+
+// startPassthroughPromptTurn gives every direct PTY prompt its own durable
+// turn and binds that turn to the lifecycle completion event. Passthrough
+// prompts do not travel through Executor.Prompt, so they need this admission
+// boundary explicitly.
+func (s *Service) startPassthroughPromptTurn(ctx context.Context, sessionID string) error {
+	if s.turnService == nil {
+		return nil
+	}
+	turnID, _, _, err := s.startTurnForSessionWithOwnershipChecked(ctx, sessionID, false, nil)
+	if err != nil {
+		return fmt.Errorf("start passthrough prompt turn: %w", err)
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("load passthrough prompt session: %w", err)
+	}
+	if session == nil {
+		return fmt.Errorf("load passthrough prompt session: session %s not found", sessionID)
+	}
+	s.bindPromptTurnID(ctx, session, turnID)
 	return nil
 }
 

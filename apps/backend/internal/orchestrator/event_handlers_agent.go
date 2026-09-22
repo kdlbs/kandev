@@ -846,7 +846,11 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// Snapshot which turn this event reports the completion of *before*
 	// contending for the guard — re-checked below once it's held. See the
 	// function doc comment for the race this closes.
-	turnAtEventFire, turnSnapshotErr := s.peekActiveTurnID(ctx, data.SessionID)
+	turnAtEventFire := data.TurnID
+	var turnSnapshotErr error
+	if turnAtEventFire == "" {
+		turnAtEventFire, turnSnapshotErr = s.peekActiveTurnID(ctx, data.SessionID)
+	}
 
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 	defer release()
@@ -949,7 +953,9 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 				zap.String("session_id", data.SessionID))
 			return
 		}
-		turnAtEventFire, turnSnapshotErr = s.peekActiveTurnID(ctx, data.SessionID)
+		if data.TurnID == "" {
+			turnAtEventFire, turnSnapshotErr = s.peekActiveTurnID(ctx, data.SessionID)
+		}
 	}
 
 	// Re-validate now that the guard is held: a concurrent interrupt (or
@@ -1007,7 +1013,15 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			return
 		}
 		turnNow, turnNowErr := s.peekActiveTurnID(ctx, data.SessionID)
-		if turnNowErr != nil || turnNow != turnAtEventFire {
+		turnChanged := turnNowErr != nil || turnNow != turnAtEventFire
+		// The lifecycle event carries the immutable turn that just completed.
+		// Its completion frame can close the active-turn row before this queued
+		// handler runs, so an empty current value is valid for that event. A
+		// different non-empty turn still proves that a successor has taken over.
+		if data.TurnID != "" && turnNowErr == nil && turnNow == "" {
+			turnChanged = false
+		}
+		if turnChanged {
 			s.logger.Debug("stale agent.ready: active turn changed (or could not be reconfirmed) while waiting for the guard",
 				zap.String("task_id", data.TaskID),
 				zap.String("session_id", data.SessionID),
@@ -1075,7 +1089,9 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// keys. The fallback is only for providers that do not report a turn ID.
 	completionOperationID := turnAtEventFire
 	if completionOperationID == "" {
-		completionOperationID = fmt.Sprintf("agent-ready:%s:%s:%d", data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+		completionOperationID = fmt.Sprintf("agent-ready:%s:%s:%d:%s",
+			data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+			session.UpdatedAt.UTC().Format(time.RFC3339Nano))
 	}
 	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
 	if completionFollowUp {
@@ -2579,13 +2595,19 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	}
 
 	s.retireInitialCreatePromptPassthroughForEvent(ctx, data)
-	completionOperationID, turnErr := s.peekActiveTurnID(ctx, data.SessionID)
-	if turnErr != nil {
-		s.logger.Debug("could not capture active turn for agent.completed workflow occurrence",
-			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(turnErr))
+	completionOperationID := data.TurnID
+	if completionOperationID == "" {
+		var turnErr error
+		completionOperationID, turnErr = s.peekActiveTurnID(ctx, data.SessionID)
+		if turnErr != nil {
+			s.logger.Debug("could not capture active turn for agent.completed workflow occurrence",
+				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(turnErr))
+		}
 	}
 	if completionOperationID == "" {
-		completionOperationID = fmt.Sprintf("agent-completed:%s:%s:%d", data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+		completionOperationID = fmt.Sprintf("agent-completed:%s:%s:%d:%s",
+			data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+			session.UpdatedAt.UTC().Format(time.RFC3339Nano))
 	}
 
 	s.finishAgentCompleted(ctx, data, session, guard, completionOperationID)

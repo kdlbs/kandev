@@ -326,6 +326,7 @@ type mockAgentManager struct {
 	// the execution ID so callers can filter by the agent that received it.
 	capturedPrompts              []string
 	capturedPromptCalls          []promptCall
+	promptTurnIDCalls            []promptTurnIDCall
 	setExecutionDescriptionCalls []promptCall
 	// Steer tracking. capturedSteerCalls records every SteerAgentWithDispatchCallback
 	// invocation; steerErr, when set, is returned instead of dispatching. Having
@@ -454,6 +455,11 @@ type promptCall struct {
 	DispatchOnly bool
 }
 
+type promptTurnIDCall struct {
+	ExecutionID string
+	TurnID      string
+}
+
 type passthroughStdinCall struct {
 	SessionID string
 	Data      string
@@ -544,6 +550,16 @@ func (m *mockAgentManager) PromptAgent(ctx context.Context, executionID string, 
 		return promptResult, nil
 	}
 	return &executor.PromptResult{}, nil
+}
+
+func (m *mockAgentManager) SetPromptTurnID(_ context.Context, executionID, turnID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.promptTurnIDCalls = append(m.promptTurnIDCalls, promptTurnIDCall{
+		ExecutionID: executionID,
+		TurnID:      turnID,
+	})
+	return nil
 }
 
 func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
@@ -2610,6 +2626,53 @@ func TestDeliverPassthroughPrompt(t *testing.T) {
 			t.Fatalf("stdin calls after cancellation = %d, want 1", got)
 		}
 	})
+}
+
+func TestDeliverPassthroughPromptStartsAndBindsDistinctTurns(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{isPassthrough: true}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+
+	if err := svc.deliverPassthroughPrompt(ctx, "s1", "first"); err != nil {
+		t.Fatalf("deliver first passthrough prompt: %v", err)
+	}
+	first, err := svc.turnService.GetActiveTurn(ctx, "s1")
+	if err != nil || first == nil {
+		t.Fatalf("load first active turn: turn=%v err=%v", first, err)
+	}
+	svc.completeTurnForSession(ctx, "s1")
+
+	if err := svc.deliverPassthroughPrompt(ctx, "s1", "second"); err != nil {
+		t.Fatalf("deliver second passthrough prompt: %v", err)
+	}
+	second, err := svc.turnService.GetActiveTurn(ctx, "s1")
+	if err != nil || second == nil {
+		t.Fatalf("load second active turn: turn=%v err=%v", second, err)
+	}
+	if second.ID == first.ID {
+		t.Fatalf("successive passthrough prompts reused turn %q", first.ID)
+	}
+
+	agentMgr.mu.Lock()
+	defer agentMgr.mu.Unlock()
+	if len(agentMgr.promptTurnIDCalls) != 2 {
+		t.Fatalf("prompt turn bindings = %d, want 2", len(agentMgr.promptTurnIDCalls))
+	}
+	if agentMgr.promptTurnIDCalls[0].TurnID != first.ID || agentMgr.promptTurnIDCalls[1].TurnID != second.ID {
+		t.Fatalf("prompt turn bindings = %+v, want [%q %q]", agentMgr.promptTurnIDCalls, first.ID, second.ID)
+	}
 }
 
 func TestHandleAgentReady_PassthroughQueuedMessage(t *testing.T) {
