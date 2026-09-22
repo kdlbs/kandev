@@ -213,7 +213,7 @@ Policies are not available in **Quick Chat**, **Remote**, **Add Sources**, or **
 When a task opens an existing branch or GitHub PR, Kandev fetches that branch; for a numbered GitHub PR it can fetch `refs/pull/NUMBER/head`, including fork PRs. At materialization, Kandev uses the PR's current GitHub base when available. Polling also keeps the task's stored comparison base aligned after GitHub retargets a stacked PR. If the intended branch is already checked out in another worktree, the new worktree uses a suffixed local branch and tracks the original `origin` branch when available. The required-refresh rule still applies before that new worktree is created.
 
 Tasks created without an initial title can expose the one-shot `set_task_title_kandev` handoff when
-**Settings → General → Task Actions → Agent-generated task titles** is enabled. After the owning
+**Settings → Preferences → Task Behavior → Tasks → Agent-generated task titles** is enabled. After the owning
 session accepts its final title, Kandev regenerates Kandev-managed branch names from that title and
 updates the stored branch snapshots. It never renames a repository row with an explicit checkout
 branch (for example, a GitHub PR branch) or a Local/Local PC checkout. A branch manually selected

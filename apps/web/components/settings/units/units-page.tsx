@@ -9,6 +9,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { useOrgUnits, type UnitRow } from "@/hooks/domains/org/use-org-units";
 import type { OrgUnit } from "@/lib/api/domains/org-units-api";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { UnitMembersDialog } from "./unit-members-dialog";
 
 function UnitIcon({ kind }: { kind: OrgUnit["kind"] }) {
@@ -104,28 +105,26 @@ export function UnitsPage() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="units-page">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("settings:unitsTitle")}</CardTitle>
-          <CardDescription>{t("settings:unitsDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {units.loading && <p className="text-muted-foreground text-sm">{t("common:loading")}</p>}
-          {!units.loading && units.units.length === 0 && (
-            <p className="text-muted-foreground text-sm">{t("settings:unitsEmpty")}</p>
-          )}
-          {units.units.map((unit) => (
-            <UnitTreeRow
-              key={unit.id}
-              unit={unit}
-              busy={units.busy}
-              onAddChild={setParentForNew}
-              onManageMembers={setMembersFor}
-              onDelete={(u) => void units.remove(u.id)}
-            />
-          ))}
-        </CardContent>
-      </Card>
+      <SettingsGroup
+        title={t("settings:unitsTitle")}
+        description={t("settings:unitsDescription")}
+        contentClassName="flex flex-col gap-2 divide-y-0"
+      >
+        {units.loading && <p className="text-muted-foreground text-sm">{t("common:loading")}</p>}
+        {!units.loading && units.units.length === 0 && (
+          <p className="text-muted-foreground text-sm">{t("settings:unitsEmpty")}</p>
+        )}
+        {units.units.map((unit) => (
+          <UnitTreeRow
+            key={unit.id}
+            unit={unit}
+            busy={units.busy}
+            onAddChild={setParentForNew}
+            onManageMembers={setMembersFor}
+            onDelete={(u) => void units.remove(u.id)}
+          />
+        ))}
+      </SettingsGroup>
 
       {parentForNew && (
         <Card data-testid="unit-create-card">

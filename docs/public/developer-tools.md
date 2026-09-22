@@ -64,7 +64,7 @@ Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordin
 
 Your chats and their names are shared by every browser and device signed in to the same Kandev instance. Starting, renaming, or closing a chat on one device updates the others, and a device that was offline catches up when it reconnects.
 
-When **Settings > Preferences > Task Behavior > Agent-generated task titles** is enabled, an ordinary
+When **Settings > Preferences > Task Behavior > Tasks > Agent-generated task titles** is enabled, an ordinary
 Quick Chat starts with its normal provisional label and its owner agent can replace that label with a
 short title based on your first request. Structured and CLI-passthrough chats receive the title
 instruction through their existing first-turn path. The new title appears on every connected device
