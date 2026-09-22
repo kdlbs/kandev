@@ -43,3 +43,13 @@ func TestPreserveOperatorConfigKeys_KeepsContainerNetworks(t *testing.T) {
 	assert.Equal(t, "internal-only", preserved[lifecycle.MetadataKeyDockerNetwork])
 	assert.Equal(t, `[{"name":"metrics"}]`, preserved[lifecycle.MetadataKeyDockerAdditionalNetworks])
 }
+
+// The local key constants exist because this tier must not import
+// internal/agent/runtime/lifecycle. Tests may, so this is where the two
+// spellings are held together: a rename on either side fails here rather than
+// silently unguarding the agent-facing profile tools.
+func TestContainerNetworkConfigKeysMatchRuntime(t *testing.T) {
+	assert.Equal(t, lifecycle.MetadataKeyDockerNetwork, dockerNetworkProfileConfigKey)
+	assert.Equal(t, lifecycle.MetadataKeyDockerNetworkGwPriority, dockerNetworkGwPriorityProfileConfigKey)
+	assert.Equal(t, lifecycle.MetadataKeyDockerAdditionalNetworks, dockerAdditionalNetworksProfileConfigKey)
+}

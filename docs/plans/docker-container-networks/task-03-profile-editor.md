@@ -10,8 +10,8 @@ requirements:
 acceptance_criteria:
   - AC-EXECUTORS-DOCKER-NETWORKS-003.1
   - AC-EXECUTORS-DOCKER-NETWORKS-003.2
-  - AC-EXECUTORS-DOCKER-NETWORKS-003.3
   - AC-EXECUTORS-DOCKER-NETWORKS-003.4
+  - AC-EXECUTORS-DOCKER-NETWORKS-003.5
 system_design:
   - ../../specs/executors/system-design/docker-container-networks.md
 ---

@@ -198,11 +198,18 @@ export function dockerContainerNetworks(containerID: string): string[] {
 export function dockerPublishedPort(containerID: string, containerPort: number): string | null {
   const result = spawnSync(
     "docker",
-    ["inspect", "--format", `{{json (index .NetworkSettings.Ports "${containerPort}/tcp")}}`, containerID],
+    [
+      "inspect",
+      "--format",
+      `{{json (index .NetworkSettings.Ports "${containerPort}/tcp")}}`,
+      containerID,
+    ],
     { encoding: "utf8" },
   );
   if (result.status !== 0) {
-    throw new Error(`failed to inspect published ports for ${containerID}: ${result.stderr.trim()}`);
+    throw new Error(
+      `failed to inspect published ports for ${containerID}: ${result.stderr.trim()}`,
+    );
   }
   const bindings = JSON.parse(result.stdout) as { HostPort?: string }[] | null;
   return bindings?.[0]?.HostPort ?? null;

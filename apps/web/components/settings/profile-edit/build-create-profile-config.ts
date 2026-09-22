@@ -27,7 +27,9 @@ export type BuildProfileConfigInput = {
   additionalNetworks: AdditionalNetworkRow[];
 };
 
-export function buildProfileConfig(input: BuildProfileConfigInput): Record<string, string> | undefined {
+export function buildProfileConfig(
+  input: BuildProfileConfigInput,
+): Record<string, string> | undefined {
   const {
     isRemote,
     isSprites,

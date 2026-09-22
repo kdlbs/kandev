@@ -133,10 +133,9 @@ test.describe("remote docker executor — task lifecycle", () => {
     );
 
     await waitForLatestSessionDone(apiClient, task.id, 1, "Wait for the remote Docker session");
-    expect(
-      fs.existsSync(kandevTree),
-      `launch created ${kandevTree} on the remote host`,
-    ).toBe(false);
+    expect(fs.existsSync(kandevTree), `launch created ${kandevTree} on the remote host`).toBe(
+      false,
+    );
 
     // A resume re-delivers the agentctl helper. It must do that through the
     // daemon too, not by caching it on the host.
@@ -148,15 +147,11 @@ test.describe("remote docker executor — task lifecycle", () => {
       prompt: "/e2e:simple-message",
     });
     await waitForSessionDone(apiClient, task.id, warm.session_id, "Wait for the resumed session");
-    expect(
-      fs.existsSync(kandevTree),
-      `resume created ${kandevTree} on the remote host`,
-    ).toBe(false);
+    expect(fs.existsSync(kandevTree), `resume created ${kandevTree} on the remote host`).toBe(
+      false,
+    );
 
     await apiClient.deleteTask(task.id);
-    expect(
-      fs.existsSync(kandevTree),
-      `teardown left ${kandevTree} on the remote host`,
-    ).toBe(false);
+    expect(fs.existsSync(kandevTree), `teardown left ${kandevTree} on the remote host`).toBe(false);
   });
 });

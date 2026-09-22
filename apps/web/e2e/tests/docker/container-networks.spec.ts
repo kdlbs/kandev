@@ -131,10 +131,10 @@ test.describe("Docker executor container networks", () => {
       );
 
       await expect
-        .poll(
-          async () => (await apiClient.getTaskEnvironment(task.id))?.container_id ?? "",
-          { message: "the launch must not produce a container", timeout: 60_000 },
-        )
+        .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.container_id ?? "", {
+          message: "the launch must not produce a container",
+          timeout: 60_000,
+        })
         .toBe("");
     } finally {
       if (profileId) await apiClient.deleteExecutorProfile(profileId).catch(() => {});

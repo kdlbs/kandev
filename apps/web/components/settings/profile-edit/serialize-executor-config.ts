@@ -84,11 +84,7 @@ function applyDockerNetworkConfig(
 ): void {
   const primary = form.isDocker ? form.primaryNetwork.trim() : "";
   setTextConfig(config, "docker_network", primary);
-  setTextConfig(
-    config,
-    "docker_network_gw_priority",
-    primary ? form.primaryGwPriority.trim() : "",
-  );
+  setTextConfig(config, "docker_network_gw_priority", primary ? form.primaryGwPriority.trim() : "");
 
   const additional = form.isDocker
     ? form.additionalNetworks

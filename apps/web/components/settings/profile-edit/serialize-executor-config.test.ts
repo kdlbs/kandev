@@ -148,7 +148,11 @@ const DOCKER_PRIMARY_NETWORK = "lab-bridge";
 describe("buildSaveConfig docker networks", () => {
   it("persists the primary network and its gateway priority", () => {
     const config = buildSaveConfig(
-      form({ isDocker: true, primaryNetwork: ` ${DOCKER_PRIMARY_NETWORK} `, primaryGwPriority: " 0 " }),
+      form({
+        isDocker: true,
+        primaryNetwork: ` ${DOCKER_PRIMARY_NETWORK} `,
+        primaryGwPriority: " 0 ",
+      }),
     );
 
     expect(config.docker_network).toBe(DOCKER_PRIMARY_NETWORK);

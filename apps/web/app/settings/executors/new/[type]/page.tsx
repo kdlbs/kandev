@@ -133,8 +133,6 @@ function CreateProfileHeader({ type, typeInfo }: { type: string; typeInfo: Execu
   );
 }
 
-
-
 function useDefaultScripts(executorType: string, setPrepareScript: (v: string) => void) {
   useEffect(() => {
     fetchDefaultScripts(executorType)

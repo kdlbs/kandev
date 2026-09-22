@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -15,6 +14,15 @@ import (
 )
 
 const allowUserNamespacesProfileConfigKey = "allow_user_namespaces"
+
+// Container network placement keys. Spelled out rather than imported from
+// internal/agent/runtime/lifecycle, which this tier must not depend on
+// directly; the test asserts they still match the runtime's canonical names.
+const (
+	dockerNetworkProfileConfigKey            = "docker_network"
+	dockerNetworkGwPriorityProfileConfigKey  = "docker_network_gw_priority"
+	dockerAdditionalNetworksProfileConfigKey = "docker_additional_networks"
+)
 
 // operatorOnlyConfigKeys are executor profile Config keys that the
 // agent-exposed MCP tools (create_executor_profile, update_executor_profile)
@@ -31,9 +39,9 @@ var operatorOnlyConfigKeys = []string{
 	// choosing its own containment. A prepare script cannot cross that
 	// boundary, so the "prepare_script is strictly more powerful" reasoning
 	// above does not cover them.
-	lifecycle.MetadataKeyDockerNetwork,
-	lifecycle.MetadataKeyDockerNetworkGwPriority,
-	lifecycle.MetadataKeyDockerAdditionalNetworks,
+	dockerNetworkProfileConfigKey,
+	dockerNetworkGwPriorityProfileConfigKey,
+	dockerAdditionalNetworksProfileConfigKey,
 }
 
 // rejectOperatorConfigKeys returns an error if the config map contains any
