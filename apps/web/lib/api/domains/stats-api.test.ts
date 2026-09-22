@@ -42,7 +42,7 @@ describe("fetchTokenUsage", () => {
 
     await expect(fetchTokenUsage("workspace-1", options, "week")).resolves.toEqual(response);
     expect(fetchJsonMock).toHaveBeenCalledWith(
-      "/api/v1/workspaces/workspace-1/stats/token-usage?range=week&include_undated=true",
+      "/api/v1/workspaces/workspace-1/stats/token-usage?range=week&include_undated=false",
       options,
     );
   });

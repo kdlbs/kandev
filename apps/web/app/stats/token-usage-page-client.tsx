@@ -6,6 +6,7 @@ import { PageShell } from "@/components/page-shell";
 import { IconChartBar } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
+import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { browserTimeZone } from "@/components/automations/schedule-expression";
 import type { TokenUsageResponse } from "@/lib/types/http";
@@ -93,9 +94,10 @@ export function TokenUsagePageClient({
     (nextRange: RangeKey) => {
       const params = new URLSearchParams(searchParams.toString());
       params.set("range", nextRange);
+      setOffset(0);
       router.replace(`/stats/token-usage?${params.toString()}`, { scroll: false });
     },
-    [router, searchParams],
+    [router, searchParams, setOffset],
   );
 
   const handleCopy = useCallback(() => {
@@ -291,8 +293,11 @@ function TokenUsagePageView({
       icon={<IconChartBar className="h-4 w-4" />}
       subtitle={t("stats:tokenUsageSubtitle")}
       scroll="none"
+      topbarTestId="token-usage-topbar"
+      freeWidth="actions"
+      actionsClassName="min-w-0 max-w-full flex-1 !shrink overflow-x-auto"
       actions={
-        <>
+        <div className="flex min-w-max items-center gap-2" data-testid="token-usage-topbar-actions">
           <StatsNavigation />
           <StatsRangeToggle range={range} onChange={onRangeChange} />
           <Button
@@ -305,7 +310,7 @@ function TokenUsagePageView({
           >
             {copied ? t("stats:copied") : t("stats:copyStats")}
           </Button>
-        </>
+        </div>
       }
     >
       <div className="min-h-0 flex-1 overflow-y-auto bg-background">
@@ -350,15 +355,34 @@ function TokenUsagePageState({
   onSort,
   onPageChange,
 }: Omit<TokenUsagePageViewProps, "range" | "copyText" | "copied" | "onCopy">) {
+  const { items: plugins } = usePlugins();
+  const sessionCost = plugins.find(
+    (plugin) => plugin.id === "kandev-session-cost" && plugin.status !== "uninstalled",
+  );
+  const pluginSettingsHref = sessionCost
+    ? `/settings/plugins/${encodeURIComponent(sessionCost.id)}`
+    : "/settings/plugins";
   if (initialError) return <TokenUsageError message={initialError} onRetry={onRetry} />;
   if (!workspaceId || state.status === "no-workspace") {
-    return <TokenUsageEmpty hasHistory={false} onAllTime={() => undefined} />;
+    return (
+      <TokenUsageEmpty
+        hasHistory={false}
+        onAllTime={() => undefined}
+        pluginSettingsHref={pluginSettingsHref}
+      />
+    );
   }
   if (state.status === "loading") return <TokenUsageLoading />;
   if (state.status === "error")
     return <TokenUsageError message={state.message} onRetry={onRetry} />;
   if (!state.data.has_history) {
-    return <TokenUsageEmpty hasHistory={false} onAllTime={() => onRangeChange("all")} />;
+    return (
+      <TokenUsageEmpty
+        hasHistory={false}
+        onAllTime={() => onRangeChange("all")}
+        pluginSettingsHref={pluginSettingsHref}
+      />
+    );
   }
   if (!state.data.has_range_data && !state.data.undated_coverage) {
     return <TokenUsageEmpty hasHistory onAllTime={() => onRangeChange("all")} />;
@@ -366,7 +390,8 @@ function TokenUsagePageState({
   return (
     <TokenUsageContent
       data={state.data}
-      trendData={trendState.status === "ready" ? trendState.data : undefined}
+      trendState={trendState}
+      onRetry={onRetry}
       view={breakdownView}
       onViewChange={onViewChange}
       provider={provider}
@@ -418,7 +443,8 @@ function apiSortKey(view: TokenUsageView, key: TokenUsageSortKey): string {
 
 function TokenUsageContent({
   data,
-  trendData,
+  trendState,
+  onRetry,
   view,
   onViewChange,
   provider,
@@ -432,7 +458,8 @@ function TokenUsageContent({
   onPageChange,
 }: {
   data: TokenUsageResponse;
-  trendData?: TokenUsageResponse;
+  trendState: TokenUsageRequestState;
+  onRetry: () => void;
   view: TokenUsageView;
   onViewChange: (view: TokenUsageView) => void;
   provider: string;
@@ -454,11 +481,7 @@ function TokenUsageContent({
         lastUpdated={data.last_updated}
       />
       <TokenUsageCoverageNotice response={data} />
-      <TokenUsageTrend
-        rows={trendData?.rows ?? []}
-        currency={trendData?.summary.currency ?? data.summary.currency}
-        datedCoverage={trendData?.dated_coverage ?? data.dated_coverage}
-      />
+      <TokenUsageTrendState state={trendState} fallback={data} onRetry={onRetry} />
       <TokenUsageBreakdown
         response={data}
         view={view}
@@ -474,6 +497,29 @@ function TokenUsageContent({
         onPageChange={onPageChange}
       />
     </>
+  );
+}
+
+function TokenUsageTrendState({
+  state,
+  fallback,
+  onRetry,
+}: {
+  state: TokenUsageRequestState;
+  fallback: TokenUsageResponse;
+  onRetry: () => void;
+}) {
+  if (state.status === "loading") return <TokenUsageLoading />;
+  if (state.status === "error") {
+    return <TokenUsageError message={state.message} onRetry={onRetry} />;
+  }
+  const data = state.status === "ready" ? state.data : fallback;
+  return (
+    <TokenUsageTrend
+      rows={data.rows}
+      currency={data.summary.currency}
+      datedCoverage={data.dated_coverage}
+    />
   );
 }
 

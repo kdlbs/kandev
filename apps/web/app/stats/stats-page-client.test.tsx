@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ replace: mocks.replace }),
+  usePathname: () => "/stats",
   useSearchParams: () => new URLSearchParams(),
 }));
 

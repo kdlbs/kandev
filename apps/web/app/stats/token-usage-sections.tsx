@@ -126,7 +126,9 @@ export function TokenUsageTrend({ rows, currency, datedCoverage }: TokenUsageTre
     [datedCoverage, granularity, rows],
   );
   const values = points.map((point) => {
-    const value = metric === "cost" ? point.cost_subcents : point.total_tokens;
+    const value =
+      metric === "cost" && point.currency !== "mixed" ? point.cost_subcents : point.total_tokens;
+    if (metric === "cost" && point.currency === "mixed") return null;
     if (value === null || !Number.isFinite(value)) return null;
     return metric === "cost" ? value / 10_000 : value;
   });
@@ -230,7 +232,11 @@ function TrendBars({
         const height = value === null ? 0 : Math.max(6, Math.round((value / maxValue) * 100));
         const formattedValue =
           metric === "cost"
-            ? formatCost(point.cost_subcents, currency, unavailable)
+            ? formatCost(
+                point.currency === "mixed" ? null : point.cost_subcents,
+                point.currency || currency,
+                unavailable,
+              )
             : formatTokens(point.total_tokens, unavailable);
         return (
           <div

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ const (
 	usageGroupDaily        = "daily"
 	usageGroupMonthly      = "monthly"
 	usageMixedValue        = "mixed"
+	usageWorkFallback      = "task"
 )
 
 var ErrInvalidSessionUsage = errors.New("invalid session usage batch")
@@ -342,6 +344,9 @@ func normalizeUsage(input models.SessionUsageMeasurement) (models.SessionUsageMe
 		if value != nil && *value < 0 {
 			return item, fmt.Errorf("%s cannot be negative", name)
 		}
+	}
+	if item.TotalTokens != nil && !tokenCategoriesFitTotal(item.InputTokens, item.OutputTokens, item.CacheReadTokens, item.CacheWriteTokens, item.ReasoningTokens, *item.TotalTokens) {
+		return item, errors.New("token categories cannot exceed total_tokens")
 	}
 	if item.CoverageStart != nil && item.CoverageEnd != nil && !item.CoverageStart.Before(*item.CoverageEnd) {
 		return item, errors.New("coverage interval must be half open and non-empty")
@@ -1113,9 +1118,14 @@ func selectUsageContributions(contributions []usageContribution) []usageContribu
 			contribution.measurement.SourceRecordID != current.contribution.measurement.SourceRecordID {
 			current.ambiguous = true
 		}
-		if usageCandidateBetter(contribution.measurement, current.contribution.measurement) {
+		merged := mergeEquivalentUsageMeasurements(
+			current.contribution.measurement,
+			contribution.measurement,
+		)
+		if usageTokenCandidateBetter(contribution.measurement, current.contribution.measurement) {
 			current.contribution = contribution
 		}
+		current.contribution.measurement = merged
 		selected[key] = current
 	}
 	result := make([]usageContribution, 0, len(selected))
@@ -1128,6 +1138,10 @@ func selectUsageContributions(contributions []usageContribution) []usageContribu
 		}
 		result = append(result, item.contribution)
 	}
+	return resolveOverlappingUsageContributions(sortUsageContributions(result))
+}
+
+func sortUsageContributions(result []usageContribution) []usageContribution {
 	sort.Slice(result, func(i, j int) bool {
 		left, right := result[i].measurement, result[j].measurement
 		if result[i].period != result[j].period {
@@ -1148,6 +1162,39 @@ func selectUsageContributions(contributions []usageContribution) []usageContribu
 		return left.SourceRecordID < right.SourceRecordID
 	})
 	return result
+}
+
+// resolveOverlappingUsageContributions prevents two source records that claim
+// the same session/model/provider interval from being added together. Native
+// ledger events are handled separately by canonicalUsageContributions and may
+// legitimately share an instant, so this pass only resolves external rows.
+func resolveOverlappingUsageContributions(contributions []usageContribution) []usageContribution {
+	for i := 0; i < len(contributions); i++ {
+		for j := i + 1; j < len(contributions); j++ {
+			left, right := contributions[i].measurement, contributions[j].measurement
+			if !usageWorkMatches(left, right) || !usageCoverageOverlaps(left, right) {
+				continue
+			}
+			winner, loser := i, j
+			if usageCandidateBetter(right, left) {
+				winner, loser = j, i
+			}
+			contributions[winner].measurement.Coverage = mergeCoverage(
+				contributions[winner].measurement.Coverage, models.UsageCoveragePartial,
+			)
+			contributions[winner].measurement.CostCoverage = mergeCoverage(
+				contributions[winner].measurement.CostCoverage, models.UsageCoveragePartial,
+			)
+			contributions[winner].measurement.AttributionStatus = models.UsageAttributionAmbiguous
+			contributions = append(contributions[:loser], contributions[loser+1:]...)
+			if loser < i {
+				i--
+				break
+			}
+			j--
+		}
+	}
+	return sortUsageContributions(contributions)
 }
 
 // canonicalUsageContributions resolves external observations against native
@@ -1178,15 +1225,16 @@ func canonicalUsageContributions(external, native []usageContribution) []usageCo
 		}
 		if nativeCoverageEquivalent(candidate.measurement, matching, native) {
 			nativeMeasurement := aggregateNativeMeasurements(matching, native)
-			if usageCandidateBetter(nativeMeasurement, candidate.measurement) {
-				// Keep the native events. They provide the same coverage unit with
-				// the host's authoritative event identity and a better source
-				// quality/coverage rank.
-				continue
-			}
-			// The external observation is the better equivalent candidate (for
-			// example, a provider-reported value versus an estimated native
-			// value). Do not add the native events as a second contribution.
+			// Token and cost authority are selected independently. A native event
+			// can provide the authoritative token totals while an external report
+			// supplies a provider-reported correction for the same coverage unit.
+			merged := mergeEquivalentUsageMeasurements(candidate.measurement, nativeMeasurement)
+			candidate.measurement = merged
+		} else if !externalCoverageSupersedesNative(candidate.measurement, matching, native) {
+			// The external observation overlaps native coverage but does not prove
+			// that it covers the same or a larger unit. Keep the complete native
+			// events and do not let a partial external row erase them.
+			continue
 		}
 		for _, index := range matching {
 			dropNative[index] = true
@@ -1200,7 +1248,32 @@ func canonicalUsageContributions(external, native []usageContribution) []usageCo
 		}
 	}
 	selected = append(selected, keepExternal...)
-	return selectUsageContributions(selected)
+	return sortUsageContributions(selected)
+}
+
+// externalCoverageSupersedesNative selects a complete external projection
+// when it covers the whole native interval (or is an unbounded lifetime
+// projection). A partial external observation cannot replace a complete native
+// event merely because their intervals overlap.
+func externalCoverageSupersedesNative(
+	candidate models.SessionUsageMeasurement,
+	indices []int,
+	native []usageContribution,
+) bool {
+	if usageCoverageRank(candidate.Coverage) < usageCoverageRank(models.UsageCoverageComplete) {
+		return false
+	}
+	start, end, dated := usageCoverageInterval(candidate)
+	if !dated {
+		return true
+	}
+	for _, index := range indices {
+		nativeStart, nativeEnd, nativeDated := usageCoverageInterval(native[index].measurement)
+		if !nativeDated || start.After(nativeStart) || end.Before(nativeEnd) {
+			return false
+		}
+	}
+	return true
 }
 
 // nativeCoverageEquivalent proves that the native events cover the same
@@ -1269,6 +1342,7 @@ func mergeMeasurementValues(target *models.SessionUsageMeasurement, value models
 		target.Currency = value.Currency
 	} else if value.Currency != "" && target.Currency != value.Currency {
 		target.Currency = usageMixedValue
+		target.CostSubcents = nil
 	}
 	if target.CoverageStart == nil || (value.CoverageStart != nil && value.CoverageStart.Before(*target.CoverageStart)) {
 		target.CoverageStart = value.CoverageStart
@@ -1284,6 +1358,10 @@ func addMeasurementNullable(target **int64, value *int64) {
 		return
 	}
 	if *target == nil {
+		return
+	}
+	if *value > 0 && **target > math.MaxInt64-*value {
+		*target = nil
 		return
 	}
 	**target += *value
@@ -1331,18 +1409,149 @@ func usageContributionKey(item models.SessionUsageMeasurement) string {
 		}
 		coverage = "interval:" + start + ":" + end
 	}
-	return strings.Join([]string{nativeCoverageKey(item), coverage}, "\x00")
+	return strings.Join([]string{item.TaskID, usageWorkIdentity(item), item.Model, item.Provider, coverage}, "\x00")
+}
+
+// usageWorkIdentity keeps source rows distinct after a session is pruned. A
+// missing session_id cannot collapse every transcript for the task into one
+// contribution; transcript_id or the collector's stable usage identity is the
+// remaining work identity in that case.
+func usageWorkIdentity(item models.SessionUsageMeasurement) string {
+	identities := make([]string, 0, 3)
+	if item.SessionID != "" {
+		identities = append(identities, "session:"+item.SessionID)
+	}
+	if item.TranscriptID != "" {
+		identities = append(identities, "transcript:"+item.TranscriptID)
+	}
+	if item.UsageIdentity != "" {
+		identities = append(identities, "usage:"+item.UsageIdentity)
+	}
+	if len(identities) > 0 {
+		return strings.Join(identities, "\x1f")
+	}
+	return usageWorkFallback
+}
+
+func usageWorkMatches(left, right models.SessionUsageMeasurement) bool {
+	return left.TaskID == right.TaskID &&
+		left.Model == right.Model &&
+		usageOptionalIdentityMatches(left.SessionID, right.SessionID) &&
+		usageWorkTranscriptMatches(left, right) &&
+		usageProviderMatches(left.Provider, right.Provider)
+}
+
+func usageWorkTranscriptMatches(left, right models.SessionUsageMeasurement) bool {
+	if left.TranscriptID != "" || right.TranscriptID != "" {
+		return usageOptionalIdentityMatches(left.TranscriptID, right.TranscriptID)
+	}
+	return usageOptionalIdentityMatches(left.UsageIdentity, right.UsageIdentity)
+}
+
+func usageOptionalIdentityMatches(left, right string) bool {
+	return left == "" || right == "" || left == right
+}
+
+func usageProviderMatches(left, right string) bool {
+	return left == right || left == "" || right == ""
+}
+
+func mergeEquivalentUsageMeasurements(left, right models.SessionUsageMeasurement) models.SessionUsageMeasurement {
+	token := left
+	if usageTokenCandidateBetter(right, left) {
+		token = right
+	}
+	cost := left
+	if usageCostCandidateBetter(right, left) {
+		cost = right
+	}
+	merged := cloneUsageMeasurement(token)
+	merged.CostSubcents = cloneInt64(cost.CostSubcents)
+	merged.Currency = cost.Currency
+	merged.CostBasis = cost.CostBasis
+	merged.CostCoverage = cost.CostCoverage
+	if merged.Currency == usageMixedValue {
+		merged.CostSubcents = nil
+	}
+	merged.Estimated = token.Estimated || cost.Estimated
+	merged.Stale = token.Stale || cost.Stale
+	if token.Source != cost.Source || token.SourceRecordID != cost.SourceRecordID {
+		merged.Source = usageMixedValue
+	}
+	return merged
+}
+
+func usageTokenCandidateBetter(candidate, current models.SessionUsageMeasurement) bool {
+	if usageCoverageRank(candidate.Coverage) != usageCoverageRank(current.Coverage) {
+		return usageCoverageRank(candidate.Coverage) > usageCoverageRank(current.Coverage)
+	}
+	if tokenCompletenessRank(candidate) != tokenCompletenessRank(current) {
+		return tokenCompletenessRank(candidate) > tokenCompletenessRank(current)
+	}
+	if candidate.Source == "native" && current.Source != "native" {
+		return true
+	}
+	if current.Source == "native" && candidate.Source != "native" {
+		return false
+	}
+	if candidate.Stale != current.Stale {
+		return !candidate.Stale
+	}
+	if candidate.Source != current.Source {
+		return candidate.Source < current.Source
+	}
+	if candidate.Revision != current.Revision {
+		return candidate.Revision > current.Revision
+	}
+	return candidate.SourceRecordID < current.SourceRecordID
+}
+
+func usageCostCandidateBetter(candidate, current models.SessionUsageMeasurement) bool {
+	if usageCoverageRank(candidate.CostCoverage) != usageCoverageRank(current.CostCoverage) {
+		return usageCoverageRank(candidate.CostCoverage) > usageCoverageRank(current.CostCoverage)
+	}
+	candidateAvailable := candidate.CostSubcents != nil
+	currentAvailable := current.CostSubcents != nil
+	if candidateAvailable != currentAvailable {
+		return candidateAvailable
+	}
+	if usageCostBasisRank(candidate.CostBasis) != usageCostBasisRank(current.CostBasis) {
+		return usageCostBasisRank(candidate.CostBasis) > usageCostBasisRank(current.CostBasis)
+	}
+	if candidate.Stale != current.Stale {
+		return !candidate.Stale
+	}
+	if candidate.Revision != current.Revision {
+		return candidate.Revision > current.Revision
+	}
+	return candidate.SourceRecordID < current.SourceRecordID
+}
+
+func tokenCompletenessRank(value models.SessionUsageMeasurement) int {
+	rank := 0
+	for _, token := range []*int64{
+		value.InputTokens, value.OutputTokens, value.CacheReadTokens,
+		value.CacheWriteTokens, value.ReasoningTokens, value.TotalTokens, value.Turns,
+	} {
+		if token != nil {
+			rank++
+		}
+	}
+	return rank
 }
 
 func usageCandidateBetter(candidate, current models.SessionUsageMeasurement) bool {
 	if usageCoverageRank(candidate.Coverage) != usageCoverageRank(current.Coverage) {
 		return usageCoverageRank(candidate.Coverage) > usageCoverageRank(current.Coverage)
 	}
-	if usageCoverageRank(candidate.CostCoverage) != usageCoverageRank(current.CostCoverage) {
-		return usageCoverageRank(candidate.CostCoverage) > usageCoverageRank(current.CostCoverage)
+	if tokenCompletenessRank(candidate) != tokenCompletenessRank(current) {
+		return tokenCompletenessRank(candidate) > tokenCompletenessRank(current)
 	}
-	if usageCostBasisRank(candidate.CostBasis) != usageCostBasisRank(current.CostBasis) {
-		return usageCostBasisRank(candidate.CostBasis) > usageCostBasisRank(current.CostBasis)
+	if usageCostCandidateBetter(candidate, current) {
+		return true
+	}
+	if usageCostCandidateBetter(current, candidate) {
+		return false
 	}
 	if candidate.Source == "native" && current.Source != "native" {
 		return true
@@ -1461,7 +1670,7 @@ func usageMatchesTime(item models.SessionUsageMeasurement, filter models.Session
 		}
 		return true
 	}
-	if filter.Start != nil && !item.CoverageEnd.After(*filter.Start) {
+	if filter.Start != nil && item.CoverageEnd != nil && !item.CoverageEnd.After(*filter.Start) {
 		return false
 	}
 	if filter.End != nil && !item.CoverageStart.Before(*filter.End) {
@@ -1515,10 +1724,6 @@ func usagePeriod(item models.SessionUsageMeasurement, timezone string) string {
 		}
 	}
 	return item.CoverageStart.In(location).Format("2006-01-02")
-}
-
-func nativeCoverageKey(item models.SessionUsageMeasurement) string {
-	return strings.Join([]string{item.TaskID, item.SessionID, item.Model, item.Provider}, "\x00")
 }
 
 // nativeCoverageMatches treats an absent provider as an unknown provider. A
@@ -1688,7 +1893,31 @@ func (r *Repository) nativeUsageContributions(ctx context.Context, filter models
 		}
 		occurredAt := parseTimeString(occurred)
 		createdAt := parseTimeString(created)
+		invalidTokenValue := input < 0
+		if input < 0 {
+			input = 0
+		}
+		for _, value := range []*sql.NullInt64{&cachedRead, &cachedWrite, &output, &thought} {
+			if value.Valid && value.Int64 < 0 {
+				value.Valid = false
+				invalidTokenValue = true
+			}
+		}
+		coverage := models.UsageCoverageComplete
+		attribution := models.UsageAttributionAttributed
+		if cost.Valid && cost.Int64 < 0 {
+			cost = sql.NullInt64{}
+		}
 		costValue, costBasis, costCoverage := nativeCostFields(costSource, cost)
+		if invalidTokenValue || !nativeTokenTotalsConsistent(input, cachedRead, cachedWrite, output, thought, total) {
+			// Native events predate the source-aware validation boundary. Preserve
+			// their usable category values, but reject an inconsistent total from
+			// aggregation so a corrupt ledger row cannot inflate or contradict the
+			// report.
+			total = sql.NullInt64{}
+			coverage = models.UsageCoveragePartial
+			attribution = models.UsageAttributionAmbiguous
+		}
 		item := models.SessionUsageMeasurement{
 			WorkspaceID: filter.WorkspaceID, TaskID: taskID, SessionID: sessionID,
 			Source: "native", SourceRecordID: "native:" + eventID,
@@ -1699,7 +1928,7 @@ func (r *Repository) nativeUsageContributions(ctx context.Context, filter models
 			ReasoningTokens: nullableIntPtr(thought), TotalTokens: nullableIntPtr(total),
 			Turns:        models.Int64(1),
 			CostSubcents: costValue, Currency: "USD", CostBasis: costBasis, CostCoverage: costCoverage,
-			Coverage: models.UsageCoverageComplete, AttributionStatus: models.UsageAttributionAttributed,
+			Coverage: coverage, AttributionStatus: attribution,
 			CoverageStart: &occurredAt, CoverageEnd: timePtr(occurredAt.Add(time.Nanosecond)),
 			// Estimated describes the usage event independently of how its
 			// cost was priced. Preserve it for unpriced events too.
@@ -1731,6 +1960,46 @@ func costCoverageFor(cost sql.NullInt64) string {
 		return models.UsageCoverageMissing
 	}
 	return models.UsageCoverageComplete
+}
+
+func nativeTokenTotalsConsistent(input int64, cachedRead, cachedWrite, output, thought, total sql.NullInt64) bool {
+	values := []sql.NullInt64{{Valid: true, Int64: input}, cachedRead, cachedWrite, output, thought, total}
+	if !nativeTokenValuesNonNegative(values) {
+		return false
+	}
+	if !total.Valid {
+		return true
+	}
+	for _, value := range values[:len(values)-1] {
+		if value.Valid && value.Int64 > total.Int64 {
+			return false
+		}
+	}
+	return true
+}
+
+func nativeTokenValuesNonNegative(values []sql.NullInt64) bool {
+	for _, value := range values {
+		if value.Valid && value.Int64 < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func tokenCategoriesFitTotal(input, output, cacheRead, cacheWrite, reasoning *int64, total int64) bool {
+	if total < 0 {
+		return false
+	}
+	for _, value := range []*int64{input, output, cacheRead, cacheWrite, reasoning} {
+		if value == nil {
+			continue
+		}
+		if *value < 0 || *value > total {
+			return false
+		}
+	}
+	return true
 }
 
 func timePtr(value time.Time) *time.Time { return &value }
@@ -1833,6 +2102,9 @@ func aggregateUsage(contributions []usageContribution, filter models.SessionUsag
 		if item.costMissing {
 			item.row.CostSubcents = nil
 		}
+		if item.row.Currency == usageMixedValue {
+			item.row.CostSubcents = nil
+		}
 		rows = append(rows, item.row)
 	}
 	var totals models.UsageTotals
@@ -1854,9 +2126,13 @@ func aggregateUsage(contributions []usageContribution, filter models.SessionUsag
 			totals.Currency = row.Currency
 		} else if row.Currency != "" && totals.Currency != row.Currency {
 			totals.Currency = usageMixedValue
+			totals.CostSubcents = nil
 		}
 		totals.CostBasis = mergeCostBasis(totals.CostBasis, row.CostBasis)
 		totals.CostCoverage = mergeCoverage(totals.CostCoverage, row.CostCoverage)
+	}
+	if totals.Currency == usageMixedValue {
+		totals.CostSubcents = nil
 	}
 	if inputMissing {
 		totals.InputTokens = nil
@@ -1896,6 +2172,13 @@ func addNullable(target **int64, missing *bool, value *int64) {
 		copy := *value
 		*target = &copy
 	} else {
+		if *value > 0 && **target > math.MaxInt64-*value {
+			*target = nil
+			if missing != nil {
+				*missing = true
+			}
+			return
+		}
 		**target += *value
 	}
 }

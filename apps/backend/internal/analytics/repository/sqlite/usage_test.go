@@ -142,6 +142,7 @@ func TestSessionUsageUpsertIsIdempotentAndAllowsNewerCorrections(t *testing.T) {
 	older.Revision = 9
 	older.PayloadDigest = "digest-9"
 	older.InputTokens = models.Int64(999)
+	older.TotalTokens = models.Int64(1000)
 	results, err = repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{older})
 	if err != nil {
 		t.Fatalf("older upsert failed: %v", err)
@@ -153,6 +154,7 @@ func TestSessionUsageUpsertIsIdempotentAndAllowsNewerCorrections(t *testing.T) {
 	conflict := measurement
 	conflict.PayloadDigest = "different-payload"
 	conflict.InputTokens = models.Int64(999)
+	conflict.TotalTokens = models.Int64(1000)
 	results, err = repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{conflict})
 	if err != nil {
 		t.Fatalf("conflicting upsert failed: %v", err)
@@ -831,7 +833,7 @@ func TestSessionUsageUsesEquivalentNativeCoverageWithoutDoubleCounting(t *testin
 	external.CacheReadTokens = models.Int64(0)
 	external.CacheWriteTokens = models.Int64(0)
 	external.ReasoningTokens = models.Int64(0)
-	external.TotalTokens = models.Int64(31)
+	external.TotalTokens = models.Int64(999)
 	external.CostSubcents = models.Int64(100)
 	external.CoverageStart = &now
 	coverageEnd := now.Add(time.Nanosecond)
@@ -851,6 +853,144 @@ func TestSessionUsageUsesEquivalentNativeCoverageWithoutDoubleCounting(t *testin
 	row := report.Rows[0]
 	if row.CostSubcents == nil || *row.CostSubcents != 200 || row.Source != "native" {
 		t.Fatalf("equivalent native row = %#v", row)
+	}
+}
+
+func TestSessionUsageMergesCostCorrectionWithoutReplacingNativeTokens(t *testing.T) {
+	dbConn := createTestDB(t)
+	seedUsageFixtures(t, dbConn)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+	if err := createNativeUsageTable(dbConn); err != nil {
+		t.Fatalf("create native usage table: %v", err)
+	}
+	start := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	insertNativeUsageEvent(t, dbConn, 1, "model-a", "provider-a", 10, 100, 10, 0, "unpriced", start)
+
+	correction := usageFixtureMeasurement(start)
+	correction.SourceRecordID = "external-cost-correction"
+	correction.UsageIdentity = "cost:transcript-1"
+	correction.PayloadDigest = "external-cost-correction-digest"
+	correction.InputTokens = nil
+	correction.OutputTokens = nil
+	correction.CacheReadTokens = nil
+	correction.CacheWriteTokens = nil
+	correction.ReasoningTokens = nil
+	correction.TotalTokens = nil
+	correction.Turns = nil
+	correction.CostSubcents = models.Int64(777)
+	correction.CostBasis = models.UsageCostBasisReported
+	correction.CostCoverage = models.UsageCoverageComplete
+	correction.CoverageStart = &start
+	end := start.Add(time.Nanosecond)
+	correction.CoverageEnd = &end
+	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{correction}); err != nil {
+		t.Fatalf("cost correction upsert failed: %v", err)
+	}
+
+	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	if err != nil {
+		t.Fatalf("cost correction report failed: %v", err)
+	}
+	if len(report.Rows) != 1 {
+		t.Fatalf("cost correction rows = %d, want 1", len(report.Rows))
+	}
+	row := report.Rows[0]
+	if row.TotalTokens == nil || *row.TotalTokens != 10 {
+		t.Fatalf("cost correction replaced native tokens: %#v", row)
+	}
+	if row.CostSubcents == nil || *row.CostSubcents != 777 || row.CostBasis != models.UsageCostBasisReported {
+		t.Fatalf("cost correction was not selected: %#v", row)
+	}
+	if row.Source != usageMixedValue {
+		t.Fatalf("cost correction source = %q, want mixed", row.Source)
+	}
+}
+
+func TestSessionUsageKeepsPrunedTranscriptIdentitiesSeparate(t *testing.T) {
+	dbConn := createTestDB(t)
+	seedUsageFixtures(t, dbConn)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+	first := usageFixtureMeasurement(time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))
+	first.SessionID = ""
+	first.TranscriptID = "transcript-a"
+	first.SourceRecordID = "record-a"
+	first.UsageIdentity = "lifetime:transcript-a"
+	first.PayloadDigest = "digest-a"
+	second := first
+	second.TranscriptID = "transcript-b"
+	second.SourceRecordID = "record-b"
+	second.UsageIdentity = "lifetime:transcript-b"
+	second.PayloadDigest = "digest-b"
+	second.InputTokens = models.Int64(7)
+	second.TotalTokens = models.Int64(7)
+	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{first, second}); err != nil {
+		t.Fatalf("pruned transcript upsert failed: %v", err)
+	}
+
+	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	if err != nil {
+		t.Fatalf("pruned transcript report failed: %v", err)
+	}
+	if len(report.Rows) != 1 || report.Totals.TotalTokens == nil || *report.Totals.TotalTokens != 38 {
+		t.Fatalf("pruned transcript identities collapsed: rows=%#v totals=%#v", report.Rows, report.Totals)
+	}
+}
+
+func TestSessionUsageResolvesOverlappingRowsWithDifferentCoverageKeys(t *testing.T) {
+	dbConn := createTestDB(t)
+	seedUsageFixtures(t, dbConn)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+	start := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	first := usageFixtureMeasurement(start)
+	first.SourceRecordID = "overlap-a"
+	first.UsageIdentity = "interval-a"
+	first.CoverageKey = "bucket-a"
+	first.CoverageStart = &start
+	first.CoverageEnd = &end
+	first.PayloadDigest = "overlap-a-digest"
+	second := first
+	second.SourceRecordID = "overlap-b"
+	second.UsageIdentity = "interval-b"
+	second.CoverageKey = "bucket-b"
+	second.PayloadDigest = "overlap-b-digest"
+	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{first, second}); err != nil {
+		t.Fatalf("overlap upsert failed: %v", err)
+	}
+
+	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	if err != nil {
+		t.Fatalf("overlap report failed: %v", err)
+	}
+	if len(report.Rows) != 1 || report.Rows[0].TotalTokens == nil || *report.Rows[0].TotalTokens != 31 {
+		t.Fatalf("overlapping coverage keys were double counted: %#v", report.Rows)
+	}
+	if report.Rows[0].Coverage != models.UsageCoveragePartial {
+		t.Fatalf("overlapping coverage = %q, want partial", report.Rows[0].Coverage)
+	}
+}
+
+func TestSessionUsageRejectsCategoriesLargerThanTotal(t *testing.T) {
+	dbConn := createTestDB(t)
+	seedUsageFixtures(t, dbConn)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+	measurement := usageFixtureMeasurement(time.Now().UTC())
+	measurement.TotalTokens = models.Int64(10)
+	measurement.InputTokens = models.Int64(20)
+	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{measurement}); err == nil {
+		t.Fatal("upsert accepted token categories larger than total")
 	}
 }
 
