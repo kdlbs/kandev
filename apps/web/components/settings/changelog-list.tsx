@@ -16,7 +16,11 @@ import {
   PaginationEllipsis,
 } from "@kandev/ui/pagination";
 import { IconExternalLink } from "@tabler/icons-react";
-import { remarkPlugins, markdownComponents } from "@/components/shared/markdown-components";
+import {
+  markdownComponents,
+  rehypePlugins,
+  remarkPlugins,
+} from "@/components/shared/markdown-components";
 import { getChangelog, type ChangelogEntry } from "@/lib/changelog";
 import { getReleaseUrl } from "@/lib/release-notes";
 
@@ -59,7 +63,11 @@ function ChangelogEntryCard({ entry }: { entry: ChangelogEntry }) {
       </CardHeader>
       <CardContent>
         <div className="markdown-body text-sm">
-          <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+          <ReactMarkdown
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={rehypePlugins}
+            components={markdownComponents}
+          >
             {entry.notes}
           </ReactMarkdown>
         </div>

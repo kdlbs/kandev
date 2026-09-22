@@ -36,6 +36,12 @@ and provider status. Task and UI systems consume its results.
   A confirmed rename may update that target; missing or ambiguous branch
   information shall not redirect it to a sibling target.
 
+- **AC-INTEGRATIONS-GITHUB-PR-DISCOVERY-001.5:** Post-push diagnostics shall
+  distinguish a provider error from a successful search without a PR.
+  Provider errors shall include a credential-safe category and target identity.
+  Successful empty searches shall not produce warnings. Cancellation shall not
+  report provider failure. A later success shall not retain a failed final outcome.
+
 ### REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001: Explain discovery failures
 
 #### Acceptance criteria
