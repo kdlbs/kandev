@@ -137,7 +137,17 @@ PR fixup then split the PR discovery retry handler to satisfy the backend
 function-size limit, added the review-requested assertions and comments, and
 guarded optional secret checks. The focused orchestrator, worktree, and GitHub
 tests passed, and base-relative `golangci-lint` completed with zero issues. The
-full backend build and test suites remain unrun locally.
+later CI remediation corrected a stale websocket subscription-count assertion,
+made tracked execution persistence read status under the execution-store lock,
+and raised the static-analysis budget from five to ten minutes after CI timed
+out with zero lint findings. The new lifecycle and websocket regressions pass
+under `-race`, the full lifecycle and websocket packages pass, `go build ./...`
+passes, and base-relative `golangci-lint --timeout=10m` reports zero issues.
+A complete local `go test ./... -count=1` run still exits nonzero on the
+environment-sensitive process-tree probe, home-config discovery, and launcher
+restart tests, and one lifecycle package failure under aggregate scheduling;
+the lifecycle package passes when rerun alone. CI's E2E matrix was green during
+both post-push runs, so no E2E code change was made.
 
 Each work order supplies exact Go checks, rooted at the repository root.
 Final package checks:

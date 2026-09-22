@@ -134,4 +134,11 @@ go test ./internal/worktree -run 'Test(RefreshDiagnostic|BaseRefreshDiagnostic|R
 golangci-lint run ./... --new-from-rev='195530e5766abf7f44f08e2d5ad436b22c28d748' --timeout=5m
 ```
 
-The full backend build and test suites remain unrun locally.
+The later CI remediation also passed `go build ./...` and the full
+`internal/worktree`, `internal/agent/runtime/lifecycle`, and
+`internal/gateway/websocket` package suites, including race-enabled runs for
+the two packages affected by CI. Base-relative lint reports zero issues with
+the ten-minute analyzer budget. A complete local `go test ./... -count=1`
+run remains nonzero on environment-sensitive process-tree, home-config, and
+launcher tests, plus one lifecycle package failure under aggregate scheduling;
+the lifecycle package passed when rerun alone.

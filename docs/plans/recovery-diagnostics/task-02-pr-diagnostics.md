@@ -139,4 +139,11 @@ go test ./internal/github -run 'Test(ClassifyPRDiscoveryError|PRDiscovery)' -cou
 golangci-lint run ./... --new-from-rev='195530e5766abf7f44f08e2d5ad436b22c28d748' --timeout=5m
 ```
 
-The full backend build and test suites remain unrun locally.
+The later CI remediation reran base-relative lint with a ten-minute analyzer
+budget and it reported zero issues. The changed lifecycle and websocket
+packages, including race-enabled runs, pass locally. The full backend build
+now passes; a complete local test run remains nonzero on the documented
+environment-sensitive process-tree, home-config, and launcher tests, plus one
+lifecycle package failure under aggregate scheduling; the lifecycle package
+passed when rerun alone. CI's E2E matrix remained green, so this work order has
+no E2E changes.
