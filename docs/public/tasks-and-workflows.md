@@ -675,6 +675,17 @@ the parked switch, it keeps the current session recoverable and reports the
 error. The destination step controls start behavior; the source step controls
 end behavior.
 
+Answering a parked session starts an agent process for it again, in the same
+task workspace the destination step's session may still be using. Kandev
+permits more than one session of a task to write that shared workspace
+concurrently; it does not serialize them or lock the workspace to one writer.
+If the destination session is still active when you answer the parked one,
+both write the same files. Kandev records this condition (a structured log
+entry and an operational counter) but does not prevent, delay, or queue it. To
+avoid concurrent writers, confirm the destination session has finished before
+answering a parked one, or use **Complete the session** instead of **Park the
+session** for steps that pin a different agent profile.
+
 When **Reset agent context** creates a fresh ACP session, Kandev preserves the
 selected ACP model, permission mode, and provider options. It restores these
 settings before the next automatic prompt. If the provider rejects a setting,

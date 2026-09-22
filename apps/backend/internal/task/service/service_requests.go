@@ -84,6 +84,10 @@ type CreateTaskRequest struct {
 	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
 	Position       int                    `json:"position"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	// TrustedHandoffMetadata allows the handoff application path to persist its
+	// server-authored provenance fields. It is internal-only and never decoded
+	// from a request body; ordinary task creation cannot forge those fields.
+	TrustedHandoffMetadata bool `json:"-"`
 	// WorkflowAgentOverrides groups one replacement by source profile. The
 	// service expands it to fixed workflow-step bindings before insertion.
 	WorkflowAgentOverrides           map[string]string              `json:"workflow_agent_overrides,omitempty"`

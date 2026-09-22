@@ -171,15 +171,20 @@ func (r *Repository) UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *
 	if err != nil {
 		return err
 	}
+	snapshot.ContentDigest = computeGitSnapshotDigest(
+		snapshot.Branch, snapshot.RemoteBranch, snapshot.HeadCommit, snapshot.BaseCommit,
+		snapshot.Ahead, snapshot.Behind, filesJSON,
+	)
 
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_git_snapshots (
 			id, task_environment_id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
-			ahead, behind, files, triggered_by, metadata, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ahead, behind, files, triggered_by, metadata, created_at, content_digest
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), snapshot.ID, snapshot.TaskEnvironmentID, nullableGitSnapshotSessionID(snapshot.SessionID), string(snapshot.SnapshotType), snapshot.Branch,
 		snapshot.RemoteBranch, snapshot.HeadCommit, snapshot.BaseCommit, snapshot.Ahead,
-		snapshot.Behind, filesJSON, snapshot.TriggeredBy, metadataJSON, snapshot.CreatedAt); err != nil {
+		snapshot.Behind, filesJSON, snapshot.TriggeredBy, metadataJSON, snapshot.CreatedAt,
+		snapshot.ContentDigest); err != nil {
 		return fmt.Errorf("insert live snapshot: %w", err)
 	}
 
@@ -232,7 +237,14 @@ func (r *Repository) DeleteLiveMonitorSnapshotsByTaskEnvironmentID(ctx context.C
 	return err
 }
 
-// CreateGitSnapshot inserts a new git snapshot into the database.
+// CreateGitSnapshot inserts a new git snapshot into the database. It always
+// records the row (matching prior behavior, so ordering/history reads stay
+// exact): content-based deduplication for this wave is intentionally
+// read-only-candidate-based rather than skip-on-write, per the plan's
+// "destructive maintenance is explicit, dry-run-first" constraint. The
+// computed content_digest lets ListDuplicateGitSnapshotCandidates identify
+// content-equivalent rows for a later, explicit maintenance pass (Task 06)
+// to prune instead of silently altering what every write persists.
 func (r *Repository) CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error {
 	if snapshot == nil {
 		return fmt.Errorf("snapshot is nil")
@@ -251,16 +263,21 @@ func (r *Repository) CreateGitSnapshot(ctx context.Context, snapshot *models.Git
 	if err != nil {
 		return err
 	}
+	snapshot.ContentDigest = computeGitSnapshotDigest(
+		snapshot.Branch, snapshot.RemoteBranch, snapshot.HeadCommit, snapshot.BaseCommit,
+		snapshot.Ahead, snapshot.Behind, filesJSON,
+	)
 
 	if snapshot.TriggeredBy != triggeredByAgentCompleted {
 		_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_git_snapshots (
 			id, task_environment_id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
-			ahead, behind, files, triggered_by, metadata, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ahead, behind, files, triggered_by, metadata, created_at, content_digest
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), snapshot.ID, snapshot.TaskEnvironmentID, nullableGitSnapshotSessionID(snapshot.SessionID), string(snapshot.SnapshotType), snapshot.Branch,
 			snapshot.RemoteBranch, snapshot.HeadCommit, snapshot.BaseCommit, snapshot.Ahead,
-			snapshot.Behind, filesJSON, snapshot.TriggeredBy, metadataJSON, snapshot.CreatedAt)
+			snapshot.Behind, filesJSON, snapshot.TriggeredBy, metadataJSON, snapshot.CreatedAt,
+			snapshot.ContentDigest)
 		return err
 	}
 
@@ -300,11 +317,11 @@ func insertGitSnapshot(
 	return exec.ExecContext(ctx, db.Rebind(`
 		INSERT INTO task_session_git_snapshots (
 			id, task_environment_id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
-			ahead, behind, files, triggered_by, metadata, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ahead, behind, files, triggered_by, metadata, created_at, content_digest
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), snapshot.ID, snapshot.TaskEnvironmentID, nullableGitSnapshotSessionID(snapshot.SessionID), string(snapshot.SnapshotType), snapshot.Branch,
 		snapshot.RemoteBranch, snapshot.HeadCommit, snapshot.BaseCommit, snapshot.Ahead,
-		snapshot.Behind, filesJSON, snapshot.TriggeredBy, metadataJSON, snapshot.CreatedAt)
+		snapshot.Behind, filesJSON, snapshot.TriggeredBy, metadataJSON, snapshot.CreatedAt, snapshot.ContentDigest)
 }
 
 func (r *Repository) lockGitSnapshotEnvironment(tx *sqlx.Tx, taskEnvironmentID string) error {

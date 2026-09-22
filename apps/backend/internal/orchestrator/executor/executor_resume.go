@@ -859,6 +859,9 @@ func (e *Executor) resumeSession(
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return nil, err
 	}
+	if startAgent {
+		e.observeSessionCoresidency(ctx, sessionCoresidencySiteResume, task.ID, session.ID)
+	}
 
 	resumeInitialState := session.State
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
@@ -2238,7 +2241,7 @@ func (e *Executor) startAgentProcessOnResumeWithTaskPromotion(
 	agentExecutionID string,
 	promoteTask bool,
 ) {
-	e.runAgentProcessAsync(ctx, taskID, session.ID, agentExecutionID, func(updCtx context.Context) {
+	e.runAgentProcessAsyncWithObservation(ctx, taskID, session.ID, agentExecutionID, sessionCoresidencySiteResume, func(updCtx context.Context) {
 		if promoteTask {
 			if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, session.ID); updateErr != nil {
 				e.logger.Warn("failed to update task state to IN_PROGRESS after resume start",

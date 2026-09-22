@@ -53,6 +53,7 @@ type Config struct {
 	Office                 OfficeConfig                 `mapstructure:"office"`
 	Features               FeaturesConfig               `mapstructure:"features"`
 	GitHubCredentialBroker GitHubCredentialBrokerConfig `mapstructure:"githubCredentialBroker"`
+	Executors              ExecutorsConfig              `mapstructure:"executors"`
 	Source                 ConfigSource                 `mapstructure:"-" json:"-"`
 }
 
@@ -69,6 +70,15 @@ type TasksConfig struct {
 // CredentialsConfig contains operator-managed credential file settings.
 type CredentialsConfig struct {
 	File string `mapstructure:"file"`
+}
+
+// ExecutorsConfig contains executor-related startup settings.
+type ExecutorsConfig struct {
+	// SSHReachabilityIntervalSeconds is the raw configured value, not yet
+	// clamped into the reachability package's own 15-3600 bound: 0 disables
+	// the poller, and reachability.ClampInterval owns the rest of the
+	// normalization at construction time.
+	SSHReachabilityIntervalSeconds int `mapstructure:"sshReachabilityIntervalSeconds"`
 }
 
 // LimitsConfig contains process and protocol capacity limits.

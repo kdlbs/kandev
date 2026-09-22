@@ -300,6 +300,7 @@ type ActionDependencies struct {
 	Runs          RunSpawner
 	AgentModifier AgentModifier
 	Skills        SkillManager
+	Handoff       HandoffDependencies
 }
 
 // CreateProjectInput contains fields an agent may provide when creating a project.

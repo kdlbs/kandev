@@ -1144,7 +1144,7 @@ func (r *Repository) buildTaskUpdateQuery(
 	}
 	metadataExpr := "?"
 	if protectDeferredLaunch {
-		stripped, marshalErr := json.Marshal(stripProtectedTaskMetadata(task.Metadata))
+		stripped, marshalErr := stripProtectedTaskMetadata(metadata)
 		if marshalErr != nil {
 			return "", nil, nil, marshalErr
 		}
@@ -1220,6 +1220,10 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		// cannot rule out on its own. See ErrWorkflowResolutionConflict (errors.go).
 		return "", 0, fmt.Errorf("%w: expected %q, task is now in %q",
 			ErrWorkflowResolutionConflict, expectedWorkflowID, fromWorkflowID)
+	}
+	metadata, err = r.preserveLiveHandoffProvenance(ctx, tx, task.ID, metadata)
+	if err != nil {
+		return "", 0, err
 	}
 	// Stamped after the transactional read/lock above, not before BeginTx: on
 	// Postgres, readTaskStepInTx's FOR UPDATE blocks until this transaction's
@@ -2416,7 +2420,7 @@ func pendingTaskMetadataMergeExpression(driver string) string {
 	return "json_patch(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, json_remove(?, '$.agent_title_pending', '$.agent_title_owner_session_id'))"
 }
 
-// stripProtectedTaskMetadata returns a shallow clone of metadata with
+// stripProtectedTaskMetadata returns metadata (already-marshaled JSON) with
 // deferred_launch removed, for updateTaskTx's protectDeferredLaunch mode
 // (UpdateTaskPreservingDeferredLaunch), applied to the write payload
 // regardless of which of the two query shapes below owns the write. The key
@@ -2430,6 +2434,16 @@ func pendingTaskMetadataMergeExpression(driver string) string {
 // a stale snapshot can never resurrect or clobber whatever the ceiling's own
 // writers did to the key in between.
 //
+// It must operate on the metadata bytes updateTaskTx passes in — already
+// merged by preserveLiveHandoffProvenance with the row's live handoffs/
+// handoff_source — rather than re-deriving from task.Metadata: re-deriving
+// would rebuild the payload from the caller's pre-transaction snapshot and
+// silently discard that merge, reverting a concurrently committed handoff
+// provenance write. Decoding into map[string]json.RawMessage rather than
+// map[string]interface{} avoids a float64 round-trip that would corrupt an
+// unrelated large or high-precision numeric field elsewhere in the document
+// (AC-27), matching preserveLiveHandoffProvenance's own approach.
+//
 // step_handoff_carry is deliberately NOT included here even though
 // service_task_metadata.go's protectedTaskMetadataUpdate treats it the same
 // way deferred_launch is treated at the HTTP PATCH boundary: unlike
@@ -2437,20 +2451,20 @@ func pendingTaskMetadataMergeExpression(driver string) string {
 // through the ordinary in-memory task.Metadata + UpdateTask sequence
 // (event_handlers_workflow.go's step-transition handling), not only a CAS
 // primitive, so protecting it here would silently drop that write.
-func stripProtectedTaskMetadata(metadata map[string]interface{}) map[string]interface{} {
-	// Always returns a non-nil map, even for nil input: json.Marshal of a nil
-	// map produces the JSON scalar `null`, and Postgres's jsonb `||` merge
-	// expression below concatenates a scalar with an object into a
+func stripProtectedTaskMetadata(metadata []byte) ([]byte, error) {
+	// Always yields a non-nil map, even for absent/null input: json.Marshal
+	// of a nil map produces the JSON scalar `null`, and Postgres's jsonb `||`
+	// merge expression below concatenates a scalar with an object into a
 	// two-element array instead of merging, corrupting the metadata column.
-	// A nil range is a no-op, so this still yields "{}" for nil input.
-	cloned := make(map[string]interface{}, len(metadata))
-	for key, value := range metadata {
-		if key == models.MetaKeyDeferredLaunch {
-			continue
+	decoded := make(map[string]json.RawMessage)
+	trimmed := strings.TrimSpace(string(metadata))
+	if trimmed != "" && trimmed != jsonNull {
+		if err := json.Unmarshal(metadata, &decoded); err != nil {
+			return nil, err
 		}
-		cloned[key] = value
 	}
-	return cloned
+	delete(decoded, models.MetaKeyDeferredLaunch)
+	return json.Marshal(decoded)
 }
 
 // protectedTaskMetadataMergeExpression is updateTaskTx's metadata write when

@@ -853,6 +853,12 @@ function handleQueueStatusChangedMessage(
   state.setQueueEntries(payload.session_id, entries, meta);
 }
 
+function clearResumeAndLaunchWarnings(store: StoreApi<AppState>, sessionId: string) {
+  const state = store.getState();
+  state.setResumeSkipped(sessionId, false);
+  state.clearLaunchWarning?.(sessionId);
+}
+
 /** Registers the task-session WebSocket handlers (state, messages, workspace sources, queue). */
 // eslint-disable-next-line max-lines-per-function -- session events remain one ordered registry.
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
@@ -912,7 +918,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       // it: a failed manual resume emits STARTING before the launch fails,
       // and clearing there would drop the Start agent retry affordance.
       if (newState === "RUNNING") {
-        store.getState().setResumeSkipped(sessionId, false);
+        clearResumeAndLaunchWarnings(store, sessionId);
       }
 
       maybeAdoptSessionOnTransition(

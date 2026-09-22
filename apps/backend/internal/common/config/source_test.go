@@ -339,6 +339,74 @@ func TestHomeConfigInvalidFirstDoesNotFallThrough(t *testing.T) {
 	}
 }
 
+// @covers AC-EXECUTORS-SSH-REACHABILITY-001.14
+//
+// The catalog's own fallback-and-bounds logic only ever falls back to the
+// default (60): the 0-disables/15-3600-clamp behavior belongs to the
+// reachability package's own ClampInterval, not this layer, per the design's
+// split between catalog-level normalization and package-level clamping.
+func TestExecutorsSSHReachabilityIntervalSecondsEnvironment(t *testing.T) {
+	tests := []struct {
+		name       string
+		env        string
+		wantValue  int
+		wantSource SettingSource
+	}{
+		{"absent uses default", "", 60, SourceDefault},
+		{"valid value passes through unclamped", "45", 45, SourceEnvironment},
+		{"zero passes through as the disable sentinel", "0", 0, SourceEnvironment},
+		{"negative falls back to the default", "-5", 60, SourceDefault},
+		{"unparsable falls back to the default", "not-a-number", 60, SourceDefault},
+		{"a value outside 15-3600 still passes through unclamped here", "9999", 9999, SourceEnvironment},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.env != "" {
+				t.Setenv("KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS", tt.env)
+			} else {
+				t.Setenv("KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS", "")
+			}
+			t.Setenv("KANDEV_SERVER_PORT", "")
+
+			cfg, err := LoadWithPath(t.TempDir())
+			if err != nil {
+				t.Fatalf("LoadWithPath: %v", err)
+			}
+			if cfg.Executors.SSHReachabilityIntervalSeconds != tt.wantValue {
+				t.Fatalf("executors.sshReachabilityIntervalSeconds = %d, want %d", cfg.Executors.SSHReachabilityIntervalSeconds, tt.wantValue)
+			}
+			if got := cfg.SourceFor("executors.sshReachabilityIntervalSeconds"); got != tt.wantSource {
+				t.Fatalf("executors.sshReachabilityIntervalSeconds source = %q, want %q", got, tt.wantSource)
+			}
+		})
+	}
+}
+
+// @covers AC-EXECUTORS-SSH-REACHABILITY-001.14
+//
+// A YAML value is not passed through the environment's fallback-and-bounds
+// logic at all — it decodes straight into the typed field, negative values
+// included, leaving ClampInterval as the sole place that normalizes it.
+func TestExecutorsSSHReachabilityIntervalSecondsYAMLPassesThroughUnclamped(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("executors:\n  sshReachabilityIntervalSeconds: -5\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS", "")
+	t.Setenv("KANDEV_SERVER_PORT", "")
+
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if cfg.Executors.SSHReachabilityIntervalSeconds != -5 {
+		t.Fatalf("executors.sshReachabilityIntervalSeconds = %d, want -5 (unclamped)", cfg.Executors.SSHReachabilityIntervalSeconds)
+	}
+	if got := cfg.SourceFor("executors.sshReachabilityIntervalSeconds"); got != SourceConfiguration {
+		t.Fatalf("executors.sshReachabilityIntervalSeconds source = %q, want %q", got, SourceConfiguration)
+	}
+}
+
 func nestedField(t *testing.T, value any, names ...string) reflect.Value {
 	t.Helper()
 	current := reflect.ValueOf(value)
