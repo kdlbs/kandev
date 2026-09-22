@@ -439,8 +439,8 @@ func mapToHTTPHeaders(headers map[string]string) []acp.HttpHeader {
 	return hdrs
 }
 
-// LoadSession restores an existing session. Compatible dialects prefer advertised
-// session/resume without history replay; other agents use session/load.
+// LoadSession restores an existing session, preferring advertised session/resume
+// without history replay and otherwise using session/load.
 // mcpServers are passed to the agent so it can reconnect to MCP servers on the new
 // agentctl instance (critical for agents that receive MCP configs via the protocol).
 //
@@ -460,7 +460,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		return fmt.Errorf("adapter not initialized")
 	}
 
-	if !capabilities.LoadSession && (!a.dialect.resumeWithoutReplay || capabilities.SessionCapabilities.Resume == nil) {
+	if !capabilities.LoadSession && capabilities.SessionCapabilities.Resume == nil {
 		a.logger.Debug("session/load rejected: agent does not advertise LoadSession capability",
 			zap.String("session_id", sessionID))
 		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")

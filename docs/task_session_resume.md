@@ -163,20 +163,19 @@ Runs `StartAgentProcess` in a background goroutine. On success, the callback res
 
 ```
 If agent has NativeSessionResume: true AND existingSessionID is non-empty:
-  -> Codex with advertised resume: session/resume without history replay
+  -> Agent advertises resume: session/resume without history replay
      -> Method not found, load advertised, context active: session/load of the same session
-  -> Other agents or Codex without advertised resume: session/load
+  -> Agent does not advertise resume: session/load
   -> Only explicitly unsupported or unknown-session errors may fall back to session/new
   -> Transport, authentication, cancellation, and inconclusive errors preserve the saved identity
 Otherwise:
   -> session/new
 ```
 
-The Codex dialect opts into replay-free resume because its response supplies typed
-configuration and model state. Other dialects retain `session/load` to preserve
-legacy model responses that the SDK's resume response cannot represent. Kandev
-already stores the displayed conversation, so Codex can restore its provider
-context without transferring that history again. Traces distinguish the actual
+Replay-free resume is selected by the agent's advertised capability. Both restore
+responses retain typed configuration and legacy model state. Kandev already
+stores the displayed conversation, so an agent can restore its provider context
+without transferring that history again. Traces distinguish the actual
 `acp.session.resume` and `acp.session.load` requests beneath `acp.session.restore`.
 
 ### `dispatchInitialPrompt` (three-way switch)
@@ -317,11 +316,11 @@ The session is NOT marked as failed -- the user can send a new message to start 
 |-------|:---:|:---:|-------|
 | Claude Code | - | - | Uses `--resume` CLI flag with stored resume token |
 | Codex | yes | - | Prefers advertised ACP `session/resume` without history replay; falls back to `session/load` when resume is unsupported |
-| Copilot | yes | - | ACP `session/load` restores context |
-| Auggie | yes | - | ACP `session/load` restores context (v0.18.1+) |
+| Copilot | yes | - | Prefers advertised ACP `session/resume`; otherwise uses `session/load` |
+| Auggie | yes | - | Prefers advertised ACP `session/resume`; otherwise uses `session/load` (v0.18.1+) |
 | Gemini | - | - | Boots idle, no context restoration |
 | Amp | - | - | Uses `ForkSessionCmd` / `ContinueSessionCmd` |
-| OpenCode | yes | - | ACP `session/load` restores context |
+| OpenCode | yes | - | Prefers advertised ACP `session/resume`; otherwise uses `session/load` |
 
 Agent configs are defined in `internal/agent/agents/`.
 

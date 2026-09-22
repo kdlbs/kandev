@@ -10,16 +10,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// restoreSessionState skips history replay for compatible dialects that advertise
-// session/resume. Other dialects need session/load to preserve legacy model state,
-// which the SDK's ResumeSessionResponse cannot represent.
+// restoreSessionState uses advertised session/resume to restore the provider
+// conversation without transferring history that Kandev already stores.
 func (a *Adapter) restoreSessionState(
 	ctx context.Context,
 	conn *acp.ClientSideConnection,
 	capabilities acp.AgentCapabilities,
 	req acp.LoadSessionRequest,
 ) (acp.LoadSessionResponse, error) {
-	if !a.dialect.resumeWithoutReplay || capabilities.SessionCapabilities.Resume == nil {
+	if capabilities.SessionCapabilities.Resume == nil {
 		return a.loadSessionWithReplay(ctx, conn, req)
 	}
 	a.logger.Info("resuming session without history replay", zap.String("session_id", string(req.SessionId)))
@@ -40,11 +39,7 @@ func (a *Adapter) restoreSessionState(
 			zap.String("session_id", string(req.SessionId)))
 		return a.loadSessionWithReplay(ctx, conn, req)
 	}
-	return acp.LoadSessionResponse{
-		Meta:          resp.Meta,
-		ConfigOptions: resp.ConfigOptions,
-		Modes:         resp.Modes,
-	}, err
+	return acp.LoadSessionResponse(resp), err
 }
 
 // loadSessionWithReplay traces the history transfer separately from a preceding resume attempt.
