@@ -92,9 +92,12 @@ has been read from `task_sessions`.
 
 The worktree recovery suites use real Git checkouts. The executor integration tests
 exercise the production launch and resume wiring with a recording admission
-boundary and assert the selected durable slot identity. A full cross-layer test
-that combines a real SQLite claim, real Git recovery, and lifecycle runtime startup
-is still a verification gap.
+boundary and assert the selected durable slot identity. The lifecycle adapter
+fixture additionally combines a real SQLite claim, two temporary Git repositories,
+the registered worktree preparer, and the final runtime seam. It covers successful
+recovery, later preparation failure, live-consumer refusal, requester-identity
+refusal, current-session creating-environment materialization, and an existing
+environment with missing worktree identity.
 
 This change does not modify rendered UI. Existing launch and resume error surfaces
 remain the presentation contract. No layout preview or artificial browser test is
@@ -104,13 +107,14 @@ required for the backend-only change.
 
 - [x] [Task 01: Scope recovery admission](task-01-scope-admission.md)
 - [ ] [Task 02: Claim recovery authority](task-02-claim-authority.md)
-- [ ] [Task 03: Prove recovery integration](task-03-prove-integration.md)
+- [x] [Task 03: Prove recovery integration](task-03-prove-integration.md)
 
 ## Verification results
 
 Implementation checks pass locally. The non-skipped PostgreSQL concurrency
-receipt is preserved. A full real-Git-to-lifecycle integration test remains
-outstanding.
+receipt is preserved. The real Git-to-lifecycle integration fixtures pass in
+normal and race-enabled runs. External CI, a real runtime-process exercise, and
+deployment validation remain outside this local evidence.
 
 Design-package checks on 2026-09-10:
 

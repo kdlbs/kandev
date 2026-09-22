@@ -1,7 +1,7 @@
 ---
 id: "03-prove-integration"
 title: "Prove recovery integration"
-status: in_progress
+status: completed
 wave: 3
 depends_on:
   - "02-claim-authority"
@@ -109,11 +109,15 @@ Do not promote a draft design solely because its document linter passes.
 The production executor launch and resume paths now call selected-environment
 admission after executor selection. `TestWorktreeRecoveryLaunchIntegration` and
 `TestWorktreeRecoveryResumeIntegration` pass and assert the selected task,
-environment, owner generation, executor, and repository slot. The full
-orchestrator/worktree and lifecycle packages pass, and existing real-Git
-worktree recovery tests pass. The integration tests use a recording admission
-boundary rather than combining real SQLite recovery publication with lifecycle
-runtime startup, so this work order remains in progress.
+environment, owner generation, executor, and repository slot. The lifecycle
+adapter fixture adds the complete local boundary: real SQLite task and worktree
+stores, two temporary Git repositories, real selected recovery admission, the
+registered `WorktreePreparer`, and the final runtime seam. Its normal and
+race-enabled runs cover replacement, retained replacement after later preparation
+failure, live-consumer and requester-identity refusal, current-session creating
+materialization, and refusal of an existing environment with missing worktree
+identity. External CI, a real runtime process, and deployment remain separate
+operational validation.
 
 ### Session-incarnation recovery admission, 2026-09-21
 
