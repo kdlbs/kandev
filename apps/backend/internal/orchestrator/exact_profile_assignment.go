@@ -264,15 +264,48 @@ func (s *Service) persistExactProfileSessionBinding(
 	exact *ExactProfileLaunchDecision,
 ) error {
 	if exact == nil ||
-		(session.ExactProfileGeneration == exact.Generation && session.ExactProfileRevision == exact.Revision) {
+		(session.AgentProfileID == exact.AgentProfileID &&
+			session.ExactProfileGeneration == exact.Generation && session.ExactProfileRevision == exact.Revision) {
 		return nil
 	}
 
 	observedState := session.State
+	session.AgentProfileID = exact.AgentProfileID
 	session.ExactProfileGeneration = exact.Generation
 	session.ExactProfileRevision = exact.Revision
 	if err := s.persistFullTaskSessionIfCurrent(ctx, session, observedState); err != nil {
 		return fmt.Errorf("persist exact profile session binding: %w", err)
 	}
 	return nil
+}
+
+// resolveAndBindExactProfileAssignment validates the current durable
+// assignment and makes its generation/revision visible on the session before
+// any recovery launch can reach the executor.
+func (s *Service) resolveAndBindExactProfileAssignment(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) (*ExactProfileLaunchDecision, error) {
+	exact, err := s.resolveExactProfileAssignment(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.persistExactProfileSessionBinding(ctx, session, exact); err != nil {
+		return nil, err
+	}
+	return exact, nil
+}
+
+func resumeOptionsWithExactProfile(
+	options executor.ResumeOptions,
+	exact *ExactProfileLaunchDecision,
+) executor.ResumeOptions {
+	if exact == nil {
+		return options
+	}
+	options.ExactProfile = true
+	options.ExactProfileModel = exact.Model
+	options.ExactProfileRevision = exact.Revision
+	return options
 }

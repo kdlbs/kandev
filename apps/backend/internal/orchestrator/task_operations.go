@@ -2992,18 +2992,11 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
-	exactAssignment, err := s.resolveExactProfileAssignment(ctx, taskID)
+	exactAssignment, err := s.resolveAndBindExactProfileAssignment(ctx, taskID, session)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.persistExactProfileSessionBinding(ctx, session, exactAssignment); err != nil {
-		return nil, err
-	}
-	if exactAssignment != nil {
-		options.ExactProfile = true
-		options.ExactProfileModel = exactAssignment.Model
-		options.ExactProfileRevision = exactAssignment.Revision
-	}
+	options = resumeOptionsWithExactProfile(options, exactAssignment)
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, entryBinding); err != nil {
 		return nil, err
 	}
@@ -3865,13 +3858,22 @@ func (s *Service) attemptColdResume(
 	if err := s.admitCeilingDispatch(resumeCtx, session.TaskID); err != nil {
 		return false, err
 	}
+	exactAssignment, err := s.resolveAndBindExactProfileAssignment(resumeCtx, session.TaskID, session)
+	if err != nil {
+		return false, err
+	}
 	dispatchCtx, releaseCeilingDispatch, err := s.commitCeilingEntryDispatch(
 		resumeCtx, session.TaskID, ceilingEntryBindingFromContext(resumeCtx),
 	)
 	if err != nil {
 		return false, err
 	}
-	execution, launchErr := s.executor.ResumeSession(dispatchCtx, session, true)
+	execution, launchErr := s.executor.ResumeSessionWithOptions(
+		dispatchCtx,
+		session,
+		true,
+		resumeOptionsWithExactProfile(executor.ResumeOptions{}, exactAssignment),
+	)
 	releaseCeilingDispatch()
 	if execution != nil && resumeAttempt != nil {
 		resumeAttempt.setExecutionID(execution.AgentExecutionID)
@@ -4056,6 +4058,10 @@ func (s *Service) startAgentOnPreparedWorkspace(
 	if err := s.validateContextCeilingEntry(launchCtx, session.TaskID); err != nil {
 		return err
 	}
+	exactAssignment, err := s.resolveAndBindExactProfileAssignment(launchCtx, session.TaskID, session)
+	if err != nil {
+		return err
+	}
 	if _, err := s.ClaimTaskTitleSession(launchCtx, session.TaskID, sessionID); err != nil {
 		return fmt.Errorf("failed to claim first-turn task title: %w", err)
 	}
@@ -4064,9 +4070,13 @@ func (s *Service) startAgentOnPreparedWorkspace(
 	}
 	var execution *executor.TaskExecution
 	if execution, err = s.launchPreparedSessionWithDynamicFallback(launchCtx, task, sessionID, executor.LaunchOptions{
-		AgentProfileID: session.AgentProfileID,
-		ExecutorID:     session.ExecutorID,
-		StartAgent:     true,
+		AgentProfileID:         session.AgentProfileID,
+		ExactProfile:           exactAssignment != nil,
+		ExactProfileGeneration: exactAssignmentGeneration(exactAssignment),
+		ExactProfileRevision:   exactAssignmentRevision(exactAssignment),
+		ExactProfileModel:      exactProfileModel(exactAssignment),
+		ExecutorID:             session.ExecutorID,
+		StartAgent:             true,
 	}); err != nil {
 		if execution != nil && resumeAttempt != nil {
 			resumeAttempt.setExecutionID(execution.AgentExecutionID)
