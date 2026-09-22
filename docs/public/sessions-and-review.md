@@ -255,6 +255,30 @@ the desktop/tablet bottom bar or phone Status drawer. Configure the plugin under
 Provider Usage**. Kandev hides the context ring rather than presenting
 impossible data when reported use exceeds the reported window.
 
+## Render math in Markdown
+
+Shared Markdown reading surfaces render common LaTeX formulas with KaTeX. Use
+single dollar signs for inline math and double dollar signs for a display
+formula:
+
+```markdown
+Energy: $E = mc^2$
+
+$$
+\frac{a}{b}
+$$
+```
+
+A standalone display can also use one line, such as `$$a^2 + b^2 = c^2$$`.
+Escape a dollar sign when you need literal currency text, such as `\$100`.
+Text such as `$100 and $200` remains plain text.
+
+Formulas use the existing chat or file-preview reading area. Wide display
+formulas scroll inside their own region on a phone, so the page keeps its
+normal width. This rendering applies to agent chat, Markdown file previews,
+task documents and plans, comments, pull-request and work-item descriptions,
+release notes, changelog entries, walkthroughs, findings, and queued messages.
+
 ## Control chat animations
 
 Open **Settings > Preferences > Appearance** and change **Chat animations**.

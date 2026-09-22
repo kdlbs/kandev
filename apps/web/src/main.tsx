@@ -1,5 +1,6 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
+import "katex/dist/katex.min.css";
 import "@/app/globals.css";
 import { setOnUnauthorized } from "@/lib/api/client";
 import { scheduleFrontendErrorReport } from "@/lib/api/domains/frontend-error-log-api";
