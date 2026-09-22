@@ -1115,6 +1115,7 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	session := &models.TaskSession{
 		ID:                            sessionID,
 		TaskID:                        task.ID,
+		QueueIncarnationID:            uuid.New().String(),
 		AgentProfileID:                agentProfileID,
 		RepositoryID:                  repositoryID,
 		BaseBranch:                    baseBranch,
@@ -1158,30 +1159,10 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		return "", err
 	}
 
-	var recoveryAdmission *worktree.RecoveryAdmission
-	if e.selectedWorktreeRecoveryAdmission != nil {
-		selectedEnv, envErr := e.resolveEnvironmentForAdmission(ctx, task.ID, taskEnvironmentID)
-		if envErr != nil {
-			return "", envErr
-		}
-		recoveryAdmission, envErr = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, execConfig.ExecutorType)
-		if envErr != nil {
-			return "", envErr
-		}
-	}
-
-	createCtx := ctx
-	if recoveryAdmission != nil {
-		createCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
-	}
-	createErr := e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
-	if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
-		if createErr == nil {
-			createErr = fmt.Errorf("release worktree recovery admission: %w", releaseErr)
-		} else {
-			createErr = errors.Join(createErr, fmt.Errorf("release worktree recovery admission: %w", releaseErr))
-		}
-	}
+	// New sessions do not become durable until createPreparedSession returns.
+	// Recovery admission validates the requesting durable session, so the
+	// post-persistence LaunchPreparedSession boundary owns the first admission.
+	createErr := e.createPreparedSession(ctx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
 	if createErr != nil {
 		e.logger.Error("failed to persist agent session",
 			zap.String("task_id", task.ID),
