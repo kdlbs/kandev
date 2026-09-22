@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/steptelemetry"
@@ -69,6 +70,9 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	}
 	req.EntryOptions = entryOptions
 	req.Prompt = ""
+	if response, handled, err := h.completeSameStepMove(ctx, msg, req); handled || err != nil {
+		return response, err
+	}
 
 	// entry_options are OPTIONAL — config-mode/admin moves don't always have an
 	// agent to hand off to. When supplied, one-shot instructions/reset/profile
@@ -98,6 +102,70 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	// Idle path — apply immediately. If a prompt was supplied, queue it on the
 	// session so the receiving agent's next turn picks it up; if not, just move.
 	return h.applyMoveTaskImmediate(ctx, msg, req, session)
+}
+
+func (h *Handlers) completeSameStepMove(ctx context.Context, msg *ws.Message, req moveTaskRequest) (*ws.Message, bool, error) {
+	if h.taskSvc == nil {
+		return moveTaskErrorResponse(msg, ws.ErrorCodeInternalError, "task service is not configured")
+	}
+	task, err := h.taskSvc.GetTask(ctx, req.TaskID)
+	if err != nil || task == nil {
+		h.logger.Error("move_task: failed to load task for destination classification",
+			zap.String("task_id", req.TaskID), zap.Error(err))
+		return moveTaskErrorResponse(msg, ws.ErrorCodeInternalError, "failed to load task for move validation")
+	}
+	if task.WorkflowID != req.WorkflowID || task.WorkflowStepID != req.WorkflowStepID {
+		return nil, false, nil
+	}
+	if code, message := h.validateSameStepMove(ctx, req, task); code != "" {
+		return moveTaskErrorResponse(msg, code, message)
+	}
+	response, err := ws.NewResponse(msg.ID, msg.Action, dto.MoveTaskResponse{
+		Task:        dto.FromTask(task),
+		Disposition: moveDispositionApplied,
+	})
+	return response, true, err
+}
+
+func (h *Handlers) validateSameStepMove(ctx context.Context, req moveTaskRequest, task *models.Task) (string, string) {
+	if err := h.taskSvc.AuthorizeWorkspaceScope(ctx, task.WorkspaceID, authz.ScopeTaskWrite); err != nil {
+		if service.IsForbidden(err) {
+			return ws.ErrorCodeForbidden, "task is not writable"
+		}
+		h.logger.Error("move_task: failed to authorize task for same-step completion",
+			zap.String("task_id", req.TaskID), zap.Error(err))
+		return ws.ErrorCodeInternalError, "failed to authorize task for move"
+	}
+	if task.ArchivedAt != nil {
+		return ws.ErrorCodeConflict, "archived tasks cannot be moved"
+	}
+
+	targetWorkflow, err := h.taskSvc.GetWorkflow(ctx, req.WorkflowID)
+	if err != nil || targetWorkflow == nil {
+		return ws.ErrorCodeValidation, "target workflow_id does not exist"
+	}
+	if targetWorkflow.WorkspaceID != task.WorkspaceID {
+		return ws.ErrorCodeValidation, "target workflow is in a different workspace"
+	}
+	if h.workflowCtrl == nil {
+		return ws.ErrorCodeInternalError, "workflow validation is not configured"
+	}
+	stepResponse, err := h.workflowCtrl.GetStep(ctx, req.WorkflowStepID)
+	if err != nil || stepResponse == nil || stepResponse.Step == nil {
+		return ws.ErrorCodeValidation, "target workflow_step_id does not exist"
+	}
+	if stepResponse.Step.WorkflowID != req.WorkflowID {
+		return ws.ErrorCodeValidation, "target workflow_step_id does not belong to the requested workflow_id"
+	}
+	if err := workflowmove.ValidateEntryOptions(req.EntryOptions, workflowmove.MoveChangePositionOnly); err != nil {
+		return ws.ErrorCodeValidation, err.Error()
+	}
+	return "", ""
+}
+
+func moveTaskErrorResponse(msg *ws.Message, code, message string) (*ws.Message, bool, error) {
+	response, err := ws.NewError(msg.ID, msg.Action, code, message, nil)
+	return response, true, err
 }
 
 // deferMoveTask records a PendingMove for the agent's turn-end handler to

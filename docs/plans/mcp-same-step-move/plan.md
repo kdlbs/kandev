@@ -1,6 +1,6 @@
 ---
 created: 2026-09-22
-status: draft
+status: implemented
 requirements:
   - REQ-TASKS-MCP-MOVE-RESULTS-001
 system_design:
@@ -15,7 +15,7 @@ legacy_specs:
 
 [Issue #3872](https://github.com/kdlbs/kandev/issues/3872) reports repeated deferred moves to a task's current step.
 One sequential work order adds a validated no-op result, regression coverage, and matching tool documentation.
-Implementation remains pending.
+Implementation and targeted verification are complete.
 
 ## Evidence and root cause
 
@@ -109,7 +109,7 @@ Together these cover the public tool adapter, backend dispatch, and persistence 
 
 ## Work orders
 
-- [ ] [Task 01: Complete same-step MCP requests](task-01-complete-same-step-moves.md)
+- [x] [Task 01: Complete same-step MCP requests](task-01-complete-same-step-moves.md)
 
 ## Verification results
 
@@ -121,7 +121,16 @@ Design validation on 2026-09-22:
 - `git diff --check -- docs/specs docs/plans/mcp-same-step-move`: passed.
 - Catalog discovery includes both new specifications. All four package files were inspected before staging.
 
-Implementation tests: pending. The temporary diagnostic failure is evidence, not a passing regression suite.
+Implementation validation on 2026-09-23:
+
+- Handler regressions, including the same-step matrix, passed. The new regression failed before the fix with `deferred` and one pending move, as expected.
+- MCP handler, MCP server, workflow move, and orchestrator equal-target regression commands in the work order passed.
+- `golangci-lint run ./internal/mcp/handlers ./internal/mcp/server`: passed with 0 issues.
+- `go build -o /tmp/kandev-issue3872-final ./cmd/kandev` from `apps/backend`: passed.
+- Public docs validation tests passed (62 tests); public docs validation passed (47 pages).
+- `python3 scripts/list-docs.py validate`: passed (299 decisions, 1114 specifications).
+- `python3 scripts/lint-spec-files.py --all`: passed.
+- `git diff --check`: passed.
 
 ## Risks
 

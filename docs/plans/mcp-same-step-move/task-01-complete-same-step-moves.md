@@ -1,7 +1,7 @@
 ---
 id: "01-complete-same-step-moves"
 title: "Complete same-step MCP requests"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -63,6 +63,8 @@ Run from the repository root:
 (cd apps/backend && go test ./internal/mcp/server -run 'TestMoveTask' -count=1)
 (cd apps/backend && go test ./internal/workflow/move -count=1)
 (cd apps/backend && go test ./internal/orchestrator -run '^TestPendingMove_EqualTargetRecordsAppliedMoveID$' -count=1)
+(cd apps/backend && golangci-lint run ./internal/mcp/handlers ./internal/mcp/server)
+(cd apps/backend && go build -o /tmp/kandev-issue3872-final ./cmd/kandev)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 python3 scripts/list-docs.py validate
@@ -74,8 +76,7 @@ git diff --check
 
 - `apps/backend/internal/mcp/handlers/config_task_handlers.go`
 - `apps/backend/internal/mcp/handlers/config_task_handlers_same_step_test.go` (new)
-- `apps/backend/internal/mcp/handlers/config_task_handlers_envelope_test.go`
-- `apps/backend/internal/mcp/handlers/config_handlers_test.go` (fixtures if required)
+- `apps/backend/internal/mcp/handlers/handlers_test.go` (shared fixture)
 - `apps/backend/internal/mcp/server/server.go`
 - `apps/backend/internal/mcp/server/config_handlers.go`
 - `apps/backend/internal/mcp/server/config_handlers_test.go`
@@ -83,7 +84,7 @@ git diff --check
 
 ## Dependencies
 
-None. Implementation requires a later explicit user request.
+None.
 
 ## Risks
 
@@ -105,4 +106,6 @@ Existing queued work must survive the no-op unchanged.
 
 ## Results
 
-Pending.
+Implemented and verified on 2026-09-23. The regression was first confirmed red: the same-step request returned `deferred`, included a move ID, and recorded one pending move. After the fix, the handler matrix, 47-request preservation cases, persisted queue dispatch, response forwarding, and tool-description checks passed. The validated no-op returns the stored task and position without changing task, queue, session, prompt, metadata, event, or transition state.
+
+All verification commands above passed. Additional checks passed: `golangci-lint run ./internal/mcp/handlers ./internal/mcp/server` (0 issues), backend binary build, public documentation validation (62 tests and 47 pages), catalog validation (299 decisions and 1114 specifications), specification lint, and `git diff --check`.
