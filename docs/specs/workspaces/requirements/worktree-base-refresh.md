@@ -70,6 +70,7 @@ local branches without publishing them first.
   linked to a GitHub pull request, Kandev shall use the pull request's current
   base branch for materialization when live provider state is available, and
   shall retain the stored base when the provider lookup is unavailable.
+  Cross-repository bases also obey criteria .15 through .19.
 - **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.12:** When polling observes that a
   linked pull request's non-empty base branch changed, Kandev shall update the
   matching task repository base without failing the pull-request sync if that
@@ -81,6 +82,7 @@ local branches without publishing them first.
   usable fallback, preparation shall fail with a missing-remote-ref
   classification. Authentication, network, timeout, cancellation, divergent,
   uncertain, and other unproven failures remain fatal for pull-request tasks.
+  This branch-only fallback does not apply to a repository-qualified PR base.
 
 - **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.14:** When a base refresh fails,
   backend diagnostics shall identify the repository, operation, branch, and
@@ -88,6 +90,22 @@ local branches without publishing them first.
   Unknown causes shall remain explicitly unknown. Diagnostics shall exclude
   credentials, remote URLs, and raw command output. Existing refresh and
   fallback decisions shall remain unchanged.
+
+## Proposed amendment: repository-qualified PR bases
+
+Criteria .15 through .19 are draft. The workspace system owns base resolution
+and materialization. The task system retains provider association ownership.
+Delivery: [Fork PR base resolution](../../../plans/fork-pr-base-resolution/plan.md).
+
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.15:** For a PR-linked checkout, base resolution shall preserve the target repository and branch. A same-named fork branch shall not replace that target.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.16:** Before required materialization succeeds, Kandev shall verify the target commit in the checkout. A provider-supplied base commit shall remain tied to its repository and branch.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.17:** When a cross-repository base cannot be resolved or fetched, required preparation shall fail without substituting a repository default. Errors shall preserve cancellation and omit credentials.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.18:** Automatic fallback and default-branch recovery shall preserve an explicit PR target. They shall not change repository defaults, push destinations, or another attachment's base.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.19:** Ordinary repository defaults and same-repository fallback behavior shall remain compatible. Every required repository must resolve independently; one valid repository shall not hide an unresolved fork base.
+
+These criteria do not require a provider refresh for valid reused worktrees.
+They do not change explicit manual comparison selection. Existing comparison
+fetch failures keep their non-blocking status behavior after workspace creation.
 
 ## Compatibility
 
