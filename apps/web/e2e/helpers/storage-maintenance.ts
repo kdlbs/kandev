@@ -87,6 +87,7 @@ export function storageBarsSnapshot(
     quarantine?: number;
     systemTemporary?: number;
     goCache?: number;
+    goCacheWarning?: string;
     unmanagedGoCache?: number;
     temporaryArtifacts?: number;
     managedContainers?: number;
@@ -107,6 +108,7 @@ export function storageBarsSnapshot(
       owned: true,
       unmanaged_path: "/data/home/.cache/go-build",
       unmanaged_size_bytes: options.unmanagedGoCache ?? 6 * 1024 ** 3,
+      warning: options.goCacheWarning,
     },
     quarantine: { available: true, count: 1, size_bytes: options.quarantine ?? 5 * 1024 ** 3 },
     temporary_artifacts: {

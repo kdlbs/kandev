@@ -557,6 +557,9 @@ func appendErrorWarnings(values []string, err error, limit int) []string {
 		}
 		return values
 	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return appendErrorWarnings(values, wrapped.Unwrap(), limit)
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return values
 	}

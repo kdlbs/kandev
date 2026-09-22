@@ -103,39 +103,22 @@ function ResourceBar({ resource }: { resource: StorageResource }) {
 interface FocusedStorageTarget {
   resourceId: string;
   element: HTMLElement;
-  path: number[];
-}
-
-function elementPath(root: HTMLElement, target: HTMLElement): number[] {
-  const path: number[] = [];
-  let current: HTMLElement | null = target;
-  while (current && current !== root) {
-    const parentElement: HTMLElement | null = current.parentElement;
-    if (!parentElement) return [];
-    const index = Array.from(parentElement.children).indexOf(current);
-    if (index < 0) return [];
-    path.unshift(index);
-    current = parentElement;
-  }
-  return current === root ? path : [];
+  focusId: string;
 }
 
 function focusedElementAfterReorder(
   container: HTMLElement,
   target: FocusedStorageTarget,
 ): HTMLElement | null {
-  if (container.contains(target.element)) return target.element;
   const resource = Array.from(
     container.querySelectorAll<HTMLElement>("[data-storage-resource-id]"),
   ).find((element) => element.dataset.storageResourceId === target.resourceId);
   if (!resource) return null;
-  let current: HTMLElement = resource;
-  for (const index of target.path) {
-    const child = current.children[index];
-    if (!(child instanceof HTMLElement)) return null;
-    current = child;
-  }
-  return current;
+  return (
+    Array.from(resource.querySelectorAll<HTMLElement>("[data-storage-focus-id]")).find(
+      (element) => element.dataset.storageFocusId === target.focusId,
+    ) ?? null
+  );
 }
 
 function ResourceRow({
@@ -155,6 +138,7 @@ function ResourceRow({
       <AccordionTrigger
         className="min-h-7 cursor-pointer items-center px-3 no-underline max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         data-testid={`storage-resource-${resource.id}-trigger`}
+        data-storage-focus-id="trigger"
       >
         <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 md:grid md:grid-cols-[minmax(0,1fr)_minmax(8rem,16rem)_auto] md:items-center md:gap-3">
           <span className="min-w-0 flex-1 break-words text-sm">{resource.label}</span>
@@ -191,6 +175,7 @@ function ResourceRow({
             disabledReason={goCacheCleanupDisabledReason}
             onClick={onRunGoCache}
             data-testid="storage-go-cache-clean"
+            focusId="go-cache-clean"
           >
             <IconTrash className="size-4" /> {t("system:storageCleanGoCache")}
           </StorageActionButton>
@@ -202,6 +187,7 @@ function ResourceRow({
             disabledReason={temporaryArtifactsCleanupDisabledReason}
             onClick={onRunTemporaryArtifacts}
             data-testid="storage-temporary-artifacts-clean"
+            focusId="temporary-artifacts-clean"
           >
             <IconTrash className="size-4" /> {t("system:storageCleanTemporaryArtifacts")}
           </StorageActionButton>
@@ -413,10 +399,15 @@ function StorageOverviewResources({
       focusedTargetRef.current = null;
       return;
     }
+    const focusId = target.dataset.storageFocusId;
+    if (!focusId) {
+      focusedTargetRef.current = null;
+      return;
+    }
     focusedTargetRef.current = {
       resourceId: resource.dataset.storageResourceId ?? "",
       element: target,
-      path: elementPath(resource, target),
+      focusId,
     };
   };
 

@@ -18,6 +18,13 @@ const EXPANDED_ATTRIBUTE = "aria-expanded";
 const EXPANDED_ATTRIBUTE_VALUE = "true";
 const ACCORDION_CONTENT_SELECTOR = '[data-slot="accordion-content"]';
 
+function expectExpandedContent(resourceTestId: string) {
+  const content = screen.getByTestId(resourceTestId).querySelector(ACCORDION_CONTENT_SELECTOR);
+  expect(content).not.toBeNull();
+  expect(content?.getAttribute("data-state")).toBe("open");
+  expect(content?.hasAttribute("hidden")).toBe(false);
+}
+
 const barsOverview = {
   settings: {
     enabled: false,
@@ -114,14 +121,8 @@ describe("StorageOverviewCard relative bars", () => {
     systemTemporaryTrigger.focus();
     expect(systemTemporaryTrigger.getAttribute(EXPANDED_ATTRIBUTE)).toBe(EXPANDED_ATTRIBUTE_VALUE);
     expect(workspacesTrigger.getAttribute(EXPANDED_ATTRIBUTE)).toBe(EXPANDED_ATTRIBUTE_VALUE);
-    expect(
-      screen
-        .getByTestId(SYSTEM_TEMPORARY_RESOURCE_TEST_ID)
-        .querySelector(ACCORDION_CONTENT_SELECTOR),
-    ).not.toBeNull();
-    expect(
-      screen.getByTestId(WORKSPACES_RESOURCE_TEST_ID).querySelector(ACCORDION_CONTENT_SELECTOR),
-    ).not.toBeNull();
+    expectExpandedContent(SYSTEM_TEMPORARY_RESOURCE_TEST_ID);
+    expectExpandedContent(WORKSPACES_RESOURCE_TEST_ID);
 
     rerender(
       <StorageOverviewCard
@@ -140,16 +141,14 @@ describe("StorageOverviewCard relative bars", () => {
       />,
     );
 
-    const reorderedSystemResource = screen.getByTestId(SYSTEM_TEMPORARY_RESOURCE_TEST_ID);
-    const reorderedWorkspacesResource = screen.getByTestId(WORKSPACES_RESOURCE_TEST_ID);
     expect(
       screen.getByTestId(SYSTEM_TEMPORARY_TRIGGER_TEST_ID).getAttribute(EXPANDED_ATTRIBUTE),
     ).toBe(EXPANDED_ATTRIBUTE_VALUE);
     expect(screen.getByTestId(WORKSPACES_TRIGGER_TEST_ID).getAttribute(EXPANDED_ATTRIBUTE)).toBe(
       EXPANDED_ATTRIBUTE_VALUE,
     );
-    expect(reorderedSystemResource.querySelector(ACCORDION_CONTENT_SELECTOR)).not.toBeNull();
-    expect(reorderedWorkspacesResource.querySelector(ACCORDION_CONTENT_SELECTOR)).not.toBeNull();
+    expectExpandedContent(SYSTEM_TEMPORARY_RESOURCE_TEST_ID);
+    expectExpandedContent(WORKSPACES_RESOURCE_TEST_ID);
     expect(document.activeElement).toBe(screen.getByTestId(SYSTEM_TEMPORARY_TRIGGER_TEST_ID));
   });
 
@@ -183,7 +182,11 @@ describe("StorageOverviewCard relative bars", () => {
           ...actionOverview,
           summary: {
             ...actionOverview.summary,
-            go_cache: { ...actionOverview.summary.go_cache, size_bytes: 16 * 1024 ** 3 },
+            go_cache: {
+              ...actionOverview.summary.go_cache,
+              size_bytes: 1,
+              warning: "cache measurement warning",
+            },
             system_temporary: {
               ...actionOverview.summary.system_temporary,
               size_bytes: 20 * 1024 ** 3,
@@ -197,6 +200,8 @@ describe("StorageOverviewCard relative bars", () => {
     expect(screen.getByTestId(GO_CACHE_TRIGGER_TEST_ID).getAttribute(EXPANDED_ATTRIBUTE)).toBe(
       EXPANDED_ATTRIBUTE_VALUE,
     );
-    expect(document.activeElement).toBe(screen.getByTestId(GO_CACHE_CLEAN_TEST_ID));
+    const disabledCleanButton = screen.getByTestId(GO_CACHE_CLEAN_TEST_ID);
+    expect(disabledCleanButton.parentElement?.getAttribute("tabindex")).toBe("0");
+    expect(document.activeElement).toBe(disabledCleanButton.parentElement);
   });
 });

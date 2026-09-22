@@ -3,6 +3,7 @@ package tempstore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -312,7 +313,10 @@ func TestAnalyzeTemporaryDeadlineNormalizesJoinedWarnings(t *testing.T) {
 				{
 					Bytes:        17,
 					SkippedCount: 2,
-					Err:          errors.Join(context.DeadlineExceeded, errors.New("permission denied")),
+					Err: fmt.Errorf(
+						"wrapped scan result: %w",
+						errors.Join(context.DeadlineExceeded, errors.New("permission denied")),
+					),
 				},
 				{
 					Bytes:        23,

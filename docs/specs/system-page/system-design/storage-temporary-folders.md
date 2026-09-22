@@ -165,7 +165,8 @@ Keep one page scroll owner. Paths wrap within the resource detail.
 Keep required help visible inline. No tooltip or overlay is needed to understand cleanup scope.
 Phone controls have at least 44-pixel hit targets. Fine-pointer buttons retain 28-pixel density.
 No fixed toolbar or new navigation route is required.
-All new copy uses `system` translations in all five supported language catalogs.
+All new copy uses `system` translations in the `en`, `pt-pt`, `zh-cn`, `zh-hk`,
+`zh-tw`, and `ja` language catalogs.
 
 ## Verification and delivery
 

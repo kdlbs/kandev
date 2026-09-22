@@ -14,10 +14,14 @@ import (
 	"github.com/kandev/kandev/internal/system/storage"
 )
 
+func int64Pointer(value int64) *int64 {
+	return &value
+}
+
 func TestAnalysisJSONUsesStorageAPISnakeCase(t *testing.T) {
 	encoded, err := json.Marshal(Analysis{
 		Path: "/cache", SizeBytes: 42, Owned: true, Enabled: false,
-		UnmanagedPath: "/user-cache", UnmanagedSizeBytes: 24,
+		UnmanagedPath: "/user-cache", UnmanagedSizeBytes: int64Pointer(24),
 	})
 	if err != nil {
 		t.Fatalf("Marshal Analysis: %v", err)
@@ -45,7 +49,7 @@ func TestAnalyzeSerializesMeasuredZeroForUnmanagedCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	if analysis.UnmanagedPath != userCache || analysis.UnmanagedSizeBytes != 0 {
+	if analysis.UnmanagedPath != userCache || analysis.UnmanagedSizeBytes == nil || *analysis.UnmanagedSizeBytes != 0 {
 		t.Fatalf("analysis = %#v, want an explicit measured zero", analysis)
 	}
 
@@ -199,7 +203,7 @@ func TestAnalyzeReportsUnmanagedDefaultGoCacheReadOnly(t *testing.T) {
 		t.Fatalf("Analyze: %v", err)
 	}
 	if analysis.UnmanagedPath != userCache ||
-		analysis.UnmanagedSizeBytes != int64(len("user cache bytes")) {
+		analysis.UnmanagedSizeBytes == nil || *analysis.UnmanagedSizeBytes != int64(len("user cache bytes")) {
 		t.Fatalf("analysis = %#v, want unmanaged cache %s", analysis, userCache)
 	}
 	if _, err := os.Stat(artifact); err != nil {

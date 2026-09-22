@@ -161,9 +161,11 @@ test.describe("Storage analysis bars", () => {
         workspaces: 1 * 1024 ** 3,
         systemTemporary: 20 * 1024 ** 3,
         goCache: 16 * 1024 ** 3,
+        goCacheWarning: "cache measurement warning",
       }),
     );
     const heldRefresh = holdNextOverviewRefresh();
+    await expect(cleanButton).toBeFocused();
     await testPage.getByTestId("storage-analyze").click();
     await heldRefresh.started;
     await cleanButton.focus();
