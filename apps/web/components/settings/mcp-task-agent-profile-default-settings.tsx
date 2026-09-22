@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { IconInfoCircle } from "@tabler/icons-react";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { SettingsInfo } from "./settings-info";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { MCPTaskAgentProfileDefault } from "@/lib/types/http";
@@ -20,6 +19,8 @@ import { Trans, useTranslation } from "react-i18next";
  * and description hold catalog KEYS, resolved at render: a module-scope `t()`
  * would freeze this copy at the boot locale (see docs/i18n.md).
  */
+const PROFILE_LABEL_KEY = "settings:profileForTasksCreatedByAgents";
+
 const OPTIONS: Array<{
   value: MCPTaskAgentProfileDefault;
   labelKey: string;
@@ -40,53 +41,39 @@ const OPTIONS: Array<{
 function MCPTaskProfileScopeDescription() {
   const { t } = useTranslation();
   return (
-    <CardDescription className="space-y-3">
+    <div className="space-y-2">
       <p>{t("settings:useThisSettingWhenAnAgent")}</p>
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-1 text-foreground">
-          <span className="font-medium">{t("settings:affectedKandevMcpTool")}</span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label={t("settings:aboutAffectedKandevMcpTools")}
-                className="relative inline-flex size-6 shrink-0 cursor-pointer items-center justify-center text-muted-foreground outline-none after:absolute after:-inset-2.5 hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <IconInfoCircle className="size-4" aria-hidden="true" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-xs text-xs">
-              <Trans i18nKey="settings:mcpAffectedToolsHelp">
-                <code>create_task_kandev</code> creates a separate task.{" "}
-                <code>spawn_session_kandev</code> adds a session to the current task, so it does not
-                use this preference.
-              </Trans>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <p>
-          <Trans i18nKey="settings:mcpCreateTaskScope">
-            <code className="rounded-sm bg-muted px-1 py-0.5 text-foreground">
-              create_task_kandev
-            </code>{" "}
-            creates new tasks and subtasks. This setting applies only when the call omits{" "}
-            <code className="rounded-sm bg-muted px-1 py-0.5 text-foreground">
-              agent_profile_id
-            </code>
-            .
-          </Trans>
+      <p>
+        <Trans i18nKey="settings:mcpCreateTaskScope">
+          <code className="rounded-sm bg-muted px-1 py-0.5 text-foreground">
+            create_task_kandev
+          </code>{" "}
+          creates new tasks and subtasks. This setting applies only when the call omits{" "}
+          <code className="rounded-sm bg-muted px-1 py-0.5 text-foreground">agent_profile_id</code>.
+        </Trans>
+      </p>
+      <p>
+        <Trans i18nKey="settings:mcpSpawnSessionScope">
+          <code className="rounded-sm bg-muted px-1 py-0.5 text-foreground">
+            spawn_session_kandev
+          </code>{" "}
+          and tasks you create yourself are not affected. An explicitly selected profile always
+          wins.
+        </Trans>
+      </p>
+      <p>
+        <Trans i18nKey="settings:mcpAffectedToolsHelp">
+          <code>create_task_kandev</code> creates a separate task. <code>spawn_session_kandev</code>{" "}
+          adds a session to the current task, so it does not use this preference.
+        </Trans>
+      </p>
+      {OPTIONS.map((option) => (
+        <p key={option.value}>
+          <strong>{t(option.labelKey)}: </strong>
+          {t(option.descriptionKey)}
         </p>
-        <p>
-          <Trans i18nKey="settings:mcpSpawnSessionScope">
-            <code className="rounded-sm bg-muted px-1 py-0.5 text-foreground">
-              spawn_session_kandev
-            </code>{" "}
-            and tasks you create yourself are not affected. An explicitly selected profile always
-            wins.
-          </Trans>
-        </p>
-      </div>
-    </CardDescription>
+      ))}
+    </div>
   );
 }
 
@@ -104,7 +91,7 @@ function MCPTaskProfileRadioGroup({
   const { t } = useTranslation();
   return (
     <RadioGroup
-      aria-label={t("settings:profileForTasksCreatedByAgents")}
+      aria-label={t(PROFILE_LABEL_KEY)}
       aria-describedby={ariaDescribedBy}
       value={value}
       onValueChange={(nextValue) => onValueChange(nextValue as MCPTaskAgentProfileDefault)}
@@ -135,7 +122,11 @@ function MCPTaskProfileRadioGroup({
                 id={descriptionId}
                 className="block whitespace-normal break-words text-xs text-muted-foreground"
               >
-                {t(option.descriptionKey)}
+                {t(
+                  option.value === "current_task"
+                    ? "settings:profileSessionShort"
+                    : "settings:profileWorkspaceShort",
+                )}
               </span>
             </span>
           </Label>
@@ -187,8 +178,13 @@ export function MCPTaskAgentProfileDefaultSettings({
   if (presentation === "row") {
     return (
       <SettingsRow
-        label={t("settings:profileForTasksCreatedByAgents")}
-        description={<MCPTaskProfileScopeDescription />}
+        label={t(PROFILE_LABEL_KEY)}
+        description={t("settings:agentProfileShort")}
+        info={
+          <SettingsInfo label={t(PROFILE_LABEL_KEY)}>
+            <MCPTaskProfileScopeDescription />
+          </SettingsInfo>
+        }
         descriptionId="mcp-task-profile-description"
         discoveryTargetId={GENERAL_SETTINGS_TARGETS.agentTaskProfile}
         isDirty={isDirty}
@@ -212,9 +208,11 @@ export function MCPTaskAgentProfileDefaultSettings({
     >
       <CardHeader>
         <CardTitle className="text-base">
-          <h3>{t("settings:profileForTasksCreatedByAgents")}</h3>
+          <h3>{t(PROFILE_LABEL_KEY)}</h3>
         </CardTitle>
-        <MCPTaskProfileScopeDescription />
+        <SettingsInfo label={t(PROFILE_LABEL_KEY)}>
+          <MCPTaskProfileScopeDescription />
+        </SettingsInfo>
       </CardHeader>
       <CardContent>
         <MCPTaskProfileRadioGroup value={draft} isDirty={isDirty} onValueChange={setDraft} />

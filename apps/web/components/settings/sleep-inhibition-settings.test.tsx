@@ -78,7 +78,7 @@ describe("SleepInhibitionSettings", () => {
     renderSettings();
 
     const infoButton = await screen.findByRole("button", {
-      name: "How host sleep prevention works",
+      name: "About Prevent idle system sleep",
     });
     fireEvent.focus(infoButton);
 

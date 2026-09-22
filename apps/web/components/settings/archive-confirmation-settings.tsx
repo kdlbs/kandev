@@ -1,4 +1,5 @@
 "use client";
+import { SettingsInfo } from "./settings-info";
 
 import { useEffect, useRef, useState } from "react";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -50,7 +51,12 @@ export function ArchiveConfirmationSettings({
     <SettingsRow
       data-testid={presentation === "row" ? "archive-confirmation-card" : undefined}
       label={t("settings:confirmBeforeArchivingTasks")}
-      description={t("settings:showCleanupDetailsAndSubtaskOptions")}
+      description={t("settings:archiveShort")}
+      info={
+        <SettingsInfo label={t("settings:confirmBeforeArchivingTasks")}>
+          {t("settings:showCleanupDetailsAndSubtaskOptions")}
+        </SettingsInfo>
+      }
       controlId="confirm-task-archive"
       touchTarget="switch"
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.archiveConfirmation}

@@ -61,10 +61,10 @@ test.describe("Mobile general settings", () => {
       const card = testPage.getByTestId("sleep-inhibition-settings");
       const toggle = card.getByRole("switch", { name: "Prevent idle system sleep" });
       await expect(card).toBeVisible();
-      const info = card.getByRole("button", { name: "How host sleep prevention works" });
+      const info = card.getByRole("button", { name: "About Prevent idle system sleep" });
       await info.click();
       const infoDrawer = testPage.getByRole("dialog", {
-        name: "How Kandev prevents host sleep",
+        name: "Prevent idle system sleep",
       });
       await expect(infoDrawer).toBeVisible();
       await expect(infoDrawer).toContainText("/usr/bin/caffeinate -i -w");
@@ -136,7 +136,7 @@ test.describe("Mobile general settings", () => {
   }) => {
     await testPage.setViewportSize({ width: 390, height: 844 });
     await testPage.goto("/settings/preferences/task-behavior");
-    await openTaskBehaviorRuntime(testPage);
+    await testPage.getByRole("tab", { name: "Conversation", exact: true }).click();
 
     const autoScrollControl = testPage.getByRole("switch", {
       name: "Show transcript auto-scroll control",

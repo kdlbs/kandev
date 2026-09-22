@@ -223,3 +223,12 @@ describe("revealSettingsTarget settling", () => {
     expect(target.scrollIntoView).toHaveBeenCalledTimes(1);
   });
 });
+
+it("focuses the setting control rather than its optional info button", () => {
+  const row = document.createElement("div");
+  row.innerHTML = '<button data-settings-info="true">Info</button><input type="number" />';
+  document.body.append(row);
+  revealSettingsTarget(row, { settleDurationMs: 0 });
+  expect(document.activeElement).toBe(row.querySelector("input"));
+  row.remove();
+});

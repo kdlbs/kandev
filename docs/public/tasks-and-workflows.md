@@ -133,7 +133,7 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 
 1. When the title field is shown, enter a concise title of up to 60 characters. Titles prefilled from
    a remote pull request, issue, or merge request are shortened with an ellipsis when needed; the
-   detailed context belongs in the description. If **Settings → Preferences → Task Behavior → Agent-generated
+   detailed context belongs in the description. If **Settings → Preferences → Task Behavior → Tasks → Agent-generated
    task titles** is enabled, the New Task dialog hides this field, requires a nonempty prompt, and uses
    the prompt's first six words as a provisional title while the first eligible agent session chooses
    the final title. The empty-description Plan Mode exception applies only when this setting is disabled.
@@ -227,7 +227,7 @@ If another person or tool initializes the remote before the first publication, K
 
 ### Let the agent name new tasks
 
-Open **Settings → Preferences → Task Behavior → Agent-generated task titles** and choose **Save changes**.
+Open **Settings → Preferences → Task Behavior → Tasks → Agent-generated task titles** and choose **Save changes**.
 The setting is enabled by default; an explicitly saved **off** value remains off. When enabled, new task
 and subtask dialogs use the prompt as the source of the title: the prompt must contain text, and Kandev
 immediately displays its first six normalized words as a provisional title. The first eligible task-mode
@@ -243,7 +243,7 @@ tool. Config and Office sessions never receive the title tool.
 
 ### Choose the profile for tasks created by agents
 
-Open **Settings → Preferences → Task Behavior → Profile for Tasks Created by Agents** to choose which agent profile Kandev assigns when an agent calls `create_task_kandev` without choosing `agent_profile_id`. The preference covers new tasks and subtasks, and it also controls the effective model, mode, and dynamic options used by the first session:
+Open **Settings → Preferences → Task Behavior → Tasks → Profile for Tasks Created by Agents** to choose which agent profile Kandev assigns when an agent calls `create_task_kandev` without choosing `agent_profile_id`. The preference covers new tasks and subtasks, and it also controls the effective model, mode, and dynamic options used by the first session:
 
 - **Creating session profile** is useful when follow-up work needs the same live setup. For a session-bound task-mode call, Kandev uses the verified creating session's profile and its effective model, mode, and dynamic options, including changes made during that session. A workflow launch profile wins first. When no workflow profile wins, the creating session profile is used. This option can reuse a more expensive setup.
 - **Workspace default profile** is useful when you want agent-created tasks to follow a consistent workspace cost policy. It skips the creating session and source, parent, or current task profiles. Kandev uses the workflow launch profile first, then the **Default Agent Profile** from the workspace that will own the new task. It does not copy the creating session's model, mode, or dynamic options. If neither source supplies a profile, task creation fails.
@@ -711,7 +711,7 @@ global session capacity blocks automatic launch. This is a separate queue:
 WIP queueing waits before destination entry, while global capacity queueing
 keeps the selected session and retries it automatically. The task detail and
 task navigator identify this cause as **Global session limit**, state that it
-applies to all workspaces, and link to Settings > Preferences > Task Behavior > Runtime and limits
+applies to all workspaces, and link to Settings > Preferences > Task Behavior > Runtime
 capacity. They show the destination, the latest capacity observation, queue
 time, and retry state. They do not show a queue position or estimated start
 time. Capacity counts older than 40 seconds, or counts unavailable because the
@@ -721,7 +721,7 @@ explicit **Start** or **Resume** action, or send a message, to override the
 automatic ceiling for that conversation.
 
 The instance session capacity is disabled by default. An administrator can
-enable it in Settings > Preferences > Task Behavior > Runtime and limits, enter a positive
+enable it in Settings > Preferences > Task Behavior > Runtime, enter a positive
 maximum, and save the change. The saved value applies to later automatic
 starts without a restart and persists across restarts. Disabling it retains
 the maximum for later use. Manual starts can exceed the limit. Workflow WIP
@@ -943,7 +943,7 @@ Archive records the task as archived and removes it from active views immediatel
 | Sprites       | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost.                                                                                                                               |
 | SSH           | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them.                                  |
 
-The archive confirmation is enabled by default at **Settings → Preferences → Task Behavior → Archiving** under **Confirm before archiving tasks**. If a parent has children, **Also archive _N_ subtasks** is unchecked by default; without it, the children remain active. Task MCP archive/delete operations affect only the selected task and do not offer the cascade checkbox. MCP delete also does not reparent direct children the way the UI's non-cascade delete does; use the UI rather than task MCP to delete a parent that still has children.
+The archive confirmation is enabled by default at **Settings → Preferences → Task Behavior → Tasks → Archiving** under **Confirm before archiving tasks**. If a parent has children, **Also archive _N_ subtasks** is unchecked by default; without it, the children remain active. Task MCP archive/delete operations affect only the selected task and do not offer the cascade checkbox. MCP delete also does not reparent direct children the way the UI's non-cascade delete does; use the UI rather than task MCP to delete a parent that still has children.
 
 To restore a task, open **List**, enable **Show archived**, and choose **Unarchive**. You can also choose **Unarchive** in the open task view on desktop or a phone. If unarchive fails, the task stays archived and recovery stays disabled. If the parent was archived with its children, the cascade-owned children are restored with it.
 

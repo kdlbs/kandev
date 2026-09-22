@@ -1,4 +1,5 @@
 "use client";
+import { SettingsInfo } from "./settings-info";
 
 import { useEffect, useRef, useState } from "react";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -54,7 +55,12 @@ export function PreventAutoStartAgentSettings({
   const row = (
     <SettingsRow
       label={t("settings:preventAutoStartAgentOnOpen")}
-      description={t("settings:preventAutoStartAgentOnOpenHelp")}
+      description={t("settings:preventStartShort")}
+      info={
+        <SettingsInfo label={t("settings:preventAutoStartAgentOnOpen")}>
+          {t("settings:preventAutoStartAgentOnOpenHelp")}
+        </SettingsInfo>
+      }
       controlId="prevent-auto-start-on-open"
       touchTarget="switch"
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.preventAutoStartOnOpen}

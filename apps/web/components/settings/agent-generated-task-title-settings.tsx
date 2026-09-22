@@ -1,4 +1,5 @@
 "use client";
+import { SettingsInfo } from "./settings-info";
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -50,15 +51,12 @@ export function AgentGeneratedTaskTitleSettings({
   const row = (
     <SettingsRow
       label={t("settings:useAgentForNewTaskTitles")}
-      description={
-        presentation === "row" ? (
-          <>
-            {t("settings:agentGeneratedTaskTitlesDescription")}{" "}
-            {t("settings:agentGeneratedTaskTitlesDisabledHint")}
-          </>
-        ) : (
-          t("settings:agentGeneratedTaskTitlesDisabledHint")
-        )
+      description={t("settings:agentTitlesShort")}
+      info={
+        <SettingsInfo label={t("settings:useAgentForNewTaskTitles")}>
+          <p>{t("settings:agentGeneratedTaskTitlesDescription")}</p>
+          <p>{t("settings:agentGeneratedTaskTitlesDisabledHint")}</p>
+        </SettingsInfo>
       }
       controlId="agent-generated-task-titles"
       touchTarget="switch"

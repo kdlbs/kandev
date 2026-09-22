@@ -1,4 +1,5 @@
 "use client";
+import { SettingsInfo } from "./settings-info";
 
 import { useEffect, useRef, useState } from "react";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -54,7 +55,12 @@ export function UnreadDividerSettings({
   const row = (
     <SettingsRow
       label={t("settings:showNewDividerInTranscripts")}
-      description={t("settings:markMessagesThatArrivedWhileA")}
+      description={t("settings:unreadShort")}
+      info={
+        <SettingsInfo label={t("settings:showNewDividerInTranscripts")}>
+          {t("settings:markMessagesThatArrivedWhileA")}
+        </SettingsInfo>
+      }
       controlId="show-unread-divider"
       touchTarget="switch"
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.unreadMessages}

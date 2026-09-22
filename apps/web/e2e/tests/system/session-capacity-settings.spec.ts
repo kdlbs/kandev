@@ -57,6 +57,7 @@ test.describe.serial("Session capacity task behavior settings", () => {
     await toggle.click();
     const maximum = card.getByTestId("session-capacity-maximum");
     await expect(maximum).toHaveValue(String(baseline.max_sessions));
+    await expect(maximum).toHaveAttribute("aria-describedby", "session-capacity-maximum-help");
     await maximum.fill("1");
     await testPage
       .getByTestId("settings-floating-save")

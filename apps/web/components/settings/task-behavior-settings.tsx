@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AgentGeneratedTaskTitleSettings } from "@/components/settings/agent-generated-task-title-settings";
 import { AnchoredPromptBarSettings } from "@/components/settings/anchored-prompt-bar-settings";
 import { ArchiveConfirmationSettings } from "@/components/settings/archive-confirmation-settings";
@@ -20,129 +20,128 @@ import {
 import { SessionCapacitySettingsContent } from "@/components/settings/system/session-capacity-settings";
 import { useSessionCapacitySettings } from "@/components/settings/system/use-session-capacity-settings";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
-import { formatEffectiveLimit, type EffectiveLimit } from "./task-behavior-settings-state";
+import { SettingsPageHeader } from "./settings-typography";
+import { SettingsTabs, SettingsTabsList, SettingsTabsPanel } from "./settings-tabs";
+import { useSettingsTab } from "@/hooks/domains/settings/use-settings-tab";
+import { useSettingsSaveCoordinator } from "./settings-save-provider";
+import { UnsavedChangesBadge } from "./unsaved-indicator";
+import {
+  TASK_BEHAVIOR_TABS,
+  TASK_BEHAVIOR_TARGET_TABS,
+  taskBehaviorTab,
+  firstNewAttentionTab,
+} from "./task-behavior-tabs";
 
-type MessageQueueState = ReturnType<typeof useMessageQueueSettingsDraft>;
-type SessionCapacityState = ReturnType<typeof useSessionCapacitySettings>;
-
-function queueEffectiveLimit(state: MessageQueueState): EffectiveLimit {
-  if (!state.snapshot) return { status: state.loadFailed ? "unavailable" : "loading" };
-  return {
-    status: "ready",
-    value: state.snapshot.effective.max_per_session,
-    unlimited: state.snapshot.effective.max_per_session === 0,
-  };
+function useTabAttention(value: string, selectTab: (tab: string) => void) {
+  const { contributorStates } = useSettingsSaveCoordinator();
+  const previousAttention = useRef<string[]>([]);
+  const attention = contributorStates.filter((state) => state.invalid || state.saveFailed);
+  const attentionKey = attention
+    .map((state) => `${state.id}:${state.invalid}:${state.saveFailed}`)
+    .join("|");
+  useEffect(() => {
+    const tokens = attentionKey ? attentionKey.split("|") : [];
+    const newTabs = tokens
+      .filter((token) => !previousAttention.current.includes(token))
+      .map((token) => taskBehaviorTab(token.split(":")[0]))
+      .filter((tab): tab is NonNullable<typeof tab> => !!tab);
+    previousAttention.current = tokens;
+    const next = firstNewAttentionTab(newTabs, []);
+    if (next && next !== value) selectTab(next);
+  }, [attentionKey, selectTab, value]);
+  return { contributorStates, attention };
 }
 
-function sessionEffectiveLimit(state: SessionCapacityState): EffectiveLimit {
-  if (!state.snapshot) return { status: state.loadFailed ? "unavailable" : "loading" };
-  return {
-    status: "ready",
-    enabled: state.snapshot.effective.enabled,
-    value: state.snapshot.effective.max_sessions,
-  };
-}
-
-function RuntimeSummary({
-  queueState,
-  sessionState,
-}: {
-  queueState: MessageQueueState;
-  sessionState: SessionCapacityState;
-}) {
-  const { t } = useTranslation();
-  const labels = {
-    loading: t("common:loading"),
-    unavailable: t("common:unavailable"),
-    unlimited: t("system:messageQueueUnlimited"),
-    noLimit: t("system:sessionCapacityNoLimit"),
-  };
-  const sessions = formatEffectiveLimit(sessionEffectiveLimit(sessionState), labels);
-  const queue = formatEffectiveLimit(queueEffectiveLimit(queueState), labels);
-
-  return (
-    <span data-testid="task-behavior-runtime-summary">
-      {t("settings:taskBehaviorRuntimeSummary", { sessions, queue })}
-    </span>
-  );
-}
-
-/** Task behavior keeps related preferences on one page and groups them by use. */
 export function TaskBehaviorSettings() {
   const { t } = useTranslation();
   const queueState = useMessageQueueSettingsDraft();
   const sessionState = useSessionCapacitySettings();
-  const [sleepNeedsReveal, setSleepNeedsReveal] = useState(false);
-  const runtimeRevealKey = [
-    queueState.loadFailed && "queue-load",
-    queueState.saveFailed && "queue-save",
-    queueState.isDirty && queueState.invalidReason && "queue-invalid",
-    sessionState.loadFailed && "session-load",
-    sessionState.saveFailed && "session-save",
-    sessionState.isDirty && sessionState.invalidReason && "session-invalid",
-    sleepNeedsReveal && "sleep",
-  ]
-    .filter(Boolean)
-    .join("|");
-
+  const [sleepAttention, setSleepAttention] = useState(false);
+  const { value, selectTab } = useSettingsTab({
+    tabs: TASK_BEHAVIOR_TABS,
+    defaultTab: "tasks",
+    targetToTab: TASK_BEHAVIOR_TARGET_TABS,
+  });
+  const { contributorStates, attention } = useTabAttention(value, selectTab);
+  const runtimeLoadError = queueState.loadFailed || sessionState.loadFailed || sleepAttention;
+  const tabLabels = {
+    tasks: t("settings:taskBehaviorTabTasks"),
+    conversation: t("settings:taskBehaviorTabConversation"),
+    runtime: t("settings:taskBehaviorTabRuntime"),
+  };
+  const tabs = TASK_BEHAVIOR_TABS.map((id) => ({
+    id,
+    ariaLabel: tabLabels[id],
+    label: (
+      <span className="flex items-center gap-2">
+        {tabLabels[id]}
+        {contributorStates.some((state) => state.isDirty && taskBehaviorTab(state.id) === id) && (
+          <UnsavedChangesBadge />
+        )}
+        {(attention.some((state) => taskBehaviorTab(state.id) === id) ||
+          (id === "runtime" && runtimeLoadError)) && (
+          <span role="status" className="text-xs text-destructive">
+            {t("settings:settingsNeedAttention")}
+          </span>
+        )}
+      </span>
+    ),
+  }));
   return (
     <div className="space-y-6" data-testid="task-behavior-settings">
-      <SettingsGroup
-        title={t("settings:taskBehaviorCreating")}
-        description={t("settings:taskBehaviorCreatingDescription")}
-        titleTestId="task-behavior-creating-title"
-        data-testid="task-behavior-group"
-      >
-        <CreationAutoFocusSettings presentation="row" />
-        <AgentGeneratedTaskTitleSettings presentation="row" />
-        <MCPTaskAgentProfileDefaultSettings presentation="row" />
-        <PreventAutoStartAgentSettings presentation="row" />
-      </SettingsGroup>
-
-      <SettingsGroup
-        title={t("settings:taskBehaviorConversation")}
-        description={t("settings:taskBehaviorConversationDescription")}
-        titleTestId="task-behavior-conversation-title"
-        data-testid="task-behavior-group"
-      >
-        <UnreadDividerSettings presentation="row" />
-        <AnchoredPromptBarSettings presentation="row" />
-        <TodoListPanelSettings presentation="row" />
-      </SettingsGroup>
-
-      <SettingsGroup
-        title={t("settings:taskBehaviorArchiving")}
-        description={t("settings:taskBehaviorArchivingDescription")}
-        titleTestId="task-behavior-archiving-title"
-        data-testid="task-behavior-group"
-      >
-        <ArchiveConfirmationSettings presentation="row" />
-      </SettingsGroup>
-
-      <SettingsGroup
-        title={t("settings:taskBehaviorRuntime")}
-        description={t("settings:taskBehaviorRuntimeDescription")}
-        titleTestId="task-behavior-runtime-title"
-        summary={
-          <>
-            <RuntimeSummary queueState={queueState} sessionState={sessionState} />{" "}
-            {t("settings:taskBehaviorRuntimeScope")}
-          </>
-        }
-        collapsible
-        defaultOpen={false}
-        isDirty={queueState.isDirty || sessionState.isDirty}
-        revealOn={runtimeRevealKey}
-        data-testid="task-behavior-runtime"
-      >
-        <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.sessionCapacity}>
-          <SessionCapacitySettingsContent state={sessionState} withinGroup />
-        </SettingsTarget>
-        <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.messageQueue}>
-          <MessageQueueSettingsContent state={queueState} withinGroup />
-        </SettingsTarget>
-        <SleepInhibitionSettings withinGroup onAttentionChange={setSleepNeedsReveal} />
-      </SettingsGroup>
+      <SettingsTabs tabs={tabs} value={value} onValueChange={selectTab}>
+        <SettingsPageHeader
+          title={t("settings:taskBehavior")}
+          tabs={<SettingsTabsList ariaLabel={t("settings:taskBehavior")} />}
+        />
+        <SettingsTabsPanel value="tasks" className="space-y-6 pt-4">
+          <SettingsGroup
+            title={t("settings:taskBehaviorCreating")}
+            titleTestId="task-behavior-creating-title"
+            data-testid="task-behavior-group"
+          >
+            <CreationAutoFocusSettings presentation="row" />
+            <AgentGeneratedTaskTitleSettings presentation="row" />
+            <MCPTaskAgentProfileDefaultSettings presentation="row" />
+            <PreventAutoStartAgentSettings presentation="row" />
+          </SettingsGroup>
+          <SettingsGroup
+            title={t("settings:taskBehaviorArchiving")}
+            titleTestId="task-behavior-archiving-title"
+            data-testid="task-behavior-group"
+          >
+            <ArchiveConfirmationSettings presentation="row" />
+          </SettingsGroup>
+        </SettingsTabsPanel>
+        <SettingsTabsPanel value="conversation" className="pt-4">
+          <SettingsGroup
+            title={t("settings:taskBehaviorConversation")}
+            titleTestId="task-behavior-conversation-title"
+            data-testid="task-behavior-group"
+          >
+            <UnreadDividerSettings presentation="row" />
+            <AnchoredPromptBarSettings presentation="row" />
+            <TodoListPanelSettings presentation="row" />
+          </SettingsGroup>
+        </SettingsTabsPanel>
+        <SettingsTabsPanel value="runtime" className="pt-4">
+          <SettingsGroup
+            title={t("settings:taskBehaviorRuntime")}
+            description={t("settings:taskBehaviorRuntimeScopeShort")}
+            titleTestId="task-behavior-runtime-title"
+            isDirty={queueState.isDirty || sessionState.isDirty}
+            data-testid="task-behavior-runtime"
+          >
+            <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.sessionCapacity}>
+              <SessionCapacitySettingsContent state={sessionState} withinGroup />
+            </SettingsTarget>
+            <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.messageQueue}>
+              <MessageQueueSettingsContent state={queueState} withinGroup />
+            </SettingsTarget>
+            <SleepInhibitionSettings withinGroup onAttentionChange={setSleepAttention} />
+          </SettingsGroup>
+        </SettingsTabsPanel>
+      </SettingsTabs>
     </div>
   );
 }

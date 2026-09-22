@@ -72,85 +72,42 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-const RUNTIME_GROUP_TEST_ID = "task-behavior-runtime";
-
-describe("TaskBehaviorSettings composition", () => {
-  it("renders the four activity groups in order with runtime closed", () => {
+vi.mock("@/hooks/domains/settings/use-settings-tab", async () => {
+  const { useState } = await import("react");
+  return {
+    useSettingsTab: () => {
+      const [value, selectTab] = useState("tasks");
+      return { value, selectTab };
+    },
+  };
+});
+vi.mock("./settings-save-provider", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./settings-save-provider")>()),
+  useSettingsSaveCoordinator: () => ({ contributorStates: [] }),
+}));
+describe("TaskBehaviorSettings tabs", () => {
+  it("starts in Tasks and reveals expanded runtime through a visible tab", () => {
     render(<TaskBehaviorSettings />);
-
     expect(
-      [
-        ...screen.getAllByTestId("task-behavior-group"),
-        screen.getByTestId(RUNTIME_GROUP_TEST_ID),
-      ].map((group) => group.textContent),
-    ).toEqual([
-      expect.stringContaining("settings:taskBehaviorCreating"),
-      expect.stringContaining("settings:taskBehaviorConversation"),
-      expect.stringContaining("settings:taskBehaviorArchiving"),
-      expect.stringContaining("settings:taskBehaviorRuntime"),
-    ]);
-    expect(screen.getByTestId(RUNTIME_GROUP_TEST_ID).querySelector("details")?.open).toBe(false);
+      screen
+        .getByRole("tab", { name: "settings:taskBehaviorTabTasks" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    fireEvent.keyDown(screen.getByRole("tab", { name: "settings:taskBehaviorTabRuntime" }), {
+      key: "Enter",
+    });
+    expect(screen.getByTestId("task-behavior-runtime").querySelector("details")).toBeNull();
+    expect(screen.getByTestId("task-behavior-runtime").getAttribute("aria-hidden")).not.toBe(
+      "true",
+    );
   });
-
-  it.each([
-    ["initial load failure", "queue", "loadFailed"],
-    ["invalid queue draft", "queue", "invalidReason"],
-    ["asynchronous session save rejection", "session", "saveFailed"],
-  ])("reveals runtime for %s", (_name, owner, stateKey) => {
-    const state = runtimeMocks[owner as "queue" | "session"] as Record<string, unknown>;
-    state[stateKey] = stateKey === "invalidReason" ? "invalid" : true;
-    if (stateKey !== "loadFailed") state.isDirty = true;
-
-    render(<TaskBehaviorSettings />);
-
-    expect(screen.getByTestId(RUNTIME_GROUP_TEST_ID).querySelector("details")?.open).toBe(true);
-  });
-
-  it("reveals runtime when a save failure arrives after a manual collapse", () => {
-    const view = render(<TaskBehaviorSettings />);
-    const runtime = screen.getByTestId(RUNTIME_GROUP_TEST_ID);
-    const details = runtime.querySelector("details")!;
-    fireEvent.click(details.querySelector("summary")!);
-    fireEvent.click(details.querySelector("summary")!);
-    expect(details.open).toBe(false);
-
-    runtimeMocks.queue.saveFailed = true;
-    view.rerender(<TaskBehaviorSettings />);
-
-    expect(details.open).toBe(true);
-  });
-
-  it("reopens runtime when a second owner reports attention while the first remains active", () => {
+  it("does not steal the active tab when runtime loading fails", () => {
     runtimeMocks.queue.loadFailed = true;
-    const view = render(<TaskBehaviorSettings />);
-    const runtime = screen.getByTestId(RUNTIME_GROUP_TEST_ID);
-    const details = runtime.querySelector("details")!;
-    expect(details.open).toBe(true);
-
-    fireEvent.click(details.querySelector("summary")!);
-    expect(details.open).toBe(false);
-
-    runtimeMocks.session.loadFailed = true;
-    view.rerender(<TaskBehaviorSettings />);
-
-    expect(details.open).toBe(true);
-  });
-
-  it.each(["queue", "session"] as const)("passes %s dirty state to the runtime group", (owner) => {
-    runtimeMocks[owner].isDirty = true;
     render(<TaskBehaviorSettings />);
-    const runtime = screen.getByTestId(RUNTIME_GROUP_TEST_ID);
-    expect(runtime.getAttribute("data-settings-dirty")).toBe("true");
-    expect(screen.getByRole("status").textContent).toBe("common:unsavedChanges");
-  });
-
-  it("reveals runtime when sleep reports attention after a manual collapse", () => {
-    const view = render(<TaskBehaviorSettings />);
-    const runtime = screen.getByTestId(RUNTIME_GROUP_TEST_ID);
-    const details = runtime.querySelector("details")!;
-    fireEvent.click(details.querySelector("summary")!);
-    fireEvent.click(screen.getByTestId("sleep-attention"));
-    view.rerender(<TaskBehaviorSettings />);
-    expect(details.open).toBe(true);
+    expect(
+      screen
+        .getByRole("tab", { name: "settings:taskBehaviorTabTasks" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
   });
 });

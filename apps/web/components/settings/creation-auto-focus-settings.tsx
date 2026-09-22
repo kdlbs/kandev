@@ -1,4 +1,5 @@
 "use client";
+import { SettingsInfo } from "./settings-info";
 
 import { useEffect, useRef, useState } from "react";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -56,7 +57,12 @@ export function CreationAutoFocusSettings({
           ? t("settings:openNewTasksAutomatically")
           : t("settings:autoFocusNewTasks")
       }
-      description={t("settings:autoFocusNewTasksHelp")}
+      description={t("settings:autoFocusShort")}
+      info={
+        <SettingsInfo label={t("settings:openNewTasksAutomatically")}>
+          {t("settings:autoFocusNewTasksHelp")}
+        </SettingsInfo>
+      }
       controlId="creation-auto-focus"
       data-testid="creation-auto-focus-row"
       touchTarget="switch"

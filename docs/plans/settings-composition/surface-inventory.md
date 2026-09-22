@@ -1,6 +1,9 @@
 # Settings Surface Inventory
 
-This inventory defines migration coverage. It is a delivery record, not another product contract.
+This inventory records the original migration coverage. It is a delivery record, not another product contract.
+The 2026-09-22 [Task 06 refinement](task-06-concise-help-and-tabs.md) is pending.
+It supersedes the completed Task behavior row's collapsed-runtime presentation with tabs and concise optional help.
+Original completion claims below do not verify this refinement.
 The route source is `apps/web/src/settings-routes.tsx`, including its dynamic routes and integration route adapter.
 For each row, record changed components, retained specialized layouts, and exact rendered evidence during implementation.
 A shared primitive change alone does not prove that every caller conforms.

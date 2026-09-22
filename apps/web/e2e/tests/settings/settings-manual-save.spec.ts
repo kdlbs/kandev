@@ -1,5 +1,4 @@
 import { test, expect } from "../../fixtures/test-base";
-import { openTaskBehaviorRuntime } from "../../helpers/settings-composition";
 import type { ApiClient } from "../../helpers/api-client";
 
 const APPEARANCE_PATH = "/settings/preferences/appearance";
@@ -211,7 +210,7 @@ test.describe("Settings manual save", () => {
 
     try {
       await testPage.goto("/settings/preferences/task-behavior");
-      await openTaskBehaviorRuntime(testPage);
+      await testPage.getByRole("tab", { name: "Conversation", exact: true }).click();
       const autoScrollControl = testPage.getByRole("switch", {
         name: "Show transcript auto-scroll control",
       });
@@ -233,7 +232,7 @@ test.describe("Settings manual save", () => {
       );
 
       await testPage.reload();
-      await openTaskBehaviorRuntime(testPage);
+      await testPage.getByRole("tab", { name: "Conversation", exact: true }).click();
       await expect(autoScrollControl).not.toBeChecked();
     } finally {
       await apiClient.saveUserSettings({

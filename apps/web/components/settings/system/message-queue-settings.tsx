@@ -6,10 +6,11 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
+import { SettingsRow } from "../settings-group";
+import { SettingsInfo } from "../settings-info";
 import { Spinner } from "@kandev/ui/spinner";
 import { Switch } from "@kandev/ui/switch";
-import { IconAlertCircle, IconInfoCircle, IconLock } from "@tabler/icons-react";
+import { IconAlertCircle, IconLock } from "@tabler/icons-react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
@@ -291,37 +292,46 @@ function QueueLimitFields({
   const { t } = useTranslation();
   return (
     <>
-      <div className="min-w-0 space-y-2">
-        <Label htmlFor="message-queue-max-per-session">
-          {t("system:messageQueueMaximumLabel")}
-        </Label>
-        <Input
-          id="message-queue-max-per-session"
-          data-testid="message-queue-max-per-session"
-          type="number"
-          inputMode="numeric"
-          min={0}
-          step={1}
-          value={draft}
-          disabled={disabled}
-          onChange={(event) => onDraftChange(event.target.value)}
-          className={settingsControlClassName("w-full max-w-xs")}
-        />
-        <p className="text-xs text-muted-foreground">{t("system:messageQueueUnlimitedHelp")}</p>
-      </div>
-      <div className="rounded-md border border-border/70 bg-muted/20 p-3 text-sm">
+      <SettingsRow
+        label={t("system:messageQueueMaximumLabel")}
+        description={t("settings:queueMaximumShort")}
+        controlId="message-queue-max-per-session"
+        info={
+          <SettingsInfo label={t("system:messageQueueMaximumLabel")}>
+            <p>{t("system:messageQueueLimitDescription")}</p>
+            <p>{t("system:messageQueueUnlimitedHelp")}</p>
+            <p>{t("system:messageQueueEffectiveHelp")}</p>
+          </SettingsInfo>
+        }
+        control={
+          <Input
+            id="message-queue-max-per-session"
+            data-testid="message-queue-max-per-session"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            step={1}
+            value={draft}
+            disabled={disabled}
+            onChange={(event) => onDraftChange(event.target.value)}
+            className={settingsControlClassName("w-full md:w-40")}
+          />
+        }
+      />
+      <div className="text-xs text-muted-foreground">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-muted-foreground">{t("system:messageQueueConfigured")}</span>
-          <span>{configured}</span>
+          {String(configured) !== effectiveValue && (
+            <>
+              <span>{t("system:messageQueueConfigured")}</span>
+              <span>{configured}</span>
+            </>
+          )}
           <span className="text-muted-foreground">{t("system:messageQueueEffective")}</span>
           <strong data-testid="message-queue-effective-value">{effectiveValue}</strong>
           <Badge variant="secondary" data-testid="message-queue-source">
             {t(sourceLabelKey(source))}
           </Badge>
         </div>
-        <p className="mt-2 text-xs text-muted-foreground">
-          {t("system:messageQueueEffectiveHelp")}
-        </p>
       </div>
     </>
   );
@@ -337,73 +347,63 @@ type MergeToggleFieldsProps = {
  * for the same per-function line-limit reason as `QueueLimitFields`. */
 function MergeToggleFields({ enabled, onChange, disabled }: MergeToggleFieldsProps) {
   const { t } = useTranslation();
+  const label = t("system:messageQueueMergeToggleLabel");
   return (
-    <div className="min-w-0 space-y-3 border-t border-border/70 pt-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <Label htmlFor="message-queue-merge-enabled">
-            {t("system:messageQueueMergeToggleLabel")}
-          </Label>
-          <p className="text-sm text-muted-foreground">
-            {t("system:messageQueueMergeDescription")}
-          </p>
-        </div>
+    <SettingsRow
+      label={label}
+      description={t("settings:queueMergeShort")}
+      controlId="message-queue-merge-enabled"
+      touchTarget="switch"
+      controlWrapperTestId="message-queue-merge-touch-target"
+      info={
+        <SettingsInfo label={label}>
+          <p>{t("system:messageQueueMergeDescription")}</p>
+          <p>{t("system:messageQueueMergeNotice")}</p>
+        </SettingsInfo>
+      }
+      control={
         <Switch
           id="message-queue-merge-enabled"
           data-testid="message-queue-merge-enabled"
           checked={enabled}
           disabled={disabled}
           onCheckedChange={onChange}
-          aria-label={t("system:messageQueueMergeToggleLabel")}
+          aria-label={label}
           className="cursor-pointer disabled:cursor-not-allowed"
         />
-      </div>
-      <div className="flex gap-2 rounded-md border border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
-        <IconInfoCircle className="size-4 shrink-0" />
-        <p>{t("system:messageQueueMergeNotice")}</p>
-      </div>
-    </div>
+      }
+    />
   );
 }
 
-/** Renders the automatic same-source admission merge setting. */
 function AutoMergeToggleFields({ enabled, onChange, disabled }: MergeToggleFieldsProps) {
   const { t } = useTranslation();
   const label = t("system:messageQueueAutoMergeToggleLabel");
   return (
-    <div className="min-w-0 space-y-3 border-t border-border/70 pt-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1 space-y-1">
-          <Label
-            htmlFor="message-queue-auto-merge-enabled"
-            className="inline-flex min-h-11 cursor-pointer items-center py-2"
-          >
-            {label}
-          </Label>
-          <p className="text-sm text-muted-foreground">
-            {t("system:messageQueueAutoMergeDescription")}
-          </p>
-        </div>
-        <div
-          data-testid="message-queue-auto-merge-touch-target"
-          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center"
-        >
-          <Switch
-            id="message-queue-auto-merge-enabled"
-            data-testid="message-queue-auto-merge-enabled"
-            checked={enabled}
-            disabled={disabled}
-            onCheckedChange={onChange}
-            aria-label={label}
-            className="cursor-pointer [@media(pointer:coarse)]:after:-inset-y-3.5 disabled:cursor-not-allowed"
-          />
-        </div>
-      </div>
-      <div className="flex gap-2 rounded-md border border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
-        <IconInfoCircle className="size-4 shrink-0" />
-        <p>{t("system:messageQueueAutoMergeNotice")}</p>
-      </div>
-    </div>
+    <SettingsRow
+      label={label}
+      description={t("settings:queueAutoMergeShort")}
+      controlId="message-queue-auto-merge-enabled"
+      touchTarget="switch"
+      controlWrapperTestId="message-queue-auto-merge-touch-target"
+      info={
+        <SettingsInfo label={label}>
+          <p>{t("system:messageQueueAutoMergeDescription")}</p>
+          <p>{t("system:messageQueueAutoMergeNotice")}</p>
+        </SettingsInfo>
+      }
+      control={
+        <Switch
+          id="message-queue-auto-merge-enabled"
+          data-testid="message-queue-auto-merge-enabled"
+          checked={enabled}
+          disabled={disabled}
+          onCheckedChange={onChange}
+          aria-label={label}
+          className="cursor-pointer disabled:cursor-not-allowed"
+        />
+      }
+    />
   );
 }
 
@@ -441,11 +441,7 @@ function MessageQueueSettingsReady({
     <>
       {withinGroup ? (
         <div className="space-y-1 pb-3">
-          <h4 className="text-base font-semibold">{t("system:messageQueueTitle")}</h4>
-          <h5 className="text-sm font-semibold">{t("system:messageQueueLimitTitle")}</h5>
-          <p className="text-sm text-muted-foreground">
-            {t("system:messageQueueLimitDescription")}
-          </p>
+          <h4 className="text-sm font-semibold">{t("system:messageQueueTitle")}</h4>
         </div>
       ) : (
         <CardHeader>
@@ -467,6 +463,11 @@ function MessageQueueSettingsReady({
           source={effective.source}
         />
 
+        {state.isDirty && state.invalidReason && (
+          <p role="alert" className="text-sm text-destructive">
+            {state.invalidReason}
+          </p>
+        )}
         {state.isLocked && (
           <Alert>
             <IconLock className="size-4" />

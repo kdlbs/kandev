@@ -12,22 +12,17 @@ test.describe("MCP-created task agent profile default on mobile", () => {
 
     await expect(testPage).toHaveURL(/\/settings\/preferences\/task-behavior$/);
     await expect(testPage.getByTestId("task-behavior-creating-title")).toBeVisible();
-    await expect(
-      testPage.getByText(/when an agent calls a Kandev MCP tool that creates a task/i),
-    ).toBeVisible();
-    await expect(testPage.getByText("create_task_kandev", { exact: true })).toBeVisible();
-    await expect(testPage.getByText("spawn_session_kandev", { exact: true })).toBeVisible();
-    await expect(testPage.getByText(/effective model, mode, and options/i)).toBeVisible();
-    await expect(testPage.getByText(/workflow-selected profiles win first/i)).toBeVisible();
-    await expect(
-      testPage.getByText(/skips the creating session and source or parent task profiles/i),
-    ).toBeVisible();
-
-    await testPage.getByRole("button", { name: "About affected Kandev MCP tools" }).tap();
-    await expect(testPage.getByRole("tooltip")).toContainText(
-      "spawn_session_kandev adds a session to the current task",
+    await expect(testPage.getByText("create_task_kandev", { exact: true })).not.toBeVisible();
+    await testPage.getByRole("button", { name: "About Profile for Tasks Created by Agents" }).tap();
+    const info = testPage.getByRole("dialog", { name: "Profile for Tasks Created by Agents" });
+    await expect(info).toContainText("create_task_kandev");
+    await expect(info).toContainText("spawn_session_kandev");
+    await expect(info).toContainText("effective model, mode, and options");
+    await expect(info).toContainText("Workflow-selected profiles win first");
+    await expect(info).toContainText(
+      "skips the creating session and source or parent task profiles",
     );
-
+    await info.getByRole("button", { name: "Close", exact: true }).tap();
     const currentTask = testPage.getByRole("radio", { name: "Creating session profile" });
     const workspaceDefault = testPage.getByRole("radio", {
       name: "Workspace default profile",

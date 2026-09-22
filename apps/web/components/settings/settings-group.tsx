@@ -243,6 +243,7 @@ type SettingsRowProps = Omit<ComponentProps<"div">, "children"> & {
   touchTarget?: "switch";
   controlWrapperTestId?: string;
   controlWrapperClassName?: string;
+  info?: ReactNode;
   details?: { label: ReactNode; children: ReactNode };
   discoveryTargetId?: string;
   isDirty?: boolean;
@@ -259,6 +260,7 @@ export function SettingsRow({
   controlWrapperTestId,
   controlWrapperClassName,
   details,
+  info,
   discoveryTargetId,
   isDirty = false,
   className,
@@ -297,7 +299,10 @@ export function SettingsRow({
       data-settings-dirty={isDirty}
     >
       <div className="min-w-0 flex-1 space-y-1">
-        <SettingsFieldLabel htmlFor={controlId}>{label}</SettingsFieldLabel>
+        <div className="flex items-center gap-1">
+          <SettingsFieldLabel htmlFor={controlId}>{label}</SettingsFieldLabel>
+          {info}
+        </div>
         {description && (
           <div id={resolvedDescriptionId} className={SETTINGS_TYPOGRAPHY.fieldDescription}>
             {description}

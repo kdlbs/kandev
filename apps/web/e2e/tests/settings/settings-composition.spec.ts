@@ -1,54 +1,24 @@
 import { expect, test } from "../../fixtures/test-base";
 
 test.describe("Settings composition", () => {
-  test("task behavior keeps its four groups ordered and runtime collapsed", async ({
-    testPage,
-  }) => {
+  test("task behavior groups are expanded within their tabs", async ({ testPage }) => {
     await testPage.goto("/settings/preferences/task-behavior");
-
-    const groups = testPage.getByTestId("task-behavior-group");
-    await expect(groups).toHaveCount(3);
-    await expect(
-      testPage.locator('[data-testid^="task-behavior-"][data-testid$="-title"]'),
-    ).toHaveCount(4);
-    expect(
-      await testPage
-        .locator('[data-testid^="task-behavior-"][data-testid$="-title"]')
-        .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-testid"))),
-    ).toEqual([
-      "task-behavior-creating-title",
-      "task-behavior-conversation-title",
-      "task-behavior-archiving-title",
-      "task-behavior-runtime-title",
-    ]);
-
-    const runtime = testPage.getByTestId("task-behavior-runtime");
-    const disclosure = runtime.locator("details");
-    await expect(disclosure).not.toHaveAttribute("open", "");
-    await expect(runtime.getByTestId("task-behavior-runtime-summary")).toBeVisible();
-
-    await disclosure.locator("summary").click();
-    await expect(disclosure).toHaveAttribute("open", "");
+    await expect(testPage.getByTestId("task-behavior-group")).toHaveCount(2);
+    await expect(testPage.getByTestId("task-behavior-creating-title")).toBeVisible();
+    await expect(testPage.getByTestId("task-behavior-archiving-title")).toBeVisible();
+    await testPage.getByRole("tab", { name: "Conversation", exact: true }).click();
+    await expect(testPage.getByTestId("task-behavior-conversation-title")).toBeVisible();
+    await testPage.getByRole("tab", { name: "Runtime", exact: true }).click();
     await expect(testPage.getByTestId("message-queue-settings")).toBeVisible();
     await expect(testPage.getByTestId("session-capacity-settings")).toBeVisible();
-
-    await disclosure.locator("summary").click();
-    await expect(disclosure).not.toHaveAttribute("open", "");
+    await expect(testPage.getByTestId("task-behavior-settings").locator("details")).toHaveCount(0);
   });
 
-  test("task behavior search reopens the runtime after it is manually collapsed", async ({
-    testPage,
-  }) => {
+  test("search focuses a previously visited runtime tab", async ({ testPage }) => {
     await testPage.goto("/settings/preferences/task-behavior#setting-message-queue");
-
-    const runtime = testPage.getByTestId("task-behavior-runtime");
-    const disclosure = runtime.locator("details");
-    await expect(disclosure).toHaveAttribute("open", "");
-    await expect(testPage.getByTestId("message-queue-max-per-session")).toBeVisible();
-
-    await disclosure.locator("summary").click();
-    await expect(disclosure).not.toHaveAttribute("open", "");
-
+    const input = testPage.getByTestId("message-queue-max-per-session");
+    await expect(input).toBeVisible();
+    await testPage.getByRole("tab", { name: "Tasks", exact: true }).click();
     const search = testPage
       .getByTestId("app-sidebar-settings-mode")
       .getByTestId("settings-search")
@@ -58,9 +28,8 @@ test.describe("Settings composition", () => {
       .getByTestId("settings-search-results")
       .locator('[data-settings-search-motion-key="item:task-behavior-message-queue"]')
       .click();
-
-    await expect(testPage.getByTestId("message-queue-max-per-session")).toBeVisible();
-    await expect(disclosure).toHaveAttribute("open", "");
+    await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
   });
 
   test("preferences keep notification surfaces inside shared groups", async ({ testPage }) => {

@@ -14,13 +14,15 @@ test.describe("Mobile settings composition", () => {
     const page = testPage.getByTestId("task-behavior-settings");
     const runtime = testPage.getByTestId("task-behavior-runtime");
     await expect(page).toBeVisible();
-    await expect(testPage.getByTestId("task-behavior-group")).toHaveCount(3);
-    await expect(runtime.locator("details")).not.toHaveAttribute("open", "");
+    await expect(testPage.getByTestId("task-behavior-group")).toHaveCount(2);
 
-    await runtime.locator("summary").tap();
+    await testPage.getByRole("tab", { name: "Runtime", exact: true }).tap();
+    await expect(runtime.locator("details")).toHaveCount(0);
     await expect(testPage.getByTestId("message-queue-settings")).toBeVisible();
 
-    const summaryBox = await runtime.locator("summary").boundingBox();
+    const summaryBox = await testPage
+      .getByRole("tab", { name: "Runtime", exact: true })
+      .boundingBox();
     const queueBox = await testPage.getByTestId("message-queue-settings").boundingBox();
     const viewport = testPage.viewportSize();
     expect(summaryBox).not.toBeNull();
@@ -35,10 +37,15 @@ test.describe("Mobile settings composition", () => {
 
     const nestedScrollOwners = await page.evaluate(
       (root) =>
-        Array.from(root.querySelectorAll("*")).filter((element) => {
-          const overflow = getComputedStyle(element).overflowY;
-          return overflow === "auto" || overflow === "scroll";
-        }).length,
+        Array.from(root.querySelectorAll('[role="tabpanel"][data-state="active"] *')).filter(
+          (element) => {
+            const overflow = getComputedStyle(element).overflowY;
+            return (
+              (overflow === "auto" || overflow === "scroll") &&
+              element.scrollHeight > element.clientHeight
+            );
+          },
+        ).length,
     );
     expect(nestedScrollOwners).toBe(0);
   });

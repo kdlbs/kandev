@@ -129,7 +129,7 @@ test("mobile configuration lock keeps the source and accessible controls consist
     .click();
   await openTaskBehaviorRuntime(testPage);
 
-  const input = testPage.getByLabel("Maximum messages per session");
+  const input = testPage.getByLabel("Maximum messages per session", { exact: true });
   await expect(input).toBeDisabled();
   await expect(testPage.getByTestId("message-queue-source")).toHaveText("Configuration");
   await expect(testPage.getByText(/Managed by configuration/)).toBeVisible();

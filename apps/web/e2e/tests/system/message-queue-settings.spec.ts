@@ -43,7 +43,7 @@ test.describe.serial("Message Queue task behavior settings", () => {
     const queueCard = testPage.getByTestId("message-queue-settings");
     // Any other unconditional card on this page works as the reference width;
     // this used to be the Voice Mode card, which moved out to the Voice plugin.
-    const siblingCard = testPage.getByTestId("archive-confirmation-card");
+    const siblingCard = testPage.getByTestId("session-capacity-settings");
     await expect(queueCard).toBeVisible();
     await expect(siblingCard).toBeVisible();
     expect((await queueCard.boundingBox())?.width ?? 0).toBeCloseTo(
@@ -81,14 +81,16 @@ test.describe.serial("Message Queue task behavior settings", () => {
     const toggle = testPage.getByTestId("message-queue-merge-enabled");
     await expect(toggle).toBeVisible();
     const wasEnabled = baseline.merge_enabled;
+    await testPage.getByRole("button", { name: "About Enable queued message merging" }).hover();
     await expect(toggle).toHaveAttribute("aria-checked", String(wasEnabled));
-    await expect(
-      testPage.getByText(/Only adjacent messages from the same sender can be merged/),
-    ).toBeVisible();
-    await expect(
-      testPage.getByText(/combined, deduplicated entity references would exceed 100/),
-    ).toBeVisible();
+    await expect(testPage.getByRole("tooltip")).toContainText(
+      "Only adjacent messages from the same sender can be merged",
+    );
+    await expect(testPage.getByRole("tooltip")).toContainText(
+      "combined, deduplicated entity references would exceed 100",
+    );
 
+    await testPage.mouse.move(0, 0);
     const saveResponse = testPage.waitForResponse(
       (response) =>
         response.request().method() === "PATCH" &&
@@ -204,7 +206,9 @@ test.describe.serial("Message Queue task behavior settings", () => {
 
     await testPage.goto("/settings/preferences/task-behavior");
     await openTaskBehaviorRuntime(testPage);
-    await expect(testPage.getByLabel("Maximum messages per session")).toBeDisabled();
+    await expect(
+      testPage.getByLabel("Maximum messages per session", { exact: true }),
+    ).toBeDisabled();
     await expect(testPage.getByTestId("message-queue-effective-value")).toHaveText("43");
     await expect(testPage.getByTestId("message-queue-source")).toHaveText("Configuration");
     await expect(testPage.getByText(/Managed by configuration/)).toBeVisible();

@@ -1,4 +1,5 @@
 "use client";
+import { SettingsInfo } from "./settings-info";
 
 import { useEffect, useRef, useState } from "react";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -55,6 +56,7 @@ type TranscriptNavigationSwitchProps = {
   id: string;
   label: string;
   description: string;
+  info: string;
   checked: boolean;
   isDirty: boolean;
   onCheckedChange: (checked: boolean) => void;
@@ -66,6 +68,7 @@ function TranscriptNavigationSwitch({
   id,
   label,
   description,
+  info,
   checked,
   isDirty,
   onCheckedChange,
@@ -87,6 +90,7 @@ function TranscriptNavigationSwitch({
       <SettingsRow
         label={label}
         description={description}
+        info={<SettingsInfo label={label}>{info}</SettingsInfo>}
         controlId={id}
         touchTarget="switch"
         discoveryTargetId={discoveryTargetId}
@@ -127,7 +131,8 @@ function TranscriptNavigationSwitches({
       <TranscriptNavigationSwitch
         id="show-anchored-prompt-bar"
         label={t("settings:showAnchoredPromptBar")}
-        description={t("settings:desktopOnlyWhileYouScrollPast")}
+        description={t("settings:anchoredPromptShort")}
+        info={t("settings:desktopOnlyWhileYouScrollPast")}
         checked={draft.showAnchoredPromptBar}
         isDirty={isDirty}
         presentation={presentation}
@@ -137,7 +142,8 @@ function TranscriptNavigationSwitches({
       <TranscriptNavigationSwitch
         id="show-scroll-to-last-prompt"
         label={t("settings:showScrollToLastPrompt")}
-        description={t("settings:showTheJumpControlAfterYour")}
+        description={t("settings:jumpPromptShort")}
+        info={t("settings:showTheJumpControlAfterYour")}
         checked={draft.showScrollToLastPrompt}
         isDirty={isDirty}
         presentation={presentation}
@@ -146,7 +152,8 @@ function TranscriptNavigationSwitches({
       <TranscriptNavigationSwitch
         id="show-scroll-to-start"
         label={t("settings:showScrollToStart")}
-        description={t("settings:showTheControlThatJumpsTo")}
+        description={t("settings:jumpStartShort")}
+        info={t("settings:showTheControlThatJumpsTo")}
         checked={draft.showScrollToStart}
         isDirty={isDirty}
         presentation={presentation}
@@ -155,7 +162,8 @@ function TranscriptNavigationSwitches({
       <TranscriptNavigationSwitch
         id="show-transcript-auto-scroll-control"
         label={t("settings:showTranscriptAutoScrollControl")}
-        description={t("settings:showThePerSessionButtonThat")}
+        description={t("settings:autoScrollShort")}
+        info={t("settings:showThePerSessionButtonThat")}
         checked={draft.showTranscriptAutoScrollControl}
         isDirty={isDirty}
         presentation={presentation}

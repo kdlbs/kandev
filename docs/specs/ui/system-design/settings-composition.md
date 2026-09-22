@@ -1,11 +1,12 @@
 ---
-status: draft
+status: current
 system: ui
 requirements:
   - REQ-UI-SETTINGS-COMPOSITION-001
   - REQ-UI-SETTINGS-COMPOSITION-002
   - REQ-UI-SETTINGS-COMPOSITION-003
   - REQ-UI-SETTINGS-COMPOSITION-004
+  - REQ-UI-SETTINGS-COMPOSITION-005
 ---
 
 # Settings Composition System Design
@@ -16,14 +17,9 @@ This design owns reusable settings composition, including the Task behavior arra
 Existing domain components retain API calls, drafts, permissions, validation, and immediate commands.
 No settings route, backend contract, or plugin API changes.
 
-Existing sources establish the starting point:
-
-- `apps/web/components/settings/task-behavior-settings.tsx` composes Task Actions, Message Queue, and Session capacity.
-- `general-settings.tsx` mixes task creation, archiving, unread markers, and sleep prevention within Task Actions.
-- `settings-card.tsx` owns card dirty markers and discovery registration.
-- `settings-typography.tsx`, `settings-card-header.tsx`, and `settings-control.ts` already own shared visual roles.
-- `settings-page-template.tsx` uses 32px vertical gaps, while `system/system-page-shell.tsx` uses 24px gaps.
-- `creation-auto-focus-settings.tsx` repeats one label in a card heading and a toggle row.
+The current implementation has shared groups and rows, a collapsed Runtime group, and lengthy inline descriptions.
+The 2026-09-22 revision replaces that presentation with visible header tabs and optional technical help.
+The original implementation remains the baseline for field state, permissions, and persistence.
 
 ## Requirement mapping
 
@@ -31,13 +27,14 @@ Existing sources establish the starting point:
 | --- | --- |
 | REQ-UI-SETTINGS-COMPOSITION-001 | Shared presentation and rollout |
 | REQ-UI-SETTINGS-COMPOSITION-002 | Task behavior composition |
-| REQ-UI-SETTINGS-COMPOSITION-003 | Disclosure lifetime and discovery |
+| REQ-UI-SETTINGS-COMPOSITION-003 | Concise help and state lifetime |
 | REQ-UI-SETTINGS-COMPOSITION-004 | Mobile and accessibility |
+| REQ-UI-SETTINGS-COMPOSITION-005 | Header tabs and discovery |
 
 ## Shared presentation and rollout
 
 Reuse `SettingsPageHeader`, `SettingsSection`, `SettingsCardHeader`, `SettingsField`, and the settings sizing helpers.
-Add small presentation compositions under `components/settings/`, provisionally `settings-group.tsx` and `settings-row.tsx`.
+Reuse `SettingsGroup` and `SettingsRow` from `components/settings/settings-group.tsx`.
 Do not create a schema-driven settings renderer or a second settings store.
 
 A group has one semantic heading, optional description/action, and one outer `SettingsCard` by default.
@@ -76,77 +73,100 @@ Their lifecycle and primary submission controls remain intact.
 ## Task behavior composition
 
 Keep `/settings/preferences/task-behavior`, its breadcrumb, and all legacy redirects.
-Extract the Task Actions composition from `general-settings.tsx` or retire that wrapper after checking callers.
-The individual stateful controls remain single-mounted domain owners.
+Add the existing `SettingsPageHeader` with `SettingsTabsList` in its tabs slot, matching Data & Logs.
+Use three tabs with stable IDs: `tasks`, `conversation`, and `runtime`.
+The default is `tasks`. Do not add pages or sidebar entries.
 
-| Group | Existing components in display order |
+| Tab | Existing controls in display order |
 | --- | --- |
-| Creating and opening tasks | `CreationAutoFocusSettings`, `AgentGeneratedTaskTitleSettings`, `MCPTaskAgentProfileDefaultSettings`, `PreventAutoStartAgentSettings` |
-| Conversation and panels | `UnreadDividerSettings`, `AnchoredPromptBarSettings`, `TodoListPanelSettings` |
-| Archiving | `ArchiveConfirmationSettings` |
-| Runtime and limits | `SessionCapacitySettings`, `MessageQueueSettings`, `SleepInhibitionSettings` |
+| Tasks | `CreationAutoFocusSettings`, `AgentGeneratedTaskTitleSettings`, `MCPTaskAgentProfileDefaultSettings`, `PreventAutoStartAgentSettings`, then `ArchiveConfirmationSettings` |
+| Conversation | `UnreadDividerSettings`, `AnchoredPromptBarSettings`, `TodoListPanelSettings` |
+| Runtime | `SessionCapacitySettingsContent`, `MessageQueueSettingsContent`, `SleepInhibitionSettings` |
 
-Replace each simple preference's card wrapper with a shared row in its owning group.
-Keep compound options, previews, and permission notices as row details or form subgroups.
-Queue controls retain distinct limits and merging subgroups without nested outer cards.
+Every section in the active tab is expanded. Remove the Runtime disclosure, its chevron, and its collapsed summary.
+Remove the redundant introduction below each Task behavior group heading.
+Keep short subgroup labels where they distinguish limits, merging, and power controls.
+Keep profile options as two compact radio choices with one-sentence descriptions.
+The profile precedence algorithm moves to the profile setting's info content.
 
-Use the short label “Open new tasks automatically” for the automatic-opening setting.
-Keep the existing auto-start switch polarity to avoid an unrelated behavioral migration.
-Use “Applies to everyone” for instance controls and identify the host for sleep prevention.
-Keep manual-start exclusions, WIP independence, and environment/configuration locks beside their controls.
-Only secondary technical details move into Details.
+The [work order](../../../plans/settings-composition/task-06-concise-help-and-tabs.md) contains the complete visible-copy inventory.
+Each setting has a short description and an info control with its applicable detail.
+Do not invent technical explanations merely to fill a popup.
+Existing long descriptions are source material, not text to copy wholesale into every popup.
+Preserve unique technical facts once, under the setting they explain.
 
-## Disclosure lifetime and discovery
+## Concise help and state lifetime
 
-Use native `details`/`summary` for the runtime group and secondary explanations.
-The closed content remains mounted, so domain hooks and save contributors retain identity.
-Closed descendants cannot receive keyboard focus.
-Opening and closing are local presentation state with no storage or URL writes.
+Add a settings-local `SettingsInfo` component, using the sleep-prevention info control as the shipped exemplar.
+Use existing `Tooltip` for noninteractive desktop details and `Drawer` for touch, selected through `useTouchDrawer`.
+Provide a named button beside the label, such as “About agent-generated titles”.
+Do not nest the info button inside a toggle label or radio label.
+Hover and keyboard focus reveal desktop details. Escape dismisses them.
+Touch opens a titled drawer with one scroll region, safe-area clearance, and focus return.
+Keep the same translated content in both presentations. Opening info never mounts another setting owner.
 
-Lift the existing runtime draft-hook invocations into a single runtime-group owner where needed.
-`system/use-session-capacity-settings.ts` already exports `useSessionCapacitySettings`.
-Extract `useMessageQueueSettingsDraft` from `system/message-queue-settings.tsx` only when required for composition.
-Pass each existing view its state instead of invoking its hook twice.
-Retain the same contributor IDs, revisions, load behavior, and payload construction.
-Do not introduce additional polling or fetches for the summary.
+Add an info slot to `SettingsRow`. Keep short help connected to the control through the existing generated description ID.
+Use plain text or structured short paragraphs in info, including the existing technical identifiers where needed.
+Do not place links, inputs, or other interactive controls inside Tooltip content.
+Runtime field components use the same info component beside their labels.
+Replace the existing profile-specific inline MCP explanation and sleep-specific trigger with this shared pattern.
 
-Derive the closed summary from loaded effective snapshots, not draft numeric strings.
-Show automatic-session capacity, message-queue limit, and an unsaved marker when a descendant differs.
-Loading or failed reads show translated Loading or Unavailable status for the affected value.
-Zero means unlimited only under the existing queue contract.
-Disabled automatic-session limits show no automatic-session limit.
-Errors reveal the group once per new error transition, allowing users to close it afterward.
-Invalid drafts reveal their group and retain existing Save-disabled feedback.
+Keep active load errors, invalid input, permission restrictions, and managed-value notices inline.
+Represent instance scope once at the Runtime tab introduction: “Applies to all workspaces.”
+Keep “Manual starts can exceed this limit” beside the automatic-session field.
+Keep “0 means unlimited” beside the queue field.
+Show effective values and source badges only where they explain a difference or an override.
+Move merge compatibility algorithms, title fallback rules, OS commands, and session-copy precedence into info.
 
-Extend `revealSettingsTarget` in `lib/settings-discovery/target.ts` to open enclosing native details before scrolling and focusing. Notify React-controlled disclosures synchronously after opening so their controlled state cannot overwrite discovery.
-Reveal outer ancestors first. Preserve existing reduced-motion, settle, and highlight behavior.
-Keep initial fragments, history navigation, and repeated `SETTINGS_TARGET_REQUEST_EVENT` requests on the existing registry path.
-Do not add a separate target registry or navigation bypass.
-Disabled controls retain focusable group fallback and a visible permission or lock explanation.
+Retain the existing stateful domain components and one contributor per resource.
+The page can retain queue/session hooks above tab presentation, avoiding duplicate fetches.
+Pass their aggregate dirty state to the Runtime group as today.
+Remove Runtime-specific reveal keys, attention callbacks, and summary formatting only when they lose all callers.
+Do not remove general target-disclosure support still used elsewhere.
 
-Collapsing a dirty group does not unregister its save contributors.
-The existing save provider owns Reset, partial failure, in-flight edits, and navigation protection.
-New save errors open the affected group. Other groups remain independent.
+## Header tabs and discovery
+
+Reuse `SettingsTabs`, `SettingsTabsPanel`, and `useSettingsTab` with their existing URL and mounted-panel contracts.
+Panels remain mounted after first visit. Never conditionally unmount a visited settings owner on tab selection.
+The route-level save provider owns all dirty contributors across panels, including Reset and partial failures.
+Do not add tab-specific Save buttons or bypass cross-route guards.
+
+Map existing `GENERAL_SETTINGS_TARGETS` to tabs:
+
+- `agentTaskProfile`, `agentGeneratedTitles`, `archiveConfirmation`, `creationAutoFocus`, `preventAutoStartOnOpen`: `tasks`.
+- `unreadMessages`, `transcriptNavigation`: `conversation`.
+- `messageQueue`, `sessionCapacity`: `runtime`.
+
+Preserve target IDs and aliases. Reuse the existing tab hook for initial fragments, query selection, history, and explicit discovery events.
+A recognized fragment takes precedence over an unrelated tab query.
+For a previously visited hidden panel, complete selection before calling target focus/highlight.
+Use one post-activation reveal request through the existing registry if the existing tab composition does not already guarantee this ordering.
+Do not create another registry or retry timer.
+
+Use `UnsavedChangesBadge` in tab labels for dirty panels, with unchanged base tab names for accessible matching.
+Report dirty/error state from existing domain owners without another save contributor or persisted UI state.
+A new invalid draft or save failure in an inactive tab selects that tab once so its field is visible.
+Resolve simultaneous failures by tab order: Tasks, Conversation, Runtime. Do not switch repeatedly on rerender.
+A load error in an inactive tab shows an accessible error marker and opens when its tab is selected, without stealing active editing focus.
 
 ## Mobile and accessibility
 
-The shipped `SettingsIndex` and `SettingsLayoutClient` provide the mobile entry point and page shell.
-Reuse their direct navigation and one scroll owner. Do not add a tab strip or phone-only settings menu.
-The Task behavior hierarchy is identical on both viewports.
-Desktop short selectors align right. Below 768px, selectors and form fields occupy a row below their description.
-Toggle controls stay beside wrapping labels where they fit with their touch target.
-Group actions stack under headings on phones.
-Disclosures open inline because they reveal related form content rather than temporary choices.
+The shipped Settings index, page shell, and Data & Logs header tabs define navigation and geometry.
+Desktop tabs align beside the page title. Phone tabs form a row below the title.
+Short English labels fit the existing tab strip. Translated overflow stays within that strip, not the document.
+Runtime remains a labelled navigation choice, not an unlabeled expansion affordance.
 
-Use the existing safe-area-aware floating Save action and page bottom clearance.
-Do not create a sticky group header or another internal vertical scroller.
-Avoid duplicate responsive mounts. Values, validation, and draft lifetimes are shared.
-Associate helpers and errors through accessible IDs. Preserve keyboard focus when closing a group containing focus.
+All sections stay visible in the active tab. Info is a temporary explanation, so phone details use a drawer.
+Keep settings in one page scroll region. The drawer owns scrolling only while it is open.
+Keep existing safe-area-aware Save controls and content clearance.
+Touch tab and info targets measure at least 44px. Desktop controls retain their shared 28px size.
+Selectors stack below descriptions on phones. Switch labels wrap without clipping the control or its active target.
+Inactive panels cannot receive focus. Info triggers have visible focus and localized accessible names.
 
 ## Localization and compatibility
 
-Render translations through `t()` or `Trans`, including summaries, badges, and disclosure labels.
-Update English, Portuguese, and Simplified Chinese. Generate Traditional Chinese through `pnpm run i18n:zh-hant`.
+Render translations through `t()` or `Trans`, including tab labels, badges, info labels, and short descriptions.
+Update English, Portuguese, Simplified Chinese, and Japanese. Generate Traditional Chinese through `pnpm run i18n:zh-hant`.
 Use plural keys with counts. Descriptions may span multiple lines and never use ellipsis.
 Preserve existing translation keys when their meaning remains unchanged.
 Preserve technical values, existing test IDs where practical, and search aliases for old labels.
@@ -158,8 +178,8 @@ The requirement and design pair preserves the local composition rationale, so th
 
 ## Verification and documentation
 
-Use component tests for mounted disclosure drafts, summary states, and target revelation.
-Use desktop and mobile E2E for grouping, actual geometry, keyboard/touch behavior, saving, and repeated search targets.
+Use component tests for cross-tab drafts, error routing, accessible help, and target revelation.
+Use desktop and mobile E2E for tabs, expanded runtime, info interaction, saving, and repeated search targets.
 Extend the existing settings typography route matrix for each migrated family.
 Keep public documentation unchanged during design. During implementation, update affected Task behavior descriptions and section names.
 Add the shared composition rule to `apps/web/AGENTS.md` when its implementation ships.

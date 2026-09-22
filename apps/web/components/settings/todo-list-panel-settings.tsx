@@ -1,4 +1,5 @@
 "use client";
+import { SettingsInfo } from "./settings-info";
 
 import { useEffect, useRef, useState } from "react";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -35,7 +36,12 @@ function TodoListPanelRows({
     >
       <SettingsRow
         label={t("settings:showAgentTodoListPanel")}
-        description={t("settings:pinTheAgentsLiveTodoChecklistAs")}
+        description={t("settings:todoShort")}
+        info={
+          <SettingsInfo label={t("settings:showAgentTodoListPanel")}>
+            {t("settings:pinTheAgentsLiveTodoChecklistAs")}
+          </SettingsInfo>
+        }
         controlId="show-todo-list-panel"
         touchTarget="switch"
         isDirty={draft.show !== saved.show}
@@ -52,7 +58,12 @@ function TodoListPanelRows({
       {draft.show && (
         <SettingsRow
           label={t("settings:onlyPinWhenTodoListIsNotEmpty")}
-          description={t("settings:onlyPinWhenTodoListIsNotEmptyDescription")}
+          description={t("settings:todoNonemptyShort")}
+          info={
+            <SettingsInfo label={t("settings:onlyPinWhenTodoListIsNotEmpty")}>
+              {t("settings:onlyPinWhenTodoListIsNotEmptyDescription")}
+            </SettingsInfo>
+          }
           controlId="todo-list-panel-only-when-not-empty"
           touchTarget="switch"
           isDirty={draft.onlyWhenNotEmpty !== saved.onlyWhenNotEmpty}

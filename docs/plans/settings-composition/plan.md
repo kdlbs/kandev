@@ -1,11 +1,12 @@
 ---
 created: 2026-09-21
-status: complete
+status: implemented
 requirements:
   - REQ-UI-SETTINGS-COMPOSITION-001
   - REQ-UI-SETTINGS-COMPOSITION-002
   - REQ-UI-SETTINGS-COMPOSITION-003
   - REQ-UI-SETTINGS-COMPOSITION-004
+  - REQ-UI-SETTINGS-COMPOSITION-005
 system_design:
   - ../../specs/ui/system-design/settings-composition.md
 legacy_specs: []
@@ -14,6 +15,12 @@ legacy_specs: []
 # Implementation Plan: Settings Composition
 
 ## Overview
+
+Revision on 2026-09-22: the user rejected collapsed Runtime and excessive inline text.
+Task 06 adds Tasks, Conversation, and Runtime header tabs with expanded sections and concise help.
+The completed Tasks 01 through 05 and their results remain historical delivery evidence.
+Task 06 supersedes their collapsed-section and long-description presentation.
+
 
 Keep Task behavior on one page and use consistent composition across first-party settings.
 Deliver shared groups with Task behavior first, then migrate bounded route families.
@@ -24,21 +31,21 @@ Each work order includes its own rendered and behavioral checks.
 
 ### In scope
 
-- Four Task behavior groups, with runtime initially collapsed and summarized.
+- Three Task behavior header tabs, expanded sections, and short descriptions with optional info.
 - Shared card padding, row spacing, descriptions, fields, actions, and disclosure treatment.
 - All first-party settings route families and the forms they expose.
 - Localization, discovery compatibility, dirty-state preservation, phone composition, and relevant documentation.
 
 ### Out of scope
 
-- New settings pages, navigation entries, or tabs.
+- New settings pages or sidebar entries. Tabs are limited to Task behavior.
 - Backend changes, new permissions, altered defaults, or auto-start switch inversion.
 - Global UI Card styling and third-party plugin content.
 - Specialized editor, table, terminal, and pipeline redesigns.
 
 ## Inputs and decisions
 
-The user accepted the single-page four-group proposal and requested consistent settings cards, descriptions, and layouts.
+The user retained one page and requested less visible text, no collapsed settings sections, and evaluation of the Data & Logs tab pattern.
 The UI system owns this independent reusable presentation contract.
 Existing typography, sizing, header tabs, search, and save coordination remain authoritative dependencies.
 The [typography plan](../settings-typography/plan.md) has unfinished historical migration records.
@@ -51,6 +58,13 @@ no delegation was used.
 - [Save coordinator ADR](../../decisions/0046-settings-route-save-coordinator.md)
 
 ## Technical approach
+
+Task 06 reuses the existing header tabs and adds shared info presentation.
+It removes Runtime collapse and redundant descriptions without changing domain settings behavior.
+Its copy table, target mapping, mobile preview, and exact checks are in the work order.
+
+The following describes the original delivery:
+
 
 Task 01 introduces small settings-local group/row compositions using existing shared roles.
 It integrates them into Task behavior, preserves domain draft owners, and opens native disclosures before target focus.
@@ -66,159 +80,102 @@ Update public descriptions of Task behavior during Task 01, not during this desi
 
 ## ASCII UI preview
 
-### UI-01: Task behavior, ordinary entry
+### UI-05: Concise Task behavior, desktop
 
-Entry: `/settings/preferences/task-behavior`. Runtime is closed and the page is clean.
-Current source order is Task Actions, Transcript Navigation, Todo List Panel, Message Queue, then Session capacity.
-Task Actions currently includes unrelated unread and sleep controls.
+Entry: `/settings/preferences/task-behavior`, default Tasks tab.
 
 ```text
+Task behavior                 [Tasks] [Conversation] [Runtime]
+-------------------------------------------------------------
+Creating and opening tasks
++-----------------------------------------------------------+
+| Open new tasks automatically (i)                  [switch] |
+| Open a task after you create it.                           |
+|-----------------------------------------------------------|
+| Agent-generated titles (i)                        [switch] |
+| Let the agent name new tasks from their prompt.            |
+|-----------------------------------------------------------|
+| Profile for agent-created tasks (i)                       |
+| Choose the default profile for tasks created by agents.   |
+| (o) Creating session: reuse the creating session's profile.|
+| ( ) Workspace default: use the workspace's default profile.|
+|-----------------------------------------------------------|
+| Prevent auto-start on open (i)                    [switch] |
+| Keep agents stopped when reopening tasks after a restart  |
+| or from the final workflow step.                          |
++-----------------------------------------------------------+
+Archiving
+[Archive confirmation row with short help and (i)]
+```
+
+Tasks contains creation/opening and archiving. Conversation contains transcript and panel preferences.
+Info appears beside the setting label. There is no repeated section-description paragraph.
+Hover/focus on `(i)` reveals technical details without changing the setting.
+
+### UI-06: Runtime, desktop
+
+Entry: the visible Runtime tab or an existing runtime search fragment.
+
+```text
+Task behavior                 [Tasks] [Conversation] [Runtime*]
+-------------------------------------------------------------
+Applies to all workspaces.
+Session capacity
+[Enable automatic-session limit (i)              switch]
+[Maximum automatic sessions (i)                     5  ]
+ Manual starts can exceed this limit.
+Message queue
+[Maximum queued messages (i)                       10  ]
+ 0 means unlimited.
+[Allow queued message merging (i)                switch]
+[Merge consecutive messages automatically (i)    switch]
+Power
+[Keep host awake (i)                             switch]
+ Prevent the computer running Kandev from sleeping during tasks.
+
+[Inline managed-value notice or error only when applicable]
+           Unsaved changes       [Reset] [Save changes]
+```
+
+Every group is expanded. No chevrons, expansion summaries, or Details accordions precede the settings.
+The floating Save surface appears only while dirty and applies across tabs.
+A new save/validation error in an inactive tab reveals that tab once. Load failures mark the tab without interrupting active edits.
+
+### UI-07: Phone tabs and info
+
+```text
+< Settings
 Task behavior
-Choose how tasks open and how their content appears.
+[Tasks] [Conversation] [Runtime]
+--------------------------------
+Agent-generated titles (i) [on]
+Let the agent name new tasks
+from their prompt.
 
-Creating and opening tasks
-+--------------------------------------------------------+
-| Open new tasks automatically     [switch]               |
-| Open a new task after you create it.                    |
-|--------------------------------------------------------|
-| Agent-generated titles           [switch]               |
-| Profile for agent-created tasks  [profile selector]     |
-| Prevent auto-start on open       [switch]               |
-+--------------------------------------------------------+
-Conversation and panels
-+--------------------------------------------------------+
-| Unread divider                   [switch]               |
-| Transcript navigation            [existing controls]    |
-| Todo checklist                   [existing controls]    |
-+--------------------------------------------------------+
-Archiving
-+--------------------------------------------------------+
-| Archive confirmation             [existing controls]    |
-+--------------------------------------------------------+
-> Runtime and limits                       [Everyone]
-  Automatic sessions: 5 | Queued messages: unlimited
+Tap (i):
++------------------------------+
+| Agent-generated titles  [X]  |
+| Prompt requirements, naming  |
+| fallback, and manual editing |
+| details.                     |
++------------------------------+
 ```
 
-### UI-02: Runtime, expanded with unsaved or failed edits
+Phone tabs occupy their own header row. Settings keep one vertical scroll owner.
+Info opens an inset drawer with safe-area clearance and 44px targets. Long details scroll inside the drawer.
+Dismissal returns focus to the info button. It never changes the draft.
+The desktop tooltip and phone drawer use identical content.
+Required structure: three visible tabs, expanded sections, concise row descriptions, and optional accessible information.
+Copy and ASCII spacing are illustrative. The work-order copy table is the English starting point.
+Maps to AC-UI-SETTINGS-COMPOSITION-002.1 through .6, -003.1 through .6, -004.1 through .5, and -005.1 through .7.
 
-```text
-v Runtime and limits                 [Everyone] [Unsaved]
-  Effective: automatic sessions 5 | queued messages 20
-+--------------------------------------------------------+
-| Session capacity                                       |
-| Enable automatic-session limit               [switch]  |
-| Maximum automatic sessions                   [  8  ]   |
-| Manual starts can exceed this limit.                   |
-|--------------------------------------------------------|
-| Message queue                                          |
-| Maximum messages per session                 [ 20  ]   |
-| Enable queued message merging                [switch]  |
-| Automatically merge consecutive messages     [switch]  |
-| > Details                                              |
-|--------------------------------------------------------|
-| Prevent host computer sleep                  [switch]  |
-| Applies to the computer running Kandev.                |
-| [Error or managed-value explanation when applicable]   |
-+--------------------------------------------------------+
-          Unsaved changes      [Reset] [Save changes]
-```
+## Tests and E2E
 
-Summary numbers are illustrative effective values. Edited values do not silently replace them.
-Loading and unavailable states replace only the affected summary value.
-Search opens the group before focus. Errors open the group and retain the existing retry action.
-
-### UI-03: Shared phone composition
-
-Entry: Settings index or app navigation, then the same settings route.
-
-```text
-< Settings           Task behavior
-Creating and opening tasks
-+--------------------------------+
-| Open new tasks          [on]   |
-| automatically                  |
-| Explanation wraps here.        |
-|--------------------------------|
-| Profile for agent-created tasks|
-| Explanation wraps here.        |
-| [profile selector            v]|
-+--------------------------------+
-Conversation and panels
-[Grouped rows]
-Archiving
-[Grouped rows]
-> Runtime and limits
-  Applies to everyone
-  Automatic sessions: 5
-  Queued messages: unlimited
-
- Unsaved changes
- [Reset]       [Save changes]
-```
-
-The settings shell owns vertical scrolling. The existing Save surface remains fixed only while dirty.
-Phone selectors stack below descriptions. Touch actions have at least 44px targets.
-Safe-area padding and content clearance keep the last setting reachable.
-No separate phone tabs, drawers, or nested scrollers are introduced for groups.
-
-### UI-04: Shared form and resource patterns
-
-```text
-Page title                           [existing tabs/action]
-One page description.
-
-Form group
-+--------------------------------------------------------+
-| Field label                                            |
-| [value input]                                          |
-| Helper explaining effect and required constraints.      |
-| [Inline error when applicable]                         |
-+--------------------------------------------------------+
-
-Resource group                              [Add resource]
-+--------------------------------------------------------+
-| Existing resource list or table                        |
-| Name / status                         [existing actions]|
-+--------------------------------------------------------+
-```
-
-On phones, actions and fields stack below their labels. Resource bodies retain their established mobile composition.
-Empty states keep their existing create/connect action. Loading, disabled, and failed states keep domain behavior.
-
-Required structure: group order, one group frame, no repeated row heading, visible essential help, and the existing Save action.
-Exact wording and ASCII spacing are illustrative. All rendered copy must be translated.
-UI-01/02 map to AC-UI-SETTINGS-COMPOSITION-002.1 through .6 and -003.1 through .6.
-UI-03 maps to -004.1 through .5. UI-04 maps to -001.1 through .5.
-
-## Tests
-
-| Criteria | Evidence |
-| --- | --- |
-| -001.1 through .5 | Existing typography tests plus family-labelled rendered matrix tests in `settings-composition.spec.ts` and `mobile-settings-composition.spec.ts` |
-| -002.1 through .6 | New `task-behavior-settings.test.tsx`: group order and runtime summary loading, effective, unlimited, disabled, and failed states |
-| -003.1/.2, -004.3 | New group/row component tests: accessible labels, details behavior, keyboard focus, and essential notices |
-| -003.3/.5/.6 | Task behavior component tests: collapse while dirty, invalid draft, save error, partial success, Reset, and in-flight edit |
-| -003.4 | Existing `lib/settings-discovery/target.test.ts`: nested closed details, disabled target fallback, repeated requests, reduced motion |
-| -004.1/.2/.4/.5 | Family-labelled mobile matrix with persisted edits, geometry, translations, and navigation checks |
-
-New tests start red before implementation. Markup-only migrations use rendered evidence rather than implementation-mirroring unit tests.
-Run existing component tests for state owners that change. Do not remove behavioral assertions to accommodate new markup.
-
-## E2E tests
-
-Add `apps/web/e2e/tests/settings/settings-composition.spec.ts` and `mobile-settings-composition.spec.ts`.
-Use existing isolated fixtures and seed representative resources for each family.
-Name tests with the work-order tags: `task behavior`, `preferences`, `agent executor`, `workspace integration`, and `system account`.
-Use the default desktop project and `mobile-chrome` for the mobile file.
-
-Task behavior scenarios cover all four groups, expand/collapse/save/reload, failed save, invalid input, locked/non-admin state, and search into closed runtime.
-Test direct fragments and repeated search after manual collapse. Keep effective summaries separate from unsaved drafts.
-Each family covers a preference/form/resource example where applicable, empty and populated lists, and visible errors.
-Measure shared spacing and equivalent control geometry rather than only checking CSS classes.
-Use Pixel 5, 767px and 768px boundary checks, and a coarse-pointer tablet case for the shared primitives.
-Include long translated/pseudo-locale labels and light/dark smoke captures. Record rendered comparison against UI-01 through UI-04.
-Reuse and extend `settings-typography.spec.ts` and `mobile-settings-typography.spec.ts` for representative cross-family coverage.
-Do not require real external credentials or containers for layout evidence.
+Task 06 owns the exact commands and scenarios for the refinement.
+Its component tests cover info accessibility, cross-tab draft lifetime, error routing, and discovery ordering.
+New desktop/mobile concise-help suites prove visible runtime controls, short descriptions, info interactions, and tab navigation.
+Existing composition, save, queue, and capacity suites retain their behavioral assertions with updated navigation.
+The work order also requires every modified existing E2E consumer to run and record results.
 
 ## Work orders
 
@@ -228,9 +185,17 @@ Do not require real external credentials or containers for layout evidence.
 - [x] [Task 04: Workspace and integration settings](task-04-workspace-integration.md)
 - [x] [Task 05: System, account, and plugin settings](task-05-system-account.md)
 
-Execute sequentially: 01 -> 02 -> 03 -> 04 -> 05. The sequence does not authorize subagents.
+- [x] [Task 06: Concise help and header tabs](task-06-concise-help-and-tabs.md)
+
+Tasks 01 through 05 are complete. Task 06 follows them sequentially. No delegation is authorized.
 
 ## Verification results
+
+Revision design checks on 2026-09-22: specification catalog validation, full specification lint, relative links, acceptance references, and whitespace checks passed.
+No application builds or tests ran during this design turn.
+
+
+Task 06 refinement is implemented. Its work order records current validation; results below describe the original delivery.
 
 Implementation checks on 2026-09-21:
 
@@ -313,9 +278,9 @@ Do not overlap these E2E commands or use worker overrides.
 
 ## Risks
 
-- Collapsing content can hide invalid controls or break search focus unless disclosure revelation precedes focus.
+- Switching tabs can hide invalid controls or break search focus unless panel activation precedes focus.
 - Replacing nested cards can lose dirty borders, target registrations, or domain hook identity.
-- Summary values can accidentally expose drafts as effective limits or duplicate runtime requests.
+- Effective values must remain distinct from drafts without duplicate runtime requests.
 - Shared spacing can affect specialized editors. Retain and document their inner geometry.
 - Brief descriptions can omit decision-critical exclusions. Keep those visible and move only secondary detail.
 - Existing E2E selectors reference card structure. Preserve semantic assertions and migrate affected selectors together.

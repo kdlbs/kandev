@@ -158,7 +158,7 @@ function focusTargetWithin(element: HTMLElement): void {
   const focusTarget =
     element.querySelector<HTMLElement>(`[${SETTINGS_TARGET_FOCUS_ATTRIBUTE}]`) ??
     element.querySelector<HTMLElement>(
-      `input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])`,
+      `input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]):not([data-settings-info]), a[href], [tabindex]:not([tabindex="-1"]):not([data-settings-info])`,
     );
   const target = focusTarget ?? element;
   if (!focusTarget && !element.hasAttribute("tabindex")) element.tabIndex = -1;
