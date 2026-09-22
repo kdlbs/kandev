@@ -2600,6 +2600,9 @@ func (m *Manager) SetPromptTurnID(_ context.Context, executionID, turnID string)
 		return fmt.Errorf("execution %q not found", executionID)
 	}
 	execution.setPromptTurnID(turnID)
+	if turnID != "" {
+		execution.clearPassthroughInitialPromptForProcess(execution.PassthroughProcessID)
+	}
 	return nil
 }
 
