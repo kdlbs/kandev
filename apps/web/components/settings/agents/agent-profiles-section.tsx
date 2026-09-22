@@ -92,6 +92,8 @@ function ProfileRowActions({
           className={settingsActionClassName("cursor-pointer")}
           aria-label={t("agents:profileActions")}
           data-testid={`profile-actions-menu-${profile.id}`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
         >
           <IconDotsVertical className="h-4 w-4" />
         </Button>
