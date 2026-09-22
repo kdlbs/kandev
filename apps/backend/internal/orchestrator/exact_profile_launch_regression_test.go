@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -132,6 +133,14 @@ func TestStartCreatedSession_PersistsExactBindingOnWorkflowRedirect(t *testing.T
 			generation,
 			revision.UnixNano(),
 		)
+	}
+	if receipt, err := repo.GetExactProfileLaunchReceipt(ctx, "task1", "session-redirected"); err != nil || receipt != nil {
+		t.Fatalf("receipt before boot = (%#v, %v), want none", receipt, err)
+	}
+	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "task1", SessionID: "session-redirected", AgentExecutionID: "exec-redirected"})
+	receipt, err := repo.GetExactProfileLaunchReceipt(ctx, "task1", "session-redirected")
+	if err != nil || receipt == nil || receipt.Outcome != models.ExactProfileLaunchOutcomeApplied || !receipt.InferenceStarted {
+		t.Fatalf("receipt after boot = (%#v, %v), want applied inference receipt", receipt, err)
 	}
 }
 
