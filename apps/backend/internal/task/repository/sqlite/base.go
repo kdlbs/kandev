@@ -142,6 +142,7 @@ type Repository struct {
 	// after it has locked the session and confirmed no attempt binding. It is
 	// test-only and proves a successor bind cannot interleave with fallback.
 	exactProfileReceiptLegacyFallbackHook func()
+	exactProfileReceiptCurrentLookupHook  func()
 	// agentPlanUpsertAfterRead is a test-only synchronization seam used to
 	// pause a plan upsert while its identity lock and transaction are held.
 	agentPlanUpsertAfterRead func()

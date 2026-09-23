@@ -580,6 +580,9 @@ func (r *Repository) getCurrentExactProfileAttemptReceiptTx(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("validate current exact profile session receipt: %w", err)
 	}
+	if r.exactProfileReceiptCurrentLookupHook != nil {
+		r.exactProfileReceiptCurrentLookupHook()
+	}
 	row := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT task_id, session_id, agent_profile_id, generation, profile_revision_nanos, model, outcome, failure_reason, inference_started, substitution_done, created_at FROM task_exact_profile_launch_attempt_receipts WHERE task_id=? AND session_id=? AND execution_id=? AND attempt_id=? AND session_incarnation_id=? AND agent_profile_id=? AND profile_revision_nanos=? AND generation=?`), binding.TaskID, binding.SessionID, binding.ExecutionID, binding.AttemptID, binding.SessionIncarnationID, binding.AgentProfileID, binding.ProfileRevision.UnixNano(), binding.Generation)
 	var receipt models.ExactProfileLaunchReceipt
 	var revisionNanos int64
