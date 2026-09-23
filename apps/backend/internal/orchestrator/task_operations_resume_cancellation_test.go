@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -88,6 +89,73 @@ func TestResumeAttemptCancellationInterruptsDetachedContext(t *testing.T) {
 		t.Fatalf("cancelled attempt validation error = %v, want ErrResumeAttemptCancelled", err)
 	}
 	attempt.finish(registry)
+}
+
+func TestCancelAgentStopsUnacceptedResumeStartupWithoutWaitingForAgentCancel(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-cancel-resume-startup"
+		sessionID   = "session-cancel-resume-startup"
+		executionID = "execution-cancel-resume-startup"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
+	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
+
+	releaseAgentCancel := make(chan struct{})
+	var releaseCancelOnce sync.Once
+	releaseCancel := func() { releaseCancelOnce.Do(func() { close(releaseAgentCancel) }) }
+	cancelEntered := make(chan struct{}, 1)
+	stopped := make(chan string, 1)
+	agentManager := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		cancelAgentBlock:       releaseAgentCancel,
+		cancelAgentEntered:     cancelEntered,
+		stopAgentWithReasonFunc: func(_ context.Context, stoppedID, _ string, _ bool) error {
+			stopped <- stoppedID
+			return nil
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentManager)
+	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	attempt, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
+	if err != nil || !owner {
+		t.Fatalf("begin resume attempt: owner=%v err=%v", owner, err)
+	}
+	attempt.setExecutionID(executionID)
+	t.Cleanup(func() {
+		releaseCancel()
+		attempt.finish(svc.resumeAttemptStore())
+	})
+
+	cancelDone := make(chan error, 1)
+	go func() { cancelDone <- svc.CancelAgent(ctx, sessionID) }()
+	select {
+	case err := <-cancelDone:
+		if err != nil {
+			t.Fatalf("CancelAgent: %v", err)
+		}
+	case <-cancelEntered:
+		releaseCancel()
+		<-cancelDone
+		t.Fatal("CancelAgent sent a protocol cancel while native session restore was still starting")
+	case <-time.After(resumeCancellationTestTimeout(t)):
+		releaseCancel()
+		<-cancelDone
+		t.Fatal("CancelAgent did not stop the unaccepted startup execution")
+	}
+
+	select {
+	case stoppedID := <-stopped:
+		if stoppedID != executionID {
+			t.Fatalf("stopped execution = %q, want %q", stoppedID, executionID)
+		}
+	default:
+		t.Fatal("CancelAgent did not stop the exact resume startup execution")
+	}
+	assertResumeSessionState(t, repo, sessionID, models.TaskSessionStateWaitingForInput)
 }
 
 func TestResumeAttemptRegistryFencesEvictedCancelledIdentities(t *testing.T) {
