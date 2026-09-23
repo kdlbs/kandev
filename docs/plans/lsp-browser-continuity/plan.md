@@ -19,9 +19,9 @@ Keep a task-host language server working after its browser tab closes, then reco
 
 ### In scope
 
-- Retain one task-host process per LSP lease until explicit Stop, actual process exit, task-runtime shutdown, or backend shutdown.
+- Retain one task-host process per LSP lease until intentional editor-idle release, explicit Stop, capacity eviction, actual process exit, task-runtime shutdown, or backend shutdown.
 - Reattach to a detached lease for the same execution and language; preserve independent simultaneously open windows.
-- Resume providers, progress, and current-document diagnostics without treating transport loss as a process crash.
+- Resume providers and progress, then accept fresh current-document diagnostics without treating transport loss as a process crash.
 - Count detached leases against the existing LSP limit and preserve supported-executor and access checks.
 - Update user-facing status, six locale catalogs, and public LSP/configuration documentation.
 
@@ -35,15 +35,17 @@ Keep a task-host language server working after its browser tab closes, then reco
 
 ### Runtime lease and protocol continuity
 
-Refactor `apps/backend/internal/gateway/websocket/lsp_handler.go` around a lease manager keyed by execution identity, language, and opaque lease ID. Keep the agentctl upstream WebSocket open after browser detachment, continuously drain it, and track the initialized capabilities, workspace metadata, open documents, active work progress, and bounded latest diagnostics. A returning authorized browser claims its detached lease or an eligible detached lease for the same execution/language. Each concurrently attached browser window keeps its own lease. `lsp_capacity.go` admits a new process lease only when a slot is free; it does not charge reattachment twice. The existing `limits.lspMaxConnections` / `KANDEV_LSP_MAX_CONNECTIONS` identity remains compatible but counts server leases.
+Refactor `apps/backend/internal/gateway/websocket/lsp_handler.go` around a lease manager keyed by execution identity, language, and opaque lease ID. Keep the agentctl upstream WebSocket open after browser detachment, continuously drain it, and track initialized and dynamic capabilities, workspace metadata, document version counters, latest configuration, and active work progress. Clear diagnostics on detach and accept only fresh, synchronized publications. A returning authorized browser claims its detached lease or an eligible detached lease for the same execution/language. Each concurrently attached browser window keeps its own lease. `lsp_capacity.go` charges one slot per lease and evicts the oldest detached lease before admitting a new process at capacity; if all are attached it returns `4005`. Reattachment does not charge twice. Intentional two-minute browser editor-idle release frees a lease; tab close and network loss do not. The existing `limits.lspMaxConnections` / `KANDEV_LSP_MAX_CONNECTIONS` identity remains compatible but counts server leases. Update its config-catalog description without changing the key or default; coordinate with the startup-configuration-parity work order that also mentions the key.
 
-The broker maps JSON-RPC request IDs to the active attachment generation, answers server requests while detached, and drops replies to a prior generation. It handles an acknowledged explicit-Stop control separately from socket close. It distinguishes actual task-host process exit (`4006`) from transport/broker failure (`4009` or abnormal browser close), and never forwards reserved WebSocket close codes `1005` or `1006` as close frames. Agentctl remains the process owner; its existing teardown still reaps descendants. A lost execution or backend shutdown closes the upstream and releases the lease exactly once.
+The broker maps JSON-RPC request IDs and `$/cancelRequest` to the active attachment generation, cancels in-flight requests on detach, answers dynamic capability and configuration requests while detached, and drops replies to a prior generation. A settings-save event updates detached leases. It handles acknowledged explicit Stop and editor-idle release separately from socket close; Stop rejects pending browser requests, sends LSP `shutdown` and `exit`, then closes upstream after bounded cleanup. Agentctl sends explicit `4006` only for confirmed process exit. Upstream read failure without that signal maps to `4009` transport/broker failure, never to server-exited; reserved close codes `1005` and `1006` are normalized. Agentctl remains the process owner and reaps descendants. A lost execution or backend shutdown closes the upstream and releases the lease exactly once.
 
-The orchestrator's idle-session reclaim path (`apps/backend/internal/orchestrator/reconcile_liveness.go`) must treat an active lease as live work. Wire a narrow lease-liveness interface through backend initialization, without importing the WebSocket gateway into the orchestrator. The lease admission path and reclaim cleanup must share a session lifecycle fence or use equivalent generation checks, so a new lease cannot race with cleanup of the execution it needs.
+The orchestrator's idle-session reclaim path (`apps/backend/internal/orchestrator/reconcile_liveness.go`) must treat an active lease as live work at all three callers: the periodic idle reaper, the agent event handler, and the streaming event handler. Wire a narrow lease-liveness interface through backend initialization, without importing the WebSocket gateway into the orchestrator. The lease admission path and reclaim cleanup must share a session lifecycle fence or use equivalent generation checks, so a new lease cannot race with cleanup of the execution it needs. Lease release/eviction removes the pin so normal reclaim can resume.
+
+Add restart-required `features.lspBrowserContinuity` / `KANDEV_FEATURES_LSP_BROWSER_CONTINUITY` as a runtime release toggle, off in prod, dev, and e2e profiles. Gate backend lease construction and WebSocket admission as well as frontend resume behavior. The disabled path keeps the current browser-owned process and reclaim behavior. Explicitly enable the flag in focused tests and E2E fixtures; exercise both enabled and disabled paths.
 
 ### Editor reconnection
 
-Update `apps/web/lib/lsp/lsp-client-manager.ts` and its protocol/state helpers to remember an opaque lease ID for tab restoration, reattach automatically after transient transport loss, and accept a resumed ready handshake with retained server capabilities. A resumed browser does not send a second LSP `initialize`; it rebuilds Monaco providers, sends current document text, waits for synchronization, and accepts only diagnostics matching that text. It restores current reported work progress from the lease snapshot. Explicit Stop sends the control and waits for acknowledgment. Backend or task-host restart clears stale lease state and follows existing auto-start/manual-enable policy.
+Update `apps/web/lib/lsp/lsp-client-manager.ts` and its protocol/state helpers to remember an opaque lease ID for tab restoration, reattach automatically after transient transport loss, and accept a resumed ready handshake with retained and dynamic capabilities. A resumed browser does not send a second LSP `initialize`; it rebuilds Monaco providers, sends current document text, waits for synchronization, and accepts only new qualifying diagnostics. It restores current reported work progress from the lease snapshot. Explicit Stop and the existing two-minute last-editor idle timer send acknowledged release controls. A hinted tab may resume its existing lease after auto-start is disabled, unless the user explicitly stopped it; an unhinted new tab follows current auto-start/manual-enable policy. Backend or task-host restart clears stale lease state and follows the same policy. Duplicated-tab hints never steal an attached lease.
 
 The toolbar and fine-pointer status bar show a localized reconnecting state; the coarse-pointer tablet uses the existing drawer. A true server exit still shows Retry. Phone viewing neither attaches nor starts LSP.
 
@@ -85,14 +87,14 @@ The structure and lifecycle states are required; the shown text and spacing are 
 
 ## Tests
 
-- AC .1, .4, .5: Go lease-manager tests prove detach preserves upstream/process, explicit Stop and task stop release it, independent attached windows, exact capacity accounting, and cancellation of a detached install on teardown.
-- AC .2, .3, .6: Go protocol tests prove initialized-capability reuse, request-generation isolation, bounded diagnostics/progress replay, content mismatch invalidation, transport versus process-exit close codes, and reserved-code normalization.
-- AC .2, .3, .6, .7: web manager tests prove resumed provider setup without second initialize, document synchronization, reconnect/backoff, localized states, stale diagnostic suppression, and phone boundary.
+- AC .1, .4, .5, .8: Go lease-manager tests prove detach survives a completed turn and reaper interval, Stop/idle release/task stop release capacity, independent attached windows, LRU detached eviction, exact accounting, and cancellation of a detached install on teardown.
+- AC .2, .3, .6, .8: Go protocol tests prove capability registration replay, detached configuration updates, monotonic document versions, diagnostic invalidation, version matching and resumed unversioned suppression, request cancellation and generation isolation, process-exit versus transport codes, and reserved-code normalization.
+- AC .2, .3, .6, .7, .8, .9: web manager tests prove resumed provider setup without second initialize, document synchronization, reconnect/backoff, idle release, close-code translation, policy after auto-start changes, duplicate-hint isolation, localized states, stale-marker suppression, and phone boundary. Flag contract tests cover both modes.
 
 ## E2E tests
 
-- AC .1, .2, .3: Extend `apps/web/e2e/tests/lsp/lsp-file-intelligence.spec.ts` and the fake LSP server. Close the desktop page, reopen the task in a fresh page, confirm the fake server's process/initialize count did not increase, and verify current-file diagnostics and status return.
-- AC .4, .5, .6: Cover explicit Stop, a second live browser window, capacity with a detached lease, and a task-host restart followed by fresh initialization in focused integration/E2E cases.
+- AC .1, .2, .3: With the flag enabled, extend `apps/web/e2e/tests/lsp/lsp-file-intelligence.spec.ts` and the fake LSP server. Close the desktop page, complete an agent turn, pass a reaper interval, reopen the task, confirm the same fake server process/initialize count, and verify fresh current-file diagnostics and status return.
+- AC .4, .5, .6, .8, .9: Cover explicit Stop, browser editor-idle release, a second live window and duplicated tab, detached-lease eviction at capacity, all-attached `4005`, and task-host restart followed by fresh initialization.
 - AC .7: Extend `apps/web/e2e/tests/lsp/mobile-lsp-file-intelligence.spec.ts` for tablet reattachment through its drawer; preserve its existing phone no-socket assertion.
 
 ## Work orders
@@ -109,11 +111,11 @@ Pending implementation.
 
 ## Risks
 
-- A retained server consumes a capacity slot and task-host memory while the browser is closed. The task stop and explicit Stop paths must remain reachable and leak-free.
-- The existing idle-session reaper can reclaim an agent runtime after a turn completes. It must not reclaim an execution with a live LSP lease, and lease admission must not race with that decision.
+- A retained server keeps the entire Local PC or Docker task host alive, including agentctl, container, and worktree runtime resources, after a turn completes. Intentional editor-idle release and oldest-detached eviction bound the cost; users returning after eviction see fresh initialization.
+- All three idle-reclaim call sites can end an execution after a turn completes. None may reclaim one with a live LSP lease, and lease admission must not race with those decisions.
 - Some servers issue client requests or progress while detached. The broker must continue draining and responding without a browser.
 - Multiple browser windows may have divergent unsaved text. They must remain on independent leases.
-- Reattached diagnostics must be bound to the current document text; a stale cached diagnostic can mislead a user after closing an unsaved editor.
+- Reattached diagnostics need a matching server-facing document version. Unversioned diagnostics stay hidden on resumed leases until a fresh server generation, which reduces diagnostic coverage for servers that omit versions.
 
 ## Open questions
 
