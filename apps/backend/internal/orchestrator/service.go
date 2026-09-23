@@ -1142,6 +1142,11 @@ type Service struct {
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
 
+	// lspLeases pins an execution while a browser-independent language-server
+	// lease owns its task-host stream. The gateway is wired through this narrow
+	// interface to avoid importing its WebSocket package here.
+	lspLeases LSPLeaseLifecycle
+
 	// sessionCeiling is the instance-wide admission controller for agent
 	// session launches. Its initial effective capacity is resolved by the
 	// composition root and can be changed by the install Settings service.

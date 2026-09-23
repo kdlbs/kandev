@@ -3865,9 +3865,9 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 	// not the event handler. This handler only manages session-level cleanup.
 }
 
-// cleanupAgentExecution stops the agentctl instance and releases its port after
-// the agent reaches a terminal state (completed/failed). This runs in a goroutine
-// so it doesn't block the event handler.
+// cleanupAgentExecution tears down the task host after the agent reaches a
+// terminal state unless an active LSP lease still owns that execution. This
+// runs in a goroutine so it doesn't block the event handler.
 func (s *Service) cleanupAgentExecution(executionID, taskID, sessionID string) {
 	s.cleanupAgentExecutionWithReason(context.Background(), executionID, taskID, sessionID, "agent completed")
 }

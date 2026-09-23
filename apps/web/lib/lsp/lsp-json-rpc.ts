@@ -17,6 +17,7 @@ export type LspUnavailableCause =
 export type LspStatus =
   | { state: "disabled" }
   | { state: "connecting" }
+  | { state: "reconnecting" }
   | { state: "installing" }
   | { state: "starting" }
   | { state: "ready" }
@@ -260,7 +261,7 @@ export const LSP_CLIENT_CAPABILITIES = {
       willSaveWaitUntil: false,
     },
     completion: {
-      dynamicRegistration: false,
+      dynamicRegistration: true,
       completionItem: {
         snippetSupport: true,
         commitCharactersSupport: true,
@@ -270,11 +271,11 @@ export const LSP_CLIENT_CAPABILITIES = {
       },
       contextSupport: true,
     },
-    hover: { dynamicRegistration: false, contentFormat: ["markdown", "plaintext"] },
-    definition: { dynamicRegistration: false },
-    references: { dynamicRegistration: false },
+    hover: { dynamicRegistration: true, contentFormat: ["markdown", "plaintext"] },
+    definition: { dynamicRegistration: true },
+    references: { dynamicRegistration: true },
     signatureHelp: {
-      dynamicRegistration: false,
+      dynamicRegistration: true,
       signatureInformation: {
         documentationFormat: ["markdown", "plaintext"],
         parameterInformation: { labelOffsetSupport: true },
@@ -282,7 +283,7 @@ export const LSP_CLIENT_CAPABILITIES = {
     },
     publishDiagnostics: { relatedInformation: true },
     semanticTokens: {
-      dynamicRegistration: false,
+      dynamicRegistration: true,
       requests: { full: true },
       tokenTypes: [
         "namespace",

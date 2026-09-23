@@ -121,6 +121,8 @@ func provideGateway(
 	authSvc *auth.Service,
 	dataDir string,
 	registerCleanup func(func() error),
+	lspContinuityEnabled bool,
+	acquireSessionFence func(string) func(),
 	lspMaxConnections ...int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
 	gateway, err := gateways.Provide(log)
@@ -147,6 +149,13 @@ func provideGateway(
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
 		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspMaxConnections...)
+		if lspContinuityEnabled {
+			gateway.LSPHandler.EnableContinuity(acquireSessionFence, eventBus)
+			orchestratorSvc.SetLSPLeaseLifecycle(gateway.LSPHandler)
+			if registerCleanup != nil {
+				registerCleanup(gateway.LSPHandler.Close)
+			}
+		}
 		gateway.SetVscodeProxy(lifecycleMgr)
 		gateway.SetPortProxy(lifecycleMgr)
 		gateway.SetPortTunnel(lifecycleMgr)

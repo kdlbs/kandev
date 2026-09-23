@@ -62,7 +62,7 @@ apps/backend/
 │   │                     # costs, dashboard, infra, labels, onboarding, projects, repository, runtime,
 │   │                     # routines, routing, scheduler, service, shared, skills, workspaces)
 │   ├── events/           # Event bus for internal pub/sub
-│   ├── gateway/          # WebSocket gateway
+│   ├── gateway/          # WebSocket gateway, including task-owned LSP lease lifecycle
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
 │   ├── githubauth/       # Shared GitHub credential-broker environment contract
 │   ├── common/           # Shared utilities, config, logger

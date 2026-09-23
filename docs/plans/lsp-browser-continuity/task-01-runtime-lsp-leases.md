@@ -1,7 +1,7 @@
 ---
 id: "01-runtime-lsp-leases"
 title: "Runtime LSP leases"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -92,4 +92,6 @@ None. Task 02 consumes the lease handshake and close-code contract.
 
 ## Results
 
-Pending.
+Implemented runtime-owned bounded leases, detach/reattach protocol brokering, capacity/idle release, task-runtime liveness fencing, process-exit signaling, and the all-off release toggle. Focused Go tests passed for the gateway, agentctl API, orchestrator, backend wiring, runtime flags, profiles, and the audited configuration catalog. Focused `go vet` passed for the changed runtime packages.
+
+Code-review remediation preserves the task-host execution after normal `agent.completed` while that exact execution has an active lease. Detach cleanup remains ordered before successor document writes; the attach call returns its own generation; initialize/initialized handshake state survives either detach boundary; reuse is scoped to the settings owner; dynamic registrations are brokered while attached and replayed after resume; and language-prefixed `workspace/configuration` sections retain their prior behavior. Focused race tests passed for both changed packages, the complete `websocket` package race suite passed, and full non-race `go test ./internal/orchestrator` passed. The combined full race run hit a nil-executor panic in an asynchronous queued-message test goroutine (`Executor.GetExecutionBySession` from `executeQueuedMessageWithReservation`); no focused LSP/reaper regression failed.

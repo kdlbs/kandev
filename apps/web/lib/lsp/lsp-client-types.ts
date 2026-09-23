@@ -1,4 +1,5 @@
 import type { LSPConnection, LspRange } from "./lsp-json-rpc";
+import type { LspDynamicRegistration } from "./lsp-dynamic-capabilities";
 import {
   EMPTY_LSP_PROGRESS,
   type LspProgressSnapshot,
@@ -25,6 +26,19 @@ export type ManagedLspConnection = LSPConnection & {
   diagnosticsByUri: Map<string, PublishDiagnosticsParams>;
   progress: LspProgressSnapshot;
   registeredProgressTokens: Set<LspProgressToken>;
+  continuityEnabled: boolean;
+  leaseId: string | null;
+  transportGeneration: number;
+  reconnectAttempts: number;
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
+  reconnecting: boolean;
+  explicitlyStopped: boolean;
+  releaseAfterConnect: "stop" | "editor_idle" | null;
+  diagnosticsReady: boolean;
+  providersReady: boolean;
+  dynamicRegistrations: Map<string, LspDynamicRegistration>;
+  semanticRefreshCallbacks: (() => void)[];
+  lspLanguage: string;
 };
 
 export type OpenDocumentParams = {
@@ -40,13 +54,30 @@ export type LspReadyWorkspace = {
   repositorySubpaths: string[];
 };
 
+export type ManagedLspConnectionOptions = {
+  key: string;
+  sessionId: string;
+  generation: number;
+  ws: WebSocket;
+  configuration: Record<string, unknown>;
+  continuityEnabled?: boolean;
+  leaseId?: string | null;
+  lspLanguage?: string;
+};
+
 export function createManagedLspConnection(
-  key: string,
-  sessionId: string,
-  generation: number,
-  ws: WebSocket,
-  configuration: Record<string, unknown>,
+  options: ManagedLspConnectionOptions,
 ): ManagedLspConnection {
+  const {
+    key,
+    sessionId,
+    generation,
+    ws,
+    configuration,
+    continuityEnabled = false,
+    leaseId = null,
+    lspLanguage = "",
+  } = options;
   return {
     key,
     sessionId,
@@ -62,6 +93,19 @@ export function createManagedLspConnection(
     diagnosticsByUri: new Map(),
     progress: EMPTY_LSP_PROGRESS,
     registeredProgressTokens: new Set(),
+    continuityEnabled,
+    leaseId,
+    transportGeneration: 0,
+    reconnectAttempts: 0,
+    reconnectTimer: null,
+    reconnecting: false,
+    explicitlyStopped: false,
+    releaseAfterConnect: null,
+    diagnosticsReady: false,
+    providersReady: false,
+    dynamicRegistrations: new Map(),
+    semanticRefreshCallbacks: [],
+    lspLanguage,
     providerDisposables: [],
     serverCapabilities: null,
     workspaceUri: null,

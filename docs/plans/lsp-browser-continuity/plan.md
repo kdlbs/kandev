@@ -1,6 +1,6 @@
 ---
 created: 2026-09-23
-status: draft
+status: implemented
 requirements:
   - REQ-PLATFORM-LSP-FILE-INTELLIGENCE-002
 system_design:
@@ -99,15 +99,24 @@ The structure and lifecycle states are required; the shown text and spacing are 
 
 ## Work orders
 
-- [ ] [Task 01: Runtime LSP leases](task-01-runtime-lsp-leases.md)
-- [ ] [Task 02: Editor reconnection and status](task-02-editor-reconnection.md) — depends on Task 01.
-- [ ] [Task 03: Browser proof and public docs](task-03-browser-proof-and-docs.md) — depends on Tasks 01 and 02.
+- [x] [Task 01: Runtime LSP leases](task-01-runtime-lsp-leases.md) — done.
+- [x] [Task 02: Editor reconnection and status](task-02-editor-reconnection.md) — done.
+- [x] [Task 03: Browser proof and public docs](task-03-browser-proof-and-docs.md) — done.
 
 Execution is sequential because the broker handshake, browser state, and E2E fixture share one protocol contract.
 
 ## Verification results
 
-Pending implementation.
+Implemented all three work orders. Focused backend tests and `go vet` passed, including the LSP gateway, agentctl API, orchestrator, backend wiring, runtime flags, profiles, and configuration catalog. The focused web LSP/component/feature suite passed (58 tests), web typecheck and changed-file ESLint passed, and `pnpm run i18n:pseudo && pnpm run i18n:check` passed. Managed desktop LSP E2E scenarios passed for close/reopen retention, independent windows and duplicate tabs, detached capacity eviction, all-attached capacity, intentional idle release, disabled-flag behavior, and fresh initialization after task-host restart. Managed mobile E2E passed for tablet drawer reattachment and the phone no-socket boundary. Public-doc validators and spec catalog/lint checks passed. `git diff --check` passed. The repository-wide E2E sleep lint reports unrelated existing violations outside the changed LSP files; targeted lint for the changed E2E files passed.
+
+### Code-review remediation results (2026-09-23)
+
+- Normal `agent.completed` cleanup now defers teardown while the exact execution owns a live LSP lease. Regression coverage drives the actual completion event and a stale-row idle-reaper scan; the runtime row remains running.
+- Detach keeps the upstream write fence through old-generation cancellation and `didClose` writes. Controlled concurrency coverage proves cleanup precedes successor `didOpen`, and a stale handler generation cannot detach its successor.
+- The broker owns the single `initialize` request and response across browser detaches. Tests cover reconnect before the response and reconnect after the response but before `initialized`; the resumed client completes the missing notification without a second initialize.
+- Detached reuse now requires the same user ID. Broker configuration lookup restores full-language and language-prefixed section behavior. Tests cover both-user lease selection and nested/missing configuration sections.
+- The browser advertises only supported dynamic provider methods, maps semantic tokens, and rebuilds registrations across resume. Focused backend/frontend registration tests pass.
+- The full non-race orchestrator suite passed (265.6s), the complete gateway race suite passed, and focused race tests for the LSP gateway and orchestrator reaper regressions passed. The combined full race run ended with a nil-executor panic in an asynchronous queued-message test goroutine (`Executor.GetExecutionBySession` from `executeQueuedMessageWithReservation`); no LSP regression test failed. All 134 LSP Vitest tests passed; web typecheck, changed-file ESLint, `git diff --check`, and the managed desktop E2E that completes a real follow-up turn and waits 95 seconds through the reaper age threshold and scan passed.
 
 ## Risks
 

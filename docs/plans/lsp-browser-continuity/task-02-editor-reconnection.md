@@ -1,7 +1,7 @@
 ---
 id: "02-editor-reconnection"
 title: "Editor reconnection and status"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-runtime-lsp-leases"
@@ -102,4 +102,6 @@ Task 01 supplies the lease/resume protocol and close-code distinction.
 
 ## Results
 
-Pending.
+Implemented lease-hint restoration, bounded reconnect, resumed capability/progress state, document synchronization before diagnostics, acknowledged Stop/idle release, localized reconnect status, feature gating, and the phone LSP boundary. The focused web LSP, hook, storage, dynamic-capability, and feature-contract suite passed (58 tests); web typecheck, changed-file ESLint, and the pseudo-locale/i18n checks passed.
+
+Code-review remediation advertises dynamic registration only for the supported completion, hover, definition, references, signature-help, and semantic-token providers. The semantic-token registration maps to Monaco's supported capability shape. A resumed handshake that reports `initialized: false` sends the one-time `initialized` notification before document synchronization and attachment readiness. All 134 LSP Vitest tests passed; web typecheck and changed-file ESLint passed.

@@ -149,6 +149,61 @@ func TestSubtaskTerminalSettle_ReclaimsProviderRuntime(t *testing.T) {
 	}
 }
 
+func TestAgentCompletedAndIdleReaperKeepExecutionWithActiveLSPLease(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	seedSession(t, repo, "task-lsp-completed", "session-lsp-completed", "")
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-lsp-completed", SessionID: "session-lsp-completed", TaskID: "task-lsp-completed",
+		AgentExecutionID: "exec-lsp-completed", Runtime: agentruntime.RuntimeStandalone,
+		Status: models.ExecutorRunningStatusRunning, LocalPID: 8181,
+		CreatedAt: now.Add(-5 * time.Minute), UpdatedAt: now.Add(-5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("upsert execution row: %v", err)
+	}
+	inner := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		isAgentRunning:         false,
+		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+			return models.ProcessLivenessDead
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), inner)
+	svc.turnService = &inactiveTurnService{}
+	svc.idleReaper = newIdleSessionReaper()
+	lease := &activeLSPLeaseForTest{
+		sessionID:      "session-lsp-completed",
+		executionID:    "exec-lsp-completed",
+		executionCheck: make(chan struct{}, 2),
+	}
+	svc.SetLSPLeaseLifecycle(lease)
+
+	svc.handleAgentCompleted(ctx, watcherAgentCompletedData("task-lsp-completed", "session-lsp-completed", "exec-lsp-completed"))
+	select {
+	case <-lease.executionCheck:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent.completed cleanup did not check the exact execution's LSP lease")
+	}
+
+	// Exercise a stale-row reaper tick after normal turn completion. The lease
+	// remains authoritative even when the agent process probe reports dead.
+	svc.reclaimIdleSessionsOnce(ctx)
+	inner.mu.Lock()
+	stopCalls := append([]stopAgentCall(nil), inner.stopAgentWithReasonArgs...)
+	inner.mu.Unlock()
+	if len(stopCalls) != 0 {
+		t.Fatalf("agent.completed stopped the lease-owned execution: %+v", stopCalls)
+	}
+	row, err := repo.GetExecutorRunningBySessionID(ctx, "session-lsp-completed")
+	if err != nil {
+		t.Fatalf("load execution after reaper tick: %v", err)
+	}
+	if row.Status != models.ExecutorRunningStatusRunning || row.LocalPID != 8181 {
+		t.Fatalf("active lease execution changed after completion/reaper: status=%q pid=%d", row.Status, row.LocalPID)
+	}
+}
+
 // TestSubtaskTerminalCollapse_LiveAgentBlocksReclaim pins the fail-closed
 // guard at the production call site: a subtask whose agent process is
 // still alive must NOT be reclaimed even when the session collapses to

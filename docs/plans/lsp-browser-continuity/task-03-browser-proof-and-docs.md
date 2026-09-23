@@ -1,7 +1,7 @@
 ---
 id: "03-browser-proof-and-docs"
 title: "Browser proof and public docs"
-status: pending
+status: done
 wave: 3
 depends_on:
   - "01-runtime-lsp-leases"
@@ -104,4 +104,6 @@ Tasks 01 and 02 must complete so the E2E scenarios exercise the final protocol a
 
 ## Results
 
-Pending.
+Added managed desktop E2E coverage for retained process identity and fresh diagnostics/progress after reattachment, independent windows and duplicate-tab isolation, Stop and idle release, detached eviction and all-attached capacity, disabled-flag compatibility, and fresh startup after task-host restart. Tablet drawer reattachment and the phone no-socket boundary passed on the managed mobile project. Updated public developer, configuration, feature-status, and WebSocket guidance; both public-doc validators passed. Spec catalog validation, spec lint, and `git diff --check` passed.
+
+Code-review remediation extends the close/reopen scenario to send and observe a second completed agent turn after LSP admission. It then waits 95 seconds to pass the 60-second idle age threshold and the 30-second reaper tick, and verifies the same fake LSP process and initialize count after reattachment. The focused managed desktop E2E passed (1 test, 1.7 minutes); the frontend production build and backend build both completed as part of the managed runner.
