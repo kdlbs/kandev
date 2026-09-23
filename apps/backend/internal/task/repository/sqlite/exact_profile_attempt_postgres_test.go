@@ -28,7 +28,7 @@ func TestPostgresExactProfileAttemptRereadsAssignmentAfterReplacement(t *testing
 			repoA, repoB, observer := newTaskPostgresRepoPair(t)
 			ctx := context.Background()
 			assignment := seedPostgresExactProfileAttempt(t, repoA, operation.name)
-			binding := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: "exact-pg-session-" + operation.name, ExecutionID: "exact-pg-execution-" + operation.name, AttemptID: "exact-pg-attempt-" + operation.name, SessionIncarnationID: "exact-pg-incarnation-" + operation.name, AgentProfileID: assignment.AgentProfileID, ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
+			binding := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: "exact-pg-session-" + operation.name, ExecutionID: "exact-pg-execution-" + operation.name, AttemptID: "exact-pg-attempt-" + operation.name, SessionIncarnationID: "exact-pg-incarnation-" + operation.name, AgentProfileID: assignment.AgentProfileID, Model: "model-exact", ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
 			if err := repoA.CreateTaskSession(ctx, &models.TaskSession{ID: binding.SessionID, TaskID: binding.TaskID, QueueIncarnationID: binding.SessionIncarnationID, State: models.TaskSessionStateCreated}); err != nil {
 				t.Fatal(err)
 			}
@@ -51,7 +51,7 @@ func TestPostgresExactProfileAttemptRereadsAssignmentAfterReplacement(t *testing
 			var writerErr error
 			go func() {
 				defer close(done)
-				receipt := &models.ExactProfileLaunchReceipt{TaskID: binding.TaskID, SessionID: binding.SessionID, AgentProfileID: binding.AgentProfileID, ProfileRevision: binding.ProfileRevision, Generation: binding.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
+				receipt := &models.ExactProfileLaunchReceipt{TaskID: binding.TaskID, SessionID: binding.SessionID, AgentProfileID: binding.AgentProfileID, ProfileRevision: binding.ProfileRevision, Generation: binding.Generation, Model: binding.Model, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
 				_, writerErr = operation.run(ctx, repoB, binding, receipt)
 			}()
 			if err := waitForPostgresLock(ctx, observer, writerPID, done); err != nil {
@@ -96,7 +96,7 @@ func TestPostgresLegacyExactReceiptLookupSerializesWithSuccessorBind(t *testing.
 	if err := repoA.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: assignment.TaskID, QueueIncarnationID: incarnationID, State: models.TaskSessionStateCreated}); err != nil {
 		t.Fatal(err)
 	}
-	legacy := &models.ExactProfileLaunchReceipt{TaskID: assignment.TaskID, SessionID: sessionID, AgentProfileID: assignment.AgentProfileID, ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
+	legacy := &models.ExactProfileLaunchReceipt{TaskID: assignment.TaskID, SessionID: sessionID, AgentProfileID: assignment.AgentProfileID, Model: "model-exact", ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
 	if changed, err := repoA.RecordExactProfileLaunchReceipt(ctx, legacy); err != nil || !changed {
 		t.Fatalf("legacy receipt = (%v, %v)", changed, err)
 	}
@@ -115,7 +115,7 @@ func TestPostgresLegacyExactReceiptLookupSerializesWithSuccessorBind(t *testing.
 	case <-time.After(5 * time.Second):
 		t.Fatal("legacy lookup did not reach locked fallback")
 	}
-	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: sessionID, ExecutionID: "exact-pg-legacy-fallback-execution", AttemptID: "exact-pg-legacy-fallback-attempt", SessionIncarnationID: incarnationID, AgentProfileID: assignment.AgentProfileID, ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
+	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: sessionID, ExecutionID: "exact-pg-legacy-fallback-execution", AttemptID: "exact-pg-legacy-fallback-attempt", SessionIncarnationID: incarnationID, AgentProfileID: assignment.AgentProfileID, Model: "model-exact", ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
 	bindPID := pgBackendPID(t, repoA.db)
 	bindDone := make(chan struct{})
 	var bindErr error
@@ -149,14 +149,14 @@ func TestPostgresCurrentExactReceiptLookupSerializesWithSuccessorAssignment(t *t
 	repoA, repoB, observer := newTaskPostgresRepoPair(t)
 	ctx := context.Background()
 	assignment := seedPostgresExactProfileAttempt(t, repoA, "current-lookup")
-	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: "exact-pg-current-lookup-session", ExecutionID: "exact-pg-current-lookup-execution", AttemptID: "exact-pg-current-lookup-attempt", SessionIncarnationID: "exact-pg-current-lookup-incarnation", AgentProfileID: assignment.AgentProfileID, ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
+	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: "exact-pg-current-lookup-session", ExecutionID: "exact-pg-current-lookup-execution", AttemptID: "exact-pg-current-lookup-attempt", SessionIncarnationID: "exact-pg-current-lookup-incarnation", AgentProfileID: assignment.AgentProfileID, Model: "model-exact", ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
 	if err := repoA.CreateTaskSession(ctx, &models.TaskSession{ID: binding.SessionID, TaskID: binding.TaskID, QueueIncarnationID: binding.SessionIncarnationID, State: models.TaskSessionStateCreated}); err != nil {
 		t.Fatal(err)
 	}
 	if changed, err := repoA.BindExactProfileLaunchAttempt(ctx, binding); err != nil || !changed {
 		t.Fatalf("bind = (%v, %v)", changed, err)
 	}
-	oldReceipt := &models.ExactProfileLaunchReceipt{TaskID: binding.TaskID, SessionID: binding.SessionID, AgentProfileID: binding.AgentProfileID, ProfileRevision: binding.ProfileRevision, Generation: binding.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
+	oldReceipt := &models.ExactProfileLaunchReceipt{TaskID: binding.TaskID, SessionID: binding.SessionID, AgentProfileID: binding.AgentProfileID, ProfileRevision: binding.ProfileRevision, Generation: binding.Generation, Model: binding.Model, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
 	if changed, err := repoA.RecordExactProfileLaunchReceiptForAttempt(ctx, binding, oldReceipt); err != nil || !changed {
 		t.Fatalf("old receipt = (%v, %v)", changed, err)
 	}

@@ -426,7 +426,7 @@ func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func(), func()) {
 
 func cloneExactProfileLaunchAttempt(binding *models.ExactProfileLaunchAttemptBinding, executionID string) (*models.ExactProfileLaunchAttemptBinding, error) {
 	if binding == nil || binding.TaskID == "" || binding.SessionID == "" || binding.ExecutionID != executionID ||
-		binding.AttemptID == "" || binding.SessionIncarnationID == "" || binding.AgentProfileID == "" ||
+		binding.AttemptID == "" || binding.SessionIncarnationID == "" || binding.AgentProfileID == "" || binding.Model == "" ||
 		binding.ProfileRevision.IsZero() || binding.Generation < 1 {
 		return nil, models.ErrExactProfileAssignmentInvalidInput
 	}

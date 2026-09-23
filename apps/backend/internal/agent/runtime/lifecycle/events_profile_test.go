@@ -81,7 +81,7 @@ func TestAgentStreamEventCarriesFrozenExactProfileAttempt(t *testing.T) {
 	binding := &models.ExactProfileLaunchAttemptBinding{
 		TaskID: "task-original", SessionID: "session-original", ExecutionID: execution.ID,
 		AttemptID: "attempt-original", SessionIncarnationID: "incarnation-original",
-		AgentProfileID: "profile-original", ProfileRevision: time.Unix(1_726_500_000, 0).UTC(), Generation: 7,
+		AgentProfileID: "profile-original", Model: "gpt-exact", ProfileRevision: time.Unix(1_726_500_000, 0).UTC(), Generation: 7,
 	}
 	if err := mgr.AdmitExactProfileLaunchAttempt(execution.ID, binding, func(*models.ExactProfileLaunchAttemptBinding) (bool, error) {
 		return true, nil
@@ -94,6 +94,7 @@ func TestAgentStreamEventCarriesFrozenExactProfileAttempt(t *testing.T) {
 	binding.AttemptID = "attempt-mutated"
 	binding.SessionIncarnationID = "incarnation-mutated"
 	binding.AgentProfileID = "profile-mutated"
+	binding.Model = "gpt-mutated"
 	binding.ProfileRevision = time.Time{}
 	binding.Generation = 99
 
@@ -105,14 +106,14 @@ func TestAgentStreamEventCarriesFrozenExactProfileAttempt(t *testing.T) {
 	got := streamEvents[0].ExactProfileAttempt
 	if got == nil || got.TaskID != "task-original" || got.SessionID != "session-original" ||
 		got.ExecutionID != "execution-attempt" || got.AttemptID != "attempt-original" ||
-		got.SessionIncarnationID != "incarnation-original" || got.AgentProfileID != "profile-original" ||
+		got.SessionIncarnationID != "incarnation-original" || got.AgentProfileID != "profile-original" || got.Model != "gpt-exact" ||
 		got.ProfileRevision != time.Unix(1_726_500_000, 0).UTC() || got.Generation != 7 {
 		t.Fatalf("stream attempt = %#v, want frozen admitted tuple", got)
 	}
 	got.TaskID = "payload-mutated"
 	mgr.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{Type: "message_chunk", Text: "second output"})
 	streamEvents = eventBus.getStreamEvents()
-	if len(streamEvents) != 2 || streamEvents[1].ExactProfileAttempt == nil || streamEvents[1].ExactProfileAttempt.TaskID != "task-original" {
+	if len(streamEvents) != 2 || streamEvents[1].ExactProfileAttempt == nil || streamEvents[1].ExactProfileAttempt.TaskID != "task-original" || streamEvents[1].ExactProfileAttempt.Model != "gpt-exact" {
 		t.Fatalf("second stream attempt = %#v, want independent frozen copy", streamEvents)
 	}
 }

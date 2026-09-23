@@ -29,7 +29,7 @@ func TestExactProfileAdmissionGuardSerializesRemovalAndRejectsRemovedExecution(t
 	manager := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), testLogger())
 	removedBinding := &models.ExactProfileLaunchAttemptBinding{
 		TaskID: session.TaskID, SessionID: session.ID, ExecutionID: "exec-removed", AttemptID: "exec-removed",
-		SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: "profile-exact", ProfileRevision: revision, Generation: 1,
+		SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: "profile-exact", Model: "gpt-exact", ProfileRevision: revision, Generation: 1,
 	}
 	called := false
 	if err := manager.AdmitExactProfileLaunchAttempt(removedBinding.ExecutionID, removedBinding, func(bound *models.ExactProfileLaunchAttemptBinding) (bool, error) {
@@ -48,7 +48,7 @@ func TestExactProfileAdmissionGuardSerializesRemovalAndRejectsRemovedExecution(t
 	}
 	binding := &models.ExactProfileLaunchAttemptBinding{
 		TaskID: session.TaskID, SessionID: session.ID, ExecutionID: execution.ID, AttemptID: execution.ID,
-		SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: "profile-exact", ProfileRevision: revision, Generation: 1,
+		SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: "profile-exact", Model: "gpt-exact", ProfileRevision: revision, Generation: 1,
 	}
 	bound := make(chan struct{})
 	releaseBind := make(chan struct{})

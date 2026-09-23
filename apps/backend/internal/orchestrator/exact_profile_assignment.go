@@ -267,13 +267,17 @@ func (s *Service) recordExactProfileStartFailure(
 		return
 	}
 	receipts, ok := s.repo.(interface {
+		GetCurrentExactProfileLaunchAttempt(context.Context, string, string) (*models.ExactProfileLaunchAttemptBinding, error)
 		RecordExactProfileLaunchReceiptForAttempt(context.Context, *models.ExactProfileLaunchAttemptBinding, *models.ExactProfileLaunchReceipt) (bool, error)
 	})
 	if !ok {
 		return
 	}
-	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: taskID, SessionID: sessionID, ExecutionID: executionID, AttemptID: executionID, SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: session.AgentProfileID, ProfileRevision: time.Unix(0, session.ExactProfileRevision).UTC(), Generation: session.ExactProfileGeneration}
-	receipt := &models.ExactProfileLaunchReceipt{TaskID: taskID, SessionID: sessionID, AgentProfileID: binding.AgentProfileID, ProfileRevision: binding.ProfileRevision, Generation: binding.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed, FailureReason: launchErr.Error()}
+	binding, bindingErr := receipts.GetCurrentExactProfileLaunchAttempt(ctx, taskID, sessionID)
+	if bindingErr != nil || binding == nil || binding.ExecutionID != executionID {
+		return
+	}
+	receipt := &models.ExactProfileLaunchReceipt{TaskID: taskID, SessionID: sessionID, AgentProfileID: binding.AgentProfileID, ProfileRevision: binding.ProfileRevision, Generation: binding.Generation, Model: binding.Model, Outcome: models.ExactProfileLaunchOutcomeFailedClosed, FailureReason: launchErr.Error()}
 	if _, err := receipts.RecordExactProfileLaunchReceiptForAttempt(ctx, binding, receipt); err != nil {
 		s.logger.Warn("failed to record exact-profile attempt failure", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
 	}
@@ -292,7 +296,7 @@ func (s *Service) admitExactProfileLaunchAttempt(ctx context.Context, session *m
 	if !ok {
 		return models.ErrExactProfileAssignmentInvalidInput
 	}
-	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: session.TaskID, SessionID: session.ID, ExecutionID: executionID, AttemptID: executionID, SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: exact.AgentProfileID, ProfileRevision: time.Unix(0, exact.Revision).UTC(), Generation: exact.Generation}
+	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: session.TaskID, SessionID: session.ID, ExecutionID: executionID, AttemptID: executionID, SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: exact.AgentProfileID, ProfileRevision: time.Unix(0, exact.Revision).UTC(), Generation: exact.Generation, Model: exact.Model}
 	admitter, ok := s.agentManager.(exactProfileLaunchAttemptAdmitter)
 	if !ok {
 		return models.ErrExactProfileAssignmentInvalidInput

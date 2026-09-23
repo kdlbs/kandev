@@ -574,7 +574,7 @@ func (r *Repository) initTaskSchema() error {
 	CREATE TABLE IF NOT EXISTS task_exact_profile_launch_attempt_bindings (
 		task_id TEXT NOT NULL, session_id TEXT NOT NULL, execution_id TEXT NOT NULL,
 		attempt_id TEXT NOT NULL, session_incarnation_id TEXT NOT NULL,
-		agent_profile_id TEXT NOT NULL, profile_revision_nanos BIGINT NOT NULL,
+		agent_profile_id TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', profile_revision_nanos BIGINT NOT NULL,
 		generation BIGINT NOT NULL, created_at TIMESTAMP NOT NULL,
 		PRIMARY KEY (task_id, session_id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);

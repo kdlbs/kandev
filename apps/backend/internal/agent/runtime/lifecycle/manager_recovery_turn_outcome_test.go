@@ -370,7 +370,7 @@ func TestManagerStartRehydratesCurrentExactAttemptBeforeRecoveryPublication(t *t
 	cleanupManagerStopCh(t, mgr)
 	t.Cleanup(func() { _ = mgr.Stop() })
 	registerRecoveryTestAgentProfile(t, mgr)
-	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: "task-1", SessionID: "session-1", ExecutionID: "exec-recovered", AttemptID: "attempt-1", SessionIncarnationID: "incarnation-1", AgentProfileID: recoveryTestAgentProfileID, ProfileRevision: time.Unix(1_726_500_000, 0).UTC(), Generation: 1}
+	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: "task-1", SessionID: "session-1", ExecutionID: "exec-recovered", AttemptID: "attempt-1", SessionIncarnationID: "incarnation-1", AgentProfileID: recoveryTestAgentProfileID, Model: "model-exact", ProfileRevision: time.Unix(1_726_500_000, 0).UTC(), Generation: 1}
 	mgr.SetExecutorRunningWriter(&exactRecoveryWriter{binding: binding})
 	if err := mgr.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -380,17 +380,18 @@ func TestManagerStartRehydratesCurrentExactAttemptBeforeRecoveryPublication(t *t
 		t.Fatal("recovered execution missing")
 	}
 	got := execution.exactProfileLaunchAttemptSnapshot()
-	if got == nil || got.AttemptID != binding.AttemptID || got.SessionIncarnationID != binding.SessionIncarnationID {
+	if got == nil || got.AttemptID != binding.AttemptID || got.SessionIncarnationID != binding.SessionIncarnationID || got.Model != binding.Model {
 		t.Fatalf("recovered exact attempt = %#v", got)
 	}
 	binding.AttemptID = "mutated"
-	if got := execution.exactProfileLaunchAttemptSnapshot(); got.AttemptID != "attempt-1" {
+	binding.Model = "model-mutated"
+	if got := execution.exactProfileLaunchAttemptSnapshot(); got.AttemptID != "attempt-1" || got.Model != "model-exact" {
 		t.Fatalf("recovered binding aliased caller state: %#v", got)
 	}
 }
 
 func TestManagerStartLeavesRecoveryEvidenceEmptyForInvalidExactAttempt(t *testing.T) {
-	valid := &models.ExactProfileLaunchAttemptBinding{TaskID: "task-1", SessionID: "session-1", ExecutionID: "exec-recovered", AttemptID: "attempt-1", SessionIncarnationID: "incarnation-1", AgentProfileID: recoveryTestAgentProfileID, ProfileRevision: time.Unix(1_726_500_000, 0).UTC(), Generation: 1}
+	valid := &models.ExactProfileLaunchAttemptBinding{TaskID: "task-1", SessionID: "session-1", ExecutionID: "exec-recovered", AttemptID: "attempt-1", SessionIncarnationID: "incarnation-1", AgentProfileID: recoveryTestAgentProfileID, Model: "model-exact", ProfileRevision: time.Unix(1_726_500_000, 0).UTC(), Generation: 1}
 	for _, tc := range []struct {
 		name    string
 		binding *models.ExactProfileLaunchAttemptBinding

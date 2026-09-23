@@ -55,10 +55,10 @@ type ExactProfileLaunchReceipt struct {
 // ExactProfileLaunchAttemptBinding is the immutable internal identity admitted
 // before process start. Legacy sessions have no row until a new exact launch.
 type ExactProfileLaunchAttemptBinding struct {
-	TaskID, SessionID, ExecutionID, AttemptID, SessionIncarnationID, AgentProfileID string
-	ProfileRevision                                                                 time.Time
-	Generation                                                                      int64
-	CreatedAt                                                                       time.Time
+	TaskID, SessionID, ExecutionID, AttemptID, SessionIncarnationID, AgentProfileID, Model string
+	ProfileRevision                                                                        time.Time
+	Generation                                                                             int64
+	CreatedAt                                                                              time.Time
 	// ExpectedPrior is an in-memory CAS token. A replacement is allowed only
 	// when the durable binding still equals this complete immutable tuple.
 	ExpectedPrior *ExactProfileLaunchAttemptBinding
