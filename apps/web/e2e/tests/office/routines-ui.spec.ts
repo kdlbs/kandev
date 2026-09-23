@@ -257,6 +257,8 @@ test.describe("Routines UI", () => {
       variables: JSON.stringify({ region: { default: "us-east" }, tier: { default: "gold" } }),
     })) as { id: string };
     expect(routine.id).toBeTruthy();
+    const agent = await officeApi.getAgent(officeSeed.agentId);
+    const agentName = typeof agent.name === "string" ? agent.name : "CEO";
 
     await testPage.goto("/office/routines");
     const row = testPage.getByTestId(`routine-row-${routine.id}`);
