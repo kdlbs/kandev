@@ -43,6 +43,22 @@ type RemoteDockerExecutor struct {
 
 	mu       sync.Mutex
 	sessions map[string]*remoteDockerSession
+	// targets holds each launched instance's SSH target from launch until its
+	// stop. A session can be dropped before then, when the keepalive watchdog
+	// declares the transport lost, and teardown still has to reach the daemon.
+	targets map[string]map[string]interface{}
+}
+
+// remoteDockerTargetKeys are the metadata keys remoteDockerTarget reads.
+var remoteDockerTargetKeys = []string{
+	MetadataKeySSHHost,
+	MetadataKeySSHHostAlias,
+	MetadataKeySSHPort,
+	MetadataKeySSHUser,
+	MetadataKeySSHIdentitySource,
+	MetadataKeySSHIdentityFile,
+	MetadataKeySSHProxyJump,
+	MetadataKeySSHHostFingerprint,
 }
 
 // remoteDockerSession is one executor profile's live connection to a remote
@@ -135,6 +151,7 @@ func NewRemoteDockerExecutor(log *logger.Logger) *RemoteDockerExecutor {
 	r := &RemoteDockerExecutor{
 		logger:   log.WithFields(zap.String("runtime", "remote_docker")),
 		sessions: map[string]*remoteDockerSession{},
+		targets:  map[string]map[string]interface{}{},
 	}
 	r.connect = r.dialRemote
 	r.reconnect = r.reconnectToContainer
@@ -309,6 +326,7 @@ func (r *RemoteDockerExecutor) CreateInstance(ctx context.Context, req *Executor
 		return nil, reconnectErr
 	}
 	if instance != nil {
+		r.rememberTarget(req)
 		return instance, nil
 	}
 	if req.WorkspaceReuseRequired {
@@ -322,7 +340,32 @@ func (r *RemoteDockerExecutor) CreateInstance(ctx context.Context, req *Executor
 		r.releaseSession(req.InstanceID)
 		return nil, err
 	}
+	r.rememberTarget(req)
 	return instance, nil
+}
+
+func (r *RemoteDockerExecutor) rememberTarget(req *ExecutorCreateRequest) {
+	target := make(map[string]interface{}, len(remoteDockerTargetKeys))
+	for _, key := range remoteDockerTargetKeys {
+		if value, ok := req.Metadata[key]; ok {
+			target[key] = value
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.targets[req.InstanceID] = target
+}
+
+func (r *RemoteDockerExecutor) target(instanceID string) map[string]interface{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.targets[instanceID]
+}
+
+func (r *RemoteDockerExecutor) forgetTarget(instanceID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.targets, instanceID)
 }
 
 // launchFresh provisions a new container for the request.
@@ -521,6 +564,7 @@ func (r *RemoteDockerExecutor) StopInstance(ctx context.Context, instance *Execu
 	// resume dials its own, and archive or delete remove a preserved container
 	// through a fresh connection from the persisted target.
 	defer r.releaseSession(instance.InstanceID)
+	defer r.forgetTarget(instance.InstanceID)
 	teardown := force || instance.AgentStopFailed || shouldTeardownDockerContainer(instance.StopReason)
 
 	r.removeLegacySessionDir(ctx, instance)
@@ -543,12 +587,32 @@ func (r *RemoteDockerExecutor) StopInstance(ctx context.Context, instance *Execu
 	session := r.sessions[instance.InstanceID]
 	r.mu.Unlock()
 	if session == nil {
-		// The connection is gone, so the container cannot be reached. It
-		// stays on the remote host; say so rather than reporting success.
+		return r.stopOverNewConnection(ctx, instance, force)
+	}
+
+	return stopDockerContainer(ctx, session.dockerClient, session.containerMgr, instance, force, r.logger)
+}
+
+// stopOverNewConnection tears down a container whose session was already
+// dropped, by connecting again to the target it was launched on.
+func (r *RemoteDockerExecutor) stopOverNewConnection(ctx context.Context, instance *ExecutorInstance, force bool) error {
+	target := r.target(instance.InstanceID)
+	if target == nil {
+		// Nothing says where the container is. It stays on the remote host;
+		// say so rather than reporting success.
 		return fmt.Errorf("remote docker: no live connection for instance %s; container %s was left running",
 			instance.InstanceID, instance.ContainerID)
 	}
-
+	session, err := r.connect(ctx, &ExecutorCreateRequest{InstanceID: instance.InstanceID, Metadata: target})
+	if err != nil {
+		return fmt.Errorf("remote docker: reconnect to remove container %s: %w", instance.ContainerID, err)
+	}
+	defer func() {
+		if closeErr := session.close(); closeErr != nil {
+			r.logger.Warn("failed to close the teardown connection",
+				zap.String("instance_id", instance.InstanceID), zap.Error(closeErr))
+		}
+	}()
 	return stopDockerContainer(ctx, session.dockerClient, session.containerMgr, instance, force, r.logger)
 }
 
