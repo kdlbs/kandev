@@ -111,6 +111,12 @@ Do not add the same target fetch to both preparation and immediate reuse.
 - Host worktree creation and recreation carry the qualified target, bypass
   branch/default fallback, preserve cancellation, and fetch the PR snapshot
   from the validated base repository separately from the target branch.
+- Qualified remote checkout reuse now fetches and verifies the pinned base OID
+  and PR head before accepting an existing checkout. PR-head fetches return the
+  observed commit OID, and branch restoration uses that immutable object ID.
+- When a qualified base and contribution binding coexist, both materializers
+  verify the PR number, branches, base attachment, and source repository. A
+  same-number, same-branch contribution from another fork is rejected.
 - Lifecycle single-repository, multi-repository, workspace recovery, and remote
   materialization requests preserve the typed PR base. Remote agentctl checks
   request identity, materializes the target, and checks out the exact PR head.

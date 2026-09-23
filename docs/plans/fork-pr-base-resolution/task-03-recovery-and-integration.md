@@ -106,7 +106,9 @@ A stale error stamp must still reject the request before all mutations.
   resolving or writing a repository default or task base. It leaves comparison
   metadata and the current launch-error stamp intact. Explicit manual base
   selection remains authoritative across provider refreshes, and ordinary
-  retry-default still updates its branch.
+  retry-default still updates its branch through the system-owned service
+  operation, which preserves provider ownership instead of recording a manual
+  base override. Explicit branch selection continues to use the manual update.
 - Cancellation and deadline errors from live PR-base lookup now stop task
   repository resolution. Multi-repository preparation returns failure when a
   valid sibling is followed by an unresolved required target, and cancellation
@@ -150,3 +152,7 @@ A stale error stamp must still reject the request before all mutations.
   manual override marker for a legacy PR, while skipping task events and agent
   refreshes because the branch did not change. The complete task-service suite
   passes with this behavior.
+- PR #3878 fixup verification: the complete GitHub-URL task-creation E2E spec
+  passed (9 tests), and five selected PR watcher auto-start/cleanup tests
+  passed after repository identity normalization accepted the canonical
+  `https://github.com` provider host. Backend build and changed-code lint passed.

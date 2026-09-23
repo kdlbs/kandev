@@ -325,8 +325,11 @@ func TestRunAgentProcessAsync_ObservesStartingSiblingsBeforeProcessStart(t *test
 	if startedBeforeObservation != 0 {
 		t.Fatalf("agent process started before co-residency observation for %d session(s): %v", startedBeforeObservation, startedWithoutObservation)
 	}
-	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after != before+2 {
-		t.Fatalf("admitted[launch] counter = %d, want %d", after, before+2)
+	// The expvar is process-global, so unrelated asynchronous observations can
+	// increment it while this integration test is running. The exact warning
+	// count above scopes the two observations under test.
+	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after < before+2 {
+		t.Fatalf("admitted[launch] counter = %d, want at least %d", after, before+2)
 	}
 	if warnings := logs.FilterLevelExact(zapcore.WarnLevel).All(); len(warnings) != 2 {
 		t.Fatalf("warning entries = %d, want 2", len(warnings))

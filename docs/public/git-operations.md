@@ -78,9 +78,10 @@ available.
 
 When a provider retargets the pull request, Kandev refreshes the stored target and the live session
 comparison. If Kandev cannot fetch the required target or the fetched commit differs from the
-provider response, task preparation stops. Kandev does not use an `origin` branch with the same name
-or start from the repository default. Restore access or connectivity to try again. Then select
-**Retry launch**.
+provider response, task preparation stops. A stale provider response or a retarget during preparation
+can cause this mismatch. Select **Retry launch** to refresh provider data and try preparation again.
+If the failure is caused by access or connectivity, restore access or connectivity before retrying.
+Kandev does not use an `origin` branch with the same name or start from the repository default.
 
 The qualified target does not replace `origin` or change push routing. A fork PR continues to use
 the configured fork for pushes. An explicit cross-repository PR target blocks **Retry with the
@@ -114,7 +115,7 @@ feature/{title}-{suffix}
 ```
 
 `{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When `pull_before_worktree` is omitted it defaults to `true`: Kandev attempts to refresh and verify the base branch before creating or recreating the worktree. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. When a usable local base exists, authentication, network, timeout, missing-ref, divergent-ref, and uncertain-ancestry errors produce a credential-safe warning and Kandev creates the worktree from that local base. The warning states that remote changes may be missing. When no usable local base exists, Kandev must materialize the requested branch from the remote; a failed refresh or missing remote ref stops task preparation with a repository-specific launch error. Explicit remote-only refs and remote executors keep this strict materialization behavior.
-Without an explicit cross-repository target, Kandev uses the current base branch for a numbered GitHub PR. If Git proves that the requested base branch was deleted, Kandev can use a configured fallback branch, often the repository default. Kandev shows a warning with both branch names. Other PR refresh errors stop preparation.
+Without an explicit cross-repository target, Kandev uses the current base branch for a numbered GitHub PR. If Git proves that the requested base branch was deleted, Kandev can use a configured fallback branch, often the repository default, only after it refreshes and verifies that fallback. Kandev shows a warning with both branch names. Other PR refresh errors stop preparation.
 
 An explicit fork target has no default fallback. Kandev stops preparation if it cannot fetch or verify that target. Kandev does not create a worktree from an unverified local or remote-tracking branch.
 

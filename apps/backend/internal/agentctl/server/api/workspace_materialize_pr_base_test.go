@@ -36,11 +36,31 @@ func TestMaterializeRepository_QualifiedPRBaseUsesUpstreamAndKeepsPRHead(t *test
 	if got := strings.TrimSpace(materializeGitOutputForTest(t, destination, "rev-parse", "refs/remotes/origin/release/next")); got != forkTargetOID {
 		t.Fatalf("origin/release/next = %q, want fork commit %q", got, forkTargetOID)
 	}
+	forkHeadOID := strings.TrimSpace(materializeGitOutputForTest(t, destination, "rev-parse", "refs/remotes/origin/feature/work"))
+	if forkHeadOID == prHeadOID {
+		t.Fatalf("fixture fork branch unexpectedly matches the PR head: %q", forkHeadOID)
+	}
 	if got := strings.TrimSpace(materializeGitOutputForTest(t, destination, "config", "--get", "remote.origin.url")); got != locator {
 		t.Fatalf("origin URL = %q, want %q", got, locator)
 	}
 	if got := strings.TrimSpace(materializeGitOutputForTest(t, destination, "config", "--get", "remote."+qualifiedBase.Target.ComparisonRemoteName()+".pushurl")); got != "DISABLED" {
 		t.Fatalf("comparison push URL = %q, want disabled", got)
+	}
+
+	reused, err = materializeRepositoryWithQualifiedPRBase(
+		context.Background(), locator, destination, "release/next", "feature/work", 42,
+		&qualifiedBase, nil, nil, nil,
+	)
+	if err != nil || !reused {
+		t.Fatalf("reuse qualified PR checkout = reused:%t err:%v, want verified reuse", reused, err)
+	}
+	staleBase := qualifiedBase
+	staleBase.OID = strings.Repeat("f", 40)
+	if _, err := materializeRepositoryWithQualifiedPRBase(
+		context.Background(), locator, destination, "release/next", "feature/work", 42,
+		&staleBase, nil, nil, nil,
+	); err == nil || !strings.Contains(err.Error(), "OID changed") {
+		t.Fatalf("reuse with stale qualified OID error = %v, want OID mismatch", err)
 	}
 }
 
@@ -85,6 +105,29 @@ func TestWorkspaceMaterializeRepository_RejectsQualifiedPRBaseMismatch(t *testin
 	w := workspaceMaterializeRequest(t, s, request)
 	if w.Code != 400 {
 		t.Fatalf("status = %d, body = %s, want invalid-qualified-target 400", w.Code, w.Body.String())
+	}
+}
+
+func TestWorkspaceMaterializeRepository_RejectsContributionFromDifferentHeadRepository(t *testing.T) {
+	s := newMaterializeTestServer(t, t.TempDir())
+	_, base, _, _, _, _ := qualifiedMaterializationFixture(t)
+	binding := &models.RemoteContribution{
+		Version: models.RemoteContributionVersion, Provider: models.RemoteContributionProviderGitHub,
+		Kind: models.RemoteContributionKindPullRequest, CanonicalURL: "https://github.com/upstream/widget/pull/42",
+		Number: 42, State: models.RemoteContributionStateOpen, BaseBranch: "release/next",
+		HeadBranch: "feature/work", HeadSHA: strings.Repeat("a", 40), CollaborationAllowed: true,
+		SourceRepository: models.RemoteContributionRepository{
+			Host: "github.com", Path: "other-fork/widget", RemoteURL: "https://github.com/other-fork/widget.git",
+		},
+	}
+	request := MaterializeRepositoryRequest{
+		RepositoryURL: "https://github.com/fork/widget.git", Destination: "repo",
+		BaseBranch: "release/next", CheckoutBranch: "feature/work", PRNumber: 42,
+		QualifiedPRBase: &base, RemoteContribution: binding,
+	}
+	response := workspaceMaterializeRequest(t, s, request)
+	if response.Code != 400 {
+		t.Fatalf("status = %d, body = %s, want mismatched contribution identity 400", response.Code, response.Body.String())
 	}
 }
 
@@ -146,6 +189,11 @@ func qualifiedMaterializationFixture(t *testing.T) (string, models.PRBase, strin
 	materializationTestGit(t, forkSeed, "commit", "-m", "fork release")
 	materializationTestGit(t, forkSeed, "push", "origin", "release/next")
 	forkTargetOID := strings.TrimSpace(materializeGitOutputForTest(t, forkSeed, "rev-parse", "HEAD"))
+	materializationTestGit(t, forkSeed, "checkout", "-b", "feature/work")
+	writeMaterializationTestFile(t, forkSeed, "fork-pr.txt", "fork branch with the same name\n")
+	materializationTestGit(t, forkSeed, "add", "fork-pr.txt")
+	materializationTestGit(t, forkSeed, "commit", "-m", "fork feature branch")
+	materializationTestGit(t, forkSeed, "push", "origin", "feature/work")
 
 	globalConfig := filepath.Join(root, "gitconfig")
 	config := fmt.Sprintf(

@@ -54,6 +54,7 @@ type taskLaunchRecoveryWorktree interface {
 
 type taskLaunchRecoveryTaskService interface {
 	UpdateRepositoryBaseBranch(context.Context, taskservice.UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error)
+	UpdateRepositoryBaseBranchFromSystem(context.Context, taskservice.UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error)
 	ListBranches(context.Context, string, string) ([]taskservice.Branch, error)
 	MoveTaskWithOptions(context.Context, string, string, string, int, taskservice.MoveTaskOptions) (*taskservice.MoveTaskResult, error)
 }
@@ -379,11 +380,17 @@ func (s *Service) recoverTaskLaunchBranch(ctx context.Context, req *TaskLaunchRe
 			return fmt.Errorf("update repository default branch: %w", err)
 		}
 	}
-	updatedTaskRepository, err := s.taskLaunchRecoveryTasks.UpdateRepositoryBaseBranch(ctx, taskservice.UpdateRepositoryBaseBranchRequest{
+	updateRequest := taskservice.UpdateRepositoryBaseBranchRequest{
 		TaskID:           req.TaskID,
 		TaskRepositoryID: taskRepository.ID,
 		BaseBranch:       baseBranch,
-	})
+	}
+	var updatedTaskRepository *models.TaskRepository
+	if req.Action == taskLaunchRecoveryRetryDefault {
+		updatedTaskRepository, err = s.taskLaunchRecoveryTasks.UpdateRepositoryBaseBranchFromSystem(ctx, updateRequest)
+	} else {
+		updatedTaskRepository, err = s.taskLaunchRecoveryTasks.UpdateRepositoryBaseBranch(ctx, updateRequest)
+	}
 	if err != nil {
 		return fmt.Errorf("update task repository base branch: %w", err)
 	}

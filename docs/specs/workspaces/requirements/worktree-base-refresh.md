@@ -91,7 +91,7 @@ local branches without publishing them first.
   credentials, remote URLs, and raw command output. Existing refresh and
   fallback decisions shall remain unchanged.
 
-## Repository-qualified PR bases
+#### Repository-qualified PR bases
 
 The workspace system owns base resolution and materialization. The task system
 retains provider association ownership.

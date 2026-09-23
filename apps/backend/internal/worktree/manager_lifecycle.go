@@ -753,7 +753,7 @@ func (m *Manager) materializeQualifiedPRBase(ctx context.Context, req *CreateReq
 }
 
 func (m *Manager) materializeQualifiedPRHead(ctx context.Context, req CreateRequest) (string, error) {
-	ref, err := gitbase.FetchPullRequestHead(ctx, func(runCtx context.Context, args ...string) (string, error) {
+	head, err := gitbase.FetchPullRequestHead(ctx, func(runCtx context.Context, args ...string) (string, error) {
 		output, runErr, execCtxErr := m.runGitCombinedAfterAcquire(runCtx, m.fetchTimeout, req.RepositoryPath, args...)
 		if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
 			return string(output), ctxErr
@@ -763,7 +763,7 @@ func (m *Manager) materializeQualifiedPRHead(ctx context.Context, req CreateRequ
 	if err != nil {
 		return "", fmt.Errorf("materialize qualified PR head %d: %w", req.PRNumber, err)
 	}
-	return ref, nil
+	return head.OID, nil
 }
 
 func (m *Manager) resolveFallbackRef(ctx context.Context, req *CreateRequest, fallback string) (string, error) {
@@ -2064,7 +2064,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	// Recreate bypasses the new-worktree path, so perform the same required
 	// base refresh before touching the existing worktree path. A failed refresh
 	// must leave the retryable on-disk state intact.
-	qualifiedPRHeadRef, err := m.materializeRecreatedQualifiedPRHead(ctx, &req)
+	qualifiedPRHeadOID, err := m.materializeRecreatedQualifiedPRHead(ctx, &req)
 	if err != nil {
 		return nil, err
 	}
@@ -2192,8 +2192,8 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 			if output, branchErr := runGitCmdCombinedOutput(ctx, branchCmd); branchErr != nil {
 				return nil, fmt.Errorf("restore contribution branch: %s: %w", strings.TrimSpace(string(output)), branchErr)
 			}
-		} else if qualifiedPRHeadRef != "" {
-			branchCmd := m.newNonInteractiveGitCmd(ctx, req.RepositoryPath, "branch", existing.Branch, qualifiedPRHeadRef)
+		} else if qualifiedPRHeadOID != "" {
+			branchCmd := m.newNonInteractiveGitCmd(ctx, req.RepositoryPath, "branch", existing.Branch, qualifiedPRHeadOID)
 			if output, branchErr := runGitCmdCombinedOutput(ctx, branchCmd); branchErr != nil {
 				return nil, fmt.Errorf("restore qualified PR worktree branch: %s: %w", strings.TrimSpace(string(output)), branchErr)
 			}

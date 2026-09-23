@@ -108,14 +108,19 @@ of ownership. Custom REST decoding must preserve the new SHA field.
 - The permanent tests cover upstream lookup, live retargeting, rejection of a
   colliding PR with a different head repository, exact TaskPR selection, and
   REST/GraphQL base OID conversion. GH CLI command-contract tests verify its
-  supported fields and REST `.base.sha` lookup.
+  supported `pr view/list --json` fields and REST base SHA/ref/repository read.
 - `go test ./internal/github ./internal/backendapp ./internal/orchestrator/executor -run 'Test(PRBase|ResolveTaskRepoInfo|GithubPRBase)' -count=1`: passed.
 - `go test ./internal/github ./internal/backendapp ./internal/orchestrator/executor -count=1`: passed.
 - `git diff --check`: passed.
 - Review correction: the GH CLI does not support `baseRefOid` in its JSON
-  field list. `GetPR` now reads `base.sha` through `gh api`; PR view/list keep
-  the existing supported fields, and a REST OID read failure does not discard
-  otherwise usable PR details. Command-contract tests cover these paths.
+  field list. `GetPR` reads base SHA, ref, and repository identity through
+  `gh api`; PR view/list keep the existing supported fields, and a REST read
+  failure does not discard otherwise usable PR details. Command-contract tests
+  cover these paths.
 - Review correction: live legacy PR data must match both the attached head
   repository and checkout branch. Contribution bindings use the validated
   source repository for that head check and the attachment for the target.
+- Review correction: GitHub repository records store `ProviderHost` as an
+  HTTPS URL. Identity normalization accepts that canonical form without
+  accepting custom ports, paths, or lookalike domains; regression tests cover
+  both the supported host and rejected variants.

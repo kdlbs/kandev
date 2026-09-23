@@ -265,6 +265,18 @@ type ghIssue struct {
 	} `json:"assignees"`
 }
 
+type ghPRBase struct {
+	SHA  string `json:"sha"`
+	Ref  string `json:"ref"`
+	Repo struct {
+		ID    int64  `json:"id"`
+		Name  string `json:"name"`
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+	} `json:"repo"`
+}
+
 func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	out, err := c.run(ctx, "pr", "view", fmt.Sprintf("%d", number),
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
@@ -284,15 +296,32 @@ func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*
 		return nil, fmt.Errorf("parse PR response: %w", err)
 	}
 	pr := convertGHPR(&raw, owner, repo)
-	baseSHA, err := c.run(ctx, "api", fmt.Sprintf("repos/%s/%s/pulls/%d", owner, repo, number), "--jq", ".base.sha")
+	baseJSON, err := c.run(ctx, "api", fmt.Sprintf("repos/%s/%s/pulls/%d", owner, repo, number), "--jq",
+		"{sha: .base.sha, ref: .base.ref, repo: {id: .base.repo.id, name: .base.repo.name, owner: .base.repo.owner}}")
 	if err != nil {
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, fmt.Errorf("get PR #%d base SHA: %w", number, err)
 		}
+		clearPRBaseRepository(pr)
 		return pr, nil
 	}
-	pr.BaseSHA = strings.TrimSpace(baseSHA)
+	var base ghPRBase
+	if err := json.Unmarshal([]byte(baseJSON), &base); err != nil {
+		clearPRBaseRepository(pr)
+		return pr, nil
+	}
+	pr.BaseSHA = strings.TrimSpace(base.SHA)
+	pr.BaseBranch = strings.TrimSpace(base.Ref)
+	pr.BaseRepoID = base.Repo.ID
+	pr.BaseRepoOwner = strings.TrimSpace(base.Repo.Owner.Login)
+	pr.BaseRepoName = strings.TrimSpace(base.Repo.Name)
 	return pr, nil
+}
+
+func clearPRBaseRepository(pr *PR) {
+	pr.BaseRepoID = 0
+	pr.BaseRepoOwner = ""
+	pr.BaseRepoName = ""
 }
 
 func (c *GHClient) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {

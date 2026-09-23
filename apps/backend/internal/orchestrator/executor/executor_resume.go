@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -446,7 +447,7 @@ func githubComparisonRepositoryFromRepository(repo *models.Repository) (models.C
 	}
 	host := strings.TrimSpace(repo.ProviderHost)
 	if host == "" {
-		host = "github.com"
+		host = defaultGitHubHost
 	}
 	return normalizeGitHubComparisonRepository(models.ComparisonTargetRepository{
 		Host: host, Path: owner + "/" + name, ProviderID: strings.TrimSpace(repo.ProviderRepoID),
@@ -454,7 +455,7 @@ func githubComparisonRepositoryFromRepository(repo *models.Repository) (models.C
 }
 
 func normalizeGitHubComparisonRepository(repository models.ComparisonTargetRepository) (models.ComparisonTargetRepository, bool) {
-	if !strings.EqualFold(strings.TrimSpace(repository.Host), "github.com") {
+	if !isGitHubComparisonHost(repository.Host) {
 		return models.ComparisonTargetRepository{}, false
 	}
 	parts := strings.Split(strings.Trim(strings.TrimSpace(repository.Path), "/"), "/")
@@ -466,6 +467,23 @@ func normalizeGitHubComparisonRepository(repository models.ComparisonTargetRepos
 	repository.Path = owner + "/" + name
 	repository.RemoteURL = fmt.Sprintf("https://github.com/%s/%s.git", owner, name)
 	return repository, true
+}
+
+func isGitHubComparisonHost(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.User != nil || parsed.Port() != "" ||
+		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	return (strings.EqualFold(parsed.Scheme, "https") || strings.EqualFold(parsed.Scheme, "http")) &&
+		strings.EqualFold(parsed.Hostname(), "github.com")
 }
 
 func hasProviderRepositoryIdentity(repo *models.Repository) bool {

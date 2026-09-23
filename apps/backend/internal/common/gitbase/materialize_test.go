@@ -15,6 +15,14 @@ type gitFake struct {
 	errors   map[string]error
 }
 
+type gitCommandError struct {
+	code int
+}
+
+func (e gitCommandError) Error() string { return "git command failed" }
+
+func (e gitCommandError) ExitCode() int { return e.code }
+
 func (f *gitFake) run(_ context.Context, args ...string) (string, error) {
 	f.commands = append(f.commands, append([]string(nil), args...))
 	key := strings.Join(args, " ")
@@ -25,9 +33,26 @@ func (f *gitFake) run(_ context.Context, args ...string) (string, error) {
 		return output, nil
 	}
 	if len(args) >= 3 && args[0] == "config" && args[1] == "--get" && strings.HasPrefix(args[2], "remote.") {
-		return "", errors.New("not configured")
+		return "", gitCommandError{code: 1}
 	}
 	return "", nil
+}
+
+func TestMaterializeQualifiedBaseDoesNotReplaceRemoteAfterConfigReadFailure(t *testing.T) {
+	base := testPRBase()
+	remoteName := base.Target.ComparisonRemoteName()
+	readErr := errors.New("repository config is unreadable")
+	fake := &gitFake{
+		errors:  map[string]error{"config --get remote." + remoteName + ".url": readErr},
+		outputs: map[string]string{},
+	}
+	_, err := Materialize(context.Background(), fake.run, base)
+	if ErrorCode(err) != ErrorRemoteSetup || !errors.Is(err, readErr) {
+		t.Fatalf("Materialize() error = %v, code = %q, want preserved config-read failure", err, ErrorCode(err))
+	}
+	if hasCommand(fake.commands, "remote", "add", "--no-tags", remoteName, base.Target.TargetRepository.RemoteURL) {
+		t.Fatalf("Materialize() replaced remote after config-read failure: %#v", fake.commands)
+	}
 }
 
 func testPRBase() models.PRBase {
@@ -125,14 +150,18 @@ func TestMaterializeQualifiedBasePreservesCancellation(t *testing.T) {
 
 func TestMaterializeQualifiedBaseFetchesPRHeadFromBaseRepository(t *testing.T) {
 	target := testPRBase().Target
-	fake := &gitFake{outputs: map[string]string{}, errors: map[string]error{}}
-	ref, err := FetchPullRequestHead(context.Background(), fake.run, target)
+	headOID := "fedcba9876543210fedcba9876543210fedcba98"
+	wantRef := "refs/remotes/" + target.ComparisonRemoteName() + "/pull/42/head"
+	fake := &gitFake{outputs: map[string]string{
+		"rev-parse --verify " + wantRef + "^{commit}": headOID,
+	}, errors: map[string]error{}}
+	head, err := FetchPullRequestHead(context.Background(), fake.run, target)
 	if err != nil {
 		t.Fatalf("FetchPullRequestHead(): %v", err)
 	}
-	wantRef := "refs/remotes/" + target.ComparisonRemoteName() + "/pull/42/head"
-	if ref != wantRef || !hasCommand(fake.commands, "fetch", "--no-tags", target.ComparisonRemoteName(), "+refs/pull/42/head:"+wantRef) {
-		t.Fatalf("head ref = %q, commands = %#v", ref, fake.commands)
+	if head.Ref != wantRef || head.OID != headOID ||
+		!hasCommand(fake.commands, "fetch", "--no-tags", target.ComparisonRemoteName(), "+refs/pull/42/head:"+wantRef) {
+		t.Fatalf("head snapshot = %#v, commands = %#v", head, fake.commands)
 	}
 }
 

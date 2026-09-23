@@ -7,6 +7,34 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+func TestGitHubComparisonRepositoryFromRepositoryAcceptsCanonicalProviderHost(t *testing.T) {
+	repo := &models.Repository{
+		Provider: "github", ProviderHost: "https://github.com",
+		ProviderOwner: "test-owner", ProviderName: "test-repo",
+	}
+
+	got, ok := githubComparisonRepositoryFromRepository(repo)
+	if !ok {
+		t.Fatal("githubComparisonRepositoryFromRepository() rejected canonical GitHub provider host")
+	}
+	if got.Host != "github.com" || got.Path != "test-owner/test-repo" ||
+		got.RemoteURL != "https://github.com/test-owner/test-repo.git" {
+		t.Fatalf("normalized GitHub repository = %#v", got)
+	}
+}
+
+func TestNormalizeGitHubComparisonRepositoryRejectsOtherHosts(t *testing.T) {
+	for _, host := range []string{"https://github.com.evil", "https://github.com:8443", "https://github.com/api"} {
+		t.Run(host, func(t *testing.T) {
+			if _, ok := normalizeGitHubComparisonRepository(models.ComparisonTargetRepository{
+				Host: host, Path: "test-owner/test-repo",
+			}); ok {
+				t.Fatalf("normalizeGitHubComparisonRepository accepted host %q", host)
+			}
+		})
+	}
+}
+
 func TestResolveTaskRepoInfo_PRBaseUsesTargetRepository(t *testing.T) {
 	target := forkPRComparisonTarget()
 	metadata := map[string]interface{}{"pr_number": 42}

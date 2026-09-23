@@ -356,6 +356,9 @@ func (r *CreateRequest) Validate() error {
 	if err := r.normalizeQualifiedPRBase(); err != nil {
 		return err
 	}
+	if err := models.ValidatePRBaseContributionIdentity(r.QualifiedPRBase, r.RemoteContribution); err != nil {
+		return fmt.Errorf("qualified PR base and contribution identity mismatch: %w", err)
+	}
 	if r.ContributionDestination != nil {
 		if err := r.ContributionDestination.Validate(); err != nil {
 			return fmt.Errorf("invalid contribution destination: %w", err)

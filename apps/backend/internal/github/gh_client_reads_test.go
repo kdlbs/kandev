@@ -207,6 +207,9 @@ func TestGHClient_GetPRBaseOIDReadFailureKeepsPRDetailsUsable(t *testing.T) {
 	if pr.Number != 8 || pr.BaseBranch != "main" || pr.BaseSHA != "" {
 		t.Fatalf("PR = %#v, want base branch without optional OID", pr)
 	}
+	if pr.BaseRepoOwner != "" || pr.BaseRepoName != "" || pr.BaseRepoID != 0 {
+		t.Fatalf("PR base repository = (%q, %q, %d), want no inferred identity after REST failure", pr.BaseRepoOwner, pr.BaseRepoName, pr.BaseRepoID)
+	}
 	got := calls(t)
 	if len(got) != 2 {
 		t.Fatalf("gh calls = %v, want PR view and a best-effort REST OID read", got)
@@ -214,7 +217,10 @@ func TestGHClient_GetPRBaseOIDReadFailureKeepsPRDetailsUsable(t *testing.T) {
 	if strings.Contains(strings.Join(got[0], " "), "baseRefOid") {
 		t.Fatalf("gh pr view requested unsupported baseRefOid: %v", got[0])
 	}
-	assertGHArgv(t, got, 1, []string{"api", "repos/acme/widget/pulls/8", "--jq", ".base.sha"})
+	assertGHArgv(t, got, 1, []string{
+		"api", "repos/acme/widget/pulls/8", "--jq",
+		"{sha: .base.sha, ref: .base.ref, repo: {id: .base.repo.id, name: .base.repo.name, owner: .base.repo.owner}}",
+	})
 }
 
 // TestGHClient_GetPR_RequestsOutcomeFields covers AC-09: the --json field

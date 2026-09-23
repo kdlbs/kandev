@@ -22,12 +22,23 @@ const (
 // scope. Callers provide the repository directory through their runner.
 type GitRunner func(context.Context, ...string) (string, error)
 
+type commandExitCoder interface {
+	ExitCode() int
+}
+
 // Materialization identifies the exact remote-tracking commit fetched for a
 // qualified PR base.
 type Materialization struct {
 	RemoteName string
 	Ref        string
 	OID        string
+}
+
+// PullRequestHead identifies the immutable commit observed after fetching a
+// GitHub pull-request head into its comparison-only ref.
+type PullRequestHead struct {
+	Ref string
+	OID string
 }
 
 // Error retains a bounded failure category while preserving cancellation and
@@ -80,8 +91,14 @@ func Materialize(ctx context.Context, run GitRunner, base models.PRBase) (Materi
 		if strings.TrimSpace(configuredURL) != target.TargetRepository.RemoteURL {
 			return Materialization{}, failure(ErrorRemoteCollision, fmt.Errorf("comparison remote collision for %s", remoteName))
 		}
-	} else if _, err := run(ctx, "remote", "add", "--no-tags", remoteName, target.TargetRepository.RemoteURL); err != nil {
-		return Materialization{}, failure(ErrorRemoteSetup, fmt.Errorf("comparison remote setup failed: %w", err))
+	} else {
+		var exitCoder commandExitCoder
+		if !errors.As(remoteErr, &exitCoder) || exitCoder.ExitCode() != 1 {
+			return Materialization{}, failure(ErrorRemoteSetup, fmt.Errorf("comparison remote configuration could not be read: %w", remoteErr))
+		}
+		if _, err := run(ctx, "remote", "add", "--no-tags", remoteName, target.TargetRepository.RemoteURL); err != nil {
+			return Materialization{}, failure(ErrorRemoteSetup, fmt.Errorf("comparison remote setup failed: %w", err))
+		}
 	}
 	if _, err := run(ctx, "config", "remote."+remoteName+".pushurl", "DISABLED"); err != nil {
 		return Materialization{}, failure(ErrorRemoteSetup, fmt.Errorf("comparison remote push protection failed: %w", err))
@@ -106,26 +123,31 @@ func Materialize(ctx context.Context, run GitRunner, base models.PRBase) (Materi
 }
 
 // FetchPullRequestHead fetches GitHub's pull-request head snapshot from the
-// validated base repository. That keeps it distinct from a same-named branch
-// on origin or from the target base branch.
-func FetchPullRequestHead(ctx context.Context, run GitRunner, target models.ComparisonTarget) (string, error) {
+// validated base repository. The returned OID remains stable if another fetch
+// later updates the comparison ref.
+func FetchPullRequestHead(ctx context.Context, run GitRunner, target models.ComparisonTarget) (PullRequestHead, error) {
 	if run == nil {
-		return "", failure(ErrorInvalidTarget, errors.New("git runner is required"))
+		return PullRequestHead{}, failure(ErrorInvalidTarget, errors.New("git runner is required"))
 	}
 	if err := target.Validate(); err != nil {
-		return "", failure(ErrorInvalidTarget, fmt.Errorf("comparison target is invalid: %w", err))
+		return PullRequestHead{}, failure(ErrorInvalidTarget, fmt.Errorf("comparison target is invalid: %w", err))
 	}
 	if target.Provider != models.ComparisonTargetProviderGitHub || target.Kind != models.ComparisonTargetKindPullRequest {
-		return "", failure(ErrorInvalidTarget, errors.New("target is not a GitHub pull request"))
+		return PullRequestHead{}, failure(ErrorInvalidTarget, errors.New("target is not a GitHub pull request"))
 	}
 	remoteName := target.ComparisonRemoteName()
 	ref := fmt.Sprintf("refs/remotes/%s/pull/%d/head", remoteName, target.Number)
 	refspec := fmt.Sprintf("+refs/pull/%d/head:%s", target.Number, ref)
 	if _, err := run(ctx, "fetch", "--no-tags", remoteName, refspec); err != nil {
-		return "", failure(ErrorFetch, fmt.Errorf("pull request head fetch failed: %w", err))
+		return PullRequestHead{}, failure(ErrorFetch, fmt.Errorf("pull request head fetch failed: %w", err))
 	}
-	if _, err := run(ctx, "rev-parse", "--verify", ref+"^{commit}"); err != nil {
-		return "", failure(ErrorRefUnavailable, fmt.Errorf("pull request head ref unavailable: %w", err))
+	output, err := run(ctx, "rev-parse", "--verify", ref+"^{commit}")
+	if err != nil {
+		return PullRequestHead{}, failure(ErrorRefUnavailable, fmt.Errorf("pull request head ref unavailable: %w", err))
 	}
-	return ref, nil
+	oid := strings.TrimSpace(output)
+	if oid == "" {
+		return PullRequestHead{}, failure(ErrorRefUnavailable, errors.New("pull request head ref resolved to an empty object ID"))
+	}
+	return PullRequestHead{Ref: ref, OID: oid}, nil
 }

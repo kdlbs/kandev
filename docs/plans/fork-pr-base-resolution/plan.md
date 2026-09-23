@@ -165,7 +165,9 @@ new implementation status, regression cases, and command results.
 ## Verification results
 
 - Investigation: both temporary reproductions failed for the expected reason.
-- Temporary tests: removed. No production or permanent test changes made.
+- Temporary investigation reproductions were removed. Permanent regression
+  coverage now covers provider command contracts, linked legacy PR resolution,
+  cross-fork identity rejection, qualified checkout reuse, and recovery writes.
 - `python3 scripts/list-docs.py validate`: passed, 299 decisions and 1112 specifications.
 - `python3 scripts/lint-spec-files.test.py`: passed, 36 tests.
 - `python3 scripts/lint-spec-files.py --all`: passed.
@@ -175,9 +177,10 @@ new implementation status, regression cases, and command results.
 - Task 01 implementation: provider lookup now uses the validated target namespace,
   retains the base OID from REST and GraphQL, and checks the response against the
   exact PR and checkout identity. GH CLI `pr view/list --json` requests omit the
-  unsupported `baseRefOid` field; `GetPR` reads `.base.sha` with `gh api` and
-  preserves PR details if that OID read fails. Exact linked task PR selection is
-  scoped by repository, PR number, and checkout branch.
+  unsupported `baseRefOid` field; `GetPR` reads the base SHA, ref, and repository
+  identity together with `gh api`, while preserving PR details if that read fails.
+  Exact linked task PR selection is scoped by repository, PR number, and checkout
+  branch.
 - Task 01 focused verification: `go test ./internal/github ./internal/backendapp ./internal/orchestrator/executor -run 'Test(PRBase|ResolveTaskRepoInfo|GithubPRBase)' -count=1` passed.
 - Task 01 package verification: `go test ./internal/github ./internal/backendapp ./internal/orchestrator/executor -count=1` passed.
 - Task 01 diff check: `git diff --check` passed.
@@ -197,6 +200,20 @@ new implementation status, regression cases, and command results.
 - Documentation checks: catalog validation passed (299 decisions and 1112 specifications); specification linter tests passed (36); full specification lint passed; public-doc tests passed (62); public-doc validation passed (47 pages).
 - `gofmt -l` for changed Go files and `git diff --check`: passed.
 - Updated `docs/public/git-operations.md` to explain qualified fork targets, required-fetch failures, retry actions, and unchanged push routing.
+- PR review remediation: qualified materialization reuse verifies the exact
+  upstream base and PR-head commit; PR-head branch restoration uses the captured
+  immutable OID. Contribution and qualified-base identities are checked at both
+  worktree and remote materialization boundaries. Retry-default uses the
+  system-owned task-base update so it does not create a manual override.
+- PR review documentation correction: criteria .15-.19 are nested under the
+  owning requirement, and the plan/design/public documentation describe current
+  validation and retry behavior.
+- PR fixup local verification: backend build and changed-code golangci-lint
+  passed. The focused review-regression command passed after the final helper
+  refactor. All packages in the aggregate affected-package run passed except
+  one transient orchestrator failure; the complete orchestrator package passed
+  in an immediate standalone rerun. The scoped PR documentation coverage
+  validator passed.
 
 ## Review corrections
 
@@ -251,3 +268,23 @@ new implementation status, regression cases, and command results.
 - Sharing materialization must preserve agentctl's asynchronous scheduling.
 - Successful comparison hydration does not prove preparation used the same ref.
   Verify producer-to-consumer wiring, not only helper outputs.
+
+## PR #3878 fixup verification (2026-09-23)
+
+- Repository identity normalization now accepts the stored public GitHub
+  provider host (`https://github.com`) as well as the bare host while rejecting
+  custom ports, URL paths, and lookalike hosts. The regression failed before
+  the change and passed after it.
+- The full GitHub-URL task creation E2E spec passed (9 tests), including local
+  and worktree launch, missing-snapshot failure, and independent worktrees.
+  Five selected PR watcher auto-start and cleanup E2E tests passed.
+- A plugin-tooltip E2E test failed once in the combined run and passed in an
+  isolated rerun. It is outside this change; no plugin code changed.
+- `make -C apps/backend build e2e-plugin-package` passed. Changed-code
+  `golangci-lint` reported 0 issues. The affected package suite passed across
+  eight backend packages, and the complete executor package passed after its
+  process-global metric assertion was made tolerant of unrelated asynchronous
+  increments while retaining exact session-specific warning assertions.
+- `git diff --check` passed. The GH CLI request contract, legacy linked-PR
+  producer-to-materializer flow, fork identity rejection, contribution source
+  validation, and base/head OID reuse regressions passed.

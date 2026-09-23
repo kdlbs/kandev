@@ -93,8 +93,8 @@ func TestRecoverTaskLaunch_DefaultRecoveryStillUpdatesOrdinaryBranch(t *testing.
 	}, source); err != nil {
 		t.Fatalf("recoverTaskLaunchBranch: %v", err)
 	}
-	if len(fake.updated) != 1 || fake.updated[0].BaseBranch != "trunk" {
-		t.Fatalf("task repository updates = %#v, want ordinary default trunk", fake.updated)
+	if len(fake.updated) != 0 || len(fake.systemUpdated) != 1 || fake.systemUpdated[0].BaseBranch != "trunk" {
+		t.Fatalf("manual updates = %#v, system updates = %#v, want system default trunk", fake.updated, fake.systemUpdated)
 	}
 	repository, err := repo.GetRepository(ctx, "repo-recovery")
 	if err != nil {

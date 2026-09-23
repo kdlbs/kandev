@@ -75,7 +75,7 @@ session and task-repository identities belong to that task. The request includes
 the current error stamp; stale stamps fail without mutation.
 
 - `retry_default` resolves the live remote default for one repository row and
-  relaunches. The proposed [qualified PR base amendment](../../workspaces/system-design/worktree-base-refresh.md#recovery-and-persistence)
+  relaunches. The [qualified PR base amendment](../../workspaces/system-design/worktree-base-refresh.md#recovery-and-persistence)
   rejects this action for an explicit cross-repository binding before writes.
   The action does not authorize replacing that binding with the fork default.
 - `pick_base_branch` validates and persists one selected branch before
