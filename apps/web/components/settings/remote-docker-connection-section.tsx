@@ -4,44 +4,11 @@ import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
+import { remoteDockerConnectionConfig } from "@/components/settings/remote-docker-connection-config";
+import { parseSSHExecutorConfig } from "@/app/settings/executors/new/[type]/ssh-config";
+import { useSaveExecutorConnection } from "@/hooks/domains/settings/use-save-executor-connection";
 import { testRemoteDockerConnection } from "@/lib/api/domains/remote-docker-api";
-import { updateExecutor } from "@/lib/api/domains/settings-api";
 import type { Executor } from "@/lib/types/http";
-
-/** Reads the saved connection into the form the shared card renders. */
-function connectionFormFromExecutor(executor: Executor): Partial<SSHExecutorConfig> {
-  const config = executor.config ?? {};
-  return {
-    name: executor.name,
-    host: config.ssh_host ?? "",
-    host_alias: config.ssh_host_alias ?? "",
-    port: config.ssh_port ? Number(config.ssh_port) : undefined,
-    user: config.ssh_user ?? "",
-    identity_source:
-      (config.ssh_identity_source as SSHExecutorConfig["identity_source"]) ?? "agent",
-    identity_file: config.ssh_identity_file ?? "",
-    proxy_jump: config.ssh_proxy_jump ?? "",
-    host_fingerprint: config.ssh_host_fingerprint ?? "",
-  };
-}
-
-/** Maps the form back onto the executor's stored connection config. */
-function connectionConfigFromForm(
-  executor: Executor,
-  cfg: SSHExecutorConfig,
-): Record<string, string> {
-  return {
-    ...(executor.config ?? {}),
-    ssh_host: cfg.host ?? "",
-    ssh_host_alias: cfg.host_alias ?? "",
-    ssh_port: cfg.port ? String(cfg.port) : "",
-    ssh_user: cfg.user ?? "",
-    ssh_identity_source: cfg.identity_source,
-    ssh_identity_file: cfg.identity_file ?? "",
-    ssh_proxy_jump: cfg.proxy_jump ?? "",
-    ssh_host_fingerprint: cfg.host_fingerprint ?? "",
-  };
-}
 
 /**
  * Connection settings for a saved Remote Docker executor.
@@ -61,18 +28,12 @@ export function RemoteDockerConnectionSection({
 }) {
   const { t } = useTranslation();
 
-  const initial = connectionFormFromExecutor(executor);
-
-  const handleSave = useCallback(
-    async (cfg: SSHExecutorConfig) => {
-      await updateExecutor(executor.id, {
-        name: cfg.name,
-        config: connectionConfigFromForm(executor, cfg),
-      });
-      onSaved?.();
-    },
-    [executor, onSaved],
+  const initial = parseSSHExecutorConfig(executor.name, executor.config);
+  const buildConfig = useCallback(
+    (cfg: SSHExecutorConfig) => remoteDockerConnectionConfig(executor.config ?? {}, cfg),
+    [executor.config],
   );
+  const handleSave = useSaveExecutorConnection(executor.id, buildConfig, onSaved);
 
   return (
     <div className="space-y-4" data-testid="remote-docker-connection-section">
@@ -83,6 +44,8 @@ export function RemoteDockerConnectionSection({
         {t("executors:remoteDockerAuthorityNotice")}
       </div>
       <SSHConnectionCard
+        // A new pinned fingerprint remounts the card, so it shows what was saved.
+        key={`${executor.id}:${executor.config?.ssh_host_fingerprint ?? "none"}`}
         initial={initial}
         onSave={handleSave}
         testConnection={testRemoteDockerConnection}
