@@ -157,3 +157,20 @@ Post-review verification against the final production build:
 - `pnpm e2e:run --host --no-build tests/task/sidebar-title-width.spec.ts` — passed, 2 tests, including the `2h` right-edge assertion and localized-token breakpoints.
 - `pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-sidebar-views.spec.ts -- --grep "task row settings|title width"` — passed, 1 test.
 - `git diff --check` — passed after the review follow-up.
+
+PR review follow-up: the Japanese `99年以上` token extended beyond the 44px phone
+time span before the fix. Phone and coarse-pointer slots now keep a 44px minimum,
+grow to non-wrapping localized content, and right-align the time without overlapping
+the in-flow phone action. Coarse-pointer desktop breakpoints retain their 44px slot
+minimum. Relative-time component tests no longer assert CSS class strings; rendered
+geometry owns the responsive time-layout contract.
+
+- `make build-web` — passed.
+- `pnpm run typecheck` — passed.
+- `pnpm exec eslint components/task/task-item-trailing.tsx components/task/task-item-trailing.test.tsx e2e/tests/task/sidebar-title-width.spec.ts` — passed.
+- `pnpm exec vitest run components/task/task-item-trailing.test.tsx components/task/task-item-compact-layout.test.tsx` — passed, 2 files and 8 tests.
+- `pnpm e2e:run --host --no-build tests/task/sidebar-title-width.spec.ts` — passed, 2 tests, including hover stability, Japanese phone containment, and coarse-pointer geometry.
+- `pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-sidebar-views.spec.ts -- --grep "task row settings|title width"` — passed, 1 test.
+- `python3 scripts/list-docs.py validate` — passed, 299 decisions and 1108 specifications.
+- `python3 scripts/lint-spec-files.py --all` — passed.
+- `git diff --check` — passed.

@@ -35,7 +35,10 @@ async function readRowLayout(row: import("@playwright/test").Locator, taskId: st
   };
 }
 
-async function expectContentSizedTimeSlot(row: import("@playwright/test").Locator) {
+async function expectContentSizedTimeSlot(
+  row: import("@playwright/test").Locator,
+  minimumWidth = 0,
+) {
   const relativeTime = row.getByTestId("sidebar-task-trailing-time");
   const timeSlot = relativeTime.locator("xpath=..");
   const visualTime = relativeTime.locator('[aria-hidden="true"]');
@@ -49,7 +52,34 @@ async function expectContentSizedTimeSlot(row: import("@playwright/test").Locato
   expect(slotBox).not.toBeNull();
   expect(visualTimeBox).not.toBeNull();
   expect(actionBox).not.toBeNull();
-  expect(slotBox!.width).toBeCloseTo(Math.max(visualTimeBox!.width, actionBox!.width), 1);
+  expect(slotBox!.width).toBeCloseTo(
+    Math.max(minimumWidth, visualTimeBox!.width, actionBox!.width),
+    1,
+  );
+  expect(
+    Math.abs(visualTimeBox!.x + visualTimeBox!.width - (slotBox!.x + slotBox!.width)),
+  ).toBeLessThanOrEqual(1);
+}
+
+async function expectTouchSizedTimeSlot(
+  row: import("@playwright/test").Locator,
+  minimumWidth: number,
+) {
+  const relativeTime = row.getByTestId("sidebar-task-trailing-time");
+  const timeSlot = relativeTime.locator("xpath=..");
+  const visualTime = relativeTime.locator('[aria-hidden="true"]');
+  const [slotBox, visualTimeBox] = await Promise.all([
+    timeSlot.boundingBox(),
+    visualTime.boundingBox(),
+  ]);
+
+  expect(slotBox).not.toBeNull();
+  expect(visualTimeBox).not.toBeNull();
+  expect(slotBox!.width).toBeGreaterThanOrEqual(minimumWidth);
+  expect(slotBox!.width).toBeGreaterThanOrEqual(visualTimeBox!.width - 1);
+  expect(
+    Math.abs(visualTimeBox!.x + visualTimeBox!.width - (slotBox!.x + slotBox!.width)),
+  ).toBeLessThanOrEqual(1);
 }
 
 function expectStableLayout(
@@ -267,6 +297,7 @@ test("sidebar title width follows compact time without hover movement", async ({
 
 test("localized time slots respect the fine-pointer width breakpoint", async ({
   testPage,
+  coarseDesktopTestPage,
   apiClient,
   seedData,
 }) => {
@@ -280,6 +311,9 @@ test("localized time slots respect the fine-pointer width breakpoint", async ({
     workflow_step_id: seedData.startStepId,
   });
 
+  await testPage.clock.setFixedTime(
+    new Date(Date.parse(task.updated_at) + 101 * 365 * 24 * 60 * 60 * 1000),
+  );
   await testPage.setViewportSize({ width: 1280, height: 900 });
   await testPage.goto(`/t/${navigationTask.id}`);
   const session = new SessionPage(testPage);
@@ -291,7 +325,7 @@ test("localized time slots respect the fine-pointer width breakpoint", async ({
   await filters.saveOverwrite();
   await filters.close();
 
-  for (const locale of ["zh-cn", "pseudo"]) {
+  for (const locale of ["zh-cn", "pseudo", "ja"]) {
     const origin = new URL(testPage.url()).origin;
     await testPage.context().addCookies([{ name: "kandev_locale", value: locale, url: origin }]);
     await testPage.reload();
@@ -327,10 +361,19 @@ test("localized time slots respect the fine-pointer width breakpoint", async ({
       expect(rowBox).not.toBeNull();
       expect(timeBox).not.toBeNull();
       expect(actionBox).not.toBeNull();
+      const visualTime = relativeTime.locator('[aria-hidden="true"]');
+      const visualTimeBox = await visualTime.boundingBox();
+      expect(visualTimeBox).not.toBeNull();
+      expect(visualTimeBox!.width).toBeGreaterThan(44);
+      await expect(visualTime).toHaveText("99年以上");
       expect(timeBox!.width).toBeGreaterThanOrEqual(44);
       expect(actionBox!.width).toBeGreaterThanOrEqual(44);
       expect(actionBox!.height).toBeGreaterThanOrEqual(44);
-      expect(timeBox!.x + timeBox!.width).toBeLessThanOrEqual(actionBox!.x + 1);
+      expect(visualTimeBox!.x).toBeGreaterThanOrEqual(timeBox!.x - 1);
+      expect(visualTimeBox!.x + visualTimeBox!.width).toBeLessThanOrEqual(
+        timeBox!.x + timeBox!.width + 1,
+      );
+      expect(visualTimeBox!.x + visualTimeBox!.width).toBeLessThanOrEqual(actionBox!.x + 1);
       expect(actionBox!.x).toBeGreaterThanOrEqual(rowBox!.x - 1);
       expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 1);
       expect(
@@ -341,5 +384,37 @@ test("localized time slots respect the fine-pointer width breakpoint", async ({
     } else {
       await expectContentSizedTimeSlot(row);
     }
+  }
+
+  const coarseOrigin = new URL(testPage.url()).origin;
+  await coarseDesktopTestPage
+    .context()
+    .addCookies([{ name: "kandev_locale", value: "ja", url: coarseOrigin }]);
+  await coarseDesktopTestPage.clock.setFixedTime(
+    new Date(Date.parse(task.updated_at) + 101 * 365 * 24 * 60 * 60 * 1000),
+  );
+  await coarseDesktopTestPage.goto(`/t/${navigationTask.id}`);
+  const coarseSession = new SessionPage(coarseDesktopTestPage);
+  await coarseSession.waitForLoad();
+
+  for (const width of [768, 640]) {
+    await coarseDesktopTestPage.setViewportSize({ width, height: 900 });
+    expect(
+      await coarseDesktopTestPage.evaluate(() => matchMedia("(pointer: coarse)").matches),
+    ).toBe(true);
+
+    if (width === 640) {
+      await coarseDesktopTestPage.getByTestId("mobile-task-picker-trigger").click();
+    }
+
+    const row = coarseDesktopTestPage.locator(
+      `[data-testid="sidebar-task-item"][data-task-row-id="${task.id}"]:visible`,
+    );
+    await expect(row).toHaveCount(1);
+    await expect(row.getByTestId("sidebar-task-trailing-time")).toBeVisible();
+    await expect(
+      row.getByTestId("sidebar-task-trailing-time").locator('[aria-hidden="true"]'),
+    ).toHaveText("99年以上");
+    await expectTouchSizedTimeSlot(row, 44);
   }
 });

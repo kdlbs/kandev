@@ -92,9 +92,11 @@ The sidebar task list remains the only scroll owner. The change does not add an 
 boundary, or horizontal scroll region.
 
 Below the existing 640px action breakpoint, retain the in-flow menu slot and visible 44px action.
-Retain the phone time width if needed to preserve its established composition; scope desktop
-compaction to fine pointers at wider viewports. Test 639px, 640px, and 768px with pointer modes
-explicitly set. Do not extend compact desktop button sizing into coarse-pointer layouts.
+Phone and coarse-pointer time slots remain at least 44px wide and may grow for longer localized
+tokens, keeping the non-wrapping time separate from the action. At wider coarse-pointer widths, keep
+the time right-aligned within its slot and do not extend compact desktop button sizing. Scope the
+content-sized desktop slot to fine pointers. Test 639px, 640px, and 768px with pointer modes
+explicitly set.
 
 ## Accessibility
 

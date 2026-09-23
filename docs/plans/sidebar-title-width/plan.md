@@ -96,9 +96,10 @@ Replace obsolete w-11 assertions; do not substitute class-only tests for geometr
   narrow and expanded sidebars. Measure max(time glyph width, button width),
   title available width, badge adjacency, and unchanged rectangles across hover,
   keyboard focus, menu open, and close (.14/.15).
-- Same file: test "title width respects action breakpoint". Check 639/640/768px
+- Same file: localized-time breakpoint test. Check 639/640/768px
   with explicit fine/coarse pointer contexts and computed sizing; include
-  representative CJK and pseudo-locale tokens (.12/.15/.16).
+  representative CJK and pseudo-locale tokens (.12/.15/.16). Assert visible
+  time right-edge alignment and non-overlap with touch actions.
 - Update sidebar-filter.spec.ts "task row presentation" scenario to remove the
   obsolete equal desktop-column width assertion (.14/.15).
 - Extend mobile-sidebar-views.spec.ts "task row settings" scenario in mobile-chrome:
