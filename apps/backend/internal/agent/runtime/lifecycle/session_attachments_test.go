@@ -56,6 +56,49 @@ func TestDispatchInitialPromptReportsDeliveryFailure(t *testing.T) {
 	}
 }
 
+// TestDispatchInitialPromptSuccessSignalsBootReadiness exercises the actual
+// prompted startup transport. A successfully accepted first prompt must cross
+// the readiness boundary; no-prompt startup is the only path that may mark
+// ready synchronously.
+func TestDispatchInitialPromptSuccessSignalsBootReadiness(t *testing.T) {
+	agentConfig, ok := newTestRegistry().Get("claude-acp")
+	if !ok {
+		t.Fatal("claude-acp test agent is not registered")
+	}
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+	connectAgentStream(t, mock, client)
+	sm := NewSessionManager(newSessionTestLogger(), newTestStopCh(t))
+	execution := &AgentExecution{ID: "execution-prompt-success", TaskID: "task-prompt-success", SessionID: "session-prompt-success", agentctl: client}
+	connectedClient, releaseClient := execution.AcquireAgentCtlClient()
+	if connectedClient != client {
+		releaseClient()
+		t.Fatal("fixture did not retain the connected agentctl client")
+	}
+	releaseClient()
+	ready := make(chan string, 1)
+	sm.dispatchInitialPrompt(context.Background(), execution, agentConfig, "deliver this prompt", nil, func(id string) error {
+		ready <- id
+		return nil
+	})
+	select {
+	case id := <-ready:
+		if id != execution.ID {
+			t.Fatalf("ready execution ID = %q, want %q", id, execution.ID)
+		}
+		for _, action := range mock.getActionLog() {
+			if action == "agent.prompt" {
+				return
+			}
+		}
+		t.Fatal("readiness crossed without agentctl accepting the initial prompt")
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("successful prompted startup never crossed the boot-readiness boundary")
+	}
+}
+
 type testAttachmentReader struct{}
 
 func (testAttachmentReader) OpenClaimed(context.Context, string, string, string) (io.ReadCloser, string, string, int64, error) {
