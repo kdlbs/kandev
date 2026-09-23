@@ -323,3 +323,35 @@ func TestCleanupDestructiveTaskResourcesArchiveFiltersDirtyPerWorktree(t *testin
 		t.Fatalf("cleaned worktrees = %+v, want only the clean sibling", got)
 	}
 }
+
+// TestCleanupDestructiveTaskResourcesArchivePreservesDirtyPathAlias covers
+// AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.5: inspection dedupes by checkout path,
+// so a second worktree record sharing a reported dirty path must be preserved
+// even though only the first record's ID appears in the inspection result.
+func TestCleanupDestructiveTaskResourcesArchivePreservesDirtyPathAlias(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	cleanup := &recordingDirtyAwareArchiveCleanup{
+		dirty: []worktree.DirtyWorktree{{WorktreeID: "worktree-alias-a", Path: "/shared/checkout"}},
+	}
+	svc.SetWorktreeCleanup(cleanup)
+
+	errs := svc.cleanupDestructiveTaskResources(
+		context.Background(), "task-archive-path-alias", nil,
+		[]*worktree.Worktree{
+			{ID: "worktree-alias-a", Path: "/shared/checkout", TaskID: "task-archive-path-alias"},
+			{ID: "worktree-alias-b", Path: "/shared/checkout", TaskID: "task-archive-path-alias"},
+			{ID: "worktree-alias-clean", Path: "/clean/checkout", TaskID: "task-archive-path-alias"},
+		},
+		taskEnvironmentCleanup{preserveBranches: true}, nil,
+	)
+	if len(errs) != 0 {
+		t.Fatalf("cleanup errors = %v, want none", errs)
+	}
+	if len(cleanup.preservedCalls) != 1 {
+		t.Fatalf("preserving cleanup calls = %d, want 1", len(cleanup.preservedCalls))
+	}
+	got := cleanup.preservedCalls[0]
+	if len(got) != 1 || got[0].ID != "worktree-alias-clean" {
+		t.Fatalf("cleaned worktrees = %+v, want only the unrelated clean checkout", got)
+	}
+}

@@ -4043,6 +4043,10 @@ func (s *Service) filterDirtyWorktreesForArchive(
 	}
 	inspector, ok := s.worktreeCleanup.(WorktreeDirtyInspector)
 	if !ok {
+		// No dirty inspector: pass all worktrees through unchanged (pre-fix
+		// behaviour). The production Manager always satisfies both interfaces;
+		// a WorktreeArchiveBatchCleaner that does not also implement
+		// WorktreeDirtyInspector skips the dirty guard entirely.
 		return worktrees, nil
 	}
 	dirty, err := inspector.InspectDirtyWorktrees(ctx, worktrees)
@@ -4055,16 +4059,29 @@ func (s *Service) filterDirtyWorktreesForArchive(
 	if len(dirty) == 0 {
 		return worktrees, nil
 	}
+	// Inspection dedupes by (RepositoryPath, Path): when two worktree records
+	// share the identical checkout directory, only the first is reported here.
+	// Matching on path as well as ID catches the un-reported alias so it is
+	// preserved alongside the record inspection actually flagged.
 	dirtyIDs := make(map[string]struct{}, len(dirty))
+	dirtyPaths := make(map[string]struct{}, len(dirty))
 	for _, d := range dirty {
 		dirtyIDs[d.WorktreeID] = struct{}{}
+		if d.Path != "" {
+			dirtyPaths[d.Path] = struct{}{}
+		}
 	}
 	reclaimable := make([]*worktree.Worktree, 0, len(worktrees))
 	for _, wt := range worktrees {
 		if wt == nil {
 			continue
 		}
-		if _, isDirty := dirtyIDs[wt.ID]; isDirty {
+		_, dirtyByID := dirtyIDs[wt.ID]
+		dirtyByPath := false
+		if wt.Path != "" {
+			_, dirtyByPath = dirtyPaths[filepath.Clean(wt.Path)]
+		}
+		if dirtyByID || dirtyByPath {
 			s.logger.Info("preserving dirty worktree during archive cleanup",
 				zap.String("task_id", taskID),
 				zap.String("worktree_id", wt.ID))

@@ -79,7 +79,7 @@ admits the task.
 ```bash
 cd apps/backend
 TMPDIR=/private/tmp/kandev-verify go test ./internal/worktree/... ./internal/task/service/...
-make -C apps/backend lint
+make lint
 ```
 
 `TMPDIR` must not sit under a symlink; on macOS `t.TempDir()` returns a `/var`

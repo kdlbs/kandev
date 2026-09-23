@@ -1,6 +1,6 @@
 ---
 created: 2026-09-21
-status: draft
+status: done
 requirements:
   - REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-001
 system_design:
@@ -68,7 +68,7 @@ handling. No database, API, or WebSocket schema change is planned.
 
 ## Work orders
 
-- [pending] [Task 01: Preserve Dirty Worktrees On Archive](task-01-preserve-dirty-archive-worktrees.md)
+- [done] [Task 01: Preserve Dirty Worktrees On Archive](task-01-preserve-dirty-archive-worktrees.md)
 
 ## Dependency order
 
