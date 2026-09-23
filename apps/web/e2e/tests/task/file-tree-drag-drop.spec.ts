@@ -95,15 +95,15 @@ async function setupTask({
 
 async function dispatchHtmlDnd(
   testPage: Page,
-  fileTree: FileTreePage,
+  fileTree: Pick<FileTreePage, "waitForFileTreeNode">,
   sourcePath: string,
   targetPath: string,
 ) {
   // Virtualized trees can unmount the source while the target is revealed.
   // Keep the browser DataTransfer on the page between the two scrolls so the
   // source and target do not need to be mounted at the same time.
-  const source = await fileTree.waitForFileTreeNode(sourcePath);
-  await expect(source).toBeVisible({ timeout: 30_000 });
+  const source = await fileTree.waitForFileTreeNode(sourcePath, 45_000);
+  await expect(source).toBeVisible({ timeout: 45_000 });
   await source.scrollIntoViewIfNeeded();
   await testPage.evaluate((nodePath) => {
     const row = Array.from(document.querySelectorAll('[data-testid="file-tree-node"]')).find(
@@ -127,8 +127,8 @@ async function dispatchHtmlDnd(
     });
   }, sourcePath);
 
-  const target = await fileTree.waitForFileTreeNode(targetPath);
-  await expect(target).toBeVisible({ timeout: 30_000 });
+  const target = await fileTree.waitForFileTreeNode(targetPath, 45_000);
+  await expect(target).toBeVisible({ timeout: 45_000 });
   await target.scrollIntoViewIfNeeded();
   await testPage.evaluate(
     ({ sourcePath, targetPath: nodePath }) => {

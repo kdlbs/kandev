@@ -7,6 +7,13 @@ type RoutineRun = {
   status: string;
 };
 
+type AgentRun = {
+  id: string;
+  agent_profile_id: string;
+  causation_id?: string;
+  reason: string;
+};
+
 async function routineRuns(
   officeApi: { listRoutineRuns(id: string): Promise<Record<string, unknown>> },
   id: string,
@@ -85,6 +92,9 @@ test.describe("Office taskless routine sessions", () => {
       name: `Taskless E2E ${Date.now()}`,
       description: "Taskless routine session smoke test",
       assignee_agent_profile_id: agentId,
+      // This test asserts that each manual fire creates a distinct agent
+      // session. Keep that contract independent of unrelated in-flight
+      // coordinator work in the shared office workspace.
       concurrency_policy: "always_create",
     });
     const routineId = routine.id as string;
@@ -126,8 +136,10 @@ test.describe("Office taskless routine sessions", () => {
           async () => {
             const result = await officeApi.listRuns(officeSeed.workspaceId);
             observedRuns = (result.runs ?? []) as unknown[];
-            const run = (observedRuns as { id: string; causation_id?: string }[]).find(
-              (candidate) => candidate.causation_id === expectedCausationId,
+            const run = (observedRuns as AgentRun[]).find(
+              (candidate) =>
+                candidate.agent_profile_id === agentId &&
+                candidate.causation_id === expectedCausationId,
             );
             runId = run?.id ?? "";
             return runId;
