@@ -2,6 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-10
+updated: 2026-09-17
 owners:
   - kandev
 ---
@@ -103,6 +104,28 @@ active task navigation after the archive operation completes.
   show confirmed archived tasks according to their filters; pending archive
   intent shall not manufacture a confirmed archived task.
 
+### REQ-TASKS-REMOVAL-NAVIGATION-004: Archive progress feedback
+
+**Intent:** Give users persistent, truthful feedback when a user-initiated
+archive request takes time to finish.
+
+#### Acceptance criteria
+
+- **AC-TASKS-REMOVAL-NAVIGATION-004.1:** When a user accepts an archive action
+  from any desktop or phone task surface, the system shall show one localized
+  loading toast for that operation or bulk batch in the existing bottom-right
+  toast stack. The English source copy shall read `Archiving in progress`, the
+  toast shall include a loading indicator, and the existing polite live region
+  shall announce it.
+- **AC-TASKS-REMOVAL-NAVIGATION-004.2:** The archive progress toast shall not
+  auto-dismiss while any archive request in its operation or batch remains
+  pending. After every request settles, the progress toast shall disappear and
+  the existing success or failure feedback shall remain the only terminal
+  notification.
+- **AC-TASKS-REMOVAL-NAVIGATION-004.3:** Cancelling or dismissing archive
+  confirmation shall show no progress toast and issue no request. Programmatic,
+  API, CLI, MCP, and agent-driven archive operations shall remain unchanged.
+
 ## Compatibility and exclusions
 
 Existing archive confirmation preferences and cascade choices remain governed
@@ -123,3 +146,4 @@ Undo, new settings, and a new mobile navigation composition are excluded.
 - [Task removal navigation](../../../plans/task-removal-navigation/plan.md)
 
 - [Immediate sidebar archive](../../../plans/immediate-sidebar-archive/plan.md)
+- [Archive progress feedback](../../../plans/archive-progress-feedback/plan.md)

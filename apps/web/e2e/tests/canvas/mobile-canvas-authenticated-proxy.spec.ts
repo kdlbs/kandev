@@ -49,7 +49,7 @@ test.describe("authenticated same-origin canvas runtime on mobile", () => {
     try {
       const seeded = await seedTaskCanvas(testPage, apiClient, seedData, true);
       canvasId = seeded.canvas.id;
-      proxy = await startCanvasAuthenticatedProxy(backend.baseUrl);
+      proxy = await startCanvasAuthenticatedProxy(backend.baseUrl, { injectRuntimeHtml: true });
       const opened = await openMobileCanvas(browser, proxy, canvasId);
       context = opened.context;
       const page = opened.page;

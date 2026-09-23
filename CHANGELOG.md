@@ -2,6 +2,55 @@
 
 All notable changes to Kandev.
 
+## 0.95.1 - 2026-09-22
+
+### Features
+
+- add Japanese locale catalogs and negotiation ([#3841](https://github.com/kdlbs/kandev/pull/3841)) by @y05h1taka
+- unify mobile navigation and task access ([#3830](https://github.com/kdlbs/kandev/pull/3830))
+- add Muse Code ACP agent support ([#3819](https://github.com/kdlbs/kandev/pull/3819)) by @jean-losi
+- customize sidebar navigation ([#3823](https://github.com/kdlbs/kandev/pull/3823))
+- show which startup step is running, with progress and ETA ([#3813](https://github.com/kdlbs/kandev/pull/3813)) by @nova28
+- create automations from configuration chat ([#3825](https://github.com/kdlbs/kandev/pull/3825))
+- add task-specific workflow agent overrides ([#3822](https://github.com/kdlbs/kandev/pull/3822))
+- focus committed workflow recipients ([#3826](https://github.com/kdlbs/kandev/pull/3826))
+- add per-task remote repository checkout options ([#3817](https://github.com/kdlbs/kandev/pull/3817))
+- add forgejo plugin to catalog ([#3807](https://github.com/kdlbs/kandev/pull/3807)) by @naerymdan
+- open task folders with host availability checks ([#3784](https://github.com/kdlbs/kandev/pull/3784))
+- add whole-file comments ([#3796](https://github.com/kdlbs/kandev/pull/3796))
+- expose task dependencies in plugin and canvas data API ([#3794](https://github.com/kdlbs/kandev/pull/3794)) by @nova28
+
+### Bug Fixes
+
+- start the agent again when a task is sent back a workflow step ([#3852](https://github.com/kdlbs/kandev/pull/3852)) by @nova28
+- keep file tree paths workspace-relative ([#3855](https://github.com/kdlbs/kandev/pull/3855))
+- restore canvas availability on task entry ([#3846](https://github.com/kdlbs/kandev/pull/3846))
+- launch opencode-acp binary-first (native binary on PATH), don't break on stale npm cache ([#3836](https://github.com/kdlbs/kandev/pull/3836)) by @jelloeater-agent
+- fail active sessions after resume relaunch errors ([#3839](https://github.com/kdlbs/kandev/pull/3839)) by @WaleWangPW
+- preserve client-side navigation for task links ([#3844](https://github.com/kdlbs/kandev/pull/3844))
+- retry transient preview deploy errors ([#3843](https://github.com/kdlbs/kandev/pull/3843))
+- reject incompatible inherited workspace repositories ([#3838](https://github.com/kdlbs/kandev/pull/3838))
+- restore orphaned sessions on task open ([#3840](https://github.com/kdlbs/kandev/pull/3840))
+- restore executor profile environment on resume ([#3835](https://github.com/kdlbs/kandev/pull/3835))
+- accept case-aliased worktree repository paths ([#3837](https://github.com/kdlbs/kandev/pull/3837))
+- terminalize sessions orphaned by backend restart via reconciliation sweep ([#3833](https://github.com/kdlbs/kandev/pull/3833)) by @benjamincham
+- detect stalled sessions and heal orphaned ones in sweep ([#3832](https://github.com/kdlbs/kandev/pull/3832)) by @benjamincham
+- restore canvas runtime and panel toolbar behavior ([#3827](https://github.com/kdlbs/kandev/pull/3827))
+- admit initial creation prompts through workflow ([#3820](https://github.com/kdlbs/kandev/pull/3820))
+- honor every offered watcher lookback period ([#3828](https://github.com/kdlbs/kandev/pull/3828)) by @Fclem
+- preserve Kubernetes runtimes after recoverable agent failures ([#3824](https://github.com/kdlbs/kandev/pull/3824))
+- send late clarification answers as messages ([#3798](https://github.com/kdlbs/kandev/pull/3798)) ([#3799](https://github.com/kdlbs/kandev/pull/3799))
+- refresh executor indicators and restore status details ([#3821](https://github.com/kdlbs/kandev/pull/3821))
+- preserve structured plugin tool errors ([#3815](https://github.com/kdlbs/kandev/pull/3815))
+- stop large upgrades from hanging silently at startup ([#3749](https://github.com/kdlbs/kandev/pull/3749)) by @nova28
+- materialize branches in inherited workspaces ([#3809](https://github.com/kdlbs/kandev/pull/3809))
+- bound oversized user-message rendering ([#3797](https://github.com/kdlbs/kandev/pull/3797)) ([#3801](https://github.com/kdlbs/kandev/pull/3801))
+- hide composer focus hint on mobile ([#3795](https://github.com/kdlbs/kandev/pull/3795))
+
+### Performance
+
+- lint only changed Go packages ([#3860](https://github.com/kdlbs/kandev/pull/3860))
+
 ## 0.95.0 - 2026-09-18
 
 ### Features

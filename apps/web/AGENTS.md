@@ -136,11 +136,8 @@ surface.
   name the target only (for example, `Bitbucket Pull Request`) and preserve their
   registered provider icon.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
-- **Self-documenting settings:** every setting must explain in visible, plain-language copy what
-  changes, when the setting applies, and when the user should choose each non-obvious option. State
-  important exclusions, precedence, cost, or destructive consequences next to the control when they
-  can affect the decision. Do not rely on tooltips, external documentation, or implementation terms
-  alone to teach the setting.
+- **Self-documenting settings:** give each setting a short, plain-language description of its effect. Use `SettingsInfo` for optional scope and implementation details: hover/focus on desktop, a drawer on touch devices. Keep active errors, permissions, managed values, and essential input constraints visible.
+- **Settings composition:** use `SettingsGroup` for bordered groups and `SettingsRow` for simple preferences; keep one domain owner/save contributor and attach discovery to actual controls. Keep sections expanded and use existing header tabs for larger pages. Preserve specialized editor/table/diagnostic/credential layouts.
 - **Settings save coordination:** settings surfaces with local unsaved state must register a
   contributor with `useSettingsSaveContributor` (or use `SettingsPageTemplate`) so the shared
   floating **Save changes** control, navigation guard, and discard flow own persistence. Do not add
@@ -234,7 +231,7 @@ Silence a legitimate one with `// i18n-exempt: <reason>` (required) as a `//`
 LINE comment — the detector's pattern is line-anchored, so a marker inside a
 `/** */` block is silently ignored.
 
-**Real-locale catalogs gate.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw` are complete;
+**Real-locale catalogs gate.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw`, `ja` are complete;
 `check-i18n-keys.mjs` fails on a missing/extra key, a dropped `{{placeholder}}`
 or `<n>` tag, an empty value, or a value identical to English. Untranslatable
 values are handled in two tiers: those `looksLikeCopy` rejects as non-copy need

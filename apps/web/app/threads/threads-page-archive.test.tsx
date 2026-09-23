@@ -181,7 +181,7 @@ describe("Threads pending archive lifecycle", () => {
         "b",
         "c",
       ]);
-      expect(transport.toast).not.toHaveBeenCalled();
+      expect(transport.toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "loading" }));
     } finally {
       await act(async () => {
         pending.resolve();

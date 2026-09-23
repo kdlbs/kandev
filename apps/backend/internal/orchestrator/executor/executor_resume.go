@@ -862,6 +862,9 @@ func (e *Executor) resumeSession(
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return nil, err
 	}
+	if startAgent {
+		e.observeSessionCoresidency(ctx, sessionCoresidencySiteResume, task.ID, session.ID)
+	}
 
 	resumeInitialState := session.State
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
@@ -969,8 +972,12 @@ func (e *Executor) resumeSession(
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
 			if startAgent {
-				e.rollbackResumeStateAfterFailure(
-					ctx, task.ID, session.ID, resumeInitialState, err,
+				// The live process owns this session's active lifecycle. Keep the
+				// STARTING projection for that process to reconcile instead of
+				// marking it FAILED as if this duplicate launch had failed.
+				e.restoreResumeCredentialSnapshotIfStarting(
+					ctx,
+					session.ID,
 					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
 				)
 			}
@@ -1107,9 +1114,21 @@ func (e *Executor) restoreResumeCredentialSnapshotIfStarting(
 	}
 }
 
+// terminalRollbackState prevents a failed relaunch from restoring an active
+// state when no agent process was recovered.
+func terminalRollbackState(priorState models.TaskSessionState) models.TaskSessionState {
+	switch priorState {
+	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+		return models.TaskSessionStateFailed
+	default:
+		return priorState
+	}
+}
+
 // rollbackResumeStateAfterFailure restores the state observed before a resume
 // attempt only while the session is still STARTING. A concurrent terminal
-// transition wins and is left untouched by transitionSessionState.
+// transition wins and is left untouched by transitionSessionState. Active
+// prior states become FAILED because the relaunch did not restore liveness.
 func (e *Executor) rollbackResumeStateAfterFailure(
 	ctx context.Context,
 	taskID, sessionID string,
@@ -1126,12 +1145,20 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 		defer e.onCeilingReservationRelease(sessionID)
 	}
 	e.restoreResumeCredentialSnapshotIfStarting(ctx, sessionID, credentialSnapshot)
+	targetState := terminalRollbackState(priorState)
 	if e.onSessionStateTransition != nil {
 		current, err := e.repo.GetTaskSession(ctx, sessionID)
 		if err != nil || current == nil || current.State != models.TaskSessionStateStarting {
 			return
 		}
-		_, _, rollbackErr := e.transitionSessionState(ctx, taskID, sessionID, priorState, resumeErr.Error())
+		_, _, rollbackErr := e.transitionSessionStateFrom(
+			ctx,
+			taskID,
+			sessionID,
+			models.TaskSessionStateStarting,
+			targetState,
+			resumeErr.Error(),
+		)
 		if rollbackErr != nil {
 			e.logger.Warn("failed to roll back session state after resume failure",
 				zap.String("task_id", taskID),
@@ -1147,7 +1174,7 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 			ctx,
 			sessionID,
 			models.TaskSessionStateStarting,
-			priorState,
+			targetState,
 			resumeErr.Error(),
 		); err != nil {
 			e.logger.Warn("failed to roll back session state after resume failure",
@@ -1161,7 +1188,7 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 	if err != nil || current == nil || current.State != models.TaskSessionStateStarting {
 		return
 	}
-	_, _, rollbackErr := e.transitionSessionState(ctx, taskID, sessionID, priorState, resumeErr.Error())
+	_, _, rollbackErr := e.transitionSessionState(ctx, taskID, sessionID, targetState, resumeErr.Error())
 	if rollbackErr != nil {
 		e.logger.Warn("failed to roll back session state after resume failure",
 			zap.String("task_id", taskID),
@@ -2238,7 +2265,7 @@ func (e *Executor) startAgentProcessOnResumeWithTaskPromotion(
 	agentExecutionID string,
 	promoteTask bool,
 ) {
-	e.runAgentProcessAsync(ctx, taskID, session.ID, agentExecutionID, func(updCtx context.Context) {
+	e.runAgentProcessAsyncWithObservation(ctx, taskID, session.ID, agentExecutionID, sessionCoresidencySiteResume, func(updCtx context.Context) {
 		if promoteTask {
 			if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, session.ID); updateErr != nil {
 				e.logger.Warn("failed to update task state to IN_PROGRESS after resume start",

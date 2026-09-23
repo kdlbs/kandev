@@ -162,7 +162,7 @@ type SubmitDraftArgs = {
 };
 
 type DraftChatSubmitPayload = Required<
-  Omit<ChatSubmitPayload, "planCommentRefs" | "clientMessageId">
+  Omit<ChatSubmitPayload, "planCommentRefs" | "previewFeedbackRefs" | "clientMessageId">
 >;
 
 function buildChatSubmitPayload(payload: DraftChatSubmitPayload): ChatSubmitPayload {

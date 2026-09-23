@@ -18,6 +18,20 @@ describe("purgeSessionRuntimeState", () => {
     store = makeStore();
   });
 
+  it("clears a launch warning when a relaunch reaches RUNNING", () => {
+    const s = store.getState();
+    s.setLaunchWarning(SESSION_ID, {
+      executorId: "executor-1",
+      host: "10.0.0.5",
+      state: "unreachable",
+      reason: "timeout",
+    });
+
+    s.clearLaunchWarning(SESSION_ID);
+
+    expect(store.getState().launchWarning.bySessionId[SESSION_ID]).toBeUndefined();
+  });
+
   it("drops per-session maps, process output, and env-scoped buffers", () => {
     const s = store.getState();
     s.registerSessionEnvironment(SESSION_ID, "env-1");
@@ -39,6 +53,12 @@ describe("purgeSessionRuntimeState", () => {
       status: "running",
     });
     s.appendProcessOutput("proc-1", "process noise");
+    s.setLaunchWarning("session-1", {
+      executorId: "executor-1",
+      host: "10.0.0.5",
+      state: "unreachable",
+      reason: "timeout",
+    });
 
     store.setState((draft) => {
       purgeSessionRuntimeState(draft, SESSION_ID);
@@ -52,6 +72,7 @@ describe("purgeSessionRuntimeState", () => {
     expect(after.processes.devProcessBySessionId[SESSION_ID]).toBeUndefined();
     expect(after.processes.processesById["proc-1"]).toBeUndefined();
     expect(after.processes.outputsByProcessId["proc-1"]).toBeUndefined();
+    expect(after.launchWarning.bySessionId["session-1"]).toBeUndefined();
     // env-scoped buffers gone because no other session references env-1.
     expect(after.shell.outputs["env-1"]).toBeUndefined();
     expect(after.shell.statuses["env-1"]).toBeUndefined();

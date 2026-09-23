@@ -259,13 +259,17 @@ func (s *AgentUpdateJobStore) run(
 
 	s.setStatus(job, dto.AgentUpdateJobStatusUpdating)
 	flusher := newUpdateOutputFlusher(s, job)
+	useNative := spec.NativeBinaryOnPath()
 	prepareCommand := spec.CacheUpdateCommand()
 	if exactTarget {
 		prepareCommand = spec.CacheUpdateCommand(target)
 	}
+	if useNative {
+		prepareCommand = spec.NativeUpdateCommand(target)
+	}
 	err = s.updater.RunUpdate(ctx, prepareCommand, flusher.append)
 	flusher.flush()
-	if err != nil {
+	if err != nil && !useNative {
 		flusher.append("managed runtime cache appears stale; repairing execution cache\n")
 		flusher.flush()
 		if repairErr := s.updater.InvalidateExecutionCache(ctx, spec.Package); repairErr != nil {
@@ -283,11 +287,7 @@ func (s *AgentUpdateJobStore) run(
 	}
 
 	s.setStatus(job, dto.AgentUpdateJobStatusRefreshing)
-	refreshCommand := spec.CachedACPCommand()
-	if exactTarget {
-		refreshCommand = spec.ACPCommand(target)
-	}
-	caps, refreshErr := s.updater.Refresh(ctx, job.AgentName, refreshCommand)
+	caps, refreshErr := s.updater.Refresh(ctx, job.AgentName, spec.RefreshCommand(target))
 	s.finishRefresh(job, ctx, caps, refreshErr, ref)
 }
 
@@ -346,10 +346,14 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 ) {
 	s.setStatus(job, dto.AgentUpdateJobStatusUpdating)
 	flusher := newUpdateOutputFlusher(s, job)
+	useNative := spec.NativeBinaryOnPath()
 	prepareCommand := spec.CacheUpdateCommand(target)
+	if useNative {
+		prepareCommand = spec.NativeUpdateCommand(target)
+	}
 	err := s.updater.RunUpdate(ctx, prepareCommand, flusher.append)
 	flusher.flush()
-	if err != nil {
+	if err != nil && !useNative {
 		flusher.append("managed runtime cache appears stale; repairing exact execution cache\n")
 		flusher.flush()
 		var repairErr error
@@ -373,7 +377,7 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 	}
 
 	s.setStatus(job, dto.AgentUpdateJobStatusRefreshing)
-	caps, probeErr := candidate.Probe(ctx, job.AgentName, spec.ACPCommand(target))
+	caps, probeErr := candidate.Probe(ctx, job.AgentName, spec.RefreshCommand(target))
 	if probeErr != nil {
 		s.finishFailed(job, ctx, fmt.Errorf("probe runtime candidate: %w", probeErr), ref)
 		return

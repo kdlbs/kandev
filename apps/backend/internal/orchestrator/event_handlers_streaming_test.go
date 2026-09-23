@@ -503,6 +503,7 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 		ctx,
 		"t1",
 		"s1",
+		nil,
 		models.TaskSessionStateCancelled,
 		"coordinator stop",
 		nil,
@@ -515,6 +516,31 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
 	require.Equal(t, []string{"s1"}, canceller.expiredSessions)
 	require.Equal(t, []bool{true}, canceller.expireContextDeadline)
+}
+
+func TestTransitionTaskSessionStateRejectsUnexpectedSourceState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+	expectedState := models.TaskSessionStateStarting
+
+	changed, finalState, err := svc.transitionTaskSessionState(
+		ctx,
+		"t1",
+		"s1",
+		&expectedState,
+		models.TaskSessionStateFailed,
+		"resume failed",
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, models.TaskSessionStateRunning, finalState)
+	require.Empty(t, eb.events)
 }
 
 func TestTransitionTaskSessionStatePublishesMetadataWrittenByHook(t *testing.T) {
@@ -535,6 +561,7 @@ func TestTransitionTaskSessionStatePublishesMetadataWrittenByHook(t *testing.T) 
 		ctx,
 		"t1",
 		"s1",
+		nil,
 		models.TaskSessionStateFailed,
 		errorValue.Message,
 		func() {
@@ -570,6 +597,7 @@ func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {
 		ctx,
 		"t1",
 		"s1",
+		nil,
 		models.TaskSessionStateCancelled,
 		"coordinator stop",
 		nil,

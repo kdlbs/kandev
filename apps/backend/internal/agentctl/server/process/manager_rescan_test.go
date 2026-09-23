@@ -670,6 +670,7 @@ func initGitRepoAt(t *testing.T, dir string) {
 	runIn("git", "config", "user.email", "test@example.com")
 	runIn("git", "config", "user.name", "Test User")
 	runIn("git", "config", "commit.gpgsign", "false")
+	runIn("git", "config", "core.hooksPath", os.DevNull)
 	runIn("git", "commit", "--allow-empty", "-m", "initial")
 }
 

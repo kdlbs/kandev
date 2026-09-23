@@ -123,6 +123,13 @@ the control has no dot but remains usable.
 4. Select **Update runtime**, **Roll back runtime**, or **Repair runtime**.
 5. Wait for the exact version to prepare and pass its ACP capability probe.
 
+OpenCode has one additional host-runtime rule. When the `opencode` executable
+is on the Kandev host `PATH`, the update installs the selected `opencode-ai`
+package version globally and the follow-up capability probe runs that same
+executable. Containers, SSH executors, and hosts without that executable keep
+using the managed `npx` runtime. This keeps the update result aligned with the
+runtime that Kandev will use for host utility calls.
+
 Kandev enables the action only after the backend validates the selected version
 against the trusted package catalogue. It does not accept package names, npm
 tags, prereleases, registry URLs, or command text. When the active version,

@@ -50,6 +50,7 @@ var supportedLocales = map[string]bool{
 	"zh-cn":  true,
 	"zh-tw":  true,
 	"zh-hk":  true,
+	"ja":     true,
 	"pseudo": true,
 }
 
@@ -82,21 +83,43 @@ func load() {
 	})
 }
 
-// Supported reports whether locale has a committed catalog.
-func Supported(locale string) bool { return supportedLocales[canonicalLocale(locale)] }
-
 // Normalize returns locale when it is supported, otherwise DefaultLocale. Used
 // for both `<html lang>` and message lookup so they can never disagree.
 func Normalize(locale string) string {
-	canonical := canonicalLocale(locale)
-	if supportedLocales[canonical] {
-		return canonical
+	if Supported(locale) {
+		return canonicalLocale(locale)
+	}
+	// A region-suffixed variant of a supported base collapses onto it when the
+	// base is unambiguous ("ja-JP" → "ja"). Multi-variant bases stay exact.
+	if collapsed := normalizeRegion(locale); supportedLocales[collapsed] {
+		return collapsed
 	}
 	return DefaultLocale
 }
 
+// Supported reports whether locale has a committed catalog.
+func Supported(locale string) bool {
+	return supportedLocales[canonicalLocale(locale)]
+}
+
 func canonicalLocale(locale string) string {
 	return strings.ToLower(strings.TrimSpace(locale))
+}
+
+// normalizeRegion collapses a region-suffixed locale onto its base when the base
+// is unambiguous: "ja-JP" → "ja", "pt-BR" → "pt" (unsupported here, falls
+// through to en via Normalize). Multi-variant bases like "zh" stay exact —
+// "zh-CN"/"zh-TW"/"zh-HK" must not collapse to a shared "zh".
+func normalizeRegion(locale string) string {
+	canonical := canonicalLocale(locale)
+	base, _, hasRegion := strings.Cut(canonical, "-")
+	if !hasRegion {
+		return canonical
+	}
+	if supportedLocales[base] && base != "zh" && base != "pt" {
+		return base
+	}
+	return canonical
 }
 
 // FromRequest resolves the active locale: the kandev_locale cookie first (the
@@ -106,8 +129,16 @@ func FromRequest(r *http.Request) string {
 	if r == nil {
 		return DefaultLocale
 	}
-	if cookie, err := r.Cookie(LocaleCookie); err == nil && Supported(cookie.Value) {
-		return Normalize(cookie.Value)
+	if cookie, err := r.Cookie(LocaleCookie); err == nil {
+		if Supported(cookie.Value) {
+			return Normalize(cookie.Value)
+		}
+		// Unambiguous region suffixes such as ja-JP collapse onto a shipped
+		// base. Supported() is exact, so Normalize() is not used here: it
+		// would turn an unknown cookie into en and skip Accept-Language.
+		if collapsed := normalizeRegion(cookie.Value); supportedLocales[collapsed] {
+			return collapsed
+		}
 	}
 	for _, tag := range parseAcceptLanguage(r.Header.Get("Accept-Language")) {
 		if Supported(tag) {

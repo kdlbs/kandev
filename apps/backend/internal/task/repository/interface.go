@@ -19,6 +19,7 @@ var ErrNoPrimarySession = repoerrors.ErrNoPrimarySession
 var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 var ErrTaskPlanCommentsChanged = repoerrors.ErrTaskPlanCommentsChanged
+var ErrTaskPreviewFeedbackChanged = repoerrors.ErrTaskPreviewFeedbackChanged
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
@@ -322,6 +323,12 @@ type WorkflowRepository interface {
 type MessageRepository interface {
 	CreateMessage(ctx context.Context, message *models.Message) error
 	GetMessage(ctx context.Context, id string) (*models.Message, error)
+	// RehydrateMessagePayload loads and verifies the externally stored
+	// payload for a message whose large tool output (e.g. shell command
+	// stdout/stderr) was moved out of the metadata column at write time, and
+	// merges the restored content back into message.Metadata. No-op when the
+	// message has no external payload (message.PayloadDigest == "").
+	RehydrateMessagePayload(ctx context.Context, message *models.Message) error
 	// GetLastMessageTimeBySessionIDs returns the newest task_session_messages
 	// updated_at for each requested session, in one chunked query. Sessions
 	// with no messages are absent from the result; callers fall back to the
@@ -409,6 +416,15 @@ type AttachmentRepository interface {
 	TransferMessageAttachments(ctx context.Context, taskID, oldSessionID, newSessionID string, attachmentIDs []string) error
 	DeleteMessageAttachment(ctx context.Context, id, ownerID string) error
 	MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error)
+}
+
+// PreviewFeedbackRepository stores one revisioned pending collection per task.
+type PreviewFeedbackRepository interface {
+	ListTaskPreviewFeedback(ctx context.Context, taskID string) (*models.TaskPreviewFeedbackSnapshot, error)
+	CreateTaskPreviewFeedback(ctx context.Context, item *models.TaskPreviewFeedback, ownerID, workspaceID string) (*models.TaskPreviewFeedbackSnapshot, error)
+	UpdateTaskPreviewFeedback(ctx context.Context, taskID, itemID, comment string, expectedVersion int64) (*models.TaskPreviewFeedbackSnapshot, error)
+	DeleteTaskPreviewFeedback(ctx context.Context, taskID, itemID string, expectedVersion int64) (*models.TaskPreviewFeedbackSnapshot, []*models.TaskMessageAttachment, error)
+	ClearTaskPreviewFeedback(ctx context.Context, taskID string, expectedRevision int64) (*models.TaskPreviewFeedbackSnapshot, []*models.TaskMessageAttachment, error)
 }
 
 // QueueAttachmentAdmissionRepository scopes provisional attachment claims to
@@ -736,6 +752,33 @@ type ExecutorRepository interface {
 	// the resume-safety invariant instead of deleting a resumable row.
 	// Returns models.ErrExecutorRunningNotFound if no row exists for the session.
 	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
+
+	// ListSSHExecutorsForReachability returns every eligible SSH executor
+	// (type=ssh, not soft-deleted, status=active) ordered ascending by id —
+	// the poller's per-pass work list.
+	ListSSHExecutorsForReachability(ctx context.Context) ([]*models.Executor, error)
+	// GetExecutorReachability returns the stored record for one executor.
+	// Returns models.ErrExecutorReachabilityNotFound if none exists.
+	GetExecutorReachability(ctx context.Context, executorID string) (*models.ExecutorReachability, error)
+	// ListExecutorReachability returns every stored reachability record.
+	ListExecutorReachability(ctx context.Context) ([]*models.ExecutorReachability, error)
+	// UpsertExecutorReachability records a single probe (or launch dial)
+	// observation. The consecutive-failure counter and derived state are
+	// computed by the statement itself from the row's own prior values, and
+	// a write is discarded when obs.CheckedAt is not strictly later than the
+	// stored checked_at — see the system design's Persistence section.
+	UpsertExecutorReachability(ctx context.Context, obs models.ExecutorReachabilityObservation) error
+	// ResetExecutorReachability invalidates the stored record after a
+	// connection-configuration save when seenUpdatedAt still matches the
+	// executor row. The version guard prevents a delayed save callback from
+	// resetting a newer configuration. State becomes unknown, the counter and
+	// reason/message clear, host is set to the newly saved value, and both
+	// timestamps become NULL. A no-op (zero rows affected) when the executor
+	// is not an active SSH executor or the version is stale.
+	ResetExecutorReachability(ctx context.Context, executorID, host string, seenUpdatedAt time.Time) error
+	// DeleteExecutorReachability removes the stored record. DeleteExecutor
+	// calls this in the same transaction as the soft delete.
+	DeleteExecutorReachability(ctx context.Context, executorID string) error
 }
 
 // EnvironmentRepository handles environment CRUD.

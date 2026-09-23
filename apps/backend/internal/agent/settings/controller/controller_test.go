@@ -174,6 +174,7 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 }
 
 func TestController_PreviewAgentCommandUsesActiveManagedRuntimeVersion(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	agent := agents.NewOpenCodeACP()
 	controller := newTestController(map[string]agents.Agent{agent.ID(): agent})
 	selectionStore := newRecoverySelectionStore()

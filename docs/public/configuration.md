@@ -147,10 +147,10 @@ The Docker socket is effectively root-equivalent on many hosts. Do not publish i
 
 ### Core agent service
 
-| YAML key               | Environment variable                              | Default     | Current behavior                                                 |
-| ---------------------- | ------------------------------------------------- | ----------- | ---------------------------------------------------------------- |
-| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `localhost` | Host of the core `agentctl` control server.                      |
-| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback. |
+| YAML key               | Environment variable                              | Default     | Current behavior                                                              |
+| ---------------------- | ------------------------------------------------- | ----------- | ---------------------------------------------------------------------------- |
+| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `127.0.0.1` | Host of the core `agentctl` control server. The literal avoids IPv6 loopback resolution variance. |
+| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback.            |
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
@@ -214,6 +214,7 @@ variable overrides YAML, and changes require a backend restart.
 | `agentctl.detachedEventLimit` | `KANDEV_ACP_DETACHED_EVENT_LIMIT` | integer `1`-`10000`, `100` | Per-instance agent events retained while no backend is attached. An invalid or out-of-range environment value fails startup. |
 | `planning.coalesceWindowMs`          | `KANDEV_PLAN_COALESCE_WINDOW_MS`  | integer `>= 0`, `300000`          | Same-author plan revision coalescing window in milliseconds.                                                                                                                                                                                          |
 | `observability.otlpEndpoint`         | `OTEL_EXPORTER_OTLP_ENDPOINT`     | URL, empty                        | OTLP tracing endpoint. Treat the value and emitted spans as sensitive.                                                                                                                                                                                |
+| `executors.sshReachabilityIntervalSeconds` | `KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS` | integer `>= 0`, `60` | Interval between background SSH-executor reachability probes, in seconds. `0` disables the poller entirely; a probed executor then keeps its last recorded state rather than going stale. The effective cadence is otherwise clamped to `15`-`3600`: a value from `1` to `14` becomes `15`, and a value above `3600` becomes `3600`, each logged once at startup. Valid environment and YAML values use this clamp. An invalid environment value falls back to `60`; an invalid YAML value fails startup like any other typed catalog key. |
 | `office.schedulerTickMs`             | `KANDEV_OFFICE_SCHEDULER_TICK_MS` | positive integer, `5000`          | Office queued/retry run safety-net interval in milliseconds.                                                                                                                                                                                          |
 | `launcher.webPort`                   | `KANDEV_WEB_PORT`                 | automatic, `0`                    | Development web-server port. It is used with `dev` and ignored by embedded-asset launches.                                                                                                                                                            |
 | `launcher.healthTimeoutMs`           | `KANDEV_HEALTH_TIMEOUT_MS`        | positive integer, `45000`         | Launcher startup-health timeout in milliseconds. Development and E2E profiles use a longer default.                                                                                                                                                   |
@@ -453,7 +454,7 @@ docker:
   volumeBasePath: "/var/lib/kandev/volumes" # compatibility-only today
 
 agent:
-  standaloneHost: "localhost"
+  standaloneHost: "127.0.0.1"
   standalonePort: 39429
 
 tasks:
@@ -580,7 +581,7 @@ The source checkout's `make dev` activates the embedded development profile, whi
 
 ## Credentials and product settings
 
-The **Unread Messages** preference in **Settings > Preferences > Task Behavior** controls the Slack-style **New** divider in session transcripts. It defaults off for each user, persists with user settings, and takes effect immediately. Enabling it also allows that user's active transcript view to advance the session read cursor.
+The **Unread Messages** preference in **Settings > Preferences > Task Behavior > Conversation** controls the Slack-style **New** divider in session transcripts. It defaults off for each user, persists with user settings, and takes effect immediately. Enabling it also allows that user's active transcript view to advance the session read cursor.
 
 Most integrations, executor profiles, agent profiles, MCP servers, repository settings, and UI preferences are persistent database records edited under **Settings**. They are not fields in `config.yaml`. Secret values use an encrypted secret store backed by `<home>/data/master.key`; filesystem permissions, database backups, and key backup are part of the security boundary.
 
@@ -630,9 +631,18 @@ overrides.
 | `agentctl.detachedEventLimit` | `KANDEV_ACP_DETACHED_EVENT_LIMIT` | `100` | Agent events retained per instance while no backend is attached. Accepts `1`-`10000`. Out-of-range or unparseable values fail startup. |
 | `planning.coalesceWindowMs`          | `KANDEV_PLAN_COALESCE_WINDOW_MS`  | `300000` | Non-negative milliseconds for same-author plan revision coalescing; invalid/negative uses five minutes.                                                                                                                                                                     |
 | `office.schedulerTickMs`             | `KANDEV_OFFICE_SCHEDULER_TICK_MS` |   `5000` | Positive integer safety-net interval for queued/retry run claiming. New-run signals are event-driven.                                                                                                                                                                       |
+| `office.maxConcurrentInstance`       | `KANDEV_OFFICE_MAX_CONCURRENT_INSTANCE` | `8` | Maximum concurrent runs for one Office agent instance. Invalid or non-positive values use the default. |
+| `office.maxConcurrentWorkspace`       | `KANDEV_OFFICE_MAX_CONCURRENT_WORKSPACE` | `4` | Maximum concurrent runs for one workspace. Invalid or non-positive values use the default. |
+| `office.workspaceBudgetPerHour`       | `KANDEV_OFFICE_WORKSPACE_BUDGET_PER_HOUR` | `120` | Maximum runs charged to one workspace in the rolling hourly budget. Invalid or non-positive values use the default. |
+| `office.routineBudgetPerHour`         | `KANDEV_OFFICE_ROUTINE_BUDGET_PER_HOUR` | `20` | Maximum runs charged to one routine in the rolling hourly budget. Invalid or non-positive values use the default. |
+| `office.promotionAgeMinutes`          | `KANDEV_OFFICE_PROMOTION_AGE_MINUTES` | `15` | Age in minutes after which a queued run receives priority promotion. Invalid or non-positive values use the default. |
+| `office.maxCausationDepth`            | `KANDEV_OFFICE_MAX_CAUSATION_DEPTH` | `8` | Maximum causation depth for a run. An enqueue beyond this depth is refused. Invalid or non-positive values use the default. |
+| `office.selfTriggerAllowance`         | `KANDEV_OFFICE_SELF_TRIGGER_ALLOWANCE` | `3` | Maximum self-triggered runs for one reason in the rolling hourly window. Invalid or non-positive values use the default. |
+| `office.selfTriggerTotalAllowance`   | `KANDEV_OFFICE_SELF_TRIGGER_TOTAL_ALLOWANCE` | `8` | Maximum self-triggered runs across all reasons in the rolling hourly window. Invalid or non-positive values use the default. |
+| `office.gateFailureThreshold`         | `KANDEV_OFFICE_GATE_FAILURE_THRESHOLD` | `3` | Consecutive launch-safety gate failures before the durable alert state is raised. Invalid or non-positive values use the default. |
 | `observability.otlpEndpoint`         | `OTEL_EXPORTER_OTLP_ENDPOINT`     |    unset | Enables OTLP/HTTP tracing for backend and agentctl spans; unset uses a no-op tracer.                                                                                                                                                                                        |
 
-Changing concurrency values trades process pressure against throughput and requires a restart. Under **Settings > Task Behavior > Message Queue**, an admin can save an install-wide capacity and independently control manual and automatic merging. The merge switches apply live and persist across restarts. `messageQueue.maxPerSession` resolves as environment, YAML, saved setting, then default; a non-negative YAML value or any valid environment value locks only capacity. A negative environment value means unlimited. See [Operations](operations.md#message-queue-settings) for capacity and automatic-fold behavior.
+Changing concurrency values trades process pressure against throughput and requires a restart. Under **Settings > Preferences > Task Behavior > Runtime**, an admin can save an install-wide capacity and independently control manual and automatic merging. The merge switches apply live and persist across restarts. `messageQueue.maxPerSession` resolves as environment, YAML, saved setting, then default; a non-negative YAML value or any valid environment value locks only capacity. A negative environment value means unlimited. See [Operations](operations.md#message-queue-settings) for capacity and automatic-fold behavior.
 
 The current OTLP exporter strips an `http://` or `https://` prefix from the configured endpoint and always uses `WithInsecure()`. Treat this as implementation-bound cleartext transport: send it only to a trusted private collector over a protected network, not directly across an untrusted network. The service name is `kandev-agentctl`, and spans can include task/session/execution IDs plus raw agent-event JSON truncated to 8192 characters. That payload can contain prompts, files, and tool data. Use collector-side access controls and retention accordingly.
 

@@ -34,19 +34,29 @@ export type CanvasAuthenticatedProxy = {
   count: (kind: RuntimeRequestKind, authenticated?: boolean) => number;
   observations: () => CanvasProxyObservation[];
   activeUpstreamRequests: () => number;
+  injectedRuntimeDocuments: () => number;
   close: () => Promise<void>;
+};
+
+export type CanvasAuthenticatedProxyOptions = {
+  /** Ask the proxy to try an HTML transformation when the origin permits it. */
+  injectRuntimeHtml?: boolean;
+  /** Simulate a proxy that removes the origin's no-transform directive. */
+  stripNoTransform?: boolean;
 };
 
 const runtimePrefix = "/api/v1/plugins/web-apps/runtime/";
 
 export async function startCanvasAuthenticatedProxy(
   backendURL: string,
+  options: CanvasAuthenticatedProxyOptions = {},
 ): Promise<CanvasAuthenticatedProxy> {
   const certificate = createCertificate();
   const backend = new URL(backendURL);
   const observations: CanvasProxyObservation[] = [];
   const upstreamRequests = new Set<ClientRequest>();
   const upstreamResponses = new Set<IncomingMessage>();
+  let injectedRuntimeDocumentCount = 0;
   const server = createTLSServer(
     {
       key: fs.readFileSync(certificate.keyPath),
@@ -95,14 +105,44 @@ export async function startCanvasAuthenticatedProxy(
           upstreamResponse = response;
           upstreamResponses.add(response);
           response.once("close", () => upstreamResponses.delete(response));
-          outgoing.writeHead(response.statusCode ?? 502, response.headers);
-          outgoing.flushHeaders();
+          const headers = proxyResponseHeaders(response.headers, options.stripNoTransform === true);
+          const shouldTransform =
+            options.injectRuntimeHtml === true &&
+            kind === "runtime-entry" &&
+            isHtmlContentType(headers["content-type"]) &&
+            !hasNoTransformDirective(headers["cache-control"]) &&
+            !headers["content-encoding"];
+          if (shouldTransform) {
+            const chunks: Buffer[] = [];
+            response.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
+            response.once("end", () => {
+              if (outgoing.destroyed) return;
+              const original = Buffer.concat(chunks);
+              const transformed = injectRuntimeHtml(original);
+              if (transformed.equals(original)) {
+                outgoing.writeHead(response.statusCode ?? 502, headers);
+                outgoing.end(original);
+                return;
+              }
+              injectedRuntimeDocumentCount += 1;
+              const transformedHeaders = {
+                ...headers,
+                "content-length": String(transformed.length),
+              };
+              delete transformedHeaders["transfer-encoding"];
+              outgoing.writeHead(response.statusCode ?? 502, transformedHeaders);
+              outgoing.end(transformed);
+            });
+          } else {
+            outgoing.writeHead(response.statusCode ?? 502, headers);
+            outgoing.flushHeaders();
+            response.pipe(outgoing);
+          }
           response.once("error", (error) => {
             if (!outgoing.destroyed) outgoing.destroy(error);
             destroyUpstream(error);
           });
           response.once("aborted", () => destroyUpstream());
-          response.pipe(outgoing);
         },
       );
       upstreamRequests.add(upstream);
@@ -176,11 +216,53 @@ export async function startCanvasAuthenticatedProxy(
       ).length,
     observations: () => observations.map((observation) => ({ ...observation })),
     activeUpstreamRequests: () => upstreamRequests.size,
+    injectedRuntimeDocuments: () => injectedRuntimeDocumentCount,
     close: async () => {
       await closeServer(server, sockets, upstreamRequests, upstreamResponses);
       fs.rmSync(certificate.directory, { recursive: true, force: true });
     },
   };
+}
+
+function proxyResponseHeaders(
+  source: IncomingMessage["headers"],
+  stripNoTransform: boolean,
+): IncomingMessage["headers"] {
+  const headers = { ...source };
+  if (!stripNoTransform) return headers;
+  const cacheControl = headerString(headers["cache-control"]);
+  if (!cacheControl) return headers;
+  const directives = cacheControl
+    .split(",")
+    .map((directive) => directive.trim())
+    .filter((directive) => directive.toLowerCase() !== "no-transform");
+  if (directives.length === 0) delete headers["cache-control"];
+  else headers["cache-control"] = directives.join(", ");
+  return headers;
+}
+
+function headerString(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value.join(", ") : (value ?? "");
+}
+
+function hasNoTransformDirective(value: string | string[] | undefined): boolean {
+  return headerString(value)
+    .split(",")
+    .some((directive) => directive.trim().toLowerCase() === "no-transform");
+}
+
+function isHtmlContentType(value: string | string[] | undefined): boolean {
+  return headerString(value).toLowerCase().startsWith("text/html");
+}
+
+function injectRuntimeHtml(document: Buffer): Buffer {
+  const source = document.toString("utf8");
+  const script = '<script src="https://static.cloudflareinsights.com/beacon.min.js"></script>';
+  const closingHead = /<\/head\s*>/i.exec(source);
+  const transformed = closingHead
+    ? `${source.slice(0, closingHead.index)}${script}${source.slice(closingHead.index)}`
+    : `${source}${script}`;
+  return Buffer.from(transformed, "utf8");
 }
 
 function runtimeRequestKind(pathname: string, method: string): RuntimeRequestKind | null {

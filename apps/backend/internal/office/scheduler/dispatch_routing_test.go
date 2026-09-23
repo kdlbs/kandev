@@ -19,6 +19,7 @@ import (
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/scheduler"
+	"github.com/kandev/kandev/internal/office/service"
 )
 
 const (
@@ -110,7 +111,8 @@ func buildScheduler(t *testing.T, repo *officesqlite.Repository, starter schedul
 	if err != nil {
 		t.Fatalf("logger: %v", err)
 	}
-	ss := scheduler.NewSchedulerService(repo, log, nil)
+	svc := service.NewService(service.ServiceOptions{Repo: repo, Logger: log})
+	ss := scheduler.NewSchedulerService(repo, log, svc)
 	ss.SetResolver(routing.NewResolver(&repoAdapter{repo: repo}, nil))
 	ss.SetTaskStarter(starter)
 	return ss

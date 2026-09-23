@@ -483,4 +483,48 @@ test.describe("Plugin-backed canvases on mobile", () => {
       await releaseFeature();
     }
   });
+
+  test("opens one published task canvas after returning and keeps Back usable", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    let canvasId: string | undefined;
+    let taskId: string | undefined;
+    let authoringPage: Page | undefined;
+    try {
+      await testPage.goto("/");
+      authoringPage = await testPage.context().newPage();
+      const seeded = await seedTaskCanvas(authoringPage, apiClient, seedData, true);
+      canvasId = seeded.canvas.id;
+      taskId = seeded.taskId;
+      await authoringPage.close();
+      authoringPage = undefined;
+
+      await testPage.reload();
+      await testPage.goto(`/t/${encodeURIComponent(seeded.taskId)}`);
+      await expect(testPage).toHaveURL(new RegExp(`${canvasHref(seeded.canvas.id)}$`), {
+        timeout: 30_000,
+      });
+      await expect(testPage.getByTestId("canvas-host-route")).toBeVisible({ timeout: 20_000 });
+      await expect(testPage.getByTestId("web-app-frame")).toHaveAttribute(
+        "data-frame-state",
+        "ready",
+        { timeout: 20_000 },
+      );
+
+      await testPage.goBack();
+      await expect(testPage).toHaveURL(new RegExp(`/t/${seeded.taskId}(?:[?]|$)`));
+      await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible({ timeout: 20_000 });
+      await expect(testPage.getByTestId("canvas-host-route")).toHaveCount(0);
+    } finally {
+      await authoringPage?.close();
+      if (canvasId) await removeCanvas(apiClient, canvasId);
+      if (taskId) await apiClient.deleteTask(taskId).catch(() => undefined);
+      await releaseFeature();
+    }
+  });
 });

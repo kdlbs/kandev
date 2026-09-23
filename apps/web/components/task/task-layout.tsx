@@ -14,6 +14,7 @@ import type { Layout } from "react-resizable-panels";
 import { useTaskCanvasLifecycleActivation } from "./dockview-canvas-activation";
 import { statusSummaryTaskError } from "@/lib/task-status-summary";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
+import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
 
 // Re-export for backwards compatibility
 export type { SelectedDiff } from "@/hooks/use-session-layout-state";
@@ -49,6 +50,7 @@ type TaskLayoutProps = {
   isArchived?: boolean;
   onTaskUnarchived?: (taskId: string) => void;
   taskCanvases?: Canvas[];
+  taskCanvasesStatus?: TaskCanvasesLoadStatus;
 };
 
 export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
@@ -91,12 +93,20 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
   initialLayout,
   isArchived,
   onTaskUnarchived,
-  taskCanvases = [],
+  taskCanvases,
+  taskCanvasesStatus,
 }: TaskLayoutProps) {
   const { isMobile, usesDesktopWorkbench, isFullDesktop } = useResponsiveBreakpoint();
   const launchErrorContext = useTaskLaunchErrorContext();
   const hasSharedTaskError = Boolean(statusSummaryTaskError(launchErrorContext?.statusSummary));
-  useTaskCanvasLifecycleActivation({ taskId, workspaceId, isMobile });
+  useTaskCanvasLifecycleActivation({
+    taskId,
+    workspaceId,
+    sessionId,
+    isMobile,
+    taskCanvases,
+    taskCanvasesStatus,
+  });
   const router = useRouter();
   const onOpenCanvas = useCallback(
     (canvasId: string) => router.push(canvasHref(canvasId)),
@@ -122,7 +132,7 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
         remoteStatusError={remoteStatusError}
         isArchived={isArchived}
         onTaskUnarchived={onTaskUnarchived}
-        taskCanvases={taskCanvases}
+        taskCanvases={taskCanvases ?? []}
         onOpenCanvas={onOpenCanvas}
         hasSharedTaskError={hasSharedTaskError}
       />

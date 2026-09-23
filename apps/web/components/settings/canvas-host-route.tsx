@@ -15,6 +15,11 @@ import {
 } from "@/lib/api/domains/canvas-api";
 import { canvasErrorMessage } from "@/lib/api/domains/canvas-error-copy";
 import { useCanvasLifecycleRevision } from "@/lib/canvas-lifecycle";
+import { useAppStore } from "@/components/state-provider";
+import {
+  canvasPresentationUserId,
+  recordCanvasPresentation,
+} from "@/lib/canvas-presentation-storage";
 import { useCanvasHostCanvases } from "./canvas-host-picker";
 import { type CanvasHostState } from "./canvas-host-components";
 import { CanvasHostRouteView } from "./canvas-host-route-view";
@@ -393,6 +398,7 @@ export function CanvasHostRoute({
   const { t } = useTranslation();
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
+  const presentationUserId = useAppStore((state) => canvasPresentationUserId(state.auth));
   const {
     canvas,
     runtimeUrl,
@@ -409,6 +415,19 @@ export function CanvasHostRoute({
   const [releasesOpen, setReleasesOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!canvas || canvas.scope_kind !== "task" || !canvas.task_id || !presentationUserId) return;
+    recordCanvasPresentation(
+      {
+        userId: presentationUserId,
+        workspaceId: canvas.workspace_id,
+        taskId: canvas.task_id,
+        canvasId: canvas.id,
+      },
+      "manual",
+    );
+  }, [canvas, presentationUserId]);
 
   const edit = () =>
     editCanvasFromHost({
