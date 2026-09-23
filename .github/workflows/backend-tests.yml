@@ -701,6 +701,32 @@ jobs:
             fi
           done
 
+      - name: Run PostgreSQL 18 exact profile attempt gates
+        run: |
+          set -euo pipefail
+          output_file="$(mktemp)"
+          go test -v -race -timeout 15m ./internal/task/repository/sqlite \
+            -run '^(TestPostgresExactProfileAttemptRereadsAssignmentAfterReplacement|TestPostgresLegacyExactReceiptLookupSerializesWithSuccessorBind|TestPostgresCurrentExactReceiptLookupSerializesWithSuccessorAssignment|TestPostgresExactProfileAttemptRejectsLegacyModelAfterReopen)$' \
+            2>&1 | tee "${output_file}"
+
+          for test_name in \
+            '=== RUN   TestPostgresExactProfileAttemptRereadsAssignmentAfterReplacement' \
+            '=== RUN   TestPostgresExactProfileAttemptRereadsAssignmentAfterReplacement/bind' \
+            '=== RUN   TestPostgresExactProfileAttemptRereadsAssignmentAfterReplacement/receipt' \
+            '=== RUN   TestPostgresLegacyExactReceiptLookupSerializesWithSuccessorBind' \
+            '=== RUN   TestPostgresCurrentExactReceiptLookupSerializesWithSuccessorAssignment' \
+            '=== RUN   TestPostgresExactProfileAttemptRejectsLegacyModelAfterReopen'; do
+            if ! grep -q "^${test_name}$" "${output_file}"; then
+              echo "::error::PostgreSQL 18 exact profile gate matched no ${test_name#*   } test"
+              exit 1
+            fi
+          done
+
+          if grep -q -- '--- SKIP:' "${output_file}"; then
+            echo "::error::PostgreSQL 18 exact profile gate skipped a required test"
+            exit 1
+          fi
+
   test-windows:
     name: Backend (windows)
     needs: changes

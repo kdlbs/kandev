@@ -206,6 +206,36 @@ func TestPostgresCurrentExactReceiptLookupSerializesWithSuccessorAssignment(t *t
 	}
 }
 
+func TestPostgresExactProfileAttemptRejectsLegacyModelAfterReopen(t *testing.T) {
+	repo, _, _ := newTaskPostgresRepoPair(t)
+	ctx := context.Background()
+	assignment := seedPostgresExactProfileAttempt(t, repo, "legacy-model")
+	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: "exact-pg-legacy-model-session", ExecutionID: "exact-pg-legacy-model-execution", AttemptID: "exact-pg-legacy-model-attempt", SessionIncarnationID: "exact-pg-legacy-model-incarnation", AgentProfileID: assignment.AgentProfileID, Model: "model-exact", ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: binding.SessionID, TaskID: binding.TaskID, QueueIncarnationID: binding.SessionIncarnationID, State: models.TaskSessionStateCreated}); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := repo.BindExactProfileLaunchAttempt(ctx, binding); err != nil || !changed {
+		t.Fatalf("bind = (%v, %v)", changed, err)
+	}
+	receipt := &models.ExactProfileLaunchReceipt{TaskID: binding.TaskID, SessionID: binding.SessionID, AgentProfileID: binding.AgentProfileID, ProfileRevision: binding.ProfileRevision, Generation: binding.Generation, Model: binding.Model, Outcome: models.ExactProfileLaunchOutcomeApplied, InferenceStarted: true}
+	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(ctx, binding, receipt); err != nil || !changed {
+		t.Fatalf("receipt = (%v, %v)", changed, err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE task_exact_profile_launch_attempt_bindings SET model = '' WHERE task_id = ? AND session_id = ?`), binding.TaskID, binding.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewWithDB(repo.db, repo.ro, nil)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if current, err := reopened.GetCurrentExactProfileLaunchAttempt(ctx, binding.TaskID, binding.SessionID); err != nil || current != nil {
+		t.Fatalf("legacy binding = %#v, %v", current, err)
+	}
+	if stale, err := reopened.GetExactProfileLaunchReceipt(ctx, binding.TaskID, binding.SessionID); err != nil || stale != nil {
+		t.Fatalf("legacy receipt = %#v, %v", stale, err)
+	}
+}
+
 func seedPostgresExactProfileAttempt(t *testing.T, repo *Repository, suffix string) *models.ExactProfileAssignment {
 	t.Helper()
 	ctx := context.Background()
