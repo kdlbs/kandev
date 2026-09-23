@@ -393,13 +393,13 @@ func (s *Service) recordExactProfileInferenceEvidence(
 	eventType string,
 	providerDiagnostic bool,
 	text string,
+	toolCallID string,
 	taskID string,
 	sessionID string,
 	executionID string,
 	attempt *models.ExactProfileLaunchAttemptBinding,
 ) {
-	if attempt == nil || (eventType != "message_streaming" && eventType != "thinking_streaming") ||
-		providerDiagnostic || strings.TrimSpace(text) == "" {
+	if attempt == nil || providerDiagnostic || !exactProfileInferenceProgress(eventType, text, toolCallID) {
 		return
 	}
 	binding := *attempt
@@ -423,4 +423,11 @@ func (s *Service) recordExactProfileInferenceEvidence(
 		s.logger.Debug("exact-profile inference evidence was not current",
 			zap.String("task_id", binding.TaskID), zap.String("session_id", binding.SessionID), zap.Error(err))
 	}
+}
+
+func exactProfileInferenceProgress(eventType, text, toolCallID string) bool {
+	if eventType == "message_streaming" || eventType == "thinking_streaming" {
+		return strings.TrimSpace(text) != ""
+	}
+	return (eventType == agentEventToolCall || eventType == agentEventToolUpdate) && strings.TrimSpace(toolCallID) != ""
 }

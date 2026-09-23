@@ -84,6 +84,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		eventType,
 		payload.Data.ProviderDiagnosticCandidate,
 		payload.Data.Text,
+		payload.Data.ToolCallID,
 		payload.TaskID,
 		payload.SessionID,
 		eventExecutionID,

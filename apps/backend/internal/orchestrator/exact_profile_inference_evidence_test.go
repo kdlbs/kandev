@@ -62,6 +62,27 @@ func TestExactProfileInferenceEvidenceRequiresCurrentNonemptyStreamProgress(t *t
 	require.Equal(t, receipt.CreatedAt, replayed.CreatedAt)
 }
 
+func TestExactProfileInferenceEvidenceAcceptsCorrelatedToolProgress(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	revision := exactProfileRecoveryAssignment(t, repo)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: session.TaskID, SessionID: session.ID, ExecutionID: "exec-tool", AttemptID: "attempt-tool", SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: "profile-exact", Model: "gpt-exact", ProfileRevision: revision, Generation: 1}
+	changed, err := repo.BindExactProfileLaunchAttempt(ctx, binding)
+	require.NoError(t, err)
+	require.True(t, changed)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = &mockMessageCreator{}
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{TaskID: binding.TaskID, SessionID: binding.SessionID, ExecutionID: binding.ExecutionID, ExactProfileAttempt: binding, Data: &lifecycle.AgentStreamEventData{Type: agentEventToolCall, ToolCallID: "tool-progress"}})
+	receipt, err := repo.GetExactProfileLaunchReceipt(ctx, binding.TaskID, binding.SessionID)
+	require.NoError(t, err)
+	require.NotNil(t, receipt)
+	require.True(t, receipt.InferenceStarted)
+	require.Equal(t, binding.Model, receipt.Model)
+}
+
 func assertNoExactProfileAttemptReceipt(t *testing.T, ctx context.Context, repo interface {
 	GetExactProfileLaunchReceipt(context.Context, string, string) (*models.ExactProfileLaunchReceipt, error)
 }, binding *models.ExactProfileLaunchAttemptBinding) {
