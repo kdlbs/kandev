@@ -43,48 +43,46 @@ export function MobileCanvasesSection({
           <IconChevronRight className="size-3.5 text-muted-foreground" />
         )}
       </Button>
-      {expanded && (
-        <div id={bodyId} className="space-y-2">
-          {loading && (
-            <p role="status" className="text-sm text-muted-foreground">
-              {t("common:loading")}
-            </p>
-          )}
-          {error && (
-            <div role="alert" className="space-y-2 text-sm">
-              <p>{t("common:requestFailed")}</p>
-              <Button variant="outline" className="h-11 cursor-pointer" onClick={onRetry}>
-                {t("canvases:retry")}
-              </Button>
-            </div>
-          )}
-          {!loading &&
-            !error &&
-            entries.map((entry) => (
-              <Button
-                key={entry.target.id}
-                asChild
-                variant="outline"
-                className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
-              >
-                <Link href={entry.href!} onClick={onNavigate}>
-                  <IconLayoutGrid className="size-4 shrink-0" />
-                  <span className="min-w-0 truncate">{entry.label}</span>
-                </Link>
-              </Button>
-            ))}
-          <Button
-            asChild
-            variant="outline"
-            className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
-          >
-            <Link href={workspaceCanvasSettingsHref(workspaceId)} onClick={onNavigate}>
-              <IconLayoutGrid className="size-4 shrink-0" />
-              {t("canvases:openWorkspaceSettings")}
-            </Link>
-          </Button>
-        </div>
-      )}
+      <div id={bodyId} hidden={!expanded} className="space-y-2">
+        {loading && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {t("common:loading")}
+          </p>
+        )}
+        {error && (
+          <div role="alert" className="space-y-2 text-sm">
+            <p>{t("common:requestFailed")}</p>
+            <Button variant="outline" className="h-11 cursor-pointer" onClick={onRetry}>
+              {t("canvases:retry")}
+            </Button>
+          </div>
+        )}
+        {!loading &&
+          !error &&
+          entries.map((entry) => (
+            <Button
+              key={entry.target.id}
+              asChild
+              variant="outline"
+              className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
+            >
+              <Link href={entry.href!} onClick={onNavigate}>
+                <IconLayoutGrid className="size-4 shrink-0" />
+                <span className="min-w-0 truncate">{entry.label}</span>
+              </Link>
+            </Button>
+          ))}
+        <Button
+          asChild
+          variant="outline"
+          className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
+        >
+          <Link href={workspaceCanvasSettingsHref(workspaceId)} onClick={onNavigate}>
+            <IconLayoutGrid className="size-4 shrink-0" />
+            {t("canvases:openWorkspaceSettings")}
+          </Link>
+        </Button>
+      </div>
     </section>
   );
 }

@@ -87,7 +87,7 @@ Home and quick actions, Tasks, then workspace tools. Built-in disclosures retain
 setup and recovery actions; regular task menus use the existing create button.
 The legacy Canvas block defers to the saved layout, including hidden Canvases.
 
-Validation: 16 mobile regressions, 3 desktop regressions, and 57 focused unit tests
+Validation: 16 mobile regressions, 3 desktop regressions, and 58 focused unit tests
 passed. Typecheck, focused ESLint, localization checks, docs catalog/spec checks,
 and harness validation passed. See the work order for exact commands and results.
 

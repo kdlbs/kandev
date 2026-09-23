@@ -73,7 +73,7 @@ nodes above Tasks. Covers the acceptance criteria in frontmatter.
 make build-web
 (cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/settings/mobile-sidebar-customization.spec.ts tests/layout/mobile-menu-hierarchy.spec.ts tests/integrations/mobile-integrations-nav.spec.ts -- --retries=0)
 (cd apps/web && pnpm e2e:run --no-build --project chromium tests/settings/sidebar-customization.spec.ts -- --retries=0)
-(cd apps/web && pnpm exec vitest run components/integrations/integrations-menu.test.ts components/navigation/app-nav-sheet.test.tsx components/navigation/mobile-automations-section.test.tsx components/app-sidebar/shortcut-section.test.tsx components/kanban/mobile-menu-utility-actions.test.tsx components/navigation/destination-rows.test.tsx)
+(cd apps/web && pnpm exec vitest run components/integrations/integrations-menu.test.ts components/navigation/app-nav-sheet.test.tsx components/navigation/mobile-automations-section.test.tsx components/navigation/mobile-canvases-section.test.tsx components/app-sidebar/shortcut-section.test.tsx components/kanban/mobile-menu-utility-actions.test.tsx components/navigation/destination-rows.test.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run i18n:check)
 python3 scripts/list-docs.py validate
@@ -106,7 +106,7 @@ task/dialog state remains owned by the existing retained controller.
   screenshot spec in the same invocation: 17 passed (16 permanent regressions
   plus capture), retries disabled. A final capture-only run regenerated all seven
   assets after visual refinement. The desktop command passed all 3 tests.
-- Green: 57 focused unit tests across the six listed suites. Typecheck, focused
+- Green: 58 focused unit tests across the seven listed suites. Typecheck, focused
   ESLint, `i18n:check`, docs catalog validation, all spec lint, public-docs
   validation, harness validation, and `git diff --check` passed.
 - Visual inspection: seeded phone task list, expanded provider/settings rows,
@@ -115,3 +115,13 @@ task/dialog state remains owned by the existing retained controller.
   screenshots use actual rendered UI and no DOM/CSS alterations.
 - Public navigation documentation, sidebar requirements/design, and scoped
   frontend guidance updated with the phone composition contract.
+
+### PR accessibility remediation
+
+A regression test reproduced the Canvas disclosure pointing to a missing panel
+while collapsed. The panel now remains mounted with `hidden`, preserving its
+accessible relationship throughout open/close transitions. The 58 focused unit
+tests, 16 mobile regressions, typecheck, and affected ESLint pass after the fix.
+The shared automation identifier remains paired with its owning disclosure, and
+canvas URLs remain guaranteed by `buildShortcutCatalog` and `canvasHref`; no
+placeholder navigation is introduced.
