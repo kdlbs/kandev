@@ -1689,32 +1689,24 @@ test('six work orders sharing three requirements stay within the search quota', 
 });
 
 // @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-003.2
-test('PR-only requirements and empty searches reuse a bounded directory lookup', async () => {
-  const { contents, changed, requirementPath, requirementIds } = repeatedCoverageFixture();
+test('newly added requirements resolve from the head diff without code search', async () => {
+  const { contents, changed, requirementPath: originalPath } = repeatedCoverageFixture();
+  const requirementPath = 'docs/specs/ui/requirements/coverage.md';
+  contents[requirementPath] = contents[originalPath];
+  delete contents[originalPath];
   changed.push({ filename: requirementPath, status: 'added' });
   let searches = 0;
-  let listings = 0;
   const client = coverageClient(contents, changed, {
     async searchCode() {
       searches += 1;
-      return [];
-    },
-    async listDirectory(directory, ref) {
-      assert.equal(directory, 'docs/specs/ui/requirements');
-      assert.equal(ref, SHA_B);
-      listings += 1;
-      if (listings > 1) {
-        throw new Error('GitHub API request failed with HTTP 429: Too Many Requests');
-      }
-      return [{ path: requirementPath, type: 'file' }];
+      throw new Error('code search should not run for a newly added requirement');
     },
   });
 
   const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
 
   assert.equal(result.status, 'covered', result.errors.join('; '));
-  assert.equal(searches, requirementIds.length);
-  assert.equal(listings, 1);
+  assert.equal(searches, 0);
 });
 
 // @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-001.5
@@ -1786,20 +1778,21 @@ test('lookup errors fail closed without poisoning later evaluations', async t =>
   for (const boundary of ['searchCode', 'listDirectory']) {
     await t.test(boundary, async () => {
       const { contents, changed, requirementPath } = repeatedCoverageFixture();
-      changed.push({ filename: requirementPath, status: 'added' });
+      const directoryFallbackPath = 'docs/specs/ui/requirements/coverage.md';
+      contents[directoryFallbackPath] = contents[requirementPath];
       let fail = true;
       const client = coverageClient(contents, changed, {
         async searchCode() {
           if (fail && boundary === 'searchCode') {
             throw new Error('GitHub API request failed with HTTP 403: API rate limit exceeded');
           }
-          return [];
+          return boundary === 'listDirectory' ? [] : [requirementPath];
         },
         async listDirectory() {
           if (fail && boundary === 'listDirectory') {
             throw new Error('GitHub API request failed with HTTP 503: Service Unavailable');
           }
-          return [];
+          return [{ path: directoryFallbackPath, type: 'file' }];
         },
       });
 

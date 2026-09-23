@@ -1506,7 +1506,8 @@ function changedRequirementSources(changedFiles, requirementDirectory) {
     }
     const status = typeof change === 'string' ? undefined : change?.status;
     const headPath = status === 'removed' ? undefined : normalizedCurrent;
-    let basePath = normalizedCurrent;
+    const isAdded = status === 'added';
+    let basePath = isAdded ? undefined : normalizedCurrent;
     if (status === 'renamed' && typeof change.previous_filename === 'string') {
       try {
         basePath = normalizeRepoPath(change.previous_filename);
@@ -1525,10 +1526,16 @@ function changedRequirementSources(changedFiles, requirementDirectory) {
     }
     const key = normalizedHead ?? `base:${normalizedBase}`;
     if (!sources.has(key)) {
-      sources.set(key, { basePath: normalizedBase, headPath: normalizedHead });
+      sources.set(key, { basePath: normalizedBase, headPath: normalizedHead, isAdded });
     }
   }
   return [...sources.values()];
+}
+
+function candidateRequirementPath(requirementDirectory, requirementId) {
+  const parts = requirementId.split('-');
+  const filename = `${parts.slice(2).join('-').replace(/-\d+$/, '').toLowerCase()}.md`;
+  return `${requirementDirectory}/${filename}`;
 }
 
 async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) {
@@ -1643,9 +1650,13 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
       const requirementDirectory = `docs/specs/${system}/requirements`;
       const requirementPaths = new Set();
       const baseContentByHeadPath = new Map();
+      const addedRequirementPaths = new Set();
       for (const source of changedRequirementSources(changedFiles, requirementDirectory)) {
         if (source.headPath) {
           requirementPaths.add(source.headPath);
+          if (source.isAdded) {
+            addedRequirementPaths.add(source.headPath);
+          }
           await load(source.headPath, headSha, contents);
         }
         if (source.basePath) {
@@ -1669,7 +1680,13 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
         const baseContent = baseContentByHeadPath.get(definition.pathname);
         if (
           hasRequirementHeading(definition.content, requirementId)
-          && hasRequirementHeading(baseContent, requirementId)
+          && (
+            hasRequirementHeading(baseContent, requirementId)
+            || (
+              addedRequirementPaths.has(definition.pathname)
+              && definition.pathname === candidateRequirementPath(requirementDirectory, requirementId)
+            )
+          )
         ) {
           verifiedRequirementIds.add(requirementId);
         }
@@ -1713,10 +1730,9 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
           requirementDirectories.set(requirementDirectory, entries);
         }
         const entries = requirementDirectories.get(requirementDirectory);
-        const candidateNames = new Set(unresolvedRequirementIds.map(requirementId => {
-          const parts = requirementId.split('-');
-          return `${parts.slice(2).join('-').replace(/-\d+$/, '').toLowerCase()}.md`;
-        }));
+        const candidateNames = new Set(unresolvedRequirementIds.map(requirementId =>
+          POSIX_PATH.basename(candidateRequirementPath(requirementDirectory, requirementId))
+        ));
         for (const entry of entries) {
           if (entry.type === 'file' && candidateNames.has(POSIX_PATH.basename(entry.path))) {
             requirementPaths.add(entry.path);
