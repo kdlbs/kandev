@@ -281,6 +281,48 @@
         );
       }
 
+      function ChatTopBarStatus(props) {
+        var slotProps = props.slotProps || {};
+        if (slotProps.presentation !== "mobile") return null;
+        return jsx(
+          "span",
+          {
+            "data-testid": "e2e-chat-top-bar-status",
+            "data-task-id": slotProps.taskId || "",
+            "data-workspace-id": slotProps.workspaceId || "",
+            "data-active-session-id": slotProps.activeSessionId || "",
+            "data-session-ids": (slotProps.sessionIds || []).join(","),
+            "data-presentation": slotProps.presentation || "unknown",
+            className:
+              "min-w-0 max-w-full truncate rounded-md border px-3 py-2 text-xs text-muted-foreground",
+          },
+          "Fixture archive synchronization is ready",
+        );
+      }
+
+      function ChatTopBarAction(props) {
+        var slotProps = props.slotProps || {};
+        var activeState = React.useState(false);
+        var active = activeState[0];
+        var setActive = activeState[1];
+        if (slotProps.presentation !== "mobile") return null;
+        return jsx(
+          ui.Button,
+          {
+            type: "button",
+            variant: "outline",
+            className: "cursor-pointer",
+            "data-testid": "e2e-chat-top-bar-action",
+            "data-presentation": slotProps.presentation || "unknown",
+            "data-activated": active ? "true" : "false",
+            onClick: function () {
+              setActive(true);
+            },
+          },
+          active ? "Fixture action complete" : "Run fixture task action",
+        );
+      }
+
       // Debounce delay for the Notes panel's autosave — short, so e2e specs
       // don't need to wait long for a write to reach host.storage.
       var NOTES_SAVE_DEBOUNCE_MS = 150;
@@ -775,6 +817,8 @@
       registry.registerRoute(FIXTURE_HELLO_PATH, PluginPage);
       registry.registerComponent("task-sidebar", SidebarSlot);
       registry.registerComponent("main-top-bar", MainTopBarSlot);
+      registry.registerComponent("chat-top-bar", ChatTopBarStatus);
+      registry.registerComponent("chat-top-bar", ChatTopBarAction);
       registry.registerComponent("app-status-bar-left", StatusSlot);
       registry.registerComponent("app-status-bar-right", StatusSlot);
       registry.registerWsHandler("task.created", function () {

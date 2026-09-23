@@ -181,6 +181,14 @@ function verifyMenuOrder() {
   ).toBe(true);
 }
 
+function resetAppNavMocks() {
+  healthHasIssues = false;
+  resolvedTheme = "light";
+  navRegistrations = [];
+  workspaceActionsRegistrations = [];
+  vi.clearAllMocks();
+}
+
 describe("AppNavSheet", () => {
   // @covers AC-UI-MOBILE-MENU-007.1 AC-UI-MOBILE-MENU-007.2
   it("puts quick actions before local navigation and Settings before Stats", () => {
@@ -194,13 +202,7 @@ describe("AppNavSheet", () => {
     host.rerender(<SectionsHost />);
     expect(screen.queryByRole("button", { name: "Task views" })).toBeNull();
   });
-  beforeEach(() => {
-    healthHasIssues = false;
-    resolvedTheme = "light";
-    navRegistrations = [];
-    workspaceActionsRegistrations = [];
-    vi.clearAllMocks();
-  });
+  beforeEach(resetAppNavMocks);
   afterEach(cleanup);
 
   it("opens from the trigger and offers the manifest destinations plus pageNav", () => {
@@ -289,6 +291,24 @@ describe("AppNavSheet", () => {
 
     expect(screen.getByTestId("mobile-workspace-action")).not.toBeNull();
     expect(captured).toEqual({ workspaceId: "ws-1", presentation: "mobile" });
+  });
+});
+
+describe("AppNavSheet plugin actions", () => {
+  beforeEach(resetAppNavMocks);
+  afterEach(cleanup);
+
+  it("places page-scoped actions in the shared Plugins section", () => {
+    render(
+      <AppNavSheet
+        pluginActions={<button data-testid="session-plugin-action">Session action</button>}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+
+    const section = screen.getByTestId("mobile-plugin-nav-section");
+    expect(section.contains(screen.getByTestId("session-plugin-action"))).toBe(true);
+    expect(screen.getAllByText("Plugins")).toHaveLength(1);
   });
 });
 

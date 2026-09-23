@@ -1,30 +1,71 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { MobilePluginNavSection } from "./mobile-plugin-nav-section";
 
 const HELLO_PATH = "/plugins/hello";
+const HELLO_ITEM_TEST_ID = "mobile-plugin-nav-item-hello";
 
 vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => "/",
 }));
 
-function renderSection(onNavigate = () => {}) {
-  return render(<MobilePluginNavSection onNavigate={onNavigate} />);
+function renderSection(onNavigate = () => {}, actions?: ReactNode, includeDestinations = true) {
+  return render(
+    <MobilePluginNavSection
+      actions={actions}
+      includeDestinations={includeDestinations}
+      onNavigate={onNavigate}
+    />,
+  );
 }
 
-describe("MobilePluginNavSection", () => {
-  afterEach(() => {
-    cleanup();
-    ["plugin-a", "plugin-b"].forEach((id) => pluginRegistry.unregisterPlugin(id));
-    window.history.pushState({}, "", "/");
-  });
+afterEach(() => {
+  cleanup();
+  ["plugin-a", "plugin-b"].forEach((id) => pluginRegistry.unregisterPlugin(id));
+  window.history.pushState({}, "", "/");
+});
 
+describe("MobilePluginNavSection actions", () => {
   it("renders nothing when no plugin has registered a nav item", () => {
     const { container } = renderSection();
     expect(container.innerHTML).toBe("");
   });
 
+  it("renders page actions without requiring a plugin destination", () => {
+    const onNavigate = vi.fn();
+    renderSection(
+      onNavigate,
+      <button type="button" data-testid="session-plugin-action">
+        Session action
+      </button>,
+    );
+
+    const section = screen.getByTestId("mobile-plugin-nav-section");
+    const action = screen.getByTestId("session-plugin-action");
+    expect(section.contains(action)).toBe(true);
+    action.click();
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it("combines page actions and destinations under one Plugins heading", () => {
+    pluginRegistry
+      .forPlugin("plugin-a")
+      .registerNavItem({ id: "hello", label: "Hello", path: HELLO_PATH });
+
+    renderSection(() => {}, <span data-testid="session-plugin-status">Connected</span>);
+
+    expect(screen.getAllByText("Plugins")).toHaveLength(1);
+    const action = screen.getByTestId("session-plugin-status");
+    const destination = screen.getByTestId(HELLO_ITEM_TEST_ID);
+    expect(
+      action.compareDocumentPosition(destination) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
+
+describe("MobilePluginNavSection destinations", () => {
   it("renders main-section nav items so plugin pages are reachable on a phone", () => {
     pluginRegistry
       .forPlugin("plugin-a")
@@ -33,7 +74,7 @@ describe("MobilePluginNavSection", () => {
     renderSection();
 
     expect(screen.getByTestId("mobile-plugin-nav-section")).not.toBeNull();
-    expect(screen.getByTestId("mobile-plugin-nav-item-hello")).not.toBeNull();
+    expect(screen.getByTestId(HELLO_ITEM_TEST_ID)).not.toBeNull();
     expect(screen.getByText("Hello")).not.toBeNull();
   });
 
@@ -97,7 +138,7 @@ describe("MobilePluginNavSection", () => {
     renderSection();
 
     expect(
-      screen.getByTestId("mobile-plugin-nav-item-hello").querySelector("svg.tabler-icon-ticket"),
+      screen.getByTestId(HELLO_ITEM_TEST_ID).querySelector("svg.tabler-icon-ticket"),
     ).not.toBeNull();
     expect(
       screen.getByTestId("mobile-plugin-nav-item-other").querySelector("svg.tabler-icon-puzzle"),
@@ -111,7 +152,7 @@ describe("MobilePluginNavSection", () => {
       .registerNavItem({ id: "hello", label: "Hello", path: HELLO_PATH });
 
     renderSection(onNavigate);
-    screen.getByTestId("mobile-plugin-nav-item-hello").click();
+    screen.getByTestId(HELLO_ITEM_TEST_ID).click();
 
     expect(window.location.pathname).toBe(HELLO_PATH);
     expect(onNavigate).toHaveBeenCalledTimes(1);

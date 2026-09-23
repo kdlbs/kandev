@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
+  ChatTopBarSlotProps as PublicChatTopBarSlotProps,
   ChatSubmitDecorationSlotProps as PublicChatSubmitDecorationSlotProps,
   HostReact as PublicHostReact,
   MainTopBarSlotProps as PublicMainTopBarSlotProps,
@@ -22,6 +23,7 @@ import type {
   TaskPanelRegistration as PublicTaskPanelRegistration,
 } from "@kandev/plugin-sdk";
 import type {
+  ChatTopBarSlotProps as HostChatTopBarSlotProps,
   ChatSubmitDecorationSlotProps as HostChatSubmitDecorationSlotProps,
   MainTopBarSlotProps as HostMainTopBarSlotProps,
   PluginConversationApi,
@@ -87,6 +89,10 @@ describe("public plugin SDK", () => {
       HostMainTopBarSlotProps,
       PublicMainTopBarSlotProps
     > = true;
+    const chatTopBarSlotPropsAreCanonical: SameType<
+      HostChatTopBarSlotProps,
+      PublicChatTopBarSlotProps
+    > = true;
     const chatSubmitDecorationSlotPropsAreCanonical: SameType<
       HostChatSubmitDecorationSlotProps,
       PublicChatSubmitDecorationSlotProps
@@ -138,6 +144,7 @@ describe("public plugin SDK", () => {
     expect(associationIsCanonical).toBe(true);
     expect(navSectionIsCanonical).toBe(true);
     expect(mainTopBarSlotPropsAreCanonical).toBe(true);
+    expect(chatTopBarSlotPropsAreCanonical).toBe(true);
     expect(chatSubmitDecorationSlotPropsAreCanonical).toBe(true);
     expect(conversationMessageIsCanonical).toBe(true);
     expect(conversationTurnIsCanonical).toBe(true);

@@ -28,19 +28,20 @@ import { linkToTask, replaceTaskUrl } from "@/lib/links";
 
 type AppNavSheetProps = {
   pageNav?: ReactNode | ((close: () => void) => ReactNode);
+  /** Page-scoped plugin controls grouped with plugin navigation on phones. */
+  pluginActions?: ReactNode;
   omitDestinations?: string[];
   /** Reuse a workbench's existing task picker and selection controller. */
   onOpenTaskViews?: () => void;
 };
 
 /** Shared phone app navigation; wider page shells retain their side sheet. */
-export function AppNavSheet({ pageNav, omitDestinations, onOpenTaskViews }: AppNavSheetProps) {
+export function AppNavSheet(props: AppNavSheetProps) {
+  const { pageNav, pluginActions, omitDestinations, onOpenTaskViews } = props;
   const { isMobile } = useResponsiveBreakpoint();
   const pathname = usePathname();
   const inOffice = useInOffice();
-  const workspace = useAppStore((s) =>
-    s.workspaces.items.find((w) => w.id === s.workspaces.activeId),
-  );
+  const workspace = useActiveNavigationWorkspace();
   const [open, setOpen] = useState(false);
   const opener = useRef<HTMLButtonElement | null>(null);
   const restoreFocus = useRef(true);
@@ -48,9 +49,6 @@ export function AppNavSheet({ pageNav, omitDestinations, onOpenTaskViews }: AppN
   const controls = useAppNavDialogs(close, onOpenTaskViews);
   const renderedPageNav = typeof pageNav === "function" ? pageNav(close) : pageNav;
   const currentPage = listingPageForPath(pathname);
-  const closeOnLinkClick = (event: MouseEvent<HTMLElement>) => {
-    if (event.target instanceof Element && event.target.closest("a[href]")) close();
-  };
 
   return (
     <>
@@ -71,7 +69,7 @@ export function AppNavSheet({ pageNav, omitDestinations, onOpenTaskViews }: AppN
       >
         <nav
           className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))]"
-          onClick={closeOnLinkClick}
+          onClick={(event) => closeMenuOnLinkClick(event, close)}
         >
           {isMobile && <NavigationWorkspacePicker close={close} />}
           {!isMobile && renderedPageNav}
@@ -127,6 +125,7 @@ export function AppNavSheet({ pageNav, omitDestinations, onOpenTaskViews }: AppN
                 />
               </>
             }
+            pluginActions={pluginActions}
             controls={isMobile ? { ...controls, openTaskViews: undefined } : controls}
           />
         </nav>
@@ -134,6 +133,16 @@ export function AppNavSheet({ pageNav, omitDestinations, onOpenTaskViews }: AppN
       {controls.dialogs}
     </>
   );
+}
+
+function useActiveNavigationWorkspace() {
+  return useAppStore((state) =>
+    state.workspaces.items.find((workspace) => workspace.id === state.workspaces.activeId),
+  );
+}
+
+function closeMenuOnLinkClick(event: MouseEvent<HTMLElement>, close: () => void) {
+  if (event.target instanceof Element && event.target.closest("a[href]")) close();
 }
 
 function NavigationWorkspacePicker({ close }: { close: () => void }) {

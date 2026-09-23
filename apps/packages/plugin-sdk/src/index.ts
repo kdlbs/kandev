@@ -39,6 +39,25 @@ export interface MainTopBarSlotProps {
 }
 
 /**
+ * Context for the `chat-top-bar` slot. Phone task contributions live in the
+ * shared menu; tablet and desktop contributions remain inline in the top bar.
+ */
+export interface ChatTopBarSlotProps {
+  /** Task the top bar belongs to, or null before one exists. */
+  taskId: string | null;
+  /** Display title of the task, when known. */
+  taskTitle?: string;
+  /** Workspace the task lives in, when known. */
+  workspaceId: string | null;
+  /** Session the top bar is currently bound to, or null before one exists. */
+  activeSessionId: string | null;
+  /** Every Kandev session id on the task, including `activeSessionId`. */
+  sessionIds: string[];
+  /** Host surface that mounted the contribution. */
+  presentation: "desktop" | "mobile";
+}
+
+/**
  * Context passed to components registered for the `chat-submit-decoration`
  * slot, which renders *over* the chat composer's send button rather than
  * beside it. The host positions the layer against the button's box and makes
