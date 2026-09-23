@@ -102,11 +102,30 @@ For a keyboard move, press `Cmd/Ctrl+K`, search for **Move to**, and select a de
 
 Moves keep the normal reachability, authorization, WIP, archive, workspace, and active-session rules. A move waits for a running agent to finish, and its options survive queueing and backend restarts. Instructions require an active target session or a destination that auto-starts an agent. Pull-request draft and review status use the PR step's automation. For the agent tool contract, see [Automation and MCP](automation-and-mcp.md#task-mcp).
 
+## Change a task's workflow
+
+Choose **Change workflow...** from a single task's card, sidebar, task actions,
+or command-palette menu. Select a destination workflow and the step where this
+task will enter. The form previews the destination's session and settings before
+you submit. The task keeps its identity, description, repositories, and existing
+conversations.
+
+When a destination workflow has fixed agent profiles, the form can map each
+profile to a compatible profile for this task. These replacements affect this
+task only. Reset a row to use the workflow's profile. Submitting replaces this
+task's previous workflow-agent mappings with the form's current choices. The
+form shows existing conversation relationships as read-only workflow details.
+
+If the task changed while the form was open, refresh its assignment and review
+the form again. If the server response is uncertain, the form blocks another
+submission until you refresh the task. A multi-task selection keeps the separate
+bulk workflow action and does not support per-task profile mappings.
+
 ## Task actions from the command palette
 
 While a task is open, `Cmd/Ctrl+K` offers the task actions available from its sidebar
 menu, including Pin/Unpin, Color, Priority, Edit, Rename, Create subtask, Nest under,
-Link, Move to, Send to workflow, Archive, and Delete. Detach and plugin actions
+Link, Move to, Change workflow..., Archive, and Delete. Detach and plugin actions
 appear when applicable. These commands target the open task, even when the search
 also shows other tasks. Duplicate remains disabled.
 

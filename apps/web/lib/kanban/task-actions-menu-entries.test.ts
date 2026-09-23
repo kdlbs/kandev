@@ -35,7 +35,7 @@ const baseArgs = {
   currentPriority: "high",
   onSelectPriority: vi.fn(),
   onMoveToStep: vi.fn(),
-  onSendToWorkflow: vi.fn(),
+  onChangeWorkflow: vi.fn(),
   // A real card always wires at least one link handler; omitting it here
   // would silently drop "link" from the entries array and let the order
   // assertion below pass without ever exercising its actual position.
@@ -102,7 +102,7 @@ describe("buildTaskActionsMenuEntries — normal tier", () => {
       "detach",
       "move-separator",
       "move-to",
-      "send-to-workflow",
+      "change-workflow",
       REMOVE_SEPARATOR,
       "archive",
       "delete",
@@ -172,10 +172,10 @@ describe("buildTaskActionsMenuEntries — archived tier", () => {
     ]);
   });
 
-  it("omits Edit, Move to, Send to workflow, Link, Detach from parent, and Archive", () => {
+  it("omits Edit, Move to, Change workflow, Link, Detach from parent, and Archive", () => {
     const entries = buildTaskActionsMenuEntries("archived", baseArgs);
     const keys = itemKeys(entries);
-    for (const omitted of ["edit", "move-to", "send-to-workflow", "link", "archive", "detach"]) {
+    for (const omitted of ["edit", "move-to", "change-workflow", "link", "archive", "detach"]) {
       expect(keys).not.toContain(omitted);
     }
   });
@@ -206,10 +206,10 @@ describe("buildTaskActionsMenuEntries — unresolved board row tier", () => {
     ]);
   });
 
-  it("omits Edit, Move to, Send to workflow, Link, and Detach from parent even with a parentTaskId", () => {
+  it("omits Edit, Move to, Change workflow, Link, and Detach from parent even with a parentTaskId", () => {
     const entries = buildTaskActionsMenuEntries("unresolved-row", baseArgs);
     const keys = itemKeys(entries);
-    for (const omitted of ["edit", "move-to", "send-to-workflow", "link", "detach"]) {
+    for (const omitted of ["edit", "move-to", "change-workflow", "link", "detach"]) {
       expect(keys).not.toContain(omitted);
     }
   });

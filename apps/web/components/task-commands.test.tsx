@@ -43,7 +43,7 @@ describe("sidebar task command parity", () => {
       "task-link",
       "task-detach",
       "task-move",
-      "task-send-workflow",
+      "task-change-workflow",
       PLUGIN_ACTION,
       "task-delete",
     ]);

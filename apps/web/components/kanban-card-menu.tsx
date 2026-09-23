@@ -9,6 +9,7 @@ import {
 import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar-link-actions";
 import { cleanupSharesParentWorkspace } from "@/components/task/task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
+import { ChangeWorkflowDialog } from "@/components/task/change-workflow-dialog";
 import {
   TaskExternalLinkDialog,
   type ExternalLinkProvider,
@@ -36,7 +37,7 @@ export interface TaskCardMenuParams {
   steps?: WorkflowStep[];
   isDeleting?: boolean;
   isArchiving?: boolean;
-  /** Row-local in-flight move guard: disables move/send-to-workflow entries. */
+  /** Row-local in-flight move guard: disables move/change-workflow entries. */
   isMoving?: boolean;
   isSelected?: boolean;
   selectedIds?: Set<string>;
@@ -217,6 +218,9 @@ export function useKanbanCardMenus({
     onDelete: onDelete ? () => dialogs.setShowDeleteConfirm(true) : undefined,
     onDetach: task.parentTaskId && !actingOnMultiSelection ? requestDetachConfirmation : undefined,
     ...buildLinkDialogHandlers(externalLinkAvailability, dialogs),
+    onChangeWorkflow: () => {
+      window.setTimeout(() => dialogs.setShowChangeWorkflow(true), 300);
+    },
     pluginLinkActions,
   };
 
@@ -239,14 +243,15 @@ export function useKanbanCardMenus({
     dropdownMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
       onMoveToStep: moveMenu.moveToStepFromDropdown,
-      onSendToWorkflow: moveMenu.sendTaskToWorkflow,
       pluginMenuContext,
       pluginEntries,
     }),
     contextMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
       onMoveToStep: moveMenu.moveSelectedToStep,
-      onSendToWorkflow: moveMenu.sendSelectionToWorkflow,
+      onChangeWorkflow: actingOnMultiSelection ? undefined : menuBase.onChangeWorkflow,
+      onSendToWorkflow: actingOnMultiSelection ? moveMenu.sendSelectionToWorkflow : undefined,
+      isBulkSelection: actingOnMultiSelection,
       pluginMenuContext,
       pluginEntries,
     }),
@@ -279,6 +284,13 @@ export function KanbanCardDialogs({
 }) {
   return (
     <>
+      <ChangeWorkflowDialog
+        open={menu.showChangeWorkflow}
+        onOpenChange={menu.setShowChangeWorkflow}
+        taskId={task.id}
+        workspaceId={workspaceId}
+        focusReturnRef={menu.detachFocusReturnRef}
+      />
       <TaskDeleteConfirmDialog
         open={menu.showDeleteConfirm}
         onOpenChange={menu.setShowDeleteConfirm}

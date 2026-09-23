@@ -215,7 +215,7 @@ describe("TaskItemWithContextMenu — grouped single-task actions", () => {
       "Link",
       "Detach from parent",
       "Move to",
-      "Send to workflow",
+      "Change workflow...",
       PLUGIN_ACTION_LABEL,
       "Archive",
       "Delete",
@@ -276,7 +276,7 @@ describe("TaskItemWithContextMenu — grouped bulk actions", () => {
     expect(labels).toEqual([
       "Pin 2 tasks",
       "Move to",
-      "Send to workflow",
+      "Change workflow for selected tasks",
       "Archive 2 tasks",
       "Delete 2 tasks",
     ]);

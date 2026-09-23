@@ -23,6 +23,10 @@ actions are owned by
 
 ## Requirements
 
+The proposed [Change workflow extension](change-workflow.md) adds a form and
+mapping contract for single-task cross-workflow actions. Its delivery package
+will reconcile the direct-submenu behavior below when that feature ships.
+
 ### REQ-TASKS-TASK-ACTIONS-MENU-003: Action outcomes and post-action navigation
 
 **Intent:** An action taken from one of these surfaces has the same effect on

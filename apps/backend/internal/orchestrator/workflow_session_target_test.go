@@ -7,10 +7,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/stretchr/testify/require"
 )
+
+type workflowTargetTestCredentialIssuer struct{}
+
+func (workflowTargetTestCredentialIssuer) Issue(context.Context, gitcredentials.Scope) (gitcredentials.Lease, error) {
+	return gitcredentials.Lease{Token: "opaque-test-lease"}, nil
+}
 
 type failWorkflowRouteMetadataRepo struct {
 	repoStore
@@ -171,6 +178,73 @@ func TestWorkflowSessionTargetUsesTaskEffectiveSourceProfile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, session.ID, resolution.session.ID)
 	require.Equal(t, "profile-b", resolution.profileID)
+}
+
+func TestWorkflowChangeCredentialPreflightUsesCandidateBoundSession(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	now := time.Now().UTC()
+	require.NoError(t, fixture.repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-destination", WorkspaceID: "ws1", Name: "Destination", CreatedAt: now, UpdatedAt: now,
+	}))
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	candidateOverrides, err := models.NewWorkflowAgentOverrides("wf-destination", []models.WorkflowAgentOverrideBinding{{
+		StepID: "implement", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b",
+	}})
+	require.NoError(t, err)
+	source := &wfmodels.WorkflowStep{
+		ID: "implement", WorkflowID: "wf-destination", Position: 0, AgentProfileID: "profile-a",
+	}
+	target := &wfmodels.WorkflowStep{
+		ID: "pr", WorkflowID: "wf-destination", Position: 1,
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyReuse,
+		SessionTarget:             &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetStep, StepID: source.ID},
+	}
+	fixture.stepGetter.steps[source.ID] = source
+	fixture.stepGetter.steps[target.ID] = target
+
+	require.NoError(t, fixture.repo.CreateExecutor(ctx, &models.Executor{
+		ID: "exec-ssh", Name: "SSH", Type: models.ExecutorTypeSSH,
+	}))
+	require.NoError(t, fixture.repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{
+		ID: "executor-profile-a", ExecutorID: "exec-ssh", Name: "A without GitHub token",
+	}))
+	require.NoError(t, fixture.repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{
+		ID: "executor-profile-b", ExecutorID: "exec-ssh", Name: "B with GitHub token",
+		Config: map[string]string{"remote_auth_secrets": `{"gh_cli_env":"test-token"}`},
+	}))
+	fixture.current.ExecutorID = "exec-ssh"
+	fixture.current.ExecutorProfileID = "executor-profile-a"
+	require.NoError(t, fixture.repo.UpdateTaskSession(ctx, fixture.current))
+	bound := &models.TaskSession{
+		ID: "session-profile-b", TaskID: task.ID, AgentProfileID: "profile-b",
+		ExecutorID: "exec-ssh", ExecutorProfileID: "executor-profile-b",
+		State: models.TaskSessionStateWaitingForInput,
+	}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, bound))
+	_, err = fixture.repo.UpsertWorkflowSessionBinding(ctx, &models.WorkflowSessionBinding{
+		TaskID: task.ID, TargetKey: workflowSessionBindingTargetKey(source.ID),
+		WorkflowID: "wf-destination", AgentProfileID: "profile-b", SessionID: bound.ID,
+		OperationID: "preflight-candidate-binding", UpdatedAt: now,
+	})
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-invalid-github", WorkspaceID: "ws1", Name: "Invalid GitHub remote",
+		SourceType: "local", Provider: "github", RemoteURL: "https://forge.example/acme/repo.git",
+	}))
+	require.NoError(t, fixture.repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-invalid-github", TaskID: task.ID, RepositoryID: "repo-invalid-github",
+	}))
+	fixture.svc.executor.SetGitHubCredentialBroker(
+		workflowTargetTestCredentialIssuer{}, "https://kandev.example/api/v1/github/credentials/resolve",
+	)
+	candidate := *task
+	candidate.WorkflowID = "wf-destination"
+	candidate.WorkflowAgentOverrides = candidateOverrides
+
+	err = fixture.svc.PreflightWorkflowStepChange(ctx, &candidate, fixture.current, target)
+	require.NoError(t, err, "candidate binding B supplies its own remote Git credential profile")
 }
 
 func TestRecordWorkflowSourceBindingDoesNotOverwriteRevisitedSourceEntry(t *testing.T) {

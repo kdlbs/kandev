@@ -170,8 +170,10 @@ type TaskMoveContextMenuItemsProps = {
     entryOptions: WorkflowMoveEntryOptions | undefined,
   ) => Promise<boolean>;
   isMoving?: boolean;
+  isBulkSelection?: boolean;
   progressByStepId?: Readonly<Record<string, WorkflowStepProgress>>;
   agentLabelsByProfileId?: Readonly<Record<string, string>>;
+  onChangeWorkflow?: () => void;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 };
 
@@ -526,11 +528,11 @@ function SendToWorkflowSubmenu({
     <ContextMenuSub>
       <ContextMenuSubTrigger
         className="[@media(pointer:coarse)]:min-h-11"
-        data-testid="task-context-send-to-workflow"
+        data-testid="task-context-change-workflow-selection"
         disabled={disabled}
       >
         <IconLogicBuffer className="mr-2 h-4 w-4" />
-        {t("task:sendToWorkflow")}
+        {t("task:changeWorkflowForSelectedTasks")}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-56">
         {workflows.map((workflow) => (
@@ -558,10 +560,13 @@ export function TaskMoveContextMenuItems({
   onMoveToStepWithOptions,
   onSubmitWithOptions,
   isMoving,
+  isBulkSelection = false,
   progressByStepId,
   agentLabelsByProfileId,
+  onChangeWorkflow,
   onSendToWorkflow,
 }: TaskMoveContextMenuItemsProps) {
+  const { t } = useTranslation();
   const { currentSteps, targets, canMove, canSend } = taskMoveOptions(
     currentWorkflowId,
     workflows,
@@ -570,7 +575,9 @@ export function TaskMoveContextMenuItems({
   const hasSameWorkflowMove = Boolean(
     (onMoveToStep || onMoveToStepWithOptions || onSubmitWithOptions) && canMove,
   );
-  const hasCrossWorkflowMove = Boolean(onSendToWorkflow && canSend);
+  const hasCrossWorkflowMove = Boolean(
+    canSend && (isBulkSelection ? onSendToWorkflow : onChangeWorkflow),
+  );
 
   if (!hasSameWorkflowMove && !hasCrossWorkflowMove) return null;
 
@@ -588,12 +595,25 @@ export function TaskMoveContextMenuItems({
         progressByStepId={progressByStepId}
         agentLabelsByProfileId={agentLabelsByProfileId}
       />
-      <SendToWorkflowSubmenu
-        workflows={targets}
-        stepsByWorkflowId={stepsByWorkflowId}
-        disabled={disabled}
-        onSendToWorkflow={onSendToWorkflow}
-      />
+      {hasCrossWorkflowMove &&
+        (isBulkSelection ? (
+          <SendToWorkflowSubmenu
+            workflows={targets}
+            stepsByWorkflowId={stepsByWorkflowId}
+            disabled={disabled}
+            onSendToWorkflow={onSendToWorkflow}
+          />
+        ) : (
+          <ContextMenuItem
+            data-testid="task-context-change-workflow"
+            className="[@media(pointer:coarse)]:min-h-11"
+            disabled={disabled}
+            onSelect={onChangeWorkflow}
+          >
+            <IconLogicBuffer className="mr-2 h-4 w-4" />
+            {t("task:changeWorkflow")}
+          </ContextMenuItem>
+        ))}
     </>
   );
 }

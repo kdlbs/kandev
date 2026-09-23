@@ -94,7 +94,6 @@
   "selectRepository": "リポジトリを選択",
   "selectTask": "タスク {{title}} を選択",
   "selectWorkflow": "ワークフローを選択",
-  "sendToWorkflow": "ワークフローに送信",
   "selectedFilterCount_one": "{{label}}: {{count}}件選択",
   "selectedFilterCount_other": "{{label}}: {{count}}件選択",
   "sentryIssue": "Sentryの問題",
