@@ -149,15 +149,19 @@ test.describe("Workflow peer resume", () => {
       await expect(
         sessionPage.activeChat().locator(".tiptap.ProseMirror:visible").first(),
       ).toBeEditable();
-      await expect
-        .poll(() =>
-          countPeerDeliveries(
-            apiClient,
-            scenario!.implementationSessionId,
-            scenario!.implementationMarker,
-          ),
-        )
-        .toBe(1);
+      await waitForPeerSessionState(
+        apiClient,
+        scenario.taskId,
+        scenario.implementationSessionId,
+        "WAITING_FOR_INPUT",
+      );
+      expect(
+        await countPeerDeliveries(
+          apiClient,
+          scenario.implementationSessionId,
+          scenario.implementationMarker,
+        ),
+      ).toBe(1);
 
       const task = await apiClient.getTask(scenario.taskId);
       expect(task.workflow_step_id).toBe(scenario.reviewStepId);

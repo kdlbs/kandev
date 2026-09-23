@@ -182,15 +182,19 @@ test.describe("mobile: workflow peer resume", () => {
         sessionPage.activeChat().locator(".tiptap.ProseMirror:visible").first(),
       ).toBeEditable();
       await assertNoDocumentHorizontalOverflow(testPage, "mobile session-open recovery");
-      await expect
-        .poll(() =>
-          countPeerDeliveries(
-            apiClient,
-            scenario!.implementationSessionId,
-            scenario!.implementationMarker,
-          ),
-        )
-        .toBe(1);
+      await waitForPeerSessionState(
+        apiClient,
+        scenario.taskId,
+        scenario.implementationSessionId,
+        "WAITING_FOR_INPUT",
+      );
+      expect(
+        await countPeerDeliveries(
+          apiClient,
+          scenario.implementationSessionId,
+          scenario.implementationMarker,
+        ),
+      ).toBe(1);
 
       const task = await apiClient.getTask(scenario.taskId);
       expect(task.workflow_step_id).toBe(scenario.reviewStepId);
