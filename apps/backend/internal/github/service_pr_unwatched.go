@@ -239,11 +239,8 @@ func (s *Service) fetchUnwatchedTaskPRs(
 		return nil
 	}
 	if exec, execErr := graphQLExecutorFor(resolved.Client); execErr == nil {
-		out, err := s.batchedUnwatchedFetch(ctx, exec, resolved.CacheScope, refs)
+		out, err := s.batchedUnwatchedFetch(ctx, exec, resolved.Client, resolved.CacheScope, refs, explicitRefresh)
 		if err == nil {
-			if explicitRefresh {
-				s.enrichBatchedWorkflowAttention(ctx, resolved.Client, resolved.CacheScope, out)
-			}
 			return out
 		}
 		s.logger.Debug("batched unwatched task PR query failed; falling back per PR", zap.Error(err))
@@ -262,9 +259,13 @@ func (s *Service) fetchUnwatchedTaskPRs(
 // derivedFetchContext so one caller disconnecting mid-flight doesn't cascade
 // context.Canceled to its co-waiters, while keeping the leader's deadline.
 func (s *Service) batchedUnwatchedFetch(
-	ctx context.Context, exec GraphQLExecutor, cacheScope string, refs []graphQLPRRef,
+	ctx context.Context, exec GraphQLExecutor, client Client, cacheScope string,
+	refs []graphQLPRRef, explicitRefresh bool,
 ) (map[string]*PRStatus, error) {
 	key := scopedCacheKey(cacheScope, "unwatched:"+batchedRefsKey(refs))
+	if explicitRefresh {
+		key += prSyncExplicitRefreshKeySuffix
+	}
 	fetchCtx, cancelFetch := derivedFetchContext(ctx)
 	defer cancelFetch()
 	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
@@ -273,6 +274,9 @@ func (s *Service) batchedUnwatchedFetch(
 		repoErrGen := s.repoErrorGenSnapshot()
 		out, queryErr := runBatchedPRQuery(fetchCtx, exec, refs)
 		out, queryErr = s.absorbMissingReposErr(out, queryErr, cacheScope, repoErrGen)
+		if queryErr == nil && explicitRefresh {
+			s.enrichBatchedWorkflowAttention(fetchCtx, client, cacheScope, out)
+		}
 		return out, queryErr
 	})
 	if err != nil {
