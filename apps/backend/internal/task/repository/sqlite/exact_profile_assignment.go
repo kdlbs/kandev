@@ -485,19 +485,24 @@ func (r *Repository) GetExactProfileLaunchReceipt(ctx context.Context, taskID, s
 		return nil, fmt.Errorf("begin exact profile launch receipt lookup: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	assignmentLockQuery := `SELECT 1 FROM task_exact_profile_assignments WHERE task_id = ?`
 	sessionLockQuery := `SELECT 1 FROM task_sessions WHERE id = ? AND task_id = ?`
+	bindingLockQuery := `SELECT 1 FROM task_exact_profile_launch_attempt_bindings WHERE task_id = ? AND session_id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
+		assignmentLockQuery += ` FOR SHARE`
 		sessionLockQuery += ` FOR SHARE`
+		bindingLockQuery += ` FOR SHARE`
 	}
 	var found int
+	err = tx.GetContext(ctx, &found, r.db.Rebind(assignmentLockQuery), taskID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("lock exact profile receipt assignment: %w", err)
+	}
 	err = tx.GetContext(ctx, &found, r.db.Rebind(sessionLockQuery), sessionID, taskID)
 	if err == nil {
-		err = tx.GetContext(ctx, &found, r.db.Rebind(`SELECT 1 FROM task_exact_profile_launch_attempt_bindings WHERE task_id = ? AND session_id = ?`), taskID, sessionID)
+		err = tx.GetContext(ctx, &found, r.db.Rebind(bindingLockQuery), taskID, sessionID)
 		if err == nil {
-			if err := tx.Commit(); err != nil {
-				return nil, fmt.Errorf("commit exact profile receipt binding check: %w", err)
-			}
-			return r.getCurrentExactProfileAttemptReceipt(ctx, taskID, sessionID)
+			return r.getCurrentExactProfileAttemptReceiptTx(ctx, tx, taskID, sessionID)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("load exact profile launch attempt binding: %w", err)
@@ -543,10 +548,10 @@ func (r *Repository) getLegacyExactProfileLaunchReceiptTx(ctx context.Context, t
 	return &receipt, nil
 }
 
-func (r *Repository) getCurrentExactProfileAttemptReceipt(ctx context.Context, taskID, sessionID string) (*models.ExactProfileLaunchReceipt, error) {
+func (r *Repository) getCurrentExactProfileAttemptReceiptTx(ctx context.Context, tx *sqlx.Tx, taskID, sessionID string) (*models.ExactProfileLaunchReceipt, error) {
 	var binding models.ExactProfileLaunchAttemptBinding
 	var bindingRevision int64
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`SELECT task_id, session_id, execution_id, attempt_id, session_incarnation_id, agent_profile_id, profile_revision_nanos, generation, created_at FROM task_exact_profile_launch_attempt_bindings WHERE task_id=? AND session_id=?`), taskID, sessionID).Scan(&binding.TaskID, &binding.SessionID, &binding.ExecutionID, &binding.AttemptID, &binding.SessionIncarnationID, &binding.AgentProfileID, &bindingRevision, &binding.Generation, &binding.CreatedAt)
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT task_id, session_id, execution_id, attempt_id, session_incarnation_id, agent_profile_id, profile_revision_nanos, generation, created_at FROM task_exact_profile_launch_attempt_bindings WHERE task_id=? AND session_id=?`), taskID, sessionID).Scan(&binding.TaskID, &binding.SessionID, &binding.ExecutionID, &binding.AttemptID, &binding.SessionIncarnationID, &binding.AgentProfileID, &bindingRevision, &binding.Generation, &binding.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -554,30 +559,43 @@ func (r *Repository) getCurrentExactProfileAttemptReceipt(ctx context.Context, t
 		return nil, fmt.Errorf("load current exact profile attempt binding: %w", err)
 	}
 	binding.ProfileRevision = time.Unix(0, bindingRevision).UTC()
-	assignment, err := r.GetExactProfileAssignment(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
-	if assignment == nil || !assignment.Active || assignment.AgentProfileID != binding.AgentProfileID || assignment.Generation != binding.Generation || !assignment.ProfileRevision.Equal(binding.ProfileRevision) {
+	var current int
+	err = tx.GetContext(ctx, &current, r.db.Rebind(`SELECT 1 FROM task_exact_profile_assignments WHERE task_id=? AND agent_profile_id=? AND profile_revision=? AND generation=? AND active=?`), binding.TaskID, binding.AgentProfileID, binding.ProfileRevision, binding.Generation, dialect.BoolToInt(true))
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
-	session, err := r.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate current exact profile assignment receipt: %w", err)
 	}
-	if session.TaskID != taskID || session.QueueIncarnationID != binding.SessionIncarnationID {
+	err = tx.GetContext(ctx, &current, r.db.Rebind(`SELECT 1 FROM task_sessions WHERE id=? AND task_id=? AND queue_incarnation_id=?`), binding.SessionID, binding.TaskID, binding.SessionIncarnationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
-	row := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`SELECT task_id, session_id, agent_profile_id, generation, profile_revision_nanos, model, outcome, failure_reason, inference_started, substitution_done, created_at FROM task_exact_profile_launch_attempt_receipts WHERE task_id=? AND session_id=? AND execution_id=? AND attempt_id=? AND session_incarnation_id=? AND agent_profile_id=? AND profile_revision_nanos=? AND generation=?`), binding.TaskID, binding.SessionID, binding.ExecutionID, binding.AttemptID, binding.SessionIncarnationID, binding.AgentProfileID, binding.ProfileRevision.UnixNano(), binding.Generation)
+	if err != nil {
+		return nil, fmt.Errorf("validate current exact profile session receipt: %w", err)
+	}
+	row := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT task_id, session_id, agent_profile_id, generation, profile_revision_nanos, model, outcome, failure_reason, inference_started, substitution_done, created_at FROM task_exact_profile_launch_attempt_receipts WHERE task_id=? AND session_id=? AND execution_id=? AND attempt_id=? AND session_incarnation_id=? AND agent_profile_id=? AND profile_revision_nanos=? AND generation=?`), binding.TaskID, binding.SessionID, binding.ExecutionID, binding.AttemptID, binding.SessionIncarnationID, binding.AgentProfileID, binding.ProfileRevision.UnixNano(), binding.Generation)
 	var receipt models.ExactProfileLaunchReceipt
 	var revisionNanos int64
 	if err := row.Scan(&receipt.TaskID, &receipt.SessionID, &receipt.AgentProfileID, &receipt.Generation, &revisionNanos, &receipt.Model, &receipt.Outcome, &receipt.FailureReason, &receipt.InferenceStarted, &receipt.SubstitutionDone, &receipt.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
 			return nil, nil
 		}
 		return nil, fmt.Errorf("load current exact profile attempt receipt: %w", err)
 	}
 	receipt.ProfileRevision = time.Unix(0, revisionNanos).UTC()
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit current exact profile receipt lookup: %w", err)
+	}
 	return &receipt, nil
 }
 
