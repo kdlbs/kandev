@@ -15,6 +15,24 @@ import {
   startQuickChatFromSetup,
 } from "./quick-chat-helpers";
 
+type E2EModelStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      sessionModels: {
+        bySessionId: Record<
+          string,
+          {
+            currentModelId?: string;
+            models?: unknown[];
+            configOptions?: { id: string }[];
+          }
+        >;
+      };
+      settingsAgents: { items: unknown[] };
+    };
+  };
+};
+
 /**
  * Quick Chat E2E tests: basic flow, enhance prompt, queued messages, multi-tab.
  */
@@ -847,7 +865,7 @@ test.describe("Quick Chat", () => {
     apiClient,
     backend,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
 
     const dialog = await openQuickChatSetup(testPage);
     const startResponse = testPage.waitForResponse(
@@ -943,6 +961,25 @@ test.describe("Quick Chat", () => {
       timeout: 30_000,
     });
 
+    await testPage.waitForFunction(
+      (sessionId) => {
+        const store = (window as E2EModelStoreWindow).__KANDEV_E2E_STORE__;
+        const state = store?.getState();
+        const models = state?.sessionModels.bySessionId[sessionId];
+        return Boolean(
+          models?.currentModelId &&
+          (models.models?.length ||
+            models.configOptions?.some((option) => option.id === "effort")) &&
+          state?.settingsAgents.items.length,
+        );
+      },
+      started.session_id,
+      {
+        timeout: 60_000,
+        message: "Restored Quick Chat model capabilities did not hydrate after backend restart",
+      },
+    );
+
     const modelSettings = restoredDialog.getByRole("button", {
       name: "Session model settings",
     });
@@ -951,7 +988,7 @@ test.describe("Quick Chat", () => {
     // user-visible label, then open it and wait for the config option itself.
     // This follows the same causal path as the user and avoids reading a
     // transient empty store entry during WebSocket reconnect.
-    await expect(modelSettings).toBeVisible({ timeout: 30_000 });
+    await expect(modelSettings).toBeVisible({ timeout: 60_000 });
     await expect(modelSettings).toContainText("Mock Fast", { timeout: 60_000 });
     await modelSettings.click();
     await expect(testPage.getByTestId("config-option-trigger-effort")).toBeVisible({

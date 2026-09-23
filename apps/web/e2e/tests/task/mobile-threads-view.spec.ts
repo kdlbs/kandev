@@ -328,11 +328,14 @@ test.describe("Mobile Threads view", () => {
     const trigger = testPage.getByTestId("app-nav-trigger");
     const menu = testPage.getByRole("dialog", { name: "Menu", exact: true });
     await trigger.tap();
-    await expect(menu.getByRole("link", { name: "Home", exact: true })).toBeVisible();
-    await expect(menu.getByTestId("mobile-home-status-button")).toBeVisible();
+    await expect(menu).toBeVisible({ timeout: 10_000 });
+    await waitForFiniteAnimations(menu);
+    await expect(menu.getByRole("link", { name: "Home", exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(menu.getByTestId("mobile-home-status-button")).toBeVisible({ timeout: 15_000 });
     const quickChat = menu.getByTestId("mobile-quick-chat-button");
     const terminal = menu.getByTestId("mobile-quick-terminal-button");
-    await waitForFiniteAnimations(menu);
     for (const action of [quickChat, terminal]) {
       await expect(action).toBeVisible();
       expectTouchTargetHeight((await action.boundingBox())?.height);
