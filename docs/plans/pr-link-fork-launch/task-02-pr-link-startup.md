@@ -1,7 +1,7 @@
 ---
 id: "02-pr-link-startup"
 title: "Prove browser PR-link startup"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-attachment-identity"
@@ -110,6 +110,18 @@ can leak into later tests unless fixtures own and remove their temporary paths.
 
 ## Results
 
-Pending. Record both suite counts and commands, reload evidence, cleanup, and
-any difference from the planned fixture. Do not mark browser verification done
-from backend-only evidence.
+Completed. The fixture uses disposable upstream and fork repositories with
+different `main` commits, publishes the fork head under the upstream PR ref,
+and seeds distinct provider head/target identities. The ordinary creation
+request contains neither `remote_contribution` nor `comparison_target`.
+
+Commands and results:
+
+- `(cd apps/web && pnpm e2e:run --project chromium tests/task/create-task-github-url.spec.ts)`: 10 passed.
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-create-task-remote-repo.spec.ts)`: 7 passed.
+- Both suites used freshly built backend and pseudo-locale Vite assets. The mock agent launched from the expected checkout branch. Terminal checks verified the full fork `HEAD` and upstream target `main` commit OIDs.
+- After reload, both flows retained `checkout_branch`, `base_branch`, PR summary number, and exact persisted PR association. The desktop flow also displays `#3879` in the session PR topbar. The phone flow uses touch submission and opens the created task from its mobile task card.
+- Cleanup is in `finally` paths and removes the task, test repository, and temporary upstream/fork Git directories.
+- `make -C apps/backend build` and web `pnpm run typecheck`: passed. Targeted ESLint for both changed specs and the shared fixture: passed.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.test.py` (36 tests), `python3 scripts/lint-spec-files.py --all`, and `git diff --check`: passed.
+- Additional broad `pnpm run lint:e2e-sleeps` check: failed on existing errors outside the changed E2E files, including unsanctioned waits in unrelated tests and unresolved rule references. Targeted ESLint for changed files passes.

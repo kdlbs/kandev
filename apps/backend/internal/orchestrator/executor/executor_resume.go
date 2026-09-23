@@ -418,6 +418,19 @@ func validPRBaseIdentity(
 	if checkoutBranch != "" && target.HeadBranch != checkoutBranch {
 		return false
 	}
+	if expected != nil || contribution {
+		return validBoundPRBaseIdentity(target, expected, attachedRepository, hasAttachedRepository,
+			headRepository, hasHeadRepository, contribution)
+	}
+	return validUnboundPRBaseIdentity(target, checkoutBranch, attachedRepository, hasAttachedRepository,
+		headRepository, hasHeadRepository)
+}
+
+func validBoundPRBaseIdentity(
+	target models.ComparisonTarget, expected *models.ComparisonTarget,
+	attachedRepository models.ComparisonTargetRepository, hasAttachedRepository bool,
+	headRepository models.ComparisonTargetRepository, hasHeadRepository, contribution bool,
+) bool {
 	if !hasAttachedRepository || !hasHeadRepository ||
 		!models.ComparisonTargetRepositoriesEqual(target.HeadRepository, headRepository) {
 		return false
@@ -431,6 +444,23 @@ func validPRBaseIdentity(
 	return expected.ChangeIdentityEqual(target) &&
 		expected.HeadBranch == target.HeadBranch &&
 		models.ComparisonTargetRepositoriesEqual(expected.HeadRepository, target.HeadRepository)
+}
+
+func validUnboundPRBaseIdentity(
+	target models.ComparisonTarget, checkoutBranch string,
+	attachedRepository models.ComparisonTargetRepository, hasAttachedRepository bool,
+	headRepository models.ComparisonTargetRepository, hasHeadRepository bool,
+) bool {
+	if !hasAttachedRepository || !hasHeadRepository {
+		return false
+	}
+	if models.ComparisonTargetRepositoriesEqual(target.TargetRepository, attachedRepository) {
+		if models.ComparisonTargetRepositoriesEqual(target.HeadRepository, attachedRepository) {
+			return true
+		}
+		return checkoutBranch != ""
+	}
+	return models.ComparisonTargetRepositoriesEqual(target.HeadRepository, headRepository)
 }
 
 func githubComparisonRepositoryFromRepository(repo *models.Repository) (models.ComparisonTargetRepository, bool) {

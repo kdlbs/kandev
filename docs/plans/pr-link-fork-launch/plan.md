@@ -1,6 +1,6 @@
 ---
 created: 2026-09-23
-status: draft
+status: done
 requirements:
   - REQ-WORKSPACES-WORKTREE-BASE-REFRESH-001
 system_design:
@@ -12,9 +12,9 @@ legacy_specs: []
 
 ## Overview
 
-Restore task startup from a fork PR link. First repair attachment-aware base
-validation. Then prove the existing desktop and phone creation flows with real
-Git fixtures and the mock provider. Both work orders remain pending.
+Restore task startup from a fork PR link. Task 01 repaired attachment-aware
+base validation. Task 02 proves desktop and phone creation with real Git
+fixtures and the mock provider.
 
 ## Evidence and root cause
 
@@ -39,7 +39,8 @@ The MCP contribution coordinator does not run on this browser creation path.
 Evidence came from live task metadata, the GitHub API, source history, and
 backend bundle `7841647e48331f84267ca55ea09d2bbd`. The running build was
 `v0.95.1-20-gf2d52f18263`. The archive was size-limited but retained creation
-and failure. No permanent reproduction test exists yet. Task 01 supplies RED.
+and failure. No permanent reproduction test existed when the failure was
+investigated. Task 01 added the regression and recorded its pre-fix RED result.
 
 ## Requirement conformance
 
@@ -94,13 +95,13 @@ qualified upstream base handling. Do not derive permission from PR identity.
 
 All criterion suffixes refer to `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001`.
 
-| Criteria | Planned evidence |
+| Criteria | Implemented evidence |
 | --- | --- |
-| .11, .15 | `executor_pr_base_identity_test.go`: `TestResolveTaskRepoInfo_TargetAttachedForkPRWithoutContribution` fails before the fix |
+| .11, .15 | `executor_pr_base_identity_test.go`: `TestResolveTaskRepoInfo_TargetAttachedForkPRWithoutContribution` recorded RED before the fix and passes after it |
 | .15, .19 | Same test file: explicit source mismatch, unrelated target, wrong branch/number, incomplete identity, same-repository compatibility |
 | .15, .17 | `backendapp/pr_base_resolver_test.go`: linked row absent/present, duplicate matches, provider failure, cancellation |
-| .16, .18 | `backendapp/pr_base_integration_test.go`: `TestTargetAttachedForkPRBasePreparationEndToEnd` proves exact head/base and unchanged push routing |
-| .17, .19 | Integration fixture: valid sibling plus invalid target blocks preparation, without a fallback checkout |
+| .16, .18 | `apps/backend/internal/orchestrator/executor/executor_pr_base_materialization_test.go`: `TestTargetAttachedForkPRBasePreparationEndToEnd` proves exact head/base and unchanged push routing |
+| .17, .19 | `executor_pr_base_identity_test.go`: `TestResolveAllRepoInfoRejectsLaunchWhenOnePRBindingIsInvalid` blocks a mixed launch without a fallback checkout |
 
 ## E2E tests
 
@@ -118,8 +119,8 @@ and navigation. Phone coverage uses touch submission on the existing surface.
 
 ## Work orders
 
-- [ ] [Task 01: Repair PR attachment identity validation](task-01-attachment-identity.md)
-- [ ] [Task 02: Prove browser PR-link startup](task-02-pr-link-startup.md)
+- [x] [Task 01: Repair PR attachment identity validation](task-01-attachment-identity.md)
+- [x] [Task 02: Prove browser PR-link startup](task-02-pr-link-startup.md)
 
 Task 02 depends on Task 01. Execution is sequential. No delegation is authorized.
 
@@ -133,7 +134,26 @@ comparison ownership and push invariants. Neither package is reopened.
 
 ## Verification results
 
-Product implementation and tests: pending. Exact commands are in each work order.
+Task 01 implementation and focused backend verification passed:
+
+- The target-attached fork identity regression failed before the executor fix
+  with `pull request identity did not match the task repository binding`.
+- Focused identity, invalid-identity, explicit-binding, cancellation,
+  multi-repository and real Git preparation tests passed.
+- `go test ./internal/orchestrator/executor ./internal/backendapp ./internal/worktree -count=1`: passed.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.test.py`,
+  `python3 scripts/lint-spec-files.py --all`, and `git diff --check`: passed.
+
+Task 02 browser implementation and verification passed:
+
+- `(cd apps/web && pnpm e2e:run --project chromium tests/task/create-task-github-url.spec.ts)`: 10 passed.
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-create-task-remote-repo.spec.ts)`: 7 passed.
+- Both suites ran against freshly built backend and pseudo-locale Vite assets. They created upstream and fork repositories with different `main` commits, submitted the ordinary PR URL without contribution/comparison bindings, launched the mock agent, and verified the exact fork `HEAD` and upstream target base commit.
+- After reload, desktop shows the `#3879` PR topbar association. Desktop and phone both retain the checkout/base branches and persisted PR summary/association. The phone test submits with touch and opens the created task from the mobile card.
+- Fixture cleanup removes its task, repository, and temporary Git remotes in `finally` paths.
+- `make -C apps/backend build`, web `pnpm run typecheck`, and targeted ESLint on the three changed E2E files: passed.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.test.py` (36 tests), `python3 scripts/lint-spec-files.py --all`, and `git diff --check`: passed.
+- An additional repository-wide `pnpm run lint:e2e-sleeps` check remains red on unrelated existing violations and unresolved rule references across other files; the changed E2E files pass targeted ESLint.
 
 Design-package checks on 2026-09-23:
 
@@ -142,7 +162,7 @@ Design-package checks on 2026-09-23:
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check`: passed.
 - Relative document links and referenced acceptance IDs: validated.
-- New package inventory: plan and both pending work orders present.
+- New package inventory at handoff: plan and both then-pending work orders were present.
 - Production and test code: unchanged. No product tests ran during planning.
 
 ## Risks
@@ -155,6 +175,7 @@ Design-package checks on 2026-09-23:
 
 ## Documentation impact
 
-This package changes planned implementation only. Public docs remain unchanged.
-Implementation restores existing PR-link behavior without new user instructions.
-The existing repository-qualified comparison ADR remains authoritative.
+This package implemented the planned correction. Public docs remain unchanged.
+The implementation restores existing PR-link behavior without new user
+instructions. The existing repository-qualified comparison ADR remains
+authoritative.

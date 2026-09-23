@@ -1,7 +1,7 @@
 ---
 id: "01-attachment-identity"
 title: "Repair PR attachment identity validation"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -19,6 +19,9 @@ system_design:
 ---
 
 # Task 01: Repair PR attachment identity validation
+
+This work order preserves the original implementation sequence. The Results
+section records the delivered implementation and verification.
 
 ## Summary
 
@@ -39,8 +42,9 @@ checkouts. Resolve from existing metadata so unprepared failed tasks can retry.
   the unbound target-attached path. Keep current explicit-binding fallback rules.
 - Cover resolver lookup with no linked row, one exact linked row, duplicate
   matches, same-number foreign rows, cancellation, and provider errors.
-- Add `TestTargetAttachedForkPRBasePreparationEndToEnd` beside existing real Git
-  integration coverage. Use separate fork/upstream repositories with different
+- Add `TestTargetAttachedForkPRBasePreparationEndToEnd` in
+  `executor_pr_base_materialization_test.go`, beside existing real Git
+  materialization coverage. Use separate fork/upstream repositories with different
   same-named base commits. Publish the fork head under upstream `refs/pull/N/head`.
   Prove target base, PR head, and unchanged origin/push configuration.
 - Repeat resolution for an unprepared task to represent retry. Include a mixed
@@ -60,30 +64,31 @@ automatic repair of live tasks, and PR-association lifecycle changes.
 3. Real Git preparation uses the correct head and target commits. Retry and
    mixed-repository checks preserve cancellation, fallback, and push invariants.
 
-## Verification
+## Planned verification sequence
 
-Run from the repository root. Record RED before production changes, then GREEN.
+This is the original RED/GREEN sequence. The Results section records the
+commands and outcomes from implementation.
 
 ```bash
 (cd apps/backend && go test ./internal/orchestrator/executor -run '^TestResolveTaskRepoInfo_TargetAttachedForkPRWithoutContribution$' -count=1 -v)
-(cd apps/backend && go test ./internal/backendapp -run '^TestTargetAttachedForkPRBasePreparationEndToEnd$' -count=1 -v)
+(cd apps/backend && go test ./internal/orchestrator/executor -run '^TestTargetAttachedForkPRBasePreparationEndToEnd$' -count=1 -v)
 (cd apps/backend && go test ./internal/orchestrator/executor ./internal/backendapp ./internal/worktree -count=1)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
 
-The first two test names are planned additions. The final package run covers
-existing same-repository, explicit contribution, and qualified-base regressions.
+The first test records the expected pre-fix RED; the second proves real Git
+materialization. Both tests reside in `internal/orchestrator/executor`. The
+final package run also covers existing same-repository, explicit contribution,
+resolver, and qualified-base regressions.
 
-## Files likely touched
+## Files touched
 
 - `apps/backend/internal/orchestrator/executor/executor_resume.go`
 - `apps/backend/internal/orchestrator/executor/executor_pr_base_identity_test.go`
+- `apps/backend/internal/orchestrator/executor/executor_pr_base_materialization_test.go`
 - `apps/backend/internal/backendapp/pr_base_resolver_test.go`
-- `apps/backend/internal/backendapp/pr_base_integration_test.go`
-- `apps/backend/internal/backendapp/orchestrator.go` only if resolver validation needs correction.
-- A sibling integration fixture file if existing files exceed lint limits.
 
 ## Dependencies
 
@@ -103,9 +108,27 @@ production resolution and preparation, not only a copied predicate.
 
 - [Requirement](../../specs/workspaces/requirements/worktree-base-refresh.md), .11 and .15-.19.
 - [Design clarification](../../specs/workspaces/system-design/worktree-base-refresh.md#ordinary-pr-link-launch-compatibility).
-- `executor_pr_base_identity_test.go` and `backendapp/pr_base_integration_test.go`.
+- `executor_pr_base_identity_test.go` and
+  `executor_pr_base_materialization_test.go`.
 - [Comparison target ADR](../../decisions/2026-08-19-repository-qualified-comparison-targets.md).
 
 ## Results
 
-Pending. Record expected RED, final commands, counts, and any fixture limitations.
+Completed. The ordinary target-attached fork regression failed before the fix
+with the reported repository-binding error. It passes after the change, along
+with wrong target/number/branch, missing head repository, empty checkout,
+explicit comparison/source mismatches, cancellation, retry, mixed-repository,
+resolver association and real Git preparation coverage.
+
+Commands and results:
+
+- `go test ./internal/orchestrator/executor -run '^TestResolveTaskRepoInfo_TargetAttachedForkPRWithoutContribution$' -count=1 -v`: expected RED before production change.
+- `go test ./internal/orchestrator/executor -run '^TestTargetAttachedForkPRBasePreparationEndToEnd$' -count=1 -v`: expected RED before production change; passed after the test exercised normal PR-head fetch.
+- Focused new executor and resolver tests: passed.
+- `go test ./internal/orchestrator/executor ./internal/backendapp ./internal/worktree -count=1`: passed.
+- Specification catalog, spec linter tests, all-spec lint and `git diff --check`: passed.
+
+The test fixture uses separate fork/upstream bare repositories with different
+same-named `main` commits. It publishes the fork head under the upstream PR
+ref and preserves the upstream origin and push URL during target-attached
+preparation.

@@ -152,7 +152,8 @@ Same-repository offline branch fallback retains criterion .11.
 
 The [PR-link fork launch repair](../../../plans/pr-link-fork-launch/plan.md)
 clarifies criterion .15 for existing browser-created attachments. This amendment
-is planned. Its work orders own implementation status.
+is implemented. Its plan and work orders record the implementation and
+verification status.
 
 The browser PR-link path stores the target repository, PR number, checkout
 branch, and base branch. It does not create a `RemoteContribution` binding.
