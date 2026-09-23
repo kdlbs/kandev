@@ -98,6 +98,7 @@
   "filesSelected": "Ƒĩĺēś Śēĺēćţēď",
   "gatewayPriority": "Ĝàţēŵàŷ ƥŕĩōŕĩţŷ",
   "gatewayPriorityNote": "Ţĥē àţţàćĥḿēńţ ŵĩţĥ ţĥē ĥĩĝĥēśţ ĝàţēŵàŷ ƥŕĩōŕĩţŷ ƥŕōvĩďēś ţĥē ćōńţàĩńēŕ'ś ďēƒàũĺţ ŕōũţē. Ĺēàvē ēvēŕŷ ƥŕĩōŕĩţŷ ēḿƥţŷ ţō ķēēƥ Ďōćķēŕ'ś ōŵń ćĥōĩćē.",
+  "gatewayPriorityMustBeAWholeNumber": "Ĝàţēŵàŷ ƥŕĩōŕĩţŷ ḿũśţ ƀē à ŵĥōĺē ńũḿƀēŕ.",
   "gitIdentity": "Ĝĩţ Ĩďēńţĩţŷ",
   "gitIdentityAutoDetect": "Àũţō-ďēţēćţ",
   "gitIdentityCustom": "Ćũśţōḿ",

@@ -95,6 +95,7 @@
   "filesSelected": "選択ファイル",
   "gatewayPriority": "ゲートウェイ優先度",
   "gatewayPriorityNote": "ゲートウェイ優先度が最も高い接続がコンテナの既定ルートを提供します。すべて空のままにすると Docker の選択を維持します。",
+  "gatewayPriorityMustBeAWholeNumber": "ゲートウェイ優先度は整数で指定してください。",
   "gitIdentity": "Git 識別情報",
   "gitIdentityAutoDetect": "自動検出",
   "gitIdentityCustom": "カスタム",

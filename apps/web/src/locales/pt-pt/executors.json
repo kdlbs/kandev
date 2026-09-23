@@ -98,6 +98,7 @@
   "filesSelected": "Ficheiros selecionados",
   "gatewayPriority": "Prioridade de gateway",
   "gatewayPriorityNote": "A ligação com a prioridade de gateway mais alta fornece a rota predefinida do contentor. Deixe todas as prioridades vazias para manter a escolha do Docker.",
+  "gatewayPriorityMustBeAWholeNumber": "A prioridade de gateway tem de ser um número inteiro.",
   "gitIdentity": "Identidade do Git",
   "gitIdentityAutoDetect": "Detetar automaticamente",
   "gitIdentityCustom": "Personalizada",

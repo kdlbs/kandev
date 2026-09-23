@@ -98,6 +98,7 @@
   "filesSelected": "已选文件",
   "gatewayPriority": "网关优先级",
   "gatewayPriorityNote": "网关优先级最高的连接提供容器的默认路由。将所有优先级留空可保留 Docker 自身的选择。",
+  "gatewayPriorityMustBeAWholeNumber": "网关优先级必须是整数。",
   "gitIdentity": "Git 身份",
   "gitIdentityAutoDetect": "自动检测",
   "gitIdentityCustom": "自定义",

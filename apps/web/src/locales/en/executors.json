@@ -98,6 +98,7 @@
   "filesSelected": "Files Selected",
   "gatewayPriority": "Gateway priority",
   "gatewayPriorityNote": "The attachment with the highest gateway priority provides the container's default route. Leave every priority empty to keep Docker's own choice.",
+  "gatewayPriorityMustBeAWholeNumber": "Gateway priority must be a whole number.",
   "gitIdentity": "Git Identity",
   "gitIdentityAutoDetect": "Auto-detect",
   "gitIdentityCustom": "Custom",

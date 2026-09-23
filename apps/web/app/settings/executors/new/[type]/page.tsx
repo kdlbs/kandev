@@ -41,6 +41,7 @@ import {
 import { SpritesApiKeyCard } from "@/components/settings/profile-edit/sprites-api-key-card";
 import { DockerNetworkCard } from "@/components/settings/profile-edit/docker-network-card";
 import { buildProfileConfig } from "@/components/settings/profile-edit/build-create-profile-config";
+import { dockerNetworksInvalidReasonKey } from "@/components/settings/profile-edit/build-docker-network-config";
 import { useDockerNetworksFormState } from "@/components/settings/profile-edit/use-docker-networks-form-state";
 import { NetworkPoliciesCard } from "@/components/settings/profile-edit/sprites-sections";
 import {
@@ -507,7 +508,7 @@ function getCreateDisabledReasonKey(
     if (!form.dockerfile.trim()) return "executors:addDockerfileContentBeforeCreating";
     if (!form.dockerImageBuilt) return "executors:buildThisDockerImageBeforeCreating";
   }
-  return null;
+  return dockerNetworksInvalidReasonKey(form);
 }
 
 function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormState>) {

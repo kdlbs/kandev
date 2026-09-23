@@ -1,6 +1,7 @@
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import type { ExecutorType } from "@/lib/types/http";
 import type { AdditionalNetworkRow } from "@/components/settings/profile-edit/use-docker-networks-form-state";
+import { serializeAdditionalNetworks } from "@/components/settings/profile-edit/build-docker-network-config";
 
 export function getExecutorProfileRuntimeFlags(executorType: ExecutorType) {
   const isRemote =
@@ -86,16 +87,7 @@ function applyDockerNetworkConfig(
   setTextConfig(config, "docker_network", primary);
   setTextConfig(config, "docker_network_gw_priority", primary ? form.primaryGwPriority.trim() : "");
 
-  const additional = form.isDocker
-    ? form.additionalNetworks
-        .map((row) => ({ name: row.name.trim(), gwPriority: row.gwPriority.trim() }))
-        .filter((row) => row.name !== "")
-        .map((row) =>
-          row.gwPriority === ""
-            ? { name: row.name }
-            : { name: row.name, gw_priority: Number(row.gwPriority) },
-        )
-    : [];
+  const additional = form.isDocker ? serializeAdditionalNetworks(form.additionalNetworks) : [];
   setJsonConfig(config, "docker_additional_networks", form.isDocker, additional);
 }
 

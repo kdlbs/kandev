@@ -67,6 +67,7 @@ export function DockerNetworkCard({
             <Input
               id="docker-primary-gw-priority"
               type="number"
+              step={1}
               value={primaryGwPriority}
               onChange={(e) => onPrimaryGwPriorityChange(e.target.value)}
               className="font-mono text-sm"
@@ -149,6 +150,7 @@ function AdditionalNetworkRowFields({
         <Input
           id={`docker-additional-priority-${index}`}
           type="number"
+          step={1}
           value={row.gwPriority}
           onChange={(e) => onUpdate(index, { gwPriority: e.target.value })}
           className="font-mono text-sm"
