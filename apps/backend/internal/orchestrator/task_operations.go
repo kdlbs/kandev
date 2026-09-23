@@ -961,8 +961,9 @@ func (s *Service) startCreatedSession(
 		Attachments:            attachments,
 		TurnID:                 initialTurnID,
 	}
-	if options.initialCreatePrompt && session.IsPassthrough {
-		launchOptions.OnExecutionAdmitted = func(executionID string) {
+	launchOptions.OnExecutionAdmitted = func(executionID string) {
+		s.admitExactProfileLaunchAttempt(ctx, session, exactAssignment, executionID)
+		if options.initialCreatePrompt && session.IsPassthrough {
 			s.bindInitialCreatePromptPassthroughExecution(ctx, sessionID, initialTurnID, executionID)
 		}
 	}

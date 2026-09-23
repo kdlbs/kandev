@@ -263,14 +263,36 @@ func (s *Service) recordExactProfileStartFailure(
 			return
 		}
 	}
-	exact, err := s.resolveExactProfileAssignment(ctx, taskID)
-	if err != nil || exact == nil ||
-		session.AgentProfileID != exact.AgentProfileID ||
-		session.ExactProfileGeneration != exact.Generation ||
-		session.ExactProfileRevision != exact.Revision {
+	if session.AgentProfileID == "" || session.ExactProfileGeneration < 1 || session.ExactProfileRevision == 0 || session.QueueIncarnationID == "" {
 		return
 	}
-	s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exact, exact.Model, launchErr)
+	receipts, ok := s.repo.(interface {
+		RecordExactProfileLaunchReceiptForAttempt(context.Context, *models.ExactProfileLaunchAttemptBinding, *models.ExactProfileLaunchReceipt) (bool, error)
+	})
+	if !ok {
+		return
+	}
+	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: taskID, SessionID: sessionID, ExecutionID: executionID, AttemptID: executionID, SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: session.AgentProfileID, ProfileRevision: time.Unix(0, session.ExactProfileRevision).UTC(), Generation: session.ExactProfileGeneration}
+	receipt := &models.ExactProfileLaunchReceipt{TaskID: taskID, SessionID: sessionID, AgentProfileID: binding.AgentProfileID, ProfileRevision: binding.ProfileRevision, Generation: binding.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed, FailureReason: launchErr.Error()}
+	if _, err := receipts.RecordExactProfileLaunchReceiptForAttempt(ctx, binding, receipt); err != nil {
+		s.logger.Warn("failed to record exact-profile attempt failure", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
+func (s *Service) admitExactProfileLaunchAttempt(ctx context.Context, session *models.TaskSession, exact *ExactProfileLaunchDecision, executionID string) {
+	if exact == nil || session == nil || executionID == "" {
+		return
+	}
+	binder, ok := s.repo.(interface {
+		BindExactProfileLaunchAttempt(context.Context, *models.ExactProfileLaunchAttemptBinding) (bool, error)
+	})
+	if !ok {
+		return
+	}
+	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: session.TaskID, SessionID: session.ID, ExecutionID: executionID, AttemptID: executionID, SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: exact.AgentProfileID, ProfileRevision: time.Unix(0, exact.Revision).UTC(), Generation: exact.Generation}
+	if changed, err := binder.BindExactProfileLaunchAttempt(ctx, binding); err != nil || !changed {
+		s.logger.Warn("failed to admit exact-profile launch attempt", zap.String("task_id", session.TaskID), zap.String("session_id", session.ID), zap.Error(err))
+	}
 }
 
 func exactProfileModel(exact *ExactProfileLaunchDecision) string {
