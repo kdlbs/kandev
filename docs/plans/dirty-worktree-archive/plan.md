@@ -25,7 +25,7 @@ cleanup set so a dirty checkout survives.
 - `completeOwnedWorktreeCleanup` then force-removes the directory once Git
   registration ownership is proven. Ownership is checked; cleanliness is not.
 - All three archive entry points converge on the `envCleanup.preserveBranches`
-  branch of `Service.cleanupTaskWorktrees`.
+  branch of `Service.cleanupDestructiveTaskResources`.
 - Reproduced directly against `CleanupWorktreesPreservingBranches`: the call
   returned `nil` and removed a worktree holding an untracked file and a tracked
   modification. The delete path refuses the identical input.
@@ -55,7 +55,7 @@ cleanup set so a dirty checkout survives.
 
 ## Technical approach
 
-`Service.cleanupTaskWorktrees` gains an admission filter on the
+`Service.cleanupDestructiveTaskResources` gains an admission filter on the
 `envCleanup.preserveBranches` path, immediately before
 `CleanupWorktreesPreservingBranches`. It reuses the existing
 `WorktreeDirtyInspector.InspectDirtyWorktrees`, which is already wired into the

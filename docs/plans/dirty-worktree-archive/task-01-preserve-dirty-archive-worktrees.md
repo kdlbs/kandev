@@ -32,7 +32,7 @@ admits the task.
 - Add failing tests first, covering an untracked file and a tracked
   modification on both archive entry points.
 - Inspect the eligible worktree set on the `envCleanup.preserveBranches` path of
-  `Service.cleanupTaskWorktrees`, immediately before
+  `Service.cleanupDestructiveTaskResources`, immediately before
   `CleanupWorktreesPreservingBranches`.
 - Reuse `WorktreeDirtyInspector.InspectDirtyWorktrees`; do not add a second
   inspection mechanism.

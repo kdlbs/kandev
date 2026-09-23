@@ -93,7 +93,7 @@ func TestArchiveTaskPreservesDirtyWorktreeUntrackedFile(t *testing.T) {
 }
 
 // TestArchiveTaskPreservesDirtyWorktreeTrackedModification covers
-// AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.2: Service.ArchiveTask must not discard
+// AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.1: Service.ArchiveTask must not discard
 // an uncommitted modification to a tracked file.
 func TestArchiveTaskPreservesDirtyWorktreeTrackedModification(t *testing.T) {
 	const (
@@ -118,6 +118,12 @@ func TestArchiveTaskPreservesDirtyWorktreeTrackedModification(t *testing.T) {
 	assertDirtyArchiveWorktreePreserved(t, svc, taskID, environmentID, wt, sourcePath, tracked, "modified\n")
 }
 
+// assertDirtyArchiveWorktreePreserved covers
+// AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.2: the task still becomes archived
+// whatever the checkout state, and
+// AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.3: a preserved worktree retains its
+// branch and its active worktree record, so a later cleanup can still
+// reclaim it once it is clean.
 func assertDirtyArchiveWorktreePreserved(
 	t *testing.T, svc *Service, taskID, environmentID string,
 	wt *worktree.Worktree, sourcePath, sentinelPath, wantContents string,
@@ -174,9 +180,11 @@ func TestArchiveTaskStillRemovesCleanWorktree(t *testing.T) {
 	}
 }
 
-// TestCleanupTaskResourcesCascadePreservesDirtyWorktree covers the cascade
-// entry point (handoff_cascade.go -> CleanupTaskResources) rather than the
-// single-task ArchiveTask call.
+// TestCleanupTaskResourcesCascadePreservesDirtyWorktree covers
+// AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.6: the rule holds for cascade archive
+// as well as for single-task archive, because all archive cleanup shares one
+// path. It drives the cascade entry point (handoff_cascade.go ->
+// CleanupTaskResources) rather than the single-task ArchiveTask call.
 func TestCleanupTaskResourcesCascadePreservesDirtyWorktree(t *testing.T) {
 	const (
 		taskID        = "task-cascade-archive-dirty"
@@ -233,7 +241,7 @@ func (c *failingDirtyInspectionCleanup) InspectDirtyWorktrees(
 }
 
 // TestCleanupDestructiveTaskResourcesArchiveInspectionFailurePreservesWholeSet
-// covers AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.5: a dirty-inspection failure
+// covers AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.4: a dirty-inspection failure
 // must preserve every worktree in the batch, never fall through to removal.
 func TestCleanupDestructiveTaskResourcesArchiveInspectionFailurePreservesWholeSet(t *testing.T) {
 	svc, _, _ := createTestService(t)
@@ -287,7 +295,7 @@ func (c *recordingDirtyAwareArchiveCleanup) InspectDirtyWorktrees(
 }
 
 // TestCleanupDestructiveTaskResourcesArchiveFiltersDirtyPerWorktree covers
-// AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.6: in a multi-repo task, a dirty
+// AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.5: in a multi-repo task, a dirty
 // worktree must be dropped while its clean sibling is still reclaimed.
 func TestCleanupDestructiveTaskResourcesArchiveFiltersDirtyPerWorktree(t *testing.T) {
 	svc, _, _ := createTestService(t)

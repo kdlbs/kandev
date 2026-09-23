@@ -59,7 +59,8 @@ Three archive entry points converge on one site. `HandoffService.archiveTaskTree
 calls `CleanupTaskResources(ctx, taskID, false)`, `Service.ArchiveTask` builds
 `taskEnvironmentCleanup{preserveBranches: true}`, and the durable cleanup job
 sets `preserveBranches: job.IsArchive()`. All three reach the
-`envCleanup.preserveBranches` branch of `Service.cleanupTaskWorktrees`.
+`envCleanup.preserveBranches` branch of
+`Service.cleanupDestructiveTaskResources`.
 
 ## Design
 
@@ -74,8 +75,8 @@ retains the branch ref and the `task_environment` row for recovery.
 
 ### Admission inspection
 
-`Service.cleanupTaskWorktrees` inspects the eligible worktree set before calling
-`CleanupWorktreesPreservingBranches`. It reuses the existing
+`Service.cleanupDestructiveTaskResources` inspects the eligible worktree set
+before calling `CleanupWorktreesPreservingBranches`. It reuses the existing
 `WorktreeDirtyInspector.InspectDirtyWorktrees`, which runs
 `git status --porcelain=v1 --untracked-files=normal -z` read-only over every
 recorded worktree and deduplicates by repository and cleaned path.
