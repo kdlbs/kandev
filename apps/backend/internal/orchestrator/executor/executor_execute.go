@@ -1698,7 +1698,10 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
 	if startAgent && opts.OnExecutionAdmitted != nil {
-		opts.OnExecutionAdmitted(resp.AgentExecutionID)
+		if err := opts.OnExecutionAdmitted(resp.AgentExecutionID); err != nil {
+			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
+			return nil, fmt.Errorf("admit execution before agent start: %w", err)
+		}
 	}
 
 	// Capture the current HEAD commit as the base commit for this session asynchronously.
@@ -2371,7 +2374,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	startAgent bool,
 	mcpMode string,
 	request *LaunchAgentRequest,
-	onExecutionAdmitted func(string),
+	onExecutionAdmitted func(string) error,
 	turnIDs ...string,
 ) (*TaskExecution, error) {
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
@@ -2447,7 +2450,10 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 		SessionID:        session.ID,
 	}
 	if onExecutionAdmitted != nil {
-		onExecutionAdmitted(executionID)
+		if err := onExecutionAdmitted(executionID); err != nil {
+			e.stopFailedStartExecution(ctx, executionID, "execution admission")
+			return nil, fmt.Errorf("admit existing execution before agent start: %w", err)
+		}
 	}
 
 	// Start the agent process asynchronously

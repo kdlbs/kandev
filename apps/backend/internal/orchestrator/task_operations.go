@@ -961,11 +961,14 @@ func (s *Service) startCreatedSession(
 		Attachments:            attachments,
 		TurnID:                 initialTurnID,
 	}
-	launchOptions.OnExecutionAdmitted = func(executionID string) {
-		s.admitExactProfileLaunchAttempt(ctx, session, exactAssignment, executionID)
+	launchOptions.OnExecutionAdmitted = func(executionID string) error {
+		if err := s.admitExactProfileLaunchAttempt(ctx, session, exactAssignment, executionID); err != nil {
+			return err
+		}
 		if options.initialCreatePrompt && session.IsPassthrough {
 			s.bindInitialCreatePromptPassthroughExecution(ctx, sessionID, initialTurnID, executionID)
 		}
+		return nil
 	}
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
 	if err != nil {

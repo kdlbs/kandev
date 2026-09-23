@@ -279,20 +279,28 @@ func (s *Service) recordExactProfileStartFailure(
 	}
 }
 
-func (s *Service) admitExactProfileLaunchAttempt(ctx context.Context, session *models.TaskSession, exact *ExactProfileLaunchDecision, executionID string) {
-	if exact == nil || session == nil || executionID == "" {
-		return
+func (s *Service) admitExactProfileLaunchAttempt(ctx context.Context, session *models.TaskSession, exact *ExactProfileLaunchDecision, executionID string) error {
+	if exact == nil {
+		return nil
+	}
+	if session == nil || executionID == "" {
+		return models.ErrExactProfileAssignmentInvalidInput
 	}
 	binder, ok := s.repo.(interface {
 		BindExactProfileLaunchAttempt(context.Context, *models.ExactProfileLaunchAttemptBinding) (bool, error)
 	})
 	if !ok {
-		return
+		return models.ErrExactProfileAssignmentInvalidInput
 	}
 	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: session.TaskID, SessionID: session.ID, ExecutionID: executionID, AttemptID: executionID, SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: exact.AgentProfileID, ProfileRevision: time.Unix(0, exact.Revision).UTC(), Generation: exact.Generation}
-	if changed, err := binder.BindExactProfileLaunchAttempt(ctx, binding); err != nil || !changed {
-		s.logger.Warn("failed to admit exact-profile launch attempt", zap.String("task_id", session.TaskID), zap.String("session_id", session.ID), zap.Error(err))
+	changed, err := binder.BindExactProfileLaunchAttempt(ctx, binding)
+	if err != nil {
+		return err
 	}
+	if !changed {
+		return models.ErrExactProfileAssignmentGeneration
+	}
+	return nil
 }
 
 func exactProfileModel(exact *ExactProfileLaunchDecision) string {

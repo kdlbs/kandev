@@ -675,7 +675,7 @@ type LaunchOptions struct {
 	// persisted the execution that will receive this turn, but before its
 	// process is started. Callers use this boundary to bind turn-scoped
 	// evidence to the execution that actually won admission.
-	OnExecutionAdmitted func(executionID string)
+	OnExecutionAdmitted func(executionID string) error
 	Prompt              string
 	PriorACPSession     string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID      string
