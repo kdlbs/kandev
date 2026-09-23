@@ -482,7 +482,14 @@ func (m *mockAgentManager) RegisterInitialPromptDispatchCallbacks(_ string, onDi
 	return nil
 }
 
-func (m *mockAgentManager) AttachExactProfileLaunchAttempt(_ string, binding *models.ExactProfileLaunchAttemptBinding) error {
+func (m *mockAgentManager) AdmitExactProfileLaunchAttempt(_ string, binding *models.ExactProfileLaunchAttemptBinding, bind func(*models.ExactProfileLaunchAttemptBinding) (bool, error)) error {
+	changed, err := bind(binding)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return models.ErrExactProfileAssignmentGeneration
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	copy := *binding

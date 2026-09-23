@@ -279,43 +279,31 @@ func (s *Service) recordExactProfileStartFailure(
 	}
 }
 
-func (s *Service) admitExactProfileLaunchAttempt(ctx context.Context, session *models.TaskSession, exact *ExactProfileLaunchDecision, executionID string) (*models.ExactProfileLaunchAttemptBinding, error) {
+func (s *Service) admitExactProfileLaunchAttempt(ctx context.Context, session *models.TaskSession, exact *ExactProfileLaunchDecision, executionID string) error {
 	if exact == nil {
-		return nil, nil
+		return nil
 	}
 	if session == nil || executionID == "" {
-		return nil, models.ErrExactProfileAssignmentInvalidInput
+		return models.ErrExactProfileAssignmentInvalidInput
 	}
 	binder, ok := s.repo.(interface {
 		BindExactProfileLaunchAttempt(context.Context, *models.ExactProfileLaunchAttemptBinding) (bool, error)
 	})
 	if !ok {
-		return nil, models.ErrExactProfileAssignmentInvalidInput
+		return models.ErrExactProfileAssignmentInvalidInput
 	}
 	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: session.TaskID, SessionID: session.ID, ExecutionID: executionID, AttemptID: executionID, SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: exact.AgentProfileID, ProfileRevision: time.Unix(0, exact.Revision).UTC(), Generation: exact.Generation}
-	changed, err := binder.BindExactProfileLaunchAttempt(ctx, binding)
-	if err != nil {
-		return nil, err
-	}
-	if !changed {
-		return nil, models.ErrExactProfileAssignmentGeneration
-	}
-	return binding, nil
-}
-
-type exactProfileLaunchAttemptAttacher interface {
-	AttachExactProfileLaunchAttempt(string, *models.ExactProfileLaunchAttemptBinding) error
-}
-
-func (s *Service) attachExactProfileLaunchAttempt(binding *models.ExactProfileLaunchAttemptBinding) error {
-	if binding == nil {
-		return nil
-	}
-	attacher, ok := s.agentManager.(exactProfileLaunchAttemptAttacher)
+	admitter, ok := s.agentManager.(exactProfileLaunchAttemptAdmitter)
 	if !ok {
 		return models.ErrExactProfileAssignmentInvalidInput
 	}
-	return attacher.AttachExactProfileLaunchAttempt(binding.ExecutionID, binding)
+	return admitter.AdmitExactProfileLaunchAttempt(executionID, binding, func(frozen *models.ExactProfileLaunchAttemptBinding) (bool, error) {
+		return binder.BindExactProfileLaunchAttempt(ctx, frozen)
+	})
+}
+
+type exactProfileLaunchAttemptAdmitter interface {
+	AdmitExactProfileLaunchAttempt(string, *models.ExactProfileLaunchAttemptBinding, func(*models.ExactProfileLaunchAttemptBinding) (bool, error)) error
 }
 
 func exactProfileModel(exact *ExactProfileLaunchDecision) string {

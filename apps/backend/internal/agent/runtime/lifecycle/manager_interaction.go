@@ -112,15 +112,40 @@ func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onD
 	return nil
 }
 
-// AttachExactProfileLaunchAttempt records the immutable attempt admitted by
-// the orchestrator before process start. Stream publishers use this snapshot
-// instead of resolving mutable task/session assignment state.
-func (m *Manager) AttachExactProfileLaunchAttempt(executionID string, binding *models.ExactProfileLaunchAttemptBinding) error {
+// AdmitExactProfileLaunchAttempt keeps a durable exact-profile binding and
+// its in-memory event identity under the execution lifecycle guard. The bind
+// callback must commit the supplied immutable tuple before this method records
+// it for stream events.
+func (m *Manager) AdmitExactProfileLaunchAttempt(
+	executionID string,
+	binding *models.ExactProfileLaunchAttemptBinding,
+	bind func(*models.ExactProfileLaunchAttemptBinding) (bool, error),
+) error {
+	if bind == nil {
+		return models.ErrExactProfileAssignmentInvalidInput
+	}
+	frozen, err := cloneExactProfileLaunchAttempt(binding, executionID)
+	if err != nil {
+		return err
+	}
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	return execution.attachExactProfileLaunchAttempt(binding)
+	execution.remoteInstanceLifecycleMu.Lock()
+	defer execution.remoteInstanceLifecycleMu.Unlock()
+	if current, exists := m.executionStore.Get(executionID); !exists || current != execution {
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	changed, err := bind(frozen)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return models.ErrExactProfileAssignmentGeneration
+	}
+	execution.installExactProfileLaunchAttempt(frozen)
+	return nil
 }
 
 // PromptAgentWithDispatchCallback exposes agentctl acceptance to callers that
@@ -1245,7 +1270,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// End session trace span
 	execution.EndSessionSpan()
 
-	m.RemoveExecution(executionID)
+	m.removeExecutionLocked(executionID, execution)
 	m.clearRemoteStatus(execution.SessionID)
 
 	m.logger.Info("agent stopped and removed from tracking",
@@ -1292,7 +1317,7 @@ func (m *Manager) detachAgentExecution(executionID string, execution *AgentExecu
 	execution.agentctlLifecycleMu.Unlock()
 
 	execution.EndSessionSpan()
-	m.RemoveExecution(executionID)
+	m.removeExecutionLocked(executionID, execution)
 	m.clearRemoteStatus(execution.SessionID)
 
 	m.logger.Info("detached agent execution for survivable backend shutdown; instance left running",

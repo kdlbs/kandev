@@ -2,7 +2,6 @@ package lifecycle
 
 import (
 	"encoding/json"
-	"reflect"
 	"testing"
 	"time"
 
@@ -84,12 +83,9 @@ func TestAgentStreamEventCarriesFrozenExactProfileAttempt(t *testing.T) {
 		AttemptID: "attempt-original", SessionIncarnationID: "incarnation-original",
 		AgentProfileID: "profile-original", ProfileRevision: time.Unix(1_726_500_000, 0).UTC(), Generation: 7,
 	}
-	attach := reflect.ValueOf(mgr).MethodByName("AttachExactProfileLaunchAttempt")
-	if !attach.IsValid() {
-		t.Fatal("manager does not expose exact-profile attempt attachment")
-	}
-	results := attach.Call([]reflect.Value{reflect.ValueOf(execution.ID), reflect.ValueOf(binding)})
-	if err, _ := results[0].Interface().(error); err != nil {
+	if err := mgr.AdmitExactProfileLaunchAttempt(execution.ID, binding, func(*models.ExactProfileLaunchAttemptBinding) (bool, error) {
+		return true, nil
+	}); err != nil {
 		t.Fatalf("attach exact-profile attempt: %v", err)
 	}
 	binding.TaskID = "task-mutated"

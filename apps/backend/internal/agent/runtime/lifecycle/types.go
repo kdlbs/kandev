@@ -424,19 +424,24 @@ func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func(), func()) {
 	return onDispatched, onFailure
 }
 
-func (e *AgentExecution) attachExactProfileLaunchAttempt(binding *models.ExactProfileLaunchAttemptBinding) error {
-	if binding == nil || binding.ExecutionID != e.ID {
-		return models.ErrExactProfileAssignmentInvalidInput
+func cloneExactProfileLaunchAttempt(binding *models.ExactProfileLaunchAttemptBinding, executionID string) (*models.ExactProfileLaunchAttemptBinding, error) {
+	if binding == nil || binding.TaskID == "" || binding.SessionID == "" || binding.ExecutionID != executionID ||
+		binding.AttemptID == "" || binding.SessionIncarnationID == "" || binding.AgentProfileID == "" ||
+		binding.ProfileRevision.IsZero() || binding.Generation < 1 {
+		return nil, models.ErrExactProfileAssignmentInvalidInput
 	}
 	copy := *binding
 	copy.ExpectedPrior = nil
+	return &copy, nil
+}
+
+// installExactProfileLaunchAttempt records the already-bound immutable tuple.
+// Admission holds remoteInstanceLifecycleMu, so no other admission or removal
+// can interleave between the durable bind and this installation.
+func (e *AgentExecution) installExactProfileLaunchAttempt(binding *models.ExactProfileLaunchAttemptBinding) {
 	e.exactProfileAttemptMu.Lock()
-	defer e.exactProfileAttemptMu.Unlock()
-	if e.exactProfileAttempt != nil {
-		return models.ErrExactProfileAssignmentGeneration
-	}
-	e.exactProfileAttempt = &copy
-	return nil
+	e.exactProfileAttempt = binding
+	e.exactProfileAttemptMu.Unlock()
 }
 
 func (e *AgentExecution) exactProfileLaunchAttemptSnapshot() *models.ExactProfileLaunchAttemptBinding {

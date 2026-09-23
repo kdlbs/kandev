@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
@@ -15,6 +16,75 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func TestExactProfileAdmissionGuardSerializesRemovalAndRejectsRemovedExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session-guard", models.TaskSessionStateCreated)
+	revision := exactProfileRecoveryAssignment(t, repo)
+	session, err := repo.GetTaskSession(ctx, "session-guard")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	manager := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), testLogger())
+	removedBinding := &models.ExactProfileLaunchAttemptBinding{
+		TaskID: session.TaskID, SessionID: session.ID, ExecutionID: "exec-removed", AttemptID: "exec-removed",
+		SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: "profile-exact", ProfileRevision: revision, Generation: 1,
+	}
+	called := false
+	if err := manager.AdmitExactProfileLaunchAttempt(removedBinding.ExecutionID, removedBinding, func(bound *models.ExactProfileLaunchAttemptBinding) (bool, error) {
+		called = true
+		return repo.BindExactProfileLaunchAttempt(ctx, bound)
+	}); !errors.Is(err, lifecycle.ErrExecutionNotFound) {
+		t.Fatalf("admit removed execution error = %v, want ErrExecutionNotFound", err)
+	}
+	if called {
+		t.Fatal("removed execution reached durable attempt binding")
+	}
+
+	execution := &lifecycle.AgentExecution{ID: "exec-guard", TaskID: "task1", SessionID: "session-guard"}
+	if err := manager.ExecutionStoreForTesting().Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	binding := &models.ExactProfileLaunchAttemptBinding{
+		TaskID: session.TaskID, SessionID: session.ID, ExecutionID: execution.ID, AttemptID: execution.ID,
+		SessionIncarnationID: session.QueueIncarnationID, AgentProfileID: "profile-exact", ProfileRevision: revision, Generation: 1,
+	}
+	bound := make(chan struct{})
+	releaseBind := make(chan struct{})
+	admitted := make(chan error, 1)
+	go func() {
+		admitted <- manager.AdmitExactProfileLaunchAttempt(execution.ID, binding, func(boundBinding *models.ExactProfileLaunchAttemptBinding) (bool, error) {
+			changed, bindErr := repo.BindExactProfileLaunchAttempt(ctx, boundBinding)
+			if bindErr == nil && changed {
+				close(bound)
+				<-releaseBind
+			}
+			return changed, bindErr
+		})
+	}()
+	<-bound
+	removed := make(chan struct{})
+	go func() {
+		manager.RemoveExecution(execution.ID)
+		close(removed)
+	}()
+	select {
+	case <-removed:
+		t.Fatal("removal completed before the admitted attempt was attached")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseBind)
+	if err := <-admitted; err != nil {
+		t.Fatalf("admit exact attempt: %v", err)
+	}
+	select {
+	case <-removed:
+	case <-time.After(time.Second):
+		t.Fatal("removal did not continue after attempt attachment")
+	}
+
+}
 
 type exactProfileWorkflowSwitchTaskRepo struct {
 	*mockTaskRepo
