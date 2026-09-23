@@ -169,6 +169,10 @@ func TestOutcomeExpvarMapsPublishedAtKnownNames(t *testing.T) {
 		"github_pr_watch_duplicates",
 		"github_pr_watch_orphans",
 		"github_pr_watch_canonical_poll_requests_total",
+		"github_review_cleanup_circuit_skips_total",
+		"github_review_cleanup_circuit_resets_total",
+		"github_review_cleanup_failures_total",
+		"github_review_cleanup_core_quota_skips_total",
 	}
 	for _, name := range expected {
 		if expvar.Get(name) == nil {

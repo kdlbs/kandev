@@ -67,8 +67,10 @@ Do not route these actions through a scheduled-only selector.
 ## Failure and recovery
 
 A missing task row remains visible to the cleanup path that removes stale
-dedup records. A watch read failure leaves its records untouched for that
-cycle. A failed task-retention check also leaves both task and record intact.
+dedup records. A task-not-found result from the session checker counts as no
+user-authored message so cleanup can remove its stale dedup record. Other
+task-retention check failures leave both task and record intact. A watch read
+failure leaves its records untouched for that cycle.
 Provider failures follow the [Platform backoff design](../../platform/system-design/pr-watch-and-bounded-storage.md#provider-failure-backoff-and-health).
 
 ## Verification

@@ -103,15 +103,20 @@ feedback checks Core quota, stops the affected workspace after shared provider
 failures, and isolates record-specific configuration failures. Credential and
 actual watch-configuration changes reset record circuit state without routine
 poll timestamps doing so. Core admission uses the remaining reset wait, so an
-expired snapshot cannot block cleanup indefinitely. Bounded expvar metrics
-report skips, resets, failures, and Core-quota skips. Explicit cleanup remains
-outside the scheduled admission path.
+expired snapshot cannot block cleanup indefinitely. Core quota and workspace
+circuit admission run before scheduled credential resolution. Auto retention
+treats task-not-found as an already missing task while preserving fail-closed
+behavior for other errors. Bounded expvar metrics report skips, resets,
+failures, and Core-quota skips. Explicit cleanup remains outside the scheduled
+admission path.
 
-Verification passed: focused cleanup/circuit tests, the full
-`internal/github` package tests, the backend binary build, public-doc
-validators, and `git diff --check`. Regression tests cover an enabled watch
-poll between record failures, a real watch-config edit, and recovery after a
-Core snapshot reset time expires. The backend-wide `make test` reached all
-packages but reported two failures in the unchanged
-`internal/agentctl/server/process/probe` package. Its config-discovery failures
-passed when rerun with isolated HOME and without task-injected config paths.
+Verification passed: focused cleanup/circuit tests, full `internal/github` and
+`internal/backendapp` package tests, the backend binary build, changed-package
+lint, specification validators, and `git diff --check`. Regression tests cover
+credential admission before resolution, missing-task cleanup, record-circuit
+pruning, metric publication, an enabled watch poll between record failures, a
+real watch-config edit, and recovery after a Core snapshot reset time expires.
+The backend-wide `make test` reached all packages but reported two failures in
+the unchanged `internal/agentctl/server/process/probe` package. Its
+config-discovery failures passed when rerun with isolated HOME and without
+task-injected config paths.

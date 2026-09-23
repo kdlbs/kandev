@@ -28,7 +28,18 @@ type scheduledReviewCleanupResult struct {
 	Successes []scheduledReviewCleanupSuccess
 }
 
-type scheduledReviewCleanupAdmission func(*ReviewPRTask, *RateTracker) (allow, stopWorkspace bool)
+type scheduledReviewCleanupAdmission struct {
+	workspace func(string) (allow, stopWorkspace bool)
+	record    func(*ReviewPRTask, *RateTracker) (allow, stopWorkspace bool)
+}
+
+func (a scheduledReviewCleanupAdmission) allowWorkspace(workspaceID string) bool {
+	if a.workspace == nil {
+		return true
+	}
+	allowed, _ := a.workspace(workspaceID)
+	return allowed
+}
 
 func cleanupBatchAdmission(ctx context.Context, client Client, tracker *RateTracker, policy string) error {
 	if err := ctx.Err(); err != nil {
@@ -118,6 +129,9 @@ func (s *Service) cleanupScheduledMergedReviewTasks(
 	if len(prTasks) == 0 {
 		return scheduledReviewCleanupResult{}, nil
 	}
+	if !admission.allowWorkspace(watch.WorkspaceID) {
+		return scheduledReviewCleanupResult{}, nil
+	}
 	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, "", "")
 	if err != nil {
 		return scheduledReviewCleanupResult{Failures: []scheduledReviewCleanupFailure{{
@@ -136,7 +150,7 @@ func (s *Service) cleanupScheduledMergedReviewTasks(
 // consumption (the GetPRFeedback path bypasses prStatusCache). Returns the
 // number of tasks deleted.
 func (s *Service) CleanupAllOrphanedReviewTasks(ctx context.Context) (int, error) {
-	result, err := s.cleanupAllReviewTasks(ctx, true, false, nil)
+	result, err := s.cleanupAllReviewTasks(ctx, true, false, scheduledReviewCleanupAdmission{})
 	return result.Deleted, err
 }
 
@@ -151,7 +165,7 @@ func (s *Service) cleanupScheduledOrphanedReviewTasks(
 // settings-page cleanup button so the user can drain everything on demand
 // without waiting for the next 5-minute poll cycle.
 func (s *Service) CleanupAllReviewTasks(ctx context.Context) (int, error) {
-	result, err := s.cleanupAllReviewTasks(ctx, false, false, nil)
+	result, err := s.cleanupAllReviewTasks(ctx, false, false, scheduledReviewCleanupAdmission{})
 	return result.Deleted, err
 }
 
@@ -248,37 +262,51 @@ func (s *Service) cleanupAllReviewTasks(
 	}
 	result := scheduledReviewCleanupResult{}
 	for workspaceID, candidates := range candidatesByWorkspace {
-		resolved, resolveErr := s.resolveAutomationClient(ctx, workspaceID, "", "")
-		if resolveErr != nil {
-			s.logger.Warn("skip review cleanup for unavailable workspace connection",
-				zap.String("workspace_id", workspaceID), zap.Error(resolveErr))
-			if scheduled {
-				result.Failures = append(result.Failures, scheduledReviewCleanupFailure{
-					Task: candidates[0], WorkspaceID: workspaceID, Err: resolveErr,
-				})
-			}
-			continue
-		}
-		if scheduled {
-			batchResult := s.cleanupScheduledReviewPRTaskBatch(
-				ctx, resolved.Client, resolved.RateTracker, candidates, workspaceID,
-				func(rpt *ReviewPRTask) string { return policyCache[rpt.ReviewWatchID] }, admission,
-			)
-			result.Deleted += batchResult.Deleted
-			result.Failures = append(result.Failures, batchResult.Failures...)
-			result.Successes = append(result.Successes, batchResult.Successes...)
-			continue
-		}
-		batchDeleted, batchErr := s.cleanupReviewPRTaskBatch(
-			ctx, resolved.Client, resolved.RateTracker, candidates,
+		workspaceResult, workspaceErr := s.cleanupReviewTasksForWorkspace(
+			ctx, workspaceID, candidates, scheduled, admission,
 			func(rpt *ReviewPRTask) string { return policyCache[rpt.ReviewWatchID] },
 		)
-		result.Deleted += batchDeleted
-		if batchErr != nil {
-			return result, batchErr
+		result.Deleted += workspaceResult.Deleted
+		result.Failures = append(result.Failures, workspaceResult.Failures...)
+		result.Successes = append(result.Successes, workspaceResult.Successes...)
+		if workspaceErr != nil {
+			return result, workspaceErr
 		}
 	}
 	return result, nil
+}
+
+func (s *Service) cleanupReviewTasksForWorkspace(
+	ctx context.Context,
+	workspaceID string,
+	candidates []*ReviewPRTask,
+	scheduled bool,
+	admission scheduledReviewCleanupAdmission,
+	resolvePolicy func(*ReviewPRTask) string,
+) (scheduledReviewCleanupResult, error) {
+	if scheduled && !admission.allowWorkspace(workspaceID) {
+		return scheduledReviewCleanupResult{}, nil
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, "", "")
+	if err != nil {
+		s.logger.Warn("skip review cleanup for unavailable workspace connection",
+			zap.String("workspace_id", workspaceID), zap.Error(err))
+		if scheduled {
+			return scheduledReviewCleanupResult{Failures: []scheduledReviewCleanupFailure{{
+				Task: candidates[0], WorkspaceID: workspaceID, Err: err,
+			}}}, nil
+		}
+		return scheduledReviewCleanupResult{}, nil
+	}
+	if scheduled {
+		return s.cleanupScheduledReviewPRTaskBatch(
+			ctx, resolved.Client, resolved.RateTracker, candidates, workspaceID, resolvePolicy, admission,
+		), nil
+	}
+	deleted, err := s.cleanupReviewPRTaskBatch(
+		ctx, resolved.Client, resolved.RateTracker, candidates, resolvePolicy,
+	)
+	return scheduledReviewCleanupResult{Deleted: deleted}, err
 }
 
 // buildReviewWatchCaches loads the cleanup policy + enabled flag for each
@@ -377,8 +405,8 @@ func (s *Service) cleanupScheduledReviewPRTaskBatch(
 		if policy == CleanupPolicyNever || s.retainAutoReviewTaskBeforeFeedback(ctx, rpt, policy) {
 			continue
 		}
-		if admission != nil {
-			allowed, stopWorkspace := admission(rpt, tracker)
+		if admission.record != nil {
+			allowed, stopWorkspace := admission.record(rpt, tracker)
 			if !allowed {
 				if stopWorkspace {
 					break
@@ -454,22 +482,27 @@ func (s *Service) retainAutoReviewTaskBeforeFeedback(ctx context.Context, rpt *R
 	if s.store == nil {
 		return true
 	}
+	if s.taskSessionChecker != nil {
+		hasUserMsg, err := s.taskSessionChecker.HasUserAuthoredMessage(ctx, rpt.TaskID)
+		if err != nil {
+			if errors.Is(err, ErrTaskNotFound) {
+				return false
+			}
+			s.logger.Debug("failed to check task user messages before scheduled cleanup",
+				zap.String("task_id", rpt.TaskID), zap.Error(err))
+			return true
+		}
+		if hasUserMsg {
+			return true
+		}
+	}
 	enabled, err := s.HasEnabledTaskPRAgentPrompts(ctx, rpt.TaskID)
 	if err != nil {
 		s.logger.Debug("failed to check task PR agent prompt options before scheduled cleanup",
 			zap.String("task_id", rpt.TaskID), zap.Error(err))
 		return true
 	}
-	if enabled || s.taskSessionChecker == nil {
-		return true
-	}
-	hasUserMsg, err := s.taskSessionChecker.HasUserAuthoredMessage(ctx, rpt.TaskID)
-	if err != nil {
-		s.logger.Debug("failed to check task user messages before scheduled cleanup",
-			zap.String("task_id", rpt.TaskID), zap.Error(err))
-		return true
-	}
-	return hasUserMsg
+	return enabled || s.taskSessionChecker == nil
 }
 
 // shouldDeleteReviewTask checks whether a review PR task is eligible for
@@ -517,6 +550,20 @@ func (s *Service) shouldDeleteReviewTaskWithClient(
 	if policy == CleanupPolicyAlways || rpt.TaskID == "" {
 		return true, reason, nil
 	}
+	if s.taskSessionChecker != nil {
+		hasUserMsg, err := s.taskSessionChecker.HasUserAuthoredMessage(ctx, rpt.TaskID)
+		if err != nil {
+			if errors.Is(err, ErrTaskNotFound) {
+				return true, reason, nil
+			}
+			s.logger.Debug("failed to check task user messages",
+				zap.String("task_id", rpt.TaskID), zap.Error(err))
+			return false, "", nil
+		}
+		if hasUserMsg {
+			return false, "", nil
+		}
+	}
 	if s.store != nil {
 		enabled, err := s.HasEnabledTaskPRAgentPrompts(ctx, rpt.TaskID)
 		if err != nil {
@@ -527,18 +574,6 @@ func (s *Service) shouldDeleteReviewTaskWithClient(
 		if enabled {
 			return false, "", nil
 		}
-	}
-	if s.taskSessionChecker == nil {
-		return true, reason, nil
-	}
-	hasUserMsg, err := s.taskSessionChecker.HasUserAuthoredMessage(ctx, rpt.TaskID)
-	if err != nil {
-		s.logger.Debug("failed to check task user messages",
-			zap.String("task_id", rpt.TaskID), zap.Error(err))
-		return false, "", nil
-	}
-	if hasUserMsg {
-		return false, "", nil
 	}
 	return true, reason, nil
 }

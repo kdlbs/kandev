@@ -929,6 +929,10 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 	// every watch" case. Fall through to the no-op loop and run the sweep.
 	p.logger.Debug("checking review watches", zap.Int("count", len(watches)))
 	cleanupCycle := newReviewCleanupCycle(ctx, p)
+	cleanupAdmission := scheduledReviewCleanupAdmission{
+		workspace: cleanupCycle.admitWorkspace,
+		record:    cleanupCycle.admit,
+	}
 	for _, watch := range watches {
 		cleanupCycle.registerWatch(watch)
 		// A previous iteration in this same cycle may have exhausted the
@@ -963,7 +967,7 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 			p.service.publishNewReviewPREvent(ctx, watch, pr)
 		}
 		// Clean up tasks for merged/closed PRs that the user hasn't opened.
-		cleanup, err := p.service.cleanupScheduledMergedReviewTasks(ctx, watch, cleanupCycle.admit)
+		cleanup, err := p.service.cleanupScheduledMergedReviewTasks(ctx, watch, cleanupAdmission)
 		if err != nil {
 			p.logCleanupError("failed to cleanup merged review tasks", err,
 				zap.String("watch_id", watch.ID))
@@ -979,7 +983,7 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 	// disabled. Without this pass those rows (and the tasks they reference)
 	// would never be re-examined, since the per-watch loop only iterates
 	// enabled watches.
-	cleanup, err := p.service.cleanupScheduledOrphanedReviewTasks(ctx, cleanupCycle.admit)
+	cleanup, err := p.service.cleanupScheduledOrphanedReviewTasks(ctx, cleanupAdmission)
 	if err != nil {
 		p.logCleanupError("failed to sweep orphaned review tasks", err)
 	} else {

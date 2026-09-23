@@ -128,7 +128,7 @@ configs. `apps/backend/internal/health` exposes aggregate health (counts by
 class, no workspace identifiers or secrets), and bounded-label expvar counters
 report skips, resets, and failures.
 
-### Planned review-cleanup extension
+### Review-cleanup extension
 
 The [review task cleanup package](../../integrations/system-design/github-review-task-cleanup.md)
 extends this existing backoff contract to scheduled review-task feedback. It
@@ -140,14 +140,17 @@ Key shared authentication and rate-limit failures by workspace automation
 connection. Keep a record-specific configuration failure isolated to that
 review record. One inaccessible PR must not suspend unrelated work in the
 workspace. Use non-secret connection generation and status as the workspace
-reset fingerprint; include the watch's update time for a record-specific
-configuration reset. Circuit state remains in memory and is discarded on
-restart. Remove record-specific state when its dedup row disappears.
+reset fingerprint. Reset a record-specific circuit when its watch
+configuration changes, excluding routine polling timestamps. Circuit state
+remains in memory and is discarded on restart. Remove record-specific state
+when its dedup row disappears.
 
-Before each scheduled feedback request, inspect the Core rate tracker and the
-relevant circuit. If Core is exhausted or the circuit is open, make no feedback
-request. A failed feedback fetch must reach the poller as a classified outcome;
-the current cleanup helper swallows that error and cannot open a circuit.
+Before resolving automation credentials for scheduled cleanup, inspect the
+Core rate tracker and workspace circuit. If Core is exhausted or the workspace
+circuit is open, skip credential resolution. After resolving credentials,
+inspect record-specific admission before each feedback request. A failed
+feedback fetch must reach the poller as a classified outcome so it can open
+the relevant circuit.
 After a shared authentication or rate-limit failure, stop the remaining
 feedback requests for that workspace in the same cycle. Continue other
 workspaces unless the shared Core tracker reports exhaustion. A record-specific

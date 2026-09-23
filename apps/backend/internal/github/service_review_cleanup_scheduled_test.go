@@ -20,6 +20,34 @@ type missingTaskReviewDeleter struct {
 	calls []string
 }
 
+type taskNotFoundReviewDeleter struct{}
+
+func (taskNotFoundReviewDeleter) DeleteTask(context.Context, string) error {
+	return ErrTaskNotFound
+}
+
+type countingReviewCleanupAutomationProvider struct {
+	client Client
+	calls  int
+}
+
+func (p *countingReviewCleanupAutomationProvider) ResolveAutomation(
+	_ context.Context,
+	connection *WorkspaceConnection,
+	_ ResolveCredentialRequest,
+) (*ResolvedCredential, error) {
+	p.calls++
+	return &ResolvedCredential{
+		Client:       p.client,
+		Capabilities: allTokenCapabilities(),
+		Principal: AuthPrincipal{
+			Kind:   AuthPrincipalHuman,
+			Source: ConnectionSourcePAT,
+			Login:  connection.Login,
+		},
+	}, nil
+}
+
 func (d *missingTaskReviewDeleter) DeleteTask(_ context.Context, taskID string) error {
 	d.calls = append(d.calls, taskID)
 	if taskID == "hard-deleted-task-enabled" || taskID == "hard-deleted-task-disabled" {
@@ -218,6 +246,25 @@ func TestCleanupReviewTasks_AutoRetentionSkipsFeedback(t *testing.T) {
 				t.Errorf("feedback calls = %d, want 0 when Auto cleanup retains the task", client.feedbackCalls)
 			}
 		})
+	}
+}
+
+func TestCleanupReviewTasks_AutoTaskNotFoundRemainsEligible(t *testing.T) {
+	poller, service, store, watch, client := setupActiveReviewCleanup(
+		t, &recordingSessionChecker{err: ErrTaskNotFound}, true,
+	)
+	service.SetTaskDeleter(taskNotFoundReviewDeleter{})
+
+	poller.checkReviewWatches(context.Background())
+	if client.feedbackCalls != 1 {
+		t.Fatalf("feedback calls for missing task = %d, want one", client.feedbackCalls)
+	}
+	rows, err := store.ListReviewPRTasksByWatch(context.Background(), watch.ID)
+	if err != nil {
+		t.Fatalf("list review rows after missing-task cleanup: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("review rows after missing-task cleanup = %+v, want none", rows)
 	}
 }
 
@@ -434,6 +481,8 @@ func TestReviewCleanupCircuit_StopsAfterSharedFailure(t *testing.T) {
 
 func TestReviewCleanupCoreQuota(t *testing.T) {
 	poller, service, _, _, client := setupOpenReviewCleanupRecords(t, CleanupPolicyAlways, 41)
+	provider := &countingReviewCleanupAutomationProvider{client: client}
+	service.resolver.SetAutomationProvider(provider)
 	quotaSkipsBefore := reviewCleanupCoreQuotaSkipsTotal.Value()
 	service.RateTracker().Record(RateSnapshot{
 		Resource: ResourceCore, Remaining: 0, ResetAt: time.Now().Add(time.Minute), UpdatedAt: time.Now(),
@@ -442,9 +491,56 @@ func TestReviewCleanupCoreQuota(t *testing.T) {
 	if client.feedbackCalls != 0 {
 		t.Fatalf("feedback calls with exhausted Core quota = %d, want 0", client.feedbackCalls)
 	}
+	if provider.calls != 0 {
+		t.Fatalf("credential resolutions with exhausted Core quota = %d, want 0", provider.calls)
+	}
 	if got := reviewCleanupCoreQuotaSkipsTotal.Value(); got <= quotaSkipsBefore {
 		t.Fatalf("Core quota skip metric = %d, want an increment", got)
 	}
+}
+
+func TestReviewCleanupWorkspaceCircuitSkipsCredentialResolution(t *testing.T) {
+	poller, service, _, _, client := setupOpenReviewCleanupRecords(t, CleanupPolicyAlways, 41)
+	provider := &countingReviewCleanupAutomationProvider{client: client}
+	service.resolver.SetAutomationProvider(provider)
+	client.feedbackErrors[41] = &GitHubAPIError{StatusCode: 401, Endpoint: "/pulls/41"}
+
+	poller.checkReviewWatches(context.Background())
+	if provider.calls != 1 || client.feedbackCalls != 1 {
+		t.Fatalf("first cleanup resolutions=%d feedback=%d, want one each", provider.calls, client.feedbackCalls)
+	}
+	service.resolver.InvalidateWorkspace("ws-1")
+	poller.checkReviewWatches(context.Background())
+	if provider.calls != 1 || client.feedbackCalls != 1 {
+		t.Fatalf("open workspace circuit resolutions=%d feedback=%d, want no additional calls", provider.calls, client.feedbackCalls)
+	}
+}
+
+func TestReviewCleanupRecordCircuitPrunesDeletedDedupRow(t *testing.T) {
+	poller, _, store, _, client := setupOpenReviewCleanupRecords(t, CleanupPolicyAlways, 41)
+	client.feedbackErrors[41] = ErrRepoNotResolvable
+	poller.checkReviewWatches(context.Background())
+	if got := reviewCleanupRecordCircuitCount(poller); got != 1 {
+		t.Fatalf("record circuit count after config failure = %d, want 1", got)
+	}
+
+	rows, err := store.ListAllReviewPRTasks(context.Background())
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("review rows before deleting dedup row = %+v, err=%v", rows, err)
+	}
+	if err := store.DeleteReviewPRTask(context.Background(), rows[0].ID); err != nil {
+		t.Fatalf("delete review dedup row: %v", err)
+	}
+	poller.checkReviewWatches(context.Background())
+	if got := reviewCleanupRecordCircuitCount(poller); got != 0 {
+		t.Fatalf("record circuit count after dedup row deletion = %d, want 0", got)
+	}
+}
+
+func reviewCleanupRecordCircuitCount(poller *Poller) int {
+	poller.reviewCleanupCircuits.mu.Lock()
+	defer poller.reviewCleanupCircuits.mu.Unlock()
+	return len(poller.reviewCleanupCircuits.records)
 }
 
 func TestReviewCleanupCoreQuota_ExpiredSnapshotAllowsFeedback(t *testing.T) {

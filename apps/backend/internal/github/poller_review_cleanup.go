@@ -62,31 +62,49 @@ func (c *reviewCleanupCycle) admit(task *ReviewPRTask, tracker *RateTracker) (bo
 	if c.poller.reviewCleanupCircuits.refreshRecordFingerprint(task.ID, recordFingerprint) {
 		incReviewCleanupCircuitReset(reviewCleanupCircuitRecord)
 	}
-	serviceTracker := c.poller.service.rateTracker
-	coreExhausted := serviceTracker != nil && serviceTracker.WaitDuration(ResourceCore) > 0
-	if !coreExhausted && tracker != nil && tracker != serviceTracker {
-		coreExhausted = tracker.WaitDuration(ResourceCore) > 0
+	if allowed, stopWorkspace := c.admitWorkspace(watch.WorkspaceID); !allowed {
+		return false, stopWorkspace
 	}
-	if coreExhausted {
-		if !c.coreQuotaSkipRecorded {
-			incReviewCleanupCoreQuotaSkip()
-			c.coreQuotaSkipRecorded = true
-		}
+	serviceTracker := c.poller.service.rateTracker
+	if tracker != nil && tracker != serviceTracker && tracker.WaitDuration(ResourceCore) > 0 {
+		c.recordCoreQuotaSkip()
 		return false, true
 	}
 	now := time.Now().UTC()
-	if open, class := c.poller.reviewCleanupCircuits.workspaceOpen(watch.WorkspaceID, now); open {
-		if !c.workspaceSkipRecorded[watch.WorkspaceID] {
-			incReviewCleanupCircuitSkip(reviewCleanupCircuitWorkspace, string(class))
-			c.workspaceSkipRecorded[watch.WorkspaceID] = true
-		}
-		return false, true
-	}
 	if open, class := c.poller.reviewCleanupCircuits.recordOpen(task.ID, now); open {
 		incReviewCleanupCircuitSkip(reviewCleanupCircuitRecord, string(class))
 		return false, false
 	}
 	return true, false
+}
+
+func (c *reviewCleanupCycle) admitWorkspace(workspaceID string) (bool, bool) {
+	if workspaceID == "" {
+		return false, false
+	}
+	c.workspaceFingerprint(workspaceID)
+	if c.poller.service != nil && c.poller.service.rateTracker != nil &&
+		c.poller.service.rateTracker.WaitDuration(ResourceCore) > 0 {
+		c.recordCoreQuotaSkip()
+		return false, true
+	}
+	now := time.Now().UTC()
+	if open, class := c.poller.reviewCleanupCircuits.workspaceOpen(workspaceID, now); open {
+		if !c.workspaceSkipRecorded[workspaceID] {
+			incReviewCleanupCircuitSkip(reviewCleanupCircuitWorkspace, string(class))
+			c.workspaceSkipRecorded[workspaceID] = true
+		}
+		return false, true
+	}
+	return true, false
+}
+
+func (c *reviewCleanupCycle) recordCoreQuotaSkip() {
+	if c.coreQuotaSkipRecorded {
+		return
+	}
+	incReviewCleanupCoreQuotaSkip()
+	c.coreQuotaSkipRecorded = true
 }
 
 func (c *reviewCleanupCycle) apply(
