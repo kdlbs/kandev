@@ -59,7 +59,14 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 | **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                 |
 | **Close Others**   | Closes other visible agent panels without deleting their sessions                                                                                                          |
 
-Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. When startup or resume fails, Kandev adds one recovery entry to the selected session's chat. The entry stays in chronological history after recovery and later agent output. Only the current unresolved failure shows recovery controls. Older entries keep their message and technical details, and repeated delivery of the same failure does not create another entry. History loading and new messages use the normal chat scroll behavior.
+Stopping a session is not deletion. Resume needs the executor's session record. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can require a fresh session.
+
+When startup or resume fails:
+
+- Kandev adds one recovery entry to the selected session's chat.
+- The current unresolved failure shows recovery controls. Older entries keep their message and technical details without stale controls.
+- Repeated delivery of the same failure does not add another entry.
+- History loading and new messages keep the normal chat scroll behavior.
 
 **Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. The session entry remains visible until the session resumes successfully. Kandev uses stacked touch-sized actions on phones. A failure in another session remains in that session's history.
 
@@ -69,7 +76,17 @@ Stopping a turn does not itself run the next queued message. If pending rows rem
 
 The expanded queue also lets you pause or discard stale work. Its compact header places the **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
 
-Use **Auto-run** for normal queue motion. ON runs one eligible row per turn in FIFO order; OFF lets the current response finish and holds later rows. The setting belongs to the session and survives an empty queue, reload, and backend restart. A pending clarification or another lifecycle guard can leave the queue waiting while the switch remains ON. **Auto-merge** controls automatic folding of later compatible admissions. It initially follows the install-wide value and follows later global changes until you change the pill. That first change creates a session override that remains independent for the session's lifetime.
+Use **Auto-run** for queue processing:
+
+| Setting | Queue behavior |
+| --- | --- |
+| **On** | Runs one eligible row per turn in FIFO order. |
+| **Off** | Lets the current response finish and holds later rows. |
+
+- The setting belongs to the session and survives an empty queue, reload, and backend restart.
+- A pending clarification or another lifecycle guard can hold the queue while Auto-run is on.
+
+**Auto-merge** folds later compatible messages. It follows the install-wide setting until you change the session's pill. That change creates a session override that stays active for the session's lifetime.
 
 ### Send while a session resumes
 
@@ -81,7 +98,12 @@ When you queue a prompt, Kandev records a submission identity before it reports 
 
 A full queue, invalid content or attachment, identity conflict, or unavailable session shows a **Message not sent** error and keeps the draft and attachments. If delivery remains uncertain, Kandev shows **Message send status unknown** and keeps them for inspection. A confirmed admission clears only the submitted draft; a failed queue refresh does not turn an accepted admission into a failure.
 
-Every row has **Send Now** for targeted priority. It sends that row directly when the session is promptable or replaces the captured active turn after backend cancellation acknowledgement. This includes a turn that Auto-run delivered from the FIFO queue after its prompt handoff completes. The handoff remains protected while it is completing, so a concurrent Send Now conflict keeps the rows pending for retry. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the remaining rows as separate FIFO turns without ordinary Cancel side effects. **Clear all** discards the visible queue. The chat toolbar's **Cancel** immediately stops the active turn, sends no queued prompt, parks any pending backlog by turning Auto-run OFF, and can complete the workflow step or move the task to review.
+Every row has **Send Now** for priority delivery:
+
+- It sends the row immediately when the session can accept a prompt.
+- For an active turn, it waits for backend cancellation acknowledgement. A handoff already in progress cannot be replaced; a conflict leaves the rows pending for retry.
+- After a successful send, Auto-run turns on. Kandev sends that row first, then drains the remaining rows as separate FIFO turns.
+- The toolbar's **Cancel** stops the active turn and sends no queued prompt. It turns Auto-run off for the backlog and can complete the workflow step or move the task to review.
 
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 

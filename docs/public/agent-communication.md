@@ -38,14 +38,11 @@ list_related_tasks_kandev()
 message_task_kandev(task_id="<full UUID>", prompt="<message text>")
 ```
 
-By default, the message goes to the task's primary session. Advanced callers can pass
-`session_id` to target a specific session that belongs to that task, including a sibling
-session on their own task. `spawn_session_kandev` returns `{task_id, session_id, state, agent_profile_id}`
-when an agent starts an additional session on an existing task; pass the `session_id` field to
-`message_task_kandev`. The returned `agent_profile_id` is the effective profile after workflow
-profile resolution. A pinned workflow-step profile wins first, followed by the workflow default
-on an unpinned step. Without a workflow launch profile, an explicit profile wins, and the existing
-inheritance rules apply when no profile is provided.
+By default, the message goes to the task's primary session. To target another session:
+
+- Pass its `session_id` to `message_task_kandev`. This also works for a sibling session on your task.
+- `spawn_session_kandev` returns `{task_id, session_id, state, agent_profile_id}`. Pass its `session_id` to `message_task_kandev`.
+- The returned `agent_profile_id` is the effective profile after workflow resolution. A pinned step profile wins, then the workflow default. Without a workflow profile, an explicit profile wins before normal inheritance rules.
 
 Delivery behaviour depends on the target session's state at the moment of the call:
 
@@ -237,7 +234,18 @@ Task B processes each incoming message as a normal turn. When it receives Agent 
 }
 ```
 
-The server normalizes this object once and omits empty optional strings. Reset is additive with the destination reset policy, and instructions are appended once after the normal destination prompt. When `skip_step_prompt` is set, the destination step's configured prompt and its task-description fallback are suppressed for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. The destination and options are validated together. Every call returns a move-result envelope: `disposition` is `"deferred"` when the current agent is running (the options persist through the turn boundary, WIP queue promotion, and backend restart before they are applied) or `"applied"` when an idle move committed immediately, `task` is the moved (or target-step) task, and an optioned move also returns a `move_id` plus the accepted `entry_options` so you can correlate the retained one-shot override with the eventual step entry. The legacy top-level `prompt` argument remains accepted as an alias for `entry_options.instructions`; when both are non-empty, validation fails. Pull-request draft/readiness is not a generic move option.
+Kandev normalizes the object, omits empty optional strings, and validates the destination with its options.
+
+| Option | Effect |
+| --- | --- |
+| `reset_context` | Adds a reset. It cannot remove a reset required by the destination step. |
+| `instructions` | Adds one instruction block after the normal destination prompt. |
+| `skip_step_prompt` | Suppresses the destination prompt and task-description fallback. With instructions, the agent starts a turn with them. Without instructions, the task moves without starting a turn. |
+
+- A move returns `disposition: "deferred"` while the agent runs, or `"applied"` when an idle move completes. Deferred options persist through the turn boundary, WIP queue promotion, and backend restart.
+- Every result includes `task`. An optioned move also returns `move_id` and the accepted `entry_options`.
+- The top-level `prompt` remains an alias for `entry_options.instructions`. If both are non-empty, validation fails.
+- Pull-request draft and review status are not generic move options.
 
 **No secrets or large dumps.** Messages are coordination, not a code-delivery channel. Do not send credentials, private keys, or large file contents through cross-task messages. Reference files by path; share access via the repository, not the message.
 

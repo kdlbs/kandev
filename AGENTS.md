@@ -151,7 +151,7 @@ history and remains immutable.
 
 ### Knowledge
 
-- **Public docs:** Website-ready user documentation lives in `docs/public/**`. Use `/docs-maintainer` when a change affects CLI commands, config keys, install/deploy flows, workflows, executors, public APIs, screenshots, or user-facing terminology.
+- **Public docs:** Website-ready user documentation lives in `docs/public/**`. Use `/docs-maintainer` when a change affects CLI commands, config keys, install/deploy flows, workflows, executors, public APIs, screenshots, or user-facing terminology. Follow `docs/public/README.md` for content structure and long-page readability.
 - **Specifications:** Durable product context, requirements, and system designs
   live under `docs/specs/**`. New work uses
   `docs/specs/<system>/requirements/` and

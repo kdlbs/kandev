@@ -66,6 +66,7 @@ Skip public docs when the change is:
    - Prefer a link to the page that owns a detailed contract over repeating it.
    - Use native `<details>` / `<summary>` disclosures for non-essential edge cases, exhaustive option lists, and advanced configuration. Keep required steps, security warnings, destructive effects, and eligibility limits visible.
    - Use tables only for genuine comparisons, not narrative text.
+   - Treat drafts or substantial rewrites over about 3,000 words as a structure-review trigger, not a word limit. Check that the page serves one main audience, content type, and reader goal; remove repeated explanations; move secondary detail to its owning page or a disclosure; and keep the common path near the top. Add a short grouped topic index when a long page needs to remain together. Preserve supported behavior, limits, security warnings, and recovery requirements instead of deleting them to reduce word count. See `docs/public/README.md` for the full long-page review rule.
 9. Preserve internal links inside `docs/public/**` where possible. Link to source-only raw docs only when the raw note is intentionally not published.
 10. Note docs impact and the page's primary content type in the PR body.
 
