@@ -54,6 +54,7 @@ test.describe("Office taskless routine sessions", () => {
     officeApi,
     apiClient,
     officeSeed,
+    backend,
     seedData,
   }) => {
     // A taskless launch has two asynchronous schedulers in front of the mock
@@ -91,6 +92,7 @@ test.describe("Office taskless routine sessions", () => {
     const sessions: string[] = [];
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       await waitForAgentIdle(officeApi, agentId);
+      await backend.ensureReady();
       const response = await officeApi.runRoutine(routineId);
       if (response.status !== 200) {
         throw new Error(
@@ -131,7 +133,7 @@ test.describe("Office taskless routine sessions", () => {
             return runId;
           },
           {
-            timeout: 90_000,
+            timeout: 120_000,
             intervals: [250, 500, 1_000],
             message: `Waiting for agent run ${attempt} to appear`,
           },
