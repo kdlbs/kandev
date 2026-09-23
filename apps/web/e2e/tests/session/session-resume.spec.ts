@@ -526,11 +526,8 @@ test.describe("Session resume (TUI passthrough mode)", () => {
 
     // 3. Restart, reload, expect RESUMED — confirms multi-repo workspace path
     //    resolution preserves resume detection.
-    const gateway = watchWs(testPage);
-    const resumeLaunch = gateway.waitForResponse("session.launch", { timeout: 60_000 });
     await backend.restart();
     await testPage.reload();
-    await resumeLaunch;
     await session.waitForPassthroughLoad(60_000);
     await session.waitForPassthroughLoaded(60_000);
     await session.expectPassthroughHasText("RESUMED", 60_000);

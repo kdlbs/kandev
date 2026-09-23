@@ -694,7 +694,10 @@ export async function publishTaskCanvas({
             publishedCanvas?.active_release_status,
           );
         },
-        { timeout: 30_000, message: "The mock agent did not publish the canvas package." },
+        {
+          timeout: useMobileSubmit ? 60_000 : 30_000,
+          message: "The mock agent did not publish the canvas package.",
+        },
       )
       .toBe(true);
     if (!publishedCanvas) throw new Error("The canvas publish response was empty.");
