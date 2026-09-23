@@ -9548,15 +9548,17 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 	// Invalidate startup before probing or cancelling the runtime. A resume
 	// continuation that is already waiting on ACP readiness will observe this
 	// identity fence and cannot publish a late token, failure, or prompt.
-	s.invalidateResumeAttempt(sessionID)
+	cancelledResumeAttempt := s.invalidateResumeAttempt(sessionID)
 	prepared, err := s.prepareCancelAgent(ctx, sessionID)
 	if err != nil {
 		return err
 	}
 	s.setCancellationIdentity(sessionID, operation, prepared.identity)
 	s.setCancellationCompletionEligible(sessionID, operation, prepared.completionEligible)
-	if err := s.cancelAgentWhileUnlocked(ctx, sessionID, operation, unlockGuard, relockGuard); err != nil {
-		return err
+	if !s.stopCancelledResumeStartup(ctx, cancelledResumeAttempt, unlockGuard, relockGuard) {
+		if err := s.cancelAgentWhileUnlocked(ctx, sessionID, operation, unlockGuard, relockGuard); err != nil {
+			return err
+		}
 	}
 	if err := s.finishCancelledAgentTurn(ctx, sessionID, prepared); err != nil {
 		return err
@@ -9564,6 +9566,43 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil
+}
+
+// stopCancelledResumeStartup terminates an exact unaccepted startup execution
+// while the session guard is held. A native session restore can be blocked in
+// the adapter, so sending a protocol cancel through that same adapter can wait
+// until restore times out. Accepted turns keep the normal in-process cancel.
+func (s *Service) stopCancelledResumeStartup(
+	ctx context.Context,
+	attempt *resumeAttempt,
+	unlockGuard, relockGuard func(),
+) bool {
+	if s == nil || s.executor == nil || attempt == nil {
+		return false
+	}
+	executionID := attempt.execution()
+	if executionID == "" || !s.resumeAttemptStore().canCleanup(attempt) ||
+		!s.claimExecutionTeardown(attempt.sessionID, executionID, executionTeardownIntentForce) {
+		return false
+	}
+
+	unlockGuard()
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
+	err := s.executor.StopExecution(stopCtx, executionID, "cancelled resume startup", true)
+	cancel()
+	relockGuard()
+	if err != nil {
+		s.releaseExecutionTeardownClaim(attempt.sessionID, executionID)
+		if s.logger != nil {
+			s.logger.Debug("failed to stop cancelled resume startup; falling back to agent cancel",
+				zap.String("task_id", attempt.taskID),
+				zap.String("session_id", attempt.sessionID),
+				zap.String("agent_execution_id", executionID),
+				zap.Error(err))
+		}
+		return false
+	}
+	return true
 }
 
 // reconcileJoinedExplicitCancellation applies the user-facing part of an

@@ -49,71 +49,75 @@ const CRASH_RECOVERY_TIMEOUT = 170_000;
 test.describe("mobile: delayed resume cancellation", () => {
   test.describe.configure({ retries: 1 });
 
-  test("cancel fences the delayed startup before a touch retry", async ({
-    testPage,
-    apiClient,
-    seedData,
-    backend,
-  }) => {
-    test.setTimeout(180_000);
+  test.describe("unaccepted startup cancellation", () => {
+    test.describe.configure({ retries: 0 });
 
-    const fixture = await seedDelayedResumeFixture(
+    test("cancel fences the delayed startup before a touch retry", async ({
       testPage,
       apiClient,
       seedData,
       backend,
-      "Mobile session cancel and retry recovery",
-    );
+    }) => {
+      test.setTimeout(180_000);
 
-    try {
-      await expect(fixture.session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });
-      await fixture.session.cancelAgentButton().tap();
-      await waitForSessionState(apiClient, {
-        taskId: fixture.task.id,
-        sessionId: fixture.identity.sessionId,
-        expectedState: "WAITING_FOR_INPUT",
-        message: "Waiting for mobile delayed resume cancellation",
-        timeout: 30_000,
-      });
-      // Retry the same saved conversation through the touch composer. The old
-      // delayed callback must not publish a second response or consume this
-      // new attempt.
-      await waitForSessionReady(
+      const fixture = await seedDelayedResumeFixture(
         testPage,
         apiClient,
-        fixture.task.id,
-        fixture.identity.sessionId,
-        90_000,
-      );
-      await expect(fixture.session.activeChat().getByTestId("chat-input-editor")).toHaveAttribute(
-        "contenteditable",
-        "true",
-        { timeout: 30_000 },
+        seedData,
+        backend,
+        "Mobile session cancel and retry recovery",
       );
 
-      const priorResponses = await readSessionMessageIdsContaining(
-        apiClient,
-        fixture.identity.sessionId,
-        "simple mock response",
-      );
-      await fixture.session.sendMessageViaButton("/e2e:simple-message");
-      await waitForNewSessionMessage(
-        apiClient,
-        fixture.identity.sessionId,
-        priorResponses,
-        "simple mock response",
-        90_000,
-      );
-      await fixture.session.expectChatResponseVisible("simple mock response", 1);
-      const responses = fixture.session
-        .activeChat()
-        .locator("[data-agent-message-body][data-message-id]")
-        .filter({ hasText: "simple mock response" });
-      await expect(responses).toHaveCount(2);
-      await assertNoDocumentHorizontalOverflow(testPage, "mobile delayed cancel and retry");
-    } finally {
-      await cleanupDelayedResumeFixture(apiClient, fixture);
-    }
+      try {
+        await expect(fixture.session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });
+        await fixture.session.cancelAgentButton().tap();
+        await waitForSessionState(apiClient, {
+          taskId: fixture.task.id,
+          sessionId: fixture.identity.sessionId,
+          expectedState: "WAITING_FOR_INPUT",
+          message: "Waiting for mobile delayed resume cancellation",
+          timeout: 30_000,
+        });
+        // Retry the same saved conversation through the touch composer. The old
+        // delayed callback must not publish a second response or consume this
+        // new attempt.
+        await waitForSessionReady(
+          testPage,
+          apiClient,
+          fixture.task.id,
+          fixture.identity.sessionId,
+          90_000,
+        );
+        await expect(fixture.session.activeChat().getByTestId("chat-input-editor")).toHaveAttribute(
+          "contenteditable",
+          "true",
+          { timeout: 30_000 },
+        );
+
+        const priorResponses = await readSessionMessageIdsContaining(
+          apiClient,
+          fixture.identity.sessionId,
+          "simple mock response",
+        );
+        await fixture.session.sendMessageViaButton("/e2e:simple-message");
+        await waitForNewSessionMessage(
+          apiClient,
+          fixture.identity.sessionId,
+          priorResponses,
+          "simple mock response",
+          90_000,
+        );
+        await fixture.session.expectChatResponseVisible("simple mock response", 1);
+        const responses = fixture.session
+          .activeChat()
+          .locator("[data-agent-message-body][data-message-id]")
+          .filter({ hasText: "simple mock response" });
+        await expect(responses).toHaveCount(2);
+        await assertNoDocumentHorizontalOverflow(testPage, "mobile delayed cancel and retry");
+      } finally {
+        await cleanupDelayedResumeFixture(apiClient, fixture);
+      }
+    });
   });
 
   test("pausing an accepted lazy resume preserves the runtime for later turns", async ({

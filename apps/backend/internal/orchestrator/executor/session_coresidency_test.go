@@ -149,9 +149,10 @@ func TestObserveSessionCoresidency_SiblingReadFailureRecordsSkipNotAbsence(t *te
 }
 
 // TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart pins the
-// LaunchPreparedSession wiring through the shared process-start hook. It waits
-// until StartAgentProcess is called, after the observation has run, and checks
-// that this launch recorded exactly one local warning.
+// wiring half of AC-004.1: LaunchPreparedSession calls the observation
+// before the agent process starts, for a real launch that otherwise
+// succeeds, not just the extracted helper. The process-start callback
+// synchronizes the assertion after the observation seam has run.
 func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	repo := newMockRepository()
 	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateScheduling}
@@ -193,7 +194,6 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 		Description: "Test description",
 	}
 	before := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch)
-
 	if _, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{
 		AgentProfileID: "profile-123",
 		Prompt:         "test prompt",
@@ -213,6 +213,9 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 	warnings := logs.FilterLevelExact(zapcore.WarnLevel).All()
 	if len(warnings) != 1 {
 		t.Fatalf("warning entries = %d, want 1; all=%v", len(warnings), logs.All())
+	}
+	if !strings.Contains(warnings[0].Message, "starting an agent while another session") {
+		t.Fatalf("warning message = %q, want the co-residency warning", warnings[0].Message)
 	}
 	fields := warnings[0].ContextMap()
 	if fields["site"] != sessionCoresidencySiteLaunch {
