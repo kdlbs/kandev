@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -16,6 +17,7 @@ const (
 	ErrorFetch           = "fetch_failed"
 	ErrorRefUnavailable  = "ref_unavailable"
 	ErrorOIDMismatch     = "oid_mismatch"
+	gitSSHUser           = "git"
 )
 
 // GitRunner executes one Git command in the caller's repository and credential
@@ -85,23 +87,13 @@ func Materialize(ctx context.Context, run GitRunner, base models.PRBase) (Materi
 		return Materialization{}, failure(ErrorInvalidTarget, fmt.Errorf("qualified PR base is invalid: %w", err))
 	}
 	target := base.Target
-	remoteName := target.ComparisonRemoteName()
-	configuredURL, remoteErr := run(ctx, "config", "--get", "remote."+remoteName+".url")
-	if remoteErr == nil {
-		if strings.TrimSpace(configuredURL) != target.TargetRepository.RemoteURL {
-			return Materialization{}, failure(ErrorRemoteCollision, fmt.Errorf("comparison remote collision for %s", remoteName))
-		}
-	} else {
-		var exitCoder commandExitCoder
-		if !errors.As(remoteErr, &exitCoder) || exitCoder.ExitCode() != 1 {
-			return Materialization{}, failure(ErrorRemoteSetup, fmt.Errorf("comparison remote configuration could not be read: %w", remoteErr))
-		}
-		if _, err := run(ctx, "remote", "add", "--no-tags", remoteName, target.TargetRepository.RemoteURL); err != nil {
-			return Materialization{}, failure(ErrorRemoteSetup, fmt.Errorf("comparison remote setup failed: %w", err))
-		}
+	remoteURL, err := comparisonRemoteURLForCheckoutTransport(ctx, run, target)
+	if err != nil {
+		return Materialization{}, failure(ErrorRemoteSetup, fmt.Errorf("comparison remote transport could not be resolved: %w", err))
 	}
-	if _, err := run(ctx, "config", "remote."+remoteName+".pushurl", "DISABLED"); err != nil {
-		return Materialization{}, failure(ErrorRemoteSetup, fmt.Errorf("comparison remote push protection failed: %w", err))
+	remoteName, err := ensureComparisonRemote(ctx, run, target, remoteURL)
+	if err != nil {
+		return Materialization{}, err
 	}
 	ref := target.ComparisonRef()
 	refspec := "+refs/heads/" + target.TargetBranch + ":" + ref
@@ -120,6 +112,46 @@ func Materialize(ctx context.Context, run GitRunner, base models.PRBase) (Materi
 		return Materialization{}, failure(ErrorOIDMismatch, fmt.Errorf("comparison target OID changed from %s to %s", base.OID, actualOID))
 	}
 	return Materialization{RemoteName: remoteName, Ref: ref, OID: actualOID}, nil
+}
+
+func ensureComparisonRemote(
+	ctx context.Context, run GitRunner, target models.ComparisonTarget, remoteURL string,
+) (string, error) {
+	remoteName := target.ComparisonRemoteName()
+	configuredURL, remoteErr := run(ctx, "config", "--get", "remote."+remoteName+".url")
+	if err := configureComparisonRemote(ctx, run, target, remoteName, remoteURL, configuredURL, remoteErr); err != nil {
+		return "", err
+	}
+	if _, err := run(ctx, "config", "remote."+remoteName+".pushurl", "DISABLED"); err != nil {
+		return "", failure(ErrorRemoteSetup, fmt.Errorf("comparison remote push protection failed: %w", err))
+	}
+	return remoteName, nil
+}
+
+func configureComparisonRemote(
+	ctx context.Context, run GitRunner, target models.ComparisonTarget,
+	remoteName, remoteURL, configuredURL string, readErr error,
+) error {
+	if readErr != nil {
+		var exitCoder commandExitCoder
+		if !errors.As(readErr, &exitCoder) || exitCoder.ExitCode() != 1 {
+			return failure(ErrorRemoteSetup, fmt.Errorf("comparison remote configuration could not be read: %w", readErr))
+		}
+		if _, err := run(ctx, "remote", "add", "--no-tags", remoteName, remoteURL); err != nil {
+			return failure(ErrorRemoteSetup, fmt.Errorf("comparison remote setup failed: %w", err))
+		}
+		return nil
+	}
+	if strings.TrimSpace(configuredURL) == remoteURL {
+		return nil
+	}
+	if !sameGitHubComparisonRepository(configuredURL, target.TargetRepository.Host, target.TargetRepository.Path) {
+		return failure(ErrorRemoteCollision, fmt.Errorf("comparison remote collision for %s", remoteName))
+	}
+	if _, err := run(ctx, "remote", "set-url", remoteName, remoteURL); err != nil {
+		return failure(ErrorRemoteSetup, fmt.Errorf("comparison remote transport update failed: %w", err))
+	}
+	return nil
 }
 
 // FetchPullRequestHead fetches GitHub's pull-request head snapshot from the
@@ -150,4 +182,99 @@ func FetchPullRequestHead(ctx context.Context, run GitRunner, target models.Comp
 		return PullRequestHead{}, failure(ErrorRefUnavailable, errors.New("pull request head ref resolved to an empty object ID"))
 	}
 	return PullRequestHead{Ref: ref, OID: oid}, nil
+}
+
+func comparisonRemoteURLForCheckoutTransport(
+	ctx context.Context, run GitRunner, target models.ComparisonTarget,
+) (string, error) {
+	originURL, err := run(ctx, "config", "--get", "remote.origin.url")
+	if err != nil {
+		var exitCoder commandExitCoder
+		if errors.As(err, &exitCoder) && exitCoder.ExitCode() == 1 {
+			return target.TargetRepository.RemoteURL, nil
+		}
+		return "", err
+	}
+	if sshURL := githubSSHComparisonURL(originURL, target.TargetRepository.Host, target.TargetRepository.Path); sshURL != "" {
+		return sshURL, nil
+	}
+	return target.TargetRepository.RemoteURL, nil
+}
+
+func githubSSHComparisonURL(originURL, providerHost, repositoryPath string) string {
+	if !strings.EqualFold(strings.TrimSpace(providerHost), "github.com") || repositoryPath == "" {
+		return ""
+	}
+	if parsed, ok := parseGitHubSSHURL(originURL); ok {
+		parsed.Path = "/" + strings.Trim(repositoryPath, "/") + ".git"
+		parsed.RawPath = ""
+		return parsed.String()
+	}
+	host, _, ok := parseGitHubSCPURL(originURL)
+	if !ok {
+		return ""
+	}
+	return gitSSHUser + "@" + host + ":" + strings.Trim(repositoryPath, "/") + ".git"
+}
+
+func sameGitHubComparisonRepository(raw, providerHost, repositoryPath string) bool {
+	if !strings.EqualFold(strings.TrimSpace(providerHost), "github.com") || repositoryPath == "" {
+		return false
+	}
+	host, path, ok := githubComparisonRemoteIdentity(raw)
+	if !ok {
+		return false
+	}
+	path = strings.Trim(strings.TrimSuffix(path, ".git"), "/")
+	return strings.EqualFold(host, "github.com") && strings.EqualFold(path, strings.Trim(repositoryPath, "/"))
+}
+
+func githubComparisonRemoteIdentity(raw string) (string, string, bool) {
+	value := strings.TrimSpace(raw)
+	switch {
+	case strings.HasPrefix(strings.ToLower(value), "ssh://"):
+		parsed, ok := parseGitHubSSHURL(value)
+		if !ok {
+			return "", "", false
+		}
+		return parsed.Hostname(), parsed.Path, true
+	case strings.HasPrefix(strings.ToLower(value), "https://"):
+		return parseGitHubHTTPSURL(value)
+	default:
+		return parseGitHubSCPURL(value)
+	}
+}
+
+func parseGitHubSSHURL(value string) (*url.URL, bool) {
+	parsed, err := url.Parse(value)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "ssh") ||
+		!strings.EqualFold(parsed.Hostname(), "github.com") || parsed.User == nil ||
+		parsed.User.Username() != gitSSHUser || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, false
+	}
+	if _, hasPassword := parsed.User.Password(); hasPassword {
+		return nil, false
+	}
+	return parsed, true
+}
+
+func parseGitHubHTTPSURL(value string) (string, string, bool) {
+	parsed, err := url.Parse(value)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.User != nil ||
+		parsed.RawQuery != "" || parsed.Fragment != "" || !strings.EqualFold(parsed.Host, "github.com") {
+		return "", "", false
+	}
+	return parsed.Host, parsed.Path, true
+}
+
+func parseGitHubSCPURL(value string) (string, string, bool) {
+	user, hostAndPath, found := strings.Cut(value, "@")
+	if !found || user != gitSSHUser {
+		return "", "", false
+	}
+	host, path, found := strings.Cut(hostAndPath, ":")
+	if !found || !strings.EqualFold(host, "github.com") || strings.TrimSpace(path) == "" {
+		return "", "", false
+	}
+	return host, path, true
 }

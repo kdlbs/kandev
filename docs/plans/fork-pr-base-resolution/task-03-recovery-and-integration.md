@@ -156,3 +156,11 @@ A stale error stamp must still reject the request before all mutations.
   passed (9 tests), and five selected PR watcher auto-start/cleanup tests
   passed after repository identity normalization accepted the canonical
   `https://github.com` provider host. Backend build and changed-code lint passed.
+- Review correction: shared qualified-base and PR-head materialization preserves
+  the checkout's SSH origin transport for comparison remotes. Focused tests cover
+  both fetch paths.
+- The first PR CI run exposed a test fake that did not model Git's exit code 1
+  for a missing config key and an existing GitHub host literal rejected by
+  `goconst`. Both are corrected. The five affected Go package suites, full
+  changed-code `golangci-lint`, and `make build` pass locally; CI for the updated
+  head is pending.

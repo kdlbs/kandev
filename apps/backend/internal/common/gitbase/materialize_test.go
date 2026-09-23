@@ -96,6 +96,65 @@ func TestMaterializeQualifiedBaseFetchesExactTargetAndVerifiesOID(t *testing.T) 
 	}
 }
 
+func TestMaterializeQualifiedBaseUsesCheckoutSSHTransport(t *testing.T) {
+	base := testPRBase()
+	remoteName := base.Target.ComparisonRemoteName()
+	comparisonRef := base.Target.ComparisonRef()
+	headRef := "refs/remotes/" + remoteName + "/pull/42/head"
+	sshURL := "git@github.com:upstream/widget.git"
+	fake := &gitFake{
+		outputs: map[string]string{
+			"config --get remote.origin.url":                    "git@github.com:fork/widget.git",
+			"rev-parse --verify " + comparisonRef + "^{commit}": "0123456789abcdef0123456789abcdef01234567",
+			"rev-parse --verify " + headRef + "^{commit}":       "fedcba9876543210fedcba9876543210fedcba98",
+		},
+		errors: map[string]error{},
+	}
+	got, err := Materialize(context.Background(), fake.run, base)
+	if err != nil {
+		t.Fatalf("Materialize(): %v", err)
+	}
+	if got.RemoteName != remoteName || got.Ref != comparisonRef ||
+		!hasCommand(fake.commands, "remote", "add", "--no-tags", remoteName, sshURL) {
+		t.Fatalf("materialization = %#v, commands = %#v; want SSH comparison remote %q at %q", got, fake.commands, remoteName, sshURL)
+	}
+	if !hasCommand(fake.commands, "fetch", "--no-tags", remoteName,
+		"+refs/heads/release/next:"+comparisonRef) {
+		t.Fatalf("fetch commands = %#v; want exact branch through SSH comparison remote", fake.commands)
+	}
+	head, err := FetchPullRequestHead(context.Background(), fake.run, base.Target)
+	if err != nil {
+		t.Fatalf("FetchPullRequestHead(): %v", err)
+	}
+	if head.Ref != headRef || head.OID != "fedcba9876543210fedcba9876543210fedcba98" ||
+		!hasCommand(fake.commands, "fetch", "--no-tags", remoteName, "+refs/pull/42/head:"+headRef) {
+		t.Fatalf("head snapshot = %#v, commands = %#v; want pull head fetched through the SSH comparison remote", head, fake.commands)
+	}
+}
+
+func TestMaterializeQualifiedBaseUpdatesSameRepositoryWhenSSHTransportChanges(t *testing.T) {
+	base := testPRBase()
+	remoteName := base.Target.ComparisonRemoteName()
+	sshURL := "git@github.com:upstream/widget.git"
+	fake := &gitFake{
+		outputs: map[string]string{
+			"config --get remote.origin.url":                                  "git@github.com:fork/widget.git",
+			"config --get remote." + remoteName + ".url":                      base.Target.TargetRepository.RemoteURL,
+			"rev-parse --verify " + base.Target.ComparisonRef() + "^{commit}": "0123456789abcdef0123456789abcdef01234567",
+		},
+		errors: map[string]error{},
+	}
+	if _, err := Materialize(context.Background(), fake.run, base); err != nil {
+		t.Fatalf("Materialize(): %v", err)
+	}
+	if !hasCommand(fake.commands, "remote", "set-url", remoteName, sshURL) {
+		t.Fatalf("commands = %#v; want same-identity comparison remote updated to SSH", fake.commands)
+	}
+	if hasCommand(fake.commands, "remote", "add", "--no-tags", remoteName, sshURL) {
+		t.Fatalf("commands = %#v; existing comparison remote was added twice", fake.commands)
+	}
+}
+
 func TestMaterializeQualifiedBaseRejectsOIDDrift(t *testing.T) {
 	base := testPRBase()
 	base.OID = "0123456789abcdef0123456789abcdef01234567"

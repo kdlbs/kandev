@@ -288,3 +288,12 @@ new implementation status, regression cases, and command results.
 - `git diff --check` passed. The GH CLI request contract, legacy linked-PR
   producer-to-materializer flow, fork identity rejection, contribution source
   validation, and base/head OID reuse regressions passed.
+- Review correction: qualified-base and PR-head materialization derive the
+  comparison remote transport from the checkout's SSH origin when present, so
+  HTTPS provider identity does not replace an executor-owned SSH route. Focused
+  tests cover both base and PR-head fetches through that SSH remote.
+- The first PR CI run exposed a test fake that did not model Git's exit code 1
+  for a missing config key and an existing GitHub host literal rejected by
+  `goconst`. Both are corrected. The five affected Go package suites, full
+  changed-code `golangci-lint`, and `make build` pass locally; CI for the updated
+  head is pending.

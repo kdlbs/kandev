@@ -463,9 +463,9 @@ func normalizeGitHubComparisonRepository(repository models.ComparisonTargetRepos
 		return models.ComparisonTargetRepository{}, false
 	}
 	owner, name := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
-	repository.Host = "github.com"
+	repository.Host = defaultGitHubHost
 	repository.Path = owner + "/" + name
-	repository.RemoteURL = fmt.Sprintf("https://github.com/%s/%s.git", owner, name)
+	repository.RemoteURL = fmt.Sprintf("https://%s/%s/%s.git", defaultGitHubHost, owner, name)
 	return repository, true
 }
 
@@ -483,7 +483,7 @@ func isGitHubComparisonHost(raw string) bool {
 		return false
 	}
 	return (strings.EqualFold(parsed.Scheme, "https") || strings.EqualFold(parsed.Scheme, "http")) &&
-		strings.EqualFold(parsed.Hostname(), "github.com")
+		strings.EqualFold(parsed.Hostname(), defaultGitHubHost)
 }
 
 func hasProviderRepositoryIdentity(repo *models.Repository) bool {
