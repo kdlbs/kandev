@@ -167,33 +167,3 @@ function LaunchQueueStatusContent({
     </section>
   );
 }
-
-export function hasWorkflowParkingMarker(
-  metadata: Record<string, unknown> | null | undefined,
-): boolean {
-  const marker = metadata?.workflow_parking;
-  if (!marker || typeof marker !== "object" || Array.isArray(marker)) return false;
-  const value = marker as Record<string, unknown>;
-  return (
-    typeof value.stamp === "string" &&
-    value.stamp.trim() !== "" &&
-    typeof value.parked_at === "string" &&
-    value.parked_at.trim() !== "" &&
-    typeof value.source_session_id === "string" &&
-    value.source_session_id.trim() !== ""
-  );
-}
-
-export function ParkedSessionNote({ visible }: { visible: boolean }) {
-  const { t } = useTranslation();
-  if (!visible) return null;
-  return (
-    <div
-      data-testid="task-parked-session-note"
-      role="note"
-      className="min-w-0 shrink-0 border-b border-border/70 bg-muted/10 px-3 py-2 text-xs text-muted-foreground"
-    >
-      {t("task:parkedSessionNote")}
-    </div>
-  );
-}

@@ -2,11 +2,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
-import {
-  hasWorkflowParkingMarker,
-  LaunchQueueStatus,
-  ParkedSessionNote,
-} from "./launch-queue-status";
+import { LaunchQueueStatus } from "./launch-queue-status";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -173,54 +169,5 @@ describe("LaunchQueueStatus retry copy", () => {
     expect(screen.getByText("Automatic retry stopped.")).toBeTruthy();
     expect(screen.queryByText(/will retry/)).toBeNull();
     expect(screen.queryByTestId("launch-queue-session-capacity-link")).toBeNull();
-  });
-});
-
-describe("workflow parking presentation", () => {
-  it.each([
-    [undefined, false],
-    [{}, false],
-    [
-      {
-        workflow_parking: {
-          stamp: "",
-          parked_at: "2026-09-16T20:00:00Z",
-          source_session_id: "source",
-        },
-      },
-      false,
-    ],
-    [{ workflow_parking: { stamp: "stamp", parked_at: "", source_session_id: "source" } }, false],
-    [
-      {
-        workflow_parking: {
-          stamp: "stamp",
-          parked_at: "2026-09-16T20:00:00Z",
-          source_session_id: "",
-        },
-      },
-      false,
-    ],
-    [
-      {
-        workflow_parking: {
-          stamp: "stamp",
-          parked_at: "2026-09-16T20:00:00Z",
-          source_session_id: "source",
-        },
-      },
-      true,
-    ],
-  ])("validates %j as %s", (metadata, expected) => {
-    expect(hasWorkflowParkingMarker(metadata as Record<string, unknown> | undefined)).toBe(
-      expected,
-    );
-  });
-
-  it("renders the note only when the selected session is parked", () => {
-    const { rerender } = render(<ParkedSessionNote visible={false} />);
-    expect(screen.queryByTestId("task-parked-session-note")).toBeNull();
-    rerender(<ParkedSessionNote visible />);
-    expect(screen.getByTestId("task-parked-session-note")).toBeTruthy();
   });
 });

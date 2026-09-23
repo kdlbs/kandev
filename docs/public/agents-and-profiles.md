@@ -291,8 +291,10 @@ candidate policies are configured on dynamic profiles.
 
 When a task launch waits for session capacity, Kandev keeps the selected
 destination and retries it automatically. Inspecting another session does not
-resume a parked predecessor. Use an explicit **Resume** action or send a
-message for manual recovery. These actions can override the automatic ceiling.
+change the workflow's selected step or primary session. You can open another
+session and use its normal controls. Kandev resumes it when the session can run;
+the automatic session ceiling still applies unless you explicitly start,
+resume, or message the session.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn

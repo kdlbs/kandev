@@ -1360,7 +1360,6 @@
   "wipQueueConfigure": "ワークフロー WIP 上限を設定",
   "wipQueueUnavailable": "ワークフロー WIP 詳細なし。",
   "wipQueueConfigurationUnavailable": "ワークフロー設定リンクなし。",
-  "parkedSessionNote": "このセッションはワークフロー用に待機中。開いても再開しない。続けるにはメッセージ送信。",
   "quorumAwaiting": "{{role}} の決定待ち、{{received}} / {{required}} 件",
   "quorumStuck": "停止中",
   "quorumStuckPendingReevaluation": "ブロック中: このステップを再評価するアクティブ セッションなし",
