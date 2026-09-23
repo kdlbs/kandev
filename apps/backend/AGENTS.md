@@ -97,13 +97,14 @@ apps/backend/
 │   └── worktree/         # Git worktree management for workspace isolation
 ```
 
-Canvas creation authority is recorded only by the trusted task authoring
-adapter. It binds the workspace owner, creating session, task scope, and
-policy version to a new draft. The first valid static web-app release may
-consume that single-use authority for exact task-scoped grants in the same
-transaction as release insertion and activation. Existing drafts, imports,
-later permission increases, and revoked grants remain on the human review
-path. Never use source metadata or a manifest trust field as authority.
+Canvas creation authority comes only from the trusted task adapter and binds
+the owner, session, task, and policy version. Its first valid static release
+may consume that authority for exact workspace-ceiling grants in the activation
+transaction. Existing drafts, imports, later permission increases, and
+revoked grants still require human review; source metadata and manifests never
+grant authority.
+Canvas scopes expose `canvas_data_scope_transition_total` with fixed transition
+and result labels. Lifecycle events carry IDs; metrics never label task data.
 
 ## Key Concepts
 
@@ -293,8 +294,7 @@ Enforced by `apps/backend/.golangci.yml` (errors on new code only):
 
 When a PR fixup touches backend code, run `golangci-lint run ./... --new-from-rev="<base-sha>" --timeout=5m` from `apps/backend` with the PR base SHA before pushing; CI enforces changed-file complexity thresholds.
 - `internal/launcher/` — native launcher owning every entrypoint (`dev`, `start`, `run`, `service`); `dev` runs `make -C apps/backend dev` with Vite as a supervised child, state under `<repoRoot>/.kandev-dev/`. The root `make dev` prebuilds only the copied launcher; the backend dev target builds the native agentctl and a linux/amd64 helper when the host is not Linux/amd64 (`docs/plans/go-dev-launcher/`).
-- `internal/agentctl/AGENTS.md` — agentctl server route groups, adapter model, ACP protocol
+- `internal/agentctl/AGENTS.md` — server routes, adapters, ACP; `cmd/mock-agent/AGENTS.md` — E2E scenario patterns and rebuild requirements
 - `internal/agentctl/server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`), iframe-blocking header stripping
 - `internal/integrations/AGENTS.md` — playbook for adding a new third-party integration (Jira/Linear pattern)
 - `docs/i18n.md` ("Backend") — `internal/i18n` covers only what Go renders straight to a browser: the SPA-unavailable error pages and the shared-task artifacts (`share.html`, gist README and description). Both are complete. Everything else stays English by design; for new user-facing output prefer a stable error code the frontend translates. Use `i18n.Tf` for anything carrying a value — never `fmt.Sprintf` a translated string, and never build a plural in Go. A locale for output that outlives the request is resolved once at write time and threaded as an argument, not a context value (ADR `2026-08-01-share-artifact-locale.md`).
-- `cmd/mock-agent/AGENTS.md` — predefined `/e2e:<name>` scenarios vs inline `e2e:...` scripts, recipe for adding a scenario, and the rebuild-before-e2e requirement

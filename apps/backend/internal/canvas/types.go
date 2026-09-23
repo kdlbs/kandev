@@ -18,7 +18,7 @@ const (
 	// canvas instances. The package identity remains in the release metadata.
 	CanvasPluginID                 = "kandev.canvas"
 	MaxTitleLength                 = 200
-	CreationAuthorityPolicyVersion = 1
+	CreationAuthorityPolicyVersion = 2
 
 	MaxTaskCanvases      = plugininstances.MaxTaskInstances
 	MaxWorkspaceCanvases = plugininstances.MaxWorkspaceInstances
@@ -55,15 +55,16 @@ const (
 )
 
 var (
-	ErrCanvasNotFound        = errors.New("canvas not found")
-	ErrInvalidCanvas         = errors.New("invalid canvas")
-	ErrInvalidCanvasState    = errors.New("invalid canvas state")
-	ErrCanvasMetadataBroken  = errors.New("canvas metadata is inconsistent with its plugin instance")
-	ErrCanvasNotConfigured   = errors.New("canvas lifecycle is not configured")
-	ErrStalePromotionReview  = plugininstances.ErrStalePromotionReview
-	ErrStaleCanvasEdit       = plugininstances.ErrStaleCanvasEdit
-	ErrStaleCanvasPublish    = plugininstances.ErrStaleCanvasPublish
-	ErrInvalidLifecycleState = plugininstances.ErrInvalidLifecycleState
+	ErrCanvasNotFound           = errors.New("canvas not found")
+	ErrInvalidCanvas            = errors.New("invalid canvas")
+	ErrInvalidCanvasState       = errors.New("invalid canvas state")
+	ErrCanvasMetadataBroken     = errors.New("canvas metadata is inconsistent with its plugin instance")
+	ErrCanvasNotConfigured      = errors.New("canvas lifecycle is not configured")
+	ErrStalePromotionReview     = plugininstances.ErrStalePromotionReview
+	ErrStaleWorkspaceDataReview = plugininstances.ErrStaleWorkspaceDataReview
+	ErrStaleCanvasEdit          = plugininstances.ErrStaleCanvasEdit
+	ErrStaleCanvasPublish       = plugininstances.ErrStaleCanvasPublish
+	ErrInvalidLifecycleState    = plugininstances.ErrInvalidLifecycleState
 
 	// These aliases preserve the stable plugin admission errors while keeping
 	// the canvas package convenient for service callers and API adapters.
@@ -109,6 +110,7 @@ type Canvas struct {
 	TaskID              string            `json:"task_id,omitempty"`
 	OriginTaskID        string            `json:"origin_task_id,omitempty"`
 	ScopeKind           string            `json:"scope_kind"`
+	DataScopeKind       string            `json:"data_scope_kind"`
 	Title               string            `json:"title"`
 	CreatedBySessionID  string            `json:"created_by_session_id,omitempty"`
 	PromotedByUserID    string            `json:"promoted_by_user_id,omitempty"`
@@ -215,6 +217,7 @@ type LifecycleEvent struct {
 	WorkspaceID         string    `json:"workspace_id"`
 	TaskID              string    `json:"task_id,omitempty"`
 	ScopeKind           string    `json:"scope_kind"`
+	DataScopeKind       string    `json:"data_scope_kind"`
 	Status              string    `json:"status"`
 	ActiveReleaseID     string    `json:"active_release_id,omitempty"`
 	ActiveReleaseStatus string    `json:"active_release_status,omitempty"`
@@ -226,6 +229,7 @@ const (
 	EventReleaseActivated          = "canvas.release.activated"
 	EventReleasePermissionRequired = "canvas.release.permission_required"
 	EventPromoted                  = "canvas.promoted"
+	EventWorkspaceDataEnabled      = "canvas.workspace_data_enabled"
 	EventArchived                  = "canvas.archived"
 	EventRestored                  = "canvas.restored"
 	EventRemoved                   = "canvas.removed"

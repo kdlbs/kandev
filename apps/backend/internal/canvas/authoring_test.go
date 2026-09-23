@@ -114,6 +114,9 @@ func TestCanvasCreationAuthorityFirstPublish(t *testing.T) {
 	if updated.ActiveReleaseID != result.Release.ID || updated.PluginID != result.Release.PluginID {
 		t.Fatalf("updated instance = %+v, want active release and package identity", updated)
 	}
+	if updated.ScopeKind != ScopeTask || updated.EffectiveDataScopeKind() != ScopeWorkspace {
+		t.Fatalf("updated scopes = placement %q, effective data %q, want task and workspace", updated.ScopeKind, updated.EffectiveDataScopeKind())
+	}
 	grants, err := instanceStore.ListGrants(context.Background(), created.PluginInstanceID)
 	if err != nil {
 		t.Fatalf("list initial grants: %v", err)
@@ -136,8 +139,8 @@ func TestCanvasCreationAuthorityFirstPublish(t *testing.T) {
 		if grant.PermissionKind == "network" {
 			key += grant.NetworkOrigin
 		}
-		if _, ok := wantGrants[key]; !ok || grant.ScopeCeiling != ScopeTask || grant.ApprovedBy != "owner-1" {
-			t.Fatalf("initial grant = %+v, want task-scoped owner grant", grant)
+		if _, ok := wantGrants[key]; !ok || grant.ScopeCeiling != ScopeWorkspace || grant.ApprovedBy != "owner-1" {
+			t.Fatalf("initial grant = %+v, want workspace-scoped owner grant", grant)
 		}
 		wantGrants[key] = true
 	}

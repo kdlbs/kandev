@@ -1,13 +1,19 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { IconEdit, IconListDetails, IconShare3, IconSparkles } from "@tabler/icons-react";
+import {
+  IconDatabase,
+  IconEdit,
+  IconListDetails,
+  IconShare3,
+  IconSparkles,
+} from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { DropdownMenuItem } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PanelHeaderOverflowMenu } from "@/components/task/panel-primitives";
-import { type Canvas } from "@/lib/api/domains/canvas-api";
+import { canvasCanEnableWorkspaceData, type Canvas } from "@/lib/api/domains/canvas-api";
 
 export function canvasLockHelp(canvas: Canvas, t: (key: string) => string): string {
   return canvas.status === "archived"
@@ -59,6 +65,7 @@ export function CanvasDesktopActions({
   onPromote,
   onReleases,
   onShare,
+  onEnableWorkspaceData,
 }: {
   canvas: Canvas;
   editing: boolean;
@@ -66,6 +73,7 @@ export function CanvasDesktopActions({
   onPromote: () => void;
   onReleases: () => void;
   onShare: () => void;
+  onEnableWorkspaceData?: () => void;
 }) {
   const { t } = useTranslation();
   const lifecycleLocked = canvas.status === "archived" || canvas.status === "disabled";
@@ -112,6 +120,24 @@ export function CanvasDesktopActions({
           {t("canvases:shareCanvas")}
         </Button>
       </CanvasDesktopActionTooltip>
+      {onEnableWorkspaceData && canvasCanEnableWorkspaceData(canvas) && (
+        <CanvasDesktopActionTooltip
+          description={t("canvases:enableWorkspaceDataHelp")}
+          disabled={false}
+          testId="canvas-action-enable-workspace-data-tooltip-trigger"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            className="cursor-pointer"
+            onClick={onEnableWorkspaceData}
+            data-testid="canvas-action-enable-workspace-data"
+          >
+            <IconDatabase className="mr-1.5 h-3.5 w-3.5" />
+            {t("canvases:enableWorkspaceData")}
+          </Button>
+        </CanvasDesktopActionTooltip>
+      )}
       {canvas.scope_kind === "task" && (
         <CanvasDesktopActionTooltip
           description={promoteDescription}
@@ -140,8 +166,32 @@ type CanvasDesktopOverflowActionsProps = {
   onPromote: () => void;
   onReleases: () => void;
   onShare: () => void;
+  onEnableWorkspaceData?: () => void;
   omitPrimaryAction?: boolean;
 };
+
+function CanvasWorkspaceDataMenuAction({
+  canvas,
+  onEnableWorkspaceData,
+  t,
+}: {
+  canvas: Canvas;
+  onEnableWorkspaceData?: () => void;
+  t: (key: string) => string;
+}) {
+  if (!onEnableWorkspaceData || !canvasCanEnableWorkspaceData(canvas)) return null;
+
+  return (
+    <DropdownMenuItem
+      className="cursor-pointer gap-2"
+      onSelect={onEnableWorkspaceData}
+      data-testid="canvas-action-enable-workspace-data"
+    >
+      <IconDatabase className="size-4" />
+      {t("canvases:enableWorkspaceData")}
+    </DropdownMenuItem>
+  );
+}
 
 export function CanvasDesktopPrimaryAction({
   canvas,
@@ -197,6 +247,7 @@ function CanvasDesktopOverflowMenuItemsContent({
   onPromote,
   onReleases,
   onShare,
+  onEnableWorkspaceData,
   omitPrimaryAction,
   t,
 }: CanvasDesktopOverflowActionsProps & { t: (key: string) => string }) {
@@ -238,6 +289,11 @@ function CanvasDesktopOverflowMenuItemsContent({
         <IconShare3 className="size-4" />
         {t("canvases:shareCanvas")}
       </DropdownMenuItem>
+      <CanvasWorkspaceDataMenuAction
+        canvas={canvas}
+        onEnableWorkspaceData={onEnableWorkspaceData}
+        t={t}
+      />
       {canvas.scope_kind === "task" && !omitPrimaryAction && (
         <DropdownMenuItem
           className="cursor-pointer gap-2"

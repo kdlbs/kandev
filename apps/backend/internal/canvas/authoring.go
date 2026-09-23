@@ -74,7 +74,21 @@ type PromotionPreview struct {
 	GrantGeneration  int64             `json:"grant_generation"`
 	CurrentScope     string            `json:"current_scope"`
 	TargetScope      string            `json:"target_scope"`
+	CurrentDataScope string            `json:"current_data_scope_kind"`
+	TargetDataScope  string            `json:"target_data_scope_kind"`
 	Placement        string            `json:"placement"`
+}
+
+// WorkspaceDataPreview is the owner-facing snapshot for widening a retained
+// task canvas's data scope without changing its placement.
+type WorkspaceDataPreview struct {
+	Canvas               *Canvas           `json:"canvas"`
+	Permissions          PermissionSummary `json:"permissions"`
+	ActiveReleaseID      string            `json:"active_release_id"`
+	PermissionDigest     string            `json:"permission_digest"`
+	GrantGeneration      int64             `json:"grant_generation"`
+	CurrentDataScopeKind string            `json:"current_data_scope_kind"`
+	TargetDataScopeKind  string            `json:"target_data_scope_kind"`
 }
 
 // authoringInstanceStore is the release/governance extension implemented by
@@ -106,12 +120,16 @@ type reviewedPromotionStore interface {
 	PromoteScopeAndGrantsReviewedTx(context.Context, *sqlx.Tx, string, string, string, []plugininstances.Grant, string, string, int64) error
 }
 
+type reviewedWorkspaceDataStore interface {
+	EnableWorkspaceDataReviewedTx(context.Context, *sqlx.Tx, string, string, string, []plugininstances.Grant, string, string, int64) error
+}
+
 type conditionalReleaseStore interface {
 	CreateReleaseIfAuthorityTx(context.Context, *sqlx.Tx, string, plugininstances.PublishAuthority, plugininstances.Release) error
 }
 
 type initialGrantStore interface {
-	AddInitialGrantsTx(context.Context, *sqlx.Tx, string, string, []plugininstances.Grant) error
+	AddInitialGrantsTx(context.Context, *sqlx.Tx, string, string, string, []plugininstances.Grant) error
 }
 
 type creationAuthorityStore interface {
@@ -294,7 +312,7 @@ func (s *Service) preparePublishedRelease(ctx context.Context, store authoringIn
 	if err != nil {
 		return plugininstances.Instance{}, plugininstances.Release{}, false, CreationAuthority{}, nil, err
 	}
-	activated := permissionsFit(permissions, instance.ScopeKind, grants)
+	activated := permissionsFit(permissions, instance.EffectiveDataScopeKind(), grants)
 	if creationAuthority.CanvasID != "" {
 		activated = true
 	}
@@ -326,7 +344,7 @@ func (s *Service) preparePublishedReleaseForInstance(ctx context.Context, store 
 	if err != nil {
 		return plugininstances.Instance{}, plugininstances.Release{}, false, err
 	}
-	activated := permissionsFit(permissions, instance.ScopeKind, grants)
+	activated := permissionsFit(permissions, instance.EffectiveDataScopeKind(), grants)
 	release, err := s.buildPublishedRelease(request, instance.ID, permissions, activated)
 	if err != nil {
 		return plugininstances.Instance{}, plugininstances.Release{}, false, err
@@ -383,7 +401,7 @@ func (s *Service) resolveCreationAuthority(ctx context.Context, request PublishR
 	if !creationAuthorityEligible(candidate, instance, request, grants, releases) {
 		return CreationAuthority{}, nil, nil
 	}
-	return candidate, grantsForManifest(permissions, candidate.OwnerUserID, ScopeTask), nil
+	return candidate, grantsForManifest(permissions, candidate.OwnerUserID, instance.EffectiveDataScopeKind()), nil
 }
 
 func (s *Service) buildPublishedRelease(request PublishRequest, instanceID string, permissions PermissionSummary, activated bool) (plugininstances.Release, error) {
@@ -422,6 +440,9 @@ func persistPublishedRelease(ctx context.Context, store authoringInstanceStore, 
 			return false, ErrStaleCanvasPublish
 		}
 		err := persistAuthorityRelease(ctx, transactional, conditional, authorityStore, canvasID, instanceID, release, activated, expectedAuthority, creationAuthority, initialGrants, ownerUserID, allowUnownedWorkspace, sessionID, taskID)
+		if err == nil && activated && creationAuthority.CanvasID != "" {
+			recordCanvasScopeTransition(canvasScopeFirstPublication, canvasScopeEnabled)
+		}
 		return err == nil, err
 	}
 	if expectedBaseReleaseID != "" {
@@ -460,7 +481,7 @@ func persistAuthorityRelease(ctx context.Context, transactional transactionalAut
 			if !ok || authorityStore == nil || creationAuthority.CanvasID != canvasID {
 				return ErrStaleCanvasPublish
 			}
-			if err := grantStore.AddInitialGrantsTx(ctx, tx, instanceID, ownerUserID, initialGrants); err != nil {
+			if err := grantStore.AddInitialGrantsTx(ctx, tx, instanceID, release.ID, ownerUserID, initialGrants); err != nil {
 				return err
 			}
 			if err := authorityStore.ConsumeCreationAuthorityTx(ctx, tx, creationAuthority, ownerUserID, sessionID, taskID, allowUnownedWorkspace); err != nil {
@@ -568,8 +589,89 @@ func (s *Service) PromotionPreview(ctx context.Context, canvasID string) (*Promo
 		GrantGeneration:  canvas.GrantGeneration,
 		CurrentScope:     ScopeTask,
 		TargetScope:      ScopeWorkspace,
+		CurrentDataScope: canvas.DataScopeKind,
+		TargetDataScope:  ScopeWorkspace,
 		Placement:        manifest.WebAppPlacementWorkspace,
 	}, nil
+}
+
+// WorkspaceDataPreview describes the active release and exact permissions a
+// workspace owner would enable for a retained task canvas.
+func (s *Service) WorkspaceDataPreview(ctx context.Context, canvasID string) (*WorkspaceDataPreview, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	store, ok := s.instances.(authoringInstanceStore)
+	if !ok {
+		return nil, ErrCanvasNotConfigured
+	}
+	canvas, err := s.Get(ctx, canvasID)
+	if err != nil {
+		return nil, err
+	}
+	if canvas.ScopeKind != ScopeTask || canvas.Status != StatusActive || canvas.ActiveReleaseID == "" ||
+		canvas.ActiveReleaseStatus != ValidationValid || canvas.DataScopeKind != ScopeTask {
+		return nil, fmt.Errorf("%w: canvas must have an active task-only release", ErrInvalidCanvasState)
+	}
+	release, err := store.GetRelease(ctx, canvas.ActiveReleaseID)
+	if err != nil {
+		return nil, err
+	}
+	if release.InstanceID != canvas.PluginInstanceID || release.ValidationStatus != ValidationValid {
+		return nil, plugininstances.ErrInvalidRelease
+	}
+	m, err := manifestFromRelease(release)
+	if err != nil {
+		return nil, err
+	}
+	return &WorkspaceDataPreview{
+		Canvas:               canvas,
+		Permissions:          ManifestPermissions(m),
+		ActiveReleaseID:      release.ID,
+		PermissionDigest:     PermissionDigest(release),
+		GrantGeneration:      canvas.GrantGeneration,
+		CurrentDataScopeKind: canvas.DataScopeKind,
+		TargetDataScopeKind:  ScopeWorkspace,
+	}, nil
+}
+
+// EnableWorkspaceDataReviewed changes only data scope and declared grants.
+// Placement, task ownership, and the active package remain unchanged.
+func (s *Service) EnableWorkspaceDataReviewed(ctx context.Context, canvasID, userID, expectedReleaseID, expectedPermissionDigest string, expectedGrantGeneration int64) (*Canvas, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(userID) == "" {
+		return nil, fmt.Errorf("%w: approving user is required", ErrInvalidCanvas)
+	}
+	preview, err := s.WorkspaceDataPreview(ctx, canvasID)
+	if err != nil {
+		return nil, err
+	}
+	grants := grantsForManifest(preview.Permissions, userID, ScopeWorkspace)
+	transactional, ok := s.instances.(transactionalAuthoringStore)
+	if !ok {
+		return nil, ErrStaleWorkspaceDataReview
+	}
+	reviewed, ok := s.instances.(reviewedWorkspaceDataStore)
+	if !ok {
+		return nil, ErrStaleWorkspaceDataReview
+	}
+	if err := transactional.WithTransaction(ctx, func(tx *sqlx.Tx) error {
+		return reviewed.EnableWorkspaceDataReviewedTx(ctx, tx, preview.Canvas.PluginInstanceID, preview.Canvas.WorkspaceID, userID, grants, expectedReleaseID, expectedPermissionDigest, expectedGrantGeneration)
+	}); err != nil {
+		return nil, err
+	}
+	recordCanvasScopeTransition(canvasScopeReviewedUpgrade, canvasScopeEnabled)
+	updated, err := s.Get(ctx, canvasID)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	publisher := s.publisher
+	s.mu.Unlock()
+	publishEvent(ctx, publisher, lifecycleEvent(EventWorkspaceDataEnabled, *updated))
+	return updated, nil
 }
 
 // PromoteCanvas atomically approves the active declaration and changes the
@@ -605,6 +707,11 @@ func (s *Service) PromoteCanvasReviewed(ctx context.Context, canvasID, userID, e
 	if err != nil {
 		return nil, err
 	}
+	result := canvasScopePreserved
+	if preview.CurrentDataScope != ScopeWorkspace && updated.DataScopeKind == ScopeWorkspace {
+		result = canvasScopeExpanded
+	}
+	recordCanvasScopeTransition(canvasScopePromotion, result)
 	s.mu.Lock()
 	publisher := s.publisher
 	s.mu.Unlock()
@@ -675,7 +782,7 @@ func (s *Service) ApproveRelease(ctx context.Context, canvasID, releaseID, userI
 	if err != nil {
 		return nil, err
 	}
-	if err := store.ApproveRelease(ctx, canvas.PluginInstanceID, releaseID, userID, grantsForManifest(ManifestPermissions(m), userID, canvas.ScopeKind)); err != nil {
+	if err := store.ApproveRelease(ctx, canvas.PluginInstanceID, releaseID, userID, grantsForManifest(ManifestPermissions(m), userID, canvas.DataScopeKind)); err != nil {
 		return nil, err
 	}
 	if err := prunePublishedReleases(ctx, store, canvas.PluginInstanceID); err != nil {
@@ -768,7 +875,7 @@ func (s *Service) RollbackRelease(ctx context.Context, canvasID, releaseID strin
 	if err != nil {
 		return nil, err
 	}
-	if !permissionsFit(ManifestPermissions(m), instance.ScopeKind, grants) {
+	if !permissionsFit(ManifestPermissions(m), instance.EffectiveDataScopeKind(), grants) {
 		return nil, fmt.Errorf("%w: rollback requires permission review", plugininstances.ErrInvalidRelease)
 	}
 	if err := store.ActivateRelease(ctx, instance.ID, release.ID); err != nil {
@@ -1016,7 +1123,7 @@ func creationAuthorityPolicyIsCurrent(authority CreationAuthority) bool {
 }
 
 func creationAuthorityInstanceMatches(authority CreationAuthority, instance plugininstances.Instance, grants []plugininstances.Grant, releases []plugininstances.Release) bool {
-	return instance.SourceKind == plugininstances.SourceLocalCanvas && instance.ScopeKind == ScopeTask && instance.Status == StatusPending && instance.ActiveReleaseID == "" && instance.GrantGeneration == 0 && instance.TaskID == authority.TaskID && len(grants) == 0 && len(releases) == 0
+	return instance.SourceKind == plugininstances.SourceLocalCanvas && instance.ScopeKind == ScopeTask && instance.DataScopeKind == plugininstances.ScopeWorkspace && instance.Status == StatusPending && instance.ActiveReleaseID == "" && instance.GrantGeneration == 0 && instance.TaskID == authority.TaskID && len(grants) == 0 && len(releases) == 0
 }
 
 func creationAuthoritySourceMatches(authority CreationAuthority, instance plugininstances.Instance, request PublishRequest) bool {

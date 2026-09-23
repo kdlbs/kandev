@@ -118,6 +118,9 @@ func (s *Service) createLocked(ctx context.Context, request CreateCanvasRequest)
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
+	if scopeKind == ScopeTask && request.OwnerUserID != "" && request.CreatedBySessionID != "" {
+		instance.DataScopeKind = plugininstances.ScopeWorkspace
+	}
 	if err := s.createAuthority(ctx, instance, metadata); err != nil {
 		return Canvas{}, LifecycleEvent{}, err
 	}
@@ -737,7 +740,7 @@ func (s *Service) buildCanvas(ctx context.Context, metadata CanvasMetadata, inst
 		return Canvas{}, err
 	}
 	if instance.ActiveReleaseID == "" {
-		return s.addPendingRelease(ctx, &canvas, instance.ID, instance.ScopeKind, grants)
+		return s.addPendingRelease(ctx, &canvas, instance.ID, instance.EffectiveDataScopeKind(), grants)
 	}
 	release, err := s.instances.GetRelease(ctx, instance.ActiveReleaseID)
 	if errors.Is(err, plugininstances.ErrNotFound) {
@@ -755,7 +758,7 @@ func (s *Service) buildCanvas(ctx context.Context, metadata CanvasMetadata, inst
 	canvas.ActiveReleaseStatus = release.ValidationStatus
 	canvas.ActiveReleaseError = release.ValidationError
 	canvas.EffectiveGrants = effectiveGrantProjection(instance, ReleasePermissionSummary(release), grants)
-	canvas.ActiveRelease = releaseMetadata(release, instance.ScopeKind, grants)
+	canvas.ActiveRelease = releaseMetadata(release, instance.EffectiveDataScopeKind(), grants)
 	return canvas, nil
 }
 
@@ -866,6 +869,7 @@ func canvasFromMetadataInstance(metadata CanvasMetadata, instance plugininstance
 		TaskID:             metadata.TaskID,
 		OriginTaskID:       metadata.OriginTaskID,
 		ScopeKind:          instance.ScopeKind,
+		DataScopeKind:      instance.EffectiveDataScopeKind(),
 		Title:              metadata.Title,
 		CreatedBySessionID: metadata.CreatedBySessionID,
 		PromotedByUserID:   metadata.PromotedByUserID,
@@ -896,6 +900,7 @@ func lifecycleEvent(eventType string, canvas Canvas) LifecycleEvent {
 		WorkspaceID:         canvas.WorkspaceID,
 		TaskID:              canvas.TaskID,
 		ScopeKind:           canvas.ScopeKind,
+		DataScopeKind:       canvas.DataScopeKind,
 		Status:              canvas.Status,
 		ActiveReleaseID:     canvas.ActiveReleaseID,
 		ActiveReleaseStatus: canvas.ActiveReleaseStatus,

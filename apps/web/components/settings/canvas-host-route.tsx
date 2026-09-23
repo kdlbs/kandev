@@ -414,6 +414,7 @@ export function CanvasHostRoute({
   const hostCanvases = useCanvasHostCanvases(canvas);
   const [menuOpen, setMenuOpen] = useState(false);
   const [promotionOpen, setPromotionOpen] = useState(false);
+  const [workspaceDataOpen, setWorkspaceDataOpen] = useState(false);
   const [releasesOpen, setReleasesOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
@@ -461,17 +462,23 @@ export function CanvasHostRoute({
       error={error}
       menuOpen={menuOpen}
       promotionOpen={promotionOpen}
+      workspaceDataOpen={workspaceDataOpen}
       releasesOpen={releasesOpen}
       shareOpen={shareOpen}
       renameOpen={renameOpen}
       editing={editing}
       setMenuOpen={setMenuOpen}
       setPromotionOpen={setPromotionOpen}
+      setWorkspaceDataOpen={setWorkspaceDataOpen}
       setReleasesOpen={setReleasesOpen}
       setShareOpen={setShareOpen}
       setRenameOpen={setRenameOpen}
       onEdit={() => void edit()}
       onPromote={() => setPromotionOpen(true)}
+      onEnableWorkspaceData={() => {
+        setMenuOpen(false);
+        setWorkspaceDataOpen(true);
+      }}
       onReleases={() => setReleasesOpen(true)}
       onShare={() => setShareOpen(true)}
       onRename={() => {

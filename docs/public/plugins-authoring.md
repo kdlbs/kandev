@@ -121,11 +121,12 @@ does not need a Go backend or an injected Kandev JavaScript API.
    the app needs.
 5. Package the manifest and static files as a gzip-compressed tar archive.
 
-For a new owner-created task canvas, the first valid release can receive the
-declared supported task-scoped permissions through its initial permission
-policy. Imported packages and later permission increases need human approval.
-Keep `network_origins` as exact HTTPS origins. Do not use wildcards, paths,
-credentials, query strings, or fragments.
+For a new owner-authorized task canvas, the first valid release can receive
+only its declared supported permissions through the initial permission policy.
+Kandev data access is limited to the current workspace while the canvas stays
+placed in its creating task. Imported packages and later permission increases
+need human approval. Keep `network_origins` as exact HTTPS origins. Do not use
+wildcards, paths, credentials, query strings, or fragments.
 
 For example, a page can read task data with the browser Fetch API:
 
@@ -137,9 +138,12 @@ if (!response.ok) {
 const tasks = await response.json();
 ```
 
-Use `./_kandev/v1/events` for the event stream. Keep all protocol paths
-relative so the same package works in task and workspace scope. Do not copy a
-capability URL from the host into the app.
+Use `./_kandev/v1/events` for the event stream. Read both `scope_kind` and
+`data_scope_kind` from `./_kandev/v1/context`: the first describes placement,
+and the second describes the Kandev data boundary. Keep all protocol paths
+relative so the same package works in task and workspace placement. For task
+lists, follow `page_info.next_cursor` to load every page. Do not set
+`workspace_id` to another workspace or copy a capability URL from the host.
 
 For recorded workflow movement, the browser can GET
 `./_kandev/v1/data/tasks/{task_id}/step-transitions` with

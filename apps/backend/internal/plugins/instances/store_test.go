@@ -44,6 +44,157 @@ func TestValidateScopeRequiresOnlyIdentifiersForScope(t *testing.T) {
 	}
 }
 
+func TestInstanceDataScopeIsIndependentAndDefaultsToPlacement(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if err := store.Create(ctx, Instance{
+		ID: "workspace-data", PluginID: "canvas-board", SourceKind: SourceLocalCanvas,
+		ScopeKind: ScopeTask, DataScopeKind: ScopeWorkspace, WorkspaceID: "workspace-1",
+		TaskID: "task-1", Status: StatusActive,
+	}); err != nil {
+		t.Fatalf("Create workspace-data task canvas: %v", err)
+	}
+	workspaceData, err := store.Get(ctx, "workspace-data")
+	if err != nil {
+		t.Fatalf("Get workspace-data task canvas: %v", err)
+	}
+	if workspaceData.ScopeKind != ScopeTask || workspaceData.EffectiveDataScopeKind() != ScopeWorkspace {
+		t.Fatalf("scopes = placement %q, effective data %q, want task and workspace", workspaceData.ScopeKind, workspaceData.EffectiveDataScopeKind())
+	}
+
+	if err := store.Create(ctx, Instance{
+		ID: "legacy", PluginID: "canvas-board", SourceKind: SourceLocalCanvas,
+		ScopeKind: ScopeTask, WorkspaceID: "workspace-1", TaskID: "task-2", Status: StatusActive,
+	}); err != nil {
+		t.Fatalf("Create legacy task canvas: %v", err)
+	}
+	legacy, err := store.Get(ctx, "legacy")
+	if err != nil {
+		t.Fatalf("Get legacy task canvas: %v", err)
+	}
+	if legacy.DataScopeKind != "" || legacy.EffectiveDataScopeKind() != ScopeTask {
+		t.Fatalf("legacy scopes = explicit %q, effective %q, want empty and task", legacy.DataScopeKind, legacy.EffectiveDataScopeKind())
+	}
+}
+
+func TestInstanceRejectsUntrustedDataScopeCombinations(t *testing.T) {
+	store := newTestStore(t)
+	for _, instance := range []Instance{
+		{ID: "installed", PluginID: "plugin", SourceKind: SourceInstalled, ScopeKind: ScopeTask, DataScopeKind: ScopeWorkspace, WorkspaceID: "workspace-1", TaskID: "task-1", Status: StatusActive},
+		{ID: "session-data", PluginID: "canvas", SourceKind: SourceLocalCanvas, ScopeKind: ScopeTask, DataScopeKind: ScopeSession, WorkspaceID: "workspace-1", TaskID: "task-2", Status: StatusActive},
+		{ID: "instance", PluginID: "canvas", SourceKind: SourceLocalCanvas, ScopeKind: ScopeTask, DataScopeKind: ScopeInstance, WorkspaceID: "workspace-1", TaskID: "task-3", Status: StatusActive},
+	} {
+		if err := store.Create(context.Background(), instance); !errors.Is(err, ErrInvalidScope) {
+			t.Errorf("Create(%s) = %v, want ErrInvalidScope", instance.ID, err)
+		}
+	}
+}
+
+func TestExistingInstanceTableMigratesWithTaskDataScopeFallback(t *testing.T) {
+	connection, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "legacy-instances.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	connection.SetMaxOpenConns(1)
+	pool := db.NewPool(sqlx.NewDb(connection, "sqlite3"), sqlx.NewDb(connection, "sqlite3"))
+	t.Cleanup(func() { _ = pool.Close() })
+	if _, err := pool.Writer().Exec(`CREATE TABLE plugin_instances (
+		id TEXT PRIMARY KEY, plugin_id TEXT NOT NULL, source_kind TEXT NOT NULL, scope_kind TEXT NOT NULL,
+		workspace_id TEXT NOT NULL DEFAULT '', task_id TEXT NOT NULL DEFAULT '', session_id TEXT NOT NULL DEFAULT '',
+		repository_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, active_release_id TEXT NOT NULL DEFAULT '',
+		grant_generation INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+	)`); err != nil {
+		t.Fatalf("create legacy plugin_instances schema: %v", err)
+	}
+	created := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := pool.Writer().Exec(`INSERT INTO plugin_instances
+		(id, plugin_id, source_kind, scope_kind, workspace_id, task_id, status, created_at, updated_at)
+		VALUES ('legacy', 'canvas', 'local_canvas', 'task', 'workspace-1', 'task-1', 'active', ?, ?)`, created, created); err != nil {
+		t.Fatalf("insert legacy instance: %v", err)
+	}
+	store, err := NewStore(pool)
+	if err != nil {
+		t.Fatalf("NewStore migrates legacy table: %v", err)
+	}
+	instance, err := store.Get(context.Background(), "legacy")
+	if err != nil {
+		t.Fatalf("Get legacy instance: %v", err)
+	}
+	if instance.DataScopeKind != "" || instance.EffectiveDataScopeKind() != ScopeTask {
+		t.Fatalf("legacy scopes = explicit %q, effective %q, want empty and task", instance.DataScopeKind, instance.EffectiveDataScopeKind())
+	}
+}
+
+func TestEnableWorkspaceDataRequiresCurrentOwnerReview(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := store.db.Exec(`CREATE TABLE workspaces (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatalf("create workspaces table: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO workspaces (id, owner_id) VALUES ('workspace-1', 'owner-1')`); err != nil {
+		t.Fatalf("insert workspace: %v", err)
+	}
+	if err := store.Create(ctx, Instance{
+		ID: "instance-1", PluginID: "canvas", SourceKind: SourceLocalCanvas,
+		ScopeKind: ScopeTask, WorkspaceID: "workspace-1", TaskID: "task-1", Status: StatusActive,
+	}); err != nil {
+		t.Fatalf("create task canvas: %v", err)
+	}
+	declared := json.RawMessage(`{"reads":["tasks"]}`)
+	if err := store.CreateRelease(ctx, Release{
+		ID: "release-1", PluginID: "canvas", InstanceID: "instance-1", PackageDigest: "digest-1",
+		SourceKind: SourceLocalCanvas, ManifestJSON: json.RawMessage(`{}`), DeclaredPermissionsJSON: declared,
+		ArtifactPath: "releases/one", ArtifactBytes: 1, ValidationStatus: ValidationValid,
+	}); err != nil {
+		t.Fatalf("create active release: %v", err)
+	}
+	if err := store.AddGrant(ctx, Grant{InstanceID: "instance-1", PermissionKind: "api_read", Resource: "tasks", ScopeCeiling: ScopeTask, ApprovedBy: "owner-1"}); err != nil {
+		t.Fatalf("add task grant: %v", err)
+	}
+	if err := store.SetActiveRelease(ctx, "instance-1", "release-1"); err != nil {
+		t.Fatalf("activate release: %v", err)
+	}
+	instanceBeforeReview, err := store.Get(ctx, "instance-1")
+	if err != nil {
+		t.Fatalf("get instance before review: %v", err)
+	}
+
+	workspaceGrant := []Grant{{InstanceID: "instance-1", PermissionKind: "api_read", Resource: "tasks", ScopeCeiling: ScopeWorkspace}}
+	apply := func(userID string, generation int64, grants []Grant) error {
+		return store.WithTransaction(ctx, func(tx *sqlx.Tx) error {
+			return store.EnableWorkspaceDataReviewedTx(ctx, tx, "instance-1", "workspace-1", userID, grants, "release-1", permissionDigest(string(declared)), generation)
+		})
+	}
+	if err := apply("owner-2", instanceBeforeReview.GrantGeneration, workspaceGrant); !errors.Is(err, ErrWorkspaceOwnerRequired) {
+		t.Fatalf("foreign owner confirmation = %v, want ErrWorkspaceOwnerRequired", err)
+	}
+	if err := apply("owner-1", instanceBeforeReview.GrantGeneration+1, workspaceGrant); !errors.Is(err, ErrStaleWorkspaceDataReview) {
+		t.Fatalf("stale review confirmation = %v, want ErrStaleWorkspaceDataReview", err)
+	}
+	undeclared := append(append([]Grant(nil), workspaceGrant...), Grant{InstanceID: "instance-1", PermissionKind: "api_write", Resource: "messages", ScopeCeiling: ScopeWorkspace})
+	if err := apply("owner-1", instanceBeforeReview.GrantGeneration, undeclared); !errors.Is(err, ErrInvalidScope) {
+		t.Fatalf("undeclared grant confirmation = %v, want ErrInvalidScope", err)
+	}
+	if err := apply("owner-1", instanceBeforeReview.GrantGeneration, workspaceGrant); err != nil {
+		t.Fatalf("owner confirmation: %v", err)
+	}
+
+	instance, err := store.Get(ctx, "instance-1")
+	if err != nil {
+		t.Fatalf("get upgraded instance: %v", err)
+	}
+	if instance.ScopeKind != ScopeTask || instance.DataScopeKind != ScopeWorkspace || instance.ActiveReleaseID != "release-1" || instance.GrantGeneration != instanceBeforeReview.GrantGeneration+1 {
+		t.Fatalf("upgraded instance = %+v, want task placement, workspace data, same release, generation increment", instance)
+	}
+	grants, err := store.ListGrants(ctx, "instance-1")
+	if err != nil {
+		t.Fatalf("list upgraded grants: %v", err)
+	}
+	if len(grants) != 1 || grants[0].ScopeCeiling != ScopeWorkspace || grants[0].ApprovedBy != "owner-1" {
+		t.Fatalf("upgraded grants = %+v, want one owner-approved workspace task grant", grants)
+	}
+}
+
 func TestCreateInstanceAdmissionIsAtomicAtTaskAndWorkspaceLimits(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

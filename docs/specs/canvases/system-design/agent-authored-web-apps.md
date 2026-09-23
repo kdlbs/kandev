@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-08-26
-last_updated: 2026-09-21
+last_updated: 2026-09-23
 requirements:
   - REQ-CANVASES-AGENT-WEB-APPS-001
   - REQ-CANVASES-AGENT-WEB-APPS-002
@@ -110,9 +110,11 @@ Use a small lifecycle record instead of declarative canvas blocks.
 - nullable `archived_at`
 - `created_at` and `updated_at`
 
-The plugin instance owns `scope_kind`, active release, status, and grants. The
-canvas service is the only service that changes the task or workspace scope of
-a canvas instance.
+The plugin instance owns placement `scope_kind`, effective data scope, active
+release, status, and grants. The canvas service is the only service that
+changes task or workspace placement or authorizes a canvas data-scope change.
+The [workspace preview design](task-canvas-workspace-preview.md) separates
+these scopes for locally requested task canvases.
 
 The canvas and plugin instance have a one-to-one relationship. Canvas removal
 removes the plugin instance, runtime tokens, grants, state, pending releases,
@@ -366,13 +368,14 @@ The promotion dialog shows:
 - each event subject
 - shared state access
 - each exact external network origin
-- the change from task scope to workspace scope
+- the change from task placement to workspace placement, with any data-scope
+  difference identified separately
 - the new workspace navigation placement
 
-The user can cancel without a state change. Confirmation creates the approved
-workspace grants and changes the plugin instance scope in one transaction. The
-canvas keeps its ID, plugin instance, active release, state, and release
-history.
+The user can cancel without a state change. Confirmation creates any needed
+workspace grants and changes the plugin instance placement scope in one
+transaction. The canvas keeps its ID, plugin instance, active release, state,
+and release history.
 
 Promotion publishes one lifecycle event after commit. The task and workspace
 navigation projections then refresh.
@@ -641,8 +644,10 @@ connection. An edit Quick Chat session also verifies its trusted target canvas
 metadata.
 
 Task canvases cannot appear in another task. Workspace canvases can serve task
-surfaces only inside their workspace. Promotion does not grant access to tasks,
-repositories, sessions, or external services by itself.
+surfaces only inside their workspace. A task canvas can use approved workspace
+data before promotion under the [workspace preview contract](task-canvas-workspace-preview.md).
+Promotion does not grant undeclared access to tasks, repositories, sessions,
+or external services.
 
 The plugin runtime repeats resource authorization for each request. Canvas
 authorization does not replace task or workspace authorization.
