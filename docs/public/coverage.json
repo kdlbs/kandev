@@ -189,6 +189,7 @@
         "assign_exact_task_profile_kandev",
         "create_task_kandev",
         "delete_task_kandev",
+        "handoff_coordinator_primary_kandev",
         "list_tasks_kandev",
         "move_task_kandev",
         "remove_task_dependency_kandev",

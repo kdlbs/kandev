@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -390,18 +389,22 @@ func resumeOptionsWithExactProfile(
 // accepting the one durable outcome.
 func (s *Service) recordExactProfileInferenceEvidence(
 	ctx context.Context,
-	payload *lifecycle.AgentStreamEventPayload,
-	eventExecutionID string,
+	eventType string,
+	providerDiagnostic bool,
+	text string,
+	taskID string,
+	sessionID string,
+	executionID string,
+	attempt *models.ExactProfileLaunchAttemptBinding,
 ) {
-	if payload == nil || payload.Data == nil || payload.ExactProfileAttempt == nil ||
-		(payload.Data.Type != "message_streaming" && payload.Data.Type != "thinking_streaming") ||
-		payload.Data.ProviderDiagnosticCandidate || strings.TrimSpace(payload.Data.Text) == "" {
+	if attempt == nil || (eventType != "message_streaming" && eventType != "thinking_streaming") ||
+		providerDiagnostic || strings.TrimSpace(text) == "" {
 		return
 	}
-	binding := *payload.ExactProfileAttempt
+	binding := *attempt
 	binding.ExpectedPrior = nil
-	if binding.TaskID != payload.TaskID || binding.SessionID != payload.SessionID ||
-		binding.ExecutionID != eventExecutionID || binding.Model == "" {
+	if binding.TaskID != taskID || binding.SessionID != sessionID ||
+		binding.ExecutionID != executionID || binding.Model == "" {
 		return
 	}
 	recorder, ok := s.repo.(interface {
