@@ -17,34 +17,6 @@ func remoteDockerRequest(instanceID string, metadata map[string]interface{}) *Ex
 	return &ExecutorCreateRequest{InstanceID: instanceID, TaskID: "task-1", Metadata: md}
 }
 
-// TestRemoteDockerStopPreservesItsSession is finding 1 from branch review.
-//
-// An ordinary stop preserves the container for resume. Releasing the SSH
-// session at the same time strands it: the later archive or delete has no
-// connection to reach the daemon, so the container is never removed.
-func TestRemoteDockerStopPreservesItsSession(t *testing.T) {
-	exec := NewRemoteDockerExecutor(dialerTestLogger(t))
-	session := &remoteDockerSession{}
-	exec.sessions["instance-1"] = session
-
-	instance := &ExecutorInstance{
-		InstanceID:  "instance-1",
-		TaskID:      "task-1",
-		ContainerID: "container-1",
-		StopReason:  "", // an ordinary stop
-	}
-	if err := exec.StopInstance(context.Background(), instance, false); err != nil {
-		t.Fatalf("StopInstance: %v", err)
-	}
-
-	exec.mu.Lock()
-	_, stillTracked := exec.sessions["instance-1"]
-	exec.mu.Unlock()
-	if !stillTracked {
-		t.Fatal("an ordinary stop released the SSH session; the preserved container is now unreachable")
-	}
-}
-
 // TestRemoteDockerTerminalStopReleasesItsSession is the other half: once the
 // container is actually removed, the connection must not leak.
 func TestRemoteDockerTerminalStopReleasesItsSession(t *testing.T) {

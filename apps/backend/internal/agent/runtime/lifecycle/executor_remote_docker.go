@@ -277,9 +277,9 @@ func (r *RemoteDockerExecutor) CreateInstance(ctx context.Context, req *Executor
 		return nil, err
 	}
 
-	// An ordinary stop keeps the session registered, so a later launch for the
-	// same instance finds a live entry here. Overwriting it would strand that
-	// session's SSH client, Docker client, forwards, and watchdog.
+	// A launch that reuses a live instance ID finds its session here.
+	// Overwriting it would strand that session's SSH client, Docker client,
+	// forwards, and watchdog.
 	r.mu.Lock()
 	replaced := r.sessions[req.InstanceID]
 	r.sessions[req.InstanceID] = session
@@ -513,13 +513,12 @@ func (r *RemoteDockerExecutor) StopInstance(ctx context.Context, instance *Execu
 	if instance == nil {
 		return nil
 	}
-	// An ordinary stop preserves the container, so it must also preserve the
-	// connection that reaches it. Releasing here strands the container: the
-	// later archive or delete would have no way to remove it.
+	// Every stop releases the session once the stop policy has run. Each launch
+	// uses a fresh instance ID, so nothing reaches this session afterward: a
+	// resume dials its own, and archive or delete remove a preserved container
+	// through a fresh connection from the persisted target.
+	defer r.releaseSession(instance.InstanceID)
 	teardown := force || instance.AgentStopFailed || shouldTeardownDockerContainer(instance.StopReason)
-	if teardown {
-		defer r.releaseSession(instance.InstanceID)
-	}
 
 	r.removeLegacySessionDir(ctx, instance)
 

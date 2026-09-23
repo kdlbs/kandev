@@ -5,12 +5,10 @@ import (
 	"testing"
 )
 
-// TestRemoteDockerClosesAReplacedSession covers the leak a review found: an
-// ordinary stop deliberately keeps the session registered, so a later
-// CreateInstance for the same instance reaches the assignment with a live
-// entry present. Overwriting the map entry strands that session's SSH client,
-// Docker client, port forwards, and keepalive watchdog for the backend's
-// lifetime.
+// TestRemoteDockerClosesAReplacedSession covers a CreateInstance that reuses
+// a live instance ID. Overwriting the map entry would strand that session's
+// SSH client, Docker client, port forwards, and keepalive watchdog for the
+// backend's lifetime.
 func TestRemoteDockerClosesAReplacedSession(t *testing.T) {
 	exec := NewRemoteDockerExecutor(dialerTestLogger(t))
 
