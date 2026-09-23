@@ -128,6 +128,38 @@ configs. `apps/backend/internal/health` exposes aggregate health (counts by
 class, no workspace identifiers or secrets), and bounded-label expvar counters
 report skips, resets, and failures.
 
+### Planned review-cleanup extension
+
+The [review task cleanup package](../../integrations/system-design/github-review-task-cleanup.md)
+extends this existing backoff contract to scheduled review-task feedback. It
+does not change task-owned PR-watch identity or the manual cleanup endpoints.
+
+Keep review-cleanup circuit state separate from the PR-monitor circuit. A
+successful PR-monitor request must not clear a failed review-cleanup target.
+Key shared authentication and rate-limit failures by workspace automation
+connection. Keep a record-specific configuration failure isolated to that
+review record. One inaccessible PR must not suspend unrelated work in the
+workspace. Use non-secret connection generation and status as the workspace
+reset fingerprint; include the watch's update time for a record-specific
+configuration reset. Circuit state remains in memory and is discarded on
+restart. Remove record-specific state when its dedup row disappears.
+
+Before each scheduled feedback request, inspect the Core rate tracker and the
+relevant circuit. If Core is exhausted or the circuit is open, make no feedback
+request. A failed feedback fetch must reach the poller as a classified outcome;
+the current cleanup helper swallows that error and cannot open a circuit.
+After a shared authentication or rate-limit failure, stop the remaining
+feedback requests for that workspace in the same cycle. Continue other
+workspaces unless the shared Core tracker reports exhaustion. A record-specific
+configuration failure stops only that record. Search success does not count as
+feedback success and does not reset the cleanup circuit.
+
+Use the existing `authcircuit.State`, `classifyPollErr`, and connection
+fingerprint rules. Do not change the public cleanup response shape. Keep
+manual cleanup and explicit watch actions outside scheduled circuit admission.
+Aggregate review-cleanup skips and failures into bounded-label health metrics;
+never use task, watch, PR, repository, or workspace IDs as metric labels.
+
 ## Related decisions
 
 - [Keep PR watches task owned](../../../decisions/2026-08-31-task-owned-pr-watch-identity.md)
