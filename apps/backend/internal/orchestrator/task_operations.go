@@ -962,7 +962,11 @@ func (s *Service) startCreatedSession(
 		TurnID:                 initialTurnID,
 	}
 	launchOptions.OnExecutionAdmitted = func(executionID string) error {
-		if err := s.admitExactProfileLaunchAttempt(ctx, session, exactAssignment, executionID); err != nil {
+		binding, err := s.admitExactProfileLaunchAttempt(ctx, session, exactAssignment, executionID)
+		if err != nil {
+			return err
+		}
+		if err := s.attachExactProfileLaunchAttempt(binding); err != nil {
 			return err
 		}
 		if options.initialCreatePrompt && session.IsPassthrough {

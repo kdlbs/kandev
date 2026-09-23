@@ -56,6 +56,11 @@ type AgentExecution struct {
 	ExactProfile         bool
 	ExactProfileModel    string
 	ExactProfileRevision int64
+	// exactProfileAttempt is the immutable tuple admitted by the orchestrator
+	// before this execution starts. It is copied at attachment so delayed stream
+	// events never consult mutable task/session assignment state.
+	exactProfileAttempt   *models.ExactProfileLaunchAttemptBinding
+	exactProfileAttemptMu sync.RWMutex
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
 	OfficeAgentProfileID string
@@ -417,6 +422,32 @@ func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func(), func()) {
 	e.initialPromptFailureCallback = nil
 	e.initialPromptDispatchCallbackMu.Unlock()
 	return onDispatched, onFailure
+}
+
+func (e *AgentExecution) attachExactProfileLaunchAttempt(binding *models.ExactProfileLaunchAttemptBinding) error {
+	if binding == nil || binding.ExecutionID != e.ID {
+		return models.ErrExactProfileAssignmentInvalidInput
+	}
+	copy := *binding
+	copy.ExpectedPrior = nil
+	e.exactProfileAttemptMu.Lock()
+	defer e.exactProfileAttemptMu.Unlock()
+	if e.exactProfileAttempt != nil {
+		return models.ErrExactProfileAssignmentGeneration
+	}
+	e.exactProfileAttempt = &copy
+	return nil
+}
+
+func (e *AgentExecution) exactProfileLaunchAttemptSnapshot() *models.ExactProfileLaunchAttemptBinding {
+	e.exactProfileAttemptMu.RLock()
+	defer e.exactProfileAttemptMu.RUnlock()
+	if e.exactProfileAttempt == nil {
+		return nil
+	}
+	copy := *e.exactProfileAttempt
+	copy.ExpectedPrior = nil
+	return &copy
 }
 
 type activeTopLevelTool struct {

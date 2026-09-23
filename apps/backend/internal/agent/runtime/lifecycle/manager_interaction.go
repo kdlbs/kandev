@@ -112,6 +112,17 @@ func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onD
 	return nil
 }
 
+// AttachExactProfileLaunchAttempt records the immutable attempt admitted by
+// the orchestrator before process start. Stream publishers use this snapshot
+// instead of resolving mutable task/session assignment state.
+func (m *Manager) AttachExactProfileLaunchAttempt(executionID string, binding *models.ExactProfileLaunchAttemptBinding) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	return execution.attachExactProfileLaunchAttempt(binding)
+}
+
 // PromptAgentWithDispatchCallback exposes agentctl acceptance to callers that
 // must keep admission serialized until the queued prompt is actually dispatched.
 func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*PromptResult, error) {

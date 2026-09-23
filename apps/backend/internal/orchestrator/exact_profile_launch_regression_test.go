@@ -307,6 +307,36 @@ func TestStartCreatedSessionAsyncStartFailureRecordsFailedClosedExactReceipt(t *
 	}
 }
 
+func TestStartCreatedSessionAttachesAdmittedExactAttempt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session-attached", models.TaskSessionStateCreated)
+	revision := exactProfileRecoveryAssignment(t, repo)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", WorkspaceID: "ws1", Title: "Test Task", State: v1.TaskStateInProgress}
+	agentManager := &mockAgentManager{
+		resolveProfileInfo: exactProfileRecoveryInfo(revision),
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-attached"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
+	if _, err := svc.StartCreatedSession(ctx, "task1", "session-attached", "profile-exact", "start", true, false, false, nil, nil); err != nil {
+		t.Fatalf("StartCreatedSession: %v", err)
+	}
+	agentManager.mu.Lock()
+	bindings := append([]*models.ExactProfileLaunchAttemptBinding(nil), agentManager.exactProfileAttemptBindings...)
+	agentManager.mu.Unlock()
+	if len(bindings) != 1 {
+		t.Fatalf("attached bindings = %#v, want one", bindings)
+	}
+	got := bindings[0]
+	if got.TaskID != "task1" || got.SessionID != "session-attached" || got.ExecutionID != "exec-attached" ||
+		got.AttemptID != "exec-attached" || got.AgentProfileID != "profile-exact" || got.ProfileRevision != revision || got.Generation != 1 || got.SessionIncarnationID == "" {
+		t.Fatalf("attached binding = %#v, want admitted immutable tuple", got)
+	}
+}
+
 func TestStartCreatedSessionRefusedExactAdmissionLeavesNoReceipt(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -329,6 +359,12 @@ func TestStartCreatedSessionRefusedExactAdmissionLeavesNoReceipt(t *testing.T) {
 	}
 	if startCalls != 0 {
 		t.Fatalf("StartAgentProcess calls = %d, want 0", startCalls)
+	}
+	agentManager.mu.Lock()
+	attached := len(agentManager.exactProfileAttemptBindings)
+	agentManager.mu.Unlock()
+	if attached != 0 {
+		t.Fatalf("refused exact admission attached %d binding(s)", attached)
 	}
 	if receipt, err := repo.GetExactProfileLaunchReceipt(ctx, "task1", "session-refused"); err != nil || receipt != nil {
 		t.Fatalf("forged receipt = %#v, %v", receipt, err)
