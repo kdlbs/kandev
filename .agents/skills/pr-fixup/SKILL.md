@@ -77,10 +77,11 @@ Directly supplied review findings need current-source validation even without
 a GitHub thread. Apply valid fixes within the user's authorization.
 Do not invent comment IDs or resolutions for findings without a thread.
 An explicit request to run PR fixup authorizes concise GitHub replies and
-resolution for each review thread in that fixup's scope once its disposition
-is complete. Do not ask a separate approval question for these writes. A
-request to address selected comments authorizes writes only for those threads;
-a review-only request authorizes no GitHub writes.
+resolution for every unresolved review thread listed by
+`scripts/pr-resolve list <PR>` once that thread's disposition is complete. This
+defines the fixup scope, so do not ask a separate approval question for these
+writes. A request to address selected comments authorizes writes only for those
+threads; a review-only request authorizes no GitHub writes.
 
 If `reviewDecision=REVIEW_REQUIRED` and `mergeStateStatus=BLOCKED`, report the
 human approval gate. Green checks do not authorize self-approval or merging.
@@ -183,14 +184,16 @@ and authoritative spec. Do not silently encode the compromise.
 A classification is not a disposition. A thread is not complete merely because
 it was called optional, informational, already addressed, or invalid. GitHub
 replies and thread resolution are external writes. An explicit PR-fixup request
-authorizes a concise reply and resolution for each unresolved thread in the
-fixup scope, including informational, optional, and invalid findings. Do not
-ask separately before these writes. Requests such as "complete cleanup", "clean
-up all review threads", or "leave no threads unresolved" authorize this for
-every unresolved thread. A request to address selected comments authorizes
-replies and resolution only for those threads. A review-only request authorizes
-no writes. When writes are not authorized, record every disposition, report the
-still-unresolved thread, and do not declare the PR clean.
+authorizes a concise reply and resolution for every unresolved review thread
+listed by `scripts/pr-resolve list <PR>`, including informational, optional,
+and invalid findings. This defines the write scope; do not ask separately
+before these writes or extend them to comments outside that list. Requests such
+as "complete cleanup", "clean up all review threads", or "leave no threads
+unresolved" authorize this for every unresolved thread. A request to address
+selected comments authorizes replies and resolution only for those threads. A
+review-only request authorizes no writes. When writes are not authorized,
+record every disposition, report the still-unresolved thread, and do not
+declare the PR clean.
 
 For code changes, push the fix and pass targeted verification before replying
 and resolving. For non-code dispositions, verify the current head first, then
