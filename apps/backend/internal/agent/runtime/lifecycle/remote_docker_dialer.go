@@ -48,13 +48,14 @@ func (d *sshDockerDialer) dial(ctx context.Context, _, _ string) (net.Conn, erro
 	return dialDockerOverSSH(ctx, d.client, d.logger, d.record)
 }
 
-// record keeps the newest failure and logs it, so the remote's own words reach
-// the operator even when a caller only sees the Engine API client's wording.
+// record keeps the newest connection outcome. A failure is logged, so the
+// remote's own words reach the operator even when a caller only sees the
+// Engine API client's wording; a clean exit (nil) clears it, so one
+// connection's failure cannot explain a later, unrelated one.
 func (d *sshDockerDialer) record(err error) {
-	if err == nil {
-		return
+	if err != nil {
+		d.logger.Warn("remote docker: dial-stdio failed", zap.Error(err))
 	}
-	d.logger.Warn("remote docker: dial-stdio failed", zap.Error(err))
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.last = err
@@ -256,22 +257,16 @@ func (c *sshDockerConn) waitBounded(budget time.Duration) {
 func (c *sshDockerConn) wait() {
 	c.waitOnce.Do(func() {
 		err := c.session.Wait()
-		exitCode := 0
-		var exitErr *ssh.ExitError
-		switch {
-		case err == nil:
-		case asExitError(err, &exitErr):
-			exitCode = exitErr.ExitStatus()
-		default:
-			exitCode = -1
-		}
+		c.mu.Lock()
+		closedLocally := c.closed
+		c.mu.Unlock()
 
-		cause := docker.ClassifyRemoteDialError(exitCode, c.stderr.String())
+		cause, report := classifyDialStdioExit(err, c.stderr.String(), closedLocally)
 		c.mu.Lock()
 		c.exited = true
 		c.exitErr = cause
 		c.mu.Unlock()
-		if cause != nil && c.onExit != nil {
+		if report && c.onExit != nil {
 			c.onExit(cause)
 		}
 	})
@@ -285,6 +280,28 @@ func (c *sshDockerConn) exitCause() error {
 		return nil
 	}
 	return c.exitErr
+}
+
+// classifyDialStdioExit turns the remote command's Wait result into a cause,
+// and reports whether the outcome says anything about the transport.
+//
+// Only an exit status comes from the remote command itself. Any other result,
+// such as a channel that closed without one, means the SSH transport ended
+// under the command, so it is reported as transport loss rather than as a
+// daemon failure. When this side closed the connection, that is expected and
+// reports nothing.
+func classifyDialStdioExit(err error, stderr string, closedLocally bool) (error, bool) {
+	if err == nil {
+		return nil, true
+	}
+	var exitErr *ssh.ExitError
+	if asExitError(err, &exitErr) {
+		return docker.ClassifyRemoteDialError(exitErr.ExitStatus(), stderr), true
+	}
+	if closedLocally {
+		return nil, false
+	}
+	return fmt.Errorf("%w: %q ended without an exit status: %v", ErrSSHTransportLost, dockerDialStdioCommand, err), true
 }
 
 func asExitError(err error, target **ssh.ExitError) bool {

@@ -90,10 +90,11 @@ func newRemoteClientWithOptionOrder(transport RemoteTransport, log *logger.Logge
 	}, nil
 }
 
-// ExplainRemoteFailure restores the transport-level cause of err when the
-// Engine API client replaced it with a generic connection failure that wraps
-// nothing. Any other error, and any error on a client with no remote
-// transport, is returned unchanged.
+// ExplainRemoteFailure adds the transport-level cause to err when the Engine
+// API client replaced it with a generic connection failure that wraps nothing.
+// Both stay in the result: the cause names the fix, and err is what this
+// request actually hit. Any other error, and any error on a client with no
+// remote transport, is returned unchanged.
 //
 // Only a connection failure is substituted: a daemon that answered and refused
 // the request has already reported the cause the user needs.
@@ -108,7 +109,7 @@ func (c *Client) ExplainRemoteFailure(err error) error {
 	if cause == nil {
 		return err
 	}
-	return cause
+	return fmt.Errorf("%w (%w)", cause, err)
 }
 
 // PingVersion pings the daemon and reports its API version, so a connection

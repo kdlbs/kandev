@@ -242,6 +242,34 @@ func TestExplainRemoteFailureRestoresTheTransportCause(t *testing.T) {
 	}
 }
 
+// TestExplainRemoteFailureKeepsTheOriginalError adds the transport cause
+// without discarding what actually failed. A recorded cause can belong to an
+// earlier connection, so the request's own error has to survive next to it.
+func TestExplainRemoteFailureKeepsTheOriginalError(t *testing.T) {
+	cause := errors.New("remote daemon is unreachable")
+	cli, err := NewRemoteClient(RemoteTransport{
+		Dial: func(context.Context, string, string) (net.Conn, error) {
+			return nil, errors.New("open SSH session: channel refused")
+		},
+		Cause: func() error { return cause },
+	}, testLogger(t))
+	if err != nil {
+		t.Fatalf("NewRemoteClient: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, pingErr := cli.PingVersion(ctx)
+	if !errors.Is(pingErr, cause) {
+		t.Fatalf("PingVersion error = %v, want it to wrap %v", pingErr, cause)
+	}
+	if !strings.Contains(pingErr.Error(), "channel refused") {
+		t.Fatalf("PingVersion error = %v, want the request's own failure kept", pingErr)
+	}
+}
+
 // TestExplainRemoteFailureLeavesDaemonErrorsAlone keeps the substitution
 // narrow. A daemon that answered and refused the request has already named the
 // cause, and replacing it with a stale transport failure would be a worse
