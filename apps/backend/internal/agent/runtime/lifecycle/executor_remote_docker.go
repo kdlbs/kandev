@@ -88,13 +88,16 @@ func (s *remoteDockerSession) closeWithWatchdogLoop(
 			firstErr = err
 		}
 	}
-	if s.dockerClient != nil {
-		if err := s.dockerClient.Close(); err != nil && firstErr == nil {
+	// SSH closes before the Docker client. Each pooled Engine API connection
+	// waits for its remote command to exit, and on a dead link that exit only
+	// arrives once the SSH connection is gone.
+	if s.sshClient != nil {
+		if err := s.sshClient.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	if s.sshClient != nil {
-		if err := s.sshClient.Close(); err != nil && firstErr == nil {
+	if s.dockerClient != nil {
+		if err := s.dockerClient.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
