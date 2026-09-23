@@ -45,7 +45,7 @@ export function AppSidebarWorkspaceActions(props: {
       className={cn(
         "flex shrink-0 items-center",
         presentation === "mobile"
-          ? "gap-2 [&_a]:min-h-11 [&_a]:min-w-11 [&_button]:min-h-11 [&_button]:min-w-11"
+          ? "min-w-0 max-w-full flex-wrap gap-2 [&_a]:min-h-11 [&_a]:min-w-11 [&_button]:min-h-11 [&_button]:min-w-11"
           : "gap-1",
       )}
       data-plugin-slot="sidebar-workspace-actions"
@@ -57,14 +57,15 @@ export function AppSidebarWorkspaceActions(props: {
 }
 
 /**
- * Shared phone navigation entry point for workspace-scoped plugin actions.
- * The same slot is mounted in the kanban drawer and at the top of the shared
- * app navigation sheet on other phone surfaces.
+ * Workspace canvases and optional plugin actions for navigation menus.
+ * Phone app navigation renders plugin actions in its dedicated Plugins section.
  */
 export function MobileWorkspaceActionsSection({
   workspaceId: providedWorkspaceId,
+  includePluginActions = true,
 }: {
   workspaceId?: string;
+  includePluginActions?: boolean;
 }) {
   const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((state) => state.workspaces?.activeId ?? null);
@@ -76,7 +77,8 @@ export function MobileWorkspaceActionsSection({
   const workspaceId = providedWorkspaceId ?? activeWorkspaceId;
   const canvases = useWorkspaceCanvases(showCanvases ? workspaceId : null);
   const activeCanvases = canvases.filter(isActiveWorkspaceCanvas);
-  const hasPluginActions = registry.getSlotRegistrations("sidebar-workspace-actions").length > 0;
+  const hasPluginActions =
+    includePluginActions && registry.getSlotRegistrations("sidebar-workspace-actions").length > 0;
 
   if (!workspaceId || (!hasPluginActions && !showCanvases)) {
     return null;

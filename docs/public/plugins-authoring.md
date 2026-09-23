@@ -2094,7 +2094,9 @@ type MainTopBarSlotProps = {
 Because the bar is not scoped to a task, no task/session ids are provided. On
 desktop, keep contributions to small badges or icon buttons in the compact
 horizontal strip. On a phone, `presentation` is `"mobile"`; the contribution
-renders in the shared listing menu's **Plugins** section. The host wraps
+renders in the shared app menu's **Plugins** section alongside sidebar workspace
+actions. When task contributions are also present, **Workspace** and **Task**
+labels distinguish their context. The host wraps
 contributions within the menu width and gives `host.ui.Button` controls a
 minimum 44px active target. Use `host.ui.Button` for documented icon actions;
 the host normalizes their SVG icons to 16px. Desktop contributions keep their

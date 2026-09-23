@@ -1,6 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
+import { installFixturePlugin, uninstallFixturePlugin } from "../../helpers/plugin-fixture";
 
 let previousLayout: unknown;
 test.beforeEach(async ({ testPage, apiClient, seedData }) => {
@@ -10,6 +11,7 @@ test.beforeEach(async ({ testPage, apiClient, seedData }) => {
   ];
 });
 test.afterEach(async ({ apiClient, seedData }) => {
+  await uninstallFixturePlugin(apiClient);
   const current = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
     seedData.workspaceId
   ];
@@ -84,6 +86,7 @@ test.describe("Sidebar customization on phone", () => {
     apiClient,
     seedData,
   }) => {
+    await installFixturePlugin(testPage);
     for (const title of [
       "Review checkout accessibility",
       "Add order tracking",
@@ -113,11 +116,19 @@ test.describe("Sidebar customization on phone", () => {
     const menu = testPage.getByTestId("app-nav-sheet");
     const tasks = menu.getByTestId("mobile-navigation-tasks-toggle");
     const automations = menu.getByRole("button", { name: "Automations", exact: true });
+    const plugins = menu.getByRole("region", { name: "Plugins", exact: true });
+    await expect(plugins).toHaveCount(1);
+    await expect(menu.locator("#hello-main-top-bar")).toHaveCount(1);
+    await expect(plugins.locator("#hello-main-top-bar")).toBeVisible();
+    const workspaceAction = plugins.getByTestId("e2e-sidebar-workspace-actions");
+    await expect(workspaceAction).toHaveCount(1);
+    await expect(menu.getByRole("link", { name: "Hello E2E", exact: true })).toHaveCount(1);
     await expect(menu.getByRole("button", { name: "Canvases", exact: true })).toHaveCount(0);
     await expect(menu.locator("[data-task-row-id]")).toHaveCount(3);
     for (const width of [360, 393, 767]) {
       await testPage.setViewportSize({ width, height: 851 });
       expect((await tasks.boundingBox())!.y).toBeLessThan((await automations.boundingBox())!.y);
+      expect((await automations.boundingBox())!.y).toBeLessThan((await plugins.boundingBox())!.y);
       expect(await menu.locator("nav").evaluate((el) => getComputedStyle(el).overflowY)).toBe(
         "auto",
       );
@@ -134,6 +145,9 @@ test.describe("Sidebar customization on phone", () => {
       expect(box.x + box.width).toBeLessThanOrEqual(width);
       expect(box.height).toBeLessThanOrEqual(851);
     }
+    await workspaceAction.tap();
+    await expect(workspaceAction).toHaveAttribute("data-clicked", "true");
+    await expect(menu).toBeVisible();
     await automations.tap();
     await expect(menu.getByRole("link", { name: "Set up an automation" })).toBeVisible();
     await menu.getByRole("button", { name: "Integrations", exact: true }).tap();

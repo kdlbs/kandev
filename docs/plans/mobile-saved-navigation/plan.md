@@ -79,6 +79,7 @@ default layout, quick actions, launch handoff, and unchanged desktop behavior.
 ## Work orders
 
 - [x] [Task 01: Restore saved phone navigation](task-01-restore-phone-navigation.md)
+- [ ] [Task 02: Consolidate mobile plugin navigation](task-02-consolidate-plugin-navigation.md)
 
 ## Verification results
 

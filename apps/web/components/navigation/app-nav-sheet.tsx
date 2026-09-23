@@ -7,10 +7,8 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNo
 import { useTranslation } from "react-i18next";
 import { MobileWorkspaceActionsSection } from "@/components/app-sidebar/app-sidebar-workspace-actions";
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
-import {
-  MobileListingMenuActions,
-  MobileQuickActions,
-} from "@/components/kanban/mobile-listing-menu-actions";
+import { MobileQuickActions } from "@/components/kanban/mobile-listing-menu-actions";
+import { StatusSurfaceMetrics } from "@/components/system-metrics/status-surface-metrics";
 import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useInOffice } from "@/hooks/use-in-office";
@@ -100,22 +98,7 @@ export function AppNavSheet(props: AppNavSheetProps) {
             }
             workspaceActions={
               <>
-                {isMobile && (
-                  <MobileListingMenuActions
-                    showQuickActions={false}
-                    workspaceId={workspace?.id}
-                    workspaceLabel={workspace?.name ?? ""}
-                    currentPage={currentPage}
-                    open={open}
-                    closeMenu={(focus = false) => {
-                      restoreFocus.current = focus;
-                      close();
-                    }}
-                    isSearchOpen={false}
-                    returnFocusRef={opener}
-                  />
-                )}
-                <MobileWorkspaceActionsSection />
+                <MobileWorkspaceActionsSection includePluginActions={!isMobile} />
                 <NavigationAutomations
                   isMobile={isMobile}
                   open={open}
@@ -126,12 +109,31 @@ export function AppNavSheet(props: AppNavSheetProps) {
               </>
             }
             pluginActions={pluginActions}
+            pluginWorkspaceContext={
+              isMobile
+                ? { workspaceId: workspace?.id, workspaceLabel: workspace?.name, currentPage }
+                : undefined
+            }
+            resources={isMobile && <NavigationMetrics open={open} />}
             controls={isMobile ? { ...controls, openTaskViews: undefined } : controls}
           />
         </nav>
       </AppNavSurface>
       {controls.dialogs}
     </>
+  );
+}
+
+function NavigationMetrics({ open }: { open: boolean }) {
+  const statusBarEnabled = useAppStore((state) => state.userSettings.appStatusBarEnabled);
+  if (statusBarEnabled) return null;
+  return (
+    <StatusSurfaceMetrics
+      presentation="mobile-drawer"
+      density="compact"
+      drawerOpen={open}
+      iconSize="size-4"
+    />
   );
 }
 

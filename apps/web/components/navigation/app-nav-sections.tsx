@@ -17,7 +17,10 @@ import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-s
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
 import { DestinationRows } from "@/components/navigation/destination-rows";
-import { MobilePluginNavSection } from "@/components/plugins/mobile-plugin-nav-section";
+import {
+  MobilePluginNavSection,
+  type MobilePluginWorkspaceContext,
+} from "@/components/plugins/mobile-plugin-nav-section";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
 import { useTheme } from "@/components/theme/app-theme";
 import { getThemeToggleLabelKey, getThemeToggleTarget } from "@/components/theme/theme-toggle";
@@ -126,6 +129,8 @@ type AppNavSectionsProps = {
   workspaceActions?: ReactNode;
   /** Optional page-scoped controls rendered with plugin destinations. */
   pluginActions?: ReactNode;
+  pluginWorkspaceContext?: MobilePluginWorkspaceContext;
+  resources?: ReactNode;
   afterPrimary?: ReactNode;
   quickActions?: ReactNode;
   phoneNavigation?: boolean;
@@ -144,6 +149,8 @@ export function AppNavSections({
   omitDestinations = [],
   workspaceActions,
   pluginActions,
+  pluginWorkspaceContext,
+  resources,
   afterPrimary,
   quickActions,
   phoneNavigation = false,
@@ -188,6 +195,7 @@ export function AppNavSections({
       {!omit.has("plugins") && (
         <MobilePluginNavSection
           actions={pluginActions}
+          workspaceContext={pluginWorkspaceContext}
           includeDestinations={!hasSavedSidebarLayout}
           onNavigate={onNavigate}
         />
@@ -199,6 +207,7 @@ export function AppNavSections({
           collapsible={phoneNavigation}
         />
       )}
+      {resources}
       <UtilityNavSection
         onNavigate={onNavigate}
         controls={controls}

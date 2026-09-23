@@ -2,7 +2,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "@/lib/plugins/registry";
-import { MobilePluginNavSection } from "./mobile-plugin-nav-section";
+import {
+  MobilePluginNavSection,
+  type MobilePluginWorkspaceContext,
+} from "./mobile-plugin-nav-section";
 
 const HELLO_PATH = "/plugins/hello";
 const HELLO_ITEM_TEST_ID = "mobile-plugin-nav-item-hello";
@@ -11,11 +14,17 @@ vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => "/",
 }));
 
-function renderSection(onNavigate = () => {}, actions?: ReactNode, includeDestinations = true) {
+function renderSection(
+  onNavigate = () => {},
+  actions?: ReactNode,
+  includeDestinations = true,
+  workspaceContext?: MobilePluginWorkspaceContext,
+) {
   return render(
     <MobilePluginNavSection
       actions={actions}
       includeDestinations={includeDestinations}
+      workspaceContext={workspaceContext}
       onNavigate={onNavigate}
     />,
   );
@@ -25,6 +34,68 @@ afterEach(() => {
   cleanup();
   ["plugin-a", "plugin-b"].forEach((id) => pluginRegistry.unregisterPlugin(id));
   window.history.pushState({}, "", "/");
+});
+
+describe("MobilePluginNavSection workspace grouping", () => {
+  const workspaceContext = {
+    workspaceId: "ws-1",
+    workspaceLabel: "Demo",
+    currentPage: "tasks",
+  } as const;
+
+  it("omits the section when the phone has no contributions", () => {
+    const { container } = renderSection(undefined, undefined, true, workspaceContext);
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("keeps workspace slots with task controls even when a saved layout owns destinations", () => {
+    const received: unknown[] = [];
+    for (const name of ["main-top-bar", "sidebar-workspace-actions"]) {
+      pluginRegistry.forPlugin("plugin-a").registerComponent(name, ({ slotProps }) => {
+        received.push(slotProps);
+        return <button data-testid={name}>{name}</button>;
+      });
+    }
+    pluginRegistry
+      .forPlugin("plugin-a")
+      .registerNavItem({ id: "hello", label: "Hello", path: HELLO_PATH });
+    renderSection(undefined, <button>Task control</button>, false, workspaceContext);
+
+    const section = screen.getByRole("region", { name: "Plugins" });
+    for (const label of ["main-top-bar", "sidebar-workspace-actions", "Task control"]) {
+      expect(section.contains(screen.getByRole("button", { name: label }))).toBe(true);
+    }
+    expect(received).toContainEqual({ ...workspaceContext, presentation: "mobile" });
+    expect(received).toContainEqual({
+      workspaceId: "ws-1",
+      workspaceLabel: "Demo",
+      presentation: "mobile",
+    });
+    expect(screen.getByRole("heading", { name: "Workspace" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Task" })).toBeTruthy();
+    expect(screen.queryByTestId(HELLO_ITEM_TEST_ID)).toBeNull();
+    expect(screen.getAllByText("Plugins")).toHaveLength(1);
+  });
+
+  it("does not invent task context for workspace-only controls and removes unloaded contributions", () => {
+    pluginRegistry
+      .forPlugin("plugin-a")
+      .registerComponent("main-top-bar", () => <button>Workspace control</button>);
+    const { rerender, container } = renderSection(undefined, undefined, true, workspaceContext);
+    expect(screen.getByRole("button", { name: "Workspace control" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Task" })).toBeNull();
+    pluginRegistry.unregisterPlugin("plugin-a");
+    rerender(<MobilePluginNavSection onNavigate={() => {}} workspaceContext={workspaceContext} />);
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("omits sidebar actions when there is no active workspace", () => {
+    pluginRegistry
+      .forPlugin("plugin-a")
+      .registerComponent("sidebar-workspace-actions", () => <button>Workspace control</button>);
+    const { container } = renderSection(undefined, undefined, true, { currentPage: "kanban" });
+    expect(container.innerHTML).toBe("");
+  });
 });
 
 describe("MobilePluginNavSection actions", () => {
