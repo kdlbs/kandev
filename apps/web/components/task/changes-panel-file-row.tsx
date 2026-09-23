@@ -22,6 +22,7 @@ import type { ChangedFile } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { TouchFileRowContent } from "./changes-panel-touch-file-row";
 
 const COARSE_POINTER_TARGET_CLASS = "min-h-11 min-w-11";
 
@@ -34,7 +35,7 @@ const splitPath = (path: string) => {
   };
 };
 
-type FileRowProps = {
+export type FileRowProps = {
   file: ChangedFile;
   isPending: boolean;
   isSelected?: boolean;
@@ -60,23 +61,10 @@ type FileRowProps = {
   indentPx?: number;
 };
 
-export function FileRow({
-  file,
-  isPending,
-  isSelected,
-  isActive,
-  onSelect,
-  onOpenDiff,
-  onStage,
-  onUnstage,
-  onDiscard,
-  onEditFile,
-  treeMode,
-  indentPx,
-}: FileRowProps) {
-  const { isFinePointer } = useResponsiveBreakpoint();
-  const { folder, file: name } = splitPath(file.path);
-  const showFolder = !treeMode && folder;
+export function FileRow(props: FileRowProps) {
+  const { file, isSelected, isActive, onSelect, onEditFile, onOpenDiff } = props;
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const touchMode = isMobile || !isFinePointer;
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button === 2) return;
@@ -101,14 +89,38 @@ export function FileRow({
       data-selected={isSelected ? "true" : "false"}
       data-active={isActive ? "true" : "false"}
       className={cn(
-        "group flex items-center justify-between gap-2 rounded-md border border-transparent px-2 py-1.5 -mx-1 text-sm cursor-pointer",
-        "md:px-1 md:py-0.5",
+        "group flex items-center justify-between rounded-md border border-transparent -mx-1 text-sm cursor-pointer",
+        touchMode ? "gap-1 px-1 py-0.5" : "gap-2 px-2 py-1.5 md:px-1 md:py-0.5",
         isSelected || isActive
           ? "border-primary/50 bg-card text-foreground hover:bg-muted/70"
           : "hover:bg-muted/60",
       )}
       onClick={handleClick}
     >
+      {touchMode ? (
+        <TouchFileRowContent {...props} />
+      ) : (
+        <DesktopFileRowContent {...props} isFinePointer={isFinePointer} />
+      )}
+    </li>
+  );
+}
+
+function DesktopFileRowContent({
+  file,
+  isPending,
+  onStage,
+  onUnstage,
+  onDiscard,
+  onEditFile,
+  treeMode,
+  indentPx,
+  isFinePointer,
+}: FileRowProps & { isFinePointer: boolean }) {
+  const { folder, file: name } = splitPath(file.path);
+  const showFolder = !treeMode && folder;
+  return (
+    <>
       <div
         className="flex items-center gap-2 min-w-0"
         style={indentPx ? { paddingLeft: indentPx } : undefined}
@@ -157,7 +169,7 @@ export function FileRow({
           onEditFile={onEditFile}
         />
       </div>
-    </li>
+    </>
   );
 }
 
