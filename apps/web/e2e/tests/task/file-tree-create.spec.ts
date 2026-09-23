@@ -21,7 +21,7 @@ async function setupTask(
   testPage: Page,
   apiClient: ApiClient,
   seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string },
-  options: { profileName: string; taskTitle: string },
+  options: { profileName: string; taskTitle: string; requiredPath?: string },
 ) {
   const profile = await createStandardProfile(apiClient, options.profileName);
   const task = await apiClient.createTaskWithAgent(
@@ -42,6 +42,28 @@ async function setupTask(
       message: `Waiting for ${options.taskTitle} task environment to be ready`,
     })
     .toBe("ready");
+
+  if (options.requiredPath) {
+    await expect
+      .poll(
+        async () => {
+          const environment = await apiClient.getTaskEnvironment(task.id);
+          const candidates = [
+            environment?.workspace_path,
+            environment?.worktree_path,
+            ...(environment?.repos?.map((repository) => repository.worktree_path) ?? []),
+          ].filter((candidate): candidate is string => Boolean(candidate));
+          return candidates.some((candidate) =>
+            fs.existsSync(path.join(candidate, options.requiredPath!)),
+          );
+        },
+        {
+          timeout: 90_000,
+          message: `Waiting for ${options.requiredPath} in the ${options.taskTitle} worktree`,
+        },
+      )
+      .toBe(true);
+  }
 
   // The task API is authoritative here. Direct navigation avoids a Kanban
   // card being replaced while the task snapshot is still settling.

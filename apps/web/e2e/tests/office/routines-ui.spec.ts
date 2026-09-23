@@ -183,6 +183,8 @@ test.describe("Routines UI", () => {
 
     await testPage.goto(`/office/routines/${routine.id}`);
     await expect(testPage.getByText(name)).toBeVisible({ timeout: 10_000 });
+    const agent = await officeApi.getAgent(officeSeed.agentId);
+    const agentName = typeof agent.name === "string" ? agent.name : "CEO";
 
     await comboboxNear(testPage, "Assignee").click();
     await testPage.getByRole("option", { name: agentName, exact: true }).click();

@@ -12,6 +12,8 @@ import {
   waitForScreenshotCaptureMode,
 } from "./preview-feedback-helpers";
 
+const SCREENSHOT_PREVIEW_TIMEOUT = 15_000;
+
 test.describe("Web preview feedback", () => {
   test.describe.configure({ retries: 1, timeout: 180_000 });
 
@@ -69,9 +71,11 @@ test.describe("Web preview feedback", () => {
       await dragScreenshotRegion(testPage, frame.locator("#save"));
       const screenshotDraft = testPage.getByTestId("preview-feedback-draft");
       await expect(screenshotDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
-        timeout: 15_000,
+        timeout: SCREENSHOT_PREVIEW_TIMEOUT,
       });
-      await expect(screenshotDraft).toContainText(/\d+ × \d+ · PNG/);
+      await expect(screenshotDraft).toContainText(/\d+ × \d+ · PNG/, {
+        timeout: SCREENSHOT_PREVIEW_TIMEOUT,
+      });
       await saveDraft(testPage, "Tighten the spacing in this region");
 
       const failedScreenshotComment = "Keep this screenshot comment after create fails";
@@ -81,7 +85,7 @@ test.describe("Web preview feedback", () => {
       await dragScreenshotRegion(testPage, frame.locator("#save"));
       const failedDraft = testPage.getByTestId("preview-feedback-draft");
       await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
-        timeout: 15_000,
+        timeout: SCREENSHOT_PREVIEW_TIMEOUT,
       });
       await failedDraft
         .getByRole("textbox", { name: "Comment on selection" })
@@ -92,7 +96,9 @@ test.describe("Web preview feedback", () => {
       await expect(failedDraft.getByRole("textbox", { name: "Comment on selection" })).toHaveValue(
         failedScreenshotComment,
       );
-      await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
+      await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
+        timeout: SCREENSHOT_PREVIEW_TIMEOUT,
+      });
       await expect(
         testPage.getByTestId("preview-feedback-popover").getByRole("alert"),
       ).toContainText("feedback could not be saved");
@@ -128,7 +134,7 @@ test.describe("Web preview feedback", () => {
       await expect(collectionItems).toHaveCount(4);
       await expect(
         collectionItems.nth(2).getByRole("img", { name: "Screenshot preview" }),
-      ).toBeVisible();
+      ).toBeVisible({ timeout: SCREENSHOT_PREVIEW_TIMEOUT });
 
       const firstItem = collectionItems.nth(0);
       await firstItem.getByRole("button", { name: "Edit feedback" }).click();

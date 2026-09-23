@@ -66,10 +66,13 @@ async function openTask(
   testPage: import("@playwright/test").Page,
   session: SessionPage,
   taskId: string,
-  options: { expectedMrCount?: number } = {},
+  options: { expectedMrCount?: number; waitForChatIdle?: boolean } = {},
 ) {
   await testPage.goto(`/t/${taskId}`);
   await session.waitForLoad();
+  if (options.waitForChatIdle) {
+    await session.waitForChatIdle({ timeout: 45_000 });
+  }
   // The shell hydrates the workspace MR map once per document. A link created
   // immediately before navigation can miss that first snapshot even though
   // the task details already show the association. Re-drive document
@@ -230,9 +233,18 @@ test.describe("GitLab MR status chip", () => {
       auto_fix_enabled: true,
       auto_merge_enabled: true,
     });
+    await expect
+      .poll(
+        async () => {
+          const options = await apiClient.getTaskMRAutomationOptions(task.id);
+          return options.auto_fix_enabled === true && options.auto_merge_enabled === true;
+        },
+        { timeout: 30_000, message: "MR automation options were not persisted" },
+      )
+      .toBe(true);
 
     const session = new SessionPage(testPage);
-    await openTask(testPage, session, task.id);
+    await openTask(testPage, session, task.id, { waitForChatIdle: true });
 
     const chip = session.mrStatusChip();
     await expect(chip).toBeVisible({ timeout: 15_000 });

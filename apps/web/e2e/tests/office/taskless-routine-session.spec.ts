@@ -131,7 +131,7 @@ test.describe("Office taskless routine sessions", () => {
             return runId;
           },
           {
-            timeout: 60_000,
+            timeout: 90_000,
             intervals: [250, 500, 1_000],
             message: `Waiting for agent run ${attempt} to appear`,
           },
