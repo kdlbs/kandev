@@ -878,7 +878,9 @@ func (r *Repository) ensureTaskExactProfileSchema() error {
 	`); err != nil {
 		return fmt.Errorf("create exact task profile schema: %w", err)
 	}
-	r.migrate.Apply("task_exact_profile_launch_attempt_bindings.model", `ALTER TABLE task_exact_profile_launch_attempt_bindings ADD COLUMN model TEXT NOT NULL DEFAULT ''`)
+	if err := r.migrate.Apply("task_exact_profile_launch_attempt_bindings.model", `ALTER TABLE task_exact_profile_launch_attempt_bindings ADD COLUMN model TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add exact profile launch attempt model: %w", err)
+	}
 	return nil
 }
 

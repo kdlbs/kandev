@@ -42,7 +42,11 @@ func TestExactProfileAssignmentSchemaExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("binding table info: %v", err)
 	}
-	defer rows.Close()
+	t.Cleanup(func() {
+		if err := rows.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	type column struct {
 		Name, Type  string
 		NotNull, PK int
@@ -64,7 +68,11 @@ func TestExactProfileAssignmentSchemaExists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fkRows.Close()
+	t.Cleanup(func() {
+		if err := fkRows.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	if !fkRows.Next() {
 		t.Fatal("binding foreign key missing")
 	}

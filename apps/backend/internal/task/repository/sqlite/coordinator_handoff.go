@@ -156,7 +156,7 @@ func lockCoordinatorHandoffTask(
 ) error {
 	query := `SELECT id FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(driver) {
-		query += ` FOR UPDATE`
+		query += forUpdateSuffix
 	}
 	var found string
 	if err := tx.QueryRowContext(ctx, rebind(query), taskID).Scan(&found); err != nil {
