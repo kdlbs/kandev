@@ -439,8 +439,8 @@ func mapToHTTPHeaders(headers map[string]string) []acp.HttpHeader {
 	return hdrs
 }
 
-// LoadSession restores an existing session, preferring session/resume without
-// history replay when advertised, otherwise using session/load.
+// LoadSession restores an existing session, preferring advertised session/resume
+// without history replay and otherwise using session/load.
 // mcpServers are passed to the agent so it can reconnect to MCP servers on the new
 // agentctl instance (critical for agents that receive MCP configs via the protocol).
 //
@@ -480,7 +480,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Unlock()
 	a.cancelAllAsyncTurnCompletes()
 
-	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.load")
+	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.restore")
 	defer span.End()
 
 	// Filter MCP servers by agent capabilities (same logic as NewSession).

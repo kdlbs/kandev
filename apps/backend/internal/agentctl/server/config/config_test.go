@@ -275,6 +275,7 @@ func TestCollectAgentEnvGitHubCLIShimSurvivesLoginShell(t *testing.T) {
 		"KANDEV_GITHUB_CLI_BASH_ENV":          bashEnv,
 		"BASH_ENV":                            parentBashEnv,
 		"KANDEV_BASH_HOOK_MARKER":             marker,
+		"HOME":                                t.TempDir(),
 		pathEnvKey:                            "/usr/bin:/bin",
 	})
 	if err != nil {

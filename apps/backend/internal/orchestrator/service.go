@@ -1018,6 +1018,9 @@ type Service struct {
 
 	// GitHub service for PR auto-detection on push
 	githubService GitHubService
+	// prDiscoveryWait is nil in production and overridable by package tests so
+	// retry diagnostics can be exercised without real-time delays.
+	prDiscoveryWait func(context.Context, time.Duration) bool
 	// ciAutomationInFlight serializes each PR's evaluation and coalesces one
 	// follow-up request instead of dropping an event that arrives mid-run.
 	ciAutomationInFlight ciAutomationCoordinator

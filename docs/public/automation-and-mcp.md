@@ -653,7 +653,7 @@ A task session currently registers these tool groups:
 | Relationships and workspace sources | List related tasks, add a mixed repository/folder source batch to an idle task, use the legacy one-branch tool, and change a repository's diff base.                                                                                                               |
 | Workflow signal                     | Signal step completion when an auto-advance step explicitly requires that signal.                                                                                                                                                                                  |
 
-When **Settings → General → Task Actions → Agent-generated task titles** is enabled (the default; an
+When **Settings → Preferences → Task Behavior → Tasks → Agent-generated task titles** is enabled (the default; an
 explicitly saved **off** value remains off), a task-mode session for a newly created task or subtask can
 expose `set_task_title_kandev`. The first eligible session to launch atomically claims the handoff and is
 prompted to call it before any other work, even though the task already has a provisional title. Use a

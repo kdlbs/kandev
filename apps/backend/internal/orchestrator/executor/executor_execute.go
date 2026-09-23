@@ -150,7 +150,34 @@ func executorNeedsResolvedCredentials(executorType string) bool {
 // starts detach from request cancellation; resume starts marked by
 // WithCancellableResumeContext retain cancellation so an explicit stop can
 // interrupt a startup that is still waiting for ACP readiness.
-func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string, onSuccess func(context.Context), escalateTaskOnFailure, fromResume bool) {
+func (e *Executor) runAgentProcessAsync(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	onSuccess func(context.Context),
+	escalateTaskOnFailure, fromResume bool,
+) {
+	e.runAgentProcessAsyncWithObservation(
+		ctx,
+		taskID,
+		sessionID,
+		agentExecutionID,
+		"",
+		onSuccess,
+		escalateTaskOnFailure,
+		fromResume,
+	)
+}
+
+// runAgentProcessAsyncWithObservation starts an agent process after the
+// caller has persisted STARTING. The observation stays in this shared seam so
+// full launches, existing-workspace starts, and resumes all inspect the same
+// durable state immediately before process startup.
+func (e *Executor) runAgentProcessAsyncWithObservation(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID, observationSite string,
+	onSuccess func(context.Context),
+	escalateTaskOnFailure, fromResume bool,
+) {
 	e.auditCeilingBypass(ctx, "runAgentProcessAsync", sessionID, true, zap.String("agent_execution_id", agentExecutionID))
 	go func() {
 		startParent := context.WithoutCancel(ctx)
@@ -161,6 +188,10 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 		}
 		startCtx, cancel := context.WithTimeout(startParent, 5*time.Minute)
 		defer cancel()
+
+		if observationSite != "" {
+			e.observeSessionCoresidency(startCtx, observationSite, taskID, sessionID)
+		}
 
 		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
 			if isCancellableResumeContext(ctx) && ctx.Err() != nil {
@@ -368,7 +399,7 @@ func (e *Executor) stopStartedExecutionIfSessionTerminal(
 // startAgentProcessAsync starts the agent subprocess and transitions its session
 // to RUNNING before reconciling the owning task to IN_PROGRESS on success.
 func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string) {
-	e.runAgentProcessAsync(ctx, taskID, sessionID, agentExecutionID, func(updCtx context.Context) {
+	e.runAgentProcessAsyncWithObservation(ctx, taskID, sessionID, agentExecutionID, sessionCoresidencySiteLaunch, func(updCtx context.Context) {
 		if !e.markSessionRunningAfterProcessStart(updCtx, taskID, sessionID) {
 			return
 		}
@@ -551,8 +582,31 @@ func (e *Executor) failedSessionStillWorkingOrUnknown(ctx context.Context, taskI
 	return false
 }
 
-func (e *Executor) hasOtherWorkingSessions(ctx context.Context, taskID, failedSessionID string) bool {
+// workingSessionSiblings lists taskID's sessions currently in a working
+// runtime state, excluding excludeSessionID. hasOtherWorkingSessions (fails
+// open: a read failure is treated as "assume other work is happening") and
+// observeSessionCoresidency (fails closed: a read failure is recorded as a
+// skip, never as zero siblings) both build on this one read+filter so their
+// notion of "working" cannot drift apart from sessionstate.IsWorking.
+func (e *Executor) workingSessionSiblings(ctx context.Context, taskID, excludeSessionID string) ([]string, error) {
 	sessions, err := e.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	siblingIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session == nil || (excludeSessionID != "" && session.ID == excludeSessionID) {
+			continue
+		}
+		if isRuntimeWorkingSessionState(session.State) {
+			siblingIDs = append(siblingIDs, session.ID)
+		}
+	}
+	return siblingIDs, nil
+}
+
+func (e *Executor) hasOtherWorkingSessions(ctx context.Context, taskID, failedSessionID string) bool {
+	siblingIDs, err := e.workingSessionSiblings(ctx, taskID, failedSessionID)
 	if err != nil {
 		e.logger.Warn("failed to list task sessions before failed-start REVIEW state reconcile",
 			zap.String("task_id", taskID),
@@ -560,22 +614,44 @@ func (e *Executor) hasOtherWorkingSessions(ctx context.Context, taskID, failedSe
 			zap.Error(err))
 		return true
 	}
-	for _, session := range sessions {
-		if session == nil {
-			continue
-		}
-		if failedSessionID != "" && session.ID == failedSessionID {
-			continue
-		}
-		if isRuntimeWorkingSessionState(session.State) {
-			e.logger.Debug("skipping failed-start task REVIEW state while another session is working",
-				zap.String("task_id", taskID),
-				zap.String("failed_session_id", failedSessionID),
-				zap.String("blocking_session_id", session.ID))
-			return true
-		}
+	if len(siblingIDs) > 0 {
+		e.logger.Debug("skipping failed-start task REVIEW state while another session is working",
+			zap.String("task_id", taskID),
+			zap.String("failed_session_id", failedSessionID),
+			zap.String("blocking_session_id", siblingIDs[0]))
+		return true
 	}
 	return false
+}
+
+// observeSessionCoresidency records, without changing any admission outcome,
+// that site is about to start an agent process for sessionID while another
+// session of the same task is already in a working runtime state, sharing
+// one task workspace. Kandev permits this by design
+// (REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001); this only makes the
+// permitted condition observable (REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004).
+// A sibling-read failure is recorded as a skip, never as an absence of
+// co-residency, and never blocks the caller either way.
+func (e *Executor) observeSessionCoresidency(ctx context.Context, site, taskID, sessionID string) {
+	siblingIDs, err := e.workingSessionSiblings(ctx, taskID, sessionID)
+	if err != nil {
+		sessionCoresidencyObservationSkipped(sessionCoresidencySkipReadFailed)
+		e.logger.Warn("skipped session co-residency observation: sibling session read failed",
+			zap.String("site", site),
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if len(siblingIDs) == 0 {
+		return
+	}
+	sessionCoresidencyAdmitted(site)
+	e.logger.Warn("starting an agent while another session of this task is already working in the shared worktree; Kandev permits concurrent sessions on one task",
+		zap.String("site", site),
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.Strings("sibling_session_ids", siblingIDs))
 }
 
 func isRuntimeWorkingSessionState(state models.TaskSessionState) bool {
@@ -1675,6 +1751,10 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 
 	if err := e.resolveLaunchEnvironment(launchCtx, req, execCfg.ProfileEnvVars, allRepos); err != nil {
 		return nil, err
+	}
+
+	if startAgent {
+		e.observeSessionCoresidency(launchCtx, sessionCoresidencySiteLaunch, task.ID, sessionID)
 	}
 
 	// Fast path: workspace already launched (executors_running row exists).

@@ -15,14 +15,24 @@ import (
 
 type sessionResumeAgent struct {
 	sessionRequestCaptureAgent
-	resumeRequest acpsdk.ResumeSessionRequest
-	resumeError   error
-	resumeCalls   int
+	resumeRequest  acpsdk.ResumeSessionRequest
+	resumeError    error
+	resumeResponse *acpsdk.ResumeSessionResponse
+	resumeCalls    int
+	loadResponse   acpsdk.LoadSessionResponse
+}
+
+func (a *sessionResumeAgent) LoadSession(ctx context.Context, req acpsdk.LoadSessionRequest) (acpsdk.LoadSessionResponse, error) {
+	_, err := a.sessionRequestCaptureAgent.LoadSession(ctx, req)
+	return a.loadResponse, err
 }
 
 func (a *sessionResumeAgent) ResumeSession(_ context.Context, req acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
 	a.resumeCalls++
 	a.resumeRequest = req
+	if a.resumeResponse != nil {
+		return *a.resumeResponse, a.resumeError
+	}
 	var response acpsdk.ResumeSessionResponse
 	if err := json.Unmarshal([]byte(`{
 		"modes":{"currentModeId":"code","availableModes":[{"id":"code","name":"Code"}]},
@@ -46,6 +56,8 @@ func newSessionResumeAdapter(t *testing.T, load, resume bool) (*Adapter, *sessio
 	_ = acpsdk.NewAgentSideConnection(fake, fromAgent, toAgent)
 	a := newTestAdapter()
 	t.Cleanup(func() { _ = a.Close() })
+	a.agentID = codexAgentID
+	a.dialect = newACPDialect(codexAgentID)
 	a.acpConn = conn
 	a.cfg.WorkDir = t.TempDir()
 	a.capabilities.LoadSession = load
@@ -103,6 +115,10 @@ func TestLoadSessionFallsBackToReplayOnlyWhenResumeUnsupported(t *testing.T) {
 		t.Run(fmt.Sprintf("resume_advertised_%t", advertised), func(t *testing.T) {
 			a, fake := newSessionResumeAdapter(t, true, advertised)
 			fake.resumeError = acpsdk.NewMethodNotFound(acpsdk.AgentMethodSessionResume)
+			fake.loadResponse.LegacyModels = &acpsdk.LegacyModels{
+				CurrentModelId:  "legacy-model",
+				AvailableModels: []acpsdk.LegacyModelInfo{{ModelId: "legacy-model", Name: "Legacy model"}},
+			}
 			if err := a.LoadSession(t.Context(), "saved-session", nil); err != nil {
 				t.Fatalf("LoadSession: %v", err)
 			}
@@ -112,7 +128,58 @@ func TestLoadSessionFallsBackToReplayOnlyWhenResumeUnsupported(t *testing.T) {
 			if advertised != (fake.resumeCalls == 1) {
 				t.Fatalf("resume calls=%d advertised=%t", fake.resumeCalls, advertised)
 			}
+			if event := findSessionModelsEvent(t, drainEvents(a)); event.CurrentModelID != "legacy-model" {
+				t.Fatalf("load fallback lost legacy model state: %+v", event)
+			}
 		})
+	}
+}
+
+func TestLoadSessionResumesLegacyModelsAcrossAgents(t *testing.T) {
+	for _, agentID := range []string{"auggie", claudeAgentID, "unknown-agent"} {
+		t.Run(agentID, func(t *testing.T) {
+			a, fake := newSessionResumeAdapter(t, true, true)
+			a.agentID = agentID
+			a.dialect = newACPDialect(agentID)
+			fake.resumeResponse = &acpsdk.ResumeSessionResponse{}
+			if err := json.Unmarshal([]byte(`{"models":{
+				"currentModelId":"legacy-model",
+				"availableModels":[{"modelId":"legacy-model","name":"Legacy model"}]
+			}}`), fake.resumeResponse); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.LoadSession(t.Context(), "saved-session", nil); err != nil {
+				t.Fatalf("LoadSession: %v", err)
+			}
+			if fake.resumeCalls != 1 || fake.loadRequest.SessionId != "" || fake.sessionCounter != 0 {
+				t.Fatalf("want resume without replay, got resume=%d load=%q new=%d",
+					fake.resumeCalls, fake.loadRequest.SessionId, fake.sessionCounter)
+			}
+			models := findSessionModelsEvent(t, drainEvents(a))
+			if models.CurrentModelID != "legacy-model" || len(models.SessionModels) != 1 {
+				t.Fatalf("resume lost legacy model state: %+v", models)
+			}
+			if state := a.GetSessionModelState(); state == nil || len(state.Models) != 1 || state.Models[0].ModelID != "legacy-model" {
+				t.Fatalf("cached model state = %+v", state)
+			}
+		})
+	}
+}
+
+func TestLoadSessionDoesNotLoadWhenReplayUnsupported(t *testing.T) {
+	a, fake := newSessionResumeAdapter(t, false, true)
+	a.dialect = newACPDialect("auggie")
+	a.agentID = "auggie"
+	a.sessionID = "prior-session"
+	fake.resumeError = acpsdk.NewMethodNotFound(acpsdk.AgentMethodSessionResume)
+	if err := a.LoadSession(t.Context(), "saved-session", nil); err == nil {
+		t.Fatal("expected unsupported session loading")
+	}
+	if fake.resumeCalls != 1 || fake.loadRequest.SessionId != "" || fake.sessionCounter != 0 {
+		t.Fatal("failed resume retried an unsupported method")
+	}
+	if a.GetSessionID() != "prior-session" || a.isLoadingSession {
+		t.Fatal("failed resume changed identity or retained replay suppression")
 	}
 }
 

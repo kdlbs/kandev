@@ -53,6 +53,7 @@ type Config struct {
 	Office                 OfficeConfig                 `mapstructure:"office"`
 	Features               FeaturesConfig               `mapstructure:"features"`
 	GitHubCredentialBroker GitHubCredentialBrokerConfig `mapstructure:"githubCredentialBroker"`
+	Executors              ExecutorsConfig              `mapstructure:"executors"`
 	Source                 ConfigSource                 `mapstructure:"-" json:"-"`
 }
 
@@ -69,6 +70,15 @@ type TasksConfig struct {
 // CredentialsConfig contains operator-managed credential file settings.
 type CredentialsConfig struct {
 	File string `mapstructure:"file"`
+}
+
+// ExecutorsConfig contains executor-related startup settings.
+type ExecutorsConfig struct {
+	// SSHReachabilityIntervalSeconds is the raw configured value, not yet
+	// clamped into the reachability package's own 15-3600 bound: 0 disables
+	// the poller, and reachability.ClampInterval owns the rest of the
+	// normalization at construction time.
+	SSHReachabilityIntervalSeconds int `mapstructure:"sshReachabilityIntervalSeconds"`
 }
 
 // LimitsConfig contains process and protocol capacity limits.
@@ -435,6 +445,35 @@ type OfficeConfig struct {
 	// deployments should set a stable value (e.g. via KANDEV_OFFICE_JWTSIGNINGKEY).
 	JWTSigningKey   string `mapstructure:"jwtSigningKey"`
 	SchedulerTickMs int    `mapstructure:"schedulerTickMs"`
+
+	// The following back the launch-safety ceilings/budgets
+	// (REQ-OFFICE-LAUNCH-SAFETY-001/003/004/005) and the backpressure
+	// gate-failure escalation threshold (REQ-OFFICE-BACKPRESSURE-003.5).
+	// Every one is boot-time-only, like SchedulerTickMs above: resolved
+	// once at startup and passed into the owning repository/service via
+	// its SetXxx method, not polled or overridable at runtime. A value
+	// below the documented minimum (1, or 1 for PromotionAgeMinutes) is
+	// replaced by that default and the resolved source is reported as
+	// SourceDefault (applyPositiveIntEnv's existing behavior), matching
+	// the "replaced by the default and logged at warn level" language the
+	// acceptance criteria use for an out-of-range operator override.
+	MaxConcurrentInstance  int `mapstructure:"maxConcurrentInstance"`
+	MaxConcurrentWorkspace int `mapstructure:"maxConcurrentWorkspace"`
+	WorkspaceBudgetPerHour int `mapstructure:"workspaceBudgetPerHour"`
+	RoutineBudgetPerHour   int `mapstructure:"routineBudgetPerHour"`
+	// PromotionAgeMinutes is REQ-OFFICE-BACKPRESSURE-002.1's age-based
+	// priority promotion period, in minutes (converted to
+	// runssqlite.ClaimSafetyLimits.PromotionAge, a time.Duration, at the
+	// wiring site — the catalog only carries plain ints).
+	PromotionAgeMinutes  int `mapstructure:"promotionAgeMinutes"`
+	MaxCausationDepth    int `mapstructure:"maxCausationDepth"`
+	SelfTriggerAllowance int `mapstructure:"selfTriggerAllowance"`
+	// SelfTriggerTotalAllowance is the reason-independent sibling of
+	// SelfTriggerAllowance (AC-OFFICE-LAUNCH-SAFETY-004.8): it may be
+	// configured below SelfTriggerAllowance, in which case it is the
+	// binding limit and the per-reason allowance becomes unreachable.
+	SelfTriggerTotalAllowance int `mapstructure:"selfTriggerTotalAllowance"`
+	GateFailureThreshold      int `mapstructure:"gateFailureThreshold"`
 }
 
 // FeaturesConfig is the typed wire/config shape for runtime feature flags.
@@ -836,6 +875,7 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 	warnings := inspectSecretPermissions(selection, v)
+	warnings = append(warnings, clampOfficeLaunchSafetyConfig(&cfg)...)
 	cfg.Source = buildConfigSource(selection, v, sources, warnings)
 
 	if err := validateStartupSettings(&cfg); err != nil {

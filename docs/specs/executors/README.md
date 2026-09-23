@@ -45,6 +45,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Kubernetes startup timing](requirements/kubernetes-startup-timing.md)
 - [Kubernetes retained compute visibility](requirements/kubernetes-retained-compute.md)
 - [SSH Session Transport Liveness](requirements/ssh-transport-liveness.md)
+- [SSH Host Reachability](requirements/ssh-reachability.md)
 
 ### System design
 
@@ -64,6 +65,8 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Kubernetes startup timing](system-design/kubernetes-startup-timing.md)
 - [Kubernetes retained compute visibility](system-design/kubernetes-retained-compute.md)
 - [SSH Session Transport Liveness](system-design/ssh-transport-liveness.md)
+- [SSH Host Reachability](system-design/ssh-reachability.md)
+- [SSH Host Reachability Surfaces](system-design/ssh-reachability-surfaces.md)
 
 ## Migration record
 

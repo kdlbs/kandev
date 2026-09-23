@@ -57,6 +57,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
   const supportsSteering = panelState.supportsSteering;
   const hasContextComments =
     panelState.planComments.length > 0 ||
+    (panelState.previewFeedback?.length ?? 0) > 0 ||
     panelState.pendingPRFeedback.length > 0 ||
     panelState.walkthroughComments.length > 0 ||
     panelState.messageComments.length > 0;

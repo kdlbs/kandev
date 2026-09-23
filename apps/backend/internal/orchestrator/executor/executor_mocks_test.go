@@ -322,6 +322,10 @@ type mockRepository struct {
 	getTaskSessionByTaskAndAgentFunc   func(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
 	updateTaskSessionStateFunc         func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
 	listActiveTaskSessionsByTaskIDFunc func(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	// listTaskSessionsFunc, when non-nil, overrides ListTaskSessions
+	// entirely — used to simulate a transient sibling-session read failure
+	// (the session-coresidency observation's fail-closed skip path).
+	listTaskSessionsFunc func(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	// Optional hook invoked at the top of UpdateTaskStateIfCurrentIn, before
 	// it reads task state/archived_at. Lets tests simulate the exact TOCTOU
 	// window this CAS closes: an earlier (non-transactional) archived-state
@@ -1031,6 +1035,12 @@ func (m *mockRepository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskI
 	return nil, nil
 }
 func (m *mockRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	m.mu.Lock()
+	fn := m.listTaskSessionsFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, taskID)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sessions := make([]*models.TaskSession, 0)

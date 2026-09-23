@@ -6,6 +6,7 @@ import {
   useKanbanCardMoveTargets,
 } from "@/components/kanban-card-menu-items";
 import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar-link-actions";
+import { cleanupSharesParentWorkspace } from "@/components/task/task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import {
   TaskExternalLinkDialog,
@@ -269,6 +270,7 @@ export function KanbanCardDialogs({
         taskTitle={task.title}
         taskId={task.id}
         executorType={task.primaryExecutorType}
+        sharesParentWorkspace={cleanupSharesParentWorkspace(task.workspaceMode)}
         isDeleting={isDeleting}
         onConfirm={(opts) => onDelete?.(task, opts)}
       />

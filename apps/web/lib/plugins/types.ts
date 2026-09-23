@@ -12,6 +12,7 @@ import type { PluginUIApi } from "@kandev/plugin-sdk";
 export type {
   IntegrationSettingsActionProps,
   IntegrationSettingsActionSurface,
+  ChatTopBarSlotProps,
   PluginContextApi,
   PluginHostRepository,
   MainTopBarSlotProps,
@@ -117,9 +118,10 @@ export interface IntegrationSettingsRegistration {
  * `slotProps`), "chat-submit-decoration" (a layer *over* the send button's own
  * box, for adornments that belong on the send affordance rather than beside it
  * — receives `ChatSubmitDecorationSlotProps`; the host positions the layer and
- * makes it `pointer-events-none`, see chat-submit-plugin-decoration.tsx), "chat-top-bar" (status in the session top bar, beside the
- * CPU/DB metrics — receives `{ taskId, taskTitle, workspaceId, activeSessionId,
- * sessionIds }`), "main-top-bar" (status/actions in the default app top bar on
+ * makes it `pointer-events-none`, see chat-submit-plugin-decoration.tsx),
+ * "chat-top-bar" (session status/actions — receives `ChatTopBarSlotProps`;
+ * phone contributions live in the shared menu), "main-top-bar"
+ * (status/actions in the default app top bar on
  * the Home / Kanban / Tasks views, beside the CPU/DB metrics and the
  * view/display controls — the app-wide, task-agnostic counterpart to
  * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage,

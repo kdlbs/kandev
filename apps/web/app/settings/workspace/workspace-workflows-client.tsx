@@ -416,6 +416,7 @@ export function WorkspaceWorkflowsClient({
           already named, marked and described. */}
       <SettingsSection
         divided
+        framed={false}
         icon={<IconArrowsShuffle className="h-5 w-5" />}
         title={t("workflows:workflows")}
         // The read-only note is the section's description here rather than a

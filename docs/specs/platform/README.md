@@ -15,6 +15,9 @@ The platform system owns cross-cutting runtime services, configuration,
 observability, notifications, localization, lifecycle safety, and shared
 operational guarantees.
 
+Repository validation performance, including local commit checks and shared CI
+execution, belongs here. The CI system retains hosted workflow trust policy.
+
 Shared read-capacity protection and aggregate reporting availability belong here.
 Domain systems retain ownership of source records and workspace context identity.
 
@@ -38,6 +41,7 @@ retains ownership of its values, validation, authority, and persistence.
 
 ### Requirements
 
+- [Task Status Summary Projection Contention](requirements/task-summary-contention.md)
 - [CI performance](requirements/ci-performance.md)
 
 - [Startup lifecycle](requirements/startup-lifecycle.md)
@@ -89,6 +93,7 @@ retains ownership of its values, validation, authority, and persistence.
 
 ### System design
 
+- [Task Status Summary Projection Contention](system-design/task-summary-contention.md)
 - [CI performance](system-design/ci-performance.md)
 
 - [Startup lifecycle](system-design/startup-lifecycle.md)

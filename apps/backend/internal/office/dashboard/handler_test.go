@@ -253,15 +253,19 @@ func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
 }
 
 // stubAgentReader returns nil/nil by default; tests that need agent
-// resolution (e.g. pending_approvers name lookup) populate `names`.
+// resolution (e.g. pending_approvers name lookup) populate `names`. Tests
+// that need a caller to clear a permission check (e.g. can_assign_tasks)
+// also populate `roles`, keyed the same way. `instances` backs
+// ListAgentInstances for workspace-scoped listing tests.
 type stubAgentReader struct {
 	names     map[string]string
+	roles     map[string]string
 	instances []*models.AgentInstance
 }
 
 func (s *stubAgentReader) GetAgentInstance(_ context.Context, id string) (*models.AgentInstance, error) {
 	if name, ok := s.names[id]; ok {
-		return &models.AgentInstance{ID: id, Name: name}, nil
+		return &models.AgentInstance{ID: id, Name: name, Role: models.AgentRole(s.roles[id])}, nil
 	}
 	return nil, nil
 }
