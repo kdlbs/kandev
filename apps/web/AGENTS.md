@@ -280,7 +280,9 @@ and `lib/plugins/types.ts` are its detailed host implementation — all three mu
   `PluginErrorBoundary`; `mobileEnabled: true` also renders it via the phone bottom nav
   (`session-mobile-bottom-nav.tsx`) with `presentation: "mobile"`.
 - **Task contributions:** `registerTaskMenuAction({ group: "edit", ... })` adds card-only actions to
-  the `Edit` submenu. Group `"primary"` adds flat actions to card and desktop/mobile task-row menus.
+  the `Edit` submenu. Group `"primary"` adds top-level actions to card and desktop/mobile task-row
+  menus; declaring `items(context)` renders an action of either group as a submenu of its children
+  instead, with `run` kept as the flat fallback.
   Card indicator/tag slots stay card-specific; `task-row-metadata` is generic for sidebar and `/tasks` rows.
 - **Sidebar workspace actions:** `registerComponent("sidebar-workspace-actions", ...)` renders after Quick Terminal/Quick Chat in the desktop sidebar's New Task row and in the shared phone navigation sheet, forwarding `SidebarWorkspaceActionsSlotProps` with `presentation: "desktop" | "mobile"`; mobile plugin controls own a 44px touch target and accessible name.
 - **`host.storage`:** authenticated per-user key/value storage (`lib/plugins/host-api.ts`) backed by `/api/plugins/{id}/user-state/...` (`docs/decisions/2026-08-01-per-user-plugin-storage.md`); `subscribe` (`lib/plugins/user-state-sync.ts`) wraps `registerWsHandler` with own-plugin filtering and own-tab echo suppression via a per-tab `writerId`.

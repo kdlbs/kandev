@@ -40,6 +40,7 @@ func RegisterCanvasNotifications(ctx context.Context, eventBus bus.EventBus, hub
 		action  string
 	}{
 		{events.CanvasCreated, ws.ActionCanvasCreated},
+		{events.CanvasUpdated, ws.ActionCanvasUpdated},
 		{events.CanvasReleaseActivated, ws.ActionCanvasReleaseActivated},
 		{events.CanvasReleasePermissionRequired, ws.ActionCanvasReleasePermissionRequired},
 		{events.CanvasPromoted, ws.ActionCanvasPromoted},

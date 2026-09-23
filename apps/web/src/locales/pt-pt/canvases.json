@@ -147,5 +147,15 @@
   "exampleRepository": "a-sua-org/o-meu-canvas",
   "examplePreviewUrl": "https://cdn.exemplo.pt/o-meu-canvas-capa.webp",
   "examplePreviewAlt": "Visão geral do canvas",
-  "yes": "Sim"
+  "yes": "Sim",
+  "renameCanvas": "Mudar o nome do canvas",
+  "canvasName": "Nome do canvas",
+  "renameCanvasInvalid": "Introduza um nome com 1 a 200 caracteres.",
+  "renameCanvasFailed": "Não foi possível mudar o nome do canvas. Tente novamente.",
+  "renamingCanvas": "A guardar o nome…",
+  "loadingShareDefaults": "A carregar os detalhes de partilha…",
+  "shareDefaultsFailed": "Não foi possível carregar os detalhes. Tente novamente.",
+  "sharingRelease": "A partilhar {{name}} versão {{version}}",
+  "shareRequiredDetails": "Complete estes detalhes",
+  "packageDetails": "Detalhes do pacote"
 }

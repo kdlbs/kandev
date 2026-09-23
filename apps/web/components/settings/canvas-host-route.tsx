@@ -356,6 +356,7 @@ function useCanvasHost(canvasId: string) {
     error,
     lifecycleRevision,
     load,
+    refresh,
     renewRuntime,
     markRuntimeReady,
     markRuntimeUnavailable,
@@ -405,6 +406,7 @@ export function CanvasHostRoute({
     state,
     error,
     load,
+    refresh,
     markRuntimeReady,
     markRuntimeUnavailable,
     setHostError,
@@ -414,6 +416,7 @@ export function CanvasHostRoute({
   const [promotionOpen, setPromotionOpen] = useState(false);
   const [releasesOpen, setReleasesOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
   const [editing, setEditing] = useState(false);
 
   useEffect(() => {
@@ -460,21 +463,27 @@ export function CanvasHostRoute({
       promotionOpen={promotionOpen}
       releasesOpen={releasesOpen}
       shareOpen={shareOpen}
+      renameOpen={renameOpen}
       editing={editing}
       setMenuOpen={setMenuOpen}
       setPromotionOpen={setPromotionOpen}
       setReleasesOpen={setReleasesOpen}
       setShareOpen={setShareOpen}
+      setRenameOpen={setRenameOpen}
       onEdit={() => void edit()}
       onPromote={() => setPromotionOpen(true)}
       onReleases={() => setReleasesOpen(true)}
       onShare={() => setShareOpen(true)}
+      onRename={() => {
+        setMenuOpen(false);
+        setRenameOpen(true);
+      }}
       onSelectCanvas={selectCanvas}
       onRuntimeReady={markRuntimeReady}
       onRuntimeError={markRuntimeUnavailable}
       onRetry={load}
       onPromotionCompleted={() => router.push(canvas ? canvasHref(canvas.id) : "/")}
-      onChanged={load}
+      onChanged={refresh}
     />
   );
 }

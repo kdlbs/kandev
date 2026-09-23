@@ -37,6 +37,11 @@ func releaseMetadata(release plugininstances.Release, scope string, grants []plu
 	}
 }
 
+// ReleaseMetadataForHTTP returns safe manifest fields for host projections.
+func ReleaseMetadataForHTTP(release plugininstances.Release, scope string, grants []plugininstances.Grant) *ReleaseMetadata {
+	return releaseMetadata(release, scope, grants)
+}
+
 type manifestSeed struct {
 	PackageID        string
 	Version          string

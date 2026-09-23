@@ -219,6 +219,8 @@ func (s *Service) handleWebAppTasks(ctx context.Context, w http.ResponseWriter, 
 		s.listWebAppTasks(ctx, w, r, host, binding)
 	case len(parts) == 1 && r.Method == http.MethodGet:
 		s.getWebAppTask(ctx, w, r, host, binding, parts[0])
+	case len(parts) == 2 && parts[1] == "step-transitions" && r.Method == http.MethodGet:
+		s.listWebAppTaskTransitions(ctx, w, r, host, binding, parts[0])
 	case len(parts) == 1 && r.Method == http.MethodPatch:
 		s.updateWebAppTask(ctx, w, r, host, binding, parts[0])
 	case len(parts) == 2 && parts[1] == "messages" && r.Method == http.MethodPost:
@@ -234,6 +236,8 @@ func (s *Service) handleWebAppWorkflows(ctx context.Context, w http.ResponseWrit
 		s.listWebAppWorkflows(ctx, w, r, host, binding)
 	case len(parts) == 2 && parts[1] == "steps" && r.Method == http.MethodGet:
 		s.listWebAppWorkflowSteps(ctx, w, r, host, binding, parts[0])
+	case len(parts) == 2 && parts[1] == "transition-groups" && r.Method == http.MethodGet:
+		s.listWebAppWorkflowTransitionGroups(ctx, w, r, host, binding, parts[0])
 	default:
 		writeWebAppError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}

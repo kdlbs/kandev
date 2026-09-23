@@ -2300,6 +2300,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			CheckoutOptions:            info.CheckoutOptions,
 			ContributionDestination:    info.ContributionDestination,
 			ComparisonTarget:           info.ComparisonTarget,
+			QualifiedPRBase:            info.QualifiedPRBase,
 			WorktreeBranchPrefix:       info.WorktreeBranchPrefix,
 			WorktreeBranchTemplate:     info.WorktreeBranchTemplate,
 			PullBeforeWorktree:         info.PullBeforeWorktree,
@@ -2375,6 +2376,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.CheckoutOptions = repoInfo.CheckoutOptions
 		req.ContributionDestination = repoInfo.ContributionDestination
 		req.ComparisonTarget = repoInfo.ComparisonTarget
+		req.QualifiedPRBase = repoInfo.QualifiedPRBase
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree

@@ -702,7 +702,7 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(trailingTime.locator(".sr-only")).toHaveText(/\S/);
     const mobileTimeBox = await trailingTime.boundingBox();
     expect(mobileTimeBox).not.toBeNull();
-    expect(mobileTimeBox!.width).toBeGreaterThanOrEqual(40);
+    expect(mobileTimeBox!.width).toBeGreaterThanOrEqual(44);
     await prCapture.screenshot("mobile-task-row-settings", {
       caption: "Mobile task-row settings in the inset bottom drawer",
     });
@@ -722,20 +722,41 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(popover).toBeHidden();
     const taskAction = row.getByRole("button", { name: "Task actions" });
     await expect(taskAction).toBeVisible();
+    await prCapture.screenshot("mobile-task-row-trailing-actions", {
+      caption: "Phone task row with adjacent time and its visible touch action",
+    });
     const taskActionBox = await taskAction.boundingBox();
     expect(taskActionBox).not.toBeNull();
     expect(taskActionBox!.width).toBeGreaterThanOrEqual(44);
     expect(taskActionBox!.height).toBeGreaterThanOrEqual(44);
+    expect(mobileTimeBox!.x + mobileTimeBox!.width).toBeLessThanOrEqual(taskActionBox!.x + 1);
     const rowBoxWithAction = await row.boundingBox();
     expect(rowBoxWithAction).not.toBeNull();
+    expect(mobileTimeBox!.x).toBeGreaterThanOrEqual(rowBoxWithAction!.x - 1);
+    expect(mobileTimeBox!.x + mobileTimeBox!.width).toBeLessThanOrEqual(
+      rowBoxWithAction!.x + rowBoxWithAction!.width + 1,
+    );
+    expect(mobileTimeBox!.y).toBeGreaterThanOrEqual(rowBoxWithAction!.y - 1);
+    expect(mobileTimeBox!.y + mobileTimeBox!.height).toBeLessThanOrEqual(
+      rowBoxWithAction!.y + rowBoxWithAction!.height + 1,
+    );
     expect(taskActionBox!.x).toBeGreaterThanOrEqual(rowBoxWithAction!.x - 1);
     expect(taskActionBox!.x + taskActionBox!.width).toBeLessThanOrEqual(
       rowBoxWithAction!.x + rowBoxWithAction!.width + 1,
+    );
+    expect(taskActionBox!.y).toBeGreaterThanOrEqual(rowBoxWithAction!.y - 1);
+    expect(taskActionBox!.y + taskActionBox!.height).toBeLessThanOrEqual(
+      rowBoxWithAction!.y + rowBoxWithAction!.height + 1,
     );
     expect(taskActionBox!.x).toBeGreaterThanOrEqual(drawerBox!.x - 1);
     expect(taskActionBox!.x + taskActionBox!.width).toBeLessThanOrEqual(
       drawerBox!.x + drawerBox!.width + 1,
     );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
     await row.tap();
     await expect(testPage).toHaveURL((url) => url.pathname === `/t/${task!.id}`);
 

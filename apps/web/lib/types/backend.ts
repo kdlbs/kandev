@@ -433,6 +433,8 @@ export type TaskStatusSummaryUpdatedPayload = {
 
 export type CanvasLifecyclePayload = {
   type?: string;
+  title?: string;
+  updated_at?: string;
   canvas_id: string;
   plugin_instance_id?: string;
   workspace_id?: string;
@@ -533,6 +535,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "workflow.step.deleted": BackendMessage<"workflow.step.deleted", WorkflowStepEventPayload>;
 
     "canvas.created": BackendMessage<"canvas.created", CanvasLifecyclePayload>;
+    "canvas.updated": BackendMessage<"canvas.updated", CanvasLifecyclePayload>;
     "canvas.release.activated": BackendMessage<"canvas.release.activated", CanvasLifecyclePayload>;
     "canvas.release.permission_required": BackendMessage<
       "canvas.release.permission_required",
