@@ -54,6 +54,11 @@ func TestAppendSessionModelsMessageUsesPersistedConfigAfterCacheRestart(t *testi
 		CurrentValue: "mock-fast",
 		Category:     "model",
 	}
+	effortOption := streams.ConfigOption{
+		Type:         "select",
+		ID:           "effort",
+		CurrentValue: "high",
+	}
 	session := &models.TaskSession{
 		ID:     "session-1",
 		TaskID: "task-1",
@@ -61,7 +66,7 @@ func TestAppendSessionModelsMessageUsesPersistedConfigAfterCacheRestart(t *testi
 			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
 				CurrentModelID:       model.ModelID,
 				Models:               []streams.SessionModelInfo{model},
-				ConfigOptions:        []streams.ConfigOption{option},
+				ConfigOptions:        []streams.ConfigOption{option, effortOption},
 				ConfigOptionsSettled: true,
 			},
 		},
@@ -81,8 +86,12 @@ func TestAppendSessionModelsMessageUsesPersistedConfigAfterCacheRestart(t *testi
 	if len(payload.Models) != 1 || payload.Models[0].Name != model.Name {
 		t.Fatalf("models = %#v, want persisted model %q", payload.Models, model.Name)
 	}
-	if len(payload.ConfigOptions) != 1 || payload.ConfigOptions[0].CurrentValue != option.CurrentValue {
-		t.Fatalf("config options = %#v, want persisted config option", payload.ConfigOptions)
+	if len(payload.ConfigOptions) != 2 || payload.ConfigOptions[0].CurrentValue != option.CurrentValue {
+		t.Fatalf("config options = %#v, want persisted model option", payload.ConfigOptions)
+	}
+	if payload.ConfigOptions[1].ID != effortOption.ID ||
+		payload.ConfigOptions[1].CurrentValue != effortOption.CurrentValue {
+		t.Fatalf("config options = %#v, want persisted effort option", payload.ConfigOptions)
 	}
 	if !payload.ConfigOptionsSettled {
 		t.Fatal("config options settled = false, want true")

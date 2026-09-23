@@ -474,25 +474,43 @@ test.describe("Code walkthrough", () => {
     await expect(session.walkthroughEditorRange()).toHaveCount(0);
   });
 
-  test("a re-emitted walkthrough replaces the previous one without a page reload", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    // The agent emits a 2-step tour, then a different 3-step tour. Opening the
-    // card refetches the latest, so the re-emit shows without reloading.
-    await seedWalkthroughTask(
+  test.describe("live walkthrough replacement", () => {
+    test.describe.configure({ retries: 0 });
+
+    test("a re-emitted walkthrough replaces the previous one without a page reload", async ({
       testPage,
       apiClient,
       seedData,
-      "walkthrough-reemit",
-      "reemit-second-done",
-    );
-    const card = await openWalkthrough(testPage);
+    }) => {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Walkthrough re-emission",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:walkthrough-reemit",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      if (!task.session_id) throw new Error("walkthrough fixture did not start a session");
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.chat.getByText("reemit-first-done", { exact: false })).toBeVisible({
+        timeout: 45_000,
+      });
 
-    await expect(testPage.getByTestId("walkthrough-launcher")).toHaveCount(1);
-    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 3");
-    await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_SECOND");
-    await expect(card.getByTestId("walkthrough-step-body")).not.toContainText("REEMIT_FIRST");
+      const card = await openWalkthrough(testPage);
+      await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 2");
+      await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_FIRST");
+
+      await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 3", {
+        timeout: 30_000,
+      });
+      await expect(testPage.getByTestId("walkthrough-launcher")).toHaveCount(1);
+      await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_SECOND");
+      await expect(card.getByTestId("walkthrough-step-body")).not.toContainText("REEMIT_FIRST");
+    });
   });
 });

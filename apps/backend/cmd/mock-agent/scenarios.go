@@ -978,9 +978,8 @@ func wtArgs(title string, steps ...map[string]interface{}) map[string]interface{
 	return map[string]interface{}{wtKeyTitle: title, wtKeySteps: steps}
 }
 
-// scenarioWalkthroughReemit emits one walkthrough, waits, then emits a second
-// (different) one — exercising the live `task.walkthrough.updated` path so the
-// UI must reflect the re-emit without a page reload.
+// scenarioWalkthroughReemit emits one walkthrough, leaves time for the E2E
+// browser to open it, then emits a different one while the card is visible.
 func scenarioWalkthroughReemit(e *emitter) {
 	fixedDelay(50)
 	wd, err := os.Getwd()
@@ -1003,7 +1002,7 @@ func scenarioWalkthroughReemit(e *emitter) {
 	}
 	e.text("reemit-first-done")
 
-	fixedDelay(200)
+	fixedDelay(2_000)
 
 	if _, err := e.callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("Second",
 		wtStep("Second step", "reemit.txt", "REEMIT_SECOND step one.", 1, 0),
