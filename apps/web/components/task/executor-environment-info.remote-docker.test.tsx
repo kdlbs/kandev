@@ -70,7 +70,7 @@ describe("EnvironmentInfo shell hint", () => {
       />,
     );
 
-    expect(shellValue()).toBe(`ssh root@10.8.4.206 docker exec -it ${SHORT_ID} sh`);
+    expect(shellValue()).toBe(`ssh -t root@10.8.4.206 docker exec -it ${SHORT_ID} sh`);
   });
 
   it("omits the user when the connection did not report one", () => {
@@ -83,7 +83,7 @@ describe("EnvironmentInfo shell hint", () => {
       />,
     );
 
-    expect(shellValue()).toBe(`ssh 10.8.4.206 docker exec -it ${SHORT_ID} sh`);
+    expect(shellValue()).toBe(`ssh -t 10.8.4.206 docker exec -it ${SHORT_ID} sh`);
   });
 
   it("includes a non-default port so the command reaches the right host", () => {
@@ -96,7 +96,7 @@ describe("EnvironmentInfo shell hint", () => {
       />,
     );
 
-    expect(shellValue()).toBe(`ssh -p 2222 root@10.8.4.206 docker exec -it ${SHORT_ID} sh`);
+    expect(shellValue()).toBe(`ssh -t -p 2222 root@10.8.4.206 docker exec -it ${SHORT_ID} sh`);
   });
 
   // Without a host there is nothing truthful to prefix, and guessing would be

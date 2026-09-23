@@ -383,7 +383,9 @@ function containerShellCommand(
 
   const port = ssh.port && ssh.port !== 22 ? `-p ${ssh.port} ` : "";
   const target = ssh.user ? `${ssh.user}@${ssh.host}` : ssh.host;
-  return `ssh ${port}${target} ${exec}`;
+  // `-t`: ssh allocates no terminal when given a command, and `docker exec -t`
+  // refuses to run without one.
+  return `ssh -t ${port}${target} ${exec}`;
 }
 
 function buildFields(
