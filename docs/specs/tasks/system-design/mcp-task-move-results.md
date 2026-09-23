@@ -31,6 +31,8 @@ For an equal destination, the helper validates the candidate before returning su
 4. Resolve the step through `workflowCtrl.GetStep` and validate workflow membership.
 5. Use `workflowmove.ValidateEntryOptions` with `MoveChangePositionOnly`.
 
+Target lookups preserve typed not-found errors. A missing or inaccessible workflow or step remains a validation error; operational repository and controller failures are logged and return `internal_error` without exposing the underlying error to the MCP caller.
+
 Production requires the task and workflow dependencies. A missing validation dependency must fail closed, without a fabricated success.
 Handler fixtures for this branch must supply real workflow steps or the existing workflow controller fixture.
 
@@ -61,8 +63,9 @@ This change does not add a database sweep or infer why an older deployment retai
 ## Failure and security
 
 Malformed payloads and conflicting prompt aliases fail during existing normalization.
-Task read failures, missing targets, authorization failures, and archive restrictions must not become `applied` responses.
-Existing transport error classification remains in use. Responses must not reveal inaccessible task data.
+Task read failures, target lookup failures, authorization failures, and archive restrictions must not become `applied` responses.
+Missing or inaccessible targets retain validation errors. Operational lookup failures return `internal_error`, and response messages must not expose database or controller details.
+Responses must not reveal inaccessible task data.
 Both workflow and step equality are required. Matching only the step identifier is insufficient.
 
 ## Validation and observability

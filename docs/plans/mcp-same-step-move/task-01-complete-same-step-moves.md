@@ -37,7 +37,7 @@ Prove that repeated calls return completion without changing task state or queue
 
 ## Acceptance
 
-1. The named handler regressions fail before the correction and pass after it, including authorization and mixed-session cases.
+1. The named handler regressions fail before the correction and pass after it, including authorization, mixed-session, and operational target lookup cases.
 2. A valid no-op preserves the complete stored task, existing queue state, and all transition effects across 47 requests.
 3. Both tool modes expose the same result semantics, and all commands below pass.
 
@@ -63,8 +63,9 @@ Run from the repository root:
 (cd apps/backend && go test ./internal/mcp/server -run 'TestMoveTask' -count=1)
 (cd apps/backend && go test ./internal/workflow/move -count=1)
 (cd apps/backend && go test ./internal/orchestrator -run '^TestPendingMove_EqualTargetRecordsAppliedMoveID$' -count=1)
-(cd apps/backend && golangci-lint run ./internal/mcp/handlers ./internal/mcp/server)
-(cd apps/backend && go build -o /tmp/kandev-issue3872-final ./cmd/kandev)
+(cd apps/backend && go test ./internal/task/repository ./internal/workflow/repository ./internal/workflow/service -count=1)
+(cd apps/backend && golangci-lint run ./internal/mcp/handlers ./internal/task/repository ./internal/workflow/repository ./internal/workflow/service)
+(cd apps/backend && go build -o /tmp/kandev-issue3872-fixup ./cmd/kandev)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 python3 scripts/list-docs.py validate
@@ -77,6 +78,14 @@ git diff --check
 - `apps/backend/internal/mcp/handlers/config_task_handlers.go`
 - `apps/backend/internal/mcp/handlers/config_task_handlers_same_step_test.go` (new)
 - `apps/backend/internal/mcp/handlers/handlers_test.go` (shared fixture)
+- `apps/backend/internal/task/repository/repoerrors/errors.go`
+- `apps/backend/internal/task/repository/sqlite/workflow.go`
+- `apps/backend/internal/task/repository/workflow_repository_test.go`
+- `apps/backend/internal/workflow/models/errors.go`
+- `apps/backend/internal/workflow/repository/sqlite.go`
+- `apps/backend/internal/workflow/repository/sqlite_test.go`
+- `apps/backend/internal/workflow/service/access.go`
+- `apps/backend/internal/workflow/service/access_test.go`
 - `apps/backend/internal/mcp/server/server.go`
 - `apps/backend/internal/mcp/server/config_handlers.go`
 - `apps/backend/internal/mcp/server/config_handlers_test.go`
@@ -109,3 +118,5 @@ Existing queued work must survive the no-op unchanged.
 Implemented and verified on 2026-09-23. The regression was first confirmed red: the same-step request returned `deferred`, included a move ID, and recorded one pending move. After the fix, the handler matrix, 47-request preservation cases, persisted queue dispatch, response forwarding, and tool-description checks passed. The validated no-op returns the stored task and position without changing task, queue, session, prompt, metadata, event, or transition state.
 
 All verification commands above passed. Additional checks passed: `golangci-lint run ./internal/mcp/handlers ./internal/mcp/server` (0 issues), backend binary build, public documentation validation (62 tests and 47 pages), catalog validation (299 decisions and 1114 specifications), specification lint, and `git diff --check`.
+
+PR review follow-up: typed workflow and step not-found errors now preserve validation behavior, while operational repository/controller failures are logged and return `internal_error` without leaking database details. The new workflow and step failure regressions failed before the correction with `VALIDATION_ERROR` and pass with `INTERNAL_ERROR`. Handler, MCP server, task repository, workflow repository/service, workflow move, and orchestrator tests passed. Changed-package lint reported 0 issues; the backend binary build, catalog validation, specification lint, and diff check passed.

@@ -91,7 +91,7 @@ All new named tests below belong to `config_task_handlers_same_step_test.go` unl
 | AC-TASKS-MCP-MOVE-RESULTS-001.1 | `TestHandleMoveTask_SameStepApplied`: RUNNING, STARTING, idle, absent, and mixed sibling sessions |
 | AC-TASKS-MCP-MOVE-RESULTS-001.2 | `TestHandleMoveTask_SameStepReturnsStoredTask`: omitted and differing requested positions |
 | AC-TASKS-MCP-MOVE-RESULTS-001.3 | `TestHandleMoveTask_SameStepPreservesEffects`: 47 repeats, pending moves, prompts, metadata, session state, and event counts |
-| AC-TASKS-MCP-MOVE-RESULTS-001.4 | `TestHandleMoveTask_SameStepValidation`: archive, access scope, targets, dependency failures, and entry options |
+| AC-TASKS-MCP-MOVE-RESULTS-001.4 | `TestHandleMoveTask_SameStepValidation`: archive, access scope, missing targets, operational lookup failures, dependency failures, and entry options |
 | AC-TASKS-MCP-MOVE-RESULTS-001.5 | Existing `TestHandleMoveTask` / `TestDeferMoveTask` cases and server `TestMoveTaskToolSchemasExposeEntryOptions` |
 
 The first regression must fail on the current code before implementation.
@@ -131,6 +131,8 @@ Implementation validation on 2026-09-23:
 - `python3 scripts/list-docs.py validate`: passed (299 decisions, 1114 specifications).
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check`: passed.
+- PR review follow-up: missing and inaccessible targets retain validation errors; operational workflow or step lookup failures now return `internal_error` without exposing repository details.
+- Handler, task repository, workflow repository, workflow service, MCP server, workflow move, and orchestrator regressions passed after the follow-up. Lint passed for the four changed Go packages, the backend binary built, and catalog/specification validation passed.
 
 ## Risks
 

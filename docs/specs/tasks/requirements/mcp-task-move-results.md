@@ -32,6 +32,7 @@ This document defines the MCP result for that case. It does not replace the orde
 - **AC-TASKS-MCP-MOVE-RESULTS-001.3:** The no-op shall leave task state, position, metadata, session state, prompts, and pending moves unchanged.
   It shall not run step actions or create transition history. Repeated requests shall have the same behavior.
 - **AC-TASKS-MCP-MOVE-RESULTS-001.4:** The no-op shall retain task-write authorization, archive restrictions, and workflow and step validation.
+  Missing or inaccessible targets shall remain validation failures; repository and controller failures shall return an internal error without exposing implementation details.
   Invalid requests shall fail without side effects. Non-empty normalized entry options shall remain invalid without a step change.
 - **AC-TASKS-MCP-MOVE-RESULTS-001.5:** A valid request to another step shall retain the existing immediate or deferred behavior.
   Both task-mode and configuration-mode tool descriptions shall explain that `applied` also means the task already occupies the requested destination.

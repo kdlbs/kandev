@@ -326,6 +326,11 @@ func TestHandleMoveTask_SameStepValidation(t *testing.T) {
 			require.NoError(t, err)
 			return context.Background()
 		}, wantCode: ws.ErrorCodeValidation},
+		{name: "workflow lookup database failure", prepare: func(t *testing.T, f *sameStepMoveFixture) context.Context {
+			_, err := f.db.Exec(`ALTER TABLE workflows RENAME TO workflows_unavailable`)
+			require.NoError(t, err)
+			return context.Background()
+		}, wantCode: ws.ErrorCodeInternalError},
 		{name: "workflow belongs to another workspace", prepare: func(t *testing.T, f *sameStepMoveFixture) context.Context {
 			ctx := context.Background()
 			require.NoError(t, f.repo.CreateWorkspace(ctx, &models.Workspace{
@@ -363,6 +368,23 @@ func TestHandleMoveTask_SameStepValidation(t *testing.T) {
 			response, err := handler.handleMoveTask(ctx, fixture.message(t, tc.fields))
 			require.NoError(t, err)
 			assertWSError(t, response, tc.wantCode)
+			if tc.wantCode == ws.ErrorCodeInternalError {
+				assert.NotContains(t, string(response.Payload), "no such table")
+			}
 		})
 	}
+}
+
+func TestHandleMoveTask_SameStepStepLookupDatabaseFailure(t *testing.T) {
+	fixture := newSameStepMoveFixture(t)
+	_, _, failedStepController, _, failedDB := newTestTaskServiceWithWorkflowDB(t)
+	_, err := failedDB.Exec(`ALTER TABLE workflow_steps RENAME TO workflow_steps_unavailable`)
+	require.NoError(t, err)
+
+	handler := fixture.handler(t, nil)
+	handler.workflowCtrl = failedStepController
+	response, err := handler.handleMoveTask(context.Background(), fixture.message(t, nil))
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeInternalError)
+	assert.NotContains(t, string(response.Payload), "no such table")
 }

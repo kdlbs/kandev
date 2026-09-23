@@ -15,10 +15,12 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
+	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -139,26 +141,67 @@ func (h *Handlers) validateSameStepMove(ctx context.Context, req moveTaskRequest
 	if task.ArchivedAt != nil {
 		return ws.ErrorCodeConflict, "archived tasks cannot be moved"
 	}
+	if code, message := h.validateSameStepMoveTargets(ctx, req, task); code != "" {
+		return code, message
+	}
+	if err := workflowmove.ValidateEntryOptions(req.EntryOptions, workflowmove.MoveChangePositionOnly); err != nil {
+		return ws.ErrorCodeValidation, err.Error()
+	}
+	return "", ""
+}
 
+func (h *Handlers) validateSameStepMoveTargets(
+	ctx context.Context,
+	req moveTaskRequest,
+	task *models.Task,
+) (string, string) {
+	if code, message := h.validateSameStepTargetWorkflow(ctx, req, task); code != "" {
+		return code, message
+	}
+	return h.validateSameStepTargetStep(ctx, req)
+}
+
+func (h *Handlers) validateSameStepTargetWorkflow(
+	ctx context.Context,
+	req moveTaskRequest,
+	task *models.Task,
+) (string, string) {
 	targetWorkflow, err := h.taskSvc.GetWorkflow(ctx, req.WorkflowID)
-	if err != nil || targetWorkflow == nil {
+	if err != nil {
+		h.logger.Error("move_task: failed to look up target workflow",
+			zap.String("task_id", req.TaskID), zap.String("workflow_id", req.WorkflowID), zap.Error(err))
+		if errors.Is(err, repoerrors.ErrWorkflowNotFound) || errors.Is(err, workflowservice.ErrNotVisible) {
+			return ws.ErrorCodeValidation, "target workflow_id does not exist"
+		}
+		return ws.ErrorCodeInternalError, "failed to validate target workflow"
+	}
+	if targetWorkflow == nil {
 		return ws.ErrorCodeValidation, "target workflow_id does not exist"
 	}
 	if targetWorkflow.WorkspaceID != task.WorkspaceID {
 		return ws.ErrorCodeValidation, "target workflow is in a different workspace"
 	}
+	return "", ""
+}
+
+func (h *Handlers) validateSameStepTargetStep(ctx context.Context, req moveTaskRequest) (string, string) {
 	if h.workflowCtrl == nil {
 		return ws.ErrorCodeInternalError, "workflow validation is not configured"
 	}
 	stepResponse, err := h.workflowCtrl.GetStep(ctx, req.WorkflowStepID)
-	if err != nil || stepResponse == nil || stepResponse.Step == nil {
+	if err != nil {
+		h.logger.Error("move_task: failed to look up target workflow step",
+			zap.String("task_id", req.TaskID), zap.String("workflow_step_id", req.WorkflowStepID), zap.Error(err))
+		if errors.Is(err, workflowservice.ErrNotVisible) || errors.Is(err, wfmodels.ErrWorkflowStepNotFound) {
+			return ws.ErrorCodeValidation, "target workflow_step_id does not exist"
+		}
+		return ws.ErrorCodeInternalError, "failed to validate target workflow step"
+	}
+	if stepResponse == nil || stepResponse.Step == nil {
 		return ws.ErrorCodeValidation, "target workflow_step_id does not exist"
 	}
 	if stepResponse.Step.WorkflowID != req.WorkflowID {
 		return ws.ErrorCodeValidation, "target workflow_step_id does not belong to the requested workflow_id"
-	}
-	if err := workflowmove.ValidateEntryOptions(req.EntryOptions, workflowmove.MoveChangePositionOnly); err != nil {
-		return ws.ErrorCodeValidation, err.Error()
 	}
 	return "", ""
 }
