@@ -953,16 +953,6 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 		}
 		acpAttachments := convertAttachments(attachments)
 		onDispatched, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
-		readyAfterDispatch := func() {
-			if onDispatched != nil {
-				onDispatched()
-			}
-			if err := markReady(execution.ID); err != nil {
-				sm.logger.Error("failed to mark execution as ready after initial prompt dispatch",
-					zap.String("execution_id", execution.ID),
-					zap.Error(err))
-			}
-		}
 		var failureHandler func(InitialPromptFailure)
 		if onInitialPromptFailure != nil {
 			initialPromptFailure := sm.initialPromptFailure
@@ -985,7 +975,7 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				false,
 				acpAttachments,
 				false,
-				sendPromptCallbacks{onDispatched: readyAfterDispatch, onFailure: failureHandler},
+				sendPromptCallbacks{onDispatched: onDispatched, onFailure: failureHandler},
 				false,
 			)
 			if err != nil {
