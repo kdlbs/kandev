@@ -51,6 +51,7 @@ func TestArchiveDeliveryIntoACreatedContainer(t *testing.T) {
 		Cmd: []string{
 			remoteAgentctlExecutablePath + "; " +
 				"stat -c '%a' /root/.agent/deep/creds.json; " +
+				"stat -c 'bin=%a' /usr/local/bin; " +
 				"cat /root/.agent/deep/creds.json",
 		},
 	})
@@ -79,6 +80,7 @@ func TestArchiveDeliveryIntoACreatedContainer(t *testing.T) {
 	require.Contains(t, logs, "HELPER_RAN", "the delivered helper must be executable")
 	require.Contains(t, logs, "600", "the credential file keeps its restrictive mode")
 	require.Contains(t, logs, "seeded-token")
+	require.Contains(t, logs, "bin=755", "delivery must not rewrite the image's own directories")
 }
 
 func readContainerLogs(t *testing.T, client *docker.Client, containerID string) string {

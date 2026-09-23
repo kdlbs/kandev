@@ -54,27 +54,41 @@ func entryByName(entries []tarEntry, name string) (tarEntry, bool) {
 	return tarEntry{}, false
 }
 
-// TestTarUploaderEmitsEveryParentDirectory is the property the delivery
-// depends on: the daemon extracts at "/", which exists, and every directory
-// below it has to arrive in the archive because nothing else creates it.
-func TestTarUploaderEmitsEveryParentDirectory(t *testing.T) {
+// TestTarUploaderLeavesParentDirectoriesToTheImage keeps delivery from
+// rewriting directories the image already owns. The daemon applies a directory
+// entry's mode to an existing directory, so an entry for usr/local/bin would
+// replace the image's mode; a missing parent is created by the daemon instead.
+func TestTarUploaderLeavesParentDirectoriesToTheImage(t *testing.T) {
 	up := newTarFileUploader()
 	require.NoError(t, up.WriteFile(context.Background(),
 		"/home/agent/.config/deep/creds.json", []byte("token"), credentialFileMode))
+	require.NoError(t, up.WriteFile(context.Background(),
+		remoteAgentctlExecutablePath, []byte("ELF"), 0o755))
 
 	entries := readTarEntries(t, up.Archive())
 
-	for _, dir := range []string{"home/", "home/agent/", "home/agent/.config/", "home/agent/.config/deep/"} {
-		entry, ok := entryByName(entries, dir)
-		require.True(t, ok, "missing directory entry %q in %v", dir, entries)
-		require.Equal(t, byte(tar.TypeDir), entry.typeFlag, "%q must be a directory entry", dir)
-		require.Equal(t, int64(0o700), entry.mode, "%q carries the session-dir mode", dir)
+	for _, entry := range entries {
+		require.NotEqual(t, byte(tar.TypeDir), entry.typeFlag,
+			"a file must not emit its parent directory %q", entry.name)
 	}
-
 	file, ok := entryByName(entries, "home/agent/.config/deep/creds.json")
 	require.True(t, ok, "missing file entry in %v", entries)
 	require.Equal(t, "token", file.body)
 	require.Equal(t, int64(credentialFileMode), file.mode)
+}
+
+// TestTarUploaderEnsureDirEmitsOnlyThatDirectory restricts the session-dir
+// mode to the directory that asked for it, never to the image's parents.
+func TestTarUploaderEnsureDirEmitsOnlyThatDirectory(t *testing.T) {
+	up := newTarFileUploader()
+	require.NoError(t, up.EnsureDir("/root/.codex"))
+
+	entries := readTarEntries(t, up.Archive())
+
+	require.Len(t, entries, 1, "entries = %v", entries)
+	require.Equal(t, "root/.codex/", entries[0].name)
+	require.Equal(t, byte(tar.TypeDir), entries[0].typeFlag)
+	require.Equal(t, int64(0o700), entries[0].mode)
 }
 
 // TestTarUploaderWritesRootOwnedEntries keeps the seeded files readable by the
@@ -89,11 +103,13 @@ func TestTarUploaderWritesRootOwnedEntries(t *testing.T) {
 	}
 }
 
-// TestTarUploaderEmitsEachDirectoryOnce guards against a second file under the
-// same directory re-emitting its parents, which some extractors reject.
+// TestTarUploaderEmitsEachDirectoryOnce guards against a directory requested
+// twice appearing twice, which some extractors reject.
 func TestTarUploaderEmitsEachDirectoryOnce(t *testing.T) {
 	up := newTarFileUploader()
 	ctx := context.Background()
+	require.NoError(t, up.EnsureDir("/root/.claude"))
+	require.NoError(t, up.EnsureDir("/root/.claude/"))
 	require.NoError(t, up.WriteFile(ctx, "/root/.claude/a.json", []byte("a"), credentialFileMode))
 	require.NoError(t, up.WriteFile(ctx, "/root/.claude/b.json", []byte("b"), credentialFileMode))
 
@@ -101,7 +117,7 @@ func TestTarUploaderEmitsEachDirectoryOnce(t *testing.T) {
 	for _, entry := range readTarEntries(t, up.Archive()) {
 		seen[entry.name]++
 	}
-	require.Equal(t, 1, seen["root/"])
+	require.Equal(t, 0, seen["root/"])
 	require.Equal(t, 1, seen["root/.claude/"])
 	require.Equal(t, 1, seen["root/.claude/a.json"])
 	require.Equal(t, 1, seen["root/.claude/b.json"])

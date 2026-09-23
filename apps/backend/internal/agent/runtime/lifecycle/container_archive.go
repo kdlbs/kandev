@@ -16,8 +16,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// sessionDirMode is the mode of every directory the archive creates. It
-// matches the local path's per-instance session root.
+// sessionDirMode is the mode of a directory added with EnsureDir. It matches
+// the local path's per-instance session root.
 const sessionDirMode int64 = 0o700
 
 // tarFileUploader collects files into one tar archive for delivery into a
@@ -45,8 +45,10 @@ func newTarFileUploader() *tarFileUploader {
 	return up
 }
 
-// WriteFile adds one file and any directories above it that the archive has
-// not already created.
+// WriteFile adds one file. Its parent directories are never added: the daemon
+// applies a directory entry's mode to a directory that already exists, so an
+// entry for usr/local/bin would rewrite the image's own mode. A parent that
+// does not exist is created by the daemon during extraction.
 func (u *tarFileUploader) WriteFile(_ context.Context, filePath string, data []byte, mode os.FileMode) error {
 	if u.err != nil {
 		return u.err
@@ -54,9 +56,6 @@ func (u *tarFileUploader) WriteFile(_ context.Context, filePath string, data []b
 	name := archiveName(filePath)
 	if name == "" {
 		return fmt.Errorf("container archive: %q is not a usable path", filePath)
-	}
-	if err := u.ensureParents(name); err != nil {
-		return err
 	}
 	if err := u.tw.WriteHeader(&tar.Header{
 		Typeflag: tar.TypeReg,
@@ -76,8 +75,9 @@ func (u *tarFileUploader) WriteFile(_ context.Context, filePath string, data []b
 	return nil
 }
 
-// EnsureDir adds a directory with no file in it, for an agent whose session
-// directory must exist before its own setup writes into it.
+// EnsureDir adds one directory with sessionDirMode, for an agent whose session
+// directory must exist before its own setup writes into it. Its parents are
+// left to the image, as in WriteFile.
 func (u *tarFileUploader) EnsureDir(dirPath string) error {
 	if u.err != nil {
 		return u.err
@@ -86,28 +86,7 @@ func (u *tarFileUploader) EnsureDir(dirPath string) error {
 	if name == "" {
 		return fmt.Errorf("container archive: %q is not a usable directory", dirPath)
 	}
-	if err := u.ensureParents(name); err != nil {
-		return err
-	}
 	return u.writeDir(name + "/")
-}
-
-func (u *tarFileUploader) ensureParents(name string) error {
-	dir := path.Dir(name)
-	if dir == "." || dir == "/" {
-		return nil
-	}
-	var components []string
-	for _, part := range strings.Split(dir, "/") {
-		if part == "" {
-			continue
-		}
-		components = append(components, part)
-		if err := u.writeDir(strings.Join(components, "/") + "/"); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (u *tarFileUploader) writeDir(name string) error {
