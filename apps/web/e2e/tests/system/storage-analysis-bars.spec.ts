@@ -82,6 +82,23 @@ test.describe("Storage analysis bars", () => {
     expect(barBox!.x + barBox!.width).toBeLessThanOrEqual(triggerBox!.x + triggerBox!.width + 1);
     expect(barBox!.width).toBeGreaterThan(0);
 
+    // @covers AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.6: all desktop tracks share one column.
+    const rowGeometry = await Promise.all(
+      ["database", "system-temporary", "workspaces", "go-cache"].map(async (id) => ({
+        bar: await testPage.getByTestId(`storage-resource-${id}-bar`).boundingBox(),
+        value: await testPage
+          .getByTestId(`storage-resource-${id}-trigger`)
+          .locator('[data-testid^="storage-analysis-source-"]')
+          .boundingBox(),
+      })),
+    );
+    for (const { bar, value } of rowGeometry) {
+      expect(bar).not.toBeNull();
+      expect(value).not.toBeNull();
+      expect(Math.abs(bar!.x - barBox!.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(bar!.width - barBox!.width)).toBeLessThanOrEqual(1);
+    }
+
     const systemTrigger = testPage.getByTestId("storage-resource-system-temporary-trigger");
     await systemTrigger.click();
     await expect(testPage.getByTestId("storage-resource-system-temporary")).toContainText(
@@ -123,6 +140,17 @@ test.describe("Storage analysis bars", () => {
     );
     await expect(testPage.getByTestId("storage-resource-database-bar")).toHaveCount(0);
     await expect(testPage.getByTestId("storage-resource-temporary-artifacts-bar")).toHaveCount(0);
+    const unavailableValue = await testPage
+      .getByTestId("storage-resource-managed-containers-trigger")
+      .locator('[data-testid="storage-analysis-source-docker"]')
+      .boundingBox();
+    const measuredValue = await testPage
+      .getByTestId("storage-resource-workspaces-trigger")
+      .locator('[data-testid="storage-analysis-source-workspaces"]')
+      .boundingBox();
+    expect(unavailableValue).not.toBeNull();
+    expect(measuredValue).not.toBeNull();
+    expect(Math.abs(unavailableValue!.x - measuredValue!.x)).toBeLessThanOrEqual(1);
   });
 
   test("keeps expanded rows and focus attached to IDs after refresh reordering", async ({

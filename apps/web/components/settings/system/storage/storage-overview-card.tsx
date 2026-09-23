@@ -140,7 +140,7 @@ function ResourceRow({
         data-testid={`storage-resource-${resource.id}-trigger`}
         data-storage-focus-id="trigger"
       >
-        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 md:grid md:grid-cols-[minmax(0,1fr)_minmax(8rem,16rem)_auto] md:items-center md:gap-3">
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 md:grid md:grid-cols-[minmax(0,1fr)_minmax(8rem,16rem)_7rem] md:items-center md:gap-3">
           <span
             className="flex min-w-0 flex-1 flex-wrap items-center gap-2 break-words text-sm"
             data-testid={`storage-resource-${resource.id}-title`}
@@ -158,7 +158,7 @@ function ResourceRow({
           </span>
           <ResourceBar resource={resource} />
           <span
-            className="flex shrink-0 items-center gap-2 text-xs font-normal text-muted-foreground"
+            className="flex shrink-0 items-center gap-2 text-xs font-normal text-muted-foreground md:col-start-3 md:block md:min-w-0 md:w-full md:break-words md:text-right"
             data-testid={resource.source ? `storage-analysis-source-${resource.source}` : undefined}
           >
             {resource.value}
