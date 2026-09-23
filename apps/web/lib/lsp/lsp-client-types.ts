@@ -35,6 +35,7 @@ export type ManagedLspConnection = LSPConnection & {
   explicitlyStopped: boolean;
   releaseAfterConnect: "stop" | "editor_idle" | null;
   diagnosticsReady: boolean;
+  documentsSynced: boolean;
   providersReady: boolean;
   dynamicRegistrations: Map<string, LspDynamicRegistration>;
   semanticRefreshCallbacks: (() => void)[];
@@ -102,6 +103,7 @@ export function createManagedLspConnection(
     explicitlyStopped: false,
     releaseAfterConnect: null,
     diagnosticsReady: false,
+    documentsSynced: false,
     providersReady: false,
     dynamicRegistrations: new Map(),
     semanticRefreshCallbacks: [],

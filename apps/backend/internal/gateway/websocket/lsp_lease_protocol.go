@@ -237,11 +237,18 @@ func (l *lspLease) handleInitializeResponse(
 		l.mu.Unlock()
 		return false, nil
 	}
-	l.initializeResponse = append(l.initializeResponse[:0], original...)
+	initializeFailed := len(rpc.Error) > 0 && string(rpc.Error) != "null"
+	if initializeFailed {
+		l.initializeResponse = nil
+		l.initializeResult = nil
+		l.serverCapabilities = nil
+	} else {
+		l.initializeResponse = append(l.initializeResponse[:0], original...)
+	}
 	l.initializeServerID = nil
 	waiter := l.initializeWaiter
 	l.initializeWaiter = nil
-	if len(rpc.Result) > 0 {
+	if !initializeFailed && len(rpc.Result) > 0 {
 		l.initializeResult = append(l.initializeResult[:0], rpc.Result...)
 		var result struct {
 			Capabilities json.RawMessage `json:"capabilities"`
@@ -272,7 +279,7 @@ func (l *lspLease) handleClientResponse(key string, original []byte) error {
 	for clientID, request := range l.clientRequests {
 		if jsonRPCIDKey(request.serverID) == key {
 			pendingID, pending = clientID, request
-			delete(l.clientRequests, clientID)
+			l.removeClientRequestLocked(clientID)
 			break
 		}
 	}
@@ -364,7 +371,7 @@ func (l *lspLease) handleBrowserMethod(
 			Settings map[string]any `json:"settings"`
 		}
 		if json.Unmarshal(rpc.Params, &params) == nil && params.Settings != nil {
-			return true, l.updateConfiguration(params.Settings, false)
+			return true, l.updateConfiguration(params.Settings, true)
 		}
 	case "$/cancelRequest":
 		return true, l.forwardCancellation(generation, rpc, original)
@@ -398,11 +405,12 @@ func (l *lspLease) forwardBrowserRequest(
 	l.requestCounter++
 	serverID := jsonRPCStringID(fmt.Sprintf("kandev:client:%d", l.requestCounter))
 	clientKey := jsonRPCIDKey(rpc.ID)
-	l.clientRequests[clientKey] = lspLeaseClientRequest{
-		serverID: append([]byte(nil), serverID...), generation: generation, clientID: append([]byte(nil), rpc.ID...),
+	if err := l.addClientRequestLocked(generation, rpc.ID, serverID); err != nil {
+		l.mu.Unlock()
+		return err
 	}
 	if err := l.checkSnapshotLimitLocked(); err != nil {
-		delete(l.clientRequests, clientKey)
+		l.removeClientRequestLocked(clientKey)
 		l.mu.Unlock()
 		return err
 	}
@@ -413,7 +421,7 @@ func (l *lspLease) forwardBrowserRequest(
 	}
 	if err = l.writeUpstreamForGeneration(generation, forwarded); err != nil {
 		l.mu.Lock()
-		delete(l.clientRequests, clientKey)
+		l.removeClientRequestLocked(clientKey)
 		l.mu.Unlock()
 	}
 	return err
@@ -471,7 +479,7 @@ func (l *lspLease) handleInitializeRequest(generation uint64, rpc jsonRPCMessage
 		WorkDoneToken json.RawMessage `json:"workDoneToken"`
 	}
 	if len(rpc.Params) > 0 && json.Unmarshal(rpc.Params, &params) == nil && len(params.WorkDoneToken) > 0 {
-		l.progressTokens[jsonRPCIDKey(params.WorkDoneToken)] = append([]byte(nil), params.WorkDoneToken...)
+		storeSnapshotByteSlice(l.progressTokens, jsonRPCIDKey(params.WorkDoneToken), params.WorkDoneToken, &l.progressTokenSnapshotBytes)
 	}
 	if err := l.checkSnapshotLimitLocked(); err != nil {
 		l.initializeServerID = nil
@@ -520,7 +528,7 @@ func (l *lspLease) forwardCancellation(generation uint64, rpc jsonRPCMessage, or
 	l.mu.Lock()
 	pending, ok := l.clientRequests[key]
 	if ok && pending.generation == generation {
-		delete(l.clientRequests, key)
+		pending, ok = l.removeClientRequestLocked(key)
 	}
 	l.mu.Unlock()
 	if !ok || pending.generation != generation {
@@ -562,21 +570,9 @@ func (l *lspLease) rewriteDocumentVersionInternal(
 	original []byte,
 	checkGeneration bool,
 ) ([]byte, bool, error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(original, &raw); err != nil {
+	raw, params, document, uri, err := decodeDocumentSyncMessage(original)
+	if err != nil {
 		return nil, false, err
-	}
-	var params map[string]json.RawMessage
-	if err := json.Unmarshal(raw["params"], &params); err != nil {
-		return nil, false, err
-	}
-	var document map[string]json.RawMessage
-	if err := json.Unmarshal(params["textDocument"], &document); err != nil {
-		return nil, false, err
-	}
-	var uri string
-	if err := json.Unmarshal(document["uri"], &uri); err != nil || uri == "" {
-		return nil, false, errors.New("document synchronization has no URI")
 	}
 	l.mu.Lock()
 	if checkGeneration && (l.closed || l.browser == nil || l.generation != generation) {
@@ -585,8 +581,13 @@ func (l *lspLease) rewriteDocumentVersionInternal(
 	}
 	switch method {
 	case lspMethodDidOpen, lspMethodDidChange:
-		l.documentVersions[uri]++
-		version := l.documentVersions[uri]
+		previous := l.documentVersions[uri]
+		version := previous + 1
+		if previous > 0 {
+			l.documentVersionsSnapshotBytes -= snapshotDocumentVersionEntrySize(uri, previous)
+		}
+		l.documentVersions[uri] = version
+		l.documentVersionsSnapshotBytes += snapshotDocumentVersionEntrySize(uri, version)
 		l.openDocuments[uri] = version
 		l.synchronizedDocs[uri] = true
 		encodedVersion, _ := json.Marshal(version)
@@ -612,6 +613,28 @@ func (l *lspLease) rewriteDocumentVersionInternal(
 	raw["params"] = encodedParams
 	message, err := json.Marshal(raw)
 	return message, true, err
+}
+
+func decodeDocumentSyncMessage(
+	original []byte,
+) (map[string]json.RawMessage, map[string]json.RawMessage, map[string]json.RawMessage, string, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(original, &raw); err != nil {
+		return nil, nil, nil, "", err
+	}
+	var params map[string]json.RawMessage
+	if err := json.Unmarshal(raw["params"], &params); err != nil {
+		return nil, nil, nil, "", err
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(params["textDocument"], &document); err != nil {
+		return nil, nil, nil, "", err
+	}
+	var uri string
+	if err := json.Unmarshal(document["uri"], &uri); err != nil || uri == "" {
+		return nil, nil, nil, "", errors.New("document synchronization has no URI")
+	}
+	return raw, params, document, uri, nil
 }
 
 func (l *lspLease) acceptDiagnostics(params json.RawMessage) (bool, error) {
@@ -654,7 +677,7 @@ func (l *lspLease) updateRegistrations(method string, params json.RawMessage) er
 		}
 		for index, registration := range registrations {
 			if registration.ID != "" && index < len(rawItems) {
-				l.registrations[registration.ID] = append([]byte(nil), rawItems[index]...)
+				storeSnapshotByteSlice(l.registrations, registration.ID, rawItems[index], &l.registrationSnapshotBytes)
 			}
 		}
 		return l.checkSnapshotLimitLocked()
@@ -670,7 +693,7 @@ func (l *lspLease) updateRegistrations(method string, params json.RawMessage) er
 		return err
 	}
 	for _, registration := range unregistrations {
-		delete(l.registrations, registration.ID)
+		deleteSnapshotByteSlice(l.registrations, registration.ID, &l.registrationSnapshotBytes)
 	}
 	return l.checkSnapshotLimitLocked()
 }
@@ -684,7 +707,7 @@ func (l *lspLease) addProgressToken(params json.RawMessage) error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.progressTokens[jsonRPCIDKey(payload.Token)] = append([]byte(nil), payload.Token...)
+	storeSnapshotByteSlice(l.progressTokens, jsonRPCIDKey(payload.Token), payload.Token, &l.progressTokenSnapshotBytes)
 	return l.checkSnapshotLimitLocked()
 }
 
@@ -708,11 +731,11 @@ func (l *lspLease) updateProgress(params json.RawMessage) error {
 	}
 	switch value.Kind {
 	case "end":
-		delete(l.progress, key)
+		deleteSnapshotByteSlice(l.progress, key, &l.progressSnapshotBytes)
 	case "report":
-		l.progress[key] = mergeProgressReport(l.progress[key], params, payload.Value)
+		storeSnapshotByteSlice(l.progress, key, mergeProgressReport(l.progress[key], params, payload.Value), &l.progressSnapshotBytes)
 	default:
-		l.progress[key] = append([]byte(nil), params...)
+		storeSnapshotByteSlice(l.progress, key, params, &l.progressSnapshotBytes)
 	}
 	return l.checkSnapshotLimitLocked()
 }

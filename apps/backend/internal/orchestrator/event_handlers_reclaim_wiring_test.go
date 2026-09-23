@@ -204,6 +204,32 @@ func TestAgentCompletedAndIdleReaperKeepExecutionWithActiveLSPLease(t *testing.T
 	}
 }
 
+func TestFailureCleanupStopsExecutionDespiteActiveLSPLease(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-lsp-failure", "session-lsp-failure", "")
+	inner := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), inner)
+	lease := &activeLSPLeaseForTest{sessionID: "session-lsp-failure", executionID: "exec-lsp-failure"}
+	svc.SetLSPLeaseLifecycle(lease)
+
+	if !svc.cleanupAgentExecutionWithReason(ctx, "exec-lsp-failure", "task-lsp-failure", "session-lsp-failure", "recoverable agent failure") {
+		t.Fatal("failed execution cleanup was deferred by an active LSP lease")
+	}
+	inner.mu.Lock()
+	stopCalls := append([]stopAgentCall(nil), inner.stopAgentWithReasonArgs...)
+	inner.mu.Unlock()
+	if len(stopCalls) != 1 || stopCalls[0].ExecutionID != "exec-lsp-failure" {
+		t.Fatalf("failure cleanup stop calls = %+v, want exact execution stop", stopCalls)
+	}
+	lease.mu.Lock()
+	stoppedLeases := append([]string(nil), lease.stoppedExecution...)
+	lease.mu.Unlock()
+	if len(stoppedLeases) != 1 || stoppedLeases[0] != "exec-lsp-failure" {
+		t.Fatalf("failure cleanup lease stops = %v, want exact execution lease stop", stoppedLeases)
+	}
+}
+
 // TestSubtaskTerminalCollapse_LiveAgentBlocksReclaim pins the fail-closed
 // guard at the production call site: a subtask whose agent process is
 // still alive must NOT be reclaimed even when the session collapses to

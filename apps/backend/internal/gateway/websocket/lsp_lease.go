@@ -17,10 +17,14 @@ import (
 )
 
 const (
-	lspLeaseSnapshotLimit = 4 << 20
-	lspLeaseDialTimeout   = 15 * time.Second
-	lspLeaseCloseTimeout  = 5 * time.Second
-	lspCloseTransport     = 4009
+	lspLeaseSnapshotLimit                = 4 << 20
+	lspLeaseDialTimeout                  = 15 * time.Second
+	lspLeaseCloseTimeout                 = 5 * time.Second
+	lspLeaseClientRequestTimeout         = 30 * time.Second
+	lspLeaseMaxPendingClientRequests     = 256
+	lspLeaseMaxClientRequestIDBytes      = 256
+	lspLeaseMaxPendingClientRequestBytes = 64 << 10
+	lspCloseTransport                    = 4009
 )
 
 const (
@@ -53,52 +57,61 @@ type lspLeaseExecution struct {
 }
 
 type lspLease struct {
-	mu                  sync.Mutex
-	manager             *lspLeaseManager
-	id                  string
-	sessionID           string
-	taskID              string
-	executionID         string
-	userID              string
-	language            string
-	upstream            *websocket.Conn
-	upstreamWriteMu     sync.Mutex
-	browserWriteMu      sync.Mutex
-	browser             *websocket.Conn
-	generation          uint64
-	detachedAt          time.Time
-	closed              bool
-	readDone            chan struct{}
-	terminalOnce        sync.Once
-	ready               bool
-	readyStatus         map[string]any
-	workspacePath       string
-	workspaceURI        string
-	repoSubpaths        []string
-	initializeResult    []byte
-	initializeServerID  []byte
-	initializeResponse  []byte
-	initializeWaiter    *lspLeaseInitializeWaiter
-	initializedReceived bool
-	serverCapabilities  []byte
-	registrations       map[string][]byte
-	progressTokens      map[string][]byte
-	progress            map[string][]byte
-	configuration       map[string]any
-	documentVersions    map[string]int64
-	openDocuments       map[string]int64
-	synchronizedDocs    map[string]bool
-	clientRequests      map[string]lspLeaseClientRequest
-	serverRequests      map[string]lspLeaseServerRequest
-	brokerRequests      map[string]chan jsonRPCResponse
-	requestCounter      uint64
-	resumedGeneration   bool
+	mu                            sync.Mutex
+	manager                       *lspLeaseManager
+	id                            string
+	sessionID                     string
+	taskID                        string
+	executionID                   string
+	userID                        string
+	language                      string
+	upstream                      *websocket.Conn
+	upstreamWriteMu               sync.Mutex
+	browserWriteMu                sync.Mutex
+	browser                       *websocket.Conn
+	generation                    uint64
+	detachedAt                    time.Time
+	closed                        bool
+	readDone                      chan struct{}
+	terminalOnce                  sync.Once
+	ready                         bool
+	readyStatus                   map[string]any
+	workspacePath                 string
+	workspaceURI                  string
+	repoSubpaths                  []string
+	initializeResult              []byte
+	initializeServerID            []byte
+	initializeResponse            []byte
+	initializeWaiter              *lspLeaseInitializeWaiter
+	initializedReceived           bool
+	serverCapabilities            []byte
+	registrations                 map[string][]byte
+	progressTokens                map[string][]byte
+	progress                      map[string][]byte
+	configuration                 map[string]any
+	configurationSnapshotBytes    int
+	documentVersions              map[string]int64
+	documentVersionsSnapshotBytes int
+	registrationSnapshotBytes     int
+	progressTokenSnapshotBytes    int
+	progressSnapshotBytes         int
+	openDocuments                 map[string]int64
+	synchronizedDocs              map[string]bool
+	clientRequests                map[string]lspLeaseClientRequest
+	pendingClientRequestBytes     int
+	clientRequestTimeout          time.Duration
+	serverRequests                map[string]lspLeaseServerRequest
+	brokerRequests                map[string]chan jsonRPCResponse
+	requestCounter                uint64
+	resumedGeneration             bool
 }
 
 type lspLeaseClientRequest struct {
 	serverID   json.RawMessage
 	generation uint64
 	clientID   []byte
+	byteSize   int
+	timer      *time.Timer
 }
 
 type lspLeaseInitializeWaiter struct {
@@ -240,27 +253,32 @@ func newLSPLease(
 	configuration map[string]any,
 	upstream *websocket.Conn,
 ) *lspLease {
-	return &lspLease{
-		manager:          manager,
-		id:               uuid.NewString(),
-		sessionID:        execution.SessionID,
-		taskID:           execution.TaskID,
-		executionID:      execution.ID,
-		userID:           userID,
-		language:         language,
-		upstream:         upstream,
-		readDone:         make(chan struct{}),
-		registrations:    make(map[string][]byte),
-		progressTokens:   make(map[string][]byte),
-		progress:         make(map[string][]byte),
-		configuration:    cloneStringAnyMap(configuration),
-		documentVersions: make(map[string]int64),
-		openDocuments:    make(map[string]int64),
-		synchronizedDocs: make(map[string]bool),
-		clientRequests:   make(map[string]lspLeaseClientRequest),
-		serverRequests:   make(map[string]lspLeaseServerRequest),
-		brokerRequests:   make(map[string]chan jsonRPCResponse),
+	lease := &lspLease{
+		manager:              manager,
+		id:                   uuid.NewString(),
+		sessionID:            execution.SessionID,
+		taskID:               execution.TaskID,
+		executionID:          execution.ID,
+		userID:               userID,
+		language:             language,
+		upstream:             upstream,
+		readDone:             make(chan struct{}),
+		registrations:        make(map[string][]byte),
+		progressTokens:       make(map[string][]byte),
+		progress:             make(map[string][]byte),
+		configuration:        cloneStringAnyMap(configuration),
+		documentVersions:     make(map[string]int64),
+		openDocuments:        make(map[string]int64),
+		synchronizedDocs:     make(map[string]bool),
+		clientRequests:       make(map[string]lspLeaseClientRequest),
+		serverRequests:       make(map[string]lspLeaseServerRequest),
+		brokerRequests:       make(map[string]chan jsonRPCResponse),
+		clientRequestTimeout: lspLeaseClientRequestTimeout,
 	}
+	if encoded, err := json.Marshal(lease.configuration); err == nil {
+		lease.configurationSnapshotBytes = len(encoded)
+	}
+	return lease
 }
 
 func (m *lspLeaseManager) detachedCandidate(
@@ -435,7 +453,7 @@ func (m *lspLeaseManager) stopMatching(match func(*lspLease) bool, reason string
 	}
 	m.mu.Unlock()
 	for _, lease := range leases {
-		lease.terminate(lspCloseTransport, "task runtime stopped", reason)
+		lease.terminate(lspCloseRuntimeStopped, "task runtime stopped", reason)
 	}
 }
 
@@ -520,8 +538,9 @@ func (l *lspLease) detach(generation uint64) {
 	clientRequests := make([]lspLeaseClientRequest, 0)
 	for key, request := range l.clientRequests {
 		if request.generation == generation {
-			clientRequests = append(clientRequests, request)
-			delete(l.clientRequests, key)
+			if removed, ok := l.removeClientRequestLocked(key); ok {
+				clientRequests = append(clientRequests, removed)
+			}
 		}
 	}
 	serverRequests := make([]lspLeaseServerRequest, 0)
@@ -605,7 +624,11 @@ func (l *lspLease) terminate(code int, text, reason string) {
 		l.browser = nil
 		l.openDocuments = make(map[string]int64)
 		l.synchronizedDocs = make(map[string]bool)
+		for key := range l.clientRequests {
+			l.removeClientRequestLocked(key)
+		}
 		l.clientRequests = make(map[string]lspLeaseClientRequest)
+		l.pendingClientRequestBytes = 0
 		l.serverRequests = make(map[string]lspLeaseServerRequest)
 		l.mu.Unlock()
 		if browser != nil {

@@ -52,6 +52,7 @@ export class LspClientProtocol {
     if (!this.host.isCurrentConnection(conn)) return;
     const { key, ws } = conn;
     const transportGeneration = conn.transportGeneration;
+    conn.documentsSynced = false;
     this.host.setStatus(key, { state: "starting" });
 
     const workspaceMetadata = configureLspWorkspace(conn, workspace);
@@ -99,6 +100,7 @@ export class LspClientProtocol {
         return;
 
       this.rebuildProviders(conn);
+      this.synchronizeOpenDocuments(conn, rpc);
       conn.initialized = true;
       this.host.setStatus(key, { state: "ready" });
     } catch (error) {
@@ -124,6 +126,7 @@ export class LspClientProtocol {
     if (!this.host.isCurrentConnection(conn)) return;
     const transportGeneration = conn.transportGeneration;
     const { key, ws } = conn;
+    conn.documentsSynced = false;
     const workspaceMetadata = configureLspWorkspace(conn, workspace);
     if (workspaceMetadata) this.host.workspaceMetadata.set(key, workspaceMetadata);
     this.host.setStatus(key, { state: "reconnecting" });
@@ -154,23 +157,11 @@ export class LspClientProtocol {
 
       if (handshake.initialized === false) rpc.sendNotification("initialized", {});
 
-      for (const [uri, document] of conn.openDocuments) {
-        rpc.sendNotification("textDocument/didOpen", {
-          textDocument: {
-            uri,
-            languageId: document.languageId,
-            version: document.version,
-            text: document.text,
-          },
-        });
-      }
+      this.synchronizeOpenDocuments(conn, rpc);
       const requestId = nextLspControlRequestId();
-      const acknowledgement = await waitForLspControlAck(
-        ws,
-        requestId,
-        "attachmentReady",
-        LSP_RELEASE_ACK_TIMEOUT_MS,
-        () =>
+      const acknowledgement = await waitForLspControlAck(ws, requestId, "attachmentReady", {
+        timeoutMs: LSP_RELEASE_ACK_TIMEOUT_MS,
+        send: () =>
           ws.send(
             JSON.stringify({
               kandev: "lsp",
@@ -178,7 +169,7 @@ export class LspClientProtocol {
               requestId,
             }),
           ),
-      );
+      });
       if (!this.host.isCurrentTransportConnection(conn, transportGeneration) || conn.rpc !== rpc)
         return;
       if (!acknowledgement) throw new Error(t("lsp:syncFailed"));
@@ -245,6 +236,24 @@ export class LspClientProtocol {
       this.host.editorState.handleDiagnostics(conn, params as PublishDiagnosticsParams);
     });
     conn.lspLanguage = lspLanguage;
+  }
+
+  private synchronizeOpenDocuments(conn: ManagedLspConnection, rpc: JsonRpcConnection): void {
+    for (const [uri, document] of conn.openDocuments) {
+      if (document.pendingClose) continue;
+      rpc.sendNotification("textDocument/didOpen", {
+        textDocument: {
+          uri,
+          languageId: document.languageId,
+          version: document.version,
+          text: document.text,
+        },
+      });
+    }
+    conn.documentsSynced = true;
+    for (const [uri, document] of conn.openDocuments) {
+      if (document.pendingClose) conn.openDocuments.delete(uri);
+    }
   }
 
   private rebuildProviders(conn: ManagedLspConnection): void {

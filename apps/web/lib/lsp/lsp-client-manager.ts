@@ -232,6 +232,26 @@ class LSPClientManager {
     this.promoteDocumentModel(sessionId, documentUri, document.text);
     const existing = conn.openDocuments.get(documentUri);
     if (existing) {
+      if (existing.pendingClose) {
+        existing.pendingClose = false;
+        existing.refCount = 1;
+        if (existing.text !== document.text) {
+          existing.text = document.text;
+          existing.version++;
+        }
+        if (conn.rpc && conn.documentsSynced) {
+          conn.rpc.sendNotification("textDocument/didOpen", {
+            textDocument: {
+              uri: documentUri,
+              languageId: existing.languageId,
+              version: existing.version,
+              text: existing.text,
+            },
+          });
+        }
+        if (document.repo) conn.repositorySubpaths.add(document.repo);
+        return;
+      }
       existing.refCount++;
       if (document.repo) conn.repositorySubpaths.add(document.repo);
       return;
@@ -243,8 +263,9 @@ class LSPClientManager {
       languageId: document.languageId,
       refCount: 1,
       text: document.text,
+      pendingClose: false,
     });
-    if (!conn.initialized || !conn.rpc) return;
+    if (!conn.documentsSynced || !conn.rpc) return;
     conn.rpc.sendNotification("textDocument/didOpen", {
       textDocument: {
         uri: documentUri,
@@ -266,7 +287,7 @@ class LSPClientManager {
     if (!conn || (!conn.initialized && !conn.reconnecting)) return;
     const canonicalUri = canonicalFileUri(documentUri);
     if (!canonicalUri) return;
-    if (!conn.initialized || !conn.rpc) {
+    if (!conn.documentsSynced || !conn.rpc) {
       const document = conn.openDocuments.get(canonicalUri);
       if (document && document.text !== text) {
         document.text = text;
@@ -285,7 +306,13 @@ class LSPClientManager {
     liveText = persistedText,
   ): void {
     for (const conn of this.connections.values()) {
-      if (conn.sessionId !== sessionId || !conn.initialized || !conn.rpc || !conn.workspaceUri) {
+      if (
+        conn.sessionId !== sessionId ||
+        !conn.initialized ||
+        !conn.documentsSynced ||
+        !conn.rpc ||
+        !conn.workspaceUri
+      ) {
         continue;
       }
 
@@ -339,11 +366,16 @@ class LSPClientManager {
     if (!canonicalUri) return;
     const document = conn.openDocuments.get(canonicalUri);
     if (!document) return;
-    document.refCount--;
+    document.refCount = Math.max(0, document.refCount - 1);
     if (document.refCount > 0) return;
 
+    if (conn.continuityEnabled && conn.reconnecting && !conn.documentsSynced) {
+      document.pendingClose = true;
+      return;
+    }
+
     conn.openDocuments.delete(canonicalUri);
-    if (!conn.initialized || !conn.rpc) return;
+    if (!conn.documentsSynced || !conn.rpc) return;
     conn.rpc.sendNotification("textDocument/didClose", {
       textDocument: { uri: canonicalUri },
     });
@@ -485,6 +517,7 @@ class LSPClientManager {
     conn.rpc = null;
     conn.initialized = false;
     conn.protocolInitialized = false;
+    conn.documentsSynced = false;
     conn.openDocuments.clear();
     conn.diagnosticsByUri.clear();
     conn.providersReady = false;

@@ -305,7 +305,7 @@ Task-owned browser continuity is controlled by the restart-required `features.ls
 
 With continuity enabled, **Stop** releases that window's lease, and closing the last editor releases it after two minutes. Stopping the task runtime or Kandev also releases its leases. Kandev allows eight active or detached leases by default; operators can change that startup limit with `KANDEV_LSP_MAX_CONNECTIONS`. If the limit is reached, a new request is rejected while every lease is attached. When a detached lease is available, Kandev evicts the one detached longest. After eviction or a backend restart, the next connection starts a fresh server and project analysis must run again. With continuity disabled, closing the browser connection reaps its process as before. If the toolbar says the server is unavailable, distinguish a missing task-host binary from an unsupported executor or the active-lease limit before retrying.
 
-During a temporary browser-to-backend transport failure, the status changes to **Reconnecting** while Kandev attempts to reattach; a WebSocket close such as `1005`, `1006`, or `4009` does not prove that the language server exited. A confirmed server process exit uses `4006` and shows the server-exited state with **Retry**.
+During a temporary browser-to-backend transport failure, the status changes to **Reconnecting** while Kandev attempts to reattach; browser closes `1005` and `1006`, backend restart close `1001`, and backend transport close `4009` do not prove that the language server exited. A confirmed server process exit uses `4006` and shows the server-exited state with **Retry**. Close `4010` means the task runtime stopped, so Kandev ends that lease without reconnecting it.
 
 ## Integrated terminal
 

@@ -5,6 +5,12 @@ export type LspBrokerControl = {
   documentVersions?: Record<string, number>;
 };
 
+export type LspControlWaitOptions = {
+  timeoutMs: number;
+  send: () => void;
+  cancelOnClose?: boolean;
+};
+
 let requestCounter = 0;
 
 export function nextLspControlRequestId(): string {
@@ -16,16 +22,18 @@ export function waitForLspControlAck(
   ws: WebSocket,
   requestId: string,
   action: string,
-  timeoutMs: number,
-  send: () => void,
+  options: LspControlWaitOptions,
 ): Promise<LspBrokerControl | null> {
+  const { timeoutMs, send, cancelOnClose = false } = options;
   return new Promise((resolve) => {
     let settled = false;
+    let onClose: (() => void) | null = null;
     const finish = (control: LspBrokerControl | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       ws.removeEventListener("message", onMessage);
+      if (onClose) ws.removeEventListener("close", onClose);
       resolve(control);
     };
     const onMessage = (event: MessageEvent) => {
@@ -39,8 +47,10 @@ export function waitForLspControlAck(
       if (message.action !== action || message.requestId !== requestId) return;
       finish(message);
     };
+    onClose = () => finish(null);
     const timer = window.setTimeout(() => finish(null), timeoutMs);
     ws.addEventListener("message", onMessage);
+    if (cancelOnClose) ws.addEventListener("close", onClose, { once: true });
     try {
       send();
     } catch {

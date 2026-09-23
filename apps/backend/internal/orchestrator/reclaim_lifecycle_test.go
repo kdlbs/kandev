@@ -55,12 +55,13 @@ func (*inactiveTurnService) AbandonOpenTurns(context.Context, string) error {
 }
 
 type activeLSPLeaseForTest struct {
-	mu              sync.Mutex
-	sessionID       string
-	executionID     string
-	checks          int
-	executionChecks int
-	executionCheck  chan struct{}
+	mu               sync.Mutex
+	sessionID        string
+	executionID      string
+	checks           int
+	executionChecks  int
+	executionCheck   chan struct{}
+	stoppedExecution []string
 }
 
 func (lease *activeLSPLeaseForTest) HasActiveLSPLease(sessionID string) bool {
@@ -81,9 +82,13 @@ func (lease *activeLSPLeaseForTest) HasActiveLSPLeaseForExecution(executionID st
 	}
 	return executionID == lease.executionID
 }
-func (*activeLSPLeaseForTest) StopLSPLeasesForSession(string)   {}
-func (*activeLSPLeaseForTest) StopLSPLeasesForTask(string)      {}
-func (*activeLSPLeaseForTest) StopLSPLeasesForExecution(string) {}
+func (*activeLSPLeaseForTest) StopLSPLeasesForSession(string) {}
+func (*activeLSPLeaseForTest) StopLSPLeasesForTask(string)    {}
+func (lease *activeLSPLeaseForTest) StopLSPLeasesForExecution(executionID string) {
+	lease.mu.Lock()
+	lease.stoppedExecution = append(lease.stoppedExecution, executionID)
+	lease.mu.Unlock()
+}
 
 // TestClassifyIdleReclaimDisposition is the single decision-matrix test for
 // the idle-reclaim predicate. Each case names the (state, runtime-live,

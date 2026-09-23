@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	gorillaws "github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -30,6 +31,7 @@ const (
 	lspCloseUnsupportedExecutor  = 4004
 	lspCloseCapacityExceeded     = 4005
 	lspCloseStreamError          = 4006
+	lspCloseRuntimeStopped       = 4010
 	lspCloseUnsupportedCloseText = "LSP is only supported for local_pc and local_docker tasks in this release"
 	lspCloseSessionNotFoundText  = "session not found"
 	lspProxyWriteTimeout         = 10 * time.Second
@@ -46,6 +48,7 @@ type LSPUserService interface {
 }
 
 type lspLifecycleManager interface {
+	CheckSessionAccess(ctx context.Context, sessionID string) error
 	ResolveSessionRuntime(ctx context.Context, sessionID string) (agentruntime.Runtime, error)
 	GetOrEnsureExecution(ctx context.Context, sessionID string) (*lifecycle.AgentExecution, error)
 }
@@ -259,12 +262,8 @@ func (h *LSPHandler) resolveContinuityExecution(
 	if h.lifecycleMgr == nil || h.leases == nil {
 		return nil, lspCloseSessionNotFound, "LSP lease manager unavailable"
 	}
-	if access, ok := h.lifecycleMgr.(interface {
-		CheckSessionAccess(context.Context, string) error
-	}); ok {
-		if access.CheckSessionAccess(ctx, sessionID) != nil {
-			return nil, lspCloseSessionNotFound, lspCloseSessionNotFoundText
-		}
+	if h.lifecycleMgr.CheckSessionAccess(ctx, sessionID) != nil {
+		return nil, lspCloseSessionNotFound, lspCloseSessionNotFoundText
 	}
 	runtimeName, err := h.lifecycleMgr.ResolveSessionRuntime(ctx, sessionID)
 	if err != nil {
@@ -287,21 +286,28 @@ func (h *LSPHandler) continuityUserSettings(
 	ctx context.Context,
 	language string,
 ) (string, map[string]any, bool) {
+	userID := ""
+	if identity, ok := authn.IdentityFromContext(ctx); ok {
+		userID = identity.UserID
+	}
 	if h.userService == nil {
-		return "", make(map[string]any), false
+		return userID, make(map[string]any), false
 	}
 	settings, err := h.userService.GetUserSettings(ctx)
 	if err != nil || settings == nil {
 		if err != nil {
 			h.logger.Debug("LSP: failed to load settings for a retained lease", zap.Error(err))
 		}
-		return "", make(map[string]any), false
+		return userID, make(map[string]any), false
+	}
+	if userID == "" {
+		userID = settings.UserID
 	}
 	configuration := make(map[string]any)
 	for key, value := range settings.LspServerConfigs[language] {
 		configuration[key] = value
 	}
-	return settings.UserID, configuration, h.settingsAllowAutoInstall(settings, language)
+	return userID, configuration, h.settingsAllowAutoInstall(settings, language)
 }
 
 func lspLeaseAdmissionClose(err error) (int, string) {

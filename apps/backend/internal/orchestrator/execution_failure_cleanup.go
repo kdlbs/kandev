@@ -17,7 +17,7 @@ func (s *Service) cleanupAgentExecutionWithReason(ctx context.Context, execution
 	if executionID == "" {
 		return true
 	}
-	if s.lspLeases != nil && s.lspLeases.HasActiveLSPLeaseForExecution(executionID) {
+	if reason == "agent completed" && s.lspLeases != nil && s.lspLeases.HasActiveLSPLeaseForExecution(executionID) {
 		s.logger.Debug("deferring execution teardown while its language server lease is active",
 			zap.String("execution_id", executionID),
 			zap.String("task_id", taskID),

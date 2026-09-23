@@ -30,6 +30,7 @@ export type OpenDocument = {
   languageId: string;
   refCount: number;
   text: string;
+  pendingClose?: boolean;
 };
 
 export type LSPConnection = {
@@ -230,6 +231,7 @@ export const CLOSE_CODE_STATUS: Record<number, (reason: string) => LspStatus> = 
     cause: "auto_install_unsupported",
   }),
   4008: () => ({ state: "error", reason: t("lsp:languageServerFailedToStart") }),
+  4010: () => ({ state: "disabled" }),
 };
 
 export function getLspUnavailableSetupHint(

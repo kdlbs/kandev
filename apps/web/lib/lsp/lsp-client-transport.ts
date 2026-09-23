@@ -195,14 +195,14 @@ export class LspClientTransport {
   private handleStoppingClose(conn: ManagedLspConnection, event: CloseEvent): boolean {
     if (this.host.getStatus(conn.key).state !== "stopping") return false;
     if (conn.continuityEnabled && conn.releaseAfterConnect === "stop") {
-      if (event.code === 4006) {
-        this.handleTerminalClose(conn, event, true);
-        return true;
-      }
       if (isAbnormalClose(event.code)) {
         conn.reconnecting = true;
+        this.host.setStatus(conn.key, { state: "reconnecting" });
         this.scheduleReconnect(conn);
+        return true;
       }
+      conn.releaseAfterConnect = null;
+      this.handleTerminalClose(conn, event, true);
       return true;
     }
     this.host.cleanupConnection(conn);
@@ -225,7 +225,7 @@ export class LspClientTransport {
     bridgeStarted: boolean,
   ): void {
     const statusFactory = CLOSE_CODE_STATUS[event.code];
-    if (conn.continuityEnabled && event.code === 4006) {
+    if (conn.continuityEnabled && (event.code === 4006 || event.code === 4010)) {
       clearLspLeaseHint(conn.sessionId, conn.lspLanguage);
       conn.leaseId = null;
     }
@@ -259,6 +259,7 @@ export class LspClientTransport {
     conn.rpc = null;
     conn.initialized = false;
     conn.protocolInitialized = false;
+    conn.documentsSynced = false;
     conn.diagnosticsReady = false;
     this.host.editorState.clearConnectionDiagnostics(conn);
     conn.progress = EMPTY_LSP_PROGRESS;
@@ -290,16 +291,23 @@ export class LspClientTransport {
 
   async release(conn: ManagedLspConnection, reason: "stop" | "editor_idle"): Promise<void> {
     if (!this.host.isCurrentConnection(conn) || conn.ws.readyState !== WebSocket.OPEN) return;
+    const ws = conn.ws;
+    const transportGeneration = conn.transportGeneration;
     const requestId = nextLspControlRequestId();
-    const acknowledgement = await waitForLspControlAck(
-      conn.ws,
-      requestId,
-      "released",
-      LSP_RELEASE_ACK_TIMEOUT_MS,
-      () => conn.ws.send(JSON.stringify({ kandev: "lsp", action: "release", reason, requestId })),
-    );
-    if (!this.host.isCurrentConnection(conn)) return;
+    const acknowledgement = await waitForLspControlAck(ws, requestId, "released", {
+      timeoutMs: LSP_RELEASE_ACK_TIMEOUT_MS,
+      send: () => ws.send(JSON.stringify({ kandev: "lsp", action: "release", reason, requestId })),
+      cancelOnClose: true,
+    });
+    if (
+      !this.host.isCurrentConnection(conn) ||
+      conn.ws !== ws ||
+      conn.transportGeneration !== transportGeneration
+    ) {
+      return;
+    }
     if (!acknowledgement) {
+      if (ws.readyState !== WebSocket.OPEN) return;
       conn.releaseAfterConnect = null;
       conn.reconnecting = false;
       this.host.cleanupConnection(conn);
@@ -316,5 +324,5 @@ export class LspClientTransport {
 }
 
 function isAbnormalClose(code: number): boolean {
-  return code === 4009 || code === 1005 || code === 1006;
+  return code === 4009 || code === 1001 || code === 1005 || code === 1006;
 }

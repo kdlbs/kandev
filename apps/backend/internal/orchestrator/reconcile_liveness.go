@@ -365,10 +365,6 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 			zap.Bool("has_active_turn", hasActiveTurn))
 		return nil
 	}
-	if s.lspLeases != nil && s.lspLeases.HasActiveLSPLease(sessionID) {
-		s.logger.Debug("idle reclaim skipped before cleanup; language-server lease is active", zap.String("session_id", sessionID))
-		return nil
-	}
 	var cleanupErr error
 	if cleaner, ok := s.agentManager.(executionIdentityCleaner); ok {
 		cleanupErr = cleaner.CleanupStaleExecutionBySessionIDIfCurrent(

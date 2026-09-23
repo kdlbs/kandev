@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/kandev/kandev/internal/events/bus"
@@ -62,45 +61,24 @@ func (l *lspLease) updateConfiguration(configuration map[string]any, notify bool
 	}
 	l.mu.Lock()
 	current, _ := json.Marshal(l.configuration)
+	ready, closed := l.ready, l.closed
 	if bytes.Equal(current, encoded) {
 		l.mu.Unlock()
-		return nil
+		return l.notifyConfiguration(configuration, notify, ready, closed)
 	}
 	l.configuration = configuration
-	ready, closed := l.ready, l.closed
+	l.configurationSnapshotBytes = len(encoded)
 	if err := l.checkSnapshotLimitLocked(); err != nil {
 		l.mu.Unlock()
 		return err
 	}
 	l.mu.Unlock()
-	if notify && ready && !closed {
-		return l.writeUpstream(jsonRPCNotification("workspace/didChangeConfiguration", map[string]any{"settings": configuration}))
-	}
-	return nil
+	return l.notifyConfiguration(configuration, notify, ready, closed)
 }
 
-func (l *lspLease) checkSnapshotLimitLocked() error {
-	snapshot := map[string]any{
-		"workspacePath":      l.workspacePath,
-		"workspaceUri":       l.workspaceURI,
-		"repoSubpaths":       l.repoSubpaths,
-		"initializeResult":   json.RawMessage(l.initializeResult),
-		"initializeServerID": json.RawMessage(l.initializeServerID),
-		"initializeResponse": json.RawMessage(l.initializeResponse),
-		"initializeWaiter":   l.initializeWaiter,
-		"initialized":        l.initializedReceived,
-		"registrations":      l.registrations,
-		"progressTokens":     l.progressTokens,
-		"progress":           l.progress,
-		"configuration":      l.configuration,
-		"documentVersions":   l.documentVersions,
-	}
-	encoded, err := json.Marshal(snapshot)
-	if err != nil {
-		return err
-	}
-	if len(encoded) > lspLeaseSnapshotLimit {
-		return fmt.Errorf("LSP resume state is %d bytes; maximum is %d", len(encoded), lspLeaseSnapshotLimit)
+func (l *lspLease) notifyConfiguration(configuration map[string]any, notify, ready, closed bool) error {
+	if notify && ready && !closed {
+		return l.writeUpstream(jsonRPCNotification("workspace/didChangeConfiguration", map[string]any{"settings": configuration}))
 	}
 	return nil
 }
