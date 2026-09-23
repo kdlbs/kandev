@@ -295,5 +295,6 @@ new implementation status, regression cases, and command results.
 - The first PR CI run exposed a test fake that did not model Git's exit code 1
   for a missing config key and an existing GitHub host literal rejected by
   `goconst`. Both are corrected. The five affected Go package suites, full
-  changed-code `golangci-lint`, and `make build` pass locally; CI for the updated
-  head is pending.
+  changed-code `golangci-lint`, and `make build` pass locally. The final PR run
+  on `05dfb312529ba3390a2967cd2b106584d77c13f7` passed all 59 checks with no
+  failures or pending checks; all seven review threads are resolved.
