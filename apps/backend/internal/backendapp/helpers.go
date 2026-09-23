@@ -933,7 +933,7 @@ func appendSessionModeMessage(sessionID string, session *models.TaskSession, lif
 	return result
 }
 
-// appendSessionModelsMessage adds session models state notification to result if cached.
+// appendSessionModelsMessage adds the current or persisted session model state to result.
 func appendSessionModelsMessage(sessionID string, session *models.TaskSession, lifecycleMgr *lifecycle.Manager, result []*ws.Message) []*ws.Message {
 	var modelState *lifecycle.CachedModelState
 	if lifecycleMgr != nil {

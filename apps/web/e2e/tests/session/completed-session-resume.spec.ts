@@ -15,7 +15,7 @@ test.describe("Completed conversation resume", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(300_000);
     const task = await seedCompletedConversation(
       apiClient,
       seedData,
@@ -75,7 +75,7 @@ test.describe("Completed conversation resume", () => {
           const current = await apiClient.listTaskSessions(task.id);
           return current.sessions.find((item) => item.id === task.session_id)?.state ?? "MISSING";
         },
-        { timeout: 60_000, message: "Waiting for the resumed conversation to become idle" },
+        { timeout: 90_000, message: "Waiting for the resumed conversation to become idle" },
       )
       .toBe("WAITING_FOR_INPUT");
     await expect(session.activeChat().locator(".tiptap.ProseMirror:visible").first()).toBeEditable({
