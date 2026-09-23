@@ -20,6 +20,7 @@ async function createTaskAndNavigate(
   apiClient: import("../../helpers/api-client").ApiClient,
   seedData: import("../../fixtures/test-base").SeedData,
   title: string,
+  navigateViaKanban = true,
 ) {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -43,9 +44,16 @@ async function createTaskAndNavigate(
     )
     .toBe(true);
 
-  // The task API is already authoritative here. Direct navigation avoids a
-  // race with the kanban snapshot refresh after the first agent session ends.
-  await testPage.goto(`/t/${task.id}`);
+  if (navigateViaKanban) {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const card = kanban.taskCardByTitle(title);
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.click();
+  } else {
+    await testPage.goto(`/t/${task.id}`);
+  }
+  await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -65,6 +73,7 @@ test.describe("Multi-session UX", () => {
       apiClient,
       seedData,
       "Tab Naming Task",
+      false,
     );
 
     // Create a second session
