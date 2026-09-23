@@ -84,6 +84,16 @@ export async function applyHarmlessPreviewUpdate(
   );
 }
 
+export async function waitForPreviewTaskSessionsLoaded(page: Page, taskId: string): Promise<void> {
+  await page.waitForFunction(
+    (currentTaskId) =>
+      (window as PreviewStoreWindow).__KANDEV_E2E_STORE__?.getState().taskSessionsByTask
+        .loadedByTaskId[currentTaskId] === true,
+    taskId,
+    { timeout: 15_000, message: `Task sessions did not load for preview task ${taskId}` },
+  );
+}
+
 export function movePreviewRequestPredicate(taskId: string, workflowStepId?: string) {
   return (request: { method(): string; url(): string; postDataJSON(): unknown }) => {
     if (
