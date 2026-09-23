@@ -71,14 +71,16 @@ func TestWebAppTransitionGroupsRequireWorkspaceAndBothGrants(t *testing.T) {
 		return recorder
 	}
 	require.Equal(t, http.StatusForbidden, call("wf-1").Code)
-	binding.ScopeKind = instances.ScopeWorkspace
+	binding.DataScopeKind = instances.ScopeWorkspace
+	require.Equal(t, http.StatusOK, call("wf-1").Code)
+	require.Equal(t, 1, source.groupCalls)
 	binding.Permissions = []string{"api_read:workflows"}
 	require.Equal(t, http.StatusForbidden, call("wf-1").Code)
 	binding.Permissions = []string{"api_read:tasks", "api_read:workflows"}
 	require.Equal(t, http.StatusNotFound, call("foreign-wf").Code)
-	require.Zero(t, source.groupCalls)
+	require.Equal(t, 1, source.groupCalls)
 	allowed := call("wf-1")
 	require.Equal(t, http.StatusOK, allowed.Code, allowed.Body.String())
-	require.Equal(t, 1, source.groupCalls)
+	require.Equal(t, 2, source.groupCalls)
 	require.Contains(t, allowed.Body.String(), `"count":2`)
 }

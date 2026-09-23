@@ -66,6 +66,12 @@ func TestWorkspaceDataUpgradePreservesPlacementAndRequiresFreshOwnerReview(t *te
 	}); err != nil {
 		t.Fatalf("advance grant generation: %v", err)
 	}
+	if err := instanceStore.AddGrant(context.Background(), instances.Grant{
+		InstanceID: canvas.PluginInstanceID, PermissionKind: "api_write", Resource: "messages",
+		ScopeCeiling: instances.ScopeTask, ApprovedBy: "owner-1",
+	}); err != nil {
+		t.Fatalf("seed stale task-ceiling grant: %v", err)
+	}
 	if _, err := service.EnableWorkspaceDataReviewed(context.Background(), canvas.ID, "owner-1", preview.ActiveReleaseID, preview.PermissionDigest, preview.GrantGeneration); !errors.Is(err, instances.ErrStaleWorkspaceDataReview) {
 		t.Fatalf("stale workspace data confirmation = %v, want ErrStaleWorkspaceDataReview", err)
 	}
@@ -101,7 +107,7 @@ func TestWorkspaceDataUpgradePreservesPlacementAndRequiresFreshOwnerReview(t *te
 	if err != nil {
 		t.Fatalf("list upgraded grants: %v", err)
 	}
-	if len(grants) != 1 || grants[0].ScopeCeiling != instances.ScopeWorkspace || grants[0].ApprovedBy != "owner-1" {
+	if len(grants) != 1 || grants[0].PermissionKind != "api_read" || grants[0].Resource != "tasks" || grants[0].ScopeCeiling != instances.ScopeWorkspace || grants[0].ApprovedBy != "owner-1" {
 		t.Fatalf("upgraded grants = %+v, want one owner-approved workspace task grant", grants)
 	}
 }

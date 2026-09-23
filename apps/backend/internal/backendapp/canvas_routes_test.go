@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
 type canvasWorkspaceOwnerAccessStub struct {
@@ -34,6 +35,8 @@ func TestCheckCanvasWorkspaceOwnerRequiresCurrentWorkspaceOwner(t *testing.T) {
 		{name: "owner", userID: "owner-1", workspace: &models.Workspace{ID: "workspace-1", OwnerID: "owner-1"}, wantOwner: true},
 		{name: "workspace member", userID: "member-1", workspace: &models.Workspace{ID: "workspace-1", OwnerID: "owner-1"}},
 		{name: "empty user", workspace: &models.Workspace{ID: "workspace-1", OwnerID: "owner-1"}},
+		{name: "auth-disabled default user owns an unowned workspace", userID: userstore.DefaultUserID, workspace: &models.Workspace{ID: "workspace-1"}, wantOwner: true},
+		{name: "ordinary user cannot own an unowned workspace", userID: "member-1", workspace: &models.Workspace{ID: "workspace-1"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

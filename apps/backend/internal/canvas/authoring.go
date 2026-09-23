@@ -132,6 +132,10 @@ type initialGrantStore interface {
 	AddInitialGrantsTx(context.Context, *sqlx.Tx, string, string, string, []plugininstances.Grant) error
 }
 
+type initialPublicationDataScopeStore interface {
+	SetInitialPublicationDataScopeTx(context.Context, *sqlx.Tx, plugininstances.PublishAuthority, string) error
+}
+
 type creationAuthorityStore interface {
 	ConsumeCreationAuthorityTx(context.Context, *sqlx.Tx, CreationAuthority, string, string, string, bool) error
 }
@@ -401,7 +405,7 @@ func (s *Service) resolveCreationAuthority(ctx context.Context, request PublishR
 	if !creationAuthorityEligible(candidate, instance, request, grants, releases) {
 		return CreationAuthority{}, nil, nil
 	}
-	return candidate, grantsForManifest(permissions, candidate.OwnerUserID, instance.EffectiveDataScopeKind()), nil
+	return candidate, grantsForManifest(permissions, candidate.OwnerUserID, creationAuthorityDataScope(candidate)), nil
 }
 
 func (s *Service) buildPublishedRelease(request PublishRequest, instanceID string, permissions PermissionSummary, activated bool) (plugininstances.Release, error) {
@@ -440,7 +444,7 @@ func persistPublishedRelease(ctx context.Context, store authoringInstanceStore, 
 			return false, ErrStaleCanvasPublish
 		}
 		err := persistAuthorityRelease(ctx, transactional, conditional, authorityStore, canvasID, instanceID, release, activated, expectedAuthority, creationAuthority, initialGrants, ownerUserID, allowUnownedWorkspace, sessionID, taskID)
-		if err == nil && activated && creationAuthority.CanvasID != "" {
+		if err == nil && activated && creationAuthority.CanvasID != "" && creationAuthorityDataScope(creationAuthority) == ScopeWorkspace {
 			recordCanvasScopeTransition(canvasScopeFirstPublication, canvasScopeEnabled)
 		}
 		return err == nil, err
@@ -481,10 +485,19 @@ func persistAuthorityRelease(ctx context.Context, transactional transactionalAut
 			if !ok || authorityStore == nil || creationAuthority.CanvasID != canvasID {
 				return ErrStaleCanvasPublish
 			}
-			if err := grantStore.AddInitialGrantsTx(ctx, tx, instanceID, release.ID, ownerUserID, initialGrants); err != nil {
+			if err := authorityStore.ConsumeCreationAuthorityTx(ctx, tx, creationAuthority, ownerUserID, sessionID, taskID, allowUnownedWorkspace); err != nil {
 				return err
 			}
-			if err := authorityStore.ConsumeCreationAuthorityTx(ctx, tx, creationAuthority, ownerUserID, sessionID, taskID, allowUnownedWorkspace); err != nil {
+			if creationAuthorityDataScope(creationAuthority) == ScopeWorkspace {
+				scopeStore, ok := transactional.(initialPublicationDataScopeStore)
+				if !ok {
+					return ErrStaleCanvasPublish
+				}
+				if err := scopeStore.SetInitialPublicationDataScopeTx(ctx, tx, expectedAuthority, release.ID); err != nil {
+					return err
+				}
+			}
+			if err := grantStore.AddInitialGrantsTx(ctx, tx, instanceID, release.ID, ownerUserID, initialGrants); err != nil {
 				return err
 			}
 		}
@@ -1119,11 +1132,11 @@ func invalidLocalCanvasManifest() error {
 }
 
 func creationAuthorityPolicyIsCurrent(authority CreationAuthority) bool {
-	return authority.PolicyVersion == CreationAuthorityPolicyVersion && authority.ConsumedAt.IsZero() && authority.OwnerUserID != "" && authority.CreatingSessionID != "" && authority.TaskID != ""
+	return creationAuthorityPolicyVersionSupported(authority.PolicyVersion) && authority.ConsumedAt.IsZero() && authority.OwnerUserID != "" && authority.CreatingSessionID != "" && authority.TaskID != ""
 }
 
 func creationAuthorityInstanceMatches(authority CreationAuthority, instance plugininstances.Instance, grants []plugininstances.Grant, releases []plugininstances.Release) bool {
-	return instance.SourceKind == plugininstances.SourceLocalCanvas && instance.ScopeKind == ScopeTask && instance.DataScopeKind == plugininstances.ScopeWorkspace && instance.Status == StatusPending && instance.ActiveReleaseID == "" && instance.GrantGeneration == 0 && instance.TaskID == authority.TaskID && len(grants) == 0 && len(releases) == 0
+	return instance.SourceKind == plugininstances.SourceLocalCanvas && instance.ScopeKind == ScopeTask && instance.EffectiveDataScopeKind() == ScopeTask && instance.Status == StatusPending && instance.ActiveReleaseID == "" && instance.GrantGeneration == 0 && instance.TaskID == authority.TaskID && len(grants) == 0 && len(releases) == 0
 }
 
 func creationAuthoritySourceMatches(authority CreationAuthority, instance plugininstances.Instance, request PublishRequest) bool {

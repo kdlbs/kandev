@@ -85,6 +85,9 @@ func TestCanvasCreationAuthorityFirstPublish(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get instance: %v", err)
 	}
+	if instance.DataScopeKind != "" || instance.EffectiveDataScopeKind() != ScopeTask {
+		t.Fatalf("new owner-authorized canvas scope = explicit %q/effective %q, want task until its first publication is consumed", instance.DataScopeKind, instance.EffectiveDataScopeKind())
+	}
 	pkg := testCanvasPackage("owner-first", []string{"tasks"})
 	pkg.Manifest.Capabilities.APIWrite = []string{"messages"}
 	pkg.Manifest.Capabilities.Events = []string{"task.updated"}
@@ -159,6 +162,73 @@ func TestCanvasCreationAuthorityFirstPublish(t *testing.T) {
 	}
 }
 
+func TestCanvasCreationAuthorityVersionOneRetainsTaskDataCeiling(t *testing.T) {
+	service, instanceStore, pool := newCanvasService(t)
+	created := createCanvas(t, service, CreateCanvasRequest{
+		WorkspaceID: "workspace-1", TaskID: "task-1", Title: "Legacy task authority",
+		CreatedBySessionID: "session-1", OwnerUserID: "owner-1",
+	})
+	if _, err := pool.Writer().Exec(`UPDATE canvas_creation_authority SET policy_version = 1 WHERE canvas_id = ?`, created.ID); err != nil {
+		t.Fatalf("set legacy authority version: %v", err)
+	}
+	instance, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	result, err := service.PublishPackage(context.Background(), PublishRequest{
+		CanvasID: created.ID, Package: testCanvasPackage("legacy-task-authority", []string{"tasks"}),
+		Artifact:          webapp.Artifact{Digest: "legacy-task-authority", RelativePath: "releases/legacy-task-authority", Bytes: 1},
+		ExpectedAuthority: instance.PublishAuthority(), SourceActorKind: "agent", SourceUserID: "owner-1",
+		SourceTaskID: "task-1", SourceSessionID: "session-1",
+	})
+	if err != nil {
+		t.Fatalf("publish with legacy authority: %v", err)
+	}
+	if !result.Activated {
+		t.Fatalf("legacy authority result = %+v, want active task-scoped first release", result)
+	}
+	updated, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("get published instance: %v", err)
+	}
+	if updated.EffectiveDataScopeKind() != ScopeTask {
+		t.Fatalf("legacy authority effective data scope = %q, want task", updated.EffectiveDataScopeKind())
+	}
+	grants, err := instanceStore.ListGrants(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("list legacy initial grants: %v", err)
+	}
+	if len(grants) != 1 || grants[0].ScopeCeiling != ScopeTask {
+		t.Fatalf("legacy authority grants = %+v, want one task-scoped task-read grant", grants)
+	}
+}
+
+func TestPublishCanvasAuthorityNormalizesLegacyNullDataScope(t *testing.T) {
+	service, instanceStore, _ := newCanvasService(t)
+	created := createCanvas(t, service, CreateCanvasRequest{WorkspaceID: "workspace-1", TaskID: "task-1", Title: "Legacy data scope"})
+	canvas, err := service.Get(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("get canvas: %v", err)
+	}
+	instance, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	expected := instance.PublishAuthority()
+	expected.DataScopeKind = canvas.DataScopeKind
+	result, err := service.PublishPackage(context.Background(), PublishRequest{
+		CanvasID: created.ID, Package: testCanvasPackage("legacy-null-data-scope", []string{"tasks"}),
+		Artifact:          webapp.Artifact{Digest: "legacy-null-data-scope", RelativePath: "releases/legacy-null-data-scope", Bytes: 1},
+		ExpectedAuthority: expected, SourceActorKind: "agent",
+	})
+	if err != nil {
+		t.Fatalf("publish with projected legacy data scope: %v", err)
+	}
+	if result.Activated || !result.PermissionRequired {
+		t.Fatalf("legacy task-scope publication = %+v, want task permission review", result)
+	}
+}
+
 func TestCanvasCreationAuthorityRejectsMismatchedSource(t *testing.T) {
 	service, instanceStore, _ := newCanvasService(t)
 	created := createCanvas(t, service, CreateCanvasRequest{
@@ -188,12 +258,26 @@ func TestCanvasCreationAuthorityRejectsMismatchedSource(t *testing.T) {
 	if result.Activated || !result.PermissionRequired {
 		t.Fatalf("mismatched owner result = %+v, want manual review", result)
 	}
+	updated, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("get mismatched-owner instance: %v", err)
+	}
+	if updated.EffectiveDataScopeKind() != ScopeTask {
+		t.Fatalf("mismatched-owner effective data scope = %q, want task", updated.EffectiveDataScopeKind())
+	}
+	approved, err := service.ApproveRelease(context.Background(), created.ID, result.Release.ID, "member-1")
+	if err != nil {
+		t.Fatalf("member approves task-scoped fallback release: %v", err)
+	}
+	if approved.DataScopeKind != ScopeTask {
+		t.Fatalf("member approval widened effective data scope to %q, want task", approved.DataScopeKind)
+	}
 	grants, err := instanceStore.ListGrants(context.Background(), created.PluginInstanceID)
 	if err != nil {
-		t.Fatalf("list mismatched-owner grants: %v", err)
+		t.Fatalf("list fallback grants: %v", err)
 	}
-	if len(grants) != 0 {
-		t.Fatalf("mismatched-owner grants = %+v, want none", grants)
+	if len(grants) != 1 || grants[0].ScopeCeiling != ScopeTask {
+		t.Fatalf("member approval grants = %+v, want one task-scoped grant", grants)
 	}
 	authority, err := service.repo.GetCreationAuthority(context.Background(), created.ID)
 	if err != nil {
@@ -255,12 +339,22 @@ func TestCanvasCreationAuthorityDoesNotApproveLaterIncrease(t *testing.T) {
 	if second.Activated || !second.PermissionRequired {
 		t.Fatalf("later owner release = %+v, want pending review", second)
 	}
+	if _, err := service.ApproveRelease(context.Background(), created.ID, second.Release.ID, "member-1"); !errors.Is(err, plugininstances.ErrWorkspaceOwnerRequired) {
+		t.Fatalf("non-owner approval of workspace-data increase = %v, want ErrWorkspaceOwnerRequired", err)
+	}
+	approved, err := service.ApproveRelease(context.Background(), created.ID, second.Release.ID, "owner-1")
+	if err != nil {
+		t.Fatalf("owner approves workspace-data increase: %v", err)
+	}
+	if approved.ActiveReleaseID != second.Release.ID {
+		t.Fatalf("active release after owner approval = %q, want %q", approved.ActiveReleaseID, second.Release.ID)
+	}
 	current, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
 	if err != nil {
 		t.Fatalf("get current instance: %v", err)
 	}
-	if current.ActiveReleaseID != first.Release.ID {
-		t.Fatalf("active release after later increase = %q, want %q", current.ActiveReleaseID, first.Release.ID)
+	if current.ActiveReleaseID != second.Release.ID {
+		t.Fatalf("active release after owner-approved increase = %q, want %q", current.ActiveReleaseID, second.Release.ID)
 	}
 }
 

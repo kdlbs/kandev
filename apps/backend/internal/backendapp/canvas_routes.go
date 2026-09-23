@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/webapp"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	userstore "github.com/kandev/kandev/internal/user/store"
 	"github.com/kandev/kandev/internal/worktree/copyfiles"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -974,7 +975,9 @@ func checkCanvasWorkspaceOwner(ctx context.Context, access canvasWorkspaceOwnerA
 	if workspace == nil {
 		return false, errors.New("canvas workspace was not found")
 	}
-	return userID != "" && workspace.OwnerID == userID, nil
+	actorID := strings.TrimSpace(userID)
+	ownerID := strings.TrimSpace(workspace.OwnerID)
+	return actorID != "" && (ownerID == actorID || (ownerID == "" && actorID == userstore.DefaultUserID)), nil
 }
 
 func canvasRouteParam(c *gin.Context, names ...string) string {

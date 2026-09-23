@@ -209,8 +209,7 @@ function createCanvasDesktopActions(canvas: Canvas | null, props: CanvasHostRout
   };
 }
 
-export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
-  const { canvas, isMobile, menuOpen, setMenuOpen } = props;
+function useCanvasHeaderPresentation(canvas: Canvas | null, isMobile: boolean) {
   const { t } = useTranslation();
   const title = canvas?.title || t("canvases:canvas");
   const dataScopeLabel = canvas
@@ -232,6 +231,13 @@ export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
         </span>
       </span>
     ) : undefined;
+  return { title, dataScopeLabel, mobileTitleSlot };
+}
+
+export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
+  const { canvas, isMobile, menuOpen, setMenuOpen } = props;
+  const { t } = useTranslation();
+  const { title, dataScopeLabel, mobileTitleSlot } = useCanvasHeaderPresentation(canvas, isMobile);
   const desktopActions = createCanvasDesktopActions(canvas, props);
   const renameAction = canvas ? (
     <Button

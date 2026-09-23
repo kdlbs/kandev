@@ -16,13 +16,25 @@ import (
 const (
 	// CanvasPluginID identifies the synthetic plugin binding used by local
 	// canvas instances. The package identity remains in the release metadata.
-	CanvasPluginID                 = "kandev.canvas"
-	MaxTitleLength                 = 200
-	CreationAuthorityPolicyVersion = 2
+	CanvasPluginID                     = "kandev.canvas"
+	MaxTitleLength                     = 200
+	creationAuthorityTaskPolicyVersion = 1
+	CreationAuthorityPolicyVersion     = 2
 
 	MaxTaskCanvases      = plugininstances.MaxTaskInstances
 	MaxWorkspaceCanvases = plugininstances.MaxWorkspaceInstances
 )
+
+func creationAuthorityPolicyVersionSupported(version int) bool {
+	return version == creationAuthorityTaskPolicyVersion || version == CreationAuthorityPolicyVersion
+}
+
+func creationAuthorityDataScope(authority CreationAuthority) string {
+	if authority.PolicyVersion == CreationAuthorityPolicyVersion {
+		return ScopeWorkspace
+	}
+	return ScopeTask
+}
 
 const (
 	ScopeTask      = plugininstances.ScopeTask

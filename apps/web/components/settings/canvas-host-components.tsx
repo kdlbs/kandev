@@ -163,19 +163,18 @@ export function CanvasHostHeader({
     <PanelHeaderBarSplit
       data-testid="canvas-host-header"
       left={
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-1">
-            <span className="block min-w-0 truncate text-sm font-medium">{title}</span>
-            {renameAction}
-          </div>
+        <div className="flex min-w-0 items-center gap-1">
+          <span className="block min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
           {dataScopeLabel && (
             <span
-              className="block truncate text-xs text-muted-foreground"
+              className="max-w-20 shrink-0 truncate text-xs text-muted-foreground"
               data-testid="canvas-data-scope"
+              title={dataScopeLabel}
             >
               {dataScopeLabel}
             </span>
           )}
+          {renameAction}
         </div>
       }
       right={

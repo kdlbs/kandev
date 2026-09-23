@@ -14,6 +14,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/db"
+	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -151,6 +152,9 @@ func TestEnableWorkspaceDataRequiresCurrentOwnerReview(t *testing.T) {
 	if err := store.AddGrant(ctx, Grant{InstanceID: "instance-1", PermissionKind: "api_read", Resource: "tasks", ScopeCeiling: ScopeTask, ApprovedBy: "owner-1"}); err != nil {
 		t.Fatalf("add task grant: %v", err)
 	}
+	if err := store.AddGrant(ctx, Grant{InstanceID: "instance-1", PermissionKind: "api_write", Resource: "messages", ScopeCeiling: ScopeTask, ApprovedBy: "owner-1"}); err != nil {
+		t.Fatalf("add stale task grant: %v", err)
+	}
 	if err := store.SetActiveRelease(ctx, "instance-1", "release-1"); err != nil {
 		t.Fatalf("activate release: %v", err)
 	}
@@ -192,6 +196,27 @@ func TestEnableWorkspaceDataRequiresCurrentOwnerReview(t *testing.T) {
 	}
 	if len(grants) != 1 || grants[0].ScopeCeiling != ScopeWorkspace || grants[0].ApprovedBy != "owner-1" {
 		t.Fatalf("upgraded grants = %+v, want one owner-approved workspace task grant", grants)
+	}
+}
+
+func TestVerifyWorkspaceOwnerAllowsAuthDisabledUnownedWorkspace(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := store.db.Exec(`CREATE TABLE workspaces (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatalf("create workspaces table: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO workspaces (id, owner_id) VALUES ('workspace-1', '')`); err != nil {
+		t.Fatalf("insert unowned workspace: %v", err)
+	}
+	if err := store.WithTransaction(ctx, func(tx *sqlx.Tx) error {
+		return verifyWorkspaceOwnerTx(ctx, tx, "workspace-1", userstore.DefaultUserID)
+	}); err != nil {
+		t.Fatalf("default user review of unowned workspace: %v", err)
+	}
+	if err := store.WithTransaction(ctx, func(tx *sqlx.Tx) error {
+		return verifyWorkspaceOwnerTx(ctx, tx, "workspace-1", "member-1")
+	}); !errors.Is(err, ErrWorkspaceOwnerRequired) {
+		t.Fatalf("ordinary user review of unowned workspace = %v, want ErrWorkspaceOwnerRequired", err)
 	}
 }
 

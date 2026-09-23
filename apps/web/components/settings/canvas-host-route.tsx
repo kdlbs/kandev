@@ -389,6 +389,21 @@ async function editCanvasFromHost(options: CanvasHostEditOptions): Promise<void>
   }
 }
 
+function useRecordCanvasPresentation(canvas: Canvas | null, userId: string | null) {
+  useEffect(() => {
+    if (!canvas || canvas.scope_kind !== "task" || !canvas.task_id || !userId) return;
+    recordCanvasPresentation(
+      {
+        userId,
+        workspaceId: canvas.workspace_id,
+        taskId: canvas.task_id,
+        canvasId: canvas.id,
+      },
+      "manual",
+    );
+  }, [canvas, userId]);
+}
+
 export function CanvasHostRoute({
   canvasId,
   embedded = false,
@@ -420,18 +435,7 @@ export function CanvasHostRoute({
   const [renameOpen, setRenameOpen] = useState(false);
   const [editing, setEditing] = useState(false);
 
-  useEffect(() => {
-    if (!canvas || canvas.scope_kind !== "task" || !canvas.task_id || !presentationUserId) return;
-    recordCanvasPresentation(
-      {
-        userId: presentationUserId,
-        workspaceId: canvas.workspace_id,
-        taskId: canvas.task_id,
-        canvasId: canvas.id,
-      },
-      "manual",
-    );
-  }, [canvas, presentationUserId]);
+  useRecordCanvasPresentation(canvas, presentationUserId);
 
   const edit = () =>
     editCanvasFromHost({

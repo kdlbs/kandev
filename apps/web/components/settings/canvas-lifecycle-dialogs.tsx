@@ -531,6 +531,7 @@ export function CanvasWorkspaceDataDialog({
     ? "!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-0 overflow-hidden rounded-none p-0 [padding-top:max(1rem,env(safe-area-inset-top))]"
     : "flex max-h-[min(90dvh,48rem)] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-lg";
 
+  // The footer uses a labeled Cancel action instead of an icon-only close button.
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent

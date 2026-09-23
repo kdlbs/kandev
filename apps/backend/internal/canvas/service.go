@@ -118,9 +118,6 @@ func (s *Service) createLocked(ctx context.Context, request CreateCanvasRequest)
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if scopeKind == ScopeTask && request.OwnerUserID != "" && request.CreatedBySessionID != "" {
-		instance.DataScopeKind = plugininstances.ScopeWorkspace
-	}
 	if err := s.createAuthority(ctx, instance, metadata); err != nil {
 		return Canvas{}, LifecycleEvent{}, err
 	}

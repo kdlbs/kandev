@@ -21,6 +21,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
 const (
@@ -181,7 +182,7 @@ type PublishAuthority struct {
 
 func (i Instance) PublishAuthority() PublishAuthority {
 	return PublishAuthority{
-		InstanceID: i.ID, ScopeKind: i.ScopeKind, DataScopeKind: i.DataScopeKind, WorkspaceID: i.WorkspaceID,
+		InstanceID: i.ID, ScopeKind: i.ScopeKind, DataScopeKind: i.EffectiveDataScopeKind(), WorkspaceID: i.WorkspaceID,
 		TaskID: i.TaskID, SessionID: i.SessionID, RepositoryID: i.RepositoryID,
 		Status: i.Status, ActiveReleaseID: i.ActiveReleaseID, GrantGeneration: i.GrantGeneration,
 	}
@@ -1189,8 +1190,8 @@ func validateWorkspaceDataReviewState(current instanceRow, declaredJSON, workspa
 
 func verifyWorkspaceOwnerTx(ctx context.Context, tx *sqlx.Tx, workspaceID, approvedBy string) error {
 	ownerUpdate, err := tx.ExecContext(ctx, tx.Rebind(
-		`UPDATE workspaces SET owner_id = owner_id WHERE id = ? AND COALESCE(owner_id, '') = ?`,
-	), workspaceID, approvedBy)
+		`UPDATE workspaces SET owner_id = owner_id WHERE id = ? AND (COALESCE(owner_id, '') = ? OR (COALESCE(owner_id, '') = '' AND ? = ?))`,
+	), workspaceID, approvedBy, approvedBy, userstore.DefaultUserID)
 	if err != nil {
 		return err
 	}
@@ -1209,6 +1210,11 @@ func updateWorkspaceDataScopeTx(ctx context.Context, tx *sqlx.Tx, current instan
 	}
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return ErrStaleWorkspaceDataReview
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM plugin_instance_grants WHERE plugin_instance_id = ?`,
+	), current.ID); err != nil {
+		return err
 	}
 	return insertInstanceGrantsTx(ctx, tx, current.ID, approvedBy, grants)
 }
@@ -1339,6 +1345,11 @@ func (s *Store) ApproveReleaseTx(ctx context.Context, tx *sqlx.Tx, instanceID, r
 		return ErrInvalidRelease
 	}
 	effectiveScope := EffectiveDataScopeKind(release.ScopeKind, release.DataScopeKind)
+	if release.SourceKind == SourceLocalCanvas && effectiveScope == ScopeWorkspace {
+		if err := verifyWorkspaceOwnerTx(ctx, tx, release.WorkspaceID, approvedBy); err != nil {
+			return err
+		}
+	}
 	if err := validateGrantsForDeclaration(release.DeclaredPermissionsJSON, effectiveScope, grants); err != nil {
 		return err
 	}
@@ -1370,6 +1381,8 @@ type pendingReleaseRow struct {
 	PluginID                string `db:"plugin_id"`
 	DeclaredPermissionsJSON string `db:"declared_permissions_json"`
 	ValidationStatus        string `db:"validation_status"`
+	SourceKind              string `db:"source_kind"`
+	WorkspaceID             string `db:"workspace_id"`
 	ScopeKind               string `db:"scope_kind"`
 	DataScopeKind           string `db:"data_scope_kind"`
 	Status                  string `db:"status"`
@@ -1378,7 +1391,7 @@ type pendingReleaseRow struct {
 func loadPendingReleaseTx(ctx context.Context, tx *sqlx.Tx, instanceID, releaseID string) (pendingReleaseRow, error) {
 	var release pendingReleaseRow
 	if err := tx.GetContext(ctx, &release, tx.Rebind(
-		`SELECT r.plugin_id, r.declared_permissions_json, r.validation_status, i.scope_kind, COALESCE(i.data_scope_kind, '') AS data_scope_kind, i.status FROM plugin_releases r JOIN plugin_instances i ON i.id = r.instance_id WHERE r.id = ? AND r.instance_id = ?`,
+		`SELECT r.plugin_id, r.declared_permissions_json, r.validation_status, i.source_kind, i.workspace_id, i.scope_kind, COALESCE(i.data_scope_kind, '') AS data_scope_kind, i.status FROM plugin_releases r JOIN plugin_instances i ON i.id = r.instance_id WHERE r.id = ? AND r.instance_id = ?`,
 	), releaseID, instanceID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return pendingReleaseRow{}, ErrNotFound
@@ -1492,7 +1505,7 @@ func (s *Store) CreateReleaseIfAuthorityTx(ctx context.Context, tx *sqlx.Tx, ins
 		return ErrInvalidRelease
 	}
 	result, err := tx.ExecContext(ctx, tx.Rebind(
-		`UPDATE plugin_instances SET updated_at = updated_at WHERE id = ? AND scope_kind = ? AND COALESCE(data_scope_kind, '') = ? AND workspace_id = ? AND task_id = ? AND session_id = ? AND repository_id = ? AND status = ? AND active_release_id = ? AND grant_generation = ?`,
+		`UPDATE plugin_instances SET updated_at = updated_at WHERE id = ? AND scope_kind = ? AND COALESCE(NULLIF(data_scope_kind, ''), scope_kind) = ? AND workspace_id = ? AND task_id = ? AND session_id = ? AND repository_id = ? AND status = ? AND active_release_id = ? AND grant_generation = ?`,
 	), instanceID, expected.ScopeKind, expected.DataScopeKind, expected.WorkspaceID, expected.TaskID, expected.SessionID, expected.RepositoryID, expected.Status, expected.ActiveReleaseID, expected.GrantGeneration)
 	if err != nil {
 		return err
@@ -1812,6 +1825,37 @@ func (s *Store) AddInitialGrantsTx(ctx context.Context, tx *sqlx.Tx, instanceID,
 		return ErrStaleCanvasPublish
 	}
 	return insertInstanceGrantsTx(ctx, tx, instanceID, approvedBy, grants)
+}
+
+// SetInitialPublicationDataScopeTx widens a pending task canvas only after its
+// creation authority has been consumed in the caller's transaction.
+func (s *Store) SetInitialPublicationDataScopeTx(ctx context.Context, tx *sqlx.Tx, expected PublishAuthority, releaseID string) error {
+	if expected.InstanceID == "" || expected.ScopeKind != ScopeTask || expected.DataScopeKind != ScopeTask ||
+		expected.Status != StatusPending || expected.ActiveReleaseID != "" || expected.WorkspaceID == "" ||
+		expected.TaskID == "" || strings.TrimSpace(releaseID) == "" {
+		return ErrStaleCanvasPublish
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(
+		`UPDATE plugin_instances
+SET data_scope_kind = ?, grant_generation = grant_generation + 1, updated_at = ?
+WHERE id = ? AND source_kind = ? AND scope_kind = ? AND COALESCE(NULLIF(data_scope_kind, ''), scope_kind) = ?
+  AND workspace_id = ? AND task_id = ? AND session_id = ? AND repository_id = ?
+  AND status = ? AND active_release_id = ? AND grant_generation = ?
+  AND NOT EXISTS (SELECT 1 FROM plugin_instance_grants WHERE plugin_instance_id = ?)
+  AND EXISTS (SELECT 1 FROM plugin_releases WHERE instance_id = ? AND id = ? AND validation_status = ?)
+  AND NOT EXISTS (SELECT 1 FROM plugin_releases WHERE instance_id = ? AND id <> ?)`),
+		ScopeWorkspace, time.Now().UTC().Format(time.RFC3339Nano), expected.InstanceID, SourceLocalCanvas,
+		expected.ScopeKind, expected.DataScopeKind, expected.WorkspaceID, expected.TaskID, expected.SessionID,
+		expected.RepositoryID, expected.Status, expected.ActiveReleaseID, expected.GrantGeneration,
+		expected.InstanceID, expected.InstanceID, releaseID, ValidationValid, expected.InstanceID, releaseID,
+	)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrStaleCanvasPublish
+	}
+	return nil
 }
 
 func (s *Store) ListGrants(ctx context.Context, instanceID string) ([]Grant, error) {
