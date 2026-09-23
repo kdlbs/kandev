@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -380,4 +382,41 @@ func resumeOptionsWithExactProfile(
 	options.ExactProfileModel = exact.Model
 	options.ExactProfileRevision = exact.Revision
 	return options
+}
+
+// recordExactProfileInferenceEvidence records the first actual model progress
+// observed for an admitted immutable attempt. Delivery and terminal frames do
+// not prove inference; the repository rechecks the full frozen tuple before
+// accepting the one durable outcome.
+func (s *Service) recordExactProfileInferenceEvidence(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	eventExecutionID string,
+) {
+	if payload == nil || payload.Data == nil || payload.ExactProfileAttempt == nil ||
+		(payload.Data.Type != "message_streaming" && payload.Data.Type != "thinking_streaming") ||
+		payload.Data.ProviderDiagnosticCandidate || strings.TrimSpace(payload.Data.Text) == "" {
+		return
+	}
+	binding := *payload.ExactProfileAttempt
+	binding.ExpectedPrior = nil
+	if binding.TaskID != payload.TaskID || binding.SessionID != payload.SessionID ||
+		binding.ExecutionID != eventExecutionID || binding.Model == "" {
+		return
+	}
+	recorder, ok := s.repo.(interface {
+		RecordExactProfileLaunchReceiptForAttempt(context.Context, *models.ExactProfileLaunchAttemptBinding, *models.ExactProfileLaunchReceipt) (bool, error)
+	})
+	if !ok {
+		return
+	}
+	receipt := &models.ExactProfileLaunchReceipt{
+		TaskID: binding.TaskID, SessionID: binding.SessionID, AgentProfileID: binding.AgentProfileID,
+		ProfileRevision: binding.ProfileRevision, Generation: binding.Generation, Model: binding.Model,
+		Outcome: models.ExactProfileLaunchOutcomeApplied, InferenceStarted: true,
+	}
+	if _, err := recorder.RecordExactProfileLaunchReceiptForAttempt(ctx, &binding, receipt); err != nil {
+		s.logger.Debug("exact-profile inference evidence was not current",
+			zap.String("task_id", binding.TaskID), zap.String("session_id", binding.SessionID), zap.Error(err))
+	}
 }

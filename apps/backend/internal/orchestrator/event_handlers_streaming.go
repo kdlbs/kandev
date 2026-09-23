@@ -79,6 +79,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
+	s.recordExactProfileInferenceEvidence(ctx, payload, eventExecutionID)
 	terminalCompleteStream := false
 
 	if eventType == agentEventComplete {
