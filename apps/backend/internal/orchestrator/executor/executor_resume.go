@@ -460,6 +460,7 @@ func validUnboundPRBaseIdentity(
 		}
 		return checkoutBranch != ""
 	}
+	// Fork-attached legacy tasks bind the attached repository to the PR head.
 	return models.ComparisonTargetRepositoriesEqual(target.HeadRepository, headRepository)
 }
 

@@ -7,6 +7,7 @@ depends_on: []
 plan: "plan.md"
 requirements:
   - REQ-WORKSPACES-WORKTREE-BASE-REFRESH-001
+  - REQ-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001
 acceptance_criteria:
   - AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.11
   - AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.15
@@ -14,8 +15,13 @@ acceptance_criteria:
   - AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.17
   - AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.18
   - AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.19
+  - AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.1
+  - AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.2
+  - AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.3
+  - AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.4
 system_design:
   - ../../specs/workspaces/system-design/worktree-base-refresh.md
+  - ../../specs/integrations/system-design/github-fork-review-start.md
 ---
 
 # Task 01: Repair PR attachment identity validation
@@ -28,6 +34,8 @@ section records the delivered implementation and verification.
 Accept a valid fork PR when the ordinary task attachment identifies its target
 repository. Preserve exact identity checks for explicit bindings and fork-attached
 checkouts. Resolve from existing metadata so unprepared failed tasks can retry.
+Keep unattended GitHub review-watch execution disabled for fork or
+identity-incomplete PRs until a user starts the linked task.
 
 ## In scope
 
@@ -49,11 +57,16 @@ checkouts. Resolve from existing metadata so unprepared failed tasks can retry.
   Prove target base, PR head, and unchanged origin/push configuration.
 - Repeat resolution for an unprepared task to represent retry. Include a mixed
   two-repository preparation where one invalid binding blocks the whole launch.
+- Keep same-repository GitHub review watches eligible for configured auto-start.
+  Persist a manual-start marker for fork or identity-incomplete review watches,
+  enforce it at automated launch boundaries, and prove a direct manual start
+  remains available. Leave ordinary browser PR-link tasks unaffected.
 
 ## Out of scope
 
-New persistence, browser payload changes, contribution push authorization,
-automatic repair of live tasks, and PR-association lifecycle changes.
+New database schema or migrations, browser payload changes, contribution push
+authorization, automatic repair of live tasks, and PR-association lifecycle
+changes.
 
 ## Acceptance
 
@@ -89,6 +102,14 @@ resolver, and qualified-base regressions.
 - `apps/backend/internal/orchestrator/executor/executor_pr_base_identity_test.go`
 - `apps/backend/internal/orchestrator/executor/executor_pr_base_materialization_test.go`
 - `apps/backend/internal/backendapp/pr_base_resolver_test.go`
+- `apps/backend/internal/orchestrator/event_handlers_github.go`
+- `apps/backend/internal/orchestrator/event_handlers_workflow.go`
+- `apps/backend/internal/orchestrator/task_operations.go`
+- `apps/backend/internal/orchestrator/event_handlers_github_review_test.go`
+- `apps/backend/internal/task/models/models.go`
+- `docs/specs/integrations/requirements/github-fork-review-start.md`
+- `docs/specs/integrations/system-design/github-fork-review-start.md`
+- `docs/decisions/2026-09-23-fork-pr-review-watch-manual-start.md`
 
 ## Dependencies
 
@@ -108,6 +129,8 @@ production resolution and preparation, not only a copied predicate.
 
 - [Requirement](../../specs/workspaces/requirements/worktree-base-refresh.md), .11 and .15-.19.
 - [Design clarification](../../specs/workspaces/system-design/worktree-base-refresh.md#ordinary-pr-link-launch-compatibility).
+- [Fork review-start requirement](../../specs/integrations/requirements/github-fork-review-start.md).
+- [Fork review-start design](../../specs/integrations/system-design/github-fork-review-start.md) and [decision](../../decisions/2026-09-23-fork-pr-review-watch-manual-start.md).
 - `executor_pr_base_identity_test.go` and
   `executor_pr_base_materialization_test.go`.
 - [Comparison target ADR](../../decisions/2026-08-19-repository-qualified-comparison-targets.md).
@@ -127,6 +150,17 @@ Commands and results:
 - Focused new executor and resolver tests: passed.
 - `go test ./internal/orchestrator/executor ./internal/backendapp ./internal/worktree -count=1`: passed.
 - Specification catalog, spec linter tests, all-spec lint and `git diff --check`: passed.
+
+Security follow-up results:
+
+- `go test ./internal/orchestrator -run 'TestBuildReviewTaskRequest_ForkPRRequiresManualStart|TestAutoStart_ForkReviewWaitsForManualStart' -count=1`: passed.
+- `go test ./internal/orchestrator ./internal/orchestrator/executor ./internal/backendapp ./internal/worktree -count=1`: passed.
+- `make -C apps/backend build`: passed.
+- `(cd apps/web && pnpm e2e:run --project chromium tests/task/create-task-github-url.spec.ts)`: 10 passed.
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-create-task-remote-repo.spec.ts)`: 7 passed.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.test.py`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`: passed.
+- Same-repository review watches retain automatic start. Fork and identity-incomplete review watches remain available without unattended execution; workflow and central automatic-start gates enforce the marker, and direct manual start launches.
+- Requirement, system design, and decision links above record the delivered security boundary. Browser PR-link launch remains unchanged.
 
 The test fixture uses separate fork/upstream bare repositories with different
 same-named `main` commits. It publishes the fork head under the upstream PR

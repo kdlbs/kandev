@@ -6,6 +6,7 @@ import {
 } from "../../helpers/empty-remote-repository";
 import { GitHelper } from "../../helpers/git-helper";
 import type { ApiClient } from "../../helpers/api-client";
+import type { SessionPage } from "../../pages/session-page";
 
 const PR_NUMBER = 3879;
 const HEAD_BRANCH = "feature/fork-pr-launch";
@@ -42,10 +43,54 @@ export type PRLinkForkLaunchFixture = {
   headBranch: string;
   headOID: string;
   targetOID: string;
-  upstreamRemotePath: string;
   forkCleanup: () => void;
   upstreamCleanup: () => void;
 };
+
+export async function expectForkPRLaunchState(
+  page: Page,
+  session: SessionPage,
+  apiClient: ApiClient,
+  fixture: PRLinkForkLaunchFixture,
+  taskId: string,
+): Promise<void> {
+  await expect(session.terminal).toBeVisible();
+  await session.typeInTerminal("git branch --show-current");
+  await session.expectTerminalHasText(fixture.headBranch);
+  await session.typeInTerminal("git rev-parse HEAD");
+  await expectTerminalCommit(page, fixture.headOID);
+  await session.typeInTerminal("git rev-parse refs/remotes/origin/main");
+  await expectTerminalCommit(page, fixture.targetOID);
+
+  await page.reload();
+  await session.waitForLoad();
+  const task = await apiClient.getTask(taskId);
+  expect(task.repositories?.[0]?.checkout_branch).toBe(fixture.headBranch);
+  expect(task.repositories?.[0]?.base_branch).toBe("main");
+  await expect
+    .poll(async () => (await apiClient.getTask(taskId)).status_summary?.pull_request?.number, {
+      timeout: 15_000,
+      message: "waiting for the persisted PR summary to reach the task list",
+    })
+    .toBe(PR_NUMBER);
+  await expect
+    .poll(async () =>
+      (await apiClient.listTaskPRs(taskId)).map((pr) => ({
+        owner: pr.owner,
+        repo: pr.repo,
+        pr_number: pr.pr_number,
+        head_branch: pr.head_branch,
+      })),
+    )
+    .toEqual([
+      {
+        owner: fixture.upstreamOwner,
+        repo: fixture.upstreamRepository,
+        pr_number: PR_NUMBER,
+        head_branch: fixture.headBranch,
+      },
+    ]);
+}
 
 export async function createPRLinkForkLaunchFixture(
   apiClient: ApiClient,
@@ -126,7 +171,6 @@ export async function createPRLinkForkLaunchFixture(
       headBranch: HEAD_BRANCH,
       headOID,
       targetOID,
-      upstreamRemotePath: upstream.remotePath,
       forkCleanup: fork.cleanup,
       upstreamCleanup: upstream.cleanup,
     };

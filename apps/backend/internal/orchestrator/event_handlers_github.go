@@ -591,6 +591,27 @@ func (s *Service) attachTaskToReservation(ctx context.Context, evt *github.NewRe
 // buildReviewTaskRequest builds the ReviewTaskRequest payload from an event.
 func buildReviewTaskRequest(evt *github.NewReviewPREvent, repositories []ReviewTaskRepository, repoSlug string) *ReviewTaskRequest {
 	pr := evt.PR
+	metadata := map[string]interface{}{
+		"review_watch_id":     evt.ReviewWatchID,
+		"pr_number":           pr.Number,
+		"pr_url":              pr.HTMLURL,
+		"pr_repo":             repoSlug,
+		"pr_author":           pr.AuthorLogin,
+		"pr_branch":           pr.HeadBranch,
+		"agent_profile_id":    evt.AgentProfileID,
+		"executor_profile_id": evt.ExecutorProfileID,
+		// Permanent guard: both the workflow-promotion path and this watcher's
+		// synchronous path must compete for the one-shot launch token.
+		models.MetaKeyAutoStartGuard: true,
+	}
+	if reviewPRHeadMatchesBase(pr) {
+		metadata[models.MetaKeyAutoStartClaimed] = true
+	} else {
+		// Fork-controlled files can be evaluated by the repository setup script,
+		// which receives executor-profile environment values. Leave fork review
+		// tasks for an explicit user start instead of granting an unattended token.
+		metadata[models.MetaKeyForkPRRequiresManualStart] = true
+	}
 	return &ReviewTaskRequest{
 		WorkspaceID:    evt.WorkspaceID,
 		WorkflowID:     evt.WorkflowID,
@@ -598,27 +619,15 @@ func buildReviewTaskRequest(evt *github.NewReviewPREvent, repositories []ReviewT
 		Title:          service.TruncateTaskTitle(fmt.Sprintf("PR #%d: %s", pr.Number, pr.Title)),
 		Description:    interpolateReviewPrompt(evt.Prompt, pr),
 		Repositories:   repositories,
-		Metadata: map[string]interface{}{
-			"review_watch_id":     evt.ReviewWatchID,
-			"pr_number":           pr.Number,
-			"pr_url":              pr.HTMLURL,
-			"pr_repo":             repoSlug,
-			"pr_author":           pr.AuthorLogin,
-			"pr_branch":           pr.HeadBranch,
-			"agent_profile_id":    evt.AgentProfileID,
-			"executor_profile_id": evt.ExecutorProfileID,
-			// Permanent guard: signals that the auto-start idempotency protocol
-			// is active for this task. Both Path A (promotion, async) and Path B
-			// (watcher, sync) check this marker and then compete for the one-shot
-			// MetaKeyAutoStartClaimed token before calling StartTask.
-			models.MetaKeyAutoStartGuard: true,
-			// One-shot token: both paths atomically remove this key; only the
-			// first removal wins and proceeds to StartTask. Prevents the
-			// duplicate-agent bug when CreateTask synchronously promotes the task
-			// from its feeder into an auto-start destination.
-			models.MetaKeyAutoStartClaimed: true,
-		},
+		Metadata:       metadata,
 	}
+}
+
+func reviewPRHeadMatchesBase(pr *github.PR) bool {
+	if pr == nil || pr.RepoOwner == "" || pr.RepoName == "" || pr.HeadRepoOwner == "" || pr.HeadRepoName == "" {
+		return false
+	}
+	return strings.EqualFold(pr.RepoOwner, pr.HeadRepoOwner) && strings.EqualFold(pr.RepoName, pr.HeadRepoName)
 }
 
 // buildIssueTaskTitle builds the "Issue #<n>: <title>" task title for an issue
@@ -646,6 +655,11 @@ func (s *Service) shouldAutoStartStep(ctx context.Context, stepID string) bool {
 func (s *Service) autoStartReviewTask(
 	ctx context.Context, evt *github.NewReviewPREvent, task *models.Task,
 ) {
+	if taskRequiresManualForkPRStart(task) {
+		s.logger.Info("fork review task is waiting for a manual start",
+			zap.String("task_id", task.ID), zap.Int("pr_number", evt.PR.Number))
+		return
+	}
 	if s.shouldSkipTerminalPRAutoStart(ctx, task) {
 		return
 	}
@@ -655,7 +669,7 @@ func (s *Service) autoStartReviewTask(
 	// autoStartTaskForStep (Path A) asynchronously; only the first claimer
 	// launches so exactly one session is created for the task.
 	if !s.claimAutoStart(ctx, task.ID, "review.auto_start") {
-		s.logger.Debug("review auto-start claim lost; promotion path will launch",
+		s.logger.Debug("review auto-start claim unavailable; skipping automatic launch",
 			zap.String("task_id", task.ID),
 			zap.Int("pr_number", evt.PR.Number))
 		return

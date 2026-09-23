@@ -3,8 +3,10 @@ created: 2026-09-23
 status: done
 requirements:
   - REQ-WORKSPACES-WORKTREE-BASE-REFRESH-001
+  - REQ-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001
 system_design:
   - ../../specs/workspaces/system-design/worktree-base-refresh.md
+  - ../../specs/integrations/system-design/github-fork-review-start.md
 legacy_specs: []
 ---
 
@@ -12,9 +14,10 @@ legacy_specs: []
 
 ## Overview
 
-Restore task startup from a fork PR link. Task 01 repaired attachment-aware
-base validation. Task 02 proves desktop and phone creation with real Git
-fixtures and the mock provider.
+Restore user-submitted task startup from a fork PR link. Task 01 repaired
+attachment-aware base validation. Task 02 proves desktop and phone creation
+with real Git fixtures and the mock provider. The PR security review also
+preserves a manual-start boundary for unattended fork review-watch tasks.
 
 ## Evidence and root cause
 
@@ -47,7 +50,11 @@ investigated. Task 01 added the regression and recorded its pre-fix RED result.
 The workspace system owns preparation identity and materialization. This is an
 implementation regression against existing criteria, not a new product feature.
 Reuse [REQ-WORKSPACES-WORKTREE-BASE-REFRESH-001](../../specs/workspaces/requirements/worktree-base-refresh.md),
-criteria .11 and .15 through .19. Requirements remain unchanged.
+criteria .11 and .15 through .19. The security review identified a separate
+integration contract: [REQ-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001](../../specs/integrations/requirements/github-fork-review-start.md)
+keeps background review-watch starts disabled for fork or identity-incomplete
+PRs. See its [system design](../../specs/integrations/system-design/github-fork-review-start.md)
+and [decision](../../decisions/2026-09-23-fork-pr-review-watch-manual-start.md).
 The [design clarification](../../specs/workspaces/system-design/worktree-base-refresh.md#ordinary-pr-link-launch-compatibility)
 separates target-attached PR checkout from fork-attached checkout.
 
@@ -65,13 +72,16 @@ collaboration and push-policy semantics owned by the task system.
 - Exact provider namespace, PR number, head branch, and repository checks.
 - Compatibility with explicit contribution bindings and fork-attached checkouts.
 - Desktop and phone PR-link startup evidence.
+- Preventing unattended GitHub review-watch launches for fork PRs until a user
+  starts the linked task explicitly.
 
 ### Out of scope
 
-- New controls, copy, API fields, persistence formats, flags, or permissions.
+- New controls, copy, public API fields, database schema, runtime flags, or permission model.
 - Changing source remotes, push routing, or contribution collaboration policy.
 - Resetting an existing checkout, repairing the live task, or automatic retries.
 - Redesigning PR association ordering, GitLab behavior, or comparison reconciliation.
+- Adding a fork trust UI, approval label, or setup-script sandbox.
 
 ## Technical approach
 
@@ -86,6 +96,13 @@ An explicit source binding always wins. A mismatch cannot enter this legacy path
 The no-association path queries the attached namespace. It must work during
 the browser association race. Existing typed errors retain fallback decisions.
 
+GitHub review-watch task creation applies the separate trust contract. Confirmed
+same-repository PRs retain their configured auto-start token. Fork or missing
+head identities retain a manual-start marker and no unattended token. Workflow
+gates and the automatic `StartTask` boundary enforce it; direct manual start
+remains available. Ordinary user-submitted PR-link tasks do not carry the
+marker.
+
 Keep the resolved source identity transient in `PRBase`. No database migration
 or new durable binding is required. The target-attached checkout keeps the
 ordinary target base and target PR-head fetch. Fork-attached checkouts retain
@@ -93,7 +110,8 @@ qualified upstream base handling. Do not derive permission from PR identity.
 
 ## Tests
 
-All criterion suffixes refer to `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001`.
+Workspace criterion suffixes refer to `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001`;
+the integration row below maps to its separately linked requirement.
 
 | Criteria | Implemented evidence |
 | --- | --- |
@@ -102,6 +120,7 @@ All criterion suffixes refer to `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001`.
 | .15, .17 | `backendapp/pr_base_resolver_test.go`: linked row absent/present, duplicate matches, provider failure, cancellation |
 | .16, .18 | `apps/backend/internal/orchestrator/executor/executor_pr_base_materialization_test.go`: `TestTargetAttachedForkPRBasePreparationEndToEnd` proves exact head/base and unchanged push routing |
 | .17, .19 | `executor_pr_base_identity_test.go`: `TestResolveAllRepoInfoRejectsLaunchWhenOnePRBindingIsInvalid` blocks a mixed launch without a fallback checkout |
+| Integration AC 001.1-.4 | `apps/backend/internal/orchestrator/event_handlers_github_review_test.go`: `TestBuildReviewTaskRequest_ForkPRRequiresManualStart` and `TestAutoStart_ForkReviewWaitsForManualStart` cover same-repository auto-start, fork or missing-identity suppression, automatic launch rejection, and explicit manual start |
 
 ## E2E tests
 
@@ -155,15 +174,26 @@ Task 02 browser implementation and verification passed:
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.test.py` (36 tests), `python3 scripts/lint-spec-files.py --all`, and `git diff --check`: passed.
 - An additional repository-wide `pnpm run lint:e2e-sleeps` check remains red on unrelated existing violations and unresolved rule references across other files; the changed E2E files pass targeted ESLint.
 
-Design-package checks on 2026-09-23:
+The fork review-watch security follow-up adds a separate integration contract:
+
+- `go test ./internal/orchestrator -run 'TestBuildReviewTaskRequest_ForkPRRequiresManualStart|TestAutoStart_ForkReviewWaitsForManualStart' -count=1`: passed.
+- `(cd apps/backend && go test ./internal/orchestrator ./internal/orchestrator/executor ./internal/backendapp ./internal/worktree -count=1)`: passed.
+- `make -C apps/backend build`: passed.
+- `(cd apps/web && pnpm e2e:run --project chromium tests/task/create-task-github-url.spec.ts)`: 10 passed.
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-create-task-remote-repo.spec.ts)`: 7 passed.
+- `(cd apps/web && pnpm exec eslint e2e/tests/task/create-task-github-url.spec.ts e2e/tests/task/mobile-create-task-remote-repo.spec.ts e2e/tests/task/pr-link-fork-launch-helpers.ts)`: passed.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.test.py`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`: passed.
+- Same-repository review watches retain their one-shot auto-start token. Fork or identity-incomplete watches stay available without an unattended launch token; both workflow launch paths and the central automatic `StartTask` boundary enforce the marker, while explicit manual start succeeds.
+- The contract and its trust boundary are recorded in the integration requirement, system design, and decision linked above. Browser PR-link tasks do not carry the marker.
+
+Historical design-package checks at the 2026-09-23 handoff:
 
 - `python3 scripts/list-docs.py validate`: passed (299 decisions, 1124 specifications).
 - `python3 scripts/lint-spec-files.test.py`: passed (36 tests).
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check`: passed.
 - Relative document links and referenced acceptance IDs: validated.
-- New package inventory at handoff: plan and both then-pending work orders were present.
-- Production and test code: unchanged. No product tests ran during planning.
+- At that handoff, the plan and both work orders were pending implementation. Production and test code were unchanged, and no product tests ran during planning. Task 01 and Task 02 were implemented and verified afterward as recorded above.
 
 ## Risks
 
@@ -175,7 +205,9 @@ Design-package checks on 2026-09-23:
 
 ## Documentation impact
 
-This package implemented the planned correction. Public docs remain unchanged.
 The implementation restores existing PR-link behavior without new user
-instructions. The existing repository-qualified comparison ADR remains
-authoritative.
+instructions. The fork review-watch security boundary is recorded in the new
+integration requirement, system design, and decision linked above. Public docs
+remain unchanged because no new user-facing controls or instructions were added.
+The existing repository-qualified comparison ADR remains authoritative for
+comparison and push invariants.

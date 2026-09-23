@@ -8,7 +8,7 @@ import { waitForHttp } from "../../helpers/causal-waits";
 import {
   cleanupPRLinkForkLaunchFixture,
   createPRLinkForkLaunchFixture,
-  expectTerminalCommit,
+  expectForkPRLaunchState,
 } from "./pr-link-fork-launch-helpers";
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
@@ -239,43 +239,8 @@ test.describe("Task creation from GitHub URL", () => {
       await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible();
       await expect(session.idleInput()).toBeVisible();
 
-      await expect(session.terminal).toBeVisible();
-      await session.typeInTerminal("git branch --show-current");
-      await session.expectTerminalHasText(fixture.headBranch);
-      await session.typeInTerminal("git rev-parse HEAD");
-      await expectTerminalCommit(testPage, fixture.headOID);
-      await session.typeInTerminal("git rev-parse refs/remotes/origin/main");
-      await expectTerminalCommit(testPage, fixture.targetOID);
-
-      await testPage.reload();
-      await session.waitForLoad();
+      await expectForkPRLaunchState(testPage, session, apiClient, fixture, taskId);
       await expect(session.prTopbarButton()).toContainText("#3879", { timeout: 15_000 });
-      const task = await apiClient.getTask(taskId);
-      expect(task.repositories?.[0]?.checkout_branch).toBe(fixture.headBranch);
-      expect(task.repositories?.[0]?.base_branch).toBe("main");
-      await expect
-        .poll(async () => (await apiClient.getTask(taskId!)).status_summary?.pull_request?.number, {
-          timeout: 15_000,
-          message: "waiting for the persisted PR summary to reach the task list",
-        })
-        .toBe(3879);
-      await expect
-        .poll(async () =>
-          (await apiClient.listTaskPRs(taskId!)).map((pr) => ({
-            owner: pr.owner,
-            repo: pr.repo,
-            pr_number: pr.pr_number,
-            head_branch: pr.head_branch,
-          })),
-        )
-        .toEqual([
-          {
-            owner: fixture.upstreamOwner,
-            repo: fixture.upstreamRepository,
-            pr_number: 3879,
-            head_branch: fixture.headBranch,
-          },
-        ]);
     } finally {
       await cleanupPRLinkForkLaunchFixture(apiClient, fixture, taskId);
     }

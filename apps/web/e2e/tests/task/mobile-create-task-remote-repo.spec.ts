@@ -7,7 +7,7 @@ import { switchToTerminalPanel, waitForShellReady } from "../terminal/mobile-ter
 import {
   cleanupPRLinkForkLaunchFixture,
   createPRLinkForkLaunchFixture,
-  expectTerminalCommit,
+  expectForkPRLaunchState,
 } from "./pr-link-fork-launch-helpers";
 
 function expectedRemoteTitle(title: string): string {
@@ -172,41 +172,7 @@ test.describe("Create task Remote repo picker on mobile", () => {
 
       await switchToTerminalPanel(testPage);
       await waitForShellReady(testPage);
-      await session.typeInTerminal("git branch --show-current");
-      await session.expectTerminalHasText(fixture.headBranch);
-      await session.typeInTerminal("git rev-parse HEAD");
-      await expectTerminalCommit(testPage, fixture.headOID);
-      await session.typeInTerminal("git rev-parse refs/remotes/origin/main");
-      await expectTerminalCommit(testPage, fixture.targetOID);
-
-      await testPage.reload();
-      await session.waitForLoad();
-      const task = await apiClient.getTask(taskId);
-      expect(task.repositories?.[0]?.checkout_branch).toBe(fixture.headBranch);
-      expect(task.repositories?.[0]?.base_branch).toBe("main");
-      await expect
-        .poll(async () => (await apiClient.getTask(taskId!)).status_summary?.pull_request?.number, {
-          timeout: 15_000,
-          message: "waiting for the persisted PR summary to reach the task list",
-        })
-        .toBe(3879);
-      await expect
-        .poll(async () =>
-          (await apiClient.listTaskPRs(taskId!)).map((pr) => ({
-            owner: pr.owner,
-            repo: pr.repo,
-            pr_number: pr.pr_number,
-            head_branch: pr.head_branch,
-          })),
-        )
-        .toEqual([
-          {
-            owner: fixture.upstreamOwner,
-            repo: fixture.upstreamRepository,
-            pr_number: 3879,
-            head_branch: fixture.headBranch,
-          },
-        ]);
+      await expectForkPRLaunchState(testPage, session, apiClient, fixture, taskId);
     } finally {
       await cleanupPRLinkForkLaunchFixture(apiClient, fixture, taskId);
     }
