@@ -451,10 +451,10 @@ test.describe("Session resume (TUI passthrough mode)", () => {
 
     // 6. Restart the backend
     const gateway = watchWs(testPage);
+    const resumeLaunch = gateway.waitForResponse("session.launch", { timeout: 60_000 });
     await backend.restart();
 
     // 7. Reload the page — forces SSR re-fetch and WS reconnect
-    const resumeLaunch = gateway.waitForResponse("session.launch", { timeout: 60_000 });
     await testPage.reload();
     await resumeLaunch;
 
@@ -527,8 +527,8 @@ test.describe("Session resume (TUI passthrough mode)", () => {
     // 3. Restart, reload, expect RESUMED — confirms multi-repo workspace path
     //    resolution preserves resume detection.
     const gateway = watchWs(testPage);
-    await backend.restart();
     const resumeLaunch = gateway.waitForResponse("session.launch", { timeout: 60_000 });
+    await backend.restart();
     await testPage.reload();
     await resumeLaunch;
     await session.waitForPassthroughLoad(60_000);

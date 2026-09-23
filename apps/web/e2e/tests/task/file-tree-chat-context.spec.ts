@@ -96,7 +96,6 @@ test.describe("File tree chat context", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
     await session.clickTab("Files");
-
     const addNodeToContext = async (nodePath: string) => {
       // File-tree rows are virtualized. Reveal each row immediately before
       // interacting so a later reveal cannot recycle its DOM node.
