@@ -480,13 +480,42 @@ func (r *Repository) validateExactProfileLaunchAttemptCurrentTx(ctx context.Cont
 // missing receipt (pre-exact sessions, or launches that never had an exact
 // assignment applied) returns nil.
 func (r *Repository) GetExactProfileLaunchReceipt(ctx context.Context, taskID, sessionID string) (*models.ExactProfileLaunchReceipt, error) {
-	var bindingExists int
-	if err := r.ro.GetContext(ctx, &bindingExists, r.ro.Rebind(`SELECT 1 FROM task_exact_profile_launch_attempt_bindings WHERE task_id = ? AND session_id = ?`), taskID, sessionID); err == nil {
-		return r.getCurrentExactProfileAttemptReceipt(ctx, taskID, sessionID)
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("load exact profile launch attempt binding: %w", err)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin exact profile launch receipt lookup: %w", err)
 	}
-	row := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+	defer func() { _ = tx.Rollback() }()
+	sessionLockQuery := `SELECT 1 FROM task_sessions WHERE id = ? AND task_id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		sessionLockQuery += ` FOR SHARE`
+	}
+	var found int
+	err = tx.GetContext(ctx, &found, r.db.Rebind(sessionLockQuery), sessionID, taskID)
+	if err == nil {
+		err = tx.GetContext(ctx, &found, r.db.Rebind(`SELECT 1 FROM task_exact_profile_launch_attempt_bindings WHERE task_id = ? AND session_id = ?`), taskID, sessionID)
+		if err == nil {
+			if err := tx.Commit(); err != nil {
+				return nil, fmt.Errorf("commit exact profile receipt binding check: %w", err)
+			}
+			return r.getCurrentExactProfileAttemptReceipt(ctx, taskID, sessionID)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("load exact profile launch attempt binding: %w", err)
+		}
+		if r.exactProfileReceiptLegacyFallbackHook != nil {
+			r.exactProfileReceiptLegacyFallbackHook()
+		}
+		return r.getLegacyExactProfileLaunchReceiptTx(ctx, tx, taskID, sessionID)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("lock exact profile receipt session: %w", err)
+	}
+	// A missing session cannot acquire a binding, so legacy lookup is safe.
+	return r.getLegacyExactProfileLaunchReceiptTx(ctx, tx, taskID, sessionID)
+}
+
+func (r *Repository) getLegacyExactProfileLaunchReceiptTx(ctx context.Context, tx *sqlx.Tx, taskID, sessionID string) (*models.ExactProfileLaunchReceipt, error) {
+	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT task_id, session_id, agent_profile_id, generation, profile_revision_nanos,
 			model, outcome, failure_reason, inference_started, substitution_done, created_at
 		FROM task_exact_profile_launch_receipts
@@ -500,11 +529,17 @@ func (r *Repository) GetExactProfileLaunchReceipt(ctx context.Context, taskID, s
 		&receipt.InferenceStarted, &receipt.SubstitutionDone, &receipt.CreatedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			if err := tx.Commit(); err != nil {
+				return nil, fmt.Errorf("commit empty legacy exact profile receipt lookup: %w", err)
+			}
 			return nil, nil
 		}
 		return nil, fmt.Errorf("load exact profile launch receipt: %w", err)
 	}
 	receipt.ProfileRevision = time.Unix(0, revisionNanos).UTC()
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit legacy exact profile receipt lookup: %w", err)
+	}
 	return &receipt, nil
 }
 

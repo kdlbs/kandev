@@ -87,6 +87,64 @@ func TestPostgresExactProfileAttemptRereadsAssignmentAfterReplacement(t *testing
 	}
 }
 
+func TestPostgresLegacyExactReceiptLookupSerializesWithSuccessorBind(t *testing.T) {
+	repoA, repoB, observer := newTaskPostgresRepoPair(t)
+	ctx := context.Background()
+	assignment := seedPostgresExactProfileAttempt(t, repoA, "legacy-fallback")
+	const sessionID = "exact-pg-legacy-fallback-session"
+	const incarnationID = "exact-pg-legacy-fallback-incarnation"
+	if err := repoA.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: assignment.TaskID, QueueIncarnationID: incarnationID, State: models.TaskSessionStateCreated}); err != nil {
+		t.Fatal(err)
+	}
+	legacy := &models.ExactProfileLaunchReceipt{TaskID: assignment.TaskID, SessionID: sessionID, AgentProfileID: assignment.AgentProfileID, ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
+	if changed, err := repoA.RecordExactProfileLaunchReceipt(ctx, legacy); err != nil || !changed {
+		t.Fatalf("legacy receipt = (%v, %v)", changed, err)
+	}
+	lookupLocked := make(chan struct{})
+	releaseLookup := make(chan struct{})
+	repoB.exactProfileReceiptLegacyFallbackHook = func() { close(lookupLocked); <-releaseLookup }
+	lookupDone := make(chan struct{})
+	var lookupReceipt *models.ExactProfileLaunchReceipt
+	var lookupErr error
+	go func() {
+		defer close(lookupDone)
+		lookupReceipt, lookupErr = repoB.GetExactProfileLaunchReceipt(ctx, assignment.TaskID, sessionID)
+	}()
+	select {
+	case <-lookupLocked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("legacy lookup did not reach locked fallback")
+	}
+	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: sessionID, ExecutionID: "exact-pg-legacy-fallback-execution", AttemptID: "exact-pg-legacy-fallback-attempt", SessionIncarnationID: incarnationID, AgentProfileID: assignment.AgentProfileID, ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
+	bindPID := pgBackendPID(t, repoA.db)
+	bindDone := make(chan struct{})
+	var bindErr error
+	go func() { defer close(bindDone); _, bindErr = repoA.BindExactProfileLaunchAttempt(ctx, binding) }()
+	if err := waitForPostgresLock(ctx, observer, bindPID, bindDone); err != nil {
+		t.Fatal(err)
+	}
+	close(releaseLookup)
+	select {
+	case <-lookupDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("legacy lookup did not finish")
+	}
+	if lookupErr != nil || lookupReceipt == nil || lookupReceipt.Outcome != legacy.Outcome {
+		t.Fatalf("legacy lookup = %#v, %v", lookupReceipt, lookupErr)
+	}
+	select {
+	case <-bindDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("successor bind did not finish")
+	}
+	if bindErr != nil {
+		t.Fatalf("successor bind: %v", bindErr)
+	}
+	if receipt, err := repoA.GetExactProfileLaunchReceipt(ctx, assignment.TaskID, sessionID); err != nil || receipt != nil {
+		t.Fatalf("successor inherited legacy receipt = %#v, %v", receipt, err)
+	}
+}
+
 func seedPostgresExactProfileAttempt(t *testing.T, repo *Repository, suffix string) *models.ExactProfileAssignment {
 	t.Helper()
 	ctx := context.Background()
