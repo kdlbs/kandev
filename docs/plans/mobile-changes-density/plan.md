@@ -75,7 +75,9 @@ Playwright owns rendered geometry, deep-tree containment, and action routing.
 `task/mobile-changes-panel.spec.ts` (mobile-chrome) gains compact-row geometry,
 menu/action flow, and breakpoint assertions for all four criteria. Existing
 `git/git-changes-panel.spec.ts` (chromium) guards desktop staging and unstaging
-and adds the 767px/768px fine-pointer composition transition.
+and adds the 767px/768px fine-pointer composition transition. The existing
+`git/mobile-symlink-identification.spec.ts` follows the file menu to Edit while
+retaining symlink-marker containment and viewer checks.
 
 ## Work orders
 
@@ -83,7 +85,7 @@ and adds the 767px/768px fine-pointer composition transition.
 
 ## Verification results
 
-Completed: 9 mobile browser tests, 4 focused desktop browser tests, 24 file-row
+Completed: 10 mobile browser tests, 4 focused desktop browser tests, 24 file-row
 and tree unit tests, typecheck, ESLint, Prettier, staged i18n ratchet, documentation catalog,
 36 specification-linter tests, full spec lint, and diff checks passed. The
 [work order](task-01-compact-touch-file-rows.md#results) records commands, the

@@ -57,6 +57,7 @@ Run from the repository root after `pnpm install --frozen-lockfile` in `apps`:
 
 ```bash
 (cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/task/mobile-changes-panel.spec.ts)
+(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/git/mobile-symlink-identification.spec.ts -- --retries 0)
 (cd apps/web
 cat > e2e/playwright.local-desktop.config.ts <<'EOF'
 import config from "./playwright.config";
@@ -89,6 +90,7 @@ git status --short -- docs/plans/mobile-changes-density
 - `apps/web/components/task/changes-panel-touch-file-row.tsx`
 - `apps/web/e2e/tests/task/mobile-changes-panel.spec.ts`
 - `apps/web/e2e/tests/git/git-changes-panel.spec.ts`
+- `apps/web/e2e/tests/git/mobile-symlink-identification.spec.ts`
 - `docs/public/sessions-and-review.md`
 
 ## Dependencies
@@ -112,6 +114,7 @@ DropdownMenu primitives, and mobile UI language contextual-action pattern.
 
 - RED: the phone filename-width assertion failed at 46.7% against a required minimum of 65%.
 - GREEN: managed production build and mobile run: **9 passed**, including flat/tree geometry, 22-level tree containment, stage/unstage, discard cancellation, Edit, and layer/PR diff routing.
+- Symlink mobile regression: **1 passed**, with retries disabled. CI and the local RED run timed out waiting for the removed inline Edit button. The updated test checks the menu trigger and Edit item touch targets, marker containment, and the same file-viewer behavior. Production rendering is unchanged by this test-only follow-up.
 - Desktop: **4 passed**, including the new 767px/768px transition and existing stage/unstage pending feedback and mixed-layer scenarios.
 - The default desktop discovery excluded this worktree because its absolute path contains `mobile-`. The temporary config above scopes that exclusion to the spec basename; it changes no test behavior and was removed after the run.
 - File-row and tree Vitest suites: **24 passed**. Updated obsolete coarse-pointer assertions and covered the pending menu and fine-pointer phone presentation.
