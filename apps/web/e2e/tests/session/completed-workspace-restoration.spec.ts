@@ -61,6 +61,7 @@ test.describe("Completed workspace restoration", () => {
     );
 
     const retry = workspaceUnavailable.getByTestId("workspace-retry");
+    await expect(retry).toBeVisible({ timeout: 30_000 });
     const retryBox = await retry.boundingBox();
     expect(retryBox, "workspace retry has no rendered hitbox").not.toBeNull();
     expect(retryBox?.height ?? 0).toBeGreaterThanOrEqual(28);

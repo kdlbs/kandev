@@ -105,6 +105,18 @@ test.describe.serial("Cancel turn availability", () => {
     });
     await cancelButton.click();
     await cancellationPending;
+    await expect
+      .poll(
+        async () => {
+          if ((await cancelButton.count()) === 0) return "hidden";
+          return (await cancelButton.isDisabled()) ? "disabled" : "enabled";
+        },
+        {
+          timeout: 45_000,
+          message: "cancel action did not transition the background-work control",
+        },
+      )
+      .toMatch(/^(disabled|hidden)$/);
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await cancellationSettled;
     await waitForActiveSessionForegroundActivity(testPage, null);
