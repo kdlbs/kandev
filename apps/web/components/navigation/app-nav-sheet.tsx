@@ -68,7 +68,7 @@ export function AppNavSheet(props: AppNavSheetProps) {
         trigger={<AppNavTrigger ref={opener} aria-expanded={open} />}
       >
         <nav
-          className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))]"
+          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] md:gap-6"
           onClick={(event) => closeMenuOnLinkClick(event, close)}
         >
           {isMobile && <NavigationWorkspacePicker close={close} />}
@@ -149,7 +149,7 @@ function NavigationWorkspacePicker({ close }: { close: () => void }) {
   const { t } = useTranslation();
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="text-sm font-medium">{t("common:workspace")}</h3>
+      <h3 className="sr-only">{t("common:workspace")}</h3>
       <AppSidebarWorkspacePicker
         modal={false}
         onActionComplete={close}

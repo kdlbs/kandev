@@ -161,6 +161,7 @@ export function AppNavSections({
           omitDestinations={omitDestinations}
           quickActions={quickActions}
           homeCoversListings={phoneNavigation}
+          afterPrimary={afterPrimary}
         />
       ) : (
         !omit.has("primary") && (
@@ -182,7 +183,7 @@ export function AppNavSections({
           {t("sidebar:taskViews")}
         </Button>
       )}
-      {afterPrimary}
+      {!hasSavedSidebarLayout && afterPrimary}
       {workspaceActions}
       {!omit.has("plugins") && (
         <MobilePluginNavSection
@@ -222,12 +223,15 @@ function PrimaryNavSection({
   const destinations = all.filter((destination) => !omitDestinations.includes(destination.id));
   if (destinations.length === 0) return null;
   return (
-    <div className="flex flex-col gap-3" data-testid="app-nav-primary">
+    <div
+      className={cn("flex flex-col", phoneNavigation ? "gap-2" : "gap-3")}
+      data-testid="app-nav-primary"
+    >
       <DestinationRows
         destinations={destinations}
         onNavigate={onNavigate}
         homeCoversListings={phoneNavigation}
-        className="gap-3 px-3 text-sm"
+        className="gap-3 px-3 text-sm aria-[current=page]:bg-primary/10"
       />
       {quickActions}
     </div>

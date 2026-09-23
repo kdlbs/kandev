@@ -13,6 +13,7 @@ import { usePluginRegistry } from "@/lib/plugins/registry";
 import { cn } from "@/lib/utils";
 import { canvasHref, workspaceCanvasSettingsHref } from "@/lib/api/domains/canvas-api";
 import { isActiveWorkspaceCanvas, useWorkspaceCanvases } from "./sections/canvases-section";
+import { useHasSavedSidebarLayout } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
 
 /**
  * Props forwarded to every plugin component registered for the
@@ -68,14 +69,16 @@ export function MobileWorkspaceActionsSection({
   const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((state) => state.workspaces?.activeId ?? null);
   const canvasesEnabled = useFeature("canvases");
+  const hasSavedSidebarLayout = useHasSavedSidebarLayout();
+  const showCanvases = canvasesEnabled && !hasSavedSidebarLayout;
   const registry = usePluginRegistry();
   const pathname = usePathname();
   const workspaceId = providedWorkspaceId ?? activeWorkspaceId;
-  const canvases = useWorkspaceCanvases(canvasesEnabled ? workspaceId : null);
+  const canvases = useWorkspaceCanvases(showCanvases ? workspaceId : null);
   const activeCanvases = canvases.filter(isActiveWorkspaceCanvas);
   const hasPluginActions = registry.getSlotRegistrations("sidebar-workspace-actions").length > 0;
 
-  if (!workspaceId || (!hasPluginActions && !canvasesEnabled)) {
+  if (!workspaceId || (!hasPluginActions && !showCanvases)) {
     return null;
   }
 
@@ -86,7 +89,7 @@ export function MobileWorkspaceActionsSection({
       role="group"
       aria-label={t("common:workspace")}
     >
-      {canvasesEnabled && (
+      {showCanvases && (
         <div className="flex flex-col gap-1" data-testid="mobile-workspace-canvases">
           <div className="flex items-center gap-2 px-1 text-xs font-semibold text-muted-foreground">
             <IconLayoutGrid className="h-4 w-4" aria-hidden="true" />

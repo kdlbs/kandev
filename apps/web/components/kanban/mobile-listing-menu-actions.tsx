@@ -111,7 +111,7 @@ export function MobileQuickActions({
     requestAnimationFrame(action);
   }
   return (
-    <div className={inline ? "grid grid-cols-2 gap-3" : "flex flex-col gap-3"}>
+    <div className={inline ? "grid grid-cols-2 gap-2" : "flex flex-col gap-3"}>
       <Button
         variant="outline"
         className="min-h-11 h-auto min-w-0 w-full cursor-pointer justify-start gap-2 whitespace-normal px-3 py-2 text-left text-sm"
