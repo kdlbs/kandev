@@ -22,13 +22,10 @@ import { FileIcon } from "@/components/ui/file-icon";
 import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
 import { LineStat } from "@/components/diff-stat";
-import type { FileRowProps } from "./changes-panel-file-row";
+import type { FileRowProps, FileRowContentProps } from "./changes-panel-file-row";
 
-export function TouchFileRowContent(props: FileRowProps) {
-  const { file, treeMode, indentPx, isPending } = props;
-  const slash = file.path.lastIndexOf("/");
-  const name = file.path.slice(slash + 1);
-  const folder = slash < 0 ? "" : file.path.slice(0, slash);
+export function TouchFileRowContent(props: FileRowContentProps) {
+  const { file, treeMode, indentPx, isPending, folder, name } = props;
 
   return (
     <>
@@ -36,7 +33,7 @@ export function TouchFileRowContent(props: FileRowProps) {
         type="button"
         title={file.path}
         className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left cursor-pointer"
-        style={indentPx ? { paddingLeft: indentPx } : undefined}
+        style={indentPx ? { paddingLeft: Math.min(indentPx, 24) } : undefined}
       >
         {isPending ? (
           <IconLoader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />

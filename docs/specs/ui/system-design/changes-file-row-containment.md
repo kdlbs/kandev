@@ -52,9 +52,11 @@ apply the touch presentation below without rewriting paths or measuring text.
 `FileRow` uses `useResponsiveBreakpoint` to choose the compact presentation
 when `isMobile || !isFinePointer`. The existing row click handler continues
 to own selection, image editing, and repository/layer-aware diff opening.
+`FileRow` splits the path once for either presentation.
 `TouchFileRowContent` renders a small file icon, a flexible filename-first
 identity button, and one 44px ellipsis trigger. List mode puts the directory
-on a secondary line; tree mode retains parent context and indentation. Long
+on a secondary line; tree mode retains parent context and caps file indentation
+at 24px so deep nesting cannot consume the filename or metadata width. Long
 basenames wrap instead of ending in an ellipsis. The identity button itself
 is at least 44px tall. Inline statistics share the secondary line without
 taking space from the basename.
@@ -102,9 +104,10 @@ viewport container is introduced. Fine-pointer desktop composition is retained.
   mobile Changes entry point and proves the same visible and actionable result.
 - Working-tree phone Playwright proves filename width, row density, long-name
   wrapping, menu containment and focus return, staging/unstaging, Edit, discard
-  cancellation, and diff navigation. It checks 393px, 767px, and 768px widths.
-- Desktop Git E2E and the existing tree Vitest suite guard inline actions and
-  tree behavior. Screenshots record the phone list, menu, and desktop surface.
+  cancellation, diff navigation, and a 22-level tree. It checks 393px and 767px
+  touch widths; the fine-pointer desktop test checks the 767px/768px transition.
+- Desktop Git E2E and the existing file-row and tree Vitest suites guard inline
+  actions, touch-menu routing, pending feedback, and tree behavior. Screenshots record the phone list, menu, and desktop surface.
 
 ## Related decisions
 

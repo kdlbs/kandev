@@ -223,7 +223,7 @@ test.describe("Mobile changes panel", () => {
       await expect(testPage.getByTestId("discard-local-changes-confirm")).toBeVisible();
       await testPage.getByRole("button", { name: "Cancel", exact: true }).tap();
       await expect(row).toBeVisible();
-      expect(git.exec("git status --porcelain")).toContain("apps/");
+      expect(git.exec("git status --porcelain --untracked-files=all")).toContain(filePath);
 
       await identity.tap();
       await expectDiffText(testPage, "READABLE_FILE_MARKER");
@@ -235,6 +235,65 @@ test.describe("Mobile changes panel", () => {
       await expect(viewer).toBeVisible();
       await expect(viewer.getByText(filePath, { exact: true })).toBeVisible();
       expect((await apiClient.getUserSettings()).settings.changes_panel_layout).toBe("flat");
+    } finally {
+      await apiClient.saveUserSettings({ changes_panel_layout: initialLayout });
+    }
+  });
+
+  // @covers AC-UI-CHANGES-FILE-ROW-CONTAINMENT-002.1
+  test("deep tree rows keep filenames and actions within the panel", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const initialLayout = (await apiClient.getUserSettings()).settings.changes_panel_layout;
+    try {
+      await apiClient.saveUserSettings({ changes_panel_layout: "tree" });
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Deep changes tree",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle();
+      const git = new GitHelper(
+        path.join(backend.tmpDir, "repos", "e2e-repo"),
+        makeGitEnv(backend.tmpDir),
+      );
+      let folder = "src";
+      for (let depth = 0; depth < 22; depth++) {
+        git.createFile(`${folder}/sibling.ts`, "sibling\n");
+        folder += `/level-${depth}`;
+      }
+      const name = "deeply-nested-file.test.ts";
+      const filePath = `${folder}/${name}`;
+      git.createFile(filePath, "DEEP_FILE_MARKER\n");
+      await openMobileChangesPanel(testPage);
+      await expandSection(testPage, "unstaged-files-section");
+      const row = testPage.getByTestId(`file-row-${filePath.replaceAll("/", "-")}`);
+      await row.scrollIntoViewIfNeeded();
+      const rowBox = (await row.boundingBox())!;
+      const filenameBox = (await row.getByText(name, { exact: true }).boundingBox())!;
+      expect(filenameBox.width).toBeGreaterThan(rowBox.width * 0.5);
+      const statusBox = (await row.locator("[data-file-status]").boundingBox())!;
+      const menuButton = row.getByRole("button", { name: "Show more actions" });
+      const menuBox = (await menuButton.boundingBox())!;
+      expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(menuBox.x);
+      expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width);
+      await menuButton.tap();
+      await expect(testPage.getByRole("menu").getByText(filePath, { exact: true })).toBeVisible();
+      await testPage.keyboard.press("Escape");
+      await row.getByTitle(filePath, { exact: true }).tap();
+      await expectDiffText(testPage, "DEEP_FILE_MARKER");
     } finally {
       await apiClient.saveUserSettings({ changes_panel_layout: initialLayout });
     }

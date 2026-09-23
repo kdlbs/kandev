@@ -66,8 +66,9 @@ the file and returns to the list. Covers AC-002.1 through AC-002.4.
 
 ## Tests
 
-Existing `changes-panel-tree.test.tsx` guards tree action wiring. Rendering and
-action routing use Playwright rather than additional component markup tests.
+Existing `changes-panel-tree.test.tsx` guards tree action wiring. Update the
+existing file-row tests for touch menus, pending state, and fine-pointer phones.
+Playwright owns rendered geometry, deep-tree containment, and action routing.
 
 ## E2E tests
 
@@ -82,8 +83,8 @@ and adds the 767px/768px fine-pointer composition transition.
 
 ## Verification results
 
-Completed: 8 mobile browser tests, 4 focused desktop browser tests, 6 tree unit
-tests, typecheck, ESLint, Prettier, staged i18n ratchet, documentation catalog,
+Completed: 9 mobile browser tests, 4 focused desktop browser tests, 24 file-row
+and tree unit tests, typecheck, ESLint, Prettier, staged i18n ratchet, documentation catalog,
 36 specification-linter tests, full spec lint, and diff checks passed. The
 [work order](task-01-compact-touch-file-rows.md#results) records commands, the
 baseline failure, and a temporary desktop-discovery override needed for this

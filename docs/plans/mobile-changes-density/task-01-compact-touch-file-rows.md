@@ -71,7 +71,7 @@ pnpm e2e:run --host --no-build --project chromium tests/git/git-changes-panel.sp
 desktop_result=$?
 rm e2e/playwright.local-desktop.config.ts
 exit "$desktop_result")
-(cd apps/web && pnpm exec vitest run components/task/changes-panel-tree.test.tsx)
+(cd apps/web && pnpm exec vitest run components/task/changes-panel-file-row.test.tsx components/task/changes-panel-tree.test.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm exec eslint components/task/changes-panel-file-row.tsx components/task/changes-panel-touch-file-row.tsx)
 (cd apps/web && pnpm run i18n:ratchet)
@@ -85,6 +85,7 @@ git status --short -- docs/plans/mobile-changes-density
 ## Files likely touched
 
 - `apps/web/components/task/changes-panel-file-row.tsx`
+- `apps/web/components/task/changes-panel-file-row.test.tsx`
 - `apps/web/components/task/changes-panel-touch-file-row.tsx`
 - `apps/web/e2e/tests/task/mobile-changes-panel.spec.ts`
 - `apps/web/e2e/tests/git/git-changes-panel.spec.ts`
@@ -110,11 +111,12 @@ DropdownMenu primitives, and mobile UI language contextual-action pattern.
 ## Results
 
 - RED: the phone filename-width assertion failed at 46.7% against a required minimum of 65%.
-- GREEN: managed production build, followed by the final mobile run with `--no-build`: **8 passed**, including flat/tree geometry, stage/unstage, discard cancellation, Edit, and layer/PR diff routing.
+- GREEN: managed production build and mobile run: **9 passed**, including flat/tree geometry, 22-level tree containment, stage/unstage, discard cancellation, Edit, and layer/PR diff routing.
 - Desktop: **4 passed**, including the new 767px/768px transition and existing stage/unstage pending feedback and mixed-layer scenarios.
 - The default desktop discovery excluded this worktree because its absolute path contains `mobile-`. The temporary config above scopes that exclusion to the spec basename; it changes no test behavior and was removed after the run.
-- `vitest run components/task/changes-panel-tree.test.tsx`: **6 passed**.
-- Typecheck, ESLint with zero warnings (both components and both specs), Prettier check, and staged i18n ratchet: **passed**.
+- File-row and tree Vitest suites: **24 passed**. Updated obsolete coarse-pointer assertions and covered the pending menu and fine-pointer phone presentation.
+- Review regression RED: a 22-level tree left zero filename width. GREEN: touch indentation is capped at 24px; the same browser test preserves more than half the row width for the basename and keeps status/menu contained.
+- Typecheck, ESLint with zero warnings (both components, the file-row unit tests, and both browser specs), Prettier check, and staged i18n ratchet: **passed**.
 - Catalog validation: **299 decisions and 1112 specifications**. Specification linter tests: **36 passed**. Full specification lint and `git diff --check`: **passed**.
 - Four fresh, inspected, compressed screenshots cover phone flat/tree lists, the action sheet, and desktop. Assets use disposable E2E data and remain outside the product branch.
 - Rendered hierarchy matches UI-01/UI-02. No new API, persistence, or locale keys. Public review guide updated with the menu entry point.
