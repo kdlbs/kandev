@@ -247,7 +247,8 @@ test.describe("Compact task topbar workflow stepper", () => {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
-    const targetStep = adjacentStep(seedData.steps, seedData.startStepId);
+    const { steps } = await apiClient.listWorkflowSteps(seedData.workflowId);
+    const targetStep = adjacentStep(steps, seedData.startStepId);
 
     await tabletTestPage.goto(`/t/${task.task_id}`);
     const session = new SessionPage(tabletTestPage);
