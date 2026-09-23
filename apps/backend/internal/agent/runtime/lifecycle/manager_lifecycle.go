@@ -270,7 +270,10 @@ func (m *Manager) Start(ctx context.Context) error {
 				execution.SessionTraceContext(), execution.TaskID, execution.SessionID, execution.ID,
 			)
 
+			exactAttempt := m.recoveredExactProfileLaunchAttempt(recoveryCtx, execution)
+			execution.remoteInstanceLifecycleMu.Lock()
 			if err := m.executionStore.Add(execution); err != nil {
+				execution.remoteInstanceLifecycleMu.Unlock()
 				// Should not happen at startup — duplicate sessions in the recovery
 				// list signal a DB consistency issue, not a normal race. Log loudly
 				// and skip; the first one to land wins.
@@ -286,6 +289,10 @@ func (m *Manager) Start(ctx context.Context) error {
 				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
 			}
+			if exactAttempt != nil {
+				execution.installExactProfileLaunchAttempt(exactAttempt)
+			}
+			execution.remoteInstanceLifecycleMu.Unlock()
 			m.setRuntimeInterest(execution.SessionID, true)
 			// AC-EXECUTORS-SURVIVAL-003.1: this execution is durably in the
 			// store as of the Add above, so its session is re-tracked from

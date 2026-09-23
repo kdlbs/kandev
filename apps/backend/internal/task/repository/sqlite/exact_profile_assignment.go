@@ -402,6 +402,40 @@ func (r *Repository) BindExactProfileLaunchAttempt(ctx context.Context, binding 
 	return true, nil
 }
 
+// GetCurrentExactProfileLaunchAttempt returns one admitted binding only while
+// its assignment and session incarnation remain current. Recovery callers must
+// match the returned execution identity before using it as event evidence.
+func (r *Repository) GetCurrentExactProfileLaunchAttempt(ctx context.Context, taskID, sessionID string) (*models.ExactProfileLaunchAttemptBinding, error) {
+	if taskID == "" || sessionID == "" {
+		return nil, models.ErrExactProfileAssignmentInvalidInput
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin exact profile launch attempt lookup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	binding := &models.ExactProfileLaunchAttemptBinding{}
+	var revisionNanos int64
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT task_id, session_id, execution_id, attempt_id, session_incarnation_id, agent_profile_id, profile_revision_nanos, generation, created_at FROM task_exact_profile_launch_attempt_bindings WHERE task_id=? AND session_id=?`), taskID, sessionID).Scan(&binding.TaskID, &binding.SessionID, &binding.ExecutionID, &binding.AttemptID, &binding.SessionIncarnationID, &binding.AgentProfileID, &revisionNanos, &binding.Generation, &binding.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load exact profile launch attempt: %w", err)
+	}
+	binding.ProfileRevision = time.Unix(0, revisionNanos).UTC()
+	if err := r.validateExactProfileLaunchAttemptCurrentTx(ctx, tx, binding); err != nil {
+		if errors.Is(err, models.ErrExactProfileAssignmentGeneration) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit exact profile launch attempt lookup: %w", err)
+	}
+	return binding, nil
+}
+
 func (r *Repository) RecordExactProfileLaunchReceiptForAttempt(ctx context.Context, binding *models.ExactProfileLaunchAttemptBinding, receipt *models.ExactProfileLaunchReceipt) (bool, error) {
 	if !validExactProfileLaunchAttemptBinding(binding) || receipt == nil {
 		return false, models.ErrExactProfileAssignmentInvalidInput

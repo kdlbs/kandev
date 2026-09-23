@@ -183,6 +183,32 @@ func TestExactProfileAttemptRejectsSupersededAssignment(t *testing.T) {
 	}
 }
 
+func TestGetCurrentExactProfileLaunchAttemptFailsClosedWhenSuperseded(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	if _, err := repo.AssignExactProfileAssignment(t.Context(), assignment); err != nil {
+		t.Fatal(err)
+	}
+	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: assignment.TaskID, SessionID: "recovery-session", ExecutionID: "recovery-execution", AttemptID: "recovery-attempt", SessionIncarnationID: "recovery-incarnation", AgentProfileID: assignment.AgentProfileID, ProfileRevision: assignment.ProfileRevision, Generation: assignment.Generation}
+	createExactProfileAttemptSession(t, repo, binding)
+	if changed, err := repo.BindExactProfileLaunchAttempt(t.Context(), binding); err != nil || !changed {
+		t.Fatalf("bind exact attempt changed=%v err=%v", changed, err)
+	}
+	got, err := repo.GetCurrentExactProfileLaunchAttempt(t.Context(), binding.TaskID, binding.SessionID)
+	if err != nil || !exactProfileLaunchAttemptBindingsEqual(got, binding) {
+		t.Fatalf("current binding=%#v err=%v", got, err)
+	}
+	next := *assignment
+	next.Generation++
+	next.ProfileRevision = next.ProfileRevision.Add(time.Second)
+	if _, err := repo.AssignExactProfileAssignment(t.Context(), &next); err != nil {
+		t.Fatal(err)
+	}
+	got, err = repo.GetCurrentExactProfileLaunchAttempt(t.Context(), binding.TaskID, binding.SessionID)
+	if err != nil || got != nil {
+		t.Fatalf("superseded binding=%#v err=%v, want nil", got, err)
+	}
+}
+
 func TestExactProfileAttemptRejectsSupersededSessionAndAdmitsSuccessor(t *testing.T) {
 	repo, assignment := newExactProfileAssignmentRepo(t)
 	if _, err := repo.AssignExactProfileAssignment(t.Context(), assignment); err != nil {
