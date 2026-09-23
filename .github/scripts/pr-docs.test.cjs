@@ -1696,10 +1696,17 @@ test('newly added requirements resolve from the head diff without code search', 
   delete contents[originalPath];
   changed.push({ filename: requirementPath, status: 'added' });
   let searches = 0;
+  let listings = 0;
   const client = coverageClient(contents, changed, {
     async searchCode() {
       searches += 1;
       throw new Error('code search should not run for a newly added requirement');
+    },
+    async listDirectory(directory, ref) {
+      assert.equal(directory, 'docs/specs/ui/requirements');
+      assert.equal(ref, SHA_B);
+      listings += 1;
+      return [{ path: requirementPath, type: 'file' }];
     },
   });
 
@@ -1707,6 +1714,42 @@ test('newly added requirements resolve from the head diff without code search', 
 
   assert.equal(result.status, 'covered', result.errors.join('; '));
   assert.equal(searches, 0);
+  assert.equal(listings, 1);
+});
+
+// @covers AC-CI-PR-DOCS-001.5
+test('newly added canonical requirements still reject duplicate IDs', async () => {
+  const { contents, changed, requirementPath: originalPath } = repeatedCoverageFixture();
+  const requirementPath = 'docs/specs/ui/requirements/coverage.md';
+  const duplicatePath = 'docs/specs/ui/requirements/duplicate.md';
+  contents[requirementPath] = contents[originalPath];
+  delete contents[originalPath];
+  contents[duplicatePath] = contents[requirementPath];
+  changed.push({ filename: requirementPath, status: 'added' });
+  let searches = 0;
+  let listings = 0;
+  const client = coverageClient(contents, changed, {
+    async searchCode() {
+      searches += 1;
+      return [requirementPath];
+    },
+    async listDirectory(directory, ref) {
+      assert.equal(directory, 'docs/specs/ui/requirements');
+      assert.equal(ref, SHA_B);
+      listings += 1;
+      return [
+        { path: requirementPath, type: 'file' },
+        { path: duplicatePath, type: 'file' },
+      ];
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'invalid', result.errors.join('; '));
+  assert.match(result.errors.join('; '), /ambiguous definitions/);
+  assert.equal(searches, 0);
+  assert.equal(listings, 1);
 });
 
 // @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-001.5

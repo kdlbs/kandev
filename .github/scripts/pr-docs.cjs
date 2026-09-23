@@ -62,7 +62,8 @@ const WORK_ORDER_REQUIRED_FIELDS = [
   'system_design',
 ];
 const MAX_DOCUMENT_BYTES = 256 * 1024;
-const MAX_DOCUMENTS = 100;
+const MAX_DOCUMENTS = 200;
+const MAX_CHANGED_WORK_ORDERS = 100;
 const MAX_TOTAL_DOCUMENT_BYTES = 4 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_CHANGED_FILES = 3000;
@@ -844,8 +845,8 @@ function validateCoverage({ changedFiles = [], fileContents = {} } = {}) {
   }
 
   result.workOrders = selectChangedWorkOrders(changedFiles);
-  if (result.workOrders.length > MAX_DOCUMENTS) {
-    result.errors.push(`More than ${MAX_DOCUMENTS} changed work orders were supplied`);
+  if (result.workOrders.length > MAX_CHANGED_WORK_ORDERS) {
+    result.errors.push(`More than ${MAX_CHANGED_WORK_ORDERS} changed work orders were supplied`);
   }
   if (result.workOrders.length === 0) {
     result.status = 'missing';
@@ -1588,6 +1589,22 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
     return content;
   }
 
+  async function listRequirementDirectory(requirementDirectory, ref) {
+    const key = JSON.stringify([requirementDirectory, ref]);
+    if (!requirementDirectories.has(key)) {
+      let entries = [];
+      try {
+        entries = await client.listDirectory(requirementDirectory, ref);
+      } catch (error) {
+        if (!isMissingResourceError(error)) {
+          throw error;
+        }
+      }
+      requirementDirectories.set(key, entries);
+    }
+    return requirementDirectories.get(key);
+  }
+
   for (const workOrderPath of selectChangedWorkOrders(changedFiles)) {
     const workOrderContent = await load(workOrderPath, headSha, contents);
     if (workOrderContent === undefined) {
@@ -1666,13 +1683,37 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
           }
         }
       }
+      const checkedAddedRequirementPaths = new Set();
+      if (addedRequirementPaths.size > 0 && typeof client.listDirectory === 'function') {
+        const entries = await listRequirementDirectory(requirementDirectory, headSha);
+        for (const entry of entries) {
+          if (
+            entry.type !== 'file'
+            || typeof entry.path !== 'string'
+            || !entry.path.startsWith(`${requirementDirectory}/`)
+            || !entry.path.endsWith('.md')
+          ) {
+            continue;
+          }
+          const pathname = normalizeRepoPath(entry.path);
+          await load(pathname, headSha, contents);
+          if (addedRequirementPaths.has(pathname)) {
+            checkedAddedRequirementPaths.add(pathname);
+          }
+        }
+      }
       const workOrderRequirements = new Set(workOrder.requirements ?? []);
       const referencedRequirementIds = designRequirements.filter(requirementId =>
         workOrderRequirements.has(requirementId)
       );
       const verifiedRequirementIds = new Set();
+      const ambiguousRequirementIds = new Set();
       for (const requirementId of referencedRequirementIds) {
         const definitions = requirementDefinitions(contents, requirementId, system);
+        if (definitions.length > 1) {
+          ambiguousRequirementIds.add(requirementId);
+          continue;
+        }
         if (definitions.length !== 1) {
           continue;
         }
@@ -1683,7 +1724,7 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
           && (
             hasRequirementHeading(baseContent, requirementId)
             || (
-              addedRequirementPaths.has(definition.pathname)
+              checkedAddedRequirementPaths.has(definition.pathname)
               && definition.pathname === candidateRequirementPath(requirementDirectory, requirementId)
             )
           )
@@ -1694,7 +1735,7 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
       const unresolvedRequirementIds = [];
       if (typeof client.searchCode === 'function') {
         for (const requirementId of referencedRequirementIds) {
-          if (verifiedRequirementIds.has(requirementId)) {
+          if (verifiedRequirementIds.has(requirementId) || ambiguousRequirementIds.has(requirementId)) {
             continue;
           }
           const searchKey = JSON.stringify([requirementDirectory, requirementId]);
@@ -1714,22 +1755,13 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
         }
       } else {
         unresolvedRequirementIds.push(
-          ...referencedRequirementIds.filter(requirementId => !verifiedRequirementIds.has(requirementId)),
+          ...referencedRequirementIds.filter(requirementId =>
+            !verifiedRequirementIds.has(requirementId) && !ambiguousRequirementIds.has(requirementId)
+          ),
         );
       }
       if (unresolvedRequirementIds.length > 0 && typeof client.listDirectory === 'function') {
-        if (!requirementDirectories.has(requirementDirectory)) {
-          let entries = [];
-          try {
-            entries = await client.listDirectory(requirementDirectory, headSha);
-          } catch (error) {
-            if (!isMissingResourceError(error)) {
-              throw error;
-            }
-          }
-          requirementDirectories.set(requirementDirectory, entries);
-        }
-        const entries = requirementDirectories.get(requirementDirectory);
+        const entries = await listRequirementDirectory(requirementDirectory, headSha);
         const candidateNames = new Set(unresolvedRequirementIds.map(requirementId =>
           POSIX_PATH.basename(candidateRequirementPath(requirementDirectory, requirementId))
         ));
