@@ -104,7 +104,7 @@ func TestExactProfileBindingSchemaReopenLeavesLegacySessionsUnbound(t *testing.T
 
 func TestExactProfileBindingSchemaUpgradesPriorExactSchema(t *testing.T) {
 	repo, assignment := newExactProfileAssignmentRepo(t)
-	if _, err := repo.db.Exec(`DROP TABLE task_exact_profile_launch_attempt_bindings`); err != nil {
+	if _, err := repo.db.Exec(`DROP TABLE task_exact_profile_launch_attempt_bindings; DROP TABLE task_exact_profile_launch_attempt_receipts`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.AssignExactProfileAssignment(t.Context(), assignment); err != nil {
@@ -117,9 +117,12 @@ func TestExactProfileBindingSchemaUpgradesPriorExactSchema(t *testing.T) {
 	if _, err := NewWithDB(repo.db, repo.ro, nil); err != nil {
 		t.Fatalf("upgrade prior exact schema: %v", err)
 	}
-	var bindings int
+	var bindings, attemptReceipts int
 	if err := repo.db.GetContext(t.Context(), &bindings, `SELECT COUNT(*) FROM task_exact_profile_launch_attempt_bindings`); err != nil || bindings != 0 {
 		t.Fatalf("upgraded bindings=%d err=%v", bindings, err)
+	}
+	if err := repo.db.GetContext(t.Context(), &attemptReceipts, `SELECT COUNT(*) FROM task_exact_profile_launch_attempt_receipts`); err != nil || attemptReceipts != 0 {
+		t.Fatalf("upgraded attempt receipts=%d err=%v", attemptReceipts, err)
 	}
 	stored, err := repo.GetExactProfileLaunchReceipt(t.Context(), assignment.TaskID, receipt.SessionID)
 	if err != nil || stored == nil || stored.Outcome != receipt.Outcome {
@@ -190,6 +193,10 @@ func TestExactProfileAttemptRejectsSupersededSessionAndAdmitsSuccessor(t *testin
 	if _, err := repo.BindExactProfileLaunchAttempt(t.Context(), old); err != nil {
 		t.Fatal(err)
 	}
+	oldReceipt := &models.ExactProfileLaunchReceipt{TaskID: old.TaskID, SessionID: old.SessionID, AgentProfileID: old.AgentProfileID, ProfileRevision: old.ProfileRevision, Generation: old.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
+	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(t.Context(), old, oldReceipt); err != nil || !changed {
+		t.Fatalf("old receipt = (%v, %v)", changed, err)
+	}
 	nextAssignment := *assignment
 	nextAssignment.Generation++
 	nextAssignment.ProfileRevision = nextAssignment.ProfileRevision.Add(time.Second)
@@ -203,13 +210,25 @@ func TestExactProfileAttemptRejectsSupersededSessionAndAdmitsSuccessor(t *testin
 	if changed, err := repo.BindExactProfileLaunchAttempt(t.Context(), successor); err != nil || !changed {
 		t.Fatalf("replace binding = (%v, %v)", changed, err)
 	}
-	oldReceipt := &models.ExactProfileLaunchReceipt{TaskID: old.TaskID, SessionID: old.SessionID, AgentProfileID: old.AgentProfileID, ProfileRevision: old.ProfileRevision, Generation: old.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
+	if receipt, err := repo.GetExactProfileLaunchReceipt(t.Context(), successor.TaskID, successor.SessionID); err != nil || receipt != nil {
+		t.Fatalf("successor inherited receipt = %#v, %v", receipt, err)
+	}
 	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(t.Context(), old, oldReceipt); changed || !errors.Is(err, models.ErrExactProfileAssignmentGeneration) {
 		t.Fatalf("old receipt = (%v, %v)", changed, err)
 	}
 	successorReceipt := &models.ExactProfileLaunchReceipt{TaskID: successor.TaskID, SessionID: successor.SessionID, AgentProfileID: successor.AgentProfileID, ProfileRevision: successor.ProfileRevision, Generation: successor.Generation, Outcome: models.ExactProfileLaunchOutcomeFailedClosed}
 	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(t.Context(), successor, successorReceipt); err != nil || !changed {
 		t.Fatalf("successor receipt = (%v, %v)", changed, err)
+	}
+	if changed, err := repo.RecordExactProfileLaunchReceiptForAttempt(t.Context(), successor, successorReceipt); err != nil || changed {
+		t.Fatalf("successor replay = (%v, %v)", changed, err)
+	}
+	if receipt, err := repo.GetExactProfileLaunchReceipt(t.Context(), successor.TaskID, successor.SessionID); err != nil || receipt == nil || receipt.Generation != successor.Generation {
+		t.Fatalf("current successor receipt = %#v, %v", receipt, err)
+	}
+	var historical int
+	if err := repo.db.GetContext(t.Context(), &historical, `SELECT COUNT(*) FROM task_exact_profile_launch_attempt_receipts WHERE task_id = ? AND session_id = ?`, old.TaskID, old.SessionID); err != nil || historical != 2 {
+		t.Fatalf("historical attempt receipts = %d, %v", historical, err)
 	}
 }
 

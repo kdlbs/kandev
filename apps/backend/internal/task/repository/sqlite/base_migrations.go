@@ -813,6 +813,16 @@ func (r *Repository) ensureTaskExactProfileSchema() error {
 			generation BIGINT NOT NULL, created_at TIMESTAMP NOT NULL,
 			PRIMARY KEY (task_id, session_id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		);
+		CREATE TABLE IF NOT EXISTS task_exact_profile_launch_attempt_receipts (
+			task_id TEXT NOT NULL, session_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+			attempt_id TEXT NOT NULL, session_incarnation_id TEXT NOT NULL,
+			agent_profile_id TEXT NOT NULL, profile_revision_nanos BIGINT NOT NULL,
+			generation BIGINT NOT NULL, model TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL,
+			failure_reason TEXT NOT NULL DEFAULT '', inference_started INTEGER NOT NULL DEFAULT 0,
+			substitution_done INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL,
+			PRIMARY KEY (task_id, session_id, execution_id, attempt_id, session_incarnation_id, agent_profile_id, profile_revision_nanos, generation),
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		);
 	`); err != nil {
 		return fmt.Errorf("create exact task profile schema: %w", err)
 	}
