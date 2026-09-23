@@ -47,8 +47,12 @@ export type SessionEntryRecoveryProxy = {
   delayedResponseCount: (action: string) => number;
   droppedResponseCount: (action: string) => number;
   rejectedResponseCount: (action: string) => number;
+  failResponses: (action: string, message: string) => void;
+  allowResponses: (action: string) => void;
   holdResponses: (action: string, scope?: { sessionId?: string }) => void;
   releaseHeldResponses: (action: string) => void;
+  pendingRequestCount: (action: string) => number;
+  failedResponseCount: (action: string) => number;
   heldResponseCount: (action: string) => number;
 };
 
@@ -144,8 +148,8 @@ function consumeDelayRule(
 }
 
 /**
- * Fail, delay, drop, or hold selected gateway responses while forwarding every other
- * frame. Rules correlate replies by request id, so the test never relies on
+ * Fail, delay, drop, or hold selected gateway responses while forwarding other frames.
+ * Rules correlate replies by request id, so the test never relies on
  * action-only or payload timing and does not inspect message contents.
  */
 export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntryRecoveryProxy> {
@@ -154,11 +158,13 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
   const delayedCounts = new Map<string, number>();
   const droppedCounts = new Map<string, number>();
   const rejectedCounts = new Map<string, number>();
+  const failedCounts = new Map<string, number>();
   const heldCounts = new Map<string, number>();
   const rules = new Map<string, DelayRule>();
   const dropRules = new Map<string, DropRule>();
   const rejectRules = new Map<string, RejectRule>();
   const holdRules = new Map<string, HoldRule>();
+  const failureMessages = new Map<string, string>();
 
   await page.routeWebSocket(/\/ws$/, (ws) => {
     const server = ws.connectToServer();
@@ -220,6 +226,20 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
             continue;
           }
           if (consumeHoldRule(context, holdRules, heldCounts)) continue;
+          if (frame && context && failureMessages.has(context.action)) {
+            failedCounts.set(context.action, (failedCounts.get(context.action) ?? 0) + 1);
+            ws.send(
+              JSON.stringify({
+                ...frame,
+                type: "error",
+                payload: {
+                  code: "INTERNAL_ERROR",
+                  message: failureMessages.get(context.action),
+                },
+              }),
+            );
+            continue;
+          }
           if (consumeDropRule(context, dropRules, droppedCounts)) continue;
           if (consumeDelayRule(context?.action, trimmed, rules, delayedCounts, ws.send.bind(ws)))
             continue;
@@ -245,16 +265,26 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
       rejectRules.set(action, { message, sessionId: scope?.sessionId });
     },
     releaseRejectedResponses: (action) => rejectRules.delete(action),
-    requestCount: (action) => requestCounts.get(action) ?? 0,
-    delayedResponseCount: (action) => delayedCounts.get(action) ?? 0,
-    droppedResponseCount: (action) => droppedCounts.get(action) ?? 0,
     rejectedResponseCount: (action) => rejectedCounts.get(action) ?? 0,
+    failResponses: (action, message) => {
+      if (!message) throw new Error("failResponses requires an error message");
+      failureMessages.set(action, message);
+    },
+    allowResponses: (action) => {
+      failureMessages.delete(action);
+    },
     holdResponses: (action, scope) => {
       holdRules.set(action, { sessionId: scope?.sessionId });
     },
     releaseHeldResponses: (action) => {
       holdRules.delete(action);
     },
+    pendingRequestCount: (action) =>
+      [...requestContexts.values()].filter((context) => context.action === action).length,
+    requestCount: (action) => requestCounts.get(action) ?? 0,
+    delayedResponseCount: (action) => delayedCounts.get(action) ?? 0,
+    droppedResponseCount: (action) => droppedCounts.get(action) ?? 0,
+    failedResponseCount: (action) => failedCounts.get(action) ?? 0,
     heldResponseCount: (action) => heldCounts.get(action) ?? 0,
   };
 }

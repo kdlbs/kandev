@@ -146,7 +146,14 @@ export async function selectGeneratedText(frame: FrameLocator): Promise<void> {
   });
 }
 
-export async function dragScreenshotRegion(page: Page, target: Locator): Promise<void> {
+export async function dragScreenshotRegion(
+  page: Page,
+  frame: FrameLocator,
+  target: Locator,
+): Promise<void> {
+  // The inspector changes the iframe's cursor only after it receives the
+  // capture-mode message. Wait for that state before sending pointer events.
+  await expect(frame.locator("html")).toHaveCSS("cursor", "crosshair");
   const box = await target.boundingBox();
   if (!box) throw new Error("screenshot target did not have a bounding box");
   await page.mouse.move(box.x + 4, box.y + 4);
