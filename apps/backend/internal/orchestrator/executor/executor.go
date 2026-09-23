@@ -661,6 +661,8 @@ const McpModeOffice = mcpmode.Office
 // created by a user-configured automation.
 const McpModeAutomation = mcpmode.Automation
 
+var ErrExactAttemptAdmission = errors.New("exact launch attempt admission refused")
+
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
 	AgentProfileID         string

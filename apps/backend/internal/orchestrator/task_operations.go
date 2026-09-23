@@ -972,7 +972,9 @@ func (s *Service) startCreatedSession(
 	}
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
 	if err != nil {
-		s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err)
+		if !errors.Is(err, executor.ErrExactAttemptAdmission) {
+			s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err)
+		}
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.
 		if initialTurnCreated {

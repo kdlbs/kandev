@@ -1700,7 +1700,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if startAgent && opts.OnExecutionAdmitted != nil {
 		if err := opts.OnExecutionAdmitted(resp.AgentExecutionID); err != nil {
 			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
-			return nil, fmt.Errorf("admit execution before agent start: %w", err)
+			return nil, fmt.Errorf("%w: %v", ErrExactAttemptAdmission, err)
 		}
 	}
 
@@ -2452,7 +2452,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	if onExecutionAdmitted != nil {
 		if err := onExecutionAdmitted(executionID); err != nil {
 			e.stopFailedStartExecution(ctx, executionID, "execution admission")
-			return nil, fmt.Errorf("admit existing execution before agent start: %w", err)
+			return nil, fmt.Errorf("%w: %v", ErrExactAttemptAdmission, err)
 		}
 	}
 

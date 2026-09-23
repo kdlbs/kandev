@@ -307,6 +307,34 @@ func TestStartCreatedSessionAsyncStartFailureRecordsFailedClosedExactReceipt(t *
 	}
 }
 
+func TestStartCreatedSessionRefusedExactAdmissionLeavesNoReceipt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session-refused", models.TaskSessionStateCreated)
+	revision := exactProfileRecoveryAssignment(t, repo)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", WorkspaceID: "ws1", Title: "Test", State: v1.TaskStateInProgress}
+	startCalls := 0
+	agentManager := &mockAgentManager{resolveProfileInfo: exactProfileRecoveryInfo(revision), launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		// Replace authority after resolution but before OnExecutionAdmitted.
+		if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{TaskID: "task1", WorkspaceID: "ws1", AgentProfileID: "profile-exact", ProfileRevision: revision.Add(time.Second), Generation: 2}); err != nil {
+			t.Fatal(err)
+		}
+		return &executor.LaunchAgentResponse{AgentExecutionID: "exec-refused"}, nil
+	}}
+	agentManager.startAgentProcessFunc = func(context.Context, string) error { startCalls++; return nil }
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
+	if _, err := svc.StartCreatedSession(ctx, "task1", "session-refused", "profile-exact", "start", true, false, false, nil, nil); !errors.Is(err, executor.ErrExactAttemptAdmission) {
+		t.Fatalf("StartCreatedSession error = %v", err)
+	}
+	if startCalls != 0 {
+		t.Fatalf("StartAgentProcess calls = %d, want 0", startCalls)
+	}
+	if receipt, err := repo.GetExactProfileLaunchReceipt(ctx, "task1", "session-refused"); err != nil || receipt != nil {
+		t.Fatalf("forged receipt = %#v, %v", receipt, err)
+	}
+}
+
 func waitForExactProfileReceipt(
 	t *testing.T,
 	repo *sqliterepo.Repository,
