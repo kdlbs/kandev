@@ -21,6 +21,11 @@ import {
 
 const AGENT_TITLE = "Mobile threads live work";
 
+function expectTouchTargetHeight(height: number | undefined): void {
+  // Device-scale-factor rounding can report a 44px CSS target just below 44.
+  expect(height ?? 0).toBeGreaterThanOrEqual(43.99);
+}
+
 function sentSessionIds(frames: readonly GatewayTrafficFrame[], action: string): string[] {
   return frames
     .filter((frame) => frame.direction === "sent" && frame.action === action && frame.sessionId)
@@ -102,7 +107,7 @@ test.describe("Mobile Threads view", () => {
       const openTask = board
         .getByTestId(`thread-column-${tasks[0].id}`)
         .getByRole("button", { name: "Open task", exact: true });
-      expect((await openTask.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      expectTouchTargetHeight((await openTask.boundingBox())?.height);
       await capturePresentation(testPage, testInfo, "grid-touch-tablet");
       await testPage.setViewportSize({ width: 393, height: 851 });
       await expect(testPage.getByTestId("thread-swipe-cue")).toHaveText("2/3");
@@ -167,7 +172,7 @@ test.describe("Mobile Threads view", () => {
     await expect(tabletViewControl).toBeVisible();
     await expect(tabletViewControl.getByText("Threads", { exact: true })).toHaveCount(0);
     await expect(column.getByTestId("thread-picker-trigger")).toHaveCount(0);
-    expect((await tabletViewControl.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expectTouchTargetHeight((await tabletViewControl.boundingBox())?.height);
     await testPage.setViewportSize({ width: 360, height: 740 });
     await expect(viewControl.getByText("Threads", { exact: true })).toBeVisible();
     await expect(column.getByTestId("thread-picker-trigger")).toBeVisible();
@@ -262,7 +267,7 @@ test.describe("Mobile Threads view", () => {
     for (const control of [viewPicker, menu, selected.getByTestId("thread-picker-trigger")]) {
       const box = await control.boundingBox();
       expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expectTouchTargetHeight(box!.height);
       expect(box!.x).toBeGreaterThanOrEqual(0);
       expect(box!.x + box!.width).toBeLessThanOrEqual(360);
       expect(
@@ -319,14 +324,17 @@ test.describe("Mobile Threads view", () => {
     const trigger = testPage.getByTestId("app-nav-trigger");
     const menu = testPage.getByRole("dialog", { name: "Menu", exact: true });
     await trigger.tap();
-    await expect(menu.getByRole("link", { name: "Home", exact: true })).toBeVisible();
-    await expect(menu.getByTestId("mobile-home-status-button")).toBeVisible();
+    await expect(menu).toBeVisible({ timeout: 10_000 });
+    await waitForFiniteAnimations(menu);
+    await expect(menu.getByRole("link", { name: "Home", exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(menu.getByTestId("mobile-home-status-button")).toBeVisible({ timeout: 15_000 });
     const quickChat = menu.getByTestId("mobile-quick-chat-button");
     const terminal = menu.getByTestId("mobile-quick-terminal-button");
-    await waitForFiniteAnimations(menu);
     for (const action of [quickChat, terminal]) {
       await expect(action).toBeVisible();
-      expect((await action.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expectTouchTargetHeight((await action.boundingBox())?.height);
     }
     await quickChat.tap();
     await expect(menu).toBeHidden();
@@ -393,7 +401,7 @@ test.describe("Mobile Threads view", () => {
     ).toHaveAttribute("aria-current", "true");
     const primaryRow = sheet.getByTestId(`thread-session-row-${target.primarySessionId}`);
     const primaryRowBox = await primaryRow.boundingBox();
-    expect(primaryRowBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expectTouchTargetHeight(primaryRowBox?.height);
     expect(await sheetContent.evaluate((element) => element.className)).toContain(
       "safe-area-inset-bottom",
     );
@@ -478,7 +486,7 @@ test.describe("Mobile Threads view", () => {
     await drawer.getByTestId("threads-task-picker-select-all").tap();
     const row = drawer.getByTestId("threads-task-picker-row").first();
     const rowBox = await row.boundingBox();
-    expect(rowBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expectTouchTargetHeight(rowBox?.height);
     await drawer.getByTestId("threads-task-picker-back").tap();
     await expect(editor).toBeVisible();
 
@@ -551,7 +559,7 @@ test.describe("Mobile Threads view", () => {
     const buttonCount = await buttons.count();
     for (let index = 0; index < buttonCount; index += 1) {
       const box = await buttons.nth(index).boundingBox();
-      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expectTouchTargetHeight(box?.height);
     }
     await assertNoHorizontalOverflow(testPage, "mobile Threads saved views");
     await expect(testPage.getByTestId("mobile-home-menu-scroll")).toHaveClass(
@@ -635,7 +643,7 @@ test.describe("Mobile Threads view", () => {
     await expectContentSizedBottomConfirmation(drawer, confirmation);
     for (const action of await confirmation.getByRole("button").all()) {
       const box = await action.boundingBox();
-      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expectTouchTargetHeight(box?.height);
     }
     await confirmation.getByRole("button", { name: "Cancel" }).tap();
     await expect(drawer).toBeVisible();

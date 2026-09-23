@@ -111,6 +111,17 @@ test.describe("Preview session tabs", () => {
     // 5. Enable preview-on-click and open the kanban board.
     await apiClient.saveUserSettings({ enable_preview_on_click: true });
     await kanban.goto();
+    // The first set-primary call happens before the browser page connects, so
+    // its task.updated notification cannot hydrate the client store. Repeat
+    // the idempotent selection after the board is live so the preview opens
+    // from the same primary-session state the user would see.
+    await apiClient.setPrimarySession(primaryId);
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).primary_session_id ?? null, {
+        timeout: 15_000,
+        message: "Waiting for the live board to observe the primary session",
+      })
+      .toBe(primaryId);
 
     const previewCard = kanban.taskCardByTitle("Preview Tabs Task");
     await expect(previewCard).toBeVisible({ timeout: 10_000 });
@@ -131,8 +142,8 @@ test.describe("Preview session tabs", () => {
     // 7. Primary tab is active by default and its session content is visible.
     // "simple mock response" appears only in the agent's reply, not in any prompt,
     // so the single getByText match is unambiguous.
-    await expect(primaryTab).toHaveAttribute("data-state", "active");
-    await expect(secondaryTab).toHaveAttribute("data-state", "inactive");
+    await expect(primaryTab).toHaveAttribute("data-state", "active", { timeout: 15_000 });
+    await expect(secondaryTab).toHaveAttribute("data-state", "inactive", { timeout: 15_000 });
     await expect(previewPanel.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 15_000,
     });
@@ -142,15 +153,15 @@ test.describe("Preview session tabs", () => {
     // prompt and the agent reply; `.first()` picks one deterministically and
     // is enough to prove the secondary session's body is rendered.
     await secondaryTab.click();
-    await expect(secondaryTab).toHaveAttribute("data-state", "active");
-    await expect(primaryTab).toHaveAttribute("data-state", "inactive");
+    await expect(testPage).toHaveURL(new RegExp(`sessionId=${secondaryId}`), { timeout: 20_000 });
+    await expect(secondaryTab).toHaveAttribute("data-state", "active", { timeout: 20_000 });
+    await expect(primaryTab).toHaveAttribute("data-state", "inactive", { timeout: 20_000 });
     await expect(
       previewPanel.getByText("secondary-session-response", { exact: false }).first(),
     ).toBeVisible({ timeout: 15_000 });
     await expect(
       previewPanel.getByText("simple mock response", { exact: false }),
     ).not.toBeVisible();
-    await expect(testPage).toHaveURL(new RegExp(`sessionId=${secondaryId}`), { timeout: 5_000 });
 
     // 9. Read-only tab bar: no close buttons and no add button are rendered.
     await expect(testPage.getByTestId(`preview-session-tab-close-${primaryId}`)).toHaveCount(0);

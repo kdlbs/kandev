@@ -6,6 +6,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent } from "@/lib/ws/workspace-files";
 import { calculateHash } from "@/lib/utils/file-diff";
 import { t } from "@/lib/i18n";
+import { defaultMarkdownFileMode } from "@/components/task/markdown-file-mode";
 
 type UseTaskCenterFileOpenOptions = {
   activeSessionId: string | null;
@@ -41,6 +42,7 @@ export function useTaskCenterFileOpen({
           isDirty: false,
           isBinary: response.is_binary,
           resolvedPath: response.resolved_path,
+          markdownMode: defaultMarkdownFileMode(filePath),
         });
       } catch (error) {
         toast({

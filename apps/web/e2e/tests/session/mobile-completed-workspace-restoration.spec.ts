@@ -78,7 +78,7 @@ test.describe("Completed workspace restoration on mobile", () => {
         .filter({ hasText: RETAINED_WORKSPACE_CONTENT }),
     ).toBeVisible();
 
-    await viewer.getByRole("button", { name: "Close" }).tap();
+    await viewer.getByRole("button", { name: "Back" }).tap();
     await expect(viewer).toHaveCount(0);
 
     await testPage

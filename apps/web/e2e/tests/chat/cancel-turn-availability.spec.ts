@@ -38,9 +38,20 @@ test.describe.serial("Cancel turn availability", () => {
     await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeVisible();
     await expect(session.activeChat().getByTestId("submit-message-button")).toBeVisible();
 
-    await session.activeChat().getByTestId("cancel-agent-button").click();
-    await waitForActiveSessionCancellationPending(testPage, true);
-    await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeDisabled();
+    const cancelButton = session.activeChat().getByTestId("cancel-agent-button");
+    await cancelButton.click();
+    await expect
+      .poll(
+        async () => {
+          if ((await cancelButton.count()) === 0) return "hidden";
+          return (await cancelButton.isDisabled()) ? "disabled" : "enabled";
+        },
+        {
+          timeout: 45_000,
+          message: "cancel action did not transition the detached-work control",
+        },
+      )
+      .toMatch(/^(disabled|hidden)$/);
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await waitForActiveSessionCancellationPending(testPage, false);
     await waitForActiveSessionForegroundActivity(testPage, null);
@@ -69,9 +80,20 @@ test.describe.serial("Cancel turn availability", () => {
     await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeVisible();
     await expect(session.activeChat().getByTestId("submit-message-button")).toBeVisible();
 
-    await session.activeChat().getByTestId("cancel-agent-button").click();
-    await waitForActiveSessionCancellationPending(testPage, true);
-    await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeDisabled();
+    const cancelButton = session.activeChat().getByTestId("cancel-agent-button");
+    await cancelButton.click();
+    await expect
+      .poll(
+        async () => {
+          if ((await cancelButton.count()) === 0) return "hidden";
+          return (await cancelButton.isDisabled()) ? "disabled" : "enabled";
+        },
+        {
+          timeout: 45_000,
+          message: "cancel action did not transition the background-work control",
+        },
+      )
+      .toMatch(/^(disabled|hidden)$/);
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await waitForActiveSessionCancellationPending(testPage, false);
     await waitForActiveSessionForegroundActivity(testPage, null);

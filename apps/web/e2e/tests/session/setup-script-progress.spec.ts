@@ -80,12 +80,9 @@ test.describe("Setup script progress UX", () => {
       const session = new SessionPage(testPage);
       await session.waitForLoad();
 
-      await expect
-        .poll(() => fs.existsSync(gitStartedFile), {
-          message: "repository preparation should reach its deterministic git gate",
-          timeout: 90_000,
-        })
-        .toBe(true);
+      // Release the optional fetch gate after the browser has subscribed. A
+      // cached repository may skip fetch entirely, so the setup-script gate
+      // is the authoritative synchronization point for this test.
       fs.writeFileSync(gitReleaseFile, "release");
       await expect
         .poll(() => fs.existsSync(startedFile), {

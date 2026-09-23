@@ -135,20 +135,33 @@ export const sshTest = backendFixture.extend<
   },
 
   _sshRuntimeReset: [
-    async ({ apiClient, seedData }, use) => {
-      await resetSSHRuntime(apiClient, seedData);
+    async ({ apiClient, backend, seedData }, use) => {
+      await resetSSHRuntime(apiClient, backend, seedData);
       try {
         await use();
       } finally {
-        await resetSSHRuntime(apiClient, seedData);
+        await resetSSHRuntime(apiClient, backend, seedData);
       }
     },
     { auto: true },
   ],
 });
 
-async function resetSSHRuntime(apiClient: ApiClient, seedData: SSHSeedData) {
-  await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+async function resetSSHRuntime(
+  apiClient: ApiClient,
+  backend: BackendContext,
+  seedData: SSHSeedData,
+) {
+  await backend.ensureReady();
+  try {
+    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+  } catch (error) {
+    if (!(error instanceof TypeError) || !/fetch failed|network error/i.test(error.message)) {
+      throw error;
+    }
+    await backend.restart();
+    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+  }
   let emptySince = 0;
   await expect
     .poll(

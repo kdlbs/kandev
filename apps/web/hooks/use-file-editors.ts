@@ -28,6 +28,10 @@ import {
   type FileEditorRequestToken,
 } from "./file-editor-state";
 import { scrollEditorIfMounted, setPendingCursorPosition } from "./file-editor-cursor";
+import {
+  defaultMarkdownFileMode,
+  type MarkdownFileMode,
+} from "@/components/task/markdown-file-mode";
 export {
   consumePendingCursorPosition,
   scrollEditorIfMounted,
@@ -99,23 +103,28 @@ function buildPersistedTabs(
   const previewParams = preview?.params as Record<string, unknown> | undefined;
   const previewItemId = (previewParams?.previewItemId ?? null) as string | null;
   const isPromoted = previewParams?.promoted === true;
-  return Array.from(openFiles.values()).flatMap(({ path, name, repo, renderedPreview }) => {
-    const itemId = buildRepoScopedItemId(path, repo);
-    const isPinned = !!api?.getPanel(`file:${itemId}`);
-    const isPreview = !isPinned && itemId === previewItemId;
-    if (!isPinned && !isPreview) return [];
-    // Promoted previews persist as pinned so edits survive refresh
-    const persistAsPinned = isPinned || (isPreview && isPromoted);
-    return [
-      {
-        path,
-        name,
-        ...(repo ? { repo } : {}),
-        ...(getFilePreviewKind(path) === "markdown" && renderedPreview ? { renderedPreview } : {}),
-        pinned: persistAsPinned,
-      },
-    ];
-  });
+  return Array.from(openFiles.values()).flatMap(
+    ({ path, name, repo, renderedPreview, markdownMode }) => {
+      const itemId = buildRepoScopedItemId(path, repo);
+      const isPinned = !!api?.getPanel(`file:${itemId}`);
+      const isPreview = !isPinned && itemId === previewItemId;
+      if (!isPinned && !isPreview) return [];
+      // Promoted previews persist as pinned so edits survive refresh
+      const persistAsPinned = isPinned || (isPreview && isPromoted);
+      return [
+        {
+          path,
+          name,
+          ...(repo ? { repo } : {}),
+          ...(getFilePreviewKind(path) === "markdown" && renderedPreview
+            ? { renderedPreview }
+            : {}),
+          ...(markdownMode ? { markdownMode } : {}),
+          pinned: persistAsPinned,
+        },
+      ];
+    },
+  );
 }
 
 type RestoreTabsParams = {
@@ -126,6 +135,8 @@ type RestoreTabsParams = {
     name: string;
     repo?: string;
     renderedPreview?: boolean;
+    markdownMode?: MarkdownFileMode;
+    markdownPreview?: boolean;
     pinned?: boolean;
   }>;
   savedActiveTab: string;
@@ -136,6 +147,18 @@ type RestoreTabsParams = {
     opts?: { quiet?: boolean; pin?: boolean; repo?: string },
   ) => void;
 };
+
+function getRestoredMarkdownMode(tab: {
+  markdownMode?: MarkdownFileMode;
+  markdownPreview?: boolean;
+  renderedPreview?: boolean;
+}): { markdownMode: MarkdownFileMode } | Record<string, never> {
+  if (tab.markdownMode) return { markdownMode: tab.markdownMode };
+  if (tab.markdownPreview !== undefined || tab.renderedPreview !== undefined) {
+    return { markdownMode: tab.markdownPreview || tab.renderedPreview ? "preview" : "source" };
+  }
+  return {};
+}
 
 async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Promise<void> {
   const {
@@ -172,12 +195,12 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
       repo: savedTab.repo,
     });
     // Seed a placeholder file state synchronously, carrying the restored
-    // `renderedPreview` flag. This makes `openFiles.has(path)` true the moment
+    // `markdownMode` value. This makes `openFiles.has(path)` true the moment
     // FileEditorPanel mounts, which suppresses its own `useFileLoader` fetch.
     // Without this seed, useFileLoader races the per-tab fetch below: both call
     // setFileState (a wholesale replace), and useFileLoader's state has no
-    // renderedPreview, so when it wins the race (common under CPU load) the
-    // restored preview flag is clobbered and the tab reopens in code view.
+    // markdownMode — so when it wins the race (common under CPU load) the
+    // restored mode is clobbered and the tab reopens in the wrong view.
     setFileState(itemId, {
       path: savedTab.path,
       repo: savedTab.repo,
@@ -186,6 +209,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
       originalContent: "",
       originalHash: "",
       isDirty: false,
+      ...getRestoredMarkdownMode(savedTab),
       renderedPreview:
         getFilePreviewKind(savedTab.path) === "markdown" ? savedTab.renderedPreview : undefined,
     });
@@ -218,6 +242,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
           getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
             ? savedTab.renderedPreview
             : undefined,
+        ...getRestoredMarkdownMode(savedTab),
       });
     } catch {
       /* useFileLoader will retry when executor is ready */
@@ -416,7 +441,8 @@ function useOpenFileAction({
           addFileEditorPanel,
           removeFileState,
         );
-        setFileState(fileKey, state);
+        const markdownMode = defaultMarkdownFileMode(filePath);
+        setFileState(fileKey, markdownMode ? { ...state, markdownMode } : state);
       } catch (error) {
         toast({
           title: t("task:failedToOpenFile"),
@@ -465,7 +491,7 @@ function useMarkdownPreviewAction({
       const fileKey = buildRepoScopedItemId(filePath, repo);
       const files = getOpenFiles();
       if (files.has(fileKey)) {
-        updateFileState(fileKey, { renderedPreview: true });
+        updateFileState(fileKey, { markdownMode: "preview" });
         const name = filePath.split("/").pop() || filePath;
         addFileEditorPanelWithPreviewCleanup(
           filePath,
@@ -495,7 +521,7 @@ function useMarkdownPreviewAction({
           addFileEditorPanel,
           removeFileState,
         );
-        setFileState(fileKey, { ...state, renderedPreview: true });
+        setFileState(fileKey, { ...state, markdownMode: "preview" });
       } catch (error) {
         toast({
           title: t("task:failedToOpenFile"),

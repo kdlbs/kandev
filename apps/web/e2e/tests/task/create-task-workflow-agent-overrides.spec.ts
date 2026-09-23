@@ -198,7 +198,10 @@ test.describe("task-specific workflow agent overrides", () => {
       await apiClient.moveTask(runtimeTask.id, fixture.workflow.id, fixture.reviewStep.id);
       await waitForWorkflowStep(apiClient, runtimeTask.id, fixture.reviewStep.id);
       await expect
-        .poll(() => apiClient.getTask(runtimeTask.id).then((task) => task.primary_session_id))
+        .poll(() => apiClient.getTask(runtimeTask.id).then((task) => task.primary_session_id), {
+          timeout: 30_000,
+          message: "review move did not restore the initial primary session",
+        })
         .toBe(initialSessionId);
       await waitForWorkflowMoveLifecycle(apiClient, runtimeTask.id);
       await testPage.reload();

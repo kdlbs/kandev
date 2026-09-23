@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
 import { Button } from "@kandev/ui/button";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
@@ -281,6 +282,7 @@ type CodeMirrorToolbarActionsProps = {
   isDirty: boolean;
   isSaving: boolean;
   onSave: () => void;
+  toolbarModeControl?: ReactNode;
   fileStatus?: { old_path?: string | null; status?: string | null };
 };
 
@@ -305,10 +307,12 @@ function CodeMirrorToolbarActions({
   isDirty,
   isSaving,
   onSave,
+  toolbarModeControl,
   fileStatus,
 }: CodeMirrorToolbarActionsProps) {
   return (
     <div className="flex items-center gap-1">
+      {toolbarModeControl}
       <CodeMirrorCommentBadge
         enableComments={enableComments}
         sessionId={sessionId}
@@ -369,6 +373,7 @@ export type CodeMirrorToolbarProps = {
   onTogglePreview?: () => void;
   onPreviewHtml?: () => void;
   isPublishingHtmlPreview?: boolean;
+  toolbarModeControl?: ReactNode;
 };
 
 export function CodeMirrorToolbar(props: CodeMirrorToolbarProps) {
@@ -396,6 +401,7 @@ export function CodeMirrorToolbar(props: CodeMirrorToolbarProps) {
     onTogglePreview,
     onPreviewHtml,
     isPublishingHtmlPreview,
+    toolbarModeControl,
   } = props;
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
   const overflowActions = (
@@ -424,6 +430,7 @@ export function CodeMirrorToolbar(props: CodeMirrorToolbarProps) {
   );
   return (
     <PanelHeaderBarSplit
+      className={toolbarModeControl ? "markdown-file-toolbar" : undefined}
       left={
         <CodeMirrorFileLabel
           path={path}
@@ -455,6 +462,7 @@ export function CodeMirrorToolbar(props: CodeMirrorToolbarProps) {
           isDirty={isDirty}
           isSaving={isSaving}
           onSave={onSave}
+          toolbarModeControl={toolbarModeControl}
           fileStatus={fileStatus}
         />
       }

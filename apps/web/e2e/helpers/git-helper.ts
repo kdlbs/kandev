@@ -88,11 +88,15 @@ export function makeGitEnv(tmpDir: string): NodeJS.ProcessEnv {
 
 export async function openTaskSession(page: Page, title: string): Promise<SessionPage> {
   const kanban = new KanbanPage(page);
-  await kanban.goto();
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 30_000 });
-  await card.click();
-  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
+  await expect(async () => {
+    if (!/\/t\//.test(page.url())) {
+      await kanban.goto();
+      const card = kanban.taskCardByTitle(title);
+      await expect(card).toBeVisible({ timeout: 5_000 });
+      await card.click();
+    }
+    await expect(page).toHaveURL(/\/t\//, { timeout: 5_000 });
+  }).toPass({ timeout: 45_000 });
   const session = new SessionPage(page);
   await session.waitForLoad();
   return session;

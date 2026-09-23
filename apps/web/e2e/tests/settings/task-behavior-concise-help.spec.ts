@@ -10,10 +10,14 @@ test("concise descriptions retain hover and keyboard technical help", async ({ t
   await expect(testPage.getByText("create_task_kandev", { exact: true })).not.toBeVisible();
   const info = testPage.getByRole("button", { name: "About Profile for Tasks Created by Agents" });
   await info.hover();
-  await expect(testPage.getByRole("tooltip")).toContainText("Workflow-selected profiles win first");
+  const tooltip = testPage.getByRole("tooltip");
+  await expect(tooltip).toBeVisible({ timeout: 15_000 });
+  await expect(tooltip).toContainText("Workflow-selected profiles win first");
   await testPage.mouse.move(0, 0);
+  await expect(tooltip).toBeHidden({ timeout: 15_000 });
   await info.focus();
-  await expect(testPage.getByRole("tooltip")).toContainText("agent_profile_id");
+  await expect(tooltip).toBeVisible({ timeout: 15_000 });
+  await expect(tooltip).toContainText("agent_profile_id");
   await testPage.keyboard.press("Escape");
   await testPage.getByRole("tab", { name: "Runtime", exact: true }).click();
   await expect(testPage.getByTestId("message-queue-max-per-session")).toBeVisible();

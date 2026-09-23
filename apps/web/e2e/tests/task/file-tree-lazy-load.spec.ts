@@ -30,6 +30,7 @@ async function setupTask(
     repository_ids: [seedData.repositoryId],
   });
   const session = await openTaskSession(testPage, taskTitle);
+  await session.waitForChatIdle({ timeout: 45_000 });
   await session.clickTab("Files");
   return session;
 }
@@ -54,7 +55,7 @@ test.describe("File tree lazy-load on expand", () => {
     const session = await setupTask(testPage, apiClient, seedData, "ft-lazy-load", "FT Lazy Load");
 
     const folder = session.fileTreeNode("lazyfolder");
-    await expect(folder).toBeVisible({ timeout: 15_000 });
+    await expect(folder).toBeVisible({ timeout: 30_000 });
 
     // Pre-expand: children should not be in the DOM yet.
     await expect(session.fileTreeNode("lazyfolder/child-a.ts")).toHaveCount(0);
@@ -96,7 +97,7 @@ test.describe("File tree lazy-load on expand", () => {
     const session = await setupTask(testPage, apiClient, seedData, "ft-lazy-keep", "FT Lazy Keep");
 
     const folder = session.fileTreeNode("keepfolder");
-    await expect(folder).toBeVisible({ timeout: 15_000 });
+    await expect(folder).toBeVisible({ timeout: 30_000 });
 
     // Expand
     await folder.click();

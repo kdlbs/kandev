@@ -42,7 +42,7 @@ test.describe("Completed conversation resume on mobile", () => {
         .locator(".cm-line")
         .filter({ hasText: RETAINED_WORKSPACE_CONTENT }),
     ).toBeVisible();
-    await viewer.getByRole("button", { name: "Close" }).tap();
+    await viewer.getByRole("button", { name: "Back" }).tap();
     await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
 
     const resume = session.completedSessionResumeButton();

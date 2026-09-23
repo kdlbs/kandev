@@ -105,8 +105,19 @@ test.describe("Office regression net", () => {
     ).toBeVisible();
 
     // Ensure the office API still reports the task too.
-    const fetched = (await officeApi.getTask(task.id)) as Record<string, unknown>;
-    expect(fetched).toBeTruthy();
+    await expect
+      .poll(
+        async () => {
+          try {
+            const fetched = (await officeApi.getTask(task.id)) as Record<string, unknown>;
+            return Boolean(fetched);
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 15_000, message: "office task API did not become available" },
+      )
+      .toBe(true);
   });
 
   test("task detail page renders the topbar breadcrumb", async ({

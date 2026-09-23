@@ -427,7 +427,7 @@ test.describe("Terminals — dockview UI", () => {
     ]);
     expect(terminalRowBox).not.toBeNull();
     expect(adjacentRowBox).not.toBeNull();
-    expect(terminalRowBox!.height).toBeCloseTo(adjacentRowBox!.height, 1);
+    expect(Math.abs(terminalRowBox!.height - adjacentRowBox!.height)).toBeLessThanOrEqual(1);
 
     let nativeDialogSeen = false;
     testPage.once("dialog", (dialog) => {

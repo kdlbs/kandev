@@ -5,6 +5,7 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
+import { watchWs } from "../../helpers/causal-waits";
 import {
   seedActiveSessionForegroundActivity,
   waitForActiveSessionForegroundActivity,
@@ -490,17 +491,20 @@ test.describe("Session resume (TUI passthrough mode)", () => {
     });
 
     // 6. Restart the backend
+    const gateway = watchWs(testPage);
+    const resumeLaunch = gateway.waitForResponse("session.launch", { timeout: 60_000 });
     await backend.restart();
 
     // 7. Reload the page — forces SSR re-fetch and WS reconnect
     await testPage.reload();
+    await resumeLaunch;
 
     // 8. Wait for passthrough terminal to reconnect after resume
-    await session.waitForPassthroughLoad();
-    await session.waitForPassthroughLoaded();
+    await session.waitForPassthroughLoad(60_000);
+    await session.waitForPassthroughLoaded(60_000);
 
     // 9. The TUI should show the RESUMED header, confirming --resume/-c was passed
-    await session.expectPassthroughHasText("RESUMED", 30_000);
+    await session.expectPassthroughHasText("RESUMED", 60_000);
   });
 
   test("resume TUI session with multiple repos reconnects with resume flag", async ({
@@ -569,9 +573,9 @@ test.describe("Session resume (TUI passthrough mode)", () => {
     //    resolution preserves resume detection.
     await backend.restart();
     await testPage.reload();
-    await session.waitForPassthroughLoad();
-    await session.waitForPassthroughLoaded();
-    await session.expectPassthroughHasText("RESUMED", 30_000);
+    await session.waitForPassthroughLoad(60_000);
+    await session.waitForPassthroughLoaded(60_000);
+    await session.expectPassthroughHasText("RESUMED", 60_000);
   });
 });
 

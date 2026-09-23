@@ -7,6 +7,10 @@ test.describe("Office run observation", () => {
     officeApi,
     officeSeed,
   }) => {
+    const agent = await officeApi.getAgent(officeSeed.agentId);
+    const agentName = String(agent.name ?? "");
+    expect(agentName).not.toBe("");
+
     const run = await apiClient.seedRun({
       agentProfileId: officeSeed.agentId,
       status: "finished",
@@ -26,10 +30,10 @@ test.describe("Office run observation", () => {
 
     await testPage.goto(`/office/agents/${officeSeed.agentId}/runs/${run.run_id}`);
     await expect(testPage.getByTestId("run-header")).toBeVisible();
-    await expect(testPage.getByTestId("run-agent-name")).toHaveText("CEO");
+    await expect(testPage.getByTestId("run-agent-name")).toHaveText(agentName);
 
     await testPage.goto("/office/workspace/activity");
-    await expect(testPage.getByText("CEO", { exact: true })).toBeVisible();
+    await expect(testPage.getByText(agentName, { exact: true })).toBeVisible();
     await expect(testPage.getByText(/KAN-14/)).toBeVisible();
 
     const activity = await officeApi.listActivity(officeSeed.workspaceId);

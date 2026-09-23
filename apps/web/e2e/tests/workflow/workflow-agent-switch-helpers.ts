@@ -52,11 +52,13 @@ export async function waitForWorkflowProfileSession(
               `${session.id}:${session.agent_profile_id}:${session.state}:${session.is_primary}`,
           )
           .join(", ");
-        const session = sessions.find((item) => item.agent_profile_id === profileId);
+        const session = sessions.find(
+          (item) => item.agent_profile_id === profileId && item.is_primary,
+        );
         sessionId = session?.id ?? "";
         return session?.state === "WAITING_FOR_INPUT";
       },
-      { timeout: 30_000, message: `profile ${profileId} never became answerable` },
+      { timeout: 60_000, message: `profile ${profileId} never became answerable` },
     )
     .toBe(true)
     .catch((error: Error) => {

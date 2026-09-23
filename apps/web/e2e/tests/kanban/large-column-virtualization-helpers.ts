@@ -4,7 +4,10 @@ import type { ApiClient } from "../../helpers/api-client";
 
 export const LARGE_COLUMN_TASK_COUNT = 440;
 const MAX_MOUNTED_TASK_CARDS = 50;
-const TASK_SEED_BATCH_SIZE = 25;
+// Keep SQLite-backed task creation below the write-lock contention threshold.
+// A large burst can produce transient 500 responses even though each request
+// is valid and the backend is otherwise healthy.
+const TASK_SEED_BATCH_SIZE = 5;
 
 export async function seedLargeColumnTasks(
   apiClient: ApiClient,

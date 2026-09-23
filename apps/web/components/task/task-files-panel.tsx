@@ -105,40 +105,42 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
     : t("task:taskNeedsRepositoryForSources");
   if (isArchived) return <ArchivedPanelPlaceholder />;
   return (
-    <SessionPanel borderSide="left">
-      <SessionPanelContent>
-        <FilesTabContent
-          sessionId={activeSessionId}
-          onOpenFile={onOpenFile}
-          handleCreateFile={handleCreateFile}
-          hookDeleteFile={hookDeleteFile}
-          hookRenameFile={hookRenameFile}
-          hookDownloadFile={hookDownloadFile}
-          activeFilePath={activeFilePath}
-          onAddSources={
-            hasRepository
-              ? (opener) => {
-                  setAddSourcesOpener(opener);
-                  setAddSourcesOpen(true);
-                }
-              : undefined
-          }
-          addSourcesButtonRef={addSourcesButtonRef}
-          addSourcesDisabledReason={resolvedAddSourcesDisabledReason}
-        />
-      </SessionPanelContent>
-      {activeTask && hasRepository ? (
-        <AddWorkspaceSourcesDialog
-          open={addSourcesOpen}
-          onOpenChange={setAddSourcesOpen}
-          taskId={activeTask.id}
-          executorType={activeTask.primaryExecutorType}
-          workspaceId={workspaceId}
-          opener={addSourcesOpener}
-          openerRef={addSourcesButtonRef}
-        />
-      ) : null}
-    </SessionPanel>
+    <div data-testid="files-panel" className="h-full min-h-0">
+      <SessionPanel borderSide="left">
+        <SessionPanelContent>
+          <FilesTabContent
+            sessionId={activeSessionId}
+            onOpenFile={onOpenFile}
+            handleCreateFile={handleCreateFile}
+            hookDeleteFile={hookDeleteFile}
+            hookRenameFile={hookRenameFile}
+            hookDownloadFile={hookDownloadFile}
+            activeFilePath={activeFilePath}
+            onAddSources={
+              hasRepository
+                ? (opener) => {
+                    setAddSourcesOpener(opener);
+                    setAddSourcesOpen(true);
+                  }
+                : undefined
+            }
+            addSourcesButtonRef={addSourcesButtonRef}
+            addSourcesDisabledReason={resolvedAddSourcesDisabledReason}
+          />
+        </SessionPanelContent>
+        {activeTask && hasRepository ? (
+          <AddWorkspaceSourcesDialog
+            open={addSourcesOpen}
+            onOpenChange={setAddSourcesOpen}
+            taskId={activeTask.id}
+            executorType={activeTask.primaryExecutorType}
+            workspaceId={workspaceId}
+            opener={addSourcesOpener}
+            openerRef={addSourcesButtonRef}
+          />
+        ) : null}
+      </SessionPanel>
+    </div>
   );
 });
 

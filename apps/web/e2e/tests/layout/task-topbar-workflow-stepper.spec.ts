@@ -169,7 +169,8 @@ test.describe("Compact task topbar workflow stepper", () => {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
-    const targetStep = adjacentStep(seedData.steps, seedData.startStepId);
+    const { steps: currentSteps } = await apiClient.listWorkflowSteps(seedData.workflowId);
+    const targetStep = adjacentStep(currentSteps, seedData.startStepId);
 
     await testPage.setViewportSize({ width: 900, height: 800 });
     await testPage.goto(`/t/${task.task_id}`);
@@ -196,7 +197,7 @@ test.describe("Compact task topbar workflow stepper", () => {
     await trigger.focus();
     await expect(disclosureSurface).toBeVisible();
     await expect(disclosure.locator('[data-testid^="workflow-step-disclosure-row-"]')).toHaveCount(
-      seedData.steps.length,
+      currentSteps.length,
     );
 
     const moveButton = testPage.getByTestId(`workflow-step-disclosure-move-${targetStep.id}`);
@@ -207,7 +208,7 @@ test.describe("Compact task topbar workflow stepper", () => {
     expect(moveButtonBox.height).toBeLessThan(40);
 
     let moveButtonFocused = false;
-    for (let tabCount = 0; tabCount < seedData.steps.length + 2; tabCount += 1) {
+    for (let tabCount = 0; tabCount < currentSteps.length + 2; tabCount += 1) {
       if (await moveButton.evaluate((element) => element === document.activeElement)) {
         moveButtonFocused = true;
         break;

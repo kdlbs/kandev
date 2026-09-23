@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useMobileNavigationGuard } from "./mobile-navigation-guard";
 
 const TaskPicker = lazy(() =>
   import("./session-task-switcher-sheet").then((module) => ({
@@ -19,6 +20,7 @@ export function ResponsiveTaskPicker({
   const { isMobile } = useResponsiveBreakpoint();
   const open = useAppStore((state) => state.mobileSession.isTaskSwitcherOpen);
   const setOpen = useAppStore((state) => state.setMobileSessionTaskSwitcherOpen);
+  const onRequestNavigation = useMobileNavigationGuard();
   const [requested, setRequested] = useState(false);
   const [entry, setEntry] = useState({ open: false, opener: null as HTMLElement | null });
   if (open && !requested) setRequested(true);
@@ -39,6 +41,7 @@ export function ResponsiveTaskPicker({
         workflowId={workflowId}
         open={open}
         onOpenChange={setOpen}
+        onRequestNavigation={onRequestNavigation}
         presentation={isMobile ? "drawer" : "sheet"}
         onCloseAutoFocus={(event) => {
           event.preventDefault();

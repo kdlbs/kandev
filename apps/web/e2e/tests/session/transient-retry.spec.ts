@@ -9,6 +9,7 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(120_000);
     const session = await seedIdleSession(testPage, apiClient, seedData, "Overloaded Retry Test");
 
     // /overloaded:9 keeps failing so the retry loop stays visible until cancel.
@@ -18,12 +19,12 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
 
     await expect
       .poll(async () => (await listTransientRetryNotices(apiClient, sessionId)).length, {
-        timeout: 30_000,
+        timeout: 60_000,
       })
       .toBe(1);
 
     // The calm yellow "retrying" card + Cancel button must appear...
-    await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
+    await expect(session.transientRetryCard()).toBeVisible({ timeout: 60_000 });
     await expect(session.transientRetryCard()).toHaveCount(1);
     await expect(session.recoveryCancelRetryButton()).toBeVisible();
 

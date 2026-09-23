@@ -37,6 +37,7 @@ import { getFileTabKey, upsertOpenFileTab } from "./task-center-panel-file-tabs"
 import { TaskCenterReviewContent } from "./task-center-review-content";
 import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
 import { getFilePreviewKind } from "@/lib/utils/file-types";
+import type { MarkdownFileMode } from "./markdown-file-mode";
 
 import type { SelectedDiff } from "./task-layout";
 import { useTranslation } from "react-i18next";
@@ -189,6 +190,15 @@ function useFileTabOperations({
     [setOpenFileTabs],
   );
 
+  const handleMarkdownModeChange = useCallback(
+    (fileKey: string, markdownMode: MarkdownFileMode) => {
+      setOpenFileTabs((prev) =>
+        prev.map((tab) => (getFileTabKey(tab) === fileKey ? { ...tab, markdownMode } : tab)),
+      );
+    },
+    [setOpenFileTabs],
+  );
+
   const { handleFileSave, handleFileDelete } = useFileSaveDelete({
     activeSessionId,
     openFileTabs,
@@ -202,6 +212,7 @@ function useFileTabOperations({
     handleCloseFileTab,
     handleFileChange,
     handleRenderedPreviewToggle,
+    handleMarkdownModeChange,
     handleFileSave,
     handleFileDelete,
     addFileTab,
@@ -271,11 +282,12 @@ function usePersistOpenFileTabs(activeSessionId: string | null, openFileTabs: Op
     if (!activeSessionId) return;
     saveOpenFileTabs(
       activeSessionId,
-      openFileTabs.map(({ path, name, repo, renderedPreview }) => ({
+      openFileTabs.map(({ path, name, repo, renderedPreview, markdownMode }) => ({
         path,
         name,
         repo,
         ...(getFilePreviewKind(path) === "markdown" && renderedPreview ? { renderedPreview } : {}),
+        ...(markdownMode ? { markdownMode } : {}),
       })),
     );
   }, [activeSessionId, openFileTabs]);
@@ -410,6 +422,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
     handleOpenFileFromChat,
     handleFileChange,
     handleRenderedPreviewToggle,
+    handleMarkdownModeChange,
     handleFileSave,
     handleFileDelete,
   } = fileTabOps;
@@ -463,6 +476,8 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
             onFileSave={handleFileSave}
             onFileDelete={handleFileDelete}
             onTogglePreview={() => handleRenderedPreviewToggle(getFileTabKey(tab))}
+            onOpenFile={handleOpenFileFromChat}
+            onMarkdownModeChange={(mode) => handleMarkdownModeChange(getFileTabKey(tab), mode)}
           />
         ))}
       </SessionTabs>

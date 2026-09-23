@@ -318,7 +318,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   await expect(
     viewer.locator(".cm-line").filter({ hasText: "active mobile worktree source" }),
   ).toBeVisible();
-  await expect(viewer.getByRole("button", { name: "Close" })).toBeVisible();
+  await expect(viewer.getByRole("button", { name: "Back" })).toBeVisible();
   await expect(
     viewer.getByText("mobile-local-repository-main/mobile-repository.txt"),
   ).toBeVisible();

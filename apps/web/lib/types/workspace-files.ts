@@ -7,6 +7,8 @@ export type FileTreeNode = {
   children?: FileTreeNode[];
 };
 
+export type MarkdownFileMode = "preview" | "edit" | "source";
+
 export type FileTreeResponse = {
   request_id?: string;
   root: FileTreeNode;
@@ -84,6 +86,10 @@ export type OpenFileTab = {
   isDirty: boolean;
   isBinary?: boolean;
   renderedPreview?: boolean;
+  hasRemoteUpdate?: boolean;
+  remoteContent?: string;
+  remoteOriginalHash?: string;
+  markdownMode?: MarkdownFileMode;
 };
 
 export const FILE_EXTENSION_COLORS: Record<string, string> = {

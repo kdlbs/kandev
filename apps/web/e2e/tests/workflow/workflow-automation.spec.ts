@@ -425,7 +425,9 @@ test.describe("Workflow automation", () => {
     // User message → dispatchPromptAsync → on_turn_start (move_to_next) →
     // Backlog → In Progress.
     await session.sendMessage("/e2e:simple-message");
-    await expect(session.chat.getByText("/e2e:simple-message")).toBeVisible({ timeout: 10_000 });
+    await expect(
+      session.chat.getByTestId("user-message-bubble").filter({ hasText: "/e2e:simple-message" }),
+    ).toBeVisible({ timeout: 10_000 });
 
     // Stepper reflects the move to In Progress.
     await expect(session.stepperStep("In Progress")).toHaveAttribute("aria-current", "step", {

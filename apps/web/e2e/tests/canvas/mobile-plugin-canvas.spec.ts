@@ -17,6 +17,12 @@ import {
   waitForTaskCanvas,
 } from "./canvas-fixture";
 
+function expectTouchTargetHeight(height: number | undefined): void {
+  // Fractional viewport scaling can report a 44px CSS target a few hundredths
+  // below 44. Keep the accessibility contract while ignoring that rounding.
+  expect(height ?? 0).toBeGreaterThanOrEqual(43.99);
+}
+
 async function approvePendingCanvasThroughHost(
   page: Page,
   apiClient: ApiClient,
@@ -393,7 +399,7 @@ test.describe("Plugin-backed canvases on mobile", () => {
 
       const actionsButton = testPage.getByTestId("canvas-mobile-actions");
       await expect(actionsButton).toBeVisible();
-      expect((await actionsButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      expectTouchTargetHeight((await actionsButton.boundingBox())?.height);
       await actionsButton.tap();
 
       const actionsSheet = testPage.getByTestId("canvas-mobile-actions-sheet");
@@ -403,7 +409,7 @@ test.describe("Plugin-backed canvases on mobile", () => {
         exact: true,
       });
       await expect(promoteButton).toBeVisible();
-      expect((await promoteButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      expectTouchTargetHeight((await promoteButton.boundingBox())?.height);
       await promoteButton.tap();
 
       const promotionDialog = testPage.getByTestId("canvas-promotion-dialog");
@@ -428,7 +434,7 @@ test.describe("Plugin-backed canvases on mobile", () => {
 
       const workspaceCanvas = testPage.getByTestId(`mobile-workspace-canvas-${activeCanvas.id}`);
       await expect(workspaceCanvas).toBeVisible({ timeout: 15_000 });
-      expect((await workspaceCanvas.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      expectTouchTargetHeight((await workspaceCanvas.boundingBox())?.height);
       await workspaceCanvas.tap();
 
       await expect(testPage).toHaveURL(new RegExp(`${canvasHref(activeCanvas.id)}$`));
@@ -463,7 +469,7 @@ test.describe("Plugin-backed canvases on mobile", () => {
       await expect(picker).toBeVisible();
       const secondCanvasItem = picker.getByTestId(`canvas-mobile-picker-item-${secondApproved.id}`);
       await expect(secondCanvasItem).toBeVisible();
-      expect((await secondCanvasItem.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      expectTouchTargetHeight((await secondCanvasItem.boundingBox())?.height);
       await secondCanvasItem.tap();
 
       await expect(testPage).toHaveURL(new RegExp(`${canvasHref(secondApproved.id)}$`));

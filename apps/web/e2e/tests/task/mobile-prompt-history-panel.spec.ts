@@ -401,9 +401,10 @@ test.describe("Prompt history panel on mobile", () => {
       }
       await route.continue();
     });
-    await panelsButton.tap();
-    await testPage.getByTestId("mobile-prompt-history-option").tap();
-    await revealPromptHistoryTarget(testPage, panel, targetBubble);
+    // Keep the history panel mounted after the first reveal. Reopening the
+    // grouped picker here adds a second animation and can leave the mobile
+    // sheet between states while the target request is being armed.
+    await expect(panel).toBeVisible();
     await testPage.clock.install();
     await installTargetScrollCounter(testPage, targetMessage.id);
     await targetBubble.tap();

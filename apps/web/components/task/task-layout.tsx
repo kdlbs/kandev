@@ -7,6 +7,7 @@ import { useRouter } from "@/lib/routing/client-router";
 import { canvasHref, type Canvas } from "@/lib/api/domains/canvas-api";
 import { TaskSheetSelectionProvider } from "./mobile/task-sheet-selection-context";
 import { ResponsiveTaskPicker } from "./mobile/responsive-task-picker";
+import { MobileNavigationGuardProvider } from "./mobile/mobile-navigation-guard";
 import { SessionMobileLayout, SessionTabletLayout } from "./mobile";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
@@ -60,12 +61,14 @@ export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
   }
   return (
     <TaskSheetSelectionProvider workspaceId={props.workspaceId}>
-      <ResponsiveTaskLayout {...props} />
-      <ResponsiveTaskPicker
-        key={pickerWorkspaceId}
-        workspaceId={props.workspaceId}
-        workflowId={props.workflowId}
-      />
+      <MobileNavigationGuardProvider>
+        <ResponsiveTaskLayout {...props} />
+        <ResponsiveTaskPicker
+          key={pickerWorkspaceId}
+          workspaceId={props.workspaceId}
+          workflowId={props.workflowId}
+        />
+      </MobileNavigationGuardProvider>
     </TaskSheetSelectionProvider>
   );
 });

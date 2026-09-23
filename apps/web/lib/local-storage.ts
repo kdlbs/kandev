@@ -1,6 +1,7 @@
 import { setWalkthroughLastSeen } from "@/lib/walkthrough-notification-storage";
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import type { LayoutProfileIdentity } from "@/lib/layout/layout-profiles";
+import type { MarkdownFileMode } from "@/lib/types/workspace-files";
 import { normalizeStoredFileTab } from "./local-storage-file-tabs";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -532,6 +533,7 @@ export interface StoredFileTab {
   repo?: string;
   renderedPreview?: boolean;
   /** Legacy Markdown-only preview field accepted during one-way migration. */
+  markdownMode?: MarkdownFileMode;
   markdownPreview?: boolean;
   pinned?: boolean;
 }
@@ -557,9 +559,9 @@ export function getOpenFileTabs(sessionId: string): StoredFileTab[] {
     let previewSeen = false;
     const normalized: StoredFileTab[] = [];
     for (let i = parsed.length - 1; i >= 0; i--) {
-      const tab = parsed[i];
-      if (!tab) continue;
-      const normalizedTab = normalizeStoredFileTab(tab);
+      const rawTab = parsed[i];
+      if (!rawTab) continue;
+      const normalizedTab = normalizeStoredFileTab(rawTab);
       const isPinned = normalizedTab.pinned === true || normalizedTab.pinned === undefined;
       if (isPinned) {
         normalized.unshift({ ...normalizedTab, pinned: true });

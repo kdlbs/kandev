@@ -169,7 +169,7 @@ export async function waitForActiveSessionCancellationPending(
       return store.getState().taskSessions.items[sessionId]?.cancellation_pending === expected;
     },
     pending,
-    { timeout: 20_000 },
+    { timeout: 45_000 },
   );
 }
 

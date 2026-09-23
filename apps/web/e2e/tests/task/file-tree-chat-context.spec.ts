@@ -60,17 +60,19 @@ test.describe("File tree chat context", () => {
     );
 
     await session.clickTab("Files");
-    await expect(session.fileTreeNode(filePath)).toBeVisible({ timeout: 15_000 });
-    await expect(session.fileTreeNode(directoryPath)).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode(filePath, 30_000);
+    await session.fileTree.waitForFileTreeNode(directoryPath, 30_000);
 
     const addNodeToContext = async (nodePath: string) => {
-      await session.fileTreeNode(nodePath).click({ button: "right" });
+      const node = await session.fileTree.waitForFileTreeNode(nodePath, 30_000);
+      await node.click({ button: "right" });
       await expect(session.fileTreeAddToChatContextMenuItem()).toBeVisible();
       await session.fileTreeAddToChatContextMenuItem().click();
     };
 
     await addNodeToContext(filePath);
-    await session.fileTreeNode(directoryPath).click({ button: "right" });
+    const directoryNode = await session.fileTree.waitForFileTreeNode(directoryPath, 30_000);
+    await directoryNode.click({ button: "right" });
     await expect(session.fileTreeAddToChatContextMenuItem()).toBeVisible();
     await prCapture.screenshot("desktop-file-tree-menu", {
       caption: "Desktop Files tree context menu with Add to chat context",

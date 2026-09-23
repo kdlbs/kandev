@@ -891,6 +891,7 @@ test.describe("Git Changes Panel", () => {
     });
 
     const session = await openTaskSession(testPage, "Git Commit Test");
+    await session.waitForChatIdle({ timeout: 45_000 });
 
     // Set up git helper
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
@@ -910,11 +911,15 @@ test.describe("Git Changes Panel", () => {
     const sha = git.commit("Add feature module");
 
     // Click the Changes tab
-    await session.clickTab("Changes");
-    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    // Activating the Changes tab requests a fresh git snapshot. Re-drive that
+    // activation while the backend's external-commit poll catches up.
+    await expect(async () => {
+      await session.clickTab("Changes");
+      await expect(session.changes).toBeVisible({ timeout: 5_000 });
+      await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 5_000 });
+    }).toPass({ timeout: 45_000 });
 
     // The commit should appear in the commits section
-    await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
     await session.expandCommitsSection();
     await expect(testPage.getByText("Add feature module")).toBeVisible({ timeout: 15_000 });
     // Verify the short SHA is displayed
@@ -2829,6 +2834,7 @@ test.describe("Git Changes Panel", () => {
         title: "Local ahead contribution",
         state: "open",
         head_branch: "feature/local-ahead",
+        head_sha: providerHead,
         base_branch: "main",
         author_login: "local-ahead-author",
         repo_owner: "testorg",
@@ -2852,6 +2858,7 @@ test.describe("Git Changes Panel", () => {
       pr_url: "https://github.com/testorg/testrepo/pull/903",
       pr_title: "Local ahead contribution",
       head_branch: "feature/local-ahead",
+      head_sha: providerHead,
       base_branch: "main",
       author_login: "local-ahead-author",
     });

@@ -64,7 +64,7 @@ async function createTaskWithTwoSessions(
   const kanban = new KanbanPage(testPage);
   await kanban.goto();
   const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 10_000 });
+  await expect(card).toBeVisible({ timeout: 30_000 });
   await card.click();
   await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 

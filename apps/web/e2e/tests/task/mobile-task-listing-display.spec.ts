@@ -49,6 +49,16 @@ test.describe("Mobile task listing display preferences", () => {
       mergeable_state: "clean",
     });
 
+    // This setting is shared by the e2e user. Reset it before the page loads
+    // so the menu click always represents the false -> true transition.
+    await apiClient.saveUserSettings({ tasks_list_show_details: false });
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_show_details, {
+        message: "task detail preference was not reset before listing",
+        timeout: 15_000,
+      })
+      .toBe(false);
+
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
     await mobile.viewOptionsButton.click();
@@ -87,6 +97,7 @@ test.describe("Mobile task listing display preferences", () => {
     await expect
       .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_show_details, {
         message: "task detail preference was not persisted",
+        timeout: 30_000,
       })
       .toBe(true);
     await testPage.keyboard.press("Escape");

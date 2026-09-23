@@ -266,10 +266,13 @@ export async function readSessionModelSnapshots(
   }, fileName);
 }
 
+export type DesktopFileSurface = "monaco" | "markdown-preview";
+
 export async function openDesktopFile(
   page: Page,
   session: SessionPage,
   filePath: string,
+  options: { expectedSurface?: DesktopFileSurface } = {},
 ): Promise<void> {
   const pathSegments = filePath.split("/");
   const fileNode = session.fileTreeNode(filePath);
@@ -278,8 +281,10 @@ export async function openDesktopFile(
   // visible so a late panel switch cannot turn a successful visibility check
   // into a 180-second click timeout. Virtualized trees can also omit a valid
   // file row from the DOM, so use the exact file search in that case.
-  await session.clickTab("Files", { force: true });
-  await expect(session.files).toBeVisible({ timeout: 30_000 });
+  await expect(async () => {
+    await session.clickTab("Files", { force: true });
+    await expect(session.files).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
   const existingSearch = session.fileSearchInput();
   if (await existingSearch.isVisible()) {
     await existingSearch.press("Escape");
@@ -338,7 +343,11 @@ export async function openDesktopFile(
   await expect(page.locator(".dv-default-tab", { hasText: path.basename(filePath) })).toBeVisible({
     timeout: 10_000,
   });
-  await expect(page.locator(".monaco-editor:visible")).toBeVisible({ timeout: 15_000 });
+  if (options.expectedSurface === "markdown-preview") {
+    await expect(page.getByTestId("markdown-preview")).toBeVisible({ timeout: 15_000 });
+  } else {
+    await expect(page.locator(".monaco-editor:visible")).toBeVisible({ timeout: 15_000 });
+  }
 }
 
 export async function openLspStatus(page: Page): Promise<Locator> {

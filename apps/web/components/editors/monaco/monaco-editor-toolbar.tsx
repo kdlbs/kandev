@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
 
 import { Button } from "@kandev/ui/button";
@@ -249,6 +250,7 @@ function PreviewButton({
   onTogglePreview?: () => void;
   onPreviewHtml?: () => void;
   isPublishingHtmlPreview?: boolean;
+  toolbarModeControl?: ReactNode;
 }) {
   const { t } = useTranslation();
   if (previewKind === "none") return null;
@@ -316,6 +318,7 @@ interface MonacoEditorToolbarProps {
   onTogglePreview?: () => void;
   onPreviewHtml?: () => void;
   isPublishingHtmlPreview?: boolean;
+  toolbarModeControl?: ReactNode;
 }
 
 type MonacoToolbarActionsProps = Pick<
@@ -346,6 +349,7 @@ type MonacoToolbarActionsProps = Pick<
   | "commentCount"
   | "hasRemoteUpdate"
   | "hasVcsDiff"
+  | "toolbarModeControl"
 > & {
   fileStatus?: { old_path?: string | null; status?: string | null };
 };
@@ -377,10 +381,12 @@ function MonacoToolbarActions({
   commentCount,
   hasRemoteUpdate,
   hasVcsDiff,
+  toolbarModeControl,
   fileStatus,
 }: MonacoToolbarActionsProps) {
   return (
     <div className="flex items-center gap-1">
+      {toolbarModeControl}
       <CommentCountBadge
         enableComments={enableComments}
         sessionId={sessionId}
@@ -493,6 +499,7 @@ export function MonacoEditorToolbar(props: MonacoEditorToolbarProps) {
   );
   return (
     <PanelHeaderBarSplit
+      className={props.toolbarModeControl ? "markdown-file-toolbar" : undefined}
       left={
         <ToolbarLeft
           path={path}

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState, type ReactNode } from "react";
 import { useEditorProvider } from "@/hooks/use-editor-resolver";
 import { useHtmlPreviewPublisher } from "@/hooks/use-html-preview-publisher";
 import { MonacoCodeEditor } from "@/components/editors/monaco/monaco-code-editor";
@@ -28,6 +28,9 @@ export type FileEditorContentProps = {
   previewKind?: FilePreviewKind;
   renderedPreview?: boolean;
   onTogglePreview?: () => void;
+  markdownPreview?: boolean;
+  onToggleMarkdownPreview?: () => void;
+  toolbarModeControl?: ReactNode;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
@@ -35,6 +38,7 @@ export type FileEditorContentProps = {
   onDownload?: () => void;
 };
 
+// eslint-disable-next-line complexity -- selects the compatible preview and editor surface.
 export const FileEditorContent = memo(function FileEditorContent(props: FileEditorContentProps) {
   const provider = useEditorProvider("code-editor");
   const [htmlPreviewIdentity, setHtmlPreviewIdentity] = useState<string | null>(null);
@@ -65,7 +69,10 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
     if (htmlPreview.url) openBrowserPanel(htmlPreview.url);
   }, [htmlPreview.url, openBrowserPanel]);
 
-  if (props.renderedPreview && props.previewKind === "markdown" && props.onTogglePreview) {
+  if (
+    (props.renderedPreview && props.previewKind === "markdown" && props.onTogglePreview) ||
+    (props.markdownPreview && props.onToggleMarkdownPreview)
+  ) {
     return (
       <MarkdownPreviewContent
         path={props.path}
@@ -78,7 +85,8 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
         repositoryName={props.repo}
         enableComments={props.enableComments}
         onDownload={props.onDownload}
-        onTogglePreview={props.onTogglePreview}
+        onTogglePreview={props.onTogglePreview ?? props.onToggleMarkdownPreview}
+        toolbarModeControl={props.toolbarModeControl}
       />
     );
   }

@@ -57,6 +57,30 @@ async function waitForSessionTurnsComplete(
     .toBe(true);
 }
 
+async function addUserMessageWhenReady(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+  content: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        try {
+          await apiClient.addUserMessage(taskId, sessionId, content);
+          return true;
+        } catch (error) {
+          if (error instanceof Error && /currently processing/i.test(error.message)) {
+            return false;
+          }
+          throw error;
+        }
+      },
+      { timeout: 60_000, message: "session did not become ready for the next user message" },
+    )
+    .toBe(true);
+}
+
 test.describe("Sidebar pending-question indicator without opening the task", () => {
   test("older detached clarification stays superseded after a newer bundle is skipped", async ({
     apiClient,
@@ -126,7 +150,7 @@ test.describe("Sidebar pending-question indicator without opening the task", () 
     await session.waitForLoad();
     await expect(session.clarificationDeferredNotice()).toBeVisible({ timeout: 30_000 });
 
-    await apiClient.addUserMessage(task.id, task.session_id, "/e2e:clarification");
+    await addUserMessageWhenReady(apiClient, task.id, task.session_id, "/e2e:clarification");
     await waitForSessionState(apiClient, {
       taskId: task.id,
       sessionId: task.session_id,
@@ -163,7 +187,8 @@ test.describe("Sidebar pending-question indicator without opening the task", () 
       "skipped clarification turn should finish before the next prompt",
     );
 
-    await apiClient.addUserMessage(
+    await addUserMessageWhenReady(
+      apiClient,
       task.id,
       task.session_id,
       'e2e:message("post-skip turn completed")',

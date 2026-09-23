@@ -17,6 +17,7 @@ test.describe("Org chart", () => {
     officeApi,
     officeSeed,
   }) => {
+    test.setTimeout(120_000);
     const worker = await officeApi.createAgent(officeSeed.workspaceId, {
       name: "Org Chart Reparent Target",
       role: "worker",
@@ -27,12 +28,19 @@ test.describe("Org chart", () => {
     await expect(officeTopbarTitle(testPage)).toHaveText(/Org/i, {
       timeout: 10_000,
     });
+    await expect(testPage.getByText("CEO").first()).toBeVisible({ timeout: 30_000 });
     const edgesBefore = await testPage.getByTestId("org-edge").count();
 
     await testPage.goto(`/office/agents/${workerId}/configuration`);
+    await expect(testPage.getByRole("combobox", { name: "Reports to" })).toBeVisible({
+      timeout: 30_000,
+    });
     await testPage.getByRole("combobox", { name: "Reports to" }).click();
     const listbox = testPage.getByRole("listbox");
-    await expect(listbox).toBeVisible();
+    await expect(listbox).toBeVisible({ timeout: 10_000 });
+    await expect(listbox.getByRole("option", { name: "CEO", exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
     await listbox.getByRole("option", { name: "CEO", exact: true }).click();
 
     const saved = waitForHttp(testPage, "PATCH", new RegExp(`/api/v1/office/agents/${workerId}$`));

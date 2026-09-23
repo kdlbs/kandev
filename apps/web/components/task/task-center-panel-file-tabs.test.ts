@@ -18,14 +18,25 @@ describe("upsertOpenFileTab", () => {
     expect(result).toEqual([{ ...file, renderedPreview: true }]);
   });
 
+  it("updates the mode on an already-open Markdown tab", () => {
+    const result = upsertOpenFileTab([file], { ...file, markdownMode: "edit" });
+
+    expect(result).toEqual([{ ...file, markdownMode: "edit" }]);
+  });
+
   it("keeps same-path tabs from different repositories separate", () => {
     const frontend = { ...file, repo: "frontend" };
-    const backend = { ...file, repo: "backend", renderedPreview: true };
+    const backend = {
+      ...file,
+      repo: "backend",
+      renderedPreview: true,
+      markdownMode: "source" as const,
+    };
 
     expect(upsertOpenFileTab([frontend], backend)).toEqual([frontend, backend]);
   });
 
-  it("preserves an existing tab when no preview state is requested", () => {
+  it("preserves an existing tab when no mode is requested", () => {
     const tabs = [file];
     expect(upsertOpenFileTab(tabs, file)).toBe(tabs);
   });

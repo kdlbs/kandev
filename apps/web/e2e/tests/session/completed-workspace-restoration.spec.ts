@@ -55,13 +55,14 @@ test.describe("Completed workspace restoration", () => {
     );
 
     const retry = workspaceUnavailable.getByTestId("workspace-retry");
+    await expect(retry).toBeVisible({ timeout: 30_000 });
     const retryBox = await retry.boundingBox();
     expect(retryBox, "workspace retry has no rendered hitbox").not.toBeNull();
     expect(retryBox?.height ?? 0).toBeGreaterThanOrEqual(32);
     await retry.click();
 
-    const fileNode = session.fileTreeNode(RETAINED_WORKSPACE_FILE);
-    await expect(fileNode).toBeVisible({ timeout: 60_000 });
+    const fileNode = await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 60_000);
+    await expect(fileNode).toBeVisible();
     await fileNode.click();
     const viewer = testPage.locator(".monaco-editor:visible").first();
     await expect(viewer).toBeVisible({ timeout: 15_000 });
@@ -106,7 +107,7 @@ test.describe("Completed workspace restoration", () => {
     await testPage.reload();
     await session.showSessionContext();
     await session.clickTab("Files");
-    await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
+    await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 60_000);
     await session.clickSessionChatTab();
     await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
 

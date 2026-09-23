@@ -15,6 +15,7 @@ const openFileTabKeys: (keyof OpenFileTab)[] = [
   "isDirty",
   "isBinary",
   "renderedPreview",
+  "markdownMode",
 ];
 
 function areOpenFileTabsEqual(left: OpenFileTab, right: OpenFileTab): boolean {
@@ -38,6 +39,7 @@ export function upsertOpenFileTab(prev: OpenFileTab[], fileTab: OpenFileTab): Op
           ...existing,
           ...fileTab,
           renderedPreview: fileTab.renderedPreview ?? existing.renderedPreview,
+          markdownMode: fileTab.markdownMode ?? existing.markdownMode,
         };
     if (areOpenFileTabsEqual(existing, refreshed)) return prev;
     return prev.map((tab, index) => (index === existingIndex ? refreshed : tab));

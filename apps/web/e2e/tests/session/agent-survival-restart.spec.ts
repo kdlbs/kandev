@@ -108,9 +108,11 @@ test.describe("Agent survival across backend restart", () => {
 
       // Board view: the card must not show the interrupted affordance either.
       const kanban = new KanbanPage(testPage);
-      await kanban.goto();
       const card = kanban.taskCard(task.id);
-      await expect(card).toBeVisible({ timeout: 20_000 });
+      await expect(async () => {
+        await kanban.goto();
+        await expect(card).toBeVisible({ timeout: 5_000 });
+      }).toPass({ timeout: 45_000 });
       await expect(card.getByTestId("task-state-interrupted")).toHaveCount(0);
     } finally {
       await releaseFeature();

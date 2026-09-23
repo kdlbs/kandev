@@ -47,7 +47,7 @@ test("identifies a symlink in Changes and the mobile file viewer", async ({
   expect(
     await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
   ).toBe(true);
-  await viewer.getByRole("button", { name: "Close", exact: true }).tap();
+  await viewer.getByRole("button", { name: "Back", exact: true }).tap();
   await testPage.getByRole("button", { name: "Files", exact: true }).tap();
   await expect(session.fileTreeNode(name).getByTestId("symlink-indicator")).toBeVisible();
   await expect(
