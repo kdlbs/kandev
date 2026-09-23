@@ -64,9 +64,11 @@ or replace it with a fork. The PR workflow uses the canonical repository and an 
 ### Compare a fork pull request
 
 When a linked pull request uses a fork, Kandev stores the provider-qualified target repository and
-target branch on the exact task-repository attachment. It then fetches that target into a
-comparison-only remote-tracking ref. This ref is read-only and is authoritative for Changes,
-commits, cumulative diff, and ahead/behind counts.
+target branch on the exact task-repository attachment. It fetches that branch into a
+comparison-only remote-tracking ref. Kandev uses the same repository identity when it prepares a
+worktree. Kandev checks the fetched commit against the pull request's reported base commit. It
+fetches the pull request head from the base repository. This comparison ref is read-only and is
+authoritative for Changes, commits, cumulative diff, and ahead/behind counts.
 
 The comparison target does not replace `origin`, the checked-out branch, or the push route. Kandev
 shows the target as `<owner>/<repository>:<branch>` without credentials. If the target cannot be
@@ -75,8 +77,16 @@ same-named branch from `origin`. Numeric comparison totals are hidden until the 
 available.
 
 When a provider retargets the pull request, Kandev refreshes the stored target and the live session
-comparison. Selecting a task base branch or removing the owning pull-request association clears the
-explicit target. A PR with incomplete fork identity is not guessed or applied to another repository.
+comparison. If Kandev cannot fetch the required target or the fetched commit differs from the
+provider response, task preparation stops. Kandev does not use an `origin` branch with the same name
+or start from the repository default. Restore access or connectivity to try again. Then select
+**Retry launch**.
+
+The qualified target does not replace `origin` or change push routing. A fork PR continues to use
+the configured fork for pushes. An explicit cross-repository PR target blocks **Retry with the
+default branch**. To retry the same PR base, select **Retry launch**. To clear the PR target, select
+a task base branch or remove the owning pull-request association. Kandev does not guess incomplete
+fork identity or apply it to another repository.
 
 These UI operations enter through Kandev's `/ws` endpoint. With authentication disabled, anyone who can reach an unprotected backend receives the synthetic administrator identity and can invoke destructive Git actions with the executor's permissions. Experimental authentication adds user and workspace authorization, but it does not restrict the executor's filesystem or credentials. Keep Kandev on loopback or behind an authenticated, origin-protected TLS proxy; see [WebSocket API](websocket-api.md).
 
@@ -104,7 +114,9 @@ feature/{title}-{suffix}
 ```
 
 `{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When `pull_before_worktree` is omitted it defaults to `true`: Kandev attempts to refresh and verify the base branch before creating or recreating the worktree. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. When a usable local base exists, authentication, network, timeout, missing-ref, divergent-ref, and uncertain-ancestry errors produce a credential-safe warning and Kandev creates the worktree from that local base. The warning states that remote changes may be missing. When no usable local base exists, Kandev must materialize the requested branch from the remote; a failed refresh or missing remote ref stops task preparation with a repository-specific launch error. Explicit remote-only refs and remote executors keep this strict materialization behavior.
-For a numbered GitHub PR, Kandev uses the current PR base when available. If Git proves that the requested PR base was deleted, Kandev can refresh and use a configured fallback branch, often the repository default, with a warning that names both branches; unproven PR refresh failures remain fatal. Kandev does not create the worktree from an unverified local or remote-tracking fallback.
+Without an explicit cross-repository target, Kandev uses the current base branch for a numbered GitHub PR. If Git proves that the requested base branch was deleted, Kandev can use a configured fallback branch, often the repository default. Kandev shows a warning with both branch names. Other PR refresh errors stop preparation.
+
+An explicit fork target has no default fallback. Kandev stops preparation if it cannot fetch or verify that target. Kandev does not create a worktree from an unverified local or remote-tracking branch.
 
 If the repository is intentionally offline, open its workspace repository settings and disable
 **Always pull before creating a new worktree**. This skips the refresh attempt for host worktrees,

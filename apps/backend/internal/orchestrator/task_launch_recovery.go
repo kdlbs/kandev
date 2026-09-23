@@ -347,6 +347,17 @@ func (s *Service) recoverTaskLaunchBranch(ctx context.Context, req *TaskLaunchRe
 	if err != nil {
 		return err
 	}
+	if req.Action == taskLaunchRecoveryRetryDefault {
+		target, found, err := models.LoadComparisonTarget(taskRepository.Metadata)
+		if err != nil {
+			return fmt.Errorf("load task repository comparison target: %w", err)
+		}
+		if found && target.Provider == models.ComparisonTargetProviderGitHub &&
+			target.Kind == models.ComparisonTargetKindPullRequest &&
+			!models.ComparisonTargetRepositoriesEqual(target.HeadRepository, target.TargetRepository) {
+			return fmt.Errorf("retry_default cannot replace an explicit cross-repository PR base; choose a base branch or retry launch")
+		}
+	}
 	if s.taskLaunchRecoveryRepo == nil {
 		return fmt.Errorf("task launch recovery repository is unavailable")
 	}

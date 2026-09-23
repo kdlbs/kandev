@@ -47,6 +47,19 @@ var ErrTaskRepositoryNotFound = errors.New("task repository not found")
 //
 // Returns the updated TaskRepository on success.
 func (s *Service) UpdateRepositoryBaseBranch(ctx context.Context, req UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error) {
+	return s.updateRepositoryBaseBranch(ctx, req, true)
+}
+
+// UpdateRepositoryBaseBranchFromSystem applies a branch update produced by a
+// provider sync or runtime recovery. It must not turn the update into a user
+// override or replace an existing manual selection.
+func (s *Service) UpdateRepositoryBaseBranchFromSystem(ctx context.Context, req UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error) {
+	return s.updateRepositoryBaseBranch(ctx, req, false)
+}
+
+func (s *Service) updateRepositoryBaseBranch(
+	ctx context.Context, req UpdateRepositoryBaseBranchRequest, manualSelection bool,
+) (*models.TaskRepository, error) {
 	baseBranch, err := validateUpdateRepositoryBaseBranchRequest(req)
 	if err != nil {
 		return nil, err
@@ -61,10 +74,13 @@ func (s *Service) UpdateRepositoryBaseBranch(ctx context.Context, req UpdateRepo
 	if err != nil {
 		return nil, err
 	}
+	previousBaseBranch := taskRepo.BaseBranch
+	_, hadComparisonTarget, targetErr := models.LoadComparisonTarget(taskRepo.Metadata)
 	updatedTaskRepo, changed, err := s.taskRepos.UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
 		ctx,
 		taskRepo.ID,
 		baseBranch,
+		manualSelection,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update task repository: %w", err)
@@ -73,6 +89,9 @@ func (s *Service) UpdateRepositoryBaseBranch(ctx context.Context, req UpdateRepo
 		return updatedTaskRepo, nil
 	}
 	taskRepo = updatedTaskRepo
+	if targetErr == nil && previousBaseBranch == baseBranch && !hadComparisonTarget {
+		return taskRepo, nil
+	}
 
 	// Detach from the caller's ctx for post-commit fan-out: the DB row is
 	// already persisted, so if the HTTP / WS request gets cancelled mid-

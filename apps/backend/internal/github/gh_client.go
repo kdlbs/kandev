@@ -283,7 +283,16 @@ func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*
 	if err := json.Unmarshal([]byte(out), &raw); err != nil {
 		return nil, fmt.Errorf("parse PR response: %w", err)
 	}
-	return convertGHPR(&raw, owner, repo), nil
+	pr := convertGHPR(&raw, owner, repo)
+	baseSHA, err := c.run(ctx, "api", fmt.Sprintf("repos/%s/%s/pulls/%d", owner, repo, number), "--jq", ".base.sha")
+	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("get PR #%d base SHA: %w", number, err)
+		}
+		return pr, nil
+	}
+	pr.BaseSHA = strings.TrimSpace(baseSHA)
+	return pr, nil
 }
 
 func (c *GHClient) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {

@@ -1,6 +1,6 @@
 ---
 created: 2026-09-22
-status: draft
+status: done
 requirements:
   - REQ-WORKSPACES-WORKTREE-BASE-REFRESH-001
 system_design:
@@ -16,9 +16,8 @@ Resolve a PR base using its target repository and branch before worktree
 preparation. Preserve ordinary repository defaults and existing push routing.
 Issue: [#3857](https://github.com/kdlbs/kandev/issues/3857).
 
-Deliver provider identity first, materialization second, and recovery guards
-with integration evidence last. All work orders are pending and sequential.
-This package does not authorize implementation or delegation.
+Provider identity, materialization, recovery guards, integration evidence, and
+public documentation are complete. Issue #3856 remains outside this package.
 
 ## Confirmed root cause
 
@@ -67,7 +66,8 @@ Neither test reproduces the external agent hint in issue #3856.
 
 The workspace system owns worktree base identity and materialization.
 Criteria .11 and .13 already cover live bases and missing-branch fallback.
-They omit repository identity. Draft criteria .15 through .19 close that gap.
+They omit repository identity. Criteria .15 through .19 close that gap and are
+now active as part of the delivered contract.
 The design amendment follows the existing repository-qualified comparison ADR.
 No new ADR or schema migration is necessary.
 
@@ -91,12 +91,13 @@ so the issue's fork-origin topology is not universal.
 - The reconciliation hint's producer, wording, and counts in issue #3856.
 - Automatic merge, rebase, reset, push, or rewriting origin.
 - New credentials, expanded repository access, or a new persistence format.
-- New UI controls, translations, or changes to manual comparison selection.
+- New UI controls or translations. Explicit manual base selection remains
+  authoritative across provider refreshes.
 - Changing background comparison readiness or valid worktree reuse policy.
 
 ## Technical approach
 
-Use the [design amendment](../../specs/workspaces/system-design/worktree-base-refresh.md#proposed-amendment-repository-qualified-pr-bases).
+Use the [design amendment](../../specs/workspaces/system-design/worktree-base-refresh.md#repository-qualified-pr-bases).
 The existing origin-default resolver remains a low-level repository operation.
 Callers with PR context must use qualified identity before fallback.
 
@@ -104,39 +105,50 @@ Reuse `ComparisonTarget` identity and deterministic comparison refs. Retain
 base OIDs only in provider observations and preparation results. Materialize
 under the existing credential route and verify the selected commit.
 
+Validate a live PR's head repository against the attached checkout or the
+validated contribution source. Keep explicit manual base selections marked
+across provider refreshes, and fail known cross-repository resolution errors
+without falling back to a bare branch.
+
 Extract only the reusable materialization primitive into `internal/common/gitbase`.
 Keep agentctl scheduling, error projection, and workspace ownership unchanged.
 Reject default recovery for an explicit cross-repository binding before writes.
 
 ## Tests
 
-All names below are planned permanent regressions, not existing passing tests.
+These permanent regressions cover the implementation and compatibility cases.
 
 | Criteria | Evidence |
 | --- | --- |
 | .11, .15 | `executor_pr_base_resolver_test.go`: `TestResolveTaskRepoInfo_PRBaseUsesTargetRepository`; colliding PR numbers and retarget cases |
-| .15, .16 | `github/pr_base_identity_test.go`: `TestPRBaseIdentityConversions`; REST, GH CLI, GraphQL, incomplete fields |
+| .15, .16 | `github/pr_base_identity_test.go`: `TestPRBaseIdentityConversionsRetainBaseCommitOID`; REST/GraphQL OID conversion and GH CLI command contract |
 | .16, .17 | `worktree/manager_pr_base_test.go`: `TestCreateWorktree_QualifiedPRBase`; two local bare repositories with different `main` commits |
 | .16, .17 | `common/gitbase/materialize_test.go`: `TestMaterializeQualifiedBase`; exact ref, OID mismatch, collisions, auth, missing ref, cancellation |
 | .15-.17, .19 | `agentctl/server/api/workspace_materialize_pr_base_test.go`: `TestMaterializeRepository_QualifiedPRBase`; remote boundary round trip |
 | .18 | `orchestrator/task_launch_recovery_pr_base_test.go`: `TestRecoverTaskLaunch_ForkPRDefaultPreservesTarget`; zero writes and zero relaunch |
 | .15-.19 | `backendapp/pr_base_integration_test.go`: `TestForkPRBasePreparationEndToEnd`; provider fixture through request wiring to real Git |
+| .17 | `lifecycle/env_preparer_worktree_pr_base_test.go`: valid sibling cannot hide a required target OID failure; cancellation returns no prepared workspace |
+| .17 | `worktree/manager_pr_base_test.go`: qualified-base recreation failure preserves the existing checkout path |
 | .19 | Existing live-default, stacked-PR fallback, comparison-target, and contribution tests plus a mixed-repository regression |
 
 ## End-to-end evidence
 
-This backend repair uses a Go integration fixture instead of a browser-only test.
-The fixture creates upstream and fork bare repositories with different sentinel
-commits, then prepares a task through the production wiring. Assert target OID,
-checkout head preservation, unchanged origin/push routing, and persisted target.
-Repeat with upstream unavailable and with one valid sibling repository.
-Existing rendered comparison behavior remains unchanged.
+`TestForkPRBasePreparationEndToEnd` converts a fake provider response, passes
+the result through backendapp's lifecycle request mapper and the lifecycle
+worktree preparer, then materializes a real linked worktree from local fork and
+upstream repositories. It verifies the provider's non-default target OID, PR
+head, comparison metadata, unchanged fork origin refs and push URL, and disabled
+push routing on the comparison remote. Separate lifecycle cases prove that a
+valid sibling cannot hide a failed required target and that cancellation does
+not return a prepared workspace. A recreation regression confirms failed
+qualified-base preflight leaves the existing checkout untouched. Remote
+materialization has its own agentctl API regression from Task 02.
 
 ## Work orders
 
-- [ ] [Task 01: Preserve qualified PR base identity](task-01-pr-base-identity.md)
-- [ ] [Task 02: Materialize the qualified PR base](task-02-qualified-materialization.md)
-- [ ] [Task 03: Guard recovery and prove integration](task-03-recovery-and-integration.md)
+- [x] [Task 01: Preserve qualified PR base identity](task-01-pr-base-identity.md)
+- [x] [Task 02: Materialize the qualified PR base](task-02-qualified-materialization.md)
+- [x] [Task 03: Guard recovery and prove integration](task-03-recovery-and-integration.md)
 
 ## Companion packages
 
@@ -160,7 +172,73 @@ new implementation status, regression cases, and command results.
 - Relative document links and work-order requirement/acceptance IDs: resolved.
 - `git diff --check`: passed. All four package files are present in Git status.
 - GitHub assignment: verified as `carlosflorencio`.
-- Implementation checks: pending; exact commands are in each work order.
+- Task 01 implementation: provider lookup now uses the validated target namespace,
+  retains the base OID from REST and GraphQL, and checks the response against the
+  exact PR and checkout identity. GH CLI `pr view/list --json` requests omit the
+  unsupported `baseRefOid` field; `GetPR` reads `.base.sha` with `gh api` and
+  preserves PR details if that OID read fails. Exact linked task PR selection is
+  scoped by repository, PR number, and checkout branch.
+- Task 01 focused verification: `go test ./internal/github ./internal/backendapp ./internal/orchestrator/executor -run 'Test(PRBase|ResolveTaskRepoInfo|GithubPRBase)' -count=1` passed.
+- Task 01 package verification: `go test ./internal/github ./internal/backendapp ./internal/orchestrator/executor -count=1` passed.
+- Task 01 diff check: `git diff --check` passed.
+- Task 02 implementation: a shared `internal/common/gitbase` primitive fetches
+  and verifies the qualified target, while host and remote preparation keep
+  PR-head materialization separate. Lifecycle copies now preserve the typed
+  target through worktree and remote checkout requests.
+- Task 02 focused verification: `go test ./internal/common/gitbase ./internal/worktree ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agentctl/server/process -run 'Test(MaterializeQualifiedBase|CreateWorktree_QualifiedPRBase|MaterializeRepository_QualifiedPRBase|QualifiedPRBase|MaterializeComparisonTarget|ResolveRemoteDefaultBranch|ResolveBaseRefWithFallback|CreateWorktree_MissingRemoteBase)' -count=1`: passed.
+- Task 02 full package verification: `go test ./internal/common/gitbase ./internal/worktree ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agentctl/server/process -count=1`: passed.
+- Task 02 Task 01 regression check: `go test ./internal/github ./internal/backendapp ./internal/orchestrator/executor -run 'Test(PRBase|ResolveTaskRepoInfo|GithubPRBase)' -count=1`: passed.
+- Task 02 `git diff --check`: passed.
+- Task 03 implementation: default recovery now rejects explicit cross-repository GitHub PR targets before repository-default or task-base writes. The comparison target and launch-error stamp remain intact; retry-launch remains unchanged, and explicit manual base selection stays authoritative across provider refreshes. Provider lookup cancellation now aborts repository resolution instead of being treated as an ordinary provider outage.
+- Task 03 focused recovery and integration checks: `go test ./internal/orchestrator ./internal/backendapp -run 'Test(RecoverTaskLaunch|ForkPRBasePreparationEndToEnd)' -count=1`: passed.
+- Task 03 regression checks for cancellation, mixed-repository failure, and recreation preflight: passed.
+- Full affected Go package verification: `go test ./internal/common/gitbase ./internal/worktree ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agentctl/server/process ./internal/github ./internal/backendapp ./internal/orchestrator ./internal/orchestrator/executor -count=1`: passed.
+- Backend build: `make -C apps/backend build`: passed for agentctl targets, Kandev, mock-agent, acpdbg, and winjob.
+- Documentation checks: catalog validation passed (299 decisions and 1112 specifications); specification linter tests passed (36); full specification lint passed; public-doc tests passed (62); public-doc validation passed (47 pages).
+- `gofmt -l` for changed Go files and `git diff --check`: passed.
+- Updated `docs/public/git-operations.md` to explain qualified fork targets, required-fetch failures, retry actions, and unchanged push routing.
+
+## Review corrections
+
+- A legacy attachment with only a PR number now qualifies the live upstream
+  target before materialization. The producer-to-materializer test starts
+  without stored comparison metadata and verifies a real worktree uses the
+  resolved upstream OID and PR head.
+- A PR with the same number and head branch from another repository is rejected
+  for a legacy attachment. Contribution PRs validate their head against
+  `SourceRepository` while keeping the attached base repository as target.
+- Invalid or ambiguous known associations and known cross-repository lookup
+  failures cannot fall back to a bare stored branch. Ordinary provider outages
+  retain the existing best-effort behavior.
+- Explicit manual base selections are marked atomically and provider refresh
+  cannot replace them. Explicit comparison-target association remains the
+  operation that clears the marker.
+
+## Review revalidation (2026-09-23)
+
+- The post-review affected-package run passed every package except
+  `internal/task/service`. It exposed that a same-branch manual choice
+  persisted its marker but also triggered unchanged-base side effects. The
+  service now skips those side effects when the metadata marker is the only
+  change.
+- Focused base-selection and comparison-target service regressions passed, and
+  `go test ./internal/task/service -count=1` passed after the correction.
+- The other packages in the affected-package run passed:
+  `internal/common/gitbase`, `internal/worktree`,
+  `internal/agent/runtime/lifecycle`, `internal/agent/runtime/agentctl`,
+  `internal/agentctl/server/api`, `internal/agentctl/server/process`,
+  `internal/github`, `internal/backendapp`, `internal/orchestrator`,
+  `internal/orchestrator/executor`, `internal/task/repository/sqlite`, and
+  `internal/task/handlers`.
+- `make -C apps/backend build`: passed for agentctl targets, Kandev, mock-agent,
+  acpdbg, and winjob.
+- Current documentation validation passed: catalog (299 decisions and 1112
+  specifications), 36 specification-linter tests, full specification lint, 62
+  public-doc tests, and validation of 47 published pages.
+- All 54 changed Go files passed `gofmt -l`; `git diff --check` passed.
+- The workspace requirement is active and its system design is current. Review
+  corrections and the final verification outcomes are recorded in all three
+  work orders.
 
 ## Risks
 

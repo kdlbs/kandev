@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/gitbase"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/gitcheckout"
@@ -31,6 +32,8 @@ type MaterializeRepositoryRequest struct {
 	Destination             string                            `json:"destination"`
 	BaseBranch              string                            `json:"base_branch"`
 	CheckoutBranch          string                            `json:"checkout_branch,omitempty"`
+	PRNumber                int                               `json:"pr_number,omitempty"`
+	QualifiedPRBase         *models.PRBase                    `json:"qualified_pr_base,omitempty"`
 	RemoteContribution      *models.RemoteContribution        `json:"remote_contribution,omitempty"`
 	ContributionDestination *models.ContributionDestination   `json:"contribution_destination,omitempty"`
 }
@@ -74,6 +77,10 @@ func (s *Server) handleWorkspaceMaterializeRepository(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, MaterializeRepositoryResponse{Error: "invalid repository branch"})
 		return
 	}
+	if err := validateQualifiedPRBaseRequest(&req); err != nil {
+		c.JSON(http.StatusBadRequest, MaterializeRepositoryResponse{Error: "invalid qualified PR base"})
+		return
+	}
 	if req.RemoteContribution != nil {
 		if err := req.RemoteContribution.Validate(); err != nil {
 			c.JSON(http.StatusBadRequest, MaterializeRepositoryResponse{Error: "invalid remote contribution"})
@@ -81,6 +88,13 @@ func (s *Server) handleWorkspaceMaterializeRepository(c *gin.Context) {
 		}
 		if req.BaseBranch != req.RemoteContribution.BaseBranch || req.CheckoutBranch != req.RemoteContribution.HeadBranch {
 			c.JSON(http.StatusBadRequest, MaterializeRepositoryResponse{Error: "remote contribution branch mismatch"})
+			return
+		}
+		if req.QualifiedPRBase != nil &&
+			(req.QualifiedPRBase.Target.Number != req.RemoteContribution.Number ||
+				req.QualifiedPRBase.Target.HeadBranch != req.RemoteContribution.HeadBranch ||
+				req.QualifiedPRBase.Target.TargetBranch != req.RemoteContribution.BaseBranch) {
+			c.JSON(http.StatusBadRequest, MaterializeRepositoryResponse{Error: "qualified PR base does not match remote contribution"})
 			return
 		}
 	}
@@ -91,7 +105,10 @@ func (s *Server) handleWorkspaceMaterializeRepository(c *gin.Context) {
 		}
 	}
 
-	reused, err := materializeRepositoryWithOptions(c.Request.Context(), req.RepositoryURL, destination, req.BaseBranch, req.CheckoutBranch, req.RemoteContribution, req.ContributionDestination, req.CheckoutOptions)
+	reused, err := materializeRepositoryWithQualifiedPRBase(
+		c.Request.Context(), req.RepositoryURL, destination, req.BaseBranch, req.CheckoutBranch,
+		req.PRNumber, req.QualifiedPRBase, req.RemoteContribution, req.ContributionDestination, req.CheckoutOptions,
+	)
 	if err != nil {
 		var directoryErr *gitcheckout.DirectoryError
 		if errors.As(err, &directoryErr) {
@@ -241,6 +258,17 @@ func materializeRepositoryInternal(ctx context.Context, locator, destination, ba
 }
 
 func materializeRepositoryWithOptions(ctx context.Context, locator, destination, baseBranch, checkoutBranch string, binding *models.RemoteContribution, contributionDestination *models.ContributionDestination, options *models.RepositoryCheckoutOptions) (bool, error) {
+	return materializeRepositoryWithQualifiedPRBase(ctx, locator, destination, baseBranch, checkoutBranch, 0, nil, binding, contributionDestination, options)
+}
+
+func materializeRepositoryWithQualifiedPRBase(
+	ctx context.Context, locator, destination, baseBranch, checkoutBranch string,
+	prNumber int, qualifiedPRBase *models.PRBase, binding *models.RemoteContribution,
+	contributionDestination *models.ContributionDestination, options *models.RepositoryCheckoutOptions,
+) (bool, error) {
+	if err := validateQualifiedPRBaseMaterialization(prNumber, baseBranch, checkoutBranch, qualifiedPRBase); err != nil {
+		return false, err
+	}
 	options, err := models.NormalizeRepositoryCheckoutOptions(options)
 	if err != nil {
 		return false, err
@@ -269,7 +297,7 @@ func materializeRepositoryWithOptions(ctx context.Context, locator, destination,
 	if err := cloneMaterializedRepository(ctx, locator, checkout, options); err != nil {
 		return false, err
 	}
-	if err := populateMaterializedRepository(ctx, checkout, baseBranch, checkoutBranch, binding, options); err != nil {
+	if err := populateMaterializedRepository(ctx, checkout, baseBranch, checkoutBranch, prNumber, qualifiedPRBase, binding, options); err != nil {
 		return false, err
 	}
 	if err := configureContributionDestination(ctx, checkout, contributionDestination); err != nil {
@@ -283,6 +311,15 @@ func materializeRepositoryWithOptions(ctx context.Context, locator, destination,
 		return false, err
 	}
 	return false, nil
+}
+
+func validateQualifiedPRBaseMaterialization(
+	prNumber int, baseBranch, checkoutBranch string, qualifiedPRBase *models.PRBase,
+) error {
+	return validateQualifiedPRBaseRequest(&MaterializeRepositoryRequest{
+		PRNumber: prNumber, BaseBranch: baseBranch, CheckoutBranch: checkoutBranch,
+		QualifiedPRBase: qualifiedPRBase,
+	})
 }
 
 func cloneMaterializedRepository(ctx context.Context, locator, checkout string, options *models.RepositoryCheckoutOptions) error {
@@ -301,10 +338,36 @@ func cloneMaterializedRepository(ctx context.Context, locator, checkout string, 
 	return gitcheckout.ConfigureSparse(ctx, checkout, options, materializeCheckoutGit)
 }
 
-func populateMaterializedRepository(ctx context.Context, checkout, baseBranch, checkoutBranch string, binding *models.RemoteContribution, options *models.RepositoryCheckoutOptions) error {
+func populateMaterializedRepository(
+	ctx context.Context, checkout, baseBranch, checkoutBranch string,
+	prNumber int, qualifiedPRBase *models.PRBase, binding *models.RemoteContribution,
+	options *models.RepositoryCheckoutOptions,
+) error {
+	if qualifiedPRBase != nil {
+		runner := func(runCtx context.Context, args ...string) (string, error) {
+			return materializeGitOutput(runCtx, append([]string{"-C", checkout}, args...)...)
+		}
+		if _, err := gitbase.Materialize(ctx, gitbase.GitRunner(runner), *qualifiedPRBase); err != nil {
+			return fmt.Errorf("materialize qualified PR base: %w", err)
+		}
+	}
 	if binding != nil {
 		if err := materializeRemoteContribution(ctx, checkout, binding); err != nil {
 			return err
+		}
+	} else if qualifiedPRBase != nil {
+		if prNumber != qualifiedPRBase.Target.Number || checkoutBranch != qualifiedPRBase.Target.HeadBranch {
+			return errors.New("qualified PR head does not match checkout request")
+		}
+		runner := func(runCtx context.Context, args ...string) (string, error) {
+			return materializeGitOutput(runCtx, append([]string{"-C", checkout}, args...)...)
+		}
+		headRef, err := gitbase.FetchPullRequestHead(ctx, gitbase.GitRunner(runner), qualifiedPRBase.Target)
+		if err != nil {
+			return fmt.Errorf("materialize qualified PR head: %w", err)
+		}
+		if _, err := materializeGitOutput(ctx, "-C", checkout, "checkout", "-B", checkoutBranch, headRef); err != nil {
+			return fmt.Errorf("check out qualified PR head: %w", err)
 		}
 	} else if err := checkoutMaterializedBranch(ctx, checkout, baseBranch, checkoutBranch); err != nil {
 		return err
@@ -314,6 +377,24 @@ func populateMaterializedRepository(ctx context.Context, checkout, baseBranch, c
 	}
 	if err := gitcheckout.Save(checkout, options); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateQualifiedPRBaseRequest(req *MaterializeRepositoryRequest) error {
+	if req == nil || req.QualifiedPRBase == nil {
+		return nil
+	}
+	base := req.QualifiedPRBase
+	if err := base.Validate(); err != nil {
+		return err
+	}
+	target := base.Target
+	if target.Provider != models.ComparisonTargetProviderGitHub || target.Kind != models.ComparisonTargetKindPullRequest {
+		return errors.New("qualified target is not a GitHub pull request")
+	}
+	if req.PRNumber != target.Number || req.BaseBranch != target.TargetBranch || req.CheckoutBranch != target.HeadBranch {
+		return errors.New("qualified PR identity does not match materialization request")
 	}
 	return nil
 }

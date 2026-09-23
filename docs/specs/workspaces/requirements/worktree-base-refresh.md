@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: workspaces
 created: 2026-08-25
 owners:
@@ -91,21 +91,23 @@ local branches without publishing them first.
   credentials, remote URLs, and raw command output. Existing refresh and
   fallback decisions shall remain unchanged.
 
-## Proposed amendment: repository-qualified PR bases
+## Repository-qualified PR bases
 
-Criteria .15 through .19 are draft. The workspace system owns base resolution
-and materialization. The task system retains provider association ownership.
+The workspace system owns base resolution and materialization. The task system
+retains provider association ownership.
 Delivery: [Fork PR base resolution](../../../plans/fork-pr-base-resolution/plan.md).
 
-- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.15:** For a PR-linked checkout, base resolution shall preserve the target repository and branch. A same-named fork branch shall not replace that target.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.15:** For a PR-linked checkout, base resolution shall preserve the target repository and branch. A same-named fork branch shall not replace that target. Before applying live PR data, Kandev shall match the PR head repository and branch to the attached checkout, or to the validated contribution source when the attachment is the PR base repository.
 - **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.16:** Before required materialization succeeds, Kandev shall verify the target commit in the checkout. A provider-supplied base commit shall remain tied to its repository and branch.
 - **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.17:** When a cross-repository base cannot be resolved or fetched, required preparation shall fail without substituting a repository default. Errors shall preserve cancellation and omit credentials.
 - **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.18:** Automatic fallback and default-branch recovery shall preserve an explicit PR target. They shall not change repository defaults, push destinations, or another attachment's base.
 - **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.19:** Ordinary repository defaults and same-repository fallback behavior shall remain compatible. Every required repository must resolve independently; one valid repository shall not hide an unresolved fork base.
 
 These criteria do not require a provider refresh for valid reused worktrees.
-They do not change explicit manual comparison selection. Existing comparison
-fetch failures keep their non-blocking status behavior after workspace creation.
+An explicit user-selected base branch remains authoritative across provider
+refreshes until the user establishes a new comparison-target association.
+Existing comparison-fetch failures keep their non-blocking status behavior
+after workspace creation.
 
 ## Compatibility
 

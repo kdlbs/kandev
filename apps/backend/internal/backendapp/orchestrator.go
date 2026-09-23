@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/kandev/kandev/internal/authz"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -337,18 +338,167 @@ type githubExecutorCredentialPolicyAdapter struct {
 	service githubCredentialPolicyService
 }
 
-type githubPRBaseResolver struct {
-	service *githubpkg.Service
+type githubPRBaseLookupService interface {
+	GetPRForAutomation(context.Context, string, string, string, int) (*githubpkg.PR, error)
+	ListTaskPRs(context.Context, []string) (map[string][]*githubpkg.TaskPR, error)
 }
 
-func (r githubPRBaseResolver) ResolvePRBaseBranch(
-	ctx context.Context, workspaceID, owner, repo string, number int,
-) (string, error) {
-	pr, err := r.service.GetPRForAutomation(ctx, workspaceID, owner, repo, number)
-	if err != nil || pr == nil {
-		return "", err
+type githubPRBaseResolver struct {
+	service githubPRBaseLookupService
+}
+
+func (r githubPRBaseResolver) ResolvePRBase(
+	ctx context.Context, workspaceID string, lookup executorpkg.PRBaseLookup,
+) (taskmodels.PRBase, error) {
+	owner, repo, err := r.prBaseRepository(ctx, lookup)
+	if err != nil {
+		return taskmodels.PRBase{}, err
 	}
-	return pr.BaseBranch, nil
+	knownCrossRepository := !strings.EqualFold(owner, lookup.AttachedOwner) ||
+		!strings.EqualFold(repo, lookup.AttachedRepository)
+	pr, err := r.service.GetPRForAutomation(ctx, workspaceID, owner, repo, lookup.Number)
+	if err != nil {
+		if knownCrossRepository {
+			return taskmodels.PRBase{}, executorpkg.NewPRBaseResolutionError(err, true, false)
+		}
+		return taskmodels.PRBase{}, err
+	}
+	base, err := githubPRBaseFromPR(pr, owner, repo, lookup.Number, lookup.CheckoutBranch)
+	if err != nil {
+		return taskmodels.PRBase{}, executorpkg.NewPRBaseResolutionError(err, knownCrossRepository, true)
+	}
+	return base, nil
+}
+
+func githubPRBaseFromPR(pr *githubpkg.PR, owner, repo string, number int, checkoutBranch string) (taskmodels.PRBase, error) {
+	if err := validateGitHubPRBaseLookup(pr, owner, repo, number, checkoutBranch); err != nil {
+		return taskmodels.PRBase{}, err
+	}
+	headOwner, headName := strings.TrimSpace(pr.HeadRepoOwner), strings.TrimSpace(pr.HeadRepoName)
+	candidate := taskmodels.ComparisonTargetCandidate{
+		Provider:         taskmodels.ComparisonTargetProviderGitHub,
+		Kind:             taskmodels.ComparisonTargetKindPullRequest,
+		Number:           number,
+		HeadBranch:       pr.HeadBranch,
+		TargetBranch:     pr.BaseBranch,
+		HeadRepository:   githubComparisonRepository(headOwner, headName, pr.HeadRepoID),
+		TargetRepository: githubComparisonRepository(owner, repo, pr.BaseRepoID),
+	}
+	target, err := candidate.Build()
+	if err != nil {
+		return taskmodels.PRBase{}, fmt.Errorf("validate GitHub PR base identity: %w", err)
+	}
+	base := taskmodels.PRBase{Target: target, OID: pr.BaseSHA}
+	if err := base.Validate(); err != nil {
+		return taskmodels.PRBase{}, err
+	}
+	return base, nil
+}
+
+func validateGitHubPRBaseLookup(pr *githubpkg.PR, owner, repo string, number int, checkoutBranch string) error {
+	if pr == nil || pr.Number != number {
+		return fmt.Errorf("GitHub PR identity did not match %s/%s#%d", owner, repo, number)
+	}
+	if checkoutBranch != "" && pr.HeadBranch != checkoutBranch {
+		return fmt.Errorf("GitHub PR head branch did not match checkout branch")
+	}
+	if (pr.RepoOwner != "" && !strings.EqualFold(pr.RepoOwner, owner)) ||
+		(pr.RepoName != "" && !strings.EqualFold(pr.RepoName, repo)) {
+		return fmt.Errorf("GitHub PR repository did not match %s/%s", owner, repo)
+	}
+	if (pr.BaseRepoOwner != "" || pr.BaseRepoName != "") &&
+		(!strings.EqualFold(pr.BaseRepoOwner, owner) || !strings.EqualFold(pr.BaseRepoName, repo)) {
+		return fmt.Errorf("GitHub PR base repository did not match %s/%s", owner, repo)
+	}
+	headOwner, headName := strings.TrimSpace(pr.HeadRepoOwner), strings.TrimSpace(pr.HeadRepoName)
+	if headOwner == "" || headName == "" {
+		return fmt.Errorf("GitHub PR head repository identity is incomplete")
+	}
+	return nil
+}
+
+func (r githubPRBaseResolver) prBaseRepository(
+	ctx context.Context, lookup executorpkg.PRBaseLookup,
+) (string, string, error) {
+	if lookup.Target != nil {
+		checkoutBranch := lookup.CheckoutBranch
+		if checkoutBranch == "" {
+			checkoutBranch = lookup.Target.HeadBranch
+		}
+		if err := lookup.Target.Validate(); err != nil || lookup.Target.Number != lookup.Number ||
+			lookup.Target.HeadBranch != checkoutBranch {
+			return "", "", fmt.Errorf("PR comparison target did not match task repository %q", lookup.TaskRepositoryID)
+		}
+		owner, repo, ok := splitGitHubRepositoryPath(lookup.Target.TargetRepository.Path)
+		if !ok {
+			return "", "", fmt.Errorf("PR comparison target repository is invalid")
+		}
+		return owner, repo, nil
+	}
+	linked, err := r.linkedTaskPR(ctx, lookup)
+	if err != nil {
+		return "", "", err
+	}
+	if linked != nil {
+		return linked.Owner, linked.Repo, nil
+	}
+	if lookup.AttachedOwner == "" || lookup.AttachedRepository == "" {
+		return "", "", fmt.Errorf("task repository %q has no GitHub repository identity", lookup.TaskRepositoryID)
+	}
+	return lookup.AttachedOwner, lookup.AttachedRepository, nil
+}
+
+func (r githubPRBaseResolver) linkedTaskPR(
+	ctx context.Context, lookup executorpkg.PRBaseLookup,
+) (*githubpkg.TaskPR, error) {
+	if lookup.TaskID == "" || lookup.RepositoryID == "" || lookup.CheckoutBranch == "" {
+		return nil, nil
+	}
+	byTask, err := r.service.ListTaskPRs(ctx, []string{lookup.TaskID})
+	if err != nil {
+		return nil, err
+	}
+	linked, err := selectLinkedTaskPRForBase(byTask[lookup.TaskID], lookup)
+	if err != nil {
+		return nil, executorpkg.NewPRBaseResolutionError(err, false, true)
+	}
+	return linked, nil
+}
+
+func selectLinkedTaskPRForBase(
+	prs []*githubpkg.TaskPR, lookup executorpkg.PRBaseLookup,
+) (*githubpkg.TaskPR, error) {
+	var match *githubpkg.TaskPR
+	for _, pr := range prs {
+		if pr == nil || pr.RepositoryID != lookup.RepositoryID || pr.PRNumber != lookup.Number ||
+			pr.HeadBranch != lookup.CheckoutBranch {
+			continue
+		}
+		if match != nil {
+			return nil, fmt.Errorf("multiple linked GitHub PRs match task repository %q", lookup.TaskRepositoryID)
+		}
+		match = pr
+	}
+	return match, nil
+}
+
+func splitGitHubRepositoryPath(path string) (string, string, bool) {
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+func githubComparisonRepository(owner, repo string, id int64) taskmodels.ComparisonTargetRepository {
+	providerID := ""
+	if id > 0 {
+		providerID = strconv.FormatInt(id, 10)
+	}
+	return taskmodels.ComparisonTargetRepository{
+		Host: "github.com", Path: owner + "/" + repo, ProviderID: providerID,
+		RemoteURL: fmt.Sprintf("https://github.com/%s/%s.git", owner, repo),
+	}
 }
 
 func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
@@ -1099,7 +1249,7 @@ func (u *repoLocalPathUpdater) UpdateRepositoryDefaultBranch(ctx context.Context
 }
 
 func (u *repoLocalPathUpdater) UpdateTaskRepositoryBaseBranch(ctx context.Context, taskID, taskRepositoryID, baseBranch string) error {
-	_, err := u.svc.UpdateRepositoryBaseBranch(ctx, taskservice.UpdateRepositoryBaseBranchRequest{
+	_, err := u.svc.UpdateRepositoryBaseBranchFromSystem(ctx, taskservice.UpdateRepositoryBaseBranchRequest{
 		TaskID:           taskID,
 		TaskRepositoryID: taskRepositoryID,
 		BaseBranch:       baseBranch,

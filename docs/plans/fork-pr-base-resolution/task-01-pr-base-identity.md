@@ -1,7 +1,7 @@
 ---
 id: "01-pr-base-identity"
 title: "Preserve qualified PR base identity"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -28,10 +28,13 @@ Resolve the namespace from the exact attachment instead of assuming origin.
 
 - Introduce a typed resolver result that reuses validated `ComparisonTarget`
   identity and carries a transient optional observed OID.
-- Retain `base.sha` / `baseRefOid` across REST, GH CLI, and GraphQL conversion.
-  Update the relevant query fields, custom JSON decoding, and mock fixtures.
+- Retain `base.sha` / `baseRefOid` across REST and GraphQL conversion. Keep
+  `gh pr view/list --json` within the supported CLI field set; read the base
+  OID through `gh api` REST because `baseRefOid` is not a supported CLI field.
 - Validate namespace, number, head repository, and checkout branch together.
-  Use existing exact task-PR associations for legacy attachments.
+  Use existing exact task-PR associations for legacy attachments. For a
+  contribution attached to the PR base, validate the head against its source
+  repository and the target against the attachment.
 - Preserve validated stored targets on provider outage. Reject known cross-
   repository inputs that lack a valid target. Preserve same-repository fallback.
 - Add the failing executor regression before changing the resolver contract.
@@ -46,6 +49,11 @@ Git materialization, recovery mutation, database migrations, and public UI.
   when the fork has an unrelated PR with the same number.
 - Provider conversion tests retain target branch/OID and reject incomplete or
   mismatched identity. Same-repository and non-PR tests still pass.
+- A legacy attachment with no stored `comparison_target` rejects a same-number,
+  same-branch PR from another head repository.
+- `gh pr view/list --json` requests contain no unsupported `baseRefOid` field;
+  `GetPR` reads the base SHA through `gh api` without losing the PR on a
+  non-cancellation OID-read error.
 - A live retarget changes only the intended launch target. An ambiguous or
   historical association cannot change another attachment.
 
@@ -95,4 +103,19 @@ of ownership. Custom REST decoding must preserve the new SHA field.
 
 ## Results
 
-Pending.
+- The initial fork/upstream regression failed as expected: the resolver queried
+  `fork-owner/widgets` instead of `upstream/widgets` for PR #42.
+- The permanent tests cover upstream lookup, live retargeting, rejection of a
+  colliding PR with a different head repository, exact TaskPR selection, and
+  REST/GraphQL base OID conversion. GH CLI command-contract tests verify its
+  supported fields and REST `.base.sha` lookup.
+- `go test ./internal/github ./internal/backendapp ./internal/orchestrator/executor -run 'Test(PRBase|ResolveTaskRepoInfo|GithubPRBase)' -count=1`: passed.
+- `go test ./internal/github ./internal/backendapp ./internal/orchestrator/executor -count=1`: passed.
+- `git diff --check`: passed.
+- Review correction: the GH CLI does not support `baseRefOid` in its JSON
+  field list. `GetPR` now reads `base.sha` through `gh api`; PR view/list keep
+  the existing supported fields, and a REST OID read failure does not discard
+  otherwise usable PR details. Command-contract tests cover these paths.
+- Review correction: live legacy PR data must match both the attached head
+  repository and checkout branch. Contribution bindings use the validated
+  source repository for that head check and the attachment for the target.

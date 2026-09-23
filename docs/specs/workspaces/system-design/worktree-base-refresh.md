@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: workspaces
 requirements:
   - REQ-WORKSPACES-WORKTREE-BASE-REFRESH-001
@@ -97,10 +97,10 @@ and repository IDs match. When more than one association matches, the checkout
 branch must also match the pull-request head. Update failures are logged and do
 not fail the authoritative task-PR sync.
 
-## Proposed amendment: repository-qualified PR bases
+## Repository-qualified PR bases
 
 This section implements criteria .15 through .19. It qualifies the branch-only
-lookup and fallback rules above. Delivery remains pending in the
+lookup and fallback rules above. Delivery is tracked in the
 [fork PR base resolution package](../../../plans/fork-pr-base-resolution/plan.md).
 
 ### Identity and provider lookup
@@ -123,18 +123,25 @@ Resolve the provider namespace from the exact attachment's existing binding:
 3. Otherwise use an exact linked `TaskPR` identity, matched to this attachment
    and checkout branch. A bare PR number is not globally unique.
 4. Legacy metadata-only requests can query the attached repository. Accept the
-   response only after head repository and branch identity match the checkout.
-   Ambiguous or mismatched responses cannot resolve a qualified PR base.
+   response only after its head repository and branch match the attached
+   checkout. For a `RemoteContribution`, compare the PR head to the validated
+   source repository and require the PR target repository to match the
+   attachment. An ambiguous or mismatched response cannot resolve a qualified
+   PR base.
 
 Never choose the first PR in a task-wide list. Validate current binding ownership
 before applying a live retarget. Preserve manual comparison selections and
 historical associations under the existing task-service reconciliation rules.
 
-`githubPRBaseResolver` in `internal/backendapp/orchestrator.go` currently returns
-only `PR.BaseBranch`. Extend this adapter and GitHub conversion paths to retain
-base repository identity and base OID. REST uses `base.sha`; GH CLI and GraphQL
-use `baseRefOid`. A lookup failure can retain a valid stored qualified target,
-but cannot downgrade that target to a bare branch name.
+`githubPRBaseResolver` in `internal/backendapp/orchestrator.go` returns a
+validated target and optional observed base OID. REST uses `base.sha` and
+GraphQL uses `baseRefOid`. The supported `gh pr view/list --json` field set does
+not include `baseRefOid`; `GHClient.GetPR` reads `.base.sha` through `gh api`
+and keeps PR details usable if that best-effort OID read fails. A lookup failure
+can retain a valid stored qualified target, but cannot downgrade that target to
+a bare branch name. A known cross-repository lookup failure or invalid legacy
+association cannot fall back to a stored branch without a qualified target;
+ordinary provider outages remain eligible for the existing stored-base rule.
 
 A stored qualified target can materialize its exact branch without a fresh
 provider snapshot. The fetched commit supplies the current OID. Without a
@@ -192,8 +199,10 @@ Reject `retry_default` for a validated cross-repository binding before any
 repository-default or task-base write. Preserve the binding and error stamp.
 Use the existing bounded recovery-error envelope. Do not relabel the action
 or silently treat it as permission to abandon the target. `retry_launch` can
-retry the same qualified preparation. An explicit manual comparison selection
-retains its existing semantics.
+retry the same qualified preparation. An explicit user-selected base branch
+is marked in task-repository metadata and remains authoritative across provider
+refreshes. Only an explicit comparison-target association clears that marker;
+provider sync and recovery cannot replace the manual selection.
 
 Ordinary `retry_default` still resolves and updates the repository default.
 Recovery must check the exact attachment and current error stamp. A second

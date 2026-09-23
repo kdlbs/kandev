@@ -19,8 +19,11 @@ type checkoutContext struct {
 
 func withCheckoutOptions(ctx context.Context, req CreateRequest) (context.Context, error) {
 	options, err := models.NormalizeRepositoryCheckoutOptions(req.CheckoutOptions)
-	if err != nil || options == nil {
+	if err != nil {
 		return ctx, err
+	}
+	if options == nil && len(req.CheckoutEnv) == 0 {
+		return ctx, nil
 	}
 	env := os.Environ()
 	keys := make([]string, 0, len(req.CheckoutEnv))
@@ -45,7 +48,7 @@ func hasSparseCheckout(ctx context.Context) bool {
 }
 
 func configureCheckoutCommand(ctx context.Context, cmd *exec.Cmd) {
-	if scope := scopedCheckout(ctx); scope.options != nil {
+	if scope := scopedCheckout(ctx); scope.env != nil {
 		cmd.Env = append([]string(nil), scope.env...)
 	}
 }

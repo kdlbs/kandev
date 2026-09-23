@@ -1,7 +1,7 @@
 ---
 id: "02-qualified-materialization"
 title: "Materialize the qualified PR base"
-status: pending
+status: done
 wave: 2
 depends_on: 
   - "01-pr-base-identity"
@@ -104,4 +104,20 @@ Do not add the same target fetch to both preparation and immediate reuse.
 
 ## Results
 
-Pending.
+- Added `internal/common/gitbase.Materialize` for deterministic qualified
+  remote setup, exact branch fetch, commit resolution, and optional provider
+  OID verification. Agentctl comparison materialization now uses the shared
+  primitive and keeps its existing asynchronous status/error policy.
+- Host worktree creation and recreation carry the qualified target, bypass
+  branch/default fallback, preserve cancellation, and fetch the PR snapshot
+  from the validated base repository separately from the target branch.
+- Lifecycle single-repository, multi-repository, workspace recovery, and remote
+  materialization requests preserve the typed PR base. Remote agentctl checks
+  request identity, materializes the target, and checks out the exact PR head.
+- Regression coverage includes linked worktrees, same-named fork/upstream
+  branches, non-default target branches, PR-head preservation, stale OIDs,
+  collisions, authentication errors, cancellation, and DTO propagation.
+- Focused verification: `go test ./internal/common/gitbase ./internal/worktree ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agentctl/server/process -run 'Test(MaterializeQualifiedBase|CreateWorktree_QualifiedPRBase|MaterializeRepository_QualifiedPRBase|QualifiedPRBase|MaterializeComparisonTarget|ResolveRemoteDefaultBranch|ResolveBaseRefWithFallback|CreateWorktree_MissingRemoteBase)' -count=1`: passed.
+- Full package verification: `go test ./internal/common/gitbase ./internal/worktree ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agentctl/server/process -count=1`: passed.
+- Task 01 regression check: `go test ./internal/github ./internal/backendapp ./internal/orchestrator/executor -run 'Test(PRBase|ResolveTaskRepoInfo|GithubPRBase)' -count=1`: passed.
+- `git diff --check`: passed.
