@@ -79,7 +79,7 @@ default layout, quick actions, launch handoff, and unchanged desktop behavior.
 ## Work orders
 
 - [x] [Task 01: Restore saved phone navigation](task-01-restore-phone-navigation.md)
-- [ ] [Task 02: Consolidate mobile plugin navigation](task-02-consolidate-plugin-navigation.md)
+- [x] [Task 02: Consolidate mobile plugin navigation](task-02-consolidate-plugin-navigation.md)
 
 ## Verification results
 
@@ -96,6 +96,11 @@ Seven screenshots use this branch's production build and a disposable mock-backe
 workspace with four seeded tasks and GitHub/GitLab integrations. Captures cover
 393px dark/light Tasks and Integrations, 360px and 767px phones, and 1280px desktop.
 PR publication and exact-head CI/review status are tracked in the PR.
+
+The user subsequently requested consolidation with PR #3889. Task 02 records
+the combined 22 mobile, 3 desktop, and 77 unit checks plus nine replacement
+screenshots with an installed, functional demonstration plugin. The new capture
+uses clean implementation commit `7de0b0f9c` and supersedes the original images.
 
 ## Risks
 

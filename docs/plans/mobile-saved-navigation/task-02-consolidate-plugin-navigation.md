@@ -1,7 +1,7 @@
 ---
 id: "02-consolidate-plugin-navigation"
 title: "Consolidate mobile plugin navigation"
-status: in_progress
+status: done
 wave: 2
 depends_on: ["01-restore-phone-navigation"]
 plan: "plan.md"
@@ -90,9 +90,12 @@ Enable Canvases only in the disposable capture runtime. Inspect both themes,
 - 77 focused unit cases across nine suites pass on the combined implementation.
   Typecheck, affected lint/formatting, catalog/specification checks, and public
   documentation validation passed.
-- Two capture rehearsals exercised installed demo-plugin actions and verified
-  four tasks in the phone and desktop navigation. Final clean-source capture,
-  PR update, and superseded-PR closure remain delivery steps.
+- After two rehearsals, the final capture ran from clean implementation commit
+  `7de0b0f9c` with a fresh production build. All nine screenshots were inspected:
+  populated Tasks, integrations, workspace/task plugins, both themes, narrow and
+  wide phones, and desktop. The real plugin checklist was exercised before capture.
+  Temporary runtime data, ports, backend process, and capture spec were removed.
+  Publication and current-head CI/review status are tracked in PR #3890.
 - The peer's intermittent history-recovery scenario passed three fresh diagnostic
   runs with retries disabled. Each observed the intended two dropped replies.
   No speculative fixture change is included; final CI remains the delivery gate.
