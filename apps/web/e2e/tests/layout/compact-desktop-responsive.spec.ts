@@ -138,6 +138,9 @@ test.describe("compact desktop responsive layout", () => {
     await expect(testPage.getByRole("button", { name: "Quick Chat" })).toBeVisible();
     await expect(kanban.viewTogglePipeline).toBeVisible();
 
+    for (const step of seedData.steps) {
+      await expect(kanban.columnByStepId(step.id)).toBeAttached({ timeout: 30_000 });
+    }
     const firstColumnBox = await kanban.columnByStepId(seedData.steps[0].id).boundingBox();
     expect(firstColumnBox).not.toBeNull();
     expect(firstColumnBox!.width).toBeGreaterThanOrEqual(280);
