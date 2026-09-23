@@ -1,6 +1,6 @@
 ---
 created: 2026-09-23
-status: draft
+status: complete
 requirements:
   - REQ-INTEGRATIONS-GITHUB-REVIEW-CLEANUP-001
   - REQ-PLATFORM-PROVIDER-BACKOFF-001
@@ -105,13 +105,21 @@ browser E2E test would not exercise the defect more faithfully.
 
 ## Work orders
 
-- [ ] [Task 01: Make scheduled cleanup archive-aware](task-01-archive-eligibility.md)
-- [ ] [Task 02: Bound eligible cleanup requests](task-02-cleanup-backoff.md)
+- [x] [Task 01: Make scheduled cleanup archive-aware](task-01-archive-eligibility.md)
+- [x] [Task 02: Bound eligible cleanup requests](task-02-cleanup-backoff.md)
 
 ## Verification results
 
-Pending implementation. Specification and plan lint results are recorded in
-the design-package handoff, not as implementation evidence.
+Task 01 targeted cleanup tests and public-doc validators passed. Task 02
+focused cleanup/circuit tests and the complete `internal/github` package
+tests passed. The backend build passed, including a post-review-fix build of
+`cmd/kandev`. Regression coverage confirms routine watch polling keeps a
+record circuit open, a real configuration edit resets it, and an expired Core
+quota snapshot allows feedback again. Public-doc validators and `git diff
+--check` passed. Backend-wide `make test` completed with two failures in the
+unchanged `internal/agentctl/server/process/probe` package; config-discovery
+tests that picked up task-injected home config passed when rerun with isolated
+HOME and config paths unset.
 
 ## Risks
 

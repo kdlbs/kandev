@@ -16,9 +16,9 @@ func TestCleanupPollCycleSkipsRemainingCleanupAfterRateLimit(t *testing.T) {
 		configureCleanupRateLimitClient(t, svc, client, nil)
 		ctx := context.Background()
 
-		first := &ReviewWatch{WorkspaceID: "ws-1", Enabled: true}
-		second := &ReviewWatch{WorkspaceID: "ws-1", Enabled: true}
-		orphan := &ReviewWatch{WorkspaceID: "ws-1", Enabled: false}
+		first := &ReviewWatch{WorkspaceID: "ws-1", Enabled: true, CleanupPolicy: CleanupPolicyAlways}
+		second := &ReviewWatch{WorkspaceID: "ws-1", Enabled: true, CleanupPolicy: CleanupPolicyAlways}
+		orphan := &ReviewWatch{WorkspaceID: "ws-1", Enabled: false, CleanupPolicy: CleanupPolicyAlways}
 		for _, watch := range []*ReviewWatch{first, second, orphan} {
 			if err := store.CreateReviewWatch(ctx, watch); err != nil {
 				t.Fatalf("CreateReviewWatch: %v", err)

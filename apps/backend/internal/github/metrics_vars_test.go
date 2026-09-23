@@ -97,6 +97,45 @@ func TestBoolLabel(t *testing.T) {
 	}
 }
 
+func TestReviewCleanupMetrics(t *testing.T) {
+	poller, _, _, _, client := setupOpenReviewCleanupRecords(t, CleanupPolicyAlways, 41, 42)
+	client.feedbackErrors[41] = &GitHubAPIError{StatusCode: 401, Endpoint: "/pulls/41"}
+	client.feedbackErrors[42] = &GitHubAPIError{StatusCode: 401, Endpoint: "/pulls/42"}
+	failuresBefore := readOutcomeCounter(t, reviewCleanupFailuresTotal, "scope=workspace;class=auth")
+	skipsBefore := readOutcomeCounter(t, reviewCleanupCircuitSkipsTotal, "scope=workspace;class=auth")
+	poller.checkReviewWatches(context.Background())
+	poller.checkReviewWatches(context.Background())
+	if got := readOutcomeCounter(t, reviewCleanupFailuresTotal, "scope=workspace;class=auth"); got <= failuresBefore {
+		t.Fatalf("workspace auth failure metric = %d, want an increment", got)
+	}
+	if got := readOutcomeCounter(t, reviewCleanupCircuitSkipsTotal, "scope=workspace;class=auth"); got <= skipsBefore {
+		t.Fatalf("workspace auth circuit skip metric = %d, want an increment", got)
+	}
+
+	incReviewCleanupFailure("workspace-id-must-not-be-a-label", reviewCleanupMetricClassAuth)
+	assertBoundedLabels := func(name string, metric *expvar.Map, allowed map[string]bool) {
+		t.Helper()
+		metric.Do(func(kv expvar.KeyValue) {
+			if !allowed[kv.Key] {
+				t.Errorf("%s contains unbounded label key %q", name, kv.Key)
+			}
+		})
+	}
+	classLabels := []string{reviewCleanupMetricClassAuth, "config", "transient", "rate_limit", reviewCleanupMetricClassOther}
+	var outcomeKeys = make(map[string]bool)
+	for _, scope := range []string{"workspace", "record"} {
+		for _, class := range classLabels {
+			outcomeKeys[outcomeMetricLabel("scope", scope, "class", class)] = true
+		}
+	}
+	assertBoundedLabels("review cleanup failures", reviewCleanupFailuresTotal, outcomeKeys)
+	assertBoundedLabels("review cleanup circuit skips", reviewCleanupCircuitSkipsTotal, outcomeKeys)
+	assertBoundedLabels("review cleanup circuit resets", reviewCleanupCircuitResetsTotal, map[string]bool{
+		outcomeMetricLabel("scope", "workspace"): true,
+		outcomeMetricLabel("scope", "record"):    true,
+	})
+}
+
 // TestIncTaskPROutcomeSyncRecordsOnExpvarMap covers AC-38: a sync's populated
 // state is recorded on the outcome-syncs expvar map under the label
 // incTaskPROutcomeSync builds, so the "did the writer stop populating

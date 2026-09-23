@@ -112,7 +112,8 @@ type Poller struct {
 
 	// circuits tracks per-workspace auth/config backoff for the PR-monitor
 	// loop only (see poller_circuit.go). Safe for concurrent use; never nil.
-	circuits *pollerCircuits
+	circuits              *pollerCircuits
+	reviewCleanupCircuits *reviewCleanupCircuits
 
 	fallbackMu              sync.Mutex
 	fallbackWorkspaceCursor int
@@ -130,6 +131,7 @@ func NewPoller(svc *Service, eventBus bus.EventBus, log *logger.Logger) *Poller 
 		eventBus:              eventBus,
 		logger:                log,
 		circuits:              newPollerCircuits(),
+		reviewCleanupCircuits: newReviewCleanupCircuits(),
 		fallbackTargetCursors: make(map[string]int),
 		clock:                 time.Now,
 	}
@@ -926,7 +928,9 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 	// sweep below is precisely what handles the "user disabled / deleted
 	// every watch" case. Fall through to the no-op loop and run the sweep.
 	p.logger.Debug("checking review watches", zap.Int("count", len(watches)))
+	cleanupCycle := newReviewCleanupCycle(ctx, p)
 	for _, watch := range watches {
+		cleanupCycle.registerWatch(watch)
 		// A previous iteration in this same cycle may have exhausted the
 		// search bucket. Skip remaining per-watch checks instead of issuing
 		// another doomed search, but fall through to the orphan sweep below
@@ -959,26 +963,32 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 			p.service.publishNewReviewPREvent(ctx, watch, pr)
 		}
 		// Clean up tasks for merged/closed PRs that the user hasn't opened.
-		if cleaned, err := p.service.CleanupMergedReviewTasks(ctx, watch); err != nil {
+		cleanup, err := p.service.cleanupScheduledMergedReviewTasks(ctx, watch, cleanupCycle.admit)
+		if err != nil {
 			p.logCleanupError("failed to cleanup merged review tasks", err,
 				zap.String("watch_id", watch.ID))
-			if cleanupBatchShouldStop(err) {
-				return
-			}
-		} else if cleaned > 0 {
+		} else {
+			cleanupCycle.apply(cleanup, watch.WorkspaceID, watch)
+		}
+		if cleanup.Deleted > 0 {
 			p.logger.Info("cleaned up merged review tasks",
-				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))
+				zap.String("watch_id", watch.ID), zap.Int("deleted", cleanup.Deleted))
 		}
 	}
 	// Global orphan sweep: catches dedup rows whose watch was deleted or
 	// disabled. Without this pass those rows (and the tasks they reference)
 	// would never be re-examined, since the per-watch loop only iterates
 	// enabled watches.
-	if cleaned, err := p.service.CleanupAllOrphanedReviewTasks(ctx); err != nil {
+	cleanup, err := p.service.cleanupScheduledOrphanedReviewTasks(ctx, cleanupCycle.admit)
+	if err != nil {
 		p.logCleanupError("failed to sweep orphaned review tasks", err)
-	} else if cleaned > 0 {
-		p.logger.Info("swept orphaned review tasks", zap.Int("deleted", cleaned))
+	} else {
+		cleanupCycle.apply(cleanup, "", nil)
+		if cleanup.Deleted > 0 {
+			p.logger.Info("swept orphaned review tasks", zap.Int("deleted", cleanup.Deleted))
+		}
 	}
+	p.pruneReviewCleanupRecordCircuits(ctx)
 }
 
 // logCleanupError logs a poller cleanup failure at WARN, except when the error

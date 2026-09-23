@@ -1,7 +1,7 @@
 ---
 id: "01-archive-eligibility"
 title: "Make scheduled cleanup archive-aware"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -89,4 +89,12 @@ scheduled eligibility separate from complete inventory.
 
 ## Results
 
-Pending.
+Added scheduled-only review-task selectors that exclude archived tasks while
+retaining empty reservations and rows for hard-deleted tasks. Scheduled Auto
+cleanup checks lifecycle prompts and user-authored messages before feedback;
+explicit cleanup and reset continue to use complete inventories. Public
+integration guidance now describes archive, unarchive, cleanup, and reset
+behavior.
+
+Verification passed: the targeted GitHub cleanup Go tests, both public-doc
+validators, and `git diff --check`.

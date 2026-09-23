@@ -6,8 +6,29 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/kandev/kandev/internal/common/authcircuit"
 	"go.uber.org/zap"
 )
+
+type scheduledReviewCleanupFailure struct {
+	Task         *ReviewPRTask
+	WorkspaceID  string
+	RecordScoped bool
+	Err          error
+}
+
+type scheduledReviewCleanupSuccess struct {
+	Task        *ReviewPRTask
+	WorkspaceID string
+}
+
+type scheduledReviewCleanupResult struct {
+	Deleted   int
+	Failures  []scheduledReviewCleanupFailure
+	Successes []scheduledReviewCleanupSuccess
+}
+
+type scheduledReviewCleanupAdmission func(*ReviewPRTask, *RateTracker) (allow, stopWorkspace bool)
 
 func cleanupBatchAdmission(ctx context.Context, client Client, tracker *RateTracker, policy string) error {
 	if err := ctx.Err(); err != nil {
@@ -81,13 +102,48 @@ func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWat
 		func(_ *ReviewPRTask) string { return policy })
 }
 
+func (s *Service) cleanupScheduledMergedReviewTasks(
+	ctx context.Context, watch *ReviewWatch, admission scheduledReviewCleanupAdmission,
+) (scheduledReviewCleanupResult, error) {
+	if s.taskDeleter == nil {
+		return scheduledReviewCleanupResult{}, nil
+	}
+	if watch == nil || watch.WorkspaceID == "" {
+		return scheduledReviewCleanupResult{}, ErrGitHubWorkspaceRequired
+	}
+	prTasks, err := s.store.ListScheduledReviewPRTasksByWatch(ctx, watch.ID)
+	if err != nil {
+		return scheduledReviewCleanupResult{}, fmt.Errorf("list scheduled review PR tasks: %w", err)
+	}
+	if len(prTasks) == 0 {
+		return scheduledReviewCleanupResult{}, nil
+	}
+	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, "", "")
+	if err != nil {
+		return scheduledReviewCleanupResult{Failures: []scheduledReviewCleanupFailure{{
+			Task: prTasks[0], WorkspaceID: watch.WorkspaceID, Err: err,
+		}}}, nil
+	}
+	policy := NormalizeCleanupPolicy(watch.CleanupPolicy)
+	result := s.cleanupScheduledReviewPRTaskBatch(ctx, resolved.Client, resolved.RateTracker,
+		prTasks, watch.WorkspaceID, func(_ *ReviewPRTask) string { return policy }, admission)
+	return result, nil
+}
+
 // CleanupAllOrphanedReviewTasks sweeps dedup rows whose watch is deleted or
 // disabled. The per-watch poller loop already processes enabled-watch rows
 // in the same cycle, so re-walking them here would double GitHub API
 // consumption (the GetPRFeedback path bypasses prStatusCache). Returns the
 // number of tasks deleted.
 func (s *Service) CleanupAllOrphanedReviewTasks(ctx context.Context) (int, error) {
-	return s.cleanupAllReviewTasks(ctx, true)
+	result, err := s.cleanupAllReviewTasks(ctx, true, false, nil)
+	return result.Deleted, err
+}
+
+func (s *Service) cleanupScheduledOrphanedReviewTasks(
+	ctx context.Context, admission scheduledReviewCleanupAdmission,
+) (scheduledReviewCleanupResult, error) {
+	return s.cleanupAllReviewTasks(ctx, true, true, admission)
 }
 
 // CleanupAllReviewTasks sweeps every dedup row across all review watches,
@@ -95,7 +151,8 @@ func (s *Service) CleanupAllOrphanedReviewTasks(ctx context.Context) (int, error
 // settings-page cleanup button so the user can drain everything on demand
 // without waiting for the next 5-minute poll cycle.
 func (s *Service) CleanupAllReviewTasks(ctx context.Context) (int, error) {
-	return s.cleanupAllReviewTasks(ctx, false)
+	result, err := s.cleanupAllReviewTasks(ctx, false, false, nil)
+	return result.Deleted, err
 }
 
 // CleanupReviewTasksForWorkspace sweeps review dedup rows owned by watches in
@@ -142,16 +199,29 @@ func (s *Service) CleanupReviewTasksForWorkspace(ctx context.Context, workspaceI
 // handle them in the same cycle).
 //
 //nolint:dupl // mirrors cleanupAllIssueTasks — different types, same orchestration
-func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (int, error) {
+func (s *Service) cleanupAllReviewTasks(
+	ctx context.Context,
+	orphansOnly bool,
+	scheduled bool,
+	admission scheduledReviewCleanupAdmission,
+) (scheduledReviewCleanupResult, error) {
 	if s.taskDeleter == nil {
-		return 0, nil
+		return scheduledReviewCleanupResult{}, nil
 	}
-	prTasks, err := s.store.ListAllReviewPRTasks(ctx)
+	var (
+		prTasks []*ReviewPRTask
+		err     error
+	)
+	if scheduled {
+		prTasks, err = s.store.ListScheduledReviewPRTasks(ctx)
+	} else {
+		prTasks, err = s.store.ListAllReviewPRTasks(ctx)
+	}
 	if err != nil {
-		return 0, fmt.Errorf("list all review PR tasks: %w", err)
+		return scheduledReviewCleanupResult{}, fmt.Errorf("list all review PR tasks: %w", err)
 	}
 	if len(prTasks) == 0 {
-		return 0, nil
+		return scheduledReviewCleanupResult{}, nil
 	}
 	policyCache, enabledCache, unknownCache, workspaceCache := s.buildReviewWatchCaches(ctx, prTasks)
 	// Allocate a fresh slice rather than reusing prTasks' backing array
@@ -176,23 +246,39 @@ func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (
 		}
 		candidatesByWorkspace[workspaceID] = append(candidatesByWorkspace[workspaceID], rpt)
 	}
-	deleted := 0
+	result := scheduledReviewCleanupResult{}
 	for workspaceID, candidates := range candidatesByWorkspace {
 		resolved, resolveErr := s.resolveAutomationClient(ctx, workspaceID, "", "")
 		if resolveErr != nil {
 			s.logger.Warn("skip review cleanup for unavailable workspace connection",
 				zap.String("workspace_id", workspaceID), zap.Error(resolveErr))
+			if scheduled {
+				result.Failures = append(result.Failures, scheduledReviewCleanupFailure{
+					Task: candidates[0], WorkspaceID: workspaceID, Err: resolveErr,
+				})
+			}
 			continue
 		}
-		batchDeleted, batchErr := s.cleanupReviewPRTaskBatch(ctx, resolved.Client, resolved.RateTracker, candidates, func(rpt *ReviewPRTask) string {
-			return policyCache[rpt.ReviewWatchID]
-		})
-		deleted += batchDeleted
+		if scheduled {
+			batchResult := s.cleanupScheduledReviewPRTaskBatch(
+				ctx, resolved.Client, resolved.RateTracker, candidates, workspaceID,
+				func(rpt *ReviewPRTask) string { return policyCache[rpt.ReviewWatchID] }, admission,
+			)
+			result.Deleted += batchResult.Deleted
+			result.Failures = append(result.Failures, batchResult.Failures...)
+			result.Successes = append(result.Successes, batchResult.Successes...)
+			continue
+		}
+		batchDeleted, batchErr := s.cleanupReviewPRTaskBatch(
+			ctx, resolved.Client, resolved.RateTracker, candidates,
+			func(rpt *ReviewPRTask) string { return policyCache[rpt.ReviewWatchID] },
+		)
+		result.Deleted += batchDeleted
 		if batchErr != nil {
-			return deleted, batchErr
+			return result, batchErr
 		}
 	}
-	return deleted, nil
+	return result, nil
 }
 
 // buildReviewWatchCaches loads the cleanup policy + enabled flag for each
@@ -261,31 +347,6 @@ func (s *Service) cleanupReviewPRTaskBatch(
 		if err := cleanupBatchAdmission(ctx, client, tracker, policy); err != nil {
 			return deleted, err
 		}
-		// Orphan reservation: process was killed after ReserveReviewPRTask
-		// succeeded but before AssignReviewPRTaskID ran, so task_id is empty
-		// and there is no task to delete. Clean up the dedup row once the PR
-		// reaches a terminal state, same gating as the normal path.
-		if rpt.TaskID == "" {
-			// Orphan reservation row — no task was ever created (process
-			// crashed between Reserve and Assign). Clean it up but DON'T
-			// increment `deleted`: the count is reported back to the
-			// settings-page toast as "Deleted N tasks", and these rows
-			// never had an associated task.
-			should, _, err := s.shouldDeleteReviewTaskWithClient(ctx, client, rpt, policy)
-			if err != nil {
-				if cleanupBatchShouldStop(err) {
-					return deleted, err
-				}
-				continue
-			}
-			if should {
-				if err := s.store.DeleteReviewPRTask(ctx, rpt.ID); err != nil {
-					s.logger.Warn("failed to delete orphan reservation row",
-						zap.String("dedup_id", rpt.ID), zap.Error(err))
-				}
-			}
-			continue
-		}
 		shouldDelete, reason, err := s.shouldDeleteReviewTaskWithClient(ctx, client, rpt, policy)
 		if err != nil {
 			if cleanupBatchShouldStop(err) {
@@ -296,39 +357,119 @@ func (s *Service) cleanupReviewPRTaskBatch(
 		if !shouldDelete {
 			continue
 		}
-		if err := s.deleteTaskWithReason(ctx, rpt.TaskID, reason); err != nil {
-			if isTaskNotFound(err) {
-				// Task already deleted; clean up the orphaned dedup record.
-				if err := s.store.DeleteReviewPRTask(ctx, rpt.ID); err != nil {
-					s.logger.Warn("failed to delete orphan dedup row after task-not-found",
-						zap.String("dedup_id", rpt.ID), zap.Error(err))
-					continue
-				}
-				deleted++
-				continue
-			}
-			s.logger.Warn("failed to delete review PR task",
-				zap.String("task_id", rpt.TaskID), zap.Error(err))
-			continue
-		}
-		if err := s.store.DeleteReviewPRTask(ctx, rpt.ID); err != nil {
-			// Task is gone but dedup row survived: log Warn and DON'T
-			// increment deleted (the next sweep cycle will retry and the
-			// settings-page toast stays accurate).
-			s.logger.Warn("deleted task but failed to remove dedup row",
-				zap.String("task_id", rpt.TaskID),
-				zap.String("dedup_id", rpt.ID), zap.Error(err))
-			continue
-		}
-		s.logger.Info("deleted review task",
-			zap.String("task_id", rpt.TaskID),
-			zap.String("reason", reason),
-			zap.String("policy", policy),
-			zap.Int("pr_number", rpt.PRNumber),
-			zap.String("repo", rpt.RepoOwner+"/"+rpt.RepoName))
-		deleted++
+		deleted += s.applyReviewPRTaskDeletion(ctx, rpt, policy, reason)
 	}
 	return deleted, nil
+}
+
+func (s *Service) cleanupScheduledReviewPRTaskBatch(
+	ctx context.Context,
+	client Client,
+	tracker *RateTracker,
+	prTasks []*ReviewPRTask,
+	workspaceID string,
+	resolvePolicy func(*ReviewPRTask) string,
+	admission scheduledReviewCleanupAdmission,
+) scheduledReviewCleanupResult {
+	result := scheduledReviewCleanupResult{}
+	for _, rpt := range prTasks {
+		policy := resolvePolicy(rpt)
+		if policy == CleanupPolicyNever || s.retainAutoReviewTaskBeforeFeedback(ctx, rpt, policy) {
+			continue
+		}
+		if admission != nil {
+			allowed, stopWorkspace := admission(rpt, tracker)
+			if !allowed {
+				if stopWorkspace {
+					break
+				}
+				continue
+			}
+		}
+		if err := cleanupBatchAdmission(ctx, client, tracker, policy); err != nil {
+			result.Failures = append(result.Failures, scheduledReviewCleanupFailure{
+				Task: rpt, WorkspaceID: workspaceID, Err: err,
+			})
+			break
+		}
+		shouldDelete, reason, err := s.shouldDeleteReviewTaskWithClient(ctx, client, rpt, policy)
+		if err != nil {
+			class := classifyPollErr(err)
+			result.Failures = append(result.Failures, scheduledReviewCleanupFailure{
+				Task: rpt, WorkspaceID: workspaceID,
+				RecordScoped: class == authcircuit.FailureClassConfig, Err: err,
+			})
+			if class != authcircuit.FailureClassConfig {
+				break
+			}
+			continue
+		}
+		result.Successes = append(result.Successes, scheduledReviewCleanupSuccess{
+			Task: rpt, WorkspaceID: workspaceID,
+		})
+		if shouldDelete {
+			result.Deleted += s.applyReviewPRTaskDeletion(ctx, rpt, policy, reason)
+		}
+	}
+	return result
+}
+
+func (s *Service) applyReviewPRTaskDeletion(ctx context.Context, rpt *ReviewPRTask, policy, reason string) int {
+	if rpt.TaskID == "" {
+		if err := s.store.DeleteReviewPRTask(ctx, rpt.ID); err != nil {
+			s.logger.Warn("failed to delete orphan reservation row",
+				zap.String("dedup_id", rpt.ID), zap.Error(err))
+		}
+		return 0
+	}
+	if err := s.deleteTaskWithReason(ctx, rpt.TaskID, reason); err != nil {
+		if isTaskNotFound(err) {
+			if err := s.store.DeleteReviewPRTask(ctx, rpt.ID); err != nil {
+				s.logger.Warn("failed to delete orphan dedup row after task-not-found",
+					zap.String("dedup_id", rpt.ID), zap.Error(err))
+				return 0
+			}
+			return 1
+		}
+		s.logger.Warn("failed to delete review PR task",
+			zap.String("task_id", rpt.TaskID), zap.Error(err))
+		return 0
+	}
+	if err := s.store.DeleteReviewPRTask(ctx, rpt.ID); err != nil {
+		s.logger.Warn("deleted task but failed to remove dedup row",
+			zap.String("task_id", rpt.TaskID), zap.String("dedup_id", rpt.ID), zap.Error(err))
+		return 0
+	}
+	s.logger.Info("deleted review task",
+		zap.String("task_id", rpt.TaskID), zap.String("reason", reason),
+		zap.String("policy", policy), zap.Int("pr_number", rpt.PRNumber),
+		zap.String("repo", rpt.RepoOwner+"/"+rpt.RepoName))
+	return 1
+}
+
+func (s *Service) retainAutoReviewTaskBeforeFeedback(ctx context.Context, rpt *ReviewPRTask, policy string) bool {
+	if policy != CleanupPolicyAuto || rpt == nil || rpt.TaskID == "" {
+		return false
+	}
+	if s.store == nil {
+		return true
+	}
+	enabled, err := s.HasEnabledTaskPRAgentPrompts(ctx, rpt.TaskID)
+	if err != nil {
+		s.logger.Debug("failed to check task PR agent prompt options before scheduled cleanup",
+			zap.String("task_id", rpt.TaskID), zap.Error(err))
+		return true
+	}
+	if enabled || s.taskSessionChecker == nil {
+		return true
+	}
+	hasUserMsg, err := s.taskSessionChecker.HasUserAuthoredMessage(ctx, rpt.TaskID)
+	if err != nil {
+		s.logger.Debug("failed to check task user messages before scheduled cleanup",
+			zap.String("task_id", rpt.TaskID), zap.Error(err))
+		return true
+	}
+	return hasUserMsg
 }
 
 // shouldDeleteReviewTask checks whether a review PR task is eligible for

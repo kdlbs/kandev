@@ -35,7 +35,7 @@ func TestDeleteTaskPRsByTaskIDRemovesOnlyTargetRows(t *testing.T) {
 	}
 }
 
-func TestCleanupCandidateListsExcludeHistoricalTasks(t *testing.T) {
+func TestReviewCleanupInventoryRetainsHistoricalTasks(t *testing.T) {
 	_, _, _, store := setupPollerTest(t)
 	ctx := context.Background()
 
@@ -86,9 +86,9 @@ func TestCleanupCandidateListsExcludeHistoricalTasks(t *testing.T) {
 		for _, candidate := range candidates {
 			got[candidate.TaskID] = true
 		}
-		want := map[string]bool{"active-review": true, "": true}
-		if len(got) != len(want) || !got["active-review"] || !got[""] {
-			t.Errorf("%s task IDs = %#v, want active-review and empty reservation", name, got)
+		if len(got) != 4 || !got["active-review"] || !got["archived-review"] ||
+			!got["missing-review"] || !got[""] {
+			t.Errorf("%s task IDs = %#v, want active, archived, missing, and empty reservation rows", name, got)
 		}
 	}
 	assertIssueCandidates := func(name string, candidates []*IssueWatchTask) {
