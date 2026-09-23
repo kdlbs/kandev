@@ -375,7 +375,11 @@ func (r *RemoteDockerExecutor) reconnectToContainer(
 // helper redelivery, so a container preserved across a backend upgrade does not
 // resume on the agentctl it was created with.
 func (r *RemoteDockerExecutor) reconnectDelegate(session *remoteDockerSession) *DockerExecutor {
-	delegate := &DockerExecutor{logger: r.logger, endpoints: session.endpoints}
+	delegate := &DockerExecutor{
+		logger:          r.logger,
+		endpoints:       session.endpoints,
+		brokerPreflight: runBrokerReachabilityViaAgentctl,
+	}
 	if session.inputs != nil {
 		delegate.beforeContainerStart = session.inputs.DeliverHelpers
 	}
