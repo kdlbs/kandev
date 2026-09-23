@@ -389,6 +389,43 @@ func TestManagerStartRehydratesCurrentExactAttemptBeforeRecoveryPublication(t *t
 	}
 }
 
+func TestManagerStartLeavesRecoveryEvidenceEmptyForInvalidExactAttempt(t *testing.T) {
+	valid := &models.ExactProfileLaunchAttemptBinding{TaskID: "task-1", SessionID: "session-1", ExecutionID: "exec-recovered", AttemptID: "attempt-1", SessionIncarnationID: "incarnation-1", AgentProfileID: recoveryTestAgentProfileID, ProfileRevision: time.Unix(1_726_500_000, 0).UTC(), Generation: 1}
+	for _, tc := range []struct {
+		name    string
+		binding *models.ExactProfileLaunchAttemptBinding
+	}{
+		{name: "missing"},
+		{name: "execution mismatch", binding: func() *models.ExactProfileLaunchAttemptBinding { b := *valid; b.ExecutionID = "other"; return &b }()},
+		{name: "malformed", binding: func() *models.ExactProfileLaunchAttemptBinding { b := *valid; b.AttemptID = ""; return &b }()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := newTestRegistryLogger()
+			registry := NewExecutorRegistry(log)
+			registry.Register(&fakeTurnOutcomeBackend{MockExecutor: &MockExecutor{name: executor.NameStandalone, recoverInstances: []*ExecutorInstance{newRecoveryTurnOutcomeExecutorInstance()}}})
+			eventBus := &MockEventBus{}
+			mgr := NewManager(newTestRegistry(), eventBus, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+			cleanupManagerStopCh(t, mgr)
+			t.Cleanup(func() { _ = mgr.Stop() })
+			registerRecoveryTestAgentProfile(t, mgr)
+			mgr.SetExecutorRunningWriter(&exactRecoveryWriter{binding: tc.binding})
+			if err := mgr.Start(context.Background()); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			execution, ok := mgr.GetExecution("exec-recovered")
+			if !ok {
+				t.Fatal("ordinary recovered execution missing")
+			}
+			if got := execution.exactProfileLaunchAttemptSnapshot(); got != nil {
+				t.Fatalf("recovered exact=%#v, want no exact evidence", got)
+			}
+			if !hasEventType(eventBus.PublishedEvents, events.AgentRunning) {
+				t.Fatal("ordinary recovered running event was not preserved")
+			}
+		})
+	}
+}
+
 // TestManagerStartRefusesAndStopsRecoveredExecutionWhenTurnOutcomeCannotBeRetrieved
 // pins AC-EXECUTORS-SURVIVAL-004.5's read-failed case: the instance must not
 // be re-tracked or published as running -- it takes the same not-re-tracked
