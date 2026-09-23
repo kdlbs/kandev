@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -36,6 +39,8 @@ type WorkspaceSourceInput struct {
 type AttachWorkspaceSourcesRequest struct {
 	TaskID                    string
 	Sources                   []WorkspaceSourceInput
+	RepositoryPlacement       WorkspaceRepositoryPlacement
+	PreviewRevision           string
 	ExpectedParentID          string
 	ExpectedParentWorkspaceID string
 }
@@ -110,9 +115,6 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	if err != nil {
 		return nil, err
 	}
-	if len(existing) == 0 {
-		return nil, fmt.Errorf("%w: task must have a repository before attaching workspace sources", ErrInvalidWorkspaceSource)
-	}
 	store := s.workspaceSourceStore()
 	if store == nil {
 		return nil, fmt.Errorf("%w: workspace source persistence is unavailable", ErrWorkspaceSourceMaterialize)
@@ -149,6 +151,18 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	}
 	batch.ExpectedParentID = req.ExpectedParentID
 	batch.ExpectedParentWorkspaceID = req.ExpectedParentWorkspaceID
+	if len(batch.Sources) == 0 && len(batch.RepositoryUpdates) == 0 && req.RepositoryPlacement != "" {
+		if err := s.validateExactWorkspaceRepositoryPlacement(ctx, task, req.Sources, req.RepositoryPlacement); err != nil {
+			return nil, err
+		}
+		if err := guardWorkspaceSourceParent(ctx, store, task, req); err != nil {
+			return nil, err
+		}
+		return s.hydrateWorkspaceSourceResult(ctx, task, store)
+	}
+	if err := s.applyWorkspaceRepositoryPlacement(ctx, task, batch, req.RepositoryPlacement, req.PreviewRevision); err != nil {
+		return nil, err
+	}
 	if len(batch.Sources) == 0 && len(batch.RepositoryUpdates) == 0 {
 		cleanupCreated(context.WithoutCancel(ctx))
 		if err := guardWorkspaceSourceParent(ctx, store, task, req); err != nil {
@@ -453,10 +467,28 @@ func (s *Service) requireCloneableLocalRepository(ctx context.Context, taskID st
 	if err != nil || executorType == "" || isLocalWorkspaceExecutor(executorType) || executorType == string(models.ExecutorTypeWorktree) {
 		return err
 	}
-	if repository == nil || repository.RemoteURL == "" {
+	if !hasCloneableWorkspaceRepositoryLocator(repository) {
 		return fmt.Errorf("%w: local repository has no safe cloneable origin", ErrUnsupportedWorkspaceSource)
 	}
 	return nil
+}
+
+func hasCloneableWorkspaceRepositoryLocator(repository *models.Repository) bool {
+	if repository == nil {
+		return false
+	}
+	locator := strings.TrimSpace(repository.RemoteURL)
+	if locator == "" && repository.ProviderOwner != "" && repository.ProviderName != "" {
+		locator, _ = repoclone.CloneURLWithHost(repository.Provider, repository.ProviderHost, repository.ProviderOwner, repository.ProviderName, repoclone.ProtocolHTTPS)
+	}
+	if locator == "" || strings.HasPrefix(locator, "/") || strings.HasPrefix(locator, "file:") {
+		return false
+	}
+	if strings.HasPrefix(locator, "git@") {
+		return true
+	}
+	parsed, err := url.Parse(locator)
+	return err == nil && parsed.Host != "" && (parsed.Scheme == protocolHTTPS || parsed.Scheme == protocolHTTP || parsed.Scheme == repoclone.ProtocolSSH || parsed.Scheme == "git")
 }
 
 func classifyWorkspaceRepositoryError(err error) error {

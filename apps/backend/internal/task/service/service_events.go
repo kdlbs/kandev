@@ -876,13 +876,14 @@ func serializeTaskWorkspaceFolders(folders []*models.TaskWorkspaceFolder) []map[
 	out := make([]map[string]interface{}, 0, len(folders))
 	for _, folder := range folders {
 		out = append(out, map[string]interface{}{
-			"id":           folder.ID,
-			"task_id":      folder.TaskID,
-			"local_path":   folder.LocalPath,
-			"display_name": folder.DisplayName,
-			"position":     folder.Position,
-			"created_at":   folder.CreatedAt.Format(time.RFC3339),
-			"updated_at":   folder.UpdatedAt.Format(time.RFC3339),
+			"id":                      folder.ID,
+			"task_id":                 folder.TaskID,
+			"local_path":              folder.LocalPath,
+			"display_name":            folder.DisplayName,
+			"workspace_relative_path": folder.WorkspaceRelativePath,
+			"position":                folder.Position,
+			"created_at":              folder.CreatedAt.Format(time.RFC3339),
+			"updated_at":              folder.UpdatedAt.Format(time.RFC3339),
 		})
 	}
 	return out

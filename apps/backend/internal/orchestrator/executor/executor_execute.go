@@ -1753,10 +1753,6 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, err
 	}
 
-	if startAgent {
-		e.observeSessionCoresidency(launchCtx, sessionCoresidencySiteLaunch, task.ID, sessionID)
-	}
-
 	// Fast path: workspace already launched (executors_running row exists).
 	// The selected-environment recovery gate above must run first, including
 	// when this path only starts an agent process on an existing workspace.
@@ -2163,8 +2159,12 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		IsEphemeral:            task.IsEphemeral,
 		IsPassthrough:          session.IsPassthrough,
 		WorkspacePath:          session.WorkspacePath,
+		WorkspaceLayout:        task.InitialWorkspaceLayout,
 		WorkspaceReuseRequired: workspaceReuseRequired,
 		McpProviders:           deriveMCPProviders(allRepos),
+	}
+	if existingEnv != nil && existingEnv.WorkspaceLayout != "" {
+		req.WorkspaceLayout = existingEnv.WorkspaceLayout
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
@@ -2216,7 +2216,11 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	} else {
 		for _, f := range folders {
 			if f != nil {
-				req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{Name: f.DisplayName, LocalPath: f.LocalPath})
+				req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{
+					Name:                  f.DisplayName,
+					LocalPath:             f.LocalPath,
+					WorkspaceRelativePath: f.WorkspaceRelativePath,
+				})
 			}
 		}
 	}
@@ -2327,6 +2331,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			spec.BranchIdentitySlug = plan.identitySlug
 			spec.BranchSlug = plan.pathSlug
 		}
+		spec.WorkspaceRelativePath = info.WorkspaceRelativePath
 		out = append(out, spec)
 	}
 	return out
@@ -2368,6 +2373,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.RepositoryID = repoInfo.RepositoryID
 		req.TaskRepositoryID = repoInfo.TaskRepositoryID
 		req.RepositoryPath = repoInfo.RepositoryPath
+		req.WorkspaceRelativePath = repoInfo.WorkspaceRelativePath
 		req.BaseBranch = repoInfo.BaseBranch
 		req.IntegrationRef = repoInfo.IntegrationRef
 		req.CheckoutBranch = repoInfo.CheckoutBranch
@@ -2978,6 +2984,9 @@ func (e *Executor) persistTaskEnvironment(
 		if len(repos) > 0 || len(existingEnv.Repos) > 0 || !repoBacked {
 			existingEnv.Status = models.TaskEnvironmentStatusReady
 		}
+		if req.WorkspaceLayout != "" {
+			existingEnv.WorkspaceLayout = req.WorkspaceLayout
+		}
 		existingEnv.MaterializationSessionID = ""
 		if persister, ok := e.repo.(taskEnvironmentTransitionPersister); ok {
 			if err := persister.PersistTaskEnvironmentTransition(ctx, existingEnv, repos, executorTransition); err != nil {
@@ -3020,6 +3029,7 @@ func (e *Executor) persistTaskEnvironment(
 		ContainerBootstrapNonceSecretID:   extractContainerBootstrapNonceSecretID(resp.Metadata),
 		ContainerControlAuthTokenSecretID: extractContainerControlAuthTokenSecretID(resp.Metadata),
 		TaskDirName:                       req.TaskDirName,
+		WorkspaceLayout:                   req.WorkspaceLayout,
 		SandboxID:                         extractSandboxID(resp.Metadata),
 	}
 	// Embed per-repo rows in the same create transaction. Single-repo
@@ -3093,7 +3103,17 @@ func (e *Executor) persistRecoveredBaseBranch(
 // store excludes them from physical checkout operations.
 func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentResponse) []*models.TaskEnvironmentRepo {
 	if len(resp.Worktrees) > 0 {
-		return buildTaskEnvironmentRepos(resp.Worktrees)
+		repos := buildTaskEnvironmentRepos(resp.Worktrees)
+		for _, repo := range repos {
+			for _, spec := range req.Repositories {
+				if spec.RepositoryID == "" || spec.RepositoryID != repo.RepositoryID || launchRepoBranchIdentitySlug(spec) != repo.BranchSlug {
+					continue
+				}
+				repo.WorkspaceRelativePath = spec.WorkspaceRelativePath
+				break
+			}
+		}
+		return repos
 	}
 	// Clone-based remote executors materialize all repositories inside one
 	// task workspace, so they have no host worktree result to project here.
@@ -3107,8 +3127,9 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 				continue
 			}
 			repos = append(repos, &models.TaskEnvironmentRepo{
-				RepositoryID: spec.RepositoryID,
-				BranchSlug:   launchRepoBranchIdentitySlug(spec),
+				RepositoryID:          spec.RepositoryID,
+				BranchSlug:            launchRepoBranchIdentitySlug(spec),
+				WorkspaceRelativePath: spec.WorkspaceRelativePath,
 				// Remote clone launches only report an environment-level workspace
 				// handle when they have no per-repository result. Do not invent a
 				// path or branch for every repository from that shared handle: it
@@ -3150,6 +3171,7 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 		WorktreeBranch:         worktreeBranch,
 		WorktreeBranchOwner:    worktreeBranchOwner,
 		WorktreeIntegrationRef: worktreeIntegrationRef,
+		WorkspaceRelativePath:  req.WorkspaceRelativePath,
 		Position:               0,
 	}}
 }
@@ -3161,6 +3183,7 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 	for i, w := range worktrees {
 		out = append(out, &models.TaskEnvironmentRepo{
 			RepositoryID:           w.RepositoryID,
+			WorkspaceRelativePath:  w.WorkspaceRelativePath,
 			BranchSlug:             w.BranchSlug,
 			WorktreeID:             w.WorktreeID,
 			WorktreePath:           w.WorktreePath,
@@ -3252,6 +3275,7 @@ func (e *Executor) persistOneTaskEnvironmentRepoTransition(
 	row = &models.TaskEnvironmentRepo{
 		TaskEnvironmentID:      envID,
 		RepositoryID:           w.RepositoryID,
+		WorkspaceRelativePath:  w.WorkspaceRelativePath,
 		BranchSlug:             w.BranchSlug,
 		WorktreeID:             w.WorktreeID,
 		WorktreePath:           w.WorktreePath,
@@ -3299,6 +3323,7 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 		return nil
 	}
 	row.BranchSlug = w.BranchSlug
+	row.WorkspaceRelativePath = w.WorkspaceRelativePath
 	// Concrete launch results populate the physical tuple together; inventory-only
 	// rows have no WorktreeID and must not replace it.
 	if replacePhysical || w.WorktreeID != "" {
@@ -3336,6 +3361,7 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 
 func taskEnvironmentRepoNeedsRefresh(row, w *models.TaskEnvironmentRepo, position int, replacePhysical bool) bool {
 	return row.BranchSlug != w.BranchSlug ||
+		row.WorkspaceRelativePath != w.WorkspaceRelativePath ||
 		((replacePhysical || w.WorktreeID != "") &&
 			(row.WorktreeID != w.WorktreeID ||
 				row.WorktreePath != w.WorktreePath ||

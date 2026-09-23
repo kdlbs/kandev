@@ -398,6 +398,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 			worktrees = append(worktrees, executor.RepoWorktreeResult{
 				TaskRepositoryID:          w.TaskRepositoryID,
 				RepositoryID:              w.RepositoryID,
+				WorkspaceRelativePath:     w.WorkspaceRelativePath,
 				BranchSlug:                w.BranchSlug,
 				WorktreeID:                w.WorktreeID,
 				WorktreeBranch:            w.WorktreeBranch,
@@ -448,6 +449,7 @@ func buildLifecycleLaunchRequest(
 		StartAgent:                    req.StartAgent,
 		TurnID:                        req.TurnID,
 		WorkspacePath:                 workspacePath,
+		WorkspaceLayout:               req.WorkspaceLayout,
 		TaskDescription:               req.TaskDescription,
 		Attachments:                   convertToLifecycleAttachments(req.Attachments),
 		Env:                           req.Env,
@@ -495,6 +497,7 @@ func buildLifecycleLaunchRequest(
 		RepoName:                      req.RepoName,
 		BranchSlug:                    req.BranchSlug,
 		BranchIdentitySlug:            req.BranchIdentitySlug,
+		WorkspaceRelativePath:         req.WorkspaceRelativePath,
 	}
 	launchReq.WorkspaceFolders = lifecycleWorkspaceFolders(req.WorkspaceFolders)
 	launchReq.RouteOverride = lifecycleRouteOverride(req.RouteOverride)
@@ -508,7 +511,11 @@ func lifecycleWorkspaceFolders(folders []executor.WorkspaceFolderSpec) []lifecyc
 	}
 	result := make([]lifecycle.WorkspaceFolderSpec, 0, len(folders))
 	for _, f := range folders {
-		result = append(result, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
+		result = append(result, lifecycle.WorkspaceFolderSpec{
+			Name:                  f.Name,
+			LocalPath:             f.LocalPath,
+			WorkspaceRelativePath: f.WorkspaceRelativePath,
+		})
 	}
 	return result
 }
@@ -565,6 +572,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 			CopyFiles:                  r.CopyFiles,
 			BranchSlug:                 r.BranchSlug,
 			BranchIdentitySlug:         r.BranchIdentitySlug,
+			WorkspaceRelativePath:      r.WorkspaceRelativePath,
 		})
 	}
 	return specs

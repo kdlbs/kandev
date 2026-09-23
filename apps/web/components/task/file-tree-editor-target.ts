@@ -19,7 +19,7 @@ function pathBasename(path: string): string {
  * paths are already worktree-relative — or from the task workspace root, where
  * the first segment names a workspace entry. A task reaches the second shape
  * both by holding several worktrees and by having any source attached through
- * *Add Repositories to workspace*, which rebinds the session to the task root
+ * *Add repositories or folders*, which rebinds the session to the task root
  * even when it adds no worktree. The worktree count therefore cannot tell the
  * two apart; the tree's own root directory name can.
  *

@@ -148,6 +148,7 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 
 4. Select a compatible executor profile and agent profile. A workflow default agent profile locks the task-level agent selector. Executor and agent compatibility is validated before launch.
 5. Enter the initial description. If the applicable launch step has a prompt template, use the eye button after **Enhance prompt with AI** to inspect the launch prompt with your description inserted. The preview leaves task IDs and saved-prompt references unresolved until the task exists. Toggle the button again to return to the unchanged description. In the **New Task** dialog, an empty description changes the primary action to **Start Plan Mode** and uses the first positional workflow step; the other dialog actions require a description. Agent-facing task MCP has different empty-description rules. When agent-generated task titles are enabled, every task and subtask action requires a nonempty prompt; the empty-description Plan Mode exception is disabled. A nonempty description exposes the standard split actions and updates the displayed destination to the first positional step with **Auto-start agent**, or falls back to **Start step** and then the first positional step.
+For a Worktree task with one initial repository, **Advanced settings** includes **Start in a parent workspace folder**. It is off by default. Enable it when later repositories should be siblings and the agent should start in the task folder above the first repository. A task with multiple initial repositories uses that parent layout automatically. The setting is available only when the selected executor and source set support the layout.
 6. Choose the applicable action:
    - **Start Plan Mode** is the primary empty-description action and creates the task through the plan-mode path.
    - **Start task** requires a nonempty description, creates the task, and starts its agent. This path starts in the first positional step whose entry actions include **Auto-start agent**, falling back to **Start step** when the workflow automates no step.
@@ -385,7 +386,7 @@ unavailable once several repositories are selected, exactly as when you add the 
 <details>
 <summary>Adding sources details</summary>
 
-For a non-archived, repository-backed task, open the **Files** panel and choose **Workspace actions → Add Repositories to workspace**. Use **Add repository** to choose a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. Use **Add folder** for an arbitrary local folder when the executor supports it. Add one or more rows in a single submission. Repository rows choose a base branch once; the flow does not ask for a second checkout branch. Local/Local PC uses the user-owned repository's current checkout and never switches it. The whole mixed batch succeeds or fails together.
+For an idle, non-archived task with a prepared workspace, open the **Files** panel and choose **+ > Add repositories or folders**. This works for repository-backed tasks, Local folder tasks, and scratch tasks when the executor supports the selected source kind. Use **Add repository** to choose a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. Use **Add folder** for an arbitrary local folder on **Worktree** or **Local/Local PC**. Add one or more rows in a single submission. Repository rows choose a base branch once; the flow does not ask for a second checkout branch. Local/Local PC uses the user-owned repository's current checkout and never switches it. The whole mixed batch succeeds or fails together.
 
 The task must be idle: Kandev disables the action while a turn or tool call is active, and rejects a race without changing the task. Desktop opens a dialog; phones open the same flow in a full-height drawer. On success, repositories appear in Files and repository-aware Changes, branch, editor, and pull-request surfaces; folders are Files-only.
 
@@ -393,19 +394,21 @@ Before submission, the dialog or drawer summarizes the effect on the workspace, 
 and running processes. **Cancel** or closing the surface sends no request and changes nothing. A
 submitted batch remains all-or-nothing.
 
-If adding a source promotes a Worktree or Local/Local PC workspace from one repository directory to
-the task root, Kandev restarts the idle agent in the new root. Existing files, Git changes, task
-state, messages, plan, attached sources, model, and mode remain. Native cross-directory resume is
-retained where supported; otherwise Kandev starts a fresh provider session and supplies recorded
-conversation context with the next prompt. Provider-private context not recorded by Kandev may not
-carry over. The intentional restart is not shown as a previous agent error.
+For a single-repository Worktree task that still uses the repository as its workspace root, a
+repository-only batch lets you choose **Inside kandev/** or **Inside the current repository**. Both
+choices keep the agent CWD and running workspace processes unchanged. Kandev records the selected
+relative path, previews the destination, and protects the outer repository from staging the nested
+worktree. The **Expand workspace root** choice remains unavailable until explicit idle session
+recovery is available. A task that already starts in a parent workspace adds repositories as
+siblings and does not show these placement choices.
 
-The host rebind stops open task terminals, dev servers, the task editor server, and other
-agentctl-managed workspace processes, so save unsaved work and restart those processes afterward.
-Local Docker, Kubernetes, SSH, and Sprites attach repository siblings to the current remote workspace and rescan
-without restarting the agent or changing its CWD.
-
-Folders are live host paths and are available only to **Local/Local PC** and **Worktree** tasks. Repository sources are supported for **Worktree**, **Local/Local PC**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. Local Git rows need a cloneable origin on Docker, Kubernetes, SSH, and Sprites; Worktree and Local/Local PC can use the host repository directly. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits and recovery behavior.
+Local folder, Local scratch, and supported remote/container workspaces keep their established root,
+agent CWD, and running processes unchanged. Local sources are live links into the current workspace;
+folder edits therefore affect the original host folder. Docker, Kubernetes, SSH, and Sprites clone
+repository sources inside the current executor workspace. Local Git rows need a cloneable origin on
+those executors. Host folders are unavailable there; **Upload folder** remains a separate copy flow
+when uploads are supported. This current-workspace flow does not expand the root or replace a native
+provider session. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits.
 
 ### Attachments and local-change consent
 

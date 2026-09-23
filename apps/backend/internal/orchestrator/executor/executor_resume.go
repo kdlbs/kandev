@@ -79,6 +79,7 @@ type repoInfo struct {
 	PRBase                     *models.PRBase
 	QualifiedPRBase            *models.PRBase
 	Position                   int
+	WorkspaceRelativePath      string
 	WorktreeBranchPrefix       string
 	WorktreeBranchTemplate     string
 	PullBeforeWorktree         bool
@@ -176,14 +177,15 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		return nil, err
 	}
 	info := &repoInfo{
-		CheckoutOptions:  options,
-		TaskRepositoryID: tr.ID,
-		RepositoryID:     tr.RepositoryID,
-		BaseBranch:       tr.BaseBranch,
-		IntegrationRef:   tr.BranchPolicyPullRequestTarget,
-		CheckoutBranch:   tr.CheckoutBranch,
-		PRNumber:         prNumberFromMetadata(tr.Metadata),
-		Position:         tr.Position,
+		CheckoutOptions:       options,
+		TaskRepositoryID:      tr.ID,
+		RepositoryID:          tr.RepositoryID,
+		BaseBranch:            tr.BaseBranch,
+		IntegrationRef:        tr.BranchPolicyPullRequestTarget,
+		CheckoutBranch:        tr.CheckoutBranch,
+		PRNumber:              prNumberFromMetadata(tr.Metadata),
+		Position:              tr.Position,
+		WorkspaceRelativePath: tr.WorkspaceRelativePath,
 	}
 	if binding, found, err := models.LoadRemoteContribution(tr.Metadata); err != nil {
 		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
@@ -1039,9 +1041,6 @@ func (e *Executor) resumeSession(
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return nil, err
 	}
-	if startAgent {
-		e.observeSessionCoresidency(ctx, sessionCoresidencySiteResume, task.ID, session.ID)
-	}
 
 	resumeInitialState := session.State
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
@@ -1599,6 +1598,7 @@ func newResumeLaunchRequest(
 		IsPassthrough:          session.IsPassthrough,
 		TaskEnvironmentID:      session.TaskEnvironmentID,
 		AllowBranchReplacement: options.AllowBranchReplacement,
+		WorkspaceLayout:        task.InitialWorkspaceLayout,
 	}
 
 	metadata := map[string]interface{}{}
@@ -1760,7 +1760,9 @@ func (e *Executor) applyResumeWorkspaceFolders(
 	for _, folder := range folders {
 		if folder != nil {
 			req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{
-				Name: folder.DisplayName, LocalPath: folder.LocalPath,
+				Name:                  folder.DisplayName,
+				LocalPath:             folder.LocalPath,
+				WorkspaceRelativePath: folder.WorkspaceRelativePath,
 			})
 		}
 	}
@@ -2250,6 +2252,7 @@ func (e *Executor) applyResumeWorktreeConfig(
 	primaryTaskRepo, _ := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
 	if primaryTaskRepo != nil && primaryTaskRepo.RepositoryID == repositoryID {
 		req.TaskRepositoryID = primaryTaskRepo.ID
+		req.WorkspaceRelativePath = primaryTaskRepo.WorkspaceRelativePath
 	}
 	if primaryTaskRepo != nil && primaryTaskRepo.CheckoutBranch != "" {
 		req.CheckoutBranch = primaryTaskRepo.CheckoutBranch

@@ -95,6 +95,10 @@ var (
 	// used as a directory segment.
 	ErrInvalidRepoName = errors.New("repo name has no usable characters after sanitization")
 
+	// ErrWorkspacePathOccupied is returned when an explicit workspace placement
+	// would reuse an existing directory owned outside the requested worktree.
+	ErrWorkspacePathOccupied = errors.New("workspace path is already occupied")
+
 	// ErrBranchUnrecoverable is returned by recreate when the worktree's
 	// branch no longer exists locally, has no exact managed recovery head,
 	// and could not be fetched from origin either. Callers can treat

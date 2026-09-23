@@ -65,6 +65,9 @@ export type {
   TaskRepository,
   WorkspaceFolder,
   WorkspaceFolderSourceRequest,
+  WorkspaceRepositoryPlacement,
+  WorkspaceRepositoryPlacementOption,
+  WorkspaceRepositoryPlacementPreview,
   WorkspaceRepositorySourceRequest,
   WorkspaceSourceRequest,
 } from "./http-workspace-sources";
@@ -99,6 +102,8 @@ export type TaskState =
   | "CANCELLED";
 
 export type TaskPriority = "critical" | "high" | "medium" | "low";
+
+export type InitialWorkspaceLayout = "repository" | "task_root";
 
 // Workflow Review Status
 export type WorkflowReviewStatus = "pending" | "approved" | "changes_requested" | "rejected";
@@ -446,6 +451,8 @@ export type Task = ActiveSubagentCountFields & {
   queued_for_step_id?: string;
   queued_at?: string | null;
   repositories?: TaskRepository[];
+  /** Initial working-directory layout for task creation. */
+  initial_workspace_layout?: InitialWorkspaceLayout;
   workspace_folders?: WorkspaceFolder[];
   primary_session_id?: SessionId | null;
   primary_session_state?: TaskSessionState | null;

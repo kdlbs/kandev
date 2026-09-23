@@ -204,6 +204,9 @@ function DialogFormBody(props: DialogFormBodyProps) {
         onBlockedByChange={props.fs.setBlockedBy}
         priority={props.fs.priority}
         onPriorityChange={props.fs.setPriority}
+        initialWorkspaceLayout={props.fs.initialWorkspaceLayout ?? "repository"}
+        onInitialWorkspaceLayoutChange={props.fs.setInitialWorkspaceLayout ?? (() => undefined)}
+        initialWorkspaceLayoutMode={props.initialWorkspaceLayoutMode}
         dependenciesDisabled={props.isCreatingSession || props.isCreatingTask}
         workflowAgentOverrideRows={props.workflowAgentOverrideRows}
         workflowAgentOverrideOptions={props.workflowAgentOverrideOptions}

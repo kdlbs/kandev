@@ -8,8 +8,10 @@ import type {
   CreateTaskResponse,
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
+  WorkspaceRepositoryPlacementPreview,
   Task,
   TaskPriority,
+  InitialWorkspaceLayout,
   MoveTaskResponse,
   ReorderBand,
   ReorderStepTasksResponse,
@@ -115,6 +117,7 @@ export async function createTask(
     /** Explicitly opt out of (false) or into (true) the auto-start-on-unblock intent. */
     start_when_unblocked?: boolean;
     workspace_path?: string;
+    initial_workspace_layout?: InitialWorkspaceLayout;
     priority?: TaskPriority;
     project_id?: string;
     metadata?: Record<string, unknown>;
@@ -192,6 +195,20 @@ export async function attachTaskWorkspaceSources(
 ) {
   return fetchJson<AttachTaskWorkspaceSourcesResponse>(
     `/api/v1/tasks/${taskId}/workspace-sources`,
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
+}
+
+export async function previewTaskWorkspaceSources(
+  taskId: string,
+  payload: AttachTaskWorkspaceSourcesRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<WorkspaceRepositoryPlacementPreview>(
+    `/api/v1/tasks/${taskId}/workspace-sources/preview`,
     {
       ...options,
       init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },

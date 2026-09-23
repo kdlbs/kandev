@@ -495,8 +495,10 @@ func (m *Manager) ReleaseWorktreeReference(ctx context.Context, wt *Worktree) er
 	wt.Status = StatusDeleted
 	wt.DeletedAt = &now
 	wt.UpdatedAt = now
-	if err := m.store.UpdateWorktree(ctx, wt); err != nil && !errors.Is(err, ErrWorktreeNotFound) {
-		return err
+	if m.store != nil {
+		if err := m.store.UpdateWorktree(ctx, wt); err != nil && !errors.Is(err, ErrWorktreeNotFound) {
+			return err
+		}
 	}
 	m.mu.Lock()
 	delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
@@ -802,6 +804,9 @@ func (m *Manager) removeWorktreeDir(
 			m.logger.Debug("git worktree prune failed", zap.Error(err))
 		}
 		m.tryRemoveEmptyTaskDir(worktreePath)
+		if err := m.removeNestedWorkspaceExclusion(context.WithoutCancel(ctx), repoPath, worktreePath); err != nil {
+			m.logger.Debug("failed to remove nested workspace exclusion", zap.String("path", worktreePath), zap.Error(err))
+		}
 		return nil
 	}
 
@@ -834,6 +839,9 @@ func (m *Manager) removeWorktreeDir(
 		}
 	}
 	m.tryRemoveEmptyTaskDir(worktreePath)
+	if err := m.removeNestedWorkspaceExclusion(context.WithoutCancel(ctx), repoPath, worktreePath); err != nil {
+		m.logger.Debug("failed to remove nested workspace exclusion", zap.String("path", worktreePath), zap.Error(err))
+	}
 	return nil
 }
 

@@ -151,8 +151,8 @@ func TestObserveSessionCoresidency_SiblingReadFailureRecordsSkipNotAbsence(t *te
 // TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart pins the
 // wiring half of AC-004.1: LaunchPreparedSession calls the observation
 // before the agent process starts, for a real launch that otherwise
-// succeeds, not just the extracted helper. Ordering is enforced by
-// production code structure, not a synchronized assertion here.
+// succeeds, not just the extracted helper. The process-start callback
+// synchronizes the assertion after the observation seam has run.
 func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-123"] = &models.TaskSession{
@@ -170,12 +170,17 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewFromZap: %v", err)
 	}
+	started := make(chan struct{}, 1)
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			return &LaunchAgentResponse{
 				AgentExecutionID: "exec-123",
 				ContainerID:      "container-123",
 			}, nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			started <- struct{}{}
+			return nil
 		},
 	}
 	executor := NewExecutor(agentManager, repo, log, ExecutorConfig{ShellPrefs: &mockShellPrefs{}})
@@ -196,11 +201,16 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("LaunchPreparedSession failed: %v", err)
 	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the agent process to start")
+	}
 
 	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after != before+1 {
 		t.Fatalf("admitted[launch] counter = %d, want %d", after, before+1)
 	}
-	warnings := logs.FilterLevelExact(zapcore.WarnLevel).All()
+	warnings := logs.FilterMessageSnippet("starting an agent while another session").All()
 	if len(warnings) != 1 {
 		t.Fatalf("warning entries = %d, want 1; all=%v", len(warnings), logs.All())
 	}
@@ -211,8 +221,8 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 }
 
 // TestResumeSession_ObservesWorkingSiblingOnAgentStart pins the wiring
-// half of AC-004.1 for the resume seam. Ordering is enforced by
-// production code structure, not a synchronized assertion here.
+// half of AC-004.1 for the resume seam. The process-start callback
+// synchronizes the assertion after the observation seam has run.
 func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
@@ -226,9 +236,14 @@ func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFromZap: %v", err)
 	}
+	started := make(chan struct{}, 1)
 	agentMgr := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			return &LaunchAgentResponse{AgentExecutionID: "exec-new"}, nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			started <- struct{}{}
+			return nil
 		},
 	}
 	exec := NewExecutor(agentMgr, repo, log, ExecutorConfig{ShellPrefs: &mockShellPrefs{}})
@@ -238,11 +253,16 @@ func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
 		t.Fatalf("ResumeSession: %v", err)
 	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the agent process to start")
+	}
 
 	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume); after != before+1 {
 		t.Fatalf("admitted[resume] counter = %d, want %d", after, before+1)
 	}
-	warnings := logs.FilterLevelExact(zapcore.WarnLevel).All()
+	warnings := logs.FilterMessageSnippet("starting an agent while another session").All()
 	if len(warnings) != 1 {
 		t.Fatalf("warning entries = %d, want 1; all=%v", len(warnings), logs.All())
 	}

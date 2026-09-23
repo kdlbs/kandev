@@ -234,15 +234,22 @@ unavailable instead of using a same-named local or `origin` branch.
 <details>
 <summary>Adding sources details</summary>
 
-For an idle, non-archived repository-backed task, use **Files → Workspace actions → Add Repositories to workspace**. **Add repository** offers a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, including refresh and create-repository actions. **Add folder** appears when the executor supports it. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer with a touch-sized repository menu.
+For an idle, non-archived task with a prepared workspace, use **Files → + → Add repositories or folders**. **Add repository** offers a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, including refresh and create-repository actions. **Add folder** appears for Worktree and Local/Local PC tasks. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer with a touch-sized repository menu.
 
-Repository sources work on **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Folder sources are live host grants and work only on **Worktree** and **Local/Local PC**; they are unavailable to Docker and remote runtimes. Remote Docker remains unimplemented. Local Git sources need a cloneable origin on Docker, SSH, and Sprites; Worktree and Local/Local PC can use host repositories directly.
+Repository sources work on **Worktree**, **Local/Local PC**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. They use the current workspace root. Local/Local PC links host repositories and folders into that root without switching the current checkout; Docker, Kubernetes, SSH, and Sprites clone repositories inside the executor workspace and require a cloneable origin for local Git rows. Folder sources are live host links and work only on **Worktree** and **Local/Local PC**. They are unavailable to remote executors, where **Upload folder** remains a separate copy flow when supported. Remote Docker remains unimplemented.
 
 Use a base branch for every repository attachment. Local/Local PC never changes the user-owned repository checkout.
 
-Read the consequence summary in the dialog or drawer before submitting. It describes whether the
-current executor will restart the agent or update the live remote workspace. **Cancel** or closing
-the surface sends no attachment request and leaves the workspace unchanged.
+Choose sources first, then review their locations. Additions within the current workspace show a brief
+continuity note. A prominent restart warning appears only when workspace-root expansion is selected.
+**Cancel** or closing the surface sends no attachment request and leaves the workspace unchanged.
+
+On a single-repository Worktree task, a repository-only batch also shows a placement choice. Choose
+`kandev/` to group new repositories below the current root, or choose the current root to place each
+one beside the existing repository files. The preview shows the exact relative paths. These nested
+choices keep the agent CWD and workspace processes unchanged, and Kandev protects the outer Git
+worktree from staging the nested checkouts. Parent-rooted tasks add repository siblings directly.
+Workspace-root expansion stays disabled until explicit idle session recovery is available.
 
 Kandev rejects the entire request if a source is invalid, duplicated, inaccessible, or cannot be materialized. A failure removes new source records and Kandev-owned materialization; existing task contents remain intact. Attachments persist across reload, relaunch, and reset. A missing persisted folder is surfaced during a new or reset environment rather than silently omitted.
 

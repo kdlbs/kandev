@@ -296,7 +296,10 @@ function PullTriggerContent({
       ) : (
         <IconCloudDownload className="h-3 w-3" />
       )}
-      {label}
+      <span aria-hidden="true" className="hidden @[420px]/changes-panel:inline">
+        {label}
+      </span>
+      <span className="sr-only">{label}</span>
       {behindCount > 0 && !(isPulling || isRebasing) && (
         <span className="text-yellow-500 text-[10px]">{behindCount}</span>
       )}

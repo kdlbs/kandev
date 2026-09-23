@@ -853,6 +853,7 @@ func (r *Repository) runTaskPriorityRecreate() error {
 		stmt string
 	}{
 		{"archived_by_cascade_id", `ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`},
+		{"initial_workspace_layout", `ALTER TABLE tasks ADD COLUMN initial_workspace_layout TEXT NOT NULL DEFAULT ''`},
 		{"wip_admitted", `ALTER TABLE tasks ADD COLUMN wip_admitted INTEGER NOT NULL DEFAULT 1`},
 		{"queued_for_step_id", `ALTER TABLE tasks ADD COLUMN queued_for_step_id TEXT NOT NULL DEFAULT ''`},
 		{"queued_at", `ALTER TABLE tasks ADD COLUMN queued_at TIMESTAMP`},
@@ -896,6 +897,7 @@ func taskPriorityMigrationStatements() []string {
 		`CREATE TABLE tasks_priority_new (
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL DEFAULT '',
+			initial_workspace_layout TEXT NOT NULL DEFAULT '',
 			workflow_id TEXT NOT NULL DEFAULT '',
 			workflow_step_id TEXT NOT NULL DEFAULT '',
 			workflow_agent_overrides TEXT,
@@ -940,7 +942,7 @@ func taskPriorityMigrationStatements() []string {
 		// recreate dance. external_id is not COALESCEd — NULL is its
 		// meaningful "no identity" state.
 		`INSERT INTO tasks_priority_new (
-			id, workspace_id, workflow_id, workflow_step_id, workflow_agent_overrides, title, description,
+			id, workspace_id, initial_workspace_layout, workflow_id, workflow_step_id, workflow_agent_overrides, title, description,
 			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled,
 			archived_at, archived_by_cascade_id, created_at, updated_at,
 			origin, project_id,
@@ -948,7 +950,7 @@ func taskPriorityMigrationStatements() []string {
 			checkout_agent_id, checkout_at, checkout_run_id,
 			external_id, external_id_settled_at, assignee_user_id, assignment_generation
 		) SELECT
-			id, COALESCE(workspace_id,''), COALESCE(workflow_id,''),
+			id, COALESCE(workspace_id,''), COALESCE(initial_workspace_layout,''), COALESCE(workflow_id,''),
 			COALESCE(workflow_step_id,''), workflow_agent_overrides, title, COALESCE(description,''),
 			COALESCE(state,'TODO'), 'medium', COALESCE(position,0),
 			COALESCE(wip_admitted,1), COALESCE(queued_for_step_id,''), queued_at,

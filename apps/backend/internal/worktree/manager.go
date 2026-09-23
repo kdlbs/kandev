@@ -203,6 +203,17 @@ func (m *Manager) SetScriptMessageHandler(handler ScriptMessageHandler) {
 // ListActiveWorktreePaths returns the absolute on-disk paths of all
 // currently active, non-deleted worktrees.
 func (m *Manager) ListActiveWorktreePaths(ctx context.Context) ([]string, error) {
+	if m.store == nil {
+		m.mu.RLock()
+		defer m.mu.RUnlock()
+		paths := make([]string, 0, len(m.worktrees))
+		for _, wt := range m.worktrees {
+			if wt != nil && wt.Status == StatusActive && wt.Path != "" {
+				paths = append(paths, wt.Path)
+			}
+		}
+		return paths, nil
+	}
 	return m.store.ListActiveWorktreePaths(ctx)
 }
 
@@ -213,6 +224,9 @@ func (m *Manager) CountActiveWorktreeReferences(
 	worktreeID string,
 	excludeSessionIDs []string,
 ) (int, error) {
+	if m.store == nil {
+		return 0, nil
+	}
 	return m.store.CountActiveWorktreeReferences(ctx, worktreeID, excludeSessionIDs)
 }
 
@@ -333,6 +347,9 @@ func (m *Manager) getRepoLock(repoPath string) *sync.Mutex {
 	m.repoLockMu.Lock()
 	defer m.repoLockMu.Unlock()
 
+	if m.repoLocks == nil {
+		m.repoLocks = make(map[string]*repoLockEntry)
+	}
 	if entry, exists := m.repoLocks[repoPath]; exists {
 		entry.refCount++
 		return entry.mu

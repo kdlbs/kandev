@@ -301,6 +301,19 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.inheritParentRepositories(ctx, req); err != nil {
 		return nil, err
 	}
+	executorType := ""
+	if strings.TrimSpace(req.InitialWorkspaceLayout) == WorkspaceLayoutTaskRoot || len(req.Repositories) > 1 {
+		resolvedExecutorType, resolveErr := s.resolveInitialWorkspaceExecutorType(ctx, req)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		executorType = resolvedExecutorType
+	}
+	initialWorkspaceLayout, err := NormalizeInitialWorkspaceLayout(req.InitialWorkspaceLayout, len(req.Repositories), executorType)
+	if err != nil {
+		return nil, err
+	}
+	req.InitialWorkspaceLayout = initialWorkspaceLayout
 	if err := s.preflightRepositorySelections(ctx, req); err != nil {
 		return nil, err
 	}
@@ -986,6 +999,7 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		IsEphemeral:            req.IsEphemeral,
 		ParentID:               req.ParentID,
 		Autopilot:              req.Autopilot,
+		InitialWorkspaceLayout: req.InitialWorkspaceLayout,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Origin:                 origin,
 		ProjectID:              req.ProjectID,
