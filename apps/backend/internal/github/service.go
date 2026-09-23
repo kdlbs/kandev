@@ -193,11 +193,10 @@ type Service struct {
 	// passiveFallback* limits the legacy per-watch fallback used by passive
 	// workspace refreshes. The admission window is shared across workspaces so
 	// a batch outage cannot turn a single background tick into an unbounded CLI
-	// fan-out.
+	// fan-out. Admissions are retained as timestamps to enforce a rolling
+	// minute instead of allowing a wall-clock boundary burst.
 	passiveFallbackMu            sync.Mutex
-	passiveFallbackWindowStart   time.Time
-	passiveFallbackGlobalUsed    int
-	passiveFallbackWorkspaceUsed map[string]int
+	passiveFallbackAdmissions    []passiveFallbackAdmission
 	passiveFallbackTargetCursors map[string]int
 
 	// passiveWorkspaceRefreshAt suppresses repeated workspace reads that find
@@ -260,7 +259,6 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		tokenClientFactory:           func(token string) Client { return NewPATClient(token) },
 		ghAccountLister:              ListGHAccounts,
 		cleanupFailureCounts:         make(map[string]int),
-		passiveFallbackWorkspaceUsed: make(map[string]int),
 		passiveFallbackTargetCursors: make(map[string]int),
 		passiveWorkspaceRefreshAt:    make(map[string]time.Time),
 		appRegistrationRuntimes:      make(map[string]*githubAppRuntime),

@@ -70,6 +70,44 @@ func TestPassiveFallbackAdmissionBoundsWorkspaceAndGlobalWindow(t *testing.T) {
 	}
 }
 
+func TestPassiveFallbackAdmissionUsesRollingMinute(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	start := time.Date(2026, time.September, 22, 12, 0, 59, 0, time.UTC)
+	clock := start
+	svc.SetClock(func() time.Time { return clock })
+	firstWorkspace := seedSearchingFallbackWatches(t, store, 7)
+	secondWorkspace := make([]*PRWatch, 7)
+	for index := range secondWorkspace {
+		secondWorkspace[index] = &PRWatch{
+			ID:          "rolling-other-" + firstWorkspace[index].ID,
+			WorkspaceID: "workspace-rolling-other",
+			Owner:       "o",
+			Repo:        "r",
+			Branch:      firstWorkspace[index].Branch,
+		}
+	}
+
+	if got := len(svc.selectPassiveFallbackTargets(testWorkspaceID, firstWorkspace)); got != prWatchFallbackWorkspaceBudget {
+		t.Fatalf("first workspace admissions = %d, want %d", got, prWatchFallbackWorkspaceBudget)
+	}
+	if got := len(svc.selectPassiveFallbackTargets("workspace-rolling-other", secondWorkspace)); got != prWatchFallbackWorkspaceBudget {
+		t.Fatalf("second workspace admissions = %d, want %d", got, prWatchFallbackWorkspaceBudget)
+	}
+
+	// A wall-clock window would reset at 12:01:00 and admit another burst.
+	// The rolling window keeps the ten admissions active until each is a full
+	// minute old.
+	clock = start.Add(2 * time.Second)
+	if got := len(svc.selectPassiveFallbackTargets(testWorkspaceID, firstWorkspace)); got != 0 {
+		t.Fatalf("boundary burst admitted %d targets, want 0", got)
+	}
+
+	clock = start.Add(time.Minute)
+	if got := len(svc.selectPassiveFallbackTargets(testWorkspaceID, firstWorkspace)); got != prWatchFallbackWorkspaceBudget {
+		t.Fatalf("expired rolling admissions = %d, want %d", got, prWatchFallbackWorkspaceBudget)
+	}
+}
+
 func TestPassiveFallbackStopsAfterFirstRateLimit(t *testing.T) {
 	_, svc, _, store := setupPollerTest(t)
 	rateClient := &fallbackProbeClient{

@@ -1206,6 +1206,11 @@ func prStatusFromTaskPRSnapshot(snapshot *TaskPR) *PRStatus {
 	}
 }
 
+type passiveFallbackAdmission struct {
+	at          time.Time
+	workspaceID string
+}
+
 func (s *Service) selectPassiveFallbackTargets(workspaceID string, watches []*PRWatch) []*PRWatch {
 	if len(watches) == 0 || workspaceID == "" {
 		return nil
@@ -1233,16 +1238,25 @@ func (s *Service) selectPassiveFallbackTargets(workspaceID string, watches []*PR
 	now := s.now()
 	s.passiveFallbackMu.Lock()
 	defer s.passiveFallbackMu.Unlock()
-	if s.passiveFallbackWindowStart.IsZero() || now.Before(s.passiveFallbackWindowStart) ||
-		now.Sub(s.passiveFallbackWindowStart) >= time.Minute {
-		s.passiveFallbackWindowStart = now
-		s.passiveFallbackGlobalUsed = 0
-		s.passiveFallbackWorkspaceUsed = make(map[string]int)
+	if s.passiveFallbackTargetCursors == nil {
+		s.passiveFallbackTargetCursors = make(map[string]int)
 	}
-	workspaceUsed := s.passiveFallbackWorkspaceUsed[workspaceID]
+	cutoff := now.Add(-time.Minute)
+	retained := s.passiveFallbackAdmissions[:0]
+	workspaceUsed := 0
+	for _, admission := range s.passiveFallbackAdmissions {
+		if !admission.at.After(cutoff) {
+			continue
+		}
+		retained = append(retained, admission)
+		if admission.workspaceID == workspaceID {
+			workspaceUsed++
+		}
+	}
+	s.passiveFallbackAdmissions = retained
 	remaining := minInt(
 		prWatchFallbackWorkspaceBudget-workspaceUsed,
-		prWatchFallbackCycleBudget-s.passiveFallbackGlobalUsed,
+		prWatchFallbackCycleBudget-len(s.passiveFallbackAdmissions),
 	)
 	if remaining <= 0 {
 		return nil
@@ -1254,10 +1268,12 @@ func (s *Service) selectPassiveFallbackTargets(workspaceID string, watches []*PR
 	selected := make([]*PRWatch, 0, remaining)
 	for offset := 0; offset < remaining; offset++ {
 		selected = append(selected, ordered[(cursor+offset)%len(ordered)])
+		s.passiveFallbackAdmissions = append(s.passiveFallbackAdmissions, passiveFallbackAdmission{
+			at:          now,
+			workspaceID: workspaceID,
+		})
 	}
 	s.passiveFallbackTargetCursors[workspaceID] = (cursor + remaining) % len(ordered)
-	s.passiveFallbackWorkspaceUsed[workspaceID] = workspaceUsed + remaining
-	s.passiveFallbackGlobalUsed += remaining
 	return selected
 }
 

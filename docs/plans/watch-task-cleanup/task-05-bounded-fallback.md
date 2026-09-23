@@ -92,7 +92,7 @@ GraphQL support use a rotating round-robin fallback with a five-target
 workspace budget and ten-target cycle budget. Fallback stops the affected
 workspace on rate-limit or authentication errors and stops the cycle on
 cancellation. The passive workspace refresh path applies the same five-target
-workspace and ten-target scheduling-window budgets with fair target rotation;
+workspace and ten-target rolling one-minute budgets with fair target rotation;
 it classifies batch failures before fallback and runs fallback checks
 sequentially so an authentication or rate-limit error leaves no unscheduled
 tail of calls for that workspace.

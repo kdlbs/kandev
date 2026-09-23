@@ -317,6 +317,44 @@ func TestCleanupBatchPreservesOrdinaryErrorsAndStopsOnCancellation(t *testing.T)
 	})
 }
 
+func TestCleanupTracksNonRateAuthenticatedUserErrors(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	client := &cleanupRateLimitClient{
+		feedback: map[int]cleanupPRResponse{
+			1: {
+				state:   prStateOpen,
+				reviews: []PRReview{{State: reviewStateApproved, Author: mockDefaultUser}},
+			},
+		},
+		userErr: errors.New("temporary authenticated-user lookup failure"),
+	}
+	configureCleanupRateLimitClient(t, svc, client, nil)
+	watch := &ReviewWatch{WorkspaceID: "ws-1", CleanupPolicy: CleanupPolicyAlways}
+	if err := store.CreateReviewWatch(context.Background(), watch); err != nil {
+		t.Fatalf("CreateReviewWatch: %v", err)
+	}
+	createReviewCleanupRows(t, store, watch, "user-lookup-failure")
+	svc.SetTaskDeleter(&recordingTaskDeleter{})
+
+	deleted, err := svc.CleanupMergedReviewTasks(context.Background(), watch)
+	if err != nil || deleted != 0 {
+		t.Fatalf("cleanup deleted=%d err=%v, want ordinary failure to be retained", deleted, err)
+	}
+
+	key := reviewFailureKey(&ReviewPRTask{
+		ReviewWatchID: watch.ID,
+		RepoOwner:     "acme",
+		RepoName:      "widget",
+		PRNumber:      1,
+	})
+	svc.cleanupFailureMu.Lock()
+	failures := svc.cleanupFailureCounts[key]
+	svc.cleanupFailureMu.Unlock()
+	if failures != 1 {
+		t.Fatalf("authenticated-user failure count = %d, want 1", failures)
+	}
+}
+
 func TestCleanupBatchStopsWhenWorkspaceCoreTrackerIsExhausted(t *testing.T) {
 	_, svc, _, store := setupPollerTest(t)
 	client := &cleanupRateLimitClient{}
