@@ -74,6 +74,7 @@ relaxing the distribution validator or download reauthorization.
 - `apps/web/lib/api/domains/canvas-distribution-api.ts`
 - `apps/web/components/settings/canvas-share-dialog.tsx` and tests
 - `apps/web/hooks/domains/canvas/use-canvas-share.ts` and tests
+- `apps/web/hooks/domains/canvas/use-canvas-export-defaults.ts` and tests
 - `apps/web/src/locales/*/canvases.json`
 - `apps/web/e2e/tests/canvas/{canvas-sharing,mobile-canvas-sharing}.spec.ts`
 - Relevant `docs/public/**` sharing page
@@ -102,3 +103,7 @@ Share presents missing fields first, keeps package details editable, and
 retains reviewed inventory and separate downloads. Canvas/backend tests,
 typecheck, localization checks, focused unit tests, and desktop/phone sharing
 E2E passed.
+PR fixup preserves an unset source mode, exposes it as a required selector,
+and rejects static export when retained entry files are missing. The defaults
+request now lives in a domain hook; focused backend and dialog tests cover the
+missing-entry and explicit-choice paths.

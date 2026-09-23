@@ -27,7 +27,7 @@ from its host toolbar without publishing a new release.
 ## In scope
 
 - Add conditional title update in the canvas repository/service, an
-  owner-authorized `PATCH /api/v1/canvases/:canvasID`, and a safe
+  workspace-management-authorized `PATCH /api/v1/canvases/:canvasID`, and a safe
   `canvas.updated` lifecycle event for task and workspace projections.
 - Add typed web API and a host-owned name editor beside the desktop toolbar
   title. Expose Rename through the phone action drawer and focused sheet.
@@ -55,7 +55,7 @@ capabilities; editing inside the canvas application.
 (cd apps/backend && go test ./internal/canvas ./internal/backendapp)
 (cd apps/web && pnpm exec vitest run components/settings/canvas-host-components.test.tsx components/settings/canvas-host-route.test.tsx)
 (cd apps/web && pnpm e2e:run --host --project=chromium tests/canvas/canvas-host-rename.spec.ts)
-(cd apps/web && pnpm e2e:run --host --project=mobile-chrome tests/canvas/canvas-host-rename.spec.ts)
+(cd apps/web && pnpm e2e:run --host --project=mobile-chrome tests/canvas/mobile-canvas-host-rename.spec.ts)
 (cd apps/web && pnpm run i18n:check)
 ```
 
@@ -87,7 +87,10 @@ management checks; the rename contract itself does not depend on its data API.
 
 ## Results
 
-Added conditional title update, owner-authorized HTTP PATCH, safe
+Added conditional title update, workspace-management-authorized HTTP PATCH, safe
 `canvas.updated` event, and desktop/phone host editors. The host refreshes
 metadata without replacing the iframe. Canvas/backend tests, typecheck,
 localization checks, focused unit tests, and desktop/phone rename E2E passed.
+PR fixup tightened the HTTP guard to workspace-manage scope and added a viewer
+regression test. The rename control uses desktop icon sizing while preserving
+phone touch sizing; save keeps a stable accessible name and announces progress.

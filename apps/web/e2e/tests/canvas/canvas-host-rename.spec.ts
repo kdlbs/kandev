@@ -28,8 +28,11 @@ test("renames a task canvas without replacing its running frame", async ({
     await frame.evaluate((element) => {
       element.setAttribute("data-rename-marker", "same-frame");
     });
+    expect(
+      (await testPage.getByTestId("canvas-rename-action").boundingBox())?.height,
+    ).toBeLessThanOrEqual(32);
     await testPage.getByTestId("canvas-rename-action").click();
-    const dialog = testPage.getByRole("dialog").last();
+    const dialog = testPage.getByRole("dialog", { name: "Rename canvas" });
     await expect(dialog.getByLabel("Canvas name")).toBeFocused();
     await dialog.getByLabel("Canvas name").fill("Updated workflow canvas");
     await dialog.getByRole("button", { name: "Save" }).click();

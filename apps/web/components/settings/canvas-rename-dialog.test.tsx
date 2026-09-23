@@ -23,6 +23,7 @@ vi.mock("@kandev/ui/dialog", () => ({
 import { CanvasRenameDialog } from "./canvas-rename-dialog";
 
 const canvas = { id: "canvas-1", title: "Old title" } as Canvas;
+const CANVAS_NAME_LABEL = "canvases:canvasName";
 afterEach(() => {
   cleanup();
   renameCanvas.mockReset();
@@ -36,7 +37,7 @@ describe("CanvasRenameDialog", () => {
     render(
       <CanvasRenameDialog canvas={canvas} open onOpenChange={onOpenChange} onRenamed={onRenamed} />,
     );
-    fireEvent.change(screen.getByLabelText("canvases:canvasName"), {
+    fireEvent.change(screen.getByLabelText(CANVAS_NAME_LABEL), {
       target: { value: "  New title  " },
     });
     fireEvent.click(screen.getByRole("button", { name: "common:save" }));
@@ -51,12 +52,21 @@ describe("CanvasRenameDialog", () => {
     render(
       <CanvasRenameDialog canvas={canvas} open onOpenChange={onOpenChange} onRenamed={vi.fn()} />,
     );
-    fireEvent.change(screen.getByLabelText("canvases:canvasName"), { target: { value: "Draft" } });
+    fireEvent.change(screen.getByLabelText(CANVAS_NAME_LABEL), { target: { value: "Draft" } });
     fireEvent.click(screen.getByRole("button", { name: "common:save" }));
     await screen.findByRole("alert");
-    expect((screen.getByLabelText("canvases:canvasName") as HTMLInputElement).value).toBe("Draft");
+    expect((screen.getByLabelText(CANVAS_NAME_LABEL) as HTMLInputElement).value).toBe("Draft");
     fireEvent.click(screen.getByRole("button", { name: "common:cancel" }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(renameCanvas).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts a 200-code-point title with astral characters", async () => {
+    renameCanvas.mockResolvedValue(canvas);
+    render(<CanvasRenameDialog canvas={canvas} open onOpenChange={vi.fn()} onRenamed={vi.fn()} />);
+    const title = "😀".repeat(200);
+    fireEvent.change(screen.getByLabelText(CANVAS_NAME_LABEL), { target: { value: title } });
+    fireEvent.click(screen.getByRole("button", { name: "common:save" }));
+    await waitFor(() => expect(renameCanvas).toHaveBeenCalledWith("canvas-1", title));
   });
 });

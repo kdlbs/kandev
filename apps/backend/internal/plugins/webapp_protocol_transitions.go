@@ -46,8 +46,12 @@ func (s *Service) listWebAppTaskTransitions(ctx context.Context, w http.Response
 		return
 	}
 	task, err := host.fetchTaskForScopeCheck(ctx, taskID)
-	if err != nil || task == nil {
+	if err != nil {
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
+		return
+	}
+	if task == nil {
+		writeWebAppError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if !webAppTaskMatches(ctx, host, binding, *task) {

@@ -32,7 +32,7 @@ export type ExportReview = {
 
 export type ExportDefaults = {
   expected_release_id: string;
-  metadata: DistributionMetadata;
+  metadata: Omit<DistributionMetadata, "source_mode"> & { source_mode?: "" | "static" | "project" };
   missing_required: string[];
 };
 

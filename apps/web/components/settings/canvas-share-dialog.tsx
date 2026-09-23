@@ -25,8 +25,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@kandev/ui/textarea";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useCanvasShare } from "@/hooks/domains/canvas/use-canvas-share";
+import { useCanvasExportDefaults } from "@/hooks/domains/canvas/use-canvas-export-defaults";
 import {
-  getCanvasExportDefaults,
   type DistributionMetadata,
   type ExportDefaults,
 } from "@/lib/api/domains/canvas-distribution-api";
@@ -34,12 +34,17 @@ import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { formatNumber } from "@/lib/i18n/formats";
 import { CanvasShareHelp } from "./canvas-share-help";
 
-type ShareMetadata = DistributionMetadata & { source_mode: "static" | "project" };
+type ShareMetadata = Omit<DistributionMetadata, "source_mode"> & {
+  source_mode: "" | "static" | "project";
+};
 
 // eslint-disable-next-line complexity -- Seeding each editable distribution field keeps the form independent from API shape changes.
 function seedShareMetadata(canvas: Canvas | null): ShareMetadata {
   const release = canvas?.active_release;
-  const sourceMode = release?.source_mode === "project" ? "project" : "static";
+  const sourceMode =
+    release?.source_mode === "project" || release?.source_mode === "static"
+      ? release.source_mode
+      : "";
   return {
     package_id: release?.package_id ?? "",
     version: release?.version ?? "",
@@ -68,17 +73,22 @@ export function CanvasShareDialog({
   const share = useCanvasShare(canvas);
   const { reset, cancel, invalidate } = share;
   const [metadata, setMetadata] = useState<ShareMetadata>(() => seedShareMetadata(canvas));
-  const [defaults, setDefaults] = useState<ExportDefaults | null>(null);
-  const [defaultsLoading, setDefaultsLoading] = useState(false);
-  const [defaultsError, setDefaultsError] = useState(false);
-  const [retryKey, setRetryKey] = useState(0);
+  const {
+    defaults,
+    loading: defaultsLoading,
+    error: defaultsError,
+    retry,
+  } = useCanvasExportDefaults(
+    canvas?.id,
+    canvas?.active_release_id,
+    open && canvas?.active_release_status === "valid",
+  );
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
       invalidate();
-      setDefaults(null);
-      setDefaultsError(false);
+      setMetadata(seedShareMetadata(canvas));
       setDetailsOpen(false);
     } else {
       reset();
@@ -86,41 +96,14 @@ export function CanvasShareDialog({
   }, [canvas?.active_release_id, canvas?.id, open, reset, invalidate]);
 
   useEffect(() => {
-    if (
-      !open ||
-      !canvas?.id ||
-      !canvas.active_release_id ||
-      canvas.active_release_status !== "valid"
-    )
-      return;
-    let current = true;
-    setDefaultsLoading(true);
-    getCanvasExportDefaults(canvas.id, { cache: "no-store" })
-      .then((value) => {
-        if (!current) return;
-        if (value.expected_release_id !== canvas.active_release_id)
-          throw new Error("stale release");
-        setDefaults(value);
-        setMetadata({
-          ...seedShareMetadata(null),
-          ...value.metadata,
-          source_mode: value.metadata.source_mode === "project" ? "project" : "static",
-        });
-        setDefaultsError(false);
-      })
-      .catch(() => {
-        if (current) {
-          setDefaults(null);
-          setDefaultsError(true);
-        }
-      })
-      .finally(() => {
-        if (current) setDefaultsLoading(false);
-      });
-    return () => {
-      current = false;
-    };
-  }, [canvas?.id, canvas?.active_release_id, canvas?.active_release_status, open, retryKey]);
+    if (!defaults) return;
+    const sourceMode = defaults.metadata.source_mode;
+    setMetadata({
+      ...seedShareMetadata(null),
+      ...defaults.metadata,
+      source_mode: sourceMode === "project" || sourceMode === "static" ? sourceMode : "",
+    });
+  }, [defaults]);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) void cancel();
@@ -145,13 +128,10 @@ export function CanvasShareDialog({
     const missing = required.find((key) => !String(metadata[key] ?? "").trim());
     if (missing) {
       setDetailsOpen(true);
-      requestAnimationFrame(() =>
-        document
-          .getElementById(
-            `canvas-share-${missing === "min_kandev_version" ? "min-version" : missing.replaceAll("_", "-")}`,
-          )
-          ?.focus(),
-      );
+      const fieldId = defaults?.missing_required.includes(missing)
+        ? `canvas-share-required-${missing}`
+        : `canvas-share-${missing === "min_kandev_version" ? "min-version" : missing.replaceAll("_", "-")}`;
+      requestAnimationFrame(() => document.getElementById(fieldId)?.focus());
       return;
     }
     void share
@@ -163,6 +143,7 @@ export function CanvasShareDialog({
         description: metadata.description?.trim(),
         author: metadata.author?.trim(),
         license: metadata.license?.trim(),
+        source_mode: metadata.source_mode || undefined,
         min_kandev_version: metadata.min_kandev_version?.trim(),
         repo_url: metadata.repo_url?.trim() || undefined,
       })
@@ -174,7 +155,7 @@ export function CanvasShareDialog({
       defaults={defaults}
       defaultsLoading={defaultsLoading}
       defaultsError={defaultsError}
-      onRetry={() => setRetryKey((value) => value + 1)}
+      onRetry={retry}
       metadata={metadata}
       onChange={updateMetadata}
       detailsOpen={detailsOpen}
@@ -312,9 +293,12 @@ function CanvasShareBody({
               disabled={share.loading || !defaults || defaultsLoading}
               onClick={onPrepare}
             >
-              {share.loading ? t("canvases:sharing") : t("canvases:prepareDownloads")}
+              {t("canvases:prepareDownloads")}
             </Button>
           )}
+          <span role="status" className="sr-only">
+            {share.loading ? t("canvases:sharing") : ""}
+          </span>
           {Boolean(share.error) && (
             <p role="alert" className="text-sm text-destructive">
               {t("canvases:shareFailed")}
@@ -422,6 +406,7 @@ function ShareMissingFields({
     description: "description",
     author: "author",
     license: "license",
+    source_mode: "sourceMode",
     min_kandev_version: "minKandevVersion",
   };
   return (
@@ -434,12 +419,29 @@ function ShareMissingFields({
           return (
             <div key={field} className="space-y-2">
               <Label htmlFor={id}>{t(`canvases:${labels[field]}`)}</Label>
-              <Input
-                id={id}
-                className="min-h-11"
-                value={String(metadata[key] ?? "")}
-                onChange={(event) => onChange(key, event.target.value)}
-              />
+              {field === "source_mode" ? (
+                <Select
+                  value={metadata.source_mode}
+                  onValueChange={(value) =>
+                    onChange("source_mode", value as ShareMetadata["source_mode"])
+                  }
+                >
+                  <SelectTrigger id={id} className="min-h-11">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="static">{t("canvases:sourceModeStatic")}</SelectItem>
+                    <SelectItem value="project">{t("canvases:sourceModeProject")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id={id}
+                  className="min-h-11"
+                  value={String(metadata[key] ?? "")}
+                  onChange={(event) => onChange(key, event.target.value)}
+                />
+              )}
             </div>
           );
         })}

@@ -206,7 +206,8 @@ On desktop, workspace canvases use the workspace Canvases area. On phones, Kande
 
 To change the name shown in Kandev, choose **Rename canvas** beside the host
 toolbar title or in the phone actions drawer. Saving changes the canvas name in
-navigation and task pickers. It does not republish or rename the release package.
+navigation and task pickers. Workspace manage permission is required. Renaming
+does not republish or rename the release package.
 
 ## Share and install a canvas
 
@@ -216,7 +217,9 @@ to the canvas package.
 
 1. Open the canvas host or the workspace canvas list.
 2. Choose **Share canvas**.
-3. Check the active release and fill any required gaps, such as the license.
+3. Check the active release and fill any required gaps, such as the license or
+   source mode. Kandev preselects static mode only when retained files support
+   it; an unavailable static export is rejected during preparation.
    Kandev fills known package details from the release; expand **Package
    details** to review or edit them. It does not choose a license for you.
 4. Choose **Prepare downloads** and review the file inventory, archive sizes,

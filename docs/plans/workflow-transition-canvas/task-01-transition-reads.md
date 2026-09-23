@@ -84,7 +84,8 @@ destination indexes. Query plans and parity tests must cover that path.
 
 ## Results
 
-Implemented task-ID cursor reads and workspace route grouping over the
+Implemented task-scoped reads with monotonic transition-ID cursors and
+workspace route grouping over the
 retained ledger. Added task-ID, source-workflow, and destination-workflow
 indexes. SQLite and Postgres schema replay share the same indexes; the
 Postgres query test is gated on `KANDEV_TEST_POSTGRES_DSN`.

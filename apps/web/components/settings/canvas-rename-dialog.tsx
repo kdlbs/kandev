@@ -121,9 +121,8 @@ function RenameForm({
       <Input
         id="canvas-rename-input"
         ref={inputRef}
-        maxLength={200}
         value={draft}
-        onChange={(event) => onDraftChange(event.target.value)}
+        onChange={(event) => onDraftChange(Array.from(event.target.value).slice(0, 200).join(""))}
         aria-invalid={Boolean(error)}
         className="min-h-11"
       />
@@ -137,8 +136,11 @@ function RenameForm({
           {t("common:cancel")}
         </Button>
         <Button type="submit" className="min-h-11" disabled={saving}>
-          {saving ? t("canvases:renamingCanvas") : t("common:save")}
+          {t("common:save")}
         </Button>
+        <span role="status" className="sr-only">
+          {saving ? t("canvases:renamingCanvas") : ""}
+        </span>
       </div>
     </form>
   );

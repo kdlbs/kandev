@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/authz"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -26,7 +27,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// canvasHTTPHandler is the owner-authorized browser API for canvas metadata
+// canvasHTTPHandler is the workspace-authorized browser API for canvas metadata
 // and host operations. Source transfer and publishing stay on the agent MCP
 // path; browsers receive only metadata and short-lived runtime capabilities.
 type canvasHTTPHandler struct {
@@ -534,7 +535,7 @@ func (h *canvasHTTPHandler) rename(c *gin.Context) {
 		h.writeError(c, err)
 		return
 	}
-	if !h.authorizeWorkspace(c, item.WorkspaceID) {
+	if !h.authorizeWorkspaceManage(c, item.WorkspaceID) {
 		return
 	}
 	var request struct {
@@ -869,6 +870,17 @@ func (h *canvasHTTPHandler) authorizeWorkspace(c *gin.Context, workspaceID strin
 	}
 	if err := taskSvc.AuthorizeWorkspaceAccess(c.Request.Context(), workspaceID); err != nil {
 		writeCanvasError(c, http.StatusNotFound, "canvas_not_found", nil)
+		return false
+	}
+	return true
+}
+
+func (h *canvasHTTPHandler) authorizeWorkspaceManage(c *gin.Context, workspaceID string) bool {
+	if !h.authorizeWorkspace(c, workspaceID) {
+		return false
+	}
+	if err := h.tasks.AuthorizeWorkspaceScope(c.Request.Context(), workspaceID, authz.ScopeWorkspaceManage); err != nil {
+		writeCanvasError(c, http.StatusForbidden, "forbidden", nil)
 		return false
 	}
 	return true

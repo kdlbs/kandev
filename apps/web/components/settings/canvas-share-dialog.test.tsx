@@ -58,6 +58,8 @@ import { CanvasShareDialog } from "./canvas-share-dialog";
 afterEach(() => cleanup());
 
 const PACKAGE_ID = "canvas-one";
+const DISPLAY_NAME = "Canvas One";
+const PREPARE_LABEL = "canvases:prepareDownloads";
 
 const canvas: Canvas = {
   id: "canvas-1",
@@ -65,7 +67,7 @@ const canvas: Canvas = {
   plugin_id: "canvas-1",
   workspace_id: "workspace-1",
   scope_kind: "workspace",
-  title: "Canvas One",
+  title: DISPLAY_NAME,
   status: "active",
   active_release_id: "release-1",
   active_release_status: "valid",
@@ -74,7 +76,7 @@ const canvas: Canvas = {
     validation_status: "valid",
     package_id: PACKAGE_ID,
     version: "1.0.0",
-    display_name: "Canvas One",
+    display_name: DISPLAY_NAME,
     description: "A portable canvas",
     author: "Author",
     source_mode: "static",
@@ -88,7 +90,7 @@ beforeEach(() => {
     metadata: {
       package_id: PACKAGE_ID,
       version: "1.0.0",
-      display_name: "Canvas One",
+      display_name: DISPLAY_NAME,
       description: "A portable canvas",
       author: "Author",
       source_mode: "static",
@@ -112,7 +114,7 @@ describe("CanvasShareDialog", () => {
     fireEvent.change(within(gaps).getByLabelText("canvases:license"), {
       target: { value: "MIT" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "canvases:prepareDownloads" }));
+    fireEvent.click(screen.getByRole("button", { name: PREPARE_LABEL }));
 
     await waitFor(() =>
       expect(prepare).toHaveBeenCalledWith(
@@ -160,14 +162,41 @@ describe("CanvasShareDialog", () => {
     render(<CanvasShareDialog canvas={canvas} open onOpenChange={vi.fn()} />);
     await screen.findByRole("alert");
     expect(
-      (screen.getByRole("button", { name: "canvases:prepareDownloads" }) as HTMLButtonElement)
-        .disabled,
+      (screen.getByRole("button", { name: PREPARE_LABEL }) as HTMLButtonElement).disabled,
     ).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "canvases:retry" }));
     await screen.findByTestId("canvas-share-package-details");
     expect(
-      (screen.getByRole("button", { name: "canvases:prepareDownloads" }) as HTMLButtonElement)
-        .disabled,
+      (screen.getByRole("button", { name: PREPARE_LABEL }) as HTMLButtonElement).disabled,
     ).toBe(false);
+  });
+
+  it("requires an explicit source mode when the release has no usable default", async () => {
+    getDefaults.mockResolvedValueOnce({
+      expected_release_id: "release-1",
+      metadata: {
+        package_id: PACKAGE_ID,
+        version: "1.0.0",
+        display_name: DISPLAY_NAME,
+        description: "A portable canvas",
+        author: "Author",
+        license: "MIT",
+        source_mode: "",
+        min_kandev_version: "0.95.0",
+      },
+      missing_required: ["source_mode"],
+    });
+    render(<CanvasShareDialog canvas={canvas} open onOpenChange={vi.fn()} />);
+    const gaps = await screen.findByTestId("canvas-share-required-gaps");
+    const sourceMode = within(gaps).getByRole("combobox", { name: "canvases:sourceMode" });
+    fireEvent.click(screen.getByRole("button", { name: PREPARE_LABEL }));
+    expect(prepare).not.toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement).toBe(sourceMode));
+    fireEvent.click(sourceMode);
+    fireEvent.click(screen.getByRole("option", { name: "canvases:sourceModeProject" }));
+    fireEvent.click(screen.getByRole("button", { name: PREPARE_LABEL }));
+    await waitFor(() =>
+      expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ source_mode: "project" })),
+    );
   });
 });

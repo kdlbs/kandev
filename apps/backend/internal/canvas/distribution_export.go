@@ -226,9 +226,13 @@ func (s *DistributionService) PrepareExport(ctx context.Context, request ExportR
 	if err != nil {
 		return ExportReview{}, err
 	}
-	metadata, err := normalizeExportMetadata(request.Metadata, releaseManifest(release))
+	current := releaseManifest(release)
+	metadata, err := normalizeExportMetadata(request.Metadata, current)
 	if err != nil {
 		return ExportReview{}, err
+	}
+	if metadata.SourceMode == manifest.SourceModeStatic && !staticExportAvailable(current, files) {
+		return ExportReview{}, fmt.Errorf("%w: static export is unavailable", ErrExportInvalid)
 	}
 	manifestValue, err := exportManifest(release.ManifestJSON, metadata)
 	if err != nil {

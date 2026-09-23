@@ -20,7 +20,7 @@ test("renames from the phone action drawer", async ({ testPage, apiClient, backe
     await testPage.goto(canvasHref(active.id));
     await testPage.getByTestId("canvas-mobile-actions").tap();
     await testPage.getByTestId("canvas-mobile-rename").tap();
-    const dialog = testPage.getByRole("dialog").last();
+    const dialog = testPage.getByRole("dialog", { name: "Rename canvas" });
     await dialog.getByLabel("Canvas name").fill("Phone canvas title");
     await dialog.getByRole("button", { name: "Save" }).tap();
     await expect(testPage.getByText("Phone canvas title").first()).toBeVisible();

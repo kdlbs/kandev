@@ -3,6 +3,7 @@
 import { CanvasShareDialog } from "./canvas-share-dialog";
 import { CanvasRenameDialog } from "./canvas-rename-dialog";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { IconPencil } from "@tabler/icons-react";
 import { CanvasHostFrame } from "./canvas-host-frame";
 import { useTranslation } from "react-i18next";
@@ -204,7 +205,7 @@ export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
     <Button
       variant="ghost"
       size="icon"
-      className="min-h-11 min-w-11"
+      className={controlSizingClassName("icon")}
       aria-label={t("canvases:renameCanvas")}
       title={t("canvases:renameCanvas")}
       onClick={props.onRename}
