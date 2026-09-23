@@ -482,7 +482,10 @@ const MAX_TASK_DELETE_PREVIEW_ATTEMPTS = 3;
  * HTTP API client for seeding test data via the backend REST API.
  */
 export class ApiClient {
-  constructor(private baseUrl: string) {}
+  constructor(
+    private baseUrl: string,
+    private ensureBackendReady?: () => Promise<void>,
+  ) {}
 
   /** Perform an HTTP request and return the raw Response (does not throw on non-2xx). */
   async rawRequest(
@@ -492,6 +495,7 @@ export class ApiClient {
     options?: Pick<RequestInit, "redirect"> & { extraHeaders?: Record<string, string> },
   ): Promise<Response> {
     const { extraHeaders, ...requestOptions } = options ?? {};
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}${path}`, {
       method,
       headers: { ...(await this.requestHeaders(method, body)), ...extraHeaders },
@@ -506,6 +510,7 @@ export class ApiClient {
     body?: unknown,
     extraHeaders?: Record<string, string>,
   ): Promise<T> {
+    await this.ensureBackendReady?.();
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
       headers: { ...(await this.requestHeaders(method, body)), ...extraHeaders },
@@ -1633,6 +1638,7 @@ export class ApiClient {
     workspaceId: string,
     yamlContent: string,
   ): Promise<{ created: string[]; skipped: string[] }> {
+    await this.ensureBackendReady?.();
     const res = await fetch(`${this.baseUrl}/api/v1/workspaces/${workspaceId}/workflows/import`, {
       method: "POST",
       headers: { "Content-Type": "application/x-yaml" },
@@ -3960,6 +3966,7 @@ export class ApiClient {
   }
 
   async runtimeUpdateTaskStatus(token: string, taskId: string, status: string): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/tasks/${taskId}/status`, {
       method: "POST",
       headers: {
@@ -3971,6 +3978,7 @@ export class ApiClient {
   }
 
   async runtimePostComment(token: string, taskId: string, body: string): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/comments`, {
       method: "POST",
       headers: {
@@ -3986,6 +3994,7 @@ export class ApiClient {
     parentTaskId: string,
     data: { title: string; description?: string; assigneeAgentId?: string },
   ): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/tasks/${parentTaskId}/subtasks`, {
       method: "POST",
       headers: {
@@ -4005,6 +4014,7 @@ export class ApiClient {
     token: string,
     data: { name: string; role: string; reason?: string },
   ): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/agents`, {
       method: "POST",
       headers: {
@@ -4016,6 +4026,7 @@ export class ApiClient {
   }
 
   async runtimePutMemory(token: string, path: string, content: string): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/memory${path}`, {
       method: "PUT",
       headers: {
@@ -4027,6 +4038,7 @@ export class ApiClient {
   }
 
   async runtimeGetMemory(token: string, path: string): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/memory${path}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
