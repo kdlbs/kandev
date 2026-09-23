@@ -68,3 +68,21 @@ git diff --check
 ## Results
 
 RED reproduced the old five-reading grid as three rows instead of two. All listed checks passed: 11 unit tests, 3 mobile Playwright tests, 2 desktop Playwright tests, ESLint, typecheck, i18n ratchet, specification/catalog validation, and public-doc validation (62 validator tests). The final mobile run used `--no-build` after a fresh successful production build; only the test's scroll reachability assertions changed between runs. Prettier and whitespace checks passed. Phone and desktop screenshots were captured with disposable E2E data and visually inspected against UI-01/UI-02.
+
+### CI follow-up
+
+The original CI failure was `terminal-agent.spec.ts`'s context-reset cascade, with report and aggregate failures following from that leaf. Two new lifecycle regressions reproduced the readiness boundary before the fix. From `apps/backend`, these checks passed:
+
+```sh
+go test -race ./internal/agent/runtime/lifecycle -run '^TestRestartPassthroughProcess' -count=20
+go test -race ./internal/agent/runtime/lifecycle -count=1
+golangci-lint run ./... --new-from-rev=545cd0b5991c2716e3fcfdfc6102d39e69a64167 --timeout=5m
+```
+
+`make build-backend` passed. Browser validation used the failed CI run's runtime image, `ghcr.io/kdlbs/kandev-ci@sha256:61bc3395791d25639eadc108c691863e122f2710ecd7caf6916fca188ab71c04`, with the rebuilt backend and retries disabled. From `apps/web` inside that runtime, all 20 repetitions passed:
+
+```sh
+bash e2e/scripts/run-raw-e2e.sh --project=chromium e2e/tests/terminal/terminal-agent.spec.ts --grep 'context reset relaunches PTY and delivers prompt in cascade' --repeat-each=20 --max-failures=1 --reporter=list --retries=0
+```
+
+Documentation/catalog checks also passed after the review corrections. Shard replay and remote CI completion are tracked in the task plan and PR #3880 checks.

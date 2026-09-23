@@ -168,3 +168,4 @@ Visual interaction is a clean Kandev adaptation of Orca's public status-bar idea
 - [Original App status bar plan](../../../plans/app-status-bar/plan.md)
 - [Status bar Appearance setting promotion plan](../../../plans/app-status-bar-appearance-setting/plan.md)
 - [Mobile Status metrics grid repair plan](../../../plans/mobile-status-metrics-grid/plan.md)
+- [Mobile system metrics card plan](../../../plans/mobile-system-metrics-card/plan.md)

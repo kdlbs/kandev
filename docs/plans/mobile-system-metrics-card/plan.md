@@ -57,3 +57,11 @@ RED: the production-build phone regression failed on expected two rows versus th
 ## Risks
 
 Long translated labels must wrap within the narrow columns. Desktop density limits, unavailable values, and simplified metrics must retain their existing behavior.
+
+## PR validation follow-up
+
+PR #3880 review identified two documentation corrections: state explicitly that the phone Menu fallback applies when Show status bar is off, and link this plan from the status-bar design. Both are addressed.
+
+CI also exposed a terminal context-reset race in `terminal-agent.spec.ts`. The same assertion reproduced without retries using the CI runtime image and backend artifacts. A fresh PTY's startup-ready callback could race the next running-state publication and suppress that turn's completion. The lifecycle reset now waits for first idle outside the passthrough lifecycle lock before returning. This is an internal ordering correction to the existing workflow reset contract; it does not change metrics collection or plugin behavior.
+
+Two focused lifecycle regressions failed before the fix. All five reset tests passed with `-race -count=20`; the complete lifecycle package passed with `-race`, and changed-code Go lint reported zero issues. Terminal browser validation and the subsequent CI check are recorded in the task results.
