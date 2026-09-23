@@ -640,6 +640,15 @@ export class ApiClient {
     return this.request("GET", "/api/v1/agents/available");
   }
 
+  /** Removes a custom agent by slug, so a spec that creates one leaves the
+   * worker's agent list as it found it. Missing is not an error. */
+  async deleteCustomAgentByName(name: string): Promise<void> {
+    const { agents } = await this.listAgents();
+    const agent = agents.find((candidate) => candidate.name === name);
+    if (!agent) return;
+    await this.request("DELETE", `/api/v1/agents/${agent.id}`);
+  }
+
   async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {
     const qs = force ? "?force=true" : "";
     await this.request("DELETE", `/api/v1/agent-profiles/${profileId}${qs}`);

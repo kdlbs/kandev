@@ -1263,6 +1263,29 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 	return r.updateAgentProfile(ctx, r.db, profile)
 }
 
+// UpdateAgentProfileModelIfEmpty adopts a probed model without replacing any
+// other profile fields. The model predicate makes the read/check/write one
+// atomic operation, so a concurrent profile edit wins over the background
+// probe instead of being overwritten by a full-row update.
+func (r *sqliteRepository) UpdateAgentProfileModelIfEmpty(
+	ctx context.Context,
+	profileID, model string,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET model = ?, updated_at = ?
+		WHERE id = ? AND deleted_at IS NULL AND model = ''
+	`), model, time.Now().UTC(), profileID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
+}
+
 func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profileExecer, profile *models.AgentProfile) error {
 	profile.UpdatedAt = time.Now().UTC()
 	cliFlagsJSON, err := cliFlagsToJSON(profile.CLIFlags)

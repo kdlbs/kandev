@@ -68,9 +68,9 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		return &PromptResponse{Success: false, Error: "work_dir is required for ACP inference"}, nil
 	}
 	model, modelConfigOptions, _ := acpcompat.MigrateCursorModel(req.AgentID, req.Model, nil)
-	resolvedCmd := resolveProbeCommand(cfg.Command[0])
-	if resolvedCmd == "" {
-		return &PromptResponse{Success: false, Error: fmt.Sprintf("command %q is not an allowed ACP command", cfg.Command[0])}, nil
+	resolvedCmd, cmdErr := resolveSpawnCommand(cfg)
+	if cmdErr != "" {
+		return &PromptResponse{Success: false, Error: cmdErr}, nil
 	}
 
 	startTime := time.Now()
@@ -83,9 +83,6 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		zap.String("model", model),
 		zap.Strings("command", args))
 
-	// Use the hard-coded resolvedCmd (not args[0]) so CodeQL can see that
-	// the executable name is not derived from tainted input.
-	//nolint:gosec // resolvedCmd is from a hard-coded allow-list; args[1:] are CLI flags
 	cmdArgs := args[1:]
 	if len(cfg.CommandPrefix) > 0 {
 		args = append(append([]string{}, cfg.CommandPrefix...), args...)
@@ -96,8 +93,10 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		cmdArgs = args[1:]
 	}
 	cmdArgs = append(cmdArgs, cfg.CLIFlags...)
-	// Use the hard-coded resolvedCmd (not args[0]) so CodeQL can see that
-	// the executable name is not derived from tainted input.
+	// Use resolvedCmd (not args[0]) so the executable name the taint tracker
+	// sees is an allow-list literal, a validated command prefix, or the
+	// operator-registered command resolveSpawnCommand documents.
+	//nolint:gosec // resolvedCmd is an allow-list literal, a validated prefix, or an operator-registered command
 	cmd := exec.CommandContext(ctx, resolvedCmd, cmdArgs...)
 	cmd.Dir = workDir
 	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
@@ -476,9 +475,9 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	if workDir == "" {
 		return &ProbeResponse{Success: false, Error: "work_dir is required for ACP probe"}, nil
 	}
-	resolvedCmd := resolveProbeCommand(cfg.Command[0])
-	if resolvedCmd == "" {
-		return &ProbeResponse{Success: false, Error: fmt.Sprintf("command %q is not an allowed ACP probe command", cfg.Command[0])}, nil
+	resolvedCmd, cmdErr := resolveSpawnCommand(cfg)
+	if cmdErr != "" {
+		return &ProbeResponse{Success: false, Error: cmdErr}, nil
 	}
 
 	startTime := time.Now()
@@ -496,9 +495,10 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		zap.String("agent_id", req.AgentID),
 		zap.Strings("command", args))
 
-	// Use the hard-coded resolvedCmd (not args[0]) so CodeQL can see that
-	// the executable name is not derived from tainted input.
-	//nolint:gosec // resolvedCmd is from a hard-coded allow-list; args[1:] are CLI flags
+	// Use resolvedCmd (not args[0]) so the allow-list literal is what reaches
+	// exec.Command for every built-in agent, and the one exception is the
+	// operator-defined command resolveSpawnCommand documents.
+	//nolint:gosec // resolvedCmd is an allow-list literal or an operator-registered command
 	cmd := exec.CommandContext(ctx, resolvedCmd, args[1:]...)
 	cmd.Dir = workDir
 	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
@@ -1267,6 +1267,32 @@ func resolveProbeCommand(name string) string {
 		}
 	}
 	return ""
+}
+
+// resolveSpawnCommand returns the executable a probe or inference subprocess
+// should spawn, or a non-empty error message when the command is not permitted.
+//
+// A built-in agent's command is compiled in, so it resolves to the allow-list
+// literal and the taint tracker can follow it to exec.Command unchanged.
+//
+// A custom agent's command cannot: it does not exist until the install
+// operator types it in Settings, so no literal can cover it. Refusing it does
+// not keep that command from running — the session path spawns the same string
+// verbatim (process/manager.go, interactive_lifecycle.go), and agentctl's own
+// piped runner accepts an arbitrary command from its request. It only denies
+// the agent the capability probe, which is where its models and modes come
+// from. The operator who typed the command is the operator who could run it
+// directly on the host.
+func resolveSpawnCommand(cfg *InferenceConfigDTO) (string, string) {
+	command := cfg.Command[0]
+	if cfg.OperatorDefined {
+		return command, ""
+	}
+	resolved := resolveProbeCommand(command)
+	if resolved == "" {
+		return "", fmt.Sprintf("command %q is not an allowed ACP probe command", command)
+	}
+	return resolved, ""
 }
 
 // resolveACPCommandPrefix validates the optional launcher that wraps an

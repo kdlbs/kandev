@@ -55,6 +55,13 @@ It implements the user's explicit one-pod-per-task expectation.
   retained task's workload; additional sessions shall use its recorded workload
   configuration while keeping independent agent-profile runtime settings.
 
+- **AC-EXECUTORS-KUBERNETES-TASK-POD-001.8:** The task shall be one credential trust boundary.
+  Sessions may use different agent profiles and credentials in the same pod.
+  Per-session settings shall prevent accidental credential inheritance or overwrite,
+  but shall not promise protection from sibling processes running as the same OS user.
+  Operators shall trust every agent attached to a task and manage provider-side
+  credential revocation after suspected exposure.
+
 ## Related contracts
 
 - [Additional-session workspace reuse](../../tasks/requirements/additional-session-workspace-reuse.md).

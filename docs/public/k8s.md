@@ -94,6 +94,8 @@ Open `http://localhost:38429`.
 
 The Kubernetes executor is independent of where the Kandev control plane runs. A host process can use a kubeconfig, while a Kandev Pod can use either a mounted kubeconfig or its in-cluster service account. One executor connects to one API server context and one namespace; each task gets one Pod in that namespace. Additional sessions on the same task share that Pod and workspace, with independent agentctl instances and session configuration.
 
+**A task is one credential trust boundary.** All agents in its Pod run as the same OS user and can read sibling credentials, including credentials from different agent profiles. Separate session HOME directories and configuration prevent accidental mixing; they do not isolate secrets. Attach only mutually trusted agents and credentials. If any sibling is compromised, stop the task's agents and revoke or rotate exposed credentials with their providers. Stopping a session alone does not revoke credentials or undo exposure. Use separate tasks with appropriately isolated executor policies for agents that must not share trust.
+
 Only administrators can create, edit, delete, or test Kubernetes executors and profiles. Members can list and use administrator-configured profiles, resume their authorized sessions, and view the sanitized status rows available to them. When Kandev authentication is disabled, requests use the synthetic single-user administrator identity.
 
 The experimental E2E matrix validates API and `agentctl` connectivity against Kubernetes 1.34.8 and 1.36.1, with the full launch, reconnect, storage, failure, and cleanup lifecycle exercised on 1.36.1. Other Kubernetes server versions are currently unvalidated rather than known incompatible.
@@ -346,7 +348,7 @@ A managed claim may remain Pending because of StorageClass, topology, quota, acc
 
 ### Recovery, snapshots, and cleanup
 
-Kandev's `executors_running` inventory is authoritative. It records exact Pod and PVC namespace/name/UID, full resource identity, workspace ownership, platform, main container, remote port, hashes, and the validated workload launch snapshot. The snapshot contains Pod template, platform, main container, and storage configuration only. It excludes Kandev-resolved credentials, resolved profile environment values, injected files, and scripts; literal values written by an administrator into the Pod template remain in the snapshot.
+Kandev's `task_environment_kubernetes` inventory is authoritative for task-owned physical resources; `executors_running` records per-session executions and legacy resources. The physical inventory records exact Pod and PVC namespace/name/UID, full resource identity, workspace ownership, platform, main container, remote port, hashes, and the validated workload launch snapshot. The snapshot contains Pod template, platform, main container, and storage configuration only. It excludes Kandev-resolved credentials, resolved profile environment values, injected files, and scripts; literal values written by an administrator into the Pod template remain in the snapshot.
 
 Current connection configuration and recorded workload configuration serve different purposes:
 

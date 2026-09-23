@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -75,6 +76,8 @@ type repoInfo struct {
 	CheckoutOptions            *models.RepositoryCheckoutOptions
 	ContributionDestination    *models.ContributionDestination
 	ComparisonTarget           *models.ComparisonTarget
+	PRBase                     *models.PRBase
+	QualifiedPRBase            *models.PRBase
 	Position                   int
 	WorktreeBranchPrefix       string
 	WorktreeBranchTemplate     string
@@ -219,7 +222,9 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 			zap.Error(err))
 		return nil, err
 	}
-	e.resolvePRBaseForLaunch(ctx, tr, repo, info)
+	if err := e.resolvePRBaseForLaunch(ctx, tr, repo, info); err != nil {
+		return nil, err
+	}
 
 	// Task checkout modes select a separate cache without rewriting the repository record.
 	repoCopy := *repo
@@ -278,32 +283,207 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 
 func (e *Executor) resolvePRBaseForLaunch(
 	ctx context.Context, tr *models.TaskRepository, repo *models.Repository, info *repoInfo,
-) {
-	if e.prBaseResolver == nil || info.PRNumber <= 0 || !isGitHubRepository(repo) {
-		return
+) error {
+	if models.HasManualBaseBranchOverride(tr.Metadata) {
+		return nil
 	}
-	baseBranch, err := e.prBaseResolver.ResolvePRBaseBranch(
-		ctx, repo.WorkspaceID, repo.ProviderOwner, repo.ProviderName, info.PRNumber,
-	)
-	baseBranch = strings.TrimSpace(baseBranch)
-	if err != nil || baseBranch == "" {
+	expected, err := applyExpectedPRComparisonTarget(tr.ID, info)
+	if err != nil {
+		return err
+	}
+	if e.prBaseResolver == nil || info.PRNumber <= 0 || !isGitHubRepository(repo) {
+		return nil
+	}
+	lookup := PRBaseLookup{
+		TaskID: tr.TaskID, TaskRepositoryID: tr.ID, RepositoryID: tr.RepositoryID,
+		Number: info.PRNumber, CheckoutBranch: info.CheckoutBranch,
+		AttachedOwner: repo.ProviderOwner, AttachedRepository: repo.ProviderName,
+		Target: expected,
+	}
+	resolved, err := e.prBaseResolver.ResolvePRBase(ctx, repo.WorkspaceID, lookup)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		if expected == nil && isUnusablePRBaseAssociation(err) {
+			return fmt.Errorf("resolve PR base for task repository %q: %w", tr.ID, err)
+		}
 		e.logger.Debug("could not resolve live pull request base branch",
 			zap.String("task_id", tr.TaskID),
 			zap.Int("pr_number", info.PRNumber),
 			zap.Error(err))
-		return
+		return nil
 	}
-	if baseBranch != tr.BaseBranch {
+	if err := resolved.Validate(); err != nil {
+		if expected == nil {
+			return NewPRBaseResolutionError(err, false, true)
+		}
+		e.logger.Debug("live pull request base identity did not match the task repository",
+			zap.String("task_id", tr.TaskID),
+			zap.Int("pr_number", info.PRNumber),
+			zap.Error(err))
+		return nil
+	}
+	attachedRepository, hasAttachedRepository := githubComparisonRepositoryFromRepository(repo)
+	headRepository := attachedRepository
+	hasHeadRepository := hasAttachedRepository
+	if info.RemoteContribution != nil {
+		headRepository, hasHeadRepository = normalizeGitHubComparisonRepository(info.RemoteContribution.SourceRepository)
+	}
+	if !validPRBaseIdentity(resolved, info.PRNumber, info.CheckoutBranch, expected,
+		attachedRepository, hasAttachedRepository, headRepository, hasHeadRepository, info.RemoteContribution != nil) {
+		if expected == nil {
+			return NewPRBaseResolutionError(errors.New("pull request identity did not match the task repository binding"), false, true)
+		}
+		e.logger.Debug("live pull request base identity did not match the task repository",
+			zap.String("task_id", tr.TaskID),
+			zap.Int("pr_number", info.PRNumber))
+		return nil
+	}
+	if resolved.Target.TargetBranch != tr.BaseBranch {
 		e.logger.Info("pull request base branch changed since task creation",
 			zap.String("task_id", tr.TaskID),
 			zap.Int("pr_number", info.PRNumber),
 			zap.String("old_base_branch", tr.BaseBranch),
-			zap.String("new_base_branch", baseBranch))
+			zap.String("new_base_branch", resolved.Target.TargetBranch))
 	}
-	info.BaseBranch = baseBranch
+	info.PRBase = &resolved
+	info.BaseBranch = resolved.Target.TargetBranch
+	if expected != nil || !models.ComparisonTargetRepositoriesEqual(attachedRepository, resolved.Target.TargetRepository) {
+		info.QualifiedPRBase = &resolved
+		info.ComparisonTarget = &resolved.Target
+	}
 	if info.RemoteContribution != nil {
-		info.RemoteContribution.BaseBranch = baseBranch
+		info.RemoteContribution.BaseBranch = resolved.Target.TargetBranch
 	}
+	return nil
+}
+
+func applyExpectedPRComparisonTarget(
+	taskRepositoryID string, info *repoInfo,
+) (*models.ComparisonTarget, error) {
+	if info.ComparisonTarget == nil {
+		return nil, nil
+	}
+	target := *info.ComparisonTarget
+	if err := target.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid PR comparison target for task repository %q: %w", taskRepositoryID, err)
+	}
+	if info.PRNumber > 0 && target.Number != info.PRNumber {
+		return nil, fmt.Errorf("PR comparison target number does not match task repository %q", taskRepositoryID)
+	}
+	if info.CheckoutBranch != "" && target.HeadBranch != info.CheckoutBranch {
+		return nil, fmt.Errorf("PR comparison target head branch does not match task repository %q", taskRepositoryID)
+	}
+	if target.Provider != models.ComparisonTargetProviderGitHub || target.Kind != models.ComparisonTargetKindPullRequest {
+		return nil, nil
+	}
+	if info.PRNumber == 0 {
+		info.PRNumber = target.Number
+	}
+	base := models.PRBase{Target: target}
+	info.PRBase = &base
+	info.QualifiedPRBase = &base
+	info.BaseBranch = target.TargetBranch
+	if info.RemoteContribution != nil {
+		info.RemoteContribution.BaseBranch = target.TargetBranch
+	}
+	return &target, nil
+}
+
+func isUnusablePRBaseAssociation(err error) bool {
+	var knownCrossRepository interface{ KnownCrossRepository() bool }
+	if errors.As(err, &knownCrossRepository) && knownCrossRepository.KnownCrossRepository() {
+		return true
+	}
+	var invalidAssociation interface{ InvalidAssociation() bool }
+	return errors.As(err, &invalidAssociation) && invalidAssociation.InvalidAssociation()
+}
+
+func validPRBaseIdentity(
+	base models.PRBase, number int, checkoutBranch string,
+	expected *models.ComparisonTarget,
+	attachedRepository models.ComparisonTargetRepository, hasAttachedRepository bool,
+	headRepository models.ComparisonTargetRepository, hasHeadRepository bool,
+	contribution bool,
+) bool {
+	target := base.Target
+	if target.Number != number || target.Provider != models.ComparisonTargetProviderGitHub ||
+		target.Kind != models.ComparisonTargetKindPullRequest {
+		return false
+	}
+	if checkoutBranch != "" && target.HeadBranch != checkoutBranch {
+		return false
+	}
+	if !hasAttachedRepository || !hasHeadRepository ||
+		!models.ComparisonTargetRepositoriesEqual(target.HeadRepository, headRepository) {
+		return false
+	}
+	if contribution && !models.ComparisonTargetRepositoriesEqual(target.TargetRepository, attachedRepository) {
+		return false
+	}
+	if expected == nil {
+		return true
+	}
+	return expected.ChangeIdentityEqual(target) &&
+		expected.HeadBranch == target.HeadBranch &&
+		models.ComparisonTargetRepositoriesEqual(expected.HeadRepository, target.HeadRepository)
+}
+
+func githubComparisonRepositoryFromRepository(repo *models.Repository) (models.ComparisonTargetRepository, bool) {
+	if repo == nil {
+		return models.ComparisonTargetRepository{}, false
+	}
+	owner := strings.TrimSpace(repo.ProviderOwner)
+	if owner == "" {
+		owner = strings.TrimSpace(repo.ProviderScope)
+	}
+	name := strings.TrimSpace(repo.ProviderName)
+	if name == "" {
+		name = strings.TrimSpace(repo.Name)
+	}
+	host := strings.TrimSpace(repo.ProviderHost)
+	if host == "" {
+		host = defaultGitHubHost
+	}
+	return normalizeGitHubComparisonRepository(models.ComparisonTargetRepository{
+		Host: host, Path: owner + "/" + name, ProviderID: strings.TrimSpace(repo.ProviderRepoID),
+	})
+}
+
+func normalizeGitHubComparisonRepository(repository models.ComparisonTargetRepository) (models.ComparisonTargetRepository, bool) {
+	if !isGitHubComparisonHost(repository.Host) {
+		return models.ComparisonTargetRepository{}, false
+	}
+	parts := strings.Split(strings.Trim(strings.TrimSpace(repository.Path), "/"), "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return models.ComparisonTargetRepository{}, false
+	}
+	owner, name := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	repository.Host = defaultGitHubHost
+	repository.Path = owner + "/" + name
+	repository.RemoteURL = fmt.Sprintf("https://%s/%s/%s.git", defaultGitHubHost, owner, name)
+	return repository, true
+}
+
+func isGitHubComparisonHost(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.User != nil || parsed.Port() != "" ||
+		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	return (strings.EqualFold(parsed.Scheme, "https") || strings.EqualFold(parsed.Scheme, "http")) &&
+		strings.EqualFold(parsed.Hostname(), defaultGitHubHost)
 }
 
 func hasProviderRepositoryIdentity(repo *models.Repository) bool {

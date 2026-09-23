@@ -24,7 +24,7 @@ func slugify(displayName string) string {
 	return s
 }
 
-// CreateCustomTUIAgentRequest is the request to create a custom TUI agent.
+// CreateCustomTUIAgentRequest is the request to create a custom agent.
 type CreateCustomTUIAgentRequest struct {
 	DisplayName string
 	Model       string
@@ -32,11 +32,37 @@ type CreateCustomTUIAgentRequest struct {
 	Description string
 	CommandArgs []string
 	// MCPStrategy selects how kandev injects its per-session MCP server into
-	// the wrapped CLI. Empty means no MCP tools, which is the default.
+	// the wrapped CLI. Empty means no MCP tools, which is the default. It
+	// applies to the terminal protocol only.
 	MCPStrategy string
+	// Protocol is the runtime kandev drives the command with
+	// (registry.CustomAgentProtocol*). Empty means terminal passthrough.
+	Protocol string
 }
 
-// CreateCustomTUIAgent registers a new custom TUI agent and persists it to the database.
+// validateCustomAgentProtocol rejects a protocol/strategy pair the registry
+// cannot build, so the HTTP layer answers 400 instead of surfacing a
+// registration failure as a server error.
+func validateCustomAgentProtocol(protocol registry.CustomAgentProtocol, mcpStrategy string) error {
+	switch protocol {
+	case registry.CustomAgentProtocolTerminal:
+		if _, ok := mcpconfig.StrategyByKey(mcpStrategy); !ok {
+			return ErrUnknownMCPStrategy
+		}
+		return nil
+	case registry.CustomAgentProtocolACP:
+		// An ACP agent receives resolved MCP servers in session/new, so a
+		// passthrough config-file strategy has nothing to write into.
+		if mcpStrategy != mcpconfig.StrategyKeyNone {
+			return ErrMCPStrategyNotApplicable
+		}
+		return nil
+	default:
+		return ErrUnknownCustomAgentProtocol
+	}
+}
+
+// CreateCustomTUIAgent registers a new custom agent and persists it to the database.
 func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomTUIAgentRequest) (*dto.AgentDTO, error) {
 	slug := slugify(req.DisplayName)
 	if slug == "" {
@@ -45,8 +71,9 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 	if req.Command == "" {
 		return nil, ErrCommandRequired
 	}
-	if _, ok := mcpconfig.StrategyByKey(req.MCPStrategy); !ok {
-		return nil, ErrUnknownMCPStrategy
+	protocol := registry.CustomAgentProtocol(req.Protocol)
+	if err := validateCustomAgentProtocol(protocol, req.MCPStrategy); err != nil {
+		return nil, err
 	}
 
 	// Check for conflict with existing registry entry
@@ -72,11 +99,13 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 		Model:          req.Model,
 		CommandArgs:    req.CommandArgs,
 		MCPStrategyKey: req.MCPStrategy,
+		Protocol:       protocol,
 	}); regErr != nil {
 		return nil, fmt.Errorf("failed to register agent: %w", regErr)
 	}
 
 	// Persist to DB
+	acp := protocol == registry.CustomAgentProtocolACP
 	tuiConfig := &models.TUIConfigJSON{
 		Command:         req.Command,
 		DisplayName:     req.DisplayName,
@@ -85,12 +114,15 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 		CommandArgs:     req.CommandArgs,
 		WaitForTerminal: true,
 		MCPStrategy:     req.MCPStrategy,
+		Protocol:        req.Protocol,
 	}
 	agent := &models.Agent{
 		Name: slug,
-		// Mirrors what TUIAgent.IsInstalled derives, so the profile MCP editor
-		// works immediately instead of only after the next discovery sweep.
-		SupportsMCP: req.MCPStrategy != mcpconfig.StrategyKeyNone,
+		// Mirrors what the registered agent's IsInstalled derives, so the
+		// profile MCP editor works immediately instead of only after the next
+		// discovery sweep. An ACP agent always supports MCP: resolved servers
+		// travel in session/new rather than through a config-file strategy.
+		SupportsMCP: acp || req.MCPStrategy != mcpconfig.StrategyKeyNone,
 		TUIConfig:   tuiConfig,
 	}
 	if err := c.repo.CreateAgent(ctx, agent); err != nil {
@@ -99,7 +131,9 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 		return nil, err
 	}
 
-	// Create default passthrough profile — use model as profile name for distinct dropdown labels
+	// Seed the default profile in the mode the protocol actually runs in. An
+	// ACP profile carries no model: the host-utility capability probe learns
+	// the agent's models and the reconciler fills one in.
 	profileName := req.Model
 	if profileName == "" {
 		profileName = req.DisplayName
@@ -111,8 +145,25 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 		Model:            "passthrough",
 		CLIPassthrough:   true,
 	}
+	if acp {
+		// The probe supplies a default when the operator named no model; it
+		// must not be the literal "passthrough" a terminal profile carries.
+		profile.Model = req.Model
+		profile.CLIPassthrough = false
+	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 		return nil, err
+	}
+
+	// A discovery sweep reports whatever the agent registry holds, and its
+	// results are cached, so a membership change has to drop that cache or the
+	// new agent is absent from Installed Agents until the TTL expires.
+	c.InvalidateDiscoveryCache()
+	if acp {
+		// An ACP agent's models and modes come from the capability probe, and
+		// the boot sweep is long past. A terminal agent has no ACP server to
+		// probe, so kicking one there would spawn the user's CLI for nothing.
+		c.probeAndAdoptModel(slug, profile.ID)
 	}
 
 	profiles := []*models.AgentProfile{profile}
@@ -152,6 +203,10 @@ func (c *Controller) SetCustomTUIAgentMCPStrategy(ctx context.Context, agentID, 
 		// carry a user-selected one.
 		return nil, ErrNotCustomTUIAgent
 	}
+	protocol := registry.CustomAgentProtocol(agent.TUIConfig.Protocol)
+	if err := validateCustomAgentProtocol(protocol, strategyKey); err != nil {
+		return nil, err
+	}
 	if agent.TUIConfig.MCPStrategy == strategyKey {
 		return c.customTUIAgentDTO(ctx, agent)
 	}
@@ -173,6 +228,10 @@ func (c *Controller) SetCustomTUIAgentMCPStrategy(ctx context.Context, agentID, 
 		}
 		return nil, fmt.Errorf("failed to re-register agent: %w", err)
 	}
+	// The replacement instance reports a different SupportsMCP, and the sweep
+	// writes that flag back over the agent row: a cached sweep would revert the
+	// strategy change that just succeeded.
+	c.InvalidateDiscoveryCache()
 
 	return c.customTUIAgentDTO(ctx, agent)
 }
@@ -183,16 +242,24 @@ func (c *Controller) SetCustomTUIAgentMCPStrategy(ctx context.Context, agentID, 
 // atomic: Unregister + Register would leave a window in which a launching
 // session sees no entry for this agent ID.
 func (c *Controller) reregisterCustomTUIAgent(agent *models.Agent) error {
-	cfg := agent.TUIConfig
-	return c.agentRegistry.ReplaceCustomTUIAgent(registry.CustomTUIAgentSpec{
-		Slug:           agent.Name,
+	return c.agentRegistry.ReplaceCustomTUIAgent(CustomAgentSpecFromStored(agent.Name, agent.TUIConfig))
+}
+
+// CustomAgentSpecFromStored builds the registry spec a stored custom-agent
+// definition replays into. Strategy changes and the boot replay both go
+// through it, so a field added to the stored config cannot reach one path and
+// silently miss the other.
+func CustomAgentSpecFromStored(name string, cfg *models.TUIConfigJSON) registry.CustomTUIAgentSpec {
+	return registry.CustomTUIAgentSpec{
+		Slug:           name,
 		DisplayName:    cfg.DisplayName,
 		Command:        cfg.Command,
 		Description:    cfg.Description,
 		Model:          cfg.Model,
 		CommandArgs:    cfg.CommandArgs,
 		MCPStrategyKey: cfg.MCPStrategy,
-	})
+		Protocol:       registry.CustomAgentProtocol(cfg.Protocol),
+	}
 }
 
 func (c *Controller) customTUIAgentDTO(ctx context.Context, agent *models.Agent) (*dto.AgentDTO, error) {

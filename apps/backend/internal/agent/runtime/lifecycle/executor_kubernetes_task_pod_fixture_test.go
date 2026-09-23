@@ -154,6 +154,7 @@ func taskPodRequest(number int) *ExecutorCreateRequest {
 	setManagedKubernetesWorkspace(req)
 	req.InstanceID = "instance-" + strconv.Itoa(number)
 	req.SessionID = "session-" + strconv.Itoa(number)
+	req.AgentProfileID = "agent-profile-" + strconv.Itoa(number)
 	req.Env = map[string]string{"SESSION_CREDENTIAL": "credential-" + strconv.Itoa(number)}
 	req.WorkspaceReuseRequired = number > 1
 	return req

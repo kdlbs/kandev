@@ -5,10 +5,11 @@ import { useTranslation } from "react-i18next";
 import { IconBuilding, IconPlayerPause, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Card, CardContent } from "@kandev/ui/card";
 import { useOrganizations } from "@/hooks/domains/org/use-organizations";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { Org } from "@/lib/types/org";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { CreateOrgCard } from "./create-org-card";
 import { DeleteOrgDialog } from "./delete-org-dialog";
 import { OrgAdminDialog } from "./org-admin-dialog";
@@ -170,28 +171,27 @@ export function OrganizationsPage() {
     // The route shell already renders the page title and description, so this
     // page starts at its content.
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("orgs:boundaryTitle")}</CardTitle>
-          <CardDescription>{t("orgs:boundaryDescription")}</CardDescription>
-        </CardHeader>
-      </Card>
+      <SettingsGroup
+        title={t("orgs:boundaryTitle")}
+        description={t("orgs:boundaryDescription")}
+        contentClassName="space-y-4 divide-y-0"
+      >
+        <CreateOrgCard busy={orgs.busy} onCreate={orgs.create} />
 
-      <CreateOrgCard busy={orgs.busy} onCreate={orgs.create} />
-
-      <div className="grid gap-3">
-        {orgs.orgs.map((org) => (
-          <OrgRow
-            key={org.id}
-            org={org}
-            busy={orgs.busy}
-            onSuspend={orgs.suspend}
-            onResume={orgs.resume}
-            onDelete={setDeleting}
-            onAddAdmin={setAdminFor}
-          />
-        ))}
-      </div>
+        <div className="grid gap-3">
+          {orgs.orgs.map((org) => (
+            <OrgRow
+              key={org.id}
+              org={org}
+              busy={orgs.busy}
+              onSuspend={orgs.suspend}
+              onResume={orgs.resume}
+              onDelete={setDeleting}
+              onAddAdmin={setAdminFor}
+            />
+          ))}
+        </div>
+      </SettingsGroup>
 
       <DeleteOrgDialog
         org={deleting}

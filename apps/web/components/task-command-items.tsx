@@ -88,6 +88,9 @@ export function buildSidebarTaskCommands(ctx: TaskCommandContext): CommandItem[]
     ...item,
     priority: 0,
     disabled: item.disabled || ctx.disabled,
-    context: task.title,
+    // An item that names its own context keeps it (a plugin submenu child
+    // carries the trigger it came from); the task title is only the default
+    // second line for everything else.
+    context: item.context ?? task.title,
   }));
 }

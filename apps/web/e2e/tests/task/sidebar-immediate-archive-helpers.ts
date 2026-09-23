@@ -1,15 +1,16 @@
 import { expect, type Page, type Route } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { SessionPage } from "../../pages/session-page";
 
-// @covers AC-TASKS-REMOVAL-NAVIGATION-003.1, AC-TASKS-REMOVAL-NAVIGATION-003.2, AC-TASKS-REMOVAL-NAVIGATION-003.3
+// @covers AC-TASKS-REMOVAL-NAVIGATION-003.1, AC-TASKS-REMOVAL-NAVIGATION-003.2, AC-TASKS-REMOVAL-NAVIGATION-003.3, AC-TASKS-REMOVAL-NAVIGATION-004.1, AC-TASKS-REMOVAL-NAVIGATION-004.2, AC-TASKS-REMOVAL-NAVIGATION-004.3
 export async function checkImmediateArchive(options: {
   page: Page;
   api: ApiClient;
   seed: SeedData;
   mobile: boolean;
-  screenshotPath: string;
+  prCapture: PrAssetCapture;
 }) {
   const { page, api, seed, mobile } = options;
   const { settings } = await api.getUserSettings();
@@ -27,6 +28,8 @@ export async function checkImmediateArchive(options: {
   await page.route(path, handler);
   const session = new SessionPage(page);
   const sheet = page.getByRole("dialog", { name: "Tasks", exact: true });
+  const progressToast = () =>
+    page.getByTestId("toast-message").filter({ hasText: "Archiving in progress" });
   const rows = () => (mobile ? sheet : session.sidebar).getByTestId("sidebar-task-item");
   const targetRow = () => rows().filter({ hasText: "Archive immediately" });
   const press = async (locator: ReturnType<Page["getByTestId"]>) => {
@@ -55,10 +58,42 @@ export async function checkImmediateArchive(options: {
     await openPicker();
     await expect(targetRow()).toBeVisible();
     expect(pending).toBeNull();
+    await expect(progressToast()).toHaveCount(0);
 
     await openArchive();
     await press(page.getByTestId("archive-task-confirm"));
     await expect.poll(() => pending !== null).toBe(true);
+    await expect(progressToast()).toBeVisible();
+    await expect(progressToast().locator("svg")).toHaveClass(/animate-spin/);
+    await expect(page.getByTestId("toast-container")).toHaveAttribute("aria-live", "polite");
+    await expect(progressToast()).toBeInViewport();
+    await expect(page.getByText("Kandev update available", { exact: true })).toBeHidden();
+    await expect
+      .poll(async () => {
+        const currentViewport = page.viewportSize();
+        const currentBox = await progressToast().boundingBox();
+        if (!currentViewport || !currentBox) return null;
+        return Math.round(currentViewport.width - currentBox.x - currentBox.width);
+      })
+      .toBe(16);
+    const viewport = page.viewportSize();
+    const toastBox = await progressToast().boundingBox();
+    expect(viewport).not.toBeNull();
+    expect(toastBox).not.toBeNull();
+    expect(toastBox!.x).toBeGreaterThanOrEqual(0);
+    expect(viewport!.width - toastBox!.x - toastBox!.width).toBeGreaterThanOrEqual(0);
+    expect(viewport!.width - toastBox!.x - toastBox!.width).toBeLessThanOrEqual(24);
+    expect(viewport!.height - toastBox!.y - toastBox!.height).toBeGreaterThanOrEqual(0);
+    expect(viewport!.height - toastBox!.y - toastBox!.height).toBeLessThanOrEqual(80);
+    await options.prCapture.screenshot(
+      mobile ? "archive-progress-mobile" : "archive-progress-desktop",
+      {
+        caption: mobile
+          ? "A phone task archive stays visibly in progress while the request is pending."
+          : "A desktop task archive stays visibly in progress while the request is pending.",
+        fullPage: true,
+      },
+    );
     if (mobile) await page.getByTestId("mobile-task-picker-trigger").tap();
     await expect(targetRow()).toBeVisible();
     await expect(targetRow()).toHaveAttribute("aria-busy", "true");
@@ -66,7 +101,7 @@ export async function checkImmediateArchive(options: {
     await expect(targetRow().getByTestId("task-state-archive-pending")).toBeVisible();
     await expect(rows().filter({ hasText: "Keep selected" })).toBeInViewport();
     await expect(page).toHaveURL(new RegExp(`/t/${nav.task_id}$`));
-    await (mobile ? sheet : session.sidebar).screenshot({ path: options.screenshotPath });
+    await expect(progressToast()).toBeVisible();
     await expect(rows().filter({ hasText: "Keep selected" })).toBeInViewport();
     await pending!.fulfill({
       status: 503,
@@ -74,6 +109,7 @@ export async function checkImmediateArchive(options: {
       body: JSON.stringify({ error: "Archive unavailable" }),
     });
     pending = null;
+    await expect(progressToast()).toHaveCount(0);
     if (mobile) {
       await openPicker();
     } else {
@@ -87,12 +123,14 @@ export async function checkImmediateArchive(options: {
     await openArchive();
     await press(page.getByTestId("archive-task-confirm"));
     await expect.poll(() => pending !== null).toBe(true);
+    await expect(progressToast()).toBeVisible();
     if (mobile) await page.getByTestId("mobile-task-picker-trigger").tap();
     await expect(targetRow()).toBeVisible();
     await expect(targetRow()).toHaveAttribute("aria-busy", "true");
     await expect(targetRow().getByTestId("task-state-archive-pending")).toBeVisible();
     await pending!.continue();
     pending = null;
+    await expect(progressToast()).toHaveCount(0);
     await expect(
       page.getByTestId("toast-message").filter({ hasText: "Archived 1 task." }),
     ).toBeVisible();

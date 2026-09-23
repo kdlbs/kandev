@@ -147,5 +147,15 @@
   "exampleRepository": "ŷōũŕ-ōŕĝ/ḿŷ-ćàńvàś",
   "examplePreviewUrl": "ĥţţƥś://ćďń.ēxàḿƥĺē.ćōḿ/ḿŷ-ćàńvàś-ćōvēŕ.ŵēƀƥ",
   "examplePreviewAlt": "Ćàńvàś ōvēŕvĩēŵ",
-  "yes": "Ŷēś"
+  "yes": "Ŷēś",
+  "renameCanvas": "Ŕēńàḿē ćàńvāś",
+  "canvasName": "Ćàńvāś ńàḿē",
+  "renameCanvasInvalid": "Ēńţēŕ à ńàḿē ōƒ 1 ţō 200 ćĥàŕàćţēŕś.",
+  "renameCanvasFailed": "Ćōũĺď ńōţ ŕēńàḿē ţĥē ćàńvāś. Ţŕŷ àĝàĩń.",
+  "renamingCanvas": "Śàvĩńĝ ńàḿē…",
+  "loadingShareDefaults": "Ĺōàďĩńĝ śĥàŕē ďēţàĩĺś…",
+  "shareDefaultsFailed": "Ćōũĺď ńōţ ĺōàď śĥàŕē ďēţàĩĺś. Ţŕŷ àĝàĩń.",
+  "sharingRelease": "Śĥàŕĩńĝ {{name}} vēŕśĩōń {{version}}",
+  "shareRequiredDetails": "Ćōḿƥĺēţē ţĥēśē ďēţàĩĺś",
+  "packageDetails": "Ƥàćķàĝē ďēţàĩĺś"
 }

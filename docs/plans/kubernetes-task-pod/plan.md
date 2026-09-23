@@ -128,9 +128,9 @@ Post-fix verification: targeted lifecycle/status race regressions, the full
 agentctl race suite, SQLite store conformance and previous-stable upgrades pass.
 The WebSocket subscription regression passes 20 race-enabled runs. Full i18n
 checks and three current component tests pass; harness/spec checks pass.
-Remote CI/review completion remains pending. The security review identifies
-shared-UID credential access across siblings; resolution requires an explicit
-trust/isolation policy decision and is not claimed complete here.
+Remote CI/review completion remains pending. The user selected shared task trust on 2026-09-23: differing profiles and credentials
+are allowed, and same-UID sibling credential access is accepted. The trust ADR,
+requirements, design and public guide record operator trust and revocation duties.
 
 ## Risks
 
@@ -139,3 +139,14 @@ must not replace sibling credentials. Legacy tasks can contain genuinely differe
 workspaces. Durable claims must recover after crashes without duplicate API creates.
 Public docs reflect the implemented and verified behavior. Persistence coverage requires a disposable
 PostgreSQL database; Kind coverage requires Docker and the pinned worker image.
+
+## 2026-09-23 fixup validation
+
+Merged main and resolved Japanese catalog conflicts while preserving all keys and
+removing duplicate keys. Both CI assertion failures reproduced locally: ownership
+coverage expected obsolete error text, and resume observations were asynchronous.
+Typed error assertions and synchronized resume coverage now pass 20 race-enabled
+runs, as does the shared-pod suite with differing agent profiles and credentials.
+Full orchestrator executor and agentctl API race suites pass. Translation checks,
+specification validation and all 199 harness files pass. Postgres CI failed while
+downloading protobuf from the Go proxy; the next head will rerun that job.

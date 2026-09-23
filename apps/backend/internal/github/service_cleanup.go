@@ -2,10 +2,60 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 
 	"go.uber.org/zap"
 )
+
+func cleanupBatchAdmission(ctx context.Context, client Client, tracker *RateTracker, policy string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if policy == CleanupPolicyNever || tracker == nil {
+		return nil
+	}
+	resource := cleanupRateResource(client)
+	if tracker.WaitDuration(resource) <= 0 {
+		return nil
+	}
+	return &GitHubAPIError{
+		StatusCode: http.StatusTooManyRequests,
+		Endpoint:   "cleanup",
+		Body:       fmt.Sprintf("GitHub %s rate limit exhausted", resource),
+	}
+}
+
+type cleanupRateResourceReporter interface {
+	RateResource() Resource
+}
+
+func cleanupRateResource(client Client) Resource {
+	if reporter, ok := client.(cleanupRateResourceReporter); ok {
+		if resource := reporter.RateResource(); resource != "" {
+			return resource
+		}
+	}
+	return ResourceCore
+}
+
+func cleanupBatchShouldStop(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var apiErr *GitHubAPIError
+	if errors.As(err, &apiErr) && isGitHubRateLimitAPIError(apiErr) {
+		return true
+	}
+	// Legacy GHClient calls return the CLI's stderr wrapped in an exec error.
+	// Keep the established marker classifier at this boundary so cleanup stops
+	// after the first affected row even when no typed API response exists.
+	return ghStderrIndicatesRateLimit(err.Error())
+}
 
 // --- Review-task cleanup ---
 
@@ -27,7 +77,8 @@ func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWat
 		return 0, fmt.Errorf("list review PR tasks: %w", err)
 	}
 	policy := NormalizeCleanupPolicy(watch.CleanupPolicy)
-	return s.cleanupReviewPRTaskBatch(ctx, resolved.Client, prTasks, func(_ *ReviewPRTask) string { return policy }), nil
+	return s.cleanupReviewPRTaskBatch(ctx, resolved.Client, resolved.RateTracker, prTasks,
+		func(_ *ReviewPRTask) string { return policy })
 }
 
 // CleanupAllOrphanedReviewTasks sweeps dedup rows whose watch is deleted or
@@ -81,9 +132,9 @@ func (s *Service) CleanupReviewTasksForWorkspace(ctx context.Context, workspaceI
 			candidates = append(candidates, rpt)
 		}
 	}
-	return s.cleanupReviewPRTaskBatch(ctx, resolved.Client, candidates, func(rpt *ReviewPRTask) string {
+	return s.cleanupReviewPRTaskBatch(ctx, resolved.Client, resolved.RateTracker, candidates, func(rpt *ReviewPRTask) string {
 		return watchPolicies[rpt.ReviewWatchID]
-	}), nil
+	})
 }
 
 // cleanupAllReviewTasks is the shared body. When orphansOnly is true, rows
@@ -133,9 +184,13 @@ func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (
 				zap.String("workspace_id", workspaceID), zap.Error(resolveErr))
 			continue
 		}
-		deleted += s.cleanupReviewPRTaskBatch(ctx, resolved.Client, candidates, func(rpt *ReviewPRTask) string {
+		batchDeleted, batchErr := s.cleanupReviewPRTaskBatch(ctx, resolved.Client, resolved.RateTracker, candidates, func(rpt *ReviewPRTask) string {
 			return policyCache[rpt.ReviewWatchID]
 		})
+		deleted += batchDeleted
+		if batchErr != nil {
+			return deleted, batchErr
+		}
 	}
 	return deleted, nil
 }
@@ -197,11 +252,15 @@ func (s *Service) deleteTaskWithReason(ctx context.Context, taskID, reason strin
 //
 //nolint:dupl // mirrors cleanupIssueTaskBatch — different types, same structure
 func (s *Service) cleanupReviewPRTaskBatch(
-	ctx context.Context, client Client, prTasks []*ReviewPRTask, resolvePolicy func(*ReviewPRTask) string,
-) int {
+	ctx context.Context, client Client, tracker *RateTracker, prTasks []*ReviewPRTask,
+	resolvePolicy func(*ReviewPRTask) string,
+) (int, error) {
 	deleted := 0
 	for _, rpt := range prTasks {
 		policy := resolvePolicy(rpt)
+		if err := cleanupBatchAdmission(ctx, client, tracker, policy); err != nil {
+			return deleted, err
+		}
 		// Orphan reservation: process was killed after ReserveReviewPRTask
 		// succeeded but before AssignReviewPRTaskID ran, so task_id is empty
 		// and there is no task to delete. Clean up the dedup row once the PR
@@ -212,7 +271,14 @@ func (s *Service) cleanupReviewPRTaskBatch(
 			// increment `deleted`: the count is reported back to the
 			// settings-page toast as "Deleted N tasks", and these rows
 			// never had an associated task.
-			if should, _ := s.shouldDeleteReviewTaskWithClient(ctx, client, rpt, policy); should {
+			should, _, err := s.shouldDeleteReviewTaskWithClient(ctx, client, rpt, policy)
+			if err != nil {
+				if cleanupBatchShouldStop(err) {
+					return deleted, err
+				}
+				continue
+			}
+			if should {
 				if err := s.store.DeleteReviewPRTask(ctx, rpt.ID); err != nil {
 					s.logger.Warn("failed to delete orphan reservation row",
 						zap.String("dedup_id", rpt.ID), zap.Error(err))
@@ -220,7 +286,13 @@ func (s *Service) cleanupReviewPRTaskBatch(
 			}
 			continue
 		}
-		shouldDelete, reason := s.shouldDeleteReviewTaskWithClient(ctx, client, rpt, policy)
+		shouldDelete, reason, err := s.shouldDeleteReviewTaskWithClient(ctx, client, rpt, policy)
+		if err != nil {
+			if cleanupBatchShouldStop(err) {
+				return deleted, err
+			}
+			continue
+		}
 		if !shouldDelete {
 			continue
 		}
@@ -256,7 +328,7 @@ func (s *Service) cleanupReviewPRTaskBatch(
 			zap.String("repo", rpt.RepoOwner+"/"+rpt.RepoName))
 		deleted++
 	}
-	return deleted
+	return deleted, nil
 }
 
 // shouldDeleteReviewTask checks whether a review PR task is eligible for
@@ -268,68 +340,95 @@ func (s *Service) cleanupReviewPRTaskBatch(
 // Terminal state covers: PR merged/closed, OR the authenticated user already
 // approved the PR on GitHub (so it's effectively done from their POV).
 func (s *Service) shouldDeleteReviewTask(ctx context.Context, rpt *ReviewPRTask, policy string) (bool, string) {
-	return s.shouldDeleteReviewTaskWithClient(ctx, s.client, rpt, policy)
+	should, reason, _ := s.shouldDeleteReviewTaskWithClient(ctx, s.client, rpt, policy)
+	return should, reason
 }
 
 func (s *Service) shouldDeleteReviewTaskWithClient(
 	ctx context.Context, client Client, rpt *ReviewPRTask, policy string,
-) (bool, string) {
+) (bool, string, error) {
 	if policy == CleanupPolicyNever {
-		return false, ""
+		return false, "", nil
 	}
 	failureKey := reviewFailureKey(rpt)
-	feedback, err := client.GetPRFeedback(ctx, rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
+	pr, err := client.GetPR(ctx, rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
 	if err != nil {
 		s.trackCleanupFailure(failureKey, "review", rpt.RepoOwner+"/"+rpt.RepoName, rpt.PRNumber, err)
-		return false, ""
+		return false, "", err
 	}
 	s.resetCleanupFailure(failureKey)
-	if feedback.PR == nil {
-		return false, ""
+	if pr == nil {
+		return false, "", nil
 	}
 	var reason string
-	if feedback.PR.State == prStateMerged || feedback.PR.State == prStateClosed {
+	if pr.State == prStateMerged || pr.State == prStateClosed {
 		reason = "pr_merged_or_closed" //nolint:goconst // also referenced by string in service_cleanup_policy_test.go; introducing a constant would require coupling the test
 	} else {
-		// Check if the authenticated user already approved the PR on GitHub.
-		user, _ := client.GetAuthenticatedUser(ctx)
-		for _, review := range feedback.Reviews {
-			if review.State == "APPROVED" && review.Author == user {
-				reason = "pr_approved_by_user"
-				break
-			}
+		reason, err = s.reviewApprovalCleanupReason(ctx, client, rpt)
+		if err != nil {
+			s.trackCleanupFailure(failureKey, "review", rpt.RepoOwner+"/"+rpt.RepoName, rpt.PRNumber, err)
+			return false, "", err
 		}
 	}
 	if reason == "" {
-		return false, ""
+		return false, "", nil
 	}
 	if policy == CleanupPolicyAlways || rpt.TaskID == "" {
-		return true, reason
+		return true, reason, nil
 	}
 	if s.store != nil {
 		enabled, err := s.HasEnabledTaskPRAgentPrompts(ctx, rpt.TaskID)
 		if err != nil {
 			s.logger.Debug("failed to check task PR agent prompt options",
 				zap.String("task_id", rpt.TaskID), zap.Error(err))
-			return false, ""
+			return false, "", nil
 		}
 		if enabled {
-			return false, ""
+			return false, "", nil
 		}
 	}
 	if s.taskSessionChecker == nil {
-		return true, reason
+		return true, reason, nil
 	}
 	hasUserMsg, err := s.taskSessionChecker.HasUserAuthoredMessage(ctx, rpt.TaskID)
 	if err != nil {
 		s.logger.Debug("failed to check task user messages",
 			zap.String("task_id", rpt.TaskID), zap.Error(err))
-		return false, ""
+		return false, "", nil
 	}
 	if hasUserMsg {
-		return false, ""
+		return false, "", nil
 	}
-	return true, reason
+	return true, reason, nil
+}
+
+func (s *Service) reviewApprovalCleanupReason(
+	ctx context.Context, client Client, rpt *ReviewPRTask,
+) (string, error) {
+	reviews, err := client.ListPRReviews(ctx, rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
+	if err != nil {
+		return "", err
+	}
+	approved := false
+	for _, review := range reviews {
+		if review.State == reviewStateApproved {
+			approved = true
+			break
+		}
+	}
+	if !approved {
+		return "", nil
+	}
+	user, userErr := client.GetAuthenticatedUser(ctx)
+	if userErr != nil {
+		return "", userErr
+	}
+	for _, review := range reviews {
+		if review.State == reviewStateApproved && review.Author == user {
+			return "pr_approved_by_user", nil
+		}
+	}
+	return "", nil
 }
 
 // reviewFailureKey builds the stable per-row identifier used for failure
@@ -396,7 +495,8 @@ func (s *Service) CleanupClosedIssueTasks(ctx context.Context, watch *IssueWatch
 		return 0, fmt.Errorf("list issue watch tasks: %w", err)
 	}
 	policy := NormalizeCleanupPolicy(watch.CleanupPolicy)
-	return s.cleanupIssueTaskBatch(ctx, resolved.Client, issueTasks, func(_ *IssueWatchTask) string { return policy }), nil
+	return s.cleanupIssueTaskBatch(ctx, resolved.Client, resolved.RateTracker, issueTasks,
+		func(_ *IssueWatchTask) string { return policy })
 }
 
 // CleanupAllOrphanedIssueTasks sweeps dedup rows whose watch is deleted or
@@ -444,9 +544,9 @@ func (s *Service) CleanupIssueTasksForWorkspace(ctx context.Context, workspaceID
 			candidates = append(candidates, it)
 		}
 	}
-	return s.cleanupIssueTaskBatch(ctx, resolved.Client, candidates, func(it *IssueWatchTask) string {
+	return s.cleanupIssueTaskBatch(ctx, resolved.Client, resolved.RateTracker, candidates, func(it *IssueWatchTask) string {
 		return watchPolicies[it.IssueWatchID]
-	}), nil
+	})
 }
 
 //nolint:dupl // mirrors cleanupAllReviewTasks — different types, same orchestration
@@ -484,9 +584,13 @@ func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (i
 				zap.String("workspace_id", workspaceID), zap.Error(resolveErr))
 			continue
 		}
-		deleted += s.cleanupIssueTaskBatch(ctx, resolved.Client, candidates, func(it *IssueWatchTask) string {
+		batchDeleted, batchErr := s.cleanupIssueTaskBatch(ctx, resolved.Client, resolved.RateTracker, candidates, func(it *IssueWatchTask) string {
 			return policyCache[it.IssueWatchID]
 		})
+		deleted += batchDeleted
+		if batchErr != nil {
+			return deleted, batchErr
+		}
 	}
 	return deleted, nil
 }
@@ -523,15 +627,26 @@ func (s *Service) buildIssueWatchCaches(
 
 //nolint:dupl // mirrors cleanupReviewPRTaskBatch — different types, same structure
 func (s *Service) cleanupIssueTaskBatch(
-	ctx context.Context, client Client, issueTasks []*IssueWatchTask, resolvePolicy func(*IssueWatchTask) string,
-) int {
+	ctx context.Context, client Client, tracker *RateTracker, issueTasks []*IssueWatchTask,
+	resolvePolicy func(*IssueWatchTask) string,
+) (int, error) {
 	deleted := 0
 	for _, it := range issueTasks {
 		policy := resolvePolicy(it)
+		if err := cleanupBatchAdmission(ctx, client, tracker, policy); err != nil {
+			return deleted, err
+		}
 		if it.TaskID == "" {
 			// Orphan reservation row — no task was created. Clean it up
 			// but don't count it as a deleted task.
-			if should, _ := s.shouldDeleteIssueTaskWithClient(ctx, client, it, policy); should {
+			should, _, err := s.shouldDeleteIssueTaskWithClient(ctx, client, it, policy)
+			if err != nil {
+				if cleanupBatchShouldStop(err) {
+					return deleted, err
+				}
+				continue
+			}
+			if should {
 				if err := s.store.DeleteIssueWatchTask(ctx, it.ID); err != nil {
 					s.logger.Warn("failed to delete orphan reservation row",
 						zap.String("dedup_id", it.ID), zap.Error(err))
@@ -539,7 +654,13 @@ func (s *Service) cleanupIssueTaskBatch(
 			}
 			continue
 		}
-		shouldDelete, reason := s.shouldDeleteIssueTaskWithClient(ctx, client, it, policy)
+		shouldDelete, reason, err := s.shouldDeleteIssueTaskWithClient(ctx, client, it, policy)
+		if err != nil {
+			if cleanupBatchShouldStop(err) {
+				return deleted, err
+			}
+			continue
+		}
 		if !shouldDelete {
 			continue
 		}
@@ -571,45 +692,46 @@ func (s *Service) cleanupIssueTaskBatch(
 			zap.String("repo", it.RepoOwner+"/"+it.RepoName))
 		deleted++
 	}
-	return deleted
+	return deleted, nil
 }
 
 // shouldDeleteIssueTask checks whether an issue task is eligible for cleanup.
 // Policy gating mirrors shouldDeleteReviewTask.
 func (s *Service) shouldDeleteIssueTask(ctx context.Context, it *IssueWatchTask, policy string) (bool, string) {
-	return s.shouldDeleteIssueTaskWithClient(ctx, s.client, it, policy)
+	should, reason, _ := s.shouldDeleteIssueTaskWithClient(ctx, s.client, it, policy)
+	return should, reason
 }
 
 func (s *Service) shouldDeleteIssueTaskWithClient(
 	ctx context.Context, client Client, it *IssueWatchTask, policy string,
-) (bool, string) {
+) (bool, string, error) {
 	if policy == CleanupPolicyNever {
-		return false, ""
+		return false, "", nil
 	}
 	failureKey := issueFailureKey(it)
 	state, err := client.GetIssueState(ctx, it.RepoOwner, it.RepoName, it.IssueNumber)
 	if err != nil {
 		s.trackCleanupFailure(failureKey, "issue", it.RepoOwner+"/"+it.RepoName, it.IssueNumber, err)
-		return false, ""
+		return false, "", err
 	}
 	s.resetCleanupFailure(failureKey)
 	if state != "closed" {
-		return false, ""
+		return false, "", nil
 	}
 	reason := "issue_closed"
 	if policy == CleanupPolicyAlways || it.TaskID == "" || s.taskSessionChecker == nil {
-		return true, reason
+		return true, reason, nil
 	}
 	hasUserMsg, err := s.taskSessionChecker.HasUserAuthoredMessage(ctx, it.TaskID)
 	if err != nil {
 		s.logger.Debug("failed to check task user messages",
 			zap.String("task_id", it.TaskID), zap.Error(err))
-		return false, ""
+		return false, "", nil
 	}
 	if hasUserMsg {
-		return false, ""
+		return false, "", nil
 	}
-	return true, reason
+	return true, reason, nil
 }
 
 func issueFailureKey(it *IssueWatchTask) string {

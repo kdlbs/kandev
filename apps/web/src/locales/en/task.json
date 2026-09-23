@@ -2237,6 +2237,7 @@
   "cleanupSingleSprites": "The Sprites cloud sandbox for this task will be destroyed. Any uncommitted work inside it will be lost.",
   "cleanupSingleSsh": "The task directory on the remote host will be removed.",
   "cleanupSingleSshNote": "Best-effort removal may not complete. Your local repo is not touched.",
+  "cleanupInheritedParentWorkspaceNote": "This task shares its parent's workspace. The parent task's worktree, branch, and files are not touched.",
   "cleanupSingleWorktree": "The task's git worktree and its branch will be deleted.",
   "cleanupSingleWorktreeNote": "Your main repo and other branches are not affected.",
   "enhancedPromptCopiedToClipboard": "Enhanced prompt copied to clipboard.",

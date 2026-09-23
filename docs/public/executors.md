@@ -347,7 +347,7 @@ continues to own bootstrap, credentials, runtime mounts, and the workspace.
 
 Stop, including force-stop, removes only the selected agentctl instance. Other sessions and the task workspace remain available. Agent, main-container, and backend restarts preserve the Pod and workspace. Resume verifies the recorded name, UID, and complete ownership-label identity, creates a new local port-forward, and reconnects. Every managed create also carries a fresh 256-bit request nonce so an ambiguous API response cannot make Kandev adopt or delete a copied-label object. Task archive/delete cleanup deletes only the exact recorded Pod and, for managed storage, the exact Kandev-created PVC. A same-name object with another UID, ownership identity, or create nonce is left untouched and cleanup fails closed.
 
-Saved executor connection settings are different from the recorded workload snapshot. Current kubeconfig/in-cluster credentials, context, and timeout are used to reach an existing session; changing them can restore or break reconnect and cleanup. Existing sessions continue to target their recorded namespace even if the saved namespace changes, and the saved namespace affects new sessions only. Current Pod template, image, platform, main container, and storage settings also affect new sessions only. If Kandev must replace a missing Pod, it uses the recorded namespace and workload snapshot rather than the edited profile.
+Saved executor connection settings are different from the recorded workload snapshot. Current kubeconfig/in-cluster credentials, context, and timeout are used to reach an existing session; changing them can restore or break reconnect and cleanup. Existing sessions continue to target their recorded namespace even if the saved namespace changes, and the saved namespace affects new task Pods only. Current Pod template, image, platform, main container, and storage settings also affect new task Pods only; additional sessions reuse the task's recorded workload. If Kandev must replace a missing Pod, it uses the recorded namespace and workload snapshot rather than the edited profile.
 
 An executor cannot be deleted or changed into or out of Kubernetes while runtime inventory still references it. Clear the sessions through normal terminal cleanup first; deleting a profile does not mutate or destroy a retained workload.
 
@@ -358,7 +358,7 @@ memory values are requests from the verified Pod spec, not actual usage or
 cost. Stop preserves a resumable Kandev-managed workspace; Archive or Delete
 can remove it. Kandev does not delete an operator-owned existing claim.
 
-See [Kubernetes](k8s.md#configure-the-kubernetes-executor) for kubeconfig and in-cluster setup, the opt-in namespaced RBAC manifest, exact ownership labels, diagnostics, template rules, and recovery guidance.
+All sessions in a task share one credential trust boundary. Same-UID agents can read sibling credentials even when their profiles differ. Operators must trust every attached agent and revoke or rotate exposed credentials after compromise. See [Kubernetes](k8s.md#configure-the-kubernetes-executor) for the trust boundary, kubeconfig and in-cluster setup, the opt-in namespaced RBAC manifest, exact ownership labels, diagnostics, template rules, and recovery guidance.
 
 ## Sprites.dev
 

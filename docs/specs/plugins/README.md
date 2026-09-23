@@ -38,6 +38,8 @@ canonical requirement and system-design documents. Use the catalog command to fi
 - [UI](../ui/README.md): renders plugin contributions.
 - [Canvases](../canvases/README.md): binds plugin web applications to task
   and workspace canvas lifecycles.
+- [Tasks](../tasks/README.md): owns task and workflow state, including the
+  transition ledger projected through the Host data API.
 - [Canvas distribution](../canvases/system-design/marketplace-sharing.md): owns
   canvas export/import and the canvas-specific marketplace flow; reuses plugin
   manifests, static validation, catalog sources, and the runtime trust contract.

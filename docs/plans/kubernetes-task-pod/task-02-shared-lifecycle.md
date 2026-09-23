@@ -113,4 +113,4 @@ leaving siblings intact. Final lifecycle race tests pass (8.512s); lint is clean
 
 ## PR remediation
 
-PR remediation adds typed not-found errors, encrypted credential recovery across backend restart, concurrent stop/attach coverage, and bounded cancellation-detached cleanup. Targeted race coverage passes; sibling credential trust/isolation remains a security-review decision.
+PR remediation adds typed not-found errors, encrypted credential recovery across backend restart, concurrent stop/attach coverage, and bounded cancellation-detached cleanup. Targeted race coverage passes; the user accepted shared task credential trust on 2026-09-23. Different profiles and credentials remain supported; the trust ADR and public guide describe sibling access and operator revocation responsibilities.

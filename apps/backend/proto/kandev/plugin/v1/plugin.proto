@@ -82,9 +82,11 @@ service Host {
   // Reads — capability api_read:<resource>
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
   rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  rpc ListTaskStepTransitions(ListTaskStepTransitionsRequest) returns (ListTaskStepTransitionsResponse);
   rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
   rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
+  rpc ListWorkflowTransitionGroups(ListWorkflowTransitionGroupsRequest) returns (ListWorkflowTransitionGroupsResponse);
   rpc ListAgentProfiles(ListAgentProfilesRequest) returns (ListAgentProfilesResponse);
   rpc ListExecutorProfiles(ListExecutorProfilesRequest) returns (ListExecutorProfilesResponse);
   rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
@@ -517,6 +519,23 @@ message GetTaskRequest {
 message GetTaskResponse {
   Task task = 1;
 }
+message TaskStepTransition {
+  string id = 1; // decimal ledger identity; stable across timestamp ties
+  optional string from_workflow_id = 2;
+  optional string from_workflow_step_id = 3;
+  optional string to_workflow_id = 4;
+  optional string to_workflow_step_id = 5;
+  string trigger = 6;
+  string occurred_at = 7; // RFC3339
+}
+message ListTaskStepTransitionsRequest {
+  string task_id = 1;
+  Page page = 2;
+}
+message ListTaskStepTransitionsResponse {
+  repeated TaskStepTransition items = 1;
+  PageInfo page_info = 2;
+}
 
 // ── Workspace / Workflow / Steps ─────────────────────────────────────────────
 message Workspace {
@@ -552,6 +571,20 @@ message ListWorkflowsRequest {
 }
 message ListWorkflowsResponse {
   repeated Workflow workflows = 1;
+  PageInfo page_info = 2;
+}
+message WorkflowTransitionGroup {
+  string kind = 1; // within | entry | exit
+  optional string from_step_id = 2;
+  optional string to_step_id = 3;
+  int64 count = 4;
+}
+message ListWorkflowTransitionGroupsRequest {
+  string workflow_id = 1;
+  Page page = 2;
+}
+message ListWorkflowTransitionGroupsResponse {
+  repeated WorkflowTransitionGroup items = 1;
   PageInfo page_info = 2;
 }
 

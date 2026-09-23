@@ -815,6 +815,14 @@ func setupSyncTest(t *testing.T) (*Service, *Store, *mockEventBus) {
 	rawDB.SetMaxIdleConns(1)
 	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
+	if _, err := sqlxDB.Exec(`
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT,
+			archived_at DATETIME
+		)`); err != nil {
+		t.Fatalf("create tasks table: %v", err)
+	}
 
 	store, err := NewStore(sqlxDB, sqlxDB)
 	if err != nil {

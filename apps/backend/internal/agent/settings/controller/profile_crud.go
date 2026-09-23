@@ -1225,6 +1225,7 @@ func (c *Controller) toAgentDTO(agent *models.Agent, profiles []*models.AgentPro
 			CommandArgs:     agent.TUIConfig.CommandArgs,
 			WaitForTerminal: agent.TUIConfig.WaitForTerminal,
 			MCPStrategy:     agent.TUIConfig.MCPStrategy,
+			Protocol:        agent.TUIConfig.Protocol,
 		}
 	}
 	if c.agentRegistry != nil {

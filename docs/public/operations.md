@@ -29,7 +29,7 @@ See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-se
 
 ## Prevent host sleep during active tasks
 
-Administrators can open **Settings > Preferences > Task Behavior** and enable
+Administrators can open **Settings > Preferences > Task Behavior > Runtime** and enable
 **Prevent host sleep while tasks run**. The install-wide setting is off by
 default and is saved with the Kandev database. It applies only to the machine
 running the backend; it does not change executor or node power policy.
@@ -56,7 +56,9 @@ availability policy instead. Enabling the preference is safe when moving the
 database between hosts: Kandev reacquires a native request only after startup
 if the new backend can provide it and a working task still exists.
 
-![Settings > Preferences > Task Behavior showing task title, archive, unread message, and host sleep controls.](../screenshots/settings-task-behavior.png)
+Task Behavior uses **Tasks**, **Conversation**, and **Runtime** tabs on one page.
+Each setting has a short description. Use its info button for technical details.
+On touch devices, the info button opens a drawer. **Save changes** saves drafts across all three tabs.
 
 ## Health and readiness
 
@@ -151,7 +153,7 @@ Add `--system` to both commands for a system service.
 
 ## Message queue settings
 
-Open **Settings > Task Behavior > Message Queue** to manage install-wide queue behavior. The default capacity is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting. At or above the new limit, only an eligible direct automatic fold into the existing tail can still succeed; other work is rejected until messages run or are removed. Staged attachments are rejected before a fold or claim. Delivery retries for work accepted before the change are not discarded by the lower cap.
+Open **Settings > Preferences > Task Behavior > Runtime** to manage install-wide queue behavior. The default capacity is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting. At or above the new limit, only an eligible direct automatic fold into the existing tail can still succeed; other work is rejected until messages run or are removed. Staged attachments are rejected before a fold or claim. Delivery retries for work accepted before the change are not discarded by the lower cap.
 
 `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence than the saved capacity. A valid environment value makes only that field read-only; zero or a negative value means unlimited. Invalid text is logged and ignored in favor of the saved setting or default. Environment changes require a backend restart, while UI changes do not.
 
@@ -315,7 +317,17 @@ The Storage page also reports **System temporary folders** as a read-only footpr
 service's effective temporary folder and, on Unix, `/tmp` when it resolves to a distinct folder.
 Resolved roots, measured size, and partial or unavailable status are shown. This footprint is
 informational and can overlap counted categories, so it is excluded from **Total counted**. It has
-no cleanup action and does not claim ownership of any path.
+no cleanup action and does not claim ownership of any path. The analysis rows use the measured byte
+values to order categories from largest to smallest. A decorative bar compares each displayed
+measurement with the largest displayed measurement; zero measurements have an empty bar, and
+unknown or unavailable measurements have no bar. These bars compare footprints and do not change
+**Total counted**, capacity thresholds, or cleanup behavior. Overlapping categories can therefore
+appear in more than one row.
+
+A temporary-folder scan that reaches its deadline keeps the sampled bytes, partial status, and
+skipped-entry counts. The expanded row shows one timeout explanation and keeps a bounded set of
+other diagnostic examples. A timeout does not authorize cleanup or indicate that the sampled size
+is a final folder total.
 
 The Host tab separately reports **Temporary Kandev files** created by services that need a short-lived
 directory under the host temporary root. Each current file is registered in the Kandev database
@@ -742,6 +754,8 @@ After restart, verify `/ready`, **System > About**, **System > Status**, the dat
 
 Configure sampling at **Settings > Preferences > Appearance > Resource Metrics**. Defaults are CPU, memory, and disk percentage every five seconds, backend disk path `/`, and execution-environment collection off. Valid intervals are 1–300 seconds; at least one of CPU, memory, disk, CPU temperature, or 1-minute system load remains selected. System load is the average number of tasks running or waiting for CPU during the last minute; compare it with the host's CPU core count. Enable **Simplified metrics** to show only each metric icon and value in the status bar, fallback top bar, or phone Status drawer, without the Host marker or percentage progress bars.
 
+On phones, detailed readings appear together in a **System metrics** card, with labelled CPU, memory, and disk readings on one row. Additional enabled metrics continue below. Open **Status** when the status bar is enabled, or **Menu** when **Show status bar** is off but host metrics are enabled.
+
 Collection starts only while at least one connected client displays metrics in the status bar, fallback top bar, or an open phone Status drawer. Phone clients subscribe only while their Status drawer is open. The built-in status surface renders the Kandev host source only. Enabling execution metrics also adds active Docker, Kubernetes, SSH, and Sprites `agentctl` sources to the metrics stream for separately owned consumers such as plugins; execution disk sampling uses `/`. A provider hook also exists for remote Docker, but creating that runtime currently returns a not-implemented error. Missing platform APIs, container permissions, an invalid disk path, a disconnected executor, macOS/Windows temperature support, or Windows load-average support produce unavailable samples rather than quotas.
 
 These metrics are lightweight UI observability. Set alerts, retention, CPU/memory limits, and disk quotas in the host, container platform, or external monitoring stack.
@@ -766,7 +780,7 @@ Kandev warns when its live WebSocket connection has not recovered for three seco
 - **Office session identity**: experimental, high risk, and on in every profile by default. The live `(task_id, agent_profile_id)` pair is guarded in-transaction on the Office session creation path, not by a table-level index; pre-existing duplicate rows are retained and resolved by selection. Two Kandev processes must not write the same SQLite file. It gives each Office participant a separate task conversation and requires a restart. Disabling the toggle restores the pre-graduation runner-seat binding and task-active-session decision re-evaluation.
 - **App status bar**: stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins. Urgent WebSocket connectivity warnings still remain visible while the feature is off.
 - **Claude background prompt handoff**: experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
-- **Unread divider**: a per-user setting at **Settings > General > Task Actions**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
+- **Unread divider**: a per-user setting at **Settings > Preferences > Task Behavior > Conversation**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
 - **Debug mode**: high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
 
 Each feature toggle requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.

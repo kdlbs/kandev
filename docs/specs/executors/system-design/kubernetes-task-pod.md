@@ -88,7 +88,8 @@ IDs and canonical workspace. Retain per-instance port-forward/client lifetime.
 Resolve each agent profile's environment/auth/MCP configuration for that instance;
 attachment must not rewrite pod-wide runtime/auth files or restart the control
 server. Audit `buildReconnectCreateInstanceRequest` and bootstrap-file consumers
-so no sibling's agent identity or credentials leak into the new instance.
+so a new instance does not accidentally inherit another session's agent identity
+or credentials.
 
 Attach-only launch skips cloning, repository setup, bootstrap, and pod-level
 prepare scripts. Preserve current task workspace inheritance admission; this
@@ -102,6 +103,22 @@ recovery secret preserves the token across backend restart; attachment retries
 finish the canonical save and remove the recovery secret before proceeding.
 Request cancellation does not cancel the bounded credential persistence attempt.
 Task teardown also removes the recovery secret.
+
+## Credential trust boundary
+
+The task is one trust boundary, as recorded in the
+[credential trust ADR](../../../decisions/2026-09-23-kubernetes-task-trust-boundary.md).
+Different agent profiles and credential bindings are allowed within its pod.
+Per-session HOME, environment and auth files separate configuration; all agents
+run as the same OS user and can read sibling files and process credentials.
+File permissions and hashed session paths do not provide security isolation.
+
+Operators must attach only mutually trusted agents and credentials. After a
+suspected compromise, stop the task's agents and revoke or rotate exposed
+credentials with their providers; stopping one session cannot undo exposure.
+Use separate tasks with appropriately isolated executor policies when agents
+must not share trust. Regression coverage verifies distinct profiles and
+credentials use one pod without overwriting each other's launch settings.
 
 ## Session termination and task cleanup
 

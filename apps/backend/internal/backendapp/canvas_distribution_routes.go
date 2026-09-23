@@ -18,6 +18,7 @@ func registerCanvasDistributionRoutes(router *gin.Engine, handler *canvasHTTPHan
 		return
 	}
 	router.POST("/api/v1/canvases/:canvasID/exports", handler.prepareCanvasExport)
+	router.GET("/api/v1/canvases/:canvasID/export-defaults", handler.getCanvasExportDefaults)
 	router.GET("/api/v1/canvases/exports/:preparationID", handler.getCanvasExport)
 	router.GET("/api/v1/canvases/exports/:preparationID/bundle", handler.downloadCanvasBundle)
 	router.GET("/api/v1/canvases/exports/:preparationID/source", handler.downloadCanvasSource)
@@ -26,6 +27,23 @@ func registerCanvasDistributionRoutes(router *gin.Engine, handler *canvasHTTPHan
 	router.GET("/api/v1/canvases/install-preparations/:preparationID", handler.getCanvasInstall)
 	router.POST("/api/v1/canvases/install-preparations/:preparationID/confirm", handler.confirmCanvasInstall)
 	router.DELETE("/api/v1/canvases/install-preparations/:preparationID", handler.cancelCanvasInstall)
+}
+
+func (h *canvasHTTPHandler) getCanvasExportDefaults(c *gin.Context) {
+	item, err := h.canvases.Get(c.Request.Context(), c.Param("canvasID"))
+	if err != nil {
+		writeCanvasDistributionError(c, err)
+		return
+	}
+	if !h.authorizeWorkspace(c, item.WorkspaceID) {
+		return
+	}
+	defaults, err := h.distribution.GetExportDefaults(c.Request.Context(), canvasRuntimeUser(c), item.WorkspaceID, item.ID)
+	if err != nil {
+		writeCanvasDistributionError(c, err)
+		return
+	}
+	writeCanvasJSON(c, http.StatusOK, defaults)
 }
 
 type canvasExportRequest struct {

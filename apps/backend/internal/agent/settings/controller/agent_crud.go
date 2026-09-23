@@ -339,7 +339,8 @@ func (c *Controller) DeleteAgent(ctx context.Context, id string) error {
 		}
 		return err
 	}
-	if agent.TUIConfig != nil {
+	custom := agent.TUIConfig != nil
+	if custom {
 		_ = c.agentRegistry.Unregister(agent.Name)
 	}
 
@@ -348,6 +349,12 @@ func (c *Controller) DeleteAgent(ctx context.Context, id string) error {
 			return ErrAgentNotFound
 		}
 		return err
+	}
+	if custom {
+		// Installed Agents is rendered from the cached discovery sweep, which
+		// reports the registry. Without this the deleted agent keeps its card
+		// until the cache expires, and Rescan re-detects its binary.
+		c.InvalidateDiscoveryCache()
 	}
 	return nil
 }

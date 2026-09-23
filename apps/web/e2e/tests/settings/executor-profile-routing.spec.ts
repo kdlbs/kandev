@@ -44,7 +44,10 @@ test.describe("executor profile routing", () => {
 
     try {
       await testPage.goto("/settings/executors");
-      await testPage.getByText(profile.name, { exact: true }).click();
+      const profileCard = testPage.getByTestId(`executor-profile-card-${profile.id}`);
+      await expect(profileCard).toBeVisible();
+      await expect(profileCard.getByText(profile.name, { exact: true })).toBeVisible();
+      await profileCard.click();
       await expectDockerProfileEditor(testPage, profile.id);
 
       const buildResponse = waitForHttp(testPage, "POST", /^\/api\/v1\/docker\/build$/, {

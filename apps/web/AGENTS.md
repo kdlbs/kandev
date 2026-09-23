@@ -136,11 +136,8 @@ surface.
   name the target only (for example, `Bitbucket Pull Request`) and preserve their
   registered provider icon.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
-- **Self-documenting settings:** every setting must explain in visible, plain-language copy what
-  changes, when the setting applies, and when the user should choose each non-obvious option. State
-  important exclusions, precedence, cost, or destructive consequences next to the control when they
-  can affect the decision. Do not rely on tooltips, external documentation, or implementation terms
-  alone to teach the setting.
+- **Self-documenting settings:** give each setting a short, plain-language description of its effect. Use `SettingsInfo` for optional scope and implementation details: hover/focus on desktop, a drawer on touch devices. Keep active errors, permissions, managed values, and essential input constraints visible.
+- **Settings composition:** use `SettingsGroup` for bordered groups and `SettingsRow` for simple preferences; keep one domain owner/save contributor and attach discovery to actual controls. Keep sections expanded and use existing header tabs for larger pages. Preserve specialized editor/table/diagnostic/credential layouts.
 - **Settings save coordination:** settings surfaces with local unsaved state must register a
   contributor with `useSettingsSaveContributor` (or use `SettingsPageTemplate`) so the shared
   floating **Save changes** control, navigation guard, and discard flow own persistence. Do not add
@@ -283,7 +280,9 @@ and `lib/plugins/types.ts` are its detailed host implementation — all three mu
   `PluginErrorBoundary`; `mobileEnabled: true` also renders it via the phone bottom nav
   (`session-mobile-bottom-nav.tsx`) with `presentation: "mobile"`.
 - **Task contributions:** `registerTaskMenuAction({ group: "edit", ... })` adds card-only actions to
-  the `Edit` submenu. Group `"primary"` adds flat actions to card and desktop/mobile task-row menus.
+  the `Edit` submenu. Group `"primary"` adds top-level actions to card and desktop/mobile task-row
+  menus; declaring `items(context)` renders an action of either group as a submenu of its children
+  instead, with `run` kept as the flat fallback.
   Card indicator/tag slots stay card-specific; `task-row-metadata` is generic for sidebar and `/tasks` rows.
 - **Sidebar workspace actions:** `registerComponent("sidebar-workspace-actions", ...)` renders after Quick Terminal/Quick Chat in the desktop sidebar's New Task row and in the shared phone navigation sheet, forwarding `SidebarWorkspaceActionsSlotProps` with `presentation: "desktop" | "mobile"`; mobile plugin controls own a 44px touch target and accessible name.
 - **`host.storage`:** authenticated per-user key/value storage (`lib/plugins/host-api.ts`) backed by `/api/plugins/{id}/user-state/...` (`docs/decisions/2026-08-01-per-user-plugin-storage.md`); `subscribe` (`lib/plugins/user-state-sync.ts`) wraps `registerWsHandler` with own-plugin filtering and own-tab echo suppression via a per-tab `writerId`.

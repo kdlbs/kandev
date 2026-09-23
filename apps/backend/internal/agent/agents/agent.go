@@ -453,6 +453,11 @@ type InferenceConfig struct {
 	Command Command
 	// ModelFlag is the flag template for specifying the model (e.g., ["--model", "{model}"]).
 	ModelFlag Param
+	// OperatorDefined marks a Command that the install operator registered in
+	// Settings rather than one compiled into this binary. The host utility's
+	// probe allow-list is built from literals, which a command that does not
+	// exist until it is typed can never join.
+	OperatorDefined bool
 }
 
 // InferenceModel describes a model available for inference.

@@ -27,6 +27,8 @@ func TestKubernetesTaskPodAdditionalSession(t *testing.T) {
 	require.Equal(t, "session-2", instances[1].SessionID)
 	require.NotEmpty(t, instances[0].Env["HOME"])
 	require.NotEqual(t, instances[0].Env["HOME"], instances[1].Env["HOME"])
+	require.Equal(t, "agent-profile-1", instances[0].Env[kubernetesEnvExecutionProfile])
+	require.Equal(t, "agent-profile-2", instances[1].Env[kubernetesEnvExecutionProfile])
 	require.Equal(t, "credential-1", instances[0].Env["SESSION_CREDENTIAL"])
 	require.Equal(t, "credential-2", instances[1].Env["SESSION_CREDENTIAL"])
 	require.Equal(t, "session-2", instances[1].Env[kubernetesEnvSessionID])

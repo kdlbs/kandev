@@ -141,6 +141,7 @@ export function CanvasHostHeader({
   menuOpen,
   onOpenActions,
   actions,
+  renameAction,
   overflowActions,
 }: {
   title: string;
@@ -148,12 +149,18 @@ export function CanvasHostHeader({
   menuOpen: boolean;
   onOpenActions: () => void;
   actions?: ReactNode;
+  renameAction?: ReactNode;
   overflowActions?: ReactNode;
 }) {
   return (
     <PanelHeaderBarSplit
       data-testid="canvas-host-header"
-      left={<span className="truncate text-sm font-medium">{title}</span>}
+      left={
+        <div className="flex min-w-0 items-center gap-1">
+          <span className="truncate text-sm font-medium">{title}</span>
+          {renameAction}
+        </div>
+      }
       right={
         <>
           {actions}
@@ -369,6 +376,7 @@ export function MobileCanvasActions({
   onPromote,
   onReleases,
   onShare,
+  onRename,
   onSelectCanvas,
   editing,
 }: {
@@ -380,6 +388,7 @@ export function MobileCanvasActions({
   onPromote: () => void;
   onReleases: () => void;
   onShare: () => void;
+  onRename: () => void;
   onSelectCanvas: (canvas: Canvas) => void;
   editing: boolean;
 }) {
@@ -401,6 +410,17 @@ export function MobileCanvasActions({
             onSelectCanvas={onSelectCanvas}
             t={t}
           />
+        )}
+        {canvas && (
+          <Button
+            variant="ghost"
+            className="min-h-11 w-full justify-start"
+            onClick={onRename}
+            data-testid="canvas-mobile-rename"
+          >
+            <IconEdit className="mr-2 size-4" />
+            {t("canvases:renameCanvas")}
+          </Button>
         )}
         {canvas?.scope_kind === "workspace" && (
           <MobileCanvasEditAction canvas={canvas} editing={editing} onEdit={onEdit} t={t} />

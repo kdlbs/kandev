@@ -93,8 +93,11 @@ func TestLoadValidation_TenSimulatedMinutes_NoWatchCreationLoopBoundedLookups(t 
 
 	durations := make([]time.Duration, 0, simulatedCycles)
 	var firstCycleWatchIDs, lastCycleWatchIDs map[string]struct{}
+	pollStart := time.Now().UTC()
 
 	for cycle := 0; cycle < simulatedCycles; cycle++ {
+		cycleNow := pollStart.Add(time.Duration(cycle)*defaultPRPollInterval + time.Second)
+		poller.SetClock(func() time.Time { return cycleNow })
 		start := time.Now()
 		poller.checkPRWatches(ctx)
 		durations = append(durations, time.Since(start))
