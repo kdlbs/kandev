@@ -10,6 +10,11 @@ import { useTranslation } from "react-i18next";
 import { taskMatchesWorkflowChange } from "./use-change-workflow-utils";
 
 type WorkflowChangeError = { code?: string; source_profile_id?: string };
+type WorkflowChangeRequestSnapshot = {
+  workflowId: string;
+  stepId: string;
+  overrides: Record<string, string>;
+};
 
 function apiErrorDetails(error: unknown): WorkflowChangeError {
   if (!(error instanceof ApiError) || !error.body || typeof error.body !== "object") return {};
@@ -47,15 +52,12 @@ export function useChangeWorkflowSubmit({
   const { t } = useTranslation();
   const { toast } = useToast();
   const pendingRef = useRef(false);
+  const lastRequestRef = useRef<WorkflowChangeRequestSnapshot | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<WorkflowChangeError | null>(null);
   const [uncertainResult, setUncertainResult] = useState(false);
 
-  useEffect(() => {
-    if (!open) return;
-    setSubmitError(null);
-    setUncertainResult(false);
-  }, [open]);
+  useEffect(() => resetOnOpen(open, lastRequestRef, setSubmitError, setUncertainResult), [open]);
 
   const submit = useCallback(async () => {
     if (!canSubmit || !task || !selectedWorkflow || !selectedStepId || !workflowChange)
@@ -67,6 +69,11 @@ export function useChangeWorkflowSubmit({
     setUncertainResult(false);
     const targetWorkflowId = selectedWorkflow.id;
     const requestOverrides = workflowChange.agent_overrides;
+    lastRequestRef.current = {
+      workflowId: targetWorkflowId,
+      stepId: selectedStepId,
+      overrides: { ...requestOverrides },
+    };
     try {
       await moveTask(task.id, {
         workflow_id: targetWorkflowId,
@@ -108,12 +115,20 @@ export function useChangeWorkflowSubmit({
     workflowChange,
   ]);
 
-  const retryAfterRefresh = useCallback(async () => {
-    const refreshed = await refreshTask();
-    if (!refreshed) return;
-    setUncertainResult(false);
-    setSubmitError(null);
-  }, [refreshTask]);
+  const retryAfterRefresh = useCallback(
+    () =>
+      retryWorkflowChangeAfterRefresh({
+        lastRequest: lastRequestRef.current,
+        refreshTask,
+        setSubmitError,
+        setUncertainResult,
+        toast,
+        t,
+        onSuccess,
+        onOpenChange,
+      }),
+    [onOpenChange, onSuccess, refreshTask, t, toast],
+  );
 
   const clearSubmitError = useCallback(() => setSubmitError(null), []);
 
@@ -126,6 +141,55 @@ export function useChangeWorkflowSubmit({
     retryAfterRefresh,
     clearSubmitError,
   };
+}
+
+async function retryWorkflowChangeAfterRefresh({
+  lastRequest,
+  refreshTask,
+  setSubmitError,
+  setUncertainResult,
+  toast,
+  t,
+  onSuccess,
+  onOpenChange,
+}: {
+  lastRequest: WorkflowChangeRequestSnapshot | null;
+  refreshTask: () => Promise<Task | null>;
+  setSubmitError: (error: WorkflowChangeError | null) => void;
+  setUncertainResult: (value: boolean) => void;
+  toast: ReturnType<typeof useToast>["toast"];
+  t: ReturnType<typeof useTranslation>["t"];
+  onSuccess?: () => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const refreshed = await refreshTask();
+  if (!refreshed) return;
+  const matchesLastRequest =
+    lastRequest &&
+    taskMatchesWorkflowChange(
+      refreshed,
+      lastRequest.workflowId,
+      lastRequest.stepId,
+      lastRequest.overrides,
+    );
+  setUncertainResult(false);
+  setSubmitError(null);
+  if (!matchesLastRequest) return;
+  toast({ title: t("task:changeWorkflowObservedSuccess"), variant: "success" });
+  onSuccess?.();
+  onOpenChange(false);
+}
+
+function resetOnOpen(
+  open: boolean,
+  lastRequestRef: { current: WorkflowChangeRequestSnapshot | null },
+  setSubmitError: (error: WorkflowChangeError | null) => void,
+  setUncertainResult: (value: boolean) => void,
+) {
+  if (!open) return;
+  lastRequestRef.current = null;
+  setSubmitError(null);
+  setUncertainResult(false);
 }
 
 async function handleSubmitError({

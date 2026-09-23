@@ -419,11 +419,9 @@ export function ChangeWorkflowAgentSection({
           />
         ))}
       {state.snapshotStatus === "success" && <ConversationSection steps={steps} />}
-      {state.task?.workflow_agent_overrides?.steps.length ? (
-        <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
-          {t("task:changeWorkflowReplacePreviousOverrides")}
-        </p>
-      ) : null}
+      <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
+        {t("task:changeWorkflowReplacePreviousOverrides")}
+      </p>
     </section>
   );
 }

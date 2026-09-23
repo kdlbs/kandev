@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
@@ -187,7 +188,7 @@ func (s *Service) PreviewWorkflowMove(ctx context.Context, request WorkflowMoveP
 			return nil, repoerrors.ErrWorkflowChangeConflict
 		}
 		if request.CandidateWorkflowOverrides != nil && request.CandidateWorkflowOverrides.WorkflowID != request.WorkflowID {
-			return nil, fmt.Errorf("workflow change override map does not match destination workflow")
+			return nil, &taskservice.WorkflowChangeValidationError{Code: taskservice.WorkflowChangeErrorInvalid}
 		}
 	}
 

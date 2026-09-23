@@ -131,6 +131,66 @@ func TestSelectExplicitWorkflowStartSessionFallsBackFromTerminalTarget(t *testin
 	require.Equal(t, "profile-a", profileID)
 }
 
+func TestCandidatePreflightIgnoresTerminalStepBinding(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	overrides, err := models.NewWorkflowAgentOverrides("wf1", []models.WorkflowAgentOverrideBinding{{
+		StepID: "implement", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b",
+	}})
+	require.NoError(t, err)
+	source := &wfmodels.WorkflowStep{ID: "implement", WorkflowID: "wf1", Position: 0, AgentProfileID: "profile-a"}
+	target := &wfmodels.WorkflowStep{
+		ID: "pr", WorkflowID: "wf1", Position: 1,
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyReuse,
+		SessionTarget:             &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetStep, StepID: source.ID},
+	}
+	fixture.stepGetter.steps[source.ID] = source
+	fixture.stepGetter.steps[target.ID] = target
+
+	require.NoError(t, fixture.repo.CreateExecutor(ctx, &models.Executor{
+		ID: "exec-ssh", Name: "SSH", Type: models.ExecutorTypeSSH,
+	}))
+	require.NoError(t, fixture.repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{
+		ID: "executor-profile-a", ExecutorID: "exec-ssh", Name: "A with GitHub token",
+		Config: map[string]string{"remote_auth_secrets": `{"gh_cli_env":"test-token"}`},
+	}))
+	require.NoError(t, fixture.repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{
+		ID: "executor-profile-b", ExecutorID: "exec-ssh", Name: "B without GitHub token",
+	}))
+	fixture.current.ExecutorID = "exec-ssh"
+	fixture.current.ExecutorProfileID = "executor-profile-a"
+	require.NoError(t, fixture.repo.UpdateTaskSession(ctx, fixture.current))
+	terminal := &models.TaskSession{
+		ID: "terminal-profile-b", TaskID: task.ID, AgentProfileID: "profile-b",
+		ExecutorID: "exec-ssh", ExecutorProfileID: "executor-profile-b",
+		State: models.TaskSessionStateCompleted,
+	}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, terminal))
+	_, err = fixture.repo.UpsertWorkflowSessionBinding(ctx, &models.WorkflowSessionBinding{
+		TaskID: task.ID, TargetKey: workflowSessionBindingTargetKey(source.ID),
+		WorkflowID: "wf1", AgentProfileID: "profile-b", SessionID: terminal.ID,
+		OperationID: "candidate-terminal-binding", UpdatedAt: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-invalid-github", WorkspaceID: "ws1", Name: "Invalid GitHub remote",
+		SourceType: "local", Provider: "github", RemoteURL: "https://forge.example/acme/repo.git",
+	}))
+	require.NoError(t, fixture.repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-invalid-github", TaskID: task.ID, RepositoryID: "repo-invalid-github",
+	}))
+	fixture.svc.executor.SetGitHubCredentialBroker(
+		workflowTargetTestCredentialIssuer{}, "https://kandev.example/api/v1/github/credentials/resolve",
+	)
+	candidate := *task
+	candidate.WorkflowAgentOverrides = overrides
+
+	require.NoError(t, fixture.svc.PreflightWorkflowStepChange(ctx, &candidate, fixture.current, target),
+		"the terminal binding is not reused; preflight must use the current session's executor profile")
+}
+
 func TestRecordWorkflowSourceBindingIgnoresDelayedEntryAfterTaskMoves(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)

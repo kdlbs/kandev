@@ -246,3 +246,25 @@ Completed on 2026-09-23.
   CAPTURE_PR_ASSETS=1 pnpm e2e:run --project chromium tests/task/change-workflow.spec.ts -- --grep "maps a task profile for a later destination step"
   CAPTURE_PR_ASSETS=1 pnpm e2e:run --project mobile-chrome tests/task/mobile-change-workflow.spec.ts
   ```
+
+### Additional PR review follow-up
+
+- Added direct hook tests for task/workspace fetch races, refresh ordering,
+  conflict and validation responses, uncertain server outcomes, and a refresh
+  that discovers an already-committed request. The seven focused frontend test
+  files passed 49 tests; the submit hook's seven cases passed after the retry
+  state was cleared on observed success.
+- Office-owned tasks now lose Move to and Change workflow through the shared
+  action-eligibility helper. The form uses 44px controls on coarse-pointer
+  tablets while keeping the desktop dialog layout, and always shows the notice
+  that a change replaces prior workflow overrides.
+- The Chromium change-workflow spec passed all three tests, including the
+  cross-workflow preview versus committed session profile/model assertion and
+  the coarse-pointer tablet case. The phone flow passed its managed E2E test.
+  Fresh desktop and phone captures were inspected and compressed.
+- The web typecheck, full web lint, i18n check/ratchet, Prettier, public-doc
+  validation, specification validation, and `git diff --check` passed.
+- `docs/public/tasks-and-workflows.md` clarifies that an uncertain submission
+  refreshes the task and asks the user to review the updated assignment. The
+  task-action and mobile-navigation requirements now match the implemented
+  single-task form and phone navigation.

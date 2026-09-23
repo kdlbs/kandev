@@ -57,8 +57,12 @@ Absence or null retains the legacy move contract. A present object requires all
 expected-source fields and an `agent_overrides` object; `{}` explicitly selects
 destination defaults. Reject malformed or missing fields. A present object is
 valid only for a different workflow in the same workspace, on a normal task.
-Reject Office/ephemeral conversion and archived tasks. Keep hidden managed workflows
-out of the picker and reject them as explicit change destinations.
+Reject Office/ephemeral conversion and archived tasks. Office ownership is
+identified by the task's `is_from_office` projection and by a non-empty
+`project_id`; the service checks both so a project-owned Office task remains
+excluded even when a caller's task projection is incomplete. Keep hidden
+managed workflows out of the picker and reject them as explicit change
+destinations.
 
 Carry the typed option through `MoveTaskOptions`, HTTP, and the existing WS move
 adapter. Both adapters must validate it consistently. MCP/plugin/bulk callers

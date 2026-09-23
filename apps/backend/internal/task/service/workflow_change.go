@@ -64,6 +64,7 @@ func (s *Service) prepareWorkflowChange(
 	if err := validateWorkflowChangeSource(task, workflowID, workflowStepID, request); err != nil {
 		return nil, err
 	}
+	// Project-backed tasks remain Office-owned if the IsFromOffice projection is missing.
 	if task.ArchivedAt != nil || task.IsEphemeral || task.IsFromOffice || task.ProjectID != "" {
 		return nil, invalidWorkflowChange(WorkflowChangeErrorInvalid, "")
 	}
@@ -259,6 +260,6 @@ func workflowChangeGuard(request *models.WorkflowChangeRequest) *models.Workflow
 	return &models.WorkflowChangeSource{
 		WorkflowID: request.ExpectedWorkflowID,
 		StepID:     request.ExpectedStepID,
-		UpdatedAt:  request.ExpectedUpdatedAt,
+		UpdatedAt:  request.ExpectedUpdatedAt.UTC(),
 	}
 }

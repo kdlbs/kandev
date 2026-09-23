@@ -144,3 +144,17 @@ handler, and orchestrator tests passed.
   `go test ./internal/orchestrator -run '^(TestWorkflowChangeCredentialPreflightUsesCandidateBoundSession|TestPreviewWorkflowMoveUsesDraftProfileForExplicitStepTarget)$' -count=1`.
 - The PostgreSQL variant remains unverified because
   `KANDEV_TEST_POSTGRES_DSN` is unset.
+
+### Additional PR review follow-up
+
+- Terminal explicit-target bindings now resolve as a fresh-session route for
+  candidate credential preflight. `TestCandidatePreflightIgnoresTerminalStepBinding`
+  covers a terminal binding whose executor profile is invalid; the preflight
+  correctly uses the real source-session policy instead.
+- A candidate override map for a different destination workflow now returns a
+  typed invalid-change error, so the preview API classifies it as a client
+  validation failure. Equivalent source timestamps in a non-UTC offset remain
+  valid through the guarded write.
+- `go test ./internal/orchestrator ./internal/task/service` and
+  `make -C apps/backend lint` passed. The PostgreSQL-gated case remains skipped
+  because `KANDEV_TEST_POSTGRES_DSN` is unset.

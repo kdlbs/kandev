@@ -200,6 +200,9 @@ func (s *Service) resolveBoundSourceWorkflowSessionWithProfile(
 	if session == nil || session.TaskID != taskID || session.AgentProfileID != effectiveProfileID {
 		return nil, nil
 	}
+	if isTerminalSessionState(session.State) {
+		return nil, nil
+	}
 	return session, nil
 }
 

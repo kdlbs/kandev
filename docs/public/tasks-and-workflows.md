@@ -117,9 +117,12 @@ task's previous workflow-agent mappings with the form's current choices. The
 form shows existing conversation relationships as read-only workflow details.
 
 If the task changed while the form was open, refresh its assignment and review
-the form again. If the server response is uncertain, the form blocks another
-submission until you refresh the task. A multi-task selection keeps the separate
-bulk workflow action and does not support per-task profile mappings.
+the form again. If the server response is uncertain, the form refreshes the task
+and blocks another submission until you review the refreshed assignment. If the
+refresh confirms the requested workflow change, the form reports success;
+otherwise, review the current assignment and form choices before deciding whether
+to retry. A multi-task selection keeps the separate bulk workflow action and does
+not support per-task profile mappings.
 
 ## Task actions from the command palette
 

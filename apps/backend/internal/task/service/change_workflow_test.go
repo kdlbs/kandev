@@ -201,6 +201,22 @@ func TestMoveTaskWithWorkflowChangeReplacesOverridesAndPreservesTaskContext(t *t
 	}
 }
 
+func TestMoveTaskWithWorkflowChangeAcceptsEquivalentOffsetTimestamp(t *testing.T) {
+	fixture := newWorkflowChangeFixture(t)
+	fixture.request.ExpectedUpdatedAt = fixture.request.ExpectedUpdatedAt.In(time.FixedZone("EET", 2*60*60))
+
+	result, err := fixture.svc.MoveTaskWithOptions(
+		context.Background(), fixture.task.ID, "workflow-target", "target-analysis", 0,
+		MoveTaskOptions{AllowActivePrimarySession: true, WorkflowChange: fixture.request},
+	)
+	if err != nil {
+		t.Fatalf("MoveTaskWithOptions with equivalent offset timestamp: %v", err)
+	}
+	if result.Task.WorkflowID != "workflow-target" || result.Task.WorkflowStepID != "target-analysis" {
+		t.Fatalf("moved assignment = %s/%s, want workflow-target/target-analysis", result.Task.WorkflowID, result.Task.WorkflowStepID)
+	}
+}
+
 func TestValidateWorkflowChangeValidatesDefaultsAndRejectsUnavailableAgent(t *testing.T) {
 	fixture := newWorkflowChangeFixture(t)
 	fixture.request.AgentOverrides = map[string]string{}
@@ -249,6 +265,20 @@ func TestValidateWorkflowChangeRejectsStaleTaskSource(t *testing.T) {
 				t.Fatalf("stale form changed task assignment: %s/%s", stored.WorkflowID, stored.WorkflowStepID)
 			}
 		})
+	}
+}
+
+func TestValidateWorkflowChangeRejectsProjectOwnedTask(t *testing.T) {
+	fixture := newWorkflowChangeFixture(t)
+	officeTask := *fixture.task
+	officeTask.ProjectID = "office-project"
+
+	_, err := fixture.svc.prepareWorkflowChange(
+		context.Background(), &officeTask, "workflow-target", "target-analysis", fixture.request,
+	)
+	var validationErr *WorkflowChangeValidationError
+	if !errors.As(err, &validationErr) || validationErr.Code != WorkflowChangeErrorInvalid {
+		t.Fatalf("project-owned task change error = %#v, want invalid workflow change", err)
 	}
 }
 

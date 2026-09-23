@@ -2628,6 +2628,18 @@ export class ApiClient {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
   }
 
+  async getTaskSession(sessionId: string): Promise<{
+    session: {
+      id: string;
+      task_id: string;
+      agent_profile_id?: string;
+      agent_profile_snapshot?: Record<string, unknown> | null;
+      state: string;
+    };
+  }> {
+    return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
+  }
+
   async getQueueSessionIdentity(
     taskId: string,
     sessionId: string,

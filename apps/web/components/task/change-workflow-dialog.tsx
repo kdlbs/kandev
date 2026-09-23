@@ -107,7 +107,8 @@ export function ChangeWorkflowDialog({
   onSuccess,
 }: ChangeWorkflowDialogProps) {
   const { t } = useTranslation();
-  const { isMobile } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const isTouchSurface = isMobile || !isFinePointer;
   const closeFocus = createFocusReturnHandler(focusReturnRef);
   const surfaceContent = (
     <>
@@ -129,7 +130,7 @@ export function ChangeWorkflowDialog({
           type="button"
           variant="ghost"
           size="icon"
-          className={cn("shrink-0", isMobile && "size-11")}
+          className={cn("shrink-0", isTouchSurface && "size-11")}
           aria-label={t("common:close")}
           onClick={() => onOpenChange(false)}
           data-testid="change-workflow-close"
@@ -143,7 +144,7 @@ export function ChangeWorkflowDialog({
         open={open}
         onOpenChange={onOpenChange}
         onSuccess={onSuccess}
-        isTouchSurface={isMobile}
+        isTouchSurface={isTouchSurface}
       />
     </>
   );

@@ -18,6 +18,7 @@ export function useChangeWorkflowTask({ open, taskId, workspaceId }: OpenTaskArg
   const [status, setStatus] = useState<ChangeWorkflowLoadStatus>("idle");
   const [error, setError] = useState<unknown>(null);
   const generationRef = useRef(0);
+  const refreshGenerationRef = useRef(0);
   const taskIdRef = useRef(taskId);
   const workspaceIdRef = useRef(workspaceId);
   taskIdRef.current = taskId;
@@ -52,19 +53,33 @@ export function useChangeWorkflowTask({ open, taskId, workspaceId }: OpenTaskArg
   }, [open, taskId, workspaceId]);
 
   const refreshTask = useCallback(async () => {
-    if (!taskIdRef.current || !workspaceIdRef.current) return null;
+    const currentTaskId = taskIdRef.current;
+    const currentWorkspaceId = workspaceIdRef.current;
+    if (!currentTaskId || !currentWorkspaceId) return null;
     const generation = generationRef.current;
+    const refreshGeneration = ++refreshGenerationRef.current;
     setStatus("loading");
     setError(null);
     try {
-      const latest = await fetchTask(taskIdRef.current, { cache: "no-store" });
-      if (generationRef.current !== generation) return null;
-      if (latest.workspace_id !== workspaceIdRef.current) throw new Error();
+      const latest = await fetchTask(currentTaskId, { cache: "no-store" });
+      if (
+        generationRef.current !== generation ||
+        refreshGenerationRef.current !== refreshGeneration ||
+        taskIdRef.current !== currentTaskId ||
+        workspaceIdRef.current !== currentWorkspaceId
+      )
+        return null;
+      if (latest.workspace_id !== currentWorkspaceId) throw new Error();
       setTask(latest);
       setStatus("success");
       return latest;
     } catch (nextError) {
-      if (generationRef.current === generation) {
+      if (
+        generationRef.current === generation &&
+        refreshGenerationRef.current === refreshGeneration &&
+        taskIdRef.current === currentTaskId &&
+        workspaceIdRef.current === currentWorkspaceId
+      ) {
         setError(nextError);
         setStatus("error");
       }

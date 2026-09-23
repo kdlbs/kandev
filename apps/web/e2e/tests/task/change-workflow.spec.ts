@@ -95,10 +95,16 @@ test.describe("Change workflow", () => {
     await expect(changeWorkflow.desktopDialog).toBeHidden();
 
     await waitForWorkflowStep(apiClient, task.id, fixture.prStep.id);
-    await waitForNewWorkflowProfileSession(apiClient, task.id, fixture.profileB.id, [
-      existingSessionId,
-    ]);
+    const destinationSessionId = await waitForNewWorkflowProfileSession(
+      apiClient,
+      task.id,
+      fixture.profileB.id,
+      [existingSessionId],
+    );
     await waitForWorkflowMoveLifecycle(apiClient, task.id);
+    const { session: routedSession } = await apiClient.getTaskSession(destinationSessionId);
+    expect(routedSession.agent_profile_id).toBe(fixture.profileB.id);
+    expect(routedSession.agent_profile_snapshot?.model).toBe("mock-slow");
     const changed = await apiClient.getTask(task.id);
     expect(changed).toMatchObject({
       id: before.id,
@@ -143,5 +149,52 @@ test.describe("Change workflow", () => {
     await kanban.openChangeWorkflowForm();
     await expect(testPage.getByRole("dialog", { name: "Change workflow..." })).toBeVisible();
     await testPage.getByTestId("change-workflow-cancel").click();
+  });
+});
+
+test.describe("coarse-pointer tablet Change workflow", () => {
+  test.use({ hasTouch: true, viewport: { width: 900, height: 1000 } });
+
+  test("keeps touch-sized form controls in the desktop dialog", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const destination = await apiClient.createWorkflow(seedData.workspaceId, "Tablet target");
+    const step = await apiClient.createWorkflowStep(destination.id, "Incoming", 0);
+    const task = await apiClient.createTask(seedData.workspaceId, "Tablet change workflow task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.openTaskActionsMenu(task.id);
+    await expect(kanban.contextChangeWorkflow()).toBeVisible();
+    await kanban.openChangeWorkflowForm();
+
+    const form = new ChangeWorkflowPage(testPage);
+    await expect(form.desktopDialog).toBeVisible();
+    await expect(form.phoneDrawer).toHaveCount(0);
+    expect(await testPage.evaluate(() => window.innerWidth)).toBe(900);
+    expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    await form.chooseWorkflow(destination.id);
+    await form.chooseStep(step.id);
+
+    for (const control of [
+      testPage.getByTestId("change-workflow-close"),
+      form.form.getByTestId("change-workflow-destination"),
+      form.form.getByTestId("change-workflow-step"),
+      form.form.getByTestId("change-workflow-submit"),
+    ]) {
+      const box = await control.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+      const receivesPointer = await control.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return element.contains(
+          document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
+        );
+      });
+      expect(receivesPointer).toBe(true);
+    }
   });
 });

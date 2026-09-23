@@ -144,11 +144,10 @@ export class KanbanPage {
 
   async sendTaskToWorkflow(taskId: string, workflowId: string, stepId: string) {
     await this.selectFromTaskContextMenu(taskId, async () => {
-      if (
-        await this.contextChangeWorkflowSelection()
-          .isVisible()
-          .catch(() => false)
-      ) {
+      await expect(
+        this.contextChangeWorkflow().or(this.contextChangeWorkflowSelection()),
+      ).toBeVisible();
+      if (await this.contextChangeWorkflowSelection().isVisible()) {
         await this.selectBulkWorkflowStep(workflowId, stepId);
         return;
       }

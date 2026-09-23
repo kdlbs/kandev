@@ -5,10 +5,11 @@ import { ChangeWorkflowDialog } from "./change-workflow-dialog";
 
 const CURRENT_AGENT_LABEL = "Current agent";
 const CURRENT_PROFILE_ID = "profile-current";
+const SUBMIT_BUTTON_TEST_ID = "change-workflow-submit";
 
 const { useChangeWorkflowMock, responsiveMock } = vi.hoisted(() => ({
   useChangeWorkflowMock: vi.fn(),
-  responsiveMock: { isMobile: false },
+  responsiveMock: { isMobile: false, isFinePointer: true },
 }));
 
 vi.mock("@/hooks/domains/kanban/use-change-workflow", () => ({
@@ -124,6 +125,7 @@ afterEach(() => {
 
 beforeEach(() => {
   responsiveMock.isMobile = false;
+  responsiveMock.isFinePointer = true;
   useChangeWorkflowMock.mockReset();
   useChangeWorkflowMock.mockReturnValue(makeHookState());
 });
@@ -152,7 +154,32 @@ describe("ChangeWorkflowDialog", () => {
     expect(screen.getByText("Wrap-up uses the initial conversation.")).toBeTruthy();
     expect(screen.getByTestId("workflow-entry-preview")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("This profile is unavailable");
-    expect((screen.getByTestId("change-workflow-submit") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId(SUBMIT_BUTTON_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("uses touch sizing on coarse-pointer tablets and always discloses override replacement", () => {
+    responsiveMock.isFinePointer = false;
+    const state = makeHookState();
+    state.task = { ...state.task!, workflow_agent_overrides: undefined };
+    useChangeWorkflowMock.mockReturnValue(state);
+    render(
+      <ChangeWorkflowDialog
+        open
+        onOpenChange={vi.fn()}
+        taskId="task-1"
+        workspaceId="workspace-1"
+      />,
+    );
+
+    expect(screen.getByRole("dialog", { name: "Change workflow..." })).toBeTruthy();
+    expect(screen.queryByTestId("change-workflow-drawer")).toBeNull();
+    expect(screen.getByTestId("change-workflow-close").className).toContain("size-11");
+    expect(screen.getByTestId(SUBMIT_BUTTON_TEST_ID).className).toContain("min-h-12");
+    expect(
+      screen.getByText(
+        "Changing workflows replaces this task's existing workflow agent overrides.",
+      ),
+    ).toBeTruthy();
   });
 
   it("resets a replacement to the workflow profile and returns cancel to the caller", () => {
@@ -187,10 +214,10 @@ describe("ChangeWorkflowDialog", () => {
 
     const drawer = screen.getByTestId("change-workflow-drawer");
     const body = screen.getByTestId("change-workflow-scroll");
-    const footer = screen.getByTestId("change-workflow-submit").parentElement;
+    const footer = screen.getByTestId(SUBMIT_BUTTON_TEST_ID).parentElement;
     expect(drawer.className).toContain("100dvh");
     expect(body.className).toContain("overflow-y-auto");
     expect(footer?.className).toContain("safe-area-inset-bottom");
-    expect(screen.getByTestId("change-workflow-submit").className).toContain("min-h-12");
+    expect(screen.getByTestId(SUBMIT_BUTTON_TEST_ID).className).toContain("min-h-12");
   });
 });

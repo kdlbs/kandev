@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -94,6 +95,32 @@ func TestPreviewWorkflowMoveUsesDraftOverrideWithoutWriting(t *testing.T) {
 	}
 	if stored.WorkflowID != task.WorkflowID || stored.WorkflowStepID != task.WorkflowStepID || stored.WorkflowAgentOverrides != nil {
 		t.Fatalf("preview persisted draft state: %+v", stored)
+	}
+}
+
+func TestPreviewWorkflowMoveRejectsCandidateOverridesForAnotherWorkflowAsValidation(t *testing.T) {
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	task, err := fixture.repo.GetTask(context.Background(), "t1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	wrongWorkflowOverrides, err := models.NewWorkflowAgentOverrides("other-workflow", []models.WorkflowAgentOverrideBinding{{
+		StepID: "some-step", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b",
+	}})
+	if err != nil {
+		t.Fatalf("NewWorkflowAgentOverrides: %v", err)
+	}
+	_, err = fixture.svc.PreviewWorkflowMove(context.Background(), WorkflowMovePreviewRequest{
+		TaskID: "t1", WorkflowID: "wf1", WorkflowStepID: "step-a",
+		WorkflowChange: &models.WorkflowChangeRequest{
+			ExpectedWorkflowID: task.WorkflowID, ExpectedStepID: task.WorkflowStepID,
+			ExpectedUpdatedAt: task.UpdatedAt, AgentOverrides: map[string]string{},
+		},
+		CandidateWorkflowOverrides: wrongWorkflowOverrides,
+	})
+	var validationErr *taskservice.WorkflowChangeValidationError
+	if !errors.As(err, &validationErr) || validationErr.Code != taskservice.WorkflowChangeErrorInvalid {
+		t.Fatalf("PreviewWorkflowMove error = %#v, want invalid workflow-change validation", err)
 	}
 }
 

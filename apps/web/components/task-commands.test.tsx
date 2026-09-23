@@ -94,4 +94,17 @@ describe("sidebar task command parity", () => {
     expect(buildSidebarTaskCommands(ctx).map((c) => c.id)).not.toContain(PLUGIN_ACTION);
     expect(buildSidebarTaskCommands(ctx).map((c) => c.id)).not.toContain("task-move");
   });
+
+  it("does not offer workflow moves for Office-owned tasks", () => {
+    const commands = buildSidebarTaskCommands(
+      context({
+        task: {
+          ...context().task,
+          isFromOffice: true,
+        },
+      }),
+    );
+    expect(commands.map((command) => command.id)).not.toContain("task-move");
+    expect(commands.map((command) => command.id)).not.toContain("task-change-workflow");
+  });
 });
