@@ -147,5 +147,15 @@
   "exampleRepository": "your-org/my-canvas",
   "examplePreviewUrl": "https://cdn.example.com/my-canvas-cover.webp",
   "examplePreviewAlt": "キャンバス概要",
-  "yes": "はい"
+  "yes": "はい",
+  "renameCanvas": "キャンバスの名前を変更",
+  "canvasName": "キャンバス名",
+  "renameCanvasInvalid": "1～200文字の名前を入力してください。",
+  "renameCanvasFailed": "キャンバス名を変更できませんでした。再試行してください。",
+  "renamingCanvas": "名前を保存中…",
+  "loadingShareDefaults": "共有情報を読み込み中…",
+  "shareDefaultsFailed": "共有情報を読み込めませんでした。再試行してください。",
+  "sharingRelease": "{{name}} バージョン {{version}} を共有",
+  "shareRequiredDetails": "次の項目を入力してください",
+  "packageDetails": "パッケージの詳細"
 }

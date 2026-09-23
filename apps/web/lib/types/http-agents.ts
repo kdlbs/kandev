@@ -19,6 +19,13 @@ export type {
 import type { AgentProfile } from "./agent-profile";
 import type { BackendMessage } from "./backend-message";
 
+/**
+ * How kandev drives a custom agent's command. Absent means terminal
+ * passthrough, which is what every definition stored before the field existed
+ * decodes to.
+ */
+export type CustomAgentProtocol = "acp";
+
 export type TUIConfig = {
   command: string;
   display_name: string;
@@ -33,6 +40,13 @@ export type TUIConfig = {
    * list here, or a strategy added in Go silently stops being selectable.
    */
   mcp_strategy?: string;
+  /**
+   * Runtime kandev drives the command with. Absent means terminal passthrough;
+   * `"acp"` means kandev speaks the Agent Client Protocol to it on standard
+   * input and output, which is what gives the agent structured chat, tool
+   * calls, models, and modes.
+   */
+  protocol?: CustomAgentProtocol;
 };
 
 /** One selectable MCP injection mechanism, served by the backend. */

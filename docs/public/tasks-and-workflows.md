@@ -160,10 +160,10 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 6. **Choose how to start:**
    | Action | Result |
    | --- | --- |
-   | **Start Plan Mode** | Creates an empty task in plan mode at the first workflow step. Available only when agent-generated titles are off. |
+   | **Start Plan Mode** | Creates an empty task in plan mode at the first positional step. Available only when agent-generated titles are off. |
    | **Start task** | Requires a description and starts the agent. Uses the first step with **Auto-start agent**, then **Start step**, then the first step. |
    | **Start task in plan mode** | Requires a description. Starts the agent in plan mode using the same step rules as **Start task**. |
-   | **Create without starting agent** | Requires a description and uses **Start step**. A structured ACP profile prepares the session; passthrough/TUI starts immediately to create its PTY. |
+   | **Create without starting agent** | Requires a description and uses **Start step**, or the first positional step if none is set. A structured ACP profile prepares the session; passthrough/TUI starts immediately to create its PTY. |
 
    On mobile, **Plan mode** and **Create only** provide the same behavior as the two non-primary actions.
 
@@ -640,7 +640,7 @@ A workflow sets task steps, prompts, agent profiles, session rules, and automati
 - Choose **Custom** to set step prompts, agent profiles, session behavior, auto-start actions, transitions, and WIP limits.
 - Keep a **Review** or **Do nothing** step when a person must approve the work.
 
-[Workflow Tips](workflow-tips.md#build-a-custom-workflow) explains templates, step settings, transitions, and safe authoring. Use [Workflow import and export](workflow-import-export.md) to copy definitions, or [Workflow sync](workflow-sync.md) to keep them in a GitHub repository.
+[Workflow Tips](workflow-tips.md#build-a-custom-workflow) explains templates, step settings, transitions, and safe authoring. For reset recovery, see [Workflow Tips](workflow-tips.md#recover-from-a-context-reset-failure). Use [Workflow import and export](workflow-import-export.md) to copy definitions, or [Workflow sync](workflow-sync.md) to keep them in a GitHub repository.
 
 ### Queue and session limits
 

@@ -223,6 +223,12 @@ type InferenceConfigDTO struct {
 	// (base URL + bearer key) right after the ACP initialize handshake, the
 	// same mechanism the live session adapter uses.
 	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
+	// OperatorDefined marks a command that came from a custom agent the
+	// install operator registered in Settings rather than from an agent
+	// definition compiled into the binary. Such a command cannot appear in
+	// the probe allow-list, because it does not exist until the operator
+	// types it. See resolveSpawnCommand.
+	OperatorDefined bool `json:"operator_defined,omitempty"`
 }
 
 // PromptResponse is the response from executing a utility prompt.

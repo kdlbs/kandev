@@ -1,6 +1,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactElement, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionMobileTopBar } from "./session-mobile-top-bar";
+
+const mocks = vi.hoisted(() => ({ pluginActions: undefined as unknown }));
 
 vi.mock("@/hooks/domains/session/use-session-git-status", () => ({
   useSessionGitStatus: () => null,
@@ -11,12 +14,21 @@ vi.mock("@/hooks/domains/session/use-session-commits", () => ({
 vi.mock("@/components/gitlab/mr-topbar-button", () => ({ MRTopbarButton: () => null }));
 vi.mock("@/components/task/port-forward-dialog", () => ({ PortForwardButton: () => null }));
 vi.mock("@/components/task/task-top-bar-plugin-actions", () => ({
-  TaskTopBarPluginActions: () => null,
+  TaskTopBarPluginActions: ({ presentation }: { presentation?: string }) => (
+    <div data-presentation={presentation} data-testid="task-top-bar-plugin-actions" />
+  ),
+  useHasTaskTopBarPluginActions: () => true,
 }));
 vi.mock("@/components/navigation/app-nav-sheet", () => ({
-  AppNavSheet: () => <button aria-label="Open navigation menu" />,
+  AppNavSheet: ({ pluginActions }: { pluginActions?: ReactNode }) => {
+    mocks.pluginActions = pluginActions;
+    return <button aria-label="Open navigation menu" />;
+  },
 }));
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  mocks.pluginActions = undefined;
+});
 
 describe("phone task navigation controls", () => {
   // @covers AC-UI-MOBILE-MENU-002.1, AC-UI-MOBILE-MENU-002.3
@@ -54,5 +66,23 @@ describe("phone task navigation controls", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Open navigation menu" }));
     expect(onTaskPickerClick).not.toHaveBeenCalled();
+  });
+
+  // @covers AC-UI-MOBILE-TASK-CHROME-001.7
+  it("moves session plugin actions out of the fixed header and into mobile navigation", () => {
+    render(
+      <SessionMobileTopBar
+        taskId="task-1"
+        workspaceId="workspace-1"
+        sessionId="session-1"
+        taskTitle="Fix checkout"
+        onTaskPickerClick={vi.fn()}
+        taskPickerOpen={false}
+      />,
+    );
+
+    expect(screen.queryByTestId("task-top-bar-plugin-actions")).toBeNull();
+    const pluginActions = mocks.pluginActions as ReactElement<{ presentation?: string }>;
+    expect(pluginActions.props.presentation).toBe("mobile");
   });
 });

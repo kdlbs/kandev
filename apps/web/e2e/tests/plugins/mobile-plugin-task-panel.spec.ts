@@ -150,4 +150,46 @@ test.describe("Mobile plugin task panel", () => {
       )
       .toBe("mobile");
   });
+
+  test("opens and selects a primary plugin submenu by touch", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    await installFixturePlugin(testPage);
+
+    const task = await apiClient.createTask(seedData.workspaceId, "Mobile plugin submenu task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+    await mobile.taskCard(task.id).getByRole("button", { name: "More options" }).tap();
+
+    const menu = testPage.locator('[data-slot="dropdown-menu-content"]:visible');
+    const submenu = menu.getByRole("menuitem", { name: "Task shortcuts", exact: true });
+    await expect(submenu).toBeVisible();
+
+    await submenu.tap();
+    const child = testPage.getByRole("menuitem", { name: "Record menu presentation", exact: true });
+    await expect(child).toBeVisible();
+    await child.tap();
+
+    await expect
+      .poll(
+        async () => {
+          const res = await apiClient.rawRequest(
+            "GET",
+            `/api/plugins/${PLUGIN_ID}/user-state/task/${task.id}/primary-submenu-presentation`,
+          );
+          if (res.status !== 200) return null;
+          const body = (await res.json()) as { value: string };
+          return body.value;
+        },
+        { timeout: 10_000, intervals: [250, 500, 1000] },
+      )
+      .toBe("mobile");
+  });
 });

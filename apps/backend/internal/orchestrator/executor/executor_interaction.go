@@ -1269,6 +1269,7 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 	for _, repoInfo := range allRepos {
 		if repoInfo.RepositoryID == session.RepositoryID {
 			req.ComparisonTarget = repoInfo.ComparisonTarget
+			req.QualifiedPRBase = repoInfo.QualifiedPRBase
 			break
 		}
 	}

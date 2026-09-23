@@ -147,5 +147,15 @@
   "exampleRepository": "your-org/my-canvas",
   "examplePreviewUrl": "https://cdn.example.com/my-canvas-cover.webp",
   "examplePreviewAlt": "Canvas overview",
-  "yes": "Yes"
+  "yes": "Yes",
+  "renameCanvas": "Rename canvas",
+  "canvasName": "Canvas name",
+  "renameCanvasInvalid": "Enter a name of 1 to 200 characters.",
+  "renameCanvasFailed": "Could not rename the canvas. Try again.",
+  "renamingCanvas": "Saving name…",
+  "loadingShareDefaults": "Loading share details…",
+  "shareDefaultsFailed": "Could not load share details. Try again.",
+  "sharingRelease": "Sharing {{name}} version {{version}}",
+  "shareRequiredDetails": "Complete these details",
+  "packageDetails": "Package details"
 }

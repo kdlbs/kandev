@@ -164,6 +164,14 @@ export function getCanvas(canvasId: string, options?: ApiRequestOptions): Promis
   return fetchJson<Canvas>(canvasPath(canvasId), options);
 }
 
+export function renameCanvas(
+  canvasId: string,
+  title: string,
+  options?: ApiRequestOptions,
+): Promise<Canvas> {
+  return mutate<Canvas>(canvasPath(canvasId), "PATCH", { title }, options);
+}
+
 export function getCanvasRuntime(
   canvasId: string,
   options?: ApiRequestOptions,
@@ -259,7 +267,7 @@ export function removeCanvas(canvasId: string, options?: ApiRequestOptions): Pro
 
 function mutate<T>(
   path: string,
-  method: "POST" | "DELETE",
+  method: "POST" | "PATCH" | "DELETE",
   body: unknown,
   options?: ApiRequestOptions,
 ): Promise<T> {

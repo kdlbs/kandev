@@ -147,5 +147,15 @@
   "exampleRepository": "你的组织/我的画布",
   "examplePreviewUrl": "https://cdn.example.cn/my-canvas-cover.webp",
   "examplePreviewAlt": "画布概览",
-  "yes": "是"
+  "yes": "是",
+  "renameCanvas": "重命名画布",
+  "canvasName": "画布名称",
+  "renameCanvasInvalid": "请输入 1 到 200 个字符的名称。",
+  "renameCanvasFailed": "无法重命名画布。请重试。",
+  "renamingCanvas": "正在保存名称…",
+  "loadingShareDefaults": "正在加载分享详情…",
+  "shareDefaultsFailed": "无法加载分享详情。请重试。",
+  "sharingRelease": "分享 {{name}} 版本 {{version}}",
+  "shareRequiredDetails": "请填写以下信息",
+  "packageDetails": "软件包详情"
 }

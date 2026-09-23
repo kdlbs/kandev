@@ -41,7 +41,9 @@ async function seedSidebarAutomation(
     state: "open",
     review_state: "approved",
     checks_state: "success",
-    mergeable_state: "clean",
+    // Keep auto-merge enabled for the indicator, but leave the PR blocked so
+    // the background CI automation cannot merge it before the picker opens.
+    mergeable_state: "blocked",
   });
   await apiClient.updateTaskCIAutomationOptions(targetTask.task_id, {
     repository_id: seedData.repositoryId,

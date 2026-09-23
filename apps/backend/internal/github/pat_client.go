@@ -1178,6 +1178,7 @@ type patPR struct {
 	} `json:"head"`
 	Base struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"base"`
 	MaintainerCanModify bool           `json:"maintainer_can_modify"`
 	HeadRepository      *patRepository `json:"-"`
@@ -1286,6 +1287,7 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 		HeadBranch:           raw.Head.Ref,
 		HeadSHA:              raw.Head.SHA,
 		BaseBranch:           raw.Base.Ref,
+		BaseSHA:              raw.Base.SHA,
 		AuthorLogin:          raw.User.Login,
 		RepoOwner:            owner,
 		RepoName:             repo,

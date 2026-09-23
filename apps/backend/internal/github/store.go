@@ -4912,8 +4912,13 @@ func (s *Store) ReleaseReviewPRTask(ctx context.Context, reviewWatchID, repoOwne
 func (s *Store) ListReviewPRTasksByWatch(ctx context.Context, watchID string) ([]*ReviewPRTask, error) {
 	var tasks []*ReviewPRTask
 	err := s.ro.SelectContext(ctx, &tasks, s.ro.Rebind(
-		`SELECT id, review_watch_id, repo_owner, repo_name, pr_number, pr_url, task_id, created_at
-		 FROM github_review_pr_tasks WHERE review_watch_id = ?`), watchID)
+		`SELECT d.id, d.review_watch_id, d.repo_owner, d.repo_name, d.pr_number, d.pr_url, d.task_id, d.created_at
+		 FROM github_review_pr_tasks d
+		 WHERE d.review_watch_id = ?
+		   AND (d.task_id = '' OR EXISTS (
+			SELECT 1 FROM tasks t
+			WHERE t.id = d.task_id AND t.archived_at IS NULL
+		   ))`), watchID)
 	return tasks, err
 }
 
@@ -4923,8 +4928,12 @@ func (s *Store) ListReviewPRTasksByWatch(ctx context.Context, watchID string) ([
 func (s *Store) ListAllReviewPRTasks(ctx context.Context) ([]*ReviewPRTask, error) {
 	var tasks []*ReviewPRTask
 	err := s.ro.SelectContext(ctx, &tasks,
-		`SELECT id, review_watch_id, repo_owner, repo_name, pr_number, pr_url, task_id, created_at
-		 FROM github_review_pr_tasks`)
+		`SELECT d.id, d.review_watch_id, d.repo_owner, d.repo_name, d.pr_number, d.pr_url, d.task_id, d.created_at
+		 FROM github_review_pr_tasks d
+		 WHERE d.task_id = '' OR EXISTS (
+			SELECT 1 FROM tasks t
+			WHERE t.id = d.task_id AND t.archived_at IS NULL
+		 )`)
 	return tasks, err
 }
 
@@ -5307,8 +5316,13 @@ func (s *Store) HasIssueWatchTask(ctx context.Context, issueWatchID, repoOwner, 
 func (s *Store) ListIssueWatchTasksByWatch(ctx context.Context, watchID string) ([]*IssueWatchTask, error) {
 	var tasks []*IssueWatchTask
 	err := s.ro.SelectContext(ctx, &tasks, s.ro.Rebind(
-		`SELECT id, issue_watch_id, repo_owner, repo_name, issue_number, issue_url, task_id, created_at
-		 FROM github_issue_watch_tasks WHERE issue_watch_id = ?`), watchID)
+		`SELECT d.id, d.issue_watch_id, d.repo_owner, d.repo_name, d.issue_number, d.issue_url, d.task_id, d.created_at
+		 FROM github_issue_watch_tasks d
+		 WHERE d.issue_watch_id = ?
+		   AND (d.task_id = '' OR EXISTS (
+			SELECT 1 FROM tasks t
+			WHERE t.id = d.task_id AND t.archived_at IS NULL
+		   ))`), watchID)
 	return tasks, err
 }
 
@@ -5317,8 +5331,12 @@ func (s *Store) ListIssueWatchTasksByWatch(ctx context.Context, watchID string) 
 func (s *Store) ListAllIssueWatchTasks(ctx context.Context) ([]*IssueWatchTask, error) {
 	var tasks []*IssueWatchTask
 	err := s.ro.SelectContext(ctx, &tasks,
-		`SELECT id, issue_watch_id, repo_owner, repo_name, issue_number, issue_url, task_id, created_at
-		 FROM github_issue_watch_tasks`)
+		`SELECT d.id, d.issue_watch_id, d.repo_owner, d.repo_name, d.issue_number, d.issue_url, d.task_id, d.created_at
+		 FROM github_issue_watch_tasks d
+		 WHERE d.task_id = '' OR EXISTS (
+			SELECT 1 FROM tasks t
+			WHERE t.id = d.task_id AND t.archived_at IS NULL
+		 )`)
 	return tasks, err
 }
 

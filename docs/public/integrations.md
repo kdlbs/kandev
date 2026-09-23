@@ -109,6 +109,19 @@ The **PR discovery failed** warning is separate from the quota values:
 
 When discovery succeeds, the warning clears and the status revision advances. If the warning remains after a quota refresh, wait for the retry time or verify the selected connection and repository scope.
 
+#### Pull request watch freshness
+
+Background checks for a known pull request run at least once per minute. A
+watch that is still searching for a pull request also checks once per minute
+while its task is running or has activity within the last two hours. Searching
+checks use a 15-minute interval after two hours of inactivity and a 30-minute
+interval after 24 hours. The checks continue at the 30-minute interval, so a
+pull request opened later on an unchanged branch remains discoverable.
+
+Passive workspace refreshes follow these intervals. An explicit pull request
+refresh checks immediately, subject to the workspace's authentication and
+GitHub rate limits.
+
 ### Automation and personal identity
 
 PAT and CLI connections are human identities. They provide both workspace automation and the fallback identity for **My GitHub** views and user-triggered actions. Settings show this shared identity inside **Workspace GitHub access** instead of repeating it as a separate **My GitHub identity** section.
@@ -340,6 +353,17 @@ Repository scope, authentication, and watch filters are workspace-specific. Repo
 For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls, **Auto-fix CI & address comments**, **Auto-merge or requeue when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**, are scoped to whichever linked PR's tab is selected. Enabling a control for one linked PR does not enable it for the task's other linked PRs; Kandev tracks delivery and deduplication separately for each linked PR. The saved auto-fix prompt override applies to every linked PR.
 
 If a current pull-request head has a GitHub Actions workflow that requires maintainer approval, the PR status control shows **Awaiting maintainer approval**, even when GitHub reports no checks. Detailed desktop and mobile views show the workflow name, the reason, and a link to GitHub. Approval-only workflow attention is not a failed check, does not start **Auto-fix CI & address comments**, and does not make the pull request ready for **Auto-merge or requeue when ready**. If GitHub does not provide enough evidence, Kandev keeps the workflow state unavailable or marks the last same-head observation as stale instead of claiming approval.
+
+Kandev refreshes GitHub Actions observations for empty, running, changing, or
+attention-required results within 30 seconds. Nonempty completed results with
+no attention requirement remain cached for up to five minutes. The cache is
+Run observations are scoped to the selected credential, repository, and head
+SHA. Job observations are scoped to the selected credential, repository, run
+ID, and workflow attempt.
+An explicit pull request refresh clears the relevant observation immediately.
+Reruns on the same SHA appear after the completed-result cache expires or after
+an explicit refresh. Provider errors are retried and are not stored as an
+empty workflow result.
 
 This is a GitHub-only lifecycle feature. Kandev reuses the existing lightweight task PR poller, which checks watched linked PRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked PRs without waiting for the next poll.
 

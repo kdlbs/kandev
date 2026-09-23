@@ -875,11 +875,12 @@ func buildProbeRequest(
 		AgentID: inst.agentType,
 		Refresh: refresh,
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
-			Command:   probeCommand.Args(),
-			ModelFlag: cfg.ModelFlag.Args(),
-			WorkDir:   inst.workDir,
-			Env:       agents.RuntimeEnvFor(ia),
-			StripEnv:  agents.StripEnvFor(ia),
+			Command:         probeCommand.Args(),
+			ModelFlag:       cfg.ModelFlag.Args(),
+			WorkDir:         inst.workDir,
+			Env:             agents.RuntimeEnvFor(ia),
+			StripEnv:        agents.StripEnvFor(ia),
+			OperatorDefined: cfg.OperatorDefined,
 		},
 	}
 }

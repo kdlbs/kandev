@@ -240,10 +240,11 @@ Kandev normalizes the object, omits empty optional strings, and validates the de
 | --- | --- |
 | `reset_context` | Adds a reset. It cannot remove a reset required by the destination step. |
 | `instructions` | Adds one instruction block after the normal destination prompt. |
-| `skip_step_prompt` | Suppresses the destination prompt and task-description fallback. With instructions, the agent starts a turn with them. Without instructions, the task moves without starting a turn. |
+| `skip_step_prompt` | Suppresses the destination prompt and task-description fallback. With instructions, the agent starts a turn with them. Without instructions, the task moves without starting a turn and remains idle. |
 
-- A move returns `disposition: "deferred"` while the agent runs, or `"applied"` when an idle move completes. Deferred options persist through the turn boundary, WIP queue promotion, and backend restart.
-- Every result includes `task`. An optioned move also returns `move_id` and the accepted `entry_options`.
+- `disposition: "deferred"` means the source session is `RUNNING` or `STARTING` and a step change waits for the turn to end. Deferred options persist through the turn boundary, WIP promotion, and backend restart.
+- `disposition: "applied"` means a step change committed immediately, or the task was already at the requested workflow and step with no entry options. In that same-step case, Kandev returns the stored task without retrying or changing its position.
+- Every result includes `task`. An optioned step change also returns `move_id` and the accepted `entry_options`.
 - The top-level `prompt` remains an alias for `entry_options.instructions`. If both are non-empty, validation fails.
 - Pull-request draft and review status are not generic move options.
 

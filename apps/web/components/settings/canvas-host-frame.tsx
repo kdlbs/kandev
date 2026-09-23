@@ -13,6 +13,7 @@ export function CanvasHostFrame({
   menuOpen,
   setMenuOpen,
   desktopActions,
+  renameAction,
   desktopOverflowActions,
   desktopOverflowMenuItems,
   desktopOverflowPrimaryAction,
@@ -27,6 +28,7 @@ export function CanvasHostFrame({
   menuOpen: boolean;
   setMenuOpen: (open: boolean) => void;
   desktopActions: ReactNode;
+  renameAction: ReactNode;
   desktopOverflowActions: ReactNode;
   desktopOverflowMenuItems: ReactNode;
   desktopOverflowPrimaryAction: ReactNode;
@@ -45,6 +47,7 @@ export function CanvasHostFrame({
           menuOpen={menuOpen}
           onOpenActions={() => setMenuOpen(true)}
           actions={isMobile ? null : desktopActions}
+          renameAction={isMobile ? null : renameAction}
           overflowActions={isMobile ? null : desktopOverflowActions}
         />
         {canvasBody}
@@ -57,6 +60,14 @@ export function CanvasHostFrame({
   return (
     <PageShell
       title={title}
+      titleSlot={
+        !isMobile ? (
+          <span className="flex min-w-0 items-center gap-1">
+            <span className="truncate text-sm font-medium">{title}</span>
+            {renameAction}
+          </span>
+        ) : undefined
+      }
       backHref="/"
       backLabel={t("sidebar:home")}
       scroll="none"

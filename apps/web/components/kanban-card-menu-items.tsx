@@ -139,6 +139,14 @@ export type BuildKanbanCardMenuEntriesArgs = {
   /** Defaults to an empty-id context (no visible plugin actions match it in practice). */
   pluginMenuContext?: PluginTaskMenuContext;
   /**
+   * Plugin contributions already built from this call's `PluginEntryInputs`.
+   * Callers must build them with the same inputs they pass here: the entries
+   * carry the disabled state, the edit handler and the menu context, so reusing
+   * a set across an input mismatch silently renders one call's plugin entries
+   * with another's behaviour. Building them in place is always correct.
+   */
+  pluginEntries?: CardPluginEntries;
+  /**
    * Forces the flat Edit item regardless of registered plugin `edit`-group
    * actions. Group `edit` is a card-only plugin contract; surfaces outside
    * the card set this so they never present the submenu form.
@@ -156,6 +164,43 @@ const EMPTY_PLUGIN_MENU_CONTEXT: PluginTaskMenuContext = {
 
 export function resolvePluginMenuContext(context?: PluginTaskMenuContext): PluginTaskMenuContext {
   return context ?? EMPTY_PLUGIN_MENU_CONTEXT;
+}
+
+/** The two plugin-derived pieces of a card menu: group "primary", and `Edit`. */
+export type CardPluginEntries = { primary: KanbanCardMenuEntry[]; edit: KanbanCardMenuEntry };
+
+/** The card-menu inputs that decide those two entries. */
+export type PluginEntryInputs = Pick<
+  BuildKanbanCardMenuEntriesArgs,
+  | "disabled"
+  | "isDeleting"
+  | "isArchiving"
+  | "isDetaching"
+  | "onEdit"
+  | "forceFlatEdit"
+  | "pluginMenuContext"
+>;
+
+/**
+ * Builds both plugin-derived card menu entries. `useKanbanCardMenus` builds one
+ * card's dropdown and context variants in a single render and they share every
+ * input here, so it calls this once and passes the result to both -- otherwise
+ * each plugin action's `items()` runs twice per render for the same children.
+ */
+export function buildCardPluginEntries(args: PluginEntryInputs): CardPluginEntries {
+  const isProcessing = Boolean(
+    args.disabled || args.isDeleting || args.isArchiving || args.isDetaching,
+  );
+  const context = resolvePluginMenuContext(args.pluginMenuContext);
+  return {
+    primary: buildPrimaryPluginEntries({ disabled: isProcessing, context }),
+    edit: buildEditMenuEntry({
+      onEdit: args.onEdit,
+      disabled: isProcessing,
+      context,
+      forceFlat: args.forceFlatEdit,
+    }),
+  };
 }
 
 function StepBadges({ step, isCurrent }: { step: TaskMoveStep; isCurrent: boolean }) {
@@ -371,6 +416,7 @@ export function buildKanbanCardMenuEntries({
   onMoveToStep,
   onSendToWorkflow,
   pluginMenuContext,
+  pluginEntries,
   forceFlatEdit,
 }: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
   const visibleWorkflows = workflows.filter((workflow) => !workflow.hidden);
@@ -396,10 +442,16 @@ export function buildKanbanCardMenuEntries({
     onSendToWorkflow,
   });
 
-  const pluginEntries = buildPrimaryPluginEntries({
-    disabled: isProcessing,
-    context: resolvePluginMenuContext(pluginMenuContext),
-  });
+  // `forceFlatEdit` outranks a prebuilt bundle: those surfaces must never show the submenu form.
+  const pluginContributions =
+    pluginEntries && !forceFlatEdit
+      ? pluginEntries
+      : buildCardPluginEntries({
+          disabled: isProcessing,
+          onEdit,
+          forceFlatEdit,
+          pluginMenuContext,
+        });
 
   const linkEntry = buildLinkSubmenu({
     disabled: isProcessing,
@@ -418,14 +470,7 @@ export function buildKanbanCardMenuEntries({
     { key: "priority", entries: priorityEntry ? [priorityEntry] : [] },
     {
       key: "edit",
-      entries: [
-        buildEditMenuEntry({
-          onEdit,
-          disabled: isProcessing,
-          context: resolvePluginMenuContext(pluginMenuContext),
-          forceFlat: forceFlatEdit,
-        }),
-      ],
+      entries: [pluginContributions.edit],
     },
     {
       key: "relationships",
@@ -439,7 +484,7 @@ export function buildKanbanCardMenuEntries({
         (entry): entry is KanbanCardMenuEntry => entry !== null,
       ),
     },
-    { key: "plugins", entries: pluginEntries },
+    { key: "plugins", entries: pluginContributions.primary },
     {
       key: "remove",
       entries: [

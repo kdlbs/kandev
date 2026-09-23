@@ -27,7 +27,9 @@ test.describe("Settings header tabs", () => {
     expect(tabListBox!.x).toBeGreaterThan(titleBox!.x + titleBox!.width);
 
     await logsTab.focus();
+    await expect(logsTab).toBeFocused();
     await testPage.keyboard.press("ArrowLeft");
+    await expect(databaseTab).toBeFocused();
     await expect(databaseTab).toHaveAttribute("aria-selected", "true");
     await expect(logsTab).toHaveAttribute("aria-selected", "false");
     await testPage.keyboard.press("ArrowRight");

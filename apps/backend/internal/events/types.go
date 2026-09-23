@@ -37,6 +37,7 @@ const (
 // source files, application state, or runtime capabilities.
 const (
 	CanvasCreated                   = "canvas.created"
+	CanvasUpdated                   = "canvas.updated"
 	CanvasReleaseActivated          = "canvas.release.activated"
 	CanvasReleasePermissionRequired = "canvas.release.permission_required"
 	CanvasPromoted                  = "canvas.promoted"

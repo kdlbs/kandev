@@ -24,7 +24,9 @@ export function buildTaskActionsMenuEntries(
 ): KanbanCardMenuEntry[] {
   if (tier === "archived") return buildArchivedTaskActionsMenuEntries(args);
   if (tier === "unresolved-row") return buildUnresolvedRowTaskActionsMenuEntries(args);
-  return buildKanbanCardMenuEntries({ ...args, forceFlatEdit: true });
+  // `forceFlatEdit` is forced here, so any entries built for the card must not be reused: their
+  // `Edit` entry may be the submenu this tier exists to suppress.
+  return buildKanbanCardMenuEntries({ ...args, forceFlatEdit: true, pluginEntries: undefined });
 }
 
 function buildArchivedTaskActionsMenuEntries({
