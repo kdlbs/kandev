@@ -11,7 +11,10 @@ test("concise descriptions retain hover and keyboard technical help", async ({ t
   const info = testPage.getByRole("button", { name: "About Profile for Tasks Created by Agents" });
   await info.hover();
   await expect(testPage.getByRole("tooltip")).toContainText("Workflow-selected profiles win first");
-  await testPage.mouse.move(0, 0);
+  // A single move leaves the hover tooltip's grace-area close pending, and a
+  // later synthetic pointer move can then close it after focus has opened it.
+  await testPage.mouse.move(0, 0, { steps: 5 });
+  await expect(testPage.getByRole("tooltip")).toHaveCount(0);
   await info.focus();
   await expect(testPage.getByRole("tooltip")).toContainText("agent_profile_id");
   await testPage.keyboard.press("Escape");
