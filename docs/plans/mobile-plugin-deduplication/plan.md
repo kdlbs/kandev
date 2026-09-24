@@ -90,3 +90,11 @@ base and fixed builds; no DOM replacement.
 A plugin with both toolbar slots must put its task-relevant actions in its task
 slot. Sidebar workspace actions are independent and remain reachable. Owner
 identity is stable even when component factories return distinct functions.
+
+## CI documentation follow-up
+
+The coverage evaluator identified the new requirement missing from the design's
+frontmatter. Added `REQ-UI-MOBILE-MENU-008` to the design dependency list. The
+exact repository coverage evaluator failed before the metadata correction and
+passes afterward (`status: covered`), along with catalog/spec lint and diff
+checks. Product code and screenshot content are unchanged.

@@ -9,6 +9,7 @@ requirements:
   - REQ-UI-MOBILE-MENU-005
   - REQ-UI-MOBILE-MENU-006
   - REQ-UI-MOBILE-MENU-007
+  - REQ-UI-MOBILE-MENU-008
 ---
 
 # Unified mobile navigation design

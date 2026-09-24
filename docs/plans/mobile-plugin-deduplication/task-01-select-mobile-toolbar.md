@@ -105,3 +105,11 @@ toolbar on task pages. All entries within its selected slot remain intact.
 - The phone Plugins drawer is absent from desktop; desktop parity is verified
   by the 768/1440px route checks rather than an unrelated screenshot.
 - `git diff --check` passed.
+
+## CI documentation follow-up
+
+The coverage evaluator identified the new requirement missing from the design's
+frontmatter. Added `REQ-UI-MOBILE-MENU-008` to the design dependency list. The
+exact repository coverage evaluator failed before the metadata correction and
+passes afterward (`status: covered`), along with catalog/spec lint and diff
+checks. Product code and screenshot content are unchanged.
