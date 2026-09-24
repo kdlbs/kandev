@@ -2394,5 +2394,10 @@
   "launchWarningReasonHostKey": "最後の試行はホストキーが固定フィンガープリントと一致しなかったため失敗しました。",
   "launchWarningReasonAuth": "最後の試行は認証に失敗しました。",
   "launchWarningReasonNetwork": "最後の試行はネットワークエラーで失敗しました。",
-  "launchWarningReasonUnknown": "最後の試行は不明な理由で失敗しました。"
+  "launchWarningReasonUnknown": "最後の試行は不明な理由で失敗しました。",
+  "bulkColorPartialError": "全{{total}}件のうち{{saved}}件のタスクの色を保存しました。残りを再試行してください。",
+  "bulkColorSaving": "色を保存中...",
+  "bulkColorAutomaticHint": "自動ルールにより表示色が上書きされる場合があります。",
+  "bulkColorTitle_one": "{{count}}件のタスクの色",
+  "bulkColorTitle_other": "{{count}}件のタスクの色"
 }
