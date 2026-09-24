@@ -4912,13 +4912,8 @@ func (s *Store) ReleaseReviewPRTask(ctx context.Context, reviewWatchID, repoOwne
 func (s *Store) ListReviewPRTasksByWatch(ctx context.Context, watchID string) ([]*ReviewPRTask, error) {
 	var tasks []*ReviewPRTask
 	err := s.ro.SelectContext(ctx, &tasks, s.ro.Rebind(
-		`SELECT d.id, d.review_watch_id, d.repo_owner, d.repo_name, d.pr_number, d.pr_url, d.task_id, d.created_at
-		 FROM github_review_pr_tasks d
-		 WHERE d.review_watch_id = ?
-		   AND (d.task_id = '' OR EXISTS (
-			SELECT 1 FROM tasks t
-			WHERE t.id = d.task_id AND t.archived_at IS NULL
-		   ))`), watchID)
+		`SELECT id, review_watch_id, repo_owner, repo_name, pr_number, pr_url, task_id, created_at
+		 FROM github_review_pr_tasks WHERE review_watch_id = ?`), watchID)
 	return tasks, err
 }
 
@@ -4928,12 +4923,37 @@ func (s *Store) ListReviewPRTasksByWatch(ctx context.Context, watchID string) ([
 func (s *Store) ListAllReviewPRTasks(ctx context.Context) ([]*ReviewPRTask, error) {
 	var tasks []*ReviewPRTask
 	err := s.ro.SelectContext(ctx, &tasks,
-		`SELECT d.id, d.review_watch_id, d.repo_owner, d.repo_name, d.pr_number, d.pr_url, d.task_id, d.created_at
-		 FROM github_review_pr_tasks d
-		 WHERE d.task_id = '' OR EXISTS (
-			SELECT 1 FROM tasks t
-			WHERE t.id = d.task_id AND t.archived_at IS NULL
-		 )`)
+		`SELECT id, review_watch_id, repo_owner, repo_name, pr_number, pr_url, task_id, created_at
+		 FROM github_review_pr_tasks`)
+	return tasks, err
+}
+
+// ListScheduledReviewPRTasksByWatch lists review-task records that routine
+// cleanup may inspect. Archived tasks stay in the complete inventory but do
+// not spend provider requests on each poll. Empty reservations and records for
+// hard-deleted tasks remain eligible for recovery.
+func (s *Store) ListScheduledReviewPRTasksByWatch(ctx context.Context, watchID string) ([]*ReviewPRTask, error) {
+	var tasks []*ReviewPRTask
+	err := s.ro.SelectContext(ctx, &tasks, s.ro.Rebind(`
+		SELECT rpt.id, rpt.review_watch_id, rpt.repo_owner, rpt.repo_name, rpt.pr_number,
+		       rpt.pr_url, rpt.task_id, rpt.created_at
+		FROM github_review_pr_tasks rpt
+		LEFT JOIN tasks t ON t.id = rpt.task_id
+		WHERE rpt.review_watch_id = ?
+		  AND (rpt.task_id = '' OR t.id IS NULL OR t.archived_at IS NULL)`), watchID)
+	return tasks, err
+}
+
+// ListScheduledReviewPRTasks lists routine-cleanup candidates across all
+// watches, preserving reservations and records for hard-deleted tasks.
+func (s *Store) ListScheduledReviewPRTasks(ctx context.Context) ([]*ReviewPRTask, error) {
+	var tasks []*ReviewPRTask
+	err := s.ro.SelectContext(ctx, &tasks, `
+		SELECT rpt.id, rpt.review_watch_id, rpt.repo_owner, rpt.repo_name, rpt.pr_number,
+		       rpt.pr_url, rpt.task_id, rpt.created_at
+		FROM github_review_pr_tasks rpt
+		LEFT JOIN tasks t ON t.id = rpt.task_id
+		WHERE rpt.task_id = '' OR t.id IS NULL OR t.archived_at IS NULL`)
 	return tasks, err
 }
 

@@ -11,6 +11,7 @@ import {
   expectCanvasFrameFillsHost,
   listCanvasReleases,
   removeCanvas,
+  seedCanvasWorkspacePreview,
   seedTaskCanvas,
   waitForSessionWorkspace,
   writeCanvasSource,
@@ -150,8 +151,12 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
 
     const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
     let canvasId: string | undefined;
+    let workspacePreview: Awaited<ReturnType<typeof seedCanvasWorkspacePreview>> | undefined;
     try {
-      const seeded = await seedTaskCanvas(testPage, apiClient, seedData);
+      workspacePreview = await seedCanvasWorkspacePreview(apiClient, seedData);
+      const seeded = await seedTaskCanvas(testPage, apiClient, seedData, false, {
+        foreignWorkspaceId: workspacePreview.foreignWorkspaceId,
+      });
       canvasId = seeded.canvas.id;
 
       await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible();
@@ -281,7 +286,21 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         .getByTestId("canvas-fixture-appearance-background")
         .textContent();
       await expect(fixture.getByTestId("canvas-fixture-context")).toHaveText(seeded.taskId);
-      await expect(fixture.getByTestId("canvas-fixture-task-count")).toHaveText("1");
+      const expectedTaskCount = (await apiClient.listTasks(seedData.workspaceId)).tasks.length;
+      expect(expectedTaskCount).toBeGreaterThanOrEqual(2);
+      await fixture.getByTestId("canvas-fixture-refresh").click();
+      await expect(fixture.getByTestId("canvas-fixture-refresh-status")).toHaveText("refreshed");
+      await expect(fixture.getByTestId("canvas-fixture-task-count")).toHaveText(
+        String(expectedTaskCount),
+      );
+      await expect(fixture.locator(".task-item")).toHaveCount(expectedTaskCount);
+      await expect(fixture.getByTestId("canvas-fixture-task-ids")).toContainText(seeded.taskId);
+      await expect(fixture.getByTestId("canvas-fixture-task-ids")).toContainText(
+        workspacePreview.workspaceTaskId,
+      );
+      await expect(fixture.getByTestId("canvas-fixture-foreign-workspace-status")).toHaveText(
+        "denied:403",
+      );
       await expect(fixture.getByTestId("canvas-fixture-workflow-count")).toHaveText("1");
       await expect(fixture.getByTestId("canvas-fixture-step-id")).not.toHaveText("loading");
       await expect(fixture.getByTestId("canvas-fixture-sse-status")).toHaveText("connected");
@@ -357,6 +376,7 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         .not.toBe(lightBackground);
     } finally {
       if (canvasId) await removeCanvas(apiClient, canvasId);
+      await workspacePreview?.cleanup();
       await releaseFeature();
     }
   });

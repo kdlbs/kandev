@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DropdownMenu, DropdownMenuContent } from "@kandev/ui/dropdown-menu";
@@ -8,6 +8,12 @@ const COPY: Record<string, string> = {
   "canvases:editCanvas": "Edit canvas",
   "canvases:releasesAndPermissions": "Releases and permissions",
   "canvases:promoteCanvas": "Promote canvas",
+  "canvases:enableWorkspaceData": "Enable workspace data",
+  "canvases:enableWorkspaceDataHelp": "Enable declared workspace data access.",
+  "canvases:taskDataScope": "Task data",
+  "canvases:workspaceDataScope": "Workspace data",
+  "canvases:taskPlacementScope": "Task",
+  "canvases:workspacePlacementScope": "Workspace",
   "canvases:canvasActions": "Canvas actions",
   "canvases:canvases": "Canvases",
   "canvases:openInNewTab": "Open in new tab",
@@ -45,6 +51,7 @@ vi.mock("@/components/plugins/canvas-page", () => ({ CanvasPage: () => null }));
 vi.mock("./canvas-lifecycle-dialogs", () => ({
   CanvasPromotionDialog: () => null,
   CanvasReleaseDialog: () => null,
+  CanvasWorkspaceDataDialog: () => null,
 }));
 
 import {
@@ -160,12 +167,56 @@ describe("canvas host action guidance", () => {
   });
 });
 
+describe("legacy workspace data action", () => {
+  it("offers the legacy workspace data review on desktop and mobile actions", () => {
+    const legacyCanvas = {
+      ...canvas,
+      status: "active" as const,
+      active_release_status: "valid" as const,
+    };
+    const onEnableWorkspaceData = vi.fn();
+    render(
+      <>
+        <CanvasDesktopActions
+          canvas={legacyCanvas}
+          editing={false}
+          onEdit={vi.fn()}
+          onPromote={vi.fn()}
+          onReleases={vi.fn()}
+          onShare={vi.fn()}
+          onEnableWorkspaceData={onEnableWorkspaceData}
+        />
+        <MobileCanvasActions
+          canvas={legacyCanvas}
+          canvases={[legacyCanvas]}
+          open
+          onOpenChange={vi.fn()}
+          onEdit={vi.fn()}
+          onPromote={vi.fn()}
+          onReleases={vi.fn()}
+          onShare={vi.fn()}
+          onRename={vi.fn()}
+          onEnableWorkspaceData={onEnableWorkspaceData}
+          onSelectCanvas={vi.fn()}
+          editing={false}
+        />
+      </>,
+    );
+
+    const buttons = screen.getAllByRole("button", { name: "Enable workspace data" });
+    expect(buttons).toHaveLength(2);
+    buttons.forEach((button) => fireEvent.click(button));
+    expect(onEnableWorkspaceData).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("canvas host chrome", () => {
   it("keeps state content in the body and leaves the shared header for title/actions", () => {
     render(
       <>
         <CanvasHostHeader
           title="Task canvas"
+          dataScopeLabel="Workspace data"
           isMobile={false}
           menuOpen={false}
           onOpenActions={vi.fn()}
@@ -177,6 +228,7 @@ describe("canvas host chrome", () => {
 
     expect(screen.getByTestId("canvas-host-header").textContent).toContain("Task canvas");
     expect(screen.getByTestId("canvas-host-header").textContent).toContain("Release actions");
+    expect(screen.getByTestId("canvas-data-scope").textContent).toBe("Workspace data");
     expect(screen.getByTestId("canvas-host-state").textContent).toContain("Canvas unavailable");
     expect(
       screen

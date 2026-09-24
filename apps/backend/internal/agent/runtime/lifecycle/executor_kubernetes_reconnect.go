@@ -92,7 +92,7 @@ func kubernetesRecordedInventory(
 	if err != nil {
 		return kubernetesRecordedState{}, kubeexecutor.ResourceIdentity{}, err
 	}
-	if recorded.agentctlInstanceID != identity.InstanceID {
+	if !getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) && recorded.agentctlInstanceID != identity.InstanceID {
 		return kubernetesRecordedState{}, kubeexecutor.ResourceIdentity{}, errors.New(
 			"kubernetes lifecycle: recorded agentctl instance does not match resource identity",
 		)
@@ -136,6 +136,7 @@ func kubernetesRecordedResourceIdentity(
 	validateConnectionIdentity bool,
 ) (kubeexecutor.ResourceIdentity, error) {
 	identity := kubeexecutor.ResourceIdentity{
+		TaskOwned:     getMetadataString(req.Metadata, kubeexecutor.MetadataKeyOwnershipVersion) == kubeexecutor.TaskOwnershipVersion,
 		ExecutorID:    getMetadataString(req.Metadata, MetadataKeyKubernetesResourceExecutorID),
 		ProfileID:     getMetadataString(req.Metadata, MetadataKeyKubernetesResourceProfileID),
 		InstanceID:    getMetadataString(req.Metadata, MetadataKeyKubernetesResourceInstanceID),
@@ -153,7 +154,11 @@ func kubernetesRecordedResourceIdentity(
 	if err := validateKubernetesRecordedIdentityField("task", req.TaskID, identity.TaskID); err != nil {
 		return kubeexecutor.ResourceIdentity{}, err
 	}
-	if err := validateKubernetesRecordedIdentityField("session", req.SessionID, identity.SessionID); err != nil {
+	if getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
+		if err := validateKubernetesRecordedIdentityField("environment", req.TaskEnvironmentID, identity.EnvironmentID); err != nil {
+			return kubeexecutor.ResourceIdentity{}, err
+		}
+	} else if err := validateKubernetesRecordedIdentityField("session", req.SessionID, identity.SessionID); err != nil {
 		return kubeexecutor.ResourceIdentity{}, err
 	}
 	if validateConnectionIdentity {
@@ -184,7 +189,9 @@ func kubernetesRequestWithRecordedIdentity(
 ) *ExecutorCreateRequest {
 	recorded := *req
 	recorded.TaskID = identity.TaskID
-	recorded.SessionID = identity.SessionID
+	if !getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
+		recorded.SessionID = identity.SessionID
+	}
 	recorded.TaskEnvironmentID = identity.EnvironmentID
 	return &recorded
 }
@@ -257,6 +264,9 @@ func (r *KubernetesExecutor) reconnectKubernetesAgentctl(
 	pod *corev1.Pod,
 	recorded kubernetesRecordedState,
 ) (*agentctl.Client, kubeexecutor.PortForwardSession, string, int, error) {
+	if getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
+		return r.connectSharedKubernetesAgentctl(ctx, runtime, req, pod, recorded.agentctlInstanceID)
+	}
 	if req.AuthToken == "" {
 		return nil, nil, "", 0, errors.New("kubernetes lifecycle: recorded agentctl auth token is unavailable")
 	}
@@ -297,6 +307,9 @@ func (r *KubernetesExecutor) connectRestartedKubernetesAgentctl(
 	pod *corev1.Pod,
 	remoteInstanceID string,
 ) (*agentctl.Client, kubeexecutor.PortForwardSession, string, int, error) {
+	if getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
+		return r.connectSharedKubernetesAgentctl(ctx, runtime, req, pod, remoteInstanceID)
+	}
 	controlForward, control, err := r.connectHealthyKubernetesControl(ctx, runtime, pod)
 	if err != nil {
 		return nil, nil, "", 0, err
@@ -503,7 +516,7 @@ func ValidateKubernetesResumeMetadata(
 	if _, err := kubeexecutor.ParseExecutorConfig(executorConfigValues); err != nil {
 		return fmt.Errorf("kubernetes lifecycle: validate current executor config: %w", err)
 	}
-	req := &ExecutorCreateRequest{TaskID: taskID, SessionID: sessionID, Metadata: metadata}
+	req := &ExecutorCreateRequest{TaskID: taskID, SessionID: sessionID, TaskEnvironmentID: getMetadataString(metadata, MetadataKeyKubernetesResourceEnvironmentID), Metadata: metadata}
 	recorded, _, err := kubernetesRecordedInventory(req, true)
 	if err != nil {
 		return err

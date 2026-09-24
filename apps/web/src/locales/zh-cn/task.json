@@ -1293,7 +1293,6 @@
   "wipQueueConfigure": "配置工作流 WIP 限制",
   "wipQueueUnavailable": "工作流 WIP 详情不可用。",
   "wipQueueConfigurationUnavailable": "工作流配置链接不可用。",
-  "parkedSessionNote": "此会话已为工作流暂停。打开它不会恢复会话。发送消息即可在此继续。",
   "quorumAwaiting": "正在等待 {{role}} 的 {{received}}/{{required}} 项决定",
   "quorumStuck": "受阻",
   "quorumStuckPendingReevaluation": "受阻：没有活动会话可重新评估此步骤",
@@ -2379,5 +2378,6 @@
   "bulkColorSaving": "正在保存颜色...",
   "bulkColorAutomaticHint": "自动规则可能覆盖显示的颜色。",
   "bulkColorTitle_other": "为 {{count}} 个任务设置颜色",
-  "bulkColorTitle_one": "为 {{count}} 个任务设置颜色"
+  "bulkColorTitle_one": "为 {{count}} 个任务设置颜色",
+  "editorActions": "编辑器和文件夹操作"
 }

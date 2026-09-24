@@ -1360,7 +1360,6 @@
   "wipQueueConfigure": "Ćōńƒĩĝũŕē ŵōŕķƒĺōŵ ŴĨƤ ĺĩḿĩţ",
   "wipQueueUnavailable": "Ŵōŕķƒĺōŵ ŴĨƤ ďēţàĩĺś àŕē ũńàvàĩĺàƀĺē.",
   "wipQueueConfigurationUnavailable": "Ţĥē ŵōŕķƒĺōŵ ćōńƒĩĝũŕàţĩōń ĺĩńķ ĩś ũńàvàĩĺàƀĺē.",
-  "parkedSessionNote": "Ţĥĩś śēśśĩōń ĩś ƥàŕķēď ƒōŕ ţĥē ŵōŕķƒĺōŵ. Ōƥēńĩńĝ ĩţ ďōēś ńōţ ŕēśũḿē ĩţ. Śēńď à ḿēśśàĝē ţō ćōńţĩńũē ĥēŕē.",
   "quorumAwaiting": "Àŵàĩţĩńĝ {{received}} ōƒ {{required}} {{role}} ďēćĩśĩōńś",
   "quorumStuck": "Śţũćķ",
   "quorumStuckPendingReevaluation": "Ɓĺōćķēď: ńō àćţĩvē śēśśĩōń ţō ŕē-ēvàĺũàţē ţĥĩś śţēƥ",
@@ -2379,5 +2378,6 @@
   "bulkColorSaving": "Śàvĩńĝ ćōĺōŕś...",
   "bulkColorAutomaticHint": "Àũţōḿàţĩć ŕũĺēś ḿàŷ ōvēŕŕĩďē ţĥē vĩśĩƀĺē ćōĺōŕ.",
   "bulkColorTitle_one": "Ćōĺōŕ ƒōŕ {{count}} ţàśķ",
-  "bulkColorTitle_other": "Ćōĺōŕ ƒōŕ {{count}} ţàśķś"
+  "bulkColorTitle_other": "Ćōĺōŕ ƒōŕ {{count}} ţàśķś",
+  "editorActions": "Ēďĩţōŕ àńď ƒōĺďēŕ àćţĩōńś"
 }

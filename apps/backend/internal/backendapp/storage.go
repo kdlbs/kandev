@@ -83,6 +83,9 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 	if err := recordRequiredStore(ctx, tracker, "schema-meta", nil); err != nil {
 		return nil, nil, nil, err
 	}
+	if taskRepoErr == nil {
+		taskRepoErr = taskRepoImpl.RecoverInterruptedKubernetesOperations(ctx)
+	}
 	if err := recordRequiredStore(ctx, tracker, "task", taskRepoErr); err != nil {
 		return nil, nil, nil, fmt.Errorf("task store: %w", err)
 	}

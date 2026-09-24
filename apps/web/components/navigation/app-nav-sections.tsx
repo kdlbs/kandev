@@ -17,7 +17,10 @@ import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-s
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
 import { DestinationRows } from "@/components/navigation/destination-rows";
-import { MobilePluginNavSection } from "@/components/plugins/mobile-plugin-nav-section";
+import {
+  MobilePluginNavSection,
+  type MobilePluginWorkspaceContext,
+} from "@/components/plugins/mobile-plugin-nav-section";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
 import { useTheme } from "@/components/theme/app-theme";
 import { getThemeToggleLabelKey, getThemeToggleTarget } from "@/components/theme/theme-toggle";
@@ -126,6 +129,8 @@ type AppNavSectionsProps = {
   workspaceActions?: ReactNode;
   /** Optional page-scoped controls rendered with plugin destinations. */
   pluginActions?: ReactNode;
+  pluginWorkspaceContext?: MobilePluginWorkspaceContext;
+  resources?: ReactNode;
   afterPrimary?: ReactNode;
   quickActions?: ReactNode;
   phoneNavigation?: boolean;
@@ -144,6 +149,8 @@ export function AppNavSections({
   omitDestinations = [],
   workspaceActions,
   pluginActions,
+  pluginWorkspaceContext,
+  resources,
   afterPrimary,
   quickActions,
   phoneNavigation = false,
@@ -161,6 +168,7 @@ export function AppNavSections({
           omitDestinations={omitDestinations}
           quickActions={quickActions}
           homeCoversListings={phoneNavigation}
+          afterPrimary={afterPrimary}
         />
       ) : (
         !omit.has("primary") && (
@@ -182,11 +190,12 @@ export function AppNavSections({
           {t("sidebar:taskViews")}
         </Button>
       )}
-      {afterPrimary}
+      {!hasSavedSidebarLayout && afterPrimary}
       {workspaceActions}
       {!omit.has("plugins") && (
         <MobilePluginNavSection
           actions={pluginActions}
+          workspaceContext={pluginWorkspaceContext}
           includeDestinations={!hasSavedSidebarLayout}
           onNavigate={onNavigate}
         />
@@ -198,6 +207,7 @@ export function AppNavSections({
           collapsible={phoneNavigation}
         />
       )}
+      {resources}
       <UtilityNavSection
         onNavigate={onNavigate}
         controls={controls}
@@ -222,12 +232,15 @@ function PrimaryNavSection({
   const destinations = all.filter((destination) => !omitDestinations.includes(destination.id));
   if (destinations.length === 0) return null;
   return (
-    <div className="flex flex-col gap-3" data-testid="app-nav-primary">
+    <div
+      className={cn("flex flex-col", phoneNavigation ? "gap-2" : "gap-3")}
+      data-testid="app-nav-primary"
+    >
       <DestinationRows
         destinations={destinations}
         onNavigate={onNavigate}
         homeCoversListings={phoneNavigation}
-        className="gap-3 px-3 text-sm"
+        className="gap-3 px-3 text-sm aria-[current=page]:bg-primary/10"
       />
       {quickActions}
     </div>

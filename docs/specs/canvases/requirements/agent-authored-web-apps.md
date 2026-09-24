@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-08-26
-last_updated: 2026-09-21
+last_updated: 2026-09-23
 ---
 
 # Agent-authored web-app canvases Requirements
@@ -15,7 +15,8 @@ last_updated: 2026-09-21
 
 A canvas is a custom web application that an agent creates for one task. A
 user can promote a useful task canvas to its workspace. A workspace canvas
-appears in workspace navigation and can use workspace-scoped data.
+appears in workspace navigation. An owner-authorized task canvas can already
+use its workspace's data while the user reviews it in the originating task.
 
 The Canvases system owns the canvas scope, source lineage, release selection,
 promotion, editing flow, and discovery. The Plugins system owns the web-application
@@ -24,13 +25,13 @@ runtime and its data contract.
 ## Terminology
 
 - **Task canvas:** A canvas that belongs to one task and appears only in that
-  task.
+  task. Its placement does not determine its approved data scope.
 - **Workspace canvas:** A canvas that belongs to one workspace and appears in
   workspace navigation. Agent-authored canvases reach this scope by promotion;
   [distribution](marketplace-sharing.md) also defines reviewed package installs.
 - **Draft:** Editable canvas source in an authorized agent workspace.
 - **Release:** An immutable package that passed validation.
-- **Promotion:** A user action that changes a task canvas to workspace scope.
+- **Promotion:** A user action that changes a task canvas to workspace placement.
 
 ## Requirements
 
@@ -120,8 +121,8 @@ browser session end.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-003: User-controlled promotion
 
-**Intent:** A useful task canvas becomes a workspace application only after a
-user reviews its scope and permissions.
+**Intent:** A useful task canvas becomes available in workspace navigation only
+after a user reviews its placement and permissions.
 
 **User story:** As a user, I want to promote a useful task canvas, so that I
 can open it from the workspace sidebar.
@@ -132,7 +133,8 @@ can open it from the workspace sidebar.
   system shall show the requested data, write, event, state, and network
   permissions before confirmation.
 - **AC-CANVASES-AGENT-WEB-APPS-003.2:** When the user confirms promotion, the
-  same canvas identity and active release shall change to workspace scope.
+  same canvas identity and active release shall change to workspace placement.
+  A release that already has workspace data access shall keep that access.
 - **AC-CANVASES-AGENT-WEB-APPS-003.3:** When promotion completes, the canvas
   shall appear in navigation for that workspace only.
 - **AC-CANVASES-AGENT-WEB-APPS-003.4:** An agent shall not promote, demote, or
@@ -342,6 +344,7 @@ including missing references, lookup failures, and passthrough exclusions.
 
 - [Canvas runtime and task-entry recovery](../../../plans/canvas-runtime-entry-recovery/plan.md)
 - [Direct canvas creation and saved prompt](../../../plans/canvas-direct-creation/plan.md)
+- [Task canvas workspace data preview](../../../plans/task-canvas-workspace-preview/plan.md)
 
 ## Out of scope
 

@@ -53,7 +53,18 @@ Kandev validates the package before it stores or runs the release. An invalid dr
 
 ## Use a canvas
 
-A task canvas belongs to one task. A workspace canvas appears in workspace navigation and uses workspace scope. Promotion changes the same canvas from task scope to workspace scope. It does not copy the canvas.
+A task canvas stays in its creating task until promotion. After the first valid
+release, a new owner-authorized task canvas can use its declared supported
+permissions across the current workspace. This lets the app preview the full
+workspace task list before it appears in workspace navigation. Imported and
+older task canvases keep their existing data scope until an authorized review
+widens it.
+
+A workspace canvas appears in workspace navigation. Promotion changes the
+canvas placement and keeps its identity, active release, state, and release
+history. For a new canvas that already has workspace data access, promotion
+changes placement only. The host review identifies whether it changes data
+access for a legacy canvas.
 
 The app uses relative requests such as `./_kandev/v1/data/tasks` and `./_kandev/v1/state`. Kandev remains the source of truth for task, workflow, and message data. Canvas state stores app-specific shared state. It does not replace Kandev domain data.
 
@@ -115,7 +126,7 @@ and **Releases and permissions** outside the failed frame. Retry creates a new
 runtime binding and startup attempt. This check confirms document and context
 startup; it does not certify application business health.
 
-Kandev calculates effective access from the package declaration, instance grant, trusted task or workspace scope, and current caller authorization. A release receives only the intersection of those permissions. See [Security and trust](security.md#isolated-web-applications) for the security boundary.
+Kandev calculates effective access from the package declaration, instance grant, trusted data scope, and current caller authorization. A release receives only the intersection of those permissions. See [Security and trust](security.md#isolated-web-applications) for the security boundary.
 
 ### Return to a task after publication
 
@@ -136,13 +147,17 @@ Only a user can promote a task canvas. An agent cannot promote, demote, grant pe
 1. Open the task canvas and choose its promotion action.
 2. Read the review dialog before you continue.
 3. Review every Kandev data read and write, event subscription, shared-state permission, and exact external HTTPS origin.
-4. Confirm the task-to-workspace scope change and workspace placement.
+4. Confirm the placement change to workspace navigation.
 
 The confirmation includes the active release ID, permission declaration
 digest, and grant generation that you reviewed. If any of these changes before
 confirmation, Kandev rejects the request as stale and requires a new review.
 
-The promotion keeps the canvas identity, active release, state, and release history. A workspace canvas then appears in workspace navigation. Canceling the review leaves the task canvas unchanged.
+The promotion keeps the canvas identity, active release, state, and release
+history. A workspace canvas then appears in workspace navigation. A new
+owner-authorized task canvas already has workspace data access, so promotion
+changes placement only. A legacy task canvas uses the permission review shown
+by its host. Canceling the review leaves the task canvas unchanged.
 
 If promotion adds a permission, Kandev keeps the current active release until a user approves the new grant. The new release stays pending permission until that review finishes.
 
@@ -193,7 +208,7 @@ Use these recovery actions:
 - Roll back to the retained prior release after a failed publish.
 - Restore the database and matching artifact directory after a storage loss. See [Canvas artifacts and recovery](operations.md#canvas-artifacts-and-recovery).
 - Archive a canvas to hide it from normal discovery. Restore it from the canvas controls.
-- Remove a task canvas to remove its task-scoped data. Removing a task does not remove a canvas already promoted to a workspace.
+- Remove a task canvas to remove the canvas and its data. Removing a task does not remove a canvas already promoted to a workspace.
 - Remove a workspace canvas to remove its grants, state, tokens, releases, and artifacts after cleanup completes.
 
 Kandev records artifact cleanup before it removes release ownership. A worker completes cleanup after the database transaction and retries it after a restart.

@@ -119,7 +119,11 @@ func dependencyRedactionScopeFromBinding(binding webapp.CapabilityBinding, direc
 	for _, id := range directlyReadableIDs {
 		ids[id] = struct{}{}
 	}
-	return dependencyRedactionScope{kind: binding.ScopeKind, workspaceID: binding.WorkspaceID, directlyReadableIDs: ids}
+	return dependencyRedactionScope{
+		kind:                instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind),
+		workspaceID:         binding.WorkspaceID,
+		directlyReadableIDs: ids,
+	}
 }
 
 // admits reports whether ref may be disclosed as a directly readable task

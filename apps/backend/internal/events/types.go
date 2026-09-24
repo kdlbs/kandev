@@ -41,6 +41,7 @@ const (
 	CanvasReleaseActivated          = "canvas.release.activated"
 	CanvasReleasePermissionRequired = "canvas.release.permission_required"
 	CanvasPromoted                  = "canvas.promoted"
+	CanvasWorkspaceDataEnabled      = "canvas.workspace_data_enabled"
 	CanvasArchived                  = "canvas.archived"
 	CanvasRestored                  = "canvas.restored"
 	CanvasRemoved                   = "canvas.removed"
