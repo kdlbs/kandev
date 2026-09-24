@@ -2,7 +2,11 @@ import { type Page } from "@playwright/test";
 import { expect } from "../fixtures/test-base";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
-import { waitForActiveSessionForegroundActivity } from "./session-store";
+import { waitForLatestSessionDone } from "./session";
+import {
+  waitForActiveSessionForegroundActivity,
+  waitForSessionAgentctlReady,
+} from "./session-store";
 import { SessionPage } from "../pages/session-page";
 
 export interface SeedRunningGeneratingSessionOptions {
@@ -40,13 +44,21 @@ export async function seedRunningGeneratingSession(
       repository_ids: [seedData.repositoryId],
     },
   );
+  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+  await waitForLatestSessionDone(
+    apiClient,
+    task.id,
+    1,
+    "the initial task prompt should finish before seeding a generating turn",
+    60_000,
+  );
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
+  await waitForSessionAgentctlReady(testPage, task.session_id);
   await session.waitForChatIdle({ timeout: 30_000 });
   await session.sendMessage(predecessorPrompt ?? `/sleep ${sleepSeconds}`);
   await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
   await waitForActiveSessionForegroundActivity(testPage, "generating");
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
   return { session, taskId: task.id, sessionId: task.session_id };
 }
