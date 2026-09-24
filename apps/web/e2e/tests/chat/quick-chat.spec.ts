@@ -833,6 +833,49 @@ test.describe("Quick Chat", () => {
     });
 
     await backend.restart();
+
+    // The restored tab can become visible before the backend has persisted
+    // the ACP catalog. Wait for the durable session metadata before reloading
+    // the shell, so the reload hydrates the same state that the backend owns.
+    const readPersistedModelCatalog = async () => {
+      const { sessions } = await apiClient.listTaskSessions(started.task_id);
+      const rawState = sessions.find((session) => session.id === started.session_id)?.metadata
+        ?.acp_model_state;
+      if (!rawState || typeof rawState !== "object") {
+        return { currentModelId: "", configOptionIds: [] as string[] };
+      }
+      const modelState = rawState as {
+        current_model_id?: unknown;
+        config_options?: unknown;
+      };
+      const configOptionIds = Array.isArray(modelState.config_options)
+        ? modelState.config_options.flatMap((option) => {
+            if (
+              !option ||
+              typeof option !== "object" ||
+              !("id" in option) ||
+              typeof option.id !== "string"
+            ) {
+              return [];
+            }
+            return [option.id];
+          })
+        : [];
+      return {
+        currentModelId:
+          typeof modelState.current_model_id === "string" ? modelState.current_model_id : "",
+        configOptionIds,
+      };
+    };
+    await expect
+      .poll(readPersistedModelCatalog, {
+        timeout: 60_000,
+        message: "restored session model catalog was not persisted",
+      })
+      .toMatchObject({
+        currentModelId: "mock-fast",
+        configOptionIds: expect.arrayContaining(["effort"]),
+      });
     await testPage.reload();
     await testPage.waitForLoadState("networkidle");
 

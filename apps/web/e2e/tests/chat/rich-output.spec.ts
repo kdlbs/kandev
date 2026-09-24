@@ -33,9 +33,17 @@ test("renders and persists native rich output with an explicit file preview", as
   await expect(lineChart.locator(".recharts-line-curve")).toHaveAttribute("stroke-dasharray", /\d/);
   await expect(lineChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(lineChart.locator(".recharts-xAxis")).toContainText("Aug 12");
-  await barChart.scrollIntoViewIfNeeded();
-  await waitForFiniteAnimations(barChart);
-  await expect(barChart.locator("svg")).toBeVisible({ timeout: 30_000 });
+  // The chart plot is mounted by an IntersectionObserver. Re-issue the
+  // scroll while waiting so the observer sees the chart after its effect
+  // attaches, even when the first scroll happens during initial render.
+  await expect(async () => {
+    await barChart.scrollIntoViewIfNeeded();
+    await barChart.evaluate((element) =>
+      element.scrollIntoView({ block: "center", inline: "nearest" }),
+    );
+    await waitForFiniteAnimations(barChart);
+    await expect(barChart.locator("svg")).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
   await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible({ timeout: 30_000 });
   await expect(barChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(barChart.locator(".recharts-xAxis")).toContainText("/api");
