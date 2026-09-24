@@ -164,6 +164,23 @@ func TestArchiveManifestFileDigestRejectsSymlink(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.6
+func TestArchiveManifestRejectsSymlinkedPathAncestor(t *testing.T) {
+	root := t.TempDir()
+	foreign := t.TempDir()
+	if err := os.Symlink("outside-target", filepath.Join(foreign, "secret-link")); err != nil {
+		t.Skipf("symlink creation is unavailable: %v", err)
+	}
+	if err := os.Symlink(foreign, filepath.Join(root, "cache")); err != nil {
+		t.Skipf("symlink creation is unavailable: %v", err)
+	}
+	// The status was captured before cache was replaced by a symlink.
+	_, err := archiveSourceManifestEntries(root, "?? cache/secret-link\x00")
+	if err == nil {
+		t.Fatal("archive source manifest captured a path through a symlinked ancestor")
+	}
+}
+
 // @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.3
 func TestArchiveManifestHandlesDeletedRenameDestination(t *testing.T) {
 	root := t.TempDir()

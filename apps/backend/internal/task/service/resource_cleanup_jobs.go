@@ -255,9 +255,9 @@ func (s *Service) captureArchiveSourceManifest(
 	return manifests, nil
 }
 
-// GetTaskSourceManifest returns durable archive/delete evidence. Authorization
-// derives from the persisted workspace identity so delete evidence remains
-// readable after its task row has been removed.
+// GetTaskSourceManifest returns every retained archive/delete evidence
+// generation after authorizing each generation's persisted workspace identity.
+// This keeps delete evidence readable after its task row has been removed.
 func (s *Service) GetTaskSourceManifest(ctx context.Context, taskID string) ([]ArchiveSourceManifest, error) {
 	inspector, ok := s.resourceCleanups.(taskResourceCleanupTaskInspector)
 	if !ok {

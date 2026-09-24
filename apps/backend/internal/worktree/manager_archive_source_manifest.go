@@ -209,6 +209,15 @@ func archiveSourceManifestPath(root, path string) error {
 
 func archiveSourceManifestDigest(root, path string) (string, error) {
 	fullPath := filepath.Join(root, path)
+	parent := filepath.Dir(fullPath)
+	handle, err := openArchiveSourceDirectory(filepath.Dir(root), parent)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = handle.Close() }()
+	if err := handle.VerifyPath(parent); err != nil {
+		return "", err
+	}
 	info, err := os.Lstat(fullPath)
 	if err != nil {
 		return "", err
@@ -218,6 +227,9 @@ func archiveSourceManifestDigest(root, path string) (string, error) {
 		if readErr != nil {
 			return "", readErr
 		}
+		if err := handle.VerifyPath(parent); err != nil {
+			return "", err
+		}
 		sum := sha256.Sum256([]byte("symlink:\x00" + target))
 		return fmt.Sprintf("%x", sum), nil
 	}
@@ -225,9 +237,24 @@ func archiveSourceManifestDigest(root, path string) (string, error) {
 		if !info.IsDir() {
 			return "", fmt.Errorf("source path is not a regular file or directory")
 		}
-		return archiveSourceManifestDirectoryDigest(fullPath)
+		digest, err := archiveSourceManifestDirectoryDigest(fullPath)
+		if err != nil {
+			return "", err
+		}
+		if err := handle.VerifyPath(parent); err != nil {
+			return "", err
+		}
+		return digest, nil
 	}
-	return archiveSourceManifestFileDigest(root, fullPath)
+	f, err := handle.OpenFile(filepath.Base(fullPath))
+	if err != nil {
+		return "", err
+	}
+	digest, err := archiveSourceManifestReadDigest(f)
+	if verifyErr := handle.VerifyPath(parent); err == nil && verifyErr != nil {
+		err = verifyErr
+	}
+	return digest, err
 }
 
 func archiveSourceManifestDirectoryDigest(root string) (string, error) {
@@ -271,6 +298,15 @@ func archiveSourceManifestDirectoryEntry(h io.Writer, root, path string) error {
 	if err != nil {
 		return err
 	}
+	parent := filepath.Dir(path)
+	handle, err := openArchiveSourceDirectory(filepath.Dir(root), parent)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = handle.Close() }()
+	if err := handle.VerifyPath(parent); err != nil {
+		return err
+	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return err
@@ -282,12 +318,22 @@ func archiveSourceManifestDirectoryEntry(h io.Writer, root, path string) error {
 		if err != nil {
 			return err
 		}
+		if err := handle.VerifyPath(parent); err != nil {
+			return err
+		}
 		_, _ = io.WriteString(h, "symlink:\x00"+target+"\x00")
 	case info.IsDir():
 		_, _ = io.WriteString(h, "directory\x00")
 	case info.Mode().IsRegular():
-		digest, err := archiveSourceManifestFileDigest(root, path)
+		f, err := handle.OpenFile(filepath.Base(path))
 		if err != nil {
+			return err
+		}
+		digest, err := archiveSourceManifestReadDigest(f)
+		if err != nil {
+			return err
+		}
+		if err := handle.VerifyPath(parent); err != nil {
 			return err
 		}
 		_, _ = io.WriteString(h, "file:\x00"+digest+"\x00")
@@ -300,7 +346,7 @@ func archiveSourceManifestDirectoryEntry(h io.Writer, root, path string) error {
 func archiveSourceManifestFileDigest(root, path string) (string, error) {
 	parent := filepath.Clean(filepath.Dir(path))
 	parentRoot := filepath.Clean(filepath.Dir(root))
-	handle, err := storageworkspaces.OpenDirectoryNoFollow(parentRoot, parent)
+	handle, err := openArchiveSourceDirectory(parentRoot, parent)
 	if err != nil {
 		return "", err
 	}
@@ -309,6 +355,14 @@ func archiveSourceManifestFileDigest(root, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return archiveSourceManifestReadDigest(f)
+}
+
+func openArchiveSourceDirectory(root, target string) (storageworkspaces.DirectoryHandle, error) {
+	return storageworkspaces.OpenDirectoryNoFollow(root, target)
+}
+
+func archiveSourceManifestReadDigest(f io.ReadCloser) (string, error) {
 	h := sha256.New()
 	_, copyErr := io.Copy(h, f)
 	closeErr := f.Close()
