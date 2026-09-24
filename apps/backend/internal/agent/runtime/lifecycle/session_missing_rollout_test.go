@@ -55,6 +55,32 @@ func TestIsMissingProviderRolloutErrRequiresMatchingStructuredEvidence(t *testin
 				`{"code":-32603,"message":"Internal error","data":{"details":"no rollout found for thread id saved-session"}} trailing`,
 			),
 		},
+		{
+			name: "matching auggie session not found error",
+			err: fmt.Errorf("load failed: %w", &acp.RequestError{
+				Code:    -32602,
+				Message: "Invalid params",
+				Data: map[string]any{
+					"details": "Session not found: saved-session",
+				},
+			}),
+			want: true,
+		},
+		{
+			name: "matching auggie session not found in json string",
+			err: errors.New(
+				`load session failed: failed to load session: {"code":-32602,"message":"Invalid params","data":{"details":"Session not found: saved-session"}}`,
+			),
+			want: true,
+		},
+		{
+			name: "auggie session not found for different session",
+			err: &acp.RequestError{
+				Code:    -32602,
+				Message: "Invalid params",
+				Data:    map[string]any{"details": "Session not found: other-session"},
+			},
+		},
 	}
 
 	for _, test := range tests {

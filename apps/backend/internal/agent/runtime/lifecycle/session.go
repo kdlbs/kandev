@@ -1893,7 +1893,8 @@ func isSessionUnknownErr(err error) bool {
 	// structured RequestError. Match only the canonical projected phrase; a
 	// broader substring would discard an unrelated internal error that happens
 	// to mention a missing resource.
-	return hasCanonicalSessionLoadMessage(err, "Resource not found")
+	return hasCanonicalSessionLoadMessage(err, "Resource not found") ||
+		hasCanonicalSessionLoadMessage(err, "Session not found")
 }
 
 // isSessionLoadFallbackErr reports the small set of session/load failures for
@@ -1910,12 +1911,15 @@ func isSessionLoadFallbackErr(err error, expectedSessionID string) bool {
 	}
 	return hasCanonicalSessionLoadMessage(err, "Method not found") ||
 		hasCanonicalSessionLoadMessage(err, "agent does not support session loading (LoadSession capability is false)") ||
-		hasCanonicalSessionLoadMessage(err, "Resource not found")
+		hasCanonicalSessionLoadMessage(err, "Resource not found") ||
+		hasCanonicalSessionLoadMessage(err, "Session not found")
 }
 
 const (
 	jsonRPCInternalError         = -32603
+	jsonRPCInvalidParams         = -32602
 	missingProviderRolloutPrefix = "no rollout found for thread id "
+	missingProviderSessionPrefix = "Session not found: "
 )
 
 type sessionLoadRequestError struct {
@@ -1927,8 +1931,9 @@ type sessionLoadRequestError struct {
 }
 
 // isMissingProviderRolloutErr recognizes Codex's explicit not-found response
-// after its process-local rollout state disappeared. The session ID must match
-// the one Kandev attempted to load; unrelated internal errors remain fatal.
+// after its process-local rollout state disappeared and Auggie's session not
+// found error. The session ID must match the one Kandev attempted to load;
+// unrelated internal errors remain fatal.
 func isMissingProviderRolloutErr(err error, expectedSessionID string) bool {
 	if err == nil || strings.TrimSpace(expectedSessionID) == "" {
 		return false
@@ -1960,9 +1965,17 @@ func matchesMissingProviderRollout(encoded []byte, expectedSessionID string) boo
 	if err := json.Unmarshal(encoded, &projected); err != nil {
 		return false
 	}
-	return projected.Code == jsonRPCInternalError &&
+	if projected.Code == jsonRPCInternalError &&
 		projected.Message == "Internal error" &&
-		projected.Data.Details == missingProviderRolloutPrefix+expectedSessionID
+		projected.Data.Details == missingProviderRolloutPrefix+expectedSessionID {
+		return true
+	}
+	if projected.Code == jsonRPCInvalidParams &&
+		projected.Message == "Invalid params" &&
+		strings.EqualFold(projected.Data.Details, missingProviderSessionPrefix+expectedSessionID) {
+		return true
+	}
+	return false
 }
 
 func hasCanonicalSessionLoadMessage(err error, canonical string) bool {
