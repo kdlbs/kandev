@@ -1360,7 +1360,6 @@
   "wipQueueConfigure": "Configure workflow WIP limit",
   "wipQueueUnavailable": "Workflow WIP details are unavailable.",
   "wipQueueConfigurationUnavailable": "The workflow configuration link is unavailable.",
-  "parkedSessionNote": "This session is parked for the workflow. Opening it does not resume it. Send a message to continue here.",
   "quorumAwaiting": "Awaiting {{received}} of {{required}} {{role}} decisions",
   "quorumStuck": "Stuck",
   "quorumStuckPendingReevaluation": "Blocked: no active session to re-evaluate this step",

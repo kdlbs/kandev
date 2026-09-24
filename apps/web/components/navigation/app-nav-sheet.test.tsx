@@ -108,6 +108,12 @@ vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
   }),
 }));
 
+vi.mock("@/components/system-metrics/status-surface-metrics", () => ({
+  StatusSurfaceMetrics: ({ drawerOpen }: { drawerOpen: boolean }) => (
+    <div role="region" aria-label="System metrics" data-open={drawerOpen} />
+  ),
+}));
+
 vi.mock("@/hooks/use-system-health-indicator", () => ({
   useSystemHealthIndicator: () => ({
     hasIssues: healthHasIssues,
@@ -290,7 +296,36 @@ describe("AppNavSheet", () => {
     fireEvent.click(screen.getByTestId(NAV_TRIGGER));
 
     expect(screen.getByTestId("mobile-workspace-action")).not.toBeNull();
-    expect(captured).toEqual({ workspaceId: "ws-1", presentation: "mobile" });
+    expect(
+      screen
+        .getByRole("region", { name: "Plugins" })
+        .contains(screen.getByTestId("mobile-workspace-action")),
+    ).toBe(true);
+    expect(captured).toEqual({
+      workspaceId: "ws-1",
+      workspaceLabel: "Workspace",
+      presentation: "mobile",
+    });
+  });
+});
+
+describe("AppNavSheet metrics", () => {
+  beforeEach(resetAppNavMocks);
+  afterEach(cleanup);
+
+  it.each([false, true])("respects app status bar enabled = %s", (enabled) => {
+    state.userSettings.appStatusBarEnabled = enabled;
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+
+    expect(screen.queryAllByRole("region", { name: "System metrics" })).toHaveLength(
+      enabled ? 0 : 1,
+    );
+    if (!enabled) {
+      expect(screen.getByRole("region", { name: "System metrics" }).getAttribute("data-open")).toBe(
+        "true",
+      );
+    }
   });
 });
 
@@ -306,7 +341,7 @@ describe("AppNavSheet plugin actions", () => {
     );
     fireEvent.click(screen.getByTestId(NAV_TRIGGER));
 
-    const section = screen.getByTestId("mobile-plugin-nav-section");
+    const section = screen.getByRole("region", { name: "Plugins" });
     expect(section.contains(screen.getByTestId("session-plugin-action"))).toBe(true);
     expect(screen.getAllByText("Plugins")).toHaveLength(1);
   });

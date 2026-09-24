@@ -82,7 +82,7 @@ func effectiveGrantProjection(instance plugininstances.Instance, summary Permiss
 	declared := permissionKeys(summary)
 	result := make([]GrantProjection, 0, len(grants))
 	for _, grant := range grants {
-		if !grantScopeCovers(grant.ScopeCeiling, instance.ScopeKind) {
+		if !grantScopeCovers(grant.ScopeCeiling, instance.EffectiveDataScopeKind()) {
 			continue
 		}
 		permission := grant.PermissionKind + ":" + grant.Resource

@@ -1293,7 +1293,6 @@
   "wipQueueConfigure": "設定工作流程 WIP 限制",
   "wipQueueUnavailable": "工作流程 WIP 詳情不可用。",
   "wipQueueConfigurationUnavailable": "工作流程設定連結不可用。",
-  "parkedSessionNote": "此工作階段已為工作流程暫停。開啟它不會恢復工作階段。傳送訊息即可在此繼續。",
   "quorumAwaiting": "正在等待 {{role}} 的 {{received}}/{{required}} 項決定",
   "quorumStuck": "受阻",
   "quorumStuckPendingReevaluation": "受阻：沒有活動工作階段可重新評估此步驟",

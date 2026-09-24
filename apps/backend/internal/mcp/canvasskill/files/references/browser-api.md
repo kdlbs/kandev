@@ -24,6 +24,7 @@ show a retry state for transient reads.
   "web_app_key": "main",
   "placement": "task-canvas",
   "scope_kind": "task",
+  "data_scope_kind": "workspace",
   "workspace_id": "workspace-id",
   "task_id": "task-id",
   "session_id": "session-id",
@@ -34,7 +35,9 @@ show a retry state for transient reads.
 
 Scope identifiers are omitted when they do not apply. `capabilities` contains
 the effective, approved permission keys. It is not a replacement for handling
-permission errors from later requests.
+permission errors from later requests. `scope_kind` describes canvas placement
+and lifecycle. `data_scope_kind` describes the Kandev data boundary. A task
+canvas can have `scope_kind: "task"` and `data_scope_kind: "workspace"`.
 
 ## Data routes
 
@@ -51,9 +54,11 @@ All data responses use JSON. Collection responses use this envelope:
 and accepts any value from 1 to 200. Unlike the gRPC Host API, this surface
 does not clamp an out-of-range `limit` into that window: a supplied value
 outside 1..200 is rejected outright with HTTP 400 `invalid_request`, and only
-an omitted `limit` falls back to the 50-row default. A task-scoped canvas is
-restricted to its task. A workspace-scoped canvas is restricted to its
-workspace.
+an omitted `limit` falls back to the 50-row default. Task data scope returns
+only the bound task. Workspace data scope returns tasks from the instance's
+trusted workspace, including when the canvas is still placed in one task. A
+`workspace_id` filter must match that workspace; another workspace is denied.
+Follow `page_info.next_cursor` until it is omitted to load every page.
 
 | Method | Route | Permission | Use |
 | --- | --- | --- | --- |

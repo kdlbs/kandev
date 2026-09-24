@@ -1474,6 +1474,19 @@ func (m *Manager) persistRuntimeSecretResult(
 	if instance == nil || execution == nil || m.secretStore == nil {
 		return false, errors.New("runtime secret persistence is unavailable")
 	}
+	if getMetadataBool(instance.Metadata, metadataKubernetesTaskOwned) {
+		// The shared control connection owns token rotation. A session snapshot
+		// must not overwrite a newer token published by a sibling refresh.
+		secretID := getMetadataString(instance.Metadata, metadataKey)
+		if secretID == "" {
+			return false, errors.New("kubernetes environment secret reference is missing")
+		}
+		if _, err := m.secretStore.Reveal(ctx, secretID); err != nil {
+			return false, err
+		}
+		execution.setMetadataValue(metadataKey, secretID)
+		return false, nil
+	}
 	secretID := execution.metadataString(metadataKey)
 	if secretID == "" {
 		resourceInstanceID := execution.metadataString(MetadataKeyKubernetesResourceInstanceID)
@@ -1535,6 +1548,9 @@ func (m *Manager) deleteCreatedRuntimeSecrets(
 }
 
 func (m *Manager) deleteKubernetesRuntimeSecrets(ctx context.Context, metadata map[string]interface{}) error {
+	if getMetadataBool(metadata, metadataKubernetesTaskOwned) {
+		return nil
+	}
 	secretIDs := kubernetesRuntimeSecretIDs(metadata)
 	if secretIDs[0] == "" && secretIDs[1] == "" {
 		return nil

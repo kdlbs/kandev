@@ -10,6 +10,8 @@ export function CanvasHostFrame({
   embedded,
   isMobile,
   title,
+  mobileTitleSlot,
+  dataScopeLabel,
   menuOpen,
   setMenuOpen,
   desktopActions,
@@ -25,6 +27,8 @@ export function CanvasHostFrame({
   embedded: boolean;
   isMobile: boolean;
   title: string;
+  mobileTitleSlot?: ReactNode;
+  dataScopeLabel?: string;
   menuOpen: boolean;
   setMenuOpen: (open: boolean) => void;
   desktopActions: ReactNode;
@@ -43,6 +47,7 @@ export function CanvasHostFrame({
       <PanelRoot data-testid="canvas-host-panel">
         <CanvasHostHeader
           title={title}
+          dataScopeLabel={dataScopeLabel}
           isMobile={isMobile}
           menuOpen={menuOpen}
           onOpenActions={() => setMenuOpen(true)}
@@ -61,13 +66,16 @@ export function CanvasHostFrame({
     <PageShell
       title={title}
       titleSlot={
-        !isMobile ? (
+        isMobile ? (
+          mobileTitleSlot
+        ) : (
           <span className="flex min-w-0 items-center gap-1">
             <span className="truncate text-sm font-medium">{title}</span>
             {renameAction}
           </span>
-        ) : undefined
+        )
       }
+      subtitle={isMobile ? undefined : dataScopeLabel}
       backHref="/"
       backLabel={t("sidebar:home")}
       scroll="none"

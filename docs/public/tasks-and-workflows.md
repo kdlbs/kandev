@@ -677,7 +677,11 @@ The session limit is off by default. Manual **Start**, **Resume**, or sending a 
 
 If session capacity blocks a start, Kandev keeps the selected destination and retries automatically. See [Agents and profiles](agents-and-profiles.md) for profile compatibility and recovery.
 
-Parked sessions share the task workspace. Resuming one while a destination session is active can create concurrent writers. Wait until the active session finishes first.
+Sessions parked by workflow transitions share the task workspace. Opening one
+can resume it when recovery rules and session capacity allow. This does not
+change the selected workflow step or primary session. Multiple sessions can
+write to the same workspace at the same time, so review their activity before
+resuming a session while another session is active.
 
 ### Change session options by workflow step
 

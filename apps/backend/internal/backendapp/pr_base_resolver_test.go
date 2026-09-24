@@ -158,6 +158,33 @@ func TestGitHubPRBaseResolverUsesLinkedPRForLegacyAttachment(t *testing.T) {
 	}
 }
 
+func TestGitHubPRBaseResolverUsesAttachedTargetWhenAssociationIsMissing(t *testing.T) {
+	service := &githubPRBaseLookupServiceStub{pr: &githubpkg.PR{
+		Number: 42, RepoOwner: "upstream", RepoName: "widgets",
+		BaseRepoOwner: "upstream", BaseRepoName: "widgets",
+		HeadRepoOwner: "fork-owner", HeadRepoName: "widgets", HeadBranch: "feature",
+		BaseBranch: "main", BaseSHA: "0123456789abcdef0123456789abcdef01234567",
+	}}
+	resolver := githubPRBaseResolver{service: service}
+	lookup := executorpkg.PRBaseLookup{
+		TaskID: "task-1", TaskRepositoryID: "task-repo-1", RepositoryID: "repo-1",
+		Number: 42, CheckoutBranch: "feature", AttachedOwner: "upstream", AttachedRepository: "widgets",
+	}
+	base, err := resolver.ResolvePRBase(context.Background(), "workspace-1", lookup)
+	if err != nil {
+		t.Fatalf("ResolvePRBase() error: %v", err)
+	}
+	if base.Target.TargetRepository.Path != "upstream/widgets" ||
+		base.Target.HeadRepository.Path != "fork-owner/widgets" || base.Target.HeadBranch != "feature" {
+		t.Fatalf("resolved target-attached PR = %#v, want upstream target and validated fork head", base.Target)
+	}
+	if !reflect.DeepEqual(service.getCalls, []string{"upstream/widgets#42"}) ||
+		!reflect.DeepEqual(service.listCalls, [][]string{{"task-1"}}) {
+		t.Fatalf("provider lookups = (%v, %v), want empty association check then attached namespace lookup",
+			service.getCalls, service.listCalls)
+	}
+}
+
 func TestGitHubPRBaseResolverClassifiesKnownCrossRepositoryFailure(t *testing.T) {
 	service := &githubPRBaseLookupServiceStub{
 		prs: []*githubpkg.TaskPR{{

@@ -28,7 +28,7 @@ func (c *countingCleanupClient) ListPRReviews(ctx context.Context, owner, repo s
 	return c.MockClient.ListPRReviews(ctx, owner, repo, number)
 }
 
-func TestCleanupMergedReviewTasksSkipsHistoricalTasks(t *testing.T) {
+func TestCleanupMergedReviewTasksIncludesHistoricalTasks(t *testing.T) {
 	_, svc, mockClient, store := setupPollerTest(t)
 	ctx := context.Background()
 
@@ -67,17 +67,18 @@ func TestCleanupMergedReviewTasksSkipsHistoricalTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CleanupMergedReviewTasks: %v", err)
 	}
-	if deleted != 1 {
-		t.Fatalf("deleted = %d, want 1 active task", deleted)
+	if deleted != 3 {
+		t.Fatalf("deleted = %d, want active, archived, and hard-deleted tasks", deleted)
 	}
-	if len(recorder.calls) != 1 || recorder.calls[0] != "active-review" {
-		t.Fatalf("DeleteTask calls = %v, want [active-review]", recorder.calls)
+	if len(recorder.calls) != 3 || recorder.calls[0] != "active-review" ||
+		recorder.calls[1] != "archived-review" || recorder.calls[2] != "missing-review" {
+		t.Fatalf("DeleteTask calls = %v, want active, archived, and hard-deleted task IDs", recorder.calls)
 	}
-	if client.prCalls != 3 {
-		t.Fatalf("GetPR calls = %d, want 3 eligible rows only", client.prCalls)
+	if client.prCalls != 5 {
+		t.Fatalf("GetPR calls = %d, want all five inventory rows", client.prCalls)
 	}
 	if client.reviewCalls != 1 {
-		t.Fatalf("ListPRReviews calls = %d, want 1 for the open eligible row", client.reviewCalls)
+		t.Fatalf("ListPRReviews calls = %d, want 1 for the open reservation", client.reviewCalls)
 	}
 
 	remaining, err := store.ListReviewPRTaskIDsByWatch(ctx, watch.ID)
@@ -88,9 +89,8 @@ func TestCleanupMergedReviewTasksSkipsHistoricalTasks(t *testing.T) {
 	for _, taskID := range remaining {
 		got[taskID] = true
 	}
-	want := map[string]bool{"archived-review": true, "missing-review": true, "": true}
-	if len(got) != len(want) || !got["archived-review"] || !got["missing-review"] || !got[""] {
-		t.Fatalf("remaining task IDs = %#v, want historical rows and open empty reservation", got)
+	if len(got) != 1 || !got[""] {
+		t.Fatalf("remaining task IDs = %#v, want only the open empty reservation", got)
 	}
 }
 
@@ -220,8 +220,8 @@ func (s *stubTaskDeleter) DeleteTask(_ context.Context, _ string) error {
 	return s.err
 }
 
-// TestCleanupMergedReviewTasks_TaskAlreadyDeleted verifies that a dedup row for
-// a missing task is ignored without consuming provider quota.
+// TestCleanupMergedReviewTasks_TaskAlreadyDeleted verifies that cleanup removes
+// a stale dedup row after the task service reports it was already deleted.
 func TestCleanupMergedReviewTasks_TaskAlreadyDeleted(t *testing.T) {
 	_, svc, mockClient, store := setupPollerTest(t)
 	ctx := context.Background()
@@ -254,8 +254,8 @@ func TestCleanupMergedReviewTasks_TaskAlreadyDeleted(t *testing.T) {
 		RepoName:  "widget",
 	})
 
-	// A missing task is not a cleanup candidate. The task deleter remains wired
-	// to prove the cleanup path does not try to delete it.
+	// The task deleter reports the prior hard deletion so cleanup can release
+	// the stale reservation row without counting a newly deleted task.
 	svc.SetTaskDeleter(&stubTaskDeleter{
 		err: fmt.Errorf("%w: %s", ErrTaskNotFound, taskID),
 	})
@@ -264,18 +264,16 @@ func TestCleanupMergedReviewTasks_TaskAlreadyDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CleanupMergedReviewTasks returned error: %v", err)
 	}
-	if deleted != 0 {
-		t.Errorf("expected 0 deleted for a missing task, got %d", deleted)
+	if deleted != 1 {
+		t.Errorf("deleted = %d, want stale dedup row cleanup to count as one", deleted)
 	}
 
-	// The historical dedup record remains available for deduplication, but is
-	// excluded from cleanup candidate queries.
 	remaining, err := store.ListReviewPRTaskIDsByWatch(ctx, watch.ID)
 	if err != nil {
 		t.Fatalf("ListReviewPRTaskIDsByWatch: %v", err)
 	}
-	if len(remaining) != 1 || remaining[0] != taskID {
-		t.Errorf("remaining task IDs = %v, want [%s]", remaining, taskID)
+	if len(remaining) != 0 {
+		t.Errorf("remaining task IDs = %v, want stale dedup row removed", remaining)
 	}
 }
 

@@ -118,7 +118,10 @@ icons show running, idle, or paused activity. Tasks and required inbox entries r
 their fixed navigation area, and hiding a shortcut does not disable the underlying feature.
 
 On a phone, open the menu and choose **Sidebar** to edit the same layout. Use the move controls to
-reorder entries or move a shortcut to another section. **Restore defaults** resets the draft for the
+reorder entries or move a shortcut to another section. Home and quick actions stay above Tasks;
+customized workspace tools and shortcut sections follow the task list. Expand **Integrations** to
+see named provider links and integration settings, including when no provider is configured.
+**Restore defaults** resets the draft for the
 active workspace; the shared **Save changes** action persists it. If another client saves first, the
 editor keeps your draft and reports the conflict so you can reconcile it.
 
