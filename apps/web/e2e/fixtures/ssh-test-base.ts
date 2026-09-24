@@ -135,25 +135,58 @@ export const sshTest = backendFixture.extend<
   },
 
   _sshRuntimeReset: [
-    async ({ apiClient, seedData }, use) => {
-      await resetSSHRuntime(apiClient, seedData);
+    async ({ apiClient, backend, seedData }, use) => {
+      await resetSSHRuntime(apiClient, backend, seedData);
       try {
         await use();
       } finally {
-        await resetSSHRuntime(apiClient, seedData);
+        await resetSSHRuntime(apiClient, backend, seedData);
       }
     },
     { auto: true },
   ],
 });
 
-async function resetSSHRuntime(apiClient: ApiClient, seedData: SSHSeedData) {
-  await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+function isFetchTransportError(error: unknown): boolean {
+  return error instanceof TypeError && /fetch failed|network error/i.test(error.message);
+}
+
+async function withBackendRecovery<T>(
+  backend: BackendContext,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isFetchTransportError(error)) throw error;
+    await backend.ensureReady();
+    try {
+      return await operation();
+    } catch (retryError) {
+      if (!isFetchTransportError(retryError)) throw retryError;
+      await backend.restart();
+      return operation();
+    }
+  }
+}
+
+async function resetSSHRuntime(
+  apiClient: ApiClient,
+  backend: BackendContext,
+  seedData: SSHSeedData,
+) {
+  await withBackendRecovery(backend, () =>
+    apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]),
+  );
   let emptySince = 0;
   await expect
     .poll(
       async () => {
-        const count = (await apiClient.listSSHSessions(seedData.sshExecutorId)).length;
+        const count = (
+          await withBackendRecovery(backend, () =>
+            apiClient.listSSHSessions(seedData.sshExecutorId),
+          )
+        ).length;
         if (count > 0) {
           emptySince = 0;
           return false;

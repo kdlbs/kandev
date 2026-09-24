@@ -185,7 +185,11 @@ export async function waitForActiveSessionCancellationPendingOrSettled(page: Pag
       const state = store.getState();
       const sessionId = state.tasks.activeSessionId;
       if (!sessionId) return false;
-      if (state.taskSessions.items[sessionId]?.cancellation_pending === true) return true;
+      const session = state.taskSessions.items[sessionId];
+      if (session?.cancellation_pending === true) return true;
+      if (session?.foreground_activity !== null && session?.foreground_activity !== undefined) {
+        return false;
+      }
       return Array.from(document.querySelectorAll<HTMLElement>("[data-placeholder]"))
         .filter((element) => element.offsetWidth > 0 && element.offsetHeight > 0)
         .some((element) => element.dataset.placeholder?.startsWith("Continue working on the "));
