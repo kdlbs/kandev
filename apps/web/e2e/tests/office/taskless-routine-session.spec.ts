@@ -56,9 +56,33 @@ async function listAgentRuns(
   agentId: string,
 ): Promise<AgentRun[]> {
   const response = await officeApi.rawRequest("GET", `/agents/${agentId}/runs?limit=100`);
-  if (!response.ok) return [];
+  if (!response.ok) {
+    throw new Error(`Listing runs for agent ${agentId} failed with HTTP ${response.status}`);
+  }
   const result = (await response.json()) as { runs?: AgentRun[] };
   return result.runs ?? [];
+}
+
+async function findAgentRunForRoutine(
+  officeApi: { rawRequest: (method: string, path: string) => Promise<Response> },
+  agentId: string,
+  routineId: string,
+  seenRunIds: Set<string>,
+): Promise<string> {
+  const runs = await listAgentRuns(officeApi, agentId);
+  for (const run of runs) {
+    if (seenRunIds.has(run.id) || !run.reason.startsWith("routine_")) continue;
+    const response = await officeApi.rawRequest("GET", `/agents/${agentId}/runs/${run.id}`);
+    if (!response.ok) continue;
+    const detail = (await response.json()) as { context_snapshot?: string };
+    try {
+      const context = JSON.parse(detail.context_snapshot ?? "{}") as { routine_id?: string };
+      if (context.routine_id === routineId) return run.id;
+    } catch {
+      // Other routine runs may have legacy or empty context snapshots.
+    }
+  }
+  return "";
 }
 
 test.describe("Office taskless routine sessions", () => {
@@ -129,18 +153,21 @@ test.describe("Office taskless routine sessions", () => {
                 candidate.causation_id === expectedCausationId && !seen.has(candidate.id),
             );
             runId = run?.id ?? "";
+            if (!runId) {
+              runId = await findAgentRunForRoutine(officeApi, officeSeed.agentId, routineId, seen);
+            }
             return runId;
           },
           {
-            timeout: 60_000,
+            timeout: 90_000,
             intervals: [250, 500, 1_000],
-            message: `Waiting for agent run ${attempt} to appear`,
+            message: `Waiting for routine ${routineId} to create an agent run`,
           },
         )
         .not.toBe("")
         .catch((error) => {
           throw new Error(
-            `No live office run found for causation ID ${expectedCausationId}: ${JSON.stringify(observedRuns)}`,
+            `No live office run found for routine ${routineId} (causation ID ${expectedCausationId}): ${JSON.stringify(observedRuns)}`,
             { cause: error },
           );
         });

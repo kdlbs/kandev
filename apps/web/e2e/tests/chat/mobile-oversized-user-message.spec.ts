@@ -158,7 +158,7 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
   );
 
   const slowPrompt = "/slow 30s";
-  await apiClient.addUserMessage(task.id, task.session_id, slowPrompt);
+  await session.sendMessageViaButton(slowPrompt);
   await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
   await waitForActiveSessionForegroundActivity(testPage, "generating");
   await waitForComposerQueueMode(testPage, 30_000);

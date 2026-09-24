@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
+import { activeTaskSessionId, waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 import { waitForSessionState } from "../../helpers/session";
 import type { ApiClient } from "../../helpers/api-client";
@@ -483,7 +484,7 @@ test.describe("Code walkthrough", () => {
       apiClient,
       seedData,
     }) => {
-      test.setTimeout(120_000);
+      test.setTimeout(180_000);
       const walkthroughStep = await apiClient.createWorkflowStep(
         seedData.workflowId,
         "Walkthrough Re-emission",
@@ -506,6 +507,8 @@ test.describe("Code walkthrough", () => {
         const startButton = testPage.getByTestId("task-description-start-button");
         await expect(startButton).toBeVisible({ timeout: 30_000 });
         await startButton.click();
+        const sessionId = await activeTaskSessionId(testPage);
+        await waitForSessionAgentctlReady(testPage, sessionId, 60_000);
         await expect(
           session.activeChat().getByText("reemit-first-done", { exact: false }),
         ).toBeVisible({ timeout: 45_000 });

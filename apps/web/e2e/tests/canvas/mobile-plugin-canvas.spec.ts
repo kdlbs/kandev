@@ -313,6 +313,7 @@ test.describe("Plugin-backed canvases on mobile", () => {
       const canvas = await waitForTaskCanvas(apiClient, taskId, canvasTitle);
       canvasIds.push(canvas.id);
       const published = await publishTaskCanvas({
+        page: testPage,
         apiClient,
         taskId,
         taskSessionId,

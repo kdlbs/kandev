@@ -65,11 +65,21 @@ test.describe("Agents browse page", () => {
   test("renders the heading and install cards statically, without a collapsible toggle", async ({
     testPage,
   }) => {
+    const availableAgents = AVAILABLE_AGENTS.agents.map((agent) => ({
+      ...agent,
+      updated_at: new Date(Date.now() + 60_000).toISOString(),
+    }));
+    await testPage.route("**/api/v1/agents/available**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...AVAILABLE_AGENTS, agents: availableAgents }),
+      }),
+    );
     await testPage.goto("/settings/agents/browse");
 
     const heading = testPage.getByRole("heading", { name: "Browse available agents" });
     await expect(heading).toBeVisible({ timeout: 15_000 });
-
     // The SSR payload marks this resource as loaded before the client hook
     // runs. Replace that hydrated snapshot directly so the assertion does not
     // depend on whether a second fetch happens after the page mounts.
@@ -89,8 +99,7 @@ test.describe("Agents browse page", () => {
           loaded: true,
         },
       });
-    }, AVAILABLE_AGENTS.agents);
-
+    }, availableAgents);
     await expect(testPage.getByTestId("install-card-codex")).toBeVisible({ timeout: 15_000 });
 
     // PR #2544 wrapped the section in a collapsible whose heading row was a
