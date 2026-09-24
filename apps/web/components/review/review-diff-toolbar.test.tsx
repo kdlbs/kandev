@@ -3,6 +3,9 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ isMobile: false }));
+const clipboardMocks = vi.hoisted(() => ({ copyToClipboard: vi.fn() }));
+
+vi.mock("@/lib/utils/copy-to-clipboard", () => clipboardMocks);
 
 vi.mock("@/components/editors/external-vcs-file-link", () => ({
   ExternalVcsFileLink: (props: Record<string, unknown>) => (
@@ -14,8 +17,18 @@ vi.mock("@/components/editors/external-vcs-file-link", () => ({
 }));
 
 vi.mock("@/components/editors/file-actions-dropdown", () => ({
-  FileActionsDropdown: () => <span data-testid="file-actions-dropdown" />,
-  FileActionsMenuItems: () => <span data-testid="file-actions-menu-items" />,
+  FileActionsDropdown: (props: { includeCopyPath?: boolean }) => (
+    <span
+      data-testid="file-actions-dropdown"
+      data-include-copy-path={String(props.includeCopyPath)}
+    />
+  ),
+  FileActionsMenuItems: (props: { includeCopyPath?: boolean }) => (
+    <span
+      data-testid="file-actions-menu-items"
+      data-include-copy-path={String(props.includeCopyPath)}
+    />
+  ),
 }));
 
 vi.mock("@/hooks/use-global-view-mode", () => ({
@@ -30,6 +43,7 @@ import { FileDiffToolbar, type FileDiffToolbarProps } from "./review-diff-toolba
 
 afterEach(() => {
   cleanup();
+  clipboardMocks.copyToClipboard.mockReset();
   mocks.isMobile = false;
 });
 
@@ -157,7 +171,10 @@ describe("FileDiffToolbar", () => {
       size: "xs",
     });
     expect(screen.getByTestId("file-actions-dropdown")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Copy diff" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Copy diff" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Copy path" }));
+    expect(clipboardMocks.copyToClipboard).toHaveBeenCalledWith("src/new-name.ts");
+    expect(screen.getByTestId("file-actions-dropdown").dataset.includeCopyPath).toBe("false");
     expect(screen.queryByRole("button", { name: /More actions for/ })).toBeNull();
   });
 
@@ -191,7 +208,10 @@ describe("FileDiffToolbar", () => {
 
     const menu = screen.getByTestId("review-file-actions-menu");
     expect(menu).toBeTruthy();
-    expect(screen.getByRole("menuitem", { name: "Copy diff" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Copy diff" })).toBeNull();
+    const copyPath = screen.getByRole("menuitem", { name: "Copy path" });
+    expect(copyPath.className).toContain("min-h-11");
+    expect(screen.getByTestId("file-actions-menu-items").dataset.includeCopyPath).toBe("false");
     const expand = screen.getByRole("menuitemcheckbox", { name: "Expand unchanged lines" });
     const wrap = screen.getByRole("menuitemcheckbox", { name: "Wrap long lines" });
     expect(expand.getAttribute("aria-checked")).toBe("false");
@@ -208,5 +228,10 @@ describe("FileDiffToolbar", () => {
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Expand unchanged lines" }));
     expect(onToggleExpandUnchanged).toHaveBeenCalledOnce();
+
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy path" }));
+    expect(clipboardMocks.copyToClipboard).toHaveBeenCalledWith("src/app.ts");
   });
 });

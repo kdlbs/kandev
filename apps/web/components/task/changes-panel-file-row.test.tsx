@@ -4,6 +4,9 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { FileRow } from "./changes-panel-file-row";
 
 const responsive = vi.hoisted(() => ({ isFinePointer: true, isMobile: false }));
+const clipboardMocks = vi.hoisted(() => ({ copyToClipboard: vi.fn() }));
+
+vi.mock("@/lib/utils/copy-to-clipboard", () => clipboardMocks);
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => responsive,
@@ -11,6 +14,7 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 
 afterEach(() => {
   cleanup();
+  clipboardMocks.copyToClipboard.mockReset();
   responsive.isFinePointer = true;
   responsive.isMobile = false;
 });
@@ -28,7 +32,7 @@ const baseFile = {
   oldPath: undefined,
 };
 
-function renderRow(path: string) {
+function renderRow(path: string, onOpenDiff = noop) {
   return render(
     <TooltipProvider>
       <ul>
@@ -36,7 +40,7 @@ function renderRow(path: string) {
           file={{ ...baseFile, path }}
           isPending={false}
           onSelect={noopSelect}
-          onOpenDiff={noop}
+          onOpenDiff={onOpenDiff}
           onStage={noop}
           onUnstage={noop}
           onDiscard={noop}
@@ -46,6 +50,34 @@ function renderRow(path: string) {
     </TooltipProvider>,
   );
 }
+
+describe("FileRow copy path", () => {
+  it("copies the repository-relative path from the desktop actions without opening the diff", () => {
+    const onOpenDiff = vi.fn();
+    const path = "packages/ui/src/button.tsx";
+    const { getByRole } = renderRow(path, onOpenDiff);
+
+    fireEvent.click(getByRole("button", { name: "Copy path" }));
+
+    expect(clipboardMocks.copyToClipboard).toHaveBeenCalledWith(path);
+    expect(onOpenDiff).not.toHaveBeenCalled();
+  });
+
+  it("copies the repository-relative path from the phone menu without opening the diff", async () => {
+    responsive.isFinePointer = false;
+    const onOpenDiff = vi.fn();
+    const path = "packages/ui/src/mobile-button.tsx";
+    const { getByRole, findByRole } = renderRow(path, onOpenDiff);
+
+    fireEvent.keyDown(getByRole("button", { name: moreActionsLabel }), { key: "Enter" });
+    const copyPath = await findByRole("menuitem", { name: "Copy path" });
+    fireEvent.click(copyPath);
+
+    expect(clipboardMocks.copyToClipboard).toHaveBeenCalledWith(path);
+    expect(onOpenDiff).not.toHaveBeenCalled();
+    expect(copyPath.className).toContain("min-h-11");
+  });
+});
 
 describe("FileRow truncation (regression: path overlaps diff stats in narrow panel)", () => {
   it("file name span allows truncation so a long name does not overflow visually", () => {
