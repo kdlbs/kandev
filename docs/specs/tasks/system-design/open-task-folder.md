@@ -9,7 +9,7 @@ requirements:
 
 ## Purpose and boundaries
 
-Add a discoverable session shortcut using the existing editors service folder operation.
+Consolidate the session folder action into the editor dropdown using the existing editors service folder operation.
 This extends task workspace access; it introduces no persistence or new OS integration.
 See [requirements](../requirements/open-task-folder.md) and
 [workspace actions](attach-workspace-sources.md).
@@ -22,13 +22,27 @@ See [requirements](../requirements/open-task-folder.md) and
 
 ## Components
 
-`apps/web/components/task/task-top-bar.tsx` renders `EditorsMenu` in
-`TopbarToolsGroup`. Add an independent folder control immediately after `EditorsMenu`,
-inside the existing unarchived-task branch. Do not tie it to enabled editors.
-Use `open-task-folder-button.tsx` and shared `useTaskFolderAction` for selection
-and opener focus. The existing `useOpenSessionFolder` owns native-launch requests,
-immediate duplicate-request suppression, loading state, and localized errors. Reuse `buildWorktreeOptions` and `useSessionWorktrees`
-for repository/branch labels rather than duplicating target resolution.
+`apps/web/components/task/task-top-bar.tsx` keeps `EditorsMenu` in
+`TopbarToolsGroup`, inside the existing unarchived-task branch. The standalone
+folder button is removed.
+`apps/web/components/task/editors-menu.tsx` delegates the dropdown shell to
+`EditorActionsDropdown` in `editor-actions-dropdown.tsx`, which renders a separated
+Open folder row after the editor entries. Reuse `useTaskFolderAction` and `TaskFolderPicker`; retain
+`useOpenSessionFolder` for requests, per-session duplicate suppression, loading,
+and localized errors. Folder opening never changes the default editor.
+
+The dropdown trigger requires a session, not a configured editor. With zero
+editors, retain the disabled no-editors row and primary editor button while
+allowing access to the folder row. Disable the folder row using the shared
+folder action's capability/loading state; it must not disable editor entries.
+Provide an accessible dropdown trigger name using existing localized editor copy.
+
+Close the dropdown before opening the folder picker. Follow
+`WorkspaceActionsMenu` in `file-browser-toolbar.tsx`: queue selection in a ref,
+activate from `onCloseAutoFocus`, and pass the persistent dropdown trigger to
+`action.open`. Cancel restores that trigger, never an unmounted menu item.
+Mount the picker outside dropdown content. Reuse `buildWorktreeOptions` and
+`useSessionWorktrees` for labels and selected-session target resolution.
 
 The phone Files workspace-actions menu already offers Open workspace folder.
 Reuse that entry and its responsive menu treatment; route multiple-worktree choices
@@ -62,7 +76,7 @@ Remote/headless host limitations remain those of the existing action.
 ## Presentation and failures
 
 Reuse translated folder copy when possible, adding a localized host-location hint
-where needed. The control has an accessible name, keyboard activation, tooltip,
+where needed. The dropdown trigger and folder row have accessible names and keyboard activation,
 loading indicator, and disabled no-session/loading/unavailable states. Pending
 folder launches are shared per session across all controls and clear only when
 the initiating request settles; another session remains independent. Catch rejected requests
@@ -95,8 +109,12 @@ items. The shared editors store retains the capability; loaded editor items with
 an unknown capability still trigger discovery. Each effect reads the live store
 before claiming discovery so simultaneous consumers share one request/retry chain. Transient failure gets one delayed
 retry while controls remain disabled; repeated failure settles to false. Unknown,
-failed, or false discovery disables folder-opening controls in the task toolbar,
+failed, or false discovery disables the folder row in the editor dropdown,
 Files menu, and `file-actions-dropdown.tsx`, plus `useOpenSessionFolder`. Editor
 entries retain their existing `editors` and `useOpenSessionInEditor` behavior.
 No desktop dialog or mobile bottom sheet opens while unavailable. This checks
 executable installation, like IDE discovery; launch-time failures still show errors.
+
+## Implementation plan
+
+[Editor dropdown folder action](../../../plans/editor-dropdown-folder/plan.md) records the implemented relocation. The original plan preserves historical validation evidence.
