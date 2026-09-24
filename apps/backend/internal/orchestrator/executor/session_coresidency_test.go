@@ -208,6 +208,7 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 		t.Fatal("timed out waiting for the agent process to start")
 	}
 
+	// Other tests can still emit asynchronous observations into the global counter.
 	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after < before+1 {
 		t.Fatalf("admitted[launch] counter = %d, want at least %d", after, before+1)
 	}
