@@ -306,8 +306,13 @@ The September 23 composition refinement groups `main-top-bar`,
 `MobilePluginNavSection`. `AppNavSheet` supplies phone workspace context through
 `AppNavSections`; the section checks registrations before rendering workspace
 controls. Phone navigation uses one wrapping action group without workspace/task
-subheadings. When task actions are supplied, collect the plugin owners registered
-for `chat-top-bar` and exclude those owners from `main-top-bar` in this menu only.
+subheadings. When task actions are supplied, `PluginSlotPresence` observes
+owner-marked `chat-top-bar` registration wrappers and reports owners with mounted
+content. Exclude only those owners from `main-top-bar` in this menu. A layout
+effect measures initial content; a scoped MutationObserver follows asynchronous
+null/content changes and disconnects on unmount. Layout-neutral wrappers retain
+child width constraints. Null-rendering task controls retain workspace fallback;
+report only changed owner sets to avoid feedback from normal status updates.
 Keep every registration in the selected slot with its original props and error
 boundary. This chooses a contextual toolbar by plugin identity, never by rendered
 text or component identity (plugins may create separate component factories for

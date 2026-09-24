@@ -15,16 +15,18 @@ legacy_specs: []
 The phone menu independently renders workspace and task toolbar registrations.
 Provider Usage creates separate component instances for the same status in both
 slots, so component identity cannot identify the duplicate. Choose the task
-slot per plugin owner when task actions exist. The user explicitly authorized
+slot per plugin owner when its task control renders content. The user explicitly authorized
 uninterrupted implementation and PR delivery in this session.
 
 ## Scope and technical approach
 
 Add an owner exclusion to the host PluginSlot and MainTopBarPluginActions.
-MobilePluginNavSection selects exclusions from live chat-top-bar registrations
-only when its task actions are supplied. Flatten the two context groups into
+MobilePluginNavSection selects exclusions from chat-top-bar owners with mounted
+content in its supplied task actions. PluginSlotPresence observes owner wrappers
+to preserve the workspace fallback while task controls render no content. Flatten the two context groups into
 one wrapping row; retain sidebar workspace actions and plugin destinations.
-No SDK, plugin implementation, persistence, or desktop changes are required.
+No SDK signature, plugin implementation, persistence, or desktop behavior changes
+are required.
 
 ## ASCII UI preview
 
@@ -60,7 +62,7 @@ base and fixed builds; no DOM replacement.
 ## Verification results
 
 - RED: four focused unit failures reproduced owner duplication and subgroup headings.
-- GREEN: 63 tests in five focused Vitest suites passed, including task slot
+- GREEN: 64 tests in five focused Vitest suites passed, including task slot
   context and error-boundary coverage. The task slot suite was included in the
   recorded command in addition to the four listed initially.
 - Managed production build: all three selected mobile scenarios passed (two
@@ -103,3 +105,14 @@ The authoring-guide review identified stale Workspace/Task subgroup guidance.
 Updated both slot tables, the canonical guide, PLUGIN-API reference, and SDK/host
 type comments to describe the same owner-based selection. Public docs validation
 (62 tests, 47 pages), coverage evaluation, spec/catalog lint, and diff checks pass.
+
+## Null-rendering task fallback
+
+Review found registered task controls can return null before a session exists.
+The new regression fails under registration-only selection. Observe mounted
+content in layout-neutral owner wrappers, retaining workspace controls until
+task content appears and restoring them if it disappears. An observer scoped
+to the task slot disconnects on unmount and only reports changed owner sets.
+Targeted unit tests, fresh production mobile E2E, and refreshed after screenshots
+verify the correction: 64 focused unit tests and all three selected mobile
+scenarios passed against a fresh production build.

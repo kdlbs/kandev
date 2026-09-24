@@ -1046,6 +1046,8 @@ interface PluginRegistry {
   // When task controls are present, a plugin's chat-top-bar registrations
   // replace its main-top-bar registrations in that menu. Every registration
   // in the selected slot renders; sidebar workspace actions stay independent.
+  // Null-rendering task controls retain the workspace fallback until content
+  // appears; the fallback returns if the task content disappears.
   // The host gives `host.ui.Button` controls a 44px touch target. Arbitrary
   // plugin interaction does not dismiss the menu. Both presentations carry
   // the active session plus every kandev session id on the task.

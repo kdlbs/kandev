@@ -205,7 +205,9 @@ the full task list.
   and sidebar workspace actions remain available.
 - **AC-UI-MOBILE-MENU-008.2:** Listing pages and task pages without task
   contributions, including archived tasks, shall retain workspace toolbar
-  controls. Selection follows live registrations, preserves each selected
+  controls. A registered task control that renders no content shall retain its
+  workspace fallback until task content appears, and restore that fallback if
+  task content disappears. Selection follows live contributions, preserves each selected
   slot's context and error isolation, and does not change desktop/tablet
   placement or plugin destinations in saved sidebar layouts.
 

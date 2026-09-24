@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AppSidebarWorkspaceActions } from "@/components/app-sidebar/app-sidebar-workspace-actions";
 import { MainTopBarPluginActions } from "@/components/kanban/main-top-bar-plugin-actions";
@@ -10,6 +10,7 @@ import { NO_WORKSPACE_CONTEXT } from "@/lib/navigation/surface-policy";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { TaskListingPage } from "@/lib/task-listing/view-navigation";
 import { cn } from "@/lib/utils";
+import { PluginSlotPresence } from "./plugin-slot-presence";
 
 export type MobilePluginWorkspaceContext = {
   workspaceId?: string;
@@ -44,9 +45,8 @@ export function MobilePluginNavSection({
 }: MobilePluginNavSectionProps) {
   const { t } = useTranslation();
   const registry = usePluginRegistry();
-  const taskPluginIds = actions
-    ? registry.getSlotRegistrations("chat-top-bar").map(({ pluginId }) => pluginId)
-    : [];
+  const [renderedTaskPluginIds, setRenderedTaskPluginIds] = useState<string[]>([]);
+  const taskPluginIds = actions ? renderedTaskPluginIds : [];
   const { hasMainActions, hasSidebarActions } = workspaceSlotAvailability(
     registry,
     workspaceContext,
@@ -84,7 +84,11 @@ export function MobilePluginNavSection({
               excludePluginIds={taskPluginIds}
             />
           )}
-          {actions}
+          {actions && (
+            <PluginSlotPresence name="chat-top-bar" onChange={setRenderedTaskPluginIds}>
+              {actions}
+            </PluginSlotPresence>
+          )}
         </div>
       )}
       {destinations.length > 0 && (

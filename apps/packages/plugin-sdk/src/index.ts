@@ -31,7 +31,8 @@ export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-f
  * Context for the `main-top-bar` slot. Phone listing contributions live in the
  * menu with 44px touch targets; interactions retain the slot's local state.
  * On phones with task controls, the same plugin's chat-top-bar replaces this
- * slot. Listings and archived tasks retain the workspace toolbar.
+ * slot once it renders content. Null-rendering task controls retain this
+ * fallback. Listings and archived tasks retain the workspace toolbar.
  */
 export interface MainTopBarSlotProps {
   workspaceId: string | null;

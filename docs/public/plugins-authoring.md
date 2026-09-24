@@ -2100,7 +2100,9 @@ desktop, keep contributions to small badges or icon buttons in the compact
 horizontal strip. On a phone, `presentation` is `"mobile"`; the contribution
 renders in the shared app menu's **Plugins** section alongside sidebar workspace
 actions. On a task with task controls, a plugin's `chat-top-bar` registrations
-replace that same plugin's `main-top-bar` registrations. Keep task-relevant
+replace that same plugin's `main-top-bar` registrations once task content renders.
+If task controls return `null`, the workspace toolbar remains available until
+task content appears; it returns if task content disappears. Keep task-relevant
 actions in `chat-top-bar`; every registration in that selected slot renders.
 Workspace-only plugins and sidebar workspace actions remain available. Listings
 and archived tasks use the workspace toolbar. The menu uses one wrapping group

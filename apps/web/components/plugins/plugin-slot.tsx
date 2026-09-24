@@ -1,8 +1,10 @@
 "use client";
 
+import { useContext } from "react";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginSlotRegistration } from "@/lib/plugins/registry";
 import { PluginErrorBoundary } from "./plugin-error-boundary";
+import { ObservedPluginSlotContext } from "./plugin-slot-presence";
 
 export type PluginSlotProps = {
   /** Named slot to render — see PLUGIN-API.md for the initial set of slot names. */
@@ -61,9 +63,16 @@ export function PluginSlotRegistrationView({
   slotProps?: unknown;
 }) {
   const { pluginId, Component } = registration;
-  return (
+  const observedSlot = useContext(ObservedPluginSlotContext);
+  const content = (
     <PluginErrorBoundary context={`plugin "${pluginId}" slot "${name}" component`}>
       <Component slotProps={slotProps} />
     </PluginErrorBoundary>
+  );
+  if (observedSlot !== name) return content;
+  return (
+    <div className="contents [&>*]:min-w-0 [&>*]:max-w-full" data-plugin-slot-owner={pluginId}>
+      {content}
+    </div>
   );
 }
