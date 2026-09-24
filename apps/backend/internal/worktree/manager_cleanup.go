@@ -301,49 +301,74 @@ func (m *Manager) CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*Workt
 			// fail closed instead of rejecting the task mutation itself.
 			continue
 		}
-		pathPresent, err := cleanupPathPresent(wt.Path)
+		oid, found, err := m.captureCleanupHeadOID(ctx, wt)
 		if err != nil {
-			return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
+			return nil, err
 		}
-		if !pathPresent {
-			branch := strings.TrimSpace(wt.Branch)
-			if branch == "" {
-				m.logger.Warn("cleanup worktree path is absent and branch is unknown",
-					zap.String("task_id", wt.TaskID),
-					zap.String("worktree_id", wt.ID),
-					zap.String("repository_path", wt.RepositoryPath),
-					zap.String("reason", "empty branch on environment row"))
-				continue
-			}
-			branchRef := "refs/heads/" + branch
-			oid, found, err := m.captureCleanupBranchOID(ctx, wt.RepositoryPath, branchRef)
-			if err != nil {
-				return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
-			}
-			if !found {
-				m.logger.Warn("cleanup worktree path and branch are absent",
-					zap.String("task_id", wt.TaskID),
-					zap.String("worktree_id", wt.ID),
-					zap.String("repository_path", wt.RepositoryPath),
-					zap.String("branch", branch),
-					zap.String("reason", "local branch ref not found"))
-				continue
-			}
+		if found {
 			identities[wt.ID] = oid
-			continue
 		}
-
-		output, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
-		if err != nil {
-			return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
-		}
-		oid, err := parseCleanupCommitOID(output)
-		if err != nil {
-			return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
-		}
-		identities[wt.ID] = oid
 	}
 	return identities, nil
+}
+
+func (m *Manager) captureCleanupHeadOID(ctx context.Context, wt *Worktree) (string, bool, error) {
+	// A cleanup snapshot can race another job removing this checkout. Use the
+	// same path-then-repository lock order as destructive worktree operations
+	// so the path and branch identity are observed consistently.
+	releasePath, err := acquireWorktreeTargetPath(ctx, wt.Path)
+	if err != nil {
+		return "", false, fmt.Errorf("lock cleanup identity path for %s: %w", wt.ID, err)
+	}
+	defer releasePath()
+
+	repoLock := m.getRepoLock(wt.RepositoryPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(wt.RepositoryPath)
+	}()
+
+	pathPresent, err := cleanupPathPresent(wt.Path)
+	if err != nil {
+		return "", false, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
+	}
+	if !pathPresent {
+		branch := strings.TrimSpace(wt.Branch)
+		if branch == "" {
+			m.logger.Warn("cleanup worktree path is absent and branch is unknown",
+				zap.String("task_id", wt.TaskID),
+				zap.String("worktree_id", wt.ID),
+				zap.String("repository_path", wt.RepositoryPath),
+				zap.String("reason", "empty branch on environment row"))
+			return "", false, nil
+		}
+		branchRef := "refs/heads/" + branch
+		oid, found, err := m.captureCleanupBranchOID(ctx, wt.RepositoryPath, branchRef)
+		if err != nil {
+			return "", false, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
+		}
+		if !found {
+			m.logger.Warn("cleanup worktree path and branch are absent",
+				zap.String("task_id", wt.TaskID),
+				zap.String("worktree_id", wt.ID),
+				zap.String("repository_path", wt.RepositoryPath),
+				zap.String("branch", branch),
+				zap.String("reason", "local branch ref not found"))
+			return "", false, nil
+		}
+		return oid, true, nil
+	}
+
+	output, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return "", false, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
+	}
+	oid, err := parseCleanupCommitOID(output)
+	if err != nil {
+		return "", false, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
+	}
+	return oid, true, nil
 }
 
 // removeWorktree performs the actual removal of a worktree.

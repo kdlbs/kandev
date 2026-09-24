@@ -182,6 +182,10 @@ behavior only after the backend delivers it.
 - Backfill/unarchive fence: full `go test ./internal/task/service -count=1`,
   focused SQLite unarchive/cancellation tests, `make lint`, specification
   catalog validation, and specification lint passed.
+- Cleanup snapshot/removal race: identity capture now shares the manager's
+  path-then-repository locks. The deterministic
+  `TestCaptureCleanupHeadOIDs_WaitsForWorktreeRemoval` regression and affected
+  Go packages passed; desktop and phone archive E2E passed after the fix.
 - Task 03: 95 targeted Vitest tests, `pnpm run i18n:check`, desktop and phone E2E (3 and 2 tests), and public-doc validation passed.
 
 ## Risks
