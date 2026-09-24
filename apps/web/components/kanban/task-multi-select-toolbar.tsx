@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconTrash, IconArchive, IconChevronRight, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
@@ -204,6 +204,9 @@ export function TaskMultiSelectToolbar({
   const taskIds = useMemo(() => [...selectedIds], [selectedIds]);
   const { isMobile } = useResponsiveBreakpoint();
   const [actionsOpen, setActionsOpen] = useState(false);
+  useEffect(() => {
+    if (selectedIds.size === 0) setActionsOpen(false);
+  }, [selectedIds.size]);
 
   if (selectedIds.size === 0) return null;
 
@@ -305,6 +308,7 @@ function BulkActionsSurface({
     <>
       <Button
         variant="outline"
+        className="cursor-pointer"
         onClick={() => onOpenChange(true)}
         data-testid="bulk-actions-button"
       >

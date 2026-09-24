@@ -1,5 +1,11 @@
 ---
+created: 2026-09-19
 status: implemented
+requirements:
+  - REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-006
+system_design:
+  - ../../specs/ui/system-design/bulk-task-colors.md
+legacy_specs: []
 ---
 
 # Bulk task colors
@@ -110,4 +116,4 @@ Public docs updated: `docs/public/tasks-and-workflows.md` now explains desktop a
 
 ## Results
 
-Implemented the shared mutation coordinator, sidebar and board Color controls, and the phone-native selection and picker flow. Focused unit/component tests passed (47), desktop Playwright passed (24), and mobile Playwright passed (2). Typecheck, focused ESLint, i18n validation, public-doc validation (62 tests and 47 pages), document catalog validation, all 36 specification-linter tests, full specification lint, and diff whitespace validation passed. The 393 px phone render matched the planned inset picker with labeled touch rows, safe containment, and no horizontal overflow.
+Implemented the shared mutation coordinator, sidebar and board Color controls, and the phone-native selection and picker flow. Focused unit/component tests passed (50), desktop Playwright passed (24), and mobile Playwright passed (2). Typecheck, focused ESLint, i18n validation, public-doc validation (62 tests and 47 pages), document catalog validation, all 36 specification-linter tests, full specification lint, and diff whitespace validation passed. PR remediation added regressions for in-flight optimistic colors, superseded save counts, focus restoration, the persistent live region, and cleared mobile action state. The 393 px phone render matched the planned inset picker with labeled touch rows, safe containment, and no horizontal overflow.

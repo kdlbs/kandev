@@ -1,8 +1,10 @@
 "use client";
 
-import { IconCheck, IconPalette } from "@tabler/icons-react";
+import { IconPalette } from "@tabler/icons-react";
 import {
   ContextMenuItem,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
@@ -67,17 +69,18 @@ export function TaskColorMenu({
             <ContextMenuSeparator />
           </>
         )}
-        {TASK_COLORS.map((color) => (
-          <TaskColorMenuItem
-            key={color}
-            color={color}
-            selected={currentColor === color}
-            disabled={isPending}
-            onSelect={() => {
-              void setColors(ids, color);
-            }}
-          />
-        ))}
+        <ContextMenuRadioGroup value={currentColor ?? ""}>
+          {TASK_COLORS.map((color) => (
+            <TaskColorMenuItem
+              key={color}
+              color={color}
+              disabled={isPending}
+              onSelect={() => {
+                void setColors(ids, color);
+              }}
+            />
+          ))}
+        </ContextMenuRadioGroup>
         <ContextMenuSeparator />
         <ContextMenuItem
           disabled={isPending || !hasColor}
@@ -95,26 +98,18 @@ export function TaskColorMenu({
 
 function TaskColorMenuItem({
   color,
-  selected,
   disabled,
   onSelect,
 }: {
   color: TaskColor;
-  selected: boolean;
   disabled?: boolean;
   onSelect: () => void;
 }) {
   const { t } = useTranslation();
   return (
-    <ContextMenuItem
-      disabled={disabled}
-      onSelect={onSelect}
-      role="menuitemradio"
-      aria-checked={selected}
-    >
+    <ContextMenuRadioItem value={color} disabled={disabled} onSelect={onSelect}>
       <span className={cn("mr-2 inline-block h-2 w-2 rounded-full", TASK_COLOR_BAR_CLASS[color])} />
       {t(TASK_COLOR_LABEL_KEYS[color])}
-      {selected && <IconCheck className="ml-auto h-3.5 w-3.5" />}
-    </ContextMenuItem>
+    </ContextMenuRadioItem>
   );
 }

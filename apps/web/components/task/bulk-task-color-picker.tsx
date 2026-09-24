@@ -7,7 +7,8 @@ import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -42,10 +43,12 @@ export function BulkTaskColorPicker({ taskIds }: { taskIds: string[] }) {
     <Button
       ref={triggerRef}
       variant="outline"
-      disabled={isPending || ids.length === 0}
+      className="cursor-pointer"
+      disabled={ids.length === 0}
+      aria-disabled={isPending || undefined}
       aria-label={t("task:color")}
       data-testid="bulk-color-button"
-      onClick={isMobile ? () => setOpen(true) : undefined}
+      onClick={isMobile && !isPending ? () => setOpen(true) : undefined}
     >
       <IconPalette />
       <span aria-hidden={isPending}>{isPending ? t("task:bulkColorSaving") : t("task:color")}</span>
@@ -57,9 +60,9 @@ export function BulkTaskColorPicker({ taskIds }: { taskIds: string[] }) {
     selected: color !== null && commonColor === color,
     disabled: isPending || (color === null && !hasColor),
   }));
-  const status = isPending && (
+  const status = (
     <span className="sr-only" role="status">
-      {t("task:bulkColorSaving")}
+      {isPending ? t("task:bulkColorSaving") : ""}
     </span>
   );
   if (isMobile)
@@ -81,8 +84,11 @@ export function BulkTaskColorPicker({ taskIds }: { taskIds: string[] }) {
     <>
       <DesktopBulkColorPicker
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen || !isPending) setOpen(nextOpen);
+        }}
         trigger={trigger}
+        commonColor={commonColor}
         options={options}
         onChoose={choose}
       />
@@ -122,6 +128,7 @@ function MobileBulkColorPicker({
         <Button
           variant="ghost"
           size="icon"
+          className="cursor-pointer"
           aria-label={t("common:close")}
           onClick={() => onOpenChange(false)}
         >
@@ -133,7 +140,7 @@ function MobileBulkColorPicker({
         <Button
           key={color ?? "none"}
           variant="ghost"
-          className="w-full justify-start gap-2"
+          className="w-full cursor-pointer justify-start gap-2"
           aria-pressed={selected}
           disabled={disabled}
           onClick={() => onChoose(color)}
@@ -152,12 +159,14 @@ function DesktopBulkColorPicker({
   open,
   onOpenChange,
   trigger,
+  commonColor,
   options,
   onChoose,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   trigger: React.ReactNode;
+  commonColor: TaskColor | null;
   options: ColorOption[];
   onChoose: (color: TaskColor | null) => void;
 }) {
@@ -174,20 +183,20 @@ function DesktopBulkColorPicker({
         <div className="px-2 py-1.5 text-xs text-muted-foreground">
           {t("task:bulkColorAutomaticHint")}
         </div>
-        {options.map(({ color, label, selected, disabled }) => (
-          <DropdownMenuItem
-            key={color ?? "none"}
-            role="menuitemradio"
-            aria-checked={selected}
-            disabled={disabled}
-            onSelect={() => onChoose(color)}
-            data-testid={`bulk-color-option-${color ?? "none"}`}
-          >
-            <ColorSwatch color={color} />
-            {label}
-            {selected && <IconCheck className="ml-auto" />}
-          </DropdownMenuItem>
-        ))}
+        <DropdownMenuRadioGroup value={commonColor ?? ""}>
+          {options.map(({ color, label, disabled }) => (
+            <DropdownMenuRadioItem
+              key={color ?? "none"}
+              value={color ?? "none"}
+              disabled={disabled}
+              onSelect={() => onChoose(color)}
+              data-testid={`bulk-color-option-${color ?? "none"}`}
+            >
+              <ColorSwatch color={color} />
+              {label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

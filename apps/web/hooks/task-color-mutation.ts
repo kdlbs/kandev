@@ -83,11 +83,14 @@ function createColorMutation(store: Store) {
     const settings = state.userSettings;
     const order = compareUserSettingsRevisions(settings.revision, revision);
     if (order === 1 || (pending.size === 0 && order !== -1)) {
+      const previousConfirmed = confirmed;
       confirmed = { ...settings.sidebarTaskColors };
       revision = settings.revision;
       if (order === 1) {
         pending.forEach((entry, id) => {
-          if (entry.state === "sent") pending.delete(id);
+          const colorChanged =
+            (settings.sidebarTaskColors[id] ?? null) !== (previousConfirmed[id] ?? null);
+          if (entry.state === "sent" && colorChanged) pending.delete(id);
         });
         if (pending.size > 0) publish();
       }
@@ -128,7 +131,7 @@ function createColorMutation(store: Store) {
         const chunk = ids.slice(offset, offset + 500);
         const { response, submittedIds } = await sync(chunk, operation, color);
         if (!response) {
-          saved += chunk.length;
+          saved += submittedIds.length;
           continue;
         }
         const mapped = mapUserSettingsResponse(response, store.getState().userSettings);
@@ -137,7 +140,7 @@ function createColorMutation(store: Store) {
           confirmed = { ...mapped.sidebarTaskColors };
           revision = mapped.revision;
         }
-        saved += chunk.length;
+        saved += submittedIds.length;
         release(submittedIds, operation);
         publish();
       }

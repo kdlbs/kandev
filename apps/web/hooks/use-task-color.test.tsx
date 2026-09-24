@@ -163,6 +163,36 @@ describe("useTaskColor", () => {
   });
 });
 
+it("keeps an in-flight color optimistic across an unrelated newer settings revision", async () => {
+  let rejectUpdate: ((reason: Error) => void) | undefined;
+  mockUpdateUserSettings.mockReturnValue(
+    new Promise<UserSettingsResponse>((_, reject) => {
+      rejectUpdate = reject;
+    }),
+  );
+  const { result } = renderHook(
+    () => ({ color: useTaskColor("task-1"), setColor: useSetTaskColor() }),
+    { wrapper },
+  );
+
+  act(() => result.current.setColor("task-1", "blue"));
+  await waitFor(() => expect(mockUpdateUserSettings).toHaveBeenCalledTimes(1));
+  act(() => {
+    capturedStore?.setState((state) => ({
+      ...state,
+      userSettings: {
+        ...state.userSettings,
+        revision: 2,
+        sidebarTaskColors: { "task-1": "red" },
+      },
+    }));
+  });
+
+  expect(result.current.color).toBe("blue");
+  act(() => rejectUpdate?.(new Error("offline")));
+  await waitFor(() => expect(result.current.color).toBe("red"));
+});
+
 // @covers AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-006.5
 it("restores only failed IDs across independent color setters", async () => {
   let resolveFirst: ((value: UserSettingsResponse) => void) | undefined;
@@ -343,6 +373,40 @@ it("does not overwrite a newer single edit with a later chunk of an older batch"
   await waitFor(() => expect(mockUpdateUserSettings).toHaveBeenCalledTimes(2));
   expect(confirmed["bulk-500"]).toBe("pink");
   expect(capturedStore?.getState().userSettings.sidebarTaskColors["bulk-500"]).toBe("pink");
+});
+
+it("does not count a superseded task as saved when its newer edit fails", async () => {
+  const ids = Array.from({ length: 501 }, (_, i) => `bulk-${i}`);
+  let resolveFirst: ((value: UserSettingsResponse) => void) | undefined;
+  mockUpdateUserSettings.mockImplementation(() => {
+    if (mockUpdateUserSettings.mock.calls.length === 1) {
+      return new Promise<UserSettingsResponse>((resolve) => {
+        resolveFirst = resolve;
+      });
+    }
+    return Promise.reject(new Error("offline"));
+  });
+  const { result } = renderHook(() => ({ bulk: useSetTaskColors(), single: useSetTaskColor() }), {
+    wrapper,
+  });
+  let saving!: Promise<{ saved: number; total: number }>;
+  act(() => {
+    saving = result.current.bulk.setColors(ids, "blue");
+  });
+  await waitFor(() => expect(mockUpdateUserSettings).toHaveBeenCalledTimes(1));
+  act(() => {
+    result.current.single("bulk-500", "pink");
+  });
+
+  let outcome: { saved: number; total: number } | undefined;
+  await act(async () => {
+    resolveFirst?.(
+      response(Object.fromEntries(ids.slice(0, 500).map((id) => [id, "blue" as const])), 2),
+    );
+    outcome = await saving;
+  });
+
+  expect(outcome).toEqual({ saved: 500, total: 501 });
 });
 
 it("keeps a queued newer edit optimistic when an older write emits a settings event", async () => {
