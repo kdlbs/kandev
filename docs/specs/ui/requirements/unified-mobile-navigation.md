@@ -195,6 +195,20 @@ the full task list.
   navigation composition, Tasks' initial expanded state, and Automations'
   initial collapsed state shall remain unchanged.
 
+### REQ-UI-MOBILE-MENU-008: One contextual toolbar per plugin
+
+- **AC-UI-MOBILE-MENU-008.1:** Phone navigation shall show plugin controls in
+  one wrapping group under Plugins without Workspace and Task subheadings.
+  When task controls are available, each plugin contributing to the task
+  toolbar shall use that toolbar instead of its workspace toolbar. All task
+  contributions from that plugin remain reachable. Workspace-only plugins
+  and sidebar workspace actions remain available.
+- **AC-UI-MOBILE-MENU-008.2:** Listing pages and task pages without task
+  contributions, including archived tasks, shall retain workspace toolbar
+  controls. Selection follows live registrations, preserves each selected
+  slot's context and error isolation, and does not change desktop/tablet
+  placement or plugin destinations in saved sidebar layouts.
+
 ## Out of scope
 
 - Global bottom navigation, a second top-bar task-actions menu, or redesigned
@@ -217,3 +231,5 @@ the full task list.
 
 - [Unified mobile navigation](../../../plans/unified-mobile-navigation/plan.md)
 - [Coherent mobile plugin menu](../../../plans/mobile-plugin-menu-coherence/plan.md)
+
+- [Mobile plugin deduplication](../../../plans/mobile-plugin-deduplication/plan.md)

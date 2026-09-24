@@ -97,6 +97,13 @@ Kandev does not inspect or reorder children inside a contribution, and disabled
 plugins return to their saved position when re-enabled.
 Full-bleed routes that opt out of host topbar chrome own their Status trigger.
 
+## Use plugins on a phone
+
+Open the hamburger menu to find plugin controls together under **Plugins**.
+On a task, a plugin's task toolbar takes the place of its workspace toolbar,
+so shared status controls appear once. Workspace-only controls, sidebar actions,
+and plugin pages remain available. Desktop keeps its separate toolbar locations.
+
 ## Installing a plugin
 
 The easiest way to install is from the in-app catalog: **Settings > Plugins >

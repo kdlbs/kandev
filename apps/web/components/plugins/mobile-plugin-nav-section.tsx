@@ -44,9 +44,13 @@ export function MobilePluginNavSection({
 }: MobilePluginNavSectionProps) {
   const { t } = useTranslation();
   const registry = usePluginRegistry();
+  const taskPluginIds = actions
+    ? registry.getSlotRegistrations("chat-top-bar").map(({ pluginId }) => pluginId)
+    : [];
   const { hasMainActions, hasSidebarActions } = workspaceSlotAvailability(
     registry,
     workspaceContext,
+    taskPluginIds,
   );
   const hasWorkspaceActions = hasMainActions || hasSidebarActions;
   // Resolved directly rather than through `useStaticDestinations`: this group's
@@ -70,20 +74,15 @@ export function MobilePluginNavSection({
       aria-label={t("common:plugins")}
     >
       <h3 className="text-sm font-medium">{t("common:plugins")}</h3>
-      {hasWorkspaceActions && workspaceContext && (
-        <div className="space-y-2" data-testid="mobile-plugin-workspace-actions">
-          {actions && <h4 className="text-xs text-muted-foreground">{t("common:workspace")}</h4>}
-          <WorkspacePluginControls
-            context={workspaceContext}
-            hasMainActions={hasMainActions}
-            hasSidebarActions={hasSidebarActions}
-          />
-        </div>
-      )}
-      {actions && (
-        <div className="space-y-2" data-testid="mobile-plugin-page-actions">
-          {hasWorkspaceActions && (
-            <h4 className="text-xs text-muted-foreground">{t("common:task")}</h4>
+      {(hasWorkspaceActions || actions) && (
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {hasWorkspaceActions && workspaceContext && (
+            <WorkspacePluginControls
+              context={workspaceContext}
+              hasMainActions={hasMainActions}
+              hasSidebarActions={hasSidebarActions}
+              excludePluginIds={taskPluginIds}
+            />
           )}
           {actions}
         </div>
@@ -103,14 +102,22 @@ function WorkspacePluginControls({
   context,
   hasMainActions,
   hasSidebarActions,
+  excludePluginIds,
 }: {
   context: MobilePluginWorkspaceContext;
   hasMainActions: boolean;
   hasSidebarActions: boolean;
+  excludePluginIds: readonly string[];
 }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-      {hasMainActions && <MainTopBarPluginActions {...context} presentation="mobile" />}
+      {hasMainActions && (
+        <MainTopBarPluginActions
+          {...context}
+          presentation="mobile"
+          excludePluginIds={excludePluginIds}
+        />
+      )}
       {hasSidebarActions && context.workspaceId && (
         <AppSidebarWorkspaceActions
           workspaceId={context.workspaceId}
@@ -125,9 +132,14 @@ function WorkspacePluginControls({
 function workspaceSlotAvailability(
   registry: ReturnType<typeof usePluginRegistry>,
   context?: MobilePluginWorkspaceContext,
+  excludePluginIds: readonly string[] = [],
 ) {
   return {
-    hasMainActions: !!context && registry.getSlotRegistrations("main-top-bar").length > 0,
+    hasMainActions:
+      !!context &&
+      registry
+        .getSlotRegistrations("main-top-bar")
+        .some(({ pluginId }) => !excludePluginIds.includes(pluginId)),
     hasSidebarActions:
       !!context?.workspaceId &&
       registry.getSlotRegistrations("sidebar-workspace-actions").length > 0,

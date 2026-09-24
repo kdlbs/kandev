@@ -16,6 +16,8 @@ export type PluginSlotProps = {
    * on the current plugin id themselves.
    */
   ownerPluginId?: string;
+  /** Owners whose contextual toolbar is already rendered in this surface. */
+  excludePluginIds?: readonly string[];
 };
 
 /**
@@ -24,11 +26,14 @@ export type PluginSlotProps = {
  * own error boundary so one broken plugin can't break the host surface. Pass
  * `ownerPluginId` to restrict rendering to that plugin's own components.
  */
-export function PluginSlot({ name, slotProps, ownerPluginId }: PluginSlotProps) {
+export function PluginSlot({ name, slotProps, ownerPluginId, excludePluginIds }: PluginSlotProps) {
   const registry = usePluginRegistry();
   const registrations = registry
     .getSlotRegistrations(name)
-    .filter((registration) => !ownerPluginId || registration.pluginId === ownerPluginId);
+    .filter(
+      ({ pluginId }) =>
+        (!ownerPluginId || pluginId === ownerPluginId) && !excludePluginIds?.includes(pluginId),
+    );
 
   if (registrations.length === 0) return null;
 
