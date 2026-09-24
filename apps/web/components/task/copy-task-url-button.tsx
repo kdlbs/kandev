@@ -25,7 +25,8 @@ export function CopyTaskUrlButton({ taskId }: { taskId: string }) {
     return () => window.clearTimeout(timeout);
   }, [copied]);
 
-  const label = t(copied ? "task:taskLinkCopied" : "task:copyTaskLink");
+  const stableLabel = t("task:copyTaskLink");
+  const tooltipLabel = t(copied ? "task:taskLinkCopied" : "task:copyTaskLink");
 
   return (
     <Tooltip>
@@ -41,7 +42,7 @@ export function CopyTaskUrlButton({ taskId }: { taskId: string }) {
               if (success) setCopied(true);
             });
           }}
-          aria-label={label}
+          aria-label={stableLabel}
           data-testid="task-preview-copy-url"
         >
           {copied ? (
@@ -51,7 +52,10 @@ export function CopyTaskUrlButton({ taskId }: { taskId: string }) {
           )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent>{tooltipLabel}</TooltipContent>
+      <span role="status" className="sr-only">
+        {copied ? t("task:taskLinkCopied") : ""}
+      </span>
     </Tooltip>
   );
 }

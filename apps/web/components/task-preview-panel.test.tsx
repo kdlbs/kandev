@@ -393,7 +393,7 @@ describe("TaskPreviewPanel copy task link", () => {
     expect(screen.queryByTestId(COPY_TEST_ID)).toBeNull();
   });
 
-  it("copies the task's detail URL and shows transient confirmation", async () => {
+  it("copies the task's detail URL, keeps a stable name, and announces confirmation", async () => {
     vi.useFakeTimers();
     renderPanel(<TaskPreviewPanel task={TASK} onClose={vi.fn()} />);
 
@@ -406,12 +406,14 @@ describe("TaskPreviewPanel copy task link", () => {
     expect(clipboardMocks.copyToClipboard).toHaveBeenCalledWith(
       `${window.location.origin}/t/${TASK.id}`,
     );
-    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COPIED_LABEL);
+    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COPY_LABEL);
+    expect(screen.getByRole("status").textContent).toBe(COPIED_LABEL);
 
     await act(async () => {
       vi.advanceTimersByTime(1500);
     });
     expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COPY_LABEL);
+    expect(screen.getByRole("status").textContent).toBe("");
   });
 
   it("does not show copied confirmation when the clipboard write fails", async () => {
@@ -423,6 +425,7 @@ describe("TaskPreviewPanel copy task link", () => {
 
     await waitFor(() => expect(clipboardMocks.copyToClipboard).toHaveBeenCalled());
     expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COPY_LABEL);
+    expect(screen.getByRole("status").textContent).toBe("");
   });
 
   it("renders the copy control before Maximize, alongside the other panel controls", () => {
@@ -442,10 +445,11 @@ describe("TaskPreviewPanel copy task link", () => {
 
     fireEvent.click(screen.getByTestId(COPY_TEST_ID));
     await act(async () => {});
-    expect(screen.getByTestId(COPY_TEST_ID).getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COPIED_LABEL);
+    expect(screen.getByRole("status").textContent).toBe(COPIED_LABEL);
 
     rerenderPanel(rerender, <TaskPreviewPanel task={OTHER_TASK} onClose={vi.fn()} />);
 
     expect(screen.getByTestId(COPY_TEST_ID).getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COPY_LABEL);
+    expect(screen.getByRole("status").textContent).toBe("");
   });
 });
