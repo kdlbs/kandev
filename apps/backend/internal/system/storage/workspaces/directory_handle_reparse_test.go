@@ -41,6 +41,34 @@ func TestDecodeWindowsReparsePathRejectsMalformedSubstituteNameMetadata(t *testi
 	})
 }
 
+func TestDecodeWindowsReparsePathRejectsInvalidTargetCodeUnits(t *testing.T) {
+	t.Run("unpaired surrogate", func(t *testing.T) {
+		buffer := windowsSymlinkReparseBuffer(`\??\C:\actual-target`, `C:\display-name`)
+		binary.LittleEndian.PutUint16(buffer[20:22], 0xD800)
+		if _, err := decodeWindowsReparsePath(buffer, uint32(len(buffer)), 20); err == nil {
+			t.Fatal("decodeWindowsReparsePath() accepted an unpaired UTF-16 surrogate")
+		}
+	})
+	t.Run("embedded NUL", func(t *testing.T) {
+		buffer := windowsSymlinkReparseBuffer(`\??\C:\actual-target`, `C:\display-name`)
+		binary.LittleEndian.PutUint16(buffer[20:22], 0)
+		if _, err := decodeWindowsReparsePath(buffer, uint32(len(buffer)), 20); err == nil {
+			t.Fatal("decodeWindowsReparsePath() accepted an embedded NUL")
+		}
+	})
+}
+
+func TestDecodeWindowsReparsePathAcceptsValidSurrogatePair(t *testing.T) {
+	buffer := windowsSymlinkReparseBuffer(`\??\C:\target-😀`, `C:\display-name`)
+	got, err := decodeWindowsReparsePath(buffer, uint32(len(buffer)), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `\??\C:\target-😀`; got != want {
+		t.Fatalf("decodeWindowsReparsePath() = %q, want %q", got, want)
+	}
+}
+
 func windowsSymlinkReparseBuffer(substituteName, printName string) []byte {
 	substitute := utf16.Encode([]rune(substituteName))
 	print := utf16.Encode([]rune(printName))
