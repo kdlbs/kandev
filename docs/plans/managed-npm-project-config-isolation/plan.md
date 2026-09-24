@@ -178,7 +178,8 @@ SSH recovery E2E checks passed for the full startup and cleanup paths.
 Fixup validation passed: the affected managed-runtime, lifecycle, settings,
 agentctl, and npm-resolution Go suites; the complete agentctl process package;
 `make -C apps/backend build`; Docker and SSH recovery E2E (2 passed); public-doc
-and specification validators; `bash -n` for the E2E npx fixture; and
+and specification validators; `bash -n` for the E2E npx fixture; Windows
+amd64 test-binary compilation for the managed-runtime and process packages; and
 `git diff --check`.
 
 ## Risks

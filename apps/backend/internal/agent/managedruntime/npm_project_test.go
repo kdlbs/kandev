@@ -34,8 +34,10 @@ func TestPrepareNPMProjectPrefixUsesPrivateTemporaryRoot(t *testing.T) {
 	if err != nil || !info.IsDir() {
 		t.Fatalf("npm project prefix stat = (%v, %v), want an existing directory", info, err)
 	}
-	if gotMode := info.Mode().Perm(); gotMode != 0o700 {
-		t.Fatalf("npm project prefix permissions = %#o, want %#o", gotMode, 0o700)
+	if runtime.GOOS != "windows" {
+		if gotMode := info.Mode().Perm(); gotMode != 0o700 {
+			t.Fatalf("npm project prefix permissions = %#o, want %#o", gotMode, 0o700)
+		}
 	}
 
 	legacyHomePrefix := filepath.Join(agentHome, ".kandev", "managed-npm-runtime")
