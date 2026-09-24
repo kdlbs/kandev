@@ -1,7 +1,7 @@
 ---
 id: "02-pointer-aware-panel-minimum"
 title: "Pointer-aware preview panel minimum and indicator floor"
-status: todo
+status: done
 wave: 2
 depends_on:
   - "01-preview-header-copy-url"
@@ -127,3 +127,30 @@ beside their sources.
   only by the component test.
 - `min-w-min` must outrank the trigger's own `min-w-0` from the wrapper
   selector; verify with a computed-style assertion, not by class presence.
+
+## Build receipt
+
+Implemented per Scope/Acceptance above via TDD. One mechanism deviation from
+the illustrative `[&>button]:min-w-min` example (Scope bullet 5, Risk 3):
+real-Chromium E2E measured the indicator trigger at 687-707px instead of the
+intended ~68/88px floor. Root cause: the step name span's `white-space:
+nowrap` (from `truncate`) makes its own min-content size its full, unbroken
+text width; `min-width: 0` on that span only relaxes its automatic minimum
+size during flex shrinking, it does not reduce what it contributes to an
+ancestor's `min-width: min-content` computation. That full width dominated
+the wrapper's `min-content` floor regardless of the span's own `min-width: 0`.
+Since the spec hedges the mechanism as an example ("for example
+`[&>button]:min-w-min`") while the numeric floors (68px fine / 88px coarse,
+derived in the system design's "The budget") are the actual acceptance
+criteria, Build replaced it with explicit conditional pixel `min-width`
+classes (`min-w-[68px]` / `min-w-[88px]`, gated on `isFinePointer`) sourced
+from those same derived numbers — see `PREVIEW_HEADER_INDICATOR` in
+`lib/settings/constants.ts` and the wrapper in `task-preview-panel.tsx`.
+Verified via a full real-Chromium E2E run after the fix: 5/5 passed, including
+the cap-formula and inline-layout assertions.
+
+Verification run at implementation time: unit/component tests (41/41 across
+the 5 files in Verification above) pass; `pnpm run typecheck` and
+`pnpm run lint` clean; E2E (`preview-workflow-step-navigation.spec.ts`,
+chromium) 5/5 pass, including the new coarse-pointer test and the extended
+fine-pointer test's inline-layout and cap-formula assertions.

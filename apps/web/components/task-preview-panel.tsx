@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { IconArrowsMaximize, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { cn } from "@kandev/ui/lib/utils";
 import { useAppStore } from "@/components/state-provider";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { Task } from "./kanban-card";
 import { PreviewSessionTabs } from "./task/preview-session-tabs";
@@ -159,6 +161,7 @@ function PreviewPanelHeader({
   setActionsMenuOpen,
 }: PreviewPanelHeaderProps) {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   const currentIndex = workflowSteps.findIndex((step) => step.id === currentStepId);
   const handleMoveStep = task && workflowSteps.length > 0 ? onMoveStep : undefined;
   return (
@@ -178,7 +181,19 @@ function PreviewPanelHeader({
             // a <button> normally sizes to its content regardless of `display`,
             // so without an explicit width it overflows this shrink-capped
             // wrapper instead of shrinking to it (defeating truncation).
-            className="min-w-0 max-w-[50%] shrink [&>button]:w-full"
+            //
+            // The floor is an explicit pixel value, not `min-w-min`: the step
+            // name span's `white-space: nowrap` (from `truncate`) makes its
+            // own min-content size its full, unbroken text width, so
+            // `min-width: min-content` on an ancestor also picks up that
+            // full width instead of just the marker and count. These
+            // literals must match PREVIEW_HEADER_INDICATOR in
+            // lib/settings/constants.ts (Tailwind's scanner needs literal
+            // class text, not an interpolated constant).
+            className={cn(
+              "max-w-[50%] shrink [&>button]:w-full",
+              isFinePointer ? "min-w-[68px]" : "min-w-[88px]",
+            )}
           >
             <MinimalWorkflowStepper
               sortedSteps={workflowSteps}

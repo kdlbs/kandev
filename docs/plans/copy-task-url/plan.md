@@ -183,7 +183,7 @@ Wave 1:
 - [x] [task-01-preview-header-copy-url](task-01-preview-header-copy-url.md) — component + wiring + unit tests (33/33 pass across 2 files, 5 tests in the new describe block) + spec/system-design amendments + extended E2E containment test (passing), committed.
 
 Wave 2:
-- [ ] [task-02-pointer-aware-panel-minimum](task-02-pointer-aware-panel-minimum.md) — pointer-aware minimum panel width (320/380px), indicator floor, unit + component tests, fine and coarse E2E containment.
+- [x] [task-02-pointer-aware-panel-minimum](task-02-pointer-aware-panel-minimum.md) — pointer-aware minimum panel width (320/380px), indicator floor, unit + component tests, fine and coarse E2E containment. Indicator floor mechanism built as explicit pixel `min-width` classes (68px/88px) instead of the spec's illustrative `[&>button]:min-w-min` — see task-02's Build receipt.
 ```
 
 ## Open Questions

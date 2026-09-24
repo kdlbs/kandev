@@ -202,3 +202,17 @@ describe("TaskPreviewPanel step indicator lifecycle", () => {
     expect(onDisclosureOpenChange).toHaveBeenLastCalledWith(false);
   });
 });
+
+describe("TaskPreviewPanel step indicator floor", () => {
+  it("gives the indicator wrapper an explicit fine-pointer content floor", () => {
+    renderPanel();
+
+    // Not `min-w-min`: a long step name's `white-space: nowrap` (from
+    // `truncate`) makes its own min-content size its full, unbroken text
+    // width, which would dominate an ancestor's `min-content` computation
+    // instead of leaving room for it to shrink to 0.
+    const wrapper = screen.getByTestId(STEPPER_TEST_ID).parentElement;
+    expect(wrapper?.className).toContain("min-w-[68px]");
+    expect(wrapper?.className).not.toContain("min-w-min");
+  });
+});

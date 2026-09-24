@@ -1,8 +1,74 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import type { ApiClient } from "../../helpers/api-client";
+import type { Locator, Page } from "@playwright/test";
 
 const LONG_STEP_NAME = `Awaiting review from the platform team ${"x".repeat(60)}`;
+
+// The header layout budget's ceiling is a two-digit step count on both sides
+// of the indicator (e.g. "10/10"); see the system design's Header layout
+// section. 100+ step workflows are out of scope (task-02).
+const STEPS_FOR_MINIMUM_WIDTH_TEST = 10;
+
+// Brings the shared workflow up to exactly STEPS_FOR_MINIMUM_WIDTH_TEST steps
+// with a long-named target step last, so the task lands on a two-digit step
+// position. Returns every step id this created, for best-effort cleanup.
+async function seedStepsForTenthPosition(
+  apiClient: ApiClient,
+  workflowId: string,
+  existingStepCount: number,
+): Promise<{ longStepId: string; createdStepIds: string[] }> {
+  const createdStepIds: string[] = [];
+  const fillerCount = Math.max(0, STEPS_FOR_MINIMUM_WIDTH_TEST - existingStepCount - 1);
+  for (let i = 0; i < fillerCount; i++) {
+    const step = await apiClient.createWorkflowStep(
+      workflowId,
+      `Filler step ${i + 1}`,
+      existingStepCount + i,
+    );
+    createdStepIds.push(step.id);
+  }
+  const longStep = await apiClient.createWorkflowStep(
+    workflowId,
+    LONG_STEP_NAME,
+    existingStepCount + fillerCount,
+  );
+  createdStepIds.push(longStep.id);
+  return { longStepId: longStep.id, createdStepIds };
+}
+
+async function cleanupCreatedSteps(apiClient: ApiClient, stepIds: string[]) {
+  for (const stepId of stepIds) {
+    await apiClient.deleteWorkflowStep(stepId).catch(() => {});
+  }
+}
+
+// Confirms the panel rendered inline — no floating backdrop, and the panel
+// sits beside the board rather than over it. Both the fine and coarse
+// containment tests must prove this before asserting the header budget: the
+// budget only binds in the inline layout (system design Risks section).
+async function expectInlinePreviewLayout(page: Page, previewPanel: Locator) {
+  await expect(page.locator('[aria-label="Close preview"]')).toHaveCount(0);
+
+  const [boardBox, panelBox] = await Promise.all([
+    page.getByTestId("kanban-board").boundingBox(),
+    previewPanel.boundingBox(),
+  ]);
+  expect(boardBox).not.toBeNull();
+  expect(panelBox).not.toBeNull();
+  if (!boardBox || !panelBox) return;
+  expect(boardBox.x + boardBox.width).toBeLessThanOrEqual(panelBox.x + 1);
+}
+
+// AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4: the indicator's width is capped
+// at half the title-and-indicator group's width (plus 1px of rounding slack).
+async function expectIndicatorWithinCap(previewPanel: Locator, triggerBox: { width: number }) {
+  const group = previewPanel.locator("div.flex.min-w-0.flex-1.items-center").first();
+  const groupBox = await group.boundingBox();
+  expect(groupBox).not.toBeNull();
+  if (!groupBox) return;
+  expect(triggerBox.width).toBeLessThanOrEqual(groupBox.width / 2 + 1);
+}
 
 // Column visibility lives on the swimlane header of the workflow it
 // configures. Mirrors the same helper in step-visibility-filter.spec.ts.
@@ -169,22 +235,23 @@ test.describe("Kanban preview workflow step navigation", () => {
     apiClient,
     seedData,
   }) => {
-    const longStep = await apiClient.createWorkflowStep(
+    const { longStepId: longStep, createdStepIds } = await seedStepsForTenthPosition(
+      apiClient,
       seedData.workflowId,
-      LONG_STEP_NAME,
       seedData.steps.length,
     );
 
     await apiClient.createTask(seedData.workspaceId, "Preview step nav containment", {
       workflow_id: seedData.workflowId,
-      workflow_step_id: longStep.id,
+      workflow_step_id: longStep,
       repository_ids: [seedData.repositoryId],
     });
 
     await testPage.setViewportSize({ width: 1400, height: 900 });
-    // Seed the persisted preview width below the panel's own 300px floor so the
-    // inline layout — the binding case per the system design — renders at
-    // exactly its minimum, rather than depending on a fragile drag interaction.
+    // Seed the persisted preview width below the panel's own fine-pointer
+    // 320px floor so the inline layout — the binding case per the system
+    // design — renders at exactly its minimum, rather than depending on a
+    // fragile drag interaction.
     await testPage.addInitScript(() => {
       window.localStorage.setItem("kandev.kanban.preview.width", "1");
     });
@@ -201,6 +268,8 @@ test.describe("Kanban preview workflow step navigation", () => {
 
     const trigger = previewPanel.getByTestId("workflow-stepper-minimal");
     await expect(trigger).toBeVisible();
+
+    await expectInlinePreviewLayout(testPage, previewPanel);
 
     const title = previewPanel.locator("h2");
     const closeButton = previewPanel.getByRole("button", { name: "Close preview" });
@@ -241,10 +310,12 @@ test.describe("Kanban preview workflow step navigation", () => {
 
     // The title floor AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3 requires, now
     // proven with three panel controls in the budget at this project's fine
-    // pointer (system design's Header layout section derives g<=74px fine
-    // pointer here; the tighter g<=34px coarse-pointer/tablet bound is not
-    // exercised by this desktop-chromium project).
+    // pointer (system design's Header layout section derives the g<=6px
+    // inline bound here; the tighter g<=7px floating bound is not exercised
+    // by this inline-layout test).
     expect(titleBox.width).toBeGreaterThanOrEqual(88);
+
+    await expectIndicatorWithinCap(previewPanel, triggerBox);
 
     // No horizontal scrolling in the header row.
     const headerScrollWidth = await previewPanel
@@ -253,7 +324,114 @@ test.describe("Kanban preview workflow step navigation", () => {
       .evaluate((el) => el.scrollWidth - el.clientWidth);
     expect(headerScrollWidth).toBeLessThanOrEqual(1);
 
-    await apiClient.deleteWorkflowStep(longStep.id).catch(() => {});
+    await cleanupCreatedSteps(apiClient, createdStepIds);
+  });
+
+  test("keeps the header a single row at the coarse-pointer panel minimum", async ({
+    coarseDesktopTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { longStepId: longStep, createdStepIds } = await seedStepsForTenthPosition(
+      apiClient,
+      seedData.workflowId,
+      seedData.steps.length,
+    );
+
+    await apiClient.createTask(seedData.workspaceId, "Preview step nav coarse containment", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: longStep,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    // Seed the persisted chosen width below the panel's own 320px fine-pointer
+    // floor. At this fixture's coarse pointer, the rendered width floors
+    // further to the 380px coarse minimum — the binding case for the coarse
+    // budget (system design's Header layout section).
+    await coarseDesktopTestPage.addInitScript(() => {
+      window.localStorage.setItem("kandev.kanban.preview.width", "1");
+    });
+
+    const kanban = new KanbanPage(coarseDesktopTestPage);
+    await enablePreviewOnClick(kanban, apiClient);
+
+    const card = kanban.taskCardByTitle("Preview step nav coarse containment");
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.click();
+
+    const previewPanel = coarseDesktopTestPage.getByTestId("task-preview-panel");
+    await expect(previewPanel).toBeVisible({ timeout: 10_000 });
+
+    const trigger = previewPanel.getByTestId("workflow-stepper-minimal");
+    await expect(trigger).toBeVisible();
+
+    // coarseDesktopTestPage leaves a board container of about 1024px, so the
+    // 380px panel stays inline; this is the binding case per the system
+    // design's Risks note.
+    await expectInlinePreviewLayout(coarseDesktopTestPage, previewPanel);
+
+    const title = previewPanel.locator("h2");
+    const closeButton = previewPanel.getByRole("button", { name: "Close preview" });
+    const maximizeButton = previewPanel.getByRole("button", { name: "Open full page" });
+    const copyButton = previewPanel.getByRole("button", { name: "Copy task link" });
+    await expect(closeButton).toBeVisible();
+    await expect(closeButton).toBeEnabled();
+    await expect(maximizeButton).toBeVisible();
+    await expect(maximizeButton).toBeEnabled();
+    await expect(copyButton).toBeVisible();
+    await expect(copyButton).toBeEnabled();
+
+    const [titleBox, triggerBox, closeBox, copyBox, maximizeBox] = await Promise.all([
+      title.boundingBox(),
+      trigger.boundingBox(),
+      closeButton.boundingBox(),
+      copyButton.boundingBox(),
+      maximizeButton.boundingBox(),
+    ]);
+    expect(titleBox).not.toBeNull();
+    expect(triggerBox).not.toBeNull();
+    expect(closeBox).not.toBeNull();
+    expect(copyBox).not.toBeNull();
+    expect(maximizeBox).not.toBeNull();
+    if (!titleBox || !triggerBox || !closeBox || !copyBox || !maximizeBox) return;
+
+    // Single row: every header element shares the same vertical center. Comparing
+    // raw tops would fail spuriously — items-center aligns centers, not tops, and
+    // the h2 title's text line-box is naturally shorter than the icon buttons.
+    const centerY = (box: { y: number; height: number }) => box.y + box.height / 2;
+    expect(Math.abs(centerY(titleBox) - centerY(closeBox))).toBeLessThan(4);
+    expect(Math.abs(centerY(triggerBox) - centerY(closeBox))).toBeLessThan(4);
+    expect(Math.abs(centerY(copyBox) - centerY(closeBox))).toBeLessThan(4);
+
+    // REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003.1: the copy control sits in the
+    // panel controls cluster, before the open-full-page control.
+    expect(copyBox.x).toBeLessThan(maximizeBox.x);
+
+    // AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.17: the indicator's hit area is
+    // at least 44x44 at a coarse pointer.
+    expect(triggerBox.width).toBeGreaterThanOrEqual(44);
+    expect(triggerBox.height).toBeGreaterThanOrEqual(44);
+
+    // The title floor AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3 requires,
+    // proven with three panel controls in the budget at this project's coarse
+    // pointer (system design's Header layout section derives the g<=7px
+    // floating bound; this inline-layout test exercises the tighter g<=6px
+    // inline bound at the coarse minimum).
+    expect(titleBox.width).toBeGreaterThanOrEqual(88);
+
+    // AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4: at the coarse minimum this
+    // is the binding case — the cap, not the title floor, limits the
+    // indicator's width.
+    await expectIndicatorWithinCap(previewPanel, triggerBox);
+
+    // No horizontal scrolling in the header row.
+    const headerScrollWidth = await previewPanel
+      .locator(".border-b")
+      .first()
+      .evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(headerScrollWidth).toBeLessThanOrEqual(1);
+
+    await cleanupCreatedSteps(apiClient, createdStepIds);
   });
 
   test("dismisses the disclosure on the first Escape and the preview on the second", async ({

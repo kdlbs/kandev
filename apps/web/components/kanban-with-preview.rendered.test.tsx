@@ -23,7 +23,7 @@ vi.mock("@/hooks/use-kanban-preview", () => ({
   useKanbanPreview: () => previewState,
 }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ isMobile: false }),
+  useResponsiveBreakpoint: () => ({ isMobile: false, isFinePointer: true }),
 }));
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: vi.fn() }),
