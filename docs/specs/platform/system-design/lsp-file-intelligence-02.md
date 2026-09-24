@@ -5,7 +5,7 @@ requirements:
   - REQ-PLATFORM-LSP-FILE-INTELLIGENCE-001
   - REQ-PLATFORM-LSP-FILE-INTELLIGENCE-002
 created: 2026-07-09
-updated: 2026-09-23
+updated: 2026-09-24
 owners:
   - tbd
 ---
@@ -93,6 +93,7 @@ This design preserves the technical source detail for `REQ-PLATFORM-LSP-FILE-INT
 - **GIVEN** two browser windows already have independent LSP leases, **WHEN** one closes or explicitly stops, **THEN** the other retains its process, requests, providers, progress, and diagnostics.
 - **GIVEN** a temporary WebSocket failure, **WHEN** the browser remains on the editor, **THEN** it shows reconnecting and reattaches without representing the failure as a language-server exit; a true process exit uses `4006` and Retry.
 - **GIVEN** the last editor in a connected tab remains closed for two minutes, **WHEN** its idle timer fires, **THEN** it explicitly releases the lease; tab close or network loss before that timer detaches without release.
+- **GIVEN** a browser has remained detached for one hour, **WHEN** its lease deadline passes, **THEN** the backend releases the lease and permits task-host idle reclaim; reattachment before the deadline cancels it, and a later eligible editor open starts fresh analysis.
 - **GIVEN** all LSP lease slots are occupied and at least one lease is detached, **WHEN** a new editor starts another language server, **THEN** the oldest detached lease is released and the new server is admitted; if every lease is attached, the editor gets `4005`.
 - **GIVEN** a returning tab has a valid lease hint, **WHEN** auto-start is later disabled for that language, **THEN** the tab still resumes its existing lease unless it explicitly stopped LSP; a new tab without a hint follows current auto-start or local manual-enable policy.
 - **GIVEN** a duplicated tab copied `sessionStorage`, **WHEN** it opens the same file while the original tab's lease is attached, **THEN** the original connection remains attached and the duplicate gets a separate lease or a capacity state.

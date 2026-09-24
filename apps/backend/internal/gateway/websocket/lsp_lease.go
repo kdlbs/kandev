@@ -24,25 +24,28 @@ const (
 	lspLeaseMaxPendingClientRequests     = 256
 	lspLeaseMaxClientRequestIDBytes      = 256
 	lspLeaseMaxPendingClientRequestBytes = 64 << 10
+	lspLeaseDetachedTimeout              = time.Hour
 	lspCloseTransport                    = 4009
 )
 
 const (
-	lspLeaseReleaseStop        = "stop"
-	lspLeaseReleaseEditorIdle  = "editor_idle"
-	lspLeaseReleaseCapacity    = "capacity"
-	lspLeaseReleaseServerExit  = "server_exit"
-	lspLeaseReleaseRuntimeStop = "runtime_stop"
-	lspLeaseReleaseBackendStop = "backend_stop"
+	lspLeaseReleaseStop            = "stop"
+	lspLeaseReleaseEditorIdle      = "editor_idle"
+	lspLeaseReleaseDetachedTimeout = "detached_timeout"
+	lspLeaseReleaseCapacity        = "capacity"
+	lspLeaseReleaseServerExit      = "server_exit"
+	lspLeaseReleaseRuntimeStop     = "runtime_stop"
+	lspLeaseReleaseBackendStop     = "backend_stop"
 )
 
 type lspLeaseManager struct {
-	mu          sync.Mutex
-	admissionMu sync.Mutex
-	leases      map[string]*lspLease
-	max         int
-	closed      bool
-	logger      *logger.Logger
+	mu              sync.Mutex
+	admissionMu     sync.Mutex
+	leases          map[string]*lspLease
+	max             int
+	detachedTimeout time.Duration
+	closed          bool
+	logger          *logger.Logger
 }
 
 type lspLeaseAgentCtlClient interface {
@@ -71,9 +74,9 @@ type lspLease struct {
 	browser                       *websocket.Conn
 	generation                    uint64
 	detachedAt                    time.Time
+	expiryTimer                   *time.Timer
 	closed                        bool
 	readDone                      chan struct{}
-	terminalOnce                  sync.Once
 	ready                         bool
 	readyStatus                   map[string]any
 	workspacePath                 string
@@ -129,7 +132,7 @@ func newLSPLeaseManager(max int, log *logger.Logger) *lspLeaseManager {
 	if max <= 0 {
 		max = defaultLSPMaxConnections
 	}
-	return &lspLeaseManager{leases: make(map[string]*lspLease), max: max, logger: log.WithFields(zap.String("component", "lsp_lease_manager"))}
+	return &lspLeaseManager{leases: make(map[string]*lspLease), max: max, detachedTimeout: lspLeaseDetachedTimeout, logger: log.WithFields(zap.String("component", "lsp_lease_manager"))}
 }
 
 func (m *lspLeaseManager) attachOrCreate(
@@ -146,6 +149,7 @@ func (m *lspLeaseManager) attachOrCreate(
 	if execution.ID == "" {
 		return nil, 0, false, errors.New("LSP execution has no stable identity")
 	}
+	m.expireDetachedLeases()
 
 	if err := m.retireReplacedLeases(execution); err != nil {
 		return nil, 0, false, err
@@ -318,6 +322,7 @@ func (m *lspLeaseManager) detachedCandidate(
 }
 
 func (m *lspLeaseManager) ensureCapacity() error {
+	m.expireDetachedLeases()
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -343,6 +348,18 @@ func (m *lspLeaseManager) ensureCapacity() error {
 	oldest.terminate(lspCloseTransport, "language server lease evicted at capacity", lspLeaseReleaseCapacity)
 	oldest.waitForClose(lspLeaseCloseTimeout)
 	return nil
+}
+
+func (m *lspLeaseManager) expireDetachedLeases() {
+	m.mu.Lock()
+	leases := make([]*lspLease, 0, len(m.leases))
+	for _, lease := range m.leases {
+		leases = append(leases, lease)
+	}
+	m.mu.Unlock()
+	for _, lease := range leases {
+		lease.expireDetached(lease.detachedTime())
+	}
 }
 
 func (m *lspLeaseManager) add(lease *lspLease) error {
@@ -495,6 +512,10 @@ func (l *lspLease) attach(browser *websocket.Conn) (uint64, bool, error) {
 	l.generation++
 	generation := l.generation
 	l.browser = browser
+	if l.expiryTimer != nil {
+		l.expiryTimer.Stop()
+		l.expiryTimer = nil
+	}
 	l.detachedAt = time.Time{}
 	resumed := len(l.initializeResult) > 0
 	l.resumedGeneration = resumed
@@ -529,6 +550,12 @@ func (l *lspLease) detach(generation uint64) {
 	browser := l.browser
 	l.browser = nil
 	l.detachedAt = time.Now()
+	detachedAt := l.detachedAt
+	l.expiryTimer = time.AfterFunc(l.manager.detachedTimeout, func() {
+		l.manager.admissionMu.Lock()
+		defer l.manager.admissionMu.Unlock()
+		l.expireDetached(detachedAt)
+	})
 	documents := make([]string, 0, len(l.openDocuments))
 	for uri := range l.openDocuments {
 		documents = append(documents, uri)
@@ -617,30 +644,47 @@ func classifyLSPUpstreamClose(err error) (int, string, string) {
 }
 
 func (l *lspLease) terminate(code int, text, reason string) {
-	l.terminalOnce.Do(func() {
-		l.mu.Lock()
-		l.closed = true
-		browser := l.browser
-		l.browser = nil
-		l.openDocuments = make(map[string]int64)
-		l.synchronizedDocs = make(map[string]bool)
-		for key := range l.clientRequests {
-			l.removeClientRequestLocked(key)
-		}
-		l.clientRequests = make(map[string]lspLeaseClientRequest)
-		l.pendingClientRequestBytes = 0
-		l.serverRequests = make(map[string]lspLeaseServerRequest)
+	l.terminateIfDetachedAt(code, text, reason, time.Time{})
+}
+
+func (l *lspLease) expireDetached(detachedAt time.Time) {
+	if detachedAt.IsZero() {
+		return
+	}
+	l.terminateIfDetachedAt(lspCloseTransport, "detached language server lease expired", lspLeaseReleaseDetachedTimeout, detachedAt)
+}
+
+func (l *lspLease) terminateIfDetachedAt(code int, text, reason string, detachedAt time.Time) {
+	l.mu.Lock()
+	if l.closed || (!detachedAt.IsZero() && (l.browser != nil || !l.detachedAt.Equal(detachedAt) || time.Since(detachedAt) < l.manager.detachedTimeout)) {
 		l.mu.Unlock()
-		if browser != nil {
-			l.browserWriteMu.Lock()
-			closeLSPConnWithCode(browser, code, text)
-			l.browserWriteMu.Unlock()
-		}
-		if l.upstream != nil {
-			_ = l.upstream.Close()
-		}
-		l.manager.remove(l, reason)
-	})
+		return
+	}
+	l.closed = true
+	if l.expiryTimer != nil {
+		l.expiryTimer.Stop()
+		l.expiryTimer = nil
+	}
+	browser := l.browser
+	l.browser = nil
+	l.openDocuments = make(map[string]int64)
+	l.synchronizedDocs = make(map[string]bool)
+	for key := range l.clientRequests {
+		l.removeClientRequestLocked(key)
+	}
+	l.clientRequests = make(map[string]lspLeaseClientRequest)
+	l.pendingClientRequestBytes = 0
+	l.serverRequests = make(map[string]lspLeaseServerRequest)
+	l.mu.Unlock()
+	if browser != nil {
+		l.browserWriteMu.Lock()
+		closeLSPConnWithCode(browser, code, text)
+		l.browserWriteMu.Unlock()
+	}
+	if l.upstream != nil {
+		_ = l.upstream.Close()
+	}
+	l.manager.remove(l, reason)
 }
 
 func (l *lspLease) waitForClose(timeout time.Duration) {
