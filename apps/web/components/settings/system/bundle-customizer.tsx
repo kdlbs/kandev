@@ -22,7 +22,7 @@ import {
 import { Spinner } from "@kandev/ui/spinner";
 import { IconExternalLink } from "@tabler/icons-react";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { linkToTask } from "@/lib/links";
+import TaskLink from "@/components/routing/task-link";
 import type {
   DiagnosticBundleCapabilities,
   DiagnosticBundleSource,
@@ -477,8 +477,8 @@ function SessionRow({
         aria-label={session.session_id}
       />
       <div className="min-w-0 flex-1">
-        <a
-          href={linkToTask(session.task_id)}
+        <TaskLink
+          taskId={session.task_id}
           target="_blank"
           rel="noopener noreferrer"
           className="flex w-fit max-w-full items-center gap-1 truncate text-sm font-medium text-foreground underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -487,7 +487,7 @@ function SessionRow({
         >
           <span className="truncate">{taskTitle}</span>
           <IconExternalLink className="size-3 shrink-0" />
-        </a>
+        </TaskLink>
         <label htmlFor={checkboxID} className="mt-1 block min-h-11 cursor-pointer">
           <span className="block truncate text-sm font-medium">{title}</span>
           <span className="block truncate text-xs text-muted-foreground">{details}</span>

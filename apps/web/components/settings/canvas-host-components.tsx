@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import {
-  IconDots,
+  IconDatabase,
   IconEdit,
   IconExternalLink,
   IconLayoutGrid,
@@ -13,11 +13,23 @@ import {
 import { useTranslation } from "react-i18next";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { Button } from "@kandev/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
+import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { CanvasPage } from "@/components/plugins/canvas-page";
-import { canvasHref, type Canvas } from "@/lib/api/domains/canvas-api";
-import { CanvasPromotionDialog, CanvasReleaseDialog } from "./canvas-lifecycle-dialogs";
+import {
+  canvasCanEnableWorkspaceData,
+  canvasHref,
+  type Canvas,
+} from "@/lib/api/domains/canvas-api";
+import { CanvasMobileActionsButton } from "./canvas-host-actions";
+import { canvasLockHelp, canvasPromotionHelp } from "./canvas-host-desktop-actions";
+export { CanvasHostDialogs, CanvasMobileActionsButton } from "./canvas-host-actions";
+export {
+  CanvasDesktopActions,
+  CanvasDesktopOverflowActions,
+  CanvasDesktopOverflowMenuItems,
+  CanvasDesktopPrimaryAction,
+} from "./canvas-host-desktop-actions";
 
 export type CanvasHostState =
   | "loading_metadata"
@@ -57,84 +69,6 @@ const STATE_COPY: Record<CanvasHostState, { title: string; description: string }
   archived: { title: "canvases:archived", description: "canvases:archivedDescription" },
 };
 
-export function CanvasHostDialogs({
-  canvas,
-  promotionOpen,
-  onPromotionOpenChange,
-  releasesOpen,
-  onReleasesOpenChange,
-  onPromotionCompleted,
-  onChanged,
-}: {
-  canvas: Canvas | null;
-  promotionOpen: boolean;
-  onPromotionOpenChange: (open: boolean) => void;
-  releasesOpen: boolean;
-  onReleasesOpenChange: (open: boolean) => void;
-  onPromotionCompleted: () => void;
-  onChanged: () => void;
-}) {
-  return (
-    <>
-      <CanvasPromotionDialog
-        canvas={canvas?.scope_kind === "task" ? canvas : null}
-        open={promotionOpen}
-        onOpenChange={onPromotionOpenChange}
-        onCompleted={onPromotionCompleted}
-      />
-      <CanvasReleaseDialog
-        canvas={canvas}
-        open={releasesOpen}
-        onOpenChange={onReleasesOpenChange}
-        onChanged={onChanged}
-      />
-    </>
-  );
-}
-
-function canvasLockHelp(canvas: Canvas, t: (key: string) => string): string {
-  return canvas.status === "archived"
-    ? t("canvases:archivedCanvasActionHelp")
-    : t("canvases:disabledCanvasActionHelp");
-}
-
-function canvasPromotionHelp(canvas: Canvas, t: (key: string) => string): string {
-  if (canvas.status === "archived" || canvas.status === "disabled") {
-    return canvasLockHelp(canvas, t);
-  }
-  if (canvas.scope_kind === "task" && canvas.active_release_status === "valid") {
-    return t("canvases:promoteCanvasHelp");
-  }
-  return t("canvases:promoteCanvasUnavailable");
-}
-
-function CanvasDesktopActionTooltip({
-  description,
-  disabled,
-  testId,
-  children,
-}: {
-  description: string;
-  disabled: boolean;
-  testId: string;
-  children: ReactNode;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className={disabled ? "cursor-not-allowed" : undefined}
-          data-testid={testId}
-          tabIndex={disabled ? 0 : undefined}
-        >
-          {children}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{description}</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function MobileCanvasAction({
   description,
   children,
@@ -158,11 +92,8 @@ export function CanvasHostBody({
   canvasId,
   title,
   state,
-  isMobile,
-  menuOpen,
   runtimeUrl,
   error,
-  onOpenActions,
   onRuntimeReady,
   onRuntimeError,
   onRetry,
@@ -170,29 +101,30 @@ export function CanvasHostBody({
   canvasId: string;
   title: string;
   state: CanvasHostState;
-  isMobile: boolean;
-  menuOpen: boolean;
   runtimeUrl: string | null;
   error: string | null;
-  onOpenActions: () => void;
   onRuntimeReady: () => void;
   onRuntimeError: () => void;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
-      className="flex h-dvh min-h-0 min-w-0 max-h-[calc(100dvh-2.75rem)] flex-1 flex-col overflow-hidden md:h-auto md:max-h-none"
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       data-testid="canvas-host-route"
     >
-      <CanvasHostHeader
-        title={title}
-        state={state}
-        isMobile={isMobile}
-        menuOpen={menuOpen}
-        onOpenActions={onOpenActions}
-      />
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {(state === "loading_runtime" || state === "ready") && runtimeUrl ? (
+      {(state === "loading_runtime" || state === "ready") && runtimeUrl ? (
+        <>
+          {state === "ready" && (
+            <span
+              className="sr-only"
+              role="status"
+              aria-live="polite"
+              data-testid="canvas-host-state"
+            >
+              <span data-testid="canvas-host-ready-announcement">{t(STATE_COPY.ready.title)}</span>
+            </span>
+          )}
           <CanvasPage
             key={`${canvasId}:${runtimeUrl}`}
             runtimeUrl={runtimeUrl}
@@ -200,90 +132,9 @@ export function CanvasHostBody({
             onLoad={onRuntimeReady}
             onError={onRuntimeError}
           />
-        ) : (
-          <CanvasHostStatePanel state={state} error={error} onRetry={onRetry} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-export function CanvasDesktopActions({
-  canvas,
-  editing,
-  onEdit,
-  onPromote,
-  onReleases,
-  onShare,
-}: {
-  canvas: Canvas;
-  editing: boolean;
-  onEdit: () => void;
-  onPromote: () => void;
-  onReleases: () => void;
-  onShare: () => void;
-}) {
-  const { t } = useTranslation();
-  const lifecycleLocked = canvas.status === "archived" || canvas.status === "disabled";
-  const promoteAvailable = canvas.scope_kind === "task" && canvas.active_release_status === "valid";
-  const promoteDisabled = lifecycleLocked || !promoteAvailable;
-  const promoteDescription = canvasPromotionHelp(canvas, t);
-  return (
-    <div className="flex items-center gap-2">
-      {canvas.scope_kind === "workspace" && (
-        <CanvasDesktopActionTooltip
-          description={lifecycleLocked ? canvasLockHelp(canvas, t) : t("canvases:editCanvasHelp")}
-          disabled={editing || lifecycleLocked}
-          testId="canvas-action-edit-tooltip-trigger"
-        >
-          <Button
-            variant="outline"
-            size="sm"
-            className="cursor-pointer"
-            disabled={editing || lifecycleLocked}
-            onClick={onEdit}
-          >
-            <IconEdit className="mr-1.5 h-3.5 w-3.5" />
-            {t("canvases:editCanvas")}
-          </Button>
-        </CanvasDesktopActionTooltip>
-      )}
-      <CanvasDesktopActionTooltip
-        description={t("canvases:releasesAndPermissionsHelp")}
-        disabled={false}
-        testId="canvas-action-releases-tooltip-trigger"
-      >
-        <Button variant="outline" size="sm" className="cursor-pointer" onClick={onReleases}>
-          <IconListDetails className="mr-1.5 h-3.5 w-3.5" />
-          {t("canvases:releasesAndPermissions")}
-        </Button>
-      </CanvasDesktopActionTooltip>
-      <CanvasDesktopActionTooltip
-        description={t("canvases:shareCanvasDescription")}
-        disabled={false}
-        testId="canvas-action-share-tooltip-trigger"
-      >
-        <Button variant="outline" size="sm" className="cursor-pointer" onClick={onShare}>
-          <IconShare3 className="mr-1.5 h-3.5 w-3.5" />
-          {t("canvases:shareCanvas")}
-        </Button>
-      </CanvasDesktopActionTooltip>
-      {canvas.scope_kind === "task" && (
-        <CanvasDesktopActionTooltip
-          description={promoteDescription}
-          disabled={promoteDisabled}
-          testId="canvas-action-promote-tooltip-trigger"
-        >
-          <Button
-            size="sm"
-            className="cursor-pointer"
-            disabled={promoteDisabled}
-            onClick={onPromote}
-          >
-            <IconSparkles className="mr-1.5 h-3.5 w-3.5" />
-            {t("canvases:promoteCanvas")}
-          </Button>
-        </CanvasDesktopActionTooltip>
+        </>
+      ) : (
+        <CanvasHostStatePanel state={state} error={error} onRetry={onRetry} />
       )}
     </div>
   );
@@ -291,47 +142,52 @@ export function CanvasDesktopActions({
 
 export function CanvasHostHeader({
   title,
-  state,
+  dataScopeLabel,
   isMobile,
   menuOpen,
   onOpenActions,
+  actions,
+  renameAction,
+  overflowActions,
 }: {
   title: string;
-  state: CanvasHostState;
+  dataScopeLabel?: string;
   isMobile: boolean;
   menuOpen: boolean;
   onOpenActions: () => void;
+  actions?: ReactNode;
+  renameAction?: ReactNode;
+  overflowActions?: ReactNode;
 }) {
-  const { t } = useTranslation();
   return (
-    <div
-      className="flex min-h-11 shrink-0 items-center gap-2 border-b px-3 py-1.5"
+    <PanelHeaderBarSplit
       data-testid="canvas-host-header"
-    >
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium md:hidden">{title}</p>
-        <p
-          className="text-xs text-muted-foreground"
-          data-testid="canvas-host-state"
-          aria-live="polite"
-        >
-          {t(STATE_COPY[state].title)}
-        </p>
-      </div>
-      {isMobile && (
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-11 w-11 shrink-0 cursor-pointer"
-          aria-label={t("canvases:canvasActions")}
-          aria-expanded={menuOpen}
-          onClick={onOpenActions}
-          data-testid="canvas-mobile-actions"
-        >
-          <IconDots className="h-4 w-4" />
-        </Button>
-      )}
-    </div>
+      left={
+        <div className="flex min-w-0 items-center gap-1">
+          <span className="block min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
+          {dataScopeLabel && (
+            <span
+              className="max-w-20 shrink-0 truncate text-xs text-muted-foreground"
+              data-testid="canvas-data-scope"
+              title={dataScopeLabel}
+            >
+              {dataScopeLabel}
+            </span>
+          )}
+          {renameAction}
+        </div>
+      }
+      right={
+        <>
+          {actions}
+          {isMobile && (
+            <CanvasMobileActionsButton menuOpen={menuOpen} onOpenActions={onOpenActions} />
+          )}
+        </>
+      }
+      overflow={!isMobile ? overflowActions : undefined}
+      overflowAt={520}
+    />
   );
 }
 
@@ -347,9 +203,14 @@ export function CanvasHostStatePanel({
   const { t } = useTranslation();
   const copy = STATE_COPY[state];
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center">
+    <div
+      className="flex min-h-0 flex-1 items-center justify-center p-6 text-center"
+      data-testid="canvas-host-state-panel"
+    >
       <div className="max-w-md space-y-3">
-        <h2 className="text-lg font-semibold">{t(copy.title)}</h2>
+        <h2 className="text-lg font-semibold" data-testid="canvas-host-state">
+          {t(copy.title)}
+        </h2>
         <p className="text-sm text-muted-foreground">{error || t(copy.description)}</p>
         {state !== "loading_metadata" && state !== "loading_runtime" && (
           <Button
@@ -482,6 +343,35 @@ function MobileCanvasPromoteAction({
   );
 }
 
+function MobileCanvasWorkspaceDataAction({
+  canvas,
+  onEnable,
+  t,
+}: {
+  canvas: Canvas | null;
+  onEnable?: () => void;
+  t: (key: string) => string;
+}) {
+  if (!canvas || !onEnable || !canvasCanEnableWorkspaceData(canvas)) return null;
+
+  return (
+    <MobileCanvasAction
+      description={t("canvases:enableWorkspaceDataHelp")}
+      testId="canvas-action-enable-workspace-data-help"
+    >
+      <Button
+        variant="ghost"
+        className="min-h-11 w-full justify-start cursor-pointer"
+        onClick={onEnable}
+        data-testid="canvas-action-enable-workspace-data"
+      >
+        <IconDatabase className="mr-2 h-4 w-4" />
+        {t("canvases:enableWorkspaceData")}
+      </Button>
+    </MobileCanvasAction>
+  );
+}
+
 function MobileCanvasShareAction({
   onShare,
   t,
@@ -531,6 +421,8 @@ export function MobileCanvasActions({
   onPromote,
   onReleases,
   onShare,
+  onRename,
+  onEnableWorkspaceData,
   onSelectCanvas,
   editing,
 }: {
@@ -542,6 +434,8 @@ export function MobileCanvasActions({
   onPromote: () => void;
   onReleases: () => void;
   onShare: () => void;
+  onRename: () => void;
+  onEnableWorkspaceData?: () => void;
   onSelectCanvas: (canvas: Canvas) => void;
   editing: boolean;
 }) {
@@ -564,11 +458,23 @@ export function MobileCanvasActions({
             t={t}
           />
         )}
+        {canvas && (
+          <Button
+            variant="ghost"
+            className="min-h-11 w-full justify-start"
+            onClick={onRename}
+            data-testid="canvas-mobile-rename"
+          >
+            <IconEdit className="mr-2 size-4" />
+            {t("canvases:renameCanvas")}
+          </Button>
+        )}
         {canvas?.scope_kind === "workspace" && (
           <MobileCanvasEditAction canvas={canvas} editing={editing} onEdit={onEdit} t={t} />
         )}
         <MobileCanvasReleasesAction onReleases={onReleases} t={t} />
         {canvas && <MobileCanvasShareAction onShare={onShare} t={t} />}
+        <MobileCanvasWorkspaceDataAction canvas={canvas} onEnable={onEnableWorkspaceData} t={t} />
         {canvas?.scope_kind === "task" && (
           <MobileCanvasPromoteAction
             canvas={canvas}

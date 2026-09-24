@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { archiveTask, deleteTask, moveTask, updateTask } from "@/lib/api";
 import type { DeleteTaskParams, WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 import { isTaskDeleteDirtyWorktreeError } from "@/lib/api/task-delete-errors";
@@ -20,8 +20,9 @@ export type TaskActionOptions = {
 };
 
 export function useTaskActions() {
-  const { toast } = useToast();
+  const { toast, dismissToast } = useToast();
   const { t } = useTranslation();
+  const archiveProgressRef = useRef({ count: 0, toastId: null as string | null });
 
   const moveTaskById = useCallback(async (taskId: string, payload: MovePayload) => {
     return moveTask(taskId, payload);
@@ -45,9 +46,29 @@ export function useTaskActions() {
     [t, toast],
   );
 
-  const archiveTaskById = useCallback(async (taskId: string, opts?: TaskActionOptions) => {
-    return archiveTask(taskId, opts);
-  }, []);
+  const archiveTaskById = useCallback(
+    async (taskId: string, opts?: TaskActionOptions) => {
+      const progress = archiveProgressRef.current;
+      progress.count += 1;
+      if (progress.count === 1) {
+        progress.toastId = toast({
+          title: t("tasks:archivingInProgress"),
+          variant: "loading",
+        });
+      }
+
+      try {
+        return await archiveTask(taskId, opts);
+      } finally {
+        progress.count -= 1;
+        if (progress.count === 0 && progress.toastId) {
+          dismissToast(progress.toastId);
+          progress.toastId = null;
+        }
+      }
+    },
+    [dismissToast, t, toast],
+  );
 
   const renameTaskById = useCallback(async (taskId: string, title: string) => {
     return updateTask(taskId, { title });

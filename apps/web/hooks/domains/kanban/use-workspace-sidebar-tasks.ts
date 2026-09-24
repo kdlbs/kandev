@@ -1,3 +1,4 @@
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
 import { useMemo, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
@@ -11,9 +12,11 @@ import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu"
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { WorkspaceContextReadError } from "@/lib/state/slices/kanban/types";
 import type { AppState } from "@/lib/state/store";
+import type { TaskRemovalState } from "@/lib/state/task-removal";
 import { getDestinationQueue, type WipQueueStatus } from "@/lib/kanban/wip-queue";
 
 export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
+  pendingArchiveTaskIds: ReadonlySet<string>;
   workflows: TaskMoveWorkflow[];
   wipQueueByTaskId: Map<string, WipQueueStatus>;
   isLoading: boolean;
@@ -28,6 +31,10 @@ export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
 const NOOP_REFRESH = () => {};
 
 type SidebarTask = AggregatedSidebarTasks["allTasks"][number];
+type SidebarTaskRemovalProjection = Pick<
+  TaskRemovalState,
+  "pendingTokenByTaskId" | "operationsByToken"
+>;
 
 function shallowTaskEqual(previous: SidebarTask, next: SidebarTask): boolean {
   const previousKeys = Object.keys(previous) as Array<keyof SidebarTask>;
@@ -180,6 +187,45 @@ export function mergeSidebarArchivedTasks(
   return archived.length > 0 ? [...activeTasks, ...archived] : activeTasks;
 }
 
+function useSidebarTaskProjection(
+  activeTasks: SidebarTask[],
+  archivedTasks: KanbanState["tasks"],
+  workspaceId: string | null,
+  needsArchivedTasks: boolean,
+  taskRemoval: SidebarTaskRemovalProjection,
+) {
+  const { operationsByToken, pendingTokenByTaskId } = taskRemoval;
+  const previousTasksRef = useRef<SidebarTask[]>([]);
+  const merged = useMemo(
+    () => mergeSidebarArchivedTasks(activeTasks, archivedTasks, workspaceId, needsArchivedTasks),
+    [activeTasks, archivedTasks, needsArchivedTasks, workspaceId],
+  );
+  const allTasks = useMemo(() => {
+    const shared = reuseUnchangedTasks(previousTasksRef.current, merged);
+    previousTasksRef.current = shared;
+    return shared;
+  }, [merged]);
+  const pendingArchiveTaskIds = useMemo(() => {
+    const pending = new Set<string>();
+    if (!workspaceId) return pending;
+    const activeTaskIds = new Set(
+      allTasks.filter((task) => task.isArchived !== true).map((task) => task.id),
+    );
+    for (const [taskId, token] of Object.entries(pendingTokenByTaskId)) {
+      const operation = operationsByToken[token];
+      if (
+        activeTaskIds.has(taskId) &&
+        operation?.action === "archive" &&
+        operation.workspaceId === workspaceId
+      ) {
+        pending.add(taskId);
+      }
+    }
+    return pending;
+  }, [allTasks, taskRemoval, workspaceId]);
+  return { allTasks, pendingArchiveTaskIds };
+}
+
 /**
  * Shared data source for the desktop sidebar and the mobile task-switcher sheet.
  *
@@ -198,7 +244,7 @@ export function mergeSidebarArchivedTasks(
 export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
   useAllWorkflowSnapshots(workspaceId);
 
-  const sidebarViews = useAppStore((state) => state.sidebarViews);
+  const sidebarViews = useAppStore((state) => selectSidebarViews(state, workspaceId));
   const effectiveView = useMemo(() => {
     const active =
       sidebarViews?.views.find((view) => view.id === sidebarViews.activeViewId) ??
@@ -211,6 +257,12 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   const needsArchivedTasks = viewRequiresArchivedTasks(effectiveView);
   const archived = useSidebarArchivedTasks(workspaceId, needsArchivedTasks);
 
+  const pendingTokenByTaskId = useAppStore((state) => state.taskRemoval.pendingTokenByTaskId);
+  const operationsByToken = useAppStore((state) => state.taskRemoval.operationsByToken);
+  const taskRemoval = useMemo(
+    () => ({ operationsByToken, pendingTokenByTaskId }),
+    [operationsByToken, pendingTokenByTaskId],
+  );
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
   const workflows = useAppStore((state) => state.workflows.items);
@@ -261,18 +313,13 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
 
   const { allSteps, stepsByWorkflowId } = useSharedStepMetadata(aggregated);
 
-  const previousTasksRef = useRef<SidebarTask[]>([]);
-  const allTasks = useMemo(() => {
-    const merged = mergeSidebarArchivedTasks(
-      aggregated.allTasks,
-      archived.tasks,
-      workspaceId,
-      needsArchivedTasks,
-    );
-    const shared = reuseUnchangedTasks(previousTasksRef.current, merged);
-    previousTasksRef.current = shared;
-    return shared;
-  }, [aggregated.allTasks, archived.tasks, needsArchivedTasks, workspaceId]);
+  const { allTasks, pendingArchiveTaskIds } = useSidebarTaskProjection(
+    aggregated.allTasks,
+    archived.tasks,
+    workspaceId,
+    needsArchivedTasks,
+    taskRemoval,
+  );
 
   const wipQueueByTaskId = useMemo(
     () => buildWipQueueByTaskId(allTasks, allSteps, stepsByWorkflowId),
@@ -298,6 +345,7 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   return {
     ...aggregated,
     allTasks,
+    pendingArchiveTaskIds,
     allSteps,
     stepsByWorkflowId,
     wipQueueByTaskId,

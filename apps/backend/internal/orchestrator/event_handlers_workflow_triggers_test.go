@@ -251,18 +251,19 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 func TestProcessOnEnterQueuesOneCurrentTransitionControlPrompt(t *testing.T) {
 	ctx := context.Background()
-	repo := setupTestRepo(t)
+	repo, workflowQueue := setupTestRepoWithSQLiteQueue(t)
 	seedSession(t, repo, "t1", "s1", "step1")
-	task, err := repo.GetTask(ctx, "t1")
-	if err != nil {
-		t.Fatalf("GetTask: %v", err)
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
+	if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", "on_enter"); err != nil {
+		t.Fatalf("ApplyTransition step2: %v", err)
 	}
-	task.WorkflowStepID = "step2"
-	if err := repo.UpdateTask(ctx, task); err != nil {
-		t.Fatalf("UpdateTask step2: %v", err)
+	transition, err := repo.GetLatestTaskStepTransition(ctx, "t1")
+	if err != nil || transition == nil {
+		t.Fatalf("GetLatestTaskStepTransition: transition=%+v err=%v", transition, err)
 	}
 
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageQueue = workflowQueue
 	svc.activeTurns.Store("s1", "turn-1")
 	step := &wfmodels.WorkflowStep{
 		ID: "step2", WorkflowID: "wf1", Name: "Review",
@@ -272,12 +273,12 @@ func TestProcessOnEnterQueuesOneCurrentTransitionControlPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTaskSession: %v", err)
 	}
-	svc.processOnEnter(ctx, "t1", session, step, "review the change", 0, nil)
+	svc.processOnEnter(ctx, "t1", session, step, "review the change", transition.ID, nil)
 	session, err = repo.GetTaskSession(ctx, "s1")
 	if err != nil {
 		t.Fatalf("GetTaskSession after first entry: %v", err)
 	}
-	svc.processOnEnter(ctx, "t1", session, step, "review the change", 0, nil)
+	svc.processOnEnter(ctx, "t1", session, step, "review the change", transition.ID, nil)
 
 	entries := svc.messageQueue.GetStatus(ctx, "s1").Entries
 	if len(entries) != 1 {
@@ -287,7 +288,7 @@ func TestProcessOnEnterQueuesOneCurrentTransitionControlPrompt(t *testing.T) {
 		t.Fatalf("queued entry metadata = %+v, want workflow control", entries[0].Metadata)
 	}
 
-	task, err = repo.GetTask(ctx, "t1")
+	task, err := repo.GetTask(ctx, "t1")
 	if err != nil {
 		t.Fatalf("GetTask before later move: %v", err)
 	}

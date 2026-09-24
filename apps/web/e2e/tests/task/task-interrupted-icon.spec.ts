@@ -4,13 +4,13 @@ import { SessionPage } from "../../pages/session-page";
 
 // Interrupted-task indicator: when Kandev dies while a task's session is
 // mid-turn, startup reconciliation marks the task with the `interrupted_at`
-// metadata key and the task list shows a red alert icon until the task is
+// metadata key and the task list shows a warning triangle until the task is
 // resumed. Seeding `interrupted_at` through the public task-metadata surface
 // is the deterministic stand-in for a real crash; the icon itself must render
 // from that marker alone.
 
 test.describe("Task list — interrupted-task icon", () => {
-  test("shows the red interrupted icon only for marked tasks", async ({
+  test("shows the warning triangle only for marked tasks", async ({
     testPage,
     apiClient,
     seedData,
@@ -58,38 +58,48 @@ test.describe("Task list — interrupted-task icon", () => {
     await apiClient.updateTaskState(terminal.id, "COMPLETED");
 
     const kanban = new KanbanPage(testPage);
+    const workflowSnapshot = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        response.url().includes(`/api/v1/workflows/${seedData.workflowId}/snapshot`) &&
+        response.ok(),
+    );
     await kanban.goto();
+    await workflowSnapshot;
+    const interruptedCard = kanban.taskCard(interrupted.id);
+    await expect(interruptedCard).toBeVisible();
+    const cardIcon = interruptedCard.getByTestId("task-state-interrupted");
+    await expect(cardIcon).toBeVisible();
+    await expect(cardIcon).toHaveClass(/tabler-icon-alert-triangle/);
+    await expect(cardIcon).toHaveClass(/text-yellow-500/);
+
     const anchorCard = kanban.taskCardByTitle("Anchor Session");
-    await expect(anchorCard).toBeVisible({ timeout: 20_000 });
+    await expect(anchorCard).toBeVisible();
     await anchorCard.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 20_000 });
+    await expect(testPage).toHaveURL(/\/t\//);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
     const interruptedRow = session.sidebarTaskItem("Interrupted Fixture");
-    await expect(interruptedRow).toBeVisible({ timeout: 20_000 });
-    await expect(interruptedRow.getByTestId("task-state-interrupted")).toBeVisible({
-      timeout: 20_000,
-    });
+    await expect(interruptedRow).toBeVisible();
+    await expect(interruptedRow.getByTestId("task-state-interrupted")).toBeVisible();
 
     const plainRow = session.sidebarTaskItem("Plain Fixture");
-    await expect(plainRow).toBeVisible({ timeout: 20_000 });
+    await expect(plainRow).toBeVisible();
     await expect(plainRow.getByTestId("task-state-interrupted")).toHaveCount(0);
 
     const terminalRow = session.sidebarTaskItem("Terminal Fixture");
-    await expect(terminalRow).toBeVisible({ timeout: 20_000 });
+    await expect(terminalRow).toBeVisible();
     await expect(terminalRow.getByTestId("task-state-interrupted")).toHaveCount(0);
 
     // Reload: the marker must survive SSR hydration from the boot payload.
     await testPage.reload();
     await session.waitForLoad();
-    await expect(session.sidebarTaskItem("Interrupted Fixture")).toBeVisible({
-      timeout: 20_000,
-    });
+    await expect(session.sidebarTaskItem("Interrupted Fixture")).toBeVisible();
     await expect(
       session.sidebarTaskItem("Interrupted Fixture").getByTestId("task-state-interrupted"),
-    ).toBeVisible({ timeout: 20_000 });
+    ).toBeVisible();
     await expect(
       session.sidebarTaskItem("Plain Fixture").getByTestId("task-state-interrupted"),
     ).toHaveCount(0);

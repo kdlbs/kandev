@@ -52,8 +52,24 @@ func (d *dynamicTaskDownstream) Launch(
 	options.AgentProfileID = launch.ExecutionProfileID
 	options.Prompt = launch.Prompt
 	options.PriorACPSession = launch.PriorACPSession
+	if d.task != nil {
+		if err := d.service.admitCeilingDispatch(ctx, d.task.ID); err != nil {
+			return dynamicruntime.DownstreamExecution{}, err
+		}
+	}
 	d.service.beginDynamicAttempt(d.sessionID)
-	execution, err := d.service.executor.LaunchPreparedSession(ctx, d.task, d.sessionID, options)
+	taskID := ""
+	if d.task != nil {
+		taskID = d.task.ID
+	}
+	dispatchCtx, releaseDispatchCommit, err := d.service.commitCeilingEntryDispatch(
+		ctx, taskID, ceilingEntryBindingFromContext(ctx),
+	)
+	if err != nil {
+		return dynamicruntime.DownstreamExecution{}, err
+	}
+	defer releaseDispatchCommit()
+	execution, err := d.service.executor.LaunchPreparedSession(dispatchCtx, d.task, d.sessionID, options)
 	if err != nil {
 		var classified *routingerr.Error
 		if errors.As(err, &classified) {
@@ -72,7 +88,7 @@ func (d *dynamicTaskDownstream) Launch(
 		return dynamicruntime.DownstreamExecution{}, fmt.Errorf("%w: %v", classified, err)
 	}
 	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
-	d.service.bindPromptAttemptToExecution(ctx, d.sessionID, execution.AgentExecutionID)
+	d.service.bindPromptAttemptToExecution(dispatchCtx, d.sessionID, execution.AgentExecutionID)
 	d.execution = execution
 	acpSessionID := ""
 	if session, sessionErr := d.service.repo.GetTaskSession(ctx, d.sessionID); sessionErr == nil && session != nil {
@@ -297,11 +313,12 @@ func (s *Service) mirrorDynamicRouteProjection(
 // process start succeeds. LaunchPreparedSession returns before this point.
 func (s *Service) handleAgentProcessStarted(
 	ctx context.Context,
-	_, sessionID, agentExecutionID string,
+	taskID, sessionID, agentExecutionID string,
 ) {
 	if !s.ceilingCallbackOwnsSession(ctx, sessionID, agentExecutionID) {
 		return
 	}
+	s.retireWorkflowStartPromptAttempt(ctx, taskID, sessionID, agentExecutionID)
 	// AC-52's acceptance edge, composed first and unconditionally on
 	// sessionID alone (AC-56a): profileExecutionResolver is a dynamic-routing
 	// precondition, not a launch one, so an instance without it configured
@@ -403,6 +420,11 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 	options executor.LaunchOptions,
 	continuationInput *dynamicruntime.ContinuationInput,
 ) (*executor.TaskExecution, error) {
+	if task != nil {
+		if err := s.validateContextCeilingEntry(ctx, task.ID); err != nil {
+			return nil, err
+		}
+	}
 	if s.profileExecutionResolver == nil {
 		return s.launchConcretePreparedSession(ctx, task, sessionID, options)
 	}
@@ -437,6 +459,11 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 	} else {
 		selected.Continuation = *continuationInput
 	}
+	if task != nil {
+		if err := s.validateContextCeilingEntry(ctx, task.ID); err != nil {
+			return nil, err
+		}
+	}
 	result, err := conductor.LaunchSelected(ctx, selected)
 	if err != nil {
 		return nil, err
@@ -456,12 +483,28 @@ func (s *Service) launchConcretePreparedSession(
 	sessionID string,
 	options executor.LaunchOptions,
 ) (*executor.TaskExecution, error) {
+	if task != nil {
+		if err := s.admitCeilingDispatch(ctx, task.ID); err != nil {
+			return nil, err
+		}
+	}
+	taskID := ""
+	if task != nil {
+		taskID = task.ID
+	}
+	dispatchCtx, releaseDispatchCommit, err := s.commitCeilingEntryDispatch(
+		ctx, taskID, ceilingEntryBindingFromContext(ctx),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseDispatchCommit()
 	if options.StartAgent && (options.Prompt != "" || len(options.Attachments) > 0) {
 		s.beginInitialPromptAttempt(sessionID, false)
 	}
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, options)
+	execution, err := s.executor.LaunchPreparedSession(dispatchCtx, task, sessionID, options)
 	if execution != nil {
-		s.bindPromptAttemptToExecution(ctx, sessionID, execution.AgentExecutionID)
+		s.bindPromptAttemptToExecution(dispatchCtx, sessionID, execution.AgentExecutionID)
 	}
 	return execution, err
 }
@@ -931,7 +974,9 @@ func (s *Service) runDetachedDynamicSuccessorLaunch(
 		errMsg = "dynamic successor launch failed"
 	}
 	s.finalizeAutomationRun(failureCtx, data.TaskID, false, errMsg)
-	s.handleRecoverableFailureLocked(failureCtx, data)
+	if dispatch := s.handleRecoverableFailureLockedState(failureCtx, data, agentruntime.StopReasonRecoverableAgentFailure); dispatch != nil {
+		s.startAgentFailureRecovery(dispatch)
+	}
 }
 
 func (s *Service) resetDynamicSuccessorWorkers() {
@@ -1063,6 +1108,7 @@ const (
 	dynamicRelaunchFailed dynamicRelaunchOutcome = iota
 	dynamicRelaunchDeferred
 	dynamicRelaunchSucceeded
+	dynamicRelaunchSuperseded
 )
 
 // relaunchDynamicTaskAfterFailure preserves the historical boolean API for
@@ -1083,7 +1129,27 @@ func (s *Service) relaunchDynamicTaskAfterFailureOutcome(
 	executionProfileID string,
 	origin launchOrigin,
 ) (outcome dynamicRelaunchOutcome) {
-	seam5Res, deferredLaunch, err := s.admitOrDeferSeam5(ctx, data.TaskID, origin, seam5DynamicRelaunchPayload(data, executionProfileID))
+	return s.relaunchDynamicTaskAfterFailureOutcomeWithBinding(ctx, data, executionProfileID, origin, ceilingEntryBindingFromContext(ctx))
+}
+
+//nolint:cyclop // Dynamic relaunch keeps admission, failure recovery, and generation fencing in one boundary.
+func (s *Service) relaunchDynamicTaskAfterFailureOutcomeWithBinding(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	executionProfileID string,
+	origin launchOrigin,
+	binding *models.CeilingWorkflowEntryBinding,
+) (outcome dynamicRelaunchOutcome) {
+	if binding != nil {
+		if err := s.validateClaimedCeilingBinding(ctx, data.TaskID, binding); err != nil {
+			if errors.Is(err, ErrCeilingLaunchSuperseded) {
+				return dynamicRelaunchSuperseded
+			}
+			return dynamicRelaunchFailed
+		}
+		ctx = withCeilingEntryBinding(ctx, binding)
+	}
+	seam5Res, deferredLaunch, err := s.admitOrDeferSeam5WithBinding(ctx, data.TaskID, origin, seam5DynamicRelaunchPayloadWithBinding(data, executionProfileID, binding), binding)
 	if err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the dynamic relaunch could not be admitted or recorded",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
@@ -1120,6 +1186,14 @@ func (s *Service) relaunchDynamicTaskAfterFailureOutcome(
 	task, session, prompt, ok := s.prepareDynamicRelaunchAfterFailure(ctx, data)
 	if !ok {
 		return dynamicRelaunchFailed
+	}
+	if binding != nil {
+		if err := s.validateClaimedCeilingBinding(ctx, data.TaskID, binding); err != nil {
+			if errors.Is(err, ErrCeilingLaunchSuperseded) {
+				return dynamicRelaunchSuperseded
+			}
+			return dynamicRelaunchFailed
+		}
 	}
 	return s.launchPreparedDynamicRelaunch(ctx, data, task, session, prompt, executionProfileID, seam5Res)
 }

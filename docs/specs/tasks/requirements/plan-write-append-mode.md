@@ -8,16 +8,16 @@ owners:
 
 # Task plan append-mode write Requirements
 
+## Implemented agent safety extension
+
+The implemented [safe agent edits contract](plan-safe-edits.md) adds conditional
+replacement, edits, and revision recovery. [Transition matrix](../system-design/plan-safe-edits.md#contract-transition)
+identifies clauses superseded for agent writes.
+
 ## Overview
 
-`update_task_plan_kandev` replaces the whole plan document. There is no partial write at
-any layer, so a caller adding a section must read the whole plan and send it back with
-the addition attached. One write therefore costs the size of the entire plan, and a run
-costs the square of the number of writes in it.
-
-The plan is also a task's only durable memory across a context reset, so it grows
-monotonically for as long as the task runs. On this instance the largest stored revision
-is 158,393 characters, so the two effects compound in production, not in theory.
+Whole-document replacement requires the caller to resend existing content for
+each addition. Append avoids that repeated input and the risk of omitted sections.
 
 This capability adds a second write mode in which the caller submits only the fragment
 it wants to add and the system composes the stored document. It changes what a caller
@@ -274,10 +274,10 @@ of a list.
   after the write rather than the size of the submitted fragment.
 - **AC-TASKS-PLAN-APPEND-006.7:** The truncation warning shall not state or imply that
   no partial update or append mode exists.
-- **AC-TASKS-PLAN-APPEND-006.8:** The truncation warning shall name `append` as the way
-  to add a section without resubmitting the whole document, while continuing to state
-  where the pre-write content lives, that the MCP plan tools cannot fetch it, and that
-  the caller must not rewrite the plan from memory.
+- **AC-TASKS-PLAN-APPEND-006.8:** A legacy truncation warning shall name `append` as
+  the way to add a section without resubmitting the whole document. When the current
+  MCP surface exposes revision tools, it shall direct the caller to list and fetch
+  the task-scoped revision, and it shall not direct the caller to rewrite from memory.
 - **AC-TASKS-PLAN-APPEND-006.9:** No agent-facing text describing a plan write shall
   state or imply that no partial update or append mode exists, or direct a caller who
   wants to add a section to read the plan and resubmit it. This binds every tool and
@@ -331,5 +331,6 @@ would let a small fragment commit an oversized document, defeating an existing l
   a store for it — a separate contract.
 - **A mode on `create_task_plan_kandev` or on the browser write path.** Fixed by
   AC-TASKS-PLAN-APPEND-005.2 and AC-TASKS-PLAN-APPEND-005.3.
-- **Reading a past revision through MCP.** Unchanged: no plan tool returns one.
+- **Reading a past revision through MCP.** Owned by the implemented safe agent plan
+  edits contract. Its task-scoped revision tools do not change browser behavior.
 - **Prepend, or insertion at any position other than the end.**

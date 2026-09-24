@@ -25,7 +25,10 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-const errorJSONKey = "error"
+const (
+	errorJSONKey          = "error"
+	errExecutorIDRequired = "executor id required"
+)
 
 // ExecutorRunningLister is the narrow repository slice we need to surface
 // active SSH sessions. We list all running executors and resolve each row's
@@ -54,11 +57,13 @@ type AgentLister interface {
 
 // Handler exposes /api/v1/ssh routes used by the settings UI.
 type Handler struct {
-	repo            ExecutorRunningLister
-	executorFetcher ExecutorFetcher
-	agents          AgentLister
-	resolver        *lifecycle.AgentctlResolver
-	logger          *logger.Logger
+	repo               ExecutorRunningLister
+	executorFetcher    ExecutorFetcher
+	agents             AgentLister
+	resolver           *lifecycle.AgentctlResolver
+	logger             *logger.Logger
+	reachabilityRepo   ReachabilityLister
+	reachabilityPoller ReachabilityProber
 }
 
 // NewHandler builds an SSH HTTP/WS handler.
@@ -68,13 +73,17 @@ func NewHandler(
 	agents AgentLister,
 	resolver *lifecycle.AgentctlResolver,
 	log *logger.Logger,
+	reachabilityRepo ReachabilityLister,
+	reachabilityPoller ReachabilityProber,
 ) *Handler {
 	return &Handler{
-		repo:            repo,
-		executorFetcher: executorFetcher,
-		agents:          agents,
-		resolver:        resolver,
-		logger:          log.WithFields(zap.String("component", "ssh-handler")),
+		repo:               repo,
+		executorFetcher:    executorFetcher,
+		agents:             agents,
+		resolver:           resolver,
+		logger:             log.WithFields(zap.String("component", "ssh-handler")),
+		reachabilityRepo:   reachabilityRepo,
+		reachabilityPoller: reachabilityPoller,
 	}
 }
 
@@ -87,12 +96,14 @@ func RegisterRoutes(
 	registry *registry.Registry,
 	resolver *lifecycle.AgentctlResolver,
 	log *logger.Logger,
+	reachabilityRepo ReachabilityLister,
+	reachabilityPoller ReachabilityProber,
 ) {
 	var agentLister AgentLister
 	if registry != nil {
 		agentLister = registry
 	}
-	h := NewHandler(repo, executorFetcher, agentLister, resolver, log)
+	h := NewHandler(repo, executorFetcher, agentLister, resolver, log, reachabilityRepo, reachabilityPoller)
 	h.registerHTTP(router)
 	h.registerWS(dispatcher)
 }
@@ -103,6 +114,9 @@ func (h *Handler) registerHTTP(router *gin.Engine) {
 	api.GET("/executors/:id/sessions", h.httpListSessions)
 	api.POST("/executors/:id/probe-agents", h.httpProbeAgents)
 	api.POST("/executors/:id/probe-shells", h.httpProbeShells)
+	api.GET("/reachability", h.httpListReachability)
+	api.GET("/executors/:id/reachability", h.httpGetReachability)
+	api.POST("/executors/:id/reachability/probe", h.httpProbeReachability)
 }
 
 func (h *Handler) registerWS(dispatcher *ws.Dispatcher) {
@@ -179,7 +193,7 @@ func (h *Handler) httpTest(c *gin.Context) {
 func (h *Handler) httpListSessions(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: "executor id required"})
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: errExecutorIDRequired})
 		return
 	}
 	rows, err := h.listSessions(c.Request.Context(), id)
@@ -232,7 +246,7 @@ type ProbeAgentsRequest struct {
 func (h *Handler) httpProbeAgents(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: "executor id required"})
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: errExecutorIDRequired})
 		return
 	}
 	if h.executorFetcher == nil || h.agents == nil {
@@ -332,7 +346,7 @@ type ProbeShellsResponse struct {
 func (h *Handler) httpProbeShells(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: "executor id required"})
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: errExecutorIDRequired})
 		return
 	}
 	if h.executorFetcher == nil {
@@ -421,38 +435,11 @@ func (h *Handler) resolveSSHTarget(ctx context.Context, executorID string) (*lif
 	if executor == nil || executor.Type != models.ExecutorTypeSSH {
 		return nil, http.StatusBadRequest, fmt.Errorf("executor %q is not an SSH executor", executorID)
 	}
-	target, err := sshTargetFromExecutorConfig(executor.Config)
+	target, err := lifecycle.SSHTargetFromExecutorConfig(executor.Config)
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}
 	return target, http.StatusOK, nil
-}
-
-// sshTargetFromExecutorConfig projects an executor.Config into the
-// SSHConnConfig the dialer expects. Keeps the handler decoupled from
-// lifecycle's internal metadata-vs-config representation.
-func sshTargetFromExecutorConfig(cfg map[string]string) (*lifecycle.SSHTarget, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("ssh executor has no config")
-	}
-	port := 0
-	if p := strings.TrimSpace(cfg["ssh_port"]); p != "" {
-		n, err := strconv.Atoi(p)
-		if err != nil || n < 1 || n > 65535 {
-			return nil, fmt.Errorf("invalid ssh_port %q", p)
-		}
-		port = n
-	}
-	return lifecycle.ResolveSSHTarget(lifecycle.SSHConnConfig{
-		HostAlias:         cfg["ssh_host_alias"],
-		Host:              cfg["ssh_host"],
-		Port:              port,
-		User:              cfg["ssh_user"],
-		IdentitySource:    lifecycle.SSHIdentitySource(cfg["ssh_identity_source"]),
-		IdentityFile:      cfg["ssh_identity_file"],
-		ProxyJump:         cfg["ssh_proxy_jump"],
-		PinnedFingerprint: cfg["ssh_host_fingerprint"],
-	})
 }
 
 // --- WS handlers ---

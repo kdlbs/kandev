@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconAdjustments, IconCheck, IconPlus } from "@tabler/icons-react";
 import {
@@ -23,10 +25,11 @@ const TRIGGER_BUTTON_CLASS = cn(
 );
 
 export function TasksViewPicker() {
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const { t } = useTranslation();
-  const views = useAppStore((s) => s.sidebarViews.views);
-  const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
-  const draft = useAppStore((s) => s.sidebarViews.draft);
+  const views = useAppStore((s) => selectSidebarViews(s).views);
+  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
+  const draft = useAppStore((s) => selectSidebarViews(s).draft);
   const setActiveView = useAppStore((s) => s.setSidebarActiveView);
   const openPopoverAfterPickerCloseRef = useRef(false);
   const {
@@ -38,12 +41,11 @@ export function TasksViewPicker() {
     newViewDisabledReason,
   } = useSidebarViewPopover();
 
-  const activeView = useMemo(
-    () => views.find((v) => v.id === activeViewId) ?? views[0],
-    [views, activeViewId],
-  );
+  const activeView = views.find((view) => view.id === activeViewId) ?? views[0];
   const hasDraft = !!draft && draft.baseViewId === activeViewId;
   const activeLabel = activeView ? sidebarViewName(activeView, t) : t("sidebar:viewAll");
+
+  if (!workspaceId) return null;
 
   return (
     <div className="flex items-center gap-0.5">
@@ -97,6 +99,7 @@ export function TasksViewPicker() {
         </DropdownMenuContent>
       </DropdownMenu>
       <SidebarFilterPopover
+        key={workspaceId}
         open={open}
         onOpenChange={onOpenChange}
         renameRequestedViewId={renameRequestedViewId}

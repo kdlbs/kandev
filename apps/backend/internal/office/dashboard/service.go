@@ -562,6 +562,20 @@ func (s *DashboardService) SetProjectBudgetEvaluator(e ProjectBudgetEvaluator) {
 	s.projectBudget = e
 }
 
+// LogActivityWithRun passes through to the wired activity logger. A no-op
+// when no logger is wired. Exposed so MCP handlers (which only hold a
+// *DashboardService reference, not the underlying office service) can log
+// activity rows attributed to a run.
+func (s *DashboardService) LogActivityWithRun(
+	ctx context.Context,
+	workspaceID, actorType, actorID, action, targetType, targetID, details, runID, sessionID string,
+) {
+	if s.activity == nil {
+		return
+	}
+	s.activity.LogActivityWithRun(ctx, workspaceID, actorType, actorID, action, targetType, targetID, details, runID, sessionID)
+}
+
 // LogTaskStateChange records a task state transition for Office tasks before
 // the task service publishes its state-change notification. This keeps the
 // activity-backed timeline durable before clients refetch the task detail.
@@ -753,10 +767,20 @@ func (s *DashboardService) SetRoutineLister(rl RoutineLister) {
 
 // ListActivityFiltered returns activity entries filtered by optional type.
 func (s *DashboardService) ListActivityFiltered(ctx context.Context, wsID, filterType string, limit int) ([]*models.ActivityEntry, error) {
+	var (
+		entries []*models.ActivityEntry
+		err     error
+	)
 	if filterType == "" || filterType == "all" {
-		return s.repo.ListActivityEntries(ctx, wsID, limit)
+		entries, err = s.repo.ListActivityEntries(ctx, wsID, limit)
+	} else {
+		entries, err = s.repo.ListActivityEntriesByType(ctx, wsID, filterType, limit)
 	}
-	return s.repo.ListActivityEntriesByType(ctx, wsID, filterType, limit)
+	if err != nil {
+		return nil, err
+	}
+	s.enrichActivityLabels(ctx, wsID, entries, nil)
+	return entries, nil
 }
 
 // ListActivityForTarget returns activity entries scoped to one target entity.

@@ -31,7 +31,7 @@ const hostRuntimeBootstrap = `(() => {
       result: outcome.result,
     };
     if (outcome.code) message.code = outcome.code;
-    window.parent.postMessage(message, "*"); // Sandboxed iframes have a null origin, so "*" is the only viable target.
+		window.parent.postMessage(message, "*"); // The host validates the current frame window and nonce.
   };
 
   const finish = (result, code) => {
@@ -59,7 +59,7 @@ const hostRuntimeBootstrap = `(() => {
 
   const checkContext = () => {
     if (outcome) return;
-    fetch("./_kandev/v1/context", { credentials: "omit", cache: "no-store" })
+	fetch("./_kandev/v1/context", { credentials: "same-origin", cache: "no-store" })
       .then((response) => {
         if (!response.ok) throw new Error("context unavailable");
         return response.json();

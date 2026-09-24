@@ -218,6 +218,21 @@ func (r *Repository) createUserMessageWithBoundary(
 	)
 }
 
+func (r *Repository) createUserMessageWithBoundaryReceipt(
+	ctx context.Context,
+	message *models.Message,
+	requestsInput int,
+	messageType, metadataJSON string,
+) (*models.ConversationMutationReceipt, error) {
+	receipt := &models.ConversationMutationReceipt{}
+	driver := r.db.DriverName()
+	nm := dialect.NormalizedMicrosecond(driver, "created_at")
+	if err := r.executeBoundaryTransaction(ctx, message, requestsInput, messageType, metadataJSON, driver, nm, nil, receipt); err != nil {
+		return nil, err
+	}
+	return receipt, nil
+}
+
 func (r *Repository) createUserMessageWithBoundaryAndInitialTaskBrief(
 	ctx context.Context,
 	message *models.Message,
@@ -227,7 +242,7 @@ func (r *Repository) createUserMessageWithBoundaryAndInitialTaskBrief(
 ) error {
 	driver := r.db.DriverName()
 	nm := dialect.NormalizedMicrosecond(driver, "created_at")
-	return r.executeBoundaryTransaction(ctx, message, requestsInput, messageType, metadataJSON, driver, nm, candidate)
+	return r.executeBoundaryTransaction(ctx, message, requestsInput, messageType, metadataJSON, driver, nm, candidate, nil)
 }
 
 // executeBoundaryTransaction runs one per-session write boundary: begin a
@@ -241,6 +256,7 @@ func (r *Repository) executeBoundaryTransaction(
 	requestsInput int,
 	messageType, metadataJSON, driver, nm string,
 	candidate *admission.InitialTaskBriefCandidate,
+	receipt *models.ConversationMutationReceipt,
 ) (err error) {
 	origCreatedAt := message.CreatedAt
 	origUpdatedAt := message.UpdatedAt
@@ -281,6 +297,13 @@ func (r *Repository) executeBoundaryTransaction(
 	if err := lockSessionTurnWrites(ctx, tx, driver, message.TaskSessionID); err != nil {
 		return err
 	}
+	var baseRevision int64
+	if receipt != nil {
+		baseRevision, err = r.ensureConversationRevisionTx(ctx, tx, message.TaskSessionID)
+		if err != nil {
+			return err
+		}
+	}
 	if candidate != nil {
 		if err := r.selectInitialTaskBriefCandidate(ctx, tx, message.TaskSessionID, message, candidate); err != nil {
 			return err
@@ -294,6 +317,11 @@ func (r *Repository) executeBoundaryTransaction(
 	}
 	if err := r.insertMessageRow(ctx, tx, message, requestsInput, messageType, metadataJSON); err != nil {
 		return err
+	}
+	if receipt != nil {
+		if err := r.populateConversationMessageReceipt(ctx, tx, receipt, baseRevision, message, models.ConversationMutationUpsert); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit user message creation: %w", err)

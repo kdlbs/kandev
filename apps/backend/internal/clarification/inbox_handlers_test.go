@@ -16,6 +16,7 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 var testInboxNow = time.Date(2026, time.September, 12, 12, 0, 0, 0, time.UTC)
@@ -58,6 +59,13 @@ func (f *fakeInboxTasks) GetTasksByIDs(_ context.Context, ids []string) ([]*task
 		}
 	}
 	return result, nil
+}
+
+// GetWorkflowStep is a no-op default so fakeInboxTasks alone still satisfies
+// inboxTaskService for every pre-existing test; History-specific tests
+// override it via fakeInboxTasksWithWorkflow (inbox_history_handlers_test.go).
+func (f *fakeInboxTasks) GetWorkflowStep(context.Context, string) (*wfmodels.WorkflowStep, error) {
+	return nil, nil
 }
 
 func (f *fakeInboxTasks) BatchGetSessionsForTasks(_ context.Context, taskIDs []string) (map[string][]*taskmodels.TaskSession, error) {
@@ -168,6 +176,22 @@ func (f *fakeInboxBundleStore) GetClarificationInboxSidecarStates(
 		return map[string]taskmodels.ClarificationInboxHiddenBundle{}, nil
 	}
 	return f.states, nil
+}
+
+// ListInboxHistoryBundles/CountInboxHistoryBundles are no-op defaults so
+// fakeInboxBundleStore alone still satisfies inboxBundleStore for every
+// pre-existing test; History-specific tests override them via
+// fakeInboxBundleStoreWithHistory (inbox_history_handlers_test.go).
+func (f *fakeInboxBundleStore) ListInboxHistoryBundles(
+	context.Context, taskmodels.ListClarificationHistoryOptions,
+) (*taskmodels.ClarificationHistoryPage, error) {
+	return &taskmodels.ClarificationHistoryPage{}, nil
+}
+
+func (f *fakeInboxBundleStore) CountInboxHistoryBundles(
+	context.Context, taskmodels.ListClarificationHistoryOptions,
+) (int, error) {
+	return 0, nil
 }
 
 // alwaysAllowAuthorizer is a taskAccessAuthorizer double that authorizes

@@ -1,12 +1,135 @@
 package lifecycle
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
+
+// @covers AC-PLATFORM-DIAGNOSTIC-LOGGING-001.12
+func TestResolvePreparerSetupScriptDiagnosticSeverity(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	log, err := commonlogger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	previousLogger := prepareScriptLogger
+	prepareScriptLogger = log
+	t.Cleanup(func() { prepareScriptLogger = previousLogger })
+
+	cases := []struct {
+		name                string
+		request             EnvPrepareRequest
+		wantExplicit        bool
+		wantEmptyDiagnostic bool
+		secret              string
+	}{
+		{
+			name: "default comment-only script",
+			request: EnvPrepareRequest{
+				TaskID:         "task-default",
+				ExecutorType:   executor.NameStandalone,
+				RepositoryPath: "/tmp/my-repo",
+			},
+			wantEmptyDiagnostic: true,
+		},
+		{
+			name: "explicit comment-only script",
+			request: EnvPrepareRequest{
+				TaskID:         "task-explicit",
+				ExecutorType:   executor.NameStandalone,
+				RepositoryPath: "/tmp/my-repo",
+				SetupScript:    "# secret-comment\n# another comment",
+			},
+			wantExplicit:        true,
+			wantEmptyDiagnostic: true,
+			secret:              "secret-comment",
+		},
+		{
+			name: "blank and shebang-only script",
+			request: EnvPrepareRequest{
+				TaskID:         "task-shebang",
+				ExecutorType:   executor.NameStandalone,
+				RepositoryPath: "/tmp/my-repo",
+				SetupScript:    "\n#!/bin/sh\n\n",
+			},
+			wantExplicit:        true,
+			wantEmptyDiagnostic: true,
+		},
+		{
+			name: "executable script",
+			request: EnvPrepareRequest{
+				TaskID:         "task-command",
+				ExecutorType:   executor.NameStandalone,
+				RepositoryPath: "/tmp/my-repo",
+				SetupScript:    "echo setup-command",
+			},
+			wantExplicit: true,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			before := logs.Len()
+			got, err := resolvePreparerSetupScript(&tt.request, "/tmp/my-repo")
+			if err != nil {
+				t.Fatalf("resolvePreparerSetupScript() error = %v", err)
+			}
+			if tt.wantEmptyDiagnostic && got != "" {
+				t.Fatalf("resolved script = %q, want empty", got)
+			}
+			if !tt.wantEmptyDiagnostic && got == "" {
+				t.Fatal("resolved executable script is empty")
+			}
+
+			entries := logs.All()[before:]
+			assertSetupScriptDiagnostic(t, entries, tt.request, tt.wantExplicit, tt.wantEmptyDiagnostic, tt.secret)
+			if !tt.wantEmptyDiagnostic && len(entries) != 0 {
+				t.Fatalf("executable script emitted omission diagnostics: %v", entries)
+			}
+		})
+	}
+
+	for _, entry := range logs.All() {
+		if entry.Level == zap.WarnLevel {
+			t.Fatalf("comment-only setup emitted warning: %#v", entry)
+		}
+	}
+}
+
+func assertSetupScriptDiagnostic(
+	t *testing.T, entries []observer.LoggedEntry, req EnvPrepareRequest, wantExplicit, wantEmpty bool, secret string,
+) {
+	t.Helper()
+	if !wantEmpty {
+		return
+	}
+	if len(entries) != 1 {
+		t.Fatalf("diagnostic entries = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.Message != "setup script is comment-only after resolution, skipping" {
+		t.Fatalf("diagnostic message = %q", entry.Message)
+	}
+	if entry.Level != zap.DebugLevel {
+		t.Fatalf("diagnostic level = %s, want debug", entry.Level)
+	}
+	fields := entry.ContextMap()
+	if fields["task_id"] != req.TaskID || fields["executor_type"] != string(req.ExecutorType) ||
+		fields["use_worktree"] != req.UseWorktree || fields["has_explicit_script"] != wantExplicit {
+		t.Fatalf("diagnostic fields = %v", fields)
+	}
+	if secret != "" && (strings.Contains(entry.Message, secret) || strings.Contains(fmt.Sprint(fields), secret)) {
+		t.Fatalf("diagnostic exposed script content: %#v", entry)
+	}
+}
 
 func TestResolvePreparerSetupScript_LocalFallbackCommentOnly(t *testing.T) {
 	req := &EnvPrepareRequest{

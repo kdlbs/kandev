@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-08-26
-last_updated: 2026-09-10
+last_updated: 2026-09-23
 ---
 
 # Agent-authored web-app canvases Requirements
@@ -15,22 +15,23 @@ last_updated: 2026-09-10
 
 A canvas is a custom web application that an agent creates for one task. A
 user can promote a useful task canvas to its workspace. A workspace canvas
-appears in workspace navigation and can use workspace-scoped data.
+appears in workspace navigation. An owner-authorized task canvas can already
+use its workspace's data while the user reviews it in the originating task.
 
 The Canvases system owns the canvas scope, source lineage, release selection,
-promotion, editing flow, and discovery. The Plugins system owns the isolated
-web-application runtime and its data contract.
+promotion, editing flow, and discovery. The Plugins system owns the web-application
+runtime and its data contract.
 
 ## Terminology
 
 - **Task canvas:** A canvas that belongs to one task and appears only in that
-  task.
+  task. Its placement does not determine its approved data scope.
 - **Workspace canvas:** A canvas that belongs to one workspace and appears in
   workspace navigation. Agent-authored canvases reach this scope by promotion;
   [distribution](marketplace-sharing.md) also defines reviewed package installs.
 - **Draft:** Editable canvas source in an authorized agent workspace.
 - **Release:** An immutable package that passed validation.
-- **Promotion:** A user action that changes a task canvas to workspace scope.
+- **Promotion:** A user action that changes a task canvas to workspace placement.
 
 ## Requirements
 
@@ -77,6 +78,22 @@ the task, so that the interface matches the work.
 - **AC-CANVASES-AGENT-WEB-APPS-001.12:** Authoring instructions shall distinguish
   an active release, a release awaiting permission review, and an unsuccessful
   publish. Local files or a successful build shall not imply publication.
+- **AC-CANVASES-AGENT-WEB-APPS-001.13:** When a user returns after publication,
+  the task shall show eligible task canvases not previously presented in that
+  browser tab. This shall also work after reload or a missed publication event.
+  Eligible canvases have an active valid release or await permission review.
+  Draft-only, archived, disabled, removed, invalid, foreign-task, and workspace
+  canvases shall not open automatically.
+- **AC-CANVASES-AGENT-WEB-APPS-001.14:** Desktop shall add new canvas panels to
+  the main editor group and focus one new panel. Existing panels shall retain
+  their placement. Repeated discovery shall not duplicate panels or steal focus.
+- **AC-CANVASES-AGENT-WEB-APPS-001.15:** Closing a presented canvas shall prevent
+  automatic reopening in that browser tab, including after reload or publication
+  of another release. Manual reopening shall remain available.
+- **AC-CANVASES-AGENT-WEB-APPS-001.16:** On phones, automatic presentation shall
+  open one focused canvas route. Returning to the task shall not redirect to
+  that canvas again. Other eligible canvases shall remain accessible through
+  the existing picker.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-002: Durable source and releases
 
@@ -104,8 +121,8 @@ browser session end.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-003: User-controlled promotion
 
-**Intent:** A useful task canvas becomes a workspace application only after a
-user reviews its scope and permissions.
+**Intent:** A useful task canvas becomes available in workspace navigation only
+after a user reviews its placement and permissions.
 
 **User story:** As a user, I want to promote a useful task canvas, so that I
 can open it from the workspace sidebar.
@@ -116,7 +133,8 @@ can open it from the workspace sidebar.
   system shall show the requested data, write, event, state, and network
   permissions before confirmation.
 - **AC-CANVASES-AGENT-WEB-APPS-003.2:** When the user confirms promotion, the
-  same canvas identity and active release shall change to workspace scope.
+  same canvas identity and active release shall change to workspace placement.
+  A release that already has workspace data access shall keep that access.
 - **AC-CANVASES-AGENT-WEB-APPS-003.3:** When promotion completes, the canvas
   shall appear in navigation for that workspace only.
 - **AC-CANVASES-AGENT-WEB-APPS-003.4:** An agent shall not promote, demote, or
@@ -208,6 +226,16 @@ canvas through native Kandev navigation.
 - **AC-CANVASES-AGENT-WEB-APPS-006.9:** A two-permission review shall expose
   both permissions and its actions without scrolling at 1280 by 720 CSS pixels.
   Longer reviews shall keep actions reachable at 390 by 844 CSS pixels.
+
+- **AC-CANVASES-AGENT-WEB-APPS-006.10:** An embedded canvas shall have one
+  host action toolbar aligned with other task panels under the shared
+  [panel toolbar contract](../../ui/requirements/panel-toolbars.md).
+  A standalone canvas shall retain one page navigation/action header.
+- **AC-CANVASES-AGENT-WEB-APPS-006.11:** Neither presentation shall add a
+  separate status-only toolbar. Loading and blocking errors shall appear once
+  in the body, with recovery actions. Ready shall show the application and an
+  accessible status announcement. Nonblocking offline state may appear inline
+  in the existing header while retaining the application.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-007: Visible runtime and release state
 
@@ -314,7 +342,9 @@ including missing references, lookup failures, and passthrough exclusions.
 
 ## Implementation plans
 
+- [Canvas runtime and task-entry recovery](../../../plans/canvas-runtime-entry-recovery/plan.md)
 - [Direct canvas creation and saved prompt](../../../plans/canvas-direct-creation/plan.md)
+- [Task canvas workspace data preview](../../../plans/task-canvas-workspace-preview/plan.md)
 
 ## Out of scope
 

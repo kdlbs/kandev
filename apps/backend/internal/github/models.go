@@ -279,6 +279,7 @@ type PR struct {
 	HeadBranch          string `json:"head_branch"`
 	HeadSHA             string `json:"head_sha"`
 	BaseBranch          string `json:"base_branch"`
+	BaseSHA             string `json:"base_sha,omitempty"`
 	AuthorLogin         string `json:"author_login"`
 	RepoOwner           string `json:"repo_owner"`
 	RepoName            string `json:"repo_name"`

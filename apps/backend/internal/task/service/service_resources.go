@@ -80,6 +80,20 @@ func validateProviderScope(raw string) (string, error) {
 	return scope, nil
 }
 
+// validateProviderScopeAndRepoIDPair enforces repoclone.Cloner's
+// WorkspaceProviderRepositoryPath invariant: a non-empty provider_scope
+// requires a paired provider_repo_id, because the scope-isolated clone
+// layout needs both to build a unique path. A bare provider_repo_id with no
+// scope is fine — that's the normal shape for every built-in provider
+// (GitHub, GitLab, Azure DevOps), none of which resolve a provider
+// connection scope — and falls through to the legacy owner/name layout.
+func validateProviderScopeAndRepoIDPair(scope, repoID string) error {
+	if strings.TrimSpace(scope) != "" && strings.TrimSpace(repoID) == "" {
+		return fmt.Errorf("%w: provider_scope requires a paired provider_repo_id", ErrInvalidRepositorySettings)
+	}
+	return nil
+}
+
 type workspaceDeleteTaskCleanup struct {
 	task        *models.Task
 	sessions    []*models.TaskSession
@@ -1052,6 +1066,10 @@ func (s *Service) createRepository(
 		resolveRepositoryProviderIdentity(repository)
 	}
 
+	if err := validateProviderScopeAndRepoIDPair(repository.ProviderScope, repository.ProviderRepoID); err != nil {
+		return nil, err
+	}
+
 	if mutator, ok := s.repoEntities.(taskrepo.RepositorySecretBindingMutator); ok {
 		if err := mutator.CreateRepositoryWithSecretBindings(ctx, repository, bindings); err != nil {
 			s.logger.Error("failed to create repository", zap.Error(err))
@@ -1469,6 +1487,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 		}
 		repository.CopyFiles = *req.CopyFiles
 	}
+	if err := validateProviderScopeAndRepoIDPair(repository.ProviderScope, repository.ProviderRepoID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1785,7 +1806,17 @@ func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest
 		return nil, err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorCreated, executor)
+	s.notifyExecutorSaved(ctx, nil, executor)
 	return executor, nil
+}
+
+// notifyExecutorSaved forwards a committed executor create/update to the
+// wired ExecutorSaveObserver, if any. before is nil on create.
+func (s *Service) notifyExecutorSaved(ctx context.Context, before, after *models.Executor) {
+	if s.executorSaveObserver == nil {
+		return
+	}
+	s.executorSaveObserver.OnExecutorSaved(ctx, before, after)
 }
 
 func (s *Service) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
@@ -1821,12 +1852,14 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 			return nil, ErrActiveTaskSessions
 		}
 	}
+	before := *executor
 	applyExecutorUpdates(executor, req)
 	executor.UpdatedAt = time.Now().UTC()
 	if err := s.executors.UpdateExecutor(ctx, executor); err != nil {
 		return nil, err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorUpdated, executor)
+	s.notifyExecutorSaved(ctx, &before, executor)
 	return executor, nil
 }
 

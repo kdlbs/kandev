@@ -11,7 +11,7 @@ import {
 } from "@/lib/state/slices/comments/format";
 import type {
   Comment,
-  DiffComment,
+  ReviewComment,
   PlanComment,
   FileEditorComment,
   PRFeedbackComment,
@@ -37,8 +37,9 @@ import { hasPendingPlanCommentMigration } from "./plan-comment-migration";
  */
 function formatSingleComment(comment: Comment): string {
   switch (comment.source) {
+    case "review-file":
     case "diff":
-      return formatReviewCommentsAsMarkdown([comment as DiffComment]);
+      return formatReviewCommentsAsMarkdown([comment as ReviewComment]);
     case "plan":
       return "";
     case "pr-feedback":

@@ -193,7 +193,7 @@ Run **Test Kubernetes** before Save and after changing cluster, namespace, templ
 
 No diagnostic PVC is retained. The streaming probe is a real temporary Pod, so quota, scheduling, image pulls, admission, and Pod billing can apply. A cleanup failure makes the test fail; inspect `kandev-stream-probe-*` in the configured namespace before retrying. Kandev returns sanitized errors and template-policy warnings, but do not place secrets in a template or error-producing field.
 
-After saving, each Kubernetes profile opens with the shared **Cluster connection** editor, **Test Kubernetes**, and executor-wide **Active sessions** before workload, workspace, credential, and script settings. The test combines the current unsaved connection and profile values. Administrators edit both resources through the page's one Save/Reset flow; members see the same hierarchy read-only. A connection edit is shared by every profile on that executor and can change how active sessions reconnect, while a profile edit affects only new workload snapshots. If both are dirty, Kandev confirms active-session impact once and saves the connection before the profile. The raw PodTemplate field grows and shrinks with its YAML; long unwrapped lines scroll inside the field without widening the settings page.
+After saving, each Kubernetes profile opens with the shared **Cluster connection** editor, **Test Kubernetes**, and executor-wide **Active sessions** before workload, workspace, credential, and script settings. The test combines the current unsaved connection and profile values. Administrators edit both resources through the page's one Save/Reset flow; members see the same hierarchy read-only. A connection edit is shared by every profile on that executor and can change how active sessions reconnect, while edits to profile workload settings affect only new workload snapshots. If both are dirty, Kandev confirms active-session impact once and saves the connection before the profile. The raw PodTemplate field grows and shrinks with its YAML; long unwrapped lines scroll inside the field without widening the settings page.
 
 Configured executor rows expand to their profile pages, and task settings links open the exact selected profile. The standalone `/settings/executors/k8s/<executor-id>` connection editor is only a recovery surface for an executor that has no profiles; a bookmarked URL for a configured executor redirects to its first profile.
 
@@ -201,7 +201,7 @@ The **Active sessions** card refreshes every 90 seconds and reads only Kandev's 
 
 On a Kubernetes task, use the Pod control in the task header to inspect the exact authorized Pod's live phase, container state, restart count, workspace mode, creation time, and sanitized failure reason. Desktop opens this disclosure on hover; touch and coarse-pointer layouts provide a named 44 px button that opens a Drawer with the same structured Pod summary. Quiet Refresh and Settings icons sit in the summary header. Refresh visibly stays busy until the immediate status read settles, and Settings opens the exact selected profile. Kubernetes does not show the generic **Reset environment** action because Pod and PVC lifecycle remains owned by Stop, Resume, Archive, and Delete.
 
-The smaller Pod glyphs on Kanban cards and in task lists request their exact session status as soon as they appear, so their healthy or failed color does not depend on a first hover. On a fine pointer, hover or keyboard focus opens a compact summary with the Pod identity and aligned rows for state, restarts, workspace mode, creation time, last check, and any sanitized failure. On touch layouts, the same glyph has an expanded 44 px hit target and opens that summary in a bottom Drawer without selecting the task row.
+The smaller Pod glyphs on Kanban cards and in task lists request their exact session status as soon as they appear, so their healthy or failed color does not depend on a first hover. While the page is visible, mounted indicators refresh automatically every 90 seconds and retry failed reads. On a fine pointer, hover or keyboard focus opens a compact summary with the Pod identity and aligned rows for state, restarts, workspace mode, creation time, last check, and any sanitized failure. On touch layouts, the same glyph has an expanded 44 px hit target and opens that summary in a bottom Drawer without selecting the task row.
 
 ### Understand template ownership
 
@@ -350,9 +350,17 @@ Kandev's `executors_running` inventory is authoritative. It records exact Pod an
 Current connection configuration and recorded workload configuration serve different purposes:
 
 - Saved kubeconfig/in-cluster mode, kubeconfig path/context, and timeout are used for later status, reconnect, replacement, and cleanup. Changing credentials or context can restore or break access to an existing session. Retained sessions continue to target their recorded namespace; changing the saved namespace affects new sessions only.
-- Saved profile edits affect new sessions. An existing Pod is never live-mutated, and a missing-Pod replacement uses the recorded workload snapshot rather than the profile's current image, template, platform, main container, or storage fields.
+- Saved workload profile edits affect new sessions. An existing Pod is never live-mutated, and a missing-Pod replacement uses the recorded workload snapshot rather than the profile's current image, template, platform, main container, or storage fields.
+
+On resume, Kandev reloads environment definitions from the recorded executor profile and resolves secret references at the launch checkpoint. Changes to that profile's environment can therefore affect a resumed process; they do not rewrite the Pod or storage snapshot. If the profile has been deleted, its environment definitions are unavailable. Profile lookup failures and executor ownership mismatches block resume.
 
 Ordinary Stop and backend shutdown close local clients and forwards but preserve the Pod and workspace. Agent or main-container restart keeps the Pod volumes; Kandev performs a new nonce handshake and local port-forward. If a Pod disappears, managed or existing PVC storage can support a replacement Pod after identity checks; `emptyDir` cannot.
+
+A recoverable agent error also preserves the established Pod, workspace, and
+recovery credentials. Use **Resume** to continue that session. If its retained
+credentials or storage are missing, recovery fails rather than silently creating
+an empty replacement workspace. A software update cannot restore resources that
+were already deleted.
 
 Archive/delete terminal cleanup and explicit force cleanup are destructive. Before deletion, Kandev verifies the recorded namespace, name, UID, and complete standard plus `kandev.ai/*` ownership-label set. It then deletes the exact Pod with UID/resource-version preconditions and deletes a PVC only when inventory proves Kandev created that managed claim. Existing claims are never deleted. A missing object is idempotent; an inventory read error, same-name replacement, UID mismatch, missing label, changed label, extra `kandev.ai/*` label, or mismatched create nonce fails closed without deleting the ambiguous object.
 

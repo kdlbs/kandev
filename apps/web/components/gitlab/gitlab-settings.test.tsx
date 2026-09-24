@@ -49,6 +49,8 @@ vi.mock("@/components/toast-provider", () => ({
 
 vi.mock("@/components/settings/settings-save-provider", () => ({
   useSettingsSaveContributor: vi.fn(),
+  SettingsSaveDirtyScope: ({ children }: { children: (isDirty: boolean) => React.ReactNode }) =>
+    children(false),
 }));
 
 vi.mock("@/components/settings/settings-prompt-editor", () => ({

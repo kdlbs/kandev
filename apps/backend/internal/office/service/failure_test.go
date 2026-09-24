@@ -102,7 +102,7 @@ func TestHandleAgentFailure_AutoPausesAtThreshold(t *testing.T) {
 		taskID := uuidish("task-pause", i)
 		insertSyntheticTask(t, svc, taskID, "ws-1", "agent-pause")
 		w := queueAndReadRun(t, svc, "agent-pause", taskID)
-		if _, err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
+		if _, err := svc.HandleAgentFailure(ctx, w, "boom", "", nil); err != nil {
 			t.Fatalf("handle failure %d: %v", i, err)
 		}
 	}
@@ -136,7 +136,7 @@ func TestRecordAgentSuccess_ResetsCounter(t *testing.T) {
 		taskID := uuidish("task-succ", i)
 		insertSyntheticTask(t, svc, taskID, "ws-1", "agent-success")
 		w := queueAndReadRun(t, svc, "agent-success", taskID)
-		if _, err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
+		if _, err := svc.HandleAgentFailure(ctx, w, "boom", "", nil); err != nil {
 			t.Fatalf("handle failure %d: %v", i, err)
 		}
 	}
@@ -180,7 +180,7 @@ func TestHandleAgentFailure_RespectsPerAgentThreshold(t *testing.T) {
 	taskID := "task-tight-1"
 	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-tight")
 	w := queueAndReadRun(t, svc, "agent-tight", taskID)
-	if _, err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
+	if _, err := svc.HandleAgentFailure(ctx, w, "boom", "", nil); err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func autoPauseAgent(
 		taskID := agentID + "-task-" + uuidish("p", i)
 		insertSyntheticTask(t, svc, taskID, wsID, agentID)
 		w := queueAndReadRun(t, svc, agentID, taskID)
-		if _, err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
+		if _, err := svc.HandleAgentFailure(ctx, w, "boom", "", nil); err != nil {
 			t.Fatalf("handle failure %d: %v", i, err)
 		}
 	}
@@ -336,7 +336,7 @@ func TestMarkAgentRunFailedFixed_LeavesInboxWhenRequeueFails(t *testing.T) {
 	taskID := "task-retry-after-queue-error"
 	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-task-retry")
 	run := queueAndReadRun(t, svc, "agent-task-retry", taskID)
-	if _, err := svc.HandleAgentFailure(ctx, run, "boom"); err != nil {
+	if _, err := svc.HandleAgentFailure(ctx, run, "boom", "", nil); err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
 	if err := svc.UpdateAgentStatusFields(ctx, "agent-task-retry",
@@ -366,7 +366,7 @@ func TestMarkAgentPausedFixed_UsesPauseSnapshot(t *testing.T) {
 	oldTaskID := "old-failure-task"
 	insertSyntheticTask(t, svc, oldTaskID, "ws-1", "agent-snapshot")
 	oldRun := queueAndReadRun(t, svc, "agent-snapshot", oldTaskID)
-	if _, err := svc.HandleAgentFailure(ctx, oldRun, "old failure"); err != nil {
+	if _, err := svc.HandleAgentFailure(ctx, oldRun, "old failure", "", nil); err != nil {
 		t.Fatalf("old failure: %v", err)
 	}
 	svc.RecordAgentSuccess(ctx, "agent-snapshot")
@@ -400,7 +400,7 @@ func TestMarkAgentPausedFixed_DiscardsRecoveryForReassignedTask(t *testing.T) {
 	reassignedTaskID := "reassigned-task"
 	insertSyntheticTask(t, svc, reassignedTaskID, "ws-1", "agent-reassigned-from")
 	failedRun := queueAndReadRun(t, svc, "agent-reassigned-from", reassignedTaskID)
-	if _, err := svc.HandleAgentFailure(ctx, failedRun, "boom"); err != nil {
+	if _, err := svc.HandleAgentFailure(ctx, failedRun, "boom", "", nil); err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
 	// Two more failures (on other tasks) to cross the default threshold
@@ -451,6 +451,87 @@ func TestMarkAgentPausedFixed_DiscardsRecoveryForReassignedTask(t *testing.T) {
 	}
 	if recoveryCount != 0 {
 		t.Fatalf("expected recovery row for reassigned task to be deleted, found %d", recoveryCount)
+	}
+}
+
+// Regression for card b250dfad: recoverPausedTask's stale-failed-run guard
+// (failure.go: discard when the latest run for the task is no longer the
+// recovery's recorded FailedRunID) was covered by nothing — neutering the
+// guard left `go test ./internal/office/...` green. If a newer run has
+// already superseded the one the pause snapshot points at (for example a
+// manual retry that landed and finished while the agent was still paused),
+// MarkAgentPausedFixed must discard that stale recovery instead of
+// re-queuing a duplicate run for a task that has already moved on.
+func TestMarkAgentPausedFixed_DiscardsRecoveryForStaleFailedRun(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-stale-run")
+	staleTaskID := "stale-task"
+	insertSyntheticTask(t, svc, staleTaskID, "ws-1", "agent-stale-run")
+	failedRun := queueAndReadRun(t, svc, "agent-stale-run", staleTaskID)
+	if _, err := svc.HandleAgentFailure(ctx, failedRun, "boom", "", nil); err != nil {
+		t.Fatalf("handle failure: %v", err)
+	}
+	// Two more failures (on other tasks) to cross the default threshold
+	// of 3 and auto-pause the agent, with the stale task's failed run
+	// captured in the pause snapshot.
+	autoPauseAgent(t, svc, "ws-1", "agent-stale-run", 2)
+
+	// Precondition: the pause snapshot must include the stale task,
+	// otherwise the negative assertions below would pass vacuously (there
+	// would be nothing to discard).
+	var preCount int
+	if err := svc.RepoForTest().ReaderDB().Get(&preCount,
+		`SELECT COUNT(*) FROM office_agent_pause_recoveries WHERE agent_id = ? AND task_id = ?`,
+		"agent-stale-run", staleTaskID,
+	); err != nil {
+		t.Fatalf("query pre-fix snapshot: %v", err)
+	}
+	if preCount != 1 {
+		t.Fatalf(
+			"test setup error: expected exactly one recovery row for stale task, found %d",
+			preCount,
+		)
+	}
+
+	// A newer run for the same task has already finished (e.g. a manual
+	// retry that landed while the agent was paused), superseding the
+	// failed run the recovery snapshot points at.
+	supersedingRunID := staleTaskID + "-superseding-run"
+	supersedingRequestedAt := time.Now().UTC().Add(time.Hour)
+	svc.ExecSQL(t,
+		`INSERT INTO runs (id, agent_profile_id, reason, payload, status, requested_at, finished_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		supersedingRunID, "agent-stale-run", service.RunReasonTaskAssigned,
+		mustMarshalJSON(map[string]string{"task_id": staleTaskID}),
+		service.RunStatusFinished, supersedingRequestedAt, supersedingRequestedAt,
+	)
+
+	if err := svc.MarkAgentPausedFixed(ctx, "user-1", "agent-stale-run"); err != nil {
+		t.Fatalf("mark fixed: %v", err)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	for _, run := range runs {
+		if run.Reason == service.RunReasonManualResumeAfterFailure &&
+			taskIDFromPayload(t, run.Payload) == staleTaskID {
+			t.Fatalf("queued recovery run for stale task %s", staleTaskID)
+		}
+	}
+
+	var recoveryCount int
+	if err := svc.RepoForTest().ReaderDB().Get(&recoveryCount,
+		`SELECT COUNT(*) FROM office_agent_pause_recoveries WHERE agent_id = ? AND task_id = ?`,
+		"agent-stale-run", staleTaskID,
+	); err != nil {
+		t.Fatalf("query pause recoveries: %v", err)
+	}
+	if recoveryCount != 0 {
+		t.Fatalf("expected recovery row for stale task to be deleted, found %d", recoveryCount)
 	}
 }
 
@@ -547,7 +628,7 @@ func TestHandleAgentFailure_RecordsTerminalShape(t *testing.T) {
 	key := service.LoopMetricLabel("workspace", "ws-1", "shape", string(service.ShapeLaunchedFailed))
 	before := terminalShapeExpvarInt(t, key)
 
-	if _, err := svc.HandleAgentFailure(ctx, run, "boom"); err != nil {
+	if _, err := svc.HandleAgentFailure(ctx, run, "boom", "", nil); err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
 
@@ -569,7 +650,7 @@ func TestOnAssigneeChanged_DismissesPriorEntryWithoutResettingCounter(t *testing
 	taskID := "task-reassign-1"
 	insertSyntheticTask(t, svc, taskID, "ws-1", "old-agent")
 	w := queueAndReadRun(t, svc, "old-agent", taskID)
-	if _, err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
+	if _, err := svc.HandleAgentFailure(ctx, w, "boom", "", nil); err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
 

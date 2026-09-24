@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconArchive, IconArchiveOff, IconLoader, IconTrash } from "@tabler/icons-react";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
+import { cleanupSharesParentWorkspace } from "@/components/task/task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { primaryTaskRepository, type Repository, type Task, type Workflow } from "@/lib/types/http";
 import { formatTaskStateLabel } from "@/lib/ui/state-labels";
@@ -20,6 +21,7 @@ import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { TaskListFacetValue } from "@/lib/plugins/types";
+import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 
 export type TasksListViewProps = {
   total: number;
@@ -548,6 +550,7 @@ function TaskRowActions({
   ) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const workspaceMode = workspaceModeFromMetadata(task.metadata);
   const archiveAnchorRef = useRef<HTMLButtonElement>(null);
   const { isFinePointer } = useResponsiveBreakpoint();
   return (
@@ -601,6 +604,7 @@ function TaskRowActions({
         taskId={task.id}
         isInFlight={isTaskInFlight(task.foreground_activity)}
         executorType={task.primary_executor_type}
+        sharesParentWorkspace={cleanupSharesParentWorkspace(workspaceMode)}
         isDeleting={isDeleting}
         onConfirm={({ cascade, discardWorktreeChanges }) =>
           onDelete(task.id, { cascade, discardWorktreeChanges })

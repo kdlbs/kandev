@@ -12,14 +12,11 @@ import {
   IconListCheck,
   IconHome,
 } from "@tabler/icons-react";
-import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { SettingsCard } from "@/components/settings/settings-card";
-import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { settingsControlClassName } from "@/components/settings/settings-control";
+import { SettingsRow } from "@/components/settings/settings-group";
 import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -43,6 +40,7 @@ import { StartupPageSettingsCard } from "@/components/settings/startup-page-sett
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-settings";
 import { SettingsMenuModeCard } from "@/components/settings/settings-menu-mode-card";
+import { ChatMotionSettingsCard } from "./chat-motion-settings-card";
 import { RichOutputMotionSettingsCard } from "@/components/settings/rich-output-motion-settings-card";
 import { AppearanceAccountSections } from "@/components/settings/appearance-account-sections";
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
@@ -68,31 +66,29 @@ function ThemeSettingsCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard
+    <SettingsRow
       isDirty={isDirty}
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.colorTheme}
       data-testid="theme-settings-card"
-    >
-      <SettingsCardHeader title={t("settings:colorTheme")} />
-      <CardContent>
-        <div className="space-y-2">
-          <Select value={theme} onValueChange={(value) => onChange(value as Theme)}>
-            <SelectTrigger
-              id="theme"
-              className={settingsControlClassName()}
-              data-settings-dirty={isDirty}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="system">{t("common:system")}</SelectItem>
-              <SelectItem value="light">{t("settings:light")}</SelectItem>
-              <SelectItem value="dark">{t("settings:dark")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </CardContent>
-    </SettingsCard>
+      label={t("settings:colorTheme")}
+      controlId="theme"
+      control={
+        <Select value={theme} onValueChange={(value) => onChange(value as Theme)}>
+          <SelectTrigger
+            id="theme"
+            className={settingsControlClassName()}
+            data-settings-dirty={isDirty}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="system">{t("common:system")}</SelectItem>
+            <SelectItem value="light">{t("settings:light")}</SelectItem>
+            <SelectItem value="dark">{t("settings:dark")}</SelectItem>
+          </SelectContent>
+        </Select>
+      }
+    />
   );
 }
 
@@ -107,34 +103,34 @@ function ChatSubmitKeyCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard
+    <SettingsRow
       isDirty={isDirty}
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.submitShortcut}
       data-testid="chat-submit-key-card"
-    >
-      <CardHeader>
-        <CardTitle className="text-base">{t("settings:submitShortcut")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <Label htmlFor="chat-submit-key">{t("settings:messageSubmitKey")}</Label>
-          <Select value={value} onValueChange={(next) => onChange(next as "enter" | "cmd_enter")}>
-            <SelectTrigger id="chat-submit-key" data-settings-dirty={isDirty}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="cmd_enter">{t("settings:cmdCtrlEnterToSend")}</SelectItem>
-              <SelectItem value="enter">{t("settings:enterToSend")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            {value === "cmd_enter"
-              ? t("settings:pressCmdCtrlEnterToSend")
-              : t("settings:pressEnterToSendMessagesPress")}
-          </p>
-        </div>
-      </CardContent>
-    </SettingsCard>
+      label={t("settings:messageSubmitKey")}
+      description={
+        value === "cmd_enter"
+          ? t("settings:pressCmdCtrlEnterToSend")
+          : t("settings:pressEnterToSendMessagesPress")
+      }
+      controlId="chat-submit-key"
+      descriptionId="chat-submit-key-description"
+      control={
+        <Select value={value} onValueChange={(next) => onChange(next as "enter" | "cmd_enter")}>
+          <SelectTrigger
+            id="chat-submit-key"
+            aria-describedby="chat-submit-key-description"
+            data-settings-dirty={isDirty}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="cmd_enter">{t("settings:cmdCtrlEnterToSend")}</SelectItem>
+            <SelectItem value="enter">{t("settings:enterToSend")}</SelectItem>
+          </SelectContent>
+        </Select>
+      }
+    />
   );
 }
 
@@ -197,6 +193,9 @@ function AppearanceThemeSection({
   richOutputAnimationsEnabled,
   isRichOutputMotionDirty,
   onRichOutputMotionChange,
+  chatAnimationsEnabled,
+  isChatMotionDirty,
+  onChatMotionChange,
 }: {
   theme: Theme;
   isThemeDirty: boolean;
@@ -204,6 +203,9 @@ function AppearanceThemeSection({
   richOutputAnimationsEnabled: boolean;
   isRichOutputMotionDirty: boolean;
   onRichOutputMotionChange: (enabled: boolean) => void;
+  chatAnimationsEnabled: boolean;
+  isChatMotionDirty: boolean;
+  onChatMotionChange: (enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -212,14 +214,17 @@ function AppearanceThemeSection({
       title={t("settings:appearance")}
       description={t("settings:customizeHowTheApplicationLooks")}
     >
-      <div className="space-y-4">
-        <ThemeSettingsCard theme={theme} isDirty={isThemeDirty} onChange={onThemeChange} />
-        <RichOutputMotionSettingsCard
-          enabled={richOutputAnimationsEnabled}
-          isDirty={isRichOutputMotionDirty}
-          onChange={onRichOutputMotionChange}
-        />
-      </div>
+      <ThemeSettingsCard theme={theme} isDirty={isThemeDirty} onChange={onThemeChange} />
+      <RichOutputMotionSettingsCard
+        enabled={richOutputAnimationsEnabled}
+        isDirty={isRichOutputMotionDirty}
+        onChange={onRichOutputMotionChange}
+      />
+      <ChatMotionSettingsCard
+        enabled={chatAnimationsEnabled}
+        isDirty={isChatMotionDirty}
+        onChange={onChatMotionChange}
+      />
     </SettingsSection>
   );
 }
@@ -298,8 +303,11 @@ function useAppearanceSaveContributor({
   const commitMenuMode = useAppStore((state) => state.commitSettingsMenuMode);
   const restoreMenuMode = useAppStore((state) => state.restoreSettingsMenuMode);
   const previewRichOutputAnimations = useAppStore((state) => state.previewRichOutputAnimations);
+  const previewChatAnimations = useAppStore((state) => state.previewChatAnimations);
   const commitRichOutputAnimations = useAppStore((state) => state.commitRichOutputAnimations);
   const restoreRichOutputAnimations = useAppStore((state) => state.restoreRichOutputAnimations);
+  const commitChatAnimations = useAppStore((state) => state.commitChatAnimations);
+  const restoreChatAnimations = useAppStore((state) => state.restoreChatAnimations);
   const { t } = useTranslation();
   const delayValid = parseSidebarHoverDelay(draft.sidebarHoverDelayMs) !== null;
   const revision = appearanceRevision(draft);
@@ -322,9 +330,8 @@ function useAppearanceSaveContributor({
         commitTheme(submitted.theme);
         commitMenuMode(submitted.settingsMenuMode);
         commitRichOutputAnimations(submitted.richOutputAnimationsEnabled);
-        // A draft edited while the save was in flight keeps its preview: what was
-        // submitted is now persisted, but the screen should still show what the
-        // user is currently looking at.
+        commitChatAnimations(submitted.chatAnimationsEnabled);
+        // Keep edits made during the save visible over the submitted baseline.
         if (draftRef.current.theme !== submitted.theme) {
           previewTheme(draftRef.current.theme);
         }
@@ -336,16 +343,15 @@ function useAppearanceSaveContributor({
         ) {
           previewRichOutputAnimations(draftRef.current.richOutputAnimationsEnabled);
         }
-        const latestUserSettings = storeApi.getState().userSettings;
-        let responseIsCurrent = false;
-        if (response) {
-          const responseOrder = compareUserSettingsRevisions(
-            response.settings.revision,
-            latestUserSettings.revision,
-          );
-          responseIsCurrent =
-            responseOrder === null ? latestUserSettings === settingsAtSubmit : responseOrder >= 0;
+        if (draftRef.current.chatAnimationsEnabled !== submitted.chatAnimationsEnabled) {
+          previewChatAnimations(draftRef.current.chatAnimationsEnabled);
         }
+        const latestUserSettings = storeApi.getState().userSettings;
+        const responseOrder = response
+          ? compareUserSettingsRevisions(response.settings.revision, latestUserSettings.revision)
+          : null;
+        const responseIsCurrent =
+          responseOrder === null ? latestUserSettings === settingsAtSubmit : responseOrder >= 0;
         const nextUserSettings =
           response && responseIsCurrent
             ? mapUserSettingsResponse(response, latestUserSettings)
@@ -355,6 +361,7 @@ function useAppearanceSaveContributor({
           submitted.settingsMenuMode,
           submitted.richOutputAnimationsEnabled,
           nextUserSettings,
+          submitted.chatAnimationsEnabled,
         );
         setSaved(confirmed);
         setDraft(rebaseAppearanceDraft(draftRef.current, submitted, confirmed, editedDuringSave));
@@ -370,6 +377,7 @@ function useAppearanceSaveContributor({
       restoreTheme();
       restoreMenuMode();
       restoreRichOutputAnimations();
+      restoreChatAnimations();
     },
   });
 }
@@ -400,6 +408,7 @@ function AppearanceSettingsSections({
   previewTheme,
   previewMenuMode,
   previewRichOutputAnimations,
+  previewChatAnimations,
 }: {
   draft: AppearanceState;
   saved: AppearanceState;
@@ -407,6 +416,7 @@ function AppearanceSettingsSections({
   previewTheme: (theme: Theme) => void;
   previewMenuMode: (mode: SettingsMenuMode) => void;
   previewRichOutputAnimations: (enabled: boolean) => void;
+  previewChatAnimations: (enabled: boolean) => void;
 }) {
   return (
     <>
@@ -416,6 +426,12 @@ function AppearanceSettingsSections({
         onThemeChange={(theme) => {
           updateDraft({ theme });
           previewTheme(theme);
+        }}
+        chatAnimationsEnabled={draft.chatAnimationsEnabled}
+        isChatMotionDirty={draft.chatAnimationsEnabled !== saved.chatAnimationsEnabled}
+        onChatMotionChange={(chatAnimationsEnabled) => {
+          updateDraft({ chatAnimationsEnabled });
+          previewChatAnimations(chatAnimationsEnabled);
         }}
         richOutputAnimationsEnabled={draft.richOutputAnimationsEnabled}
         isRichOutputMotionDirty={
@@ -456,10 +472,18 @@ export function AppearanceSettings() {
   const { savedTheme, previewTheme } = useTheme();
   const savedMenuMode = useAppStore((state) => state.settingsMenu.savedMode);
   const savedRichOutputAnimations = useAppStore((state) => state.richOutputMotion.savedEnabled);
+  const savedChatAnimations = useAppStore((state) => state.chatMotion.savedEnabled);
   const previewMenuMode = useAppStore((state) => state.previewSettingsMenuMode);
   const previewRichOutputAnimations = useAppStore((state) => state.previewRichOutputAnimations);
+  const previewChatAnimations = useAppStore((state) => state.previewChatAnimations);
   const [saved, setSaved] = useState(() =>
-    createAppearanceSavedState(savedTheme, savedMenuMode, savedRichOutputAnimations, userSettings),
+    createAppearanceSavedState(
+      savedTheme,
+      savedMenuMode,
+      savedRichOutputAnimations,
+      userSettings,
+      savedChatAnimations,
+    ),
   );
   const [draft, setDraft] = useState(saved);
   const draftRef = useRef(draft);
@@ -475,6 +499,7 @@ export function AppearanceSettings() {
       previousSaved.settingsMenuMode,
       previousSaved.richOutputAnimationsEnabled,
       userSettings,
+      previousSaved.chatAnimationsEnabled,
     );
     setDraft(
       rebaseAppearanceDraft(
@@ -512,6 +537,7 @@ export function AppearanceSettings() {
         previewTheme={previewTheme}
         previewMenuMode={previewMenuMode}
         previewRichOutputAnimations={previewRichOutputAnimations}
+        previewChatAnimations={previewChatAnimations}
       />
     </div>
   );

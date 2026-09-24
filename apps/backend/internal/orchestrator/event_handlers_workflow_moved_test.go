@@ -647,15 +647,15 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 	})
 
 	t.Run("queues auto-start prompt on enter", func(t *testing.T) {
-		repo := setupTestRepo(t)
+		repo, workflowQueue := setupTestRepoWithSQLiteQueue(t)
 		seedSession(t, repo, "t1", "s1", "step1")
-		task, err := repo.GetTask(ctx, "t1")
-		if err != nil {
-			t.Fatalf("get task: %v", err)
+		store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
+		if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", "on_enter"); err != nil {
+			t.Fatalf("ApplyTransition step2: %v", err)
 		}
-		task.WorkflowStepID = "step2"
-		if err := repo.UpdateTask(ctx, task); err != nil {
-			t.Fatalf("set task workflow step: %v", err)
+		transition, err := repo.GetLatestTaskStepTransition(ctx, "t1")
+		if err != nil || transition == nil {
+			t.Fatalf("GetLatestTaskStepTransition: transition=%+v err=%v", transition, err)
 		}
 
 		stepGetter := newMockStepGetter()
@@ -673,16 +673,18 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 		}
 
 		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+		svc.messageQueue = workflowQueue
 		// Seed an active-turn entry so flipStaleRunningToWaiting recognises the
 		// session as genuinely mid-turn and the auto-start prompt is queued
 		// (the behavior this subtest asserts).
 		svc.activeTurns.Store("s1", "turn-1")
 		svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
-			TaskID:          "t1",
-			SessionID:       "s1",
-			FromStepID:      "step1",
-			ToStepID:        "step2",
-			TaskDescription: "auto-start task",
+			TaskID:           "t1",
+			SessionID:        "s1",
+			FromStepID:       "step1",
+			ToStepID:         "step2",
+			StepTransitionID: transition.ID,
+			TaskDescription:  "auto-start task",
 		})
 
 		// Since session is in RUNNING state, the auto-start prompt should be queued

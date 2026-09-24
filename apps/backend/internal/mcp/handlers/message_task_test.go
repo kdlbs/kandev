@@ -41,6 +41,7 @@ type fakeOrchestrator struct {
 	onTurnStart             func(context.Context, string, string) error
 	turnStartResult         orchestrator.ProcessOnTurnStartResult
 	interruptCalls          []interruptCall
+	readinessCalls          []messagequeue.QueueSessionIdentity
 	launchCalls             []*orchestrator.LaunchSessionRequest
 	launchErr               error
 	launchFunc              func(context.Context, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
@@ -312,6 +313,12 @@ func (f *fakeOrchestrator) QueueUserPrompt(ctx context.Context, taskID, sessionI
 }
 
 func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.queue }
+
+func (f *fakeOrchestrator) CheckQueueAdmissionReadiness(_ context.Context, identity messagequeue.QueueSessionIdentity) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readinessCalls = append(f.readinessCalls, identity)
+}
 
 // QueueAndInterruptForPeerMessage inserts prompt into the fake's real
 // message queue (so tests can assert on queue state via f.queue), then

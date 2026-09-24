@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -179,6 +180,12 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case streamEventThinkingStreaming:
 		s.handleThinkingStreamingEvent(ctx, payload)
 
+	case streams.EventTypeResponseAttemptReset:
+		if !s.responseAttemptResetOwnsCurrentPrompt(payload) {
+			return
+		}
+		s.handleResponseAttemptReset(ctx, payload)
+
 	case agentEventToolCall:
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
@@ -264,6 +271,51 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// short-circuits on it), so this is also a safe no-op for an ordinary
 		// human-driven turn where the session already left WAITING_FOR_INPUT.
 		s.applyParkedTransition(ctx, taskID, sessionID, false, "", false, models.TaskSessionStateWaitingForInput)
+	}
+}
+
+func (s *Service) responseAttemptResetOwnsCurrentPrompt(
+	payload *lifecycle.AgentStreamEventPayload,
+) bool {
+	if payload == nil || payload.Data == nil || payload.Data.PromptGeneration == 0 {
+		return false
+	}
+	generationOwner, ok := s.agentManager.(interface {
+		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	})
+	if !ok {
+		return false
+	}
+	executionID := payload.ExecutionID
+	if executionID == "" {
+		executionID = payload.AgentID
+	}
+	return generationOwner.OwnsPromptGeneration(
+		payload.SessionID,
+		executionID,
+		payload.Data.PromptGeneration,
+	)
+}
+
+func (s *Service) handleResponseAttemptReset(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
+	if s.streamingRetractions == nil {
+		return
+	}
+	for _, messageID := range payload.Data.RetractedMessageIDs {
+		if messageID == "" {
+			continue
+		}
+		if err := s.streamingRetractions.DeleteMessage(ctx, messageID); err != nil {
+			s.logger.Warn("failed to retract abandoned response message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("session_id", payload.SessionID),
+				zap.String("execution_id", payload.ExecutionID),
+				zap.String("message_id", messageID),
+				zap.Error(err))
+		}
 	}
 }
 
@@ -1168,11 +1220,10 @@ func (s *Service) updateTaskSessionStateWithHook(
 				zap.Error(err))
 		}
 	}
-	// Work has resumed: a session entering STARTING/RUNNING clears the
-	// startup interruption marker and republishes the task so open clients
-	// drop the red interruption icon. No-op when the marker is absent.
+	// Entering STARTING/RUNNING only records a recovery attempt. The durable
+	// interruption marker is cleared after the provider confirms boot/readiness,
+	// so failed or cancelled attempts remain visible to the user.
 	if nextState == models.TaskSessionStateStarting || nextState == models.TaskSessionStateRunning {
-		s.clearTaskInterruptedMarker(ctx, taskID)
 		s.clearTaskAutoStartFailedMarker(ctx, taskID)
 	}
 	if authoritativeUpdatedAt == nil {
@@ -1292,6 +1343,7 @@ func (s *Service) logTaskSessionStateWriteError(
 func (s *Service) transitionTaskSessionState(
 	ctx context.Context,
 	taskID, sessionID string,
+	expectedState *models.TaskSessionState,
 	nextState models.TaskSessionState,
 	errorMessage string,
 	onChanged func(),
@@ -1307,6 +1359,7 @@ func (s *Service) transitionTaskSessionState(
 					admittedCtx,
 					taskID,
 					sessionID,
+					expectedState,
 					nextState,
 					errorMessage,
 					onChanged,
@@ -1322,6 +1375,9 @@ func (s *Service) transitionTaskSessionState(
 	}
 	if session == nil {
 		return false, "", fmt.Errorf("get session before state transition: session %q is nil", sessionID)
+	}
+	if expectedState != nil && session.State != *expectedState {
+		return false, session.State, nil
 	}
 	if isTerminalSessionState(session.State) || session.State == nextState {
 		return false, session.State, nil
@@ -1445,6 +1501,8 @@ func (s *Service) persistBootstrapFailureMessage(
 	if s.messageCreator == nil {
 		return fmt.Errorf("bootstrap failure message creator is unavailable")
 	}
+	// Bootstrap failures occur before any turn started, so there is no failed
+	// turn to attach to — resolve the turn lazily via the empty turn ID.
 	return s.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
 		TaskID:           taskID,
 		SessionID:        sessionID,
@@ -1456,7 +1514,7 @@ func (s *Service) persistBootstrapFailureMessage(
 		AttemptID:        errorValue.AttemptID,
 		ErrorStamp:       errorValue.Stamp(),
 		Causes:           errorValue.Causes,
-	})
+	}, "")
 }
 
 func (s *Service) publishAcceptedTaskSessionState(
@@ -2137,9 +2195,8 @@ func (s *Service) setSessionStartingWithOptions(
 	}
 
 	// The launch path moves a session to STARTING without going through
-	// updateTaskSessionStateWithHook, so clear the interruption marker here
-	// too (no-op when absent).
-	s.clearTaskInterruptedMarker(ctx, taskID)
+	// updateTaskSessionStateWithHook. It records an attempt only; the
+	// interruption marker is cleared after confirmed provider readiness.
 	s.clearTaskAutoStartFailedMarker(ctx, taskID)
 
 	if publishSession != nil {
@@ -2150,14 +2207,39 @@ func (s *Service) setSessionStartingWithOptions(
 
 // clearTaskInterruptedMarker removes the startup interruption marker from a
 // task and republishes task.updated when it was actually present, so open
-// clients drop the red interruption icon. Called from the session-start
-// funnel when a session enters STARTING/RUNNING — work has resumed, so the
-// task is no longer interrupted. No-op when the marker is absent.
-func (s *Service) clearTaskInterruptedMarker(ctx context.Context, taskID string) {
+// clients drop the warning icon. Callers invoke it only after provider
+// readiness confirms that recovery succeeded. No-op when the marker is absent.
+func (s *Service) clearTaskInterruptedMarker(
+	ctx context.Context,
+	taskID string,
+	expectedMarker string,
+) {
 	if taskID == "" {
 		return
 	}
-	removed, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyInterruptedAt)
+	var (
+		removed bool
+		err     error
+	)
+	if strings.TrimSpace(expectedMarker) == "" {
+		// A recovery callback without a valid immutable marker snapshot fails
+		// closed. There is no safe unconditional removal path.
+		return
+	}
+	if remover, ok := s.repo.(interface {
+		RemoveTaskMetadataKeyIfValue(context.Context, string, string, string) (bool, error)
+	}); ok {
+		removed, err = remover.RemoveTaskMetadataKeyIfValue(
+			ctx, taskID, models.MetaKeyInterruptedAt, expectedMarker,
+		)
+	} else {
+		// A read followed by an unconditional legacy removal is not a
+		// compare-and-set. Refuse to clear when the adapter cannot provide the
+		// guarded primitive so a delayed callback cannot erase a newer marker.
+		s.logger.Warn("skipping interrupted-marker clear without compare-and-set support",
+			zap.String("task_id", taskID))
+		return
+	}
 	if err != nil {
 		s.logger.Warn("failed to clear interrupted marker",
 			zap.String("task_id", taskID),
@@ -2179,9 +2261,9 @@ func (s *Service) clearTaskInterruptedMarker(ctx context.Context, taskID string)
 
 // clearTaskAutoStartFailedMarker removes the auto-start-failure marker from a
 // task and republishes task.updated when it was actually present, so open
-// clients drop the failure badge. Called from the same session-start funnel
-// as clearTaskInterruptedMarker: a session entering STARTING/RUNNING means an
-// agent did launch, so any earlier auto-start failure no longer applies.
+// clients drop the failure badge. It shares the session-start funnel with the
+// interruption marker, but remains clear at launch admission because it means
+// the auto-start request itself was accepted.
 // No-op when the marker is absent.
 func (s *Service) clearTaskAutoStartFailedMarker(ctx context.Context, taskID string) {
 	if taskID == "" {
@@ -2389,21 +2471,25 @@ func taskArchived(task *models.Task) bool {
 func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSessionID string) {
 	// Task lookup errors fail closed so office/archived guards cannot be bypassed
 	// by a transient repository failure.
-	if dbTask, err := s.repo.GetTask(ctx, taskID); err != nil {
+	dbTask, err := s.repo.GetTask(ctx, taskID)
+	switch {
+	case err != nil:
 		s.logger.Warn("failed to load task before REVIEW state reconcile",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return
-	} else if dbTask != nil && dbTask.IsFromOffice {
+	case dbTask != nil && dbTask.IsFromOffice:
 		s.logger.Debug("skipping REVIEW transition for office task",
 			zap.String("task_id", taskID))
 		return
-	} else if taskArchived(dbTask) {
+	case taskArchived(dbTask):
 		s.logger.Debug("skipping REVIEW transition for archived task",
 			zap.String("task_id", taskID))
 		return
 	}
 
+	ctx, releaseCeilingEntry := s.lockCeilingEntryAdmission(ctx, taskID)
+	defer releaseCeilingEntry()
 	s.taskRuntimeStateMu.Lock()
 	defer s.taskRuntimeStateMu.Unlock()
 
@@ -2417,23 +2503,61 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 		}
 	}
 
-	if blockingSessionID, ok := s.otherWorkingSessionID(ctx, taskID, completedSessionID); !ok {
+	blockingSessionID, sessionsReadable := s.otherWorkingSessionID(ctx, taskID, completedSessionID)
+	if !sessionsReadable {
 		return
-	} else if blockingSessionID != "" {
+	}
+	if blockingSessionID != "" {
 		s.logger.Debug("skipping task REVIEW state while another session is working",
 			zap.String("task_id", taskID),
 			zap.String("completed_session_id", completedSessionID),
 			zap.String("blocking_session_id", blockingSessionID))
 		return
 	}
+	targetState := v1.TaskStateReview
+	allowedStates := []v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling}
+	observedDeferral, queued, queueErr := s.readValidCeilingDeferredLaunch(ctx, dbTask)
+	if queueErr != nil {
+		s.logger.Warn("skipping task REVIEW state reconcile while deferred launch ownership is uncertain",
+			zap.String("task_id", taskID), zap.Error(queueErr))
+		return
+	}
+	// The queue row and task route can change independently of the task-state
+	// CAS. Re-read both at the final boundary. A replacement entry is not ours
+	// to reconcile from this completion callback; its own admission/sweep path
+	// will publish the correct projection.
+	latestTask, latestTaskErr := s.repo.GetTask(ctx, taskID)
+	if latestTaskErr != nil || latestTask == nil || latestTask.IsFromOffice || taskArchived(latestTask) {
+		return
+	}
+	latestDeferral, latestQueued, latestQueueErr := s.readValidCeilingDeferredLaunch(ctx, latestTask)
+	if latestQueueErr != nil {
+		s.logger.Warn("skipping task REVIEW state reconcile while final deferred launch ownership is uncertain",
+			zap.String("task_id", taskID), zap.Error(latestQueueErr))
+		return
+	}
+	if queued && latestQueued {
+		equivalent, compareErr := sameCeilingDeferralIdentity(observedDeferral, latestDeferral)
+		if compareErr != nil || !equivalent {
+			return
+		}
+	}
+	queued = latestQueued
+	if queued {
+		// A sibling session can finish while the destination launch is waiting
+		// for capacity. Keep the task in Scheduling so the queued destination is
+		// not hidden behind a false Review state.
+		targetState = v1.TaskStateScheduling
+		allowedStates = append(allowedStates, v1.TaskStateReview)
+	}
 	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
 		ctx,
 		taskID,
-		v1.TaskStateReview,
-		[]v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling},
+		targetState,
+		allowedStates,
 	)
 	if err != nil {
-		s.logger.Error("failed to update task state to REVIEW",
+		s.logger.Error("failed to reconcile task runtime state",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return
@@ -2441,8 +2565,59 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 	if !updated {
 		return
 	}
-	s.logger.Info("task moved to REVIEW state",
+	s.logger.Info("task runtime state reconciled",
 		zap.String("task_id", taskID))
+}
+
+//nolint:cyclop,nestif // Queue reconciliation validates independent task, record, destination, and workflow-entry state.
+func (s *Service) readValidCeilingDeferredLaunch(
+	ctx context.Context,
+	task *models.Task,
+) (models.CeilingDeferral, bool, error) {
+	if task == nil || task.ArchivedAt != nil || task.State == v1.TaskStateCancelled {
+		return models.CeilingDeferral{}, false, nil
+	}
+	raw, _, err := s.repo.GetTaskDeferredLaunch(ctx, task.ID)
+	if err != nil {
+		return models.CeilingDeferral{}, false, err
+	}
+	if raw == nil {
+		return models.CeilingDeferral{}, false, nil
+	}
+	ceilingFlag, hasCeilingFlag := raw[models.CeilingDeferredKey]
+	if !hasCeilingFlag || ceilingFlag != true {
+		return models.CeilingDeferral{}, false, nil
+	}
+	deferral, err := models.ReadCeilingDeferral(raw)
+	if err != nil {
+		return models.CeilingDeferral{}, false, err
+	}
+	if sessionID := models.CeilingDeferralSessionID(task, deferral); sessionID != "" {
+		if !models.CeilingDeferralTargetsSession(task, deferral, sessionID) {
+			return models.CeilingDeferral{}, false, nil
+		}
+		session, sessionErr := s.repo.GetTaskSession(ctx, sessionID)
+		if sessionErr != nil {
+			if errors.Is(sessionErr, models.ErrTaskSessionNotFound) {
+				return models.CeilingDeferral{}, false, nil
+			}
+			return models.CeilingDeferral{}, false, sessionErr
+		}
+		if session == nil || session.TaskID != task.ID || isTerminalSessionState(session.State) {
+			return models.CeilingDeferral{}, false, nil
+		}
+		if session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning {
+			return models.CeilingDeferral{}, false, nil
+		}
+	}
+	disposition, detail, validationErr := s.validateCeilingEntry(ctx, task, deferral)
+	if validationErr != nil {
+		return models.CeilingDeferral{}, false, validationErr
+	}
+	if disposition == ceilingEntryUnavailable {
+		return models.CeilingDeferral{}, false, fmt.Errorf("deferred launch ownership is unavailable: %s", detail)
+	}
+	return deferral, disposition == ceilingEntryValid, nil
 }
 
 func isWorkingSessionState(state models.TaskSessionState) bool {
@@ -2569,7 +2744,6 @@ func (s *Service) setQueuedSessionRunningForIdentity(
 	session.UpdatedAt = updatedAt
 	if oldState != models.TaskSessionStateRunning {
 		s.reconcileRunningTaskStateLocked(ctx, identity.TaskID, identity.SessionID)
-		s.clearTaskInterruptedMarker(ctx, identity.TaskID)
 		s.clearTaskAutoStartFailedMarker(ctx, identity.TaskID)
 		s.publishTaskSessionStateChanged(
 			ctx,
@@ -3152,18 +3326,29 @@ func (s *Service) handleOfficeTurnComplete(
 	return true
 }
 
-// handleAgentPlanEvent handles agent_plan events from tool calls (e.g. ExitPlanMode)
-// and creates a dedicated agent_plan message in the session.
+// handleAgentPlanEvent handles agent_plan events from tool calls (e.g. ExitPlanMode).
 func (s *Service) handleAgentPlanEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload.SessionID == "" || payload.Data.PlanContent == "" || s.messageCreator == nil {
 		return
 	}
 	sessionID := payload.SessionID
-	if err := s.messageCreator.CreateSessionMessage(
-		ctx, payload.TaskID, payload.Data.PlanContent, sessionID,
-		string(models.MessageTypeAgentPlan), s.getActiveTurnID(sessionID), nil, false,
+	turnID := s.getActiveTurnID(sessionID)
+	if payload.Data.ToolCallID == "" {
+		if err := s.messageCreator.CreateSessionMessage(
+			ctx, payload.TaskID, payload.Data.PlanContent, sessionID,
+			string(models.MessageTypeAgentPlan), turnID, nil, false,
+		); err != nil {
+			s.logger.Error("failed to create uncorrelated agent plan message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return
+	}
+	if err := s.messageCreator.UpsertAgentPlanMessage(
+		ctx, payload.TaskID, payload.Data.ToolCallID, sessionID, payload.Data.PlanContent, turnID,
 	); err != nil {
-		s.logger.Error("failed to create agent plan message",
+		s.logger.Error("failed to upsert agent plan message",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))

@@ -320,7 +320,10 @@ test.describe("Mobile rewritten contribution history", () => {
     await session.waitForChatIdle({ timeout: 45_000 });
     git.exec(`git checkout -B ${providerBranch} ${localHead}`);
     git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
 
     const changes = testPage.getByTestId("mobile-changes-panel");
     await expect(changes.getByTestId("remote-contribution-drift-status")).toHaveCount(0);
@@ -567,7 +570,10 @@ test.describe("Mobile rewritten contribution history", () => {
     await testPage.reload();
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
 
     const changes = testPage.getByTestId("mobile-changes-panel");
     const providerSection = changes.getByTestId("current-pr-commits-section");

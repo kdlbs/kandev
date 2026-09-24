@@ -371,9 +371,12 @@ export const test = backendFixture.extend<
         confirm_task_archive: true,
         agent_generated_task_titles: false,
         mcp_task_agent_profile_default: "current_task",
-        sidebar_views: [DEFAULT_SIDEBAR_VIEW],
-        sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
-        sidebar_draft: null,
+        sidebar_view_state: {
+          workspace_id: seedData.workspaceId,
+          views: [DEFAULT_SIDEBAR_VIEW],
+          active_view_id: DEFAULT_SIDEBAR_VIEW.id,
+          draft: null,
+        },
         thread_views: [DEFAULT_THREAD_VIEW],
         thread_active_view_id: DEFAULT_THREAD_VIEW.id,
         thread_view_draft: null,
@@ -405,6 +408,10 @@ export const test = backendFixture.extend<
         show_scroll_to_last_prompt: true,
         show_scroll_to_start: false,
         show_transcript_auto_scroll_control: true,
+        // Reset the Kanban priority filter. Priority-filter tests persist their
+        // selection, and a stale selection can hide default-priority tasks in
+        // unrelated tests that run later in the same worker.
+        kanban_priority_filter_tokens: [],
         tasks_list_sort: "updated_desc",
         tasks_list_group: "state",
       });
@@ -626,9 +633,12 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
       confirm_task_archive: true,
       agent_generated_task_titles: false,
       mcp_task_agent_profile_default: "current_task",
-      sidebar_views: [DEFAULT_SIDEBAR_VIEW],
-      sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
-      sidebar_draft: null,
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views: [DEFAULT_SIDEBAR_VIEW],
+        active_view_id: DEFAULT_SIDEBAR_VIEW.id,
+        draft: null,
+      },
       thread_views: [DEFAULT_THREAD_VIEW],
       thread_active_view_id: DEFAULT_THREAD_VIEW.id,
       thread_view_draft: null,
@@ -648,6 +658,10 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
       show_scroll_to_last_prompt: true,
       show_scroll_to_start: false,
       show_transcript_auto_scroll_control: true,
+      // Reset the Kanban priority filter. Priority-filter tests persist their
+      // selection, and a stale selection can hide default-priority tasks in
+      // unrelated tests that run later in the same worker.
+      kanban_priority_filter_tokens: [],
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",

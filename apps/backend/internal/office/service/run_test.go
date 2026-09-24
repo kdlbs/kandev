@@ -7,7 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
-	runsservice "github.com/kandev/kandev/internal/runs/service"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // windowedDedupCounterValue reads the current value of one
@@ -108,7 +108,7 @@ func TestQueueRun_Idempotency_ReportsWindowedDedupOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first enqueue: %v", err)
 	}
-	if first != runsservice.QueueOutcomeQueued {
+	if first != shared.QueueOutcomeQueued {
 		t.Fatalf("first outcome = %v, want QueueOutcomeQueued", first)
 	}
 
@@ -118,7 +118,7 @@ func TestQueueRun_Idempotency_ReportsWindowedDedupOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second enqueue: %v", err)
 	}
-	if second != runsservice.QueueOutcomeDeduped {
+	if second != shared.QueueOutcomeDeduped {
 		t.Fatalf("second outcome = %v, want QueueOutcomeDeduped", second)
 	}
 

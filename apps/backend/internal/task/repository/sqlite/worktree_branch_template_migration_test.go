@@ -24,10 +24,10 @@ func TestWorktreeBranchTemplateMigrationPreservesCustomValue(t *testing.T) {
 		t.Fatalf("create repository: %v", err)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay migrations: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("second replay migrations: %v", err)
 	}
 
@@ -76,10 +76,10 @@ func TestWorktreeBranchTemplateMigrationBackfillsLegacyPrefix(t *testing.T) {
 	if _, err := repo.db.Exec(`ALTER TABLE repositories DROP COLUMN worktree_branch_template`); err != nil {
 		t.Fatalf("remove template column from legacy schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("migrate legacy schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay legacy migration: %v", err)
 	}
 

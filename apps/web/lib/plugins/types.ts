@@ -12,6 +12,7 @@ import type { PluginUIApi } from "@kandev/plugin-sdk";
 export type {
   IntegrationSettingsActionProps,
   IntegrationSettingsActionSurface,
+  ChatTopBarSlotProps,
   PluginContextApi,
   PluginHostRepository,
   MainTopBarSlotProps,
@@ -117,9 +118,10 @@ export interface IntegrationSettingsRegistration {
  * `slotProps`), "chat-submit-decoration" (a layer *over* the send button's own
  * box, for adornments that belong on the send affordance rather than beside it
  * — receives `ChatSubmitDecorationSlotProps`; the host positions the layer and
- * makes it `pointer-events-none`, see chat-submit-plugin-decoration.tsx), "chat-top-bar" (status in the session top bar, beside the
- * CPU/DB metrics — receives `{ taskId, taskTitle, workspaceId, activeSessionId,
- * sessionIds }`), "main-top-bar" (status/actions in the default app top bar on
+ * makes it `pointer-events-none`, see chat-submit-plugin-decoration.tsx),
+ * "chat-top-bar" (session status/actions — receives `ChatTopBarSlotProps`;
+ * phone contributions live in the shared menu), "main-top-bar"
+ * (status/actions in the default app top bar on
  * the Home / Kanban / Tasks views, beside the CPU/DB metrics and the
  * view/display controls — the app-wide, task-agnostic counterpart to
  * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage,
@@ -358,8 +360,16 @@ export type PluginTaskMenuContext = PluginSDK.PluginTaskMenuContext;
  * "edit" nests the item inside the card's `Edit` submenu; group "primary"
  * renders it as a flat, top-level menu item after the movement group and
  * before the `Archive`/`Delete` removal group.
+ *
+ * An action that declares `items` becomes a submenu: `label` is its
+ * (unselectable) trigger, the returned children are its entries, and `run`
+ * remains the fallback for a host that predates the field and for a build
+ * whose `items` yields nothing usable.
  */
 export type TaskMenuActionRegistration = PluginSDK.TaskMenuActionRegistration;
+
+/** One child of a `TaskMenuActionRegistration` that declares `items`. */
+export type TaskMenuSubItemRegistration = PluginSDK.TaskMenuSubItemRegistration;
 
 /** Read-only context passed to `TaskFilterRegistration.matches`. */
 export type PluginTaskFilterContext = Parameters<PluginSDK.TaskFilterRegistration["matches"]>[0];

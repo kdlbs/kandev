@@ -56,6 +56,7 @@ export function useSheetData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const {
     allTasks,
+    pendingArchiveTaskIds,
     allSteps,
     stepsByWorkflowId,
     wipQueueByTaskId,
@@ -100,6 +101,7 @@ export function useSheetData(workspaceId: string | null) {
       repositoriesById,
       stepColorById: new Map(allSteps.map((step) => [step.id, step.color])),
       automaticColorSettings,
+      pendingArchiveTaskIds,
     };
     const items: TaskSwitcherItem[] = workspaceContextAccessDenied
       ? []
@@ -122,6 +124,7 @@ export function useSheetData(workspaceId: string | null) {
         repositoriesById: ctx.repositoriesById,
         stepColorById: ctx.stepColorById,
         automaticColorSettings: ctx.automaticColorSettings,
+        pendingArchiveTaskIds: ctx.pendingArchiveTaskIds,
       };
       items.unshift(buildArchivedSidebarItem(archivedState, archivedContext));
     }
@@ -136,6 +139,7 @@ export function useSheetData(workspaceId: string | null) {
     dismissedAgentErrors,
     wipQueueByTaskId,
     automaticColorSettings,
+    pendingArchiveTaskIds,
     archivedState,
     workspaceContextAccessDenied,
   ]);

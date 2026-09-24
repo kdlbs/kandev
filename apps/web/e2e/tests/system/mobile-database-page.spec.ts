@@ -2,7 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Mobile System Database page", () => {
   test("renders database stats and maintenance controls", async ({ testPage }) => {
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/data-storage?tab=database");
 
     await expect(testPage.getByTestId("system-page-title")).toHaveText("Data & Logs");
     await expect(testPage.getByTestId("system-database-card")).toBeVisible();

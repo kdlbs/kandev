@@ -21,7 +21,9 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/previewfeedback"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
+	"github.com/kandev/kandev/internal/task/repository/previewfeedbacktx"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -295,6 +297,16 @@ type QueueAttachmentClaimer interface {
 
 type QueueAttachmentClaimPreparer interface {
 	PrepareQueueAttachmentClaim(context.Context, string, []v1.MessageAttachment) (messagequeue.QueueAttachmentClaim, error)
+}
+
+type previewFeedbackAttachmentPreparer interface {
+	PreviewFeedbackAttachments(context.Context, string, []models.TaskPreviewFeedbackRef) ([]v1.MessageAttachment, error)
+}
+
+type planCommentQueueAttachmentPreparation struct {
+	claim           *messagequeue.QueueAttachmentClaim
+	previewResolver func(context.Context, string, []models.TaskPreviewFeedbackRef) ([]messagequeue.MessageAttachment, error)
+	claimResolver   func(context.Context, string, []messagequeue.MessageAttachment) (messagequeue.QueueAttachmentClaim, error)
 }
 
 type QueueAttachmentReleaser interface {
@@ -572,6 +584,7 @@ type wsQueueMessageRequest struct {
 	ContextFiles          []v1.ContextFileMeta             `json:"context_files,omitempty"`
 	EntityReferences      []v1.EntityReference             `json:"entity_references,omitempty"`
 	PlanCommentRefs       []models.TaskPlanCommentRef      `json:"plan_comment_refs,omitempty"`
+	PreviewFeedbackRefs   []models.TaskPreviewFeedbackRef  `json:"preview_feedback_refs,omitempty"`
 	RequirePrimarySession bool                             `json:"require_primary_session,omitempty"`
 	UserID                string                           `json:"user_id,omitempty"`
 }
@@ -599,7 +612,7 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		return denied, nil
 	}
-	if req.Content == "" && len(req.Attachments) == 0 && len(req.PlanCommentRefs) == 0 {
+	if req.Content == "" && len(req.Attachments) == 0 && len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
 	}
 	if validationError := validatePlanCommentQueueRequest(req); validationError != "" {
@@ -617,7 +630,7 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, reservedIdentityError(req.UserID), nil)
 	}
 	var err error
-	identifiedOrdinary := req.ClientQueueID != "" && len(req.PlanCommentRefs) == 0
+	identifiedOrdinary := req.ClientQueueID != "" && len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0
 	if identifiedOrdinary {
 		references, normalizeErr := entityrefs.NormalizeForSubmission(req.EntityReferences)
 		if normalizeErr != nil {
@@ -650,6 +663,7 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		metadata[messagequeue.MetadataQueueAdmissionIDs] = []string{req.ClientQueueID}
 	}
 	var snapshot *models.TaskPlanCommentSnapshot
+	var previewSnapshot *models.TaskPreviewFeedbackSnapshot
 	var replay bool
 	var queued *messagequeue.QueuedMessage
 	switch {
@@ -658,11 +672,11 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		if errors.Is(err, errQueueInvalidReferences) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, queueInvalidReferences, nil)
 		}
-	case len(req.PlanCommentRefs) > 0:
+	case len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0:
 		result, admissionErr := h.admitPlanCommentQueuedMessage(ctx, &req, queuedBy, metadata)
 		err = admissionErr
 		if result != nil {
-			queued, snapshot, replay = result.Message, result.Snapshot, result.Replay
+			queued, snapshot, previewSnapshot, replay = result.Message, result.Snapshot, result.PreviewSnapshot, result.Replay
 		}
 	case h.queuedWorkAdmitter != nil:
 		// Route ordinary user work through the exact-turn settlement guard so a
@@ -707,6 +721,9 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		if errors.Is(err, errQueuedAttachmentUnavailable) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Attachment is no longer available", nil)
 		}
+		if errors.Is(err, errPreviewFeedbackAttachmentInvalid) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment metadata is invalid", nil)
+		}
 		if conflict := planCommentQueueError(msg, err); conflict != nil {
 			return conflict, nil
 		}
@@ -721,6 +738,7 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 	if !replay {
 		h.publishPlanCommentSnapshot(ctx, snapshot)
+		h.publishPreviewFeedbackSnapshot(ctx, previewSnapshot)
 	}
 	h.publishStatusForIdentity(ctx, identity, queued)
 	if h.queueReadiness != nil {
@@ -730,11 +748,12 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 }
 
 var (
-	errQueueInvalidReferences        = errors.New("invalid queued entity references")
-	errQueuedAttachmentUnavailable   = errors.New("queued attachment unavailable")
-	errQueuedAttachmentRollback      = errors.New("queued attachment rollback failed")
-	errAttachmentCleanupLeaseActive  = errors.New("queue attachment cleanup blocked by edit lease")
-	errAttachmentCleanupEntryChanged = errors.New("queue attachment cleanup entry changed")
+	errQueueInvalidReferences           = errors.New("invalid queued entity references")
+	errQueuedAttachmentUnavailable      = errors.New("queued attachment unavailable")
+	errQueuedAttachmentRollback         = errors.New("queued attachment rollback failed")
+	errPreviewFeedbackAttachmentInvalid = errors.New("preview feedback attachment metadata is invalid")
+	errAttachmentCleanupLeaseActive     = errors.New("queue attachment cleanup blocked by edit lease")
+	errAttachmentCleanupEntryChanged    = errors.New("queue attachment cleanup entry changed")
 )
 
 func (h *QueueHandlers) admitIdentifiedOrdinaryQueuedMessage(
@@ -938,36 +957,111 @@ func (h *QueueHandlers) admitPlanCommentQueuedMessage(
 		return nil, errors.New("plan comment queue admission is unavailable")
 	}
 	attachments := queueAttachmentsToV1(req.Attachments)
-	var attachmentClaim *messagequeue.QueueAttachmentClaim
-	if h.attachmentClaimer != nil && len(attachments) > 0 {
-		preparer, ok := h.attachmentClaimer.(QueueAttachmentClaimPreparer)
-		if !ok {
-			return nil, errors.New("transactional attachment admission is unavailable")
-		}
-		claim, err := preparer.PrepareQueueAttachmentClaim(ctx, req.TaskID, attachments)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", errQueuedAttachmentUnavailable, err)
-		}
-		attachmentClaim = &claim
+	prepared, err := h.preparePlanCommentQueueAttachments(ctx, req, attachments)
+	if err != nil {
+		return nil, err
 	}
 	return service.QueueMessageWithPlanComments(ctx, messagequeue.PlanCommentQueueRequest{
 		ClientQueueID: req.ClientQueueID, SessionID: req.SessionID, TaskID: req.TaskID,
 		SessionIncarnationID: req.SessionIncarnationID,
 		Content:              req.Content, Model: req.Model, UserID: queuedBy, PlanMode: req.PlanMode,
 		Attachments: req.Attachments, Metadata: metadata, PlanCommentRefs: req.PlanCommentRefs,
-		RequirePrimarySession: req.RequirePrimarySession, AttachmentClaim: attachmentClaim,
+		PreviewFeedbackRefs:   req.PreviewFeedbackRefs,
+		RequirePrimarySession: req.RequirePrimarySession, AttachmentClaim: prepared.claim,
+		PreviewFeedbackAttachmentResolver: prepared.previewResolver,
+		AttachmentClaimResolver:           prepared.claimResolver,
 	})
+}
+
+func (h *QueueHandlers) preparePlanCommentQueueAttachments(
+	ctx context.Context,
+	req *wsQueueMessageRequest,
+	attachments []v1.MessageAttachment,
+) (planCommentQueueAttachmentPreparation, error) {
+	if len(req.PreviewFeedbackRefs) == 0 {
+		return h.prepareOrdinaryQueueAttachments(ctx, req.TaskID, attachments)
+	}
+	return h.preparePreviewFeedbackQueueAttachments(req)
+}
+
+func (h *QueueHandlers) prepareOrdinaryQueueAttachments(
+	ctx context.Context,
+	taskID string,
+	attachments []v1.MessageAttachment,
+) (planCommentQueueAttachmentPreparation, error) {
+	if h.attachmentClaimer == nil || len(attachments) == 0 {
+		return planCommentQueueAttachmentPreparation{}, nil
+	}
+	preparer, ok := h.attachmentClaimer.(QueueAttachmentClaimPreparer)
+	if !ok {
+		return planCommentQueueAttachmentPreparation{}, errors.New("transactional attachment admission is unavailable")
+	}
+	claim, err := preparer.PrepareQueueAttachmentClaim(ctx, taskID, attachments)
+	if err != nil {
+		return planCommentQueueAttachmentPreparation{}, fmt.Errorf("%w: %v", errQueuedAttachmentUnavailable, err)
+	}
+	return planCommentQueueAttachmentPreparation{claim: &claim}, nil
+}
+
+func (h *QueueHandlers) preparePreviewFeedbackQueueAttachments(
+	req *wsQueueMessageRequest,
+) (planCommentQueueAttachmentPreparation, error) {
+	preparer, ok := h.attachmentClaimer.(previewFeedbackAttachmentPreparer)
+	if !ok {
+		return planCommentQueueAttachmentPreparation{}, nil
+	}
+	prepared := planCommentQueueAttachmentPreparation{
+		previewResolver: func(
+			resolveCtx context.Context,
+			taskID string,
+			refs []models.TaskPreviewFeedbackRef,
+		) ([]messagequeue.MessageAttachment, error) {
+			resolved, err := preparer.PreviewFeedbackAttachments(resolveCtx, taskID, refs)
+			if err != nil {
+				return nil, err
+			}
+			converted := queueAttachmentsFromV1(resolved)
+			if err := validatePreviewFeedbackQueueAttachments(req.Attachments, converted); err != nil {
+				return nil, err
+			}
+			return converted, nil
+		},
+	}
+	if claimPreparer, canPrepare := h.attachmentClaimer.(QueueAttachmentClaimPreparer); canPrepare && len(req.Attachments) > 0 {
+		prepared.claimResolver = func(
+			resolveCtx context.Context,
+			taskID string,
+			candidate []messagequeue.MessageAttachment,
+		) (messagequeue.QueueAttachmentClaim, error) {
+			return claimPreparer.PrepareQueueAttachmentClaim(resolveCtx, taskID, queueAttachmentsToV1(candidate))
+		}
+	}
+	return prepared, nil
+}
+
+func validatePreviewFeedbackQueueAttachments(
+	caller []messagequeue.MessageAttachment,
+	resolved []messagequeue.MessageAttachment,
+) error {
+	all := append(append([]messagequeue.MessageAttachment{}, caller...), resolved...)
+	if invalid := firstInvalidDeliveryMode(all); invalid >= 0 {
+		return fmt.Errorf("%w: attachment delivery mode at index %d", errPreviewFeedbackAttachmentInvalid, invalid)
+	}
+	if invalid := firstInvalidAttachment(all); invalid >= 0 {
+		return fmt.Errorf("%w at index %d", errPreviewFeedbackAttachmentInvalid, invalid)
+	}
+	return nil
 }
 
 func validatePlanCommentQueueRequest(req wsQueueMessageRequest) string {
 	if len(req.ClientQueueID) > messagequeue.MaxQueueAdmissionIDLength {
 		return "client_queue_id is too long"
 	}
-	if len(req.PlanCommentRefs) == 0 {
+	if len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 {
 		return ""
 	}
 	if req.ClientQueueID == "" {
-		return "client_queue_id is required with plan comments"
+		return "client_queue_id is required with task feedback"
 	}
 	if plancomments.ContainsReservedPlaceholder(req.Content) {
 		return "content contains a reserved plan comment marker"
@@ -982,12 +1076,32 @@ func validatePlanCommentQueueRequest(req wsQueueMessageRequest) string {
 		}
 		seen[ref.ID] = struct{}{}
 	}
+	seenPreview := make(map[string]struct{}, len(req.PreviewFeedbackRefs))
+	for _, ref := range req.PreviewFeedbackRefs {
+		if ref.ID == "" || ref.Version <= 0 {
+			return "preview_feedback_refs are invalid"
+		}
+		if _, duplicate := seenPreview[ref.ID]; duplicate {
+			return "preview_feedback_refs contain duplicates"
+		}
+		seenPreview[ref.ID] = struct{}{}
+	}
 	return ""
 }
 
 func planCommentQueueError(msg *ws.Message, err error) *ws.Message {
-	if errors.Is(err, plancomments.ErrRenderedTooLarge) {
+	if errors.Is(err, plancomments.ErrRenderedTooLarge) || errors.Is(err, previewfeedback.ErrPromptTooLarge) {
 		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Rendered message content is too long", nil)
+		return response
+	}
+	var previewChanged *previewfeedbacktx.FeedbackChangedError
+	if errors.As(err, &previewChanged) {
+		details := map[string]interface{}{}
+		if previewChanged.Snapshot != nil {
+			details["snapshot"] = dto.TaskPreviewFeedbackSnapshotFromModel(previewChanged.Snapshot)
+		}
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodePreviewFeedbackChanged,
+			"Task preview feedback changed", details)
 		return response
 	}
 	var commentsChanged *plancommenttx.CommentsChangedError
@@ -1041,6 +1155,19 @@ func (h *QueueHandlers) publishPlanCommentSnapshot(
 	if err := h.eventBus.Publish(ctx, events.TaskPlanCommentsChanged,
 		bus.NewEvent(events.TaskPlanCommentsChanged, "queue-handlers", snapshot)); err != nil {
 		h.logger.Error("publish consumed plan comments", zap.String("task_id", snapshot.TaskID), zap.Error(err))
+	}
+}
+
+func (h *QueueHandlers) publishPreviewFeedbackSnapshot(
+	ctx context.Context,
+	snapshot *models.TaskPreviewFeedbackSnapshot,
+) {
+	if snapshot == nil || h.eventBus == nil {
+		return
+	}
+	if err := h.eventBus.Publish(ctx, events.TaskPreviewFeedbackChanged,
+		bus.NewEvent(events.TaskPreviewFeedbackChanged, "queue-handlers", snapshot)); err != nil {
+		h.logger.Error("publish consumed preview feedback", zap.String("task_id", snapshot.TaskID), zap.Error(err))
 	}
 }
 
@@ -2337,6 +2464,18 @@ func queueAttachmentsToV1(attachments []messagequeue.MessageAttachment) []v1.Mes
 			MimeType:     attachment.MimeType,
 			Name:         attachment.Name,
 			SizeBytes:    attachment.SizeBytes,
+			DeliveryMode: attachment.DeliveryMode,
+		})
+	}
+	return converted
+}
+
+func queueAttachmentsFromV1(attachments []v1.MessageAttachment) []messagequeue.MessageAttachment {
+	converted := make([]messagequeue.MessageAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		converted = append(converted, messagequeue.MessageAttachment{
+			AttachmentID: attachment.AttachmentID, Type: attachment.Type, Data: attachment.Data,
+			MimeType: attachment.MimeType, Name: attachment.Name, SizeBytes: attachment.SizeBytes,
 			DeliveryMode: attachment.DeliveryMode,
 		})
 	}

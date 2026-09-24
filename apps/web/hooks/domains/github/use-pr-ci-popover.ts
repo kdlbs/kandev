@@ -113,8 +113,13 @@ export function usePRCIPopover(
     wasEnabledRef.current = enabled;
     if (!opened) return;
     queueMicrotask(() => {
-      refetch();
-      trackSync(refreshTaskPR?.());
+      const sync = refreshTaskPR?.();
+      trackSync(sync);
+      if (sync) {
+        void sync.then(refetch, refetch);
+      } else {
+        refetch();
+      }
     });
   }, [enabled, refetch, refreshTaskPR, trackSync]);
 

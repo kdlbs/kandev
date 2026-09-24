@@ -102,12 +102,12 @@ func (c *Controller) previewAgentUpdate(
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdateTargetInvalid, err)
 	}
-	command := spec.CacheUpdateCommand(target).Args()
+	command := spec.UpdateCommand(target).Args()
 	if !exactCatalogue && targetVersion == "" && !useDefault {
 		// Keep the compatibility preview for embedders that provide only the
 		// legacy latest-version seam. Production uses the catalogue resolver and
 		// always previews an exact package@version command.
-		command = spec.CacheUpdateCommand().Args()
+		command = spec.UpdateCommand().Args()
 	}
 	return &dto.AgentUpdatePreviewDTO{
 		AgentName:         name,

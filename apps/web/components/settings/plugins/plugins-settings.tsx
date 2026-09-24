@@ -22,6 +22,7 @@ import { PluginUpdateStatus } from "./plugin-update-status";
 import { usePluginActions } from "./use-plugin-actions";
 import { usePluginUpdateAction } from "./use-plugin-update-action";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { SettingsGroup } from "@/components/settings/settings-group";
 
 /**
  * Operator UI to browse, install, enable, disable, uninstall, and update kandev
@@ -143,12 +144,11 @@ function InstalledTab({
   const { t } = useTranslation();
 
   return (
-    <>
-      {canManage && <GlobalAutoUpdateToggle settings={autoUpdate} />}
-
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div className="text-sm font-medium text-foreground">{t("plugins:installedPlugins")}</div>
-        {canManage && (
+    <SettingsGroup
+      title={t("plugins:installedPlugins")}
+      contentClassName="space-y-4 divide-y-0"
+      action={
+        canManage ? (
           <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
             <Button
               data-testid="plugins-sync-button"
@@ -178,8 +178,10 @@ function InstalledTab({
               {t("plugins:installPlugin")}
             </Button>
           </div>
-        )}
-      </div>
+        ) : undefined
+      }
+    >
+      {canManage && <GlobalAutoUpdateToggle settings={autoUpdate} />}
 
       <PluginUpdateStatus
         checking={updates.checking}
@@ -209,7 +211,7 @@ function InstalledTab({
         updateAction={updateAction}
         isFinePointer={isFinePointer}
       />
-    </>
+    </SettingsGroup>
   );
 }
 
