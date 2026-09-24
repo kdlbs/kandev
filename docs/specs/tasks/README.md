@@ -170,6 +170,7 @@ signals, and task-scoped scheduling contracts.
 - [MCP Tool Name Stability](system-design/mcp-tool-name-stability.md)
 - [MCP workspace modes](system-design/mcp-workspace-mode.md)
 - [Remote Contribution Tasks](system-design/remote-contribution-tasks.md)
+- [Rich task title previews](system-design/rich-task-title-previews.md)
 - [Branch history explanations](system-design/branch-history-explanations.md)
 - [Passthrough Queued Prompt Dispatch](system-design/passthrough-queued-prompt-dispatch.md)
 - [Saved Prompt Delivery](system-design/saved-prompt-delivery.md)
