@@ -36,18 +36,28 @@ acceptance_criteria:
      AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003.3/.4.
   4. `docs/specs/ui/requirements/kanban-preview-workflow-step-navigation.md`
      gains REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003 and amends the "Panel
-     controls" terminology and AC-002.2/.4 (18px → 70px gap bound) for a
-     third fixed-width control.
+     controls" terminology and AC-002.2/.4 (18px/19px → `g <= 74px`/`75px`
+     fine pointer, `g <= 34px`/`35px` coarse pointer, binding) for a third
+     fixed-width control.
   5. `docs/specs/ui/system-design/kanban-preview-workflow-step-navigation.md`'s
-     "Header layout" section is recomputed for three `h-8 w-8` controls
-     (104px controls-plus-gaps, 158px/159px remainder, `g <= 70px`/`71px`).
+     "Header layout" section is recomputed for the three panel controls,
+     whose widths are NOT uniform (Copy and Maximize add `h-8 w-8`, 32px at
+     a fine pointer; Close stays unstyled `size="icon"`, 28px; all three
+     converge on 44px under `[@media(pointer:coarse)]:`): 100px fine /
+     140px coarse controls-plus-gaps, 162px/163px fine remainder
+     (inline/floating), 122px/123px coarse remainder, `g <= 74px`/`75px`
+     fine, `g <= 34px`/`35px` coarse (the coarse-pointer inline bound is
+     the tightest and binding).
   6. `preview-workflow-step-navigation.spec.ts`'s minimum-width containment
      test asserts the new control's visibility, enabled state, row alignment,
      and position ahead of the Maximize control, and passes at the 300px
      panel minimum.
 - **Verification:**
   - `cd apps/web && pnpm exec vitest run components/task-preview-panel.test.tsx`
-    — 21/21 passed.
+    — 22/22 passed (21 at first commit, plus the round-2 F1 regression test;
+    33/33 passed across `task-preview-panel.test.tsx` and
+    `task-preview-panel-step-indicator.test.tsx` together, the latter also
+    touched by round 2 for an unrelated `TooltipProvider` wrap).
   - `cd apps/web && pnpm run typecheck` — clean.
   - `cd apps/web && pnpm run lint -- components/task-preview-panel.tsx components/task-preview-panel.test.tsx components/task/copy-task-url-button.tsx` — 0 problems.
   - `python3 scripts/lint-spec-files.py --all` — all specification files passed.
@@ -74,6 +84,9 @@ acceptance_criteria:
 - **Output contract:** summary, files changed, exact verification commands with
   results, task status → `done`, plan checkbox update.
 - **Status note:** marked done. All verification commands above were run in
-  this environment and passed; the width-budget bound (`g <= 70px`) was
-  proven empirically via the extended Playwright containment test rather than
-  trusted from the hand derivation alone.
+  this environment and passed; the fine-pointer width-budget bound
+  (`g <= 74px`) was proven empirically via the extended Playwright
+  containment test, which runs against this project's desktop-chromium fine
+  pointer only. The tighter, binding coarse-pointer bound (`g <= 34px`) is
+  not exercised by that E2E project and rests on the hand derivation alone
+  (see the system design's "Header layout" section).

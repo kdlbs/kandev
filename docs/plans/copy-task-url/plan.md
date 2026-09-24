@@ -76,9 +76,11 @@ backend or store changes.
 - `AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.2` amended from "both panel
   controls" to "every panel control".
 - `AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4` amended: the inter-element-gap
-  bound moves from 18px to 70px, and the prose is reframed — with three
-  controls, the title-floor override is the routinely-engaged path rather
-  than a theoretical edge case.
+  bound moves from 18px/19px to `g <= 74px`/`75px` at a fine pointer and
+  `g <= 34px`/`35px` at a coarse pointer (the coarse-pointer bound is the
+  tighter of the two and therefore binding), and the prose is reframed —
+  with three controls, the title-floor override is the routinely-engaged
+  path rather than a theoretical edge case.
 - "Out of scope" copy bullet narrowed to REQ-001/-002, since REQ-003
   introduces its own new copy.
 
@@ -86,11 +88,17 @@ backend or store changes.
 
 - `REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003` added to the requirement
   mapping and to Components and responsibilities (`CopyTaskUrlButton`).
-- "Header layout" arithmetic recomputed for three `h-8 w-8` controls: content
-  box 262px (inline)/263px (floating) unchanged; controls-plus-gaps
-  104px (was 68px); remainder 158px (was 194px) inline / 159px (was 195px)
-  floating; bound `g <= 70px` (was 18px) inline, `g <= 71px` (was 19px)
-  floating.
+- "Header layout" arithmetic recomputed for the three panel controls, whose
+  widths are NOT uniform (the close control stays unstyled `size="icon"`,
+  28px at a fine pointer, while Copy and Maximize add `h-8 w-8`, 32px; all
+  three converge on 44px under `[@media(pointer:coarse)]:`): content box
+  262px (inline)/263px (floating) unchanged; controls-plus-gaps `32+32+28+8`
+  = 100px fine / `44*3+8` = 140px coarse; remainder 162px (was 194px) fine
+  inline / 163px floating, 122px coarse inline / 123px floating; bound
+  `g <= 74px` (was 18px) fine inline / `75px` floating, `g <= 34px` (was
+  19px) coarse inline / `35px` floating — the coarse-pointer inline bound,
+  `g <= 34px`, is the tightest of the four and therefore binding across both
+  layouts and both pointer modes.
 - Test-strategy E2E bullet updated to assert all three panel controls, not
   two.
 
@@ -104,7 +112,7 @@ backend or store changes.
   button briefly shows a checkmark and reverts after the confirmation window;
   the accessible name/tooltip differ from the Link submenu's wording.
   **File:** `apps/web/components/task-preview-panel.test.tsx` (new
-  `describe("TaskPreviewPanel copy task link", ...)` block, 4 tests).
+  `describe("TaskPreviewPanel copy task link", ...)` block, 5 tests).
   **How:** mock `@/lib/utils/copy-to-clipboard`, wrap the render helpers in
   `TooltipProvider` (Radix throws without an ancestor provider in this repo's
   version — see `components/workflow-selector-row.test.tsx`), use
@@ -120,8 +128,10 @@ backend or store changes.
   extended to assert the copy-task-link control is visible, enabled, shares
   the header row's vertical center with the other controls, and sits before
   the open-full-page control — empirically re-proving the title floor holds
-  at the 300px minimum with three fixed-width controls now in the budget,
-  rather than trusting the recomputed `g <= 70px` bound by derivation alone.
+  at the 300px minimum with three fixed-width controls now in the budget, at
+  this desktop-chromium project's fine pointer (`g <= 74px`). The tighter
+  `g <= 34px` coarse-pointer/tablet bound is not exercised by this project
+  and remains derivation-only.
   **File:** `apps/web/e2e/tests/kanban/preview-workflow-step-navigation.spec.ts`.
 
 ## Implementation Waves
@@ -130,7 +140,7 @@ Small feature — sequential, no parallel candidates.
 
 ```text
 Wave 1:
-- [x] [task-01-preview-header-copy-url](task-01-preview-header-copy-url.md) — component + wiring + unit tests (21/21 pass) + spec/system-design amendments + extended E2E containment test (passing), committed.
+- [x] [task-01-preview-header-copy-url](task-01-preview-header-copy-url.md) — component + wiring + unit tests (33/33 pass across 2 files, 5 tests in the new describe block) + spec/system-design amendments + extended E2E containment test (passing), committed.
 ```
 
 ## Open Questions
