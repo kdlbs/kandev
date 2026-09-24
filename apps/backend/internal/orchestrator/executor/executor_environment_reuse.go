@@ -591,12 +591,13 @@ func executorRunningMatchesEnvironment(running *models.ExecutorRunning, env *mod
 }
 
 func applyExecutorRunningMetadata(req *LaunchAgentRequest, running *models.ExecutorRunning) {
+	// A workspace can be shared across task sessions, but native execution
+	// identity is valid only for the exact non-empty session that created it.
 	requestIsKubernetes := models.ExecutorType(req.ExecutorType) == models.ExecutorTypeKubernetes
 	runningIsKubernetes := running.Runtime == agentruntime.RuntimeKubernetes
-	mayReuseExecution := true
+	mayReuseExecution := req.SessionID != "" && running.SessionID == req.SessionID
 	if requestIsKubernetes || runningIsKubernetes {
-		mayReuseExecution = requestIsKubernetes && runningIsKubernetes &&
-			req.SessionID != "" && running.SessionID == req.SessionID
+		mayReuseExecution = mayReuseExecution && requestIsKubernetes && runningIsKubernetes
 	}
 	if running.AgentExecutionID != "" && req.PreviousExecutionID == "" && mayReuseExecution {
 		req.PreviousExecutionID = running.AgentExecutionID

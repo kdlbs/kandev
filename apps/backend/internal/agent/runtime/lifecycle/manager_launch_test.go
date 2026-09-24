@@ -1697,6 +1697,37 @@ func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
 	require.True(t, got.isResumedSession, "isResumedSession must be set when PreviousExecutionID is non-empty")
 }
 
+func TestLaunch_PromotesWorkspaceOnlyExecutionWithInitialPrompt(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-prompt",
+		AgentName: "auggie",
+	}}
+
+	existing := &AgentExecution{
+		ID:             "exec-workspace-only-prompt",
+		SessionID:      "session-prompt",
+		TaskID:         "task-prompt",
+		AgentProfileID: "profile-prompt",
+	}
+	require.NoError(t, mgr.executionStore.Add(existing))
+
+	attachment := MessageAttachment{AttachmentID: "attachment-1", Type: "resource", Name: "brief.md"}
+	got, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:          existing.TaskID,
+		SessionID:       existing.SessionID,
+		AgentProfileID:  existing.AgentProfileID,
+		TaskDescription: "start the requested work",
+		TurnID:          "turn-initial",
+		Attachments:     []MessageAttachment{attachment},
+	})
+	require.NoError(t, err)
+	require.Same(t, existing, got)
+	require.Equal(t, "start the requested work", getTaskDescriptionFromMetadata(got))
+	require.Equal(t, []MessageAttachment{attachment}, getAttachmentsFromMetadata(got))
+	require.Equal(t, "turn-initial", got.promptTurnIDSnapshot())
+}
+
 func TestLaunch_DoesNotPromoteWorkspaceExecutionAfterSessionTerminalizes(t *testing.T) {
 	mgr := newTestManager(t)
 	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{

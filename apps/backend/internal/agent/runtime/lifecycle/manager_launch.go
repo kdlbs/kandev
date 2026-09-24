@@ -1539,6 +1539,13 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			execution.isResumedSession = true
 		}
 		execution.IsPassthrough = req.IsPassthrough
+		// The workspace-only execution was created before a prompt was admitted.
+		// Transfer this launch's prompt payload before StartAgentProcess reads it.
+		execution.setMetadataValue("task_description", req.TaskDescription)
+		execution.setMetadataValue("attachments", append([]MessageAttachment(nil), req.Attachments...))
+		execution.setMetadataValue("session_id", req.SessionID)
+		execution.setMetadataValue("prompt_turn_id", req.TurnID)
+		execution.setPromptTurnID(req.TurnID)
 		if !req.IsPassthrough {
 			executorType := req.ExecutorType
 			if executorType == "" {
