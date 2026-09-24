@@ -1357,6 +1357,7 @@
   "remoteContributionReplaceDescription": "Substitui o branch publicado do PR pela versão inalterada da tarefa. Requer confirmação e correspondência exata do commit de referência do fornecedor.",
   "remoteContributionUseDescription": "Usa a versão atual do PR nesta tarefa. O Kandev cria primeiro um branch de recuperação e requer uma árvore de trabalho limpa.",
   "remoteContributionViewDescription": "Abre a versão do PR #{{number}} sem alterar o checkout da tarefa.",
+  "remoteRepositoryIdentity": "Repositório {{repository}} no {{provider}}",
   "replacePRBranchConfirmation": "Substituir o branch publicado do PR de {{repository}} em {{head}} pela versão da tarefa? Isto altera o branch no fornecedor para corresponder à versão da tarefa.",
   "usePRVersionConfirmation": "Usar a versão do PR em {{head}}? O Kandev vai criar primeiro um branch de recuperação para a versão atual da tarefa. A árvore de trabalho tem de estar limpa.",
   "remoteContributionProviderChangedAgain": "O PR mudou novamente. Atualize a versão do fornecedor e tente outra vez.",

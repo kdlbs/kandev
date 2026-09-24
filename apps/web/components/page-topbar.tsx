@@ -12,26 +12,20 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@kandev/ui/breadcrumb";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { cn } from "@kandev/ui/lib/utils";
+import {
+  ParentCrumbLabel,
+  ParentCrumbMenuItem,
+  type ParentCrumb,
+} from "@/components/page-topbar-parent-crumb";
+export type { ParentCrumb } from "@/components/page-topbar-parent-crumb";
 import { AppStatusDrawerTrigger } from "@/components/app-status-bar/app-status-surface-provider";
 import { useTopbarPressure } from "@/hooks/use-topbar-pressure";
 import { linkToTaskOverview } from "@/lib/links";
 
 /** The one bar height. Bespoke bars adopt this token instead of redeclaring it. */
 export const TOPBAR_HEIGHT_CLASSNAME = "h-10 min-h-11 md:min-h-10";
-
-/**
- * A middle breadcrumb between the leading crumb and the page title. No `href`
- * means orientation rather than navigation; `phoneOnlyLink` keeps the crumb
- * clickable below `md` (where the sidebar is hidden) and static above it.
- */
-export type ParentCrumb = { label: string; href?: string; phoneOnlyLink?: boolean };
 
 type PageTopbarProps = {
   /** Page title shown as the rightmost (current) breadcrumb */
@@ -251,40 +245,6 @@ function TitleCrumb({
   );
 }
 
-function ParentCrumbLabel({ crumb }: { crumb: ParentCrumb }) {
-  if (crumb.href) {
-    return (
-      <>
-        <BreadcrumbLink asChild>
-          <Link
-            href={crumb.href}
-            className={cn(
-              "max-w-40 truncate cursor-pointer text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline",
-              crumb.phoneOnlyLink && "md:hidden",
-            )}
-          >
-            {crumb.label}
-          </Link>
-        </BreadcrumbLink>
-        {crumb.phoneOnlyLink && (
-          <span className="hidden max-w-40 cursor-default truncate text-muted-foreground/60 md:inline">
-            {crumb.label}
-          </span>
-        )}
-      </>
-    );
-  }
-  // Static crumb: orientation only, dimmed so it does not read as a link. The
-  // `title` is what makes a name longer than `max-w-40` readable at all, since
-  // truncation is the only thing standing between a long label and a squeezed
-  // page title.
-  return (
-    <span title={crumb.label} className="max-w-40 cursor-default truncate text-muted-foreground/60">
-      {crumb.label}
-    </span>
-  );
-}
-
 /**
  * Middle crumbs: the full chain from `md` up; below `md` everything except the
  * last parent collapses into a `…` dropdown so deep paths stay one row —
@@ -332,17 +292,12 @@ function ParentCrumbs({
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
-                {collapsed.map((p) =>
-                  p.href ? (
-                    <DropdownMenuItem key={p.href} asChild>
-                      <Link href={p.href}>{p.label}</Link>
-                    </DropdownMenuItem>
-                  ) : (
-                    <DropdownMenuItem key={p.label} disabled>
-                      {p.label}
-                    </DropdownMenuItem>
-                  ),
-                )}
+                {collapsed.map((p, index) => (
+                  <ParentCrumbMenuItem
+                    key={`${p.externalUrl ?? p.href ?? p.label}-${index}`}
+                    crumb={p}
+                  />
+                ))}
               </DropdownMenuContent>
             </DropdownMenu>
           </BreadcrumbItem>
@@ -368,6 +323,15 @@ function GhostSeparator() {
  */
 function GhostLabel({ label, className }: { label: string; className?: string }) {
   return <span data-label={label} className={cn("before:content-[attr(data-label)]", className)} />;
+}
+
+function GhostParentLabel({ crumb }: { crumb: ParentCrumb }) {
+  return (
+    <>
+      {crumb.icon && <span aria-hidden className="size-3.5 shrink-0" />}
+      <GhostLabel label={crumb.label} className="max-w-40 truncate" />
+    </>
+  );
 }
 
 type TopbarGhostProps = {
@@ -426,7 +390,7 @@ function TopbarGhost({
         {lead}
         {chain.map((p, index) => (
           <span key={`${p.href ?? p.label}-${index}`} className="flex items-center gap-1.5">
-            <GhostLabel label={p.label} className="max-w-40 truncate" />
+            <GhostParentLabel crumb={p} />
             <GhostSeparator />
           </span>
         ))}
@@ -441,7 +405,7 @@ function TopbarGhost({
         )}
         {lastParent && (
           <>
-            <GhostLabel label={lastParent.label} className="max-w-40 truncate" />
+            <GhostParentLabel crumb={lastParent} />
             <GhostSeparator />
           </>
         )}

@@ -1356,6 +1356,7 @@
   "remoteContributionReplaceDescription": "用未更改的任務版本替換已發佈的 PR 分支。需要確認，並且提供者的最新提交必須完全匹配。",
   "remoteContributionUseDescription": "在此任務中使用目前 PR 版本。Kandev 會先建立恢復分支，並且工作區必須乾淨。",
   "remoteContributionViewDescription": "開啟 PR #{{number}} 版本，不更改任務工作區。",
+  "remoteRepositoryIdentity": "{{provider}} 儲存庫 {{repository}}",
   "replacePRBranchConfirmation": "要用任務版本替換 {{repository}} 在 {{head}} 的已發佈 PR 分支嗎？這會讓提供者分支與任務版本一致。",
   "usePRVersionConfirmation": "要使用 {{head}} 的 PR 版本嗎？Kandev 會先為目前任務版本建立恢復分支。工作區必須乾淨。",
   "remoteContributionProviderChangedAgain": "PR 再次發生更改。請刷新提供者版本後重試。",

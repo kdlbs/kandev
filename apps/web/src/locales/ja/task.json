@@ -1423,6 +1423,7 @@
   "remoteContributionReplaceDescription": "公開済み PR ブランチを、変わってないタスク版で置き換える。確認と、provider-head の完全一致が必要。",
   "remoteContributionUseDescription": "このタスクで現在の PR 版を使う。Kandev が先に回復ブランチを作成し、作業ツリーはクリーン必須。",
   "remoteContributionViewDescription": "タスクのチェックアウトは変えずに、PR #{{number}} 版を開く。",
+  "remoteRepositoryIdentity": "{{provider}} リポジトリ {{repository}}",
   "replacePRBranchConfirmation": "{{repository}} の公開済み PR ブランチを {{head}} でタスク版に置き換える？ これで provider ブランチがタスク版に合う。",
   "usePRVersionConfirmation": "{{head}} の PR 版を使う？ Kandev は先に今のタスク版の回復ブランチを作る。作業ツリーはクリーン必須。",
   "remoteContributionProviderChangedAgain": "PR がまた変わった。provider 版を更新して、もう一度試す。",

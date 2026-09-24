@@ -1423,6 +1423,7 @@
   "remoteContributionReplaceDescription": "Ŕēƥĺàćē ţĥē ƥũƀĺĩśĥēď ƤŔ ƀŕàńćĥ ŵĩţĥ ŷōũŕ ũńćĥàńĝēď ţàśķ vēŕśĩōń. Ŕēqũĩŕēś ćōńƒĩŕḿàţĩōń àńď àń ēxàćţ ƥŕōvĩďēŕ-ĥēàď ḿàţćĥ.",
   "remoteContributionUseDescription": "Ũśē ţĥē ćũŕŕēńţ ƤŔ vēŕśĩōń ĩń ţĥĩś ţàśķ. Ķàńďēv ćŕēàţēś à ŕēćōvēŕŷ ƀŕàńćĥ ƒĩŕśţ àńď ŕēqũĩŕēś à ćĺēàń ŵōŕķĩńĝ ţŕēē.",
   "remoteContributionViewDescription": "Ōƥēń ƤŔ #{{number}} vēŕśĩōń ŵĩţĥōũţ ćĥàńĝĩńĝ ţĥē ţàśķ ćĥēćķōũţ.",
+  "remoteRepositoryIdentity": "{{provider}} ŕēƥōśĩţōŕŷ {{repository}}",
   "replacePRBranchConfirmation": "Ŕēƥĺàćē ţĥē ƥũƀĺĩśĥēď ƤŔ ƀŕàńćĥ ƒōŕ {{repository}} àţ {{head}} ŵĩţĥ ţĥē ţàśķ vēŕśĩōń? Ţĥĩś ćĥàńĝēś ţĥē ƥŕōvĩďēŕ ƀŕàńćĥ ţō ḿàţćĥ ţĥē ţàśķ vēŕśĩōń.",
   "usePRVersionConfirmation": "Ũśē ţĥē ƤŔ vēŕśĩōń àţ {{head}}? Ķàńďēv ŵĩĺĺ ćŕēàţē à ŕēćōvēŕŷ ƀŕàńćĥ ƒōŕ ţĥē ćũŕŕēńţ ţàśķ vēŕśĩōń ƒĩŕśţ. Ţĥē ŵōŕķĩńĝ ţŕēē ḿũśţ ƀē ćĺēàń.",
   "remoteContributionProviderChangedAgain": "Ţĥē ƤŔ ćĥàńĝēď àĝàĩń. Ŕēƒŕēśĥ ţĥē ƥŕōvĩďēŕ vēŕśĩōń àńď ţŕŷ àĝàĩń.",
