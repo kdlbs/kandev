@@ -331,6 +331,7 @@ function useCanvasHost(canvasId: string) {
     (reason: WebAppStartupFailureReason) => {
       clearRuntimeRenewal();
       setRuntimeUrl(null);
+      setError(null);
       setRuntimeFailureReason(reason);
       setState("runtime_failed");
     },

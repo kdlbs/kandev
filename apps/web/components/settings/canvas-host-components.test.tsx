@@ -310,3 +310,24 @@ describe("canvas host chrome", () => {
     );
   });
 });
+
+describe("canvas host body prop forwarding", () => {
+  it("forwards the startup-failure reason from the body to the state panel", () => {
+    render(
+      <CanvasHostBody
+        canvasId="canvas-1"
+        title="Task canvas"
+        state="runtime_failed"
+        runtimeUrl={null}
+        error={null}
+        runtimeFailureReason="timeout"
+        onRuntimeReady={vi.fn()}
+        onRuntimeError={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText("The canvas application did not start in time. Try again."),
+    ).toBeTruthy();
+  });
+});
