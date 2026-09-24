@@ -65,6 +65,39 @@ func TestArchiveManifestRejectsForeignLinkedWorktree(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.2
+func TestArchiveManifestRejectsSiblingWorktreeGitdir(t *testing.T) {
+	repo := initGitRepoForWorktreeTest(t)
+	firstPath := filepath.Join(t.TempDir(), "task-one")
+	secondPath := filepath.Join(t.TempDir(), "task-two")
+	runGit(t, repo, "worktree", "add", "-b", "feature/task-one", firstPath)
+	runGit(t, repo, "worktree", "add", "-b", "feature/task-two", secondPath)
+	if err := os.WriteFile(filepath.Join(secondPath, "task-two-only.txt"), []byte("task two"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, secondPath, "add", "task-two-only.txt")
+	runGit(t, secondPath, "commit", "-m", "add task two file")
+	secondGitPointer, err := os.ReadFile(filepath.Join(secondPath, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(firstPath, ".git"), secondGitPointer, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := mgr.CaptureArchiveSourceManifests(context.Background(), []*Worktree{{
+		ID: "task-one-worktree", TaskID: "task-one", RepositoryID: "repo",
+		Path: firstPath, RepositoryPath: repo,
+	}})
+	if err == nil {
+		t.Fatalf("captured sibling worktree state under task-one identity: %+v", manifest)
+	}
+}
+
 func TestArchiveManifestRejectsDisappearedUntrackedPath(t *testing.T) {
 	entries, err := archiveSourceManifestEntries(t.TempDir(), "?? disappeared.txt\x00")
 	if err == nil {

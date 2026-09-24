@@ -121,6 +121,9 @@ func (m *Manager) capturePresentArchiveSourceManifest(ctx context.Context, wt *W
 }
 
 func (m *Manager) validateArchiveWorktreeRegistration(ctx context.Context, wt *Worktree) error {
+	if err := validateArchiveWorktreeGitDirBackpointer(wt.Path, ctx, m); err != nil {
+		return err
+	}
 	worktreeCommonDir, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return err
@@ -146,6 +149,87 @@ func (m *Manager) validateArchiveWorktreeRegistration(ctx context.Context, wt *W
 		}
 	}
 	return fmt.Errorf("worktree path is not registered in the recorded repository")
+}
+
+func validateArchiveWorktreeGitDirBackpointer(worktreePath string, ctx context.Context, manager *Manager) error {
+	gitDir, err := manager.runBoundedGitInspect(ctx, worktreePath, "rev-parse", "--path-format=absolute", "--git-dir")
+	if err != nil {
+		return err
+	}
+	gitDir = filepath.Clean(strings.TrimSpace(gitDir))
+	worktreeRoot, err := openArchiveSourceDirectory(filepath.Dir(worktreePath), worktreePath)
+	if err != nil {
+		return fmt.Errorf("open registered worktree: %w", err)
+	}
+	marker, err := readArchiveSourcePointerFile(worktreeRoot, ".git")
+	closeErr := worktreeRoot.Close()
+	if err != nil {
+		return fmt.Errorf("read worktree gitdir pointer: %w", err)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close worktree gitdir pointer: %w", closeErr)
+	}
+	pointedGitDir, ok := archiveSourceGitDirPointer(string(marker), worktreePath)
+	if !ok || pointedGitDir != gitDir {
+		return fmt.Errorf("worktree gitdir pointer does not match git metadata")
+	}
+
+	gitMetadata, err := openArchiveSourceDirectory(filepath.Dir(gitDir), gitDir)
+	if err != nil {
+		return fmt.Errorf("open worktree git metadata: %w", err)
+	}
+	defer func() { _ = gitMetadata.Close() }()
+	backpointer, err := readArchiveSourcePointerFile(gitMetadata, "gitdir")
+	if err != nil {
+		return fmt.Errorf("read worktree git metadata backpointer: %w", err)
+	}
+	pointedWorktreeGitFile, ok := archiveSourceResolvePath(string(backpointer), filepath.Dir(gitDir))
+	wantWorktreeGitFile, absErr := filepath.Abs(filepath.Join(worktreePath, ".git"))
+	if absErr != nil {
+		return absErr
+	}
+	if !ok || pointedWorktreeGitFile != filepath.Clean(wantWorktreeGitFile) {
+		return fmt.Errorf("worktree git metadata belongs to a different worktree path")
+	}
+	return nil
+}
+
+func readArchiveSourcePointerFile(directory storageworkspaces.DirectoryHandle, name string) ([]byte, error) {
+	mode, err := directory.LstatEntry(name)
+	if err != nil {
+		return nil, err
+	}
+	if !mode.IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", name)
+	}
+	return directory.ReadFile(name)
+}
+
+func archiveSourceGitDirPointer(content, relativeTo string) (string, bool) {
+	content = strings.TrimSpace(content)
+	if !strings.HasPrefix(content, "gitdir: ") {
+		return "", false
+	}
+	pointer := strings.TrimSpace(strings.TrimPrefix(content, "gitdir: "))
+	if pointer == "" {
+		return "", false
+	}
+	return archiveSourceResolvePath(pointer, relativeTo)
+}
+
+func archiveSourceResolvePath(pointer, relativeTo string) (string, bool) {
+	pointer = strings.TrimSpace(pointer)
+	if pointer == "" {
+		return "", false
+	}
+	if !filepath.IsAbs(pointer) {
+		pointer = filepath.Join(relativeTo, pointer)
+	}
+	abs, err := filepath.Abs(pointer)
+	if err != nil {
+		return "", false
+	}
+	return filepath.Clean(abs), true
 }
 
 func archiveSourceManifestEntries(root, output string) ([]ArchiveSourceManifestEntry, error) {
