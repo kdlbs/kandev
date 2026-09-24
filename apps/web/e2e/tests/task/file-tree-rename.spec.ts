@@ -100,6 +100,8 @@ test.describe("File tree inline rename", () => {
       requiredPath: "rename-me.ts",
     });
 
+    // Root rows are virtualized. Reveal this file through the tree's bounded
+    // scroll helper before opening its context menu.
     const node = await session.fileTree.waitForFileTreeNode("rename-me.ts");
 
     const input = await startRenameViaContextMenu(testPage, node);
