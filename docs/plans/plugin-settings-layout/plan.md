@@ -74,6 +74,8 @@ ESLint, localization, public-doc and spec validators, and diff checks. See the
 [work-order results](task-01-flatten-settings.md#results). Four fresh PR screenshots
 cover Installed and Browse on phone and desktop with synthetic records; the
 disposable capture test passed and was removed afterward.
+The public plugin guide uses the new desktop Installed screenshot and no longer
+repeats an illustration of the previous layout.
 
 ## Risks
 

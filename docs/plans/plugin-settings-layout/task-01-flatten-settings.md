@@ -77,6 +77,7 @@ git diff --check
 - `apps/web/e2e/tests/settings/mobile-plugin-updates.spec.ts`
 - `apps/web/e2e/tests/plugins/plugins.spec.ts`
 - `docs/public/plugins.md`
+- `docs/screenshots/plugin-settings.png`
 
 ## Dependencies and parallelism
 
@@ -110,6 +111,8 @@ Sync at y=314.5 and Check for updates at y=366.5. The final page preserves both
 
 A disposable capture spec passed against the production build with isolated,
 synthetic plugin records. Four compressed screenshots show Installed and Browse
-on phone and desktop; assets are published separately from the implementation
+on phone and desktop; PR comparison assets are published on a separate media
 branch. The rendered phone composition matches UI-01. The public plugin guide
-now describes the compact toolbar and flat list.
+describes the compact toolbar and flat list and includes the new desktop
+Installed screenshot. Its duplicate illustration of the previous layout was
+removed during PR review.
