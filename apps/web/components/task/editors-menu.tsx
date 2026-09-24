@@ -28,11 +28,13 @@ import {
 } from "@/components/task/editors-menu-availability";
 import { useTranslation } from "react-i18next";
 
-const menuItemClass = "cursor-pointer";
+const menuItemClass =
+  "cursor-pointer [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11";
 
 type EditorsMenuProps = {
   activeSessionId: string | null;
   embeddedVscodeSupported: boolean;
+  onEditorOpened?: () => void;
 };
 
 function useWorktreeOptions(sessionId: string | null): WorktreeOption[] {
@@ -107,6 +109,7 @@ function OpenEditorButton({
                   variant="outline"
                   className={buttonClass}
                   data-testid="editors-menu-open"
+                  aria-label={tooltip}
                   disabled={disabled}
                 >
                   {icon}
@@ -132,6 +135,7 @@ function OpenEditorButton({
             variant="outline"
             className={buttonClass}
             data-testid="editors-menu-open"
+            aria-label={tooltip}
             onClick={() => onOpen()}
             disabled={disabled}
           >
@@ -173,7 +177,11 @@ function EditorMenuEntry({
   );
 }
 
-export function EditorsMenu({ activeSessionId, embeddedVscodeSupported }: EditorsMenuProps) {
+export function EditorsMenu({
+  activeSessionId,
+  embeddedVscodeSupported,
+  onEditorOpened,
+}: EditorsMenuProps) {
   const { t } = useTranslation();
   const openEditor = useOpenSessionInEditor(activeSessionId ?? null);
   const { editors } = useEditors();
@@ -190,11 +198,14 @@ export function EditorsMenu({ activeSessionId, embeddedVscodeSupported }: Editor
 
   const openWith = (editorId: string, worktreeId?: string) => {
     if (!editorId) return;
-    void openEditor.open({ editorId, worktreeId });
+    void openEditor.open({ editorId, worktreeId }).then((response) => {
+      // The hook returns null when opening fails or no session is selected.
+      if (response) onEditorOpened?.();
+    });
   };
 
   return (
-    <div className="inline-flex h-7 rounded-md border border-border overflow-hidden">
+    <div className="inline-flex h-7 rounded-md border border-border overflow-hidden [@media(pointer:coarse)]:h-auto">
       <OpenEditorButton
         disabled={!activeSessionId || openEditor.isLoading || enabledEditors.length === 0}
         isLoading={openEditor.isLoading}
@@ -209,6 +220,7 @@ export function EditorsMenu({ activeSessionId, embeddedVscodeSupported }: Editor
             variant="outline"
             className="rounded-none border-0 border-l px-2 cursor-pointer focus-visible:ring-inset"
             data-testid="editors-menu-list"
+            aria-label={t("task:openInOtherEditor")}
             disabled={!activeSessionId || enabledEditors.length === 0}
           >
             <IconChevronDown className="h-4 w-4" />

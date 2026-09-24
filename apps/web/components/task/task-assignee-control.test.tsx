@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { TaskAssigneeControl } from "./task-assignee-control";
 import { resetDirectoryCacheForTests } from "@/hooks/domains/users/use-assignable-people";
 
@@ -69,10 +70,12 @@ function stateWith(assigneeUserId?: string, authenticated = true) {
   };
 }
 
-function renderControl(assigneeUserId?: string, authenticated = true) {
+function renderControl(assigneeUserId?: string, authenticated = true, compact = false) {
   return render(
     <StateProvider initialState={stateWith(assigneeUserId, authenticated)}>
-      <TaskAssigneeControl taskId="t-1" workspaceId="ws-1" />
+      <TooltipProvider>
+        <TaskAssigneeControl taskId="t-1" workspaceId="ws-1" compact={compact} />
+      </TooltipProvider>
     </StateProvider>,
   );
 }
@@ -95,6 +98,31 @@ function renderControlWithDisabledSyntheticUser(assigneeUserId?: string) {
 }
 
 describe("TaskAssigneeControl", () => {
+  it("keeps full names accessible and searchable from the compact avatar", async () => {
+    renderControl("user-1", true, true);
+    await waitFor(() =>
+      expect(screen.getByTestId(CONTROL).getAttribute("aria-label")).toBe(
+        "Assigned to: Ada Lovelace",
+      ),
+    );
+    expect(screen.getByTestId(CONTROL).textContent).toBe("AL");
+    fireEvent.click(screen.getByTestId(CONTROL));
+    fireEvent.click(await screen.findByText("Grace Hopper"));
+    await waitFor(() =>
+      expect(updateTask).toHaveBeenCalledWith("t-1", { assignee_user_id: "user-2" }),
+    );
+  });
+
+  it("allows assigning an unassigned task from the compact control", async () => {
+    renderControl(undefined, true, true);
+    expect(screen.getByTestId(CONTROL).getAttribute("aria-label")).toBe("Assigned to: Unassigned");
+    fireEvent.click(screen.getByTestId(CONTROL));
+    fireEvent.click(await screen.findByText("Assign to me"));
+    await waitFor(() =>
+      expect(updateTask).toHaveBeenCalledWith("t-1", { assignee_user_id: "user-2" }),
+    );
+  });
+
   it("shows the assignee's name from the store, not a raw user id", async () => {
     renderControl("user-1");
     await waitFor(() => expect(screen.getByTestId(CONTROL).textContent).toContain("Ada Lovelace"));

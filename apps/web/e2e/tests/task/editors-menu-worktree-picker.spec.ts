@@ -1,3 +1,4 @@
+import { openTaskTools } from "../../helpers/task-tools";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -5,6 +6,8 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { requireBox } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT", "IDLE"];
 
@@ -13,63 +16,91 @@ const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT", "IDLE"];
  * task top bar must offer a worktree picker instead of silently opening the
  * first worktree (regression: it always opened Worktrees[0]).
  */
-test.describe("Editors menu worktree picker", () => {
-  test("multi-repo task offers a worktree choice on the IDE button", async ({
-    testPage,
-    apiClient,
-    seedData,
-    backend,
-  }) => {
-    // Two disposable repos so the session materializes two worktrees.
-    const gitEnv = makeGitEnv(backend.tmpDir);
-    const repoIds: string[] = [];
-    for (const name of ["orders-api", "storefront-web"]) {
-      const repoDir = path.join(backend.tmpDir, "repos", name);
-      fs.mkdirSync(repoDir, { recursive: true });
-      execSync("git init -b main", { cwd: repoDir, env: gitEnv });
-      execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
-      const repo = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
-        name,
-        pull_before_worktree: false,
-      });
-      repoIds.push(repo.id);
-    }
+for (const hasTouch of [false, true]) {
+  test.describe(`Editors menu worktree picker (${hasTouch ? "touch" : "desktop"})`, () => {
+    test.use({ hasTouch });
+    test("multi-repo task offers a worktree choice on the IDE button", async ({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+    }) => {
+      // Two disposable repos so the session materializes two worktrees.
+      const gitEnv = makeGitEnv(backend.tmpDir);
+      const repoIds: string[] = [];
+      for (const name of ["orders-api", "storefront-web"]) {
+        const repoDir = path.join(backend.tmpDir, "repos", hasTouch ? `touch-${name}` : name);
+        fs.mkdirSync(repoDir, { recursive: true });
+        execSync("git init -b main", { cwd: repoDir, env: gitEnv });
+        execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+        const repo = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+          name,
+          pull_before_worktree: false,
+        });
+        repoIds.push(repo.id);
+      }
 
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Sync order totals across services",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: repoIds,
-        executor_profile_id: seedData.worktreeExecutorProfileId,
-      },
-    );
-
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return DONE_STATES.includes(sessions[0]?.state ?? "");
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Sync order totals across services",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: repoIds,
+          executor_profile_id: seedData.worktreeExecutorProfileId,
         },
-        { timeout: 60_000, message: "Waiting for the agent session to finish" },
-      )
-      .toBe(true);
+      );
 
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    // Park focus on the idle chat composer before opening the menu so a late
-    // composer autofocus can't steal focus and dismiss the Radix dropdown.
-    await session.idleInput().click();
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(task.id);
+            return DONE_STATES.includes(sessions[0]?.state ?? "");
+          },
+          { timeout: 60_000, message: "Waiting for the agent session to finish" },
+        )
+        .toBe(true);
 
-    // The IDE button now opens a worktree picker instead of launching directly.
-    await testPage.getByTestId("editors-menu-open").click();
-    const items = testPage.getByTestId("editors-menu-worktree-item");
-    await expect(items).toHaveCount(2);
-    await expect(items.filter({ hasText: "orders-api" })).toBeVisible();
-    await expect(items.filter({ hasText: "storefront-web" })).toBeVisible();
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      // Park focus on the idle chat composer before opening the menu so a late
+      // composer autofocus can't steal focus and dismiss the Radix dropdown.
+      await session.idleInput().click();
+
+      // The IDE button now opens a worktree picker instead of launching directly.
+      await openTaskTools(testPage);
+      await testPage.getByTestId("editors-menu-open").click();
+      const items = testPage.getByTestId("editors-menu-worktree-item");
+      await expect(items).toHaveCount(2);
+      await expect(items.filter({ hasText: "orders-api" })).toBeVisible();
+      await expect(items.filter({ hasText: "storefront-web" })).toBeVisible();
+      if (hasTouch) {
+        await waitForFiniteAnimations(testPage.getByRole("menu"));
+        for (const item of await items.all()) {
+          const box = await requireBox(item, "touch worktree option");
+          expect(box.height).toBeGreaterThanOrEqual(44);
+          expect(box.width).toBeGreaterThanOrEqual(44);
+        }
+        await testPage.keyboard.press("Escape");
+        await testPage.getByTestId("editors-menu-list").tap();
+        const submenuTrigger = testPage.locator('[data-slot="dropdown-menu-sub-trigger"]').first();
+        await expect(submenuTrigger).toBeVisible();
+        await waitForFiniteAnimations(testPage.getByRole("menu"));
+        expect(
+          (await requireBox(submenuTrigger, "touch editor submenu")).height,
+        ).toBeGreaterThanOrEqual(44);
+        await submenuTrigger.tap();
+        await expect(items).toHaveCount(2);
+        await waitForFiniteAnimations(items.first().locator(".."));
+        for (const item of await items.all()) {
+          expect(
+            (await requireBox(item, "touch nested worktree option")).height,
+          ).toBeGreaterThanOrEqual(44);
+        }
+      }
+    });
   });
-});
+}

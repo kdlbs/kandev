@@ -406,7 +406,7 @@ function PresetDropdown({
         onCloseAutoFocus={onCloseAutoFocus}
         ref={deleteMenuRef}
         align="end"
-        className="w-60"
+        className="w-60 [@media(pointer:coarse)]:[&_[role=menuitem]]:min-h-11 [@media(pointer:coarse)]:[&_[role=menuitem]]:min-w-11"
         onFocusOutside={(event) => {
           if (confirmingDeleteId && isSavedLayoutConfirmationTarget(event.target)) {
             event.preventDefault();
@@ -495,7 +495,7 @@ function usePresetDropdownVisibility(onClose: () => void) {
   return { dropdownOpen, tooltipOpen, handleDropdownOpenChange, handleTooltipOpenChange };
 }
 
-export function LayoutPresetSelector() {
+export function LayoutPresetSelector({ onLayoutSelected }: { onLayoutSelected?: () => void } = {}) {
   const { t } = useTranslation();
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -559,11 +559,20 @@ export function LayoutPresetSelector() {
         deleteMenuRef={deleteMenuRef}
         tooltipOpen={!isMobile && tooltipOpen}
         onTooltipOpenChange={handleTooltipOpenChange}
-        resetLayout={resetLayout}
+        resetLayout={() => {
+          resetLayout();
+          onLayoutSelected?.();
+        }}
         savedLayouts={savedLayouts}
         isFinePointer={isMobile || isFinePointer}
-        onApplyCustom={handleApplyCustom}
-        onApplyBuiltIn={handleApplyBuiltIn}
+        onApplyCustom={async (layout) => {
+          await handleApplyCustom(layout);
+          onLayoutSelected?.();
+        }}
+        onApplyBuiltIn={(preset) => {
+          handleApplyBuiltIn(preset);
+          onLayoutSelected?.();
+        }}
         confirmingDeleteId={deleteCandidate?.id ?? null}
         onDelete={beginDelete}
         onCancelDelete={cancelDelete}

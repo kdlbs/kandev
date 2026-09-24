@@ -22,9 +22,9 @@ See [requirements](../requirements/open-task-folder.md) and
 
 ## Components
 
-`apps/web/components/task/task-top-bar.tsx` renders `EditorsMenu` in
-`TopbarToolsGroup`. Add an independent folder control immediately after `EditorsMenu`,
-inside the existing unarchived-task branch. Do not tie it to enabled editors.
+`apps/web/components/task/task-top-bar-tools.tsx` renders `EditorsMenu` in
+the Task tools disclosure. An independent folder control sits immediately after
+`EditorsMenu`, inside the unarchived-task branch. It is not tied to enabled editors.
 Use `open-task-folder-button.tsx` and shared `useTaskFolderAction` for selection
 and opener focus. The existing `useOpenSessionFolder` owns native-launch requests,
 immediate duplicate-request suppression, loading state, and localized errors. Reuse `buildWorktreeOptions` and `useSessionWorktrees`

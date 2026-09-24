@@ -1,3 +1,4 @@
+import { openTaskTools } from "../../helpers/task-tools";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -75,6 +76,9 @@ async function seedTaskWithSession(
   title: string,
   repositoryIds: string[] = [seedData.repositoryId],
 ): Promise<{ session: SessionPage; sessionId: string }> {
+  const { executors } = await apiClient.listExecutors();
+  const localProfile = executors.find((executor) => executor.type === "local")?.profiles?.[0];
+  expect(localProfile).toBeDefined();
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -84,6 +88,7 @@ async function seedTaskWithSession(
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: repositoryIds,
+      executor_profile_id: localProfile!.id,
     },
   );
 
@@ -104,6 +109,17 @@ test.describe("VS Code toolbar open", () => {
     apiClient,
     seedData,
   }) => {
+    const editorsResponse = await apiClient.rawRequest("GET", "/api/v1/editors");
+    expect(editorsResponse.ok).toBe(true);
+    const { editors } = (await editorsResponse.json()) as {
+      editors: { id: string; kind: string }[];
+    };
+    const embeddedEditor = editors.find((editor) => editor.kind === "internal_vscode");
+    expect(embeddedEditor).toBeDefined();
+    const settings = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      default_editor_id: embeddedEditor!.id,
+    });
+    expect(settings.ok).toBe(true);
     const { session } = await seedTaskWithSession(
       testPage,
       apiClient,
@@ -112,9 +128,13 @@ test.describe("VS Code toolbar open", () => {
       [],
     );
 
+    await openTaskTools(testPage);
     await testPage.getByTestId("editors-menu-open").click();
 
     await expect(session.vscodeTab()).toBeVisible({ timeout: 10_000 });
+    await expect(
+      testPage.getByRole("dialog", { name: "Task tools", exact: true }),
+    ).not.toBeVisible();
   });
 });
 

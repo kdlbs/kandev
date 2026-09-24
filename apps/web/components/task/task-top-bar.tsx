@@ -2,15 +2,12 @@
 
 import { memo, type ReactNode } from "react";
 import Link from "@/components/routing/app-link";
-import { IconBug, IconCircleDot } from "@tabler/icons-react";
+import { IconCircleDot } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PageTopbar, type ParentCrumb } from "@/components/page-topbar";
 import { useOfficeProject } from "@/hooks/use-office-workspace-data";
 import { TaskTopBarTitle } from "@/components/task/task-top-bar-title";
-import { OpenTaskFolderButton } from "@/components/task/open-task-folder-button";
-import { EditorsMenu } from "@/components/task/editors-menu";
-import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
 import { TaskRightPanelsToggle } from "@/components/task/task-right-panels-toggle";
 import { DocumentControls } from "@/components/task/document/document-controls";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
@@ -26,9 +23,9 @@ import { TaskAssigneeControl } from "@/components/task/task-assignee-control";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { TaskTopBarActionsMenu } from "@/components/task/task-top-bar-actions-menu";
-import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
+import { TaskTopBarMetrics } from "./task-top-bar-metrics";
+import { TaskTopBarTools } from "./task-top-bar-tools";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
-import { isDebugUI } from "@/lib/config";
 import { useTranslation } from "react-i18next";
 import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 
@@ -126,9 +123,8 @@ const TaskTopBar = memo(function TaskTopBar({
           />
         ) : undefined
       }
-      // The stepper handles its own truncation (`w-full min-w-0 overflow-hidden`),
-      // so the center zone may shrink instead of pushing chrome out of the bar.
-      centerClassName="min-w-0 shrink"
+      // Reserve enough room for the compact current-step label before truncating the title.
+      centerClassName="min-w-32 shrink"
       actions={
         <TopBarRight
           taskId={taskId}
@@ -214,33 +210,6 @@ function TopbarCluster({
     >
       {children}
     </div>
-  );
-}
-
-function DebugOverlayToggle({
-  showDebugOverlay,
-  onToggleDebugOverlay,
-}: {
-  showDebugOverlay?: boolean;
-  onToggleDebugOverlay: () => void;
-}) {
-  const { t } = useTranslation();
-  const label = showDebugOverlay ? t("task:hideDebugInfo") : t("task:showDebugInfo");
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 cursor-pointer px-2"
-          onClick={onToggleDebugOverlay}
-          aria-label={label}
-        >
-          <IconBug className="h-4 w-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
   );
 }
 
@@ -331,48 +300,6 @@ function GitHubIssueTopbarButton({
   );
 }
 
-function TopbarToolsGroup({
-  activeSessionId,
-  showDebugOverlay,
-  onToggleDebugOverlay,
-  isArchived,
-  embeddedVscodeSupported,
-}: {
-  activeSessionId?: string | null;
-  showDebugOverlay?: boolean;
-  onToggleDebugOverlay?: () => void;
-  isArchived?: boolean;
-  embeddedVscodeSupported?: boolean;
-}) {
-  const { t } = useTranslation();
-  const showDebugToggle = isDebugUI() && onToggleDebugOverlay;
-
-  return (
-    <TopbarCluster label={t("task:taskTools")}>
-      <TaskRightPanelsToggle sessionId={activeSessionId ?? null} />
-      {!isArchived && (
-        <div className="inline-flex items-center gap-1 [&_button]:h-7 [&_button]:text-xs">
-          <LayoutPresetSelector />
-          <EditorsMenu
-            activeSessionId={activeSessionId ?? null}
-            embeddedVscodeSupported={embeddedVscodeSupported ?? false}
-          />
-          <OpenTaskFolderButton sessionId={activeSessionId ?? null} />
-        </div>
-      )}
-      {showDebugToggle && (
-        <DebugOverlayToggle
-          showDebugOverlay={showDebugOverlay}
-          onToggleDebugOverlay={onToggleDebugOverlay}
-        />
-      )}
-    </TopbarCluster>
-  );
-}
-
-/** Right section: status/attention + tools rendered inline.
- *  The former overflow popover was removed in the UI overhaul — every cluster
- *  is always visible so users don't have to discover the dots menu. */
 function TopBarRight({
   taskId,
   activeSessionId,
@@ -409,7 +336,7 @@ function TopBarRight({
   const { t } = useTranslation();
   return (
     <div className="flex items-center justify-self-end gap-2 [&_button]:whitespace-nowrap">
-      <TopbarMetrics activeSessionId={activeSessionId} size="sm" />
+      <TaskTopBarMetrics />
       {!isArchived && (
         <TopbarCluster
           label={t("task:pluginTopBarActions")}
@@ -439,7 +366,7 @@ function TopBarRight({
         </TopbarCluster>
       )}
       <TopbarCluster label={t("task:assignedTo")} className="[&_button]:h-7 [&_button]:text-xs">
-        <TaskAssigneeControl taskId={taskId} workspaceId={workspaceId} isArchived={isArchived} />
+        <TaskAssigneeControl {...{ taskId, workspaceId, isArchived }} compact />
       </TopbarCluster>
       <AttentionStatusGroup
         taskId={taskId}
@@ -450,7 +377,8 @@ function TopBarRight({
         issueUrl={issueUrl}
         issueNumber={issueNumber}
       />
-      <TopbarToolsGroup
+      <TaskRightPanelsToggle sessionId={activeSessionId ?? null} />
+      <TaskTopBarTools
         activeSessionId={activeSessionId}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}

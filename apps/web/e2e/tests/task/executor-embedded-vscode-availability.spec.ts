@@ -1,3 +1,4 @@
+import { openTaskTools } from "../../helpers/task-tools";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { routeSessionEmbeddedVscodeCapability } from "../../helpers/session-capabilities";
@@ -39,6 +40,7 @@ async function seedTaskAndOpenEditorMenu(
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  await openTaskTools(page);
   await page.getByTestId("editors-menu-list").click();
 }
 

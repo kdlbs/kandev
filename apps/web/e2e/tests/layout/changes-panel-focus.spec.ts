@@ -1,3 +1,4 @@
+import { openTaskTools } from "../../helpers/task-tools";
 import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
 import { SessionPage } from "../../pages/session-page";
@@ -381,6 +382,7 @@ test.describe("Changes panel focus behavior", () => {
       testPage.locator(".dv-default-tab").filter({ hasText: /^Changes \(1\)$/ }),
     ).toBeVisible({ timeout: 15_000 });
 
+    await openTaskTools(testPage);
     const presetTrigger = testPage.getByTestId("layout-preset-trigger");
     await presetTrigger.click();
     await testPage.locator('[data-testid="layout-preset-item"][data-preset-id="vscode"]').click();

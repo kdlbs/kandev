@@ -1,3 +1,4 @@
+import { openTaskTools } from "../../helpers/task-tools";
 import { expect, type Page } from "@playwright/test";
 import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -405,6 +406,7 @@ test.describe("saved Dockview layouts", () => {
     expect(await dockviewPanelIds(testPage)).not.toContain(`session:${taskA.sessionId}`);
 
     const presetTrigger = testPage.getByTestId("layout-preset-trigger");
+    await openTaskTools(testPage);
     if ((await presetTrigger.getAttribute("aria-expanded")) !== "true") {
       await presetTrigger.click();
     }
@@ -424,6 +426,7 @@ test.describe("saved Dockview layouts", () => {
     await expect(testPage.getByText("target task current")).toBeVisible();
     await expect(testPage.getByText("source task only")).not.toBeVisible();
 
+    await openTaskTools(testPage);
     if ((await presetTrigger.getAttribute("aria-expanded")) !== "true") {
       await presetTrigger.click();
     }
@@ -436,6 +439,7 @@ test.describe("saved Dockview layouts", () => {
     await confirmation.getByRole("button", { name: "Cancel" }).click();
     expect((await apiClient.getUserSettings()).settings.saved_layouts).toHaveLength(2);
 
+    await openTaskTools(testPage);
     if ((await presetTrigger.getAttribute("aria-expanded")) !== "true") {
       await presetTrigger.click();
     }

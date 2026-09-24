@@ -1,3 +1,4 @@
+import { openTaskTools } from "../../helpers/task-tools";
 import { expect, test } from "../../fixtures/test-base";
 import {
   createFolderTestRepository,
@@ -39,9 +40,11 @@ test("task tools open the folder beside the IDE action and recover from errors",
       json: attempts === 1 ? { error: "failed to open folder" } : { success: true },
     });
   });
+  await openTaskTools(testPage);
   const folder = testPage.getByTestId("open-task-folder");
   await expect(folder).toBeVisible();
   await expect(folder).toHaveAccessibleName("Open folder");
+  await openTaskTools(testPage);
   const editorBox = await testPage.getByTestId("editors-menu-list").boundingBox();
   const folderBox = await folder.boundingBox();
   expect(folderBox!.height).toBeCloseTo(28, 0);
@@ -99,6 +102,7 @@ test("desktop folder picker opens only the selected repository", async ({
     payloads.push(route.request().postDataJSON());
     await route.fulfill({ json: { success: true } });
   });
+  await openTaskTools(testPage);
   const trigger = testPage.getByTestId("open-task-folder");
   await trigger.focus();
   await testPage.keyboard.press("Enter");
@@ -142,6 +146,7 @@ test("missing host folder opener disables the action before any picker opens", a
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle();
+  await openTaskTools(testPage);
   await expect(testPage.getByTestId("open-task-folder")).toBeDisabled();
   await expect(testPage.getByRole("dialog", { name: "Choose a folder" })).not.toBeVisible();
   expect(requests).toBe(0);

@@ -77,9 +77,7 @@ A task carries two independent assignees: the **agent** that runs it, and the **
 
 It works the same on both boards.
 
-On a **kanban** task, the assignee sits in the task's top bar. Open the control to pick a colleague, or choose **Assign to me** to take the task over.
-
-![The kanban task top bar showing the workflow stepper and, on the right, an assignee control reading Bruno Costa.](../screenshots/team-access-kanban-assignee-topbar.png)
+On a **kanban** task, the assignee appears as an avatar in the task's top bar, or a person icon when unassigned. Hover or focus to read the name. Open the control to pick a colleague, or choose **Assign to me** to take the task over.
 
 Cards on the board carry the same name, so you can see who is on what without opening anything.
 

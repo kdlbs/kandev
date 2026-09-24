@@ -1,3 +1,4 @@
+import { openTaskTools } from "../../helpers/task-tools";
 import { expect, type Page } from "@playwright/test";
 import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -181,6 +182,7 @@ test.describe("right-panel visibility", () => {
       "Preview contextual right pane",
       { viewport: { width: 1600, height: 900 } },
     );
+    await openTaskTools(testPage);
     await testPage.getByTestId("layout-preset-trigger").click();
     await testPage.locator('[data-testid="layout-preset-item"][data-preset-id="preview"]').click();
     const toggle = testPage.getByTestId("task-right-panels-toggle");
@@ -339,6 +341,7 @@ for (const layout of ["default", "plan", "preview"] as const) {
       { viewport: { width: 1600, height: 900 } },
     );
     if (layout !== "default") {
+      await openTaskTools(testPage);
       await testPage.getByTestId("layout-preset-trigger").click();
       await testPage
         .locator(`[data-testid="layout-preset-item"][data-preset-id="${layout}"]`)

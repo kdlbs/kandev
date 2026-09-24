@@ -1,3 +1,4 @@
+import { openTaskTools } from "../../helpers/task-tools";
 import { expect, type Page } from "@playwright/test";
 import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -261,6 +262,7 @@ test.describe("Task layout profile defaults", () => {
 
     const task = await createTaskWithSession(apiClient, seedData, "Hidden Layout Override Task");
     await openTask(testPage, task.id);
+    await openTaskTools(testPage);
     await testPage.getByTestId("layout-preset-trigger").click();
     await expect(
       testPage.locator(
@@ -358,6 +360,7 @@ test.describe("Task layout profile defaults", () => {
     const taskA = await createTaskWithSession(apiClient, seedData, "Existing Layout Task");
     await openTask(testPage, taskA.id);
 
+    await openTaskTools(testPage);
     await testPage.getByTestId("layout-preset-trigger").click();
     await testPage.locator('[data-testid="layout-preset-item"][data-preset-id="default"]').click();
     await expect(testPage.getByTestId("terminal-panel")).toBeVisible({ timeout: 15_000 });
@@ -392,11 +395,13 @@ test.describe("Task layout profile defaults", () => {
     await openTask(testPage, taskA.id);
     await expect(testPage.getByTestId("terminal-panel")).toBeVisible({ timeout: 15_000 });
 
+    await openTaskTools(testPage);
     await testPage.getByTestId("layout-preset-trigger").click();
     await testPage.getByTestId("layout-reset-item").click();
     await expectNoTerminalDefault(testPage);
 
     await openTask(testPage, taskA.id);
+    await openTaskTools(testPage);
     await testPage.getByTestId("layout-preset-trigger").click();
     await testPage
       .locator('[data-testid="layout-saved-delete"][data-layout-id="focused-default"]')
