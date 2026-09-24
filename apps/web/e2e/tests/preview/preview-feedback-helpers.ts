@@ -109,6 +109,17 @@ export async function chooseCapture(page: Page, name: string): Promise<void> {
   await choice.click();
 }
 
+/** Wait until the iframe has applied screenshot mode before dispatching a drag. */
+export async function waitForScreenshotCaptureMode(frame: FrameLocator): Promise<void> {
+  await expect
+    .poll(
+      async () =>
+        frame.locator("html").evaluate((element) => (element as HTMLElement).style.cursor),
+      { timeout: 5_000, message: "preview iframe did not enter screenshot capture mode" },
+    )
+    .toBe("crosshair");
+}
+
 export async function saveDraft(page: Page, comment: string): Promise<void> {
   const draft = page.getByTestId("preview-feedback-draft");
   await expect(draft).toBeVisible({ timeout: 15_000 });

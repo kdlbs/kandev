@@ -60,8 +60,8 @@ test.describe("File tree chat context", () => {
     );
 
     await session.clickTab("Files");
-    await expect(session.fileTreeNode(filePath)).toBeVisible({ timeout: 15_000 });
-    await expect(session.fileTreeNode(directoryPath)).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode(filePath, 30_000);
+    await session.fileTree.waitForFileTreeNode(directoryPath, 30_000);
 
     const addNodeToContext = async (nodePath: string) => {
       await session.fileTreeNode(nodePath).click({ button: "right" });

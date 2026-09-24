@@ -289,6 +289,25 @@ test.describe("GitLab MR status chip", () => {
     expect(options.mr_options?.find((o) => o.mr_iid === ARMED_IID)?.auto_fix_enabled).toBe(true);
     expect(options.mr_options?.find((o) => o.mr_iid === IDLE_IID)?.auto_fix_enabled).toBe(false);
 
+    // The link endpoint commits each association independently. Verify that
+    // both rows are durable before the page performs its one-per-document
+    // workspace MR snapshot, so the UI assertion cannot observe the first
+    // commit while the second is still being written.
+    await expect
+      .poll(
+        async () => {
+          const response = await apiClient.rawRequest(
+            "GET",
+            `/api/v1/gitlab/tasks/${encodeURIComponent(task.id)}/mrs`,
+          );
+          if (!response.ok) return -1;
+          const body = (await response.json()) as { task_mrs?: unknown[] };
+          return body.task_mrs?.length ?? 0;
+        },
+        { timeout: 15_000, message: "both linked GitLab MRs should be persisted" },
+      )
+      .toBe(2);
+
     const session = new SessionPage(testPage);
     await openTask(testPage, session, task.id, { expectedMrCount: 2 });
 

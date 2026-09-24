@@ -173,6 +173,27 @@ export async function waitForActiveSessionCancellationPending(
   );
 }
 
+/**
+ * Wait until cancellation is backend-owned, or until the fast path has already
+ * settled before the projection event can be observed by the browser.
+ */
+export async function waitForActiveSessionCancellationPendingOrSettled(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) return false;
+      const state = store.getState();
+      const sessionId = state.tasks.activeSessionId;
+      if (!sessionId) return false;
+      if (state.taskSessions.items[sessionId]?.cancellation_pending === true) return true;
+      return Array.from(document.querySelectorAll<HTMLElement>("[data-placeholder]"))
+        .filter((element) => element.offsetWidth > 0 && element.offsetHeight > 0)
+        .some((element) => element.dataset.placeholder?.startsWith("Continue working on the "));
+    },
+    { timeout: 20_000 },
+  );
+}
+
 export async function waitForActiveQuickChatSupportsSteering(
   page: Page,
   expected = true,

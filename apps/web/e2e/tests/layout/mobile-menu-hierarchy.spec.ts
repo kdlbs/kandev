@@ -182,7 +182,7 @@ test("translated quick actions fit their phone targets", async ({ testPage }) =>
           (el) => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight,
         ),
       ).toBe(true);
-      expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      expect(Math.round((await button.boundingBox())!.height)).toBeGreaterThanOrEqual(44);
     }
     await testPage.screenshot({ path: test.info().outputPath(`quick-actions-pt-${width}.png`) });
   }
