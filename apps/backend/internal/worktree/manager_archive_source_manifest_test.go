@@ -137,6 +137,10 @@ func TestArchiveManifestCapturesIgnoredDirectoryContents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("capture ignored directory source: %v", err)
 	}
+	runGit(t, repo, "worktree", "remove", "--force", worktreePath)
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("worktree after cleanup: %v, want removed", err)
+	}
 	for _, entry := range manifests["wt"].Entries {
 		if (entry.Path == "cache/" || entry.Path == "cache/data.txt") && entry.ContentSHA256 != "" {
 			return

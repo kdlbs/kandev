@@ -267,10 +267,10 @@ func (s *Service) GetTaskSourceManifest(ctx context.Context, taskID string) ([]A
 	if err != nil {
 		return nil, fmt.Errorf("list task cleanup jobs: %w", err)
 	}
-	for i := len(jobs) - 1; i >= 0; i-- {
-		job := jobs[i]
+	manifests := make([]ArchiveSourceManifest, 0)
+	for _, job := range jobs {
 		if job == nil || job.TaskID != taskID {
-			continue
+			return nil, errors.New("task source manifest cleanup job identity is invalid")
 		}
 		var snapshot taskResourceCleanupSnapshot
 		if err := json.Unmarshal([]byte(job.ResourceSnapshot), &snapshot); err != nil {
@@ -293,9 +293,12 @@ func (s *Service) GetTaskSourceManifest(ctx context.Context, taskID string) ([]A
 				return nil, errors.New("task source manifest does not match cleanup worktree inventory")
 			}
 		}
-		return snapshot.ArchiveSourceManifest, nil
+		manifests = append(manifests, snapshot.ArchiveSourceManifest...)
 	}
-	return nil, ErrTaskSourceManifestNotFound
+	if len(manifests) == 0 {
+		return nil, ErrTaskSourceManifestNotFound
+	}
+	return manifests, nil
 }
 
 func sourceManifestMatchesSnapshotWorktree(manifest ArchiveSourceManifest, worktrees []*worktree.Worktree) bool {

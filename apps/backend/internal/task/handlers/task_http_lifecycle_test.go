@@ -221,6 +221,27 @@ func TestHTTPGetArchiveSourceManifestDeniesForeignWorkspace(t *testing.T) {
 	require.JSONEq(t, `{"error":"archive source manifest not found"}`, missingRec.Body.String())
 }
 
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.5
+func TestHTTPGetArchiveSourceManifestReturnsAllCleanupGenerations(t *testing.T) {
+	repo := &httpTaskRepo{cleanupJobs: []*models.TaskResourceCleanupJob{
+		{
+			ID: "cleanup-first", TaskID: "task-b",
+			ResourceSnapshot: `{"workspace_id":"ws-b","worktrees":[{"id":"wt-first","task_id":"task-b","repository_id":"repo-b"}],"archive_source_manifest":[{"task_id":"task-b","cleanup_job_id":"cleanup-first","worktree_id":"wt-first","repository_id":"repo-b"}]}`,
+		},
+		{
+			ID: "cleanup-second", TaskID: "task-b",
+			ResourceSnapshot: `{"workspace_id":"ws-b","worktrees":[{"id":"wt-second","task_id":"task-b","repository_id":"repo-b"}],"archive_source_manifest":[{"task_id":"task-b","cleanup_job_id":"cleanup-second","worktree_id":"wt-second","repository_id":"repo-b"}]}`,
+		},
+	}}
+	h := newHTTPTaskHandlers(t, repo)
+	ownerCtx, ownerRec := taskRequestAs(t, "user-b", http.MethodGet,
+		"/api/v1/tasks/task-b/archive-source-manifest", "task-b")
+	h.httpGetArchiveSourceManifest(ownerCtx)
+	require.Equal(t, http.StatusOK, ownerRec.Code)
+	require.Contains(t, ownerRec.Body.String(), `"cleanup_job_id":"cleanup-first"`)
+	require.Contains(t, ownerRec.Body.String(), `"cleanup_job_id":"cleanup-second"`)
+}
+
 func TestHTTPGetTaskReturnsNotFoundForUnknownTask(t *testing.T) {
 	h := newHTTPTaskHandlers(t, &httpTaskRepo{})
 	c, rec := taskRequestAs(t, "", http.MethodGet, "/api/v1/tasks/nope", "nope")
