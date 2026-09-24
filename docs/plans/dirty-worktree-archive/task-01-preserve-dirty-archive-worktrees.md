@@ -1,7 +1,7 @@
 ---
 id: "01-preserve-dirty-archive-worktrees"
 title: "Preserve dirty worktrees on archive"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

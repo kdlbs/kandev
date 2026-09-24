@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-001
 created: 2026-09-21
-updated: 2026-09-21
+updated: 2026-09-24
 owners:
   - cfl
 ---
@@ -52,8 +52,10 @@ if pathPresent && !options.DiscardWorktreeChanges {
 `CleanupWorktreesPreservingBranches` always passes `removeBranch=false`, so every
 archive skips the gate. `completeOwnedWorktreeCleanup` then force-removes the
 directory once Git registration ownership is proven. Ownership is checked;
-cleanliness is not. Archive preserves the branch ref, so committed work survives
-and only uncommitted work is destroyed.
+cleanliness is not. Archive uses the existing branch-preserving cleanup path.
+Clean worktrees are removed, and the manager may compact a managed branch after
+proving that it is fully integrated. A dirty worktree is filtered out before
+cleanup, so its branch ref and `task_environment` row remain.
 
 Three archive entry points converge on one site. `HandoffService.archiveTaskTree`
 calls `CleanupTaskResources(ctx, taskID, false)`, `Service.ArchiveTask` builds
@@ -95,9 +97,10 @@ The failure is logged and counts as a cleanup diagnostic, never as a fall-throug
 to removal.
 
 A preserved worktree is never passed to cleanup, so its record keeps its active
-status and its branch is untouched. It remains eligible for a later cleanup
-attempt once the checkout is clean, through the existing retry and unarchive
-paths.
+status and its branch is untouched. The record remains available for a later
+cleanup operation after the checkout becomes clean. The archive job does not
+schedule another attempt solely because the checkout was dirty, because this
+preservation is not a cleanup error.
 
 ## Out of scope
 

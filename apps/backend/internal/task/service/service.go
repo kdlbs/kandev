@@ -74,8 +74,9 @@ type WorktreeCleanupIdentityProvider interface {
 	CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*worktree.Worktree) (map[string]string, error)
 }
 
-// WorktreeDirtyInspector reports local changes before a task deletion mutates
-// task rows or persists a cleanup job.
+// WorktreeDirtyInspector reports local changes before a destructive worktree
+// operation. The delete preflight uses it before task mutation, and archive
+// cleanup uses it before branch-preserving cleanup.
 type WorktreeDirtyInspector interface {
 	InspectDirtyWorktrees(ctx context.Context, worktrees []*worktree.Worktree) ([]worktree.DirtyWorktree, error)
 }
