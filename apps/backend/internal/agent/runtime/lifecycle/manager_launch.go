@@ -2419,8 +2419,13 @@ func (m *Manager) createBootMessage(ctx context.Context, execution *AgentExecuti
 	return bootMsg, bootStopCh
 }
 
-// getTaskDescriptionFromMetadata extracts the task description string from execution metadata.
+// getTaskDescriptionFromMetadata returns the task description for a fresh
+// execution. A resumed execution restores its existing conversation and waits
+// for the caller's next prompt instead of replaying the original launch prompt.
 func getTaskDescriptionFromMetadata(execution *AgentExecution) string {
+	if execution.isResumedSession {
+		return ""
+	}
 	return execution.metadataString("task_description")
 }
 

@@ -298,7 +298,10 @@ func (s *Server) runAgentStreamWriterWithJournalReplay(ctx context.Context, conn
 	})
 	if err != nil {
 		if !errors.Is(err, errAgentStreamReplayStopped) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			s.logger.Error("failed to stream agent delivery replay", zap.Error(err))
+			s.logger.Error("failed to stream agent delivery replay",
+				zap.String("delivery_stream_id", deliveryStreamID),
+				zap.Uint64("replay_cursor", after),
+				zap.Error(err))
 		}
 		return
 	}

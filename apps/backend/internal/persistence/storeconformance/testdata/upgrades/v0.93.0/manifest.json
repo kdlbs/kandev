@@ -103,6 +103,7 @@
       "session_continuation_snapshots",
       "session_recovery_blocks",
       "session_restore_attempts",
+      "task_environment_kubernetes",
       "task_workflow_session_bindings"
     ]
   }

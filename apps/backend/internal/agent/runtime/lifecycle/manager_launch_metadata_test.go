@@ -576,6 +576,18 @@ func TestSetExecutionDescriptionFeedsPassthroughPromptInjection(t *testing.T) {
 		"the description set on a workspace-only execution is what the prompt path reads back")
 }
 
+func TestGetTaskDescriptionFromMetadataDoesNotReplayInitialPromptOnResume(t *testing.T) {
+	exec := &AgentExecution{
+		ID:               "exec-1",
+		SessionID:        "session-1",
+		isResumedSession: true,
+	}
+	exec.setMetadataValue("task_description", "original task prompt")
+
+	require.Empty(t, getTaskDescriptionFromMetadata(exec),
+		"a resumed execution must wait for its caller's prompt instead of replaying the original launch prompt")
+}
+
 func TestPrepareProgressRecorderMergeFillsOnlyBlankSlots(t *testing.T) {
 	recorder := newPrepareProgressRecorder(nil)
 	recorder.Callback(0)(PrepareStep{Name: "Validate Docker"}, 0, 2)
