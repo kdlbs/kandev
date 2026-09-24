@@ -98,16 +98,19 @@ export async function openQuickChatSetup(page: Page, navigateHome = true): Promi
 export async function selectAgentIfNeeded(dialog: Locator, page: Page) {
   const selector = dialog.getByTestId("agent-profile-selector");
   await expect(selector).toBeVisible({ timeout: 10_000 });
-  await expect(async () => {
-    const text = await selector.innerText();
-    if (!text.includes("Select agent")) return;
-
-    await selector.click();
+  const selectedProfile = await selector.innerText();
+  if (selectedProfile.includes("Select agent")) {
+    // Keep the picker open while its options render. Retrying the click can
+    // toggle the popover closed before a slow profile catalog becomes usable.
+    if ((await selector.getAttribute("aria-expanded")) !== "true") {
+      await selector.click();
+    }
+    await expect(selector).toHaveAttribute("aria-expanded", "true", { timeout: 10_000 });
     const option = page.getByRole("option").first();
-    await expect(option).toBeVisible({ timeout: 2_000 });
+    await expect(option).toBeVisible({ timeout: 10_000 });
     await option.click();
-    await expect(selector).not.toContainText("Select agent", { timeout: 2_000 });
-  }).toPass({ timeout: 10_000, intervals: [250, 500, 1_000] });
+    await expect(selector).not.toContainText("Select agent", { timeout: 10_000 });
+  }
 }
 
 export async function waitForQuickChatComposerReady(dialog: Locator): Promise<Locator> {

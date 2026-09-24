@@ -129,7 +129,8 @@ function PromptsSection({ query, prompts, contextFiles, onToggleFile }: PromptsS
         return (
           <div
             key={prompt.id}
-            className="flex min-h-11 cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-muted/50"
+            className="flex min-h-11 cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-muted/50 [@media(pointer:coarse)]:min-h-12"
+            data-testid="context-prompt-item"
             onClick={() => onToggleFile({ path: promptPath, name: prompt.name, pinned: true })}
           >
             <Checkbox

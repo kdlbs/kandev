@@ -89,6 +89,19 @@ export async function waitForSessionAgentctlReady(
   );
 }
 
+export async function activeTaskSessionId(page: Page): Promise<string> {
+  await page.waitForFunction(() => {
+    return Boolean(
+      (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId,
+    );
+  });
+  const sessionId = await page.evaluate(
+    () => (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId ?? null,
+  );
+  if (!sessionId) throw new Error("No active task session is available in the E2E store");
+  return sessionId;
+}
+
 export async function waitForActiveSessionForegroundActivity(
   page: Page,
   activity: "generating" | "background" | null,
