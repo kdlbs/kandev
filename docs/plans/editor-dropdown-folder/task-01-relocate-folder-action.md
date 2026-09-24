@@ -169,4 +169,3 @@ verify the removed button, 28px dropdown trigger, menu reachability without
 editors, selected-worktree payload, keyboard use, cancellation focus and retry.
 Native opening is HTTP-stubbed; these tests do not assert Finder/Explorer window
 visibility. No backend native-launch behavior changed.
-
