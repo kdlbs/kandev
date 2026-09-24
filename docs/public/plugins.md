@@ -172,7 +172,10 @@ a required setting that has no value yet:
 ![The Settings > Plugins page listing an installed, active plugin with its category, a Setup required badge, an unsigned badge, Disable/Uninstall actions, and a chevron opening the plugin's settings page.](../screenshots/plugin-settings-list.png)
 
 The Installed tab also gives you an overview of automatic updates, installed
-versions, available updates, and per-plugin controls:
+versions, available updates, and per-plugin controls. **Install plugin** sits
+beside the list heading. **Sync** and **Check for updates** share a compact
+toolbar, with the automatic-update preference and plugin list below. On phones,
+the secondary actions wrap below the heading and retain touch-sized targets:
 
 ![Settings > Plugins showing automatic updates and the installed plugin list with sync, update, enable, disable, uninstall, and settings controls.](../screenshots/plugin-settings.png)
 
