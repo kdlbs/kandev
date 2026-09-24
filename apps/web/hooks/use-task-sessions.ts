@@ -49,6 +49,7 @@ async function hydrateTaskSessions({
       [...fetchedSessions, ...sessionsAddedDuringLoad],
       activityEpochsAtRequestStart,
     );
+    getStoreState().reconcileWorkflowSessionFocus?.(taskId);
     return sessionsAddedDuringLoad.length > 0;
   } catch (error) {
     console.error("Failed to load task sessions:", error);
@@ -58,6 +59,7 @@ async function hydrateTaskSessions({
     const currentSessions = storedTaskSessions(getStoreState, taskId);
     if (!force && currentSessions.length > 0) {
       setTaskSessionsForTask(taskId, currentSessions, activityEpochsAtRequestStart);
+      getStoreState().reconcileWorkflowSessionFocus?.(taskId);
     }
     setTaskSessionsError(taskId, error instanceof Error ? error.message : String(error));
     return false;

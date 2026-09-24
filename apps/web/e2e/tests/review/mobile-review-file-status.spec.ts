@@ -81,7 +81,10 @@ test.describe("Review file status on mobile", () => {
     git.createFile(MOBILE_FILE, "mobile added file\n");
     git.stageFile(MOBILE_FILE);
 
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
     const changesPanel = testPage.getByTestId("mobile-changes-panel");
     await expect(changesPanel).toBeVisible();
     await expect(

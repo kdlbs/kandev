@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -40,6 +42,51 @@ type fakeRuntimeUpdater struct {
 	invalidatePkg   string
 	refreshCalls    int
 	resolvedPackage string
+}
+
+func TestAgentUpdateJobUsesNativeInstallAndRefresh(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, testExecutableName("opencode")), []byte("native"), 0o755); err != nil {
+		t.Fatalf("write native executable: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	updater := &fakeRuntimeUpdater{
+		current:      hostutility.AgentCapabilities{AgentVersion: "1.0.0"},
+		currentFound: true,
+		target:       "1.1.0",
+		refreshCaps:  hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.1.0"},
+	}
+	store, completed := newUpdateTestStore(updater, newMaintenanceCoordinator(), nil)
+	spec := agents.ManagedNPMRuntimeSpec{
+		Package:      "opencode-ai",
+		ACPArgs:      []string{"acp"},
+		NativeBinary: "opencode",
+	}
+	job, err := store.Enqueue("opencode-acp", spec)
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusSucceeded)
+
+	updater.mu.Lock()
+	defer updater.mu.Unlock()
+	if got, want := updater.runCommand, []string{"npm", "install", "-g", "opencode-ai@1.1.0"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("native update command = %#v, want %#v", got, want)
+	}
+	if got, want := updater.refreshCommand, []string{"opencode", "acp"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("native refresh command = %#v, want %#v", got, want)
+	}
+	if updater.invalidateCalls != 0 {
+		t.Fatalf("native update invalidated npm cache %d times, want 0", updater.invalidateCalls)
+	}
+}
+
+func testExecutableName(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
 }
 
 type sequencedVersionUpdater struct {
@@ -553,7 +600,7 @@ func TestAgentUpdateJobResolvesUpdatesRefreshesAndStreams(t *testing.T) {
 	if got := strings.Join(updater.runCommand, " "); got != wantUpdate {
 		t.Fatalf("update command = %q, want %q", got, wantUpdate)
 	}
-	wantRefresh := "npx --yes --prefer-offline @example/managed-acp --acp"
+	wantRefresh := "npx --yes --prefer-offline @example/managed-acp@1.1.0 --acp"
 	if got := strings.Join(updater.refreshCommand, " "); got != wantRefresh {
 		t.Fatalf("refresh command = %q, want %q", got, wantRefresh)
 	}

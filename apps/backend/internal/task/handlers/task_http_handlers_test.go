@@ -307,6 +307,33 @@ func TestStartAgentForNewTask_SetsDeferredStart(t *testing.T) {
 		"sync prepare must defer the start so the passthrough PTY is launched with the prompt by the follow-up IntentStartCreated")
 }
 
+func TestDispatchTaskSessionMarksExplicitCreationPrompt(t *testing.T) {
+	called := make(chan struct{}, 1)
+	orch := &captureOrchestrator{
+		startCreatedCalled:   called,
+		startCreatedResponse: &orchestrator.LaunchSessionResponse{Success: true, SessionID: "session-1"},
+	}
+	h := &TaskHandlers{orchestrator: orch, logger: newTestLogger(t)}
+
+	h.dispatchTaskSession(
+		context.Background(),
+		"task-1",
+		"initial request",
+		httpCreateTaskRequest{WorkflowStepID: "step-explicit", AgentProfileID: "profile-1"},
+		&startAgentDispatch{sessionID: "session-1", initialCreatePrompt: true},
+	)
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("async IntentStartCreated launch did not complete")
+	}
+
+	orch.mu.Lock()
+	defer orch.mu.Unlock()
+	require.Len(t, orch.requests, 1)
+	assert.True(t, orch.requests[0].InitialCreatePrompt)
+}
+
 func TestDispatchTaskSessionRecordsOnlyTheSuccessfulEffectiveProfile(t *testing.T) {
 	t.Run("successful launch uses the resolved profile", func(t *testing.T) {
 		recorder := &captureAgentProfileRecentUseRecorder{profileIDs: make(chan string, 1)}
@@ -360,6 +387,24 @@ func TestDispatchTaskSessionRecordsOnlyTheSuccessfulEffectiveProfile(t *testing.
 		case <-time.After(50 * time.Millisecond):
 		}
 	})
+}
+
+func TestEligibleInitialCreatePromptRequiresOriginalExplicitStepAndText(t *testing.T) {
+	tests := []struct {
+		name string
+		body httpCreateTaskRequest
+		want bool
+	}{
+		{name: "eligible", body: httpCreateTaskRequest{StartAgent: true, WorkflowStepID: "step-1", Description: "build"}, want: true},
+		{name: "inferred step", body: httpCreateTaskRequest{StartAgent: true, Description: "build"}, want: false},
+		{name: "empty text", body: httpCreateTaskRequest{StartAgent: true, WorkflowStepID: "step-1"}, want: false},
+		{name: "prepare only", body: httpCreateTaskRequest{WorkflowStepID: "step-1", Description: "build"}, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, eligibleInitialCreatePrompt(tc.body))
+		})
+	}
 }
 
 // configChatRepo returns a non-nil workspace so resolveConfigChatDefaults does

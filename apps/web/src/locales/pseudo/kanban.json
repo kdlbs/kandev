@@ -106,6 +106,7 @@
   "step": "Śţēƥ",
   "subtaskOf": "Śũƀţàśķ ōƒ",
   "taskList": "Ţàśķ ĺĩśţ",
+  "tasksInStep": "Ţàśķś ĩń {{step}}",
   "tasksOverWipLimit": "{{label}} ţàśķś, ōvēŕ ŴĨƤ ĺĩḿĩţ",
   "theseOptionsAffectThisTaskList": "Ţĥēśē ōƥţĩōńś àƒƒēćţ ţĥĩś ţàśķ ĺĩśţ ōńĺŷ.",
   "threads": "Ţĥŕēàďś",

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/pkg/agent"
 )
 
 func TestLoadWithStartupUsesExplicitManagedValues(t *testing.T) {
@@ -25,6 +27,7 @@ func TestLoadWithStartupUsesExplicitManagedValues(t *testing.T) {
 		IdleReaperInterval:        3 * time.Minute,
 		NotificationQueueCapacity: 4096,
 		OTLPEndpoint:              "http://configured:4318",
+		PromptCancelJoinTimeout:   12 * time.Second,
 	}
 	cfg, err := LoadWithStartup(startup)
 	if err != nil {
@@ -38,6 +41,9 @@ func TestLoadWithStartupUsesExplicitManagedValues(t *testing.T) {
 	}
 	if cfg.OTLPEndpoint != startup.OTLPEndpoint {
 		t.Fatalf("managed OTLP endpoint = %q, want %q", cfg.OTLPEndpoint, startup.OTLPEndpoint)
+	}
+	if cfg.PromptCancelJoinTimeout != startup.PromptCancelJoinTimeout {
+		t.Fatalf("managed prompt cancel join timeout = %s, want %s", cfg.PromptCancelJoinTimeout, startup.PromptCancelJoinTimeout)
 	}
 }
 
@@ -77,6 +83,14 @@ func TestLoadWithStartupPropagatesAgentSurvivalEnabled(t *testing.T) {
 // TestLoadWithoutStartupLeavesAgentSurvivalDisabled pins that a legacy/direct
 // (unmanaged) launch -- Load(), no startup contract -- never engages the
 // capability, matching AC-EXECUTORS-SURVIVAL-005.2's "defaults disabled".
+func TestLoadWithoutStartupAcceptsTruthyE2ESelector(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "1")
+	t.Setenv("KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT", "12s")
+	if got := Load().PromptCancelJoinTimeout; got != 12*time.Second {
+		t.Fatalf("prompt cancel join timeout = %s, want 12s", got)
+	}
+}
+
 func TestLoadWithoutStartupLeavesAgentSurvivalDisabled(t *testing.T) {
 	cfg := Load()
 	if cfg.AgentSurvivalEnabled {
@@ -103,6 +117,59 @@ func TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability(t *testin
 	})
 	if !cfg.NamespacesMCPToolsByServer {
 		t.Fatal("InstanceConfig did not retain NamespacesMCPToolsByServer")
+	}
+}
+
+func TestInjectedKandevMCPProvenance(t *testing.T) {
+	workDir := t.TempDir()
+	base := &Config{Defaults: InstanceDefaults{
+		Protocol:     agent.ProtocolACP,
+		AgentCommand: "agent --acp",
+		WorkDir:      workDir,
+	}}
+	input := []McpServerConfig{
+		{Name: "kandev", Type: "stdio", Command: "spoofed-kandev"},
+		{Name: "third-party", Type: "http", URL: "https://mcp.example.test/mcp"},
+	}
+
+	cfg := base.NewInstanceConfig(43210, &InstanceOverrides{
+		Env:        []string{},
+		McpServers: input,
+	})
+	if !cfg.InjectedKandevMCP {
+		t.Fatal("positive-port instance must retain injected Kandev provenance")
+	}
+	if len(cfg.McpServers) != 3 {
+		t.Fatalf("McpServers = %+v, want injected HTTP/SSE plus third-party", cfg.McpServers)
+	}
+	if cfg.McpServers[0].Name != "kandev" || cfg.McpServers[0].Type != "http" || cfg.McpServers[0].URL != "http://localhost:43210/mcp" {
+		t.Fatalf("HTTP injection = %+v", cfg.McpServers[0])
+	}
+	if cfg.McpServers[1].Name != "kandev" || cfg.McpServers[1].Type != "sse" || cfg.McpServers[1].URL != "http://localhost:43210/sse" {
+		t.Fatalf("SSE injection = %+v", cfg.McpServers[1])
+	}
+	if cfg.McpServers[2].Name != "third-party" {
+		t.Fatalf("unrelated MCP server was not preserved: %+v", cfg.McpServers)
+	}
+
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal InstanceConfig: %v", err)
+	}
+	var serialized map[string]any
+	if err := json.Unmarshal(encoded, &serialized); err != nil {
+		t.Fatalf("unmarshal InstanceConfig: %v", err)
+	}
+	if _, present := serialized["InjectedKandevMCP"]; present {
+		t.Fatalf("provenance marker leaked into serialized config: %s", encoded)
+	}
+
+	withoutPort := base.NewInstanceConfig(0, &InstanceOverrides{
+		Env:        []string{},
+		McpServers: input,
+	})
+	if withoutPort.InjectedKandevMCP {
+		t.Fatal("zero-port instance must not claim injected Kandev provenance")
 	}
 }
 
@@ -208,6 +275,7 @@ func TestCollectAgentEnvGitHubCLIShimSurvivesLoginShell(t *testing.T) {
 		"KANDEV_GITHUB_CLI_BASH_ENV":          bashEnv,
 		"BASH_ENV":                            parentBashEnv,
 		"KANDEV_BASH_HOOK_MARKER":             marker,
+		"HOME":                                t.TempDir(),
 		pathEnvKey:                            "/usr/bin:/bin",
 	})
 	if err != nil {

@@ -44,7 +44,26 @@ func (r *sameStepMoveRaceRepository) UpdateTaskIfWorkflowStepMatches(
 	return r.Repository.UpdateTaskIfWorkflowStepMatches(ctx, task, expectedStepID, expectedWorkflowID)
 }
 
-func TestHandleMoveTask_SameStepRaceRecordsStaleSourceAndReplays(t *testing.T) {
+func (r *sameStepMoveRaceRepository) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID, targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	expectedWorkflowID string,
+) (bool, bool, error) {
+	r.once.Do(func() {
+		if r.beforeUpdate != nil {
+			r.beforeUpdate()
+		}
+	})
+	return r.Repository.UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+		ctx, task, expectedStepID, targetStepID, limit, admittedState, queueExitPending, expectedWorkflowID,
+	)
+}
+
+func TestHandleMoveTask_CrossStepRaceRecordsStaleSourceAndReplays(t *testing.T) {
 	ctx := context.Background()
 	var raceRepo *sameStepMoveRaceRepository
 	svc, repo, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflowTasks(t, func(repo *taskrepo.Repository) taskrepository.TaskRepository {
@@ -57,6 +76,7 @@ func TestHandleMoveTask_SameStepRaceRecordsStaleSourceAndReplays(t *testing.T) {
 	for _, step := range []*workflowmodels.WorkflowStep{
 		{ID: "step-source", WorkflowID: "wf-same-step", Name: "Source", Position: 0, CreatedAt: now, UpdatedAt: now},
 		{ID: "step-concurrent", WorkflowID: "wf-same-step", Name: "Concurrent", Position: 1, CreatedAt: now, UpdatedAt: now},
+		{ID: "step-target", WorkflowID: "wf-same-step", Name: "Target", Position: 2, CreatedAt: now, UpdatedAt: now},
 	} {
 		require.NoError(t, workflowRepo.CreateStep(ctx, step))
 	}
@@ -70,7 +90,7 @@ func TestHandleMoveTask_SameStepRaceRecordsStaleSourceAndReplays(t *testing.T) {
 	}
 	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
 	request := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
-		"task_id": "task-same-step", "workflow_id": "wf-same-step", "workflow_step_id": "step-source", "position": 9,
+		"task_id": "task-same-step", "workflow_id": "wf-same-step", "workflow_step_id": "step-target", "position": 9,
 	})
 	request.ID = "same-step-race"
 
@@ -85,7 +105,7 @@ func TestHandleMoveTask_SameStepRaceRecordsStaleSourceAndReplays(t *testing.T) {
 	assert.Equal(t, "step-concurrent", operation.ObservedStepID)
 
 	retry := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
-		"task_id": "task-same-step", "workflow_id": "wf-same-step", "workflow_step_id": "step-source", "position": 0,
+		"task_id": "task-same-step", "workflow_id": "wf-same-step", "workflow_step_id": "step-target", "position": 0,
 	})
 	retry.ID = request.ID
 	retryResponse, err := h.handleMoveTask(ctx, retry)

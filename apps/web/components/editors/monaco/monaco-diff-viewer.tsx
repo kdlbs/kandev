@@ -76,6 +76,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
   const commentState = useDiffViewerComments({
     data,
     sessionId,
+    repositoryName: props.repo,
     compact,
     onCommentAdd,
     onCommentDelete,

@@ -33,7 +33,7 @@ test.describe("Org chart", () => {
     await testPage.getByRole("combobox", { name: "Reports to" }).click();
     const listbox = testPage.getByRole("listbox");
     await expect(listbox).toBeVisible();
-    await listbox.getByRole("option", { name: "CEO" }).click();
+    await listbox.getByRole("option", { name: "CEO", exact: true }).click();
 
     const saved = waitForHttp(testPage, "PATCH", new RegExp(`/api/v1/office/agents/${workerId}$`));
     await testPage.getByRole("button", { name: "Save Configuration" }).click();

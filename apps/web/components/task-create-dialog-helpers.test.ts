@@ -335,6 +335,16 @@ describe("buildCreateTaskPayload priority", () => {
   it("defaults to medium when no priority is selected", () => {
     expect(buildCreateTaskPayload(base).priority).toBe("medium");
   });
+
+  it("sends task-only workflow profile replacements and omits an empty map", () => {
+    expect(
+      buildCreateTaskPayload({
+        ...base,
+        workflowAgentOverrides: { "profile-luna": "profile-terra" },
+      }).workflow_agent_overrides,
+    ).toEqual({ "profile-luna": "profile-terra" });
+    expect(buildCreateTaskPayload(base).workflow_agent_overrides).toBeUndefined();
+  });
 });
 
 it("initializes a planning session without navigating when auto-focus is off", () => {

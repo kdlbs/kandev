@@ -28,7 +28,8 @@ func TestCreateCanvasBuiltin(t *testing.T) {
 			"source directory",
 			"authorized live Kandev data",
 			"awaits permission review",
-			"requires promotion",
+			"adds workspace navigation",
+			"Do not claim that promotion is required to preview",
 			"local build alone does not publish",
 		} {
 			if !strings.Contains(prompt.Content, want) {

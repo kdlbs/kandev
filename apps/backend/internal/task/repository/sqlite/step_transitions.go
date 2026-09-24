@@ -3,13 +3,94 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strconv"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/steptelemetry"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/routing"
 )
+
+// ListTaskStepTransitions reads newest-first ledger rows using immutable IDs.
+func (r *Repository) ListTaskStepTransitions(ctx context.Context, taskID string, beforeID int64, limit int) ([]models.StepTransition, error) {
+	query := `SELECT id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, occurred_at
+		FROM task_step_transitions WHERE task_id = ?`
+	args := []any{taskID}
+	if beforeID > 0 {
+		query += ` AND id < ?`
+		args = append(args, beforeID)
+	}
+	query += ` ORDER BY id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list task step transitions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]models.StepTransition, 0)
+	for rows.Next() {
+		var item models.StepTransition
+		var fromWorkflow, fromStep, toWorkflow, toStep sql.NullString
+		if err := rows.Scan(&item.ID, &fromWorkflow, &fromStep, &toWorkflow, &toStep, &item.Trigger, &item.OccurredAt); err != nil {
+			return nil, fmt.Errorf("scan task step transition: %w", err)
+		}
+		item.FromWorkflowID = nullableValue(fromWorkflow)
+		item.FromWorkflowStepID = nullableValue(fromStep)
+		item.ToWorkflowID = nullableValue(toWorkflow)
+		item.ToWorkflowStepID = nullableValue(toStep)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func nullableValue(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
+}
+
+// ListWorkflowTransitionGroups counts retained routes involving one workflow.
+// Rows remain present when a step is removed because the ledger stores IDs.
+func (r *Repository) ListWorkflowTransitionGroups(ctx context.Context, workspaceID, workflowID, afterKey string, limit int) ([]models.TransitionGroup, error) {
+	const query = `WITH scoped AS (
+		SELECT CASE WHEN h.from_workflow_id = ? AND h.to_workflow_id = ? THEN 'within'
+			WHEN h.to_workflow_id = ? THEN 'entry' ELSE 'exit' END AS kind,
+			CASE WHEN h.from_workflow_id = ? THEN h.from_workflow_step_id END AS from_step_id,
+			CASE WHEN h.to_workflow_id = ? THEN h.to_workflow_step_id END AS to_step_id
+		FROM task_step_transitions h JOIN tasks t ON t.id = h.task_id
+		WHERE t.workspace_id = ? AND (h.from_workflow_id = ? OR h.to_workflow_id = ?)
+	), grouped AS (
+		SELECT kind, from_step_id, to_step_id, COUNT(*) AS route_count
+		FROM scoped GROUP BY kind, from_step_id, to_step_id
+	), ordered AS (
+		SELECT kind, from_step_id, to_step_id, route_count,
+			kind || '|' || COALESCE(from_step_id, '') || '|' || COALESCE(to_step_id, '') AS route_key
+		FROM grouped
+	)
+	SELECT kind, from_step_id, to_step_id, route_count FROM ordered
+	WHERE route_key > ? ORDER BY route_key LIMIT ?`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), workflowID, workflowID, workflowID,
+		workflowID, workflowID, workspaceID, workflowID, workflowID, afterKey, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list workflow transition groups: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]models.TransitionGroup, 0)
+	for rows.Next() {
+		var item models.TransitionGroup
+		var fromStep, toStep sql.NullString
+		if err := rows.Scan(&item.Kind, &fromStep, &toStep, &item.Count); err != nil {
+			return nil, fmt.Errorf("scan workflow transition group: %w", err)
+		}
+		item.FromStepID, item.ToStepID = nullableValue(fromStep), nullableValue(toStep)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
 
 // stepTransitionTx is satisfied by both *sql.Tx and *sqlx.Tx, the two
 // transaction types the mutation paths in this package use.
@@ -184,6 +265,112 @@ func (r *Repository) GetLatestTaskStepTransitionID(ctx context.Context, taskID s
 		return 0, err
 	}
 	return id, nil
+}
+
+// EnsureCurrentTaskStepTransition returns the latest workflow-entry identity,
+// creating a durable current-entry row when an older database predates the
+// transition ledger. The task-row write guard serializes this backfill with
+// workflow moves, so a launch never captures a synthetic identity for an
+// obsolete step.
+func (r *Repository) EnsureCurrentTaskStepTransition(ctx context.Context, taskID string) (int64, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin workflow entry backfill: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	entryID, err := r.ensureCurrentTaskStepTransitionTx(ctx, tx, taskID)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return entryID, nil
+}
+
+func (r *Repository) ensureCurrentTaskStepTransitionTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+) (int64, error) {
+	// Acquire the same task-row write boundary used by queue admission. SQLite
+	// otherwise allows a read transaction to observe the task before a
+	// concurrent writer commits its move, while PostgreSQL obtains the row lock
+	// through the same UPDATE and its FOR UPDATE read below.
+	guard, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET updated_at = updated_at WHERE id = ?
+	`), taskID)
+	if err != nil {
+		return 0, fmt.Errorf("guard task for workflow entry backfill: %w", err)
+	}
+	rows, err := guard.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("workflow entry backfill task rows affected: %w", err)
+	}
+	if rows == 0 {
+		return 0, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	}
+
+	var latestID int64
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT id
+		FROM task_step_transitions
+		WHERE task_id = ?
+		ORDER BY id DESC
+		LIMIT 1
+	`), taskID).Scan(&latestID)
+	if err != nil && err != sql.ErrNoRows {
+		return 0, fmt.Errorf("read workflow entry during backfill: %w", err)
+	}
+	if err == nil && latestID > 0 {
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
+		return latestID, nil
+	}
+
+	workflowID, workflowStepID, found, err := r.readTaskStepInTx(ctx, tx, taskID)
+	if err != nil {
+		return 0, err
+	}
+	if !found || workflowID == "" || workflowStepID == "" {
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
+		return 0, nil
+	}
+
+	backfilledID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
+		taskID:           taskID,
+		toWorkflowID:     workflowID,
+		toWorkflowStepID: workflowStepID,
+		occurredAt:       time.Now().UTC(),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("write workflow entry backfill: %w", err)
+	}
+	return backfilledID, nil
+}
+
+// CountStepEntries returns the number of committed task_step_transitions
+// rows whose to_workflow_step_id is stepID for taskID — the recorded entry
+// count REQ-TWS-001 floors at 1 to derive the step-entry number. Recorded
+// entries before the ledger's first row (2026-08-16) do not exist and cannot
+// be counted, so the result is a lower bound on the true entry count for a
+// task whose history predates the ledger. An empty taskID or stepID returns
+// (0, nil) without issuing a query: the ledger normalizes "" to NULL, so a
+// query would only ever be able to return 0.
+func (r *Repository) CountStepEntries(ctx context.Context, taskID, stepID string) (int, error) {
+	if taskID == "" || stepID == "" {
+		return 0, nil
+	}
+	const query = `SELECT COUNT(*) FROM task_step_transitions WHERE task_id = ? AND to_workflow_step_id = ?`
+	var count int
+	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), taskID, stepID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count step entries: %w", err)
+	}
+	return count, nil
 }
 
 // formatEntryID converts recordStepTransition's ledger identifier into the

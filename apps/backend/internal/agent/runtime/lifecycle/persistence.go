@@ -80,8 +80,8 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
 	}
 	running := &models.ExecutorRunning{
-		ID:                 execution.SessionID,
-		SessionID:          execution.SessionID,
+		ID:                 executionInventorySessionID(execution),
+		SessionID:          executionInventorySessionID(execution),
 		TaskID:             execution.TaskID,
 		ExecutorID:         strings.TrimSpace(getMetadataString(metadata, "executor_id")),
 		ExecutionProfileID: execution.AgentProfileID,
@@ -104,6 +104,14 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 			running.Metadata = make(map[string]interface{})
 		}
 		running.Metadata[MetadataKeyOfficeAgentProfileID] = officeProfileID
+	}
+	if execution.Owner.Kind == ExecutionOwnerRun {
+		if running.Metadata == nil {
+			running.Metadata = make(map[string]interface{})
+		}
+		running.Metadata[runExecutionOwnerMetadataKey] = execution.Owner
+		running.Resumable = false
+		running.WorktreePath = execution.WorkspacePath
 	}
 	if prior != nil {
 		if strings.TrimSpace(prior.ExecutorID) != "" {
@@ -255,6 +263,28 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 	_ = m.persistExecutorRunningResult(ctx, execution)
 }
 
+// buildRunningForPersistence reads a tracked execution while the execution
+// store's read lock is held. Status transitions use that store lock, so taking
+// the same lock here prevents persistence from racing with an asynchronous
+// readiness failure. Callers that are persisting an execution before it is
+// tracked still use the mapper directly.
+func (m *Manager) buildRunningForPersistence(
+	execution *AgentExecution,
+	prior *models.ExecutorRunning,
+) *models.ExecutorRunning {
+	if execution == nil || m.executionStore == nil {
+		return buildRunningFromExecution(execution, prior)
+	}
+
+	var running *models.ExecutorRunning
+	if err := m.executionStore.WithRLock(execution.ID, func(tracked *AgentExecution) {
+		running = buildRunningFromExecution(tracked, prior)
+	}); err == nil {
+		return running
+	}
+	return buildRunningFromExecution(execution, prior)
+}
+
 func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *AgentExecution) error {
 	if m.runningWriter == nil {
 		// Permitted in tests that don't exercise persistence; logged so a
@@ -279,7 +309,7 @@ func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *A
 	// its current columns and the next transition (or reconciliation) re-persists.
 	var prior *models.ExecutorRunning
 	if reader, ok := m.runningWriter.(executorRunningReader); ok {
-		existing, err := reader.GetExecutorRunningBySessionID(ctx, execution.SessionID)
+		existing, err := reader.GetExecutorRunningBySessionID(ctx, executionInventorySessionID(execution))
 		switch {
 		case err == nil:
 			prior = existing
@@ -297,7 +327,7 @@ func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *A
 		execution.AgentProfileID = prior.ExecutionProfileID
 	}
 
-	running := buildRunningFromExecution(execution, prior)
+	running := m.buildRunningForPersistence(execution, prior)
 	// Attach the host-local liveness handle for local/standalone rows. Kept out
 	// of buildRunningFromExecution (a pure mapper) because the PID lives on the
 	// manager, wired from the agentctl launcher at DI. resolveLocalPID returns 0

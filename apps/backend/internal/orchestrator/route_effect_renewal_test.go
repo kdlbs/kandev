@@ -683,7 +683,7 @@ func TestLaunchProcessOnEnterRetriesTransientEffectCompletion(t *testing.T) {
 	session, err := baseRepo.GetTaskSession(ctx, "async-completion-session")
 	require.NoError(t, err)
 
-	svc.launchProcessOnEnter(ctx, task.ID, session, step, task.Description, 0, 0, nil)
+	svc.launchProcessOnEnter(ctx, task.ID, session, step, task.Description, 0, nil)
 	<-done
 
 	require.Equal(t, 1, countingRepo.destinationEntryCount())

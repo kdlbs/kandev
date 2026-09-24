@@ -1539,6 +1539,44 @@ func TestRecoverAgentPromptStream(t *testing.T) {
 		require.ErrorContains(t, err, "stream manager is not configured")
 	})
 
+	t.Run("restores stale failed status when the recovered stream is already connected", func(t *testing.T) {
+		mock := newMockAgentServer(t)
+		t.Cleanup(mock.Close)
+
+		client := createTestClient(t, mock.server.URL)
+		t.Cleanup(client.Close)
+
+		streamCtx, cancelStream := context.WithCancel(context.Background())
+		t.Cleanup(cancelStream)
+		require.NoError(t, client.StreamUpdates(streamCtx, func(agentctl.AgentEvent) {}, nil, nil))
+		select {
+		case <-mock.wsConnected:
+		case <-time.After(2 * time.Second):
+			t.Fatal("mock server did not see preconnected updates stream")
+		}
+
+		mgr := newTestManager(t)
+		exec := &AgentExecution{
+			ID:                 "exec-preconnected-recover",
+			SessionID:          "session-preconnected-recover",
+			ACPSessionID:       "acp-session-1",
+			Status:             v1.AgentStatusFailed,
+			agentctl:           client,
+			promptDoneCh:       make(chan PromptCompletionSignal, 1),
+			sessionInitialized: true,
+		}
+		require.NoError(t, mgr.executionStore.Add(exec))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		t.Cleanup(cancel)
+		require.NoError(t, mgr.RecoverAgentPromptStream(ctx, exec.SessionID))
+
+		updated, ok := mgr.executionStore.Get(exec.ID)
+		require.True(t, ok)
+		require.Equal(t, v1.AgentStatusReady, updated.Status,
+			"a remote refresh may reconnect the stream before prompt recovery repairs the disconnect status")
+	})
+
 	t.Run("reconnects stream and restores stale failed status", func(t *testing.T) {
 		mock := newMockAgentServer(t)
 		t.Cleanup(mock.Close)

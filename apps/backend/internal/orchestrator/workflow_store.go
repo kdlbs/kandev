@@ -342,27 +342,13 @@ func (s *workflowStore) recordAlreadySatisfiedTransition(ctx context.Context, ta
 func (s *workflowStore) ApplyDeferredMoveTransition(
 	ctx context.Context,
 	taskID, sessionID, fromStepID, toStepID, moveID string,
-	records ...messagequeue.PendingMoveRecord,
-) error {
-	var record *messagequeue.PendingMoveRecord
-	if len(records) > 0 {
-		record = &records[0]
-	}
+	record messagequeue.PendingMoveRecord,
+) (int64, error) {
 	ctx, err := s.rehydrateDeferredRouteOperation(ctx, taskID, fromStepID, toStepID, moveID)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if record == nil {
-		applied, err := s.applyTransitionIfAtStepWithMoveID(ctx, taskID, sessionID, fromStepID, toStepID, engine.TriggerOnEnter, moveID, false)
-		if err != nil {
-			return err
-		}
-		if !applied {
-			return ErrTransitionSourceChanged
-		}
-		return nil
-	}
-	return s.applyTransition(ctx, taskID, sessionID, fromStepID, toStepID, engine.TriggerOnEnter, moveID, record)
+	return s.applyTransition(ctx, taskID, sessionID, fromStepID, toStepID, engine.TriggerOnEnter, moveID, &record)
 }
 
 func (s *workflowStore) rehydrateDeferredRouteOperation(ctx context.Context, taskID, fromStepID, toStepID, moveID string) (context.Context, error) {
@@ -473,14 +459,14 @@ func (s *workflowStore) applyTransition(
 	trigger engine.Trigger,
 	moveID string,
 	deferredMove *messagequeue.PendingMoveRecord,
-) error {
+) (int64, error) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
-		return fmt.Errorf("load task for transition: %w", err)
+		return 0, fmt.Errorf("load task for transition: %w", err)
 	}
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
 	if err != nil {
-		return fmt.Errorf("load target step for transition: %w", err)
+		return 0, fmt.Errorf("load target step for transition: %w", err)
 	}
 	// Keep WorkflowID in sync with the target step's owning workflow. Most
 	// callers transition within the same workflow (targetStep.WorkflowID ==
@@ -488,7 +474,7 @@ func (s *workflowStore) applyTransition(
 	// cross-workflow move_task_kandev hand-offs too — without this, the task
 	// would end up with a step ID from a workflow its WorkflowID doesn't match.
 	if err := markDeferredMoveApplied(task, moveID); err != nil {
-		return err
+		return 0, err
 	}
 
 	oldWorkflowID := task.WorkflowID
@@ -516,10 +502,10 @@ func (s *workflowStore) applyTransition(
 		if err := s.updateDeferredTransitionTask(
 			transitionCtx, task, fromStepID, targetStep, *deferredMove,
 		); err != nil {
-			return fmt.Errorf("update task workflow step: %w", err)
+			return 0, fmt.Errorf("update task workflow step: %w", err)
 		}
 	} else if err := s.updateTransitionTask(transitionCtx, task, fromStepID, targetStep); err != nil {
-		return fmt.Errorf("update task workflow step: %w", err)
+		return 0, fmt.Errorf("update task workflow step: %w", err)
 	}
 
 	// Pass the pre-move workflow ID through so cross-workflow transitions
@@ -544,7 +530,7 @@ func (s *workflowStore) applyTransition(
 
 	s.pullNextTaskOnVacate(ctx, fromStepID, taskID)
 
-	return nil
+	return task.WorkflowStepTransitionID, nil
 }
 
 func (s *workflowStore) carryStepHandoffForTransition(

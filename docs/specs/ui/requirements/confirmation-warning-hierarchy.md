@@ -163,6 +163,11 @@ repository resources, so that I can understand the consequence before acting.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.14:** At phone widths, the discard
   selection shall remain inside the existing centered dialog and its scrolling
   body. Its label shall provide a touch target of at least 44 CSS px.
+- **AC-UI-TASK-CLEANUP-CONFIRMATION-001.15:** When a task uses an inherited
+  parent workspace, its delete confirmation shall state that any running agent
+  sessions for the task will be stopped and that the parent task's worktree,
+  branch, and files remain untouched. It shall omit statements that the task's
+  worktree or branch will be deleted.
 
 Consent inspection, clean-workspace suppression, and failure recovery follow
 [task runtime cleanup](../../tasks/requirements/runtime-cleanup.md),

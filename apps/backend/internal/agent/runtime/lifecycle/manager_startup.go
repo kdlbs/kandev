@@ -49,6 +49,9 @@ func (m *Manager) startPassthroughExecution(ctx context.Context, execution *Agen
 		}
 		profileInfo = resolved
 	}
+	if err := validatePassthroughProvider(profileInfo); err != nil {
+		return err
+	}
 	return m.startPassthroughSession(ctx, execution, profileInfo)
 }
 
@@ -105,6 +108,12 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		return fmt.Errorf("execution %q not found", executionID)
 	}
 	if err := execution.contextResetAdmissionError(); err != nil {
+		return err
+	}
+	if err := m.admitExecutionOwner(ctx, &LaunchRequest{
+		Owner:          execution.Owner,
+		OwnerAdmission: execution.OwnerAdmission,
+	}); err != nil {
 		return err
 	}
 	defer func() {
@@ -190,6 +199,13 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
 
 	execution.remoteInstanceLifecycleMu.Lock()
+	if err := m.admitExecutionOwner(operationCtx, &LaunchRequest{
+		Owner:          execution.Owner,
+		OwnerAdmission: execution.OwnerAdmission,
+	}); err != nil {
+		execution.remoteInstanceLifecycleMu.Unlock()
+		return err
+	}
 	if err := m.ensureLaunchSessionStillActive(operationCtx, execution.SessionID, executionAdmissionAgent); err != nil {
 		execution.remoteInstanceLifecycleMu.Unlock()
 		return err
@@ -432,12 +448,16 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 		env[k] = v
 	}
 
+	// partial=true: a broken secret reference on one profile env var drops that
+	// var (with a warn log) rather than blanking the agent's whole environment
+	// at session launch (AC-004.1). Required keys (the OpenAI-compatible
+	// provider key) are checked fail-closed upstream in resolveProviderGatewayAuth.
 	if profileInfo != nil {
-		if err := m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env); err != nil {
+		if err := m.mergeAgentProfileEnvFromInfoWithPartial(ctx, profileInfo, env, true); err != nil {
 			return nil, fmt.Errorf("resolve agent profile environment: %w", err)
 		}
 	} else {
-		if err := m.mergeAgentProfileEnv(ctx, executionProfileID(req), env); err != nil {
+		if err := m.mergeAgentProfileEnvWithPartial(ctx, executionProfileID(req), env, true); err != nil {
 			return nil, fmt.Errorf("resolve agent profile environment: %w", err)
 		}
 	}

@@ -69,7 +69,7 @@ func TestPostgresCoordinatorGrantSchemaChecksCurrentSchema(t *testing.T) {
 	if current {
 		t.Fatal("legacy current schema was accepted because another schema has the corrected foreign key")
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("repair current coordinator grant schema: %v", err)
 	}
 	current, err = repo.coordinatorGrantSchemaCurrent()

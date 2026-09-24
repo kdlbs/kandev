@@ -395,8 +395,10 @@ printf 'prepared\\n' > "$workspace/custom-prepare-marker"
   test("stopping the session cleans up the session runtime dir but leaves the task dir", async ({
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(180_000);
+    await backend.ensureReady();
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "H7 stop cleanup",

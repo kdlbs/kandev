@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -54,10 +55,10 @@ func TestCoordinatorGrantSchemaRepairsLegacyForeignKeyAndReplays(t *testing.T) {
 		t.Fatalf("insert legacy grant: %v", err)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("repair legacy grant schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay grant schema migration: %v", err)
 	}
 

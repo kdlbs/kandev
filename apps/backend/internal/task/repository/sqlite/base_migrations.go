@@ -14,7 +14,30 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/startup"
 )
+
+// migrateMessagePayloadStorage adds digest-backed external storage for large
+// tool-message payloads (currently shell command stdout/stderr) so
+// task_session_messages.metadata stays bounded while preserving lazy,
+// integrity-verified detail loading. See externalizeMessagePayload (write
+// path) and RehydrateMessagePayload (explicit authorized read path) in
+// message_payload.go. task_message_payloads is content-addressed by SHA-256
+// digest, so an identical payload referenced by more than one message is
+// stored exactly once.
+func (r *Repository) migrateMessagePayloadStorage() {
+	_ = r.migrate.Apply("task_session_messages.payload_digest", `ALTER TABLE task_session_messages ADD COLUMN payload_digest TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_session_messages.payload_size", `ALTER TABLE task_session_messages ADD COLUMN payload_size INTEGER NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("idx_messages_payload_digest", `CREATE INDEX IF NOT EXISTS idx_messages_payload_digest ON task_session_messages(payload_digest)`)
+	_ = r.migrate.Apply("task_message_payloads.table", fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS task_message_payloads (
+			digest TEXT PRIMARY KEY,
+			compressed_content %s NOT NULL,
+			uncompressed_size INTEGER NOT NULL,
+			compressed_size INTEGER NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		)`, dialect.BlobType(r.db.DriverName())))
+}
 
 // migrateExecutorProfiles adds mcp_policy column and drops is_default from executor_profiles.
 func (r *Repository) migrateExecutorProfiles() error {
@@ -53,7 +76,9 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 }
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
-func (r *Repository) runMigrations() error {
+//
+//nolint:cyclop,funlen,maintidx // Legacy flat list of independent idempotent migration steps.
+func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrateCoordinatorGrantSchema(); err != nil {
 		return err
 	}
@@ -119,6 +144,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
 	}
+	// Store task-local fixed-step profile substitutions after the workflow-FK
+	// rebuild so legacy databases cannot lose the column during that recreate.
+	_ = r.migrate.Apply("tasks.workflow_agent_overrides", `ALTER TABLE tasks ADD COLUMN workflow_agent_overrides TEXT`)
 	// Must run AFTER migrateTasksRemoveWorkflowFK: that migration recreates
 	// tasks from an explicit column list. Adding this column beforehand would
 	// have it silently dropped by the recreate on any database still carrying
@@ -157,6 +185,10 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTaskEnvironmentReposAllowMultiBranch(); err != nil {
 		return err
 	}
+	_ = r.migrate.Apply("task_environment_repos.worktree_branch_owner", `ALTER TABLE task_environment_repos ADD COLUMN worktree_branch_owner TEXT NOT NULL DEFAULT 'unknown'`)
+	_ = r.migrate.Apply("task_environment_repos.worktree_integration_ref", `ALTER TABLE task_environment_repos ADD COLUMN worktree_integration_ref TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_environment_repos.worktree_recovery_head_sha", `ALTER TABLE task_environment_repos ADD COLUMN worktree_recovery_head_sha TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_environment_repos.worktree_branch_compacted_at", `ALTER TABLE task_environment_repos ADD COLUMN worktree_branch_compacted_at TIMESTAMP`)
 	r.migrate.Apply("workflows.sort_order", `ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflows.agent_profile_id", `ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("workflows.hidden", `ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
@@ -197,6 +229,12 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_plans.implementation_started_session_id", `ALTER TABLE task_plans ADD COLUMN implementation_started_session_id TEXT`)
 	r.migrate.Apply("task_plans.implementation_started_by", `ALTER TABLE task_plans ADD COLUMN implementation_started_by TEXT`)
 	_ = r.migrate.Apply("task_plans.comments_revision", `ALTER TABLE task_plans ADD COLUMN comments_revision INTEGER NOT NULL DEFAULT 0`)
+	if err := r.migrate.Apply("task_plans.write_version", `ALTER TABLE task_plans ADD COLUMN write_version TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := r.backfillTaskPlanWriteVersions(); err != nil {
+		return err
+	}
 
 	// Authoritative per-message change signal (chat render-perf). SQLite forbids a
 	// non-constant default on ADD COLUMN, so the column is added nullable and
@@ -204,7 +242,9 @@ func (r *Repository) runMigrations() error {
 	// explicitly in CreateMessage/UpdateMessage. The backfill UPDATE is idempotent
 	// (WHERE updated_at IS NULL).
 	r.migrate.Apply("task_session_messages.updated_at", `ALTER TABLE task_session_messages ADD COLUMN updated_at TIMESTAMP`)
+	startup.BeginStep(ctx, startup.StepMessageTimestampsBackfill)
 	r.migrate.Apply("task_session_messages.updated_at.backfill", `UPDATE task_session_messages SET updated_at = created_at WHERE updated_at IS NULL`)
+	startup.EndStep(ctx, startup.StepMessageTimestampsBackfill)
 	r.migrate.Apply("idx_messages_session_updated", `CREATE INDEX IF NOT EXISTS idx_messages_session_updated ON task_session_messages(task_session_id, updated_at)`)
 
 	// task_session_commits gains a uniqueness constraint before its writer
@@ -368,7 +408,7 @@ func (r *Repository) runMigrations() error {
 	// table is not part of the supported upgrade path, so there is no
 	// intermediate-shape rebuild to run here. Only the historical-message
 	// backfill belongs in the migration phase.
-	r.migrateSubagentContextBackfill()
+	r.migrateSubagentContextBackfill(ctx)
 
 	// Durable per-session prompt ordinals. prompt_seq is allocated from a
 	// per-session sequence counter inside the create write boundary, so an
@@ -387,7 +427,19 @@ func (r *Repository) runMigrations() error {
 			task_session_id TEXT PRIMARY KEY,
 			last_seq INTEGER NOT NULL
 		)`)
-	if err := r.backfillPromptSeq(); err != nil {
+	if err := r.backfillPromptSeq(ctx); err != nil {
+		return err
+	}
+
+	// Bounded operational payload storage (PR-watch/storage-bounds plan,
+	// wave 2): digest-backed external storage for large tool-message
+	// payloads (currently shell command stdout/stderr - see
+	// externalizeMessagePayload/RehydrateMessagePayload) and a content
+	// digest on git snapshots so content-equivalent rows become
+	// identifiable via ListDuplicateGitSnapshotCandidates for a later,
+	// explicit maintenance pass to prune.
+	r.migrateMessagePayloadStorage()
+	if err := r.migrateGitSnapshotContentDigest(); err != nil {
 		return err
 	}
 
@@ -408,6 +460,24 @@ func (r *Repository) runMigrations() error {
 	// allocated.
 	_ = r.migrate.Apply("workflow_step_entries.marker_positions", `ALTER TABLE workflow_step_entries ADD COLUMN marker_positions TEXT NOT NULL DEFAULT ''`)
 
+	// One row per SSH executor holding observed reachability — deliberately
+	// not columns on executors, which holds user-authored config and a
+	// user-controlled status switch. No foreign key: deletion is explicit
+	// (DeleteExecutor deletes the row in the same transaction as the soft
+	// delete), not a cascade.
+	_ = r.migrate.Apply("executor_reachability.table", `
+		CREATE TABLE IF NOT EXISTS executor_reachability (
+			executor_id          TEXT PRIMARY KEY,
+			state                TEXT NOT NULL DEFAULT 'unknown',
+			reason               TEXT NOT NULL DEFAULT '',
+			message              TEXT NOT NULL DEFAULT '',
+			consecutive_failures INTEGER NOT NULL DEFAULT 0,
+			host                 TEXT NOT NULL DEFAULT '',
+			checked_at           TIMESTAMP,
+			last_success_at      TIMESTAMP,
+			updated_at           TIMESTAMP NOT NULL
+		)`)
+
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
 	// instead of leaving a schema that allocateStepEntryIfPending can't write to.
@@ -417,6 +487,44 @@ func (r *Repository) runMigrations() error {
 
 	return nil
 }
+
+// backfillTaskPlanWriteVersions assigns a fresh opaque token to legacy HEAD
+// rows. The empty-value predicate makes startup replay and an interrupted
+// backfill safe without changing an already assigned version.
+func (r *Repository) backfillTaskPlanWriteVersions() error {
+	ctx := r.migrationContext()
+	rows, err := r.db.QueryxContext(ctx, r.db.Rebind(`
+		SELECT id FROM task_plans
+		WHERE COALESCE(write_version, '') = ''
+	`))
+	if err != nil {
+		return fmt.Errorf("list plans missing write versions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var planIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("scan plan missing write version: %w", err)
+		}
+		planIDs = append(planIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate plans missing write versions: %w", err)
+	}
+	for _, id := range planIDs {
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
+			UPDATE task_plans
+			SET write_version = ?
+			WHERE id = ? AND COALESCE(write_version, '') = ''
+		`), uuid.NewString(), id); err != nil {
+			return fmt.Errorf("backfill plan write version %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
 func (r *Repository) backfillTaskSessionQueueIncarnations() error {
 	ctx := r.migrationContext()
 	rows, err := r.db.QueryxContext(ctx, `SELECT id FROM task_sessions WHERE queue_incarnation_id = ''`)
@@ -456,7 +564,7 @@ func (r *Repository) backfillTaskSessionQueueIncarnations() error {
 // session's sequence counter at its backfilled maximum. Idempotent: user rows
 // already carrying a nonzero prompt_seq are untouched, and the counter seed
 // ignores existing rows.
-func (r *Repository) backfillPromptSeq() error {
+func (r *Repository) backfillPromptSeq(ctx context.Context) error {
 	nmU := dialect.NormalizedMicrosecond(r.db.DriverName(), "u.created_at")
 	nmM := dialect.NormalizedMicrosecond(r.db.DriverName(), "task_session_messages.created_at")
 	update := fmt.Sprintf(`
@@ -468,7 +576,8 @@ func (r *Repository) backfillPromptSeq() error {
 			  AND (%s < %s OR (%s = %s AND u.id <= task_session_messages.id))
 		)
 		WHERE author_type = 'user' AND prompt_seq = 0`, nmU, nmM, nmU, nmM)
-	ctx := r.migrationContext()
+	startup.BeginStep(ctx, startup.StepPromptSeqBackfill)
+	defer startup.EndStep(ctx, startup.StepPromptSeqBackfill)
 	if _, err := r.db.ExecContext(ctx, update); err != nil {
 		return fmt.Errorf("backfill prompt_seq: %w", err)
 	}

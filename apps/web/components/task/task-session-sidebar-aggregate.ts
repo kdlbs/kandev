@@ -114,6 +114,7 @@ function reconcileTaskProjection(
     // a partial WS event, so do not let it erase the value from the full
     // workflow projection.
     autopilot: active.autopilot ?? projected.autopilot,
+    isFromOffice: active.isFromOffice ?? projected.isFromOffice,
     _workflowId: activeWorkflowId,
   };
   const task = activeTaskIsNewer(active, projected) ? activeTask : projected;

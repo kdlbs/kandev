@@ -9,16 +9,19 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	"github.com/kandev/kandev/internal/workflow/routing"
+	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -59,6 +62,9 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	if req.WorkflowStepID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
 	}
+	if h.taskSvc == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "task service unavailable", nil)
+	}
 	if replay, handled, err := h.replayMoveTaskOperation(ctx, msg, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position); handled {
 		return replay, err
 	}
@@ -73,6 +79,9 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	}
 	req.EntryOptions = entryOptions
 	req.Prompt = ""
+	if response, handled, err := h.completeSameStepMove(ctx, msg, req); handled || err != nil {
+		return response, err
+	}
 
 	// entry_options are OPTIONAL — config-mode/admin moves don't always have an
 	// agent to hand off to. When supplied, one-shot instructions/reset/profile
@@ -185,6 +194,123 @@ func (h *Handlers) replayPendingMoveRequest(ctx context.Context, operationID, ta
 		return move.WorkflowID, move.WorkflowStepID, move.Position, nil
 	}
 	return workflowID, targetStepID, position, nil
+}
+
+func (h *Handlers) completeSameStepMove(ctx context.Context, msg *ws.Message, req moveTaskRequest) (*ws.Message, bool, error) {
+	if h.taskSvc == nil {
+		return moveTaskErrorResponse(msg, ws.ErrorCodeInternalError, "task service is not configured")
+	}
+	task, err := h.taskSvc.GetTask(ctx, req.TaskID)
+	if err != nil || task == nil {
+		h.logger.Error("move_task: failed to load task for destination classification",
+			zap.String("task_id", req.TaskID), zap.Error(err))
+		return moveTaskErrorResponse(msg, ws.ErrorCodeInternalError, "failed to load task for move validation")
+	}
+	if task.WorkflowID != req.WorkflowID || task.WorkflowStepID != req.WorkflowStepID {
+		return nil, false, nil
+	}
+	if code, message := h.validateSameStepMove(ctx, req, task); code != "" {
+		return moveTaskErrorResponse(msg, code, message)
+	}
+	if turnID, producer, cause, causeID := h.workflowRouteCause(ctx, req.SenderSessionID, routing.ProducerManualMove); producer == routing.ProducerMergedPR {
+		err := h.taskSvc.RecordWorkflowRouteOperation(ctx, routing.Operation{
+			ID: workflowRouteOperationID("mcp-move", msg.ID), TaskID: req.TaskID, WorkspaceID: task.WorkspaceID,
+			Producer: producer, ExpectedStepID: task.WorkflowStepID, ObservedStepID: task.WorkflowStepID,
+			TargetStepID: req.WorkflowStepID, SessionID: req.SenderSessionID, TurnID: turnID,
+			ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SenderSessionID,
+			ExternalCause: cause, ExternalCauseID: causeID, Outcome: routing.OutcomeAlreadySatisfied,
+		})
+		if err != nil {
+			return moveTaskErrorResponse(msg, ws.ErrorCodeInternalError, "failed to record already-satisfied route")
+		}
+	}
+	response, err := ws.NewResponse(msg.ID, msg.Action, dto.MoveTaskResponse{
+		Task:        dto.FromTask(task),
+		Disposition: moveDispositionApplied,
+	})
+	return response, true, err
+}
+
+func (h *Handlers) validateSameStepMove(ctx context.Context, req moveTaskRequest, task *models.Task) (string, string) {
+	if err := h.taskSvc.AuthorizeWorkspaceScope(ctx, task.WorkspaceID, authz.ScopeTaskWrite); err != nil {
+		if service.IsForbidden(err) {
+			return ws.ErrorCodeForbidden, "task is not writable"
+		}
+		h.logger.Error("move_task: failed to authorize task for same-step completion",
+			zap.String("task_id", req.TaskID), zap.Error(err))
+		return ws.ErrorCodeInternalError, "failed to authorize task for move"
+	}
+	if task.ArchivedAt != nil {
+		return ws.ErrorCodeConflict, "archived tasks cannot be moved"
+	}
+	if code, message := h.validateSameStepMoveTargets(ctx, req, task); code != "" {
+		return code, message
+	}
+	if err := workflowmove.ValidateEntryOptions(req.EntryOptions, workflowmove.MoveChangePositionOnly); err != nil {
+		return ws.ErrorCodeValidation, err.Error()
+	}
+	return "", ""
+}
+
+func (h *Handlers) validateSameStepMoveTargets(
+	ctx context.Context,
+	req moveTaskRequest,
+	task *models.Task,
+) (string, string) {
+	if code, message := h.validateSameStepTargetWorkflow(ctx, req, task); code != "" {
+		return code, message
+	}
+	return h.validateSameStepTargetStep(ctx, req)
+}
+
+func (h *Handlers) validateSameStepTargetWorkflow(
+	ctx context.Context,
+	req moveTaskRequest,
+	task *models.Task,
+) (string, string) {
+	targetWorkflow, err := h.taskSvc.GetWorkflow(ctx, req.WorkflowID)
+	if err != nil {
+		h.logger.Error("move_task: failed to look up target workflow",
+			zap.String("task_id", req.TaskID), zap.String("workflow_id", req.WorkflowID), zap.Error(err))
+		if errors.Is(err, repoerrors.ErrWorkflowNotFound) || errors.Is(err, workflowservice.ErrNotVisible) {
+			return ws.ErrorCodeValidation, "target workflow_id does not exist"
+		}
+		return ws.ErrorCodeInternalError, "failed to validate target workflow"
+	}
+	if targetWorkflow == nil {
+		return ws.ErrorCodeValidation, "target workflow_id does not exist"
+	}
+	if targetWorkflow.WorkspaceID != task.WorkspaceID {
+		return ws.ErrorCodeValidation, "target workflow is in a different workspace"
+	}
+	return "", ""
+}
+
+func (h *Handlers) validateSameStepTargetStep(ctx context.Context, req moveTaskRequest) (string, string) {
+	if h.workflowCtrl == nil {
+		return ws.ErrorCodeInternalError, "workflow validation is not configured"
+	}
+	stepResponse, err := h.workflowCtrl.GetStep(ctx, req.WorkflowStepID)
+	if err != nil {
+		h.logger.Error("move_task: failed to look up target workflow step",
+			zap.String("task_id", req.TaskID), zap.String("workflow_step_id", req.WorkflowStepID), zap.Error(err))
+		if errors.Is(err, workflowservice.ErrNotVisible) || errors.Is(err, wfmodels.ErrWorkflowStepNotFound) {
+			return ws.ErrorCodeValidation, "target workflow_step_id does not exist"
+		}
+		return ws.ErrorCodeInternalError, "failed to validate target workflow step"
+	}
+	if stepResponse == nil || stepResponse.Step == nil {
+		return ws.ErrorCodeValidation, "target workflow_step_id does not exist"
+	}
+	if stepResponse.Step.WorkflowID != req.WorkflowID {
+		return ws.ErrorCodeValidation, "target workflow_step_id does not belong to the requested workflow_id"
+	}
+	return "", ""
+}
+
+func moveTaskErrorResponse(msg *ws.Message, code, message string) (*ws.Message, bool, error) {
+	response, err := ws.NewError(msg.ID, msg.Action, code, message, nil)
+	return response, true, err
 }
 
 // deferMoveTask records a PendingMove for the agent's turn-end handler to
@@ -385,10 +511,11 @@ func (h *Handlers) applyMoveTaskImmediate(
 		return ws.NewError(msg.ID, msg.Action, classifyMoveTaskError(err), moveTaskErrorMessage(err), nil)
 	}
 	response := dto.MoveTaskResponse{
-		Task:         dto.FromTask(result.Task),
-		MoveID:       result.MoveID,
-		EntryOptions: result.EntryOptions,
-		Disposition:  moveDispositionApplied,
+		Task:                  dto.FromTask(result.Task),
+		WorkflowEntryIdentity: result.WorkflowEntryIdentity,
+		MoveID:                result.MoveID,
+		EntryOptions:          result.EntryOptions,
+		Disposition:           moveDispositionApplied,
 	}
 	if result.WorkflowStep != nil {
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)

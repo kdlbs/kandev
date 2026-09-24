@@ -1456,6 +1456,8 @@ func (m *Manager) buildAdapterConfig() error {
 		AssumeMcpHttp:             m.cfg.AssumeMcpHttp,
 		RequiresProcessKill:       m.cfg.RequiresProcessKill,
 		NotificationQueueCapacity: m.cfg.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:   m.cfg.PromptCancelJoinTimeout,
+		ProviderGatewayAuth:       m.cfg.ProviderGatewayAuth,
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -2760,6 +2762,9 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	// If auto-approve is enabled, immediately approve with the first "allow" option
 	if m.cfg.AutoApprovePermissions {
 		return m.autoApprovePermission(req)
+	}
+	if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+		return response, nil
 	}
 
 	// Create pending permission with response channel

@@ -88,24 +88,25 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 }
 
 type wsCreateTaskRequest struct {
-	WorkspaceID       string                    `json:"workspace_id"`
-	WorkflowID        string                    `json:"workflow_id"`
-	WorkflowStepID    string                    `json:"workflow_step_id"`
-	Title             string                    `json:"title"`
-	Description       string                    `json:"description,omitempty"`
-	Autopilot         bool                      `json:"autopilot,omitempty"`
-	Priority          string                    `json:"priority,omitempty"`
-	State             *v1.TaskState             `json:"state,omitempty"`
-	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position          int                       `json:"position,omitempty"`
-	Metadata          map[string]interface{}    `json:"metadata,omitempty"`
-	StartAgent        bool                      `json:"start_agent,omitempty"`
-	AgentProfileID    string                    `json:"agent_profile_id,omitempty"`
-	ExecutorID        string                    `json:"executor_id,omitempty"`
-	ExecutorProfileID string                    `json:"executor_profile_id,omitempty"`
-	PlanMode          bool                      `json:"plan_mode,omitempty"`
-	Attachments       []v1.MessageAttachment    `json:"attachments,omitempty"`
-	ParentID          string                    `json:"parent_id,omitempty"`
+	WorkspaceID            string                    `json:"workspace_id"`
+	WorkflowID             string                    `json:"workflow_id"`
+	WorkflowStepID         string                    `json:"workflow_step_id"`
+	WorkflowAgentOverrides map[string]string         `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                    `json:"title"`
+	Description            string                    `json:"description,omitempty"`
+	Autopilot              bool                      `json:"autopilot,omitempty"`
+	Priority               string                    `json:"priority,omitempty"`
+	State                  *v1.TaskState             `json:"state,omitempty"`
+	Repositories           []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	Position               int                       `json:"position,omitempty"`
+	Metadata               map[string]interface{}    `json:"metadata,omitempty"`
+	StartAgent             bool                      `json:"start_agent,omitempty"`
+	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
+	ExecutorID             string                    `json:"executor_id,omitempty"`
+	ExecutorProfileID      string                    `json:"executor_profile_id,omitempty"`
+	PlanMode               bool                      `json:"plan_mode,omitempty"`
+	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
+	ParentID               string                    `json:"parent_id,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -136,22 +137,23 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "repository_id, local_path, or remote_url is required", nil)
 		}
 		repos = append(repos, dto.TaskRepositoryInput{
-			RepositoryID:   r.RepositoryID,
-			BaseBranch:     r.BaseBranch,
-			CheckoutBranch: r.CheckoutBranch,
-			BranchPolicyID: r.BranchPolicyID,
-			PRNumber:       r.PRNumber,
-			LocalPath:      r.LocalPath,
-			Name:           r.Name,
-			DefaultBranch:  r.DefaultBranch,
-			GitHubURL:      r.GitHubURL,
-			RemoteURL:      r.RemoteURL,
-			Provider:       r.Provider,
-			ProviderHost:   r.ProviderHost,
-			ProviderScope:  r.ProviderScope,
-			ProviderRepoID: r.ProviderRepoID,
-			ProviderOwner:  r.ProviderOwner,
-			ProviderName:   r.ProviderName,
+			CheckoutOptions: r.CheckoutOptions,
+			RepositoryID:    r.RepositoryID,
+			BaseBranch:      r.BaseBranch,
+			CheckoutBranch:  r.CheckoutBranch,
+			BranchPolicyID:  r.BranchPolicyID,
+			PRNumber:        r.PRNumber,
+			LocalPath:       r.LocalPath,
+			Name:            r.Name,
+			DefaultBranch:   r.DefaultBranch,
+			GitHubURL:       r.GitHubURL,
+			RemoteURL:       r.RemoteURL,
+			Provider:        r.Provider,
+			ProviderHost:    r.ProviderHost,
+			ProviderScope:   r.ProviderScope,
+			ProviderRepoID:  r.ProviderRepoID,
+			ProviderOwner:   r.ProviderOwner,
+			ProviderName:    r.ProviderName,
 		})
 	}
 
@@ -164,9 +166,12 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			req.Metadata = make(map[string]interface{})
 		}
 		req.Metadata[models.MetaKeyAgentProfileID] = req.AgentProfileID
-		if req.ExecutorProfileID != "" {
-			req.Metadata[models.MetaKeyExecutorProfileID] = req.ExecutorProfileID
+	}
+	if req.ExecutorProfileID != "" {
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
 		}
+		req.Metadata[models.MetaKeyExecutorProfileID] = req.ExecutorProfileID
 	}
 
 	title := strings.TrimSpace(req.Title)
@@ -185,6 +190,9 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkspaceID:                 req.WorkspaceID,
 		WorkflowID:                  req.WorkflowID,
 		WorkflowStepID:              req.WorkflowStepID,
+		WorkflowAgentOverrides:      req.WorkflowAgentOverrides,
+		ExecutorID:                  req.ExecutorID,
+		ExecutorProfileID:           req.ExecutorProfileID,
 		Title:                       title,
 		Description:                 description,
 		Autopilot:                   req.Autopilot,
@@ -324,22 +332,23 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.Repositories != nil {
 		for _, r := range req.Repositories {
 			repos = append(repos, dto.TaskRepositoryInput{
-				RepositoryID:   r.RepositoryID,
-				BaseBranch:     r.BaseBranch,
-				CheckoutBranch: r.CheckoutBranch,
-				BranchPolicyID: r.BranchPolicyID,
-				PRNumber:       r.PRNumber,
-				LocalPath:      r.LocalPath,
-				Name:           r.Name,
-				DefaultBranch:  r.DefaultBranch,
-				GitHubURL:      r.GitHubURL,
-				RemoteURL:      r.RemoteURL,
-				Provider:       r.Provider,
-				ProviderHost:   r.ProviderHost,
-				ProviderScope:  r.ProviderScope,
-				ProviderRepoID: r.ProviderRepoID,
-				ProviderOwner:  r.ProviderOwner,
-				ProviderName:   r.ProviderName,
+				CheckoutOptions: r.CheckoutOptions,
+				RepositoryID:    r.RepositoryID,
+				BaseBranch:      r.BaseBranch,
+				CheckoutBranch:  r.CheckoutBranch,
+				BranchPolicyID:  r.BranchPolicyID,
+				PRNumber:        r.PRNumber,
+				LocalPath:       r.LocalPath,
+				Name:            r.Name,
+				DefaultBranch:   r.DefaultBranch,
+				GitHubURL:       r.GitHubURL,
+				RemoteURL:       r.RemoteURL,
+				Provider:        r.Provider,
+				ProviderHost:    r.ProviderHost,
+				ProviderScope:   r.ProviderScope,
+				ProviderRepoID:  r.ProviderRepoID,
+				ProviderOwner:   r.ProviderOwner,
+				ProviderName:    r.ProviderName,
 			})
 		}
 	}
@@ -499,9 +508,10 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	}
 
 	response := dto.MoveTaskResponse{
-		Task:         dto.FromTask(result.Task),
-		MoveID:       result.MoveID,
-		EntryOptions: result.EntryOptions,
+		Task:                  dto.FromTask(result.Task),
+		WorkflowEntryIdentity: result.WorkflowEntryIdentity,
+		MoveID:                result.MoveID,
+		EntryOptions:          result.EntryOptions,
 	}
 	if result.WorkflowStep != nil {
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)

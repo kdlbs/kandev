@@ -35,9 +35,9 @@ Office config sync is built standalone, as `internal/office/configsync`. It
 reuses workflow sync's *pattern* — the same field vocabulary, provider-dispatch
 shape, and poll-and-record lifecycle — but not its *package*: no shared library
 is extracted, and `internal/workflowsync` is neither modified nor imported.
-Extracting the common mechanics is deferred so it can be designed against two
-working implementations rather than one working and one imagined; the reasoning
-is under [Prior art and alternatives](#prior-art-and-alternatives).
+Extracting the common mechanics was deferred until both implementations existed
+to be compared. That question has since been settled as a decline, so no
+extraction is pending; see [Related decisions](#related-decisions).
 
 ## Requirement mapping
 
@@ -79,10 +79,10 @@ the reconciliation, and the HTTP surface. Nothing in it is shared with
 | `Runner` | Per-workspace lock, authorization, fetch, reconcile, `recordFailure`. |
 | `Controller` | The four HTTP handlers. |
 
-The field vocabulary, the status columns, and the poll-and-record lifecycle are
-deliberately identical to `workflow_sync_configs` — that is the requirement the
-task sets — but the identity is by *convention*, enforced by this design and by
-tests, not by a shared type.
+The field vocabulary, the status columns, and the poll-and-record lifecycle
+started out identical to `workflow_sync_configs` — that is the requirement the
+task sets — but the identity was convention, never a shared type or a test, and
+it is no longer maintained; see [Related decisions](#related-decisions).
 
 ### `internal/workflowsync` (unchanged)
 
@@ -140,12 +140,10 @@ of `TestOfficeRouteScopeCompleteness`.
 
 ### Config fields
 
-A separate table, with column names, types, and semantics deliberately
-identical to `workflow_sync_configs` so a later extraction is a merge rather
-than a rename: `workspace_id` (primary key), `provider`,
-`repo_owner`, `repo_name`, `project_path`, `branch`, `path`,
-`interval_seconds`, `poll_enabled`, `last_synced_at`, `last_ok`, `last_error`,
-`last_warnings`, `last_hash`, `created_at`, `updated_at`.
+Office's own table: `workspace_id` (primary key), `provider`, `repo_owner`,
+`repo_name`, `project_path`, `branch`, `path`, `interval_seconds`,
+`poll_enabled`, `last_synced_at`, `last_ok`, `last_error`, `last_warnings`,
+`last_hash`, `created_at`, `updated_at`.
 
 ### Defaults and the addressable root
 
@@ -432,7 +430,7 @@ provider, and repository for human debugging. Recorded
 ## Frontend
 
 Office gets its own card,
-`components/office/settings/office-config-sync-card.tsx`, modelled on
+`components/office/settings/office-config-sync-status-card.tsx`, modelled on
 `components/settings/workflow-sync-status-banner.tsx` but not shared with it.
 `workflow-sync-status-banner.tsx` is not edited, extracted, or rewrapped.
 
@@ -483,9 +481,8 @@ seam an earlier draft of this design proposed: a shared `internal/reposync`
 library onto which `internal/workflowsync` would be migrated and Office then
 built.
 
-**That extraction is deferred, and this design builds Office standalone
-instead.** The same note is the reason: it records a **god-object failure** from
-a codebase where a `SyncCoordinator` reached 2,506 lines, and warns that the
+**This design builds Office standalone instead.** The same note is the reason:
+it records a **god-object failure** from a codebase where a `SyncCoordinator` reached 2,506 lines, and warns that the
 failure begins when a shared coordinator absorbs per-caller variation. The two
 callers here are already known to
 diverge on five points, every one of which the shared seam would have had to
@@ -499,14 +496,9 @@ differences in a library written before either caller exists is speculative
 abstraction, which the repository's engineering principles rule out directly.
 
 Deferring costs genuine duplication — two poll loops, two config stores, two
-status cards — and that cost is accepted rather than argued away. It is bounded
-by building Office to the *same* vocabulary (identical column names, the same
-`SyncResult` field shape, the same poll-and-record lifecycle) so a later
-extraction is a merge of two working implementations rather than a redesign. A
-follow-up card carries the extraction and the five collisions above, sequenced
-after this ships: doing it first re-imports the coupling this narrowing removed,
-and "not worth extracting" is only a defensible verdict once both halves exist
-to be compared.
+status cards — and that cost is accepted rather than argued away. The extraction
+was taken up once both halves shipped, and declined: the five collisions above
+are seams, not a library. The vocabulary is no longer held aligned.
 
 `synthesis/pbt-from-ears-bridge.md` treats EARS acceptance criteria as
 **universal properties** - for any input where the trigger holds, the response
@@ -554,8 +546,17 @@ in
 then the settings card. `internal/workflowsync` is not touched at any point, so
 no step in this order can regress a shipped feature.
 
+## Out of scope
+
+**Table alignment with `workflow_sync_configs`.** Not held aligned and not
+compared here; the three timestamp columns diverge.
+
 ## Related decisions
 
+- [Decline the `internal/reposync` extraction](../../../decisions/2026-09-15-reposync-extraction-declined.md)
+  is the disposition of the card this design deferred to. It retires three
+  positions quoted in full there; every sentence stating them is rewritten
+  above.
 - [ADR 0031](../../../decisions/0031-office-skill-reference-files.md) defined
   skill support files and `file_inventory`, which round 2's `references/`
   request exists to populate.

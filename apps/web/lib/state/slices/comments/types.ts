@@ -28,11 +28,27 @@ type CommentBase = {
 export type DiffComment = CommentBase & {
   source: "diff";
   filePath: string;
+  /** Explicit scope for new comments; absent on legacy persisted rows. */
+  repositoryName?: string;
   startLine: number;
   endLine: number;
   side: AnnotationSide;
   codeContent: string;
 };
+
+export type ReviewFileComment = CommentBase & {
+  source: "review-file";
+  filePath: string;
+  repositoryName: string;
+  baseRef?: string;
+  isSubmodule?: boolean;
+};
+
+export type ReviewComment = DiffComment | ReviewFileComment;
+
+export function isReviewComment(c: Comment): c is ReviewComment {
+  return c.source === "diff" || c.source === "review-file";
+}
 
 export type PlanComment = CommentBase & {
   source: "plan";
@@ -100,6 +116,7 @@ export type AgentMessageComment = CommentBase & {
 
 export type Comment =
   | DiffComment
+  | ReviewFileComment
   | PlanComment
   | FileEditorComment
   | PRFeedbackComment

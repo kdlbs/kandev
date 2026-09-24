@@ -16,6 +16,7 @@ const ZH_CN_LOCALE = "zh-cn";
 const ZH_TW_LOCALE = "zh-tw";
 const ZH_HK_LOCALE = "zh-hk";
 const PT_PT_LOCALE = "pt-pt";
+const JA_LOCALE = "ja";
 const DISPLAY_LANGUAGE_KEY = "settings:displayLanguage";
 
 afterEach(async () => {
@@ -37,6 +38,9 @@ describe("locale predicates", () => {
     expect(isSupportedLocale("zh-HK")).toBe(true);
     expect(isSupportedLocale(PT_PT_LOCALE)).toBe(true);
     expect(isSupportedLocale("pt-PT")).toBe(true);
+    expect(isSupportedLocale(JA_LOCALE)).toBe(true);
+    expect(isSupportedLocale("ja-JP")).toBe(true);
+    expect(isSupportedLocale("  JA  ")).toBe(true);
     expect(isSupportedLocale("pseudo")).toBe(true);
     expect(isSupportedLocale("fr")).toBe(false);
     expect(isSupportedLocale(42)).toBe(false);
@@ -49,6 +53,8 @@ describe("locale predicates", () => {
     expect(normalizeLocale("zh-TW")).toBe(ZH_TW_LOCALE);
     expect(normalizeLocale("zh-HK")).toBe(ZH_HK_LOCALE);
     expect(normalizeLocale("pt-PT")).toBe(PT_PT_LOCALE);
+    expect(normalizeLocale("ja")).toBe(JA_LOCALE);
+    expect(normalizeLocale("ja-JP")).toBe(JA_LOCALE);
     expect(normalizeLocale("pseudo")).toBe("pseudo");
     expect(normalizeLocale("nope")).toBe(DEFAULT_LOCALE);
     expect(normalizeLocale(undefined)).toBe(DEFAULT_LOCALE);
@@ -56,7 +62,15 @@ describe("locale predicates", () => {
 
   it("exposes en as the default and lists every shipped locale", () => {
     expect(DEFAULT_LOCALE).toBe("en");
-    expect([...SUPPORTED_LOCALES]).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk", "pseudo"]);
+    expect([...SUPPORTED_LOCALES]).toEqual([
+      "en",
+      "pt-pt",
+      "zh-cn",
+      "zh-tw",
+      "zh-hk",
+      "ja",
+      "pseudo",
+    ]);
   });
 
   // Only the `isProd` half of the contract. `selectableLocales` also requires
@@ -64,8 +78,16 @@ describe("locale predicates", () => {
   // is fixed to `true` for the whole vitest run (config resolves in serve mode).
   // `bundling.test.ts` covers the decision that produces it, in both directions.
   it("hides the pseudo locale from production builds", () => {
-    expect(selectableLocales(false)).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk", "pseudo"]);
-    expect(selectableLocales(true)).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk"]);
+    expect(selectableLocales(false)).toEqual([
+      "en",
+      "pt-pt",
+      "zh-cn",
+      "zh-tw",
+      "zh-hk",
+      "ja",
+      "pseudo",
+    ]);
+    expect(selectableLocales(true)).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk", "ja"]);
   });
 
   /**
@@ -177,6 +199,17 @@ describe("activateLocale", () => {
     expect(i18n.hasResourceBundle(ZH_HK_LOCALE, "settings")).toBe(true);
     expect(i18n.getResource(ZH_HK_LOCALE, "settings", "displayLanguage")).toBe("顯示語言");
     expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe("顯示語言");
+  });
+
+  it("activates Japanese and resolves its real catalog", async () => {
+    const result = await activateLocale("ja");
+    expect(result).toBe(JA_LOCALE);
+    expect(i18n.language).toBe(JA_LOCALE);
+    expect(document.documentElement.lang).toBe(JA_LOCALE);
+    expect(readLocaleCookie()).toBe(JA_LOCALE);
+    expect(i18n.hasResourceBundle(JA_LOCALE, "settings")).toBe(true);
+    expect(i18n.getResource(JA_LOCALE, "settings", "displayLanguage")).toBe("表示言語");
+    expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe("表示言語");
   });
 
   it("resolves reviewed product vocabulary for each Traditional Chinese region", async () => {

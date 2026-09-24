@@ -49,7 +49,7 @@ export class SessionPage {
     return this.page.getByTestId("port-forwarding-menu-item");
   }
   get mobileSessionMenu() {
-    return this.page.getByTestId("mobile-session-menu");
+    return this.page.getByTestId("mobile-task-picker-trigger");
   }
   get mobilePortForwardingToggle() {
     return this.page.getByTestId("mobile-port-forwarding-toggle");
@@ -1075,6 +1075,24 @@ export class SessionPage {
     await tab.click(options);
   }
 
+  /** Open the Changes Diff action in its direct or width-aware overflow presentation. */
+  async openChangesDiff(): Promise<void> {
+    const direct = this.changes.getByRole("button", { name: "Diff", exact: true });
+    const overflow = this.changes.getByTestId("panel-header-overflow").first();
+    await expect
+      .poll(async () => (await direct.isVisible()) || (await overflow.isVisible()), {
+        timeout: 15_000,
+        message: "Waiting for the Changes Diff action",
+      })
+      .toBe(true);
+    if (await direct.isVisible()) {
+      await direct.click();
+      return;
+    }
+    await overflow.click();
+    await this.page.getByRole("menuitem", { name: "Diff", exact: true }).click();
+  }
+
   /**
    * Click the session/chat tab regardless of its current title.
    * Session tabs are renamed from "Agent" to "#N AgentName" by useChatSessionTitle,
@@ -1430,10 +1448,17 @@ export class SessionPage {
       return;
     }
 
-    await compactStepper.click();
-    const moveButton = this.page.getByTestId(`workflow-step-disclosure-move-${step.id}`);
-    await expect(moveButton).toBeVisible();
-    await moveButton.click();
+    await expect(async () => {
+      const moveButton = this.page.getByTestId(`workflow-step-disclosure-move-${step.id}`);
+      if (!(await moveButton.isVisible())) {
+        await compactStepper.click();
+      }
+      await expect(moveButton).toBeVisible({ timeout: 3_000 });
+      await moveButton.click({ timeout: 3_000 });
+    }).toPass({
+      timeout: 15_000,
+      intervals: [100, 250, 500],
+    });
   }
 
   /**

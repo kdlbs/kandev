@@ -33,6 +33,7 @@ type Service struct {
 	workspaceProvider    WorkspaceProvider
 	resolveProfile       models.AgentProfileResolver
 	matchProfile         models.AgentProfileMatcher
+	importProfileCatalog ImportProfileCatalog
 	syncOps              SyncWorkflowOps
 	sessionAccessChecker func(context.Context, string) error
 	// workflowAccessChecker / workspaceAccessChecker carry the task domain's
@@ -902,6 +903,20 @@ func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, po
 // profile IDs embedded in existing review actions while imports use the normal
 // matcher directly.
 func (s *Service) stepFromPortableWithMatcher(workflowID string, sp models.StepPortable, posToID map[int]string, matchProfile models.AgentProfileMatcher, existingProfileID string) *models.WorkflowStep {
+	return s.stepFromPortableWithMatcherOptions(workflowID, sp, posToID, matchProfile, existingProfileID, true)
+}
+
+// stepFromPortableWithMatcherOptions keeps review-action profile conversion
+// available while allowing the interactive importer to bind direct step
+// profiles from its validated selection map without invoking the matcher.
+func (s *Service) stepFromPortableWithMatcherOptions(
+	workflowID string,
+	sp models.StepPortable,
+	posToID map[int]string,
+	matchProfile models.AgentProfileMatcher,
+	existingProfileID string,
+	matchDirectProfile bool,
+) *models.WorkflowStep {
 	step := &models.WorkflowStep{
 		ID:                         posToID[sp.Position],
 		WorkflowID:                 workflowID,
@@ -923,7 +938,7 @@ func (s *Service) stepFromPortableWithMatcher(workflowID string, sp models.StepP
 		WIPLimit:                   sp.WIPLimit,
 		PullFromStepID:             sp.PullFromStepID(posToID),
 	}
-	if sp.AgentProfile != nil && matchProfile != nil {
+	if matchDirectProfile && sp.AgentProfile != nil && matchProfile != nil {
 		step.AgentProfileID = matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode, existingProfileID)
 	}
 	return step

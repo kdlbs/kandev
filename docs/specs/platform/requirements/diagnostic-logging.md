@@ -41,6 +41,11 @@ Users can see frontend failures that leave no backend evidence, and support cann
   than 15 seconds. A browser wall-clock offset shall not change this duration.
   The backend shall remain authoritative for job expiry.
 
+- **AC-PLATFORM-DIAGNOSTIC-LOGGING-001.12:** When a resolved setup script
+  contains only comments, a shebang, or blank lines, its omission shall not
+  produce a warning. Debug diagnostics can record the omission. Executable
+  script failures shall retain their existing warning behavior.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/diagnostic-logging-01.md), [part 2](../system-design/diagnostic-logging-02.md).

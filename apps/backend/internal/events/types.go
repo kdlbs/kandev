@@ -23,6 +23,13 @@ const (
 	// predecessor failed or was cancelled. Payload:
 	// {task_id, failed_task_id, failed_state}.
 	TaskDependencyFailed = "task.dependency_failed"
+	// TaskStalled fires when the session reconciliation sweep observes a task
+	// holding an active session with no live execution behind it and no
+	// session events or messages for longer than the stall threshold.
+	// Detection only: the event never accompanies a state transition, a
+	// synthesized decision, or a queued run. Payload:
+	// {task_id, workspace_id, session_ids, stalled_for, last_event_at}.
+	TaskStalled = "task.stalled"
 )
 
 // Event types for plugin-backed canvas lifecycle changes. Payloads contain
@@ -30,9 +37,11 @@ const (
 // source files, application state, or runtime capabilities.
 const (
 	CanvasCreated                   = "canvas.created"
+	CanvasUpdated                   = "canvas.updated"
 	CanvasReleaseActivated          = "canvas.release.activated"
 	CanvasReleasePermissionRequired = "canvas.release.permission_required"
 	CanvasPromoted                  = "canvas.promoted"
+	CanvasWorkspaceDataEnabled      = "canvas.workspace_data_enabled"
 	CanvasArchived                  = "canvas.archived"
 	CanvasRestored                  = "canvas.restored"
 	CanvasRemoved                   = "canvas.removed"
@@ -116,12 +125,13 @@ const TaskStatusSummaryUpdated = "task.status_summary.updated"
 
 // Event types for task plans
 const (
-	TaskPlanCreated         = "task_plan.created"
-	TaskPlanUpdated         = "task_plan.updated"
-	TaskPlanDeleted         = "task_plan.deleted"
-	TaskPlanRevisionCreated = "task_plan.revision.created"
-	TaskPlanReverted        = "task_plan.reverted"
-	TaskPlanCommentsChanged = "task_plan.comments.changed"
+	TaskPlanCreated            = "task_plan.created"
+	TaskPlanUpdated            = "task_plan.updated"
+	TaskPlanDeleted            = "task_plan.deleted"
+	TaskPlanRevisionCreated    = "task_plan.revision.created"
+	TaskPlanReverted           = "task_plan.reverted"
+	TaskPlanCommentsChanged    = "task_plan.comments.changed"
+	TaskPreviewFeedbackChanged = "task.preview_feedback.changed"
 )
 
 // Event types for task walkthroughs (agent-authored guided code tours)
@@ -185,6 +195,10 @@ const (
 	ExecutorCreated = "executor.created"
 	ExecutorUpdated = "executor.updated"
 	ExecutorDeleted = "executor.deleted"
+	// ExecutorReachabilityChanged is published only when a probe or a
+	// connection-configuration reset actually changes the stored state or
+	// reason — a steady host never publishes.
+	ExecutorReachabilityChanged = "executor.reachability.changed"
 )
 
 // Event types for executor profiles
@@ -301,6 +315,16 @@ const (
 // Event types for available commands
 const (
 	AvailableCommandsUpdated = "available_commands.updated" // Available slash commands updated
+)
+
+// Event types for session launch warnings
+const (
+	// SessionLaunchWarning is published once, immediately before an SSH
+	// launch's CreateInstance call, when the target executor's stored
+	// reachability record is unreachable and the record is still within the
+	// probing window. It carries Kandev's own attribution of the target
+	// host, independent of whatever an agent process itself reports.
+	SessionLaunchWarning = "session.launch.warning"
 )
 
 // Event types for session mode
@@ -503,6 +527,16 @@ func BuildSessionModeWildcardSubject() string {
 // BuildAgentCapabilitiesSubject creates an agent capabilities subject for a specific session
 func BuildAgentCapabilitiesSubject(sessionID string) string {
 	return AgentCapabilitiesUpdated + "." + sessionID
+}
+
+// BuildSessionLaunchWarningSubject creates a session launch warning subject for a specific session
+func BuildSessionLaunchWarningSubject(sessionID string) string {
+	return SessionLaunchWarning + "." + sessionID
+}
+
+// BuildSessionLaunchWarningWildcardSubject creates a wildcard subscription for all session launch warning events
+func BuildSessionLaunchWarningWildcardSubject() string {
+	return SessionLaunchWarning + ".*"
 }
 
 // BuildAgentCapabilitiesWildcardSubject creates a wildcard subscription for all agent capabilities events
