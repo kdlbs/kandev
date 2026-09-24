@@ -58,4 +58,46 @@ test.describe("Task topbar remote repository", () => {
     await expect.poll(() => popup.url()).toBe(repositoryBrowserUrl);
     await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}$`));
   });
+
+  test("measures the repository crumb within its visible width cap", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const longRepositoryName =
+      "agent-orchestrator-with-a-deliberately-long-name-for-breadcrumb-measurement";
+    const longRepositoryUrl = `https://github.com/${repositoryOwner}/${longRepositoryName}`;
+    const task = await apiClient.createTask(
+      seedData.workspaceId,
+      "Measure a long repository crumb",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repositories: [
+          {
+            remote_url: `${longRepositoryUrl}.git`,
+            provider: "github",
+            provider_owner: repositoryOwner,
+            provider_name: longRepositoryName,
+          },
+        ],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const repositoryLink = testPage.getByRole("link", {
+      name: `GitHub repository ${repositoryOwner}/${longRepositoryName}`,
+    });
+    await expect(repositoryLink).toBeVisible();
+    const visibleWidth = await repositoryLink.evaluate(
+      (element) => element.getBoundingClientRect().width,
+    );
+    const ghostLabel = testPage.locator(`span[data-label="${longRepositoryName}"]`).first();
+    const measuredWidth = await ghostLabel.evaluate(
+      (element) => element.parentElement?.getBoundingClientRect().width ?? 0,
+    );
+
+    expect(visibleWidth).toBeLessThanOrEqual(160);
+    expect(measuredWidth).toBeCloseTo(visibleWidth, 0);
+  });
 });

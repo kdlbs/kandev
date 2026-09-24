@@ -327,10 +327,10 @@ function GhostLabel({ label, className }: { label: string; className?: string })
 
 function GhostParentLabel({ crumb }: { crumb: ParentCrumb }) {
   return (
-    <>
+    <span className="flex max-w-40 min-w-0 items-center gap-1.5">
       {crumb.icon && <span aria-hidden className="size-3.5 shrink-0" />}
-      <GhostLabel label={crumb.label} className="max-w-40 truncate" />
-    </>
+      <GhostLabel label={crumb.label} className="min-w-0 truncate" />
+    </span>
   );
 }
 
