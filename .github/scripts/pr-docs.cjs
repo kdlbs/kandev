@@ -1491,6 +1491,11 @@ function hasRequirementHeading(content, requirementId) {
   return typeof content === 'string' && requirementHeadingPattern(requirementId).test(content);
 }
 
+function isCodeSearchRateLimitError(error) {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /class=code-search category=rate-limit status=HTTP (?:403|429)\b/.test(message);
+}
+
 function changedRequirementSources(changedFiles, requirementDirectory) {
   const sources = new Map();
   const prefix = `${requirementDirectory}/`;
@@ -1547,6 +1552,8 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
   const loaded = new Map();
   const requirementSearches = new Map();
   const requirementDirectories = new Map();
+  const scannedRequirementDirectories = new Map();
+  const missingRequirementDirectories = new Set();
   let documentCount = 0;
   let totalBytes = 0;
   async function load(pathname, ref, targetContents) {
@@ -1588,21 +1595,41 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
     }
     return content;
   }
-
-  async function listRequirementDirectory(requirementDirectory, ref) {
-    const key = JSON.stringify([requirementDirectory, ref]);
-    if (!requirementDirectories.has(key)) {
+  async function listRequirementDirectory(directory) {
+    if (!requirementDirectories.has(directory)) {
       let entries = [];
       try {
-        entries = await client.listDirectory(requirementDirectory, ref);
+        entries = await client.listDirectory(directory, headSha);
       } catch (error) {
         if (!isMissingResourceError(error)) {
           throw error;
         }
+        missingRequirementDirectories.add(directory);
       }
-      requirementDirectories.set(key, entries);
+      requirementDirectories.set(directory, entries);
     }
-    return requirementDirectories.get(key);
+    return requirementDirectories.get(directory);
+  }
+  async function scanRequirementDirectory(directory, targetPaths) {
+    if (!scannedRequirementDirectories.has(directory)) {
+      const entries = await listRequirementDirectory(directory);
+      if (missingRequirementDirectories.has(directory)) {
+        throw new Error(`Requirements directory listing is missing for ${directory}`);
+      }
+      const paths = entries
+        .filter(entry => entry.type === 'file'
+          && POSIX_PATH.dirname(entry.path) === directory
+          && entry.path.endsWith('.md'))
+        .map(entry => entry.path);
+      const unseenCount = paths.filter(pathname => !loaded.has(`${headSha}\u0000${pathname}`)).length;
+      if (documentCount + unseenCount > MAX_DOCUMENTS) {
+        throw new Error(`Requirement directory scan exceeds the ${MAX_DOCUMENTS}-document limit`);
+      }
+      scannedRequirementDirectories.set(directory, paths);
+    }
+    for (const pathname of scannedRequirementDirectories.get(directory)) {
+      targetPaths.add(pathname);
+    }
   }
 
   for (const workOrderPath of selectChangedWorkOrders(changedFiles)) {
@@ -1685,7 +1712,7 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
       }
       const checkedAddedRequirementPaths = new Set();
       if (addedRequirementPaths.size > 0 && typeof client.listDirectory === 'function') {
-        const entries = await listRequirementDirectory(requirementDirectory, headSha);
+        const entries = await listRequirementDirectory(requirementDirectory);
         for (const entry of entries) {
           if (
             entry.type !== 'file'
@@ -1700,6 +1727,11 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
           if (addedRequirementPaths.has(pathname)) {
             checkedAddedRequirementPaths.add(pathname);
           }
+        }
+      }
+      if (scannedRequirementDirectories.has(requirementDirectory)) {
+        for (const pathname of scannedRequirementDirectories.get(requirementDirectory)) {
+          requirementPaths.add(pathname);
         }
       }
       const workOrderRequirements = new Set(workOrder.requirements ?? []);
@@ -1735,15 +1767,27 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
       const unresolvedRequirementIds = [];
       if (typeof client.searchCode === 'function') {
         for (const requirementId of referencedRequirementIds) {
-          if (verifiedRequirementIds.has(requirementId) || ambiguousRequirementIds.has(requirementId)) {
+          if (
+            verifiedRequirementIds.has(requirementId)
+            || ambiguousRequirementIds.has(requirementId)
+            || scannedRequirementDirectories.has(requirementDirectory)
+          ) {
             continue;
           }
           const searchKey = JSON.stringify([requirementDirectory, requirementId]);
           if (!requirementSearches.has(searchKey)) {
-            requirementSearches.set(
-              searchKey,
-              await client.searchCode(requirementId, requirementDirectory),
-            );
+            try {
+              requirementSearches.set(
+                searchKey,
+                await client.searchCode(requirementId, requirementDirectory),
+              );
+            } catch (error) {
+              if (!isCodeSearchRateLimitError(error) || typeof client.listDirectory !== 'function') {
+                throw error;
+              }
+              await scanRequirementDirectory(requirementDirectory, requirementPaths);
+              break;
+            }
           }
           const matches = requirementSearches.get(searchKey);
           if (matches.length === 0) {
@@ -1761,7 +1805,7 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
         );
       }
       if (unresolvedRequirementIds.length > 0 && typeof client.listDirectory === 'function') {
-        const entries = await listRequirementDirectory(requirementDirectory, headSha);
+        const entries = await listRequirementDirectory(requirementDirectory);
         const candidateNames = new Set(unresolvedRequirementIds.map(requirementId =>
           POSIX_PATH.basename(candidateRequirementPath(requirementDirectory, requirementId))
         ));

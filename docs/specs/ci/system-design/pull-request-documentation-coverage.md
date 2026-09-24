@@ -1,6 +1,6 @@
 ---
 status: draft
-last_updated: 2026-09-21
+last_updated: 2026-09-23
 system: ci
 requirements:
   - REQ-CI-PR-DOCS-001
@@ -90,6 +90,7 @@ stable pull request path has this request budget before transient retries:
 | Changed files | One request per 100-file page. |
 | File contents | At most one read for each `(revision, path)` pair. |
 | Requirement search | At most one search for each unresolved `(directory, requirement ID)` pair. |
+| Requirement directory | At most one listing and exact-head scan per system directory. |
 | Commit status | One pending write and one terminal write. |
 
 The initial pull request snapshot used to choose the pending-status revision is
@@ -108,8 +109,11 @@ Use the existing code-search and directory fallback for a new, moved, absent,
 or unresolved ID. A moved ID needs fallback when it has no verified base
 identity. Search results name candidates only. Read every candidate
 at the exact head. Then use structural validation to establish the definition.
-Missing, incomplete, or ambiguous results fail closed. Document-count, response,
-and byte limits apply across the head and base reads.
+If code search is rate-limited, list the exact-head requirements directory and
+read every direct Markdown file within the remaining document and byte limits.
+This complete scan preserves duplicate detection without depending on the
+search quota. Missing, incomplete, or ambiguous results fail closed. Document
+count, response, and byte limits apply across the head and base reads.
 
 ## Events and overrides
 
@@ -153,7 +157,10 @@ Do not report stale successes for a new head. Metadata publication is eventually
 
 Paginate file lists and compare the count to current `changed_files`. Reject results at GitHub's 3,000-file cap and mismatched counts.
 Reject truncated responses, invalid encodings, oversized documents, unsupported frontmatter, symlinks, submodules, and ambiguous IDs.
-Bound artifact reads to 100 documents, 256 KiB each, and 4 MiB total. Report limits explicitly; never silently discard documents.
+Bound changed work orders to 100 and artifact reads to 200 documents, 256 KiB
+each, and 4 MiB total. The document bound also applies to a complete system
+requirements scan when code search is rate-limited. Report limits explicitly;
+never silently discard documents.
 
 The API adapter makes at most three attempts for transient transport failures,
 HTTP 408 or 429, and retryable 5xx responses. It also retries HTTP 403 responses

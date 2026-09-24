@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
+import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
 
 // Regression test for the user-reported bug:
 //
@@ -55,11 +56,9 @@ test.describe("Create-task URL flow - branches after reopen", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
-    // Switch to Remote tab and paste via the chip popover (URL input moved
-    // inside the chip in Task 5/8).
-    await testPage.getByTestId("source-mode-remote").click();
-    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-    const pasteInput = testPage.getByTestId("remote-repo-input");
+    // Add the URL through the shared repository picker.
+    await openTaskRepositoryPicker(testPage);
+    const pasteInput = testPage.getByTestId("task-repository-picker-input");
     await pasteInput.fill(`https://github.com/${repoFullName}`);
     await pasteInput.press("Enter");
 

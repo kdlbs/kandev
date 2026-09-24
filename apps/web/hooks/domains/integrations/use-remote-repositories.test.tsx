@@ -7,8 +7,11 @@ const mocks = vi.hoisted(() => ({
   listAzureDevOpsProjects: vi.fn(),
   listAzureDevOpsRepositories: vi.fn(),
   useGitHubStatus: vi.fn(),
+  useGitHubEnabled: vi.fn(),
   useGitLabStatus: vi.fn(),
+  useGitLabEnabled: vi.fn(),
   useAzureDevOpsConnection: vi.fn(),
+  useAzureDevOpsEnabled: vi.fn(),
 }));
 
 vi.mock("@/lib/api/domains/github-api", () => ({
@@ -22,11 +25,20 @@ vi.mock("@/lib/api/domains/azure-devops-api", () => ({
 vi.mock("@/hooks/domains/github/use-github-status", () => ({
   useGitHubStatus: mocks.useGitHubStatus,
 }));
+vi.mock("@/hooks/domains/github/use-github-enabled", () => ({
+  useGitHubEnabled: mocks.useGitHubEnabled,
+}));
 vi.mock("@/hooks/domains/gitlab/use-gitlab-status", () => ({
   useGitLabStatus: mocks.useGitLabStatus,
 }));
+vi.mock("@/hooks/domains/gitlab/use-gitlab-enabled", () => ({
+  useGitLabEnabled: mocks.useGitLabEnabled,
+}));
 vi.mock("@/hooks/domains/azure-devops/use-azure-devops-browse", () => ({
   useAzureDevOpsConnection: mocks.useAzureDevOpsConnection,
+}));
+vi.mock("@/hooks/domains/azure-devops/use-azure-devops-enabled", () => ({
+  useAzureDevOpsEnabled: mocks.useAzureDevOpsEnabled,
 }));
 
 import { useRemoteRepositories } from "./use-remote-repositories";
@@ -58,17 +70,20 @@ function setBuiltInAvailability({
     loading: false,
     refresh: vi.fn(),
   });
+  mocks.useGitHubEnabled.mockReturnValue({ enabled: true, loaded: true });
   mocks.useGitLabStatus.mockReturnValue({
     status: gitlab ? { authenticated: true, token_configured: true } : null,
     loading: false,
     refresh: vi.fn(),
   });
+  mocks.useGitLabEnabled.mockReturnValue({ enabled: true, loaded: true });
   mocks.useAzureDevOpsConnection.mockReturnValue({
     data: azureDevOps ? { hasSecret: true, lastOk: true } : null,
     loading: false,
     error: null,
     refresh: vi.fn(),
   });
+  mocks.useAzureDevOpsEnabled.mockReturnValue({ enabled: true, loaded: true });
 }
 
 beforeEach(() => setBuiltInAvailability());
@@ -121,6 +136,7 @@ describe("useRemoteRepositories registered provider listings", () => {
     pluginRegistry.forPlugin(PLUGIN_ID).registerRepositoryProvider({
       id: "bitbucket",
       label: "Bitbucket",
+      getAvailability: async () => ({ configured: true, enabled: true, tested: true }),
       matchesURL: () => false,
       listBranches: async () => [],
       inspectURL: async () => null,
@@ -150,9 +166,16 @@ describe("useRemoteRepositories registered provider listings", () => {
         defaultBranch: "main",
       }),
     ]);
-    expect(result.current.availableProviders).toEqual(["bitbucket"]);
+    expect(result.current.availableProviders).toEqual([
+      "github",
+      "gitlab",
+      "azure_devops",
+      "bitbucket",
+    ]);
   });
+});
 
+describe("useRemoteRepositories registered provider pagination", () => {
   it("follows provider cursors and forwards server-side search", async () => {
     const listRepositories = vi.fn(
       async ({ cursor, query: _query }: { cursor?: string; query?: string }) =>
@@ -186,6 +209,7 @@ describe("useRemoteRepositories registered provider listings", () => {
     pluginRegistry.forPlugin(PLUGIN_ID).registerRepositoryProvider({
       id: "bitbucket",
       label: "Bitbucket",
+      getAvailability: async () => ({ configured: true, enabled: true, tested: true }),
       matchesURL: () => false,
       listBranches: async () => [],
       inspectURL: async () => null,
@@ -286,7 +310,7 @@ describe("useRemoteRepositories provider eligibility", () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.repos.map((repo) => repo.fullName)).toEqual(["acme/web"]);
-    expect(result.current.availableProviders).toEqual(["github"]);
+    expect(result.current.availableProviders).toEqual(["github", "gitlab"]);
     expect(result.current.sourceErrors).toEqual([
       { provider: "gitlab", error: new Error(GITLAB_UNAVAILABLE) },
     ]);
@@ -340,7 +364,7 @@ describe("useRemoteRepositories provider results", () => {
     ]);
     expect(result.current.repos[1].defaultBranch).toBe("trunk");
     expect(result.current.repos[2].defaultBranch).toBe("");
-    expect(result.current.availableProviders).toEqual(["github", "azure_devops"]);
+    expect(result.current.availableProviders).toEqual(["github", "gitlab", "azure_devops"]);
     expect(result.current.error).toEqual(new Error(GITLAB_UNAVAILABLE));
     expect(result.current.sourceErrors).toEqual([
       { provider: "gitlab", error: new Error(GITLAB_UNAVAILABLE) },
@@ -355,7 +379,7 @@ describe("useRemoteRepositories provider results", () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.repos).toEqual([]);
-    expect(result.current.availableProviders).toEqual(["github"]);
+    expect(result.current.availableProviders).toEqual(["github", "gitlab", "azure_devops"]);
     expect(result.current.unavailable).toBe(false);
   });
 

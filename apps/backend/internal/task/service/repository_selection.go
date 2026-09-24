@@ -52,6 +52,13 @@ func NewRepositorySelectionError(code RepositorySelectionErrorCode, cause error)
 }
 
 func (s *Service) preflightRepositorySelections(ctx context.Context, req *CreateTaskRequest) error {
+	for index, input := range req.Repositories {
+		resolved, err := s.resolveRemoteOriginInput(ctx, req.WorkspaceID, input)
+		if err != nil {
+			return err
+		}
+		req.Repositories[index] = resolved
+	}
 	return s.preflightRepositoryInputs(ctx, req.WorkspaceID, req.Repositories)
 }
 

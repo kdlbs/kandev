@@ -2,7 +2,6 @@
 
 import { IconBrandGithub, IconBrandGitlab, IconGitBranch } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import type { RemoteRepositoryProvider } from "@/hooks/domains/integrations/use-remote-repositories";
 import { pluginRegistry } from "@/lib/plugins/registry";
@@ -24,7 +23,7 @@ export function RemoteRepositoryProviderIcon({ provider }: { provider: RemoteRep
   return <Icon className="size-3.5 shrink-0" />;
 }
 
-function providerLabel(provider: RemoteRepositoryProvider): string {
+export function getRemoteRepositoryProviderLabel(provider: RemoteRepositoryProvider): string {
   return (
     PROVIDER_LABELS[provider] ??
     pluginRegistry.getRepositoryProvider(provider)?.label ??
@@ -32,35 +31,21 @@ function providerLabel(provider: RemoteRepositoryProvider): string {
   );
 }
 
-function ProviderTab({
-  provider,
-  compact,
-}: {
-  provider: RemoteRepositoryProvider;
-  compact: boolean;
-}) {
-  const label = providerLabel(provider);
+function ProviderTab({ provider }: { provider: RemoteRepositoryProvider }) {
+  const label = getRemoteRepositoryProviderLabel(provider);
   const trigger = (
     <TabsTrigger
       value={provider}
-      aria-label={compact ? label : undefined}
       className={cn(
-        "min-h-11 sm:min-h-9 min-w-0 flex-1 cursor-pointer rounded-none after:hidden",
-        compact ? "px-2" : "gap-1.5 px-3",
+        "min-h-11 sm:min-h-9 min-w-max shrink-0 cursor-pointer rounded-none gap-1.5 px-3 after:hidden",
       )}
     >
       <RemoteRepositoryProviderIcon provider={provider} />
-      {compact ? null : label}
+      {label}
     </TabsTrigger>
   );
 
-  if (!compact) return trigger;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-      <TooltipContent side="top">{label}</TooltipContent>
-    </Tooltip>
-  );
+  return trigger;
 }
 
 export function RemoteRepoProviderTabs({
@@ -72,7 +57,6 @@ export function RemoteRepoProviderTabs({
   value: RemoteRepositoryProvider;
   onChange: (provider: RemoteRepositoryProvider) => void;
 }) {
-  const compact = providers.length >= 3;
   return (
     <Tabs
       value={value}
@@ -81,10 +65,10 @@ export function RemoteRepoProviderTabs({
     >
       <TabsList
         data-testid="remote-repo-provider-tabs"
-        className="min-h-[45px] sm:min-h-[37px] w-full justify-start gap-0 overflow-hidden rounded-none border-t bg-muted/30 p-0"
+        className="min-h-[45px] sm:min-h-[37px] w-full justify-start gap-0 overflow-x-auto rounded-none border-t bg-muted/30 p-0"
       >
         {providers.map((provider) => (
-          <ProviderTab key={provider} provider={provider} compact={compact} />
+          <ProviderTab key={provider} provider={provider} />
         ))}
       </TabsList>
     </Tabs>

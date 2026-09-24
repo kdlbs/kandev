@@ -110,11 +110,8 @@ test.describe("Plugin-backed canvases on mobile", () => {
 
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
-      await expect(dialog.getByTestId("source-mode-scratch")).toHaveAttribute(
-        "aria-checked",
-        "true",
-      );
-      await expect(dialog.getByTestId("source-mode-workspace")).toBeVisible();
+      await expect(dialog.getByTestId("source-mode-scratch")).toHaveCount(0);
+      await expect(dialog.getByTestId("mobile-repository-manager")).toBeVisible();
       await expect(dialog.getByTestId("executor-profile-selector")).toContainText(
         localProfile!.name,
       );

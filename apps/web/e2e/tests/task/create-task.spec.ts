@@ -841,6 +841,12 @@ test.describe("Task creation agent compatibility", () => {
       await dialog.getByTestId("task-title-input").fill("Replace incompatible agent");
       await dialog.getByTestId("task-description-input").fill("executor switch after agent pick");
 
+      // This scenario verifies agent replacement. Remove the workspace's local
+      // fixture repository so the remote Docker source policy does not add an
+      // unrelated origin-eligibility constraint to the assertion.
+      const removeRepository = dialog.getByTestId("remove-repo-chip").first();
+      if (await removeRepository.count()) await removeRepository.click();
+
       // Make sure the seeded agent is the selection while the default executor
       // still accepts it. The dialog usually restores it on its own; clicking
       // an already-selected option would toggle it off, so only pick it when

@@ -9,6 +9,7 @@ import type {
   Task,
   TaskPriority,
   CreateTaskResponse,
+  Branch,
 } from "@/lib/types/http";
 import type { createTask } from "@/lib/api";
 import type { UseBranchesByURLResult } from "@/hooks/domains/github/use-branches-by-url";
@@ -33,6 +34,10 @@ import type {
 } from "@/components/task-create-dialog-options";
 import type { useToast } from "@/components/toast-provider";
 import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
+import type { TaskRemoteProviderReadinessMap } from "@/components/task-create-dialog-remote-provider-readiness";
+import type { TaskCreateLastUsedSourceApi } from "@/lib/types/http-user-settings";
+import type { ExecutorSourcePolicy } from "@/components/task-create-dialog-executor-source-policy";
+import type { RepositoryCloneSourceState } from "@/hooks/domains/repositories/use-repository-clone-source";
 
 export type TaskCreateSubmit = (
   payload: Parameters<typeof createTask>[0],
@@ -135,7 +140,16 @@ export type TaskRepoRow = {
   baseBranch?: string;
   /** Saved repository policy selected for this row. */
   branchPolicyId?: string;
+  /** Explicit remote-origin checkout mode for a remote executor. */
+  checkoutSource?: "remote_origin";
+  /** Credential-free origin identity confirmed by the backend. */
+  expectedOrigin?: string;
+  /** Branches read from the verified origin while remote clone mode is active. */
+  remoteBranches?: Branch[];
 };
+
+/** A workspace or host-local repository in the ordered task draft. */
+export type TaskLocalRepositorySelection = TaskRepoRow & { kind: "local" };
 
 /** Repository fields needed to rehydrate an edit form without losing a policy snapshot. */
 export type TaskRepositorySnapshot = {
@@ -181,6 +195,43 @@ export type TaskRemoteRepoRow = {
   fullName?: string; // "owner/name"
 };
 
+/** A provider-backed or pasted repository in the ordered task draft. */
+export type TaskRemoteRepositorySelection = TaskRemoteRepoRow & { kind: "remote" };
+
+/** A live host folder in the ordered task workspace draft. */
+export type TaskWorkspaceFolderSelection = {
+  kind: "folder";
+  key: string;
+  localPath: string;
+  displayName?: string;
+};
+
+/** Every workspace source attached to a task, in the order submitted. */
+export type TaskWorkspaceSelection =
+  | TaskLocalRepositorySelection
+  | TaskRemoteRepositorySelection
+  | TaskWorkspaceFolderSelection;
+
+/** @deprecated Use TaskWorkspaceSelection for new source-aware callers. */
+export type TaskRepositorySelection = TaskWorkspaceSelection;
+
+export type TaskRepositorySetsConfig = {
+  sets: RepositorySet[];
+  onApply: (set: RepositorySet) => void;
+  rows?: TaskRepoRow[];
+  repositories?: Repository[];
+  save?: {
+    workspaceId: string;
+    rows: TaskRepoRow[];
+    repositories: Repository[];
+    isLocalExecutor: boolean;
+    freshBranchEnabled: boolean;
+    selections?: TaskRepositorySelection[];
+    open: boolean;
+    setOpen: (open: boolean) => void;
+  } | null;
+};
+
 export type StepType = {
   id: string;
   title: string;
@@ -204,6 +255,8 @@ export type TaskCreateDialogInitialValues = {
   preferLocalExecutor?: boolean;
   /** Existing task repository rows, including immutable policy snapshots. */
   repositories?: TaskRepositorySnapshot[];
+  /** Optional mixed draft supplied by callers that already have ordered rows. */
+  repositorySelections?: TaskRepositorySelection[];
   repositoryId?: string;
   branch?: string;
   /** Existing remote branch to check out directly in the worktree (e.g. a PR's head branch),
@@ -279,6 +332,10 @@ export type DialogComputedValues = {
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
   executorProfileOptions: ReturnType<typeof useExecutorProfileOptions>;
   executorHint: string | null;
+  executorSourcePolicy: ExecutorSourcePolicy;
+  executorSourceNotice: string | null;
+  sourcePolicyReason: string | null;
+  folderDisabledReason?: string;
   isLocalExecutor: boolean;
   headerRepositoryOptions: ReturnType<typeof useRepositoryOptions>["headerRepositoryOptions"];
   agentProfilesLoading: boolean;
@@ -297,6 +354,10 @@ export type DialogComputedValues = {
   agentCompatState: AgentCompatState;
   /** Label of the effective agent profile (null when none is selected or it is unknown). */
   selectedAgentProfileName: string | null;
+  /** Current host-origin inspections keyed by the stable local-row key. */
+  remoteOriginStates: Record<string, RepositoryCloneSourceState>;
+  /** Rechecks selected host origins after provider or network recovery. */
+  refreshRemoteOrigins: () => void;
   /** Subset of agent profiles that pass the executor's auth-credential check. See `StoreSelections.compatibleAgentProfiles`. */
   compatibleAgentProfiles: AgentProfileOption[];
   /** True once the remote-auth catalog has been fetched. See `StoreSelections.authLoaded`. */
@@ -338,6 +399,7 @@ export type TaskCreateEffectsArgs = {
   effectiveWorkflowId: string | null;
   repositories: Repository[];
   repositoriesLoading: boolean;
+  repositoriesLoaded: boolean;
   agentProfiles: AgentProfileOption[];
   compatibleAgentProfiles: AgentProfileOption[];
   authLoaded: boolean;
@@ -347,6 +409,14 @@ export type TaskCreateEffectsArgs = {
   workflows: Array<{ id: string; agent_profile_id?: string }>;
   /** Backend-owned last-used repository. */
   lastUsedRepositoryId?: string | null;
+  /** Workspace-scoped ordered contents saved by the last successful create. */
+  workspaceSourcesByWorkspace?: Record<string, TaskCreateLastUsedSourceApi[]>;
+  /** True once a saved contents snapshot exists for the current workspace. */
+  hasWorkspaceSourcesSnapshot?: boolean;
+  /** Only fresh New Task drafts may hydrate the workspace contents snapshot. */
+  restoreWorkspaceContents?: boolean;
+  /** Source preset supplied by a caller takes precedence over last-used state. */
+  initialValues?: TaskCreateDialogInitialValues;
   /** Whether DB-backed user settings are loaded, or a best-effort fetch has settled. */
   userSettingsLoaded?: boolean;
   /** Backend-owned last-used agent profile. */
@@ -415,9 +485,26 @@ export type DialogFormState = {
    * order is the position the backend sees. There is no "primary" concept.
    */
   repositories: TaskRepoRow[];
+  /** Ordered local and remote rows. The legacy projections above remain for boundary adapters. */
+  repositorySelections?: TaskRepositorySelection[];
+  repositorySelectionsTouched?: boolean;
+  appendRepositorySelection?: (
+    selection:
+      | Omit<TaskLocalRepositorySelection, "key">
+      | Omit<TaskRemoteRepositorySelection, "key">
+      | Omit<TaskWorkspaceFolderSelection, "key">,
+  ) => string;
+  /** Appends a live host folder without changing existing sources. */
+  appendFolderSelection?: (selection: Omit<TaskWorkspaceFolderSelection, "key">) => string;
+  /** Ordered folder projection used by source-aware callers. */
+  workspaceFolders?: Array<Omit<TaskWorkspaceFolderSelection, "kind">>;
+  resetRepositorySelections?: (v: TaskRepositorySelection[]) => void;
+  hydrateRepositorySelections?: (v: TaskRepositorySelection[]) => void;
   /** False while rows are hydrated from an existing task; true after user edits. */
   repositoriesDirty: boolean;
   setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
+  /** Applies automatic local-row defaults without marking the draft as user-edited. */
+  hydrateRepositories?: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
   setRepositoriesDirty: (dirty: boolean) => void;
   addRepository: () => void;
   removeRepository: (key: string) => void;
@@ -432,6 +519,9 @@ export type DialogFormState = {
   addRemoteRepo: () => void;
   removeRemoteRepo: (key: string) => void;
   updateRemoteRepo: (key: string, patch: Partial<TaskRemoteRepoRow>) => void;
+  /** Current readiness of provider connections used by picker-selected rows. */
+  remoteProviderReadiness?: TaskRemoteProviderReadinessMap;
+  setRemoteProviderReadiness?: (value: TaskRemoteProviderReadinessMap) => void;
   /**
    * Per-URL branches cache. Each chip reads its own row's branches by URL;
    * no dialog-level singleton branch field remains.
@@ -450,6 +540,17 @@ export type DialogFormState = {
   setExecutorId: (v: string) => void;
   executorProfileId: string;
   setExecutorProfileId: (v: string) => void;
+  /** True after the user explicitly changes the executor in this draft. */
+  executorChoiceTouched?: boolean;
+  setExecutorChoiceTouched?: (touched: boolean) => void;
+  /** Worktree selection retained while an automatic folder-only switch is active. */
+  automaticExecutorRestore?: { executorId: string; executorProfileId: string } | null;
+  setAutomaticExecutorRestore?: (
+    value: { executorId: string; executorProfileId: string } | null,
+  ) => void;
+  /** Shows the one-time folder-only executor adjustment notice. */
+  folderOnlyExecutorNotice?: boolean;
+  setFolderOnlyExecutorNotice?: (visible: boolean) => void;
   /**
    * Writes executorProfileId from an autopick/stored-profile seed effect
    * only, never from the user's own picker. This is the sole writer
@@ -532,8 +633,12 @@ export type SubmitHandlersDeps = {
   effectiveWorkflowId: string | null;
   /** Unified repo list from the form. Empty when in GitHub URL mode. */
   repositories: TaskRepoRow[];
+  /** Ordered mixed repository rows. When present, this is the source of truth for submission. */
+  repositorySelections?: TaskRepositorySelection[];
   /** Whether the user explicitly changed repository selections in this form. */
   repositoriesDirty: boolean;
+  /** Readiness for provider-backed picker rows. Pasted URLs do not use this gate. */
+  remoteProviderReadiness?: TaskRemoteProviderReadinessMap;
   /** All on-machine discovered repos — used to look up `default_branch` for `localPath` rows. */
   discoveredRepositories: LocalRepository[];
   /** Workspace repositories — used to look up `default_branch` for `repositoryId` rows. */
@@ -583,6 +688,7 @@ export type SubmitHandlersDeps = {
   setTaskName: (v: string) => void;
   setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
   setRemoteRepos: React.Dispatch<React.SetStateAction<TaskRemoteRepoRow[]>>;
+  resetRepositorySelections?: (v: TaskRepositorySelection[]) => void;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;
   setSelectedWorkflowId: (v: string | null) => void;
@@ -590,10 +696,13 @@ export type SubmitHandlersDeps = {
   clearDraft: () => void;
   freshBranchEnabled: boolean;
   isLocalExecutor: boolean;
+  /** True when the selected executor materializes local repositories from origin. */
+  remoteOriginMode?: boolean;
   /** Resolved on-disk path for the selected repository (workspace or discovered). Empty if not local. */
   repositoryLocalPath: string;
   /** When true, the task is created with no repositories (repo-less mode). */
   noRepository: boolean;
+  sourcePolicyInvalid?: boolean;
   /** Predecessor task IDs to link at creation time. */
   blockedBy?: string[];
   /** Edit-mode dependency draft and persistence state. */
@@ -658,6 +767,8 @@ export type DialogFormBodyProps = {
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
   onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
+  repositoryLocked?: boolean;
+  branchLocked?: boolean;
   onAgentProfileChange: (v: string) => void;
   onExecutorProfileChange: (v: string) => void;
   onWorkflowChange: (v: string) => void;
@@ -665,25 +776,12 @@ export type DialogFormBodyProps = {
   onToggleFreshBranch: (enabled: boolean) => void;
   onToggleNoRepository?: () => void;
   onWorkspacePathChange: (value: string) => void;
+  onFolderSelectionAdded?: (wasEmpty: boolean) => void;
+  onRepositorySelectionAdded?: (wasFolderOnly: boolean) => void;
+  onAllWorkspaceSourcesRemoved?: () => void;
+  onRepositorySelectionRemoved?: (remaining: TaskRepositorySelection[]) => void;
   /** Repository sets available in this workspace, and how to apply or define one. */
-  repositorySets?: {
-    sets: RepositorySet[];
-    onApply: (set: RepositorySet) => void;
-    /**
-     * Present when the current selection can be saved as a new set. Null when
-     * there is no workspace-repository row to save, so the action is never a
-     * dead end.
-     */
-    save?: {
-      workspaceId: string;
-      rows: TaskRepoRow[];
-      repositories: Repository[];
-      isLocalExecutor: boolean;
-      freshBranchEnabled: boolean;
-      open: boolean;
-      setOpen: (open: boolean) => void;
-    } | null;
-  };
+  repositorySets?: TaskRepositorySetsConfig;
   localRepositoryCreation?: {
     executorSelection:
       | import("@/components/task-create-dialog-handlers").DirectLocalExecutorSelection
@@ -706,9 +804,16 @@ export type DialogFormBodyProps = {
    * branch for local execution; fresh-branch mode unlocks it).
    */
   isLocalExecutor: boolean;
+  executorSourcePolicy: ExecutorSourcePolicy;
+  executorSourceNotice?: string | null;
+  folderDisabledReason?: string;
   agentCompatState: AgentCompatState;
   /** Label of the effective agent profile, for the incompatible-agent note. */
   selectedAgentProfileName: string | null;
+  /** Current host-origin inspections keyed by the stable local-row key. */
+  remoteOriginStates: Record<string, RepositoryCloneSourceState>;
+  /** Rechecks the selected host origins after a provider or network recovery. */
+  refreshRemoteOrigins: () => void;
   /** Name of the effective workflow, for the workflow-locked incompatible note. */
   effectiveWorkflowName: string | null;
   executorProfileName: string | null;

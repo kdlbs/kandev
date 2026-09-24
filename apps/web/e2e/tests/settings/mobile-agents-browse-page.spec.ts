@@ -1,6 +1,18 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import type { ListAvailableAgentsResponse } from "../../../lib/types/http";
+
+type E2EStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      setAvailableAgents: (
+        agents: ListAvailableAgentsResponse["agents"],
+        tools?: ListAvailableAgentsResponse["tools"],
+      ) => void;
+    };
+  };
+};
 
 // Same interception as the desktop spec: the default mock-agent is discovered
 // as already available, so the catalog would show its "everything installed"
@@ -39,6 +51,15 @@ const AVAILABLE_AGENTS = {
   total: 1,
 } satisfies ListAvailableAgentsResponse;
 
+async function seedAvailableAgents(page: Page): Promise<void> {
+  await page.waitForFunction(() => Boolean((window as E2EStoreWindow).__KANDEV_E2E_STORE__));
+  await page.evaluate((response) => {
+    const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+    if (!store) throw new Error("E2E store bridge is unavailable");
+    store.getState().setAvailableAgents(response.agents, response.tools);
+  }, AVAILABLE_AGENTS);
+}
+
 test.describe("Agents browse page on mobile", () => {
   test("renders statically without a collapsible toggle or horizontal overflow", async ({
     testPage,
@@ -52,10 +73,11 @@ test.describe("Agents browse page on mobile", () => {
     );
 
     await testPage.goto("/settings/agents/browse");
+    await seedAvailableAgents(testPage);
 
     const heading = testPage.getByRole("heading", { name: "Browse available agents" });
     await expect(heading).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByTestId("install-card-codex")).toBeVisible();
+    await expect(testPage.getByTestId("install-card-codex")).toBeVisible({ timeout: 15_000 });
 
     // Same static-page contract as the desktop spec: the heading is not a
     // button and the settings content region carries no collapse semantics.

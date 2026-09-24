@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
@@ -7,28 +8,35 @@ import { dwell } from "../../helpers/causal-waits";
 useRegularMode();
 
 test.describe("Create task workspace repository picker on mobile", () => {
-  test("marks another row's repository while keeping it selectable", async ({
-    testPage,
-    prCapture,
-  }) => {
+  test("adds another local row through the repository sheet", async ({ testPage, prCapture }) => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
     await mobile.mobileFab.click();
 
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
-    const repositoryChips = dialog.getByTestId("repo-chip-trigger");
+    const manager = testPage.getByTestId("mobile-repository-manager");
+    const management = testPage.getByTestId("mobile-repository-management");
+    const repositoryChips = management.getByTestId("repo-chip-trigger");
+
+    await manager.tap();
+    await expect(management).toBeVisible();
     await expect(repositoryChips.first()).toContainText("E2E Repo");
-
-    await dialog.getByTestId("add-repository").click();
-    await expect(repositoryChips).toHaveCount(2);
-    await repositoryChips.nth(1).tap();
-
-    const selectedElsewhere = testPage.getByRole("option", { name: /^E2E Repo/ });
+    await management.getByTestId("mobile-repository-add").tap();
+    const sourceOptions = testPage.getByTestId("workspace-source-menu-options");
+    await expect(sourceOptions).toBeVisible();
+    await sourceOptions.getByTestId("workspace-source-menu-repository").tap();
+    const selectedElsewhere = testPage
+      .getByTestId("task-repository-local-option")
+      .filter({ hasText: "E2E Repo" });
     await expect(selectedElsewhere).toBeVisible();
-    await expect(selectedElsewhere.getByTestId("already-added-repository-marker")).toBeVisible();
     await selectedElsewhere.tap();
+    await expect(management).toBeVisible();
+    await expect(repositoryChips).toHaveCount(2);
     await expect(repositoryChips.nth(1)).toContainText("E2E Repo");
+    await waitForFiniteAnimations(testPage.getByTestId("mobile-repository-sheet-content"));
+    await testPage.getByTestId("mobile-repository-done").dispatchEvent("click");
+    await expect(manager).toContainText("Repositories (2)");
     await dwell(
       testPage,
       300,

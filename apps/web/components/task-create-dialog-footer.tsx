@@ -234,6 +234,7 @@ export type TaskCreateDialogFooterProps = {
   workspaceId: string | null;
   effectiveWorkflowId: string | null;
   executorHint: string | null;
+  executorSourceNotice?: string | null;
   noCompatibleAgent: boolean;
   agentCompatState: AgentCompatState;
   selectedAgentProfileName: string | null;
@@ -423,6 +424,7 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
     hasTitle,
     hasDescription,
     executorHint,
+    executorSourceNotice,
     onCancel,
     onUpdateWithoutAgent,
     onCreateWithoutAgent,
@@ -433,9 +435,14 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
 
   return (
     <>
-      {!isSessionMode && !isTaskStarted && executorHint && (
-        <div className="flex flex-1 items-center gap-3 text-sm text-muted-foreground">
-          <span className="text-xs text-muted-foreground">{executorHint}</span>
+      {!isSessionMode && !isTaskStarted && (executorSourceNotice || executorHint) && (
+        <div className="flex flex-1 flex-col justify-center gap-0.5 text-sm text-muted-foreground">
+          {executorSourceNotice ? (
+            <span className="text-xs text-muted-foreground">{executorSourceNotice}</span>
+          ) : null}
+          {executorHint ? (
+            <span className="text-xs text-muted-foreground">{executorHint}</span>
+          ) : null}
         </div>
       )}
       <DialogClose asChild>

@@ -8,6 +8,7 @@ plan: "plan.md"
 requirements:
   - REQ-CI-PR-DOCS-001
   - REQ-CI-PR-DOCS-003
+  - REQ-CI-PR-DOCS-004
 acceptance_criteria:
   - AC-CI-PR-DOCS-001.2
   - AC-CI-PR-DOCS-001.3
@@ -18,6 +19,7 @@ acceptance_criteria:
   - AC-CI-PR-DOCS-003.2
   - AC-CI-PR-DOCS-003.3
   - AC-CI-PR-DOCS-003.4
+  - AC-CI-PR-DOCS-004.3
 system_design:
   - ../../specs/ci/system-design/pull-request-documentation-coverage.md
 ---
@@ -45,6 +47,9 @@ Application code, unrelated workflow cleanup, live label changes, and live rules
 - Repeated requirement lookups reuse successful results only within one PR
   snapshot and requirement directory. Empty search results still load changed
   requirements at the exact head; failed lookups remain evaluation errors.
+- A code-search rate limit triggers one complete exact-head requirements
+  directory scan, bounded by the document and byte limits. Missing definitions,
+  duplicates, listing failures, and exceeded bounds remain visible outcomes.
 
 ## Verification
 
@@ -53,6 +58,8 @@ Run from the repository root:
 ```bash
 node --test .github/scripts/pr-docs.test.cjs
 python3 .github/scripts/pr-docs-workflow-contract_test.py
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
 
@@ -127,11 +134,11 @@ TDD evidence:
 A GET-only diagnostic using this workspace's fixed evaluator on exact PR
 #3626 head `93abff34efe8c9ab2bec68acb8e6aba1eb2a23d4` returned `covered`: six
 work orders, nine accepted references, three searches, 18 total requests, and
-no failed requests. It published no status. The earlier CI run's caught
-exception was not observed, and distinct IDs or a depleted shared quota can
-still fail closed. The fix must reach trusted `main` before the privileged
-workflow consumes it; rerunning an older run does not substitute this branch's
-evaluator. Workflow permissions, bounds, policy, and status rules are unchanged.
+no failed requests. It published no status. That diagnostic predates the
+rate-limit recovery below and did not exercise the search-limit path. The
+updated evaluator must reach trusted `main` before the privileged workflow can
+use it; rerunning an older run does not substitute the current evaluator.
+Workflow permissions, coverage policy, and status rules are unchanged.
 
 Internal docs updated only. This CI implementation change has no public product
 documentation or screenshot impact.
@@ -154,3 +161,20 @@ TDD evidence:
 - `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check`: passed.
+
+### Code-search rate-limit recovery, 2026-09-23
+
+Rate-limited requirement searches now fall back to a complete exact-head
+directory scan. The scan reuses the current evaluation's directory listing and
+document cache, preserves duplicate and missing-definition validation, and
+fails closed when the 200-document or 4 MiB bounds are exceeded. The changed
+work-order cap remains 100.
+
+TDD evidence:
+
+- Red: a rate-limited search returned `error` although exact-head requirement
+  documents were available.
+- Green: primary and secondary rate-limited searches scan once and return
+  covered; duplicate definitions remain invalid; an unavailable listing or
+  scan above 200 documents returns an error.
+- `node --test .github/scripts/pr-docs.test.cjs`: 85 tests passed.

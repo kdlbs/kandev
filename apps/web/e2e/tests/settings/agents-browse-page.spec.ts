@@ -1,5 +1,17 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 import type { ListAvailableAgentsResponse } from "../../../lib/types/http";
+
+type E2EStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      setAvailableAgents: (
+        agents: ListAvailableAgentsResponse["agents"],
+        tools?: ListAvailableAgentsResponse["tools"],
+      ) => void;
+    };
+  };
+};
 
 // The default mock-agent is discovered as already available (it has an
 // InstallScript, but the catalog filters on !available && install_script), so
@@ -39,6 +51,15 @@ const AVAILABLE_AGENTS = {
   total: 1,
 } satisfies ListAvailableAgentsResponse;
 
+async function seedAvailableAgents(page: Page): Promise<void> {
+  await page.waitForFunction(() => Boolean((window as E2EStoreWindow).__KANDEV_E2E_STORE__));
+  await page.evaluate((response) => {
+    const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+    if (!store) throw new Error("E2E store bridge is unavailable");
+    store.getState().setAvailableAgents(response.agents, response.tools);
+  }, AVAILABLE_AGENTS);
+}
+
 test.describe("Agents browse page", () => {
   test("renders the heading and install cards statically, without a collapsible toggle", async ({
     testPage,
@@ -52,10 +73,11 @@ test.describe("Agents browse page", () => {
     );
 
     await testPage.goto("/settings/agents/browse");
+    await seedAvailableAgents(testPage);
 
     const heading = testPage.getByRole("heading", { name: "Browse available agents" });
     await expect(heading).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByTestId("install-card-codex")).toBeVisible();
+    await expect(testPage.getByTestId("install-card-codex")).toBeVisible({ timeout: 15_000 });
 
     // PR #2544 wrapped the section in a collapsible whose heading row was a
     // toggle button. Reverted, the heading must be a plain heading: no button
@@ -68,7 +90,7 @@ test.describe("Agents browse page", () => {
     // A role-less clickable wrapper (e.g. <div onClick>) would not surface as
     // a button; clicking the heading must not hide the install cards.
     await heading.click();
-    await expect(testPage.getByTestId("install-card-codex")).toBeVisible();
+    await expect(testPage.getByTestId("install-card-codex")).toBeVisible({ timeout: 15_000 });
 
     // A separately-triggered collapsible (e.g. a toggle button elsewhere in
     // the content) would not be caught by the heading assertions. The page

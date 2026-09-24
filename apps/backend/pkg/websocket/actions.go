@@ -21,11 +21,12 @@ const (
 	ActionWorkspaceDelete = "workspace.delete"
 
 	// Repository actions
-	ActionRepositoryList   = "repository.list"
-	ActionRepositoryCreate = "repository.create"
-	ActionRepositoryGet    = "repository.get"
-	ActionRepositoryUpdate = "repository.update"
-	ActionRepositoryDelete = "repository.delete"
+	ActionRepositoryList               = "repository.list"
+	ActionRepositoryCreate             = "repository.create"
+	ActionRepositoryGet                = "repository.get"
+	ActionRepositoryUpdate             = "repository.update"
+	ActionRepositoryDelete             = "repository.delete"
+	ActionRepositoryCloneSourceInspect = "repository.clone_source.inspect"
 
 	// Repository Set actions
 	ActionRepositorySetList   = "repository_set.list"

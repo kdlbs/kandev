@@ -1,11 +1,12 @@
 ---
 created: 2026-09-10
-updated: 2026-09-21
+updated: 2026-09-23
 status: done
 requirements:
   - REQ-CI-PR-DOCS-001
   - REQ-CI-PR-DOCS-002
   - REQ-CI-PR-DOCS-003
+  - REQ-CI-PR-DOCS-004
 system_design:
   - ../../specs/ci/system-design/pull-request-documentation-coverage.md
 legacy_specs: []
@@ -28,6 +29,7 @@ Public user documentation remains governed by the existing contribution checklis
 ## Technical approach
 
 Use the proposed `.github/scripts/pr-docs.cjs` module for pure policy functions and bounded GitHub reads.
+On code-search rate limits, scan all direct Markdown requirements at the exact head within document and byte limits.
 Use `.github/workflows/pr-docs.yml` for base-controlled execution and the `PR documentation coverage` commit status.
 Reuse the existing Node runtime from GitHub-hosted runners and the built-in test runner; no pnpm dependency installation is needed.
 Register Node and workflow contract tests in `.github/workflows/lint-action-pinning.yml`.
@@ -48,6 +50,7 @@ All named test suites below are proposed files.
 | AC-CI-PR-DOCS-001.1; AC-CI-PR-DOCS-002.1 through .4 | Fake GitHub adapter exercises draft/fork events and label transitions |
 | AC-CI-PR-DOCS-003.1 through .3 | API failures, pagination caps, stale head/label reads, path and content restrictions |
 | AC-CI-PR-DOCS-003.4 through .5 | Per-member queue evaluation, active prefix reevaluation, mismatched queue boundaries, override removal, and rollout checklist |
+| AC-CI-PR-DOCS-004.3 | Rate-limited code search falls back to a complete bounded exact-head requirements scan; duplicates and missing definitions remain visible |
 
 Use a representative #3137 fixture: `fix(worktree)` with runtime recovery paths and no artifacts fails.
 Do not fetch the live PR in unit tests.
@@ -136,6 +139,23 @@ Task 05 verification completed on 2026-09-21:
 - All 24 workflow files passed action-pinning lint.
 - `zizmor .github/workflows/pr-docs.yml` reported no findings.
 - The specification catalog and linter passed; `git diff --check` passed.
+
+## Amendment: exact-head fallback for code-search rate limits
+
+Task 01 now scans every direct Markdown requirement in the exact-head system
+directory when GitHub Code Search returns a rate-limit response. The scan is
+bounded by 200 documents and 4 MiB, reuses the directory listing and file cache,
+and preserves missing and duplicate definition failures. An unavailable
+listing or exceeded bound fails closed.
+
+Verification on 2026-09-23:
+
+- 85 validator tests, including HTTP 403/429 fallback, duplicate definitions,
+  missing listings, and exceeded document bounds.
+- 7 PR documentation workflow contract tests and 9 action-pinning tests passed.
+- All 24 workflow files passed action-pinning lint; `zizmor .github/workflows/pr-docs.yml` reported no findings.
+- The specification catalog and full specification lint passed; `git diff --check` passed.
+- A local replay of the changed PR tree with Code Search forced to rate-limit returned covered for 9 work orders using one directory scan.
 
 ## Risks
 

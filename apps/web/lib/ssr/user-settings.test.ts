@@ -351,6 +351,7 @@ describe("buildCoreFields task-create last-used mapping", () => {
       agentProfileId: null,
       executorProfileId: null,
       workflowIdsByWorkspace: {},
+      workspaceSourcesByWorkspace: {},
       synced: false,
     });
   });
@@ -388,6 +389,7 @@ describe("buildCoreFields task-create last-used mapping", () => {
         "workspace-1": "workflow-1",
         "workspace-2": "workflow-2",
       },
+      workspaceSourcesByWorkspace: {},
       synced: true,
     });
   });

@@ -1752,6 +1752,131 @@ test('newly added canonical requirements still reject duplicate IDs', async () =
   assert.equal(listings, 1);
 });
 
+// @covers AC-CI-PR-DOCS-004.3
+test('rate-limited code search scans the exact-head requirements directory', async () => {
+  const { contents, changed, requirementPath } = repeatedCoverageFixture();
+  changed.push({ filename: requirementPath, status: 'added' });
+  let searches = 0;
+  let listings = 0;
+  const client = coverageClient(contents, changed, {
+    async searchCode() {
+      searches += 1;
+      throw new Error(
+        'GitHub API request stopped: class=code-search category=rate-limit '
+        + 'status=HTTP 429 attempts=3 outcome=wait-budget-exhausted next_delay_ms=736000',
+      );
+    },
+    async listDirectory(directory, ref) {
+      assert.equal(directory, 'docs/specs/ui/requirements');
+      assert.equal(ref, SHA_B);
+      listings += 1;
+      return [{ path: requirementPath, type: 'file' }];
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'covered', result.errors.join('; '));
+  assert.equal(searches, 1);
+  assert.equal(listings, 1);
+  assert.equal(result.acceptedReferences.length, result.workOrders.length);
+});
+
+// @covers AC-CI-PR-DOCS-004.3
+test('secondary-rate-limited code search uses the directory scan', async () => {
+  const { contents, changed, requirementPath } = repeatedCoverageFixture();
+  changed.push({ filename: requirementPath, status: 'added' });
+  let listings = 0;
+  const client = coverageClient(contents, changed, {
+    async searchCode() {
+      throw new Error(
+        'GitHub API request stopped: class=code-search category=rate-limit '
+        + 'status=HTTP 403 attempts=3 outcome=wait-budget-exhausted next_delay_ms=736000',
+      );
+    },
+    async listDirectory() {
+      listings += 1;
+      return [{ path: requirementPath, type: 'file' }];
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'covered', result.errors.join('; '));
+  assert.equal(listings, 1);
+});
+
+// @covers AC-CI-PR-DOCS-004.3
+test('rate-limit directory scan still rejects duplicate requirement definitions', async () => {
+  const { contents, changed, requirementPath } = repeatedCoverageFixture();
+  const duplicatePath = 'docs/specs/ui/requirements/duplicate.md';
+  contents[duplicatePath] = contents[requirementPath];
+  changed.push({ filename: requirementPath, status: 'added' });
+  const client = coverageClient(contents, changed, {
+    async searchCode() {
+      throw new Error(
+        'GitHub API request stopped: class=code-search category=rate-limit '
+        + 'status=HTTP 429 attempts=3 outcome=wait-budget-exhausted next_delay_ms=736000',
+      );
+    },
+    async listDirectory() {
+      return [requirementPath, duplicatePath].map(path => ({ path, type: 'file' }));
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'invalid');
+  assert.match(result.errors.join('; '), /ambiguous definitions/);
+});
+
+// @covers AC-CI-PR-DOCS-004.3
+test('rate-limit directory scan fails closed when its document bound is exceeded', async () => {
+  const { contents, changed } = repeatedCoverageFixture();
+  const directoryEntries = Array.from({ length: 201 }, (_, index) => ({
+    path: `docs/specs/ui/requirements/candidate-${index}.md`,
+    type: 'file',
+  }));
+  const client = coverageClient(contents, changed, {
+    async searchCode() {
+      throw new Error(
+        'GitHub API request stopped: class=code-search category=rate-limit '
+        + 'status=HTTP 429 attempts=3 outcome=wait-budget-exhausted next_delay_ms=736000',
+      );
+    },
+    async listDirectory() {
+      return directoryEntries;
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'error');
+  assert.match(result.errors.join('; '), /directory scan exceeds the 200-document limit/);
+});
+
+// @covers AC-CI-PR-DOCS-004.3
+test('rate-limit directory scan fails closed when the listing is unavailable', async () => {
+  const { contents, changed, requirementPath } = repeatedCoverageFixture();
+  changed.push({ filename: requirementPath, status: 'added' });
+  const client = coverageClient(contents, changed, {
+    async searchCode() {
+      throw new Error(
+        'GitHub API request stopped: class=code-search category=rate-limit '
+        + 'status=HTTP 429 attempts=3 outcome=wait-budget-exhausted next_delay_ms=736000',
+      );
+    },
+    async listDirectory() {
+      throw new Error('GitHub API request failed with HTTP 404: Not Found');
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'error');
+  assert.match(result.errors.join('; '), /requirements directory listing is missing/i);
+});
+
 // @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-001.5
 test('directory fallback reuses exact-head entries without accepting missing requirements', async t => {
   for (const outcome of ['file', 'empty', 'missing']) {

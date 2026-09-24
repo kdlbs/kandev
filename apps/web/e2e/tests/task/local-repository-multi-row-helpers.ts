@@ -16,6 +16,10 @@ export async function exerciseMultiRowCreation(
   await activate(executor);
   await activate(page.getByRole("option", { name: /Worktree/i }));
   const originalExecutor = await executor.textContent();
+  if (options.mobile) {
+    await page.getByTestId("mobile-repository-manager").tap();
+    await expect(page.getByTestId("mobile-repository-management")).toBeVisible();
+  }
   const firstRow = page.getByTestId("repo-chip").nth(0);
   await expect(firstRow).toHaveAttribute("data-repository-id", /.+/);
   await expect(firstRow.getByTestId("branch-chip-trigger")).toBeEnabled();
@@ -23,10 +27,16 @@ export async function exerciseMultiRowCreation(
   const firstId = await firstRow.getAttribute("data-repository-id");
   expect(firstId).toBeTruthy();
   const firstBranch = await firstRow.getByTestId("branch-chip-trigger").textContent();
-  await activate(page.getByTestId("add-repository"));
+  if (options.mobile) {
+    await page.getByTestId("mobile-repository-add").tap();
+  } else {
+    await activate(page.getByTestId("add-repository"));
+  }
+  const repositorySource = page.getByTestId("workspace-source-menu-repository");
+  await expect(repositorySource).toBeVisible();
+  await activate(repositorySource);
   const secondRow = page.getByTestId("repo-chip").nth(1);
-  await activate(secondRow.getByTestId("repo-chip-trigger"));
-  const refresh = page.getByTestId("repo-refresh-button");
+  const refresh = page.getByTestId("task-repository-picker-refresh");
   const create = page.getByTestId("create-local-repository-button");
   await expect(refresh).toBeVisible();
   await expect(create).toBeVisible();
@@ -52,20 +62,31 @@ export async function exerciseMultiRowCreation(
       },
     });
   });
-  const refreshed = waitForHttp(page, "GET", new RegExp(`${repositoriesPath}$`));
+  const refreshed = waitForHttp(page, "GET", new RegExp(`${repositoriesPath}$`), {
+    predicate: async (response) => {
+      const body = (await response.json()) as {
+        repositories?: Array<{ id?: string }>;
+      };
+      return (
+        body.repositories?.some((repository) => repository.id === "refresh-only-option") ?? false
+      );
+    },
+  });
   try {
     await activate(refresh);
     await expect(refresh).toBeDisabled();
     await expect(create).toBeVisible();
     releaseRefresh();
     await refreshed;
-    await expect(page.getByRole("option", { name: /Refreshed option/ })).toBeVisible();
+    await expect(
+      page.getByTestId("task-repository-local-option").filter({ hasText: "Refreshed option" }),
+    ).toBeVisible();
   } finally {
     releaseRefresh();
     await refreshed;
     await page.unroute(`**${repositoriesPath}`);
   }
-  await expect(firstRow).toHaveAttribute("data-repository-id", firstId!);
+  if (!options.mobile) await expect(firstRow).toHaveAttribute("data-repository-id", firstId!);
   await page.getByPlaceholder("Search repositories...").fill("no-matching-option");
   await expect(refresh).toBeVisible();
   await expect(create).toBeVisible();
@@ -90,6 +111,10 @@ export async function exerciseMultiRowCreation(
   await activate(surface.getByRole("button", { name: "Create repository" }));
   await initialized;
   await expect(surface).not.toBeVisible();
+  if (options.mobile) {
+    await page.getByTestId("mobile-repository-manager").dispatchEvent("click");
+    await expect(page.getByTestId("mobile-repository-management")).toBeVisible();
+  }
   await expect(secondRow.getByTestId("repo-chip-trigger")).toContainText(name);
   await expect(secondRow.getByTestId("branch-chip-trigger")).toContainText("main");
   await expect(firstRow).toHaveAttribute("data-repository-id", firstId!);
@@ -97,9 +122,11 @@ export async function exerciseMultiRowCreation(
   await expect(executor).toHaveText(originalExecutor!);
   const secondId = await secondRow.getAttribute("data-repository-id");
   await activate(secondRow.getByTestId("repo-chip-trigger"));
-  await expect(refresh).toBeVisible();
+  const rowRefresh = page.getByTestId("repo-refresh-button");
+  await expect(rowRefresh).toBeVisible();
   await expect(create).toBeVisible();
   await page.keyboard.press("Escape");
+  if (options.mobile) await page.getByTestId("mobile-repository-done").tap();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth,

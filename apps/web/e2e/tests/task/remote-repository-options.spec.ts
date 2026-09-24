@@ -1,5 +1,21 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 import { KanbanPage } from "../../pages/kanban-page";
+import { pasteTaskRepositoryURL } from "../../helpers/task-repository-picker";
+
+async function clearSelectedRepositories(page: Page): Promise<void> {
+  for (const testId of ["remove-repo-chip", "remote-chip-remove"]) {
+    const removeButtons = page.getByTestId(testId);
+    while ((await removeButtons.count()) > 0) {
+      await removeButtons.first().click();
+    }
+  }
+}
+
+async function openRemoteAndPasteURL(page: Page, url: string): Promise<void> {
+  await clearSelectedRepositories(page);
+  await pasteTaskRepositoryURL(page, url);
+}
 
 test("remote repository gear applies task-only settings and cancels draft edits", async ({
   testPage,
@@ -21,16 +37,10 @@ test("remote repository gear applies task-only settings and cancels draft edits"
   const kanban = new KanbanPage(testPage);
   await kanban.goto();
   await kanban.createTaskButton.first().click();
-  await testPage.getByTestId("source-mode-remote").click();
-  await expect(testPage.getByTestId("repository-options-trigger")).toHaveCount(0);
-  await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-  await testPage.getByTestId("remote-repo-input").fill("https://github.com/checkout-options/repo");
-  await testPage.getByTestId("remote-repo-input").press("Enter");
+  await openRemoteAndPasteURL(testPage, "https://github.com/checkout-options/repo");
+  await expect(testPage.getByTestId("repository-options-trigger")).toHaveCount(1);
   await apiClient.mockGitHubAddBranches("checkout-options", "other", [{ name: "main" }]);
-  await testPage.getByTestId("remote-add-row").click();
-  await testPage.getByTestId("remote-repo-chip-trigger").last().click();
-  await testPage.getByTestId("remote-repo-input").fill("https://github.com/checkout-options/other");
-  await testPage.getByTestId("remote-repo-input").press("Enter");
+  await pasteTaskRepositoryURL(testPage, "https://github.com/checkout-options/other");
   await testPage.getByTestId("repository-options-trigger").first().click();
   await expect(testPage.getByText("For this task only", { exact: true })).toBeVisible();
   await testPage.getByTestId("repository-options-download").click();
@@ -92,7 +102,7 @@ test("remote repository gear applies task-only settings and cancels draft edits"
     sparse_directories: ["extensions/my-extension", "packages/shared"],
   });
   await kanban.createTaskButton.first().click();
-  await testPage.getByTestId("source-mode-remote").click();
+  await clearSelectedRepositories(testPage);
   await expect(testPage.getByTestId("repository-options-trigger")).toHaveCount(0);
   await expect(testPage.getByTestId("repository-options-summary")).toHaveCount(0);
 });

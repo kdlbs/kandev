@@ -829,6 +829,21 @@
         id: PROVIDER_ID,
         label: "Bitbucket",
         icon: FixtureBitbucketIcon,
+        getAvailability: function (context) {
+          return host.api
+            .invokeAction(
+              "connection-status",
+              { workspaceId: context.workspaceId },
+              { signal: context.signal },
+            )
+            .then(function (result) {
+              return {
+                configured: true,
+                enabled: true,
+                tested: result.connected === true,
+              };
+            });
+        },
         listRepositories: function () {
           return Promise.resolve([fixtureRepository()]);
         },

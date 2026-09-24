@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, type Page } from "@playwright/test";
+import { waitForHttp } from "../../helpers/causal-waits";
 import {
   createEmptyRemoteRepository,
   removeTestRepository,
@@ -46,6 +47,16 @@ export type PRLinkForkLaunchFixture = {
   forkCleanup: () => void;
   upstreamCleanup: () => void;
 };
+
+export function waitForForkPRInfo(page: Page, fixture: PRLinkForkLaunchFixture) {
+  return waitForHttp(
+    page,
+    "GET",
+    new RegExp(
+      `/api/v1/github/prs/${fixture.upstreamOwner}/${fixture.upstreamRepository}/${PR_NUMBER}/info$`,
+    ),
+  );
+}
 
 export async function expectForkPRLaunchState(
   page: Page,

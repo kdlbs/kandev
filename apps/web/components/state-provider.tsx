@@ -79,7 +79,11 @@ function taskCreateLastUsedEqual(
   b: AppState["userSettings"]["taskCreateLastUsed"],
 ) {
   return taskCreateLastUsedScalarsEqual(a, b)
-    ? taskCreateWorkflowMapsEqual(a?.workflowIdsByWorkspace, b?.workflowIdsByWorkspace)
+    ? taskCreateWorkflowMapsEqual(a?.workflowIdsByWorkspace, b?.workflowIdsByWorkspace) &&
+        taskCreateWorkspaceSourcesMapsEqual(
+          a?.workspaceSourcesByWorkspace,
+          b?.workspaceSourcesByWorkspace,
+        )
     : false;
 }
 
@@ -105,6 +109,17 @@ function taskCreateWorkflowMapsEqual(
   const keys = Object.keys(left);
   if (keys.length !== Object.keys(right).length) return false;
   return keys.every((key) => left[key] === right[key]);
+}
+
+function taskCreateWorkspaceSourcesMapsEqual(
+  a: AppState["userSettings"]["taskCreateLastUsed"]["workspaceSourcesByWorkspace"] | undefined,
+  b: AppState["userSettings"]["taskCreateLastUsed"]["workspaceSourcesByWorkspace"] | undefined,
+) {
+  const left = a ?? {};
+  const right = b ?? {};
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  return keys.every((key) => JSON.stringify(left[key]) === JSON.stringify(right[key]));
 }
 
 export function useAppStore<T>(selector: (state: AppState) => T) {

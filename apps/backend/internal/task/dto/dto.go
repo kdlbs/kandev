@@ -651,6 +651,17 @@ type LocalRepositoryStatusResponse struct {
 	DirtyFiles    []string `json:"dirty_files"`
 }
 
+// LocalRepositoryCloneSourceResponse is the safe, read-only origin inspection
+// used before a local checkout is offered to a remote executor.
+type LocalRepositoryCloneSourceResponse struct {
+	Ready         bool        `json:"ready"`
+	Origin        string      `json:"origin,omitempty"`
+	Reason        string      `json:"reason,omitempty"`
+	CurrentBranch string      `json:"current_branch,omitempty"`
+	DefaultBranch string      `json:"default_branch,omitempty"`
+	Branches      []BranchDTO `json:"branches"`
+}
+
 type LocalRepositoryDTO struct {
 	Path          string `json:"path"`
 	Name          string `json:"name"`

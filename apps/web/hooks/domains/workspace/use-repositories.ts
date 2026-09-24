@@ -124,5 +124,5 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
     };
   }, [enabled, forceRefresh, isLoaded, setRepositories, setRepositoriesLoading, workspaceId]);
 
-  return { repositories, isLoading, refresh };
+  return { repositories, isLoading, isLoaded, refresh };
 }

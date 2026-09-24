@@ -60,4 +60,22 @@ describe("resetTaskForm canvas source preset", () => {
     expect(resetters.setPreferLocalExecutor).toHaveBeenCalledWith(false);
     expect(resetters.setWorkflowAgentOverrides).toHaveBeenCalledWith({});
   });
+
+  it("restores a legacy remote preset when the canonical resetter is unavailable", () => {
+    const resetters = makeResetters();
+
+    resetTaskForm(resetters, "", "", null, {
+      title: "",
+      remoteUrl: "https://bitbucket.example.test/acme/app.git",
+      branch: "main",
+    });
+
+    expect(resetters.setRemoteRepos).toHaveBeenCalledWith([
+      expect.objectContaining({
+        url: "https://bitbucket.example.test/acme/app.git",
+        branch: "main",
+        source: "paste",
+      }),
+    ]);
+  });
 });

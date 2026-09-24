@@ -41,14 +41,37 @@ func startRealChild(t *testing.T, ownProcessGroup bool) *exec.Cmd {
 	return cmd
 }
 
+// observedStartTime reads the child timestamp from the same process-table
+// source used by the probe. Building the test's turn boundary from that
+// observation keeps the assertion independent of container or VM boot-time
+// epoch differences between /proc sources.
+func observedStartTime(t *testing.T, pid int) time.Time {
+	t.Helper()
+	reader := platformProcessTableReader()
+	if reader == nil {
+		t.Fatal("probe: no process-table reader")
+	}
+	table, err := reader.ReadProcessTable()
+	if err != nil {
+		t.Fatalf("read process table: %v", err)
+	}
+	for _, entry := range table {
+		if entry.PID == pid {
+			return entry.StartTime
+		}
+	}
+	t.Fatalf("process %d was absent from process-table snapshot", pid)
+	return time.Time{}
+}
+
 // AC-70: a descendant that predates the recorded turn start by a wide
 // margin settles.
 func TestProbeRealTree_AllDescendantsPreTurn_Settled(t *testing.T) {
 	skipUnlessRealTreeSupported(t)
 
-	startRealChild(t, false)
-	time.Sleep(50 * time.Millisecond) // clear the platform's start-time resolution
-	turnStart := time.Now()
+	child := startRealChild(t, false)
+	turnStart := observedStartTime(t, child.Process.Pid).Add(100 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	got, err := ProbeBackgroundWorkloads(os.Getpid(), turnStart)
 	if err != nil {
@@ -64,9 +87,9 @@ func TestProbeRealTree_AllDescendantsPreTurn_Settled(t *testing.T) {
 func TestProbeRealTree_NewDescendantAfterTurnStart_Live(t *testing.T) {
 	skipUnlessRealTreeSupported(t)
 
-	startRealChild(t, false) // pre-turn descendant
-	time.Sleep(50 * time.Millisecond)
-	turnStart := time.Now()
+	preTurnChild := startRealChild(t, false) // pre-turn descendant
+	turnStart := observedStartTime(t, preTurnChild.Process.Pid).Add(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	settled, err := ProbeBackgroundWorkloads(os.Getpid(), turnStart)
 	if err != nil {
@@ -76,7 +99,7 @@ func TestProbeRealTree_NewDescendantAfterTurnStart_Live(t *testing.T) {
 		t.Fatalf("before the new descendant: got %q, want %q", settled, ResultSettled)
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	startRealChild(t, false) // post-turn-start descendant
 
 	live, err := ProbeBackgroundWorkloads(os.Getpid(), turnStart)

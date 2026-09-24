@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- task creation payload and source mapping share one request boundary. */
+
 import type { useRouter } from "@/lib/routing/client-router";
 import type { Task, Branch, LocalRepository, Repository, TaskPriority } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
@@ -6,11 +8,14 @@ import type {
   StepType,
   TaskRemoteRepoRow,
   TaskRepoRow,
+  TaskRepositorySelection,
 } from "@/components/task-create-dialog-types";
+import { hasUnavailablePickerRemoteProvider } from "@/components/task-create-dialog-remote-provider-readiness";
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { selectPreferredBranch } from "@/lib/utils";
 import { branchOptionValue } from "@/components/branch-picker-options";
+import { splitLocalExecutorBranches } from "@/components/task-create-dialog-branch-utils";
 import { createDebugLogger } from "@/lib/debug/log";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { linkToTask } from "@/lib/links";
@@ -18,6 +23,7 @@ import { INTENT_PLAN } from "@/lib/state/layout-manager";
 import { createTask } from "@/lib/api";
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
 import type { MessageAttachment } from "@/lib/services/session-launch-service";
+import type { WorkspaceSourceRequest } from "@/lib/types/http-workspace-sources";
 
 type CreateTaskParams = Parameters<typeof createTask>[0];
 type CreateTaskRepositoryPayload = NonNullable<CreateTaskParams["repositories"]>[number];
@@ -26,6 +32,12 @@ type RemoteRepoPRMetadata = {
   baseBranch?: string;
   number?: number;
 };
+type FreshRepositoryPayload = Partial<{
+  fresh_branch: boolean;
+  new_branch_name: string;
+  confirm_discard: boolean;
+  consented_dirty_files: string[];
+}>;
 const selectionDebug = createDebugLogger("task-create:selection");
 const BRANCH_AUTOPICK_DEBUG = "branch-autopick";
 
@@ -201,6 +213,8 @@ export type BuildCreatePayloadArgs = {
   trimmedDescription: string;
   autoTitle?: boolean;
   repositoriesPayload: CreateTaskParams["repositories"];
+  /** Presence-aware ordered source payload. `[]` represents explicit scratch. */
+  workspaceSourcesPayload?: CreateTaskParams["workspace_sources"];
   agentProfileId: string;
   executorId: string;
   executorProfileId: string;
@@ -227,15 +241,6 @@ function nonEmptyArray<T>(value?: T[]): T[] | undefined {
 
 function nonEmptyRecord<T extends Record<string, string>>(value?: T): T | undefined {
   return value && Object.keys(value).length > 0 ? value : undefined;
-}
-
-type CreateTaskTitleFields =
-  | { title: string; auto_title?: false }
-  | { title?: never; auto_title: true };
-
-function buildCreateTaskTitle(args: BuildCreatePayloadArgs): CreateTaskTitleFields {
-  if (args.autoTitle) return { auto_title: true };
-  return { title: args.trimmedTitle };
 }
 
 type CreateTaskStateFields = {
@@ -268,18 +273,19 @@ function buildOptionalCreateTaskFields(args: BuildCreatePayloadArgs): OptionalCr
     plan_mode: args.planMode || undefined,
     attachments: args.attachments,
     parent_id: optionalString(args.parentId),
-    workspace_path: optionalString(args.workspacePath),
+    ...(args.workspaceSourcesPayload === undefined
+      ? { workspace_path: optionalString(args.workspacePath) }
+      : {}),
     autopilot: args.autopilot || undefined,
   };
 }
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
-  return {
+  const commonPayload = {
     workspace_id: args.workspaceId,
     workflow_id: args.effectiveWorkflowId,
-    ...buildCreateTaskTitle(args),
     description: args.trimmedDescription,
-    repositories: args.repositoriesPayload,
+    ...createTaskSourceFields(args),
     ...buildCreateTaskState(args.withAgent),
     ...buildOptionalCreateTaskFields(args),
     priority: args.priority ?? "medium",
@@ -289,6 +295,24 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     // than launching now, so a chain runs in order instead of all at once.
     blocked_by: nonEmptyArray(args.blockedBy),
   };
+  if (args.autoTitle) return { ...commonPayload, auto_title: true };
+  return { ...commonPayload, title: args.trimmedTitle };
+}
+
+function createTaskSourceFields(
+  args: BuildCreatePayloadArgs,
+): Pick<CreateTaskParams, "workspace_sources" | "repositories" | "workspace_path"> {
+  if (args.workspaceSourcesPayload !== undefined) {
+    return { workspace_sources: args.workspaceSourcesPayload };
+  }
+  return {
+    repositories: args.repositoriesPayload,
+    workspace_path: optionalTaskValue(args.workspacePath),
+  };
+}
+
+function optionalTaskValue<T>(value: T | null | undefined): T | undefined {
+  return value || undefined;
 }
 
 export function validateCreateInputs(inputs: {
@@ -299,16 +323,26 @@ export function validateCreateInputs(inputs: {
   effectiveWorkflowId: string | null;
   /** Unified repos list. The form is valid if any row has a repo set OR URL mode is filled. */
   repositories: TaskRepoRow[];
+  /** Ordered mixed rows from the current draft. */
+  selections?: TaskRepositorySelection[];
   /** Remote URL rows. The form is valid when at least one has a non-empty URL. */
   remoteRepos?: TaskRemoteRepoRow[];
+  /** Readiness for provider-backed picker rows. Pasted URLs do not use this gate. */
+  remoteProviderReadiness?: import("@/components/task-create-dialog-remote-provider-readiness").TaskRemoteProviderReadinessMap;
   agentProfileId: string;
   noRepository?: boolean;
+  sourcePolicyInvalid?: boolean;
 }): boolean {
-  const hasRemoteRepo = (inputs.remoteRepos ?? []).some((r) => r.url.trim() !== "");
-  const hasRepo =
-    inputs.noRepository ||
-    inputs.repositories.some((r) => r.repositoryId || r.localPath) ||
-    hasRemoteRepo;
+  const selections =
+    inputs.selections ?? resolveLegacySelections(inputs.repositories, inputs.remoteRepos ?? []);
+  const hasRepo = Boolean(inputs.noRepository || selections.some(selectionHasValue));
+  if (
+    !inputs.noRepository &&
+    hasUnavailablePickerRemoteProvider(selections, inputs.remoteProviderReadiness)
+  ) {
+    return false;
+  }
+  if (inputs.sourcePolicyInvalid) return false;
   return Boolean(
     (inputs.autoTitle ? inputs.trimmedDescription : inputs.trimmedTitle) &&
     inputs.workspaceId &&
@@ -316,6 +350,22 @@ export function validateCreateInputs(inputs: {
     inputs.agentProfileId &&
     hasRepo,
   );
+}
+
+function resolveLegacySelections(
+  repositories: TaskRepoRow[],
+  remoteRepos: TaskRemoteRepoRow[],
+): TaskRepositorySelection[] {
+  return [
+    ...repositories.map((row) => ({ kind: "local" as const, ...row })),
+    ...remoteRepos.map((row) => ({ kind: "remote" as const, ...row })),
+  ];
+}
+
+function selectionHasValue(selection: TaskRepositorySelection): boolean {
+  if (selection.kind === "remote") return selection.url.trim() !== "";
+  if (selection.kind === "folder") return Boolean(selection.localPath.trim());
+  return Boolean(selection.repositoryId || selection.localPath);
 }
 
 /**
@@ -372,6 +422,8 @@ export function findUnresolvedProviderRemote(
  *   detection happens on the backend.
  */
 export function buildRepositoriesPayload(opts: {
+  /** Ordered mixed rows from the current task draft. */
+  selections?: TaskRepositorySelection[];
   /** True when the form is in GitHub Remote (URL) mode. */
   useRemote: boolean;
   /** Remote-URL rows; non-empty `url` rows are mapped 1:1 to payload entries. */
@@ -399,12 +451,17 @@ export function buildRepositoriesPayload(opts: {
    * goes empty after a refresh.
    */
   isLocalExecutor?: boolean;
+  /** True when the selected executor will materialize local repositories from their origin. */
+  remoteOriginMode?: boolean;
   /**
    * Optional fresh-branch metadata. The UI gates this to single-row + local
    * executor; when present we apply it to every row (which is at most one).
    */
   freshBranch?: { confirmDiscard: boolean; consentedDirtyFiles: string[] };
 }): NonNullable<CreateTaskParams["repositories"]> {
+  if (opts.selections) {
+    return buildMixedRepositoryPayload(opts.selections, opts);
+  }
   if (opts.useRemote) {
     return buildRemoteRepoPayload(opts);
   }
@@ -424,35 +481,173 @@ export function buildRepositoriesPayload(opts: {
   const isLocalExecutor = !!opts.isLocalExecutor && !opts.freshBranch;
   return opts.repositories
     .filter((row) => row.repositoryId || row.localPath)
-    .map((row) => {
-      const defaultBranch = resolveRowDefaultBranch(row, opts);
-      const branches = splitLocalExecutorBranches({
-        rowBranch: row.branch,
+    .map((row) => buildLocalRepositoryPayloadRow(row, opts, fresh, isLocalExecutor));
+}
+
+function buildMixedRepositoryPayload(
+  selections: TaskRepositorySelection[],
+  opts: Parameters<typeof buildRepositoriesPayload>[0],
+): NonNullable<CreateTaskParams["repositories"]> {
+  const fresh = opts.freshBranch
+    ? {
+        fresh_branch: true,
+        confirm_discard: opts.freshBranch.confirmDiscard,
+        consented_dirty_files: opts.freshBranch.consentedDirtyFiles,
+      }
+    : {};
+  const isLocalExecutor = !!opts.isLocalExecutor && !opts.freshBranch;
+  return selections.flatMap((selection) => {
+    if (selection.kind === "folder") return [];
+    if (selection.kind === "remote") {
+      return selection.url.trim() ? [buildRemoteRepoPayloadRow(selection, opts.prInfoByUrl)] : [];
+    }
+    if (!selection.repositoryId && !selection.localPath) return [];
+    return [buildLocalRepositoryPayloadRow(selection, opts, fresh, isLocalExecutor)];
+  });
+}
+
+/** Builds the ordered, tagged source payload used by the new task-creation contract. */
+export function buildWorkspaceSourcesPayload(
+  opts: Parameters<typeof buildRepositoriesPayload>[0],
+): WorkspaceSourceRequest[] {
+  const selections =
+    opts.selections ?? resolveLegacySelections(opts.repositories, opts.remoteRepos);
+  const fresh = opts.freshBranch
+    ? {
+        fresh_branch: true,
+        confirm_discard: opts.freshBranch.confirmDiscard,
+        consented_dirty_files: opts.freshBranch.consentedDirtyFiles,
+      }
+    : {};
+  const isLocalExecutor = !!opts.isLocalExecutor && !opts.freshBranch;
+  return selections.flatMap((selection): WorkspaceSourceRequest[] => {
+    if (selection.kind === "folder") {
+      const localPath = selection.localPath.trim();
+      if (!localPath) return [];
+      return [
+        {
+          kind: "folder" as const,
+          local_path: localPath,
+          ...(selection.displayName ? { display_name: selection.displayName } : {}),
+        },
+      ];
+    }
+    if (selection.kind === "remote") {
+      if (!selection.url.trim()) return [];
+      const repository = buildRemoteRepoPayloadRow(selection, opts.prInfoByUrl);
+      return [workspaceRepositorySource(repository)];
+    }
+    if (!selection.repositoryId && !selection.localPath) return [];
+    const repository = buildLocalRepositoryPayloadRow(selection, opts, fresh, isLocalExecutor);
+    return [workspaceRepositorySource(repository)];
+  });
+}
+
+function workspaceRepositorySource(
+  repository: CreateTaskRepositoryPayload,
+): WorkspaceSourceRequest & { kind: "repository" } {
+  return {
+    kind: "repository",
+    ...(repository.checkout_options ? { checkout_options: repository.checkout_options } : {}),
+    ...repositoryIdentityFields(repository),
+    ...repositoryBranchFields(repository),
+    ...repositoryFreshBranchFields(repository),
+  };
+}
+
+type RepositorySourceFields = Partial<
+  Omit<Extract<WorkspaceSourceRequest, { kind: "repository" }>, "kind">
+>;
+
+function repositoryIdentityFields(repository: CreateTaskRepositoryPayload): RepositorySourceFields {
+  return {
+    ...(repository.repository_id ? { repository_id: repository.repository_id } : {}),
+    ...(repository.local_path ? { local_path: repository.local_path } : {}),
+    ...(repository.github_url ? { github_url: repository.github_url } : {}),
+    ...(repository.remote_url ? { remote_url: repository.remote_url } : {}),
+    ...(repository.provider ? { provider: repository.provider } : {}),
+    ...(repository.provider_host ? { provider_host: repository.provider_host } : {}),
+    ...(repository.provider_scope ? { provider_scope: repository.provider_scope } : {}),
+    ...(repository.provider_repo_id ? { provider_repo_id: repository.provider_repo_id } : {}),
+    ...(repository.provider_owner ? { provider_owner: repository.provider_owner } : {}),
+    ...(repository.provider_name ? { provider_name: repository.provider_name } : {}),
+    ...(repository.checkout_source ? { checkout_source: repository.checkout_source } : {}),
+    ...(repository.expected_origin ? { expected_origin: repository.expected_origin } : {}),
+  };
+}
+
+function repositoryBranchFields(repository: CreateTaskRepositoryPayload): RepositorySourceFields {
+  return {
+    ...(repository.base_branch ? { base_branch: repository.base_branch } : {}),
+    ...(repository.checkout_branch ? { checkout_branch: repository.checkout_branch } : {}),
+    ...(repository.branch_policy_id ? { branch_policy_id: repository.branch_policy_id } : {}),
+    ...(repository.pr_number ? { pr_number: repository.pr_number } : {}),
+  };
+}
+
+function repositoryFreshBranchFields(
+  repository: CreateTaskRepositoryPayload,
+): RepositorySourceFields {
+  return {
+    ...(repository.fresh_branch ? { fresh_branch: repository.fresh_branch } : {}),
+    ...(repository.new_branch_name ? { new_branch_name: repository.new_branch_name } : {}),
+    ...(repository.confirm_discard !== undefined
+      ? { confirm_discard: repository.confirm_discard }
+      : {}),
+    ...(repository.consented_dirty_files
+      ? { consented_dirty_files: repository.consented_dirty_files }
+      : {}),
+  };
+}
+
+function buildLocalRepositoryPayloadRow(
+  row: TaskRepoRow,
+  opts: Parameters<typeof buildRepositoriesPayload>[0],
+  fresh: FreshRepositoryPayload,
+  isLocalExecutor: boolean,
+): CreateTaskRepositoryPayload {
+  const defaultBranch = resolveRowDefaultBranch(row, opts);
+  const branches = opts.freshBranch
+    ? { base_branch: row.branch || undefined, checkout_branch: undefined }
+    : splitLocalExecutorBranches({
+        // Restored local sources can carry both the branch checked out on the
+        // host and the saved integration base. Worktree-backed executors use the
+        // base while direct local execution keeps the checkout branch.
+        rowBranch: isLocalExecutor ? row.branch : row.baseBranch || row.branch,
         defaultBranch,
-        // Fresh-branch mode uses row.branch as the fork base. A saved set base
-        // is checkout metadata for the ordinary local-executor flow and must
-        // not override the branch the user picked to fork from.
-        baseBranch: opts.freshBranch ? undefined : row.baseBranch,
+        baseBranch: row.baseBranch,
         isLocalExecutor,
       });
-      if (row.repositoryId) {
-        return {
-          repository_id: row.repositoryId,
-          ...(row.branchPolicyId ? { branch_policy_id: row.branchPolicyId } : {}),
-          base_branch: branches.base_branch,
-          checkout_branch: branches.checkout_branch,
-          ...fresh,
-        };
-      }
-      return {
-        repository_id: "",
-        base_branch: branches.base_branch,
-        checkout_branch: branches.checkout_branch,
-        local_path: row.localPath,
-        default_branch: defaultBranch || undefined,
-        ...fresh,
-      };
-    });
+  if (row.repositoryId) {
+    return {
+      repository_id: row.repositoryId,
+      ...(row.branchPolicyId ? { branch_policy_id: row.branchPolicyId } : {}),
+      base_branch: branches.base_branch,
+      checkout_branch: branches.checkout_branch,
+      ...localRepositoryOriginFields(row, opts),
+      ...fresh,
+    };
+  }
+  return {
+    repository_id: "",
+    base_branch: branches.base_branch,
+    checkout_branch: branches.checkout_branch,
+    local_path: row.localPath,
+    default_branch: defaultBranch || undefined,
+    ...localRepositoryOriginFields(row, opts),
+    ...fresh,
+  };
+}
+
+function localRepositoryOriginFields(
+  row: TaskRepoRow,
+  opts: Parameters<typeof buildRepositoriesPayload>[0],
+): Pick<CreateTaskRepositoryPayload, "checkout_source" | "expected_origin"> {
+  if (opts.remoteOriginMode === false) return {};
+  return {
+    ...(row.checkoutSource ? { checkout_source: row.checkoutSource } : {}),
+    ...(row.expectedOrigin ? { expected_origin: row.expectedOrigin } : {}),
+  };
 }
 
 /**
@@ -588,32 +783,3 @@ function resolveRowDefaultBranch(
  * For non-local executors (worktree-based): keep the historical shape where
  * `base_branch=rowBranch` (the worktree creates a new branch off of it).
  */
-function splitLocalExecutorBranches(args: {
-  rowBranch?: string;
-  defaultBranch?: string;
-  baseBranch?: string;
-  isLocalExecutor: boolean;
-}): { base_branch: string | undefined; checkout_branch: string | undefined } {
-  // Without a known default_branch we can't anchor base_branch to the
-  // integration ref — and using rowBranch as a stand-in reproduces the
-  // exact bug this PR fixes (changes panel collapses to HEAD on refresh).
-  // Fall through to the legacy non-split shape: a workspace repo with an
-  // unset default_branch is no worse off than before, and the backend's
-  // resolveRepoInput probe will populate it on the next CreateRepository
-  // call. Wait for that probe rather than synthesizing a guess here.
-  if (!args.isLocalExecutor) {
-    return {
-      base_branch: args.baseBranch || args.rowBranch || undefined,
-      checkout_branch: undefined,
-    };
-  }
-  if (!args.defaultBranch) {
-    return {
-      base_branch: args.baseBranch || args.rowBranch || undefined,
-      checkout_branch: args.baseBranch ? args.rowBranch || undefined : undefined,
-    };
-  }
-  const base = args.baseBranch || args.defaultBranch;
-  const checkout = args.rowBranch && args.rowBranch !== base ? args.rowBranch : undefined;
-  return { base_branch: args.baseBranch || base, checkout_branch: checkout };
-}

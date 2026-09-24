@@ -543,5 +543,6 @@
   "sidebarYearsMax": "99年以上",
   "integrationSettings": "統合設定",
   "pageNavigation": "このページ",
-  "viewOptions": "表示オプション"
+  "viewOptions": "表示オプション",
+  "go": "Go 言語"
 }

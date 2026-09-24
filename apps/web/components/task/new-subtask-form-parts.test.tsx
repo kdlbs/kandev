@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
 
+const repoChipsProps = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
+
 vi.mock("@/components/enhance-prompt-button", () => ({
   EnhancePromptButton: ({ onClick }: { onClick: () => void }) => (
     <button type="button" onClick={onClick}>
@@ -13,13 +15,16 @@ vi.mock("@/components/enhance-prompt-button", () => ({
 }));
 
 vi.mock("@/components/task-create-dialog-repo-chips", () => ({
-  RepoChipsRow: () => (
-    <div data-testid="repo-chips-row">
-      <button type="button" data-testid="repo-chip-trigger">
-        Parent repository
-      </button>
-    </div>
-  ),
+  RepoChipsRow: (props: Record<string, unknown>) => {
+    repoChipsProps.current = props;
+    return (
+      <div data-testid="repo-chips-row">
+        <button type="button" data-testid="repo-chip-trigger">
+          Parent repository
+        </button>
+      </div>
+    );
+  },
 }));
 
 // The subtask form reads the workspace's repository sets, which needs the store.
@@ -84,6 +89,7 @@ function createFormProps(workspaceMode: FormProps["workspaceMode"]): FormProps {
     worktreeBranch: "feature/parent",
     isLocalExecutor: false,
     freshBranchAvailable: false,
+    hasAllBranches: true,
     profileOptions: [],
     executorProfileOptions: [],
     agentProfileId: "agent-profile",
@@ -153,6 +159,10 @@ describe("PromptZone", () => {
 });
 
 describe("SubtaskFormBody workspace messaging", () => {
+  beforeEach(() => {
+    repoChipsProps.current = null;
+  });
+
   it("shows the parent branch only when the child inherits the workspace", () => {
     const { rerender } = render(<SubtaskFormBody {...createFormProps("inherit_parent")} />);
 
@@ -162,5 +172,65 @@ describe("SubtaskFormBody workspace messaging", () => {
 
     expect(screen.queryByText("Same branch as current session")).toBeNull();
     expect(screen.getByTestId("repo-chip-trigger")).toBeTruthy();
+  });
+
+  it("disables creation while a selected repository is unresolved", () => {
+    render(<SubtaskFormBody {...createFormProps("new_workspace")} hasAllBranches={false} />);
+
+    const submitButtons = screen.getAllByRole("button", { name: /create subtask/i });
+    expect((submitButtons.at(-1) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("passes executor source policy and transition handlers to editable workspace subtasks", () => {
+    const handlers = createFormProps("new_workspace").handlers;
+    const onFolderSelectionAdded = vi.fn();
+    const onRepositorySelectionAdded = vi.fn();
+    const onRepositorySelectionRemoved = vi.fn();
+    const onRefreshRemoteOrigins = vi.fn();
+    const executorSourcePolicy = {
+      capabilities: {
+        canAddFolders: false,
+        canChooseCheckoutBranch: true,
+        requiresCloneableLocalRepository: true,
+        executorCapabilitiesKnown: true,
+      },
+      mode: "repository" as const,
+      folderAvailable: false,
+      folderDisabledReason: "requires_host_executor" as const,
+      incompatible: false,
+      incompatibleReason: undefined,
+    };
+    const props = createFormProps("new_workspace");
+    props.handlers = {
+      ...handlers,
+      onFolderSelectionAdded,
+      onRepositorySelectionAdded,
+      onRepositorySelectionRemoved,
+    } as FormProps["handlers"];
+    props.executorSourcePolicy = executorSourcePolicy;
+    props.folderDisabledReason = "Folders require a host executor";
+    props.remoteOriginStates = {
+      "row-1": {
+        status: "ready",
+        result: {
+          ready: true,
+          origin: "https://github.com/acme/parent.git",
+          branches: [{ name: "main", type: "remote", remote: "origin" }],
+        },
+      },
+    };
+    props.onRefreshRemoteOrigins = onRefreshRemoteOrigins;
+
+    render(<SubtaskFormBody {...props} />);
+
+    expect(repoChipsProps.current).toMatchObject({
+      executorSourcePolicy,
+      folderDisabledReason: "Folders require a host executor",
+      remoteOriginStates: props.remoteOriginStates,
+      onRefreshRemoteOrigins,
+      onFolderSelectionAdded,
+      onRepositorySelectionAdded,
+      onRepositorySelectionRemoved,
+    });
   });
 });

@@ -61,3 +61,10 @@ Not every piece of agent work is tied to a codebase. Users want to brainstorm a 
 - **Scratch workspace location and lifecycle.** Per-task scratch dir under the kandev data directory (e.g. `~/.kandev/data/scratch/<task-id>/`)? Wiped on task delete, or retained until manual cleanup? Per-executor — does `local_docker` get a named volume, or a tmpfs?
 - **Folder picker mechanism.** Backend endpoint that lists local directories (browse from `$HOME`)? Or a free-text path input with server-side validation? Does kandev's existing repo-add flow already have a directory browser we can reuse?
 - **Storage of the picked folder.** New nullable `task_sessions.workspace_path` column, or reuse an existing field?
+## Creation selector extension
+
+For the current creation selector and mixed folders,
+[Mixed repository selection](mixed-repository-selection.md), requirements 004 and
+005, supersedes the exclusive optional-folder UI described above. Direct single
+folder CWD and scratch lifecycle remain; multiple folders and repository-plus-
+folder input use the shared task workspace. No-container-folder exclusions remain.

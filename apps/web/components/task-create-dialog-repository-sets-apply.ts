@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { useToast } from "@/components/toast-provider";
 import type { Repository, RepositorySet } from "@/lib/types/http";
-import type { TaskRepoRow } from "@/components/task-create-dialog-types";
+import type { TaskRepoRow, TaskRepositorySelection } from "@/components/task-create-dialog-types";
 import { applyRepositorySet } from "@/components/task-create-dialog-repository-sets";
 
 type UseApplyRepositorySetArgs = {
@@ -13,6 +13,9 @@ type UseApplyRepositorySetArgs = {
   repositories: Repository[];
   setRepositories: (rows: TaskRepoRow[]) => void;
   setRepositoriesDirty: (dirty: boolean) => void;
+  setNoRepository: (noRepository: boolean) => void;
+  selections?: TaskRepositorySelection[];
+  setRepositorySelections?: (selections: TaskRepositorySelection[]) => void;
 };
 
 /**
@@ -29,6 +32,9 @@ export function useApplyRepositorySet({
   repositories,
   setRepositories,
   setRepositoriesDirty,
+  setNoRepository,
+  selections,
+  setRepositorySelections,
 }: UseApplyRepositorySetArgs) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -37,7 +43,25 @@ export function useApplyRepositorySet({
     (set: RepositorySet) => {
       const outcome = applyRepositorySet({ rows, set, repositories });
       if (outcome.addedCount > 0) {
-        setRepositories(outcome.rows);
+        setNoRepository(false);
+        if (selections && setRepositorySelections) {
+          const existingKeys = new Set(selections.map((selection) => selection.key));
+          const next = selections.filter(
+            (selection) =>
+              !(
+                selection.kind === "local" &&
+                !selection.repositoryId &&
+                !selection.localPath &&
+                !selection.branch
+              ),
+          );
+          for (const row of outcome.rows) {
+            if (!existingKeys.has(row.key)) next.push({ kind: "local", ...row });
+          }
+          setRepositorySelections(next);
+        } else {
+          setRepositories(outcome.rows);
+        }
         setRepositoriesDirty(true);
       }
       if (outcome.missingCount > 0) {
@@ -61,6 +85,16 @@ export function useApplyRepositorySet({
         });
       }
     },
-    [rows, repositories, setRepositories, setRepositoriesDirty, t, toast],
+    [
+      rows,
+      repositories,
+      setRepositories,
+      setRepositoriesDirty,
+      setNoRepository,
+      selections,
+      setRepositorySelections,
+      t,
+      toast,
+    ],
   );
 }

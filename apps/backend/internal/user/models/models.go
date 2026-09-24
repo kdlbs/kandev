@@ -266,11 +266,35 @@ type SidebarTaskPrefs struct {
 }
 
 type TaskCreateLastUsed struct {
-	RepositoryID           string            `json:"repository_id"`
-	Branch                 string            `json:"branch"`
-	AgentProfileID         string            `json:"agent_profile_id"`
-	ExecutorProfileID      string            `json:"executor_profile_id"`
-	WorkflowIDsByWorkspace map[string]string `json:"workflow_ids_by_workspace"`
+	RepositoryID                string                                `json:"repository_id"`
+	Branch                      string                                `json:"branch"`
+	AgentProfileID              string                                `json:"agent_profile_id"`
+	ExecutorProfileID           string                                `json:"executor_profile_id"`
+	WorkflowIDsByWorkspace      map[string]string                     `json:"workflow_ids_by_workspace"`
+	WorkspaceSourcesByWorkspace map[string][]TaskCreateLastUsedSource `json:"workspace_sources_by_workspace,omitempty"`
+}
+
+// TaskCreateLastUsedSource is the durable, workspace-scoped source descriptor
+// used to restore the ordered contents of a new task draft.
+type TaskCreateLastUsedSource struct {
+	Kind           string `json:"kind"`
+	RepositoryID   string `json:"repository_id,omitempty"`
+	LocalPath      string `json:"local_path,omitempty"`
+	GitHubURL      string `json:"github_url,omitempty"`
+	RemoteURL      string `json:"remote_url,omitempty"`
+	Provider       string `json:"provider,omitempty"`
+	ProviderHost   string `json:"provider_host,omitempty"`
+	ProviderScope  string `json:"provider_scope,omitempty"`
+	ProviderRepoID string `json:"provider_repo_id,omitempty"`
+	ProviderOwner  string `json:"provider_owner,omitempty"`
+	ProviderName   string `json:"provider_name,omitempty"`
+	CheckoutSource string `json:"checkout_source,omitempty"`
+	ExpectedOrigin string `json:"expected_origin,omitempty"`
+	BaseBranch     string `json:"base_branch,omitempty"`
+	CheckoutBranch string `json:"checkout_branch,omitempty"`
+	BranchPolicyID string `json:"branch_policy_id,omitempty"`
+	PRNumber       int    `json:"pr_number,omitempty"`
+	DisplayName    string `json:"display_name,omitempty"`
 }
 
 // AgentProfileRecentUseContext identifies an operational selector whose

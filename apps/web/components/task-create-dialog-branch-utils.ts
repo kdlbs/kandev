@@ -93,3 +93,27 @@ export function computeBranchDisabledReason({
   if (optionCount === 0) return t("task:branchDisabledNoBranches");
   return undefined;
 }
+
+/** Splits the selected branch into the integration base and checkout branch. */
+export function splitLocalExecutorBranches(args: {
+  rowBranch?: string;
+  defaultBranch?: string;
+  baseBranch?: string;
+  isLocalExecutor: boolean;
+}): { base_branch: string | undefined; checkout_branch: string | undefined } {
+  if (!args.isLocalExecutor) {
+    return {
+      base_branch: args.baseBranch || args.rowBranch || undefined,
+      checkout_branch: undefined,
+    };
+  }
+  if (!args.defaultBranch) {
+    return {
+      base_branch: args.baseBranch || args.rowBranch || undefined,
+      checkout_branch: args.baseBranch ? args.rowBranch || undefined : undefined,
+    };
+  }
+  const base = args.baseBranch || args.defaultBranch;
+  const checkout = args.rowBranch && args.rowBranch !== base ? args.rowBranch : undefined;
+  return { base_branch: args.baseBranch || base, checkout_branch: checkout };
+}

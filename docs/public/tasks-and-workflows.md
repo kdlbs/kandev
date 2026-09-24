@@ -122,10 +122,7 @@ with the built-in Kanban steps, so it can accept tasks immediately.
 
 1. Open **Settings → Workspaces** and select **Add Workspace**.
 2. Enter the required workspace name.
-3. Open the workspace's **Repositories** page and add its local repositories.
-   - Create an empty local repository from **New Task** when needed.
-   - Add remote URLs through **New Task → Remote**.
-   - Use [Repository sets](#repository-sets) to select groups of repositories together.
+3. Open the workspace's **Repositories** page and add the existing local repositories the workspace needs. Create an empty local repository from **New Task** when needed. Remote URLs are not registered on this page; add them through the repository picker in **New Task**. Use [Repository sets](#repository-sets) to select groups of repositories together.
 4. Open its **Workflows** page to review the default **Kanban** workflow. Create, import, or synchronize another workflow when the workspace needs a different process.
 5. On **Workspace Settings**, optionally choose a **Default Executor** and **Default Agent Profile**. Both default to **No default** unless configured.
 
@@ -147,13 +144,9 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 
 1. **Set a title.** If the title field appears, enter up to 60 characters. With **Agent-generated task titles** enabled, Kandev uses the prompt's first six words as a provisional title. See [advanced task creation](#let-the-agent-name-new-tasks).
 2. **Choose a workspace and workflow.** Kandev can infer them from the current view. A regular task must belong to a workflow. Use the arrow between the workflow and step names to see where each start action places the task.
-3. **Choose a source:**
+3. Add workspace contents one at a time. When the list is empty, the button reads **+ Add Repository/Folder**; after a selection it reads **+ Add**. The menu contains **Repository**, **Local Folder**, and **Repository Set**. **Repository** has a **Local** tab for configured repositories, discovered Git folders, and new local repository creation, plus one named tab for each provider that is configured, enabled, and successfully tested. Provider tabs search that provider's repositories and accept supported URLs. **Local Folder** adds a live host folder without branch controls. **Repository Set** appends missing registered repositories without replacing the current contents. You can mix local and remote repositories with folders in any order. Select a branch policy or base branch for each repository. A policy creates a fresh branch from its saved base and uses its branch template. Each editable local repository row offers **Refresh repositories** and **Create new repository**. Creation initializes `main` with one empty initial commit in a parent folder you choose.
 
-   | Source | Use it for | Notes |
-   | --- | --- | --- |
-   | **Repo** | A configured, discovered, or new local repository | Choose a branch or [branch policy](#branch-policies). Add more rows for a multi-repository task. |
-   | **Remote** | A remote repository | Search GitHub, GitLab, or Azure DevOps, or paste a supported URL. Public GitHub reads and public `gitlab.com` branch discovery work without credentials. Private access and authenticated browse/write actions require provider credentials. |
-   | **None** | Planning, research, or work outside Git | Use a scratch workspace or an optional folder on the Kandev host. Git worktree and repository-aware Changes, branch, and pull-request features are unavailable. |
+   Remove every content row to submit an explicit empty workspace. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable for a repository-less task. A pasted URL stays editable until you press Enter; then select its branch. Anonymous, credential-free reads include public GitHub repository branches, pull requests, and issues, plus public `gitlab.com` branch discovery. Private resources and authenticated browse/write features require valid provider credentials. On a phone, the contents button opens one sheet; use **Repository**, **Local Folder**, **Repository Set**, **Back**, and **Done** without leaving that sheet.
 
 4. **Choose an executor and agent profile.** Both profiles must be compatible. A workflow default agent profile locks the task-level selector.
 5. **Add a description when needed.** Use the eye button beside **Enhance prompt with AI** to preview a step's prompt template. The preview does not resolve task IDs or saved-prompt references until the task exists.
@@ -211,7 +204,7 @@ When you create a task, Kandev saves the selected policy values on the task repo
 or deletion of the policy do not change the task. Kandev's pull-request dialog uses the saved target
 by default. You can change it before creation. Kandev also adds the saved target to the agent's task
 context. The instruction tells the agent to pass the target explicitly to its provider CLI.
-Policies are not offered in **Quick Chat**, **Remote**, **Add Sources**, or **Add Branch** flows.
+Policies are not offered in **Quick Chat**, **Add Sources**, or **Add Branch** flows.
 
 Kandev remembers draft or recently used repository, branch, executor, and profile choices. Review the restored values before submitting, especially after changing workspace.
 
@@ -228,7 +221,7 @@ Kandev rejects an existing target path and creates one empty initial commit with
 
 ### Work with an empty remote repository
 
-An existing local checkout or a repository selected from **Remote** can point to a remote with no refs. Kandev creates a local empty baseline so a normal **Worktree** task can start. The baseline contains no README, license, `.gitignore`, or other project files.
+An existing local checkout or a repository selected from an eligible provider can point to a remote with no refs. Kandev creates a local empty baseline so a normal **Worktree** task can start. The baseline contains no README, license, `.gitignore`, or other project files.
 
 Task launch, resume, and worktree recovery do not write to the remote. When the work is ready, use the existing **Changes** action to **Push** or **Create pull request**. Kandev publishes the selected base branch first, then the task branch, with the task runtime's Git credentials. Read or clone access alone is not enough to publish.
 
@@ -317,7 +310,9 @@ progress.
 
 ### Multiple repositories
 
-A task can include several local or remote repository rows. Multi-repository creation supports **Worktree**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. Local/Local PC creation remains unavailable until its initial-launch path can materialize sibling repositories, and Remote Docker is not implemented. Public GitHub and GitLab repositories can be cloned and fetched anonymously. Private repositories and authenticated browse/write features need credentials that can access the selected base branch.
+A task can include several local or remote repository rows and live local folders. Repository-only multi-repository creation supports **Worktree**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. Live host folders are supported by **Local** and **Worktree** executors. One folder is the working directory; multiple contents use a task-owned root with named siblings. Remote Docker and host-folder transfer are not implemented. Public GitHub and GitLab repositories can be cloned and fetched anonymously. Private repositories and authenticated browse/write features need credentials that can access the selected base branch.
+
+When a container or remote executor is selected, **Local Folder** is disabled. A local checkout can be selected only after Kandev verifies a usable remote origin, and Kandev clones that origin for the executor. Local uncommitted changes and unpushed commits are not included. Branch choices come from the remote; if a saved local-only branch is unavailable, the row stays selected and task creation remains blocked until you choose a remote branch or remove the row.
 
 If Kandev cannot resolve a pasted remote URL or its branch, the repository row keeps the URL and shows the provider error. Use **Retry** after correcting the URL or when a transient provider failure has cleared.
 
@@ -390,9 +385,11 @@ member fields in one request. The same five operations exist as
 Sets are workspace-scoped and shared: everyone who can see the workspace sees and can apply its sets.
 A set name is unique within its workspace, compared case-insensitively. Deleting a set removes the
 grouping only, never a repository; deleting a repository removes it from every set and leaves the sets
-themselves in place. Sets are not offered in **Remote** or **None** source mode. On an executor that
-cannot run a multi-repository task the control still works; the executor picker marks that profile
-unavailable once several repositories are selected, exactly as when you add the rows by hand.
+themselves in place. Sets are available while editing a task repository draft and append registered
+workspace members without changing existing rows. Unregistered local paths and pasted URLs are not
+saved as set members. On an executor that cannot run a multi-repository task the control still
+works; the executor picker marks that profile unavailable once several repositories are selected,
+exactly as when you add the rows by hand.
 
 </details>
 

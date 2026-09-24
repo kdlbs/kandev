@@ -239,6 +239,7 @@ describe("local repository executor selection", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- repository transition cases share one handler fixture.
 describe("repository source changes", () => {
   function renderRepositoryChangeHandler(
     rows: Array<{ key: string; repositoryId?: string; localPath?: string; branch: string }>,
@@ -278,6 +279,62 @@ describe("repository source changes", () => {
     expect(fs.setExecutorId).toHaveBeenCalledWith("");
     expect(fs.setExecutorProfileId).toHaveBeenCalledWith("");
   });
+
+  it.each(["local", "remote"])(
+    "switches a Worktree draft to direct Local after removing the final %s repository",
+    (removedKind) => {
+      const setExecutorId = vi.fn();
+      const setExecutorProfileId = vi.fn();
+      const setAutomaticExecutorRestore = vi.fn();
+      const setFolderOnlyExecutorNotice = vi.fn();
+      const local = {
+        kind: "local" as const,
+        key: "repo-1",
+        repositoryId: "repo-1",
+        branch: "main",
+      };
+      const remote = {
+        kind: "remote" as const,
+        key: "repo-1",
+        url: "https://github.com/acme/api",
+        branch: "main",
+        source: "paste" as const,
+      };
+      const folder = { kind: "folder" as const, key: "folder-1", localPath: "/work/assets" };
+      const fs = {
+        executorId: "worktree",
+        executorProfileId: WORKTREE_PROFILE_ID,
+        executorChoiceTouched: false,
+        repositorySelections: [removedKind === "local" ? local : remote, folder],
+        repositories: removedKind === "local" ? [local] : [],
+        remoteRepos: removedKind === "remote" ? [remote] : [],
+        setExecutorId,
+        setExecutorProfileId,
+        setAutomaticExecutorRestore,
+        setFolderOnlyExecutorNotice,
+      } as unknown as DialogFormState;
+      const { result } = renderHook(() =>
+        useDialogHandlers(fs, [], {
+          workspaceId: "workspace-1",
+          executors: [
+            executor("worktree", "worktree", [{ id: WORKTREE_PROFILE_ID, name: "Worktree" }]),
+            executor("local", "local", [{ id: LOCAL_PROFILE_ID, name: "Local" }]),
+          ],
+          upsertWorkspaceRepository: vi.fn(),
+        }),
+      );
+
+      act(() => result.current.onRepositorySelectionRemoved?.([folder]));
+
+      expect(setFolderOnlyExecutorNotice).toHaveBeenCalledWith(true);
+      expect(setAutomaticExecutorRestore).toHaveBeenCalledWith({
+        executorId: "worktree",
+        executorProfileId: WORKTREE_PROFILE_ID,
+      });
+      expect(setExecutorId).toHaveBeenCalledWith("local");
+      expect(setExecutorProfileId).toHaveBeenCalledWith(LOCAL_PROFILE_ID);
+    },
+  );
 
   it("clears the executor when leaving repository-less mode", () => {
     const setNoRepository = vi.fn();

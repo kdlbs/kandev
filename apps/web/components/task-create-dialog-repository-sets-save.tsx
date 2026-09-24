@@ -18,7 +18,7 @@ import { createRepositorySet } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAppStore } from "@/components/state-provider";
 import type { Repository } from "@/lib/types/http";
-import type { TaskRepoRow } from "@/components/task-create-dialog-types";
+import type { TaskRepoRow, TaskRepositorySelection } from "@/components/task-create-dialog-types";
 import {
   selectedRepositoryIdsForSet,
   selectedRepositoryMembersForSet,
@@ -30,6 +30,8 @@ type SaveRepositorySetDialogProps = {
   workspaceId: string;
   /** The picker's current rows; only workspace repository rows can be saved. */
   rows: TaskRepoRow[];
+  /** Full ordered draft, used to explain remote and host-local exclusions. */
+  selections?: TaskRepositorySelection[];
   /** Workspace defaults are needed to capture the effective local base. */
   repositories?: Repository[];
   /** Local execution keeps the checkout branch separate from the base. */
@@ -51,6 +53,7 @@ export function SaveRepositorySetDialog({
   onOpenChange,
   workspaceId,
   rows,
+  selections,
   repositories,
   isLocalExecutor = false,
   freshBranchEnabled = false,
@@ -69,8 +72,11 @@ export function SaveRepositorySetDialog({
   );
   // A row that names a discovered local path, a remote URL, or nothing at all is
   // not a workspace repository, so it cannot be a member.
-  const excludedRowCount = rows.filter((row) => !row.repositoryId).length;
-  const duplicateRowCount = rows.length - excludedRowCount - repositoryIds.length;
+  const excludedRowCount = selections
+    ? selections.filter((selection) => selection.kind !== "local" || !selection.repositoryId).length
+    : rows.filter((row) => !row.repositoryId).length;
+  const duplicateRowCount =
+    (selections?.length ?? rows.length) - excludedRowCount - repositoryIds.length;
 
   const handleSubmit = async () => {
     const trimmed = name.trim();

@@ -2,7 +2,7 @@
 status: draft
 system: ci
 created: 2026-09-10
-updated: 2026-09-21
+updated: 2026-09-23
 owners:
   - kandev
 ---
@@ -70,7 +70,7 @@ Contributors can write the artifacts manually; use of the repository harness is 
 
 - **AC-CI-PR-DOCS-004.1:** Within one pull request revision or merge-group member evaluation, the system shall reuse the initial pull request snapshot and each repeated artifact lookup.
 - **AC-CI-PR-DOCS-004.2:** When a changed requirement keeps its trusted base identity, the system shall resolve it from the exact-head and base documents. It shall not make a GitHub code-search request for that requirement.
-- **AC-CI-PR-DOCS-004.3:** When a requirement is new, moved, unresolved, or ambiguous, the system shall use bounded fallback lookup and shall preserve missing-definition and duplicate-definition failures.
+- **AC-CI-PR-DOCS-004.3:** When a requirement is new, moved, unresolved, or ambiguous, the system shall use bounded fallback lookup and shall preserve missing-definition and duplicate-definition failures. If code search is rate-limited, the evaluator shall list and scan every Markdown file in the exact-head system requirements directory within the document and byte limits. An unavailable listing or exceeded bound shall fail closed.
 - **AC-CI-PR-DOCS-004.4:** A full evaluation shall run after pull request creation, reopening, revision changes, base-branch retargets, exact exception-label transitions, manual retries, and merge-group checks. It shall not run after title or description edits, draft-readiness changes, or unrelated label changes.
 
 ## Out of scope

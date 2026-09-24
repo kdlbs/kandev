@@ -791,6 +791,35 @@ func TestConvertCreateTaskRepositoriesForwardsPRNumber(t *testing.T) {
 	}, repos[0])
 }
 
+func TestConvertCreateTaskRepositoriesPreservesMixedOrderAndProviderIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	repos, ok := convertCreateTaskRepositories(c, []httpTaskRepositoryInput{
+		{RepositoryID: "repo-local", BaseBranch: "develop", CheckoutBranch: "feature/local", CheckoutSource: "remote_origin", ExpectedOrigin: "https://github.com/acme/local.git"},
+		{
+			RemoteURL: "https://git.example.test/acme/remote.git", BaseBranch: "main",
+			CheckoutBranch: "feature/remote", Provider: "fixture-source-control",
+			ProviderHost: "https://git.example.test", ProviderScope: "workspace-a",
+			ProviderRepoID: "remote-42", ProviderOwner: "acme", ProviderName: "remote", PRNumber: 42,
+		},
+	})
+
+	require.True(t, ok)
+	require.Len(t, repos, 2)
+	assert.Equal(t, dto.TaskRepositoryInput{
+		RepositoryID: "repo-local", BaseBranch: "develop", CheckoutBranch: "feature/local",
+		CheckoutSource: "remote_origin", ExpectedOrigin: "https://github.com/acme/local.git",
+	}, repos[0])
+	assert.Equal(t, dto.TaskRepositoryInput{
+		RemoteURL: "https://git.example.test/acme/remote.git", BaseBranch: "main",
+		CheckoutBranch: "feature/remote", Provider: "fixture-source-control",
+		ProviderHost: "https://git.example.test", ProviderScope: "workspace-a",
+		ProviderRepoID: "remote-42", ProviderOwner: "acme", ProviderName: "remote", PRNumber: 42,
+	}, repos[1])
+}
+
 func TestBuildTaskCreateLastUsedPatchRecordsFirstWorkspaceRepository(t *testing.T) {
 	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
 		AgentProfileID:    "agent-2",
@@ -820,6 +849,60 @@ func TestBuildTaskCreateLastUsedPatchRecordsWorkspaceWorkflow(t *testing.T) {
 		AgentProfileID:         "agent-2",
 		ExecutorProfileID:      "exec-profile-2",
 	}, patch)
+}
+
+func TestBuildTaskCreateLastUsedPatchPreservesOrderedWorkspaceSources(t *testing.T) {
+	sources := []service.WorkspaceSourceInput{
+		{Kind: service.WorkspaceSourceFolder, LocalPath: "/work/assets", DisplayName: "assets"},
+		{
+			Kind:           service.WorkspaceSourceRepository,
+			RepositoryID:   "repo-local",
+			BaseBranch:     "main",
+			CheckoutBranch: "feature/local",
+			BranchPolicyID: "policy-1",
+		},
+		{
+			Kind:           service.WorkspaceSourceRepository,
+			RemoteURL:      "https://git.example.test/acme/api.git",
+			Provider:       "fixture",
+			ProviderRepoID: "remote-1",
+			ProviderOwner:  "acme",
+			ProviderName:   "api",
+			PRNumber:       42,
+		},
+	}
+
+	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
+		WorkspaceID:       "workspace-1",
+		AgentProfileID:    "agent-1",
+		ExecutorProfileID: "executor-1",
+	}, nil, &sources)
+
+	require.Equal(t, []usermodels.TaskCreateLastUsedSource{
+		{Kind: "folder", LocalPath: "/work/assets", DisplayName: "assets"},
+		{
+			Kind: "repository", RepositoryID: "repo-local", BaseBranch: "main",
+			CheckoutBranch: "feature/local", BranchPolicyID: "policy-1",
+		},
+		{
+			Kind: "repository", RemoteURL: "https://git.example.test/acme/api.git",
+			Provider: "fixture", ProviderRepoID: "remote-1", ProviderOwner: "acme",
+			ProviderName: "api", PRNumber: 42,
+		},
+	}, patch.WorkspaceSourcesByWorkspace["workspace-1"])
+	assert.Equal(t, "agent-1", patch.AgentProfileID)
+	assert.Equal(t, "executor-1", patch.ExecutorProfileID)
+}
+
+func TestBuildTaskCreateLastUsedPatchPreservesExplicitEmptyWorkspaceSources(t *testing.T) {
+	sources := []service.WorkspaceSourceInput{}
+	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
+		WorkspaceID: "workspace-empty",
+	}, nil, &sources)
+
+	require.Contains(t, patch.WorkspaceSourcesByWorkspace, "workspace-empty")
+	require.NotNil(t, patch.WorkspaceSourcesByWorkspace["workspace-empty"])
+	assert.Empty(t, patch.WorkspaceSourcesByWorkspace["workspace-empty"])
 }
 
 func TestBuildTaskCreateLastUsedPatchUsesFreshBranchRequestBase(t *testing.T) {

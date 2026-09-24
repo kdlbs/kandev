@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- remote chip regressions share one caller-shaped fixture. */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Branch } from "@/lib/types/http";
@@ -18,9 +19,7 @@ const INPUT_TID = "remote-repo-input";
 const ALREADY_ADDED_MARKER = "already-added-repository-marker";
 const FULL_NAME = "acme/site";
 const URL_ACME_SITE = "https://github.com/acme/site";
-afterEach(() => {
-  cleanup();
-});
+afterEach(cleanup);
 describe("RemoteRepoChip — write paths", () => {
   it("keeps the committed URL visible and exposes an actionable resolution retry", () => {
     const onRetry = vi.fn();
@@ -51,6 +50,36 @@ describe("RemoteRepoChip — write paths", () => {
     expect(retryButton.className).toContain("h-7");
     expect(retryButton.className).toContain("pointer:coarse");
     fireEvent.click(retryButton);
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("shows connection recovery controls for an unavailable picker provider", () => {
+    const onRetry = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row({
+          url: URL_ACME_SITE,
+          branch: "main",
+          source: "picker",
+          provider: "github",
+        })}
+        branches={[{ name: "main", type: "remote" }]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible()}
+        connectionUnavailable
+        onURLChange={vi.fn()}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+        onRetry={onRetry}
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("repository provider is unavailable");
+    expect(screen.getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
+      "/settings/integrations",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /retry remote repository resolution/i }));
     expect(onRetry).toHaveBeenCalledOnce();
   });
 });

@@ -204,15 +204,45 @@ type TaskRepositoryInput struct {
 	BranchPolicyID  string                     `json:"branch_policy_id,omitempty"`
 }
 
+// TaskWorkspaceSourceInput is one ordered repository or local-folder source
+// used when creating a task. The complete list is presence-aware at transport
+// boundaries so an empty list means an explicit scratch workspace.
+type TaskWorkspaceSourceInput struct {
+	Kind                string                     `json:"kind"`
+	CheckoutOptions     *RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
+	RepositoryID        string                     `json:"repository_id,omitempty"`
+	LocalPath           string                     `json:"local_path,omitempty"`
+	GitHubURL           string                     `json:"github_url,omitempty"`
+	RemoteURL           string                     `json:"remote_url,omitempty"`
+	Provider            string                     `json:"provider,omitempty"`
+	ProviderHost        string                     `json:"provider_host,omitempty"`
+	ProviderScope       string                     `json:"provider_scope,omitempty"`
+	ProviderRepoID      string                     `json:"provider_repo_id,omitempty"`
+	ProviderOwner       string                     `json:"provider_owner,omitempty"`
+	ProviderName        string                     `json:"provider_name,omitempty"`
+	CheckoutSource      string                     `json:"checkout_source,omitempty"`
+	ExpectedOrigin      string                     `json:"expected_origin,omitempty"`
+	BaseBranch          string                     `json:"base_branch,omitempty"`
+	CheckoutBranch      string                     `json:"checkout_branch,omitempty"`
+	BranchPolicyID      string                     `json:"branch_policy_id,omitempty"`
+	PRNumber            int                        `json:"pr_number,omitempty"`
+	DisplayName         string                     `json:"display_name,omitempty"`
+	FreshBranch         bool                       `json:"fresh_branch,omitempty"`
+	NewBranchName       string                     `json:"new_branch_name,omitempty"`
+	ConfirmDiscard      bool                       `json:"confirm_discard,omitempty"`
+	ConsentedDirtyFiles []string                   `json:"consented_dirty_files,omitempty"`
+}
+
 // CreateTaskRequest for creating a new task
 type CreateTaskRequest struct {
-	Title          string                 `json:"title" binding:"required,max=500"`
-	Description    string                 `json:"description" binding:"required"`
-	Priority       string                 `json:"priority,omitempty" binding:"omitempty,oneof=critical high medium low"`
-	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	StartAgent     bool                   `json:"start_agent,omitempty"`
-	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
+	Title            string                      `json:"title" binding:"required,max=500"`
+	Description      string                      `json:"description" binding:"required"`
+	Priority         string                      `json:"priority,omitempty" binding:"omitempty,oneof=critical high medium low"`
+	Repositories     []TaskRepositoryInput       `json:"repositories,omitempty"`
+	WorkspaceSources *[]TaskWorkspaceSourceInput `json:"workspace_sources,omitempty"`
+	Metadata         map[string]interface{}      `json:"metadata,omitempty"`
+	StartAgent       bool                        `json:"start_agent,omitempty"`
+	AgentProfileID   string                      `json:"agent_profile_id,omitempty"`
 }
 
 // UpdateTaskRequest for updating an existing task

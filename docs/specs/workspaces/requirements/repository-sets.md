@@ -134,8 +134,10 @@ do not select every branch for each task.
   its effective base. The dialog shall explain this rule and report additional
   rows separately from rows that are not workspace repositories.
 - **AC-WORKSPACES-REPOSITORY-SETS-003.10:** The control shall remain absent from
-  Quick Chat, Remote URL, and No repository modes. Executor capability shall not
-  hide or disable the control.
+  Quick Chat. It shall be available in an editable task repository draft,
+  including a draft that also contains remote rows or no repository rows.
+  Applying a set shall append registered workspace members and preserve every
+  existing row. Executor capability shall not hide or disable the control.
 
 ## Compatibility
 
@@ -150,7 +152,8 @@ do not select every branch for each task.
 - A shared branch value that is applied to every repository.
 - Branch policies, branch templates, pull-request targets, agent profiles,
   executor profiles, or workflows in a set.
-- Remote-URL sources, folder sources, cross-workspace sets, and per-user sets.
+- Folder sources, cross-workspace sets, and per-user sets. Remote URL rows stay
+  excluded from saved set membership.
 - Automatic repair of unavailable saved bases.
 
 ## Traceability

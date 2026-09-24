@@ -167,7 +167,7 @@ Scripts execute in agent workspaces and therefore belong to the trust boundary. 
 
 Repositories saved by an older Kandev version may still contain a path spelling with symbolic-link components. If branch operations report that such a saved path resolves to a different location after upgrading, edit and save the repository path again to record its current canonical location. Kandev does not silently accept the new resolution because that would also accept a saved path whose symbolic-link target was changed after registration.
 
-Remote repository and issue/PR URLs are not added from this settings page. Use the **Remote** tab in **New Task** to search configured GitHub, GitLab, and Azure DevOps repositories, or paste a supported provider URL. See [Integrations](integrations.md) and [Tasks and workflows](tasks-and-workflows.md).
+Remote repository and issue/PR URLs are not added from this settings page. Use the repository picker in **New Task** to search eligible GitHub, GitLab, and Azure DevOps providers, or paste a supported provider URL. See [Integrations](integrations.md) and [Tasks and workflows](tasks-and-workflows.md).
 
 ## Configure an agent profile
 
@@ -185,7 +185,7 @@ For the first task on an existing repository, keep the seeded **Worktree** execu
 
 1. Select **New Task** from the sidebar or task board.
 2. Enter a specific title and a description with the expected outcome, constraints, and validation. A non-empty description enables the normal start and create-only actions.
-3. Under **Repo**, select the workspace repository and base branch. To start a new project, open the repository selector, choose **Create new repository**, enter one folder name, and select its parent folder. Kandev creates an empty `main` repository with one empty initial commit and no project files. Select **None** only for work that genuinely needs a plain workspace directory.
+3. Under **Repositories**, use the repository picker to add one or more local or remote rows. Each row can use its own branch and repository settings. To start a new project, open the picker, choose **Create new repository**, enter one folder name, and select its parent folder. Kandev creates an empty `main` repository with one empty initial commit and no project files. Remove all repository rows when the task should use only a scratch folder.
 4. Choose the Development workflow and an agent profile. For an existing repository, choose the Worktree executor profile. For a newly initialized repository, keep the Local profile that Kandev selects automatically. Kandev remembers compatible recent choices, so re-check them after changing repository, agent, or trust boundary.
 5. Select **Start task**. Its menu also offers **Start task in plan mode** and **Create without starting agent**. On an empty description, the primary action is **Start Plan Mode**.
 

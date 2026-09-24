@@ -24,6 +24,48 @@ func (r *repositorySelectionResolverStub) ResolveRepositorySelection(
 	return r.resolve(input)
 }
 
+func TestCreateTaskMixedRepositorySelectionsPreserveOrderAndBranches(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createRepositorySelectionWorkspace(t, repo)
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-local", WorkspaceID: "ws-1", Name: "local", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	svc.SetRepositorySelectionResolver(&repositorySelectionResolverStub{resolve: authoritativeRepositoryInput})
+
+	result, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "mixed repositories",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-local", BaseBranch: "develop", CheckoutBranch: "feature/local"},
+			{
+				RemoteURL: "https://bitbucket.example.test/projects/TEAM/fixture",
+				Provider:  "fixture-source-control", ProviderRepoID: "repo-42", ProviderOwner: "TEAM",
+				ProviderName: "fixture", BaseBranch: "main", CheckoutBranch: "feature/remote", PRNumber: 42,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if result.Task == nil || len(result.Task.Repositories) != 2 {
+		t.Fatalf("created task repositories = %+v, want two rows", result.Task)
+	}
+	local, remote := result.Task.Repositories[0], result.Task.Repositories[1]
+	if local.Position != 0 || local.RepositoryID != "repo-local" || local.BaseBranch != "develop" ||
+		local.CheckoutBranch != "feature/local" {
+		t.Fatalf("local task repository = %+v, want first local row with its branches", local)
+	}
+	if remote.Position != 1 || remote.RepositoryID == "" || remote.BaseBranch != "main" ||
+		remote.CheckoutBranch != "feature/remote" {
+		t.Fatalf("remote task repository = %+v, want second remote row with its branches", remote)
+	}
+	if got, ok := remote.Metadata["pr_number"].(float64); !ok || got != 42 {
+		t.Fatalf("remote metadata = %+v, want pr_number 42", remote.Metadata)
+	}
+}
+
 func TestCreateTaskPreflightsPluginRepositoryBeforePersistence(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -288,6 +330,7 @@ func authoritativeRepositoryInput(input TaskRepositoryInput) (TaskRepositoryInpu
 		Provider:  "fixture-source-control", ProviderHost: "https://bitbucket.example.test",
 		ProviderScope: "workspace-a", ProviderRepoID: "repo-42", ProviderOwner: "TEAM", ProviderName: "fixture",
 		DefaultBranch: "main", BaseBranch: input.BaseBranch, CheckoutBranch: input.CheckoutBranch,
+		PRNumber:                  input.PRNumber,
 		TrustedProviderDescriptor: true,
 	}, nil
 }

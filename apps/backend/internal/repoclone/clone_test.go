@@ -672,6 +672,76 @@ printf '%s\n' "$GH_TOKEN|$GITHUB_TOKEN|$GIT_CONFIG_GLOBAL|$GIT_CONFIG_NOSYSTEM|$
 	assertUniqueGitConfigEnv(t, cmd.Env)
 }
 
+func TestListLocalOriginBranchesUsesWorkspaceCredentialWithoutAmbientFallback(t *testing.T) {
+	root := t.TempDir()
+	binDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	capturePath := filepath.Join(root, "capture")
+	gitPath := filepath.Join(binDir, "git")
+	script := `#!/bin/sh
+if [ "$3" = config ]; then
+  printf '%s\n' 'https://github.com/acme/private.git'
+  exit 0
+fi
+if [ "$3" = ls-remote ]; then
+  helper=${GIT_CONFIG_VALUE_1#!}
+  "$helper" get > "$KANDEV_TEST_CAPTURE.helper"
+  printf '%s\n' "$GH_TOKEN|$GITHUB_TOKEN|$GIT_CONFIG_GLOBAL|$GIT_CONFIG_NOSYSTEM|$KANDEV_REPOCLONE_GITHUB_USERNAME|$KANDEV_REPOCLONE_GITHUB_TOKEN|$GIT_CONFIG_VALUE_0" > "$KANDEV_TEST_CAPTURE.env"
+  printf '%s\n' 'sha refs/heads/main' 'sha refs/heads/feature/api'
+  exit 0
+fi
+exit 1
+`
+	if err := os.WriteFile(gitPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("KANDEV_TEST_CAPTURE", capturePath)
+	t.Setenv("GH_TOKEN", "ambient-gh-token")
+	t.Setenv("GITHUB_TOKEN", "ambient-github-token")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "credential.helper")
+	t.Setenv("GIT_CONFIG_VALUE_0", "!malicious-helper")
+
+	credentials := &recordingCredentialProvider{password: "workspace-token"}
+	cloner := NewCloner(Config{BasePath: filepath.Join(root, "repos")}, ProtocolSSH, "", logger.Default())
+	cloner.SetGitCredentialProvider(credentials)
+	branches, err := cloner.ListLocalOriginBranches(
+		context.Background(), filepath.Join(root, "checkout"), GitCredentialRequest{
+			WorkspaceID:          "workspace-a",
+			RepositoryID:         "repo-private",
+			Provider:             "github",
+			ProviderHost:         "https://github.com",
+			ProviderScope:        "acme",
+			ProviderRepositoryID: "provider-private",
+			Owner:                "acme",
+			Name:                 "private",
+		},
+	)
+	if err != nil {
+		t.Fatalf("ListLocalOriginBranches(): %v", err)
+	}
+	if want := []string{"main", "feature/api"}; !reflect.DeepEqual(branches, want) {
+		t.Fatalf("branches = %#v, want %#v", branches, want)
+	}
+	if credentials.request.WorkspaceID != "workspace-a" ||
+		credentials.request.RepositoryID != "repo-private" ||
+		credentials.request.CloneURL != "https://github.com/acme/private.git" {
+		t.Fatalf("credential request = %+v", credentials.request)
+	}
+	env := strings.TrimSpace(readTestFile(t, capturePath+".env"))
+	parts := strings.Split(env, "|")
+	if len(parts) != 7 || parts[0] != "" || parts[1] != "" || parts[2] != os.DevNull || parts[3] != "1" ||
+		parts[4] != "" || parts[5] != "" || parts[6] != "" {
+		t.Fatalf("git auth environment = %#v", parts)
+	}
+	if helper := readTestFile(t, capturePath+".helper"); helper != "username=x-access-token\npassword=workspace-token\n" {
+		t.Fatalf("credential helper output = %q", helper)
+	}
+}
+
 func TestManagedGitCommandExecutesWithCompleteConfigAndNoAmbientAuth(t *testing.T) {
 	t.Setenv("GH_TOKEN", "ambient-gh-token")
 	t.Setenv("GITHUB_TOKEN", "ambient-github-token")

@@ -159,6 +159,30 @@ func newWSTaskHandlers(t *testing.T, repo *wsTaskRepo) *TaskHandlers {
 	return &TaskHandlers{service: svc, logger: log}
 }
 
+func TestWSCreateTaskConversionPreservesMixedRepositoryOrder(t *testing.T) {
+	got := convertToServiceRepos([]dto.TaskRepositoryInput{
+		{RepositoryID: "repo-local", BaseBranch: "develop", CheckoutBranch: "feature/local", CheckoutSource: "remote_origin", ExpectedOrigin: "https://github.com/acme/local.git"},
+		{
+			RemoteURL: "https://git.example.test/acme/remote.git", BaseBranch: "main",
+			CheckoutBranch: "feature/remote", Provider: "fixture-source-control",
+			ProviderHost: "https://git.example.test", ProviderScope: "workspace-a",
+			ProviderRepoID: "remote-42", ProviderOwner: "acme", ProviderName: "remote", PRNumber: 42,
+		},
+	})
+
+	require.Len(t, got, 2)
+	assert.Equal(t, service.TaskRepositoryInput{
+		RepositoryID: "repo-local", BaseBranch: "develop", CheckoutBranch: "feature/local",
+		CheckoutSource: "remote_origin", ExpectedOrigin: "https://github.com/acme/local.git",
+	}, got[0])
+	assert.Equal(t, service.TaskRepositoryInput{
+		RemoteURL: "https://git.example.test/acme/remote.git", BaseBranch: "main",
+		CheckoutBranch: "feature/remote", Provider: "fixture-source-control",
+		ProviderHost: "https://git.example.test", ProviderScope: "workspace-a",
+		ProviderRepoID: "remote-42", ProviderOwner: "acme", ProviderName: "remote", PRNumber: 42,
+	}, got[1])
+}
+
 // asUser returns a context carrying a scoped identity. An identity-free
 // context is treated as an internal caller and skips scoping entirely, so
 // every authorization test must supply one.

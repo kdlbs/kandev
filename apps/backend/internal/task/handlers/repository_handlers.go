@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -57,6 +58,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	// Local-status (branch + dirty files) backs the fresh-branch consent
 	// flow on the local executor. Path-only — fresh-branch is local-only.
 	api.GET("/workspaces/:id/repositories/local-status", h.httpLocalRepositoryStatus)
+	api.POST("/workspaces/:id/repository-clone-source", h.httpRepositoryCloneSource)
 	api.GET("/workspaces/:id/repositories/validate", h.httpValidateRepositoryPath)
 	api.GET("/fs/list-dir", h.httpListDirectory)
 	api.POST("/fs/create-dir", h.httpCreateDirectory)
@@ -78,6 +80,7 @@ func (h *RepositoryHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionRepositoryGet, h.wsGetRepository)
 	dispatcher.RegisterFunc(ws.ActionRepositoryUpdate, h.wsUpdateRepository)
 	dispatcher.RegisterFunc(ws.ActionRepositoryDelete, h.wsDeleteRepository)
+	dispatcher.RegisterFunc(ws.ActionRepositoryCloneSourceInspect, h.wsRepositoryCloneSource)
 	dispatcher.RegisterFunc(ws.ActionRepositoryScriptList, h.wsListRepositoryScripts)
 	dispatcher.RegisterFunc(ws.ActionRepositoryScriptCreate, h.wsCreateRepositoryScript)
 	dispatcher.RegisterFunc(ws.ActionRepositoryScriptGet, h.wsGetRepositoryScript)
@@ -427,6 +430,43 @@ func (h *RepositoryHandlers) httpLocalRepositoryStatus(c *gin.Context) {
 	})
 }
 
+type repositoryCloneSourceRequest struct {
+	RepositoryID string `json:"repository_id"`
+	LocalPath    string `json:"local_path"`
+}
+
+func (h *RepositoryHandlers) httpRepositoryCloneSource(c *gin.Context) {
+	var body repositoryCloneSourceRequest
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
+		return
+	}
+	result, err := h.service.InspectLocalRepositoryCloneSource(
+		c.Request.Context(), c.Param("id"), body.RepositoryID, body.LocalPath,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidRepositoryPath):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, repoerrors.ErrWorkspaceNotFound), errors.Is(err, repoerrors.ErrRepositoryNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "repository or workspace not found"})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	branches := make([]dto.BranchDTO, 0, len(result.Branches))
+	for _, branch := range result.Branches {
+		branches = append(branches, dto.FromBranch(branch))
+	}
+	c.JSON(http.StatusOK, dto.LocalRepositoryCloneSourceResponse{
+		Ready: result.Ready, Origin: result.Origin, Reason: result.Reason,
+		CurrentBranch: result.CurrentBranch, DefaultBranch: result.DefaultBranch, Branches: branches,
+	})
+}
+
 type httpCreateRepositoryRequest struct {
 	Name                   string                                 `json:"name"`
 	SourceType             string                                 `json:"source_type"`
@@ -770,6 +810,41 @@ func (h *RepositoryHandlers) wsListRepositories(ctx context.Context, msg *ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list repositories", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, reposToListResponse(repositories))
+}
+
+type wsRepositoryCloneSourceRequest struct {
+	WorkspaceID  string `json:"workspace_id"`
+	RepositoryID string `json:"repository_id"`
+	LocalPath    string `json:"local_path"`
+}
+
+func (h *RepositoryHandlers) wsRepositoryCloneSource(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsRepositoryCloneSourceRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.WorkspaceID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
+	}
+	result, err := h.service.InspectLocalRepositoryCloneSource(ctx, req.WorkspaceID, req.RepositoryID, req.LocalPath)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidRepositoryPath):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		case errors.Is(err, repoerrors.ErrWorkspaceNotFound), errors.Is(err, repoerrors.ErrRepositoryNotFound):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Repository or workspace not found", nil)
+		default:
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+	}
+	branches := make([]dto.BranchDTO, 0, len(result.Branches))
+	for _, branch := range result.Branches {
+		branches = append(branches, dto.FromBranch(branch))
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.LocalRepositoryCloneSourceResponse{
+		Ready: result.Ready, Origin: result.Origin, Reason: result.Reason,
+		CurrentBranch: result.CurrentBranch, DefaultBranch: result.DefaultBranch, Branches: branches,
+	})
 }
 
 type wsCreateRepositoryRequest struct {

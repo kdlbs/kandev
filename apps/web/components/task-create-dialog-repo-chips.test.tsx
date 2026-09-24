@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- repository creation regressions share this focused row fixture. */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import type { Branch, Repository, RepositoryBranchPolicy } from "@/lib/types/http";
+import type { Branch, Repository, RepositoryBranchPolicy, RepositorySet } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "./task-create-dialog-types";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
@@ -77,6 +77,18 @@ const REPO_BACK_ID = "repo-back";
 const REPO_CHIP_TRIGGER = "repo-chip-trigger";
 const BRANCH_CHIP_TRIGGER = "branch-chip-trigger";
 const DISCOVERED_REPO_PATH = "/home/me/projects/local-project";
+const TEST_TIMESTAMP = "2026-08-24T10:00:00Z";
+const REMOTE_LABEL = "Remote";
+const REMOTE_SOURCE_MODE_TEST_ID = "source-mode-remote";
+const REPOSITORY_SET = {
+  id: "set-1",
+  workspace_id: "ws-1",
+  name: "Frontend and backend",
+  description: "",
+  repositories: [],
+  created_at: TEST_TIMESTAMP,
+  updated_at: TEST_TIMESTAMP,
+} as unknown as RepositorySet;
 
 function makeRepo(id: string, name: string): Repository {
   return {
@@ -167,11 +179,51 @@ describe("RepoChipsRow", () => {
     );
 
     expect(screen.getByTestId("source-mode-workspace").textContent).toBe("Repo");
-    expect(screen.getByTestId("source-mode-remote").textContent).toBe("Remote");
+    expect(screen.getByTestId(REMOTE_SOURCE_MODE_TEST_ID).textContent).toBe(REMOTE_LABEL);
     expect(screen.getByTestId("source-mode-scratch").textContent).toBe("None");
     expect(screen.getByTestId("source-mode-workspace").className).not.toContain("min-h-11");
     fireEvent.click(screen.getByTestId("source-mode-remote"));
     expect(onToggleRemote).toHaveBeenCalledOnce();
+  });
+
+  it("hides set application and source switching when the repository is locked", () => {
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+        onToggleRemote={vi.fn()}
+        onToggleNoRepository={vi.fn()}
+        repositoryLocked
+        repositorySets={{ sets: [REPOSITORY_SET], onApply: vi.fn() }}
+      />,
+    );
+
+    expect(screen.queryByTestId("repository-sets-trigger")).toBeNull();
+    expect(screen.queryByTestId(REMOTE_SOURCE_MODE_TEST_ID)).toBeNull();
+  });
+
+  it("hides set application when only the branch is locked", () => {
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+        onToggleRemote={vi.fn()}
+        onToggleNoRepository={vi.fn()}
+        branchLocked
+        repositorySets={{ sets: [REPOSITORY_SET], onApply: vi.fn() }}
+      />,
+    );
+
+    expect(screen.queryByTestId("repository-sets-trigger")).toBeNull();
+    expect(screen.getByTestId(REMOTE_SOURCE_MODE_TEST_ID)).toBeTruthy();
   });
 
   it("renders one chip per row plus an Add button", () => {
@@ -299,6 +351,43 @@ describe("RepoChipsRow", () => {
     // for local mode) over the last-used / main fallback. This is what surfaces
     // the workspace's actual on-disk branch in the chip and ensures the submit
     // payload always carries an explicit value (not "" → backend default).
+    expect(onRowBranchChange).toHaveBeenCalledWith("r0", "feature/x");
+  });
+
+  it("local-executor discovered rows preserve the current checkout branch", () => {
+    mockBranches.value = {
+      branches: [
+        { name: "main", type: "local" } as Branch,
+        { name: "feature/x", type: "local" } as Branch,
+      ],
+      isLoading: false,
+    };
+    const discoveredRow = row({ key: "r0", localPath: DISCOVERED_REPO_PATH });
+    const onRowBranchChange = vi.fn();
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({
+          repositorySelections: [{ kind: "local", ...discoveredRow }],
+          repositories: [discoveredRow],
+          discoveredRepositories: [
+            {
+              path: DISCOVERED_REPO_PATH,
+              name: "local-project",
+              default_branch: "main",
+            },
+          ] as unknown as DialogFormState["discoveredRepositories"],
+          currentLocalBranch: "feature/x",
+          currentLocalBranchLoading: false,
+        })}
+        repositories={[]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={onRowBranchChange}
+        isLocalExecutor
+      />,
+    );
+
     expect(onRowBranchChange).toHaveBeenCalledWith("r0", "feature/x");
   });
 
@@ -448,8 +537,8 @@ describe("RepoChipsRow", () => {
         base_branch: "main",
         branch_template: "feature/{title}-{suffix}",
         pull_request_target: "develop",
-        created_at: "2026-08-24T10:00:00Z",
-        updated_at: "2026-08-24T10:00:00Z",
+        created_at: TEST_TIMESTAMP,
+        updated_at: TEST_TIMESTAMP,
       },
     ];
     renderInProvider(

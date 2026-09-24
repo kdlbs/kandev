@@ -8,6 +8,7 @@ import type {
   CreateTaskResponse,
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
+  WorkspaceSourceRequest,
   Task,
   TaskPriority,
   MoveTaskResponse,
@@ -86,10 +87,15 @@ export async function createTask(
       provider_repo_id?: string;
       provider_owner?: string;
       provider_name?: string;
+      checkout_source?: "remote_origin";
+      expected_origin?: string;
       fresh_branch?: boolean;
+      new_branch_name?: string;
       confirm_discard?: boolean;
       consented_dirty_files?: string[];
     }>;
+    /** Presence-aware ordered folders and repositories for task creation. */
+    workspace_sources?: WorkspaceSourceRequest[];
     state?: Task["state"];
     start_agent?: boolean;
     prepare_session?: boolean;
