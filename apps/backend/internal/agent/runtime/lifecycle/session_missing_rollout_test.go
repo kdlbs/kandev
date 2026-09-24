@@ -8,7 +8,7 @@ import (
 	"github.com/coder/acp-go-sdk"
 )
 
-func TestIsMissingProviderRolloutErrRequiresMatchingStructuredEvidence(t *testing.T) {
+func TestIsMissingProviderSessionErrRequiresMatchingStructuredEvidence(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
@@ -81,12 +81,20 @@ func TestIsMissingProviderRolloutErrRequiresMatchingStructuredEvidence(t *testin
 				Data:    map[string]any{"details": "Session not found: other-session"},
 			},
 		},
+		{
+			name: "auggie session not found with case mismatch",
+			err: &acp.RequestError{
+				Code:    -32602,
+				Message: "Invalid params",
+				Data:    map[string]any{"details": "Session not found: SAVED-SESSION"},
+			},
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := isMissingProviderRolloutErr(test.err, "saved-session"); got != test.want {
-				t.Fatalf("isMissingProviderRolloutErr() = %t, want %t", got, test.want)
+			if got := isMissingProviderSessionErr(test.err, "saved-session"); got != test.want {
+				t.Fatalf("isMissingProviderSessionErr() = %t, want %t", got, test.want)
 			}
 		})
 	}

@@ -251,7 +251,7 @@ func (sm *SessionManager) createOrLoadSession(
 			zap.Bool("method_not_found", isMethodNotFoundErr(err)),
 			zap.Bool("capability_mismatch", hasCanonicalSessionLoadMessage(err, "agent does not support session loading (LoadSession capability is false)")),
 			zap.Bool("session_unknown", isSessionUnknownErr(err)),
-			zap.Bool("provider_session_missing", isMissingProviderRolloutErr(err, existingSessionID)))
+			zap.Bool("provider_session_missing", isMissingProviderSessionErr(err, existingSessionID)))
 		return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
 	}
 	return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
@@ -1893,8 +1893,7 @@ func isSessionUnknownErr(err error) bool {
 	// structured RequestError. Match only the canonical projected phrase; a
 	// broader substring would discard an unrelated internal error that happens
 	// to mention a missing resource.
-	return hasCanonicalSessionLoadMessage(err, "Resource not found") ||
-		hasCanonicalSessionLoadMessage(err, "Session not found")
+	return hasCanonicalSessionLoadMessage(err, "Resource not found")
 }
 
 // isSessionLoadFallbackErr reports the small set of session/load failures for
@@ -1906,13 +1905,12 @@ func isSessionLoadFallbackErr(err error, expectedSessionID string) bool {
 		return false
 	}
 	if isMethodNotFoundErr(err) || isSessionUnknownErr(err) ||
-		isMissingProviderRolloutErr(err, expectedSessionID) {
+		isMissingProviderSessionErr(err, expectedSessionID) {
 		return true
 	}
 	return hasCanonicalSessionLoadMessage(err, "Method not found") ||
 		hasCanonicalSessionLoadMessage(err, "agent does not support session loading (LoadSession capability is false)") ||
-		hasCanonicalSessionLoadMessage(err, "Resource not found") ||
-		hasCanonicalSessionLoadMessage(err, "Session not found")
+		hasCanonicalSessionLoadMessage(err, "Resource not found")
 }
 
 const (
@@ -1930,25 +1928,25 @@ type sessionLoadRequestError struct {
 	} `json:"data"`
 }
 
-// isMissingProviderRolloutErr recognizes Codex's explicit not-found response
+// isMissingProviderSessionErr recognizes Codex's explicit not-found response
 // after its process-local rollout state disappeared and Auggie's session not
 // found error. The session ID must match the one Kandev attempted to load;
 // unrelated internal errors remain fatal.
-func isMissingProviderRolloutErr(err error, expectedSessionID string) bool {
+func isMissingProviderSessionErr(err error, expectedSessionID string) bool {
 	if err == nil || strings.TrimSpace(expectedSessionID) == "" {
 		return false
 	}
 	var reqErr *acp.RequestError
 	if errors.As(err, &reqErr) {
 		encoded, marshalErr := json.Marshal(reqErr)
-		if marshalErr == nil && matchesMissingProviderRollout(encoded, expectedSessionID) {
+		if marshalErr == nil && matchesMissingProviderSession(encoded, expectedSessionID) {
 			return true
 		}
 	}
 	message := err.Error()
 	for offset := strings.IndexByte(message, '{'); offset >= 0; {
 		candidate := message[offset:]
-		if matchesMissingProviderRollout([]byte(candidate), expectedSessionID) {
+		if matchesMissingProviderSession([]byte(candidate), expectedSessionID) {
 			return true
 		}
 		next := strings.IndexByte(candidate[1:], '{')
@@ -1960,7 +1958,7 @@ func isMissingProviderRolloutErr(err error, expectedSessionID string) bool {
 	return false
 }
 
-func matchesMissingProviderRollout(encoded []byte, expectedSessionID string) bool {
+func matchesMissingProviderSession(encoded []byte, expectedSessionID string) bool {
 	var projected sessionLoadRequestError
 	if err := json.Unmarshal(encoded, &projected); err != nil {
 		return false
@@ -1972,7 +1970,7 @@ func matchesMissingProviderRollout(encoded []byte, expectedSessionID string) boo
 	}
 	if projected.Code == jsonRPCInvalidParams &&
 		projected.Message == "Invalid params" &&
-		strings.EqualFold(projected.Data.Details, missingProviderSessionPrefix+expectedSessionID) {
+		projected.Data.Details == missingProviderSessionPrefix+expectedSessionID {
 		return true
 	}
 	return false
