@@ -14,6 +14,11 @@ Apply this guidance whenever editing `.github/**`.
   normalized repository-relative paths, regular-file type, response path,
   size, encoding, and content. Do not grant generic `gh api`, arbitrary
   interpreters, or broad Bash merely to read PR files.
+- Before selecting or changing an external model in CI that receives PR source
+  or other sensitive context, verify the provider's current data-use and
+  training policy and identify the exact inputs sent. Do not assume a free tier
+  keeps prompts private. If the policy allows training, get an explicit owner
+  decision and record the accepted risk beside the model selection.
 - PR label/metadata cleanup jobs that operate on pull requests must declare
   `pull-requests: write`, not `issues: write`; mirror the permission shape used
   by `preview-env.yml`.

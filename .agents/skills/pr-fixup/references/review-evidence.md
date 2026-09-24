@@ -22,6 +22,12 @@ The summary fields are:
   from timestamps.
 - `errors`: affected data is unknown; do not reconstruct it from memory.
 
+After every `scripts/pr-state --summary <PR>`, run
+`scripts/pr-resolve list <PR>` before declaring review state clear. The summary
+can show no visible current-head threads while the resolver still reports a
+hidden or out-of-head unresolved thread; fetch each listed body before replying
+or resolving it.
+
 Record `checks_head_sha`, `checks_snapshot_complete`, `failed_checks`,
 `pending_checks`, review counts, and the PR delivery fields
 (`pr.head_repository_owner`, `pr.head_repository_name`, `pr.head_ref_name`,
@@ -69,6 +75,16 @@ discussion comments, and commit workflow/status evidence. Keep SSH Git
 operations available for fetch, rebase, and push; after a push, require the
 connector-reported PR head OID to equal local `HEAD`. If the fallback cannot
 provide CI or review evidence, report it as unknown or pending, never clean.
+
+If required-check policy is unavailable because REST is rate-limited or denied,
+use `github_fetch` to GET
+`https://api.github.com/repos/<owner>/<repo>/rulesets`, select an active
+repository ruleset whose ref-name conditions apply to the PR's current base
+ref, then fetch its detail at `/repos/<owner>/<repo>/rulesets/<id>` and inspect
+`required_status_checks` contexts. Compare them with check evidence for the
+exact PR head. A missing, inaccessible, or ambiguous applicable policy leaves
+the waiter blocked and required checks unknown; neither exit 3 nor a partial
+green rollup proves the PR clean.
 
 For connector-backed review writes, prefer structured workflow results and
 `github_list_pull_request_review_threads`; do not request full PR HTML or diffs.

@@ -7,8 +7,10 @@
 Run from `apps/` unless noted:
 
 - `pnpm --filter @kandev/desktop build:vite` builds the startup surface.
-- `pnpm --filter @kandev/desktop build` builds the Linux desktop bundle locally.
+- `pnpm --filter @kandev/desktop build` builds Linux `deb` and `rpm` bundles only.
 - `pnpm --filter @kandev/desktop e2e` builds the app and runs the Linux smoke harness under Xvfb when needed.
+- From the repository root, `make desktop-dev` prepares the native runtime and starts Tauri dev; `make desktop-build` prepares the runtime and builds the macOS app bundle/DMG; `make desktop-open` builds and opens the `.app`.
+- Running the lower-level Tauri dev command directly requires prepared runtime resources or `KANDEV_DESKTOP_RUNTIME_DIR` pointing to them.
 - From `apps/desktop/src-tauri`, `cargo test --features desktop-runtime` runs the complete Rust
   suite, including native command/plugin integration.
 

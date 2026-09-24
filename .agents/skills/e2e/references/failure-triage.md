@@ -10,6 +10,13 @@ matching manifest with `E2E_SHARD=<n> bash e2e/scripts/run-planned-shard.sh <man
 `--shard=N/14` is only approximate. Regenerate the manifest after source changes and never
 overlap another managed/raw E2E run. Then add pressure deliberately:
 
+Before replaying an archived manifest, check for inherited `KANDEV_FEATURES_*`
+environment variables. A raw host Playwright replay can bypass the managed
+runner's fixture-environment sanitizer and produce an invalid feature-gated
+failure. Prefer a fresh managed or runtime-container replay, or explicitly
+apply the fixture sanitizer; never treat a raw replay with inherited feature
+flags as CI evidence.
+
 1. Run the exact failed shard in the CI runtime image with CI env enabled:
    ```bash
    docker run --rm --ipc=host -v "$PWD":/work -w /work/apps/web \
@@ -34,13 +41,16 @@ overlap another managed/raw E2E run. Then add pressure deliberately:
 3. Preserve nearby test ordering when a single-test repeat stays green; run the full spec or shard with the same resource limits before declaring a flake non-reproducible.
 
 The config uses `failOnFlakyTests: !CI`: local runs fail on a flaky retry, while
-CI temporarily tolerates one. Either result is a failure signal for agents:
-reproduce it with `--retries=0` only after disabling any `test.describe.configure({ retries: 1 })` override; never
-rerun until it happens to pass. If isolated repeats stay green but the shard
-fails, binary-search preceding specs in one worker. The fix is complete only
-when the smallest reproducing sequence passes without retries.
+CI temporarily tolerates one. Either result is a failure signal for agents.
+Playwright CLI `--retries=0` does not override a test-level
+`test.describe.configure({ retries: 1 })`; temporarily set that describe retry
+to zero, regenerate the manifest after the source change, and run the exact
+shard with `--retries=0 --workers=1`. Restore the source change before reporting
+or committing. Never rerun until it happens to pass. If isolated repeats stay
+green but the shard fails, binary-search preceding specs in one worker. The fix
+is complete only when the smallest reproducing sequence passes without retries.
 
-Record the exact command, resource limits, repeat number, and failure artifact path. For an explicit no-flakes requirement, download `blob-report-*` with `gh run download <run-id> --pattern 'blob-report-*' --dir <tmp>` and run `python3 scripts/playwright-blob-audit <tmp>`; aggregate green is not flake-free. For a failed shard, inspect every `error-context.md` in its downloaded
+Record the exact command, resource limits, repeat number, and failure artifact path. For every PR E2E check, download all `blob-report-*` artifacts with `gh run download <run-id> --pattern 'blob-report-*' --dir <tmp>` and run `python3 scripts/playwright-blob-audit <tmp>`; a green aggregate can hide retry or error evidence. Reconcile retry counts with `e2e-retry-summary`, downloaded with `gh run download <run-id> --name e2e-retry-summary --dir <tmp>`: `flake.flaky` and tests with `outcome: "flaky"` are flaky verdicts, while `attempts > 1` alone is only a retry signal. For an explicit no-flakes request, require zero flaky verdicts; for a no-retries request, require every test to have one attempt. Missing or invalid required artifacts are incomplete evidence. Report passed and skipped results separately. For a failed shard, inspect every `error-context.md` in its downloaded
 `test-results-<shard>` artifact and compare shared page-object waits with `main`
 before changing product code; the context can expose duplicate active terminals
 or a terminal stuck on "Starting terminal...".
@@ -77,6 +87,17 @@ When a test fails:
 | **Frontend-only** | Screenshot shows wrong UI, missing element, client error. API calls succeed. | Start dev server, fix with hot reload, verify with `playwright-cli`, then `make build-web` + re-run test |
 | **Backend** | 500 errors, wrong API response, "Backend did not become healthy" | Fix Go code, `make build-backend`, re-run test |
 
+### Native Tauri smoke tests
+
+- A fake-runtime file or process marker proves fixture-side progress, not that
+  the WebView has rendered the corresponding state. Wait for an observable UI
+  condition or an explicit render-ready test signal instead of a fixed sleep.
+- Use semantic or accessibility-driven activation and verify the focused
+  control before keyboard input. Do not assume fixed coordinates or a stable
+  Tab order across window sizes.
+- Preserve separate startup and settled-state screenshots as CI artifacts so
+  runtime startup failures can be distinguished from delayed rendering.
+
 ### Common issues
 
 - **"Backend did not become healthy"** — run `make build-backend build-web`, check with `E2E_DEBUG=1`
@@ -92,6 +113,7 @@ When a test fails:
 - **Initial hydration/readiness regressions:** do not use a page-object readiness helper that can reload or re-navigate the page (for example `SessionPage.waitForLoad`) to prove first-render behavior. Wait directly for the invariant locator on the current navigation, using a bounded non-reloading wait when needed. Keep reload-capable helpers for persistence and recovery scenarios.
 - **Auto-started session never goes idle** — for sessions started by the same call that creates them, the mock agent can finish before the client WS subscription registers, so a raw `idleInput()` visibility wait hangs. Use `SessionPage.waitForChatIdle()` before opening transient dialogs/drawers/popovers; it may reload and re-derive state from the Go boot payload. If it must run later, reopen the transient UI first. For WS/session hydration races, retain a bounded reload-and-retry fallback in the page object: keep the fast path immediate and the final check failing when genuinely stuck; remove it only with an equivalent deterministic readiness guarantee and focused regression.
 - **Editor readiness is not submit readiness** — a `contenteditable` may be present and writable while a session is still `STARTING`. Before submitting, wait for the scoped submit control to be enabled or for the exact session to reach `WAITING_FOR_INPUT`; use retries disabled when reproducing this boundary.
+- **Radix dropdown inside a clickable row/card** — a mobile `.tap()` can leave an uncontrolled menu closed despite propagation guards. Assert the trigger's `aria-expanded`; when it reproduces, use controlled `open`/`onOpenChange`, prevent default on trigger `pointerdown`, and toggle on the completed click. Stop propagation when the trigger overlays a row action, then repeat the focused mobile test with `--retries=0`.
 - **Flaky timeouts** — **never increase locator timeouts to fix flaky tests.** If a locator times out, the root cause is almost always something else: a setup failure, missing navigation, race condition, or the element genuinely not rendering. Investigate why the element never appears instead of giving it more time. Note: infrastructure health timeouts (30s in `fixtures/backend.ts`) and overall test timeouts (60s in `playwright.config.ts`) are separate and should not be modified either.
 - Screenshots on failure, video on first retry (CI). In workflow cache steps, `actions/cache/restore` sets `cache-hit` to `true` for an exact key, `false` for a restore-key/prefix hit, and empty on a miss; gate verification/fallback on empty versus non-empty, smoke-test Chromium before skipping image extraction, and use bounded backoff for transient registry metadata probes such as `docker buildx imagetools inspect`.
 - **Page-closed errors after timeouts** — `Target page, context or browser has been closed` can be teardown masking an earlier overlay interception. Inspect the preceding action and screenshot, for example with `rtk proxy unzip -p <trace.zip> 0-trace.trace | rtk proxy jq -c 'select(.type == "action" or .type == "error")'`, then close the overlay in the page object, assert it is closed, and rerun with retries disabled before changing timeouts or routes.

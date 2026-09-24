@@ -29,7 +29,7 @@
 #
 # Exit codes:
 #   0  terminal and clean      - no failed checks, no unresolved threads
-#   1  terminal with findings  - failures and/or review threads to act on
+#   1  terminal with findings  - failures, reviews, conflicts, or base findings
 #   2  deadline reached        - checks still pending or terminal rollup not confirmed
 #   3  blocked                 - merged/closed, approval required, or access lost
 #
@@ -44,11 +44,22 @@ SLEEP="${PR_AWAIT_SLEEP:-sleep}"
 ACTIVE_READ_PID=''
 ACTIVE_READ_GROUP=''
 ACTIVE_WATCHDOG_PID=''
+READ_ERR=''
+RATE_LIMIT_MESSAGE=''
 
 # Blocked results leave the poll loop before a snapshot exists, but a caller
 # that asked for JSON still needs to parse the answer.
 emit_blocked() {
   local outcome=$1 message=$2
+  local blocked_reason='blocked_evidence'
+  case "$outcome" in
+    blocked-pr-state) blocked_reason='pr_closed_or_merged' ;;
+    blocked-approval) blocked_reason='approval_required' ;;
+    blocked-merge-state | blocked-merge-unknown) blocked_reason='mergeability_unknown' ;;
+    blocked-required-statuses) blocked_reason='required_status_policy_unknown' ;;
+    blocked-rate-limit) blocked_reason='rate_limit' ;;
+    blocked-access) blocked_reason='access_or_transport_error' ;;
+  esac
   if [[ "${FORMAT:-text}" == 'json' ]]; then
     local waited_sec="${WAITED:-0}"
     local polls="${POLLS:-0}"
@@ -75,12 +86,15 @@ emit_blocked() {
       --argjson interval_sec "$interval_sec" \
       --arg mergeable "$mergeable_value" \
       --arg merge_state_status "$merge_status_value" \
+      --arg blocked_reason "$blocked_reason" \
       '{pr: $pr, outcome: $outcome, mode: $mode, waited_sec: $waited_sec,
         polls: $polls, head_changes: $head_changes, exit_code: $exit_code,
         message: $message, toolchain: $toolchain, evidence_complete: false,
         deadline_sec: $deadline_sec, interval_sec: $interval_sec,
         mergeable: $mergeable, merge_state_status: $merge_state_status,
-        summary: null}'
+        check_count: 0, passed_check_count: 0, skipped_check_count: 0,
+        neutral_check_count: 0, failed_check_count: 0, pending_check_count: 0,
+        finding_reasons: [$blocked_reason], summary: null}'
   else
     printf 'PR %s\n%s\n' "$PR" "$message"
     toolchain_hint
@@ -158,6 +172,33 @@ PR=$((10#$PR))
 
 progress() {
   [[ "$QUIET" -eq 1 ]] || printf '%s\n' "$*" >&2
+}
+
+rate_limit_text() {
+  local text=$1
+  local lower
+  lower="$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')"
+  [[ "$lower" == *'rate limit'* || "$lower" == *'secondary rate'* ||
+    "$lower" == *'secondary-rate'* || "$lower" == *'retry-after'* ||
+    "$lower" == *'x-ratelimit'* || "$lower" == *'http 429'* ||
+    "$lower" == *'status 429'* ]]
+}
+
+rate_limit_detail_from_text() {
+  local text=$1
+  [[ -n "$text" ]] || return 1
+  rate_limit_text "$text" || return 1
+  printf '%s' "$(printf '%s' "$text" | tr '\r\n' '  ' | cut -c1-500)"
+}
+
+rate_limit_detail_from_summary() {
+  local summary=$1
+  local detail
+  detail="$(jq -r '[.errors[]?.message // empty
+    | select(test("rate limit|secondary[- ]rate|retry-after|x-ratelimit|http 429|status 429"; "i"))]
+    | join("; ")' <<<"$summary")"
+  [[ -n "$detail" ]] || return 1
+  printf '%s' "$detail"
 }
 
 # A current-head check rollup can briefly contain only the first materialized
@@ -257,8 +298,10 @@ stop_active_read() {
 # deadline: the poll loop can only check the clock between reads, never during.
 run_bounded_capture() {
   local secs=$1 outfile=$2
+  local errfile="${PR_AWAIT_READ_ERR:-${READ_ERR:-}}"
   shift 2
   [[ -z "$outfile" ]] || : >"$outfile"
+  [[ -z "$errfile" ]] || : >"$errfile"
 
   resolve_timeout_bin
   if [[ -n "$TIMEOUT_BIN" ]]; then
@@ -268,9 +311,9 @@ run_bounded_capture() {
     esac
     set -m
     if [[ -n "$outfile" ]]; then
-      "$TIMEOUT_BIN" "$secs" "$@" >"$outfile" 2>/dev/null &
+      "$TIMEOUT_BIN" "$secs" "$@" >"$outfile" 2>"${errfile:-/dev/null}" &
     else
-      "$TIMEOUT_BIN" "$secs" "$@" >/dev/null 2>&1 &
+      "$TIMEOUT_BIN" "$secs" "$@" >/dev/null 2>"${errfile:-/dev/null}" &
     fi
     local pid=$!
     [[ "$had_monitor" -eq 1 ]] || set +m
@@ -298,9 +341,9 @@ run_bounded_capture() {
   esac
   set -m
   if [[ -n "$outfile" ]]; then
-    "$@" >"$outfile" 2>/dev/null &
+    "$@" >"$outfile" 2>"${errfile:-/dev/null}" &
   else
-    "$@" >/dev/null 2>&1 &
+    "$@" >/dev/null 2>"${errfile:-/dev/null}" &
   fi
   local pid=$!
   [[ "$had_monitor" -eq 1 ]] || set +m
@@ -387,8 +430,10 @@ BASH_VERSION_SEEN='unknown'
 record_toolchain
 
 READ_TMP="$(mktemp "${TMPDIR:-/tmp}/pr-await-read-XXXXXX")"
+READ_ERR="$(mktemp "${TMPDIR:-/tmp}/pr-await-error-XXXXXX")"
 cleanup_read_tmp() {
   [[ -z "${READ_TMP:-}" ]] || rm -f "$READ_TMP"
+  [[ -z "${READ_ERR:-}" ]] || rm -f "$READ_ERR"
 }
 
 handle_signal() {
@@ -438,6 +483,7 @@ MERGE_TIMED_OUT=0
 EVIDENCE_ERRORS=0
 MERGE_UNKNOWN=0
 REQUIRED_STATUS_UNKNOWN=0
+REQUIRED_STATUS_UNKNOWN_LIMIT=5
 HEAD_CHANGES=0
 FIRST_HEAD=''
 SUMMARY_JSON=''
@@ -471,6 +517,13 @@ while :; do
     [[ -n "$SUMMARY_JSON" ]] || OUTCOME='blocked-access'
     break
   fi
+  if rate_detail="$(rate_limit_detail_from_text "$(cat "$READ_ERR")")"; then
+    RATE_LIMIT_MESSAGE="BLOCKED: GitHub rate limit while reading pr-state. ${rate_detail}
+Honor Retry-After or X-RateLimit-Reset when present, then retry the waiter; review evidence is unknown."
+    progress "poll ${POLLS}: GitHub rate limit detected while reading pr-state"
+    OUTCOME='blocked-rate-limit'
+    break
+  fi
   summary_body="$(cat "$READ_TMP")"
   # A non-zero read is a failed read, whatever it printed. Checking only the
   # parse would let a pr-state that exited 1 through on an empty snapshot.
@@ -494,6 +547,14 @@ while :; do
     continue
   fi
   summary_body="$(augment_required_status_checks <<<"$summary_body")"
+  if rate_detail="$(rate_limit_detail_from_summary "$summary_body")"; then
+    RATE_LIMIT_MESSAGE="BLOCKED: GitHub rate limit reported by pr-state. ${rate_detail}
+Honor Retry-After or X-RateLimit-Reset when present, then retry the waiter; review evidence is unknown."
+    progress "poll ${POLLS}: GitHub rate limit reported by pr-state"
+    SUMMARY_JSON="$summary_body"
+    OUTCOME='blocked-rate-limit'
+    break
+  fi
   SUMMARY_JSON="$summary_body"
   CONSECUTIVE_ERRORS=0
 
@@ -524,6 +585,13 @@ while :; do
     break
   fi
   merge_body="$(cat "$READ_TMP")"
+  if rate_detail="$(rate_limit_detail_from_text "$(cat "$READ_ERR")")"; then
+    RATE_LIMIT_MESSAGE="BLOCKED: GitHub rate limit while reading merge state. ${rate_detail}
+Honor Retry-After or X-RateLimit-Reset when present, then retry the waiter; mergeability is unknown."
+    progress "poll ${POLLS}: GitHub rate limit detected while reading merge state"
+    OUTCOME='blocked-rate-limit'
+    break
+  fi
   # Staged in a local first, same reason as the pr-state read above: a failed
   # read must not overwrite the last good MERGE_JSON with unusable text.
   if [[ "$read_rc" -ne 0 ]] || ! jq -e . >/dev/null 2>&1 <<<"$merge_body"; then
@@ -605,7 +673,10 @@ while :; do
   if [[ "$required_status_known" != 'yes' ]]; then
     REQUIRED_STATUS_UNKNOWN=$((REQUIRED_STATUS_UNKNOWN + 1))
     progress "poll ${POLLS}: required status policy is unavailable (${REQUIRED_STATUS_UNKNOWN} in a row)"
-    if [[ "$REQUIRED_STATUS_UNKNOWN" -ge 3 ]]; then
+    # Policy endpoints can fail transiently while the check rollup remains
+    # usable. Give a later policy snapshot a bounded chance to recover before
+    # blocking; an eventually unknown policy still cannot prove the PR clean.
+    if [[ "$REQUIRED_STATUS_UNKNOWN" -ge "$REQUIRED_STATUS_UNKNOWN_LIMIT" ]]; then
       OUTCOME='blocked-required-statuses'
       break
     fi
@@ -756,8 +827,15 @@ WAITED=$((SECONDS - START_SEC))
 jq -e . >/dev/null 2>&1 <<<"$MERGE_JSON" || MERGE_JSON='{}'
 
 if [[ -z "$SUMMARY_JSON" ]] || ! jq -e . >/dev/null 2>&1 <<<"$SUMMARY_JSON"; then
+  if [[ "$OUTCOME" == 'blocked-rate-limit' ]]; then
+    emit_blocked 'blocked-rate-limit' "$RATE_LIMIT_MESSAGE"
+  fi
   emit_blocked 'blocked-access' \
 "BLOCKED: no usable pr-state snapshot was obtained; treat CI state as unknown."
+fi
+
+if [[ "$OUTCOME" == 'blocked-rate-limit' ]]; then
+  emit_blocked 'blocked-rate-limit' "$RATE_LIMIT_MESSAGE"
 fi
 
 if [[ "$OUTCOME" == 'blocked-access' ]]; then
@@ -779,6 +857,9 @@ fi
 failed_n="$(jq -r '.failed_checks | length' <<<"$SUMMARY_JSON")"
 pending_n="$(jq -r '.pending_checks | length' <<<"$SUMMARY_JSON")"
 passed_n="$(jq -r '.passed_check_count // 0' <<<"$SUMMARY_JSON")"
+check_count_n="$(jq -r '.check_count // 0' <<<"$SUMMARY_JSON")"
+skipped_n="$(jq -r '[.terminal_checks[]? | select(.conclusion == "skipped")] | length' <<<"$SUMMARY_JSON")"
+neutral_n="$(jq -r '[.terminal_checks[]? | select(.conclusion == "neutral")] | length' <<<"$SUMMARY_JSON")"
 # `unresolved_review_thread_count` is every unresolved thread (pr-state:922);
 # `hidden_unresolved_threads` is the subset filtered out of `unresolved_threads`,
 # not an addition to it. Summing the two counts the hidden ones twice.
@@ -804,8 +885,40 @@ conflicted=0
 # only threads would report such a PR clean.
 findings=$((failed_n + threads_total_n + comments_n + conflicted + changes_req_n + blocked_rev_n + base_advanced))
 
+finding_reasons="$(jq -cn \
+  --argjson failed "$failed_n" \
+  --argjson threads "$threads_total_n" \
+  --argjson comments "$comments_n" \
+  --argjson conflicted "$conflicted" \
+  --argjson changes_requested "$changes_req_n" \
+  --argjson blocked_review "$blocked_rev_n" \
+  --argjson base_advanced "$base_advanced" \
+  --argjson pending "$pending_n" \
+  --argjson check_count "$check_count_n" \
+  --argjson provisional "$TERMINAL_ROLLUP_PROVISIONAL" \
+  --arg outcome "$OUTCOME" \
+  '[
+    (if $failed > 0 then "failed_checks" else empty end),
+    (if $threads > 0 then "unresolved_review_threads" else empty end),
+    (if $comments > 0 then "actionable_issue_comments" else empty end),
+    (if $conflicted > 0 then "merge_conflict" else empty end),
+    (if $changes_requested > 0 then "changes_requested" else empty end),
+    (if $blocked_review > 0 then "blocked_review" else empty end),
+    (if $base_advanced > 0 then "base_advanced" else empty end),
+    (if $pending > 0 then "pending_checks" else empty end),
+    (if $provisional > 0 then "unconfirmed_terminal_rollup" else empty end),
+    (if $check_count == 0 then "no_checks_registered" else empty end),
+    (if $outcome == "blocked-pr-state" then "pr_closed_or_merged" else empty end),
+    (if $outcome == "blocked-approval" then "approval_required" else empty end),
+    (if $outcome == "blocked-evidence" then "incomplete_evidence" else empty end),
+    (if $outcome == "blocked-merge-unknown" then "mergeability_unknown" else empty end),
+    (if $outcome == "blocked-required-statuses" then "required_status_policy_unknown" else empty end),
+    (if $outcome == "blocked-rate-limit" then "rate_limit" else empty end),
+    (if $outcome == "blocked-access" or $outcome == "blocked-merge-state" then "access_or_transport_error" else empty end)
+  ] | unique')"
+
 case "$OUTCOME" in
-  blocked-pr-state | blocked-approval | blocked-evidence | blocked-merge-unknown | blocked-required-statuses) code=3 ;;
+  blocked-pr-state | blocked-approval | blocked-evidence | blocked-merge-unknown | blocked-required-statuses | blocked-rate-limit) code=3 ;;
   deadline) code=2 ;;
   strict-terminal) [[ "$findings" -gt 0 ]] && code=1 || code=0 ;;
   *) [[ "$findings" -gt 0 ]] && code=1 || code=0 ;;
@@ -826,12 +939,23 @@ if [[ "$FORMAT" == 'json' ]]; then
     --argjson deadline_sec "$DEADLINE_SEC" \
     --argjson interval_sec "$INTERVAL_SEC" \
     --argjson evidence_complete "$([[ "$evidence_errors_n" -eq 0 && "$threads_known_final" == 'yes' ]] && echo true || echo false)" \
+    --argjson check_count "$check_count_n" \
+    --argjson passed_check_count "$passed_n" \
+    --argjson skipped_check_count "$skipped_n" \
+    --argjson neutral_check_count "$neutral_n" \
+    --argjson failed_check_count "$failed_n" \
+    --argjson pending_check_count "$pending_n" \
+    --argjson finding_reasons "$finding_reasons" \
     '{pr: $pr, outcome: $outcome, mode: $mode, waited_sec: $waited_sec, polls: $polls,
       head_changes: $head_changes, exit_code: $exit_code,
       message: null, toolchain: $toolchain, evidence_complete: $evidence_complete,
       deadline_sec: $deadline_sec, interval_sec: $interval_sec,
       mergeable: ($merge.mergeable // "UNKNOWN"),
       merge_state_status: ($merge.mergeStateStatus // "UNKNOWN"),
+      check_count: $check_count, passed_check_count: $passed_check_count,
+      skipped_check_count: $skipped_check_count, neutral_check_count: $neutral_check_count,
+      failed_check_count: $failed_check_count, pending_check_count: $pending_check_count,
+      finding_reasons: $finding_reasons,
       summary: $summary}'
   exit "$code"
 fi
@@ -842,7 +966,11 @@ printf 'PR %s @ %s (%s -> %s)\n' "$PR" "${FIRST_HEAD:0:9}" "$branch" "$base"
 printf 'gate: %s | outcome: %s | waited %dm%02ds over %d poll(s)\n' \
   "$MODE" "$OUTCOME" "$((WAITED / 60))" "$((WAITED % 60))" "$POLLS"
 [[ "$HEAD_CHANGES" -gt 0 ]] && printf 'note: head moved %d time(s) during the wait\n' "$HEAD_CHANGES"
-printf 'checks: %s passed, %s failed, %s pending\n' "$passed_n" "$failed_n" "$pending_n"
+printf 'checks: %s passed, %s skipped, %s neutral, %s failed, %s pending (%s total)\n' \
+  "$passed_n" "$skipped_n" "$neutral_n" "$failed_n" "$pending_n" "$check_count_n"
+if [[ "$(jq -r 'length' <<<"$finding_reasons")" -gt 0 ]]; then
+  printf 'finding reasons: %s\n' "$(jq -r 'join(", ")' <<<"$finding_reasons")"
+fi
 printf 'merge: %s / %s | review: %s\n' "$mergeable" "$merge_status" "$review_decision"
 printf 'toolchain: %s\n' "$TOOLCHAIN"
 
