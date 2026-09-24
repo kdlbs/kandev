@@ -47,9 +47,11 @@ backend or store changes.
   directly, per `apps/web/AGENTS.md`.
 - On a successful copy, swaps the icon to `IconCheck` for 1500ms as visual
   confirmation, then reverts.
-- `aria-label` and tooltip content both use `t("task:copyTaskLink")` /
-  `t("task:taskLinkCopied")`, distinct wording and a distinct icon from the
-  Link submenu's `IconLink` (`kanban-card-link-submenu.tsx`).
+- The stable `aria-label` uses `t("task:copyTaskLink")`; the tooltip uses the
+  supplementary `t("task:copyTaskLinkHint")` before copying and
+  `t("task:taskLinkCopied")` after a successful copy. This keeps the tooltip
+  useful without repeating the accessible name, and keeps the wording and icon
+  distinct from the Link submenu's `IconLink` (`kanban-card-link-submenu.tsx`).
 - Reference pattern: `components/integrations/change-request-detail-copy-button.tsx`
   and `components/task/port-forward-dialog-actions.tsx`'s `PortUrlActions`.
 
@@ -63,9 +65,10 @@ backend or store changes.
 
 ### i18n
 
-- New keys `task:copyTaskLink` ("Copy task link") and `task:taskLinkCopied`
-  ("Task link copied") in `en/task.json`, translated in `pt-pt`, `zh-cn`
-  (zh-hant pair via `pnpm run i18n:zh-hant`), and the pseudo locale.
+- New keys `task:copyTaskLink` ("Copy task link"),
+  `task:copyTaskLinkHint` ("Copies the task link to the clipboard"), and
+  `task:taskLinkCopied` ("Task link copied") in all seven task catalogs,
+  including the pseudo locale.
 
 ---
 

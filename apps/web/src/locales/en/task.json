@@ -361,6 +361,7 @@
   "copyMessageToClipboard": "Copy message to clipboard",
   "copyPath": "Copy path",
   "copyTaskLink": "Copy task link",
+  "copyTaskLinkHint": "Copies the task link to the clipboard",
   "copyToClipboard": "Copy to clipboard",
   "copyUrl": "Copy URL",
   "copyWorkspacePath": "Copy workspace path",

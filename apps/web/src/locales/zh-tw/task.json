@@ -351,6 +351,7 @@
   "copyMessageToClipboard": "複製訊息到剪貼簿",
   "copyPath": "複製路徑",
   "copyTaskLink": "複製任務連結",
+  "copyTaskLinkHint": "將任務連結複製到剪貼簿",
   "copyToClipboard": "複製到剪貼簿",
   "copyUrl": "複製 URL",
   "copyWorkspacePath": "複製工作區路徑",

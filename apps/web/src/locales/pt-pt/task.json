@@ -351,6 +351,7 @@
   "copyMessageToClipboard": "Copiar a mensagem para a área de transferência",
   "copyPath": "Copiar o caminho",
   "copyTaskLink": "Copiar a ligação da tarefa",
+  "copyTaskLinkHint": "Copia a ligação da tarefa para a área de transferência",
   "copyToClipboard": "Copiar para a área de transferência",
   "copyUrl": "Copiar o URL",
   "copyWorkspacePath": "Copiar o caminho da área de trabalho",

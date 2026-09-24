@@ -286,14 +286,13 @@ the control cluster, not into a second row. It also exceeds the 81px fine and
 - **The indicator does not shrink below its floor.** Today the preview's
   indicator wrapper (`min-w-0 max-w-[50%] shrink [&>button]:w-full`) and the
   trigger (`min-w-0`) can both shrink to 0, which lets the trigger's
-  non-shrinking children overflow its box. The preview's wrapper enforces the
-  floor from the preview side: it gives the trigger `min-width: min-content`
-  (for example `[&>button]:min-w-min`, which outranks the trigger's own
-  `min-w-0` by selector specificity) and lets its own width fall back to the
-  trigger's min-content instead of 0. Because the step name span keeps
-  `min-w-0 truncate`, the min-content is exactly the indicator floor. The
-  shared trigger's own default classes stay unchanged, so the task top bar
-  keeps its current presentation, per the requirement's Out of scope.
+  non-shrinking children overflow its box. The preview's wrapper applies the
+  explicit `min-w-[68px]` fine-pointer class or `min-w-[88px]` coarse-pointer
+  class. These literal classes keep Tailwind's scanner from dropping the
+  conditional styles. The numeric values come from
+  `PREVIEW_HEADER_INDICATOR` in `lib/settings/constants.ts`. The shared
+  trigger's own default classes stay unchanged, so the task top bar keeps its
+  current presentation, per the requirement's Out of scope.
 - **The cap stays a share of the remainder.** The indicator's half-share cap is
   half of the row's content width after the control cluster and `g`, not 50%
   of the whole row. The nested shrinkable group holding the title and the

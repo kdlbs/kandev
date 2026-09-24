@@ -7,6 +7,7 @@ import { ToastProvider } from "@/components/toast-provider";
 import { TaskPreviewPanel } from "./task-preview-panel";
 import type { WorkflowStepperStep } from "./task/workflow-step-disclosure";
 import type { Task } from "./kanban-card";
+import { PREVIEW_HEADER_INDICATOR } from "@/lib/settings/constants";
 
 vi.mock("./task/preview-session-tabs", () => ({
   PreviewSessionTabs: () => <div data-testid="preview-session-tabs" />,
@@ -212,7 +213,7 @@ describe("TaskPreviewPanel step indicator floor", () => {
     // width, which would dominate an ancestor's `min-content` computation
     // instead of leaving room for it to shrink to 0.
     const wrapper = screen.getByTestId(STEPPER_TEST_ID).parentElement;
-    expect(wrapper?.className).toContain("min-w-[68px]");
+    expect(wrapper?.className).toContain(`min-w-[${PREVIEW_HEADER_INDICATOR.MIN_WIDTH_PX}px]`);
     expect(wrapper?.className).not.toContain("min-w-min");
   });
 });

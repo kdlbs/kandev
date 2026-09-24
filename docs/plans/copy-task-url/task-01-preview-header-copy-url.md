@@ -23,8 +23,9 @@ acceptance_criteria:
 
 - **Acceptance:**
   1. `CopyTaskUrlButton` (`apps/web/components/task/copy-task-url-button.tsx`)
-     renders an `IconCopy` ghost icon button, `h-8 w-8`, with a tooltip and
-     `aria-label` reading "Copy task link"; on click it copies
+     renders an `IconCopy` ghost icon button, `h-8 w-8`, with a stable
+     `aria-label` reading "Copy task link" and a supplementary tooltip hint;
+     on click it copies
      `${window.location.origin}${linkToTask(taskId)}` via the shared
      `copyToClipboard()` utility and shows an `IconCheck` confirmation for
      1500ms.

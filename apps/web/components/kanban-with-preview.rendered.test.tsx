@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
@@ -11,6 +11,7 @@ const previewState = vi.hoisted(() => ({
   close: vi.fn(),
   updatePreviewWidth: vi.fn(),
 }));
+const responsiveState = vi.hoisted(() => ({ isMobile: false, isFinePointer: true }));
 const TEST_IDS = vi.hoisted(() => ({
   panel: "task-preview-panel",
   secondarySessionButton: "select-secondary-session",
@@ -23,7 +24,7 @@ vi.mock("@/hooks/use-kanban-preview", () => ({
   useKanbanPreview: () => previewState,
 }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ isMobile: false, isFinePointer: true }),
+  useResponsiveBreakpoint: () => responsiveState,
 }));
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -91,6 +92,10 @@ const TASK = {
   position: 0,
   primarySessionId: TEST_IDS.primarySession,
 };
+const INITIAL_STATE = {
+  kanban: { workflowId: "workflow-1", steps: [], tasks: [TASK] },
+  kanbanMulti: { snapshots: {} },
+} as never;
 
 function StoreCapture({
   onStore,
@@ -102,9 +107,12 @@ function StoreCapture({
 }
 
 afterEach(() => {
+  cleanup();
   previewState.open.mockReset();
   previewState.close.mockReset();
   previewState.updatePreviewWidth.mockReset();
+  previewState.previewWidthPx = 360;
+  responsiveState.isFinePointer = true;
   window.history.replaceState({}, "", "/");
 });
 
@@ -112,14 +120,7 @@ describe("KanbanWithPreview removal recovery", () => {
   it("restores a non-primary session after a failed preview removal", async () => {
     let store!: ReturnType<typeof useAppStoreApi>;
     render(
-      <StateProvider
-        initialState={
-          {
-            kanban: { workflowId: "workflow-1", steps: [], tasks: [TASK] },
-            kanbanMulti: { snapshots: {} },
-          } as never
-        }
-      >
+      <StateProvider initialState={INITIAL_STATE}>
         <StoreCapture onStore={(value) => (store = value)} />
         <KanbanWithPreview />
       </StateProvider>,
@@ -168,5 +169,48 @@ describe("KanbanWithPreview removal recovery", () => {
     expect(new URL(window.location.href).searchParams.get("sessionId")).toBe(
       TEST_IDS.secondarySession,
     );
+  });
+});
+
+describe("KanbanWithPreview rendered preview width", () => {
+  it("updates for pointer mode without changing the chosen width", () => {
+    previewState.previewWidthPx = 320;
+    responsiveState.isFinePointer = true;
+    const { rerender } = render(
+      <StateProvider initialState={INITIAL_STATE}>
+        <KanbanWithPreview />
+      </StateProvider>,
+    );
+
+    const getPanelShell = () => {
+      const panel = screen.getByTestId(TEST_IDS.panel);
+      const shell = panel.parentElement?.parentElement;
+      if (!(shell instanceof HTMLElement)) throw new Error("preview panel shell is missing");
+      return shell;
+    };
+
+    expect(getPanelShell().style.width).toBe("320px");
+
+    act(() => {
+      responsiveState.isFinePointer = false;
+      rerender(
+        <StateProvider initialState={INITIAL_STATE}>
+          <KanbanWithPreview />
+        </StateProvider>,
+      );
+    });
+
+    expect(getPanelShell().style.width).toBe("380px");
+
+    act(() => {
+      responsiveState.isFinePointer = true;
+      rerender(
+        <StateProvider initialState={INITIAL_STATE}>
+          <KanbanWithPreview />
+        </StateProvider>,
+      );
+    });
+
+    expect(getPanelShell().style.width).toBe("320px");
   });
 });

@@ -60,6 +60,25 @@ async function expectInlinePreviewLayout(page: Page, previewPanel: Locator) {
   expect(boardBox.x + boardBox.width).toBeLessThanOrEqual(panelBox.x + 1);
 }
 
+async function expectPreviewPanelWidth(previewPanel: Locator, expectedWidth: number) {
+  const panelShell = previewPanel.locator("xpath=../..");
+  const shellBox = await panelShell.boundingBox();
+  expect(shellBox).not.toBeNull();
+  if (!shellBox) return null;
+  expect(Math.abs(shellBox.width - expectedWidth)).toBeLessThanOrEqual(1);
+  return shellBox;
+}
+
+function expectInsidePanel(
+  box: { x: number; y: number; width: number; height: number },
+  panel: { x: number; y: number; width: number; height: number },
+) {
+  expect(box.x).toBeGreaterThanOrEqual(panel.x - 1);
+  expect(box.x + box.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
+  expect(box.y).toBeGreaterThanOrEqual(panel.y - 1);
+  expect(box.y + box.height).toBeLessThanOrEqual(panel.y + panel.height + 1);
+}
+
 // AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4: the indicator's width is capped
 // at half the title-and-indicator group's width (plus 1px of rounding slack).
 async function expectIndicatorWithinCap(previewPanel: Locator, triggerBox: { width: number }) {
@@ -270,6 +289,9 @@ test.describe("Kanban preview workflow step navigation", () => {
     await expect(trigger).toBeVisible();
 
     await expectInlinePreviewLayout(testPage, previewPanel);
+    const panelShellBox = await expectPreviewPanelWidth(previewPanel, 320);
+    expect(panelShellBox).not.toBeNull();
+    if (!panelShellBox) return;
 
     const title = previewPanel.locator("h2");
     const closeButton = previewPanel.getByRole("button", { name: "Close preview" });
@@ -295,6 +317,10 @@ test.describe("Kanban preview workflow step navigation", () => {
     expect(copyBox).not.toBeNull();
     expect(maximizeBox).not.toBeNull();
     if (!titleBox || !triggerBox || !closeBox || !copyBox || !maximizeBox) return;
+
+    for (const box of [titleBox, triggerBox, closeBox, copyBox, maximizeBox]) {
+      expectInsidePanel(box, panelShellBox);
+    }
 
     // Single row: every header element shares the same vertical center. Comparing
     // raw tops would fail spuriously — items-center aligns centers, not tops, and
@@ -369,6 +395,9 @@ test.describe("Kanban preview workflow step navigation", () => {
     // 380px panel stays inline; this is the binding case per the system
     // design's Risks note.
     await expectInlinePreviewLayout(coarseDesktopTestPage, previewPanel);
+    const panelShellBox = await expectPreviewPanelWidth(previewPanel, 380);
+    expect(panelShellBox).not.toBeNull();
+    if (!panelShellBox) return;
 
     const title = previewPanel.locator("h2");
     const closeButton = previewPanel.getByRole("button", { name: "Close preview" });
@@ -394,6 +423,10 @@ test.describe("Kanban preview workflow step navigation", () => {
     expect(copyBox).not.toBeNull();
     expect(maximizeBox).not.toBeNull();
     if (!titleBox || !triggerBox || !closeBox || !copyBox || !maximizeBox) return;
+
+    for (const box of [titleBox, triggerBox, closeBox, copyBox, maximizeBox]) {
+      expectInsidePanel(box, panelShellBox);
+    }
 
     // Single row: every header element shares the same vertical center. Comparing
     // raw tops would fail spuriously — items-center aligns centers, not tops, and

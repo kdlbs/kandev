@@ -149,7 +149,7 @@ from those same derived numbers — see `PREVIEW_HEADER_INDICATOR` in
 Verified via a full real-Chromium E2E run after the fix: 5/5 passed, including
 the cap-formula and inline-layout assertions.
 
-Verification run at implementation time: unit/component tests (41/41 across
+Verification run at implementation time: unit/component tests (42/42 across
 the 5 files in Verification above) pass; `pnpm run typecheck` and
 `pnpm run lint` clean; E2E (`preview-workflow-step-navigation.spec.ts`,
 chromium) 5/5 pass, including the new coarse-pointer test and the extended

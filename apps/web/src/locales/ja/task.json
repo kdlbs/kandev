@@ -361,6 +361,7 @@
   "copyMessageToClipboard": "メッセージをクリップボードにコピー",
   "copyPath": "パスをコピー",
   "copyTaskLink": "タスクリンクをコピー",
+  "copyTaskLinkHint": "タスクのリンクをクリップボードにコピー",
   "copyToClipboard": "クリップボードにコピー",
   "copyUrl": "URLをコピー",
   "copyWorkspacePath": "ワークスペースのパスをコピー",

@@ -26,7 +26,7 @@ export function CopyTaskUrlButton({ taskId }: { taskId: string }) {
   }, [copied]);
 
   const stableLabel = t("task:copyTaskLink");
-  const tooltipLabel = t(copied ? "task:taskLinkCopied" : "task:copyTaskLink");
+  const tooltipLabel = t(copied ? "task:taskLinkCopied" : "task:copyTaskLinkHint");
 
   return (
     <Tooltip>

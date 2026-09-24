@@ -39,7 +39,9 @@ test.describe("Preview panel copy task URL control", () => {
     // Hover tooltip identifies the control distinctly from the Link submenu
     // (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003.3/.4), which reads plain "Link".
     await copyButton.hover();
-    const tooltip = testPage.getByRole("tooltip", { name: "Copy task link" });
+    const tooltip = testPage.getByRole("tooltip", {
+      name: "Copies the task link to the clipboard",
+    });
     await expect(tooltip).toBeVisible();
     await expect(tooltip).not.toHaveText("Link");
 
