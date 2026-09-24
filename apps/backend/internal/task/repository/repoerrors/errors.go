@@ -9,6 +9,9 @@ var ErrWorkspaceNameMismatch = errors.New("workspace name mismatch")
 // ErrWorkspaceNotFound reports that no workspace row matched the supplied id.
 var ErrWorkspaceNotFound = errors.New("workspace not found")
 
+// ErrWorkflowNotFound reports that no workflow row matched the supplied id.
+var ErrWorkflowNotFound = errors.New("workflow not found")
+
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 

@@ -26,6 +26,10 @@ func int64Ptr(v int64) *int64 { return &v }
 // ── fakes for the narrow Host data API interfaces ───────────────────────
 
 type fakeTaskDataSource struct {
+	transitionRows   map[string][]taskmodels.StepTransition
+	transitionGroups map[string][]taskmodels.TransitionGroup
+	transitionCalls  int
+	groupCalls       int
 	workspaces       []*taskmodels.Workspace
 	tasksByWorkspace map[string][]*taskmodels.Task
 	tasksByID        map[string]*taskmodels.Task
@@ -64,6 +68,16 @@ type fakeTaskDataSource struct {
 	// BuildDependencyViews/Bounded call, so tests can prove attachment
 	// derives over the right (e.g. post-filter) slice.
 	dependencyViewsTasks []string
+}
+
+func (f *fakeTaskDataSource) ListTaskStepTransitions(_ context.Context, taskID string, _ int, _ string) ([]taskmodels.StepTransition, string, error) {
+	f.transitionCalls++
+	return f.transitionRows[taskID], "", nil
+}
+
+func (f *fakeTaskDataSource) ListWorkflowTransitionGroups(_ context.Context, workflowID string, _ int, _ string) ([]taskmodels.TransitionGroup, string, error) {
+	f.groupCalls++
+	return f.transitionGroups[workflowID], "", nil
 }
 
 func (f *fakeTaskDataSource) ListWorkspaces(context.Context) ([]*taskmodels.Workspace, error) {
@@ -400,6 +414,24 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		interactionDeps: func() interactionResponder { return d.responder },
 	}
 	return d
+}
+
+// @covers AC-PLUGINS-WORKFLOW-HISTORY-001.4 AC-PLUGINS-WORKFLOW-HISTORY-002.1
+func TestHostTransitionHistoryUsesExistingReadGrants(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": {ID: "task-1", WorkspaceID: "ws-1"}}
+	d.tasks.transitionRows = map[string][]taskmodels.StepTransition{"task-1": {{ID: 9, Trigger: "test", OccurredAt: time.Now().UTC()}}}
+	reader, ok := pluginsdk.TransitionHistory(d.host)
+	if !ok {
+		t.Fatal("plugin Host transition-history extension is unavailable")
+	}
+	items, _, err := reader.ListTask(context.Background(), "task-1", pluginsdk.Page{})
+	if err != nil || len(items) != 1 || items[0].ID != "9" {
+		t.Fatalf("task history = %+v, err=%v", items, err)
+	}
+	if _, _, err := reader.ListWorkflowGroups(context.Background(), "wf-1", pluginsdk.Page{}); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("workflow groups without workflows grant: %v", err)
+	}
 }
 
 // ── capability gating: denied without api_read:<resource> ──────────────

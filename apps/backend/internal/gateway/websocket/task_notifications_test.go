@@ -207,7 +207,7 @@ func TestTaskEventBroadcaster_OrdersTranscriptMutationsAcrossTransportSubjects(t
 // lifecycle state events intentionally sharing one ordered wildcard).
 //
 // The old code had a second subscription system (subscribeEventBusHandlers in
-// cmd/kandev/helpers.go) that subscribed to the same four events, causing
+// cmd/kandev/helpers.go) that subscribed to the same routed events, causing
 // duplicate broadcasts. This test counts the broadcaster's internal
 // subscriptions directly to guard against re-introducing duplicates.
 func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {

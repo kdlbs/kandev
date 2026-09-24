@@ -2,6 +2,8 @@
 status: draft
 system: integrations
 requirements:
+  - REQ-INTEGRATIONS-GITHUB-PR-POLLING-001
+  - REQ-INTEGRATIONS-GITHUB-PR-POLLING-002
   - REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-001
   - REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001
 created: 2026-09-11
@@ -187,3 +189,86 @@ historical scope and results.
 - [Sync coordination](github-task-pr-sync-coordination.md)
 - [Authentication ownership ADR](../../../decisions/0047-github-authentication-ownership.md)
 - [Implementation package](../../../plans/github-pr-discovery-health/plan.md)
+
+## Adaptive discovery schedule
+
+`REQ-INTEGRATIONS-GITHUB-PR-POLLING-001` maps to this section.
+Keep `defaultPRPollInterval` at 1 minute. Select due searching targets before
+batch construction. Known numbered watches keep the current cadence.
+
+| Searching task state | Minimum interval |
+| --- | --- |
+| Running or activity age below 2 hours | 1 minute |
+| Activity age from 2 hours to below 24 hours | 15 minutes |
+| Activity age at least 24 hours | 30 minutes |
+
+Use injected time and `PRWatch.LastCheckedAt` for due checks. Round execution
+to the next 1-minute tick, so actual delay may include one extra tick.
+Use watch creation as an activity baseline for the first 2 hours.
+A never-checked watch is immediately eligible. Missing activity evidence
+fails open to fast polling. No new random delay is required in this package.
+
+Add a narrow task-activity projection, loaded in bulk for eligible watch tasks.
+Reuse the bounded query pattern in
+`task/repository/sqlite/task_status_summary.go:LoadTaskLastActivity`, but not
+its generic task-update source. Preserve that existing UI query unchanged.
+Use persisted session execution state and conversation timestamps, plus observed
+commit/push activity. Do not use generic task or watch `UpdatedAt`: GitHub sync
+can update those fields itself. Exclude automatic provider notifications from
+conversation activity. Include human messages and agent execution activity.
+Do not scan remote branches or invoke GitHub to calculate idleness.
+Record observed branch activity from existing local Git event paths; absence of
+such an event is not proof that no remote push occurred.
+
+An activity transition restores next-tick eligibility even after a slow poll.
+Persisted task activity and last-check timestamps survive restart. A runtime
+branch-activity marker may reset on restart without stopping periodic discovery.
+Expire runtime markers after 24 hours and remove them with their watch.
+Reconciliation of an unchanged watch must preserve its age and last check.
+
+Group equivalent discovery targets before admission. Any active member selects
+the 1-minute schedule for that target; do not duplicate the provider query.
+Numbered targets and searching targets remain separate groups even when they
+share a repository and branch, because their polling cadences differ.
+Passive task/page refresh must use the same admission rule or it defeats the
+background savings. Explicit user refresh bypasses only idle admission, never
+quota or auth gates. Preserve `PRSyncFreshnessWindow` at 30 seconds for existing
+sync consumers and keep the distinction between automatic and explicit reads.
+If a passive provider attempt is already active, an explicit refresh starts a
+new admitted attempt instead of joining the passive result. The superseded
+attempt cannot publish its result, and concurrent explicit refreshes share the
+explicit batch singleflight key. A retry deadline from an authentication,
+rate-limit, or invalid-query failure remains authoritative.
+When a passive workspace read finds no stale task, admit workspace discovery
+reads at most once per minute. A newly created or reset watch clears that
+cooldown, and stale-task refreshes bypass it.
+
+## Bounded fallback
+
+`REQ-INTEGRATIONS-GITHUB-PR-POLLING-002` maps to this section.
+Replace the poller's all-or-nothing boolean batch outcome with per-workspace
+outcomes: completed, deferred, fallback-eligible. Publish successful results
+without waiting for every workspace to succeed. Preserve existing shared
+health admission for rate limits and invalid queries, and auth circuits.
+
+Allow 5 fallback target checks per workspace, capped at 10 per cycle globally.
+Apply this limit to unsupported-GraphQL clients too. Rotate workspace and target
+selection between cycles so fixed ordering cannot starve later targets.
+These are target-check limits, not HTTP-request limits: a check may paginate
+or fetch several resources. Stop a workspace on the first authentication,
+configuration, rate-limit, or invalid-query error and check cancellation before
+each target. Never retry successful batches via REST.
+Do not mark deferred targets as successfully checked.
+Deduplicate equivalent watches before consuming either budget and apply one
+fallback result to every watch in the selected target group.
+
+Retain existing failure schedules: discovery retry starts at 1 minute and caps
+at 15 minutes; auth/config circuits start at 2 minutes and cap at 6 hours with
+25 percent jitter. Provider reset deadlines and credential changes retain
+existing handling. This package adds no independent retry loop.
+
+## Polling efficiency delivery
+
+See [the implementation plan](../../../plans/watch-task-cleanup/plan.md).
+Use deterministic clock tests for exact 2-hour and 24-hour boundaries,
+restart, mixed groups, passive reads, explicit refresh, and fallback fairness.

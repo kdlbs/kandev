@@ -211,8 +211,7 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 }
 
 // TestResumeSession_ObservesWorkingSiblingOnAgentStart pins the wiring
-// half of AC-004.1 for the resume seam. Ordering is enforced by
-// production code structure, not a synchronized assertion here.
+// half of AC-004.1 for resume admission and asynchronous process startup.
 func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
@@ -226,25 +225,42 @@ func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFromZap: %v", err)
 	}
+	observedAtStart := make(chan int, 1)
+	finished := make(chan struct{})
 	agentMgr := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			return &LaunchAgentResponse{AgentExecutionID: "exec-new"}, nil
 		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			observedAtStart <- logs.FilterLevelExact(zapcore.WarnLevel).Len()
+			return nil
+		},
 	}
 	exec := NewExecutor(agentMgr, repo, log, ExecutorConfig{ShellPrefs: &mockShellPrefs{}})
 	exec.SetCapabilities(&mockCapabilities{})
+	exec.SetOnAgentProcessStarted(func(context.Context, string, string, string) { close(finished) })
 	before := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume)
 
 	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
 		t.Fatalf("ResumeSession: %v", err)
 	}
 
-	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume); after != before+1 {
-		t.Fatalf("admitted[resume] counter = %d, want %d", after, before+1)
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for resumed agent startup")
+	}
+	if observed := <-observedAtStart; observed != 2 {
+		t.Fatalf("observations before process start = %d, want launch admission and process startup", observed)
+	}
+
+	// Other tests can still emit asynchronous observations into the global counter.
+	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume); after < before+2 {
+		t.Fatalf("admitted[resume] counter = %d, want at least %d", after, before+2)
 	}
 	warnings := logs.FilterLevelExact(zapcore.WarnLevel).All()
-	if len(warnings) != 1 {
-		t.Fatalf("warning entries = %d, want 1; all=%v", len(warnings), logs.All())
+	if len(warnings) != 2 {
+		t.Fatalf("warning entries = %d, want 2; all=%v", len(warnings), logs.All())
 	}
 	fields := warnings[0].ContextMap()
 	if fields["site"] != sessionCoresidencySiteResume {
@@ -325,8 +341,11 @@ func TestRunAgentProcessAsync_ObservesStartingSiblingsBeforeProcessStart(t *test
 	if startedBeforeObservation != 0 {
 		t.Fatalf("agent process started before co-residency observation for %d session(s): %v", startedBeforeObservation, startedWithoutObservation)
 	}
-	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after != before+2 {
-		t.Fatalf("admitted[launch] counter = %d, want %d", after, before+2)
+	// The expvar is process-global, so unrelated asynchronous observations can
+	// increment it while this integration test is running. The exact warning
+	// count above scopes the two observations under test.
+	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after < before+2 {
+		t.Fatalf("admitted[launch] counter = %d, want at least %d", after, before+2)
 	}
 	if warnings := logs.FilterLevelExact(zapcore.WarnLevel).All(); len(warnings) != 2 {
 		t.Fatalf("warning entries = %d, want 2", len(warnings))

@@ -230,6 +230,7 @@ func (m *mockRepository) UpdateTaskRepositoryComparisonTarget(
 	string,
 	*models.ComparisonTarget,
 	*models.ComparisonTarget,
+	bool,
 ) (*models.TaskRepository, bool, error) {
 	return nil, false, nil
 }
@@ -237,6 +238,7 @@ func (m *mockRepository) UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
 	context.Context,
 	string,
 	string,
+	bool,
 ) (*models.TaskRepository, bool, error) {
 	return nil, false, nil
 }

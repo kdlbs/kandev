@@ -21,6 +21,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
 const (
@@ -66,6 +67,8 @@ var (
 	ErrInstallationStorageLimit = errors.New("canvas installation storage limit exceeded")
 	ErrInvalidRelease           = errors.New("invalid plugin release")
 	ErrStalePromotionReview     = errors.New("canvas promotion review is stale")
+	ErrStaleWorkspaceDataReview = errors.New("canvas workspace data review is stale")
+	ErrWorkspaceOwnerRequired   = errors.New("current workspace owner is required")
 	ErrStaleCanvasEdit          = errors.New("canvas edit base release is stale")
 	ErrStaleCanvasPublish       = errors.New("canvas publish authority is stale")
 	ErrInvalidLifecycleState    = errors.New("plugin instance lifecycle state does not allow this operation")
@@ -100,6 +103,16 @@ func ValidateScope(kind string, ids ScopeIdentifiers) error {
 	return nil
 }
 
+func validateDataScope(sourceKind, placementScope, dataScope string) error {
+	if dataScope == "" || dataScope == placementScope {
+		return nil
+	}
+	if sourceKind == SourceLocalCanvas && placementScope == ScopeTask && dataScope == ScopeWorkspace {
+		return nil
+	}
+	return ErrInvalidScope
+}
+
 func scopeIdentifiersFor(kind string) map[string]bool {
 	switch kind {
 	case ScopeInstance:
@@ -122,6 +135,7 @@ type Instance struct {
 	PluginID        string
 	SourceKind      string
 	ScopeKind       string
+	DataScopeKind   string
 	WorkspaceID     string
 	TaskID          string
 	SessionID       string
@@ -133,6 +147,21 @@ type Instance struct {
 	UpdatedAt       time.Time
 }
 
+// EffectiveDataScopeKind preserves the placement-bound behavior of stored
+// instances whose nullable data scope predates the independent scope field.
+func (i Instance) EffectiveDataScopeKind() string {
+	return EffectiveDataScopeKind(i.ScopeKind, i.DataScopeKind)
+}
+
+// EffectiveDataScopeKind resolves legacy rows and runtime bindings that do
+// not carry a separate data scope.
+func EffectiveDataScopeKind(placementScope, dataScope string) string {
+	if dataScope == "" {
+		return placementScope
+	}
+	return dataScope
+}
+
 // PublishAuthority is the durable identity captured when a trusted authoring
 // request is authorized. A publish must match every field in this snapshot at
 // the release insertion boundary so a scope transition, archive, or competing
@@ -141,6 +170,7 @@ type Instance struct {
 type PublishAuthority struct {
 	InstanceID      string
 	ScopeKind       string
+	DataScopeKind   string
 	WorkspaceID     string
 	TaskID          string
 	SessionID       string
@@ -152,14 +182,14 @@ type PublishAuthority struct {
 
 func (i Instance) PublishAuthority() PublishAuthority {
 	return PublishAuthority{
-		InstanceID: i.ID, ScopeKind: i.ScopeKind, WorkspaceID: i.WorkspaceID,
+		InstanceID: i.ID, ScopeKind: i.ScopeKind, DataScopeKind: i.EffectiveDataScopeKind(), WorkspaceID: i.WorkspaceID,
 		TaskID: i.TaskID, SessionID: i.SessionID, RepositoryID: i.RepositoryID,
 		Status: i.Status, ActiveReleaseID: i.ActiveReleaseID, GrantGeneration: i.GrantGeneration,
 	}
 }
 
 func (a PublishAuthority) IsZero() bool {
-	return a.InstanceID == "" && a.ScopeKind == "" && a.WorkspaceID == "" &&
+	return a.InstanceID == "" && a.ScopeKind == "" && a.DataScopeKind == "" && a.WorkspaceID == "" &&
 		a.TaskID == "" && a.SessionID == "" && a.RepositoryID == "" &&
 		a.Status == "" && a.ActiveReleaseID == "" && a.GrantGeneration == 0
 }
@@ -247,6 +277,7 @@ CREATE TABLE IF NOT EXISTS plugin_instances (
   plugin_id TEXT NOT NULL,
   source_kind TEXT NOT NULL,
   scope_kind TEXT NOT NULL,
+  data_scope_kind TEXT,
   workspace_id TEXT NOT NULL DEFAULT '',
   task_id TEXT NOT NULL DEFAULT '',
   session_id TEXT NOT NULL DEFAULT '',
@@ -321,6 +352,9 @@ func (s *Store) initSchema() error {
 			return err
 		}
 	}
+	if _, err := s.db.Exec(`ALTER TABLE plugin_instances ADD COLUMN data_scope_kind TEXT`); err != nil && !db.IsDuplicateColumnError(err) {
+		return err
+	}
 	return nil
 }
 
@@ -358,6 +392,9 @@ func (s *Store) CreateTx(ctx context.Context, tx *sqlx.Tx, instance Instance) er
 	if err := ValidateScope(instance.ScopeKind, ScopeIdentifiers{WorkspaceID: instance.WorkspaceID, TaskID: instance.TaskID, SessionID: instance.SessionID, RepositoryID: instance.RepositoryID}); err != nil {
 		return err
 	}
+	if err := validateDataScope(instance.SourceKind, instance.ScopeKind, instance.DataScopeKind); err != nil {
+		return err
+	}
 	if err := s.checkAdmission(ctx, tx, instance.ScopeKind, instance.WorkspaceID, instance.TaskID); err != nil {
 		return err
 	}
@@ -370,8 +407,8 @@ func (s *Store) CreateTx(ctx context.Context, tx *sqlx.Tx, instance Instance) er
 		updatedAt = createdAt
 	}
 	_, err := tx.ExecContext(ctx, tx.Rebind(`
-INSERT INTO plugin_instances (id, plugin_id, source_kind, scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), instance.ID, instance.PluginID, instance.SourceKind, instance.ScopeKind, instance.WorkspaceID, instance.TaskID, instance.SessionID, instance.RepositoryID, instance.Status, instance.ActiveReleaseID, instance.GrantGeneration, createdAt.Format(time.RFC3339Nano), updatedAt.Format(time.RFC3339Nano))
+INSERT INTO plugin_instances (id, plugin_id, source_kind, scope_kind, data_scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at)
+VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?)`), instance.ID, instance.PluginID, instance.SourceKind, instance.ScopeKind, instance.DataScopeKind, instance.WorkspaceID, instance.TaskID, instance.SessionID, instance.RepositoryID, instance.Status, instance.ActiveReleaseID, instance.GrantGeneration, createdAt.Format(time.RFC3339Nano), updatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}
@@ -385,7 +422,7 @@ func (s *Store) ListBySource(ctx context.Context, sourceKind string, includeRemo
 	if strings.TrimSpace(sourceKind) == "" {
 		return nil, ErrInvalidScope
 	}
-	query := `SELECT id, plugin_id, source_kind, scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE source_kind = ?`
+	query := `SELECT id, plugin_id, source_kind, scope_kind, data_scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE source_kind = ?`
 	args := []any{sourceKind}
 	if !includeRemoved {
 		query += ` AND status <> ?`
@@ -453,7 +490,7 @@ func (s *Store) checkAdmissionExcept(ctx context.Context, tx *sqlx.Tx, scopeKind
 
 func (s *Store) Get(ctx context.Context, id string) (Instance, error) {
 	var row instanceRow
-	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`SELECT id, plugin_id, source_kind, scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE id = ?`), id)
+	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`SELECT id, plugin_id, source_kind, scope_kind, data_scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE id = ?`), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Instance{}, ErrNotFound
 	}
@@ -487,7 +524,7 @@ func (s *Store) GetMany(ctx context.Context, ids []string) ([]Instance, error) {
 	for i, id := range unique {
 		args[i] = id
 	}
-	rows, err := s.ro.QueryxContext(ctx, s.ro.Rebind(`SELECT id, plugin_id, source_kind, scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE id IN (`+placeholders+`)`), args...)
+	rows, err := s.ro.QueryxContext(ctx, s.ro.Rebind(`SELECT id, plugin_id, source_kind, scope_kind, data_scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE id IN (`+placeholders+`)`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -508,7 +545,7 @@ func (s *Store) GetMany(ctx context.Context, ids []string) ([]Instance, error) {
 }
 
 func (s *Store) List(ctx context.Context, workspaceID string, includeRemoved bool) ([]Instance, error) {
-	query := `SELECT id, plugin_id, source_kind, scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE workspace_id = ?`
+	query := `SELECT id, plugin_id, source_kind, scope_kind, data_scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE workspace_id = ?`
 	args := []any{workspaceID}
 	if !includeRemoved {
 		query += ` AND status <> ?`
@@ -558,7 +595,7 @@ func (s *Store) Restore(ctx context.Context, id string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	var row instanceRow
-	if err := tx.GetContext(ctx, &row, tx.Rebind(`SELECT id, plugin_id, source_kind, scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE id = ?`), id); err != nil {
+	if err := tx.GetContext(ctx, &row, tx.Rebind(`SELECT id, plugin_id, source_kind, scope_kind, data_scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE id = ?`), id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -611,7 +648,7 @@ func (s *Store) SetScope(ctx context.Context, id, scopeKind string, ids ScopeIde
 	}
 	defer func() { _ = tx.Rollback() }()
 	var current instanceRow
-	if err := tx.GetContext(ctx, &current, tx.Rebind(`SELECT id, plugin_id, source_kind, scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE id = ?`), id); err != nil {
+	if err := tx.GetContext(ctx, &current, tx.Rebind(`SELECT id, plugin_id, source_kind, scope_kind, data_scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE id = ?`), id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -619,6 +656,9 @@ func (s *Store) SetScope(ctx context.Context, id, scopeKind string, ids ScopeIde
 	}
 	if current.Status == StatusRemoved {
 		return ErrNotFound
+	}
+	if err := validateDataScope(current.SourceKind, scopeKind, current.DataScopeKind.String); err != nil {
+		return err
 	}
 	if err := s.checkAdmissionExcept(ctx, tx, scopeKind, ids.WorkspaceID, ids.TaskID, id); err != nil {
 		return err
@@ -718,7 +758,7 @@ func (s *Store) ActivateReleaseTx(ctx context.Context, tx *sqlx.Tx, instanceID, 
 	}
 	var current instanceRow
 	if err := tx.GetContext(ctx, &current, tx.Rebind(
-		`SELECT id, plugin_id, source_kind, scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE id = ?`,
+		`SELECT id, plugin_id, source_kind, scope_kind, data_scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE id = ?`,
 	), instanceID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
@@ -743,7 +783,7 @@ func (s *Store) ActivateReleaseTx(ctx context.Context, tx *sqlx.Tx, instanceID, 
 		}
 		return err
 	}
-	if release.ValidationStatus != ValidationValid || !declaredGrantsFitInstance(ctx, tx, instanceID, current.ScopeKind, release.DeclaredPermissionsJSON) {
+	if release.ValidationStatus != ValidationValid || !declaredGrantsFitInstance(ctx, tx, instanceID, EffectiveDataScopeKind(current.ScopeKind, current.DataScopeKind.String), release.DeclaredPermissionsJSON) {
 		return ErrInvalidRelease
 	}
 	result, err := tx.ExecContext(ctx, tx.Rebind(
@@ -1106,6 +1146,79 @@ func (s *Store) PromoteScopeAndGrantsReviewedTx(ctx context.Context, tx *sqlx.Tx
 	return s.promoteScopeAndGrantsReviewedTx(ctx, tx, instanceID, workspaceID, approvedBy, grants, expectedReleaseID, expectedPermissionDigest, expectedGrantGeneration)
 }
 
+// EnableWorkspaceDataReviewedTx widens only a retained task canvas's data
+// scope after the current workspace owner confirms its current release.
+func (s *Store) EnableWorkspaceDataReviewedTx(ctx context.Context, tx *sqlx.Tx, instanceID, workspaceID, approvedBy string, grants []Grant, expectedReleaseID, expectedPermissionDigest string, expectedGrantGeneration int64) error {
+	if err := validateWorkspaceDataReviewRequest(instanceID, workspaceID, approvedBy, expectedReleaseID, expectedPermissionDigest, expectedGrantGeneration); err != nil {
+		return err
+	}
+	current, declaredJSON, err := loadPromotionState(ctx, tx, instanceID)
+	if err != nil {
+		return err
+	}
+	if err := validateWorkspaceDataReviewState(current, declaredJSON, workspaceID, expectedReleaseID, expectedPermissionDigest, expectedGrantGeneration); err != nil {
+		return err
+	}
+	if err := validateGrantsForDeclaration(declaredJSON, ScopeWorkspace, grants); err != nil {
+		return err
+	}
+	if err := verifyWorkspaceOwnerTx(ctx, tx, workspaceID, approvedBy); err != nil {
+		return err
+	}
+	return updateWorkspaceDataScopeTx(ctx, tx, current, workspaceID, approvedBy, grants, expectedReleaseID, expectedGrantGeneration)
+}
+
+func validateWorkspaceDataReviewRequest(instanceID, workspaceID, approvedBy, expectedReleaseID, expectedPermissionDigest string, expectedGrantGeneration int64) error {
+	if strings.TrimSpace(instanceID) == "" || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(approvedBy) == "" ||
+		strings.TrimSpace(expectedReleaseID) == "" || strings.TrimSpace(expectedPermissionDigest) == "" || expectedGrantGeneration < 0 {
+		return ErrStaleWorkspaceDataReview
+	}
+	return nil
+}
+
+func validateWorkspaceDataReviewState(current instanceRow, declaredJSON, workspaceID, expectedReleaseID, expectedPermissionDigest string, expectedGrantGeneration int64) error {
+	if current.SourceKind != SourceLocalCanvas || current.ScopeKind != ScopeTask || current.WorkspaceID != workspaceID ||
+		current.TaskID == "" || current.Status != StatusActive || current.DataScopeKind.Valid && current.DataScopeKind.String == ScopeWorkspace {
+		return ErrInvalidLifecycleState
+	}
+	if current.ActiveReleaseID != expectedReleaseID || current.GrantGeneration != expectedGrantGeneration ||
+		permissionDigest(declaredJSON) != expectedPermissionDigest || EffectiveDataScopeKind(current.ScopeKind, current.DataScopeKind.String) != ScopeTask {
+		return ErrStaleWorkspaceDataReview
+	}
+	return nil
+}
+
+func verifyWorkspaceOwnerTx(ctx context.Context, tx *sqlx.Tx, workspaceID, approvedBy string) error {
+	ownerUpdate, err := tx.ExecContext(ctx, tx.Rebind(
+		`UPDATE workspaces SET owner_id = owner_id WHERE id = ? AND (COALESCE(owner_id, '') = ? OR (COALESCE(owner_id, '') = '' AND ? = ?))`,
+	), workspaceID, approvedBy, approvedBy, userstore.DefaultUserID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := ownerUpdate.RowsAffected(); affected == 0 {
+		return ErrWorkspaceOwnerRequired
+	}
+	return nil
+}
+
+func updateWorkspaceDataScopeTx(ctx context.Context, tx *sqlx.Tx, current instanceRow, workspaceID, approvedBy string, grants []Grant, expectedReleaseID string, expectedGrantGeneration int64) error {
+	result, err := tx.ExecContext(ctx, tx.Rebind(
+		`UPDATE plugin_instances SET data_scope_kind = ?, grant_generation = grant_generation + 1, updated_at = ? WHERE id = ? AND source_kind = ? AND scope_kind = ? AND workspace_id = ? AND task_id = ? AND status = ? AND active_release_id = ? AND grant_generation = ? AND COALESCE(data_scope_kind, '') = ?`,
+	), ScopeWorkspace, time.Now().UTC().Format(time.RFC3339Nano), current.ID, SourceLocalCanvas, ScopeTask, workspaceID, current.TaskID, StatusActive, expectedReleaseID, expectedGrantGeneration, current.DataScopeKind.String)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrStaleWorkspaceDataReview
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM plugin_instance_grants WHERE plugin_instance_id = ?`,
+	), current.ID); err != nil {
+		return err
+	}
+	return insertInstanceGrantsTx(ctx, tx, current.ID, approvedBy, grants)
+}
+
 func (s *Store) promoteScopeAndGrantsReviewedTx(ctx context.Context, tx *sqlx.Tx, instanceID, workspaceID, approvedBy string, grants []Grant, expectedReleaseID, expectedPermissionDigest string, expectedGrantGeneration int64) error {
 	if err := validatePromotionRequest(instanceID, workspaceID, approvedBy); err != nil {
 		return err
@@ -1129,7 +1242,7 @@ func (s *Store) promoteScopeAndGrantsReviewedTx(ctx context.Context, tx *sqlx.Tx
 func loadPromotionState(ctx context.Context, tx *sqlx.Tx, instanceID string) (instanceRow, string, error) {
 	var current instanceRow
 	if err := tx.GetContext(ctx, &current, tx.Rebind(
-		`SELECT id, plugin_id, source_kind, scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE id = ?`,
+		`SELECT id, plugin_id, source_kind, scope_kind, data_scope_kind, workspace_id, task_id, session_id, repository_id, status, active_release_id, grant_generation, created_at, updated_at FROM plugin_instances WHERE id = ?`,
 	), instanceID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return instanceRow{}, "", ErrNotFound
@@ -1231,14 +1344,20 @@ func (s *Store) ApproveReleaseTx(ctx context.Context, tx *sqlx.Tx, instanceID, r
 	if release.ValidationStatus != ValidationPendingPermission {
 		return ErrInvalidRelease
 	}
-	if err := validateGrantsForDeclaration(release.DeclaredPermissionsJSON, release.ScopeKind, grants); err != nil {
+	effectiveScope := EffectiveDataScopeKind(release.ScopeKind, release.DataScopeKind)
+	if release.SourceKind == SourceLocalCanvas && effectiveScope == ScopeWorkspace {
+		if err := verifyWorkspaceOwnerTx(ctx, tx, release.WorkspaceID, approvedBy); err != nil {
+			return err
+		}
+	}
+	if err := validateGrantsForDeclaration(release.DeclaredPermissionsJSON, effectiveScope, grants); err != nil {
 		return err
 	}
 	existingGrants, err := loadInstanceGrants(ctx, tx, instanceID)
 	if err != nil {
 		return err
 	}
-	if !grantsCoverDeclaration(release.DeclaredPermissionsJSON, release.ScopeKind, append(existingGrants, grants...)) {
+	if !grantsCoverDeclaration(release.DeclaredPermissionsJSON, effectiveScope, append(existingGrants, grants...)) {
 		return ErrInvalidScope
 	}
 	if err := insertInstanceGrantsTx(ctx, tx, instanceID, approvedBy, grants); err != nil {
@@ -1262,14 +1381,17 @@ type pendingReleaseRow struct {
 	PluginID                string `db:"plugin_id"`
 	DeclaredPermissionsJSON string `db:"declared_permissions_json"`
 	ValidationStatus        string `db:"validation_status"`
+	SourceKind              string `db:"source_kind"`
+	WorkspaceID             string `db:"workspace_id"`
 	ScopeKind               string `db:"scope_kind"`
+	DataScopeKind           string `db:"data_scope_kind"`
 	Status                  string `db:"status"`
 }
 
 func loadPendingReleaseTx(ctx context.Context, tx *sqlx.Tx, instanceID, releaseID string) (pendingReleaseRow, error) {
 	var release pendingReleaseRow
 	if err := tx.GetContext(ctx, &release, tx.Rebind(
-		`SELECT r.plugin_id, r.declared_permissions_json, r.validation_status, i.scope_kind, i.status FROM plugin_releases r JOIN plugin_instances i ON i.id = r.instance_id WHERE r.id = ? AND r.instance_id = ?`,
+		`SELECT r.plugin_id, r.declared_permissions_json, r.validation_status, i.source_kind, i.workspace_id, i.scope_kind, COALESCE(i.data_scope_kind, '') AS data_scope_kind, i.status FROM plugin_releases r JOIN plugin_instances i ON i.id = r.instance_id WHERE r.id = ? AND r.instance_id = ?`,
 	), releaseID, instanceID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return pendingReleaseRow{}, ErrNotFound
@@ -1383,8 +1505,8 @@ func (s *Store) CreateReleaseIfAuthorityTx(ctx context.Context, tx *sqlx.Tx, ins
 		return ErrInvalidRelease
 	}
 	result, err := tx.ExecContext(ctx, tx.Rebind(
-		`UPDATE plugin_instances SET updated_at = updated_at WHERE id = ? AND scope_kind = ? AND workspace_id = ? AND task_id = ? AND session_id = ? AND repository_id = ? AND status = ? AND active_release_id = ? AND grant_generation = ?`,
-	), instanceID, expected.ScopeKind, expected.WorkspaceID, expected.TaskID, expected.SessionID, expected.RepositoryID, expected.Status, expected.ActiveReleaseID, expected.GrantGeneration)
+		`UPDATE plugin_instances SET updated_at = updated_at WHERE id = ? AND scope_kind = ? AND COALESCE(NULLIF(data_scope_kind, ''), scope_kind) = ? AND workspace_id = ? AND task_id = ? AND session_id = ? AND repository_id = ? AND status = ? AND active_release_id = ? AND grant_generation = ?`,
+	), instanceID, expected.ScopeKind, expected.DataScopeKind, expected.WorkspaceID, expected.TaskID, expected.SessionID, expected.RepositoryID, expected.Status, expected.ActiveReleaseID, expected.GrantGeneration)
 	if err != nil {
 		return err
 	}
@@ -1659,8 +1781,8 @@ func (s *Store) AddGrant(ctx context.Context, grant Grant) error {
 // canvas creation. It does not advance grant_generation because SetPluginIDTx
 // increments it before the public ActivateReleaseTx call in the same
 // activation transaction. The empty-grant case is valid.
-func (s *Store) AddInitialGrantsTx(ctx context.Context, tx *sqlx.Tx, instanceID, approvedBy string, grants []Grant) error {
-	if strings.TrimSpace(instanceID) == "" || strings.TrimSpace(approvedBy) == "" {
+func (s *Store) AddInitialGrantsTx(ctx context.Context, tx *sqlx.Tx, instanceID, releaseID, approvedBy string, grants []Grant) error {
+	if strings.TrimSpace(instanceID) == "" || strings.TrimSpace(releaseID) == "" || strings.TrimSpace(approvedBy) == "" {
 		return ErrInvalidScope
 	}
 	var exists int
@@ -1672,6 +1794,27 @@ func (s *Store) AddInitialGrantsTx(ctx context.Context, tx *sqlx.Tx, instanceID,
 	if exists == 0 {
 		return ErrNotFound
 	}
+	var current struct {
+		ScopeKind     string `db:"scope_kind"`
+		DataScopeKind string `db:"data_scope_kind"`
+	}
+	if err := tx.GetContext(ctx, &current, tx.Rebind(
+		`SELECT scope_kind, COALESCE(data_scope_kind, '') AS data_scope_kind FROM plugin_instances WHERE id = ?`,
+	), instanceID); err != nil {
+		return err
+	}
+	var release struct {
+		DeclaredPermissionsJSON string `db:"declared_permissions_json"`
+		ValidationStatus        string `db:"validation_status"`
+	}
+	if err := tx.GetContext(ctx, &release, tx.Rebind(
+		`SELECT declared_permissions_json, validation_status FROM plugin_releases WHERE id = ? AND instance_id = ?`,
+	), releaseID, instanceID); err != nil || release.ValidationStatus != ValidationValid {
+		return ErrInvalidRelease
+	}
+	if err := validateGrantsForDeclaration(release.DeclaredPermissionsJSON, EffectiveDataScopeKind(current.ScopeKind, current.DataScopeKind), grants); err != nil {
+		return err
+	}
 	var existing int
 	if err := tx.GetContext(ctx, &existing, tx.Rebind(
 		`SELECT COUNT(*) FROM plugin_instance_grants WHERE plugin_instance_id = ?`,
@@ -1682,6 +1825,37 @@ func (s *Store) AddInitialGrantsTx(ctx context.Context, tx *sqlx.Tx, instanceID,
 		return ErrStaleCanvasPublish
 	}
 	return insertInstanceGrantsTx(ctx, tx, instanceID, approvedBy, grants)
+}
+
+// SetInitialPublicationDataScopeTx widens a pending task canvas only after its
+// creation authority has been consumed in the caller's transaction.
+func (s *Store) SetInitialPublicationDataScopeTx(ctx context.Context, tx *sqlx.Tx, expected PublishAuthority, releaseID string) error {
+	if expected.InstanceID == "" || expected.ScopeKind != ScopeTask || expected.DataScopeKind != ScopeTask ||
+		expected.Status != StatusPending || expected.ActiveReleaseID != "" || expected.WorkspaceID == "" ||
+		expected.TaskID == "" || strings.TrimSpace(releaseID) == "" {
+		return ErrStaleCanvasPublish
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(
+		`UPDATE plugin_instances
+SET data_scope_kind = ?, grant_generation = grant_generation + 1, updated_at = ?
+WHERE id = ? AND source_kind = ? AND scope_kind = ? AND COALESCE(NULLIF(data_scope_kind, ''), scope_kind) = ?
+  AND workspace_id = ? AND task_id = ? AND session_id = ? AND repository_id = ?
+  AND status = ? AND active_release_id = ? AND grant_generation = ?
+  AND NOT EXISTS (SELECT 1 FROM plugin_instance_grants WHERE plugin_instance_id = ?)
+  AND EXISTS (SELECT 1 FROM plugin_releases WHERE instance_id = ? AND id = ? AND validation_status = ?)
+  AND NOT EXISTS (SELECT 1 FROM plugin_releases WHERE instance_id = ? AND id <> ?)`),
+		ScopeWorkspace, time.Now().UTC().Format(time.RFC3339Nano), expected.InstanceID, SourceLocalCanvas,
+		expected.ScopeKind, expected.DataScopeKind, expected.WorkspaceID, expected.TaskID, expected.SessionID,
+		expected.RepositoryID, expected.Status, expected.ActiveReleaseID, expected.GrantGeneration,
+		expected.InstanceID, expected.InstanceID, releaseID, ValidationValid, expected.InstanceID, releaseID,
+	)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrStaleCanvasPublish
+	}
+	return nil
 }
 
 func (s *Store) ListGrants(ctx context.Context, instanceID string) ([]Grant, error) {
@@ -2210,19 +2384,20 @@ func (s *Store) RemoveInstanceTx(ctx context.Context, tx *sqlx.Tx, id string) er
 }
 
 type instanceRow struct {
-	ID              string `db:"id"`
-	PluginID        string `db:"plugin_id"`
-	SourceKind      string `db:"source_kind"`
-	ScopeKind       string `db:"scope_kind"`
-	WorkspaceID     string `db:"workspace_id"`
-	TaskID          string `db:"task_id"`
-	SessionID       string `db:"session_id"`
-	RepositoryID    string `db:"repository_id"`
-	Status          string `db:"status"`
-	ActiveReleaseID string `db:"active_release_id"`
-	GrantGeneration int64  `db:"grant_generation"`
-	CreatedAt       string `db:"created_at"`
-	UpdatedAt       string `db:"updated_at"`
+	ID              string         `db:"id"`
+	PluginID        string         `db:"plugin_id"`
+	SourceKind      string         `db:"source_kind"`
+	ScopeKind       string         `db:"scope_kind"`
+	DataScopeKind   sql.NullString `db:"data_scope_kind"`
+	WorkspaceID     string         `db:"workspace_id"`
+	TaskID          string         `db:"task_id"`
+	SessionID       string         `db:"session_id"`
+	RepositoryID    string         `db:"repository_id"`
+	Status          string         `db:"status"`
+	ActiveReleaseID string         `db:"active_release_id"`
+	GrantGeneration int64          `db:"grant_generation"`
+	CreatedAt       string         `db:"created_at"`
+	UpdatedAt       string         `db:"updated_at"`
 }
 
 func (r instanceRow) instance() (Instance, error) {
@@ -2234,7 +2409,7 @@ func (r instanceRow) instance() (Instance, error) {
 	if err != nil {
 		return Instance{}, err
 	}
-	return Instance{ID: r.ID, PluginID: r.PluginID, SourceKind: r.SourceKind, ScopeKind: r.ScopeKind, WorkspaceID: r.WorkspaceID, TaskID: r.TaskID, SessionID: r.SessionID, RepositoryID: r.RepositoryID, Status: r.Status, ActiveReleaseID: r.ActiveReleaseID, GrantGeneration: r.GrantGeneration, CreatedAt: created, UpdatedAt: updated}, nil
+	return Instance{ID: r.ID, PluginID: r.PluginID, SourceKind: r.SourceKind, ScopeKind: r.ScopeKind, DataScopeKind: r.DataScopeKind.String, WorkspaceID: r.WorkspaceID, TaskID: r.TaskID, SessionID: r.SessionID, RepositoryID: r.RepositoryID, Status: r.Status, ActiveReleaseID: r.ActiveReleaseID, GrantGeneration: r.GrantGeneration, CreatedAt: created, UpdatedAt: updated}, nil
 }
 
 type releaseRow struct {

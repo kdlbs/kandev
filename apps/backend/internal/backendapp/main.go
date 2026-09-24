@@ -788,6 +788,7 @@ func startAgentInfrastructure(
 	// Wire GitHub service into orchestrator for PR auto-detection on push
 	if services.GitHub != nil {
 		orchestratorSvc.SetGitHubService(services.GitHub)
+		services.GitHub.SetTaskActivityProvider(&githubTaskActivityAdapter{repo: repos.Task})
 		services.GitHub.SetTaskDeleter(&taskDeleterAdapter{svc: services.Task})
 		taskStoreAdapter := githubTaskIssueStoreAdapter{svc: services.Task}
 		services.GitHub.SetTaskIssueStore(taskStoreAdapter)
@@ -1067,6 +1068,8 @@ func startGatewayAndServe(
 		services.Auth,
 		cfg.ResolvedHomeDir(),
 		func(fn func() error) { addCleanup(fn) },
+		cfg.Features.LSPBrowserContinuity,
+		orchestratorSvc.AcquireSessionLifecycleFence,
 		cfg.Limits.LSPMaxConnections,
 	)
 	if terminalSvc != nil {
@@ -1150,6 +1153,7 @@ func startGatewayAndServe(
 			}
 			ghPoller := githubpkg.NewPoller(services.GitHub, eventBus, log)
 			ghPoller.SetTaskBranchProvider(orchestratorSvc)
+			ghPoller.SetTaskActivityProvider(&githubTaskActivityAdapter{repo: repos.Task})
 			ghPoller.Start(ctx)
 			addCleanup(func() error { ghPoller.Stop(); return nil })
 			log.Info("GitHub poller started")

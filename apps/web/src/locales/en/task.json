@@ -360,6 +360,7 @@
   "copyMessage": "Copy message",
   "copyMessageToClipboard": "Copy message to clipboard",
   "copyPath": "Copy path",
+  "copyPathWithControlCharacters": "This path contains control characters and cannot be copied.",
   "copyToClipboard": "Copy to clipboard",
   "copyUrl": "Copy URL",
   "copyWorkspacePath": "Copy workspace path",
@@ -1360,7 +1361,6 @@
   "wipQueueConfigure": "Configure workflow WIP limit",
   "wipQueueUnavailable": "Workflow WIP details are unavailable.",
   "wipQueueConfigurationUnavailable": "The workflow configuration link is unavailable.",
-  "parkedSessionNote": "This session is parked for the workflow. Opening it does not resume it. Send a message to continue here.",
   "quorumAwaiting": "Awaiting {{received}} of {{required}} {{role}} decisions",
   "quorumStuck": "Stuck",
   "quorumStuckPendingReevaluation": "Blocked: no active session to re-evaluate this step",
@@ -2378,5 +2378,11 @@
   "checkoutOptions.credentialsUnsupported": "Use Kandev-managed Git credentials for advanced checkout options.",
   "toolPayloadRemovedAt": "Tool details removed on {{date}}.",
   "toolPayloadRemoved": "Tool details removed.",
-  "openTaskSwitcherFor": "Open task switcher: {{title}}"
+  "openTaskSwitcherFor": "Open task switcher: {{title}}",
+  "bulkColorPartialError": "Colors saved for {{saved}} of {{total}} tasks. Try again for the rest.",
+  "bulkColorSaving": "Saving colors...",
+  "bulkColorAutomaticHint": "Automatic rules may override the visible color.",
+  "bulkColorTitle_one": "Color for {{count}} task",
+  "bulkColorTitle_other": "Color for {{count}} tasks",
+  "editorActions": "Editor and folder actions"
 }

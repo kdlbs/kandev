@@ -129,5 +129,10 @@
   "boardSort": "Board sort",
   "boardSortCreatedDesc": "Newest first",
   "boardSortPriorityDesc": "Priority",
-  "priorityFilter": "Priority filter"
+  "priorityFilter": "Priority filter",
+  "bulkSelected_one": "{{count}} selected",
+  "bulkSelected_other": "{{count}} selected",
+  "bulkActions": "Actions",
+  "selectTasks": "Select tasks",
+  "cancelTaskSelection": "Cancel selection"
 }

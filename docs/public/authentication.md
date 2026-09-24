@@ -76,13 +76,29 @@ Plugin webhooks (`/api/plugins/{id}/webhooks/{key}`) are **not** public by defau
 
 ## Multiple instances on one host
 
-Browsers match cookies by host and ignore the port, so several auth-enabled kandev instances on the same host (same IP, different ports) would otherwise share one cookie jar. Kandev isolates them by port-scoping its instance-identity cookie **names**: `kandev_session_<port>`, `kandev-active-workspace_<port>`, and `office-active-workspace_<port>` on a ported host, plain names on a default-port host. Default-port normalization is scheme-aware and mirrors the SPA's `URL.port` behavior: `:80` on HTTP and `:443` on HTTPS yield no suffix (browsers omit them from `Host`), while the scheme-mismatched combinations (HTTP `:443`, HTTPS `:80`) keep their port suffix on both sides, so `example.com:80` and `example.com` resolve to the same plain names and two HTTP instances on ports 80 and 443 stay isolated. Logging into one instance no longer logs the others out, and selecting a workspace in one no longer changes what the others boot into.
+Browsers match cookies by host and ignore the port. Kandev adds the port to its instance-identity cookie names when the host uses a non-default port:
 
-**Reverse proxies must preserve the browser hostname.** The CORS/WS origin gate compares the browser `Origin` hostname with the request `Host` and ignores `X-Forwarded-Host` and ports. The proxy may either preserve the full `Host` (`public.example:8443`) or rewrite only the port and forward a correct `X-Forwarded-Host` (the cookie resolver takes the public port from it; the header is honored only from peers listed in `KANDEV_TRUSTED_PROXIES`, the same list that gates `X-Forwarded-For`). Rewriting a **non-loopback hostname** is rejected with 403 before authentication. Loopback-alias rewrites (e.g. `localhost` → `127.0.0.1`) pass the gate by design.
+| Cookie name | Name on a non-default port |
+| --- | --- |
+| `kandev_session` | `kandev_session_<port>` |
+| `kandev-active-workspace` | `kandev-active-workspace_<port>` |
+| `office-active-workspace` | `office-active-workspace_<port>` |
+
+Default ports follow the URL scheme. HTTP `:80` and HTTPS `:443` use plain cookie names. HTTP `:443` and HTTPS `:80` keep the port suffix. This keeps sessions and workspace selections separate across instances on different ports.
+
+**Reverse proxies must preserve the browser hostname.** The CORS and WebSocket origin gate compares the browser's `Origin` hostname with the request `Host`. It ignores `X-Forwarded-Host` and ports.
+
+- Preserve the full public `Host`, or rewrite only its port and send the correct `X-Forwarded-Host`.
+- Kandev reads that forwarded header only from peers in `KANDEV_TRUSTED_PROXIES`, the same list used for `X-Forwarded-For`.
+- Rewriting a non-loopback hostname returns 403 before authentication. A loopback alias such as `localhost` to `127.0.0.1` passes this gate.
 
 **Session-cookie migration.** Old auth-enabled builds conflict with each other via the shared unprefixed `kandev_session`; an upgraded instance ignores the legacy session token and requires one re-login (the new build never reads the unprefixed session cookie, so this holds on rollback and re-upgrade too). Workspace selections keep their validated legacy read fallback, so a pre-upgrade selection survives.
 
-A custom `auth.cookieName` (see [configuration](configuration.md#authentication-office-plugins-and-feature-flags)) disables automatic port isolation and must be unique per cookie host. In particular, an explicit `auth.cookieName: kandev_session` (copied from the pre-isolation default) silently keeps the old shared-name behavior after upgrade: remove the setting (or any other value equal to the base name) to inherit port isolation. A custom name does not change the origin gate, which compares hostnames independently of cookie names. Instances served on the same host at default ports over different schemes (HTTP `:80` + HTTPS `:443`) carry no port in their Host and keep the plain names; they are not isolated by this mechanism.
+A custom `auth.cookieName` disables automatic port isolation. It must be unique per cookie host. See [configuration](configuration.md#authentication-office-plugins-and-feature-flags).
+
+- An explicit `auth.cookieName: kandev_session` keeps the old shared-name behavior. Remove it to use port isolation.
+- A custom name does not change the origin gate, which checks hostnames.
+- HTTP `:80` and HTTPS `:443` both use plain names. This mechanism does not isolate those two default-port instances.
 
 ## What is isolated
 

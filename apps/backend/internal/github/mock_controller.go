@@ -388,9 +388,19 @@ func (c *MockController) addPRs(ctx *gin.Context) {
 		return
 	}
 	for i := range req.PRs {
+		normalizeMockPRHeadRepository(&req.PRs[i])
 		c.mock.AddPR(&req.PRs[i])
 	}
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.PRs)})
+}
+
+// Mock PR fixtures omit a head repository only for same-repository PRs; fork
+// fixtures must provide their source identity explicitly.
+func normalizeMockPRHeadRepository(pr *PR) {
+	if pr != nil && strings.TrimSpace(pr.HeadRepoOwner) == "" && strings.TrimSpace(pr.HeadRepoName) == "" {
+		pr.HeadRepoOwner = pr.RepoOwner
+		pr.HeadRepoName = pr.RepoName
+	}
 }
 
 func (c *MockController) addIssues(ctx *gin.Context) {
@@ -840,7 +850,7 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 	if headSHA == "" {
 		headSHA = mockHeadSHA(req.Owner, req.Repo, req.PRNumber)
 	}
-	c.mock.AddPR(&PR{
+	pr := &PR{
 		Number:                                req.PRNumber,
 		Title:                                 req.PRTitle,
 		URL:                                   req.PRURL,
@@ -866,7 +876,9 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 		MergeQueueLastRemovalBeforeSHA:        req.MergeQueueLastRemovalBeforeSHA,
 		CreatedAt:                             now,
 		UpdatedAt:                             now,
-	})
+	}
+	normalizeMockPRHeadRepository(pr)
+	c.mock.AddPR(pr)
 }
 
 // seedPRFeedback registers checks (and optionally reviews / comments) for a

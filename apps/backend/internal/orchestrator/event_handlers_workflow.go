@@ -1716,6 +1716,9 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 		}
 		return
 	}
+	if s.skipForkPRAutoStart(ctx, task, eventName, autoStartOnCreateClaimed) {
+		return
+	}
 	if task.QueuedForStepID != "" {
 		if autoStartOnCreateClaimed {
 			s.restoreAutoStartOnCreate(ctx, taskID, eventName)
@@ -1948,6 +1951,9 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		}
 		return
 	}
+	if s.skipForkPRAutoStart(ctx, task, eventName, autoStartOnCreateClaimed) {
+		return
+	}
 	if models.HasAutoStartOnCreateIntent(task.Metadata) || models.HasAutoStartOnCreateInFlight(task.Metadata) || autoStartOnCreateClaimed {
 		sessions, err := s.repo.ListTaskSessions(ctx, task.ID)
 		if err != nil {
@@ -2095,6 +2101,26 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 			s.completeAutoStartOnCreate(asyncCtx, task.ID, eventName)
 		}
 	}()
+}
+
+func taskRequiresManualForkPRStart(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	required, _ := task.Metadata[models.MetaKeyForkPRRequiresManualStart].(bool)
+	return required
+}
+
+func (s *Service) skipForkPRAutoStart(ctx context.Context, task *models.Task, eventName string, autoStartOnCreateClaimed bool) bool {
+	if !taskRequiresManualForkPRStart(task) {
+		return false
+	}
+	s.logger.Info(eventName+": fork review task is waiting for a manual start",
+		zap.String("task_id", task.ID))
+	if autoStartOnCreateClaimed || models.HasAutoStartOnCreateIntent(task.Metadata) || models.HasAutoStartOnCreateInFlight(task.Metadata) {
+		s.discardAutoStartOnCreate(ctx, task.ID, eventName)
+	}
+	return true
 }
 
 // autoStartOfficeTaskForLoadedStep is the Office-aware counterpart of the
@@ -5566,8 +5592,8 @@ type passthroughRunningPreparer interface {
 // deliverPassthroughPrompt writes a prompt to PTY stdin and marks the session as running.
 // Uses the per-agent PlanPassthroughStdinChunks so Claude's inter-chunk SubmitDelay is
 // honored here too (queued / workflow-auto-start path); other agents stay on the single
-// atomic write. Falls back to the simple "\r" append if config resolution fails so a
-// transient lookup error never silently swallows the prompt.
+// atomic write. Config resolution is required: an unknown agent contract must not fall
+// back to one unframed write, because a long prompt can be silently truncated.
 //
 // Callers that already hold the per-session cancellation guard must use
 // PreparePassthroughRunning + writePassthroughPrompt instead (see handleAgentReady); this
@@ -5592,15 +5618,10 @@ func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, conte
 func (s *Service) writePassthroughPrompt(ctx context.Context, sessionID, content string) error {
 	pt, cfgErr := s.agentManager.ResolvePassthroughConfig(ctx, sessionID)
 	if cfgErr != nil {
-		s.logger.Warn("failed to resolve passthrough config, falling back to \\r submit",
+		s.logger.Warn("failed to resolve passthrough config; refusing unsafe prompt write",
 			zap.String("session_id", sessionID),
 			zap.Error(cfgErr))
-	}
-	if cfgErr != nil {
-		if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, content+"\r"); err != nil {
-			return fmt.Errorf("write to passthrough stdin: %w", err)
-		}
-		return nil
+		return fmt.Errorf("resolve passthrough config: %w", cfgErr)
 	}
 	for _, chunk := range agents.PlanPassthroughStdinChunks(content, pt) {
 		if chunk.DelayBefore > 0 {

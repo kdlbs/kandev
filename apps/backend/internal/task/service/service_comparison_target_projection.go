@@ -72,7 +72,7 @@ func (s *Service) RemoveComparisonTargetForChange(
 	if !ok || current.Provider != provider || current.Kind != kind || current.Number != number {
 		return nil
 	}
-	if _, changed, err := s.taskRepos.UpdateTaskRepositoryComparisonTarget(ctx, taskRepo.ID, nil, &current); err != nil {
+	if _, changed, err := s.taskRepos.UpdateTaskRepositoryComparisonTarget(ctx, taskRepo.ID, nil, &current, false); err != nil {
 		return fmt.Errorf("remove comparison target for detach: %w", err)
 	} else if !changed {
 		return nil

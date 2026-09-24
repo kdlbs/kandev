@@ -108,6 +108,12 @@ vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
   }),
 }));
 
+vi.mock("@/components/system-metrics/status-surface-metrics", () => ({
+  StatusSurfaceMetrics: ({ drawerOpen }: { drawerOpen: boolean }) => (
+    <div role="region" aria-label="System metrics" data-open={drawerOpen} />
+  ),
+}));
+
 vi.mock("@/hooks/use-system-health-indicator", () => ({
   useSystemHealthIndicator: () => ({
     hasIssues: healthHasIssues,
@@ -181,6 +187,14 @@ function verifyMenuOrder() {
   ).toBe(true);
 }
 
+function resetAppNavMocks() {
+  healthHasIssues = false;
+  resolvedTheme = "light";
+  navRegistrations = [];
+  workspaceActionsRegistrations = [];
+  vi.clearAllMocks();
+}
+
 describe("AppNavSheet", () => {
   // @covers AC-UI-MOBILE-MENU-007.1 AC-UI-MOBILE-MENU-007.2
   it("puts quick actions before local navigation and Settings before Stats", () => {
@@ -194,13 +208,7 @@ describe("AppNavSheet", () => {
     host.rerender(<SectionsHost />);
     expect(screen.queryByRole("button", { name: "Task views" })).toBeNull();
   });
-  beforeEach(() => {
-    healthHasIssues = false;
-    resolvedTheme = "light";
-    navRegistrations = [];
-    workspaceActionsRegistrations = [];
-    vi.clearAllMocks();
-  });
+  beforeEach(resetAppNavMocks);
   afterEach(cleanup);
 
   it("opens from the trigger and offers the manifest destinations plus pageNav", () => {
@@ -288,7 +296,54 @@ describe("AppNavSheet", () => {
     fireEvent.click(screen.getByTestId(NAV_TRIGGER));
 
     expect(screen.getByTestId("mobile-workspace-action")).not.toBeNull();
-    expect(captured).toEqual({ workspaceId: "ws-1", presentation: "mobile" });
+    expect(
+      screen
+        .getByRole("region", { name: "Plugins" })
+        .contains(screen.getByTestId("mobile-workspace-action")),
+    ).toBe(true);
+    expect(captured).toEqual({
+      workspaceId: "ws-1",
+      workspaceLabel: "Workspace",
+      presentation: "mobile",
+    });
+  });
+});
+
+describe("AppNavSheet metrics", () => {
+  beforeEach(resetAppNavMocks);
+  afterEach(cleanup);
+
+  it.each([false, true])("respects app status bar enabled = %s", (enabled) => {
+    state.userSettings.appStatusBarEnabled = enabled;
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+
+    expect(screen.queryAllByRole("region", { name: "System metrics" })).toHaveLength(
+      enabled ? 0 : 1,
+    );
+    if (!enabled) {
+      expect(screen.getByRole("region", { name: "System metrics" }).getAttribute("data-open")).toBe(
+        "true",
+      );
+    }
+  });
+});
+
+describe("AppNavSheet plugin actions", () => {
+  beforeEach(resetAppNavMocks);
+  afterEach(cleanup);
+
+  it("places page-scoped actions in the shared Plugins section", () => {
+    render(
+      <AppNavSheet
+        pluginActions={<button data-testid="session-plugin-action">Session action</button>}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+
+    const section = screen.getByRole("region", { name: "Plugins" });
+    expect(section.contains(screen.getByTestId("session-plugin-action"))).toBe(true);
+    expect(screen.getAllByText("Plugins")).toHaveLength(1);
   });
 });
 

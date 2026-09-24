@@ -38,8 +38,8 @@ Muse Code has no native ACP server, so Kandev runs it through the community
 [`@bex-co/muse-code-acp`](https://github.com/bex-co/muse-code-acp) adapter,
 which is not affiliated with Meta:
 
-- Structured ACP sessions and one-shot inference use
-  `npx --yes --prefer-offline @bex-co/muse-code-acp@<effective-version>`, which
+- Structured ACP sessions and one-shot inference use the managed
+  `@bex-co/muse-code-acp` package at the selected effective version. This
   needs Node.js 22 or later.
 - The adapter drives the native `muse` executable through `muse serve`; CLI
   Passthrough starts `muse` directly.
@@ -67,8 +67,8 @@ pin one model for both, set it there, for example
 
 Pi uses separate executables for its two Kandev modes:
 
-- Structured ACP sessions and one-shot inference use
-  `npx --yes --prefer-offline pi-acp@<effective-version>`.
+- Structured ACP sessions and one-shot inference use the managed `pi-acp`
+  package at the selected effective version.
 - CLI Passthrough starts the globally installed `pi` executable.
 - The Pi install action runs `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
 
@@ -177,6 +177,14 @@ silently select another version. When the retry succeeds, no recovery card is
 shown. When it fails again, Kandev and Office show one **Retry runtime** action
 with collapsed technical details.
 
+Managed `npx` runtimes use a Kandev-owned npm project directory, so an `.npmrc`
+in the task repository does not change the managed runtime's package lookup.
+The task repository remains the command's working directory. User and global npm
+settings still apply, including `min-release-age` and `before` policies. If an
+age policy blocks the selected version, Kandev does not repair the npm cache or
+repeat the lookup online. Wait until the version meets the policy, or select an
+older trusted version, then choose **Retry runtime**.
+
 Do not use `npm cache clean --force` as the normal recovery step. It removes
 unrelated npm data and does not target the stale execution tree. If the
 specialized retry cannot resolve the runtime, check that the Kandev service
@@ -187,9 +195,13 @@ uses the expected npm installation and configured registry. Run `npm config get 
 
 ### Add a custom terminal agent
 
-Use **Settings > Agents > Add TUI Agent** for a CLI that Kandev does not register. Enter a display name, command, and optional model label. `{{model}}` in the command is replaced by the selected model value, then the entire command is split on whitespace with Go's `strings.Fields`.
+Use **Settings > Agents > Add custom agent** for a CLI that Kandev does not register. Enter a display name, a protocol, and a command. The entire command is split on whitespace with Go's `strings.Fields`.
 
-That parser is not a shell and is not quote-aware: quotes and backslashes do not preserve a path or model containing spaces as one argument. Custom TUI agents always use terminal passthrough. They do not gain ACP features such as structured permission prompts, model discovery, modes, or session configuration merely by being added. Test the exact resulting argument split before assigning it to work.
+That parser is not a shell and is not quote-aware: quotes and backslashes do not preserve a path or model containing spaces as one argument. Test the exact resulting argument split before assigning it to work.
+
+A **Terminal** agent runs as passthrough. It also takes an optional model label, and `{{model}}` in the command is replaced by that value. It gains no ACP features: no structured permission prompts, no model discovery, no modes, no session configuration.
+
+An **ACP** agent is driven over the Agent Client Protocol instead, so it does get structured chat, tool calls, permission prompts, and probed models and modes. Enter the command that starts the CLI's ACP server, usually behind a flag such as `--acp`. Its model comes from the capability probe rather than the command, and its MCP servers travel in `session/new`, so neither the model label nor the MCP strategy is offered.
 
 </details>
 
@@ -287,8 +299,10 @@ candidate policies are configured on dynamic profiles.
 
 When a task launch waits for session capacity, Kandev keeps the selected
 destination and retries it automatically. Inspecting another session does not
-resume a parked predecessor. Use an explicit **Resume** action or send a
-message for manual recovery. These actions can override the automatic ceiling.
+change the workflow's selected step or primary session. You can open another
+session and use its normal controls. Kandev resumes it when the session can run;
+the automatic session ceiling still applies unless you explicitly start,
+resume, or message the session.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn
@@ -445,7 +459,7 @@ Workspace automation selectors do not offer passthrough agent profiles. Local ex
 
 ACP sessions can expose typed messages, tool updates, permission requests, models, modes, dynamic configuration, todos, usage, and resume metadata. Each capability depends on the agent's actual ACP implementation. ACP-only profile settings, including command prefixes and structured configuration, do not add those capabilities to a terminal-passthrough CLI.
 
-Passthrough preserves the CLI's native PTY interface. It is useful when the native terminal has features that ACP does not expose, but Kandev cannot manufacture structured capabilities that are absent. Custom TUI profiles are locked to passthrough. Profile-specific MCP injection also varies by CLI; verify the command preview and the MCP section before depending on it.
+Terminal custom profiles use passthrough and preserve the CLI's native PTY interface. This is useful when the native terminal has features that ACP does not expose, but Kandev cannot manufacture structured capabilities that are absent. Custom ACP profiles use structured ACP sessions. Profile-specific MCP injection also varies by CLI; verify the command preview and the MCP section before depending on it.
 
 > **MCP credential exposure:** MCP headers and environment values are stored in profile configuration. Codex may place them in process arguments, and Cursor or Pi may leave them in project files after teardown. Use short-lived, narrowly scoped credentials and review persisted files.
 

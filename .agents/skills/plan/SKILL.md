@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Create a committed implementation plan and work orders from approved requirements and current system designs. Use after specification work and before implementation.
+description: Create an implementation plan and work orders from approved requirements and current system designs. Leave the design package uncommitted for review before implementation.
 ---
 
 # Create an Implementation Plan
@@ -258,6 +258,11 @@ Task checks provide pre-PR evidence. Configured PR reviewers provide semantic
 review after the PR opens.
 
 ### 5. End the design turn
+
+Leave the full design package, including requirements, system designs, ADRs,
+plan, and work orders, unstaged and uncommitted so the user can review its diff
+in the workspace. Do not stage or commit these files unless the user explicitly
+asks. Check `git status --short` and include the changed paths in the handoff.
 
 Report the requirement IDs, system designs, plan, work orders, dependency
 order, exact checks, and open risks. For UI changes, also render a compact

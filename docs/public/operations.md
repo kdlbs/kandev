@@ -325,7 +325,17 @@ The Storage page also reports **System temporary folders** as a read-only footpr
 service's effective temporary folder and, on Unix, `/tmp` when it resolves to a distinct folder.
 Resolved roots, measured size, and partial or unavailable status are shown. This footprint is
 informational and can overlap counted categories, so it is excluded from **Total counted**. It has
-no cleanup action and does not claim ownership of any path.
+no cleanup action and does not claim ownership of any path. The analysis rows use the measured byte
+values to order categories from largest to smallest. A decorative bar compares each displayed
+measurement with the largest displayed measurement; zero measurements have an empty bar, and
+unknown or unavailable measurements have no bar. These bars compare footprints and do not change
+**Total counted**, capacity thresholds, or cleanup behavior. Overlapping categories can therefore
+appear in more than one row.
+
+A temporary-folder scan that reaches its deadline keeps the sampled bytes, partial status, and
+skipped-entry counts. The expanded row shows one timeout explanation and keeps a bounded set of
+other diagnostic examples. A timeout does not authorize cleanup or indicate that the sampled size
+is a final folder total.
 
 The Host tab separately reports **Temporary Kandev files** created by services that need a short-lived
 directory under the host temporary root. Each current file is registered in the Kandev database
@@ -751,6 +761,8 @@ After restart, verify `/ready`, **System > About**, **System > Status**, the dat
 ## Resource metrics
 
 Configure sampling at **Settings > Preferences > Appearance > Resource Metrics**. Defaults are CPU, memory, and disk percentage every five seconds, backend disk path `/`, and execution-environment collection off. Valid intervals are 1–300 seconds; at least one of CPU, memory, disk, CPU temperature, or 1-minute system load remains selected. System load is the average number of tasks running or waiting for CPU during the last minute; compare it with the host's CPU core count. Enable **Simplified metrics** to show only each metric icon and value in the status bar, fallback top bar, or phone Status drawer, without the Host marker or percentage progress bars.
+
+On phones, detailed readings appear together in a **System metrics** card, with labelled CPU, memory, and disk readings on one row. Additional enabled metrics continue below. Open **Status** when the status bar is enabled, or **Menu** when **Show status bar** is off but host metrics are enabled.
 
 Collection starts only while at least one connected client displays metrics in the status bar, fallback top bar, or an open phone Status drawer. Phone clients subscribe only while their Status drawer is open. The built-in status surface renders the Kandev host source only. Enabling execution metrics also adds active Docker, Kubernetes, SSH, and Sprites `agentctl` sources to the metrics stream for separately owned consumers such as plugins; execution disk sampling uses `/`. A provider hook also exists for remote Docker, but creating that runtime currently returns a not-implemented error. Missing platform APIs, container permissions, an invalid disk path, a disconnected executor, macOS/Windows temperature support, or Windows load-average support produce unavailable samples rather than quotas.
 

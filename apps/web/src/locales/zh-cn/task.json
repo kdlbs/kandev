@@ -350,6 +350,7 @@
   "copyMessage": "复制消息",
   "copyMessageToClipboard": "复制消息到剪贴板",
   "copyPath": "复制路径",
+  "copyPathWithControlCharacters": "此路径包含控制字符，无法复制。",
   "copyToClipboard": "复制到剪贴板",
   "copyUrl": "复制 URL",
   "copyWorkspacePath": "复制工作区路径",
@@ -1293,7 +1294,6 @@
   "wipQueueConfigure": "配置工作流 WIP 限制",
   "wipQueueUnavailable": "工作流 WIP 详情不可用。",
   "wipQueueConfigurationUnavailable": "工作流配置链接不可用。",
-  "parkedSessionNote": "此会话已为工作流暂停。打开它不会恢复会话。发送消息即可在此继续。",
   "quorumAwaiting": "正在等待 {{role}} 的 {{received}}/{{required}} 项决定",
   "quorumStuck": "受阻",
   "quorumStuckPendingReevaluation": "受阻：没有活动会话可重新评估此步骤",
@@ -2378,5 +2378,11 @@
   "checkoutOptions.credentialsUnsupported": "请使用由 Kandev 管理的 Git 凭据启用高级检出选项。",
   "toolPayloadRemovedAt": "工具详细数据已于 {{date}} 删除。",
   "toolPayloadRemoved": "工具详细数据已删除。",
-  "openTaskSwitcherFor": "打开任务切换器：{{title}}"
+  "openTaskSwitcherFor": "打开任务切换器：{{title}}",
+  "bulkColorPartialError": "已保存 {{total}} 个任务中 {{saved}} 个任务的颜色。请重试其余任务。",
+  "bulkColorSaving": "正在保存颜色...",
+  "bulkColorAutomaticHint": "自动规则可能覆盖显示的颜色。",
+  "bulkColorTitle_other": "为 {{count}} 个任务设置颜色",
+  "bulkColorTitle_one": "为 {{count}} 个任务设置颜色",
+  "editorActions": "编辑器和文件夹操作"
 }

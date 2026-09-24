@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: platform
 requirements:
   - REQ-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001
@@ -86,6 +86,14 @@ sessions, repositories, or pull requests. Existing flat task runtime fields may
 remain during migration, but switchers use the summary when present.
 
 ## Derivation rules
+
+For a late `message.queue.status_changed` event, `Projector.handleEvent` treats
+an authoritative task-not-found result from either workspace resolution or
+`LoadLaunchQueue` as deletion. It drops cached projection state under the
+task lock and publishes nothing. A different lookup error remains an error;
+the read model cannot infer deletion from a transient database failure. This
+extends AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.11 to projectors that
+already cached the task's workspace before deletion.
 
 - Pending permission outranks pending clarification for the row's primary
   state icon. Both outrank generating/background activity, which outranks
@@ -419,3 +427,5 @@ intermediate replacement.
   [`../../plans/deleted-session-error-summary/plan.md`](../../../plans/deleted-session-error-summary/plan.md)
 - Semantic no-op equality repair:
   [Task-summary semantic equality](../../../plans/task-summary-semantic-equality/plan.md)
+- Late deleted-task queue event repair:
+  [Recent runtime log remediation](../../../plans/recent-runtime-log-remediation/plan.md)

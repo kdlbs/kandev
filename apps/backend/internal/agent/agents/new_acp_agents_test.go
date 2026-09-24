@@ -81,8 +81,8 @@ var newACPAgentSpecs = []struct {
 	}},
 	{func() Agent { return NewPiACP() }, acpAgentSpec{
 		id: "pi-acp", displayName: "Pi", detectBinaries: []string{"pi"},
-		expectedArgv:       []string{"npx", "--yes", "--prefer-offline", "pi-acp@0.0.33"},
-		inferenceArgv:      []string{"npx", "--yes", "--prefer-offline", "pi-acp@0.0.33"},
+		expectedArgv:       []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "pi-acp@0.0.33"},
+		inferenceArgv:      []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "pi-acp@0.0.33"},
 		passthroughArgv:    []string{"pi"},
 		installViaNpm:      true,
 		installScript:      "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
@@ -173,8 +173,8 @@ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || 
 	}},
 	{func() Agent { return NewMuseACP() }, acpAgentSpec{
 		id: "muse-acp", displayName: "Muse", detectBinaries: []string{"muse"},
-		expectedArgv:           []string{"npx", "--yes", "--prefer-offline", "@bex-co/muse-code-acp@0.6.1"},
-		inferenceArgv:          []string{"npx", "--yes", "--prefer-offline", "@bex-co/muse-code-acp@0.6.1"},
+		expectedArgv:           []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@bex-co/muse-code-acp@0.6.1"},
+		inferenceArgv:          []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@bex-co/muse-code-acp@0.6.1"},
 		passthroughArgv:        []string{"muse"},
 		installViaNpm:          false,
 		skipInstallBinaryCheck: true,

@@ -140,6 +140,9 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	oldSessionID, newSessionID string,
+	source, destination *QueueSessionIdentity,
+	sourceGeneration int64,
+	queuePositionOffset int64,
 ) error {
 	var claimID, claimJSON string
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
@@ -174,14 +177,30 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 	if err != nil || sessionID != oldSessionID || claim.Dispatch.SessionID != oldSessionID {
 		return ErrSendNowClaimChanged
 	}
+	if claim.Identity.SessionIncarnationID != "" {
+		if source == nil || claim.Identity != *source {
+			return ErrSessionIdentityMismatch
+		}
+		if claim.OperationGeneration != sourceGeneration || claim.SessionGeneration != sourceGeneration {
+			return ErrSendNowClaimChanged
+		}
+	}
+	if destination == nil && claim.Identity.SessionIncarnationID != "" {
+		return ErrSessionIdentityMismatch
+	}
 	for sourceIndex := range claim.Sources {
 		claim.Sources[sourceIndex].SessionID = newSessionID
+		claim.Sources[sourceIndex].Position += queuePositionOffset
 	}
 	claim.Dispatch.SessionID = newSessionID
+	if destination != nil {
+		claim.Identity = *destination
+	}
 	claim.SessionGeneration, err = r.getSendNowGenerationTx(ctx, tx, newSessionID)
 	if err != nil {
 		return err
 	}
+	claim.OperationGeneration = claim.SessionGeneration
 	claimJSONBytes, err := json.Marshal(&claim)
 	if err != nil {
 		return fmt.Errorf("marshal transferred Send Now claim: %w", err)

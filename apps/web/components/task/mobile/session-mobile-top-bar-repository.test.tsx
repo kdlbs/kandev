@@ -25,6 +25,7 @@ vi.mock("@/components/task/port-forward-dialog", () => ({
 
 vi.mock("@/components/task/task-top-bar-plugin-actions", () => ({
   TaskTopBarPluginActions: () => null,
+  useHasTaskTopBarPluginActions: () => false,
 }));
 
 vi.mock("@/components/gitlab/mr-topbar-button", () => ({

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync/atomic"
 
@@ -109,6 +110,103 @@ func TestSendNowAcceptedClaimIsAcknowledgedAfterProcessRestart(t *testing.T) {
 	if status := restartedQueue.GetStatus(ctx, "session-1"); status.Count != 0 {
 		t.Fatalf("accepted Send Now source was restored after restart: %#v", status.Entries)
 	}
+}
+
+func TestTransferredIdentityAwareSendNowClaimReconcilesAfterProcessRestart(t *testing.T) {
+	for _, accepted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("accepted=%t", accepted), func(t *testing.T) {
+			ctx := context.Background()
+			dbPath := filepath.Join(t.TempDir(), "queue.db")
+			queue, db, sourceIdentity, destinationIdentity := newIdentityWorkflowTransferQueue(t, dbPath, true)
+			source, err := queue.QueueMessageWithMetadataForSession(
+				ctx, sourceIdentity, "transferred prompt", "", "user", false, nil, nil,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			claim, err := queue.ClaimSendNowForSession(ctx, sourceIdentity, []messagequeue.QueuedMessage{*source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if accepted {
+				if err := queue.MarkPendingSendNowClaimAccepted(ctx, claim); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := queue.TransferSessionWithDurableAttachmentPreparation(
+				ctx, sourceIdentity.TaskID, sourceIdentity.SessionID, destinationIdentity.SessionID, nil, nil,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`DELETE FROM task_sessions WHERE id = ?`, sourceIdentity.SessionID); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			restartedQueue, restartedDB, _, _ := newIdentityWorkflowTransferQueue(t, dbPath, false)
+			t.Cleanup(func() { _ = restartedDB.Close() })
+			restarted := &Service{logger: testLogger(), messageQueue: restartedQueue}
+			if err := restarted.reconcilePendingSendNowClaimsOnStartup(ctx); err != nil {
+				t.Fatal(err)
+			}
+			status := restartedQueue.GetStatus(ctx, destinationIdentity.SessionID)
+			if accepted && status.Count != 0 {
+				t.Fatalf("accepted transferred claim restored after restart: %#v", status.Entries)
+			}
+			if !accepted && (len(status.Entries) != 1 || status.Entries[0].ID != source.ID) {
+				t.Fatalf("unaccepted transferred claim after restart = %#v, want source %s", status.Entries, source.ID)
+			}
+		})
+	}
+}
+
+func newIdentityWorkflowTransferQueue(
+	t *testing.T,
+	dbPath string,
+	seed bool,
+) (*messagequeue.Service, *sqlx.DB, messagequeue.QueueSessionIdentity, messagequeue.QueueSessionIdentity) {
+	t.Helper()
+	raw, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw.SetMaxOpenConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, archived_at TIMESTAMP, updated_at TIMESTAMP)`,
+		`CREATE TABLE IF NOT EXISTS task_sessions (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, queue_incarnation_id TEXT NOT NULL)`,
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			_ = db.Close()
+			t.Fatal(err)
+		}
+	}
+	source := messagequeue.QueueSessionIdentity{TaskID: "task-1", SessionID: "session-old", SessionIncarnationID: "incarnation-old"}
+	destination := messagequeue.QueueSessionIdentity{TaskID: source.TaskID, SessionID: "session-new", SessionIncarnationID: "incarnation-new"}
+	if seed {
+		if _, err := db.Exec(`INSERT OR IGNORE INTO tasks (id, updated_at) VALUES (?, CURRENT_TIMESTAMP)`, source.TaskID); err != nil {
+			_ = db.Close()
+			t.Fatal(err)
+		}
+		for _, identity := range []messagequeue.QueueSessionIdentity{source, destination} {
+			if _, err := db.Exec(`
+				INSERT INTO task_sessions (id, task_id, queue_incarnation_id) VALUES (?, ?, ?)
+				ON CONFLICT(id) DO UPDATE SET task_id = excluded.task_id, queue_incarnation_id = excluded.queue_incarnation_id
+			`, identity.SessionID, identity.TaskID, identity.SessionIncarnationID); err != nil {
+				_ = db.Close()
+				t.Fatal(err)
+			}
+		}
+	}
+	repo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	return messagequeue.NewService(repo, messagequeue.DefaultMaxPerSession, testLogger()), db, source, destination
 }
 
 type transientAcceptedMarkerRepository struct {

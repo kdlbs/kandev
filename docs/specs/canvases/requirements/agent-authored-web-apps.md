@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-08-26
-last_updated: 2026-09-21
+last_updated: 2026-09-23
 ---
 
 # Agent-authored web-app canvases Requirements
@@ -15,7 +15,8 @@ last_updated: 2026-09-21
 
 A canvas is a custom web application that an agent creates for one task. A
 user can promote a useful task canvas to its workspace. A workspace canvas
-appears in workspace navigation and can use workspace-scoped data.
+appears in workspace navigation. An owner-authorized task canvas can already
+use its workspace's data while the user reviews it in the originating task.
 
 The Canvases system owns the canvas scope, source lineage, release selection,
 promotion, editing flow, and discovery. The Plugins system owns the web-application
@@ -24,13 +25,13 @@ runtime and its data contract.
 ## Terminology
 
 - **Task canvas:** A canvas that belongs to one task and appears only in that
-  task.
+  task. Its placement does not determine its approved data scope.
 - **Workspace canvas:** A canvas that belongs to one workspace and appears in
   workspace navigation. Agent-authored canvases reach this scope by promotion;
   [distribution](marketplace-sharing.md) also defines reviewed package installs.
 - **Draft:** Editable canvas source in an authorized agent workspace.
 - **Release:** An immutable package that passed validation.
-- **Promotion:** A user action that changes a task canvas to workspace scope.
+- **Promotion:** A user action that changes a task canvas to workspace placement.
 
 ## Requirements
 
@@ -120,8 +121,8 @@ browser session end.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-003: User-controlled promotion
 
-**Intent:** A useful task canvas becomes a workspace application only after a
-user reviews its scope and permissions.
+**Intent:** A useful task canvas becomes available in workspace navigation only
+after a user reviews its placement and permissions.
 
 **User story:** As a user, I want to promote a useful task canvas, so that I
 can open it from the workspace sidebar.
@@ -132,7 +133,8 @@ can open it from the workspace sidebar.
   system shall show the requested data, write, event, state, and network
   permissions before confirmation.
 - **AC-CANVASES-AGENT-WEB-APPS-003.2:** When the user confirms promotion, the
-  same canvas identity and active release shall change to workspace scope.
+  same canvas identity and active release shall change to workspace placement.
+  A release that already has workspace data access shall keep that access.
 - **AC-CANVASES-AGENT-WEB-APPS-003.3:** When promotion completes, the canvas
   shall appear in navigation for that workspace only.
 - **AC-CANVASES-AGENT-WEB-APPS-003.4:** An agent shall not promote, demote, or
@@ -255,7 +257,8 @@ blocked by permissions, invalid, or using a prior release.
 - **AC-CANVASES-AGENT-WEB-APPS-007.5:** A runtime URL or iframe load event
   alone shall not display Ready. Until the current frame acknowledges startup,
   the host shall display Loading. After 15 seconds without acknowledgement,
-  it shall show an unavailable state with Retry and Releases actions.
+  it shall show the `AC-CANVASES-AGENT-WEB-APPS-007.9` state with Retry and
+  Releases actions.
 - **AC-CANVASES-AGENT-WEB-APPS-007.6:** Retry, release replacement, token
   renewal, and canvas navigation shall ignore acknowledgements from previous
   frame attempts. An unavailable frame shall not cover recovery controls.
@@ -267,6 +270,18 @@ blocked by permissions, invalid, or using a prior release.
   once in plain language, identify newly requested access, and show exact
   external origins. Ordinary permission review shall not appear as a validation
   failure. Active and retained valid releases shall have distinct labels.
+
+- **AC-CANVASES-AGENT-WEB-APPS-007.9:** When a canvas application fails
+  startup acknowledgement with a valid active release, the host shall show a
+  runtime-startup-failure state attributing the failure to the application or
+  runtime, distinct from the release-unavailable state of
+  `AC-CANVASES-AGENT-WEB-APPS-007.1`.
+- **AC-CANVASES-AGENT-WEB-APPS-007.10:** The runtime-startup-failure
+  description shall distinguish at least three causes: guest-reported
+  `document_error`, an application unable to reach its runtime API, and
+  host-observed `timeout` without acknowledgement by the
+  `AC-CANVASES-AGENT-WEB-APPS-007.5` deadline. Pre-bootstrap failure uses
+  `timeout`. Unknown causes shall not blame releases.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-008: Bounded agent authoring
 
@@ -342,6 +357,7 @@ including missing references, lookup failures, and passthrough exclusions.
 
 - [Canvas runtime and task-entry recovery](../../../plans/canvas-runtime-entry-recovery/plan.md)
 - [Direct canvas creation and saved prompt](../../../plans/canvas-direct-creation/plan.md)
+- [Task canvas workspace data preview](../../../plans/task-canvas-workspace-preview/plan.md)
 
 ## Out of scope
 

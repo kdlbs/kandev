@@ -9,6 +9,7 @@ requirements:
   - REQ-UI-MOBILE-MENU-005
   - REQ-UI-MOBILE-MENU-006
   - REQ-UI-MOBILE-MENU-007
+  - REQ-UI-MOBILE-MENU-008
 ---
 
 # Unified mobile navigation design
@@ -294,18 +295,51 @@ quick-action row; use min-width zero and wrapping labels with minimum 44px heigh
 Do not move plugin content, search or metrics into that row.
 
 Phone sequence: workspace picker; Home and quick actions; existing page-local
-navigation; Tasks; existing workspace plugin/canvas and fallback metric content;
-Automations; existing plugin navigation groups; Integrations; Utilities. Optional
+navigation; Tasks; canvases; Automations; Plugins; Integrations; optional fallback
+system metrics; Utilities. Optional
 extension slots remain reachable without breaking the adjacency of Home/quick
 actions or the relative order of the named sections. Office retains its local
 navigation and suppression of the Kanban task and automation sections.
 
-A saved sidebar layout owns its configured section order and visibility instead
-of the default sequence. Keep phone quick actions immediately after its Home row,
-or at the top when Home is hidden. Home still covers all listing modes. Retain
-the embedded Tasks section and Utilities outside the configurable projection;
-do not duplicate default Automations, plugin groups, or Integrations when the
-saved layout renders those sections.
+The September 23 composition refinement groups `main-top-bar`,
+`sidebar-workspace-actions`, and page-scoped `chat-top-bar` contributions inside
+`MobilePluginNavSection`. `AppNavSheet` supplies phone workspace context through
+`AppNavSections`; the section checks registrations before rendering workspace
+controls. Phone navigation uses one wrapping action group without workspace/task
+subheadings. When task actions are supplied, `PluginSlotPresence` observes
+owner-marked `chat-top-bar` registration wrappers and reports owners with mounted
+content. Exclude only those owners from `main-top-bar` in this menu. A layout
+effect measures initial content; a scoped MutationObserver follows asynchronous
+null/content changes and disconnects on unmount. Layout-neutral wrappers retain
+child width constraints. Null-rendering task controls retain workspace fallback;
+report only changed owner sets to avoid feedback from normal status updates.
+Keep every registration in the selected slot with its original props and error
+boundary. This chooses a contextual toolbar by plugin identity, never by rendered
+text or component identity (plugins may create separate component factories for
+the two slots). Sidebar workspace actions remain independent. Without task
+actions, including archived tasks, show all workspace toolbar controls. Recompute
+from live registry state; desktop/tablet slots and navigation destinations remain
+unchanged. Empty sections disappear. `MobileWorkspaceActionsSection` retains canvases
+and opts out of rendering plugin actions only for phone app navigation.
+
+`NavigationMetrics` retains the status-bar preference gate and reuses
+`StatusSurfaceMetrics` after navigation. No new subscription, metric setting,
+or resource card is introduced. The phone scroller uses a 16px section gap;
+plugin controls wrap within its width. Main-toolbar host buttons retain a 44px
+minimum touch target without forcing labeled buttons into square icon geometry.
+Wider consumers of the existing listing menu and inline plugin slots retain
+their composition. The delivery record is the
+[coherent mobile plugin menu plan](../../../plans/mobile-plugin-menu-coherence/plan.md).
+
+A saved sidebar layout retains visibility and the relative order of optional
+tools and plugin destinations. On phones, keep Home and quick actions before
+the embedded Tasks section, followed by those optional nodes; when Home is
+hidden, quick actions remain first. Home still covers all listing modes. Keep
+workspace/task plugin controls together after the configurable projection,
+followed by metrics and Utilities. Do not duplicate saved plugin destinations,
+Automations, Canvases, or Integrations in default sections, or persist this phone
+composition over the desktop layout. See the
+[sidebar customization design](sidebar-customization.md).
 
 Add an explicit phone disclosure option to `MobileIntegrationsSection`; leave
 its default/wider behavior unchanged. Use a local initially-false expanded state,
@@ -330,3 +364,5 @@ Validate ordered geometry and both quick launch outcomes from Home and task
 workbench, disclosure keyboard/touch behavior, empty/configured integrations,
 workspace switches, long translated labels, and unchanged 768px/wider composition.
 Reuse the populated isolated preview and reapply its mock seed after any restart.
+
+The [mobile plugin deduplication plan](../../../plans/mobile-plugin-deduplication/plan.md) records the September 24 toolbar selection correction.

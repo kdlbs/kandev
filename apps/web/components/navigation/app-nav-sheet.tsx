@@ -7,10 +7,8 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNo
 import { useTranslation } from "react-i18next";
 import { MobileWorkspaceActionsSection } from "@/components/app-sidebar/app-sidebar-workspace-actions";
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
-import {
-  MobileListingMenuActions,
-  MobileQuickActions,
-} from "@/components/kanban/mobile-listing-menu-actions";
+import { MobileQuickActions } from "@/components/kanban/mobile-listing-menu-actions";
+import { StatusSurfaceMetrics } from "@/components/system-metrics/status-surface-metrics";
 import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useInOffice } from "@/hooks/use-in-office";
@@ -28,19 +26,20 @@ import { linkToTask, replaceTaskUrl } from "@/lib/links";
 
 type AppNavSheetProps = {
   pageNav?: ReactNode | ((close: () => void) => ReactNode);
+  /** Page-scoped plugin controls grouped with plugin navigation on phones. */
+  pluginActions?: ReactNode;
   omitDestinations?: string[];
   /** Reuse a workbench's existing task picker and selection controller. */
   onOpenTaskViews?: () => void;
 };
 
 /** Shared phone app navigation; wider page shells retain their side sheet. */
-export function AppNavSheet({ pageNav, omitDestinations, onOpenTaskViews }: AppNavSheetProps) {
+export function AppNavSheet(props: AppNavSheetProps) {
+  const { pageNav, pluginActions, omitDestinations, onOpenTaskViews } = props;
   const { isMobile } = useResponsiveBreakpoint();
   const pathname = usePathname();
   const inOffice = useInOffice();
-  const workspace = useAppStore((s) =>
-    s.workspaces.items.find((w) => w.id === s.workspaces.activeId),
-  );
+  const workspace = useActiveNavigationWorkspace();
   const [open, setOpen] = useState(false);
   const opener = useRef<HTMLButtonElement | null>(null);
   const restoreFocus = useRef(true);
@@ -48,9 +47,6 @@ export function AppNavSheet({ pageNav, omitDestinations, onOpenTaskViews }: AppN
   const controls = useAppNavDialogs(close, onOpenTaskViews);
   const renderedPageNav = typeof pageNav === "function" ? pageNav(close) : pageNav;
   const currentPage = listingPageForPath(pathname);
-  const closeOnLinkClick = (event: MouseEvent<HTMLElement>) => {
-    if (event.target instanceof Element && event.target.closest("a[href]")) close();
-  };
 
   return (
     <>
@@ -70,8 +66,8 @@ export function AppNavSheet({ pageNav, omitDestinations, onOpenTaskViews }: AppN
         trigger={<AppNavTrigger ref={opener} aria-expanded={open} />}
       >
         <nav
-          className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))]"
-          onClick={closeOnLinkClick}
+          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] md:gap-6"
+          onClick={(event) => closeMenuOnLinkClick(event, close)}
         >
           {isMobile && <NavigationWorkspacePicker close={close} />}
           {!isMobile && renderedPageNav}
@@ -102,22 +98,7 @@ export function AppNavSheet({ pageNav, omitDestinations, onOpenTaskViews }: AppN
             }
             workspaceActions={
               <>
-                {isMobile && (
-                  <MobileListingMenuActions
-                    showQuickActions={false}
-                    workspaceId={workspace?.id}
-                    workspaceLabel={workspace?.name ?? ""}
-                    currentPage={currentPage}
-                    open={open}
-                    closeMenu={(focus = false) => {
-                      restoreFocus.current = focus;
-                      close();
-                    }}
-                    isSearchOpen={false}
-                    returnFocusRef={opener}
-                  />
-                )}
-                <MobileWorkspaceActionsSection />
+                <MobileWorkspaceActionsSection includePluginActions={!isMobile} />
                 <NavigationAutomations
                   isMobile={isMobile}
                   open={open}
@@ -127,6 +108,13 @@ export function AppNavSheet({ pageNav, omitDestinations, onOpenTaskViews }: AppN
                 />
               </>
             }
+            pluginActions={pluginActions}
+            pluginWorkspaceContext={
+              isMobile
+                ? { workspaceId: workspace?.id, workspaceLabel: workspace?.name, currentPage }
+                : undefined
+            }
+            resources={isMobile && <NavigationMetrics open={open} />}
             controls={isMobile ? { ...controls, openTaskViews: undefined } : controls}
           />
         </nav>
@@ -136,11 +124,34 @@ export function AppNavSheet({ pageNav, omitDestinations, onOpenTaskViews }: AppN
   );
 }
 
+function NavigationMetrics({ open }: { open: boolean }) {
+  const statusBarEnabled = useAppStore((state) => state.userSettings.appStatusBarEnabled);
+  if (statusBarEnabled) return null;
+  return (
+    <StatusSurfaceMetrics
+      presentation="mobile-drawer"
+      density="compact"
+      drawerOpen={open}
+      iconSize="size-4"
+    />
+  );
+}
+
+function useActiveNavigationWorkspace() {
+  return useAppStore((state) =>
+    state.workspaces.items.find((workspace) => workspace.id === state.workspaces.activeId),
+  );
+}
+
+function closeMenuOnLinkClick(event: MouseEvent<HTMLElement>, close: () => void) {
+  if (event.target instanceof Element && event.target.closest("a[href]")) close();
+}
+
 function NavigationWorkspacePicker({ close }: { close: () => void }) {
   const { t } = useTranslation();
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="text-sm font-medium">{t("common:workspace")}</h3>
+      <h3 className="sr-only">{t("common:workspace")}</h3>
       <AppSidebarWorkspacePicker
         modal={false}
         onActionComplete={close}

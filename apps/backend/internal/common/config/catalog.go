@@ -119,7 +119,7 @@ var startupCatalog = []CatalogEntry{
 	{Key: "credentials.file", EnvVars: []string{"KANDEV_CREDENTIALS_FILE"}, Owner: "credentials", Default: ""},
 	{Key: "limits.ghMaxConcurrent", EnvVars: []string{"KANDEV_GH_MAX_CONCURRENT"}, Owner: "subprocess admission", Default: "8"},
 	{Key: "limits.gitMaxConcurrent", EnvVars: []string{"KANDEV_GIT_MAX_CONCURRENT"}, Owner: "subprocess admission", Default: "12"},
-	{Key: "limits.lspMaxConnections", EnvVars: []string{"KANDEV_LSP_MAX_CONNECTIONS"}, Owner: "LSP gateway", Default: "8"},
+	{Key: "limits.lspMaxConnections", EnvVars: []string{"KANDEV_LSP_MAX_CONNECTIONS"}, Owner: "LSP gateway", Default: "8", Description: "Maximum active LSP server leases, including leases detached from a browser."},
 	{Key: "messageQueue.maxPerSession", EnvVars: []string{"KANDEV_QUEUE_MAX_PER_SESSION"}, Owner: "message queue", Default: "10"},
 	{Key: "agentctl.idleTimeout", EnvVars: []string{"KANDEV_ACP_IDLE_TIMEOUT"}, Owner: "agentctl", Default: "1h"},
 	{Key: "agentctl.idleReaperInterval", EnvVars: []string{"KANDEV_ACP_IDLE_REAPER_INTERVAL"}, Owner: "agentctl", Default: "1m"},
