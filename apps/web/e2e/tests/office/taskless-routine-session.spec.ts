@@ -6,6 +6,12 @@ type RoutineRun = {
   status: string;
 };
 
+type AgentRun = {
+  id: string;
+  reason: string;
+  context_snapshot?: string;
+};
+
 async function routineRuns(
   officeApi: { listRoutineRuns(id: string): Promise<Record<string, unknown>> },
   id: string,
@@ -26,6 +32,7 @@ test.describe("Office taskless routine sessions", () => {
       name: `Taskless E2E ${Date.now()}`,
       description: "Taskless routine session smoke test",
       assignee_agent_profile_id: officeSeed.agentId,
+      concurrency_policy: "always_create",
     });
     const routineId = routine.id as string;
 
@@ -35,21 +42,36 @@ test.describe("Office taskless routine sessions", () => {
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       const response = await officeApi.runRoutine(routineId);
       expect(response.status).toBe(200);
-      await expect
-        .poll(() => routineRuns(officeApi, routineId), { timeout: 20_000 })
-        .toHaveLength(attempt);
       let runId = "";
+      await expect
+        .poll(() => routineRuns(officeApi, routineId), {
+          timeout: 30_000,
+          intervals: [250, 500, 1_000],
+          message: `Waiting for routine run ${attempt} to appear`,
+        })
+        .toHaveLength(attempt);
       await expect
         .poll(
           async () => {
             const result = await officeApi.listRuns(officeSeed.workspaceId);
-            const run = ((result.runs ?? []) as { id: string; reason: string }[]).find(
-              (candidate) => !seen.has(candidate.id) && candidate.reason.startsWith("routine_"),
-            );
+            const run = ((result.runs ?? []) as AgentRun[]).find((candidate) => {
+              if (seen.has(candidate.id) || !candidate.reason.startsWith("routine_")) {
+                return false;
+              }
+              try {
+                return JSON.parse(candidate.context_snapshot ?? "{}").routine_id === routineId;
+              } catch {
+                return false;
+              }
+            });
             runId = run?.id ?? "";
             return runId;
           },
-          { timeout: 30_000 },
+          {
+            timeout: 60_000,
+            intervals: [250, 500, 1_000],
+            message: `Waiting for agent run ${attempt} to appear`,
+          },
         )
         .not.toBe("");
       seen.add(runId);

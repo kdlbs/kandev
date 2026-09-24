@@ -59,6 +59,12 @@ test.describe("File tree chat context", () => {
       backend,
     );
 
+    // The task environment can finish its initial file-tree snapshot after
+    // the chat becomes idle. Reload once before reading Files so the tree
+    // starts from the durable worktree state instead of a stale empty cache.
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
     await session.clickTab("Files");
     await session.fileTree.waitForFileTreeNode(filePath, 30_000);
     await session.fileTree.waitForFileTreeNode(directoryPath, 30_000);
