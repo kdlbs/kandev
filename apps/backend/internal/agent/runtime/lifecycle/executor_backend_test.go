@@ -39,6 +39,8 @@ func TestShouldPersistMetadataKey(t *testing.T) {
 
 func TestKubernetesRuntimeMetadataKeysPersistWithoutLocalForward(t *testing.T) {
 	persistent := []string{
+		"kubernetes_task_owned",
+		"kubernetes_resource_ownership_version",
 		"auth_mode",
 		"kubeconfig_path",
 		"kube_context",

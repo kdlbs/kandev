@@ -127,7 +127,7 @@ Resolve the provider namespace from the exact attachment's existing binding:
    checkout. For a `RemoteContribution`, compare the PR head to the validated
    source repository and require the PR target repository to match the
    attachment. An ambiguous or mismatched response cannot resolve a qualified
-   PR base.
+   PR base. Ordinary target-attached PR links use the compatibility path below.
 
 Never choose the first PR in a task-wide list. Validate current binding ownership
 before applying a live retarget. Preserve manual comparison selections and
@@ -147,6 +147,57 @@ A stored qualified target can materialize its exact branch without a fresh
 provider snapshot. The fetched commit supplies the current OID. Without a
 validated target identity, a known cross-repository request remains unresolved.
 Same-repository offline branch fallback retains criterion .11.
+
+### Ordinary PR-link launch compatibility
+
+The [PR-link fork launch repair](../../../plans/pr-link-fork-launch/plan.md)
+clarifies criterion .15 for existing browser-created attachments. This amendment
+is implemented. Its plan and work orders record the implementation and
+verification status.
+
+The browser PR-link path stores the target repository, PR number, checkout
+branch, and base branch. It does not create a `RemoteContribution` binding.
+`associatePRFromRepoInputs` links the PR asynchronously. Launch must therefore
+resolve identity correctly before and after that association exists.
+
+Base validation distinguishes these attachment forms:
+
+- With `RemoteContribution`, the persisted source repository and head branch
+  remain authoritative. The provider target must match the attached repository.
+- With a fork-attached checkout, the provider head must match the attached
+  repository and checkout branch. Existing comparison-target checks still apply.
+- With an ordinary target-attached PR checkout, provider resolution must use
+  the attached target namespace and exact PR number. The returned target must
+  match that attachment, and the returned head branch must match the checkout.
+  The validated provider response supplies the source repository for this
+  launch. Missing, malformed, unrelated, or ambiguous identities are rejected.
+
+The last form requires a positive PR number and a non-empty checkout branch.
+It applies only without an explicit contribution or comparison binding.
+It cannot override an explicit source binding after a mismatch. An unrelated
+linked PR cannot authorize this form merely by sharing a number or branch.
+
+`validPRBaseIdentity` must evaluate the attachment form before applying its head
+repository comparison. Do not remove repository checks or accept a branch-only
+match. `githubPRBaseResolver` retains provider namespace validation and exact
+linked-association selection. Without a linked row, it resolves the attached
+namespace directly. Multiple matching linked rows remain an error.
+
+For a target-attached checkout, the existing PR-head fetch uses the target
+repository's PR namespace. The comparison base remains that target repository's
+branch. A fork-attached checkout retains qualified upstream materialization.
+No contribution binding, comparison binding, credential scope, or push destination
+is synthesized by this compatibility path. Provider resolution is read-only.
+
+Retry of an unprepared legacy task uses the same validation. Valid worktree
+reuse and explicit manual-base overrides retain their existing rules.
+A provider outage retains the existing fallback policy. Known cross-repository
+errors and cancellation must not become branch-only fallback successes.
+
+Coverage includes ordinary PR-link metadata with and without a linked row,
+explicit source mismatch, unrelated target, malformed identity, colliding PR
+numbers, and two attachments where only one is valid. A real Git fixture proves
+that PR head and base commits come from their respective repositories.
 
 ### Preparation and materialization
 

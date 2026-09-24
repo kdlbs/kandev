@@ -1452,6 +1452,8 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if autoStart {
 		if task, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
 			return nil, fmt.Errorf("failed to fetch task for automatic launch gate: %w", taskErr)
+		} else if taskRequiresManualForkPRStart(task) {
+			return nil, errForkPRManualStartRequired
 		} else if s.shouldSkipTerminalPRAutoStart(ctx, task) {
 			return nil, nil
 		}
@@ -1964,6 +1966,7 @@ func validateOfficeRuntimeEnv(env map[string]string) error {
 }
 
 var (
+	errForkPRManualStartRequired        = errors.New("fork pull request review requires a manual start")
 	errOfficeTaskStartRequiresScheduler = errors.New(
 		"office tasks must be started through Office; use StartTaskWithEnv with scheduler-injected credentials",
 	)

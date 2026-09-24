@@ -175,8 +175,11 @@ the full task list.
   move those actions below the task list. Existing workspace context, activity
   indicators, launch behavior, and focus handoff shall be retained.
 - **AC-UI-MOBILE-MENU-007.2:** Regular workspace sections shall follow Tasks,
-  Automations, Integrations, Utilities order. Existing eligible plugin actions,
-  canvases, and page-local destinations shall remain reachable. Utilities shall
+  Automations, Integrations, Utilities order. Existing eligible plugin actions
+  shall share one Plugins section, with workspace and task context distinguished
+  when both are present. Optional system metrics shall follow navigation instead
+  of separating plugin controls. Canvases and page-local destinations shall
+  remain reachable. Utilities shall
   place Settings before Stats, followed by theme and support actions; existing
   conditional status and health affordances shall retain their behavior.
 - **AC-UI-MOBILE-MENU-007.3:** Integrations shall use a labelled, keyboard- and
@@ -213,3 +216,4 @@ the full task list.
 ## Implementation plans
 
 - [Unified mobile navigation](../../../plans/unified-mobile-navigation/plan.md)
+- [Coherent mobile plugin menu](../../../plans/mobile-plugin-menu-coherence/plan.md)

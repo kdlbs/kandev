@@ -73,6 +73,41 @@ func TestLoadSessionReturnsCapabilitiesForResumedSession(t *testing.T) {
 	}
 }
 
+func TestLoadSessionRetainsMCPServersForResumedPrompt(t *testing.T) {
+	sessionID := acp.SessionId("session-load-mcp-test")
+	priorServers := mcpServers
+	mcpServers = nil
+	t.Cleanup(func() { mcpServers = priorServers })
+	agent := &mockAgent{
+		conn:              &promptCancelUpdater{started: make(chan struct{})},
+		sessions:          make(map[acp.SessionId]bool),
+		sessionConfig:     make(map[acp.SessionId][]acp.SessionConfigOption),
+		sessionMCPServers: make(map[acp.SessionId]map[string]mcpServerDef),
+		commandsEmitted:   make(map[acp.SessionId]bool),
+	}
+	request := acp.LoadSessionRequest{
+		SessionId: sessionID,
+		McpServers: []acp.McpServer{{
+			Sse: &acp.McpServerSseInline{
+				Name: "resumed-test",
+				Type: "sse",
+				Url:  "http://127.0.0.1:1/sse",
+			},
+		}},
+	}
+
+	if _, err := agent.LoadSession(context.Background(), request); err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	server, ok := agent.sessionMCPServers[sessionID]["resumed-test"]
+	if !ok {
+		t.Fatal("LoadSession() did not retain MCP server for the resumed session")
+	}
+	if server.URL != "http://127.0.0.1:1/sse" {
+		t.Fatalf("resumed MCP server URL = %q, want %q", server.URL, "http://127.0.0.1:1/sse")
+	}
+}
+
 func TestSetSessionConfigOptionRejectsUnknownValue(t *testing.T) {
 	sessionID := acp.SessionId("session-config-test")
 	agent := &mockAgent{

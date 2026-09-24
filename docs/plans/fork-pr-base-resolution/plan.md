@@ -152,6 +152,9 @@ materialization has its own agentctl API regression from Task 02.
 
 ## Companion packages
 
+- [PR-link fork launch repair](../pr-link-fork-launch/plan.md): pending follow-up
+  for ordinary target-attached browser PR tasks. Historical results here remain unchanged.
+
 - [Fork PR comparison targets](../fork-pr-comparison-targets/plan.md): implemented;
   reuse its identity, remote, and manual-selection invariants.
 - [Noninteractive comparison Git](../noninteractive-comparison-target-git/plan.md):

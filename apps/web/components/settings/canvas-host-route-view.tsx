@@ -18,7 +18,7 @@ import {
   MobileCanvasActions,
   type CanvasHostState,
 } from "./canvas-host-components";
-import { type Canvas } from "@/lib/api/domains/canvas-api";
+import { canvasDataScope, type Canvas } from "@/lib/api/domains/canvas-api";
 
 type CanvasHostRouteViewProps = {
   canvasId: string;
@@ -31,17 +31,20 @@ type CanvasHostRouteViewProps = {
   error: string | null;
   menuOpen: boolean;
   promotionOpen: boolean;
+  workspaceDataOpen: boolean;
   releasesOpen: boolean;
   shareOpen: boolean;
   renameOpen: boolean;
   editing: boolean;
   setMenuOpen: (open: boolean) => void;
   setPromotionOpen: (open: boolean) => void;
+  setWorkspaceDataOpen: (open: boolean) => void;
   setReleasesOpen: (open: boolean) => void;
   setShareOpen: (open: boolean) => void;
   setRenameOpen: (open: boolean) => void;
   onEdit: () => void;
   onPromote: () => void;
+  onEnableWorkspaceData: () => void;
   onReleases: () => void;
   onShare: () => void;
   onRename: () => void;
@@ -57,6 +60,8 @@ function CanvasHostRouteDialogs({
   canvas,
   promotionOpen,
   setPromotionOpen,
+  workspaceDataOpen,
+  setWorkspaceDataOpen,
   releasesOpen,
   setReleasesOpen,
   shareOpen,
@@ -70,6 +75,8 @@ function CanvasHostRouteDialogs({
   | "canvas"
   | "promotionOpen"
   | "setPromotionOpen"
+  | "workspaceDataOpen"
+  | "setWorkspaceDataOpen"
   | "releasesOpen"
   | "setReleasesOpen"
   | "shareOpen"
@@ -85,6 +92,8 @@ function CanvasHostRouteDialogs({
         canvas={canvas}
         promotionOpen={promotionOpen}
         onPromotionOpenChange={setPromotionOpen}
+        workspaceDataOpen={workspaceDataOpen}
+        onWorkspaceDataOpenChange={setWorkspaceDataOpen}
         releasesOpen={releasesOpen}
         onReleasesOpenChange={setReleasesOpen}
         onPromotionCompleted={onPromotionCompleted}
@@ -134,6 +143,7 @@ function CanvasHostRouteMobileActions({
   setMenuOpen,
   onEdit,
   onPromote,
+  onEnableWorkspaceData,
   onReleases,
   onShare,
   onRename,
@@ -147,6 +157,7 @@ function CanvasHostRouteMobileActions({
   | "setMenuOpen"
   | "onEdit"
   | "onPromote"
+  | "onEnableWorkspaceData"
   | "onReleases"
   | "onShare"
   | "onRename"
@@ -160,6 +171,7 @@ function CanvasHostRouteMobileActions({
       onOpenChange={setMenuOpen}
       onEdit={onEdit}
       onPromote={onPromote}
+      onEnableWorkspaceData={onEnableWorkspaceData}
       onReleases={onReleases}
       onShare={onShare}
       onRename={onRename}
@@ -187,6 +199,7 @@ function createCanvasDesktopActions(canvas: Canvas | null, props: CanvasHostRout
     onPromote: props.onPromote,
     onReleases: props.onReleases,
     onShare: props.onShare,
+    onEnableWorkspaceData: props.onEnableWorkspaceData,
   };
   return {
     actions: <CanvasDesktopActions {...actionProps} />,
@@ -196,10 +209,35 @@ function createCanvasDesktopActions(canvas: Canvas | null, props: CanvasHostRout
   };
 }
 
+function useCanvasHeaderPresentation(canvas: Canvas | null, isMobile: boolean) {
+  const { t } = useTranslation();
+  const title = canvas?.title || t("canvases:canvas");
+  const dataScopeLabel = canvas
+    ? t(
+        canvasDataScope(canvas) === "workspace"
+          ? "canvases:workspaceDataScope"
+          : "canvases:taskDataScope",
+      )
+    : undefined;
+  const mobileTitleSlot =
+    isMobile && dataScopeLabel ? (
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="truncate text-sm font-medium">{title}</span>
+        <span
+          className="shrink-0 text-xs font-normal text-muted-foreground"
+          data-testid="canvas-data-scope"
+        >
+          {dataScopeLabel}
+        </span>
+      </span>
+    ) : undefined;
+  return { title, dataScopeLabel, mobileTitleSlot };
+}
+
 export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
   const { canvas, isMobile, menuOpen, setMenuOpen } = props;
   const { t } = useTranslation();
-  const title = canvas?.title || t("canvases:canvas");
+  const { title, dataScopeLabel, mobileTitleSlot } = useCanvasHeaderPresentation(canvas, isMobile);
   const desktopActions = createCanvasDesktopActions(canvas, props);
   const renameAction = canvas ? (
     <Button
@@ -236,6 +274,7 @@ export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
       setMenuOpen={setMenuOpen}
       onEdit={props.onEdit}
       onPromote={props.onPromote}
+      onEnableWorkspaceData={props.onEnableWorkspaceData}
       onReleases={props.onReleases}
       onShare={props.onShare}
       onRename={props.onRename}
@@ -249,6 +288,8 @@ export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
       canvas={canvas}
       promotionOpen={props.promotionOpen}
       setPromotionOpen={props.setPromotionOpen}
+      workspaceDataOpen={props.workspaceDataOpen}
+      setWorkspaceDataOpen={props.setWorkspaceDataOpen}
       releasesOpen={props.releasesOpen}
       setReleasesOpen={props.setReleasesOpen}
       shareOpen={props.shareOpen}
@@ -265,6 +306,8 @@ export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
       embedded={props.embedded}
       isMobile={isMobile}
       title={title}
+      mobileTitleSlot={mobileTitleSlot}
+      dataScopeLabel={dataScopeLabel}
       menuOpen={menuOpen}
       setMenuOpen={setMenuOpen}
       desktopActions={desktopActions.actions}

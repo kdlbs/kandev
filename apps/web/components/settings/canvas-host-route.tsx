@@ -389,6 +389,21 @@ async function editCanvasFromHost(options: CanvasHostEditOptions): Promise<void>
   }
 }
 
+function useRecordCanvasPresentation(canvas: Canvas | null, userId: string | null) {
+  useEffect(() => {
+    if (!canvas || canvas.scope_kind !== "task" || !canvas.task_id || !userId) return;
+    recordCanvasPresentation(
+      {
+        userId,
+        workspaceId: canvas.workspace_id,
+        taskId: canvas.task_id,
+        canvasId: canvas.id,
+      },
+      "manual",
+    );
+  }, [canvas, userId]);
+}
+
 export function CanvasHostRoute({
   canvasId,
   embedded = false,
@@ -414,23 +429,13 @@ export function CanvasHostRoute({
   const hostCanvases = useCanvasHostCanvases(canvas);
   const [menuOpen, setMenuOpen] = useState(false);
   const [promotionOpen, setPromotionOpen] = useState(false);
+  const [workspaceDataOpen, setWorkspaceDataOpen] = useState(false);
   const [releasesOpen, setReleasesOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [editing, setEditing] = useState(false);
 
-  useEffect(() => {
-    if (!canvas || canvas.scope_kind !== "task" || !canvas.task_id || !presentationUserId) return;
-    recordCanvasPresentation(
-      {
-        userId: presentationUserId,
-        workspaceId: canvas.workspace_id,
-        taskId: canvas.task_id,
-        canvasId: canvas.id,
-      },
-      "manual",
-    );
-  }, [canvas, presentationUserId]);
+  useRecordCanvasPresentation(canvas, presentationUserId);
 
   const edit = () =>
     editCanvasFromHost({
@@ -461,17 +466,23 @@ export function CanvasHostRoute({
       error={error}
       menuOpen={menuOpen}
       promotionOpen={promotionOpen}
+      workspaceDataOpen={workspaceDataOpen}
       releasesOpen={releasesOpen}
       shareOpen={shareOpen}
       renameOpen={renameOpen}
       editing={editing}
       setMenuOpen={setMenuOpen}
       setPromotionOpen={setPromotionOpen}
+      setWorkspaceDataOpen={setWorkspaceDataOpen}
       setReleasesOpen={setReleasesOpen}
       setShareOpen={setShareOpen}
       setRenameOpen={setRenameOpen}
       onEdit={() => void edit()}
       onPromote={() => setPromotionOpen(true)}
+      onEnableWorkspaceData={() => {
+        setMenuOpen(false);
+        setWorkspaceDataOpen(true);
+      }}
       onReleases={() => setReleasesOpen(true)}
       onShare={() => setShareOpen(true)}
       onRename={() => {

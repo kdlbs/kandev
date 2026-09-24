@@ -44,6 +44,7 @@ func RegisterCanvasNotifications(ctx context.Context, eventBus bus.EventBus, hub
 		{events.CanvasReleaseActivated, ws.ActionCanvasReleaseActivated},
 		{events.CanvasReleasePermissionRequired, ws.ActionCanvasReleasePermissionRequired},
 		{events.CanvasPromoted, ws.ActionCanvasPromoted},
+		{events.CanvasWorkspaceDataEnabled, ws.ActionCanvasWorkspaceDataEnabled},
 		{events.CanvasArchived, ws.ActionCanvasArchived},
 		{events.CanvasRestored, ws.ActionCanvasRestored},
 		{events.CanvasRemoved, ws.ActionCanvasRemoved},

@@ -59,11 +59,7 @@ import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
 import { statusSummaryTaskError } from "@/lib/task-status-summary";
-import {
-  hasWorkflowParkingMarker,
-  LaunchQueueStatus,
-  ParkedSessionNote,
-} from "./launch-queue-status";
+import { LaunchQueueStatus } from "./launch-queue-status";
 import { WipQueueStatus } from "./wip-queue-status";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 
@@ -1253,7 +1249,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     >
       {!hideLaunchQueueStatus && <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />}
       {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
-      <ParkedSessionNote visible={hasWorkflowParkingMarker(session?.metadata)} />
       <PanelBody
         padding={false}
         scroll={false}

@@ -460,6 +460,7 @@ func TestCheckReviewWatches_RunsOrphanSweepWhenNoEnabledWatches(t *testing.T) {
 
 	rec := &recordingTaskDeleter{}
 	svc.SetTaskDeleter(rec)
+	svc.SetTaskSessionChecker(&recordingSessionChecker{})
 
 	poller.checkReviewWatches(ctx)
 

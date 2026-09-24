@@ -76,7 +76,7 @@ test.describe("authenticated same-origin canvas runtime", () => {
         true,
       );
 
-      await frame.getByTestId("canvas-fixture-continue").click();
+      await frame.getByTestId("canvas-fixture-continue").dispatchEvent("click");
       await expect(frame.getByTestId("canvas-fixture-message-status")).toHaveText("accepted");
       await expect
         .poll(async () =>

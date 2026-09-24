@@ -1294,7 +1294,6 @@
   "wipQueueConfigure": "Configurar o limite WIP do fluxo de trabalho",
   "wipQueueUnavailable": "Os detalhes do WIP do fluxo de trabalho não estão disponíveis.",
   "wipQueueConfigurationUnavailable": "A ligação para a configuração do fluxo de trabalho não está disponível.",
-  "parkedSessionNote": "Esta sessão está parada para o fluxo de trabalho. Abri-la não a retoma. Envie uma mensagem para continuar aqui.",
   "quorumAwaiting": "A aguardar {{received}} de {{required}} decisões de {{role}}",
   "quorumStuck": "Bloqueado",
   "quorumStuckPendingReevaluation": "Bloqueado: sem sessão ativa para reavaliar esta etapa",

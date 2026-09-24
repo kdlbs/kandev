@@ -8,7 +8,7 @@ import {
   seedTaskCanvas,
 } from "./canvas-fixture";
 
-test("task and workspace transition reads stay inside canvas scope", async ({
+test("workspace transition groups remain available before and after task canvas promotion", async ({
   testPage,
   apiClient,
   backend,
@@ -45,13 +45,16 @@ test("task and workspace transition reads stay inside canvas scope", async ({
           item.to_workflow_step_id === seedData.startStepId,
       ),
     ).toBe(true);
-    const taskScopeGroups = await body.evaluate(
-      async (_, flowId) =>
-        (await fetch(`./_kandev/v1/data/workflows/${encodeURIComponent(flowId)}/transition-groups`))
-          .status,
-      seedData.workflowId,
+    const prePromotionGroups = await body.evaluate(async (_, flowId) => {
+      const response = await fetch(
+        `./_kandev/v1/data/workflows/${encodeURIComponent(flowId)}/transition-groups?limit=200`,
+      );
+      return { status: response.status, body: await response.json() };
+    }, seedData.workflowId);
+    expect(prePromotionGroups.status).toBe(200);
+    expect(prePromotionGroups.body.items.some((item: { count: number }) => item.count > 0)).toBe(
+      true,
     );
-    expect(taskScopeGroups).toBe(403);
     const workspace = await promoteCanvas(apiClient, approved);
     await testPage.goto(canvasHref(workspace.id));
     const groups = await testPage

@@ -53,6 +53,7 @@ type ExecutorRunningWriter interface {
 // Optional only for tests that don't exercise the persistence path.
 func (m *Manager) SetExecutorRunningWriter(w ExecutorRunningWriter) {
 	m.runningWriter = w
+	m.wireKubernetesEnvironmentStore()
 }
 
 // buildRunningFromExecution maps an in-memory execution into the persistence

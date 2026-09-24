@@ -10,8 +10,8 @@ last_updated: 2026-09-10
 # Canvases
 
 Canvases own agent-authored task applications and their promotion to workspace
-applications. The system owns canvas scope, source lineage, release selection,
-editing sessions, discovery, and portable canvas distribution.
+applications. The system owns canvas placement and data scope, source lineage,
+release selection, editing sessions, discovery, and portable canvas distribution.
 
 The Plugins system owns the web-application runtime, permissions,
 Kandev data access, state, events, and package validation. The task system
@@ -20,18 +20,21 @@ remains authoritative for task data and permissions.
 ## Requirements
 
 - [Agent-authored web-app canvases](requirements/agent-authored-web-apps.md)
+- [Task canvas workspace data preview](requirements/task-canvas-workspace-preview.md)
 - [Canvas marketplace and sharing](requirements/marketplace-sharing.md)
 - [Deprecated collaborative canvases](requirements/collaborative-canvases.md)
 
 ## System design
 
 - [Agent-authored web-app canvases](system-design/agent-authored-web-apps.md)
+- [Task canvas workspace data preview](system-design/task-canvas-workspace-preview.md)
 - [Canvas marketplace and sharing](system-design/marketplace-sharing.md)
 - [Superseded collaborative canvases](system-design/collaborative-canvases.md)
 
 ## Related context
 
 - [Runtime and permission fix plan](../../plans/canvas-runtime-permission-fixes/plan.md)
+- [Task canvas workspace data preview plan](../../plans/task-canvas-workspace-preview/plan.md)
 - [Agent MCP discovery guidance](../agents/system-design/mcp-tool-discovery-guidance.md)
 - [MCP discovery and canvas prompt plan](../../plans/mcp-discovery-canvas-prompts/plan.md)
 - [GitHub Copilot App Canvas reference](../../copilot-canvas-reference.md)

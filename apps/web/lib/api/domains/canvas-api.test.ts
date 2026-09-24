@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   archiveCanvas,
   confirmCanvasPromotion,
+  enableCanvasWorkspaceData,
   getCanvasRuntime,
   listTaskCanvases,
   listWorkspaceCanvases,
+  requestCanvasWorkspaceData,
   requestCanvasPromotion,
   type CanvasPromotionPreview,
   type CanvasRuntimeResponse,
@@ -153,7 +155,64 @@ describe("canvas host and lifecycle endpoints", () => {
       }),
     });
   });
+});
 
+describe("workspace data scope endpoint", () => {
+  it("reviews and confirms a task canvas workspace data upgrade", async () => {
+    const preview = {
+      canvas: {
+        id: "canvas-1",
+        plugin_instance_id: "instance-1",
+        plugin_id: "plugin-1",
+        workspace_id: "workspace-1",
+        task_id: "task-1",
+        scope_kind: "task",
+        data_scope_kind: "task",
+        title: "Canvas",
+        status: "active",
+      },
+      active_release_id: "release-3",
+      permission_digest: "digest-3",
+      grant_generation: 9,
+      current_data_scope_kind: "task",
+      target_data_scope_kind: "workspace",
+      permissions: { reads: ["tasks"] },
+    };
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(preview))
+      .mockResolvedValueOnce(jsonResponse({ ...preview.canvas, data_scope_kind: "workspace" }));
+
+    await expect(
+      requestCanvasWorkspaceData("canvas-1", { baseUrl: API_BASE_URL }),
+    ).resolves.toEqual(preview);
+    await enableCanvasWorkspaceData(
+      "canvas-1",
+      {
+        expected_release_id: "release-3",
+        expected_permission_digest: "digest-3",
+        expected_grant_generation: 9,
+      },
+      { baseUrl: API_BASE_URL },
+    );
+
+    expect(fetchSpy.mock.calls[0][0]).toBe(
+      `${API_BASE_URL}/api/v1/canvases/canvas-1/workspace-data-preview`,
+    );
+    expect(fetchSpy.mock.calls[1][0]).toBe(
+      `${API_BASE_URL}/api/v1/canvases/canvas-1/workspace-data`,
+    );
+    expect(fetchSpy.mock.calls[1][1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        expected_release_id: "release-3",
+        expected_permission_digest: "digest-3",
+        expected_grant_generation: 9,
+      }),
+    });
+  });
+});
+
+describe("canvas archive endpoint", () => {
   it("archives with a mutation request and preserves the API response", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ id: "canvas-1", status: "archived" }));
 

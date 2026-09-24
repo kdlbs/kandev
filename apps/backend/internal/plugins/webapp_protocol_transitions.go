@@ -85,7 +85,7 @@ func (s *Service) listWebAppWorkflowTransitionGroups(ctx context.Context, w http
 		writeWebAppError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	if binding.ScopeKind != instances.ScopeWorkspace || binding.WorkspaceID == "" || !host.capabilities.CanRead(resourceTasks) || !host.capabilities.CanRead(resourceWorkflows) {
+	if instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind) != instances.ScopeWorkspace || binding.WorkspaceID == "" || !host.capabilities.CanRead(resourceTasks) || !host.capabilities.CanRead(resourceWorkflows) {
 		writeWebAppError(w, http.StatusForbidden, "plugin_permission_denied")
 		return
 	}

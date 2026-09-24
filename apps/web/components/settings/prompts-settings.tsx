@@ -502,56 +502,58 @@ export function PromptsSettings() {
       onSave={showCreate ? handleCreate : handleUpdate}
       onDiscard={resetForm}
     >
-      <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
-        <Trans i18nKey="settings:promptMentionHelp" values={{ token: PROMPT_MENTION_TOKEN }}>
-          Use <span className="font-medium text-foreground">{PROMPT_MENTION_TOKEN}</span> in the
-          chat input to insert a prompt’s content. Prompts are matched by name and expanded in
-          place.
-        </Trans>
-      </div>
-      <SettingsGroup
-        title={t("settings:promptsCustomHeading")}
-        contentClassName="space-y-6 divide-y-0"
-        action={
-          <Button
-            onClick={startCreate}
-            disabled={isBusy || isEditing || showCreate}
-            className={settingsActionClassName()}
-            data-testid="prompt-create-button"
-          >
-            {t("settings:promptAdd")}
-          </Button>
-        }
-      >
-        {showCreate && (
-          <PromptCreateForm
-            formState={formState}
-            onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
-            onCancel={resetForm}
-            isBusy={isBusy}
-          />
-        )}
-
-        <div className="space-y-3">
-          <PromptListContent
-            promptsLoaded={promptsLoaded}
-            prompts={prompts}
-            editingId={editingId}
-            editingRef={editingRef}
-            formState={formState}
-            onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
-            onStartEditing={startEditing}
-            onOpenDelete={openDeleteDialog}
-            onDeleteCancel={closeDeleteDialog}
-            onDeleteConfirm={confirmDelete}
-            onCancel={resetForm}
-            isBusy={isBusy}
-            showCreate={showCreate}
-            isFinePointer={isFinePointer}
-            deleteTargetId={deleteTarget?.id ?? null}
-          />
+      <div className="space-y-6">
+        <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
+          <Trans i18nKey="settings:promptMentionHelp" values={{ token: PROMPT_MENTION_TOKEN }}>
+            Use <span className="font-medium text-foreground">{PROMPT_MENTION_TOKEN}</span> in the
+            chat input to insert a prompt’s content. Prompts are matched by name and expanded in
+            place.
+          </Trans>
         </div>
-      </SettingsGroup>
+        <SettingsGroup
+          title={t("settings:promptsCustomHeading")}
+          contentClassName="space-y-6 divide-y-0"
+          action={
+            <Button
+              onClick={startCreate}
+              disabled={isBusy || isEditing || showCreate}
+              className={settingsActionClassName()}
+              data-testid="prompt-create-button"
+            >
+              {t("settings:promptAdd")}
+            </Button>
+          }
+        >
+          {showCreate && (
+            <PromptCreateForm
+              formState={formState}
+              onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
+              onCancel={resetForm}
+              isBusy={isBusy}
+            />
+          )}
+
+          <div className="space-y-3">
+            <PromptListContent
+              promptsLoaded={promptsLoaded}
+              prompts={prompts}
+              editingId={editingId}
+              editingRef={editingRef}
+              formState={formState}
+              onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
+              onStartEditing={startEditing}
+              onOpenDelete={openDeleteDialog}
+              onDeleteCancel={closeDeleteDialog}
+              onDeleteConfirm={confirmDelete}
+              onCancel={resetForm}
+              isBusy={isBusy}
+              showCreate={showCreate}
+              isFinePointer={isFinePointer}
+              deleteTargetId={deleteTarget?.id ?? null}
+            />
+          </div>
+        </SettingsGroup>
+      </div>
     </SettingsPageTemplate>
   );
 }
