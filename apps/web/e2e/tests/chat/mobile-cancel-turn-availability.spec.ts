@@ -30,11 +30,13 @@ test.describe.serial("Mobile cancel turn availability", () => {
       seedData,
       "Mobile background cancellation availability",
     );
+    const sessionId = await session.activeChat().getAttribute("data-session-id");
+    if (!sessionId) throw new Error("The active chat panel has no session ID");
 
-    await session.sendMessageViaButton("/detached-background 20s");
+    await session.sendMessageViaButton("/detached-background 60s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 20_000 });
     await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
-    await waitForActiveSessionForegroundActivity(testPage, "background");
+    await waitForActiveSessionForegroundActivity(testPage, "background", sessionId);
 
     const chat = session.activeChat();
     const cancel = chat.getByTestId("cancel-agent-button");
@@ -57,7 +59,7 @@ test.describe.serial("Mobile cancel turn availability", () => {
     });
 
     await cancel.tap();
-    await waitForActiveSessionCancellationPendingOrSettled(testPage);
+    await waitForActiveSessionCancellationPendingOrSettled(testPage, sessionId);
     await expect
       .poll(async () => {
         if (!(await cancel.isVisible().catch(() => false))) return true;
@@ -65,8 +67,8 @@ test.describe.serial("Mobile cancel turn availability", () => {
       })
       .toBe(true);
     await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
-    await waitForActiveSessionCancellationPending(testPage, false);
-    await waitForActiveSessionForegroundActivity(testPage, null);
+    await waitForActiveSessionCancellationPending(testPage, false, sessionId);
+    await waitForActiveSessionForegroundActivity(testPage, null, sessionId, 75_000);
     await expect(cancel).not.toBeVisible({ timeout: 15_000 });
     await assertNoDocumentHorizontalOverflow(testPage, "mobile background cancellation");
   });

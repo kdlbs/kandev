@@ -7,6 +7,8 @@ type RoutineRun = {
   status: string;
 };
 
+type AgentRun = { id: string; reason: string };
+
 async function routineRuns(
   officeApi: { listRoutineRuns(id: string): Promise<Record<string, unknown>> },
   id: string,
@@ -49,6 +51,16 @@ async function waitForAgentIdle(
     .toBe("idle");
 }
 
+async function listAgentRuns(
+  officeApi: { rawRequest: (method: string, path: string) => Promise<Response> },
+  agentId: string,
+): Promise<AgentRun[]> {
+  const response = await officeApi.rawRequest("GET", `/agents/${agentId}/runs?limit=100`);
+  if (!response.ok) return [];
+  const result = (await response.json()) as { runs?: AgentRun[] };
+  return result.runs ?? [];
+}
+
 test.describe("Office taskless routine sessions", () => {
   test("fires a real taskless routine twice without creating task rows", async ({
     officeApi,
@@ -74,6 +86,8 @@ test.describe("Office taskless routine sessions", () => {
     });
     const routineId = routine.id as string;
 
+    const existing = await listAgentRuns(officeApi, officeSeed.agentId);
+    const seen = new Set(existing.map((run) => run.id));
     const sessions: string[] = [];
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       await waitForAgentIdle(officeApi, officeSeed.agentId);
@@ -111,7 +125,8 @@ test.describe("Office taskless routine sessions", () => {
             const result = await officeApi.listRuns(officeSeed.workspaceId);
             observedRuns = (result.runs ?? []) as unknown[];
             const run = (observedRuns as { id: string; causation_id?: string }[]).find(
-              (candidate) => candidate.causation_id === expectedCausationId,
+              (candidate) =>
+                candidate.causation_id === expectedCausationId && !seen.has(candidate.id),
             );
             runId = run?.id ?? "";
             return runId;
@@ -129,6 +144,7 @@ test.describe("Office taskless routine sessions", () => {
             { cause: error },
           );
         });
+      seen.add(runId);
       const detailPath = `/agents/${officeSeed.agentId}/runs/${runId}`;
       await expect
         .poll(

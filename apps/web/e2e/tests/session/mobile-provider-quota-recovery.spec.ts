@@ -77,6 +77,7 @@ test("keeps OpenCode quota recovery touch-safe on mobile", async ({
     recovery.getByTestId("provider-quota-delete-button"),
   ]) {
     await expect(button).toBeVisible();
+    await button.scrollIntoViewIfNeeded();
     await expect(button).toBeInViewport();
     const box = await button.boundingBox();
     expect(box).not.toBeNull();

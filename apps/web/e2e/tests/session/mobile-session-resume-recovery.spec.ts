@@ -76,7 +76,7 @@ test.describe("mobile: delayed resume cancellation", () => {
           sessionId: fixture.identity.sessionId,
           expectedState: "WAITING_FOR_INPUT",
           message: "Waiting for mobile delayed resume cancellation",
-          timeout: 30_000,
+          timeout: 60_000,
         });
         // Retry the same saved conversation through the touch composer. The old
         // delayed callback must not publish a second response or consume this

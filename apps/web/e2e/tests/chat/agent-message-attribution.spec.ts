@@ -230,8 +230,16 @@ test.describe("Cross-task agent message attribution", () => {
       apiClient,
       seedData,
       "Target — slow initial turn",
-      ["e2e:delay(2000)", 'e2e:message("first turn done")'].join("\n"),
+      ["e2e:delay(60000)", 'e2e:message("first turn done")'].join("\n"),
     );
+    const session = await openTask(testPage, target.id);
+    await waitForSessionState(apiClient, {
+      taskId: target.id,
+      sessionId: target.sessionId,
+      expectedState: "RUNNING",
+      message: "The target turn must be running before the sender queues its follow-up",
+      timeout: 30_000,
+    });
 
     await createSenderTaskingTarget(
       apiClient,
@@ -241,11 +249,19 @@ test.describe("Cross-task agent message attribution", () => {
       "queued follow-up",
     );
 
-    const session = await openTask(testPage, target.id);
+    await expect(session.chat.getByTestId("queue-chip")).toContainText("1 queued", {
+      timeout: 30_000,
+    });
+    await waitForSessionState(apiClient, {
+      taskId: target.id,
+      sessionId: target.sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "The target turn must finish before its queued follow-up is delivered",
+      timeout: 90_000,
+    });
 
-    // The cross-task message eventually drains and renders. Bubble shows the
-    // raw prompt only; the kandev-system attribution block is stripped server
-    // side before the API/WS broadcast.
+    // The delivered bubble shows only the prompt; the kandev-system
+    // attribution block is stripped before the API/WS broadcast.
     await expect(session.chat).toContainText("queued follow-up", { timeout: 30_000 });
     await expect(session.chat).not.toContainText("<kandev-system>");
 

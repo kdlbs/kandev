@@ -66,7 +66,6 @@ test.describe("Chat multi-file read links", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 45_000 });
 
     // Each file is its own openable link (FilePathButton renders the bare path as
     // both the title and the button text) — never a single combined link.
