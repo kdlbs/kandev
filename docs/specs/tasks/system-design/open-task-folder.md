@@ -35,7 +35,8 @@ The dropdown trigger requires a session, not a configured editor. With zero
 editors, retain the disabled no-editors row and primary editor button while
 allowing access to the folder row. Disable the folder row using the shared
 folder action's capability/loading state; it must not disable editor entries.
-Provide an accessible dropdown trigger name using existing localized editor copy.
+The dropdown trigger uses the localized `task:editorActions` name, explicitly
+announcing both editor and folder actions.
 
 Close the dropdown before opening the folder picker. Follow
 `WorkspaceActionsMenu` in `file-browser-toolbar.tsx`: queue selection in a ref,

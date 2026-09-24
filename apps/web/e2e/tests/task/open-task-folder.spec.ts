@@ -44,6 +44,7 @@ test("editor dropdown opens the folder without configured editors and recovers f
   await expect(testPage.getByTestId("open-task-folder")).toHaveCount(0);
   await expect(testPage.getByTestId("editors-menu-open")).toBeDisabled();
   const trigger = testPage.getByTestId("editors-menu-list");
+  await expect(trigger).toHaveAccessibleName("Editor and folder actions");
   await expect(trigger).toBeEnabled();
   expect((await trigger.boundingBox())!.height).toBeCloseTo(28, 0);
   await trigger.click();

@@ -2373,5 +2373,6 @@
   "checkoutOptions.credentialsUnsupported": "请使用由 Kandev 管理的 Git 凭据启用高级检出选项。",
   "toolPayloadRemovedAt": "工具详细数据已于 {{date}} 删除。",
   "toolPayloadRemoved": "工具详细数据已删除。",
-  "openTaskSwitcherFor": "打开任务切换器：{{title}}"
+  "openTaskSwitcherFor": "打开任务切换器：{{title}}",
+  "editorActions": "编辑器和文件夹操作"
 }

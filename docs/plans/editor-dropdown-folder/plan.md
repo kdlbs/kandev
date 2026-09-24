@@ -164,3 +164,18 @@ restoration can dismiss a newly opened picker unless opening waits for menu clos
 The original package records an unrelated source-attachment E2E baseline failure;
 this package targets the folder suites. Native window visibility remains outside
 HTTP-stubbed browser evidence.
+
+## PR review remediation (2026-09-24)
+
+Claude's inline finding and summary suggestion identified the editor-only
+accessible name on a menu that also opens folders. The trigger now announces
+"Editor and folder actions" through `task:editorActions` in all six locales and
+the pseudo locale; Traditional Chinese values use the repository converter.
+The new focused regression failed before the change.
+
+Post-fix checks: `pnpm exec vitest run components/task/editors-menu.test.tsx`
+passes 11 tests; changed-file ESLint passes; a fresh managed production build and
+`pnpm e2e:run --host tests/task/open-task-folder.spec.ts` pass all 3 browser tests,
+including the accessible-name assertion. The local full i18n check still reports
+the previously recorded Japanese keys, which are already fixed on current main;
+none of its findings concern the new label.

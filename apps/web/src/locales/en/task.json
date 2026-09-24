@@ -2373,5 +2373,6 @@
   "checkoutOptions.credentialsUnsupported": "Use Kandev-managed Git credentials for advanced checkout options.",
   "toolPayloadRemovedAt": "Tool details removed on {{date}}.",
   "toolPayloadRemoved": "Tool details removed.",
-  "openTaskSwitcherFor": "Open task switcher: {{title}}"
+  "openTaskSwitcherFor": "Open task switcher: {{title}}",
+  "editorActions": "Editor and folder actions"
 }

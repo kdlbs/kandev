@@ -38,6 +38,7 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 }));
 
 const OPEN_FOLDER_LABEL = "Open folder";
+const EDITOR_MENU_TRIGGER_TEST_ID = "editors-menu-list";
 
 function view(sessionId: string | null) {
   return (
@@ -58,7 +59,7 @@ afterEach(cleanup);
 
 // @covers AC-TASKS-OPEN-FOLDER-001.1, AC-TASKS-OPEN-FOLDER-001.2, AC-TASKS-OPEN-FOLDER-001.3
 async function openMenu() {
-  fireEvent.keyDown(screen.getByTestId("editors-menu-list"), { key: "ArrowDown" });
+  fireEvent.keyDown(screen.getByTestId(EDITOR_MENU_TRIGGER_TEST_ID), { key: "ArrowDown" });
   return screen.findByRole("menu");
 }
 async function chooseFolder() {
@@ -70,7 +71,7 @@ async function chooseFolder() {
 describe("task folder action", () => {
   it("opens without any editor configuration", async () => {
     render(view("s1"));
-    expect((screen.getByTestId("editors-menu-list") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId(EDITOR_MENU_TRIGGER_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
     await chooseFolder();
     await waitFor(() =>
       expect(fixtures.openSessionFolder).toHaveBeenCalledWith(
@@ -82,7 +83,7 @@ describe("task folder action", () => {
   });
   it("disables opening without a session", () => {
     render(view(null));
-    expect((screen.getByTestId("editors-menu-list") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId(EDITOR_MENU_TRIGGER_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
   });
   it("sends the only worktree explicitly", async () => {
     fixtures.worktrees = [{ id: "wt-1", repositoryId: "r1", path: "/repo-one", branch: "main" }];
@@ -208,4 +209,12 @@ it("keeps editor launching available when the folder opener is unavailable", asy
   fireEvent.click(screen.getByRole("menuitem", { name: "Test editor" }));
   expect(fixtures.openEditor).toHaveBeenCalledTimes(2);
   expect(fixtures.openSessionFolder).not.toHaveBeenCalled();
+});
+
+// @covers AC-TASKS-OPEN-FOLDER-001.1
+it("announces both editor and folder actions on the dropdown trigger", () => {
+  render(view("s1"));
+  expect(screen.getByRole("button", { name: "Editor and folder actions" })).toBe(
+    screen.getByTestId(EDITOR_MENU_TRIGGER_TEST_ID),
+  );
 });

@@ -2363,5 +2363,6 @@
   "checkoutOptions.credentialsUnsupported": "高度なチェックアウトオプションには、Kandev 管理の Git 認証情報を使って。",
   "toolPayloadRemovedAt": "ツール詳細は {{date}} に削除済み。",
   "toolPayloadRemoved": "ツール詳細は削除済み。",
-  "openTaskSwitcherFor": "タスク切替を開く: {{title}}"
+  "openTaskSwitcherFor": "タスク切替を開く: {{title}}",
+  "editorActions": "エディターとフォルダーの操作"
 }

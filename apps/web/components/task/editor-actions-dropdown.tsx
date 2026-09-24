@@ -36,7 +36,7 @@ export function EditorActionsDropdown({
             variant="outline"
             className="rounded-none border-0 border-l px-2 cursor-pointer focus-visible:ring-inset"
             data-testid="editors-menu-list"
-            aria-label={t("task:openEditor")}
+            aria-label={t("task:editorActions")}
             disabled={!sessionId}
           >
             <IconChevronDown className="h-4 w-4" />
