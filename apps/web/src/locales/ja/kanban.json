@@ -128,5 +128,10 @@
   "boardSort": "ボードの並び順",
   "boardSortCreatedDesc": "新しい順",
   "boardSortPriorityDesc": "優先度順",
-  "priorityFilter": "優先度フィルタ"
+  "priorityFilter": "優先度フィルタ",
+  "bulkSelected_one": "{{count}}件選択中",
+  "bulkSelected_other": "{{count}}件選択中",
+  "bulkActions": "操作",
+  "selectTasks": "タスクを選択",
+  "cancelTaskSelection": "選択をキャンセル"
 }

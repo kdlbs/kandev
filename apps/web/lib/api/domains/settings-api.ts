@@ -347,6 +347,7 @@ export async function createCustomTUIAgent(
     description?: string;
     mcp_strategy?: string;
     protocol?: string;
+    disable_bracketed_paste?: boolean;
   },
   options?: ApiRequestOptions,
 ): Promise<Agent> {

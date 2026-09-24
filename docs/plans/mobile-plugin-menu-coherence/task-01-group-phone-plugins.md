@@ -145,3 +145,12 @@ containment and test host buttons and raw sidebar controls separately.
   The history suite's retry override was temporarily removed for these runs
   and restored when the unsuccessful experiment was removed.
   No production behavior or screenshot changed during this follow-up.
+
+## Subsequent toolbar-selection correction
+
+The [September 24 follow-up](../mobile-plugin-deduplication/plan.md) supersedes
+the Workspace/Task subheadings and simultaneous toolbar rendering described
+here. Phone navigation now selects each plugin's task toolbar when task actions
+exist, while preserving workspace-only controls and independent sidebar actions.
+The follow-up records current regression coverage and seeded screenshots; the
+results above remain the historical September 23 delivery record.

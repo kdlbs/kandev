@@ -38,8 +38,8 @@ Muse Code has no native ACP server, so Kandev runs it through the community
 [`@bex-co/muse-code-acp`](https://github.com/bex-co/muse-code-acp) adapter,
 which is not affiliated with Meta:
 
-- Structured ACP sessions and one-shot inference use
-  `npx --yes --prefer-offline @bex-co/muse-code-acp@<effective-version>`, which
+- Structured ACP sessions and one-shot inference use the managed
+  `@bex-co/muse-code-acp` package at the selected effective version. This
   needs Node.js 22 or later.
 - The adapter drives the native `muse` executable through `muse serve`; CLI
   Passthrough starts `muse` directly.
@@ -67,8 +67,8 @@ pin one model for both, set it there, for example
 
 Pi uses separate executables for its two Kandev modes:
 
-- Structured ACP sessions and one-shot inference use
-  `npx --yes --prefer-offline pi-acp@<effective-version>`.
+- Structured ACP sessions and one-shot inference use the managed `pi-acp`
+  package at the selected effective version.
 - CLI Passthrough starts the globally installed `pi` executable.
 - The Pi install action runs `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
 
@@ -176,6 +176,14 @@ permissions, and session identity. It does not change the npm registry or
 silently select another version. When the retry succeeds, no recovery card is
 shown. When it fails again, Kandev and Office show one **Retry runtime** action
 with collapsed technical details.
+
+Managed `npx` runtimes use a Kandev-owned npm project directory, so an `.npmrc`
+in the task repository does not change the managed runtime's package lookup.
+The task repository remains the command's working directory. User and global npm
+settings still apply, including `min-release-age` and `before` policies. If an
+age policy blocks the selected version, Kandev does not repair the npm cache or
+repeat the lookup online. Wait until the version meets the policy, or select an
+older trusted version, then choose **Retry runtime**.
 
 Do not use `npm cache clean --force` as the normal recovery step. It removes
 unrelated npm data and does not target the stale execution tree. If the

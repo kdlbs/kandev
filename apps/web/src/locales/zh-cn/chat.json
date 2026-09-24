@@ -63,6 +63,8 @@
   "technicalDetails": "技术详情",
   "managedRuntimeNpmTitle": "npm 无法准备运行时",
   "managedRuntimeNpmBody": "Kandev 已刷新软件包数据，并重试了同一运行时一次。",
+  "managedRuntimeNpmPolicyTitle": "npm 阻止了此运行时版本",
+  "managedRuntimeNpmPolicyBody": "请检查 npm 的 min-release-age 或 before 设置。请等待此版本符合条件，或选择较旧版本后重试。",
   "managedRuntimeRetry": "重试运行时",
   "providerQuotaTitle": "{{provider}} 使用额度已达上限",
   "newChatTab": "新建聊天",

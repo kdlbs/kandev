@@ -196,6 +196,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workspaces/:id/tasks/by-external-id", h.httpGetTaskByExternalID)
 	api.DELETE("/workspaces/:id/tasks/by-external-id", h.httpReleaseTaskExternalID)
 	api.GET("/tasks/:id", h.httpGetTask)
+	api.GET("/tasks/:id/archive-source-manifest", h.httpGetArchiveSourceManifest)
 	api.GET("/tasks/:id/context", h.httpGetTaskContext)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.POST("/task-sessions/:id/last-agent-error/dismiss", h.httpDismissLastAgentError)

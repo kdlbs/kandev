@@ -74,6 +74,12 @@ type WorktreeCleanupIdentityProvider interface {
 	CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*worktree.Worktree) (map[string]string, error)
 }
 
+// WorktreeArchiveSourceManifestProvider captures the archive-time source
+// evidence required before an owned checkout can be removed.
+type WorktreeArchiveSourceManifestProvider interface {
+	CaptureArchiveSourceManifests(ctx context.Context, worktrees []*worktree.Worktree) (map[string]worktree.ArchiveSourceManifest, error)
+}
+
 // WorktreeDirtyInspector reports local changes before a task deletion mutates
 // task rows or persists a cleanup job.
 type WorktreeDirtyInspector interface {

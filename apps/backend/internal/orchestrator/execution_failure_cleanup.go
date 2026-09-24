@@ -17,6 +17,13 @@ func (s *Service) cleanupAgentExecutionWithReason(ctx context.Context, execution
 	if executionID == "" {
 		return true
 	}
+	if reason == "agent completed" && s.lspLeases != nil && s.lspLeases.HasActiveLSPLeaseForExecution(executionID) {
+		s.logger.Debug("deferring execution teardown while its language server lease is active",
+			zap.String("execution_id", executionID),
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return false
+	}
 	if !s.claimForcedExecutionCleanup(sessionID, executionID) {
 		s.logger.Debug("skipping duplicate execution teardown",
 			zap.String("execution_id", executionID),
@@ -36,6 +43,9 @@ func (s *Service) cleanupAgentExecutionWithReason(ctx context.Context, execution
 	// Defensive terminal-boundary retirement. Normal lifecycle events run this
 	// first; the repeated forced-cleanup call is idempotent.
 	s.retireExecutionActivityAndPublish(ctx, taskID, sessionID, executionID)
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForExecution(executionID)
+	}
 	if err := s.executor.StopExecution(ctx, executionID, reason, true); err != nil && !agentruntime.IsNotFound(err) {
 		s.logger.Debug("agent execution cleanup after terminal state",
 			zap.String("execution_id", executionID),

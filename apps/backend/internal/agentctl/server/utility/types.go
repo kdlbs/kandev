@@ -144,6 +144,9 @@ const (
 	// ProbeFailureManagedRuntimeNPMResolution means the trusted top-level npm
 	// package failed exact-version resolution with ETARGET.
 	ProbeFailureManagedRuntimeNPMResolution ProbeFailureCode = "managed_runtime_npm_resolution"
+	// ProbeFailureManagedRuntimeNPMPolicy means npm rejected the trusted exact
+	// package version under a date-qualified release policy.
+	ProbeFailureManagedRuntimeNPMPolicy ProbeFailureCode = "managed_runtime_npm_policy"
 )
 
 // ProbeAuthMethod is a single advertised authentication method.

@@ -146,6 +146,9 @@ type TUIConfigDTO struct {
 	// Protocol is the runtime kandev drives the command with ("" = terminal
 	// passthrough, "acp" = ACP on stdin/stdout).
 	Protocol string `json:"protocol,omitempty"`
+	// DisableBracketedPaste selects paced unframed delivery for terminal TUIs
+	// that do not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool `json:"disable_bracketed_paste,omitempty"`
 }
 
 type AgentDTO struct {

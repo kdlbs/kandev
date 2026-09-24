@@ -128,5 +128,10 @@
   "boardSort": "看板排序",
   "boardSortCreatedDesc": "最新優先",
   "boardSortPriorityDesc": "優先級",
-  "priorityFilter": "優先級篩選"
+  "priorityFilter": "優先級篩選",
+  "bulkSelected_other": "已選擇 {{count}} 個",
+  "bulkActions": "操作",
+  "selectTasks": "選擇任務",
+  "cancelTaskSelection": "取消選擇",
+  "bulkSelected_one": "已選擇 {{count}} 個"
 }
