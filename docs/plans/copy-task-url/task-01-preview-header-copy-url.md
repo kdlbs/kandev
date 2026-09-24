@@ -90,3 +90,8 @@ acceptance_criteria:
   pointer only. The tighter, binding coarse-pointer bound (`g <= 34px`) is
   not exercised by that E2E project and rests on the hand derivation alone
   (see the system design's "Header layout" section).
+- **Superseded arithmetic:** the `g <= 74px`/`34px` bounds above were wrong
+  at a coarse pointer (they omitted the step indicator's own floor and the
+  task actions trigger). The reconciled budget and the pointer-aware minimum
+  panel width are implemented by
+  [task-02](task-02-pointer-aware-panel-minimum.md).

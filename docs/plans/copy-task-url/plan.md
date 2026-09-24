@@ -2,6 +2,7 @@
 created: 2026-09-21
 status: draft
 requirements:
+  - REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001
   - REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002
   - REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003
 system_design:
@@ -79,12 +80,9 @@ backend or store changes.
   that budget.
 - `AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.2` amended from "both panel
   controls" to "every panel control".
-- `AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4` amended: the inter-element-gap
-  bound moves from 18px/19px to `g <= 74px`/`75px` at a fine pointer and
-  `g <= 34px`/`35px` at a coarse pointer (the coarse-pointer bound is the
-  tighter of the two and therefore binding), and the prose is reframed —
-  with three controls, the title-floor override is the routinely-engaged
-  path rather than a theoretical edge case.
+- `AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4` and the new `002.7`: see
+  "Touch-floor reconciliation" below. The earlier `g <= 74px`/`34px` bounds
+  are superseded.
 - "Out of scope" copy bullet narrowed to REQ-001/-002, since REQ-003
   introduces its own new copy.
 
@@ -92,19 +90,36 @@ backend or store changes.
 
 - `REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003` added to the requirement
   mapping and to Components and responsibilities (`CopyTaskUrlButton`).
-- "Header layout" arithmetic recomputed for the three panel controls, whose
-  widths are NOT uniform (the close control stays unstyled `size="icon"`,
-  28px at a fine pointer, while Copy and Maximize add `h-8 w-8`, 32px; all
-  three converge on 44px under `[@media(pointer:coarse)]:`): content box
-  262px (inline)/263px (floating) unchanged; controls-plus-gaps `32+32+28+8`
-  = 100px fine / `44*3+8` = 140px coarse; remainder 162px (was 194px) fine
-  inline / 163px floating, 122px coarse inline / 123px floating; bound
-  `g <= 74px` (was 18px) fine inline / `75px` floating, `g <= 34px` (was
-  19px) coarse inline / `35px` floating — the coarse-pointer inline bound,
-  `g <= 34px`, is the tightest of the four and therefore binding across both
-  layouts and both pointer modes.
+- "Header layout" rewritten with measured terms, the budget, and the
+  pointer-aware minimum; see "Touch-floor reconciliation" below.
 - Test-strategy E2E bullet updated to assert all three panel controls, not
   two.
+
+### Touch-floor reconciliation (wave 2)
+
+The third control broke two floors at the old 300px minimum. At a coarse
+pointer the cluster (160px) and the 88px title floor left 14px for a step
+indicator whose AC-001.17 hit area is 44px. At a fine pointer the cluster
+(120px) left 54px, below a two-digit count's 67.4px. The spec pair now:
+
+- Defines the control cluster (including the task actions trigger), the
+  pointer mode, the minimum panel width, and the indicator floor.
+- AC-001.17: the 44px applies at every panel width.
+- AC-002.1 to .3: hold at the minimum panel width for the current pointer mode.
+- AC-002.4: the indicator never shrinks below its floor; only the step name
+  truncates. Cluster + 88px title + floor fit for up to 99 steps with gaps of
+  6px or less.
+- AC-002.7 (new): minimum 320px fine, 380px coarse; rendered width is the larger
+  of the chosen width and the live minimum; storage keeps the chosen width
+  (floor 320px); the resize drag and the inline/floating choice follow it.
+- Decision: raise the minimum per pointer mode. Rejected alternatives: exempting
+  the 44px floor, a title below 88px, and a narrow-width overflow menu. Cost:
+  at most 80px of board width at a coarse pointer.
+
+Budget: fine `120 + 88 + 68 = 276`, so `W >= 314 + g`; coarse
+`160 + 88 + 88 = 336`, so `W >= 374 + g`. At 320px and 380px, `g <= 6px`
+inline and `g <= 7px` floating. Implemented by
+[task-02](task-02-pointer-aware-panel-minimum.md).
 
 ---
 
@@ -127,16 +142,34 @@ backend or store changes.
 
 ## E2E Tests
 
-- **Scenario:** the existing "keeps the header a single row at the panel's
-  minimum width" test (`preview-workflow-step-navigation.spec.ts`) is
-  extended to assert the copy-task-link control is visible, enabled, shares
-  the header row's vertical center with the other controls, and sits before
-  the open-full-page control — empirically re-proving the title floor holds
-  at the 300px minimum with three fixed-width controls now in the budget, at
-  this desktop-chromium project's fine pointer (`g <= 74px`). The tighter
-  `g <= 34px` coarse-pointer/tablet bound is not exercised by this project
-  and remains derivation-only.
+- **Scenario (wave 1, done):** the existing "keeps the header a single row"
+  containment test asserts the copy-task-link control's visibility, enabled
+  state, row alignment, and position before the open-full-page control.
+- **Scenario (wave 2):** per the system design's Test strategy, the same
+  containment test is extended with a 10+ step workflow, a long step name, and
+  the task actions trigger at the 320px fine minimum; a new test runs the same
+  setup and assertions on `tabletTestPage` (coarse pointer) at 380px, adding the
+  indicator's 44x44 floor.
   **File:** `apps/web/e2e/tests/kanban/preview-workflow-step-navigation.spec.ts`.
+
+## ASCII UI preview
+
+`UI-02: Preview header at the minimum panel width`, from the kanban board with
+a task previewed. Before: at 300px coarse, the indicator is squeezed to 14px.
+After: the panel minimum grows so every floor fits. The structure is required;
+the spacing is illustrative. Phones render no preview (below 768px).
+
+```text
+Fine pointer, panel 320px (was 300px):
+| Fix login redi... | * Rev.. 12/15 | ... [copy] [open] [x] |
+  title >= 88px      indicator floor   control cluster 120px
+
+Coarse pointer, panel 380px (was 300px):
+| Fix login redi... | * Rev.. 12/15 v | ...  [copy] [open] [x] |
+  title >= 88px      indicator >= 44x44  control cluster 160px
+```
+
+Maps to AC-001.17, AC-002.1 to .4 and .7; checked by the task-02 E2E tests.
 
 ## Implementation Waves
 
@@ -145,6 +178,9 @@ Small feature — sequential, no parallel candidates.
 ```text
 Wave 1:
 - [x] [task-01-preview-header-copy-url](task-01-preview-header-copy-url.md) — component + wiring + unit tests (33/33 pass across 2 files, 5 tests in the new describe block) + spec/system-design amendments + extended E2E containment test (passing), committed.
+
+Wave 2:
+- [ ] [task-02-pointer-aware-panel-minimum](task-02-pointer-aware-panel-minimum.md) — pointer-aware minimum panel width (320/380px), indicator floor, unit + component tests, fine and coarse E2E containment.
 ```
 
 ## Open Questions

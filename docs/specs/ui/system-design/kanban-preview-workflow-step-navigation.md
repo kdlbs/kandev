@@ -99,7 +99,10 @@ contract, a store field, or a persisted preference.
 - `KanbanWithPreview` resolves the previewed task's own workflow step list and
   passes it, the task id, the workflow id, and the current step id down to
   `TaskPreviewPanel`. It also owns the move-failure state for the panel, cleared
-  on a new move and on a task change.
+  on a new move and on a task change. It also resolves the rendered panel width
+  from the user's chosen width and the live pointer mode
+  (REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002, see
+  [Header layout](#pointer-aware-minimum-panel-width)).
 
 ## Step resolution
 
@@ -193,138 +196,148 @@ order than a first render of the same steps.
 
 ## Header layout
 
-The preview header stays one flex row: title, step indicator, panel controls.
+The preview header stays one flex row: title, step indicator, control cluster.
+Four widths bound it: the control cluster, the 88px title floor, the step
+indicator's floor, and the minimum panel width. Earlier revisions of this
+section let the indicator shrink to 0 to protect the title. With the
+copy-task-link control added, that broke the indicator's 44px touch floor
+(AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.17). This revision gives every floor
+a fixed size and derives the minimum panel width from their sum, per pointer
+mode, so no floor yields to another at any width the panel can take.
 
-- The panel controls do not shrink. There are three of them:
-  `CopyTaskUrlButton`, the open-full-page control, and the close control, in
-  the header's `flex items-center gap-1` control cluster
-  (REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003). Their widths are NOT uniform,
-  and differ by pointer mode, because `@kandev/ui`'s `Button` resolves
-  `size="icon"` to `CONTROL_SIZING.icon` = `size-7 max-md:size-11
-  [@media(pointer:coarse)]:size-11` (`control-sizing.tsx`) before any
-  per-instance className is merged, and tailwind-merge only overrides classes
-  in the same modifier scope: an unprefixed `h-8 w-8` on an instance replaces
-  the unprefixed `size-7`, but never the `max-md:` or `pointer:coarse`
-  variants, which survive on every control regardless of that instance's own
-  className. Concretely: `CopyTaskUrlButton` and the open-full-page control
-  both add `h-8 w-8`, so they render at 32px at a fine pointer; the close
-  control adds no size override, so it stays at the unmodified `size-7`, 28px.
-  All three converge on 44px (`size-11`) under `[@media(pointer:coarse)]:` —
-  and, separately, under `max-md:` (viewport width < 768px) — regardless of
-  which controls carry `h-8 w-8`. When the previewed task offers actions,
-  `TaskActionsMenuTrigger` also renders in that same cluster, ahead of the
-  three panel controls; it is a `p-1 -m-1` icon button whose padding and
-  negative margin cancel, so it claims roughly its 16px icon's worth of row
-  space rather than a full control width, and this section does not fold it
-  into the fixed-width budget below. That omission predates this revision —
-  the budget below never accounted for the trigger — and this revision only
-  makes it explicit instead of leaving the cluster's true width silently
-  under-stated.
-- The preview itself only renders at desktop and tablet widths:
-  `KanbanWithPreview` short-circuits to a full-width `KanbanBoard` when
-  `isMobile` (viewport width < 768px), so the `max-md:size-11` variant above
-  is dead code in this surface — never reachable, because the header this
-  section describes does not exist below 768px. The `[@media(pointer:coarse)]`
-  variant IS reachable: a tablet in the 768–1023px range with a coarse
-  (touch) pointer renders this header, still at desktop/tablet width, with
-  every panel control at 44px. Both pointer modes below are therefore live
-  cases this section must bound, not a fine-pointer default with a
-  theoretical alternate.
-- The step indicator sits in a shrinkable container with an upper bound on the
-  share of the row it can claim, so a long step name cannot crowd the title out
-  of the row. That bound is half of the row's width remaining after BOTH the
-  panel controls and the row's inter-element gaps take their fixed width
-  (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4). Both subtractions are load
-  bearing, and so is the base width they are subtracted from; the next bullet
-  derives all three and records why.
-- The arithmetic at the 300px panel minimum, with `g` the total of the row's
-  inter-element gaps. The 300px is the width of the panel's OUTER container, not
-  the header's content box, and several terms sit between the two. Enumerated in
-  order for the inline layout: that container carries `border-l` (1px); it holds
-  the resize handle (`w-1`, 4px, non-shrinking) as a flex sibling before the
-  panel; the panel's own root carries `border-l` (1px); and the header row adds
-  `px-4` on both sides (32px). Box sizing is `border-box` throughout, so each
-  border is inside the width it is measured against. The header's content box is
-  therefore `300 - 1 - 4 - 1 - 32` = **262px**, unchanged by this revision. The
-  three panel controls plus their own two `gap-1` separators (8px) take, at a
-  fine pointer, `32 + 32 + 28 + 8` = **100px**, leaving **162px**; at a coarse
-  pointer, `44 * 3 + 8` = **140px**, leaving **122px**.
-- With two controls (before `CopyTaskUrlButton` existed), the fine-pointer
-  remainder let the indicator's half-share cap and the 88px title floor
-  (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3) both hold at once, without the
-  cap ever needing to yield. With three controls, neither pointer mode's
-  remainder is large enough for that: `(162 - g) / 2` tops out at 81px fine,
-  `(122 - g) / 2` tops out at 61px coarse, both below the 88px floor for
-  every `g >= 0`. **The cap and the floor now conflict whenever the step name
-  is long enough to want its full cap, at every gap value and both pointer
-  modes, not only past some threshold.** The title floor still holds, but
-  only because the AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4 override is a
-  real, load-bearing layout mechanism here and not merely a theoretical
-  fallback: the title's `min-w-[88px]` is a hard CSS floor, the step
-  indicator's wrapper carries `min-w-0` (it can shrink below its cap, down to
-  0), and flexbox resolves that conflict by giving the title its floor first
-  and letting the indicator absorb the rest. The bound the header must
-  respect is therefore the simpler one the floor alone needs, evaluated at
-  each pointer mode's own remainder: `162 - g >= 88` fine (`g <= 74px`) and
-  `122 - g >= 88` coarse (`g <= 34px`). The coarse-pointer bound is the
-  tighter of the two and therefore the one that governs: **`g <= 34px`**. It
-  remains generous in practice: the header carries no gap class today, so
-  `g = 0`, and the title is guaranteed at least 88px whenever the indicator's
-  content wants more than its share, up to the full remainder (122px coarse,
-  162px fine) when the indicator is short, empty, or absent.
-- Every term in that derivation is named on purpose, including which pointer
-  mode it is evaluated at. Three earlier drafts of this section each stated a
-  bound computed from premises they had not inspected: the first omitted the
-  inter-element gaps; the second took the header's base width to be the
-  300px minimum less only its own padding, missing the container border, the
-  resize handle and the panel border between them; the third — this
-  revision's own first pass, adding `CopyTaskUrlButton` — assumed all three
-  panel controls render at a uniform 32px, when the close control is
-  unstyled `size="icon"` (28px at a fine pointer) and every control's
-  coarse-pointer variant survives its own `h-8 w-8` override regardless. All
-  three produced a bound that looked safe and was not. A bound whose terms
-  are not enumerated, including the pointer mode it holds for, cannot be
-  re-checked when the layout around it changes, so the enumeration is part
-  of the contract rather than commentary on it.
-- The two layouts differ by one pixel at the same panel width. The floating
-  layout's outer container has no `border-l`, so its header content box is
-  263px, one wider than the inline layout at every step of the arithmetic
-  above: 163px fine-pointer remainder (`g <= 75px`) and 123px coarse-pointer
-  remainder (`g <= 35px`). The inline layout's `g <= 34px` is therefore still
-  the binding case across both layouts and both pointer modes: a header
-  satisfying it satisfies the floating layout, and the fine-pointer bound, by
-  construction.
-- When a row cannot satisfy both bounds — which is now the steady state at the
-  300px minimum whenever the step name wants its full cap, not an edge case
-  reached only past some threshold — the title floor wins and the indicator
-  shrinks below its cap. The cap is a maximum, never a reservation, so
-  yielding is always available to it; the floor is a minimum and has nowhere
-  to yield to. The two bounds are stated separately because the cap governs at
-  every width while the floor is what an assertion at the minimum width
-  checks.
-- The cap is a share of the width remaining after the controls, NOT a percentage
-  of the whole row. A plain `max-width: 50%` on the indicator would resolve
-  against the row's full 262px content box and yield 131px, which is not this
-  bound. Expressing it takes a nested shrinkable group holding the title and the
-  indicator, or an equivalent that excludes the controls from the percentage
-  basis. Relatedly, the header is `justify-between` with two children today; a
-  third child changes how free space is distributed, so the row's alignment is
-  part of what the containment assertions must cover rather than something that
-  survives the change untouched. Free space goes to the title, which is the
-  shrinkable and growable element: the step indicator sits adjacent to the panel
-  controls at the end of the row rather than floating between the two, so a
-  short title does not leave the indicator stranded mid-row and the indicator's
-  position does not move as the title's length changes.
-- The title stays a shrinkable, truncating element with a minimum width of 88px.
-- Both the title and the step name truncate with an ellipsis. The position count
-  and the current-step marker do not shrink, so the count stays readable while
-  the name truncates.
-- The indicator's accessible name carries step name, number, and total, so
-  truncation costs no information.
+### Terms, measured
 
-The narrow bound is the panel's 300px minimum width in the inline layout, which
-is the narrower of the two by the pixel derived above. The header must be proven
-there, not only at the 500px default and not only in the floating layout.
+Each number is read from a class or measured in Chromium with the built
+stylesheet and the app's Figtree font. The list is part of the contract: an
+unlisted term cannot be re-checked when the layout changes.
+
+- **Header content box.** Inline layout: the panel's outer container carries
+  `border-l` (1px), holds the resize handle (`w-1`, 4px, non-shrinking) before
+  the panel, the panel root carries `border-l` (1px), and the header row adds
+  `px-4` (32px). Box sizing is `border-box` throughout. So the content box is
+  `W - 38` for an outer width `W`. The floating layout has no outer
+  `border-l`, so its content box is `W - 37`, one pixel wider. The inline
+  layout is therefore the binding case.
+- **Control widths.** `@kandev/ui`'s `Button` resolves `size="icon"` to
+  `size-7 max-md:size-11 [@media(pointer:coarse)]:size-11`
+  (`control-sizing.tsx`). tailwind-merge overrides only classes in the same
+  variant scope, so an instance's unprefixed `h-8 w-8` replaces `size-7` but
+  never the `pointer:coarse` variant. The built stylesheet emits that variant
+  after `.h-8` and `.w-8` at equal specificity, so it wins at a coarse pointer.
+  At a fine pointer, `CopyTaskUrlButton` and the open-full-page control render
+  at 32px and the close control at 28px. At a coarse pointer all three render at
+  44px. The `max-md:` variant is unreachable here, because `KanbanWithPreview`
+  renders no preview below 768px.
+- **Task actions menu trigger.** A raw `button` with `p-1 -m-1` around a 16px
+  icon. The padding and negative margin cancel in layout, so it occupies 16px
+  of row width at both pointer modes. It is counted in the budget, because it
+  renders whenever the task offers actions, which is the common case.
+- **Control cluster.** `flex items-center gap-1`, so one 4px gap between each
+  pair of adjacent children. With the trigger present: fine
+  `16 + 32 + 32 + 28 + 3 * 4` = **120px**, coarse `16 + 44 * 3 + 3 * 4` =
+  **160px**. Without the trigger: 100px fine, 140px coarse. The budget uses
+  the larger figures.
+- **Title floor.** `min-w-[88px]` on the `h2`: **88px**
+  (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3).
+- **Indicator floor.** `CompactWorkflowTrigger` is `px-2` (16px) with
+  `gap-1.5` (6px) between its children: the marker group (8px `h-2 w-2`
+  marker, a 6px gap, and the step name span, which truncates to 0), the
+  position count (`text-[11px] tabular-nums`, not shrinking), and at a coarse
+  pointer the 14px disclosure cue. Measured: the count is 17.4px for one digit
+  on each side (`3/5`) and 31.4px for two (`12/15`). The indicator floor is
+  therefore 53.4px fine and 73.4px coarse for workflows of at most 9 steps,
+  and 67.4px fine and 87.4px coarse for 10 to 99 steps. A single-step
+  workflow omits the count, which gives 30px fine and 50px coarse. The budget
+  takes the 10-to-99-step ceiling, rounded up: **68px fine, 88px coarse**.
+  Every coarse value is at least 44px, so the indicator's content already
+  satisfies AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.17. The height comes from
+  the trigger's existing `min-h-11`.
+- **Gaps.** `g` is the total of the header row's own inter-element gaps,
+  between the title, the indicator, and the control cluster. The header
+  carries no gap class today, so `g = 0`.
+
+### The budget
+
+Required content width = cluster + title floor + indicator floor + `g`:
+
+- Fine: `120 + 88 + 68 + g` = `276 + g`. Inline outer width `>= 314 + g`.
+- Coarse: `160 + 88 + 88 + g` = `336 + g`. Inline outer width `>= 374 + g`.
+
+The minimum panel widths in AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.7 are
+320px fine (content box 282px) and 380px coarse (content box 342px). Each
+leaves 6px of slack, so the header satisfies every floor while **`g <= 6px`**
+in the inline layout and `g <= 7px` in the floating layout. That is the bound
+AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4 names. Both pointer modes bind at
+the same `g`, by choice of the two minimums rather than by coincidence.
+
+At the old 300px minimum the same sums fail. Coarse: content box 262px, and
+`160 + 88` leaves 14px for an indicator whose floor is 50px to 88px, so the
+indicator's hit area falls below 44px. Fine: `120 + 88` leaves 54px, enough
+for a one-digit count (53.4px) but not a two-digit one (67.4px), so the
+count's non-shrinking box overflows the indicator. Before the copy-task-link
+control existed, 300px held at a fine pointer and kept a 44px hit area at a
+coarse pointer. Both failures are caused by this requirement's third control,
+which is why this requirement also fixes them.
+
+Three-digit counts (100 or more steps) are out of scope, per the requirement.
+
+### Mechanism
+
+- **The indicator does not shrink below its floor.** Today the preview's
+  indicator wrapper (`min-w-0 max-w-[50%] shrink [&>button]:w-full`) and the
+  trigger (`min-w-0`) can both shrink to 0, which lets the trigger's
+  non-shrinking children overflow its box. The preview's wrapper enforces the
+  floor from the preview side: it gives the trigger `min-width: min-content`
+  (for example `[&>button]:min-w-min`, which outranks the trigger's own
+  `min-w-0` by selector specificity) and lets its own width fall back to the
+  trigger's min-content instead of 0. Because the step name span keeps
+  `min-w-0 truncate`, the min-content is exactly the indicator floor. The
+  shared trigger's own default classes stay unchanged, so the task top bar
+  keeps its current presentation, per the requirement's Out of scope.
+- **The cap stays a share of the remainder.** The indicator's half-share cap is
+  half of the row's content width after the control cluster and `g`, not 50%
+  of the whole row. The nested shrinkable group holding the title and the
+  indicator is what excludes the cluster from the percentage basis. A plain
+  `max-width: 50%` on the indicator would resolve against the full content box
+  and give a different bound. When the cap and the title floor conflict, the
+  title's `min-w-[88px]` wins and the indicator shrinks below its cap, down to
+  its floor and never past it. At the minimum panel width, both floors fit by
+  construction of the budget above.
+- **Free space goes to the title.** The title is the shrinkable and growable
+  element. The indicator sits next to the control cluster at the end of the
+  row, so a short title does not leave it mid-row and its position does not
+  move as the title's length changes.
+- **Truncation.** The title and the step name truncate with an ellipsis. The
+  marker, the position count, and the disclosure cue do not shrink. The
+  indicator's accessible name carries the step name, number, and total, so
+  truncation loses no information.
+
+### Pointer-aware minimum panel width
+
+- `PREVIEW_PANEL` (`lib/settings/constants.ts`) sets `MIN_WIDTH_PX` to 320 and
+  adds `COARSE_MIN_WIDTH_PX: 380`. `MIN_WIDTH_PX` stays the storage floor:
+  `useKanbanPreview` keeps clamping the chosen width to it, both when restoring
+  from `kandev.kanban.preview.width` and in `updatePreviewWidth`. So a stored
+  300px, or the E2E seed of `1`, reads as 320px, and the persisted value is
+  always the chosen width, never a pointer-adjusted one.
+- One pure helper computes the rendered width: `max(chosenWidthPx,
+  isFinePointer ? MIN_WIDTH_PX : COARSE_MIN_WIDTH_PX)`. It lives next to the
+  constants so it has one owner and a unit test.
+  `KanbanWithPreview` reads `isFinePointer` from `useResponsiveBreakpoint`,
+  which already tracks pointer precision live. It passes the rendered width
+  to `useKanbanLayout` (the floating-versus-inline decision), to both
+  layouts' `width` style, and to the resize handler's start width. A pointer
+  change re-renders through the hook's subscription, so no reload is needed
+  and no effect writes the rendered width back to state.
+- The resize handler clamps the width it reports to the rendered minimum in
+  effect during the drag before calling `updatePreviewWidth`. The handle
+  accepts mouse input only, so in practice that is the fine minimum.
+- The 500px default and the 95vw maximum are unchanged; at 768px, the
+  narrowest viewport with a preview, 95vw is 729px.
+
+The binding layout is the inline layout at each pointer mode's minimum panel
+width. The header must be proven there at both pointer modes, not only at the
+500px default and not only in the floating layout.
 
 ## Control flow
 
@@ -461,22 +474,53 @@ passes against the uncorrected marker: it is a false negative for this
 correction, not coverage of it. The correction lands in code the task top bar
 renders in production, so an untested change here regresses two surfaces.
 
+Unit tests cover the rendered-width helper: a chosen width below, at, and above
+each pointer mode's minimum; the same chosen width under both pointer modes, to
+show a pointer change re-derives the rendered width without changing the chosen
+one; and `useKanbanPreview` reading a stored 300px, and a stored 1, as 320px.
+A component test renders `KanbanWithPreview` with a mocked
+`useResponsiveBreakpoint` and a stored 320px width. It flips `isFinePointer` and
+asserts the panel's `width` style moves from 320px to 380px and back, with the
+stored value untouched. This is the only practical coverage of a live pointer
+change, because Playwright cannot switch a page's pointer media mid-test.
+
 Desktop E2E covers the motivating scenario end to end: hide a step's column
 through the board column visibility filter, open the preview on a task, open the
 disclosure, confirm the hidden step is still listed, move the task to it, and
-assert the task's step through the API. A second scenario resizes the preview to
-its minimum width **in the inline layout**, with a step name long enough to drive
-the indicator to its cap, and asserts single-row containment, every panel control
-(copy-task-link, open-full-page, close) visible and clickable, and a title of at least the 88px
-AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3 requires — the literal floor, not
-merely a non-zero width, because a non-zero assertion passes on a one-pixel
-title and would leave the containment budget unproven at exactly the width it
-was written for. The inline layout is specified because it is the binding case:
-its header content box at the 300px minimum is 262px against the floating
-layout's 263px, so a title floor proven there holds for both, while one proven
-only in the floating layout does not. A third asserts the two-stage Escape.
+assert the task's step through the API. A third asserts the two-stage Escape.
 
-Tablet E2E reuses the existing touch-drawer path against the preview indicator.
+Two E2E scenarios prove the header budget at its binding width, one per pointer
+mode. They share one setup and one set of assertions, so they differ only in
+the page fixture:
+
+- **Setup.** Add workflow steps until the task's own workflow has at least 10
+  steps, so the position count has two digits, which is the widest count the
+  budget covers. Put the task on a step whose name is long enough to drive the
+  indicator to its cap, and make sure the task offers actions, so the task
+  actions menu trigger renders and the full control cluster is in play. Seed
+  `kandev.kanban.preview.width` with `1` so the panel renders at exactly its
+  minimum without a fragile drag.
+- **Fine pointer** (`testPage`, desktop chromium at 1400x900, inline layout).
+  The existing containment test is extended with this setup.
+- **Coarse pointer** (`tabletTestPage`, 900x900 with `hasTouch`, which is the
+  only fixture that reports a coarse pointer). This is a new test. No existing
+  test combines a coarse pointer with the minimum panel width. Record in the
+  work order whether the panel rendered inline or floating at this viewport.
+  Both must satisfy the budget, and the inline layout is the tighter of the two
+  by one pixel.
+- **Assertions, both pointer modes.** The panel's outer width equals the
+  pointer mode's minimum (320px or 380px, within 1px). The header is a single
+  row: every header element shares one vertical center within 4px. The title
+  is at least 88px wide: the literal floor, because a non-zero assertion passes
+  on a one-pixel title. Every control-cluster element is visible, enabled, and
+  inside the panel's box. The header has no horizontal scroll
+  (`scrollWidth - clientWidth <= 1`). The step indicator's box contains the
+  boxes of its marker and position count (and, at a coarse pointer, its
+  disclosure cue), which proves the floor holds rather than overflowing. The
+  indicator's right edge does not pass the cluster's left edge. At a coarse
+  pointer only, the indicator is at least 44px wide and 44px tall.
+
+The existing tablet touch-drawer E2E stays.
 
 ## Related decisions
 
