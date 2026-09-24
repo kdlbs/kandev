@@ -274,12 +274,13 @@ At the old 300px minimum the same sums fail. Coarse: content box 262px, and
 `160 + 88` leaves 14px for an indicator whose floor is 50px to 88px, so the
 indicator's hit area falls below 44px. Fine: `120 + 88` leaves 54px, enough
 for a one-digit count (53.4px) but not a two-digit one (67.4px), so the
-count's non-shrinking box overflows the indicator. Before the copy-task-link
-control existed, 300px held at a fine pointer and kept a 44px hit area at a
-coarse pointer. Both failures are caused by this requirement's third control,
-which is why this requirement also fixes them.
+count's non-shrinking box overflows the indicator. Both failures are caused by
+this requirement's third control, which is why this requirement fixes them.
 
 Three-digit counts (100 or more steps) are out of scope, per the requirement.
+Their indicator floor (about 81.4px fine, 101.4px coarse) passes the 74px and
+94px left beside the 88px title by 7.4px, so the `min-w-0` group overflows onto
+the control cluster, not into a second row.
 
 ### Mechanism
 
@@ -502,14 +503,12 @@ the page fixture:
   minimum without a fragile drag.
 - **Fine pointer** (`testPage`, desktop chromium at 1400x900, inline layout).
   The existing containment test is extended with this setup.
-- **Coarse pointer** (`tabletTestPage`, 900x900 with `hasTouch`, which is the
-  only fixture that reports a coarse pointer). This is a new test. No existing
-  test combines a coarse pointer with the minimum panel width. Record in the
-  work order whether the panel rendered inline or floating at this viewport.
-  Both must satisfy the budget, and the inline layout is the tighter of the two
-  by one pixel.
-- **Assertions, both pointer modes.** The panel's outer width equals the
-  pointer mode's minimum (320px or 380px, within 1px). The header is a single
+- **Coarse pointer** (`coarseDesktopTestPage`, 1280x900, `hasTouch`). A new
+  test. Its board container of about 1024px keeps the 380px panel inline, the
+  binding layout; `tabletTestPage` would float it.
+- **Assertions, both pointer modes.** The panel is inline (no floating
+  backdrop). Its outer width equals the pointer mode's minimum (320px or
+  380px, within 1px). The header is a single
   row: every header element shares one vertical center within 4px. The title
   is at least 88px wide: the literal floor, because a non-zero assertion passes
   on a one-pixel title. Every control-cluster element is visible, enabled, and
@@ -517,8 +516,11 @@ the page fixture:
   (`scrollWidth - clientWidth <= 1`). The step indicator's box contains the
   boxes of its marker and position count (and, at a coarse pointer, its
   disclosure cue), which proves the floor holds rather than overflowing. The
-  indicator's right edge does not pass the cluster's left edge. At a coarse
-  pointer only, the indicator is at least 44px wide and 44px tall.
+  indicator's right edge does not pass the cluster's left edge. The indicator
+  is at most half the title-and-indicator group's width plus 1px, the
+  AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4 cap (about 91px coarse, where it
+  binds). At a coarse pointer only, the indicator is
+  at least 44px wide and 44px tall.
 
 The existing tablet touch-drawer E2E stays.
 

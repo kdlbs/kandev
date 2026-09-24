@@ -320,9 +320,10 @@ previewed task's link from the preview header without opening the full page.
 - Any change to what entering a step triggers. Step `on_enter` actions,
   including agent auto-start, behave exactly as they do for a board drag or a
   task top bar move.
-- Workflows of 100 or more steps: the header budget covers two-digit counts
-  only, so AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3 and 002.5 are not
-  guaranteed at the minimum panel width for them.
+- Workflows of 100 or more steps: their wider indicator floor overflows onto
+  the control cluster at the minimum panel width, so
+  AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.2 and the fit clause of 002.4 are
+  not guaranteed for them.
 - The task actions menu trigger's own touch hit area, owned by the task actions
   menu requirements; this surface only counts its row width.
 - Resizing the panel by touch. The resize handle stays mouse-only.

@@ -148,8 +148,10 @@ inline and `g <= 7px` floating. Implemented by
 - **Scenario (wave 2):** per the system design's Test strategy, the same
   containment test is extended with a 10+ step workflow, a long step name, and
   the task actions trigger at the 320px fine minimum; a new test runs the same
-  setup and assertions on `tabletTestPage` (coarse pointer) at 380px, adding the
-  indicator's 44x44 floor.
+  setup and assertions on `coarseDesktopTestPage` (1280x900, coarse pointer) at
+  380px, adding the indicator's 44x44 floor. Both assert the panel rendered
+  inline and that the indicator is at most half its title-and-indicator group
+  (the AC-002.4 cap).
   **File:** `apps/web/e2e/tests/kanban/preview-workflow-step-navigation.spec.ts`.
 
 ## ASCII UI preview

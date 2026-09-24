@@ -54,7 +54,10 @@ section.
 - The task top bar's presentation, the 500px default, and the 95vw maximum.
 - Touch resizing (the handle stays mouse-only) and the task actions menu
   trigger's own hit area.
-- Workflows of 100 or more steps.
+- Workflows of 100 or more steps. Their three-digit count overflows the
+  indicator onto the control cluster at the minimum width, so AC-002.2 and the
+  fit clause of AC-002.4 are not guaranteed for them (requirements Out of
+  scope).
 
 ## ASCII UI preview
 
@@ -82,11 +85,15 @@ Coarse pointer, panel 380px (was 300px):
    actions trigger present, the header is one row, the title is at least
    88px, every cluster control is inside the panel, the indicator box contains
    its marker, count (and coarse cue), and at a coarse pointer the indicator is
-   at least 44x44 (AC-001.17, AC-002.1 to AC-002.4).
+   at least 44x44 (AC-001.17, AC-002.1 to AC-002.4). The indicator's width is
+   at most half the title-and-indicator group's width plus 1px (the AC-002.4
+   cap): about 91px coarse, where the cap binds, and about 74px fine, where the
+   title floor binds first.
 3. The E2E coverage in the system design's Test strategy exists: the existing
    fine-pointer containment test extended, and a new coarse-pointer test on
-   `tabletTestPage`. Record in this work order whether the tablet panel
-   rendered inline or floating.
+   `coarseDesktopTestPage` (1280x900, `hasTouch`). Both tests assert the panel
+   rendered inline (no floating backdrop, and the panel does not overlap the
+   board) before asserting the budget.
 
 ## Verification
 
@@ -111,8 +118,10 @@ beside their sources.
 
 ## Risks
 
-- `tabletTestPage` (900x900, `hasTouch`) is the only coarse-pointer fixture;
-  at 900px the 50% board rule may float the panel. Both layouts must pass.
+- The coarse test must render inline to prove the binding layout.
+  `coarseDesktopTestPage` leaves a board container of about 1024px, so a 380px
+  panel stays inline; `tabletTestPage` (900x900) would float it and is not
+  used. If the inline assertion fails, fix the setup, not the assertion.
 - Playwright cannot switch pointer media mid-test, so the live flip is proven
   only by the component test.
 - `min-w-min` must outrank the trigger's own `min-w-0` from the wrapper
