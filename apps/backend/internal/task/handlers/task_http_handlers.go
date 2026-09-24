@@ -467,6 +467,18 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 	c.JSON(http.StatusOK, dtos[0])
 }
 
+// httpGetArchiveSourceManifest exposes only durable archive-time evidence.
+// Service authorization binds the read to the requested task before any
+// cleanup row is decoded.
+func (h *TaskHandlers) httpGetArchiveSourceManifest(c *gin.Context) {
+	manifest, err := h.service.GetArchiveSourceManifest(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		handleNotFound(c, h.logger, err, "archive source manifest not found")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"worktrees": manifest})
+}
+
 func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 	ctx := c.Request.Context()
 	sessions, err := h.service.ListTaskSessions(ctx, c.Param("id"))
