@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"unicode/utf16"
 
 	"golang.org/x/sys/windows"
 )
@@ -356,22 +355,7 @@ func (h *windowsDirectoryHandle) ReadLink(name string) (string, error) {
 	default:
 		return "", errors.New("reparse point is not a symbolic link or junction")
 	}
-	nameOffset := binary.LittleEndian.Uint16(buffer[12:14])
-	nameLength := binary.LittleEndian.Uint16(buffer[14:16])
-	if nameLength == 0 {
-		nameOffset = binary.LittleEndian.Uint16(buffer[8:10])
-		nameLength = binary.LittleEndian.Uint16(buffer[10:12])
-	}
-	start := pathOffset + int(nameOffset)
-	end := start + int(nameLength)
-	if start < pathOffset || end > int(returned) || nameLength%2 != 0 {
-		return "", errors.New("reparse point path is invalid")
-	}
-	units := make([]uint16, nameLength/2)
-	for index := range units {
-		units[index] = binary.LittleEndian.Uint16(buffer[start+index*2 : start+index*2+2])
-	}
-	return string(utf16.Decode(units)), nil
+	return decodeWindowsReparsePath(buffer, returned, pathOffset)
 }
 
 func (h *windowsDirectoryHandle) ReadDir() ([]os.DirEntry, error) {
