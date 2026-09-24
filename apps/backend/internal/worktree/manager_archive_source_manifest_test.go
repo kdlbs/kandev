@@ -72,6 +72,41 @@ func TestArchiveManifestRejectsDisappearedUntrackedPath(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.3
+func TestArchiveManifestCapturesIgnoredUntrackedFile(t *testing.T) {
+	repo := initGitRepoForWorktreeTest(t)
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("ignored.env\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".gitignore")
+	runGit(t, repo, "commit", "-m", "ignore generated file")
+	worktreePath := filepath.Join(t.TempDir(), "task-worktree")
+	runGit(t, repo, "worktree", "add", "-b", "feature/task", worktreePath)
+	if err := os.WriteFile(filepath.Join(worktreePath, "ignored.env"), []byte("local value"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifests, err := mgr.CaptureArchiveSourceManifests(context.Background(), []*Worktree{{
+		ID: "wt", TaskID: "task", RepositoryID: "repo", Path: worktreePath, RepositoryPath: repo,
+	}})
+	if err != nil {
+		t.Fatalf("capture ignored untracked source: %v", err)
+	}
+	runGit(t, repo, "worktree", "remove", "--force", worktreePath)
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("worktree after cleanup: %v, want removed", err)
+	}
+	for _, entry := range manifests["wt"].Entries {
+		if entry.Path == "ignored.env" && entry.ContentSHA256 != "" {
+			return
+		}
+	}
+	t.Fatalf("ignored untracked file has no path and digest in manifest: %+v", manifests["wt"].Entries)
+}
+
 func TestArchiveManifestFileDigestRejectsSymlink(t *testing.T) {
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside.txt")

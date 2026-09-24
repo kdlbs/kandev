@@ -109,7 +109,7 @@ func (m *Manager) capturePresentArchiveSourceManifest(ctx context.Context, wt *W
 		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source index for %s: %w", wt.ID, err)
 	}
 	indexState := sha256.Sum256([]byte(indexStage))
-	status, err := m.runBoundedGitInspect(ctx, wt.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	status, err := m.runBoundedGitInspect(ctx, wt.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching")
 	if err != nil {
 		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source status for %s: %w", wt.ID, err)
 	}
