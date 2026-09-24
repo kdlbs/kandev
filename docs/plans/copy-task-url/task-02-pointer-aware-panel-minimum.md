@@ -55,9 +55,9 @@ section.
 - Touch resizing (the handle stays mouse-only) and the task actions menu
   trigger's own hit area.
 - Workflows of 100 or more steps. Their three-digit count overflows the
-  indicator onto the control cluster at the minimum width, so AC-002.2 and the
-  fit clause of AC-002.4 are not guaranteed for them (requirements Out of
-  scope).
+  indicator onto the control cluster at the minimum width, and its floor wins
+  over the half-share cap, so AC-002.2 and the cap of AC-002.4 are not
+  guaranteed for them (requirements Out of scope).
 
 ## ASCII UI preview
 
@@ -81,7 +81,8 @@ Coarse pointer, panel 380px (was 300px):
 1. At a fine pointer the panel renders at no less than 320px and at a coarse
    pointer at no less than 380px, from the same stored chosen width, flipping
    live with the pointer mode and never overwriting storage (AC-002.7).
-2. At each minimum, with a 10+ step workflow, a long step name, and the task
+2. At each minimum, with a 10+ step workflow, the task on step 10 or later
+   (a two-digit count on both sides), a long step name, and the task
    actions trigger present, the header is one row, the title is at least
    88px, every cluster control is inside the panel, the indicator box contains
    its marker, count (and coarse cue), and at a coarse pointer the indicator is

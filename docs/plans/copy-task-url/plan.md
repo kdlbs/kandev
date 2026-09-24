@@ -146,7 +146,8 @@ inline and `g <= 7px` floating. Implemented by
   containment test asserts the copy-task-link control's visibility, enabled
   state, row alignment, and position before the open-full-page control.
 - **Scenario (wave 2):** per the system design's Test strategy, the same
-  containment test is extended with a 10+ step workflow, a long step name, and
+  containment test is extended with a 10+ step workflow (the task on step 10
+  or later, so both sides of the count have two digits), a long step name, and
   the task actions trigger at the 320px fine minimum; a new test runs the same
   setup and assertions on `coarseDesktopTestPage` (1280x900, coarse pointer) at
   380px, adding the indicator's 44x44 floor. Both assert the panel rendered

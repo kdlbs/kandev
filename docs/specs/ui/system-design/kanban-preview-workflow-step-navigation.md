@@ -198,12 +198,10 @@ order than a first render of the same steps.
 
 The preview header stays one flex row: title, step indicator, control cluster.
 Four widths bound it: the control cluster, the 88px title floor, the step
-indicator's floor, and the minimum panel width. Earlier revisions of this
-section let the indicator shrink to 0 to protect the title. With the
-copy-task-link control added, that broke the indicator's 44px touch floor
-(AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.17). This revision gives every floor
-a fixed size and derives the minimum panel width from their sum, per pointer
-mode, so no floor yields to another at any width the panel can take.
+indicator's floor, and the minimum panel width. Every floor has a fixed size,
+and the minimum panel width is their sum per pointer mode, so no floor yields
+to another at any width the panel can take
+(AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.17).
 
 ### Terms, measured
 
@@ -280,7 +278,8 @@ this requirement's third control, which is why this requirement fixes them.
 Three-digit counts (100 or more steps) are out of scope, per the requirement.
 Their indicator floor (about 81.4px fine, 101.4px coarse) passes the 74px and
 94px left beside the 88px title by 7.4px, so the `min-w-0` group overflows onto
-the control cluster, not into a second row.
+the control cluster, not into a second row. It also exceeds the 81px fine and
+91px coarse half-share cap: the floor wins over the cap.
 
 ### Mechanism
 
@@ -495,9 +494,9 @@ mode. They share one setup and one set of assertions, so they differ only in
 the page fixture:
 
 - **Setup.** Add workflow steps until the task's own workflow has at least 10
-  steps, so the position count has two digits, which is the widest count the
-  budget covers. Put the task on a step whose name is long enough to drive the
-  indicator to its cap, and make sure the task offers actions, so the task
+  steps, and put the task on step 10 or later, so both sides of the position
+  count have two digits, the widest count the budget covers. Give that step a
+  name long enough to drive the indicator to its cap, and make sure the task offers actions, so the task
   actions menu trigger renders and the full control cluster is in play. Seed
   `kandev.kanban.preview.width` with `1` so the panel renders at exactly its
   minimum without a fragile drag.

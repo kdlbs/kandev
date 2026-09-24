@@ -322,8 +322,8 @@ previewed task's link from the preview header without opening the full page.
   task top bar move.
 - Workflows of 100 or more steps: their wider indicator floor overflows onto
   the control cluster at the minimum panel width, so
-  AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.2 and the fit clause of 002.4 are
-  not guaranteed for them.
+  AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.2 and the half-share cap of 002.4
+  are not guaranteed for them.
 - The task actions menu trigger's own touch hit area, owned by the task actions
   menu requirements; this surface only counts its row width.
 - Resizing the panel by touch. The resize handle stays mouse-only.
