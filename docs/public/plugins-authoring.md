@@ -645,7 +645,7 @@ to strings, but an unmounted name renders nowhere.
 | new-session-input-actions | New-session composer toolbar                                                               | PluginComposerSlotProps                                          |
 | chat-submit-decoration    | Layer over the composer's send button                                                      | ChatSubmitDecorationSlotProps                                    |
 | chat-top-bar              | Session top bar or phone Plugins menu                                                      | ChatTopBarSlotProps                                              |
-| main-top-bar              | Home/Kanban/Tasks top bar or phone Plugins menu                                             | MainTopBarSlotProps                                              |
+| main-top-bar              | Home/Kanban/Tasks top bar or phone Plugins menu; a task toolbar from the same plugin takes precedence | MainTopBarSlotProps                                              |
 | app-status-bar-left       | Left side of desktop status bar or mobile status drawer                                    | AppStatusBarSlotProps                                            |
 | app-status-bar-right      | Right side of desktop status bar or mobile status drawer                                   | AppStatusBarSlotProps                                            |
 | plugin-settings           | Top of this plugin's Settings > Plugins page                                               | { pluginId, status }; owner-scoped to the plugin being viewed    |
@@ -1887,7 +1887,7 @@ plugins at once. Available slots:
 | `new-session-input-actions` | New-session composer toolbar                                                                           | `PluginComposerSlotProps`                                         |
 | `chat-submit-decoration`    | Layer over the chat composer's send button, for adornments that belong on the send affordance itself   | `ChatSubmitDecorationSlotProps`                                   |
 | `chat-top-bar`              | Session top bar on desktop; shared Plugins menu section on phones                                      | `ChatTopBarSlotProps`                                             |
-| `main-top-bar`              | Default app top bar on desktop; shared Plugins menu section on phones                               | `MainTopBarSlotProps`                                             |
+| `main-top-bar`              | Default app top bar on desktop; phone Plugins menu unless the same plugin supplies task controls | `MainTopBarSlotProps`                                             |
 | `app-status-bar-left`       | Default-left item in the global status surface                                                         | `AppStatusBarSlotProps`                                           |
 | `app-status-bar-right`      | Default-right item in the global status surface                                                        | `AppStatusBarSlotProps`                                           |
 | `plugin-settings`           | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }`                                            |
@@ -2099,8 +2099,12 @@ Because the bar is not scoped to a task, no task/session ids are provided. On
 desktop, keep contributions to small badges or icon buttons in the compact
 horizontal strip. On a phone, `presentation` is `"mobile"`; the contribution
 renders in the shared app menu's **Plugins** section alongside sidebar workspace
-actions. When task contributions are also present, **Workspace** and **Task**
-labels distinguish their context. The host wraps
+actions. On a task with task controls, a plugin's `chat-top-bar` registrations
+replace that same plugin's `main-top-bar` registrations. Keep task-relevant
+actions in `chat-top-bar`; every registration in that selected slot renders.
+Workspace-only plugins and sidebar workspace actions remain available. Listings
+and archived tasks use the workspace toolbar. The menu uses one wrapping group
+without Workspace/Task subheadings. The host wraps
 contributions within the menu width and gives `host.ui.Button` controls a
 minimum 44px active target. Use `host.ui.Button` for documented icon actions;
 the host normalizes their SVG icons to 16px. Desktop contributions keep their

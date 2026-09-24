@@ -1043,6 +1043,9 @@ interface PluginRegistry {
   // `ChatTopBarSlotProps`: `{ taskId, taskTitle, workspaceId,
   // activeSessionId, sessionIds, presentation }`. On a phone, presentation is
   // "mobile" and contributions live inside the shared Plugins menu section.
+  // When task controls are present, a plugin's chat-top-bar registrations
+  // replace its main-top-bar registrations in that menu. Every registration
+  // in the selected slot renders; sidebar workspace actions stay independent.
   // The host gives `host.ui.Button` controls a 44px touch target. Arbitrary
   // plugin interaction does not dismiss the menu. Both presentations carry
   // the active session plus every kandev session id on the task.
@@ -1056,6 +1059,9 @@ interface PluginRegistry {
   // contribution sizing is unchanged. It is the app-wide,
   // task-agnostic counterpart to "chat-top-bar", so it carries no task/session
   // ids.
+  // Phone listings and archived tasks retain main-top-bar controls. On other
+  // task pages, workspace-only plugins remain alongside the selected task
+  // toolbars in one group without Workspace/Task subheadings.
   // "sidebar-workspace-actions" renders icon buttons after the built-in Quick
   // Terminal and Quick Chat actions in the desktop sidebar's New Task row and
   // in the shared phone navigation sheet. It forwards

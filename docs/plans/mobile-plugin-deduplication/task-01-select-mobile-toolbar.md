@@ -113,3 +113,8 @@ frontmatter. Added `REQ-UI-MOBILE-MENU-008` to the design dependency list. The
 exact repository coverage evaluator failed before the metadata correction and
 passes afterward (`status: covered`), along with catalog/spec lint and diff
 checks. Product code and screenshot content are unchanged.
+
+The authoring-guide review identified stale Workspace/Task subgroup guidance.
+Updated both slot tables, the canonical guide, PLUGIN-API reference, and SDK/host
+type comments to describe the same owner-based selection. Public docs validation
+(62 tests, 47 pages), coverage evaluation, spec/catalog lint, and diff checks pass.
