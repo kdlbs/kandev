@@ -161,6 +161,7 @@ async function seedQueuedPR(apiClient: ApiClient, taskId: string) {
     checks_total: 3,
     checks_passing: 3,
   });
+  await seedMergeReadyPRFeedback(apiClient);
   await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
 }
 
@@ -188,5 +189,23 @@ async function seedEligiblePR(apiClient: ApiClient, taskId: string) {
     checks_total: 3,
     checks_passing: 3,
   });
+  await seedMergeReadyPRFeedback(apiClient);
   await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
+}
+
+async function seedMergeReadyPRFeedback(apiClient: ApiClient) {
+  await apiClient.mockGitHubSeedPRFeedback({
+    owner: OWNER,
+    repo: REPO,
+    pr_number: PR_NUMBER,
+    checks: [
+      { name: "Build", status: "completed", conclusion: "success" },
+      { name: "Unit tests", status: "completed", conclusion: "success" },
+      { name: "E2E tests", status: "completed", conclusion: "success" },
+    ],
+    reviews: [
+      { id: 1, author: "reviewer-one", state: "APPROVED" },
+      { id: 2, author: "reviewer-two", state: "APPROVED" },
+    ],
+  });
 }
