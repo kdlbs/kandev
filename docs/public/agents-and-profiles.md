@@ -38,8 +38,8 @@ Muse Code has no native ACP server, so Kandev runs it through the community
 [`@bex-co/muse-code-acp`](https://github.com/bex-co/muse-code-acp) adapter,
 which is not affiliated with Meta:
 
-- Structured ACP sessions and one-shot inference use
-  `npx --yes --prefer-offline --prefix ~/.kandev/managed-npm-runtime @bex-co/muse-code-acp@<effective-version>`, which
+- Structured ACP sessions and one-shot inference use the managed
+  `@bex-co/muse-code-acp` package at the selected effective version. This
   needs Node.js 22 or later.
 - The adapter drives the native `muse` executable through `muse serve`; CLI
   Passthrough starts `muse` directly.
@@ -67,8 +67,8 @@ pin one model for both, set it there, for example
 
 Pi uses separate executables for its two Kandev modes:
 
-- Structured ACP sessions and one-shot inference use
-  `npx --yes --prefer-offline --prefix ~/.kandev/managed-npm-runtime pi-acp@<effective-version>`.
+- Structured ACP sessions and one-shot inference use the managed `pi-acp`
+  package at the selected effective version.
 - CLI Passthrough starts the globally installed `pi` executable.
 - The Pi install action runs `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
 

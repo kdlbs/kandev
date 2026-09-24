@@ -64,12 +64,14 @@ be verified independently of the new error presentation.
   trusted `--prefix ~/.kandev/managed-npm-runtime` argument for
   `ACPCommandWithNpmPreference` and `CacheUpdateCommand`. Keep exact
   package/version and ACP argument order.
-- Create that directory under the effective npm child home before invoking it.
-  Cover the backend host update runner,
+- Treat that value as a canonical marker. Resolve it on the npm execution host
+  to a private, user-scoped directory under the system temporary root and
+  create it before invoking npm. Keep the resolved directory outside mounted
+  agent session homes as well as outside the task workspace. Cover the backend
+  host update runner,
   `agentctl/server/process.Manager`, and `agentctl/server/utility.ACPInferenceExecutor`
-  probe and prompt paths. The `~` must resolve on the npm execution host, never
-  to the backend host's absolute home for a remote task. Preserve the child
-  `cmd.Dir` and session cwd.
+  probe and prompt paths. Never use a backend-host path for a remote task.
+  Preserve the child `cmd.Dir` and session cwd.
 - Update `onlineManagedRuntimeArgs`, `managedRuntimeProbeRetry`, and
   `managedRuntimeProbePackageSpec` to accept only the new trusted command shape.
   Continue rejecting unversioned, foreign, native, and passthrough commands.
@@ -163,13 +165,26 @@ Task 01 and Task 02 targeted Go package suites passed, and
 ESLint, i18n check, production build, and desktop, mobile, and Office E2E checks
 passed. The review correction was revalidated with the Task 02 Go suite and
 backend build. Public documentation/spec validation and `git diff --check`
-passed. Run `pnpm --filter @kandev/web build` so its prebuild hooks generate
-release notes and the changelog before Vite runs.
+passed.
+
+The PR fixup found that OpenCode mounts its full `/root` directory from the
+host's per-container session root. Creating the original home-based npm prefix
+inside that mount left root-owned files that blocked the E2E worker's temp-root
+cleanup. The final implementation resolves the canonical marker to a
+user-scoped directory under the execution host's system temp root. Unit tests
+cover command preparation outside the agent home, and the focused Docker and
+SSH recovery E2E checks passed for the full startup and cleanup paths.
+
+Fixup validation passed: the affected managed-runtime, lifecycle, settings,
+agentctl, and npm-resolution Go suites; the complete agentctl process package;
+`make -C apps/backend build`; Docker and SSH recovery E2E (2 passed); public-doc
+and specification validators; `bash -n` for the E2E npx fixture; and
+`git diff --check`.
 
 ## Risks
 
-- npm returns `ENOENT` for a missing prefix; every execution path must provision
-  it before invoking npm, including remote and container paths.
+- Every execution host must have a writable system temporary root; prefix
+  provisioning fails safely before npm starts if it does not.
 - Command-shape guards, cache lookup, and update preparation must agree on the
   same prefix. A mismatch could disable stale-metadata recovery or target the
   wrong cache.

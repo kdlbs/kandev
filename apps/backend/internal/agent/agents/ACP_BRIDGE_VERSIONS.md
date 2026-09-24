@@ -20,12 +20,11 @@ package/default generation resets it during startup.
 Normal capability probes, sessions, container commands, and one-shot inference
 use `npx --yes --prefer-offline --prefix ~/.kandev/managed-npm-runtime
 package@<effective-version>` with the ACP arguments above. The prefix directory
-is created under the npm child's home on its execution host before npm starts.
-The agent process still runs in the task workspace, but its project `.npmrc`
-does not control managed runtime package resolution. For example, an
-unmodified Claude installation launches
-`npx --yes --prefer-offline --prefix ~/.kandev/managed-npm-runtime
-@agentclientprotocol/claude-agent-acp@<effective-version>`.
+is a canonical marker that the execution host replaces with a private,
+user-scoped directory under its system temporary root before npm starts. It
+stays outside the task workspace and mounted agent home. The agent process
+still runs in the task workspace, but its project `.npmrc` does not control
+managed runtime package resolution.
 The `<effective-version>` placeholder resolves at launch to the exact Kandev
 default or the exact operator selection. OpenCode's error-only log flags
 are part of its managed command so agentctl can observe terminal provider

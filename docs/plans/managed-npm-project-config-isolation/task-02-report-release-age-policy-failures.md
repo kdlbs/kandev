@@ -142,9 +142,10 @@ Settings update jobs also classify a bounded 64 KiB output tail against the
 trusted update spec before cache invalidation in both legacy and exact-candidate
 flows. A matching failure returns a safe typed policy error without retrying;
 ordinary update failures retain their existing repair behavior. Prefix
-provisioning selects `USERPROFILE` on Windows and `HOME` on POSIX to match
-npm's tilde expansion, including when both variables are set. Public Muse and
-Pi command examples now show the managed prefix.
+provisioning resolves the canonical marker to a private user-scoped directory
+under the execution host's system temporary root, outside mounted agent homes.
+Public Muse and Pi descriptions name the managed packages without exposing
+this internal path.
 
 The targeted Go suites passed, including lifecycle, host probe, agentctl, npm
 matcher, routing, orchestrator, agent registration, and settings packages.

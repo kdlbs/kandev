@@ -114,7 +114,15 @@ func TestRepairManagedRuntimeCacheUsesIsolatedNpmPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read npm arguments: %v", err)
 	}
-	wantArgs := "--prefix\n~/.kandev/managed-npm-runtime\nconfig\nget\ncache\n"
+	argLines := strings.Split(strings.TrimSpace(string(args)), "\n")
+	if len(argLines) != 5 {
+		t.Fatalf("npm args = %q, want five arguments", args)
+	}
+	prefix := argLines[1]
+	if !filepath.IsAbs(prefix) || !strings.HasPrefix(filepath.Clean(prefix), filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+		t.Fatalf("npm project prefix = %q, want an absolute path under %q", prefix, os.TempDir())
+	}
+	wantArgs := "--prefix\n" + prefix + "\nconfig\nget\ncache\n"
 	if string(args) != wantArgs {
 		t.Fatalf("npm args = %q, want %q", args, wantArgs)
 	}
@@ -122,8 +130,11 @@ func TestRepairManagedRuntimeCacheUsesIsolatedNpmPrefix(t *testing.T) {
 	if err != nil || string(cwd) != workDir {
 		t.Fatalf("npm working directory = %q, error = %v, want workspace %q", cwd, err, workDir)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".kandev", "managed-npm-runtime")); err != nil {
-		t.Fatalf("managed npm prefix was not provisioned under child HOME: %v", err)
+	if info, err := os.Stat(prefix); err != nil || !info.IsDir() {
+		t.Fatalf("managed npm prefix was not provisioned: info=%v err=%v", info, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".kandev", "managed-npm-runtime")); !os.IsNotExist(err) {
+		t.Fatalf("managed npm prefix was created under child HOME, stat error = %v", err)
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Fatalf("execution tree stat error = %v, want tree removed", err)

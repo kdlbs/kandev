@@ -10,9 +10,12 @@ real_npx=${KANDEV_E2E_REAL_NPX:-/usr/bin/npx}
 mock_agent=${KANDEV_E2E_MOCK_AGENT_PATH:-/usr/local/bin/mock-agent}
 
 if [ "${3:-}" = "--prefix" ]; then
-	if [ "${4:-}" != "~/.kandev/managed-npm-runtime" ]; then
-		exec "$real_npx" "$@"
-	fi
+	case "${4:-}" in
+		"~/.kandev/managed-npm-runtime"|*/kandev-managed-npm-runtime-????????????????) ;;
+		*)
+			exec "$real_npx" "$@"
+			;;
+	esac
 	package_spec=${5:-}
 	shift_count=5
 fi

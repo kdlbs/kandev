@@ -230,10 +230,6 @@ func TestManagedNPMRuntimeLaunchIgnoresWorkspaceNpmrc(t *testing.T) {
 
 	home := t.TempDir()
 	workspace := t.TempDir()
-	prefix := filepath.Join(home, ".kandev", "managed-npm-runtime")
-	if err := os.MkdirAll(prefix, 0o700); err != nil {
-		t.Fatalf("create runtime prefix: %v", err)
-	}
 	if err := os.WriteFile(filepath.Join(workspace, ".npmrc"), []byte("min-release-age=87600\nregistry=https://registry.invalid/\n"), 0o600); err != nil {
 		t.Fatalf("write workspace npmrc: %v", err)
 	}
@@ -265,6 +261,13 @@ func TestManagedNPMRuntimeLaunchIgnoresWorkspaceNpmrc(t *testing.T) {
 	}
 
 	isolatedArgs := append([]string(nil), args[prefixIndex:prefixIndex+2]...)
+	if err := managedruntime.PrepareNPMProjectPrefix(isolatedArgs); err != nil {
+		t.Fatalf("prepare managed npm prefix: %v", err)
+	}
+	prefix := isolatedArgs[1]
+	if !filepath.IsAbs(prefix) || !strings.HasPrefix(filepath.Clean(prefix), filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+		t.Fatalf("managed npm prefix = %q, want an absolute path under %q", prefix, os.TempDir())
+	}
 	isolatedArgs = append(isolatedArgs, "config", "get", "min-release-age")
 	if got := readConfig(isolatedArgs...); workspaceReleaseAge == "87600" && got == workspaceReleaseAge {
 		t.Fatalf("managed npm still reads workspace min-release-age: %q", got)

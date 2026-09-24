@@ -138,6 +138,7 @@ func TestProbeClassifiesTrustedManagedRuntimeETarget(t *testing.T) {
 	binDir := t.TempDir()
 	npxPath := filepath.Join(binDir, "npx")
 	fixture := "#!/bin/sh\n" +
+		"printf '%s' \"$4\" > \"$NPM_PREFIX_FILE\"\n" +
 		"printf '%s\\n' 'npm error code ETARGET' " +
 		"'npm error notarget No matching version found for @scope/managed-acp@1.2.3.' >&2\n" +
 		"exit 1\n"
@@ -147,6 +148,7 @@ func TestProbeClassifiesTrustedManagedRuntimeETarget(t *testing.T) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	home := t.TempDir()
 	workDir := t.TempDir()
+	prefixFile := filepath.Join(t.TempDir(), "npm-prefix")
 
 	executor := NewACPInferenceExecutor(zap.NewNop())
 	response, err := executor.Probe(context.Background(), &ProbeRequest{
@@ -154,7 +156,7 @@ func TestProbeClassifiesTrustedManagedRuntimeETarget(t *testing.T) {
 		InferenceConfig: &InferenceConfigDTO{
 			Command: []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@scope/managed-acp@1.2.3"},
 			WorkDir: workDir,
-			Env:     map[string]string{"HOME": home},
+			Env:     map[string]string{"HOME": home, "NPM_PREFIX_FILE": prefixFile},
 		},
 	})
 	if err != nil {
@@ -166,8 +168,19 @@ func TestProbeClassifiesTrustedManagedRuntimeETarget(t *testing.T) {
 	if strings.Contains(response.Error, "@scope/managed-acp") || strings.Contains(response.Error, "npm error") {
 		t.Fatalf("probe error exposed subprocess diagnostics: %q", response.Error)
 	}
-	if info, err := os.Stat(filepath.Join(home, ".kandev", "managed-npm-runtime")); err != nil || !info.IsDir() {
+	actualPrefixBytes, err := os.ReadFile(prefixFile)
+	if err != nil {
+		t.Fatalf("read probe npm prefix: %v", err)
+	}
+	actualPrefix := string(actualPrefixBytes)
+	if !filepath.IsAbs(actualPrefix) || !strings.HasPrefix(filepath.Clean(actualPrefix), filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+		t.Fatalf("probe npm prefix = %q, want absolute path under %q", actualPrefix, os.TempDir())
+	}
+	if info, err := os.Stat(actualPrefix); err != nil || !info.IsDir() {
 		t.Fatalf("probe did not prepare managed npm prefix: info=%v err=%v", info, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".kandev", "managed-npm-runtime")); !os.IsNotExist(err) {
+		t.Fatalf("probe created managed npm prefix under agent home, stat error = %v", err)
 	}
 }
 

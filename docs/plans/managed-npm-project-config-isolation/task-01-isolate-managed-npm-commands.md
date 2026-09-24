@@ -18,18 +18,20 @@ system_design:
 
 ## Summary
 
-Give built-in managed runtime npm commands the executor-local
-`~/.kandev/managed-npm-runtime` project prefix while keeping the agent process
-in its task workspace. Apply that root consistently to preparation, probes,
-launches, retries, and cache discovery.
+Give built-in managed runtime npm commands a canonical project-prefix marker
+that resolves on the execution host to a private system-temporary directory.
+Keep that directory outside the task workspace and mounted agent session home.
+Keep the agent process in its task workspace and apply the same resolved root
+to preparation, probes, launches, retries, and cache discovery.
 
 ## In scope
 
 - Start with a failing `TestManagedNPMRuntimeLaunchIgnoresWorkspaceNpmrc`
   regression that demonstrates the reported project-config leak.
-- Add the trusted prefix to managed launch and update command construction and
-  provision its directory with the effective child environment on every host
-  execution path. Preserve `cmd.Dir` and ACP session cwd.
+- Add the trusted prefix marker to managed launch and update command
+  construction and resolve and provision it under the execution host's system
+  temporary root on every host execution path. Preserve `cmd.Dir` and ACP
+  session cwd.
 - Adjust exact-command recognizers and cache discovery to use the same prefix.
   Confirm the exact package's `_npx` cache key remains unchanged.
 
@@ -51,7 +53,7 @@ launches, retries, and cache discovery.
 ## Verification
 
 ```bash
-(cd apps/backend && go test ./internal/agent/agents ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agentctl/server/process ./internal/agentctl/server/utility ./internal/agent/settings/controller -count=1)
+(cd apps/backend && go test ./internal/agent/managedruntime ./internal/agent/agents ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agentctl/server/process ./internal/agentctl/server/utility ./internal/agent/settings/controller -count=1)
 ```
 
 ## Files likely touched
@@ -74,8 +76,8 @@ None.
 
 ## Risks
 
-- The prefix path must be valid for the npm process's user and environment;
-  backend-host paths cannot be sent to Docker or SSH as if they were local.
+- The prefix path must be available on the execution host; backend-host paths
+  cannot be sent to Docker or SSH as if they were local.
 - A prefix flag at the wrong side of npm's `--` separator would become an
   agent argument instead of npm configuration.
 
@@ -91,13 +93,14 @@ None.
 
 ## Results
 
-Done. Managed `npx` launch and `npm exec` preparation commands use the fixed
-executor-local project prefix. Agentctl provisions it from the effective child
-home before launches, probes, one-shot prompts, and cache discovery; the host
-update runner applies the same rule. The task workspace remains the command
-working directory, and the exact package spec still determines the same `_npx`
-cache key. Added npm CLI integration coverage for a workspace registry setting,
-plus executor-local provisioning and unavailable-prefix tests.
+Done. Managed `npx` launch and `npm exec` preparation commands carry one
+trusted prefix marker. The execution host resolves it to a private,
+user-scoped directory under the system temporary root before launches, probes,
+one-shot prompts, and cache discovery. The host update runner applies the same
+rule. The task workspace remains the command working directory, and the exact
+package spec still determines the same `_npx` cache key. Tests cover npm's
+workspace-config isolation, prefix provisioning outside mounted agent home,
+and unavailable-prefix handling.
 
 Verification passed:
 

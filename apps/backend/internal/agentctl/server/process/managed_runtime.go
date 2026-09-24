@@ -32,7 +32,7 @@ func (m *Manager) RepairManagedRuntimeCacheWithEnvironment(
 		return errors.New("resolve agent environment for managed runtime repair")
 	}
 	args := append(managedruntime.NPMProjectPrefixArgs(), "config", "get", "cache")
-	if err := managedruntime.EnsureNPMProjectPrefixForCommand(args, env); err != nil {
+	if err := managedruntime.PrepareNPMProjectPrefix(args); err != nil {
 		return errors.New("prepare managed npm project prefix")
 	}
 	output, err := m.Output(ctx, tools.CommandSpec{

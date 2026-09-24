@@ -14,13 +14,16 @@ whole process out of the workspace would change agent behavior.
 
 ## Decision
 
-Kandev uses the trusted npm argument `--prefix
-~/.kandev/managed-npm-runtime` for every built-in managed npm command. npm
-expands `~` on the execution host, so Kandev provisions that directory against
-the child process's effective home before npm starts. It keeps the subprocess
-working directory in the workspace. Cache discovery and recovery use the same
-npm prefix and effective environment as the failed command. The prefix is
-independent of an optional `KANDEV_HOME_DIR` override for state and logs.
+Kandev uses the canonical npm marker `--prefix
+~/.kandev/managed-npm-runtime` for every built-in managed npm command. Before
+the command starts, its execution host replaces the marker with a private,
+user-scoped directory under the system temporary root and creates it. This
+keeps the prefix local to the npm process without placing it in the task
+workspace or the agent home, which may be a host-mounted session directory.
+The subprocess still starts in the workspace. Cache discovery and recovery use
+the same resolved prefix and effective environment as the failed command. The
+prefix is independent of an optional `KANDEV_HOME_DIR` override for state and
+logs.
 
 The repository's project `.npmrc` does not govern Kandev's managed runtime
 resolution. Explicit environment overrides and user/global npm configuration
@@ -29,10 +32,11 @@ isolation are reported distinctly and do not trigger stale-cache repair.
 
 ## Consequences
 
-Every managed npm execution path must provision the prefix before invoking npm.
-Command validation and cache repair must use the new argument shape. The cache
-key remains based on the exact package specification. Native and passthrough
-commands retain their current working-directory and npm behavior.
+Every managed npm execution path must resolve and provision the canonical
+prefix before invoking npm. Command validation and cache repair use the
+canonical marker; the launched npm process receives the resolved temp path.
+The cache key remains based on the exact package specification. Native and
+passthrough commands retain their current working-directory and npm behavior.
 
 ## Alternatives Considered
 

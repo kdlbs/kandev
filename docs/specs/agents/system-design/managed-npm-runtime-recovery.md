@@ -43,16 +43,23 @@ Kandev backend.
 
 ## Project-independent npm configuration
 
-Managed npm command construction adds `--prefix ~/.kandev/managed-npm-runtime`
-as npm arguments. npm expands `~` in its own execution environment, so the
-same trusted command works on the backend host, in Docker, and over SSH without
-embedding a backend-host path. Provision that directory against Node's home
-selection on the execution host before npm starts: `HOME` on POSIX and
-`USERPROFILE` on Windows. This keeps npm's `~` expansion aligned with the
-directory Kandev creates; npm returns `ENOENT` for a missing prefix.
+Managed npm command construction adds the canonical marker
+`--prefix ~/.kandev/managed-npm-runtime`. Before the command starts, the
+execution host replaces that marker with a private, user-scoped directory
+under its system temporary root and creates the directory. The path is
+resolved where npm runs, so the same trusted command works on the backend
+host, in Docker, and over SSH without embedding a backend-host path.
+
+The project root must stay outside both the task workspace and the mounted
+agent session home. Some container agents, including OpenCode, mount their
+whole home from host-managed session state. Creating the project root under
+that home can leave root-owned files in a host temporary directory. The
+system temporary root avoids that mount while remaining local to the npm
+execution host. A missing or unavailable prefix fails safely before npm
+starts.
 Apply the same prefix to exact-version cache preparation, capability probes,
 one-shot prompts, normal task launches, and online-preferred retries. The
-Kandev-owned prefix under the npm user's home is independent of an optional
+Kandev-owned prefix is independent of both the task workspace and an optional
 `KANDEV_HOME_DIR` override for Kandev state and logs.
 
 The child process still starts in the task workspace, and ACP receives that

@@ -382,7 +382,7 @@ func runDirectCommandOutput(ctx context.Context, command agents.Command) (string
 		return "", errors.New("runtime update command is empty")
 	}
 	env := filteredInstallEnv()
-	if err := managedruntime.EnsureNPMProjectPrefixInEnvironment(argv, env); err != nil {
+	if err := managedruntime.PrepareNPMProjectPrefix(argv); err != nil {
 		return "", errors.New("managed npm project prefix could not be prepared")
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
@@ -477,7 +477,7 @@ func runDirectCommand(ctx context.Context, command agents.Command, onChunk func(
 		return errors.New("runtime update command is empty")
 	}
 	env := filteredInstallEnv()
-	if err := managedruntime.EnsureNPMProjectPrefixInEnvironment(argv, env); err != nil {
+	if err := managedruntime.PrepareNPMProjectPrefix(argv); err != nil {
 		return errors.New("managed npm project prefix could not be prepared")
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)

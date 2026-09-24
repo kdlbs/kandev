@@ -1,61 +1,45 @@
 package managedruntime
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
-func TestHomeForNPMUsesPlatformSpecificEnvironment(t *testing.T) {
-	tests := []struct {
-		name        string
-		goos        string
-		home        string
-		userProfile string
-		want        string
-	}{
-		{
-			name:        "windows uses user profile",
-			goos:        "windows",
-			home:        `C:\Git\home`,
-			userProfile: `C:\Users\agent`,
-			want:        `C:\Users\agent`,
-		},
-		{
-			name:        "unix uses home",
-			goos:        "linux",
-			home:        "/home/agent",
-			userProfile: `C:\Users\agent`,
-			want:        "/home/agent",
-		},
-		{
-			name:        "empty preferred value falls back",
-			goos:        "windows",
-			home:        "/home/agent",
-			userProfile: "  ",
-			want:        "/home/agent",
-		},
+func TestPrepareNPMProjectPrefixUsesPrivateTemporaryRoot(t *testing.T) {
+	tempRoot := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("TEMP", tempRoot)
+		t.Setenv("TMP", tempRoot)
+	} else {
+		t.Setenv("TMPDIR", tempRoot)
+	}
+	agentHome := filepath.Join(t.TempDir(), "mounted-agent-home")
+	if err := os.MkdirAll(agentHome, 0o700); err != nil {
+		t.Fatalf("create mounted agent home: %v", err)
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := homeForNPM(test.goos, test.home, test.userProfile); got != test.want {
-				t.Fatalf("homeForNPM() = %q, want %q", got, test.want)
-			}
-		})
+	args := append([]string{"npx"}, NPMProjectPrefixArgs()...)
+	if err := PrepareNPMProjectPrefix(args); err != nil {
+		t.Fatalf("prepare npm project prefix: %v", err)
 	}
-}
 
-func TestNPMProjectHomeSourcesUseSamePlatformPreference(t *testing.T) {
-	const (
-		home        = "/posix/home"
-		userProfile = `C:\Users\agent`
-	)
-	want := homeForNPM(runtime.GOOS, home, userProfile)
-	if got := homeFromMap(map[string]string{"HOME": home, "USERPROFILE": userProfile}); got != want {
-		t.Fatalf("homeFromMap() = %q, want %q", got, want)
+	got := args[2]
+	if !filepath.IsAbs(got) || !strings.HasPrefix(got, filepath.Clean(tempRoot)+string(filepath.Separator)) {
+		t.Fatalf("npm project prefix = %q, want absolute path under system temp root %q", got, tempRoot)
 	}
-	env := []string{"HOME=" + home, "USERPROFILE=" + userProfile}
-	if got := homeFromEnvironment(env); got != want {
-		t.Fatalf("homeFromEnvironment() = %q, want %q", got, want)
+	info, err := os.Stat(got)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("npm project prefix stat = (%v, %v), want an existing directory", info, err)
+	}
+	if gotMode := info.Mode().Perm(); gotMode != 0o700 {
+		t.Fatalf("npm project prefix permissions = %#o, want %#o", gotMode, 0o700)
+	}
+
+	legacyHomePrefix := filepath.Join(agentHome, ".kandev", "managed-npm-runtime")
+	if _, err := os.Stat(legacyHomePrefix); !os.IsNotExist(err) {
+		t.Fatalf("npm project prefix was created under mounted agent home, stat error = %v", err)
 	}
 }
