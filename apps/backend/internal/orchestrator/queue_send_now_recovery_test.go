@@ -299,6 +299,7 @@ func TestSessionRecoveryResolutionRestoresPendingSendNowClaim(t *testing.T) {
 	}
 	if len(claims) != 0 {
 		t.Fatalf("pending Send Now claim was not settled after recovery: %#v", claims)
+	}
 }
 
 type transientAcceptedMarkerRepository struct {

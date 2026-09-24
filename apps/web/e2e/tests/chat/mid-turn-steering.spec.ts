@@ -16,7 +16,7 @@ registerSeparateQueueRows(test);
 // focus, so asserting message delivery is the robust signal.
 
 test.describe.serial("Claude mid-turn steering experiment", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test.describe("enabled", () => {
     test.beforeAll(async ({ backend }) => {

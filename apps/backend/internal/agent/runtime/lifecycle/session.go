@@ -2061,10 +2061,8 @@ func isMethodNotFoundErr(err error) bool {
 	return false
 }
 
-// isSessionUnknownErr reports whether an error from session/load means the
-// agent doesn't know about the requested session ID — typically because the
-// agent process restarted and lost its in-memory session map. The caller
-// should fall back to creating a fresh session rather than aborting the launch.
+// isSessionUnknownErr reports whether a session/load error proves that the
+// agent no longer has the requested native session state.
 func isSessionUnknownErr(err error) bool {
 	if err == nil {
 		return false
@@ -2078,23 +2076,6 @@ func isSessionUnknownErr(err error) bool {
 	// broader substring would discard an unrelated internal error that happens
 	// to mention a missing resource.
 	return hasCanonicalSessionLoadMessage(err, "Resource not found")
-}
-
-// isSessionLoadFallbackErr reports the small set of session/load failures for
-// which replacing the provider conversation is known to be safe. Errors from
-// the agentctl WebSocket boundary are message-only, so retain the structured
-// ACP checks and match only their canonical projected messages here.
-func isSessionLoadFallbackErr(err error, expectedSessionID string) bool {
-	if err == nil {
-		return false
-	}
-	if isMethodNotFoundErr(err) || isSessionUnknownErr(err) ||
-		isMissingProviderSessionErr(err, expectedSessionID) {
-		return true
-	}
-	return hasCanonicalSessionLoadMessage(err, "Method not found") ||
-		hasCanonicalSessionLoadMessage(err, "agent does not support session loading (LoadSession capability is false)") ||
-		hasCanonicalSessionLoadMessage(err, "Resource not found")
 }
 
 const (
@@ -2114,8 +2095,8 @@ type sessionLoadRequestError struct {
 
 // isMissingProviderSessionErr recognizes Codex's explicit not-found response
 // after its process-local rollout state disappeared and Auggie's session not
-// found error. The session ID must match the one Kandev attempted to load;
-// unrelated internal errors remain fatal.
+// found error. The session ID must match the one Kandev attempted to load so an
+// unrelated provider error cannot be classified as missing native state.
 func isMissingProviderSessionErr(err error, expectedSessionID string) bool {
 	if err == nil || strings.TrimSpace(expectedSessionID) == "" {
 		return false

@@ -179,6 +179,9 @@ func (e *RestoreRequiredError) RecoveryReason() string {
 
 func newRestoreRequiredError(identity RestoreIdentity, err error) *RestoreRequiredError {
 	reason := classifyRestoreFailure(err)
+	if isMissingProviderSessionErr(err, identity.NativeSessionID) {
+		reason = RestoreReasonNativeStateMissing
+	}
 	return &RestoreRequiredError{
 		Decision: DecideRestore(RestoreRequest{
 			Identity: identity,
