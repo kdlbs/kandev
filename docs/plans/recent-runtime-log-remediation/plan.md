@@ -135,6 +135,16 @@ passed; Darwin helper binaries were left unsigned because neither `codesign`
 nor `rcodesign` is installed in this environment. `list-docs.py validate`,
 `lint-spec-files.py --all`, and `git diff --check` also passed.
 
+PR E2E follow-up: shard 6/14 was canceled at its 35-minute job limit, which
+caused the report-merge and aggregate E2E checks to fail. Replaying the exact
+PR merge checkout and shard manifest exposed an intermittent strict-mode
+failure: a page-wide `/slow 2s` locator matched both the sent bubble and the
+composer draft. Both assertions now target the active chat's user-message
+bubble. The two-test serial group passed in the CI runtime image with its
+retry override temporarily disabled and Playwright retries set to zero. The
+full local replay was stopped after 41 of 255 tests, so it is not recorded as
+a full-shard pass; the PR workflow must provide the full-shard result.
+
 ## Risks
 
 - A single pool snapshot cannot prove the cause of a timeout; compare repeated
