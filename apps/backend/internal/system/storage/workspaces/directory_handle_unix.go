@@ -159,6 +159,19 @@ func (h *unixDirectoryHandle) RemoveDirectory(ctx context.Context) error {
 }
 
 func (h *unixDirectoryHandle) ReadFile(name string) ([]byte, error) {
+	file, err := h.OpenFile(name)
+	if err != nil {
+		return nil, err
+	}
+	content, readErr := io.ReadAll(file)
+	closeErr := file.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	return content, closeErr
+}
+
+func (h *unixDirectoryHandle) OpenFile(name string) (io.ReadCloser, error) {
 	if h == nil || h.targetFD < 0 {
 		return nil, errors.New("directory handle is closed")
 	}
@@ -183,9 +196,7 @@ func (h *unixDirectoryHandle) ReadFile(name string) ([]byte, error) {
 		_ = file.Close()
 		return nil, fmt.Errorf("directory entry is not a regular file: %s", name)
 	}
-	content, readErr := io.ReadAll(file)
-	_ = file.Close()
-	return content, readErr
+	return file, nil
 }
 
 func (h *unixDirectoryHandle) WriteFile(name string, data []byte, mode os.FileMode) error {

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
 
 // ArchiveSourceManifest is the content-identity record captured before an
@@ -225,7 +227,7 @@ func archiveSourceManifestDigest(root, path string) (string, error) {
 		}
 		return archiveSourceManifestDirectoryDigest(fullPath)
 	}
-	return archiveSourceManifestFileDigest(fullPath)
+	return archiveSourceManifestFileDigest(root, fullPath)
 }
 
 func archiveSourceManifestIsSubmodule(path string) bool {
@@ -289,7 +291,7 @@ func archiveSourceManifestDirectoryEntry(h io.Writer, root, path string) error {
 	case info.IsDir():
 		_, _ = io.WriteString(h, "directory\x00")
 	case info.Mode().IsRegular():
-		digest, err := archiveSourceManifestFileDigest(path)
+		digest, err := archiveSourceManifestFileDigest(root, path)
 		if err != nil {
 			return err
 		}
@@ -300,8 +302,15 @@ func archiveSourceManifestDirectoryEntry(h io.Writer, root, path string) error {
 	return nil
 }
 
-func archiveSourceManifestFileDigest(path string) (string, error) {
-	f, err := os.Open(path)
+func archiveSourceManifestFileDigest(root, path string) (string, error) {
+	parent := filepath.Clean(filepath.Dir(path))
+	parentRoot := filepath.Clean(filepath.Dir(root))
+	handle, err := storageworkspaces.OpenDirectoryNoFollow(parentRoot, parent)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = handle.Close() }()
+	f, err := handle.OpenFile(filepath.Base(path))
 	if err != nil {
 		return "", err
 	}

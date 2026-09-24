@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,6 +67,10 @@ func (h *postRemovalSwapDirectoryHandle) RemoveDirectory(context.Context) error 
 }
 
 func (h *postRemovalSwapDirectoryHandle) ReadFile(string) ([]byte, error) {
+	return nil, os.ErrNotExist
+}
+
+func (h *postRemovalSwapDirectoryHandle) OpenFile(string) (io.ReadCloser, error) {
 	return nil, os.ErrNotExist
 }
 

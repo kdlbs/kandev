@@ -72,6 +72,21 @@ func TestArchiveManifestRejectsDisappearedUntrackedPath(t *testing.T) {
 	}
 }
 
+func TestArchiveManifestFileDigestRejectsSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "source.txt")
+	if err := os.Symlink(outside, path); err != nil {
+		t.Skipf("symlink creation is unavailable: %v", err)
+	}
+	if _, err := archiveSourceManifestFileDigest(root, path); err == nil {
+		t.Fatal("archive source digest followed a symlink")
+	}
+}
+
 // @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.3
 func TestArchiveManifestHandlesDeletedRenameDestination(t *testing.T) {
 	root := t.TempDir()

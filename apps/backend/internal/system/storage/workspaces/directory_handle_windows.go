@@ -207,6 +207,19 @@ func windowsDependencyHandlesSameFile(a, b windows.Handle) (bool, error) {
 }
 
 func (h *windowsDirectoryHandle) ReadFile(name string) ([]byte, error) {
+	file, err := h.OpenFile(name)
+	if err != nil {
+		return nil, err
+	}
+	content, readErr := io.ReadAll(file)
+	closeErr := file.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	return content, closeErr
+}
+
+func (h *windowsDirectoryHandle) OpenFile(name string) (io.ReadCloser, error) {
 	if h == nil || h.targetHandle == 0 {
 		return nil, errors.New("directory handle is closed")
 	}
@@ -238,9 +251,7 @@ func (h *windowsDirectoryHandle) ReadFile(name string) ([]byte, error) {
 		_ = file.Close()
 		return nil, fmt.Errorf("directory entry is not a regular file: %s", name)
 	}
-	content, readErr := io.ReadAll(file)
-	_ = file.Close()
-	return content, readErr
+	return file, nil
 }
 
 func (h *windowsDirectoryHandle) WriteFile(name string, data []byte, _ os.FileMode) error {
