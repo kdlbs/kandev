@@ -193,6 +193,8 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
     setRemoteRepos: vi.fn(),
     setAgentProfileId: vi.fn(),
     setExecutorId: vi.fn(),
+    setMcpServerIds: vi.fn(),
+    setMcpServerIdsDirty: vi.fn(),
     setSelectedWorkflowId: vi.fn(),
     setFetchedSteps: vi.fn(),
     clearDraft: vi.fn(),
@@ -201,6 +203,8 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
     repositoryLocalPath: "",
     noRepository: true,
     workspacePath: "",
+    mcpServerIds: [],
+    mcpServerIdsDirty: false,
     ...overrides,
   };
 }

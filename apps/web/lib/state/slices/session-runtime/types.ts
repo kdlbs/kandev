@@ -541,6 +541,7 @@ export type SessionRuntimeSliceActions = {
       currentModelId: string;
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
+      configOptionsSettled?: boolean;
       configBaseline?: Record<string, string>;
       /** Set when the session started on the profile's fallback model
        *  because the configured start model was unavailable. */

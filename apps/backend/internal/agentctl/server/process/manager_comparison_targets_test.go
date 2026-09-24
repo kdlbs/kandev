@@ -178,6 +178,39 @@ func TestRetryUnavailableComparisonTargetsReplacesStaleMatchingOperation(t *test
 	}
 }
 
+func TestRetryUnavailableComparisonTargetsCanSupersedePublishedFailure(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+	target := comparisonTargetProcessTestTarget()
+	mgr, _ := newComparisonTargetTestManager(t, repoDir, target, nil)
+	tracker := mgr.GetWorkspaceTracker()
+	tracker.SetComparisonTarget(&target)
+	tracker.SetComparisonTargetUnavailable(&target, comparisonTargetErrorFetch)
+
+	_, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	operation := &comparisonTargetOperation{
+		target:  target,
+		tracker: tracker,
+		cancel:  cancel,
+	}
+	mgr.comparisonTargetOpsMu.Lock()
+	mgr.comparisonTargetOps = map[string]*comparisonTargetOperation{"": operation}
+	mgr.comparisonTargetOpsMu.Unlock()
+
+	if !mgr.publishComparisonTargetUnavailable("", operation, comparisonTargetErrorFetch) {
+		t.Fatal("failed to publish the completed comparison failure")
+	}
+
+	// A fresh request can arrive immediately after failure publication. The
+	// completed operation must no longer block the new materialization attempt.
+	mgr.RetryUnavailableComparisonTargets()
+	resolution := waitForComparisonResolution(t, tracker, comparisonTargetStatusReady, "")
+	if resolution.Ref != target.ComparisonRef() {
+		t.Fatalf("recovered comparison ref = %q, want %q", resolution.Ref, target.ComparisonRef())
+	}
+}
+
 func TestComparisonTargetPublicationRequiresActiveOperation(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	t.Cleanup(cleanup)

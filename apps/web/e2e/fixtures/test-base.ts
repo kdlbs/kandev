@@ -192,7 +192,7 @@ export const test = backendFixture.extend<
   // Worker-scoped API client
   apiClient: [
     async ({ backend }, use) => {
-      const client = new ApiClient(backend.baseUrl);
+      const client = new ApiClient(backend.baseUrl, backend.ensureReady);
       // Confirm the E2E mock routes mounted. They are gated by KANDEV_E2E_MOCK
       // in fixtures/backend.ts; if the env var isn't propagating, /api/v1/_test
       // returns 404 and every session-driven test would fail with a confusing

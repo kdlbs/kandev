@@ -62,6 +62,7 @@ import { statusSummaryTaskError } from "@/lib/task-status-summary";
 import { LaunchQueueStatus } from "./launch-queue-status";
 import { WipQueueStatus } from "./wip-queue-status";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
+import { TaskSessionMCPSettings } from "./task-session-mcp-settings";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -615,6 +616,7 @@ type TaskChatPanelProps = {
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId?: string | null;
   taskId?: string | null;
+  workspaceId?: string | null;
   /**
    * Task this panel belongs to, independent of whether it has a session yet.
    * Only the status row uses it, so a task with no session still shows its
@@ -1046,6 +1048,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
   taskId: taskIdHint = null,
+  workspaceId = null,
   statusTaskId = null,
   onOpenFile,
   showRequestChangesTooltip = false,
@@ -1165,6 +1168,16 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const showScrollToLastPrompt = useAppStore((state) => state.userSettings.showScrollToLastPrompt);
   const showScrollToStart = useAppStore((state) => state.userSettings.showScrollToStart);
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const mcpWorkspaceId = useAppStore((state) => {
+    const currentTaskId = taskId ?? taskIdHint;
+    if (!currentTaskId) return null;
+    return (
+      workspaceId ??
+      state.kanban.tasks.find((item) => item.id === currentTaskId)?.workspaceId ??
+      state.workspaces.activeId ??
+      null
+    );
+  });
   // The anchored bar is a desktop-only, fine-pointer affordance; coarse
   // pointers use the compact scroll control instead.
   const showAnchoredBar = isFinePointer && !isMobile && showAnchoredPromptBar;
@@ -1249,115 +1262,129 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     >
       {!hideLaunchQueueStatus && <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />}
       {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
-      <PanelBody
-        padding={false}
-        scroll={false}
-        className="relative flex min-h-0 flex-col overflow-hidden"
-      >
-        <div className="flex min-h-0 flex-1 flex-col">
-          {resolvedSessionId ? (
-            <div className="shrink-0 px-2">
-              <LaunchWarning sessionId={resolvedSessionId} />
-            </div>
-          ) : null}
-          <div className="min-h-0 flex-1">
-            <TaskMarkdownFileLinkProvider
-              taskId={taskId}
-              sessionId={resolvedSessionId}
-              worktreePath={getSessionWorkspacePath(session)}
-              onOpenFile={onOpenFile}
-            >
-              <MessageList
-                ref={messageListRef}
-                items={groupedItems}
-                messages={allMessages}
-                footerActionMessages={footerActionMessages}
-                permissionsByToolCallId={permissionsByToolCallId}
-                childrenByParentToolCallId={childrenByParentToolCallId}
-                taskId={taskId ?? undefined}
-                sessionId={resolvedSessionId}
-                messagesLoading={messagesLoading}
-                historyRefreshPending={historyRefreshPending}
-                historyStatus={historyStatus}
-                historyError={historyError}
-                onRetryHistory={retryHistory}
-                isWorking={isWorking}
-                sessionState={session?.state}
-                worktreePath={getSessionWorkspacePath(session)}
-                onOpenFile={onOpenFile}
-                dividerBeforeItemKey={dividerBeforeItemKey}
-                lastPromptMessageId={lastPromptMessageId}
-                onLastPromptEdgeChange={setLastPromptEdge}
-                firstMessageId={firstMessageId}
-                onFirstMessageHiddenChange={setIsFirstMessageHidden}
-                anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
-                isVisible={transcriptIsVisible}
-                launchErrorOwned={launchErrorOwned}
-                launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
-                launchErrorOccurredAt={launchErrorOwned ? taskLaunchError?.occurred_at : undefined}
-                stickyPromptBar={
-                  showAnchoredBar && lastPromptMessage ? (
-                    <AnchoredLastPromptBar
-                      promptText={lastPromptMessage.content}
-                      isVisible={anchoredBarVisible}
-                      onScrollUp={scrollToLastPrompt}
-                      showScrollToLastPrompt={showScrollToLastPrompt}
-                      onHeightChange={setAnchoredBarHeight}
-                    />
-                  ) : undefined
-                }
-              />
-            </TaskMarkdownFileLinkProvider>
-          </div>
-        </div>
-        {isJumpLoading && (
-          <div
-            data-testid="transcript-jump-loading"
-            role="status"
-            aria-live="polite"
-            className="absolute right-3 top-3 rounded-md bg-background px-2 py-1 text-xs text-muted-foreground shadow"
-          >
-            {t("task:loading")}
-          </div>
-        )}
-        <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
-      </PanelBody>
-      <ComposerFooterAllocation>
-        {!isArchived && (
-          <ClarificationPanelSection
-            pending={Boolean(pendingClarification)}
-            messages={pendingClarificationGroup}
-            agentDisconnected={session?.pending_action === null}
-            onResolved={handleClarificationResolved}
-            onLateAnswer={lateAnswer.send}
-            lateAnswerState={lateAnswer.state}
-            shortcutScopeRef={panelRef}
-            maxHeightVh={50}
+      <div className="min-h-0 min-w-0 flex flex-1 flex-col">
+        {resolvedSessionId && taskId && (
+          <TaskSessionMCPSettings
+            sessionId={resolvedSessionId}
+            taskId={taskId}
+            workspaceId={mcpWorkspaceId}
+            profileId={session?.agent_profile_id}
           />
         )}
-        <ChatFooter
-          isArchived={isArchived}
-          chatInputRef={chatInputRef}
-          clarificationKey={clarificationKey}
-          onClarificationResolved={handleClarificationResolved}
-          handleSubmit={handleSubmit}
-          handleCancelTurn={handleCancelTurn}
-          showRequestChangesTooltip={showRequestChangesTooltip}
-          onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
-          panelState={panelState}
-          isSending={isSending}
-          hideSessionsDropdown={hideSessionsDropdown}
-          hidePlanMode={embedded}
-          showScrollToLastPrompt={showScrollButton}
-          onScrollToLastPrompt={scrollToLastPrompt}
-          lastPromptScrollDirection={scrollDirection}
-          showScrollToStart={showScrollToStartButton}
-          onScrollToStart={scrollToStart}
-          statusTaskId={statusTaskId ?? taskIdHint}
-          showAgentStartHint={showAgentStartHint}
-          launchErrorOwned={launchErrorOwned}
-        />
-      </ComposerFooterAllocation>
+        <div className="min-h-0 flex flex-1 flex-col">
+          <PanelBody
+            padding={false}
+            scroll={false}
+            className="relative flex min-h-0 flex-col overflow-hidden"
+          >
+            <div className="flex min-h-0 flex-1 flex-col">
+              {resolvedSessionId ? (
+                <div className="shrink-0 px-2">
+                  <LaunchWarning sessionId={resolvedSessionId} />
+                </div>
+              ) : null}
+              <div className="min-h-0 flex-1">
+                <TaskMarkdownFileLinkProvider
+                  taskId={taskId}
+                  sessionId={resolvedSessionId}
+                  worktreePath={getSessionWorkspacePath(session)}
+                  onOpenFile={onOpenFile}
+                >
+                  <MessageList
+                    ref={messageListRef}
+                    items={groupedItems}
+                    messages={allMessages}
+                    footerActionMessages={footerActionMessages}
+                    permissionsByToolCallId={permissionsByToolCallId}
+                    childrenByParentToolCallId={childrenByParentToolCallId}
+                    taskId={taskId ?? undefined}
+                    sessionId={resolvedSessionId}
+                    messagesLoading={messagesLoading}
+                    historyRefreshPending={historyRefreshPending}
+                    historyStatus={historyStatus}
+                    historyError={historyError}
+                    onRetryHistory={retryHistory}
+                    isWorking={isWorking}
+                    sessionState={session?.state}
+                    worktreePath={getSessionWorkspacePath(session)}
+                    onOpenFile={onOpenFile}
+                    dividerBeforeItemKey={dividerBeforeItemKey}
+                    lastPromptMessageId={lastPromptMessageId}
+                    onLastPromptEdgeChange={setLastPromptEdge}
+                    firstMessageId={firstMessageId}
+                    onFirstMessageHiddenChange={setIsFirstMessageHidden}
+                    anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
+                    isVisible={transcriptIsVisible}
+                    launchErrorOwned={launchErrorOwned}
+                    launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
+                    launchErrorOccurredAt={
+                      launchErrorOwned ? taskLaunchError?.occurred_at : undefined
+                    }
+                    stickyPromptBar={
+                      showAnchoredBar && lastPromptMessage ? (
+                        <AnchoredLastPromptBar
+                          promptText={lastPromptMessage.content}
+                          isVisible={anchoredBarVisible}
+                          onScrollUp={scrollToLastPrompt}
+                          showScrollToLastPrompt={showScrollToLastPrompt}
+                          onHeightChange={setAnchoredBarHeight}
+                        />
+                      ) : undefined
+                    }
+                  />
+                </TaskMarkdownFileLinkProvider>
+              </div>
+            </div>
+            {isJumpLoading && (
+              <div
+                data-testid="transcript-jump-loading"
+                role="status"
+                aria-live="polite"
+                className="absolute right-3 top-3 rounded-md bg-background px-2 py-1 text-xs text-muted-foreground shadow"
+              >
+                {t("task:loading")}
+              </div>
+            )}
+            <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
+          </PanelBody>
+          <ComposerFooterAllocation>
+            {!isArchived && (
+              <ClarificationPanelSection
+                pending={Boolean(pendingClarification)}
+                messages={pendingClarificationGroup}
+                agentDisconnected={session?.pending_action === null}
+                onResolved={handleClarificationResolved}
+                onLateAnswer={lateAnswer.send}
+                lateAnswerState={lateAnswer.state}
+                shortcutScopeRef={panelRef}
+                maxHeightVh={50}
+              />
+            )}
+            <ChatFooter
+              isArchived={isArchived}
+              chatInputRef={chatInputRef}
+              clarificationKey={clarificationKey}
+              onClarificationResolved={handleClarificationResolved}
+              handleSubmit={handleSubmit}
+              handleCancelTurn={handleCancelTurn}
+              showRequestChangesTooltip={showRequestChangesTooltip}
+              onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
+              panelState={panelState}
+              isSending={isSending}
+              hideSessionsDropdown={hideSessionsDropdown}
+              hidePlanMode={embedded}
+              showScrollToLastPrompt={showScrollButton}
+              onScrollToLastPrompt={scrollToLastPrompt}
+              lastPromptScrollDirection={scrollDirection}
+              showScrollToStart={showScrollToStartButton}
+              onScrollToStart={scrollToStart}
+              statusTaskId={statusTaskId ?? taskIdHint}
+              showAgentStartHint={showAgentStartHint}
+              launchErrorOwned={launchErrorOwned}
+            />
+          </ComposerFooterAllocation>
+        </div>
+      </div>
     </PanelRoot>
   );
 });

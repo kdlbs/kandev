@@ -249,6 +249,9 @@ type SaveEditedTaskFieldsArgs = {
   updatePayload: Parameters<typeof updateTask>[1];
   trimmedDescription: string;
   runnerChanged: boolean;
+  mcpServerIds: string[];
+  mcpServerIdsDirty: boolean;
+  saveTaskMCPSelections?: (definitionIds: string[]) => Promise<unknown>;
 } & Omit<EditDependencySaveArgs, "updatedTask">;
 
 // A runner switch that already committed is never rolled back; tag a
@@ -259,10 +262,19 @@ async function saveEditedTaskFields({
   updatePayload,
   trimmedDescription,
   runnerChanged,
+  mcpServerIds,
+  mcpServerIdsDirty,
+  saveTaskMCPSelections,
   ...dependencySaveArgs
 }: SaveEditedTaskFieldsArgs) {
   try {
     const updatedTask = await updateTask(editingTask.id, updatePayload);
+    await saveMCPSelectionIfNeeded({
+      isStartedEdit: dependencySaveArgs.isStartedEdit,
+      dirty: mcpServerIdsDirty,
+      definitionIds: mcpServerIds,
+      save: saveTaskMCPSelections,
+    });
     await saveEditedTaskDependencies({ ...dependencySaveArgs, updatedTask });
     return { updatedTask, trimmedDescription };
   } catch (error) {
@@ -271,25 +283,40 @@ async function saveEditedTaskFields({
   }
 }
 
-async function shouldKeepEditDialogOpen(
-  error: unknown,
-  refreshStaleBranchPolicies: (error: unknown) => Promise<boolean>,
-): Promise<boolean> {
-  if (isRepositorySelectionError(error)) return true;
-  if (isTaskDependencyUpdateFailure(error)) return true;
-  // A rejected switch, or a later call failing after the switch already
-  // committed, both need the user back in the dialog to see the reason and
-  // retry.
-  if (error instanceof RunnerSwitchRejectedError) return true;
-  if (error instanceof TaskUpdateAfterRunnerSwitchError) return true;
-  if (error instanceof LaunchAfterTaskUpdateError) return true;
-  return refreshStaleBranchPolicies(error);
-}
-
 function isRepositorySelectionError(error: unknown): boolean {
   return (
     error instanceof ApiError && Boolean(REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""])
   );
+}
+
+async function saveMCPSelectionIfNeeded({
+  isStartedEdit,
+  dirty,
+  definitionIds,
+  save,
+}: {
+  isStartedEdit: boolean;
+  dirty: boolean;
+  definitionIds: string[];
+  save?: (definitionIds: string[]) => Promise<unknown>;
+}) {
+  if (isStartedEdit || !dirty || !save) return;
+  await save(definitionIds);
+}
+
+async function shouldKeepTaskDialogOpen(
+  error: unknown,
+  mcpServerIdsDirty: boolean,
+  saveTaskMCPSelections: ((definitionIds: string[]) => Promise<unknown>) | undefined,
+  refreshStaleBranchPolicies: (error: unknown) => Promise<boolean>,
+) {
+  if (error instanceof RunnerSwitchRejectedError) return true;
+  if (error instanceof TaskUpdateAfterRunnerSwitchError) return true;
+  if (error instanceof LaunchAfterTaskUpdateError) return true;
+  if (mcpServerIdsDirty && Boolean(saveTaskMCPSelections)) return true;
+  if (isRepositorySelectionError(error)) return true;
+  if (isTaskDependencyUpdateFailure(error)) return true;
+  return refreshStaleBranchPolicies(error);
 }
 
 // eslint-disable-next-line max-lines-per-function
@@ -333,6 +360,8 @@ export function useTaskSubmitHandlers({
   setRemoteRepos,
   setAgentProfileId,
   setExecutorId,
+  setMcpServerIds,
+  setMcpServerIdsDirty,
   setSelectedWorkflowId,
   setFetchedSteps,
   clearDraft,
@@ -345,6 +374,9 @@ export function useTaskSubmitHandlers({
   workflowAgentOverrides,
   workflowAgentOverridesBlockedReason,
   blockedBy,
+  mcpServerIds = [],
+  saveTaskMCPSelections,
+  mcpServerIdsDirty,
   editDependencies,
   transformDescriptionBeforeSubmit,
 }: SubmitHandlersDeps) {
@@ -466,6 +498,8 @@ export function useTaskSubmitHandlers({
     setExecutorId("");
     setSelectedWorkflowId(workflowId);
     setFetchedSteps(null);
+    setMcpServerIds([]);
+    setMcpServerIdsDirty(false);
     // State setters are stable; only workflowId can change
   }, [
     workflowId,
@@ -478,6 +512,8 @@ export function useTaskSubmitHandlers({
     setExecutorId,
     setSelectedWorkflowId,
     setFetchedSteps,
+    setMcpServerIds,
+    setMcpServerIdsDirty,
   ]);
 
   const getRepositoriesPayload = useCallback(
@@ -521,6 +557,7 @@ export function useTaskSubmitHandlers({
         prompt: trimmedDescription,
         agentProfileId,
         executorId,
+        mcpServerIds,
         attachments: toMessageAttachments(attachments),
       });
       onOpenChange(false);
@@ -536,6 +573,7 @@ export function useTaskSubmitHandlers({
         executorProfileId: executorProfileId || undefined,
         prompt: trimmedDescription,
         attachments: toMessageAttachments(attachments),
+        mcpServerIds,
       });
       const response = await launchSession(request);
       if (response.session_id) {
@@ -569,6 +607,7 @@ export function useTaskSubmitHandlers({
     descriptionInputRef,
     setIsCreatingSession,
     applyAgentProfileRecentUse,
+    mcpServerIds,
   ]);
 
   const performTaskUpdate = useCallback(async () => {
@@ -603,6 +642,9 @@ export function useTaskSubmitHandlers({
       updatePayload,
       trimmedDescription,
       runnerChanged,
+      mcpServerIds,
+      mcpServerIdsDirty,
+      saveTaskMCPSelections,
       editDependencies,
       isStartedEdit,
       descriptionInputRef,
@@ -616,6 +658,9 @@ export function useTaskSubmitHandlers({
     getRepositoriesPayload,
     isStartedEdit,
     repositoriesDirty,
+    mcpServerIds,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
     editDependencies,
     isEditMode,
     setTaskName,
@@ -662,7 +707,12 @@ export function useTaskSubmitHandlers({
 
       onSuccess?.(updatedTask, "edit", { taskSessionId });
     } catch (error) {
-      closeDialog = !(await shouldKeepEditDialogOpen(error, refreshStaleBranchPolicies));
+      closeDialog = !(await shouldKeepTaskDialogOpen(
+        error,
+        mcpServerIdsDirty,
+        saveTaskMCPSelections,
+        refreshStaleBranchPolicies,
+      ));
       toast({
         title: t("task:failedToUpdateTask"),
         description: taskSubmitErrorMessage(error),
@@ -681,6 +731,8 @@ export function useTaskSubmitHandlers({
     onSuccess,
     onOpenChange,
     refreshStaleBranchPolicies,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
     toast,
     setIsCreatingTask,
     applyAgentProfileRecentUse,
@@ -698,7 +750,12 @@ export function useTaskSubmitHandlers({
       if (!result) return;
       onSuccess?.(result.updatedTask, "edit");
     } catch (error) {
-      closeDialog = !(await shouldKeepEditDialogOpen(error, refreshStaleBranchPolicies));
+      closeDialog = !(await shouldKeepTaskDialogOpen(
+        error,
+        mcpServerIdsDirty,
+        saveTaskMCPSelections,
+        refreshStaleBranchPolicies,
+      ));
       toast({
         title: t("task:failedToUpdateTask"),
         description: taskSubmitErrorMessage(error),
@@ -714,6 +771,8 @@ export function useTaskSubmitHandlers({
     onSuccess,
     onOpenChange,
     refreshStaleBranchPolicies,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
     toast,
     setIsCreatingTask,
     editDependencies,
@@ -756,6 +815,7 @@ export function useTaskSubmitHandlers({
           priority,
           workflowAgentOverrides,
           blockedBy,
+          mcpServerIds,
         });
         submittedPayload = payload;
         return payload;
@@ -827,6 +887,7 @@ export function useTaskSubmitHandlers({
       isEditMode,
       workflowAgentOverrides,
       workflowAgentOverridesBlockedReason,
+      mcpServerIds,
     ],
   );
 
@@ -1064,6 +1125,7 @@ export function useTaskSubmitHandlers({
           priority,
           workflowAgentOverrides,
           blockedBy,
+          mcpServerIds,
         });
         submittedPayload = p;
         return p;
@@ -1115,6 +1177,7 @@ export function useTaskSubmitHandlers({
     blockedBy,
     workflowAgentOverrides,
     workflowAgentOverridesBlockedReason,
+    mcpServerIds,
   ]);
 
   const editSubmitHandler = isStartedEdit ? handleUpdateWithoutAgent : handleEditSubmit;

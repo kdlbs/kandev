@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/archivecascade"
@@ -437,6 +438,11 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 		}
 		if err := s.workspacePolicyAttacher.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, *req.WorkspacePolicy); err != nil {
 			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, fmt.Errorf("attach workspace policy: %w", err))
+		}
+	}
+	if s.mcpSelectionWriter != nil && len(req.MCPServerIDs) > 0 {
+		if err := s.mcpSelectionWriter.Replace(ctx, mcpconfig.SelectionScopeTask, task.WorkspaceID, task.ID, req.MCPServerIDs); err != nil {
+			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, fmt.Errorf("persist MCP selections: %w", err))
 		}
 	}
 
@@ -3144,9 +3150,12 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	s.deleteDependencyEdgesForTask(operationCtx, id)
 
 	// 5. Publish event (sync, fast) - frontend removes task immediately
-	var extra map[string]interface{}
+	extra := map[string]interface{}{}
+	if sessionIDs := taskSessionIDs(sessions); len(sessionIDs) > 0 {
+		extra["mcp_session_ids"] = sessionIDs
+	}
 	if reason != "" {
-		extra = map[string]interface{}{"reason": reason}
+		extra["reason"] = reason
 	}
 	s.publishTaskEventWithExtra(operationCtx, events.TaskDeleted, task, nil, extra)
 	s.pullNextTaskOnVacate(operationCtx, task.WorkflowStepID, task.ID)

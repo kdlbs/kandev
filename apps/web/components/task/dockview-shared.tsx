@@ -44,9 +44,9 @@ import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
 
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import { usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
+import { useResyncGitStatusOnTabActivate } from "@/hooks/use-resync-git-status-on-tab-activate";
 import { useTranslation } from "react-i18next";
 
 // ---------------------------------------------------------------------------
@@ -232,38 +232,6 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
       panelId={panelId}
     />
   );
-}
-
-/**
- * Force a fresh git-status push whenever the diff panel becomes visible.
- *
- * Background: the diff panel's content is derived from `gitStatus` (the
- * per-file `.diff` string), which only refreshes when a `session.git.event`
- * status_update arrives from agentctl's workspace poll loop. That loop runs at
- * 3s (fast) only while the workspace is in fast poll mode; if the focus→fast
- * upgrade lost a race with agentctl startup the loop can sit in slow mode (30s)
- * and the open diff shows stale content until the next slow tick.
- *
- * This is the diff-side analog of `useResyncOnTabActivate` in
- * file-editor-panel.tsx (which force-syncs editor content on activation). Tab
- * activation is a deterministic, user-driven "I'm about to look at this diff"
- * signal, so we ask the backend for a fresh git-status snapshot via the
- * explicit `session.git.refresh` request. Focus itself remains an ACK-only
- * control signal, avoiding replay on ordinary task switching. No-op when the
- * session isn't focused. Visibility is used instead of active state because
- * a right-column group can remain visible while another dockview group owns
- * global focus.
- */
-function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
-  const isVisible = usePanelActive(panelId);
-
-  useEffect(() => {
-    if (!sessionId || !isVisible) return;
-    // Visibility is synchronized by usePanelActive, including the initial
-    // portal-registration race. Ask for a fresh snapshot whenever the panel
-    // becomes visible or its session changes.
-    getWebSocketClient()?.refreshSessionData(sessionId);
-  }, [sessionId, isVisible]);
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or

@@ -13,6 +13,8 @@ function makeResetters(): FormResetters {
     setAgentProfileId: vi.fn(),
     setExecutorId: vi.fn(),
     setExecutorProfileId: vi.fn(),
+    setMcpServerIds: vi.fn(),
+    setMcpServerIdsDirty: vi.fn(),
     setSelectedWorkflowId: vi.fn(),
     setWorkflowAgentOverrides: vi.fn(),
     setFetchedSteps: vi.fn(),

@@ -48,7 +48,7 @@ test.describe("Web preview feedback", () => {
       }
       expect(new Set(choiceBoxes.map((box) => Math.round(box?.y ?? -1))).size).toBe(1);
 
-      await chooseCapture(testPage, "Select element");
+      await chooseCapture(testPage, "Select element", frame);
       await frame.locator("#save").hover();
       const candidate = frame.locator('[data-kandev-inspector-ui="candidate"]');
       await expect(candidate).toBeVisible();
@@ -58,12 +58,12 @@ test.describe("Web preview feedback", () => {
 
       await frame.locator("#details-route").click();
       await expect(frame.locator("h1")).toHaveText("Order details");
-      await chooseCapture(testPage, "Select text");
+      await chooseCapture(testPage, "Select text", frame);
       await selectGeneratedText(frame);
       await expect(testPage.getByTestId("preview-feedback-draft")).toContainText("$42.00");
       await saveDraft(testPage, "Explain how this generated total was calculated");
 
-      await chooseCapture(testPage, "Select screenshot region");
+      await chooseCapture(testPage, "Select screenshot region", frame);
       await dragScreenshotRegion(testPage, frame.locator("#save"));
       const screenshotDraft = testPage.getByTestId("preview-feedback-draft");
       await expect(screenshotDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
@@ -72,7 +72,7 @@ test.describe("Web preview feedback", () => {
 
       const failedScreenshotComment = "Keep this screenshot comment after create fails";
       createFailure.failNextCreate();
-      await chooseCapture(testPage, "Select screenshot region");
+      await chooseCapture(testPage, "Select screenshot region", frame);
       await dragScreenshotRegion(testPage, frame.locator("#save"));
       const failedDraft = testPage.getByTestId("preview-feedback-draft");
       await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
@@ -185,7 +185,7 @@ test.describe("Web preview feedback", () => {
       await session.browserAddressInput.press("Enter");
       const queuedFrame = session.browserPanel.frameLocator("iframe");
       await expect(queuedFrame.locator("#save")).toBeVisible({ timeout: 15_000 });
-      await chooseCapture(testPage, "Select element");
+      await chooseCapture(testPage, "Select element", queuedFrame);
       await queuedFrame.locator("#save").click();
       await saveDraft(testPage, "Queue this button adjustment while the agent is busy");
 

@@ -1240,6 +1240,9 @@ type startTaskOptions struct {
 	// workflow-entry record. The start path rechecks it immediately before
 	// runtime admission so a stale route cannot dispatch the old payload.
 	ceilingEntryBinding *models.CeilingWorkflowEntryBinding
+	// MCPServerIDs replaces the selections for the task session. Nil means the
+	// caller did not request a session-scoped change.
+	MCPServerIDs []string
 }
 
 // StartTaskWithRoute launches a stable Office identity through a complete
@@ -1617,6 +1620,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	seam1Res.rebindToSession(sessionID)
 	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam1Res.manualOverride, seam1Res.population, seam1Res.populationKnown, seam1Res.ceiling)
 
+	if err := s.applyMCPServerSelectionsForTask(ctx, task, sessionID, opts.MCPServerIDs); err != nil {
+		return nil, err
+	}
 	// Seed a matching conditional session configuration before lifecycle
 	// startup. The ACP manager applies this durable runtime layer after the
 	// selected profile and before the first prompt, preserving the original

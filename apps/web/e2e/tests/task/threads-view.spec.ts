@@ -570,7 +570,7 @@ test.describe("Threads view", () => {
       sentSessionIds(capture.frames, "message.list"),
       "the unselected sibling must not request a transcript",
     ).not.toContain(target.primarySessionId);
-    await expect(targetColumn.getByRole("button", { name: /add|new/i })).toHaveCount(0);
+    await expect(targetColumn.getByTestId("sessions-dropdown-trigger")).toHaveCount(0);
 
     // The session linked from the task page is a settled clarification sibling.
     // Switching back to the primary replaces only this column's detail stream;

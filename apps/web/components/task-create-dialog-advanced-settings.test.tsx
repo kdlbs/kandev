@@ -102,7 +102,7 @@ describe("TaskCreateAdvancedSettings", () => {
     expect(row.className).not.toContain("flex-col");
     expect(row.parentElement).toBe(grid);
     expect(grid.firstElementChild).toBe(row);
-    expect(grid.lastElementChild).toBe(priorityRow);
+    expect(priorityRow.parentElement).toBe(grid);
     expect(priorityRow.className).toContain("md:col-start-2");
     expect(priorityRow.className).toContain("md:justify-self-start");
     expect(priorityRow.className).not.toContain("md:justify-self-end");

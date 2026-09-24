@@ -98,6 +98,7 @@ type CreateTaskRequest struct {
 	ExecutorID        string                 `json:"-"`
 	ExecutorProfileID string                 `json:"-"`
 	DeferredLaunch    map[string]interface{} `json:"deferred_launch,omitempty"`
+	MCPServerIDs      []string               `json:"mcp_server_ids,omitempty"`
 	// RecordAgentProfileRecentUse opts this deferred launch into task_create
 	// profile-history attribution. Only the authenticated HTTP/WS selector
 	// surfaces set it; programmatic callers such as MCP must leave it false.

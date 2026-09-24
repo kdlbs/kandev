@@ -93,7 +93,7 @@ export async function openBrowserPreview(
   return { session, frame };
 }
 
-export async function chooseCapture(page: Page, name: string): Promise<void> {
+export async function chooseCapture(page: Page, name: string, frame?: FrameLocator): Promise<void> {
   const popover = page.getByTestId("preview-feedback-popover");
   if (!(await popover.isVisible())) {
     await page.getByTestId("preview-feedback-trigger").click();
@@ -107,6 +107,12 @@ export async function chooseCapture(page: Page, name: string): Promise<void> {
     throw new Error(`capture choice is outside viewport: ${JSON.stringify({ box, viewport })}`);
   }
   await choice.click();
+  if (frame && (name === "Select element" || name === "Select screenshot region")) {
+    // The menu click posts the capture-mode message to the preview iframe.
+    // Wait for the iframe's observable cursor state before sending pointer
+    // input, otherwise the first drag can be handled by the preview itself.
+    await expect(frame.locator("html")).toHaveCSS("cursor", "crosshair", { timeout: 5_000 });
+  }
 }
 
 export async function saveDraft(page: Page, comment: string): Promise<void> {

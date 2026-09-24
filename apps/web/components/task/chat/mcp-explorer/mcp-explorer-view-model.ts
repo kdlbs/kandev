@@ -33,7 +33,21 @@ export function buildMcpExplorerServers(
   attachmentHistory?: MCPAttachmentHistory,
 ): MCPAttachmentServer[] {
   const observedServers = attachmentHistory?.current.servers;
-  if (observedServers && observedServers.length > 0) return observedServers;
+  if (observedServers && observedServers.length > 0) {
+    const observedNames = new Set(observedServers.map((server) => server.name));
+    const configuredOnly = configuredNames
+      .filter((name) => !observedNames.has(name))
+      .map((name) =>
+        name === "kandev"
+          ? { name, source: "kandev" as const, status: "unknown" as const }
+          : {
+              name,
+              source: "profile" as const,
+              status: "delivered" as const,
+            },
+      );
+    return [...observedServers, ...configuredOnly];
+  }
   return configuredNames.map((name) => ({ name, status: "unknown" }));
 }
 

@@ -53,10 +53,17 @@ export function useSessionMcp(agentProfileId: string | null | undefined, session
 
   const mcpServers = useMemo(() => {
     const observedServers = attachmentHistory?.current.servers;
-    if (observedServers?.length) return observedServers.map((server) => server.name);
     if (!supportsMcp) return EMPTY_SERVERS;
-    if (fetchResult && fetchResult.profileId === agentProfileId) return fetchResult.servers;
-    return DEFAULT_KANDEV;
+    const configuredServers =
+      fetchResult && fetchResult.profileId === agentProfileId
+        ? fetchResult.servers
+        : DEFAULT_KANDEV;
+    if (!observedServers?.length) return configuredServers;
+    const observedNames = new Set(observedServers.map((server) => server.name));
+    return [
+      ...observedServers.map((server) => server.name),
+      ...configuredServers.filter((name) => !observedNames.has(name)),
+    ];
   }, [attachmentHistory, supportsMcp, fetchResult, agentProfileId]);
 
   return { supportsMcp, mcpServers, attachmentHistory };

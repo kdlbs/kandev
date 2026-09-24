@@ -413,7 +413,7 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	var lateCleanupErr error
 	cleanups, lateCleanupErr = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
 	postCommitErr = errors.Join(postCommitErr, lateCleanupErr)
-	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows)
+	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows, cleanups)
 	s.runWorkspaceDeleteTaskCleanups(cleanups, deletedTasks)
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", workspace.ID))
@@ -561,12 +561,28 @@ func (s *Service) cancelWorkspaceDeleteTaskCleanupJobs(ctx context.Context, clea
 	return nil
 }
 
-func (s *Service) publishWorkspaceDeleteChildEvents(ctx context.Context, tasks []*models.Task, workflows []*models.Workflow) {
+func (s *Service) publishWorkspaceDeleteChildEvents(
+	ctx context.Context,
+	tasks []*models.Task,
+	workflows []*models.Workflow,
+	cleanups []workspaceDeleteTaskCleanup,
+) {
+	sessionIDsByTask := make(map[string][]string, len(cleanups))
+	for _, cleanup := range cleanups {
+		if cleanup.task == nil || cleanup.task.ID == "" {
+			continue
+		}
+		sessionIDsByTask[cleanup.task.ID] = taskSessionIDs(cleanup.sessions)
+	}
 	for _, task := range tasks {
 		if task == nil || task.ID == "" {
 			continue
 		}
-		s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
+		extra := map[string]interface{}{}
+		if sessionIDs := sessionIDsByTask[task.ID]; len(sessionIDs) > 0 {
+			extra["mcp_session_ids"] = sessionIDs
+		}
+		s.publishTaskEventWithExtra(ctx, events.TaskDeleted, task, nil, extra)
 	}
 	for _, workflow := range workflows {
 		if workflow == nil || workflow.ID == "" {

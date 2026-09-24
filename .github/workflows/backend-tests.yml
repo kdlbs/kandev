@@ -144,6 +144,7 @@ jobs:
     # Checkout receives the short-lived job token. Keep this credential-bearing
     # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
     # Skips the per-run setup-go / golangci-lint download steps below.
@@ -225,10 +226,14 @@ jobs:
           #
           # A merge_group run has no pull request behind it, so the queue branch
           # is cut from `merge_group.base_sha`, which is the equivalent base.
+          # A manual run has no push before-SHA; compare it with the checked-out
+          # main branch so incremental lint does not scan historical findings.
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             BASE_SHA="$(git merge-base HEAD "origin/${BASE_REF}")"
           elif [[ "${EVENT_NAME}" == "merge_group" ]]; then
             BASE_SHA="${MERGE_GROUP_BASE_SHA}"
+          elif [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            BASE_SHA="$(git merge-base HEAD origin/main)"
           else
             BASE_SHA="${PUSH_BEFORE}"
           fi
@@ -266,10 +271,11 @@ jobs:
       - name: Run golangci-lint
         # golangci-lint is preinstalled in the kandev-ci image; invoke it
         # directly instead of going through `golangci/golangci-lint-action`,
-        # which would re-download its own binary on every run. Ten minutes
-        # leaves headroom for cold caches while still bounding analysis time.
+        # which would re-download its own binary on every run. `--timeout=5m`
+        # was too short for a cold cache; keep the explicit budget finite while
+        # allowing the full repository analysis to finish reliably.
         shell: bash
-        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=10m
+        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=15m
 
   test_shards:
     name: Backend Tests (${{ matrix.shard }}/2)
@@ -566,9 +572,10 @@ jobs:
     permissions:
       contents: read
       packages: read
-    # The env-gated package suite runs with the race detector and can exceed
-    # ten minutes on a hosted runner as the repository test set grows.
-    timeout-minutes: 20
+    # The explicit package suite runs with the race detector and includes the
+    # large task repository package. Keep enough finite job budget for that
+    # package after the earlier persistence gates complete.
+    timeout-minutes: 30
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     services:
       postgres:

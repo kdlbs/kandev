@@ -783,7 +783,7 @@ type mcpRepositoryInput struct {
 
 // handleCreateTask creates a new task and optionally auto-starts an agent session.
 func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them
+	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them.
 	var req mcpCreateTaskRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -960,6 +960,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		StartAgent:             startAgent,
 		ExternalID:             req.ExternalID,
 		WorkspacePolicy:        &workspacePolicy,
+		MCPServerIDs:           req.MCPServerIDs,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))

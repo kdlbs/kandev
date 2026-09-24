@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // clockTicksPerSecond is Linux's USER_HZ, the tick rate /proc/<pid>/stat's
@@ -72,23 +74,17 @@ func (linuxProcessTableReader) ReadProcessTable() ([]processInfo, error) {
 }
 
 // linuxBootTime anchors /proc/<pid>/stat's ticks-since-boot starttime field
-// to agentctl's own wall clock via /proc/uptime (system uptime in seconds),
-// NOT /proc/stat's btime (whole-second resolution, which would reproduce
-// the banned `ps -eo lstart` failure mode — round-5 F8).
+// to agentctl's own wall clock via CLOCK_BOOTTIME. /proc/uptime can be
+// namespace-relative while process stat starttime remains host-relative, so
+// reading it directly can make every existing descendant appear new.
 func linuxBootTime() (time.Time, error) {
-	data, err := os.ReadFile("/proc/uptime")
-	if err != nil {
-		return time.Time{}, err
+	now := time.Now()
+	var bootClock unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &bootClock); err != nil {
+		return time.Time{}, fmt.Errorf("read boot clock: %w", err)
 	}
-	fields := strings.Fields(string(data))
-	if len(fields) == 0 {
-		return time.Time{}, fmt.Errorf("unexpected /proc/uptime contents %q", data)
-	}
-	uptimeSeconds, err := strconv.ParseFloat(fields[0], 64)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("parse /proc/uptime: %w", err)
-	}
-	return time.Now().Add(-time.Duration(uptimeSeconds * float64(time.Second))), nil
+	elapsed := time.Duration(bootClock.Sec)*time.Second + time.Duration(bootClock.Nsec)
+	return now.Add(-elapsed), nil
 }
 
 func readLinuxProcessStat(pid int, bootTime time.Time) (processInfo, bool, error) {

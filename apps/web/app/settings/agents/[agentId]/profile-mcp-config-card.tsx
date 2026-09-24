@@ -17,10 +17,12 @@ import { SettingsCard } from "@/components/settings/settings-card";
 // call time. Components in this file use the `useTranslation()` hook.
 import { t as translate } from "@/lib/i18n";
 import { useProfileMcpConfig } from "./use-profile-mcp-config";
+import { ProfileMCPSelectionCard } from "./profile-mcp-selection-card";
 import type { AgentProfileMcpConfig } from "@/lib/types/http";
 
 type ProfileMcpConfigCardProps = {
   profileId: string;
+  workspaceId?: string | null;
   supportsMcp: boolean;
   /**
    * Whether the profile is in CLI passthrough mode. When true (and
@@ -396,6 +398,7 @@ function McpProfileHint({
 
 export function ProfileMcpConfigCard({
   profileId,
+  workspaceId,
   supportsMcp,
   cliPassthrough,
   mcpInjection,
@@ -443,6 +446,10 @@ export function ProfileMcpConfigCard({
   });
 
   if (!supportsMcp) return null;
+
+  if (!state.isDraft && workspaceId) {
+    return <ProfileMCPSelectionCard profileId={profileId} workspaceId={workspaceId} />;
+  }
 
   return (
     <SettingsCard isDirty={state.currentDirty}>

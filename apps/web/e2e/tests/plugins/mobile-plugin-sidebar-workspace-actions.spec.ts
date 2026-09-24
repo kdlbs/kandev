@@ -8,6 +8,7 @@ import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
 const SLOT_TEST_ID = "e2e-sidebar-workspace-actions";
+const TOUCH_TARGET_LAYOUT_TOLERANCE_PX = 0.5;
 
 test.describe("Mobile plugin workspace actions", () => {
   test.afterEach(async ({ apiClient }) => {
@@ -34,7 +35,10 @@ test.describe("Mobile plugin workspace actions", () => {
     const box = await slot.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.width).toBeGreaterThanOrEqual(44);
-    expect(box!.height).toBeGreaterThanOrEqual(44);
+    // 2.75rem is the authored 44px touch target. Chromium can report the
+    // computed height just below that integer after rem-to-device-pixel
+    // conversion (for example, 43.99993896484375px).
+    expect(box!.height).toBeGreaterThanOrEqual(44 - TOUCH_TARGET_LAYOUT_TOLERANCE_PX);
 
     await slot.tap();
     await expect(slot).toHaveAttribute("data-clicked", "true");

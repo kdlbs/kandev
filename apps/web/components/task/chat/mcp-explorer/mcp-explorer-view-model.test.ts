@@ -26,7 +26,7 @@ function history(servers: MCPAttachmentServer[]): MCPAttachmentHistory {
 }
 
 describe("MCP explorer view model", () => {
-  it("uses observed servers and falls back to configured names", () => {
+  it("keeps configured servers visible when observations are partial", () => {
     const configured = buildMcpExplorerServers(["kandev", "filesystem"]);
     expect(configured.map((item) => item.name)).toEqual(["kandev", "filesystem"]);
 
@@ -34,8 +34,19 @@ describe("MCP explorer view model", () => {
       ["kandev", "filesystem"],
       history([server({ name: "filesystem", source: "profile", status: "delivered" })]),
     );
-    expect(observed.map((item) => item.name)).toEqual(["filesystem"]);
+    expect(observed.map((item) => item.name)).toEqual(["filesystem", "kandev"]);
     expect(observed[0].source).toBe("profile");
+    expect(observed[1].status).toBe("unknown");
+
+    const partial = buildMcpExplorerServers(
+      ["kandev", "filesystem"],
+      history([server({ name: "kandev", source: "kandev", status: "active" })]),
+    );
+    expect(partial.map((item) => item.name)).toEqual(["kandev", "filesystem"]);
+    expect(partial[1]).toMatchObject({
+      source: "profile",
+      status: "delivered",
+    });
   });
 
   it("selects kandev first and falls back when the selection disappears", () => {
