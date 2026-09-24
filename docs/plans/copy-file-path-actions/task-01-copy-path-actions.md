@@ -13,6 +13,7 @@ acceptance_criteria:
   - AC-UI-COPY-FILE-PATH-ACTIONS-001.3
   - AC-UI-COPY-FILE-PATH-ACTIONS-001.4
   - AC-UI-COPY-FILE-PATH-ACTIONS-001.5
+  - AC-UI-COPY-FILE-PATH-ACTIONS-001.6
 system_design:
   - ../../specs/ui/system-design/copy-file-path-actions.md
 ---
@@ -23,7 +24,9 @@ system_design:
 
 Add Copy path to working-tree file rows in the Changes panel and replace the
 Review diff toolbar's Copy diff action with Copy path. Both actions copy the
-current repository-relative path through the shared clipboard helper.
+current repository-relative path through the shared clipboard helper when it
+contains no C0 or DEL ASCII control character. Unsafe paths are refused with
+localized feedback.
 
 ## In scope
 
@@ -32,15 +35,18 @@ current repository-relative path through the shared clipboard helper.
 - Add Copy path to the touch Changes row action menu without changing row-tap
   diff navigation.
 - Replace Copy diff in the desktop and phone Review diff file actions.
+- Refuse paths containing C0 or DEL ASCII control characters from each Copy
+  path entry point and report the refusal.
 - Suppress the Review toolbar's existing absolute-worktree Copy path item so
   the repository-relative action is the single Copy path choice there.
 - Add focused unit and desktop/phone browser coverage for path value and access.
+- Add desktop/phone component coverage for control-character rejection.
 
 ## Out of scope
 
 - Copy diff actions in task diff, Monaco, and other editor surfaces.
 - Path conversion, Git behavior, backend/API changes, and persistence.
-- New localization keys or public documentation.
+- Public documentation changes.
 
 ## Acceptance
 
@@ -48,6 +54,8 @@ current repository-relative path through the shared clipboard helper.
   and phone; using it does not open the diff.
 - Review diff exposes Copy path in place of Copy diff on desktop and phone and
   copies the active path, including the current path for a rename.
+- Paths with C0 or DEL ASCII control characters are not copied from either
+  surface, and the UI reports the refusal.
 - Phone controls and menu items meet the 44px target requirement, and desktop
   row actions are available by keyboard focus as well as pointer hover.
 
@@ -72,17 +80,26 @@ Phone:   Diff header .../path/to/programme_test.go [more]
          Menu: Copy path / Edit / Preview / diff controls
 ```
 
-AC-001.1 through AC-001.5 require the current repository-relative value,
-separate row and copy actions, current rename path, and desktop/phone access.
-The full plan preview defines fixed versus scrollable content and each control's
-placement.
+UI-05 from the [full preview](plan.md#ascii-ui-preview) shows the refusal
+notice when a path contains a C0 or DEL ASCII control character. The clipboard
+and the selected row or diff remain unchanged.
+
+```text
+Copy path: refused
+Notice: This path contains control characters and cannot be copied.
+```
+
+AC-001.1 through AC-001.6 require the current repository-relative value for
+safe paths, separate row and copy actions, current rename path, desktop/phone
+access, and control-character rejection. The full plan preview defines fixed
+versus scrollable content and each control's placement.
 
 ## Verification
 
 Run from the repository root after `pnpm install --frozen-lockfile` in `apps`:
 
 ```bash
-(cd apps/web && pnpm exec vitest run components/task/changes-panel-file-row.test.tsx components/review/review-diff-toolbar.test.tsx)
+(cd apps/web && pnpm exec vitest run components/task/changes-panel-file-row.test.tsx components/review/review-diff-toolbar.test.tsx lib/utils/copy-repository-path.test.ts)
 (cd apps/web && pnpm e2e:run --host --project chromium tests/git/git-changes-panel.spec.ts tests/review/review-file-status.spec.ts)
 (cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/task/mobile-changes-panel.spec.ts tests/review/mobile-review-file-status.spec.ts)
 (cd apps/web && pnpm exec eslint components/task/changes-panel-file-row.tsx components/task/changes-panel-touch-file-row.tsx components/review/review-diff-toolbar.tsx components/task/changes-panel-file-row.test.tsx components/review/review-diff-toolbar.test.tsx)
@@ -97,6 +114,10 @@ Run from the repository root after `pnpm install --frozen-lockfile` in `apps`:
 - `apps/web/components/task/changes-panel-file-row.test.tsx`
 - `apps/web/components/review/review-diff-toolbar.tsx`
 - `apps/web/components/review/review-diff-toolbar.test.tsx`
+- `apps/web/hooks/use-copy-repository-path.ts`
+- `apps/web/lib/utils/copy-repository-path.ts`
+- `apps/web/lib/utils/copy-repository-path.test.ts`
+- `apps/web/src/locales/*/task.json`
 - `apps/web/components/editors/file-actions-dropdown.tsx`
 - `apps/web/e2e/tests/git/git-changes-panel.spec.ts`
 - `apps/web/e2e/tests/task/mobile-changes-panel.spec.ts`
@@ -139,3 +160,18 @@ Verification passed:
   passed (2 tests per project).
 - Targeted ESLint and Prettier, web typecheck, i18n ratchet, specification
   validation, specification lint, and `git diff --check` passed.
+
+PR review remediation removed the unused Review toolbar `diff` prop, made the
+keyboard-focus E2E assertion find Copy path without a fixed Tab count, and
+added a shared C0/DEL path-copy guard with localized refusal feedback. The
+system design now has valid requirement-mapping anchors, and acceptance
+criterion AC-UI-COPY-FILE-PATH-ACTIONS-001.6 records the refusal contract.
+
+Verification after remediation passed:
+
+- Focused Changes row, Review toolbar, and path-copy utility Vitest suites: 39
+  tests.
+- Desktop Chromium E2E: 28 tests; the managed backend and Vite builds passed.
+- Phone mobile-chrome E2E: 10 tests; the managed backend and Vite builds passed.
+- Web typecheck, targeted ESLint and Prettier, `i18n:check`,
+  `i18n:ratchet`, specification validation and lint, and `git diff --check`.

@@ -612,12 +612,13 @@ test.describe("Git Changes Panel", () => {
     const row = testPage.getByTestId(`file-row-${filePath.replace(/[/\\]/g, "-")}`);
     await expect(row).toBeVisible();
     const fileIdentity = row.getByTitle(filePath, { exact: true });
-    await fileIdentity.focus();
-    await testPage.keyboard.press("Tab");
-    await testPage.keyboard.press("Tab");
-    await testPage.keyboard.press("Tab");
-
     const copyPath = row.getByRole("button", { name: "Copy path" });
+    const rowButtonCount = await row.getByRole("button").count();
+    await fileIdentity.focus();
+    for (let index = 0; index < rowButtonCount; index += 1) {
+      await testPage.keyboard.press("Tab");
+      if (await copyPath.evaluate((element) => element === document.activeElement)) break;
+    }
     await expect(copyPath).toBeFocused();
     await expect
       .poll(() =>

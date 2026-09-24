@@ -19,7 +19,7 @@ import { LineStat } from "@/components/diff-stat";
 import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import { FileIcon } from "@/components/ui/file-icon";
 import { getFileCategory } from "@/lib/utils/file-types";
-import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import { useCopyRepositoryPath } from "@/hooks/use-copy-repository-path";
 import type { ChangedFile } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
 import { useTranslation } from "react-i18next";
@@ -70,6 +70,7 @@ export type FileRowContentProps = FileRowProps & {
 export function FileRow(props: FileRowProps) {
   const { file, isSelected, isActive, onSelect, onEditFile, onOpenDiff } = props;
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const copyRepositoryPath = useCopyRepositoryPath();
   const touchMode = isMobile || !isFinePointer;
   const { folder, file: name } = splitPath(file.path);
 
@@ -90,7 +91,7 @@ export function FileRow(props: FileRowProps) {
   };
 
   const handleCopyPath = () => {
-    void copyToClipboard(file.path);
+    void copyRepositoryPath(file.path);
   };
 
   return (

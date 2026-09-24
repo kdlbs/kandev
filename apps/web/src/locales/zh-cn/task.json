@@ -350,6 +350,7 @@
   "copyMessage": "复制消息",
   "copyMessageToClipboard": "复制消息到剪贴板",
   "copyPath": "复制路径",
+  "copyPathWithControlCharacters": "此路径包含控制字符，无法复制。",
   "copyToClipboard": "复制到剪贴板",
   "copyUrl": "复制 URL",
   "copyWorkspacePath": "复制工作区路径",

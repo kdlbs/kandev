@@ -360,6 +360,7 @@
   "copyMessage": "Copy message",
   "copyMessageToClipboard": "Copy message to clipboard",
   "copyPath": "Copy path",
+  "copyPathWithControlCharacters": "This path contains control characters and cannot be copied.",
   "copyToClipboard": "Copy to clipboard",
   "copyUrl": "Copy URL",
   "copyWorkspacePath": "Copy workspace path",

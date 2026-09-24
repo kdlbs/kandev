@@ -350,6 +350,7 @@
   "copyMessage": "Copiar a mensagem",
   "copyMessageToClipboard": "Copiar a mensagem para a área de transferência",
   "copyPath": "Copiar o caminho",
+  "copyPathWithControlCharacters": "Este caminho contém caracteres de controlo e não pode ser copiado.",
   "copyToClipboard": "Copiar para a área de transferência",
   "copyUrl": "Copiar o URL",
   "copyWorkspacePath": "Copiar o caminho da área de trabalho",

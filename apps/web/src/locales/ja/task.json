@@ -360,6 +360,7 @@
   "copyMessage": "メッセージをコピー",
   "copyMessageToClipboard": "メッセージをクリップボードにコピー",
   "copyPath": "パスをコピー",
+  "copyPathWithControlCharacters": "このパスには制御文字が含まれているため、コピーできません。",
   "copyToClipboard": "クリップボードにコピー",
   "copyUrl": "URLをコピー",
   "copyWorkspacePath": "ワークスペースのパスをコピー",

@@ -27,6 +27,9 @@ contract, persistent state, or path conversion.
 
 - `ChangesPanel` continues to provide each working-tree
   `ChangedFile.path`.
+
+### Changes row action
+
 - `FileRowActions` in
   `apps/web/components/task/changes-panel-file-row.tsx` adds the
   desktop Copy path control beside existing row actions.
@@ -34,6 +37,9 @@ contract, persistent state, or path conversion.
   `apps/web/components/task/changes-panel-touch-file-row.tsx` adds
   Copy path to the existing row action menu. The row itself remains the primary
   diff action.
+
+### Review diff action
+
 - `DesktopFileDiffToolbar` and `MobileFileMenuItems` in
   `apps/web/components/review/review-diff-toolbar.tsx` replace the
   Review toolbar's Copy diff action with Copy path.
@@ -45,7 +51,8 @@ contract, persistent state, or path conversion.
   `apps/web/lib/utils/copy-to-clipboard.ts` remains the clipboard
   boundary, including its secure-context fallback.
 - The existing `task:copyPath` translation supplies the accessible
-  name and tooltip. No new locale key is required.
+  name and tooltip. `task:copyPathWithControlCharacters` supplies refusal
+  feedback when a path contains control characters.
 
 ## Path value
 
@@ -57,13 +64,20 @@ renamed file copies its current path; the existing previous-path value remains
 reserved for rename cues and external links. Each copy action stops row-click
 propagation where applicable.
 
+Paths containing C0 or DEL ASCII control characters are rejected before the
+clipboard write. For these paths the action reports the refusal and leaves the
+clipboard unchanged. Other paths are copied exactly as represented by the
+surface.
+
 ## Control flow
 
 1. The row or active diff supplies its current path.
-2. The Copy path control calls the shared clipboard helper with that exact
-   value.
-3. The Changes row remains selected and the Review diff remains open.
-4. If the modern clipboard API is unavailable or rejects the write, the shared
+2. The shared path-copy helper rejects values containing C0 or DEL ASCII
+   control characters and reports the refusal.
+3. For other values, the helper calls the shared clipboard helper with the
+   exact repository-relative path.
+4. The Changes row remains selected and the Review diff remains open.
+5. If the modern clipboard API is unavailable or rejects the write, the shared
    helper attempts its existing DOM fallback. The action remains available for
    retry if copying still fails.
 
@@ -91,8 +105,9 @@ propagation where applicable.
 
 Clipboard writes use the shared helper and its current fallback. A failed
 attempt does not alter the selected file, current diff, or path value; users can
-retry from the same control. The existing copy-diff action does not provide a
-separate success message, and this change does not add new feedback state.
+retry from the same control. A path containing C0 or DEL ASCII control
+characters is not copied and displays localized refusal feedback. A normal
+clipboard failure remains available for retry from the same control.
 
 ## Persistence
 
@@ -100,8 +115,11 @@ None. Clipboard actions are transient.
 
 ## Security
 
-Only the repository-relative path already shown by the UI is copied. No
-filesystem root, credential, or repository label is added.
+Repository filenames are untrusted input. C0 and DEL ASCII control characters
+are refused before clipboard access to prevent a copied name from injecting
+additional terminal input. For other paths, only the repository-relative value
+already shown by the UI is copied. No filesystem root, credential, or
+repository label is added.
 
 ## Observability
 

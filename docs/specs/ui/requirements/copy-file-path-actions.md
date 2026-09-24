@@ -28,16 +28,19 @@ directly so that I can reuse it without selecting the text.
 #### Acceptance criteria
 
 - **AC-UI-COPY-FILE-PATH-ACTIONS-001.1:** Given a working-tree file row in the
-  Changes panel, when a user activates Copy path, the clipboard shall receive
-  the exact repository-relative path represented by that row, and the action
-  shall not open the file diff.
+  Changes panel whose path has no C0 or DEL ASCII control character, when a
+  user activates Copy path, the clipboard shall receive the exact
+  repository-relative path represented by that row, and the action shall not
+  open the file diff.
 - **AC-UI-COPY-FILE-PATH-ACTIONS-001.2:** Given a file in the Review diff
-  panel, when the user activates Copy path, the clipboard shall receive the
-  current repository-relative file path. Copy path shall replace Copy diff in
-  that panel's file toolbar.
+  panel whose path has no C0 or DEL ASCII control character, when the user
+  activates Copy path, the clipboard shall receive the current
+  repository-relative file path. Copy path shall replace Copy diff in that
+  panel's file toolbar.
 - **AC-UI-COPY-FILE-PATH-ACTIONS-001.3:** For a renamed file, Copy path shall
-  copy the current path shown by the file row or diff header. The previous path
-  remains available only through the existing rename context.
+  copy the current path shown by the file row or diff header when that path has
+  no C0 or DEL ASCII control character. The previous path remains available
+  only through the existing rename context.
 - **AC-UI-COPY-FILE-PATH-ACTIONS-001.4:** Copy path shall be keyboard and
   pointer reachable on desktop and touch reachable on phones. It shall not
   depend on hover as the only access path, and its phone controls shall have
@@ -45,6 +48,10 @@ directly so that I can reuse it without selecting the text.
 - **AC-UI-COPY-FILE-PATH-ACTIONS-001.5:** The copied value shall not include a
   repository label or an absolute worktree path, including in a multi-repository
   task.
+- **AC-UI-COPY-FILE-PATH-ACTIONS-001.6:** Given a file path containing a C0 or
+  DEL ASCII control character, when a user activates Copy path in the Changes
+  panel or Review diff panel, the clipboard shall remain unchanged and the UI
+  shall report that the path cannot be copied.
 
 ## Out of scope
 
