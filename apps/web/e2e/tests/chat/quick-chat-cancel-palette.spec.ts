@@ -55,7 +55,7 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
   test("cancels Quick Chat while detached background work runs", async ({ testPage }) => {
     test.setTimeout(120_000);
     const quickChat = await openQuickChatWithAgent(testPage);
-    await sendQuickChatMessage(quickChat, testPage, "/detached-background 20s");
+    await sendQuickChatMessage(quickChat, testPage, "/detached-background 60s");
 
     const quickSessionId = await testPage.evaluate(() => {
       const store = (
@@ -80,7 +80,7 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
     await cancel.click();
     await waitForQuickChatCancellationPending(testPage, quickSessionId, true);
     await expect(cancel).toBeDisabled();
-    await waitForQuickChatSessionSettled(testPage, quickSessionId);
+    await waitForQuickChatSessionSettled(testPage, quickSessionId, 75_000);
     await expect(cancel).not.toBeVisible({ timeout: 15_000 });
   });
 

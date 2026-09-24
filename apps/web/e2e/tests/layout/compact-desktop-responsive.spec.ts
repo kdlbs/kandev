@@ -74,12 +74,14 @@ test.describe("compact desktop responsive layout", () => {
     seedData,
   }) => {
     await testPage.setViewportSize(COMPACT_DESKTOP_VIEWPORT);
-    await apiClient.saveUserSettings({
-      workspace_id: seedData.workspaceId,
-      workflow_filter_id: seedData.workflowId,
-      kanban_hidden_step_ids: {},
-      workflow_ids_with_auto_hide_empty_steps: [],
-    });
+    const { settings } = await apiClient.getUserSettings();
+    const workflowFilterId = settings.workflow_filter_id ?? "";
+    const hiddenSteps =
+      (settings.kanban_hidden_step_ids as Record<string, string[]> | undefined) ?? {};
+    const autoHideWorkflows =
+      (settings.workflow_ids_with_auto_hide_empty_steps as string[] | undefined) ?? [];
+    const visibleHiddenSteps = { ...hiddenSteps };
+    delete visibleHiddenSteps[seedData.workflowId];
 
     const laneTasks: Array<{ taskId: string; stepId: string }> = [];
     for (const step of seedData.steps) {
@@ -89,9 +91,6 @@ test.describe("compact desktop responsive layout", () => {
       });
       laneTasks.push({ taskId: task.id, stepId: step.id });
     }
-    // The board hides empty columns. Wait for the task snapshot to include
-    // every seeded step before opening the page, so a slow WS projection
-    // cannot make a populated column look empty.
     await expect
       .poll(
         async () => {
@@ -117,63 +116,83 @@ test.describe("compact desktop responsive layout", () => {
       parent_id: parent.id,
     });
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    for (const laneTask of laneTasks) {
-      await expect(kanban.taskCard(laneTask.taskId)).toBeVisible({ timeout: 15_000 });
-      await expect(kanban.columnByStepId(laneTask.stepId)).toBeAttached({ timeout: 15_000 });
-    }
-
-    const desktopLayout = testPage.getByTestId("desktop-kanban-layout");
-    await expect(desktopLayout).toHaveCount(1);
-    await expect(desktopLayout).toBeVisible();
-    await expect(testPage.getByTestId("desktop-kanban-stage-navigator")).toHaveCount(0);
-    await expect(testPage.getByTestId("tablet-kanban-layout")).toHaveCount(0);
-    await expect(testPage.getByTestId("mobile-kanban-layout")).toHaveCount(0);
-    await expect(testPage.getByRole("button", { name: "Open menu" })).toHaveCount(0);
-
-    await expect(testPage.getByPlaceholder("Search tasks...")).toBeVisible();
-    await expect(kanban.createTaskButton).toBeVisible();
-    await expect(testPage.getByRole("button", { name: "Quick Chat" })).toBeVisible();
-    await expect(kanban.viewTogglePipeline).toBeVisible();
-
-    const firstColumnBox = await kanban.columnByStepId(seedData.steps[0].id).boundingBox();
-    expect(firstColumnBox).not.toBeNull();
-    expect(firstColumnBox!.width).toBeGreaterThanOrEqual(280);
-
-    const scrollWindow = testPage.getByTestId("desktop-kanban-scroll-window");
-    await expect(scrollWindow).toBeVisible();
-    await scrollWindow.evaluate((element) => {
-      element.scrollLeft = element.scrollWidth;
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: seedData.workflowId,
+      kanban_hidden_step_ids: visibleHiddenSteps,
+      workflow_ids_with_auto_hide_empty_steps: autoHideWorkflows.filter(
+        (workflowId) => workflowId !== seedData.workflowId,
+      ),
     });
-    const lastStep = seedData.steps.at(-1);
-    expect(lastStep).toBeDefined();
-    await expect(kanban.columnByStepId(lastStep!.id)).toBeInViewport();
 
-    const relationship = kanban.taskCard(child.id).getByTestId("task-parent-relationship");
-    const [cardBox, relationshipBox] = await Promise.all([
-      kanban.taskCard(child.id).boundingBox(),
-      relationship.boundingBox(),
-    ]);
-    expect(cardBox).not.toBeNull();
-    expect(relationshipBox).not.toBeNull();
-    expect(relationshipBox!.x).toBeGreaterThanOrEqual(cardBox!.x);
-    expect(relationshipBox!.x + relationshipBox!.width).toBeLessThanOrEqual(
-      cardBox!.x + cardBox!.width,
-    );
-    await expect(relationship).toHaveAttribute("title", /deliberately long parent task title/);
-    await expect
-      .poll(() => testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
-      .toBe(true);
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
 
-    await testPage.setViewportSize({ width: 1600, height: 800 });
-    await expect(testPage.getByTestId("desktop-kanban-stage-navigator")).toHaveCount(0);
+      const desktopLayout = testPage.getByTestId("desktop-kanban-layout");
+      await expect(desktopLayout).toHaveCount(1);
+      await expect(desktopLayout).toBeVisible();
+      await expect(testPage.getByTestId("desktop-kanban-stage-navigator")).toHaveCount(0);
+      await expect(testPage.getByTestId("tablet-kanban-layout")).toHaveCount(0);
+      await expect(testPage.getByTestId("mobile-kanban-layout")).toHaveCount(0);
+      await expect(testPage.getByRole("button", { name: "Open menu" })).toHaveCount(0);
 
-    // Below the 768px sidebar boundary the board uses mobile composition; the
-    // tablet layout is a coarse-pointer fallback and is not reachable here.
-    await testPage.setViewportSize({ width: 700, height: 800 });
-    await expect(testPage.getByTestId("mobile-kanban-layout")).toBeVisible();
-    await expect(testPage.getByTestId("desktop-kanban-stage-navigator")).toHaveCount(0);
+      await expect(testPage.getByPlaceholder("Search tasks...")).toBeVisible();
+      await expect(kanban.createTaskButton).toBeVisible();
+      await expect(testPage.getByRole("button", { name: "Quick Chat" })).toBeVisible();
+      await expect(kanban.viewTogglePipeline).toBeVisible();
+
+      for (const laneTask of laneTasks) {
+        await expect(kanban.taskCard(laneTask.taskId)).toBeVisible({ timeout: 15_000 });
+        await expect(kanban.columnByStepId(laneTask.stepId)).toBeAttached({ timeout: 15_000 });
+      }
+      for (const step of seedData.steps) {
+        await expect(kanban.columnByStepId(step.id)).toBeAttached({ timeout: 15_000 });
+      }
+      const firstColumnBox = await kanban.columnByStepId(seedData.steps[0].id).boundingBox();
+      expect(firstColumnBox).not.toBeNull();
+      expect(firstColumnBox!.width).toBeGreaterThanOrEqual(280);
+
+      const scrollWindow = testPage.getByTestId("desktop-kanban-scroll-window");
+      await expect(scrollWindow).toBeVisible();
+      await scrollWindow.evaluate((element) => {
+        element.scrollLeft = element.scrollWidth;
+      });
+      const lastStep = seedData.steps.at(-1);
+      expect(lastStep).toBeDefined();
+      await expect(kanban.columnByStepId(lastStep!.id)).toBeInViewport();
+
+      const relationship = kanban.taskCard(child.id).getByTestId("task-parent-relationship");
+      const [cardBox, relationshipBox] = await Promise.all([
+        kanban.taskCard(child.id).boundingBox(),
+        relationship.boundingBox(),
+      ]);
+      expect(cardBox).not.toBeNull();
+      expect(relationshipBox).not.toBeNull();
+      expect(relationshipBox!.x).toBeGreaterThanOrEqual(cardBox!.x);
+      expect(relationshipBox!.x + relationshipBox!.width).toBeLessThanOrEqual(
+        cardBox!.x + cardBox!.width,
+      );
+      await expect(relationship).toHaveAttribute("title", /deliberately long parent task title/);
+      await expect
+        .poll(() => testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+        .toBe(true);
+
+      await testPage.setViewportSize({ width: 1600, height: 800 });
+      await expect(testPage.getByTestId("desktop-kanban-stage-navigator")).toHaveCount(0);
+
+      // Below the 768px sidebar boundary the board uses mobile composition; the
+      // tablet layout is a coarse-pointer fallback and is not reachable here.
+      await testPage.setViewportSize({ width: 700, height: 800 });
+      await expect(testPage.getByTestId("mobile-kanban-layout")).toBeVisible();
+      await expect(testPage.getByTestId("desktop-kanban-stage-navigator")).toHaveCount(0);
+    } finally {
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: workflowFilterId,
+        kanban_hidden_step_ids: hiddenSteps,
+        workflow_ids_with_auto_hide_empty_steps: autoHideWorkflows,
+      });
+    }
   });
 });

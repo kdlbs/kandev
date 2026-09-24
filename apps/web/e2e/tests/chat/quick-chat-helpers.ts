@@ -138,10 +138,15 @@ export async function waitForQuickChatDirectInput(dialog: Locator): Promise<void
   await expect(editor).toBeEditable({ timeout: 15_000 });
 }
 
-export async function startQuickChatFromSetup(dialog: Locator, page: Page) {
+export async function startQuickChatFromSetup(
+  dialog: Locator,
+  page: Page,
+  startResponse?: Promise<Response>,
+) {
   await selectAgentIfNeeded(dialog, page);
   await expect(dialog.getByTestId("quick-chat-start")).toBeEnabled({ timeout: 10_000 });
   await dialog.getByTestId("quick-chat-start").click();
+  if (startResponse) await startResponse;
 
   // The composer is intentionally editable during STARTING, so editability
   // alone is no longer a readiness signal. Wait for the submit gate to clear
@@ -150,9 +155,13 @@ export async function startQuickChatFromSetup(dialog: Locator, page: Page) {
   await waitForQuickChatComposerReady(dialog);
 }
 
-export async function openQuickChatWithAgent(page: Page, navigateHome = true): Promise<Locator> {
+export async function openQuickChatWithAgent(
+  page: Page,
+  navigateHome = true,
+  startResponse?: Promise<Response>,
+): Promise<Locator> {
   const dialog = await openQuickChatSetup(page, navigateHome);
-  await startQuickChatFromSetup(dialog, page);
+  await startQuickChatFromSetup(dialog, page, startResponse);
   // The composer becomes usable before the session model catalog is hydrated.
   // Wait for the model control as well so callers can immediately inspect or
   // change the session configuration without racing that second readiness gate.
