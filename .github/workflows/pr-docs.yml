@@ -4,7 +4,7 @@ name: Pull request documentation coverage
 # The checked-out validator is always from a trusted workflow/base revision.
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers] base-controlled metadata-only workflow
-    types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review]
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
@@ -36,8 +36,20 @@ jobs:
   coverage:
     name: Publish PR documentation coverage status
     if: >-
-      github.event_name != 'workflow_dispatch' ||
-      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      (
+        github.event_name != 'workflow_dispatch' ||
+        github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      ) &&
+      (
+        github.event_name != 'pull_request_target' ||
+        (github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+        github.event.label.name == 'no-docs-allow'
+      ) &&
+      (
+        github.event_name != 'pull_request_target' ||
+        github.event.action != 'edited' ||
+        github.event.changes.base != null
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:

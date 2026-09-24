@@ -3,6 +3,7 @@ package statussummary
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -73,6 +74,10 @@ type TaskActivityLoader func(context.Context, string) (*time.Time, error)
 // sibling pull requests across projector restarts and CAS rebases.
 type PullRequestLoader func(context.Context, string) ([]PullRequestInput, error)
 
+// LaunchQueueLoader reads the task-owned automatic launch queue. The loader
+// returns nil when the task has no deferred launch.
+type LaunchQueueLoader func(context.Context, string) (*LaunchQueueSummary, error)
+
 // SummaryUpdated is the complete replacement payload sent to workspace
 // subscribers. It intentionally contains no transcript, file list, or source
 // event payload.
@@ -96,6 +101,7 @@ type ProjectorConfig struct {
 	LoadTaskLaunchError     TaskLaunchErrorLoader
 	LoadTaskActivity        TaskActivityLoader
 	LoadPullRequests        PullRequestLoader
+	LoadLaunchQueue         LaunchQueueLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
 	// a task across all of its sessions (pending semantics identical to
 	// message.queue.get). Wired from the messagequeue service at the
@@ -103,6 +109,14 @@ type ProjectorConfig struct {
 	CountQueuedPrompts func(context.Context, string) (int, error)
 	Logger             *logger.Logger
 	Now                func() time.Time
+	// RetryBackoff paces genuine compare-and-set retries so two writers that
+	// collide do not immediately collide again. It receives the zero-based
+	// retry attempt (0 for the wait before the second try) and must return
+	// once the caller should retry, or ctx.Err() if ctx is done first. Nil
+	// selects the built-in bounded exponential backoff with jitter; tests may
+	// inject a fast/no-op implementation to keep unit tests instantaneous
+	// while still exercising the retry path.
+	RetryBackoff func(ctx context.Context, attempt int) error
 }
 
 // Projector converts authoritative, bounded occurrences into one complete
@@ -119,9 +133,11 @@ type Projector struct {
 	loadTaskLaunchError     TaskLaunchErrorLoader
 	loadTaskActivity        TaskActivityLoader
 	loadPullRequests        PullRequestLoader
+	loadLaunchQueue         LaunchQueueLoader
 	countQueuedPrompts      func(context.Context, string) (int, error)
 	logger                  *logger.Logger
 	now                     func() time.Time
+	retryBackoff            func(ctx context.Context, attempt int) error
 
 	mu         sync.Mutex
 	state      map[string]*projectionState
@@ -153,14 +169,16 @@ type projectionState struct {
 	// clearedErrorStamps records, per session, the stamp of the last error this
 	// projection cleared, so a durable breadcrumb replayed on a later session
 	// event cannot re-arm an error affordance the agent already recovered from.
-	clearedErrorStamps map[string]string
-	errorsObserved     bool
-	git                map[string]GitSummary
-	gitBaseline        *GitSummary
-	gitObserved        bool
-	prs                map[string]pullRequestObservation
-	prBaseline         *PullRequestSummary
-	prObserved         bool
+	clearedErrorStamps  map[string]string
+	errorsObserved      bool
+	git                 map[string]GitSummary
+	gitBaseline         *GitSummary
+	gitObserved         bool
+	prs                 map[string]pullRequestObservation
+	prBaseline          *PullRequestSummary
+	prObserved          bool
+	launchQueue         *LaunchQueueSummary
+	launchQueueObserved bool
 }
 
 type sessionObservation struct {
@@ -202,6 +220,10 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
+	retryBackoff := cfg.RetryBackoff
+	if retryBackoff == nil {
+		retryBackoff = defaultCASRetryBackoff
+	}
 	return &Projector{
 		store:                   cfg.Store,
 		eventBus:                cfg.EventBus,
@@ -212,12 +234,67 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		loadTaskLaunchError:     cfg.LoadTaskLaunchError,
 		loadTaskActivity:        cfg.LoadTaskActivity,
 		loadPullRequests:        cfg.LoadPullRequests,
+		loadLaunchQueue:         cfg.LoadLaunchQueue,
 		countQueuedPrompts:      cfg.CountQueuedPrompts,
 		logger:                  log.WithFields(zap.String("component", "task-status-summary-projector")),
 		now:                     now,
+		retryBackoff:            retryBackoff,
 		state:                   make(map[string]*projectionState),
 		taskLocks:               make(map[string]*taskProjectionLock),
 	}
+}
+
+// casRetryBaseDelay and casRetryMaxDelay bound the in-process wait between a
+// rejected compare-and-set and the next retry. These are intentionally small
+// (single-digit milliseconds): the goal is only to avoid two writers
+// retrying in lockstep, not to throttle event handling. A per-task mutex
+// already serializes this projector's own writers, so this backoff exists for
+// the cross-writer case (a concurrent boot reconciliation or HTTP rebuild
+// racing the live projector on the same row).
+const (
+	casRetryBaseDelay = 4 * time.Millisecond
+	casRetryMaxDelay  = 64 * time.Millisecond
+)
+
+// defaultCASRetryBackoff waits a bounded exponential delay with up to +25%
+// jitter before a genuine compare-and-set retry. It never increases the
+// caller's attempt bound on its own; it only paces the attempts that already
+// exist so a competing writer has a chance to finish first.
+func defaultCASRetryBackoff(ctx context.Context, attempt int) error {
+	delay := casRetryBaseDelay << attempt
+	if delay <= 0 || delay > casRetryMaxDelay {
+		delay = casRetryMaxDelay
+	}
+	delay += casRetryJitter(delay)
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// casRetryJitter returns a random offset in [0, base/4] so concurrent
+// retriers spread out instead of colliding again on the same tick.
+func casRetryJitter(base time.Duration) time.Duration {
+	quarter := int64(base / 4)
+	if quarter <= 0 {
+		return 0
+	}
+	return time.Duration(rand.Int63n(quarter + 1)) //nolint:gosec
+}
+
+// waitForCASRetry backs off before a genuine compare-and-set retry. Callers
+// pass the zero-based index of the retry about to be attempted (0 for the
+// wait before the second overall attempt).
+func (p *Projector) waitForCASRetry(ctx context.Context, attempt int) error {
+	backoff := p.retryBackoff
+	if backoff == nil {
+		backoff = defaultCASRetryBackoff
+	}
+	return backoff(ctx, attempt)
 }
 
 // Start subscribes only to source occurrences that can affect a summary.
@@ -250,7 +327,7 @@ func (p *Projector) Start(ctx context.Context) error {
 		events.MessageQueueStatusChanged,
 	}
 	for _, pattern := range patterns {
-		sub, err := p.eventBus.Subscribe(pattern, p.handleEvent)
+		sub, err := p.eventBus.Subscribe(pattern, p.HandleEvent)
 		if err != nil {
 			p.Close()
 			return fmt.Errorf("subscribe task status summary source %q: %w", pattern, err)
@@ -282,7 +359,11 @@ func (p *Projector) Close() {
 // HandleEvent is exported for focused tests and for callers that already
 // multiplex event-bus subscriptions. Start normally installs it directly.
 func (p *Projector) HandleEvent(ctx context.Context, event *bus.Event) error {
-	return p.handleEvent(ctx, event)
+	err := p.handleEvent(ctx, event)
+	if err != nil {
+		recordHandlerFailure()
+	}
+	return err
 }
 
 func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
@@ -349,6 +430,16 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 			return err
 		}
 	}
+	launchQueueChanged := false
+	if p.loadLaunchQueue != nil {
+		nextQueue, loadErr := p.loadLaunchQueue(ctx, taskID)
+		if loadErr != nil {
+			return fmt.Errorf("load launch queue for task status summary %q: %w", taskID, loadErr)
+		}
+		launchQueueChanged = !state.launchQueueObserved || !equalLaunchQueue(state.launchQueue, nextQueue)
+		state.launchQueue = cloneLaunchQueue(nextQueue)
+		state.launchQueueObserved = true
+	}
 
 	if event.Type == events.MessageQueueStatusChanged {
 		activityChanged := applyTaskActivityEventLocked(state, event.Type, data)
@@ -360,7 +451,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 				return refreshErr
 			}
 		}
-		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged || taskErrorChanged, event.Type, data)
+		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged || taskErrorChanged || launchQueueChanged, event.Type, data)
 	}
 
 	refreshPending := p.loadPendingActions != nil &&
@@ -370,11 +461,11 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		if refreshErr != nil {
 			return refreshErr
 		}
-		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || pullRequestChanged
+		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || pullRequestChanged || launchQueueChanged
 		return p.persistPendingRefreshLocked(ctx, taskID, state, changed, event.Type, data)
 	}
 
-	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || pullRequestChanged
+	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || pullRequestChanged || launchQueueChanged
 	if !changed {
 		return nil
 	}
@@ -416,7 +507,14 @@ func (p *Projector) persistPendingRefreshLocked(
 		if eventType != "" {
 			p.applySourceEventLocked(state, eventType, eventData)
 		}
+		if attempt < maxPendingPersistAttempts-1 {
+			recordCASRetry()
+			if err := p.waitForCASRetry(ctx, attempt); err != nil {
+				return fmt.Errorf("wait before CAS retry refreshing pending task status %q: %w", taskID, err)
+			}
+		}
 	}
+	recordCASExhaustion()
 	p.logger.Warn("exhausted CAS retries refreshing pending task status",
 		zap.String("task_id", taskID),
 		zap.Int("attempts", maxPendingPersistAttempts))
@@ -468,7 +566,14 @@ func (p *Projector) applyQueueStatusEvent(
 			return err
 		}
 		sourceChanged = true
+		if attempt < maxQueueCountPersistAttempts-1 {
+			recordCASRetry()
+			if err := p.waitForCASRetry(ctx, attempt); err != nil {
+				return fmt.Errorf("wait before CAS retry updating queued prompt count %q: %w", taskID, err)
+			}
+		}
 	}
+	recordCASExhaustion()
 	// The count self-corrects on the next queue event or list load, but a
 	// sustained contention run is worth surfacing so a repeated rejector is not
 	// silently starved.

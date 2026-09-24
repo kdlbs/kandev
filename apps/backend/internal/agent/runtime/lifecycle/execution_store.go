@@ -90,6 +90,7 @@ func (s *ExecutionStore) Add(execution *AgentExecution) error {
 	if execution.ContainerID != "" {
 		s.byContainer[execution.ContainerID] = execution.ID
 	}
+	agentActiveRuntimes.Set(int64(len(s.executions)))
 	return nil
 }
 
@@ -114,6 +115,7 @@ func (s *ExecutionStore) Remove(executionID string) {
 
 	// Remove from primary map
 	delete(s.executions, executionID)
+	agentActiveRuntimes.Set(int64(len(s.executions)))
 }
 
 // Get returns an agent execution by its ID.
@@ -151,6 +153,24 @@ func (s *ExecutionStore) OwnsPromptGeneration(sessionID, executionID string, gen
 	}
 	execution, exists := s.executions[currentExecutionID]
 	return exists && generation != 0 && execution.promptGeneration == generation
+}
+
+func (s *ExecutionStore) ownsActivePromptGeneration(
+	sessionID, executionID string,
+	generation uint64,
+) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	currentExecutionID, exists := s.bySession[sessionID]
+	if !exists || currentExecutionID != executionID {
+		return false
+	}
+	execution, exists := s.executions[currentExecutionID]
+	return exists && generation != 0 &&
+		execution.promptGeneration == generation &&
+		execution.dispatchedPromptGeneration == generation &&
+		execution.promptCompletionGeneration != generation
 }
 
 // OwnsPromptActivity reports whether the execution still owns the prompt and

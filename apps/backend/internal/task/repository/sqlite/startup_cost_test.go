@@ -137,7 +137,7 @@ func TestStartupMigrationCostsPopulated(t *testing.T) {
 		t.Fatalf("reset prompt sequence counters: %v", err)
 	}
 	promptSeqStarted := time.Now()
-	if err := replayRepo.backfillPromptSeq(); err != nil {
+	if err := replayRepo.backfillPromptSeq(context.Background()); err != nil {
 		_ = replayDB.Close()
 		t.Fatalf("measure prompt sequence backfill: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestBackfillPromptSeqStopsOnCanceledContext(t *testing.T) {
 		migrate: dbpkg.NewRequiredMigrateLoggerContext(db, nil, ctx),
 	}
 	done := make(chan error, 1)
-	go func() { done <- repo.backfillPromptSeq() }()
+	go func() { done <- repo.backfillPromptSeq(ctx) }()
 	select {
 	case <-started:
 	case <-time.After(2 * time.Second):

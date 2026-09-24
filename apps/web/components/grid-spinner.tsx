@@ -6,6 +6,7 @@ import { createPersistentMotionVisibility } from "@kandev/ui/persistent-motion-v
 
 type GridSpinnerProps = {
   className?: string;
+  ariaLabel?: string;
 };
 
 const gridKeyframes: Keyframe[] = [
@@ -17,7 +18,7 @@ const gridKeyframes: Keyframe[] = [
 
 const useCompositorEffect = typeof window === "undefined" ? React.useEffect : React.useLayoutEffect;
 
-export function GridSpinner({ className }: GridSpinnerProps) {
+export function GridSpinner({ className, ariaLabel }: GridSpinnerProps) {
   const { t } = useTranslation();
   const gridRef = React.useRef<HTMLSpanElement>(null);
 
@@ -55,7 +56,7 @@ export function GridSpinner({ className }: GridSpinnerProps) {
       ref={gridRef}
       className={`spinner-grid ${className ?? ""}`}
       role="status"
-      aria-label={t("common:loadingIndicatorLabel")}
+      aria-label={ariaLabel ?? t("common:loadingIndicatorLabel")}
     >
       <span className="spinner-grid-cube" />
       <span className="spinner-grid-cube" />

@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-09-11
-updated: 2026-09-14
+updated: 2026-09-18
 requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-005
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006
@@ -22,8 +22,8 @@ to own contribution admission and durable bootstrap failure projection.
 | Requirement | Design section |
 | --- | --- |
 | REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-005 | Workspace-only registration |
-| REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006 | Recovery presentation ownership; responsive amendment |
-| REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007 | Proposed attempt isolation |
+| REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006 | Recovery presentation ownership; post-start recoverable failure detail; responsive amendment |
+| REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007 | Attempt isolation; accepted-turn ownership |
 
 The following amendments are implemented in the
 [contribution resume recovery package](../../../plans/contribution-resume-recovery/plan.md).
@@ -84,6 +84,26 @@ state. Automatic fallback remains allowed; manual restore remains explicit.
 Success clears only its matching attempt. A stale callback cannot clear a
 newer failure. Retain the archive/navigation generation guards from requirement
 004 and the provider-specific runtime recovery policies.
+
+### Post-start recoverable failure detail (requirement 006)
+
+`createRecoveryStatusMessage` (`internal/orchestrator/event_handlers_agent.go`)
+populates the recovery entry's `error_output` metadata with
+`routingerr.Sanitize(data.FailureDetails)` for post-start recoverable failures,
+matching what the bootstrap, managed-runtime-npm, and provider-quota paths
+already do. Without this, a failure that occurs after agent startup, such as a
+model provider rejecting a dispatched prompt with an invalid-tool-definition
+`400`, left `error_output` empty, so the recovery card showed only the short
+summary line and the collapsed technical-details disclosure never appeared.
+
+The frontend already renders this. `ActionMessageDetails` / `TechnicalDetails`
+(`apps/web/components/task/chat/messages/action-message-details.tsx`) render
+`error_output` inside an initially collapsed disclosure, so no frontend change
+is required. When sanitization yields an empty string, `error_output` is
+omitted and the generic recovery card is shown. Sanitization removes URLs,
+credentials, and identifiers; raw agent stderr is never added to durable
+metadata. The `remediation_url` link stays a separate metadata field and is
+never folded into `error_output`.
 
 ### Responsive amendment
 
@@ -250,3 +270,75 @@ Desktop and phone tests exercise the actual backend resume path and reload.
 This applies the accepted [backend cancellation ownership decision](../../../decisions/2026-08-03-backend-owned-cancellation-progress.md).
 It extends that implementation to startup attempts without a new durable state
 or an alternative cancellation owner. No new ADR is required.
+
+## Accepted-turn ownership (requirement 007)
+
+This amendment clarifies the startup boundary in the preceding attempt
+isolation design. The [repair package](../../../plans/resumed-turn-cancellation/plan.md)
+records implementation and validation of criteria 007.7 through 007.9.
+
+### Startup authority and execution identity
+
+`resumeAttemptRegistry` owns startup cancellation authority. An attempt identity
+also identifies valid runtime events after startup. These are separate responsibilities.
+The registry must retain event provenance when startup cancellation authority ends.
+
+Add an explicit accepted phase to `resumeAttempt`, protected by the registry
+mutex. Transfer authority under the existing session cancellation guard.
+The transition checks the current attempt and captured execution before acceptance.
+It is idempotent and cannot revive an invalidated attempt.
+
+`preparePromptDispatchCallback` receives provider acceptance through
+`PromptWithDispatchCallback`. Record the accepted phase before releasing its
+dispatch guard and before publication errors can select startup cleanup.
+The callback is evidence of provider acceptance even when a subsequent durable
+publication or `afterDispatch` hook fails. Preserve the existing accepted-error path.
+Do not wait for the blocking prompt call to return before transferring authority.
+
+`runExplicitCancellationOwned` continues to call `invalidateResumeAttempt`.
+Invalidation cancels only attempts that still own startup. An accepted attempt
+keeps its event identity while normal runtime cancellation settles the turn.
+A cancelled turn does not cancel the accepted attempt context or confer startup
+teardown authority. Shutdown and explicit runtime teardown retain their existing owners.
+
+`finishPromptExecutorDispatch` and the compound resume continuation distinguish
+accepted work from cancelled startup. Normal cancellation returns the turn outcome.
+It does not roll back an accepted claim, decorate it as recovery failure, or
+call `cleanupCancelledResumeAttempt`. Apply the same rule to model-switch paths
+that bypass the ordinary prompt callback.
+
+Retain normal deferred attempt completion so outer compound calls can finish
+without treating the successful transfer as a missing registry owner.
+Successful tombstones continue to authorize matching execution callbacks.
+Both direct and identity-based startup cleanup reject accepted attempts.
+Old cancelled attempts remain fenced, including reused execution IDs and retries.
+Do not weaken execution generation checks or accept unknown callback identities.
+
+### Entry points and failure boundaries
+
+Apply the transfer to lazy message resume, `ResumeTaskSessionAndPrompt`, and
+the handler retry path. Preserve the original identity across internal retry.
+Resume without a prompt relinquishes startup ownership once readiness succeeds.
+A later ordinary prompt must not inherit startup cancellation authority.
+
+Before acceptance, cancellation still interrupts startup and prevents dispatch.
+After acceptance, provider errors use normal prompt failure handling.
+Publication failure does not authorize prompt replay or startup cleanup.
+A provider that cannot settle cancellation retains the existing bounded escalation
+policy. Archive, workflow parking, explicit stop, crash, and backend restart
+remain independent reasons for runtime removal or recovery.
+
+### Compatibility, presentation, and evidence
+
+The change is process-local. It adds no durable state, public API, runtime flag,
+locale string, or new interface control. Desktop and phone retain their existing
+composer, pause control, cancellation progress, and transcript scroll owner.
+Tests use those surfaces and require a successful follow-up on the same execution.
+Visible boot-row count alone is insufficient because the UI deduplicates resume entries.
+
+Barrier-controlled service tests prove both acceptance orderings and process
+survival. They also prove valid events after cancellation and stale-event rejection.
+The existing backend cancellation ADR remains authoritative. This local lifecycle
+correction needs no separate ADR. Removing attempt tracking at initial readiness
+is insufficient for compound resume because it leaves a pre-dispatch cancellation gap.
+Removing all attempt checks would lose stale-callback protection.

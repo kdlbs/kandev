@@ -335,6 +335,22 @@ func provideGateway(
 				return loadTaskGitObservations(ctx, taskRepo, taskID)
 			},
 			LoadPullRequests: loadPullRequests,
+			LoadLaunchQueue: func(ctx context.Context, taskID string) (*statussummary.LaunchQueueSummary, error) {
+				task, err := taskRepo.GetTask(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+				if task == nil {
+					return nil, fmt.Errorf("task %q not found", taskID)
+				}
+				observation, observationErr := orchestratorSvc.CurrentSessionCeilingObservation(ctx)
+				return statussummary.LaunchQueueSummaryFromTaskWithCapacity(task, &statussummary.LaunchQueueCapacityObservation{
+					InUse:      observation.InUse,
+					Limit:      observation.Limit,
+					ObservedAt: observation.ObservedAt,
+					Known:      observationErr == nil && observation.Known,
+				}), nil
+			},
 			ResolveWorkspace: func(ctx context.Context, taskID string) (string, error) {
 				task, err := taskRepo.GetTask(ctx, taskID)
 				if err != nil {

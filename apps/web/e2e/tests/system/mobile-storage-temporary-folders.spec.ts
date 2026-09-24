@@ -19,6 +19,8 @@ test.describe("Mobile system temporary folders", () => {
     await trigger.tap();
     const resource = testPage.getByTestId("storage-resource-system-temporary");
     await expect(resource).toContainText("Partial");
+    await expect(resource).toContainText("Scan timed out. Showing partial usage.");
+    await expect(resource).not.toContainText("context deadline exceeded");
     await expect(resource).toContainText(fixture.root);
     await expect(resource).toContainText(
       "Read-only. This footprint can overlap counted categories.",
@@ -80,7 +82,7 @@ test.describe("Mobile system temporary folders", () => {
     expect(box).not.toBeNull();
     expect(box!.height).toBeGreaterThanOrEqual(44);
     await cleanButton.tap();
-    await expect(testPage.getByText("Clean stale Kandev artifacts?")).toBeVisible();
+    await expect(testPage.getByText("Clean inactive Kandev temporary files?")).toBeVisible();
     await prCapture.screenshot("mobile-system-temporary-cleanup-confirmation", {
       caption: "Mobile storage keeps explicit registered cleanup in a touch-sized flow",
     });

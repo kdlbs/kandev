@@ -99,6 +99,19 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 	return m.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, nil)
 }
 
+// RegisterInitialPromptDispatchCallbacks installs one-shot callbacks for the
+// initial prompt sent during StartAgentProcess. Model-switch startup launches
+// that prompt asynchronously, so callers that own startup cancellation must
+// wait for either provider acceptance or a pre-acceptance delivery failure.
+func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	execution.setInitialPromptDispatchCallbacks(onDispatched, onFailure)
+	return nil
+}
+
 // PromptAgentWithDispatchCallback exposes agentctl acceptance to callers that
 // must keep admission serialized until the queued prompt is actually dispatched.
 func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*PromptResult, error) {
@@ -1138,7 +1151,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	}
 	backendForce := force
 	stopCtx := ctx
-	if shouldPreserveFailedKubernetesResume(execution, reason) {
+	if shouldPreserveKubernetesRuntime(execution, reason) {
 		backendForce = false
 		var cancelStop context.CancelFunc
 		stopCtx, cancelStop = kubernetesDurableContext(ctx)
@@ -1212,16 +1225,22 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		now := time.Now()
 		exec.FinishedAt = &now
 	})
-	// Persist terminal status before releasing the in-memory execution. Privileged
-	// MCP operations revalidate this durable mirror in their transaction, so a
-	// stopped execution must never leave a live-looking attestation behind.
-	if err := m.persistStoppedExecutorRunning(context.WithoutCancel(ctx), execution); err != nil {
-		if errors.Is(err, models.ErrExecutionRotated) {
-			m.RemoveExecution(executionID)
-			return nil
+	if execution.Owner.Kind == ExecutionOwnerRun {
+		if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
+			return err
 		}
-		m.scheduleStoppedExecutorPersistence(execution)
-		return fmt.Errorf("persist terminal status for execution %q: %w", executionID, err)
+	} else {
+		// Persist terminal status before releasing the in-memory execution. Privileged
+		// MCP operations revalidate this durable mirror in their transaction, so a
+		// stopped execution must never leave a live-looking attestation behind.
+		if err := m.persistStoppedExecutorRunning(context.WithoutCancel(ctx), execution); err != nil {
+			if errors.Is(err, models.ErrExecutionRotated) {
+				m.RemoveExecution(executionID)
+				return nil
+			}
+			m.scheduleStoppedExecutorPersistence(execution)
+			return fmt.Errorf("persist terminal status for execution %q: %w", executionID, err)
+		}
 	}
 	m.finishStoppedExecution(ctx, execution)
 
@@ -1284,11 +1303,6 @@ func (m *Manager) finishStoppedExecution(ctx context.Context, execution *AgentEx
 	m.logger.Info("agent stopped and removed from tracking",
 		zap.String("execution_id", execution.ID), zap.String("task_id", execution.TaskID))
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
-}
-
-func shouldPreserveFailedKubernetesResume(execution *AgentExecution, reason string) bool {
-	return execution != nil && execution.RuntimeName == executor.NameKubernetes &&
-		execution.isResumedSession && reason == StopReasonAgentBootstrapFailed
 }
 
 // detachAgentExecution implements the AC-EXECUTORS-SURVIVAL survivable-detach
@@ -1935,6 +1949,10 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	}
 	if client.HasAgentStream() {
 		releaseClient()
+		if execution.Status == v1.AgentStatusFailed &&
+			execution.isSessionInitialized() && execution.ACPSessionID != "" {
+			return m.restoreRecoveredFailedExecution(ctx, execution)
+		}
 		return nil
 	}
 	releaseClient()
@@ -2682,7 +2700,7 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 	runtimeInstance := &ExecutorInstance{
 		InstanceID:           execution.ID,
 		TaskID:               execution.TaskID,
-		SessionID:            execution.SessionID,
+		SessionID:            executionInventorySessionID(execution),
 		ContainerID:          execution.ContainerID,
 		StandaloneInstanceID: execution.standaloneInstanceID,
 		StandalonePort:       execution.standalonePort,

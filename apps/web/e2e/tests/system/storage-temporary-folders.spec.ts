@@ -72,6 +72,8 @@ test.describe("System temporary folders", () => {
     await trigger.click();
     const resource = testPage.getByTestId("storage-resource-system-temporary");
     await expect(resource).toContainText("Partial");
+    await expect(resource).toContainText("Scan timed out. Showing partial usage.");
+    await expect(resource).not.toContainText("context deadline exceeded");
     await expect(resource).toContainText(fixture.root);
     await expect(resource).toContainText("One fixture entry was skipped.");
     await prCapture.screenshot("system-temporary-partial", {
@@ -117,7 +119,7 @@ test.describe("System temporary folders", () => {
     );
 
     await testPage.getByTestId("storage-policy-temporary-artifacts-clean").click();
-    await expect(testPage.getByText("Clean stale Kandev artifacts?")).toBeVisible();
+    await expect(testPage.getByText("Clean inactive Kandev temporary files?")).toBeVisible();
     await prCapture.screenshot("system-temporary-cleanup-confirmation", {
       caption: "Desktop storage confirms registered artifact cleanup before quarantine",
     });

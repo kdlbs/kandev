@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { moveTask } from "@/lib/api";
-import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
+import type { WorkflowMoveEntryOptions, WorkflowMoveResponse } from "@/lib/api/domains/kanban-api";
 import { useAppStore } from "@/components/state-provider";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { useLayoutStore } from "@/lib/state/layout-store";
@@ -101,6 +101,89 @@ function shouldClearProgressMove(
   );
 }
 
+function useWorkflowStepMoveFocus({
+  taskId,
+  workflowId,
+  presentationToken,
+}: Pick<UseWorkflowStepMoveParams, "taskId" | "workflowId" | "presentationToken">) {
+  const navigationRevision = useAppStore((s) => s.taskRemoval.navigationRevision);
+  const beginWorkflowSessionFocus = useAppStore((s) => s.beginWorkflowSessionFocus);
+  const bindWorkflowSessionFocus = useAppStore((s) => s.bindWorkflowSessionFocus);
+  const reconcileWorkflowSessionFocus = useAppStore((s) => s.reconcileWorkflowSessionFocus);
+  const cancelWorkflowSessionFocus = useAppStore((s) => s.cancelWorkflowSessionFocus);
+  const activeFocusRequestIdRef = useRef<number | null>(null);
+
+  const beginFocus = useCallback(
+    (destinationStepId: string) => {
+      if (!taskId || !workflowId) return null;
+      const requestId = beginWorkflowSessionFocus({
+        taskId,
+        workflowId,
+        destinationStepId,
+        presentationToken,
+        navigationRevision,
+      });
+      activeFocusRequestIdRef.current = requestId;
+      return requestId;
+    },
+    [beginWorkflowSessionFocus, navigationRevision, presentationToken, taskId, workflowId],
+  );
+  const commitFocus = useCallback(
+    (requestId: number | null, response: WorkflowMoveResponse) => {
+      if (requestId === null) return;
+      try {
+        if (!response.workflow_entry_identity) {
+          cancelWorkflowSessionFocus({ requestId, presentationToken });
+          return;
+        }
+        bindWorkflowSessionFocus({
+          requestId,
+          presentationToken,
+          entryIdentity: response.workflow_entry_identity,
+        });
+        if (!taskId) return;
+        reconcileWorkflowSessionFocus(taskId, {
+          metadata: response.task?.metadata,
+          updatedAt: response.task?.updated_at,
+          workflowStepId: response.task?.workflow_step_id,
+          entryIdentity: response.workflow_entry_identity,
+        });
+      } finally {
+        if (activeFocusRequestIdRef.current === requestId) {
+          activeFocusRequestIdRef.current = null;
+        }
+      }
+    },
+    [
+      bindWorkflowSessionFocus,
+      cancelWorkflowSessionFocus,
+      presentationToken,
+      reconcileWorkflowSessionFocus,
+      taskId,
+    ],
+  );
+  const cancelFocus = useCallback(
+    (requestId: number | null) => {
+      if (requestId === null) return;
+      cancelWorkflowSessionFocus({ requestId, presentationToken });
+      if (activeFocusRequestIdRef.current === requestId) {
+        activeFocusRequestIdRef.current = null;
+      }
+    },
+    [cancelWorkflowSessionFocus, presentationToken],
+  );
+
+  useEffect(
+    () => () => {
+      const requestId = activeFocusRequestIdRef.current;
+      if (requestId !== null) cancelWorkflowSessionFocus({ requestId });
+    },
+    [cancelWorkflowSessionFocus],
+  );
+
+  return { beginFocus, cancelFocus, commitFocus };
+}
+
 /**
  * The single implementation of the compact stepper's move request. Extracted
  * so the task top bar and the kanban preview header share one plan-mode
@@ -119,6 +202,7 @@ export function useWorkflowStepMove({
   onMoveError,
 }: UseWorkflowStepMoveParams): UseWorkflowStepMoveResult {
   const disablePlanMode = useDisablePlanMode();
+  const focus = useWorkflowStepMoveFocus({ taskId, workflowId, presentationToken });
   const [movingToStepId, setMovingToStepId] = useState<string | null>(null);
   const [progressingToStepId, setProgressingToStepId] = useState<string | null>(null);
   // Only the in-flight step's own button is disabled, so every other step stays
@@ -162,6 +246,7 @@ export function useWorkflowStepMove({
   const handleMove = useCallback(
     async (stepId: string, entryOptions?: WorkflowMoveEntryOptions): Promise<boolean> => {
       if (!taskId || !workflowId) return false;
+      const focusRequestId = focus.beginFocus(stepId);
       onMoveStart?.();
       disablePlanMode();
       const requestId = ++moveRequestRef.current;
@@ -179,15 +264,17 @@ export function useWorkflowStepMove({
       setMovingToStepId(stepId);
       setProgressingToStepId(stepId);
       try {
-        await moveTask(taskId, {
+        const response = await moveTask(taskId, {
           workflow_id: workflowId,
           workflow_step_id: stepId,
           position: 0,
           entry_options: entryOptions,
         });
+        if (requestId === moveRequestRef.current) focus.commitFocus(focusRequestId, response);
         return true;
       } catch (err) {
         console.error("[useWorkflowStepMove] Failed to move task:", err);
+        focus.cancelFocus(focusRequestId);
         if (requestId === moveRequestRef.current) {
           progressMoveRef.current = null;
           priorMoveTargetsRef.current.clear();
@@ -201,7 +288,7 @@ export function useWorkflowStepMove({
         if (requestId === moveRequestRef.current) setMovingToStepId(null);
       }
     },
-    [taskId, workflowId, currentStepId, disablePlanMode, onMoveStart, onMoveError],
+    [taskId, workflowId, currentStepId, focus, disablePlanMode, onMoveStart, onMoveError],
   );
 
   return { movingToStepId, progressingToStepId, handleMove };

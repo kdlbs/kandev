@@ -145,6 +145,19 @@ Workflow-level settings include the name and default agent profile. Each step ca
 | WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A manual move into a full target succeeds and queues in that target. |
 | Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
 
+### Recover from a context reset failure
+
+When **Reset agent context** starts a fresh ACP session, Kandev restores the
+selected model, permission mode, and provider options before the next automatic
+prompt. If the provider rejects a setting, reset fails, or the request times
+out, Kandev leaves the session waiting for input and does not send that prompt.
+The conversation shows a previous-agent-error notice with the reset cause.
+
+To recover, delete the affected conversation from its session actions, then
+create a new session. The task workspace and files remain available. See
+[Sessions and Review](sessions-and-review.md) for the session actions and mobile
+session picker.
+
 The Kanban column shows the admitted count and limit, followed by a **Queued**
 section when overflow exists. The task sidebar shows a queue icon for each
 queued task; hover or focus gives its position in the destination queue.
@@ -190,7 +203,7 @@ The standard Kanban editor exposes these events:
 | Event | When it runs | Editor actions |
 |-------|--------------|----------------|
 | `on_enter` | A task enters a step through normal step-entry processing. | Enable plan mode, auto-start agent, reset context. |
-| `on_turn_start` | A user sends a message. The transition happens before that message is delivered. | Move next, previous, or to a selected step. |
+| `on_turn_start` | A user sends a message, including the first non-empty prompt when a task is created with an explicit workflow step. The transition happens before that message is delivered. Prompts started automatically when a task enters a step do not run this event. | Move next, previous, or to a selected step. |
 | `on_turn_complete` | A normal agent turn finishes when its signal requirements are satisfied. An explicit user cancellation qualifies when the step enables its cancellation policy, even if the completion signal is absent. A pending clarification always blocks completion. | Move next, previous, or to a selected step; disable plan mode. |
 | `on_exit` | A task leaves a step. | Disable plan mode. |
 
@@ -251,7 +264,8 @@ A task may contain several repositories, but a workflow step is not bound to one
 - **Agent does not start:** verify the effective workflow/step agent profile, its health, executor profile, repository access, and the `auto_start_agent` entry action.
 - **Task stays after a turn:** check for an absent transition, a pending clarification, the explicit-completion toggle, a queued WIP card waiting for capacity, or an invalid target left by an older definition.
 - **Task stays after a cancel:** check for a pending clarification, the cancelled-turn completion policy, an absent or blocked transition, a queued WIP card, or an invalid target left by an older definition.
-- **Task cannot be dragged:** the destination may disallow manual moves, be at its WIP limit, or the task may have a starting/running session.
+- **Moving tasks on a phone:** open the task card menu and choose **Move to**. Swiping a card scrolls the column; phone cards do not support drag-to-move or drag reordering.
+- **Task cannot be dragged on desktop or tablet:** the destination may disallow manual moves, be at its WIP limit, or the task may have a starting/running session.
 - **Auto-archive looks late:** the sweep cadence is five minutes and task updates extend the age check.
 - **Synced workflow is read-only:** edit its repository definition and run Sync now, or remove the sync configuration to release all synced workflows as editable manual workflows.
 

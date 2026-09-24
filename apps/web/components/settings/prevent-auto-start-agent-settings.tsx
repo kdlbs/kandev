@@ -1,17 +1,22 @@
 "use client";
+import { SettingsInfo } from "./settings-info";
 
 import { useEffect, useRef, useState } from "react";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import { SettingsCard } from "./settings-card";
+import { SettingsRow, type SettingsPresentation } from "./settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { useTranslation } from "react-i18next";
 
-export function PreventAutoStartAgentSettings() {
+export function PreventAutoStartAgentSettings({
+  presentation = "card",
+}: {
+  presentation?: SettingsPresentation;
+}) {
   const { t } = useTranslation();
   const preventAutoStartAgentOnOpen = useAppStore(
     (state) => state.userSettings.preventAutoStartAgentOnOpen,
@@ -47,6 +52,33 @@ export function PreventAutoStartAgentSettings() {
     discard: () => setDraft(saved),
   });
 
+  const row = (
+    <SettingsRow
+      label={t("settings:preventAutoStartAgentOnOpen")}
+      description={t("settings:preventStartShort")}
+      info={
+        <SettingsInfo label={t("settings:preventAutoStartAgentOnOpen")}>
+          {t("settings:preventAutoStartAgentOnOpenHelp")}
+        </SettingsInfo>
+      }
+      controlId="prevent-auto-start-on-open"
+      touchTarget="switch"
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.preventAutoStartOnOpen}
+      isDirty={isDirty}
+      control={
+        <Switch
+          id="prevent-auto-start-on-open"
+          checked={draft}
+          data-settings-dirty={isDirty}
+          onCheckedChange={setDraft}
+          className="shrink-0 cursor-pointer"
+        />
+      }
+    />
+  );
+
+  if (presentation === "row") return row;
+
   return (
     <SettingsCard
       isDirty={isDirty}
@@ -56,25 +88,7 @@ export function PreventAutoStartAgentSettings() {
       <CardHeader>
         <CardTitle className="text-base">{t("settings:preventAutoStartAgentOnOpen")}</CardTitle>
       </CardHeader>
-      <CardContent>
-        <div className="flex min-h-11 items-center justify-between gap-4">
-          <div className="min-w-0 space-y-0.5">
-            <Label htmlFor="prevent-auto-start-on-open">
-              {t("settings:preventAutoStartAgentOnOpen")}
-            </Label>
-            <p className="text-xs text-muted-foreground">
-              {t("settings:preventAutoStartAgentOnOpenHelp")}
-            </p>
-          </div>
-          <Switch
-            id="prevent-auto-start-on-open"
-            checked={draft}
-            data-settings-dirty={isDirty}
-            onCheckedChange={setDraft}
-            className="shrink-0 cursor-pointer"
-          />
-        </div>
-      </CardContent>
+      <CardContent>{row}</CardContent>
     </SettingsCard>
   );
 }

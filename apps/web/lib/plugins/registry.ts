@@ -146,6 +146,7 @@ class PluginRegistryStore {
   private workLifecycle = new PluginWorkLifecycle();
   private taskPanels: Owned<TaskPanelRegistration>[] = [];
   private taskMenuActions: Owned<TaskMenuActionRegistration>[] = [];
+  private reportedUnreadableTaskMenuActions = new WeakSet<Owned<TaskMenuActionRegistration>>();
   private taskFilters: Owned<TaskFilterRegistration>[] = [];
   private taskListFacets: Owned<TaskListFacetRegistration>[] = [];
   private nextSlotRegistrationId = 0;
@@ -699,9 +700,23 @@ class PluginRegistryStore {
   getTaskMenuActions(
     group?: TaskMenuActionRegistration["group"],
   ): PluginTaskMenuActionRegistration[] {
-    return this.taskMenuActions
-      .filter((entry) => !group || entry.value.group === group)
-      .map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
+    const actions: PluginTaskMenuActionRegistration[] = [];
+    for (const entry of this.taskMenuActions) {
+      try {
+        if (!group || entry.value.group === group) {
+          actions.push({ ...entry.value, pluginId: entry.pluginId });
+        }
+      } catch (error) {
+        if (!this.reportedUnreadableTaskMenuActions.has(entry)) {
+          this.reportedUnreadableTaskMenuActions.add(entry);
+          console.error(
+            `[plugins] task menu action from "${entry.pluginId}" could not be read`,
+            error,
+          );
+        }
+      }
+    }
+    return actions;
   }
 
   /** Every registered task filter, in registration order. */

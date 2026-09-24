@@ -69,7 +69,7 @@ test.describe("Mobile Status drawer", () => {
     await testPage.goto("/");
     await testPage.reload();
 
-    await testPage.getByRole("button", { name: "Open menu" }).click();
+    await testPage.getByTestId("app-nav-trigger").click();
     const statusTrigger = testPage.getByTestId("mobile-home-status-button");
     await expect(statusTrigger).toBeVisible();
     const triggerBox = await statusTrigger.boundingBox();

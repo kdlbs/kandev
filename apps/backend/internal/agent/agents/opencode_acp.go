@@ -18,11 +18,19 @@ var opencodeACPLogoDark []byte
 
 const opencodeACPPackage = "opencode-ai"
 
+// opencodeNativeBinary is the standalone opencode CLI. When it is installed on
+// PATH we launch it directly — mirroring CodeNomad's binary-first launch — so
+// agent startups and refreshes never depend on per-launch `npx --prefer-
+// offline` resolution (see ManagedNPMRuntimeSpec.NativeBinary).
+const opencodeNativeBinary = "opencode"
+
 var (
-	_ Agent                  = (*OpenCodeACP)(nil)
-	_ PassthroughAgent       = (*OpenCodeACP)(nil)
-	_ InferenceAgent         = (*OpenCodeACP)(nil)
-	_ ManagedNPMRuntimeAgent = (*OpenCodeACP)(nil)
+	_ Agent                     = (*OpenCodeACP)(nil)
+	_ PassthroughAgent          = (*OpenCodeACP)(nil)
+	_ InferenceAgent            = (*OpenCodeACP)(nil)
+	_ HostUtilityInferenceAgent = (*OpenCodeACP)(nil)
+	_ ManagedNPMRuntimeAgent    = (*OpenCodeACP)(nil)
+	_ NativeBinaryAgent         = (*OpenCodeACP)(nil)
 )
 
 // OpenCodeACP is the ACP protocol variant of OpenCode.
@@ -84,15 +92,27 @@ func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error)
 	return result, nil
 }
 
+// NativeBinaryName returns the standalone opencode CLI name probed for in the
+// execution environment. See NativeBinaryAgent.
+func (a *OpenCodeACP) NativeBinaryName() string { return opencodeNativeBinary }
+
 func (a *OpenCodeACP) BuildCommand(opts CommandOptions) Command {
+	// Prefer the standalone opencode binary when the lifecycle probe found it
+	// on PATH. The managed npm runtime remains the fallback for containerized
+	// and remote runtimes.
+	if opts.PreferNativeBinary {
+		return a.ManagedNPMRuntime().NativeCommand()
+	}
 	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
 }
 
 func (a *OpenCodeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
-	return newManagedNPMRuntimeSpec(
-		opencodeACPPackage,
-		"acp", "--print-logs", "--log-level", "ERROR",
-	)
+	return ManagedNPMRuntimeSpec{
+		Package:        opencodeACPPackage,
+		DefaultVersion: MustDefaultManagedNPMRuntimeVersion(opencodeACPPackage),
+		ACPArgs:        []string{"acp", "--print-logs", "--log-level", "ERROR"},
+		NativeBinary:   opencodeNativeBinary,
+	}
 }
 
 func (a *OpenCodeACP) Runtime() *RuntimeConfig {
@@ -171,10 +191,26 @@ func (a *OpenCodeACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings
 }
 
-// InferenceConfig returns configuration for one-shot inference using ACP.
+// InferenceConfig returns the executor-safe configuration for one-shot
+// inference. Session inference can run inside a container or on SSH, so it
+// keeps the managed npm command unless the executor selects native use.
 func (a *OpenCodeACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
 		Command:   a.ManagedNPMRuntime().CachedACPCommand(),
+	}
+}
+
+// HostUtilityInferenceConfig prefers the native binary because host utility
+// instances run on the backend host and do not cross an executor boundary.
+func (a *OpenCodeACP) HostUtilityInferenceConfig() *InferenceConfig {
+	spec := a.ManagedNPMRuntime()
+	command := spec.CachedACPCommand()
+	if spec.NativeBinaryOnPath() {
+		command = spec.NativeCommand()
+	}
+	return &InferenceConfig{
+		Supported: true,
+		Command:   command,
 	}
 }

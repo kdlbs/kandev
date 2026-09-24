@@ -316,7 +316,7 @@ func TestExecutorRunningLocalPIDMigrationOnLegacyDB(t *testing.T) {
 
 	// Re-run migrations, exactly as a boot of the new binary would. The
 	// idempotent ADD COLUMN must re-add local_pid without erroring.
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations on legacy DB: %v", err)
 	}
 

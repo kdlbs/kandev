@@ -14,6 +14,7 @@ import (
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
+	"github.com/kandev/kandev/internal/startup"
 )
 
 const availabilityWorkspaceID = statsReferenceWorkspaceID
@@ -125,6 +126,7 @@ func newAnalyticsAvailabilityHealth(t *testing.T, fixture statsReferenceFixture)
 		ID:             "analytics",
 		OwnerPackage:   "internal/analytics/repository",
 		RequiredTables: []string{"tasks"},
+		Sweep:          startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker failed: %v", err)

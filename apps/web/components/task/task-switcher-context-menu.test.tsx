@@ -12,6 +12,7 @@ import type { TaskSwitcherItem } from "./task-switcher-types";
 const PLUGIN_ID = "example-task-actions";
 const PLUGIN_ACTION_LABEL = "Inspect task";
 const WORKFLOW_1_ID = "workflow-1";
+const WORKFLOW_1_NAME = "Workflow 1";
 const WORKFLOW_ID = WORKFLOW_1_ID;
 const STEP_ID = "step-1";
 const SEPARATOR_SLOT = "context-menu-separator";
@@ -171,7 +172,7 @@ describe("TaskItemWithContextMenu — grouped single-task actions", () => {
               parentTaskId: "parent-1",
             })}
             workflows={[
-              { id: WORKFLOW_ID, name: "Workflow 1" },
+              { id: WORKFLOW_ID, name: WORKFLOW_1_NAME },
               { id: "workflow-2", name: "Workflow 2" },
             ]}
             stepsByWorkflowId={{
@@ -246,7 +247,7 @@ describe("TaskItemWithContextMenu — grouped bulk actions", () => {
             task={task({ workflowId: WORKFLOW_ID, workflowStepId: STEP_ID })}
             selectedTaskIds={new Set(["task-1", "task-2"])}
             workflows={[
-              { id: WORKFLOW_ID, name: "Workflow 1" },
+              { id: WORKFLOW_ID, name: WORKFLOW_1_NAME },
               { id: "workflow-2", name: "Workflow 2" },
             ]}
             stepsByWorkflowId={{
@@ -309,7 +310,7 @@ function renderWorkflowMoveMenu({
               workflowId: WORKFLOW_1_ID,
               workflowStepId: "step-1",
             })}
-            workflows={[{ id: WORKFLOW_1_ID, name: "Workflow 1" }]}
+            workflows={[{ id: WORKFLOW_1_ID, name: WORKFLOW_1_NAME }]}
             stepsByWorkflowId={{
               [WORKFLOW_1_ID]: [
                 { id: "step-1", title: "Todo" },

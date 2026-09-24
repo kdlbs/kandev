@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -74,10 +75,10 @@ func assertLegacyWorkspaceCoordinatorGrantSchemaMigration(t *testing.T, repo *Re
 		t.Fatalf("seed legacy same-workspace grant: %v", err)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("migrate legacy coordinator grant schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay migrated coordinator grant schema: %v", err)
 	}
 	var migratedRows int
@@ -116,10 +117,10 @@ func TestPostgresWorkspaceCoordinatorGrantSchemaIsReplaySafeAndWorkspaceBound(t 
 
 func assertWorkspaceCoordinatorGrantSchema(t *testing.T, repo *Repository) {
 	t.Helper()
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("first migration replay: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("second migration replay: %v", err)
 	}
 

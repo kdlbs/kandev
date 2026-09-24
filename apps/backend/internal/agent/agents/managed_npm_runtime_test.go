@@ -1,7 +1,10 @@
 package agents
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -22,6 +25,7 @@ func TestManagedNPMRuntimeContracts(t *testing.T) {
 		{"copilot", NewCopilotACP(), "@github/copilot", []string{"--acp"}},
 		{"gemini", NewGemini(), "@google/gemini-cli", []string{"--acp"}},
 		{"pi", NewPiACP(), "pi-acp", nil},
+		{"muse", NewMuseACP(), "@bex-co/muse-code-acp", nil},
 	}
 
 	for _, tt := range tests {
@@ -118,7 +122,6 @@ func TestManagedNPMRuntimeOnlineCommandChangesOnlyNpmFreshnessFlag(t *testing.T)
 		Package: "@scope/managed-acp",
 		ACPArgs: []string{"--acp", "--model", "fast"},
 	}
-
 	offline := spec.ACPCommand("1.2.3").Args()
 	online := spec.ACPCommandWithNpmPreference("1.2.3", true).Args()
 	want := []string{"npx", "--yes", "--prefer-online", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast"}
@@ -153,6 +156,7 @@ func TestManagedAgentsHonorExactVersionCommandOption(t *testing.T) {
 		{"copilot", NewCopilotACP()},
 		{"gemini", NewGemini()},
 		{"pi", NewPiACP()},
+		{"muse", NewMuseACP()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -165,5 +169,54 @@ func TestManagedAgentsHonorExactVersionCommandOption(t *testing.T) {
 				t.Fatalf("exact BuildCommand = %#v, want %#v", got, want)
 			}
 		})
+	}
+}
+
+func TestManagedNPMRuntimeNativeBinaryPreference(t *testing.T) {
+	nativeBin := "opencode"
+	ab := ManagedNPMRuntimeSpec{
+		Package:        "opencode-ai",
+		DefaultVersion: "1.2.3",
+		ACPArgs:        []string{"acp", "--print-logs", "--log-level", "ERROR"},
+		NativeBinary:   nativeBin,
+	}
+	t.Setenv("PATH", t.TempDir())
+	if ab.NativeBinaryOnPath() {
+		t.Fatal("NativeBinaryOnPath() = true with empty PATH dir, want false")
+	}
+	wantNpx := []string{"npx", "--yes", "--prefer-offline", "opencode-ai@1.2.3", "acp", "--print-logs", "--log-level", "ERROR"}
+	if got := ab.RefreshCommand().Args(); !slices.Equal(got, wantNpx) {
+		t.Fatalf("RefreshCommand (absent binary) = %#v, want %#v", got, wantNpx)
+	}
+
+	dir := t.TempDir()
+	name := nativeBin
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("fake"), 0o755); err != nil {
+		t.Fatalf("write fake binary: %v", err)
+	}
+	t.Setenv("PATH", dir)
+	if !ab.NativeBinaryOnPath() {
+		t.Fatal("NativeBinaryOnPath() = false with binary on PATH, want true")
+	}
+	wantNative := []string{"opencode", "acp", "--print-logs", "--log-level", "ERROR"}
+	if got := ab.NativeCommand().Args(); !slices.Equal(got, wantNative) {
+		t.Fatalf("NativeCommand() = %#v, want %#v", got, wantNative)
+	}
+	if got := ab.UpdateCommand("2.0.0").Args(); !slices.Equal(got, []string{"npm", "install", "-g", "opencode-ai@2.0.0"}) {
+		t.Fatalf("UpdateCommand() = %#v, want native npm install", got)
+	}
+	if got := ab.RefreshCommand().Args(); !slices.Equal(got, wantNative) {
+		t.Fatalf("RefreshCommand (present binary) = %#v, want %#v", got, wantNative)
+	}
+
+	plain := ManagedNPMRuntimeSpec{Package: "@scope/custom", ACPArgs: []string{"acp"}}
+	if got := plain.RefreshCommand().Args(); !slices.Equal(got, []string{"npx", "--yes", "--prefer-offline", "@scope/custom", "acp"}) {
+		t.Fatalf("RefreshCommand (no native) = %#v, want npx", got)
+	}
+	if got := ab.ExecutionCacheKey(); got != managedruntime.NpxExecutionCacheKey("opencode-ai@1.2.3") {
+		t.Fatalf("ExecutionCacheKey with NativeBinary = %q, want package key", got)
 	}
 }

@@ -60,7 +60,7 @@ export function MainTopBarPluginActions(props: {
 
   return (
     <div
-      className="flex min-w-0 flex-wrap items-center gap-2 [&_[data-slot=button]]:!size-8 [&_[data-slot=button]]:!p-0 [&_[data-slot=button]_svg]:!size-4"
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-2 [&>*]:min-w-0 [&>*]:max-w-full [&_[data-slot=button]]:!min-h-11 [&_[data-slot=button]]:!min-w-11 [&_[data-slot=button]]:!max-w-full [&_[data-slot=button]]:!whitespace-normal [&_[data-slot=button]_svg]:!size-4"
       data-testid="mobile-main-top-bar-plugin-actions"
     >
       {content}

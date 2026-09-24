@@ -225,7 +225,7 @@ func TestProcessCronTrigger_HeavyMaterialiseFailureMarksRunFailed(t *testing.T) 
 type failingTaskCreator struct{}
 
 func (f *failingTaskCreator) CreateOfficeTaskInWorkflow(
-	_ context.Context, _, _, _, _, _, _ string,
+	_ context.Context, _, _, _, _, _, _, _ string,
 ) (string, error) {
 	return "", errors.New("simulated task creation failure")
 }

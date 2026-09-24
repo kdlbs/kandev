@@ -24,7 +24,9 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -48,6 +50,7 @@ var supportedLocales = map[string]bool{
 	"zh-cn":  true,
 	"zh-tw":  true,
 	"zh-hk":  true,
+	"ja":     true,
 	"pseudo": true,
 }
 
@@ -80,21 +83,43 @@ func load() {
 	})
 }
 
-// Supported reports whether locale has a committed catalog.
-func Supported(locale string) bool { return supportedLocales[canonicalLocale(locale)] }
-
 // Normalize returns locale when it is supported, otherwise DefaultLocale. Used
 // for both `<html lang>` and message lookup so they can never disagree.
 func Normalize(locale string) string {
-	canonical := canonicalLocale(locale)
-	if supportedLocales[canonical] {
-		return canonical
+	if Supported(locale) {
+		return canonicalLocale(locale)
+	}
+	// A region-suffixed variant of a supported base collapses onto it when the
+	// base is unambiguous ("ja-JP" → "ja"). Multi-variant bases stay exact.
+	if collapsed := normalizeRegion(locale); supportedLocales[collapsed] {
+		return collapsed
 	}
 	return DefaultLocale
 }
 
+// Supported reports whether locale has a committed catalog.
+func Supported(locale string) bool {
+	return supportedLocales[canonicalLocale(locale)]
+}
+
 func canonicalLocale(locale string) string {
 	return strings.ToLower(strings.TrimSpace(locale))
+}
+
+// normalizeRegion collapses a region-suffixed locale onto its base when the base
+// is unambiguous: "ja-JP" → "ja", "pt-BR" → "pt" (unsupported here, falls
+// through to en via Normalize). Multi-variant bases like "zh" stay exact —
+// "zh-CN"/"zh-TW"/"zh-HK" must not collapse to a shared "zh".
+func normalizeRegion(locale string) string {
+	canonical := canonicalLocale(locale)
+	base, _, hasRegion := strings.Cut(canonical, "-")
+	if !hasRegion {
+		return canonical
+	}
+	if supportedLocales[base] && base != "zh" && base != "pt" {
+		return base
+	}
+	return canonical
 }
 
 // FromRequest resolves the active locale: the kandev_locale cookie first (the
@@ -104,8 +129,16 @@ func FromRequest(r *http.Request) string {
 	if r == nil {
 		return DefaultLocale
 	}
-	if cookie, err := r.Cookie(LocaleCookie); err == nil && Supported(cookie.Value) {
-		return Normalize(cookie.Value)
+	if cookie, err := r.Cookie(LocaleCookie); err == nil {
+		if Supported(cookie.Value) {
+			return Normalize(cookie.Value)
+		}
+		// Unambiguous region suffixes such as ja-JP collapse onto a shipped
+		// base. Supported() is exact, so Normalize() is not used here: it
+		// would turn an unknown cookie into en and skip Accept-Language.
+		if collapsed := normalizeRegion(cookie.Value); supportedLocales[collapsed] {
+			return collapsed
+		}
 	}
 	for _, tag := range parseAcceptLanguage(r.Header.Get("Accept-Language")) {
 		if Supported(tag) {
@@ -120,7 +153,9 @@ func FromRequest(r *http.Request) string {
 }
 
 // parseAcceptLanguage returns the header's tags in descending q-value order.
-// Malformed entries are skipped rather than failing the request.
+// Malformed entries, and any entry whose q-value is unparseable or not
+// positive, are excluded rather than falling through to the request's
+// default acceptability of 1.0.
 func parseAcceptLanguage(header string) []string {
 	if header == "" {
 		return nil
@@ -136,15 +171,9 @@ func parseAcceptLanguage(header string) []string {
 		if tag == "" {
 			continue
 		}
-		q := 1.0
-		for _, field := range fields[1:] {
-			field = strings.TrimSpace(field)
-			if !strings.HasPrefix(field, "q=") {
-				continue
-			}
-			if _, err := fmt.Sscanf(field, "q=%f", &q); err != nil {
-				q = 1.0
-			}
+		q, ok := acceptLanguageQuality(fields[1:])
+		if !ok || q <= 0 {
+			continue
 		}
 		items = append(items, weighted{tag: tag, q: q})
 	}
@@ -159,6 +188,28 @@ func parseAcceptLanguage(header string) []string {
 		tags = append(tags, item.tag)
 	}
 	return tags
+}
+
+// acceptLanguageQuality reads the q parameter from one Accept-Language
+// field's ";"-separated parameters, defaulting to 1.0 when none is present.
+// It reports ok=false for a q parameter that is present but unparseable, not
+// a finite number, or outside HTTP quality's [0,1] range, so the caller
+// excludes the tag instead of promoting a malformed value to the highest
+// priority or letting it outrank well-formed entries.
+func acceptLanguageQuality(params []string) (float64, bool) {
+	q := 1.0
+	for _, field := range params {
+		field = strings.TrimSpace(field)
+		if !strings.HasPrefix(field, "q=") {
+			continue
+		}
+		parsed, err := strconv.ParseFloat(strings.TrimPrefix(field, "q="), 64)
+		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 || parsed > 1 {
+			return 0, false
+		}
+		q = parsed
+	}
+	return q, true
 }
 
 // T returns the message for key in locale, falling back to DefaultLocale and

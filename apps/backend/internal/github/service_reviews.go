@@ -215,20 +215,20 @@ func (s *Service) DeleteReviewWatch(ctx context.Context, id string) error {
 		}
 	}
 	if s.taskDeleter != nil {
-		prTasks, err := s.store.ListReviewPRTasksByWatch(ctx, id)
+		taskIDs, err := s.store.ListReviewPRTaskIDsByWatch(ctx, id)
 		if err != nil {
 			s.logger.Warn("failed to list review PR tasks for pre-delete sweep",
 				zap.String("watch_id", id), zap.Error(err))
 		} else {
-			for _, rpt := range prTasks {
-				if rpt.TaskID == "" {
+			for _, taskID := range taskIDs {
+				if taskID == "" {
 					continue
 				}
-				if err := s.taskDeleter.DeleteTask(ctx, rpt.TaskID); err != nil &&
+				if err := s.taskDeleter.DeleteTask(ctx, taskID); err != nil &&
 					!isTaskNotFound(err) {
 					s.logger.Warn("failed to delete review task during watch cleanup",
 						zap.String("watch_id", id),
-						zap.String("task_id", rpt.TaskID),
+						zap.String("task_id", taskID),
 						zap.Error(err))
 				}
 			}

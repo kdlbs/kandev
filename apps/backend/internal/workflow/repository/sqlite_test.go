@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -11,6 +12,14 @@ import (
 
 	"github.com/kandev/kandev/internal/workflow/models"
 )
+
+func TestGetMissingWorkflowStepReturnsTypedNotFound(t *testing.T) {
+	repo := setupTestRepo(t)
+	_, err := repo.GetStep(context.Background(), "missing-step")
+	if !errors.Is(err, models.ErrWorkflowStepNotFound) {
+		t.Fatalf("GetStep error = %v, want ErrWorkflowStepNotFound", err)
+	}
+}
 
 func setupTestRepo(t *testing.T) *Repository {
 	repo, _ := setupTestRepoWithDB(t)

@@ -79,7 +79,7 @@ test.describe("Mobile external VCS file link", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${MOBILE_FILE}"]`);
     await expect(fileNode).toBeVisible({ timeout: 15_000 });
     await fileNode.tap();

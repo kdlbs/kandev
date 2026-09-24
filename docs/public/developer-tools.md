@@ -44,8 +44,8 @@ Use `@` for files, saved prompts, and the current plan. New task lookup is under
 
 Select **Quick Chat** beside **New Task** in the expanded sidebar, or select its standalone row in the collapsed sidebar.
 
-On a phone, open the topbar menu in **Kanban**, **List**, or **Threads**, then
-select **Quick Chat** or **Quick terminal**. The menu closes before the tool
+On a phone, open the hamburger app menu from a listing, task workbench, or
+shared page, then select **Quick Chat** or **Quick terminal**. The menu closes before the tool
 opens. The topbar menu button shows Quick Chat activity: a blue dot while a chat
 is running and a green dot when a reply is ready to read. Terminal tabs do not
 contribute to this activity indicator.
@@ -64,7 +64,7 @@ Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordin
 
 Your chats and their names are shared by every browser and device signed in to the same Kandev instance. Starting, renaming, or closing a chat on one device updates the others, and a device that was offline catches up when it reconnects.
 
-When **Settings > Preferences > Task Behavior > Agent-generated task titles** is enabled, an ordinary
+When **Settings > Preferences > Task Behavior > Tasks > Agent-generated task titles** is enabled, an ordinary
 Quick Chat starts with its normal provisional label and its owner agent can replace that label with a
 short title based on your first request. Structured and CLI-passthrough chats receive the title
 instruction through their existing first-turn path. The new title appears on every connected device
@@ -205,6 +205,14 @@ re-picks their engine and language: preferences are not carried over.
 
 ## Files and editor integrations
 
+To open a task folder in your file manager, select **Open folder** beside the IDE control in the task toolbar. On a phone, use **Files → Workspace actions → Open workspace folder**. For tasks with several worktrees, choose the repository and branch to open.
+
+This opens Finder on macOS, the default file manager on Linux, or Explorer on Windows on the machine running Kandev. A browser connected to a remote Kandev instance does not open that folder on your own device. The host needs a desktop session and an available file manager.
+
+The folder action is disabled when the host folder-opening command is unavailable
+(`open` on macOS, `xdg-open` on Linux, or `explorer` on Windows), or while its
+availability is unknown. The repository picker is also unavailable in that case.
+
 > **Security:** Embedded VS Code runs code-server with `--auth none` inside the task environment. Use it only with a trusted executor and network boundary.
 
 <details>
@@ -223,6 +231,16 @@ The preview uses the native browser engine. HTML, CSS, JavaScript, inline event 
 Relative and root-relative URLs resolve from the selected task repository or workspace root. Static files use their normal browser content types, and the current entry document is held in memory. The static server does not persist the overlay, run a build, provide HMR, or proxy an application backend. It bounds one entry document to 5 MiB and keeps at most 32 recently published overlays per agentctl instance.
 
 Closing the preview, file tab, focused viewer, or optional Browser panel removes that view but does not stop the shared static server. One bounded server is reused for the agentctl session and stops when that task runtime is torn down. If the page needs a build pipeline, HMR, backend routes, or project services, start a development server and open it in the **Browser** panel instead. If the task session stops, publish the file again or select **Retry** after the session becomes available. Preview URLs and in-editor preview state are not restored as durable file state.
+
+### Comment on a rendered preview
+
+Select **Annotate** in a Browser panel or rendered HTML-file preview. Choose **Select text**, **Select element**, or **Select screenshot region**, make the selection in the page, enter a comment, and select **Save feedback**. Element mode outlines and labels the candidate under the pointer, keyboard focus, or active touch before selection. Text feedback keeps the exact selected text together with its containing element, DOM range endpoints, rendered rectangles, scroll position, viewport size, and device pixel ratio. This position data lets the agent identify text that JavaScript generated or that the live page no longer contains.
+
+Screenshot mode rasterizes the selected part of the rendered document and shows the PNG before saving. A screenshot is limited to 16 megapixels and 10 MiB, and one pending collection can contain up to 10 screenshots. Browser rendering features that cannot be read or reproduced by the rasterizer, including some canvas, video, font, and cross-origin resources, can look different or cause capture to fail. A failed capture or upload keeps a retryable draft; discarding it removes its staged image.
+
+Saved feedback belongs to the task. It remains pending while you navigate between routes, close or reopen previews, switch task sessions, reload the browser, or restart Kandev. The active task composer shows the shared pending count. Review, edit, or delete items from **Annotate**. None of the captured content reaches an agent until you use the ordinary chat **Send** action.
+
+Send addresses the selected task session. An idle session receives the feedback directly; a busy session receives the same text, element metadata, and PNG attachments through its durable queue. Kandev removes only the exact saved versions accepted with that message. A validation, capacity, attachment, or version conflict leaves the feedback and composer draft available for correction and retry. The preview server and navigated page state remain ephemeral even though the saved feedback is durable.
 
 Open the context menu on any file or folder in the Files tree: right-click on desktop or long-press on touch to see **Open in \<editor\>**, which launches your default editor at that path instead of at the worktree root. When more than one editor is configured, **Open in other editor** lists the rest. When the tree is rooted above the worktrees (a multi-worktree task or any task that has had sources attached), Kandev resolves the clicked path back to its own worktree, so no picker is needed. The action is hidden for entries that belong to no worktree, such as an attached plain folder, because the editor launch is resolved against a worktree. It is also hidden while several files are selected, because it applies to a single path.
 

@@ -4,6 +4,7 @@ import { useRef, type RefObject } from "react";
 import { useActiveWorkspaceRepositories } from "@/components/kanban-card-repositories";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
+import { cleanupSharesParentWorkspace } from "@/components/task/task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
 import { TaskExternalLinkDialog } from "@/components/task/task-external-link-dialog";
@@ -122,6 +123,20 @@ function useLastResolvedBoardRow(
   return ref.current.boardRow;
 }
 
+function buildConfirmationTarget(
+  taskId: string,
+  taskTitle: string,
+  triggerRef: RefObject<HTMLElement | null>,
+) {
+  return {
+    taskId,
+    taskTitle,
+    anchorRef: triggerRef,
+    focusReturnRef: triggerRef,
+    restoreFocusOnConfirm: true,
+  };
+}
+
 /**
  * Mounts every dialog a task actions menu entry can open. Hosted per surface
  * so a dialog outlives the menu that opened it.
@@ -140,13 +155,7 @@ export function TaskActionsMenuDialogs({
   const editBoardRow = useLastResolvedBoardRow(taskId, boardRow);
   if (!taskId) return null;
   const linkDialogTask = buildLinkDialogTask(taskId, taskTitle, boardRow);
-  const confirmationTarget = {
-    taskId,
-    taskTitle,
-    anchorRef: menu.triggerRef,
-    focusReturnRef: menu.triggerRef,
-    restoreFocusOnConfirm: true,
-  };
+  const confirmationTarget = buildConfirmationTarget(taskId, taskTitle, menu.triggerRef);
 
   return (
     <>
@@ -175,6 +184,7 @@ export function TaskActionsMenuDialogs({
         taskTitle={taskTitle}
         taskId={taskId}
         executorType={boardRow?.primaryExecutorType ?? subjectExecutorType}
+        sharesParentWorkspace={cleanupSharesParentWorkspace(boardRow?.workspaceMode)}
         isDeleting={isDeleting}
         onConfirm={(opts) => menu.onConfirmDelete(opts)}
         focusReturnRef={menu.triggerRef}

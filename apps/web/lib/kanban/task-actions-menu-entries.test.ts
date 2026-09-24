@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { buildTaskActionsMenuEntries } from "./task-actions-menu-entries";
-import type { KanbanCardMenuEntry } from "@/components/kanban-card-menu-items";
+import {
+  buildCardPluginEntries,
+  type KanbanCardMenuEntry,
+} from "@/components/kanban-card-menu-items";
 
 const PLUGIN_ID = "test-task-actions-menu-plugin";
 const REMOVE_SEPARATOR = "remove-separator";
@@ -38,6 +41,38 @@ const baseArgs = {
   // assertion below pass without ever exercising its actual position.
   onLinkPullRequest: vi.fn(),
 };
+
+describe("buildTaskActionsMenuEntries — prebuilt plugin entries", () => {
+  afterEach(() => pluginRegistry.unregisterPlugin(PLUGIN_ID));
+
+  // Regression: these tiers force `forceFlatEdit`, so a caller's prebuilt set --
+  // built for the card, where an edit-group action nests -- would render the very
+  // Edit submenu the tier exists to suppress.
+  it("ignores prebuilt entries, keeping the flat Edit item", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "nested",
+      label: "Nested",
+      group: "edit",
+      items: () => [{ id: "child", label: "Child", run: vi.fn() }],
+      run: vi.fn(),
+    });
+    const context = {
+      workspaceId: "ws-1",
+      taskId: "task-1",
+      taskTitle: "Task",
+      workflowStepId: "step-1",
+      presentation: "desktop" as const,
+    };
+    const cardEntries = buildCardPluginEntries({ onEdit: vi.fn(), pluginMenuContext: context });
+
+    const entries = buildTaskActionsMenuEntries("normal", {
+      ...baseArgs,
+      pluginEntries: cardEntries,
+    });
+
+    expect(entries.find((entry) => entry.key === "edit")?.kind).toBe("item");
+  });
+});
 
 describe("buildTaskActionsMenuEntries — normal tier", () => {
   afterEach(() => pluginRegistry.unregisterPlugin(PLUGIN_ID));
@@ -131,7 +166,7 @@ describe("buildTaskActionsMenuEntries — archived tier", () => {
 
     const entries = buildTaskActionsMenuEntries("archived", baseArgs);
     expect(itemKeys(entries)).toEqual([
-      `plugin-primary-${PLUGIN_ID}-primary-action`,
+      `plugin-primary-${PLUGIN_ID}:primary-action`,
       REMOVE_SEPARATOR,
       "delete",
     ]);
@@ -164,7 +199,7 @@ describe("buildTaskActionsMenuEntries — unresolved board row tier", () => {
 
     const entries = buildTaskActionsMenuEntries("unresolved-row", baseArgs);
     expect(itemKeys(entries)).toEqual([
-      `plugin-primary-${PLUGIN_ID}-primary-action`,
+      `plugin-primary-${PLUGIN_ID}:primary-action`,
       REMOVE_SEPARATOR,
       "archive",
       "delete",

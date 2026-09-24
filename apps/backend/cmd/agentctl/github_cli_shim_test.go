@@ -122,6 +122,7 @@ func TestInstallGitHubCLIShimLoginShellRestoresManagedTools(t *testing.T) {
 	env["KANDEV_GITHUB_PARENT_BASH_ENV"] = parentEnv
 	env["KANDEV_BASH_HOOK_MARKER"] = marker
 	env["BASH_ENV"] = env["KANDEV_GITHUB_CLI_BASH_ENV"]
+	env["HOME"] = root
 	env["PATH"] = "/usr/bin:/bin"
 	commandEnv := make([]string, 0, len(env))
 	for key, value := range env {

@@ -17,15 +17,19 @@ func cloneTaskMetadata(metadata map[string]interface{}) map[string]interface{} {
 	return cloned
 }
 
-// protectedTaskMetadataUpdate applies a generic metadata replacement while
-// keeping server-managed deferred-launch and step-handoff records owned by the
-// server. The HTTP PATCH surface may replace ordinary metadata, but it cannot
-// create, replace, or remove either record.
+// keeping server-managed deferred-launch, step-handoff, task-handoff, and
+// task-boundary causation records owned by the server. The HTTP PATCH surface
+// may replace ordinary metadata, but it cannot create, replace, or remove
+// these records. It cannot set, reset, or lower the causation carrier: any
+// office_carrier_* key in the request is stripped, then the task's existing
+// carrier is restored in its place.
 func protectedTaskMetadataUpdate(existing, requested map[string]interface{}) map[string]interface{} {
 	updated := cloneTaskMetadata(requested)
 	if updated == nil {
 		updated = make(map[string]interface{})
 	}
+	models.StripOfficeCarrierMetadata(updated)
+	models.RestoreOfficeCarrierMetadata(updated, existing)
 	if deferred, ok := existing[models.MetaKeyDeferredLaunch]; ok {
 		updated[models.MetaKeyDeferredLaunch] = deferred
 	} else {
@@ -36,5 +40,31 @@ func protectedTaskMetadataUpdate(existing, requested map[string]interface{}) map
 	} else {
 		delete(updated, models.MetaKeyStepHandoffCarry)
 	}
+	if source, ok := existing[models.MetaKeyHandoffSource]; ok {
+		updated[models.MetaKeyHandoffSource] = source
+	} else {
+		delete(updated, models.MetaKeyHandoffSource)
+	}
+	if handoffs, ok := existing[models.MetaKeyHandoffs]; ok {
+		updated[models.MetaKeyHandoffs] = handoffs
+	} else {
+		delete(updated, models.MetaKeyHandoffs)
+	}
 	return updated
+}
+
+// protectedTaskMetadataForCreate strips server-managed records from ordinary
+// task creation. The handoff path opts in after it has built and authorized the
+// provenance payload itself. Office causation carriers always come from the
+// separate trusted request field and are never accepted from Metadata.
+func protectedTaskMetadataForCreate(metadata map[string]interface{}, trustedHandoff bool) map[string]interface{} {
+	created := cloneTaskMetadata(metadata)
+	models.StripOfficeCarrierMetadata(created)
+	delete(created, models.MetaKeyDeferredLaunch)
+	delete(created, models.MetaKeyStepHandoffCarry)
+	if !trustedHandoff {
+		delete(created, models.MetaKeyHandoffSource)
+		delete(created, models.MetaKeyHandoffs)
+	}
+	return created
 }

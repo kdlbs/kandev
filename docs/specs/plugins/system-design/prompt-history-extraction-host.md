@@ -14,6 +14,16 @@ owners:
 
 # Prompt History Plugin Host Prerequisites System Design
 
+
+## Storage replacement, 2026-09-16
+
+The [source reconciliation design](conversation-source-reconciliation.md) now owns the intended conversation transport and storage replacement.
+The [replacement plan](../../../plans/conversation-storage-replacement/plan.md) owns its implementation.
+The durable journal, fixed-cutoff snapshots, ACKs, poison dispatch, and retention text here records the prior implementation.
+It does not require the replacement to preserve those mechanisms.
+Authorization, safe DTOs, lifecycle fencing, core compatibility, and visible recovery outcomes remain required.
+
+
 ## Purpose and boundaries
 
 This design adds the narrow public browser Host contracts required for a future external prompt-history plugin. The host continues to own authorization, transcript persistence, transport reconciliation, task-panel placement, native navigation, custom-prompt disclosure, and browser-local favorite state. The future plugin owns prompt-list derivation and presentation through those contracts.
@@ -76,7 +86,7 @@ Classification meanings:
 |`internal/task/service.Service` and repository interfaces|Authorized task/session reads and message/turn access.|covered but contract change required|Add a narrow conversation read interface exposing actor/session authorization, plural author filters, deterministic keyset pages, turns, and minimal DTO inputs; plugin handlers call this interface, never SQLite directly.|
 |`internal/backendapp/helpers.go`, backend composition, and plugin route registration|Wires plugin handlers with their dependencies.|lacking API contract|Inject the narrow conversation read interface into `internal/plugins` and preserve normal user/workspace authorization; add composition-level tests proving inaccessible sessions do not leak existence.|
 |`internal/plugins/host_data.go`, mappers, `pkg/pluginsdk`, `plugin.proto`|Separate Go backend-plugin conversation contract.|unchanged|No browser prompt-history change; it is not used by the UI bundle.|
-|Task message/turn event publication and WebSocket session subscription|Sanitized message/turn/removal events.|contract change|`SessionEventStream` is the sole durable per-session log, sequencer, and fanout. Mutation services append transactionally; migrate subject subscriptions and direct broadcasts. Client coalescing preserves sequence, holds gaps, and never publishes a second stream.|
+|Task message/turn event publication and WebSocket session subscription|Sanitized message/turn/removal events.|contract change|Source transactions return transient receipts after commit. The v2 gateway publishes revision-bound changes to core and plugin scopes; source reads repair gaps and session absence is terminal.|
 
 ### Shared types, contracts, and documentation
 
@@ -103,62 +113,119 @@ Classification meanings:
 
 ## Public browser API contract
 
-[`PLUGIN-API.md`](../../../plans/plugins/PLUGIN-API.md#browser-conversation-facade) is the canonical declaration for the runtime-free TypeScript types, Host-only wire envelopes, retryability mapping, lifecycle, and compatibility policy. The SDK and web Host must remain structurally assignable to that declaration.
+[PLUGIN-API.md](../../../plans/plugins/PLUGIN-API.md#hostconversation---live-paginated-session-history)
+is the canonical declaration for the runtime-free TypeScript types, source
+revision behavior, lifecycle, and private v2 wire envelopes. The SDK and web
+Host remain structurally assignable to that declaration.
 
 Implementation invariants:
 
-- Browser conversation state exposes sanitized message and turn DTOs, including non-empty `updatedAt`, nullable task selection, hydration, pagination, retry, and terminal removal state. It never exposes cursors, tokens, sidecars, event payloads, Kandev stores, or React runtime values.
-- `taskId: undefined` inherits the active panel task, `null` selects all tasks in the session, and an explicit string must equal the panel task. Mismatches fail before network activity.
-- `HostReact` includes structural `useLayoutEffect`; task-panel registration keeps literal `title` as the fallback and adds optional localized title, typed visibility, session kind, and scoped message navigation.
-- The Host owns custom-prompt disclosure and read-only favorite observation. Plugins receive only `host.ui.PromptMentionText` and `host.conversation.useMessageFavorite`.
-- Persisted update timestamps map to `updatedAt`; a missing row update timestamp falls back to `createdAt`. An unseen timestamp-less add may use `createdAt`, while a timestamp-less update is rejected for snapshot repair. Deletes remain terminal by ID.
+- Browser conversation state exposes sanitized message and turn DTOs, including non-empty updatedAt, nullable task selection, hydration, pagination, retry, and terminal removal state. It never exposes cursors, revision tokens, source sidecars, event payloads, Kandev stores, or React runtime values.
+- taskId: undefined inherits the active panel task, null selects all tasks in the session, and an explicit string must equal the panel task. Mismatches fail before network activity.
+- The Host owns custom-prompt disclosure and read-only favorite observation. Plugins receive only host.ui.PromptMentionText and host.conversation.useMessageFavorite.
+- Persisted update timestamps map to updatedAt; a missing row update timestamp falls back to createdAt. Deletes remain terminal by ID.
+- Desktop and phone panels share the same scope, DTOs, filtering, pagination, and navigation capability. Phone presentation keeps the existing full-height Chat surface and local transcript scroll owner.
 
 ## Browser conversation facade
 
-`buildHostApi` creates a plugin-scoped conversation implementation alongside `storage`. The task-panel wrapper injects `history` as an opaque, generation-bound handle; its hook IDs must match the wrapper's task/session context, while no panel context yields only the nullable empty state. Hook returns are immutable SDK DTOs; no SDK type imports `AppState`, Zustand, Kandev HTTP types, or session-event payloads. Before import, the loader calls authenticated `GET /api/plugins/{id}/conversation/binding`. Success is `{bindingToken,generation,expiresAt}` with RFC3339 UTC `expiresAt` <=10m; every response, including errors, sends `Cache-Control: no-store`. Plugin-visible errors use the canonical envelope with only `401/unauthenticated/false` or `404/not_found/false`; binding-only `409/generation_superseded/true` stays loader-internal with bounded retry and never reaches plugin code. On `401` or `404` the current load is skipped without disabling persisted state; the loader never imports until binding succeeds. revoked grants rebind or abort. `host.ts` keeps grants Host-only; reload stages grant/import/init, preserving old state until successor commit and fencing only pending state on failure. Disable, uninstall, or replacement revokes old grants.
+buildHostApi creates a plugin-scoped conversation implementation alongside storage.
+The task-panel wrapper injects history as an opaque, generation-bound handle.
+No panel context yields the nullable empty state. Hook results are immutable SDK
+DTOs and do not import AppState, Zustand, Kandev HTTP types, or WebSocket
+payloads.
 
-Messages are stored internally in ascending deterministic order and projected into requested order. Equal in-flight requests join per scope/query. Cache identity includes panel/plugin ID, session ID, tri-state task ID, author filter, sort, page size, and generation; cursor fingerprints use the same identity. Live matching requires exact session/task equality for inherited or explicit task strings, accepts every task ID for explicit null, and accepts `session.removed` for the selected session regardless of event task ID. Each panel has an independent cache, Host-minted consumer identity, and abort controller. Concurrent calls for one continuation join; exhausted and removed states perform no network activity. Reads never initialize `messages.bySession`.
+Before plugin import, the loader calls authenticated
+GET /api/plugins/{pluginId}/conversation/binding. Success contains
+bindingToken, generation, and an RFC3339 UTC expiresAt no later than ten minutes
+after issuance. Every response, including errors, sends Cache-Control: no-store.
+Binding-only generation superseded responses stay inside the loader. A failed
+binding skips the current load without disabling persisted state. Reload stages
+grant, import, and initialization, preserving the old state until the successor
+commits; disable, uninstall, replacement, and failed reload revoke the old grant.
+
+Messages and turns are read from current source pages in deterministic keyset
+order. Equal in-flight requests join per scope and query. Cache identity includes
+panel and plugin ID, session ID, tri-state task ID, author filter, sort, page
+size, and generation. A source scope owns its cache, Host-minted scope ID, abort
+controller, epoch, and decimal applied revision. Reads never initialize
+messages.bySession.
+
+Live source changes require the matching scope ID and session ID. A complete
+receipt applies operations by entity ID after its base revision matches the
+scope's applied revision. A reset marker, malformed operation, wrong epoch,
+revision gap, stale base, or failed operation starts a source read. Changes that
+arrive before the relevant snapshot commits are buffered and drained after the
+source page and revision are installed together. An empty operation list is a
+valid coverage-only change when the revision interval is contiguous.
+
+The process epoch changes after restart or restore. Revisions are decimal
+strings to avoid JavaScript precision loss. Source notifications are transient
+and published after the source transaction commits. There is no durable payload
+journal, ACK protocol, poison queue, replay promise, content hash, or
+caller-selectable as-of read. Session removal arrives on the normal
+session.removed channel, retains projected rows, sets removed, and closes
+pagination and retry for every matching scope.
 
 ## Backend read routes
 
-Add authenticated plugin-scoped routes before the wildcard webhook routes:
+The browser Host uses these source-backed routes:
 
-```text
-GET  /api/plugins/{pluginId}/conversation/task-sessions/{sessionId}/messages
-GET  /api/plugins/{pluginId}/conversation/task-sessions/{sessionId}/turns
-GET  /api/plugins/{pluginId}/conversation/binding
-POST /api/plugins/{pluginId}/conversation/continuation/renew
-```
+GET /api/plugins/{pluginId}/conversation/v2/task-sessions/{sessionId}/messages
+GET /api/plugins/{pluginId}/conversation/v2/task-sessions/{sessionId}/turns
+GET /api/plugins/{pluginId}/conversation/v2/task-sessions/{sessionId}/revision
+GET /api/plugins/{pluginId}/conversation/binding
 
-Queries bound `limit` (default 20, max 100), opaque keyset `cursor`, repeated supported `author_type`, and `sort`; invalid/empty filters return `400`. Public responses are `{ messages, hasMore, cursor }` with `cursor: string | null` and `{ turns }`; `cursor` is null when no next page exists. Exact Host-only wire request/response and event payload DTOs are canonical in the `PLUGIN-API.md` Host-only conversation wire contract. Internally responses carry `snapshotCutoff` and row-sequence sidecars. The Host sends the subscribe ACK's binding `snapshot_token` in the Host-only `X-Kandev-Snapshot-Token` header; server validation applies the committed cutoff and `rowSequence <= cutoff` to every page, seeking the cursor key directly. The cursor encodes `(created_at,id,direction,cutoff,fingerprint,expiry,generation)` and rejects tampering or mismatch with `400`; it is never an offset. Before 80% expiry Host-only `continuation/renew` accepts cursor/token and returns the same cutoff/fingerprint with new expiry; renewal never picks a new cutoff. Renewal success and error responses use `Cache-Control: no-store`. If retention/generation cannot preserve it, the Host-only renew returns `409`, surfaced to plugin code as retryable `upstream_failure`; `loadMore` leaves state/cursor unchanged and explicit retry starts fresh. Each panel scope has monotonic `continuation_revision` sentinel `0` over `{cursor,snapshot_token,cutoff,fingerprint,generation}`. Renewal and `loadMore` serialize per scope and CAS-install matching revisions; page, cursor, and `hasMore` commit atomically. Stale responses drop; failed renewal leaves the tuple unchanged; close/retry invalidates it.
+The source message and turn readers require an authenticated identity, an active
+plugin with api_read:messages, and normal task/session authorization. They call
+task service and repository interfaces. Responses contain sanitized camel-case
+DTOs and private epoch and revision metadata; arbitrary metadata, raw content,
+and system blocks remain excluded. expected_revision is an optional decimal
+guard. Bounded query filters preserve the existing author, task, sort, and
+keyset semantics. First-party REST and Go RPC contracts remain unchanged.
 
-Both handlers:
+The private v2 WebSocket actions are
+session.conversation.subscribe,
+session.conversation.unsubscribe, and session.conversation.changed.
+Subscribe binds the scope to the authenticated user, plugin capability,
+generation, session, and optional task and author filters. Core uses the same
+source reader with consumer_kind core. Plugin uses consumer_kind plugin with
+plugin ID, generation, and binding token. Scope IDs are opaque and unique per
+mounted consumer.
 
-1. require an authenticated Kandev identity;
-2. resolve an active installed plugin and require `api_read:messages`;
-3. resolve the task session through the normal user/workspace authorization boundary;
-4. call task services and repository interfaces, not SQL;
-5. map to the narrow camel-case browser-plugin DTO;
-6. strip Kandev system content and omit raw content and arbitrary metadata;
-7. return stable error codes for authentication, capability, input, inaccessible session, and server failures.
+A successful subscribe returns protocol_version 2, scope_id, session_id, epoch,
+and decimal revision. A changed notification returns protocol_version 2,
+scope_id, session_id, epoch, base_revision, revision, optional reset, and
+operations. Message and turn operations carry only the fields needed for the
+existing core projection and sanitized plugin DTO. The notification is
+published only after commit. Filtering can produce a coverage-only empty
+operation list while still advancing the revision.
 
-Handlers use a conversation-specific resolver: absent, inactive, and capability-missing plugins collapse to sanitized `404` before session authorization, unlike `activeRecord`'s `503`. All responses use `{"error":{"code":"...","message":"...","retryable":false|true}}`; the stable errors are `401/unauthenticated/false`, `404/not_found/false`, `400/invalid_query/false`, and authorized `5xx/upstream_failure/true`. Binding and continuation-renewal success and error responses use `Cache-Control: no-store`. A narrow exact-path auth error-writer branch emits the same `401` envelope; no broad plugin-route exemption is allowed.
+Core WebSocket hydration uses a per-session source subscription. Its reducer
+validates scope, epoch, decimal revisions, contiguous intervals, and operation
+shape. It applies message and turn operations by ID and triggers the existing
+authorized snapshot recovery on a gap, reset, malformed value, or epoch change.
+The core session state remains the product's projection owner. Normal
+session.removed delivery remains terminal.
 
-Message mapping reads only the allowlisted `metadata.sender_task_id` key; non-empty string values become `senderTaskId`, while missing, empty, or non-string values omit that field. Turns omit metadata/runtime; first-party REST and Go RPC contracts remain unchanged.
-
-`SessionEventStream` owns session sequencing and fanout for message, turn, and removal events. Subscribe is discriminated: a core request requires the Host-minted `wire_id`; a plugin request requires `plugin_id`, `generation`, `binding_token`, and its Host-minted `consumer_id`. Identity fields are mutually exclusive. Bindings check user, capability, and generation, and registration atomically captures the event watermark.
-
-The exact Host-only subscribe/ACK envelopes, legacy parsing rules, result states, and token field presence are canonical in the `PLUGIN-API.md` Host-only conversation wire contract. `SessionEventStream` validates outer IDs, session/binding identity, integer ranges, contiguous ACK advancement, and current/prior retry tokens. It binds resume and snapshot tokens to user, plugin, session, consumer, generation, and cutoff; snapshot commit precedes ACK and releases buffered post-cutoff events. `fresh`, `replay`, `gap`, and `invalid_resume` retain their documented reconciliation semantics. Events use `{type:"session.event",protocol_version,event_type,session_id,task_id, sequence,event_id,payload}`. Canonical policy is `{1:{ignorable:["session.workspace_sources.updated"]}}`; only a type listed by its matching version may advance ACK without projection. Missing, malformed, or unsupported versions and other unknown types remain durable poison: the cursor stays before the event, diagnostics retain its ID/version, and advancement stops. Rebind atomically snapshots past poison at a new cutoff, commits that cutoff, and returns a replacement token/cursor; the poison is not projected. `session.removed` is terminal regardless of whether it precedes or follows poison, and never becomes a legacy data update.
-
-Snapshot reads are current-state reads captured at committed cutoff, not an as-of query. `SessionMessageVersion` and `SessionTurnVersion` are immutable, keyed/indexed by `(entity_id,row_sequence)` plus session/task identity; each entity selects maximum `row_sequence <= cutoff`. A tombstone at or below cutoff excludes its entity, while a later tombstone remains post-cutoff; apply the terminal session barrier after selection. The adapter strips sidecars, seeds row sequences, buffers post-cutoff events, deduplicates reflected rows, then replays. Core delivery uses a per-wire `legacy-core/<wireId>` cursor: reconnecting the same wire resumes its cursor, a new wire starts at its registration watermark, and each wire gets at most one projection per `event_id`/sequence. Projection precedes ACK; `message.added|updated|deleted` and `session.turn.started|session.turn.completed` map to existing core notifications, while removal is terminal. Merge uses ID with sequence as ordering/fencing authority; `updatedAt` is freshness only.
-
-The durable append API returns `appended`, `duplicate`, `late_terminal`, or `sequence_conflict`; identity/payload conflicts are poison and late-terminal events drop after fencing. Version, tombstone, and log rows allocate one locked per-session sequence in one transaction; immutable `SessionEventLog` rows and `SessionDeliveryCursor` rows hold ACK, identity, epoch, lease/retry/generation. `SessionDeliveryDispatcher` owns poison: 30s lease, five attempts, 30s-capped backoff. Host-only `session.event.poison.requeue` requires `session_events:requeue`, audits actor/epoch, is idempotent, and never auto-skips. Startup reclaims leases. Tokens and reconnect grace are 10m; GC and tombstones through both bounds. Bus publication is not replay truth.
+Stale legacy session.subscribe or session.unsubscribe requests that carry
+ordered stream fields are rejected after cutover. No plugin or core path
+recreates a durable conversation stream. The source migration is one forward
+startup cutover: revision-only triggers are installed, the five legacy
+conversation tables are dropped transactionally, and the old
+.host/session-events.sqlite file and sidecars are removed only after the
+database cutover succeeds. The cleanup validates each target with lstat,
+refuses symlinks and non-regular files, and can retry on the next startup.
 
 ## Test-only transition controls
 
 The fixture exposes response-bounded message patch/delete and turn-completion controls. Handlers persist before typed events; completion takes RFC3339. Fixture source is `apps/web/e2e/fixtures/plugins/prompt-history-plugin/`; `e2e-plugin-ui` cleans/builds before packaging, and archive checks source/output hashes, capability, min version, and panel key.
 
-Deletes and session removal are terminal barriers. All production callers, including plugin `PluginOwnedTaskTree`, workspace resource/task FK cascades, task/session repositories, handoff/task-agent cascades, quick-chat expiry, profile/automation/office cleanup, workflow replacement/compensation, reference cleanup, and MCP handlers invoke one transaction-aware `SessionDeletionService`. It locks/captures sessions, reserves terminal sequences, and inserts unique outbox rows before deletion/commit; pre-listing, standalone deletes, and unobserved FK cascades are forbidden. Partial cascades, rollback, retries, and duplicates are idempotent; leased post-commit dispatch handles startup drain, recovery, backoff, requeue, duplicate ACK, and poison.
+Deletes and session removal are terminal barriers. Source revision triggers cover
+message and turn deletes, bulk operations, and foreign-key cascades. A missing
+session is terminal for a current-state reader. A missed receipt, rollback,
+retry, or process restart is repaired by a consistent source read; no durable
+deletion payload, consumer cursor, delivery worker, or universal deletion
+outbox is required for this view.
 
 ## Task-panel contract
 

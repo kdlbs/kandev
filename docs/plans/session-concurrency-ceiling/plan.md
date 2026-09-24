@@ -42,6 +42,15 @@ remain separate during repair.
 
 ## Risks
 
+The [opt-in session ceiling plan](../session-ceiling-opt-in/plan.md) replaces the
+CPU-derived default and environment-only configuration with disabled defaults
+and live Settings. The results here describe the original delivery; they do not
+verify that follow-up.
+
+Follow-up: [queued session ownership](../queued-session-ownership/plan.md) adds
+passive-origin enforcement and task queue visibility. Existing manual override
+semantics and the completed work order remain unchanged.
+
 - A repository read failure before a process callback is treated as not owned,
   so a reservation can wait for the sweep instead of being released by an
   ambiguous callback.
