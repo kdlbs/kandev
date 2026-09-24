@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -127,8 +128,8 @@ func TestArchiveManifestCapturesUnmergedIndex(t *testing.T) {
 		t.Fatalf("capture unmerged index: %v", err)
 	}
 	manifest := manifests["wt"]
-	if manifest.IndexTreeOID != "" || len(manifest.IndexFileSHA256) != 64 {
-		t.Fatalf("unmerged index evidence = tree %q, file digest %q", manifest.IndexTreeOID, manifest.IndexFileSHA256)
+	if len(manifest.IndexStateSHA256) != 64 {
+		t.Fatalf("unmerged index state digest = %q", manifest.IndexStateSHA256)
 	}
 }
 
@@ -150,6 +151,46 @@ func TestArchiveManifestRejectsCorruptIndex(t *testing.T) {
 	}}); err == nil {
 		t.Fatal("captured source state with a corrupt Git index")
 	}
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.3
+func TestArchiveManifestInspectionDoesNotWriteGitObjects(t *testing.T) {
+	repo := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "task-worktree")
+	runGit(t, repo, "worktree", "add", "-b", "feature/task", worktreePath)
+	if err := os.WriteFile(filepath.Join(worktreePath, "staged.txt"), []byte("staged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, worktreePath, "add", "staged.txt")
+	before := gitLooseObjectCount(t, repo)
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.CaptureArchiveSourceManifests(context.Background(), []*Worktree{{
+		ID: "wt", TaskID: "task", RepositoryID: "repo", Path: worktreePath, RepositoryPath: repo,
+	}}); err != nil {
+		t.Fatalf("capture staged source state: %v", err)
+	}
+	if after := gitLooseObjectCount(t, repo); after != before {
+		t.Fatalf("capture wrote Git objects: count before=%d after=%d", before, after)
+	}
+}
+
+func gitLooseObjectCount(t *testing.T, repo string) int {
+	t.Helper()
+	output := runGit(t, repo, "count-objects", "-v")
+	for _, line := range strings.Split(output, "\n") {
+		if value, found := strings.CutPrefix(line, "count: "); found {
+			count, err := strconv.Atoi(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return count
+		}
+	}
+	t.Fatal("git count-objects omitted the loose object count")
+	return 0
 }
 
 // @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.3

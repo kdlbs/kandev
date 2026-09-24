@@ -146,13 +146,13 @@ func TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity(t *testing.T) {
 	}
 	var snapshot struct {
 		ArchiveSourceManifest []struct {
-			TaskID       string `json:"task_id"`
-			CleanupJobID string `json:"cleanup_job_id"`
-			WorktreeID   string `json:"worktree_id"`
-			RepositoryID string `json:"repository_id"`
-			HeadOID      string `json:"head_oid"`
-			IndexTreeOID string `json:"index_tree_oid"`
-			Entries      []struct {
+			TaskID           string `json:"task_id"`
+			CleanupJobID     string `json:"cleanup_job_id"`
+			WorktreeID       string `json:"worktree_id"`
+			RepositoryID     string `json:"repository_id"`
+			HeadOID          string `json:"head_oid"`
+			IndexStateSHA256 string `json:"index_state_sha256"`
+			Entries          []struct {
 				Path          string `json:"path"`
 				ContentSHA256 string `json:"content_sha256"`
 			} `json:"entries"`
@@ -168,7 +168,7 @@ func TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity(t *testing.T) {
 	if manifest.TaskID != taskID || manifest.CleanupJobID == "" || manifest.WorktreeID != wt.ID || manifest.RepositoryID != repositoryID {
 		t.Fatalf("archive source manifest identity = %+v, want task/job/worktree/repository binding", manifest)
 	}
-	if manifest.HeadOID == "" || manifest.IndexTreeOID == "" {
+	if manifest.HeadOID == "" || manifest.IndexStateSHA256 == "" {
 		t.Fatalf("archive source manifest lacks git identities: %+v", manifest)
 	}
 	entries := make(map[string]string, len(manifest.Entries))

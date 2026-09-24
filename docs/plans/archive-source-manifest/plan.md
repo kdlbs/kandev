@@ -25,7 +25,8 @@ the authorized task audit route.
 - Worktree identity is checked against both Git's common directory and its
   registration list for the persisted repository.
 - A successful empty inventory is distinguished from a not-yet-captured retry.
-- Unmerged indexes use a digest of the index file. Dirty submodules use a
+- Staged-index records are hashed through Git's read-only listing command,
+  including unmerged stages. Dirty submodules use a
   digest over sorted working-tree paths and identities.
 - Older archived cleanup rows are not reconstructed or described as clean.
 

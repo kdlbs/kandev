@@ -40,11 +40,11 @@ access to retained cleanup evidence.
 
 The cleanup snapshot contains one manifest per owned task worktree. A manifest
 binds task ID, cleanup-job ID, task-environment ID, worktree ID, and repository
-ID. It records HEAD, the staged index tree when available, or an index-file
-SHA-256 for an unmerged index. Changed paths contain porcelain status and a
-SHA-256 identity. Symlink identities hash the link target. Dirty submodule
-identities hash sorted relative paths and file/link identities while omitting
-Git administrative metadata.
+ID. It records HEAD and the SHA-256 digest of `git ls-files --stage -z`, which
+includes unmerged stages and does not write Git objects. Changed paths contain
+porcelain status and a SHA-256 identity. Symlink identities hash the link
+target. Dirty submodule identities hash sorted relative paths and file/link
+identities while omitting Git administrative metadata.
 
 The existing `archive_source_manifest` field remains additive and
 backward-compatible in cleanup snapshots. A capture-complete marker
@@ -75,10 +75,9 @@ distinguishes a successful empty inventory from a not-yet-captured retry.
 Missing or malformed Git state, unreadable indexes, unsafe paths, disappearing
 untracked files, unreadable file content, unregistered or foreign worktrees,
 and snapshot persistence failures produce a retryable cleanup error. No
-worktree removal follows that failure. Unmerged indexes are represented using
-the index-file digest when `git write-tree` cannot create a tree because
-unmerged entries exist. A dirty submodule is represented by a recursive digest
-of its working tree rather than rejected as a directory.
+worktree removal follows that failure. Unmerged indexes are represented by the
+same staged-index digest as resolved indexes. A dirty submodule is represented
+by a recursive digest of its working tree rather than rejected as a directory.
 
 If the process crashes before the manifest compare-and-set, the worker has not
 entered worktree cleanup. If it crashes after the compare-and-set, retries use

@@ -30,7 +30,8 @@ the retained evidence after task deletion.
 
 - Verify exact repository and registered worktree identity before capture.
 - Record Git and changed-path identities without storing source bytes, including
-  unmerged indexes, dirty submodules, symlinks, and rename status.
+  read-only staged-index records, unmerged indexes, dirty submodules, symlinks,
+  and rename status.
 - Persist the completed manifest under the claimed cleanup job before
   destructive work and reuse it on retries.
 - Keep the task-scoped route authorized and test its foreign-workspace denial.
@@ -56,6 +57,8 @@ python3 scripts/lint-spec-files.py --all
 Completed in the PR fixup.
 
 - Passed: `cd apps/backend && go test -count=1 -run '^TestArchiveManifest' ./internal/worktree`.
+  This includes a staged-file regression that verifies inspection does not
+  increase the repository's loose Git object count.
 - Passed: `cd apps/backend && go test -count=1 -run 'TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity|TestDeleteTaskWithDiscardConsentPersistsAndCleansDirtyWorktree|TestTaskLifecycleCleanup_MissingWorktree|TestCleanupPersistsSourceManifestAfterStopBeforeWorktreeRemoval|TestCleanupCaptureFailureBlocksWorktreeRemoval|TestCleanupRetryReusesPersistedSourceManifest' ./internal/task/service`.
 - Passed: `cd apps/backend && go test -count=1 -run 'TestHTTPGetArchiveSourceManifestDeniesForeignWorkspace' ./internal/task/handlers`.
 - Passed under the race detector: the `TestArchiveManifest` worktree cases and the three cleanup boundary/retry cases above.

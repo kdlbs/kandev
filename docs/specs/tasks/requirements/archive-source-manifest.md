@@ -44,10 +44,11 @@ with an archived or deleted task, so that I can audit its terminal integrity.
   shall verify that the path is a registered worktree of the recorded
   repository; uncertain or foreign ownership shall block cleanup.
 - **AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.3:** Evidence shall include HEAD,
-  staged-index identity, tracked and untracked status, and content digests for
-  changed paths. It shall retain no source bytes or dereferenced symlink data.
-  An unmerged index shall retain a digest of its index file. Dirty submodules
-  shall have a stable digest of their working-tree contents.
+  a digest of Git's staged-index records, tracked and untracked status, and
+  content digests for changed paths. It shall retain no source bytes or
+  dereferenced symlink data. The staged-index digest shall include unmerged
+  stages without writing Git objects. Dirty submodules shall have a stable
+  digest of their working-tree contents.
 - **AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.4:** Git metadata, index, status, path,
   or content capture failures shall be recorded as a recoverable cleanup error
   and shall block destructive cleanup. A disappeared untracked path shall not

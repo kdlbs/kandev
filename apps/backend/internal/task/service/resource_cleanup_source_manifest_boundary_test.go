@@ -54,7 +54,7 @@ func (c *manifestBoundaryCleanup) CaptureArchiveSourceManifests(
 	for _, wt := range worktrees {
 		result[wt.ID] = worktree.ArchiveSourceManifest{
 			TaskID: wt.TaskID, WorktreeID: wt.ID, RepositoryID: wt.RepositoryID,
-			TaskEnvironmentID: wt.TaskEnvironmentID, HeadOID: "head", IndexTreeOID: "index",
+			TaskEnvironmentID: wt.TaskEnvironmentID, HeadOID: "head", IndexStateSHA256: "index",
 		}
 	}
 	return result, nil

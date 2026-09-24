@@ -114,8 +114,7 @@ type ArchiveSourceManifest struct {
 	WorktreeID        string                                `json:"worktree_id"`
 	RepositoryID      string                                `json:"repository_id"`
 	HeadOID           string                                `json:"head_oid"`
-	IndexTreeOID      string                                `json:"index_tree_oid"`
-	IndexFileSHA256   string                                `json:"index_file_sha256,omitempty"`
+	IndexStateSHA256  string                                `json:"index_state_sha256"`
 	PathPresent       bool                                  `json:"path_present"`
 	Entries           []worktree.ArchiveSourceManifestEntry `json:"entries,omitempty"`
 }
@@ -248,7 +247,7 @@ func (s *Service) captureArchiveSourceManifest(
 		manifests = append(manifests, ArchiveSourceManifest{
 			TaskID: manifest.TaskID, CleanupJobID: jobID, TaskEnvironmentID: manifest.TaskEnvironmentID,
 			WorktreeID: manifest.WorktreeID, RepositoryID: manifest.RepositoryID,
-			HeadOID: manifest.HeadOID, IndexTreeOID: manifest.IndexTreeOID, IndexFileSHA256: manifest.IndexFileSHA256,
+			HeadOID: manifest.HeadOID, IndexStateSHA256: manifest.IndexStateSHA256,
 			Entries:     manifest.Entries,
 			PathPresent: manifest.PathPresent,
 		})

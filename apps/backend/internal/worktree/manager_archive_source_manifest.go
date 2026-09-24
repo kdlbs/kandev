@@ -20,8 +20,7 @@ type ArchiveSourceManifest struct {
 	WorktreeID        string                       `json:"worktree_id"`
 	RepositoryID      string                       `json:"repository_id"`
 	HeadOID           string                       `json:"head_oid"`
-	IndexTreeOID      string                       `json:"index_tree_oid"`
-	IndexFileSHA256   string                       `json:"index_file_sha256,omitempty"`
+	IndexStateSHA256  string                       `json:"index_state_sha256"`
 	PathPresent       bool                         `json:"path_present"`
 	Entries           []ArchiveSourceManifestEntry `json:"entries,omitempty"`
 }
@@ -103,23 +102,11 @@ func (m *Manager) capturePresentArchiveSourceManifest(ctx context.Context, wt *W
 	if err != nil {
 		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source HEAD for %s: %w", wt.ID, err)
 	}
-	indexTree, err := m.runBoundedGitInspect(ctx, wt.Path, "write-tree")
-	var indexFileSHA256 string
+	indexStage, err := m.runBoundedGitInspect(ctx, wt.Path, "ls-files", "--stage", "-z")
 	if err != nil {
-		unmerged, unmergedErr := m.runBoundedGitInspect(ctx, wt.Path, "ls-files", "-u", "-z")
-		if unmergedErr != nil || unmerged == "" {
-			return ArchiveSourceManifest{}, fmt.Errorf("capture archive source index for %s: %w", wt.ID, err)
-		}
-		indexPath, pathErr := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--path-format=absolute", "--git-path", "index")
-		if pathErr != nil {
-			return ArchiveSourceManifest{}, fmt.Errorf("locate archive source index for %s: %w", wt.ID, pathErr)
-		}
-		indexFileSHA256, pathErr = archiveSourceManifestFileDigest(strings.TrimSpace(indexPath))
-		if pathErr != nil {
-			return ArchiveSourceManifest{}, fmt.Errorf("hash archive source index for %s: %w", wt.ID, pathErr)
-		}
-		indexTree = ""
+		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source index for %s: %w", wt.ID, err)
 	}
+	indexState := sha256.Sum256([]byte(indexStage))
 	status, err := m.runBoundedGitInspect(ctx, wt.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source status for %s: %w", wt.ID, err)
@@ -128,7 +115,7 @@ func (m *Manager) capturePresentArchiveSourceManifest(ctx context.Context, wt *W
 	if err != nil {
 		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source entries for %s: %w", wt.ID, err)
 	}
-	return ArchiveSourceManifest{TaskID: wt.TaskID, TaskEnvironmentID: wt.TaskEnvironmentID, WorktreeID: wt.ID, RepositoryID: wt.RepositoryID, HeadOID: strings.TrimSpace(head), IndexTreeOID: strings.TrimSpace(indexTree), IndexFileSHA256: indexFileSHA256, PathPresent: true, Entries: entries}, nil
+	return ArchiveSourceManifest{TaskID: wt.TaskID, TaskEnvironmentID: wt.TaskEnvironmentID, WorktreeID: wt.ID, RepositoryID: wt.RepositoryID, HeadOID: strings.TrimSpace(head), IndexStateSHA256: fmt.Sprintf("%x", indexState), PathPresent: true, Entries: entries}, nil
 }
 
 func (m *Manager) validateArchiveWorktreeRegistration(ctx context.Context, wt *Worktree) error {
