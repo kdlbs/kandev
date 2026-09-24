@@ -130,3 +130,12 @@ to the task slot disconnects on unmount and only reports changed owner sets.
 Targeted unit tests, fresh production mobile E2E, and refreshed after screenshots
 verify the correction: 64 focused unit tests and all three selected mobile
 scenarios passed against a fresh production build.
+
+## Context presentation clarification
+
+The final review identified an older acceptance criterion still requiring
+workspace/task distinction. AC-UI-MOBILE-MENU-007.2 now delegates plugin
+presentation to 008.1/008.2, and 008.1 explicitly supersedes the former subgroup
+distinction. This documentation correction preserves the verified behavior and
+screenshots. Catalog validation, specification lint, the exact PR documentation
+coverage evaluator, and diff checks passed.

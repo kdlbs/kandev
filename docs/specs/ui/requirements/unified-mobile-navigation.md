@@ -176,8 +176,9 @@ the full task list.
   indicators, launch behavior, and focus handoff shall be retained.
 - **AC-UI-MOBILE-MENU-007.2:** Regular workspace sections shall follow Tasks,
   Automations, Integrations, Utilities order. Existing eligible plugin actions
-  shall share one Plugins section, with workspace and task context distinguished
-  when both are present. Optional system metrics shall follow navigation instead
+  shall share one Plugins section. Toolbar selection and context presentation
+  shall follow AC-UI-MOBILE-MENU-008.1 and AC-UI-MOBILE-MENU-008.2.
+  Optional system metrics shall follow navigation instead
   of separating plugin controls. Canvases and page-local destinations shall
   remain reachable. Utilities shall
   place Settings before Stats, followed by theme and support actions; existing
@@ -199,6 +200,8 @@ the full task list.
 
 - **AC-UI-MOBILE-MENU-008.1:** Phone navigation shall show plugin controls in
   one wrapping group under Plugins without Workspace and Task subheadings.
+  This supersedes the former workspace/task subgroup distinction in
+  AC-UI-MOBILE-MENU-007.2.
   When task controls are available, each plugin contributing to the task
   toolbar shall use that toolbar instead of its workspace toolbar. All task
   contributions from that plugin remain reachable. Workspace-only plugins
