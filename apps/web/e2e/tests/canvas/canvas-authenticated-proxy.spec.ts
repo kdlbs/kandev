@@ -92,7 +92,7 @@ test.describe("authenticated same-origin canvas runtime", () => {
     }
   });
 
-  test("keeps the existing recoverable failure when a proxy ignores no-transform", async ({
+  test("surfaces a runtime startup failure when a proxy ignores no-transform", async ({
     browser,
     testPage,
     apiClient,
@@ -114,9 +114,10 @@ test.describe("authenticated same-origin canvas runtime", () => {
       const opened = await openAuthenticatedCanvas(browser, proxy, canvasId);
       context = opened.context;
 
-      await expect(opened.page.getByTestId("canvas-host-state")).toHaveText("Canvas unavailable", {
-        timeout: 30_000,
-      });
+      await expect(opened.page.getByTestId("canvas-host-state")).toHaveText(
+        "Canvas runtime failed to start",
+        { timeout: 30_000 },
+      );
       await expect(opened.page.getByTestId("web-app-frame")).toHaveCount(0);
       await expect(
         opened.page.getByRole("button", { name: "Try again", exact: true }),
