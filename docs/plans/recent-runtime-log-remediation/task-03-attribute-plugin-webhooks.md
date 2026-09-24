@@ -45,6 +45,12 @@ boundary while preserving the exact HTTP response.
 (cd apps/backend && go test -tags fts5 ./internal/plugins -run 'TestWebhook' -count=1)
 ```
 
+PR review follow-up confirmed that `Service.Get` reads the in-memory plugin
+registry and returns only the record or `store.ErrNotFound`; the webhook maps
+that not-found result to 404 after authorization. The proposed lookup-driven
+500 branch is unreachable in the current implementation, so no code change was
+needed.
+
 ## Files likely touched
 
 - `apps/backend/internal/plugins/handlers.go`

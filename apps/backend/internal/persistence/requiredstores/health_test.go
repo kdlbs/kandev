@@ -268,6 +268,18 @@ func TestRuntimeHealthProbeFailureLogsBoundedStageAndRecovers(t *testing.T) {
 			}
 
 			core, observed := observer.New(zapcore.WarnLevel)
+			warningObserved := make(chan struct{}, 1)
+			releaseWarning := make(chan struct{})
+			core = zapcore.RegisterHooks(core, func(entry zapcore.Entry) error {
+				if entry.Message == "required persistence probe failed" {
+					select {
+					case warningObserved <- struct{}{}:
+					default:
+					}
+					<-releaseWarning
+				}
+				return nil
+			})
 			log, err := logger.NewFromZap(zap.New(core))
 			if err != nil {
 				t.Fatalf("NewFromZap: %v", err)
@@ -287,10 +299,19 @@ func TestRuntimeHealthProbeFailureLogsBoundedStageAndRecovers(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = tx.Rollback() })
 
-			ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
-			defer cancel()
+			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan struct{})
 			go health.run(ctx, 200*time.Millisecond, done)
+			select {
+			case <-warningObserved:
+				cancel()
+				close(releaseWarning)
+			case <-time.After(5 * time.Second):
+				cancel()
+				close(releaseWarning)
+				<-done
+				t.Fatal("health probe loop did not emit its first failure warning")
+			}
 			select {
 			case <-done:
 			case <-time.After(2 * time.Second):
@@ -299,7 +320,7 @@ func TestRuntimeHealthProbeFailureLogsBoundedStageAndRecovers(t *testing.T) {
 
 			entries := observed.FilterMessage("required persistence probe failed").All()
 			if len(entries) != 1 {
-				t.Fatalf("failure warnings = %d, want one bounded warning", len(entries))
+				t.Fatalf("failure warnings = %d, want one bounded warning: %+v", len(entries), entries)
 			}
 			fields := entries[0].ContextMap()
 			if got := fields["stage"]; got != test.stage {

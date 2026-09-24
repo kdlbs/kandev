@@ -384,6 +384,13 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 
 	state, err := p.ensureState(ctx, taskID)
 	if err != nil {
+		if event.Type == events.MessageQueueStatusChanged && isMissingTaskLookupErr(err) {
+			p.dropProjectionState(taskID)
+			p.logger.Debug("skipping queue status projection for missing task",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+			return nil
+		}
 		return err
 	}
 	if workspaceID := stringField(data, "workspace_id"); workspaceID != "" {

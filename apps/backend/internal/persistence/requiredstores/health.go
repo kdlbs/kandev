@@ -288,6 +288,9 @@ func (h *Health) run(ctx context.Context, interval time.Duration, done chan stru
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if ctx.Err() != nil {
+				return
+			}
 			checkCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 			_, diagnostic, err := h.checkRuntimeDetailed(checkCtx)
 			if err != nil {

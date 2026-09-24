@@ -84,7 +84,7 @@ package.
 
 | Acceptance criterion | Evidence |
 | --- | --- |
-| `AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.11` | `projector_queued_test.go`: cached-workspace deleted task and transient queue-loader error; no publication or retained state on deletion. |
+| `AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.11` | `projector_queued_test.go`: cold and cached deleted tasks plus a transient queue-loader error; no publication or retained state on deletion, while transient failures propagate. |
 | `AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.1` | `requiredstores/health_test.go`: blocked writer or reader, stage/elapsed/pool fields, one warning, unchanged health recovery. |
 | `AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.2` | `plugins/handlers_webhook_lifecycle_test.go`: host lease failure, RPC error, and plugin-supplied 503 retain response semantics and log only safe fields. |
 | `AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.3` | `executor_pr_base_identity_test.go`: all mismatch reasons and valid fork cases preserve the current decision. |
@@ -117,6 +117,23 @@ task-not-found sentinel, updated gateway nil-task fallbacks, and added the
 `invalid_resolved_pr_base` PR diagnostic. Verification after these changes:
 `go test -tags fts5 ./internal/task/statussummary ./internal/orchestrator/executor ./internal/backendapp`
 and `make -C apps/backend build` both pass; `git diff --check` remains clean.
+
+PR review follow-up added a cold projection regression for a deleted task and
+kept the persistence-loop test alive until its first failure warning, then
+canceled it deterministically. `Service.Get` uses the in-memory registry and
+returns only a record or `store.ErrNotFound`, so the proposed webhook lookup
+500 path cannot occur and requires no code change. Verification after these
+follow-ups:
+
+- `go test -tags fts5 ./internal/task/statussummary -run 'TestProjectorQueueEvent' -count=1`
+- `go test -tags fts5 ./internal/persistence/requiredstores -run 'TestRuntimeHealthProbeFailureLogsBoundedStageAndRecovers' -count=3`
+- `go test -tags fts5 ./internal/task/statussummary ./internal/persistence/requiredstores ./internal/plugins ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle ./internal/startup ./internal/backendapp`
+- `make -C apps/backend build`
+
+The focused and complete affected-package checks passed. The backend build
+passed; Darwin helper binaries were left unsigned because neither `codesign`
+nor `rcodesign` is installed in this environment. `list-docs.py validate`,
+`lint-spec-files.py --all`, and `git diff --check` also passed.
 
 ## Risks
 

@@ -76,8 +76,17 @@ The periodic health warning now records the failed stage, elapsed time, a
 fixed error class, and writer/reader pool snapshots without the raw database
 error. Writer and reader timeouts emit one warning for a sweep, and the next
 successful check restores health. Table-probe failures carry their store ID.
-Verification passed:
+The periodic-loop test now waits for its first failure warning before
+cancelling; the loop checks cancellation before starting another probe when a
+tick is already queued. Verification passed:
 
 ```bash
 (cd apps/backend && go test -tags fts5 ./internal/persistence/requiredstores -run 'Test(RuntimeHealth|StartupHealth|HealthCheck|ProbeTables)' -count=1)
+```
+
+The synchronized writer/reader warning regression also passed three consecutive
+runs:
+
+```bash
+(cd apps/backend && go test -tags fts5 ./internal/persistence/requiredstores -run 'TestRuntimeHealthProbeFailureLogsBoundedStageAndRecovers' -count=3)
 ```

@@ -322,6 +322,51 @@ func TestProjectorQueueEventForMissingTaskIsNoop(t *testing.T) {
 }
 
 // @covers AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.11
+func TestProjectorQueueEventForColdMissingTaskWithProductionLoadersIsNoop(t *testing.T) {
+	const taskID = "task-cold-deleted-queue"
+	store := newProjectorTestStore()
+	eventBus := bus.NewMemoryEventBus(logger.Default())
+	updates := new(atomic.Int64)
+	if _, err := eventBus.Subscribe(events.TaskStatusSummaryUpdated, func(_ context.Context, _ *bus.Event) error {
+		updates.Add(1)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer eventBus.Close()
+
+	projector := NewProjector(ProjectorConfig{
+		Store:    store,
+		EventBus: eventBus,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "", fmt.Errorf("%w: %s", repoerrors.ErrTaskNotFound, taskID)
+		},
+		LoadLaunchQueue: func(context.Context, string) (*LaunchQueueSummary, error) {
+			return nil, fmt.Errorf("%w: %s", repoerrors.ErrTaskNotFound, taskID)
+		},
+	})
+
+	err := projector.handleEvent(context.Background(), bus.NewEvent(events.MessageQueueStatusChanged, "test", map[string]interface{}{
+		"task_id": taskID,
+	}))
+	if err != nil {
+		t.Fatalf("queue status for a cold deleted task returned error: %v", err)
+	}
+	if got := updates.Load(); got != 0 {
+		t.Fatalf("summary publishes = %d, want 0", got)
+	}
+	if len(store.rows) != 0 {
+		t.Fatalf("cold missing-task event wrote summaries: %d rows", len(store.rows))
+	}
+	projector.mu.Lock()
+	_, retained := projector.state[taskID]
+	projector.mu.Unlock()
+	if retained {
+		t.Fatal("cold missing-task event retained projection state")
+	}
+}
+
+// @covers AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.11
 func TestProjectorQueueEventForMissingTaskWithCachedWorkspaceIsNoop(t *testing.T) {
 	const taskID = "task-cached-deleted-queue"
 	store := newProjectorTestStore()

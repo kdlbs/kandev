@@ -37,6 +37,7 @@ type recoveryOutcomeSummary struct {
 }
 
 func (s recoveryOutcomeSummary) notRetrackedCount() int {
+	// retrackedCount should never exceed candidateCount; clamp to 0 defensively.
 	if !s.candidateCountKnown || s.candidateCount <= s.retrackedCount {
 		return 0
 	}

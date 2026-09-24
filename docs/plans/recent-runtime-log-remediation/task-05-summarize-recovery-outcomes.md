@@ -84,3 +84,7 @@ decisions remain unchanged. Verification passed:
 (cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle -run 'Test.*Recovery' -count=1)
 (cd apps/backend && go test -tags fts5 ./internal/startup -run 'Test.*Step' -count=1)
 ```
+
+PR review follow-up added a code comment stating the candidate/retracked-count
+invariant and defensive zero clamp. The recovery logic and decisions are
+unchanged.
