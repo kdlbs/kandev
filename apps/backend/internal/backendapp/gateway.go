@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	orchestratorhandlers "github.com/kandev/kandev/internal/orchestrator/handlers"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -341,7 +342,7 @@ func provideGateway(
 					return nil, err
 				}
 				if task == nil {
-					return nil, fmt.Errorf("task %q not found", taskID)
+					return nil, fmt.Errorf("%w: %s", repoerrors.ErrTaskNotFound, taskID)
 				}
 				observation, observationErr := orchestratorSvc.CurrentSessionCeilingObservation(ctx)
 				return statussummary.LaunchQueueSummaryFromTaskWithCapacity(task, &statussummary.LaunchQueueCapacityObservation{
@@ -357,7 +358,7 @@ func provideGateway(
 					return "", err
 				}
 				if task == nil {
-					return "", fmt.Errorf("task %q not found", taskID)
+					return "", fmt.Errorf("%w: %s", repoerrors.ErrTaskNotFound, taskID)
 				}
 				return task.WorkspaceID, nil
 			},

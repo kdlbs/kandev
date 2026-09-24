@@ -2,6 +2,7 @@ package statussummary
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func TestProjectorQueueEventUpdatesQueuedPromptCount(t *testing.T) {
@@ -273,7 +275,7 @@ func TestProjectorQueueEventForMissingTaskIsNoop(t *testing.T) {
 		// Simulate DeleteTask: the task row is already gone when purge
 		// publishes message.queue.status_changed.
 		ResolveWorkspace: func(context.Context, string) (string, error) {
-			return "", fmt.Errorf("task %q not found", taskID)
+			return "", fmt.Errorf("%w: %s", repoerrors.ErrTaskNotFound, taskID)
 		},
 		CountQueuedPrompts: func(context.Context, string) (int, error) {
 			counterCalls.Add(1)
@@ -316,6 +318,83 @@ func TestProjectorQueueEventForMissingTaskIsNoop(t *testing.T) {
 	projector.mu.Unlock()
 	if retained {
 		t.Fatal("missing-task queue event retained projection state")
+	}
+}
+
+// @covers AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.11
+func TestProjectorQueueEventForMissingTaskWithCachedWorkspaceIsNoop(t *testing.T) {
+	const taskID = "task-cached-deleted-queue"
+	store := newProjectorTestStore()
+	eventBus := bus.NewMemoryEventBus(logger.Default())
+	updates := new(atomic.Int64)
+	if _, err := eventBus.Subscribe(events.TaskStatusSummaryUpdated, func(_ context.Context, _ *bus.Event) error {
+		updates.Add(1)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	projector := NewProjector(ProjectorConfig{
+		Store:    store,
+		EventBus: eventBus,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			t.Fatal("cached workspace should skip task lookup")
+			return "", nil
+		},
+		LoadLaunchQueue: func(context.Context, string) (*LaunchQueueSummary, error) {
+			return nil, fmt.Errorf("%w: %s", repoerrors.ErrTaskNotFound, taskID)
+		},
+		CountQueuedPrompts: func(context.Context, string) (int, error) {
+			return 0, nil
+		},
+	})
+	t.Cleanup(func() { eventBus.Close() })
+
+	projector.mu.Lock()
+	projector.state[taskID] = &projectionState{workspaceID: "workspace-1"}
+	projector.mu.Unlock()
+
+	err := projector.handleEvent(ctx, bus.NewEvent(events.MessageQueueStatusChanged, "test", map[string]interface{}{
+		"task_id": taskID,
+	}))
+	if err != nil {
+		t.Fatalf("queue status for deleted task with cached workspace returned error: %v", err)
+	}
+	if got := updates.Load(); got != 0 {
+		t.Fatalf("summary publishes = %d, want 0", got)
+	}
+	projector.mu.Lock()
+	_, retained := projector.state[taskID]
+	projector.mu.Unlock()
+	if retained {
+		t.Fatal("deleted task queue event retained cached projection state")
+	}
+}
+
+// @covers AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.11
+func TestProjectorQueueEventPropagatesTransientLaunchQueueFailureContainingNotFoundText(t *testing.T) {
+	const taskID = "task-queue-loader-transient"
+	queryErr := errors.New("driver query failed: task not found in diagnostic context")
+	projector := NewProjector(ProjectorConfig{
+		LoadLaunchQueue: func(context.Context, string) (*LaunchQueueSummary, error) {
+			return nil, queryErr
+		},
+	})
+	projector.mu.Lock()
+	projector.state[taskID] = &projectionState{workspaceID: "workspace-1"}
+	projector.mu.Unlock()
+
+	err := projector.handleEvent(context.Background(), bus.NewEvent(events.MessageQueueStatusChanged, "test", map[string]interface{}{
+		"task_id": taskID,
+	}))
+	if !errors.Is(err, queryErr) {
+		t.Fatalf("launch queue error = %v, want original transient error", err)
+	}
+	projector.mu.Lock()
+	_, retained := projector.state[taskID]
+	projector.mu.Unlock()
+	if !retained {
+		t.Fatal("transient launch queue failure dropped cached projection state")
 	}
 }
 

@@ -394,7 +394,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		if err != nil {
 			// Lifecycle purge publishes queue-status after DeleteTask commits.
 			// Only skip verified not-found; transient resolve errors must surface.
-			if event.Type == events.MessageQueueStatusChanged && isMissingTaskResolveErr(err) {
+			if event.Type == events.MessageQueueStatusChanged && isMissingTaskLookupErr(err) {
 				p.dropProjectionState(taskID)
 				p.logger.Debug("skipping queue status projection for missing task",
 					zap.String("task_id", taskID),
@@ -434,6 +434,13 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 	if p.loadLaunchQueue != nil {
 		nextQueue, loadErr := p.loadLaunchQueue(ctx, taskID)
 		if loadErr != nil {
+			if event.Type == events.MessageQueueStatusChanged && isMissingTaskLookupErr(loadErr) {
+				p.dropProjectionState(taskID)
+				p.logger.Debug("skipping queue status projection for missing task",
+					zap.String("task_id", taskID),
+					zap.Error(loadErr))
+				return nil
+			}
 			return fmt.Errorf("load launch queue for task status summary %q: %w", taskID, loadErr)
 		}
 		launchQueueChanged = !state.launchQueueObserved || !equalLaunchQueue(state.launchQueue, nextQueue)
