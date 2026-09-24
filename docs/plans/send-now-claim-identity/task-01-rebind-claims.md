@@ -47,8 +47,10 @@ reconciliation usable while retaining exact claim fencing.
 The direct and durable transfer paths now pass the live destination identity
 into the atomic transfer transaction, which validates it before rebinding the
 claim and derives the claim generation from the destination session generation.
-The legacy transfer fallback rejects an identity-aware claim rather than
-retaining the retired identity, while identity-free legacy claims keep their
-existing behavior. Accepted and unaccepted transfer, restart reconciliation,
-source fencing, fallback rejection, and race coverage pass. No UI or public
-documentation change is required.
+Durable transfer preparation also includes attachments held only by a pending
+Send Now claim after the source queue row is removed. The legacy transfer
+fallback rejects an identity-aware claim rather than retaining the retired
+identity, while identity-free legacy claims keep their existing behavior.
+Accepted and unaccepted transfer, restart reconciliation, source fencing,
+fallback rejection, claim attachment preparation, and race coverage pass. No
+UI or public documentation change is required.
