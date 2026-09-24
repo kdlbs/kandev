@@ -1786,6 +1786,7 @@ func (s *Service) recoverManualMoveLifecycle(ctx context.Context, task *models.T
 	s.processManualMoveLifecycleWithFeederBarrier(
 		ctx, task.ID, session, fromStep, targetStep,
 		sourceStepID, task.WorkflowStepID, task.Description,
+		0,
 	)
 	return true
 }
@@ -3064,7 +3065,7 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	taskID string,
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
-	fromStepID, toStepID, taskDescription string, _ ...int64,
+	fromStepID, toStepID, taskDescription string, transitionID int64,
 ) {
 	lockValue, _ := s.queuedMoveLifecycleLocks.LoadOrStore(taskID, &sync.Mutex{})
 	lock := lockValue.(*sync.Mutex)
@@ -3088,7 +3089,7 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	// once execution starts the effect is absorbing, so a successor blocked
 	// behind a crashed worker cannot reclaim it while that worker is mid-ExitOrEnter.
 	effectClaim, claimed, effectErr := s.claimRouteEffectForStepEnter(
-		ctx, taskID, toStepID, task.WorkflowStepTransitionID,
+		ctx, taskID, toStepID, transitionID,
 	)
 	if effectErr != nil {
 		if errors.Is(effectErr, errRouteEffectExecutionStarted) {
@@ -3120,7 +3121,7 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	}
 	if err := s.processExitEnterForClaimedEffect(
 		ctx, effectClaim, taskID, session, fromStep, targetStep,
-		fromStepID, toStepID, taskDescription,
+		fromStepID, toStepID, taskDescription, transitionID,
 	); err != nil {
 		s.logger.Warn("manual move lifecycle stopped before completion",
 			zap.String("task_id", taskID), zap.String("from_step_id", fromStepID),
@@ -3162,7 +3163,7 @@ func (s *Service) processExitEnterForClaimedEffect(
 	taskID string,
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
-	fromStepID, toStepID, taskDescription string,
+	fromStepID, toStepID, taskDescription string, transitionID int64,
 ) error {
 	if targetStep == nil {
 		var err error
@@ -3188,11 +3189,11 @@ func (s *Service) processExitEnterForClaimedEffect(
 			return err
 		}
 		s.processOnExit(ctx, taskID, preparedSession, fromStep)
-		s.processOnEnter(ctx, taskID, preparedSession, targetStep, taskDescription, 0, fromStep)
+		s.processOnEnter(ctx, taskID, preparedSession, targetStep, taskDescription, transitionID, fromStep)
 		return nil
 	}
 	s.processOnExit(ctx, taskID, session, fromStep)
-	return s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, fromStep)
+	return s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, fromStep, transitionID)
 }
 
 func (s *Service) continueQueuedMoveLifecycle(ctx context.Context, taskID, vacatedStepID string) {
