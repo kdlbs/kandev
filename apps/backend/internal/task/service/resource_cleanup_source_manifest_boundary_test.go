@@ -163,6 +163,47 @@ func TestCleanupPersistsSourceManifestAfterStopBeforeWorktreeRemoval(t *testing.
 	}
 }
 
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.1
+func TestDeleteCleanupTriggersPersistSourceManifestBeforeWorktreeRemoval(t *testing.T) {
+	for _, trigger := range []models.TaskResourceCleanupTrigger{
+		models.TaskResourceCleanupTriggerWorkspaceDelete,
+		models.TaskResourceCleanupTriggerQuickChatExpire,
+	} {
+		t.Run(string(trigger), func(t *testing.T) {
+			ctx := context.Background()
+			svc, repo := setupOfficeTest(t)
+			svc.StopTaskResourceCleanupWorker()
+			stopper := &manifestBoundaryStopper{}
+			cleanup := &manifestBoundaryCleanup{repo: repo, stopper: stopper}
+			svc.SetWorktreeCleanup(cleanup)
+			svc.SetExecutionStopper(stopper)
+
+			snapshot, err := json.Marshal(taskResourceCleanupSnapshot{
+				Worktrees:   []*worktree.Worktree{{ID: "wt", TaskID: "task", RepositoryID: "repo"}},
+				StopTargets: []persistedTaskStopTarget{{SessionID: "session", ExecutionID: "execution"}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			job := &models.TaskResourceCleanupJob{
+				ID: "manifest-boundary-job", OperationID: string(trigger) + ":manifest-boundary",
+				TaskID: "task", Trigger: trigger,
+				State: models.TaskResourceCleanupStatePending, ResourceSnapshot: string(snapshot),
+			}
+			if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+				t.Fatal(err)
+			}
+			if err := svc.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
+				t.Fatalf("process %s cleanup: %v", trigger, err)
+			}
+			if !stopper.stopped || cleanup.captureCount != 1 || !cleanup.cleanupCalled {
+				t.Fatalf("stop=%v captures=%d cleanup=%v, want manifest persisted before removal",
+					stopper.stopped, cleanup.captureCount, cleanup.cleanupCalled)
+			}
+		})
+	}
+}
+
 // @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.4
 func TestCleanupCaptureFailureBlocksWorktreeRemoval(t *testing.T) {
 	ctx := context.Background()

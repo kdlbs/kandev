@@ -1232,7 +1232,9 @@ func taskResourceCleanupCapturesSourceManifest(trigger models.TaskResourceCleanu
 	case models.TaskResourceCleanupTriggerArchive,
 		models.TaskResourceCleanupTriggerDelete,
 		models.TaskResourceCleanupTriggerCascadeArchive,
-		models.TaskResourceCleanupTriggerCascadeDelete:
+		models.TaskResourceCleanupTriggerCascadeDelete,
+		models.TaskResourceCleanupTriggerWorkspaceDelete,
+		models.TaskResourceCleanupTriggerQuickChatExpire:
 		return true
 	default:
 		return false
