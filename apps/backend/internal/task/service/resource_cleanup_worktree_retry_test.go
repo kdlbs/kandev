@@ -146,6 +146,17 @@ func TestDeleteTaskWithDiscardConsentPersistsAndCleansDirtyWorktree(t *testing.T
 	}); err != nil {
 		t.Fatalf("delete task with discard consent: %v", err)
 	}
+	var jobID string
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT id FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger = 'delete'
+		ORDER BY created_at DESC LIMIT 1
+	`, taskID).Scan(&jobID); err != nil {
+		t.Fatalf("load delete cleanup job: %v", err)
+	}
+	if err := svc.processTaskResourceCleanupJob(ctx, jobID); err != nil {
+		t.Fatalf("process delete cleanup job: %v", err)
+	}
 	var encodedSnapshot string
 	if err := repo.DB().QueryRowContext(ctx, `
 		SELECT resource_snapshot FROM task_resource_cleanup_jobs
@@ -170,17 +181,6 @@ func TestDeleteTaskWithDiscardConsentPersistsAndCleansDirtyWorktree(t *testing.T
 	}
 	if len(retrieved) != 1 || retrieved[0].CleanupJobID == "" || retrieved[0].WorktreeID != wt.ID {
 		t.Fatalf("retrieved delete source manifest = %+v, want durable task evidence", retrieved)
-	}
-	var jobID string
-	if err := repo.DB().QueryRowContext(ctx, `
-		SELECT id FROM task_resource_cleanup_jobs
-		WHERE task_id = ? AND trigger = 'delete'
-		ORDER BY created_at DESC LIMIT 1
-	`, taskID).Scan(&jobID); err != nil {
-		t.Fatalf("load delete cleanup job: %v", err)
-	}
-	if err := svc.processTaskResourceCleanupJob(ctx, jobID); err != nil {
-		t.Fatalf("process delete cleanup job: %v", err)
 	}
 	if _, statErr := os.Stat(wt.Path); !os.IsNotExist(statErr) {
 		t.Fatalf("consented cleanup left worktree on disk: %s (stat err = %v)", wt.Path, statErr)

@@ -26,6 +26,7 @@ const (
 const taskResourceCleanupMutationOutcomeUnknown = "task mutation outcome requires reconciliation"
 
 var ErrCleanupCancellationRace = errors.New("cleanup cancellation lost lifecycle race")
+var ErrTaskSourceManifestNotFound = errors.New("task source manifest not found")
 
 type taskResourceCleanupCancellationCAS interface {
 	CancelTaskResourceCleanupJobIfPending(ctx context.Context, id string) (bool, error)
@@ -99,8 +100,9 @@ type taskResourceCleanupSnapshot struct {
 	OrphanReapRecords []orphanReapCandidateRecord `json:"orphan_reap_records,omitempty"`
 	// OrphanReapSkips carries a root-level or phase-level skip that has no
 	// per-candidate record to attach its reason to.
-	OrphanReapSkips       []orphanReapSkipRecord  `json:"orphan_reap_skips,omitempty"`
-	ArchiveSourceManifest []ArchiveSourceManifest `json:"archive_source_manifest,omitempty"`
+	OrphanReapSkips               []orphanReapSkipRecord  `json:"orphan_reap_skips,omitempty"`
+	ArchiveSourceManifest         []ArchiveSourceManifest `json:"archive_source_manifest,omitempty"`
+	ArchiveSourceManifestCaptured bool                    `json:"archive_source_manifest_captured,omitempty"`
 }
 
 // ArchiveSourceManifest is the task-scoped evidence retained before an archive
@@ -113,6 +115,7 @@ type ArchiveSourceManifest struct {
 	RepositoryID      string                                `json:"repository_id"`
 	HeadOID           string                                `json:"head_oid"`
 	IndexTreeOID      string                                `json:"index_tree_oid"`
+	IndexFileSHA256   string                                `json:"index_file_sha256,omitempty"`
 	PathPresent       bool                                  `json:"path_present"`
 	Entries           []worktree.ArchiveSourceManifestEntry `json:"entries,omitempty"`
 }
@@ -175,13 +178,6 @@ func (s *Service) persistTaskResourceCleanup(
 		TaskEnvironment:        envCleanup.env,
 		DeleteEnvironmentRow:   envCleanup.deleteRow,
 		LegacyWorktreeCleanup:  s.hasLegacyWorktreeCleanup(),
-	}
-	if taskResourceCleanupCapturesSourceManifest(trigger) {
-		manifest, err := s.captureArchiveSourceManifest(ctx, jobID, taskID, worktrees)
-		if err != nil {
-			return nil, fmt.Errorf("capture archive source manifest: %w", err)
-		}
-		snapshot.ArchiveSourceManifest = manifest
 	}
 	if collectSSH {
 		sshTaskDirs, err := s.gatherSSHReclaimTargets(ctx, taskID)
@@ -252,7 +248,8 @@ func (s *Service) captureArchiveSourceManifest(
 		manifests = append(manifests, ArchiveSourceManifest{
 			TaskID: manifest.TaskID, CleanupJobID: jobID, TaskEnvironmentID: manifest.TaskEnvironmentID,
 			WorktreeID: manifest.WorktreeID, RepositoryID: manifest.RepositoryID,
-			HeadOID: manifest.HeadOID, IndexTreeOID: manifest.IndexTreeOID, Entries: manifest.Entries,
+			HeadOID: manifest.HeadOID, IndexTreeOID: manifest.IndexTreeOID, IndexFileSHA256: manifest.IndexFileSHA256,
+			Entries:     manifest.Entries,
 			PathPresent: manifest.PathPresent,
 		})
 	}
@@ -299,7 +296,7 @@ func (s *Service) GetTaskSourceManifest(ctx context.Context, taskID string) ([]A
 		}
 		return snapshot.ArchiveSourceManifest, nil
 	}
-	return nil, taskrepo.ErrTaskNotFound
+	return nil, ErrTaskSourceManifestNotFound
 }
 
 func sourceManifestMatchesSnapshotWorktree(manifest ArchiveSourceManifest, worktrees []*worktree.Worktree) bool {
@@ -790,6 +787,9 @@ func (s *Service) executeTaskResourceCleanupJob(
 	if cancelled, err := s.cancelIfTaskUnarchived(ctx, job); err != nil || cancelled {
 		return err
 	}
+	if err := s.captureAndPersistTaskSourceManifest(ctx, job, snapshot, len(failedStops) > 0); err != nil {
+		return err
+	}
 	var errs []error
 	if taskResourceCleanupDeletesTask(job.Trigger) && s.attachmentSvc != nil {
 		var attachmentErr error
@@ -869,6 +869,41 @@ func (s *Service) executeTaskResourceCleanupJob(
 		errs = append(errs, fmt.Errorf("%d runtime stop operations failed", len(failedStops)))
 	}
 	return errors.Join(errs...)
+}
+
+func (s *Service) captureAndPersistTaskSourceManifest(
+	ctx context.Context,
+	job *models.TaskResourceCleanupJob,
+	snapshot *taskResourceCleanupSnapshot,
+	runtimeStopFailed bool,
+) error {
+	if !taskResourceCleanupCapturesSourceManifest(job.Trigger) || snapshot.ArchiveSourceManifestCaptured ||
+		len(snapshot.ArchiveSourceManifest) > 0 {
+		return nil
+	}
+	if runtimeStopFailed {
+		return fmt.Errorf("runtime stop incomplete; defer source manifest capture and cleanup")
+	}
+	manifest, err := s.captureArchiveSourceManifest(ctx, job.ID, job.TaskID, snapshot.Worktrees)
+	if err != nil {
+		return fmt.Errorf("capture archive source manifest: %w", err)
+	}
+	snapshot.ArchiveSourceManifest = manifest
+	snapshot.ArchiveSourceManifestCaptured = true
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		return fmt.Errorf("encode archive source manifest: %w", err)
+	}
+	updated, err := s.resourceCleanups.UpdateClaimedTaskResourceCleanupSnapshot(
+		ctx, job.ID, job.Attempts, string(encoded),
+	)
+	if err != nil {
+		return fmt.Errorf("persist archive source manifest before cleanup: %w", err)
+	}
+	if !updated {
+		return fmt.Errorf("persist archive source manifest before cleanup: cleanup claim changed")
+	}
+	return nil
 }
 
 func (s *Service) hasLegacyWorktreeCleanup() bool {
@@ -1182,13 +1217,6 @@ func (s *Service) PrepareTaskResourceCleanupWithOptions(
 		LegacyWorktreeCleanup:  s.hasLegacyWorktreeCleanup(),
 		SSHTaskDirs:            sshTaskDirs,
 		WorkspaceID:            task.WorkspaceID,
-	}
-	if taskResourceCleanupCapturesSourceManifest(job.Trigger) {
-		manifest, manifestErr := s.captureArchiveSourceManifest(ctx, job.ID, taskID, worktrees)
-		if manifestErr != nil {
-			return cancelPrepared(fmt.Errorf("capture archive source manifest: %w", manifestErr))
-		}
-		snapshot.ArchiveSourceManifest = manifest
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {

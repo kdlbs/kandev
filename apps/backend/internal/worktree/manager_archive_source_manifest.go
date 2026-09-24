@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -19,6 +21,7 @@ type ArchiveSourceManifest struct {
 	RepositoryID      string                       `json:"repository_id"`
 	HeadOID           string                       `json:"head_oid"`
 	IndexTreeOID      string                       `json:"index_tree_oid"`
+	IndexFileSHA256   string                       `json:"index_file_sha256,omitempty"`
 	PathPresent       bool                         `json:"path_present"`
 	Entries           []ArchiveSourceManifestEntry `json:"entries,omitempty"`
 }
@@ -93,13 +96,29 @@ func (m *Manager) capturePresentArchiveSourceManifest(ctx context.Context, wt *W
 	if filepath.Clean(strings.TrimSpace(gitDir)) == ".git" {
 		return ArchiveSourceManifest{}, fmt.Errorf("archive source manifest path is a primary repository, not a registered worktree")
 	}
+	if err := m.validateArchiveWorktreeRegistration(ctx, wt); err != nil {
+		return ArchiveSourceManifest{}, fmt.Errorf("validate archive source worktree registration for %s: %w", wt.ID, err)
+	}
 	head, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
 		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source HEAD for %s: %w", wt.ID, err)
 	}
 	indexTree, err := m.runBoundedGitInspect(ctx, wt.Path, "write-tree")
+	var indexFileSHA256 string
 	if err != nil {
-		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source index for %s: %w", wt.ID, err)
+		unmerged, unmergedErr := m.runBoundedGitInspect(ctx, wt.Path, "ls-files", "-u", "-z")
+		if unmergedErr != nil || unmerged == "" {
+			return ArchiveSourceManifest{}, fmt.Errorf("capture archive source index for %s: %w", wt.ID, err)
+		}
+		indexPath, pathErr := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--path-format=absolute", "--git-path", "index")
+		if pathErr != nil {
+			return ArchiveSourceManifest{}, fmt.Errorf("locate archive source index for %s: %w", wt.ID, pathErr)
+		}
+		indexFileSHA256, pathErr = archiveSourceManifestFileDigest(strings.TrimSpace(indexPath))
+		if pathErr != nil {
+			return ArchiveSourceManifest{}, fmt.Errorf("hash archive source index for %s: %w", wt.ID, pathErr)
+		}
+		indexTree = ""
 	}
 	status, err := m.runBoundedGitInspect(ctx, wt.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
@@ -109,45 +128,83 @@ func (m *Manager) capturePresentArchiveSourceManifest(ctx context.Context, wt *W
 	if err != nil {
 		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source entries for %s: %w", wt.ID, err)
 	}
-	return ArchiveSourceManifest{TaskID: wt.TaskID, TaskEnvironmentID: wt.TaskEnvironmentID, WorktreeID: wt.ID, RepositoryID: wt.RepositoryID, HeadOID: strings.TrimSpace(head), IndexTreeOID: strings.TrimSpace(indexTree), PathPresent: true, Entries: entries}, nil
+	return ArchiveSourceManifest{TaskID: wt.TaskID, TaskEnvironmentID: wt.TaskEnvironmentID, WorktreeID: wt.ID, RepositoryID: wt.RepositoryID, HeadOID: strings.TrimSpace(head), IndexTreeOID: strings.TrimSpace(indexTree), IndexFileSHA256: indexFileSHA256, PathPresent: true, Entries: entries}, nil
+}
+
+func (m *Manager) validateArchiveWorktreeRegistration(ctx context.Context, wt *Worktree) error {
+	worktreeCommonDir, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return err
+	}
+	repositoryCommonDir, err := m.runBoundedGitInspect(ctx, wt.RepositoryPath, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(strings.TrimSpace(worktreeCommonDir)) != filepath.Clean(strings.TrimSpace(repositoryCommonDir)) {
+		return fmt.Errorf("worktree belongs to a different repository")
+	}
+	registered, err := m.runBoundedGitInspect(ctx, wt.RepositoryPath, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return err
+	}
+	want, err := filepath.Abs(wt.Path)
+	if err != nil {
+		return err
+	}
+	for _, field := range strings.Split(registered, "\x00") {
+		if strings.HasPrefix(field, "worktree ") && filepath.Clean(strings.TrimPrefix(field, "worktree ")) == filepath.Clean(want) {
+			return nil
+		}
+	}
+	return fmt.Errorf("worktree path is not registered in the recorded repository")
 }
 
 func archiveSourceManifestEntries(root, output string) ([]ArchiveSourceManifestEntry, error) {
 	fields := strings.Split(output, "\x00")
 	entries := make([]ArchiveSourceManifestEntry, 0, len(fields))
 	for index := 0; index < len(fields); index++ {
-		field := fields[index]
-		if field == "" {
+		if fields[index] == "" {
 			continue
 		}
-		if len(field) < 4 || field[2] != ' ' {
-			return nil, fmt.Errorf("invalid git status record")
-		}
-		path := field[3:]
-		if err := archiveSourceManifestPath(root, path); err != nil {
-			return nil, err
-		}
-		entry := ArchiveSourceManifestEntry{Path: path, Status: field[:2]}
-		digest, err := archiveSourceManifestDigest(root, path)
+		entry, consumed, err := archiveSourceManifestEntry(root, fields, index)
 		if err != nil {
-			if os.IsNotExist(err) {
-				if field[0] != 'D' && field[1] != 'D' {
-					return nil, fmt.Errorf("source path disappeared before content identity was captured")
-				}
-				entries = append(entries, entry)
-				continue
-			}
 			return nil, err
 		}
-		entry.ContentSHA256 = digest
 		entries = append(entries, entry)
-		// In porcelain v1 -z, rename and copy records carry the original
-		// pathname as the following NUL-delimited field without a status prefix.
-		if (field[0] == 'R' || field[0] == 'C' || field[1] == 'R' || field[1] == 'C') && index+1 < len(fields) {
-			index++
-		}
+		index += consumed
 	}
 	return entries, nil
+}
+
+func archiveSourceManifestEntry(root string, fields []string, index int) (ArchiveSourceManifestEntry, int, error) {
+	field := fields[index]
+	if len(field) < 4 || field[2] != ' ' {
+		return ArchiveSourceManifestEntry{}, 0, fmt.Errorf("invalid git status record")
+	}
+	path := field[3:]
+	consumed := 0
+	if field[0] == 'R' || field[0] == 'C' || field[1] == 'R' || field[1] == 'C' {
+		if index+1 >= len(fields) || fields[index+1] == "" {
+			return ArchiveSourceManifestEntry{}, 0, fmt.Errorf("git rename or copy record lacks its original path")
+		}
+		consumed = 1
+	}
+	if err := archiveSourceManifestPath(root, path); err != nil {
+		return ArchiveSourceManifestEntry{}, 0, err
+	}
+	entry := ArchiveSourceManifestEntry{Path: path, Status: field[:2]}
+	digest, err := archiveSourceManifestDigest(root, path)
+	if err != nil {
+		if os.IsNotExist(err) && (field[0] == 'D' || field[1] == 'D') {
+			return entry, consumed, nil
+		}
+		if os.IsNotExist(err) {
+			return ArchiveSourceManifestEntry{}, 0, fmt.Errorf("source path disappeared before content identity was captured")
+		}
+		return ArchiveSourceManifestEntry{}, 0, err
+	}
+	entry.ContentSHA256 = digest
+	return entry, consumed, nil
 }
 
 func archiveSourceManifestPath(root, path string) error {
@@ -176,12 +233,99 @@ func archiveSourceManifestDigest(root, path string) (string, error) {
 		return fmt.Sprintf("%x", sum), nil
 	}
 	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("source path is not a regular file")
+		if !info.IsDir() || !archiveSourceManifestIsSubmodule(fullPath) {
+			return "", fmt.Errorf("source path is not a regular file or git submodule")
+		}
+		return archiveSourceManifestDirectoryDigest(fullPath)
 	}
-	data, err := os.ReadFile(fullPath)
+	return archiveSourceManifestFileDigest(fullPath)
+}
+
+func archiveSourceManifestIsSubmodule(path string) bool {
+	info, err := os.Lstat(filepath.Join(path, ".git"))
+	return err == nil && (info.Mode().IsRegular() || info.IsDir())
+}
+
+func archiveSourceManifestDirectoryDigest(root string) (string, error) {
+	paths, err := archiveSourceManifestDirectoryPaths(root)
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(data)
-	return fmt.Sprintf("%x", sum), nil
+	sort.Strings(paths)
+	h := sha256.New()
+	for _, path := range paths {
+		if err := archiveSourceManifestDirectoryEntry(h, root, path); err != nil {
+			return "", err
+		}
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+func archiveSourceManifestDirectoryPaths(root string) ([]string, error) {
+	paths := make([]string, 0)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		if entry.Name() == ".git" {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		paths = append(paths, path)
+		return nil
+	})
+	return paths, err
+}
+
+func archiveSourceManifestDirectoryEntry(h io.Writer, root, path string) error {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	_, _ = io.WriteString(h, rel+"\x00")
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		target, err := os.Readlink(path)
+		if err != nil {
+			return err
+		}
+		_, _ = io.WriteString(h, "symlink:\x00"+target+"\x00")
+	case info.IsDir():
+		_, _ = io.WriteString(h, "directory\x00")
+	case info.Mode().IsRegular():
+		digest, err := archiveSourceManifestFileDigest(path)
+		if err != nil {
+			return err
+		}
+		_, _ = io.WriteString(h, "file:\x00"+digest+"\x00")
+	default:
+		return fmt.Errorf("submodule source path is not a regular file")
+	}
+	return nil
+}
+
+func archiveSourceManifestFileDigest(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	_, copyErr := io.Copy(h, f)
+	closeErr := f.Close()
+	if copyErr != nil {
+		return "", copyErr
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }

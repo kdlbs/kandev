@@ -139,15 +139,15 @@ func TestTaskLifecycleCleanup_MissingWorktree(t *testing.T) {
 			if job.State != models.TaskResourceCleanupStatePending {
 				t.Fatalf("cleanup state after mutation = %q, want pending", job.State)
 			}
+			if err := taskSvc.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
+				t.Fatalf("processTaskResourceCleanupJob: %v", err)
+			}
 			manifest, err := taskSvc.GetTaskSourceManifest(ctx, fixture.taskID)
 			if err != nil {
-				t.Fatalf("GetTaskSourceManifest after lifecycle mutation: %v", err)
+				t.Fatalf("GetTaskSourceManifest after lifecycle cleanup: %v", err)
 			}
 			if len(manifest) != 2 {
 				t.Fatalf("task source manifest entries = %d, want both worktrees", len(manifest))
-			}
-			if err := taskSvc.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
-				t.Fatalf("processTaskResourceCleanupJob: %v", err)
 			}
 			job, err = repo.GetTaskResourceCleanupJob(ctx, job.ID)
 			if err != nil {

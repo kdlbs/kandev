@@ -473,6 +473,10 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 func (h *TaskHandlers) httpGetArchiveSourceManifest(c *gin.Context) {
 	manifest, err := h.service.GetArchiveSourceManifest(c.Request.Context(), c.Param("id"))
 	if err != nil {
+		if errors.Is(err, service.ErrTaskSourceManifestNotFound) {
+			handleNotFound(c, h.logger, taskrepo.ErrTaskNotFound, "archive source manifest not found")
+			return
+		}
 		handleNotFound(c, h.logger, err, "archive source manifest not found")
 		return
 	}
