@@ -65,6 +65,9 @@ async function setupTaskWithFilePanel(args: {
   );
 
   const session = await openTaskSession(args.testPage, "Panel Leak Source");
+  await args.testPage.reload();
+  await session.waitForLoad();
+  await session.waitForChatIdle({ timeout: 45_000 });
   await session.clickTab("Files");
   await expect(session.files).toBeVisible({ timeout: 10_000 });
 

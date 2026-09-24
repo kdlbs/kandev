@@ -10,7 +10,7 @@ export async function openFileComment(page: Page, dialog: Locator, mobile: boole
     await page
       .getByTestId("review-file-actions-menu")
       .getByRole("menuitem", { name: "Comment on file" })
-      .tap();
+      .click();
   } else {
     await header.getByRole("button", { name: "Comment on file", exact: true }).click();
   }

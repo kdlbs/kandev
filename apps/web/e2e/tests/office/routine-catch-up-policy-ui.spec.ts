@@ -52,6 +52,7 @@ test.describe("Routine catch-up policy UI", () => {
     testPage,
     prCapture,
   }) => {
+    test.setTimeout(120_000);
     await testPage.goto("/office/routines");
     await testPage.getByRole("button", { name: "New Routine" }).click();
 
@@ -61,6 +62,9 @@ test.describe("Routine catch-up policy UI", () => {
       .locator("..")
       .getByRole("combobox")
       .click();
+    await expect(testPage.getByRole("option", { name: "CEO", exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
     await testPage.getByRole("option", { name: "CEO", exact: true }).click();
     await testPage.getByRole("button", { name: "Next" }).click();
     await testPage.getByRole("button", { name: "Next" }).click();

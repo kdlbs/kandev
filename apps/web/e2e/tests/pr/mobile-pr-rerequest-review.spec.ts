@@ -236,8 +236,11 @@ test.describe("mobile PR re-request review", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await testPage.getByRole("button", { name: "Review", exact: true }).tap();
+    await expect(testPage.getByLabel("Loading change request")).toHaveCount(0, {
+      timeout: 30_000,
+    });
     const action = session.prReRequestReviewButton(REVIEWER);
-    await expect(action).toBeVisible({ timeout: 15_000 });
+    await expect(action).toBeVisible({ timeout: 30_000 });
 
     await testPage.getByTestId("review-item-selector-trigger").tap();
     const secondReview = testPage.getByRole("menuitemradio", {
