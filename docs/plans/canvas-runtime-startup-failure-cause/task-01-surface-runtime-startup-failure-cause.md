@@ -1,7 +1,7 @@
 ---
 id: "01-surface-runtime-startup-failure-cause"
 title: "Surface the canvas runtime startup failure cause"
-status: todo
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -25,10 +25,13 @@ runtime-startup-failure state whose copy names the application or its runtime in
 ## In scope
 
 - Add a `WebAppStartupFailureReason` union to `apps/web/components/plugins/web-app-startup.ts`
-  covering `document_error`, `context_unavailable`, a startup timeout, and an iframe load error.
+  covering `document_error`, `context_unavailable`, and a startup timeout. An iframe load error was
+  considered and dropped: React attaches no DOM `"error"` listener for `iframe`/`object`/`embed`
+  (only `"load"`), so the existing `handleError` wiring at `web-app-frame.tsx:139` (pre-fix) could
+  never fire; it is dead code, deleted rather than given a reason.
 - Settle each attempt in `web-app-frame.tsx` with readiness or one reason, and give `onError` that
   reason as an argument. Pass the guest `code` from the parsed result at line 119; supply the
-  timeout reason at line 105 and the load-error reason at line 139.
+  timeout reason at line 105.
 - Forward the reason through `canvas-page.tsx` and `canvas-host-components.tsx` to
   `canvas-host-route.tsx`.
 - Add a `runtime_failed` member to `CanvasHostState`, record the reason in the host, and resolve the
@@ -126,4 +129,12 @@ None. The CSP fix this defect was found behind is already on `main` at 93a7cba93
 
 ## Results
 
-Pending implementation.
+Shipped in `fc4cd24ea`, reconciled to three causes (dropping the never-reachable iframe load-error
+case) in `e962ff312` after Review round 1. The threading is `web-app-startup.ts`
+(`WebAppStartupFailureReason` union) -> `web-app-frame.tsx` (`StartupAttempt`,
+`finishAttempt(outcome)`, `onError?: (reason) => void`) -> `canvas-page.tsx` ->
+`canvas-host-route.tsx` (`runtimeFailureReason` state, `markRuntimeUnavailable(reason)` ->
+`state: "runtime_failed"`) -> `canvas-host-route-view.tsx` -> `canvas-host-components.tsx`
+(`RUNTIME_FAILED_DESCRIPTIONS`). New `canvases:` keys shipped in `en`, `pseudo`, `pt-pt`, `zh-cn`,
+`zh-hk`, `zh-tw`. All three verification commands and both proxy E2E specs pass; verbatim receipts
+are in the task's Kandev task plan.

@@ -1,6 +1,6 @@
 ---
 created: 2026-09-21
-status: in_progress
+status: done
 requirements:
   - REQ-CANVASES-AGENT-WEB-APPS-007
 system_design:
@@ -43,16 +43,18 @@ component and recorded what the host receives.
 Zero arguments in every case is the defect: the cause is computed, parsed, validated, and dropped.
 The scratch file was deleted after the measurement; the regression coverage lands in the work order.
 
-There are four failure origins, not three. Besides the two guest codes and the
-`WEB_APP_STARTUP_TIMEOUT_MS` deadline (`web-app-frame.tsx:105`), the iframe element's own error
-handler (`web-app-frame.tsx:139`) settles a fourth.
+There are three failure origins: the two guest codes and the `WEB_APP_STARTUP_TIMEOUT_MS` deadline
+(`web-app-frame.tsx:105`). The iframe element's own `onError` looked like a fourth, but React
+attaches no DOM `"error"` listener for `iframe`/`object`/`embed` (only `"load"`; confirmed against
+the installed `react-dom-client.development.js`), so that handler could never fire and was deleted
+rather than wired up.
 
 ## Scope
 
 ### In scope
 
-- A host-facing failure-cause union in `web-app-startup.ts` covering the two guest codes, the
-  startup timeout, and the iframe load error.
+- A host-facing failure-cause union in `web-app-startup.ts` covering the two guest codes and the
+  startup timeout.
 - Carrying the cause through `WebAppFrame` -> `CanvasPage` -> `CanvasHostBody` ->
   `CanvasHostRoute`.
 - A `runtime_failed` host state with per-cause descriptions, keeping Retry and release actions.
@@ -75,9 +77,10 @@ handler (`web-app-frame.tsx:139`) settles a fourth.
   not available" per `AC-CANVASES-AGENT-WEB-APPS-007.1`, and the state drives the title as well as
   the description. `offline` is already taken by `canvas-host-route.tsx:131` for
   `navigator.onLine === false`; overloading it would hide a second cause behind one label.
-- **Four causes, four descriptions, one title.** `AC-CANVASES-AGENT-WEB-APPS-007.10` requires the
-  timeout to be distinguishable from both guest codes. The iframe load error is free once the union
-  exists and is a genuinely different thing to tell a user.
+- **Three causes, three descriptions, one title.** `AC-CANVASES-AGENT-WEB-APPS-007.10` requires the
+  timeout to be distinguishable from both guest codes. A fourth, iframe-load-error cause was
+  considered and dropped: React never attaches a DOM `"error"` listener for `iframe`, so there is no
+  reachable signal to give it a description for.
 - **Translations ship with this change, against the card's instruction.** The card asks for
   `en/canvases.json` only. Measured against the current tree, that leaves CI red:
   adding one `en` key and running `node apps/web/scripts/check-i18n-keys.mjs` exits 1 with
@@ -136,7 +139,7 @@ existing recovery action. Criteria: `AC-CANVASES-AGENT-WEB-APPS-007.9` for the d
 
 ## Work orders
 
-- [ ] [Task 01: Surface the canvas runtime startup failure cause](task-01-surface-runtime-startup-failure-cause.md)
+- [x] [Task 01: Surface the canvas runtime startup failure cause](task-01-surface-runtime-startup-failure-cause.md)
 
 ## Existing E2E assertions on the current copy
 
@@ -167,4 +170,11 @@ above. Commands are in the work order.
 
 ## Verification results
 
-Pending implementation.
+Shipped in `fc4cd24ea` (implementation) and `e962ff312` (reconciling the spec and this plan down to
+the three causes the host actually observes, after Review round 1 caught the four-cause claim
+against the code). Component suite green (`web-app-frame.test.tsx`, `canvas-host-route.test.tsx`,
+`canvas-host-components.test.tsx`, `canvas-page.test.tsx`), `pnpm run i18n:check` and
+`i18n:ratchet` clean across all six locales, `make fmt lint typecheck test` and `make lint-format`
+green, and both proxy E2E specs (`canvas-authenticated-proxy.spec.ts`,
+`mobile-canvas-authenticated-proxy.spec.ts`) pass against the new `Canvas runtime failed to start`
+title. Full receipts are in the task's Kandev task plan, not duplicated here.
