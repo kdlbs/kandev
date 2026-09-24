@@ -38,6 +38,44 @@ type httpTaskRepo struct {
 	countedWorkflowID string
 	countedStepID     string
 	cleanupJobs       []*models.TaskResourceCleanupJob
+	cleanupJobsByOp   map[string]*models.TaskResourceCleanupJob
+}
+
+func (r *httpTaskRepo) CreateTaskResourceCleanupJob(
+	_ context.Context, job *models.TaskResourceCleanupJob,
+) error {
+	if r.cleanupJobsByOp == nil {
+		r.cleanupJobsByOp = make(map[string]*models.TaskResourceCleanupJob)
+	}
+	r.cleanupJobsByOp[job.OperationID] = job
+	return nil
+}
+
+func (r *httpTaskRepo) GetTaskResourceCleanupJobByOperationID(
+	_ context.Context, operationID string,
+) (*models.TaskResourceCleanupJob, error) {
+	return r.cleanupJobsByOp[operationID], nil
+}
+
+func (r *httpTaskRepo) UpdateTaskResourceCleanupSnapshot(
+	_ context.Context, operationID, snapshot string,
+) error {
+	if job := r.cleanupJobsByOp[operationID]; job != nil {
+		job.ResourceSnapshot = snapshot
+	}
+	return nil
+}
+
+func (r *httpTaskRepo) StartPreparedTaskResourceCleanupJob(
+	_ context.Context, id string,
+) (bool, error) {
+	for _, job := range r.cleanupJobsByOp {
+		if job.ID == id && job.State == models.TaskResourceCleanupStatePrepared {
+			job.State = models.TaskResourceCleanupStatePending
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *httpTaskRepo) ListTaskResourceCleanupJobs(

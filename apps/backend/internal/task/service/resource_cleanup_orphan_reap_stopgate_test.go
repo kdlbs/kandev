@@ -65,7 +65,7 @@ func TestExecuteTaskResourceCleanupJobSkipsReapPhaseOnFailedStop(t *testing.T) {
 	job := &models.TaskResourceCleanupJob{
 		ID: "job-failed-stop", TaskID: taskID, Trigger: models.TaskResourceCleanupTriggerDelete,
 	}
-	snapshot := &taskResourceCleanupSnapshot{}
+	snapshot := &taskResourceCleanupSnapshot{ArchiveSourceManifestCaptured: true}
 	err := svc.executeTaskResourceCleanupJob(ctx, job, snapshot)
 
 	if err == nil {
@@ -82,13 +82,8 @@ func TestExecuteTaskResourceCleanupJobSkipsReapPhaseOnFailedStop(t *testing.T) {
 	}
 }
 
-// AC-TASKS-ORPHAN-REAP-001.1: recording a removed path as a reap root is not
-// gated on a clean overall stop — only the reap phase's signal-sending is
-// (AC-TASKS-ORPHAN-REAP-006.2). A multi-session task with a mixed stop
-// outcome removes every non-preserved session's directory on this attempt
-// regardless of the failure elsewhere; a directory actually removed here must
-// still be recorded, since it will no longer exist to re-derive candidacy
-// from on a later attempt once the failing session's stop succeeds.
+// AC-TASKS-ORPHAN-REAP-006.2: completed session cleanup still runs after a
+// partial stop, while the running session and orphan reap phase are gated.
 func TestExecuteTaskResourceCleanupJobRecordsReapRootForSucceededSessionDespiteMixedStopOutcome(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -116,15 +111,12 @@ func TestExecuteTaskResourceCleanupJobRecordsReapRootForSucceededSessionDespiteM
 	svc.orphanReapHostSnapshotter = poisonOrphanReapHostSnapshotter{t: t}
 
 	okDir := filepath.Join(quickChatDir, okSessionID)
-	// Resolve while the directory still exists — resolveOrphanReapPathBestEffort
-	// falls back to an unresolved absolute path once it is gone, so the
-	// resolved form must be captured before the cleanup below removes it.
 	wantRoot := resolveOrphanReapPathBestEffort(okDir)
 
 	job := &models.TaskResourceCleanupJob{
 		ID: "job-mixed-stop", TaskID: taskID, Trigger: models.TaskResourceCleanupTriggerDelete,
 	}
-	snapshot := &taskResourceCleanupSnapshot{}
+	snapshot := &taskResourceCleanupSnapshot{ArchiveSourceManifestCaptured: true}
 	err := svc.executeTaskResourceCleanupJob(ctx, job, snapshot)
 
 	if err == nil {
@@ -143,8 +135,7 @@ func TestExecuteTaskResourceCleanupJobRecordsReapRootForSucceededSessionDespiteM
 		}
 	}
 	if !found {
-		t.Fatalf("expected the removed directory %q to be recorded as a reap root even though the "+
-			"reap phase's signal-sending step is gated off this attempt; got roots=%+v", wantRoot, snapshot.OrphanReapRoots)
+		t.Fatalf("expected the removed session directory to be recorded as a reap root, got %+v", snapshot.OrphanReapRoots)
 	}
 	// The signal-sending phase itself is still gated off this attempt
 	// (AC-TASKS-ORPHAN-REAP-006.2): no candidate records or skips yet, and
@@ -167,6 +158,11 @@ type cancellingWorktreeCleanup struct {
 func (c *cancellingWorktreeCleanup) OnTaskDeleted(context.Context, string) error { return nil }
 func (c *cancellingWorktreeCleanup) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
 	return nil, nil
+}
+func (c *cancellingWorktreeCleanup) CaptureArchiveSourceManifests(
+	ctx context.Context, worktrees []*worktree.Worktree,
+) (map[string]worktree.ArchiveSourceManifest, error) {
+	return (&recordingWorktreeCleanup{}).CaptureArchiveSourceManifests(ctx, worktrees)
 }
 func (c *cancellingWorktreeCleanup) CleanupWorktrees(_ context.Context, _ []*worktree.Worktree) error {
 	if err := os.RemoveAll(c.realPath); err != nil {
@@ -209,7 +205,8 @@ func TestExecuteTaskResourceCleanupJobRecordsReapRootDespiteCancellationDuringCl
 		ID: "job-cancel-during-cleanup", TaskID: taskID, Trigger: models.TaskResourceCleanupTriggerDelete,
 	}
 	snapshot := &taskResourceCleanupSnapshot{
-		Worktrees: []*worktree.Worktree{{ID: "wt-cancel-during-cleanup", TaskID: taskID, Path: wtPath}},
+		ArchiveSourceManifestCaptured: true,
+		Worktrees:                     []*worktree.Worktree{{ID: "wt-cancel-during-cleanup", TaskID: taskID, Path: wtPath}},
 	}
 	err := svc.executeTaskResourceCleanupJob(ctx, job, snapshot)
 	if !errors.Is(err, context.Canceled) {
@@ -246,6 +243,11 @@ func (c *cancellingWorktreeCleanupParent) OnTaskDeleted(context.Context, string)
 }
 func (c *cancellingWorktreeCleanupParent) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
 	return nil, nil
+}
+func (c *cancellingWorktreeCleanupParent) CaptureArchiveSourceManifests(
+	ctx context.Context, worktrees []*worktree.Worktree,
+) (map[string]worktree.ArchiveSourceManifest, error) {
+	return (&recordingWorktreeCleanup{}).CaptureArchiveSourceManifests(ctx, worktrees)
 }
 func (c *cancellingWorktreeCleanupParent) CleanupWorktrees(_ context.Context, _ []*worktree.Worktree) error {
 	if err := os.RemoveAll(c.realPath); err != nil {

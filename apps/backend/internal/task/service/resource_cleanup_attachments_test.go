@@ -55,7 +55,9 @@ func TestDurableDeleteCleanupRemovesTaskAttachments(t *testing.T) {
 		TaskID: taskID, Trigger: models.TaskResourceCleanupTriggerCascadeDelete,
 		State: models.TaskResourceCleanupStateRunning,
 	}
-	if err := taskSvc.executeTaskResourceCleanupJob(ctx, job, &taskResourceCleanupSnapshot{}); err != nil {
+	if err := taskSvc.executeTaskResourceCleanupJob(ctx, job, &taskResourceCleanupSnapshot{
+		ArchiveSourceManifestCaptured: true,
+	}); err != nil {
 		t.Fatalf("executeTaskResourceCleanupJob: %v", err)
 	}
 	if _, err := repo.GetMessageAttachment(ctx, attachment.ID); !errors.Is(err, ErrAttachmentNotFound) {

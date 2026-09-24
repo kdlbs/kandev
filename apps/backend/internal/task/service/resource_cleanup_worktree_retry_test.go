@@ -195,6 +195,12 @@ func (dirtyWorktreeCleanupFailure) GetAllByTaskID(context.Context, string) ([]*w
 	return nil, nil
 }
 
+func (dirtyWorktreeCleanupFailure) CaptureArchiveSourceManifests(
+	ctx context.Context, worktrees []*worktree.Worktree,
+) (map[string]worktree.ArchiveSourceManifest, error) {
+	return (&recordingWorktreeCleanup{}).CaptureArchiveSourceManifests(ctx, worktrees)
+}
+
 func (dirtyWorktreeCleanupFailure) CleanupWorktrees(context.Context, []*worktree.Worktree) error {
 	return fmt.Errorf("cleanup worktrees: %w", worktree.ErrDirtyWorktreeCleanup)
 }
