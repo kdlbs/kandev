@@ -5,8 +5,8 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/requirements/kanban-preview-workflow-step-navigation.md"
-system_design: "../../specs/ui/system-design/kanban-preview-workflow-step-navigation.md"
+system_design:
+  - "../../specs/ui/system-design/kanban-preview-workflow-step-navigation.md"
 requirements:
   - REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003
   - REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002

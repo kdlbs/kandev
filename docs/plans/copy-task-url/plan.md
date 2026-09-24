@@ -1,7 +1,11 @@
 ---
-spec: docs/specs/ui/requirements/kanban-preview-workflow-step-navigation.md
 created: 2026-09-21
 status: draft
+requirements:
+  - REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002
+  - REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003
+system_design:
+  - ../../specs/ui/system-design/kanban-preview-workflow-step-navigation.md
 ---
 
 # Implementation Plan: Copy Task URL From the Preview Header
