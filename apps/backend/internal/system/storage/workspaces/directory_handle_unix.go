@@ -199,6 +199,110 @@ func (h *unixDirectoryHandle) OpenFile(name string) (io.ReadCloser, error) {
 	return file, nil
 }
 
+func (h *unixDirectoryHandle) OpenSubdirectory(name string) (DirectoryHandle, error) {
+	if h == nil || h.targetFD < 0 {
+		return nil, errors.New("directory handle is closed")
+	}
+	if err := validateDirectoryEntryName(name); err != nil {
+		return nil, err
+	}
+	rootFD, err := unix.Dup(h.targetFD)
+	if err != nil {
+		return nil, err
+	}
+	parentFD, err := unix.Dup(h.targetFD)
+	if err != nil {
+		_ = unix.Close(rootFD)
+		return nil, err
+	}
+	targetFD, err := unix.Openat(h.targetFD, name, dependencyDirectoryOpenFlags, 0)
+	if err != nil {
+		_ = unix.Close(parentFD)
+		_ = unix.Close(rootFD)
+		return nil, err
+	}
+	return &unixDirectoryHandle{rootFD: rootFD, parentFD: parentFD, targetFD: targetFD, target: name}, nil
+}
+
+func (h *unixDirectoryHandle) LstatEntry(name string) (os.FileMode, error) {
+	if h == nil || h.targetFD < 0 {
+		return 0, errors.New("directory handle is closed")
+	}
+	if err := validateDirectoryEntryName(name); err != nil {
+		return 0, err
+	}
+	var info unix.Stat_t
+	if err := unix.Fstatat(h.targetFD, name, &info, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return 0, err
+	}
+	mode := os.FileMode(info.Mode & 0o777)
+	switch info.Mode & unix.S_IFMT {
+	case unix.S_IFDIR:
+		mode |= os.ModeDir
+	case unix.S_IFLNK:
+		mode |= os.ModeSymlink
+	case unix.S_IFIFO:
+		mode |= os.ModeNamedPipe
+	case unix.S_IFSOCK:
+		mode |= os.ModeSocket
+	case unix.S_IFCHR:
+		mode |= os.ModeDevice | os.ModeCharDevice
+	case unix.S_IFBLK:
+		mode |= os.ModeDevice
+	}
+	if info.Mode&0o4000 != 0 {
+		mode |= os.ModeSetuid
+	}
+	if info.Mode&0o2000 != 0 {
+		mode |= os.ModeSetgid
+	}
+	if info.Mode&0o1000 != 0 {
+		mode |= os.ModeSticky
+	}
+	return mode, nil
+}
+
+func (h *unixDirectoryHandle) ReadLink(name string) (string, error) {
+	if h == nil || h.targetFD < 0 {
+		return "", errors.New("directory handle is closed")
+	}
+	if err := validateDirectoryEntryName(name); err != nil {
+		return "", err
+	}
+	buffer := make([]byte, 256)
+	for {
+		n, err := unix.Readlinkat(h.targetFD, name, buffer)
+		if err != nil {
+			return "", err
+		}
+		if n < len(buffer) {
+			return string(buffer[:n]), nil
+		}
+		buffer = make([]byte, len(buffer)*2)
+	}
+}
+
+func (h *unixDirectoryHandle) ReadDir() ([]os.DirEntry, error) {
+	if h == nil || h.targetFD < 0 {
+		return nil, errors.New("directory handle is closed")
+	}
+	fd, err := unix.Openat(h.targetFD, ".", dependencyDirectoryOpenFlags, 0)
+	if err != nil {
+		return nil, err
+	}
+	directory := os.NewFile(uintptr(fd), "worktree-directory")
+	if directory == nil {
+		_ = unix.Close(fd)
+		return nil, errors.New("create directory reader from handle")
+	}
+	entries, readErr := directory.ReadDir(-1)
+	closeErr := directory.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	return entries, closeErr
+}
+
 func (h *unixDirectoryHandle) WriteFile(name string, data []byte, mode os.FileMode) error {
 	if h == nil || h.targetFD < 0 {
 		return errors.New("directory handle is closed")

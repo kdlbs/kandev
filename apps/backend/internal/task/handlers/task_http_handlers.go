@@ -468,8 +468,7 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 }
 
 // httpGetArchiveSourceManifest exposes only durable archive-time evidence.
-// Service authorization binds the read to the requested task before any
-// cleanup row is decoded.
+// Service authorization binds each decoded cleanup snapshot to its workspace.
 func (h *TaskHandlers) httpGetArchiveSourceManifest(c *gin.Context) {
 	manifest, err := h.service.GetArchiveSourceManifest(c.Request.Context(), c.Param("id"))
 	if err != nil {

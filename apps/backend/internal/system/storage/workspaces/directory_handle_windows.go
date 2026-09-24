@@ -4,6 +4,7 @@ package workspaces
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode/utf16"
 
 	"golang.org/x/sys/windows"
 )
@@ -252,6 +254,145 @@ func (h *windowsDirectoryHandle) OpenFile(name string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("directory entry is not a regular file: %s", name)
 	}
 	return file, nil
+}
+
+func (h *windowsDirectoryHandle) OpenSubdirectory(name string) (DirectoryHandle, error) {
+	if h == nil || h.targetHandle == 0 {
+		return nil, errors.New("directory handle is closed")
+	}
+	if err := validateDirectoryEntryName(name); err != nil {
+		return nil, err
+	}
+	targetHandle, err := openWindowsDependencyDirectoryRelative(h.targetHandle, name, windowsDependencyReadAccess)
+	if err != nil {
+		return nil, err
+	}
+	if reparse, err := windowsDependencyHandleIsReparsePoint(targetHandle); err != nil {
+		_ = windows.CloseHandle(targetHandle)
+		return nil, err
+	} else if reparse {
+		_ = windows.CloseHandle(targetHandle)
+		return nil, fmt.Errorf("directory entry is a reparse point: %s", name)
+	}
+	rootHandle, err := duplicateWindowsDependencyHandle(h.targetHandle)
+	if err != nil {
+		_ = windows.CloseHandle(targetHandle)
+		return nil, err
+	}
+	parentHandle, err := duplicateWindowsDependencyHandle(h.targetHandle)
+	if err != nil {
+		_ = windows.CloseHandle(targetHandle)
+		_ = windows.CloseHandle(rootHandle)
+		return nil, err
+	}
+	return &windowsDirectoryHandle{
+		rootHandle: rootHandle, parentHandle: parentHandle, targetHandle: targetHandle, target: name,
+	}, nil
+}
+
+func (h *windowsDirectoryHandle) LstatEntry(name string) (os.FileMode, error) {
+	if h == nil || h.targetHandle == 0 {
+		return 0, errors.New("directory handle is closed")
+	}
+	if err := validateDirectoryEntryName(name); err != nil {
+		return 0, err
+	}
+	handle, err := openWindowsDependencyHandle(h.targetHandle, name, windowsDependencyReadAccess, 0)
+	if err != nil {
+		return 0, err
+	}
+	if reparse, err := windowsDependencyHandleIsReparsePoint(handle); err != nil {
+		_ = windows.CloseHandle(handle)
+		return 0, err
+	} else if reparse {
+		_ = windows.CloseHandle(handle)
+		return os.ModeSymlink, nil
+	}
+	file := os.NewFile(uintptr(handle), filepath.Join("worktree-directory", name))
+	if file == nil {
+		_ = windows.CloseHandle(handle)
+		return 0, errors.New("create file info from directory entry handle")
+	}
+	info, err := file.Stat()
+	closeErr := file.Close()
+	if err != nil {
+		return 0, err
+	}
+	return info.Mode(), closeErr
+}
+
+func (h *windowsDirectoryHandle) ReadLink(name string) (string, error) {
+	if h == nil || h.targetHandle == 0 {
+		return "", errors.New("directory handle is closed")
+	}
+	if err := validateDirectoryEntryName(name); err != nil {
+		return "", err
+	}
+	handle, err := openWindowsDependencyHandle(h.targetHandle, name, windowsDependencyReadAccess, 0)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = windows.CloseHandle(handle) }()
+	buffer := make([]byte, windows.MAXIMUM_REPARSE_DATA_BUFFER_SIZE)
+	var returned uint32
+	if err := windows.DeviceIoControl(
+		handle, windows.FSCTL_GET_REPARSE_POINT, nil, 0, &buffer[0], uint32(len(buffer)), &returned, nil,
+	); err != nil {
+		return "", err
+	}
+	if returned < 16 {
+		return "", errors.New("reparse point data is truncated")
+	}
+	tag := binary.LittleEndian.Uint32(buffer[:4])
+	pathOffset := 16
+	switch tag {
+	case windows.IO_REPARSE_TAG_SYMLINK:
+		if returned < 20 {
+			return "", errors.New("symbolic link data is truncated")
+		}
+		pathOffset = 20
+	case windows.IO_REPARSE_TAG_MOUNT_POINT:
+		pathOffset = 16
+	default:
+		return "", errors.New("reparse point is not a symbolic link or junction")
+	}
+	nameOffset := binary.LittleEndian.Uint16(buffer[12:14])
+	nameLength := binary.LittleEndian.Uint16(buffer[14:16])
+	if nameLength == 0 {
+		nameOffset = binary.LittleEndian.Uint16(buffer[8:10])
+		nameLength = binary.LittleEndian.Uint16(buffer[10:12])
+	}
+	start := pathOffset + int(nameOffset)
+	end := start + int(nameLength)
+	if start < pathOffset || end > int(returned) || nameLength%2 != 0 {
+		return "", errors.New("reparse point path is invalid")
+	}
+	units := make([]uint16, nameLength/2)
+	for index := range units {
+		units[index] = binary.LittleEndian.Uint16(buffer[start+index*2 : start+index*2+2])
+	}
+	return string(utf16.Decode(units)), nil
+}
+
+func (h *windowsDirectoryHandle) ReadDir() ([]os.DirEntry, error) {
+	if h == nil || h.targetHandle == 0 {
+		return nil, errors.New("directory handle is closed")
+	}
+	handle, err := duplicateWindowsDependencyHandle(h.targetHandle)
+	if err != nil {
+		return nil, err
+	}
+	directory := os.NewFile(uintptr(handle), "worktree-directory")
+	if directory == nil {
+		_ = windows.CloseHandle(handle)
+		return nil, errors.New("create directory reader from handle")
+	}
+	entries, readErr := directory.ReadDir(-1)
+	closeErr := directory.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	return entries, closeErr
 }
 
 func (h *windowsDirectoryHandle) WriteFile(name string, data []byte, _ os.FileMode) error {

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -71,6 +72,22 @@ func (h *postRemovalSwapDirectoryHandle) ReadFile(string) ([]byte, error) {
 }
 
 func (h *postRemovalSwapDirectoryHandle) OpenFile(string) (io.ReadCloser, error) {
+	return nil, os.ErrNotExist
+}
+
+func (h *postRemovalSwapDirectoryHandle) OpenSubdirectory(string) (storageworkspaces.DirectoryHandle, error) {
+	return nil, os.ErrNotExist
+}
+
+func (h *postRemovalSwapDirectoryHandle) LstatEntry(string) (os.FileMode, error) {
+	return 0, os.ErrNotExist
+}
+
+func (h *postRemovalSwapDirectoryHandle) ReadLink(string) (string, error) {
+	return "", os.ErrNotExist
+}
+
+func (h *postRemovalSwapDirectoryHandle) ReadDir() ([]os.DirEntry, error) {
 	return nil, os.ErrNotExist
 }
 

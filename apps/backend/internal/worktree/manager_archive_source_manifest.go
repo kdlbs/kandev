@@ -208,150 +208,215 @@ func archiveSourceManifestPath(root, path string) error {
 }
 
 func archiveSourceManifestDigest(root, path string) (string, error) {
-	fullPath := filepath.Join(root, path)
-	parent := filepath.Dir(fullPath)
-	handle, err := openArchiveSourceDirectory(filepath.Dir(root), parent)
+	parent, name, err := archiveSourceManifestOpenParent(root, path)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = handle.Close() }()
-	if err := handle.VerifyPath(parent); err != nil {
-		return "", err
-	}
-	info, err := os.Lstat(fullPath)
+	defer func() { _ = parent.Close() }()
+	mode, err := parent.LstatEntry(name)
 	if err != nil {
 		return "", err
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		target, readErr := os.Readlink(fullPath)
+	if mode&os.ModeSymlink != 0 {
+		target, readErr := parent.ReadLink(name)
 		if readErr != nil {
 			return "", readErr
-		}
-		if err := handle.VerifyPath(parent); err != nil {
-			return "", err
 		}
 		sum := sha256.Sum256([]byte("symlink:\x00" + target))
 		return fmt.Sprintf("%x", sum), nil
 	}
-	if !info.Mode().IsRegular() {
-		if !info.IsDir() {
+	if !mode.IsRegular() {
+		if !mode.IsDir() {
 			return "", fmt.Errorf("source path is not a regular file or directory")
 		}
-		digest, err := archiveSourceManifestDirectoryDigest(fullPath)
+		directory, err := parent.OpenSubdirectory(name)
 		if err != nil {
 			return "", err
 		}
-		if err := handle.VerifyPath(parent); err != nil {
-			return "", err
-		}
-		return digest, nil
+		defer func() { _ = directory.Close() }()
+		digest, err := archiveSourceManifestDirectoryDigestHandle(directory)
+		return digest, err
 	}
-	f, err := handle.OpenFile(filepath.Base(fullPath))
+	f, err := parent.OpenFile(name)
 	if err != nil {
 		return "", err
 	}
-	digest, err := archiveSourceManifestReadDigest(f)
-	if verifyErr := handle.VerifyPath(parent); err == nil && verifyErr != nil {
-		err = verifyErr
-	}
-	return digest, err
+	return archiveSourceManifestReadDigest(f)
 }
 
-func archiveSourceManifestDirectoryDigest(root string) (string, error) {
-	paths, err := archiveSourceManifestDirectoryPaths(root)
-	if err != nil {
+type archiveSourceManifestDirectoryRecord struct {
+	path   string
+	kind   string
+	digest string
+	target string
+}
+
+const (
+	archiveSourceManifestKindSymlink   = "symlink"
+	archiveSourceManifestKindDirectory = "directory"
+	archiveSourceManifestKindFile      = "file"
+)
+
+func archiveSourceManifestDirectoryDigestHandle(root storageworkspaces.DirectoryHandle) (string, error) {
+	records := make([]archiveSourceManifestDirectoryRecord, 0)
+	if err := archiveSourceManifestCollectDirectory(root, "", &records); err != nil {
 		return "", err
 	}
-	sort.Strings(paths)
+	sort.Slice(records, func(i, j int) bool { return records[i].path < records[j].path })
 	h := sha256.New()
-	for _, path := range paths {
-		if err := archiveSourceManifestDirectoryEntry(h, root, path); err != nil {
-			return "", err
+	for _, record := range records {
+		_, _ = io.WriteString(h, record.path+"\x00")
+		switch record.kind {
+		case archiveSourceManifestKindSymlink:
+			_, _ = io.WriteString(h, "symlink:\x00"+record.target+"\x00")
+		case archiveSourceManifestKindDirectory:
+			_, _ = io.WriteString(h, "directory\x00")
+		case archiveSourceManifestKindFile:
+			_, _ = io.WriteString(h, "file:\x00"+record.digest+"\x00")
 		}
 	}
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-func archiveSourceManifestDirectoryPaths(root string) ([]string, error) {
-	paths := make([]string, 0)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == root {
-			return nil
-		}
-		if entry.Name() == ".git" {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		paths = append(paths, path)
-		return nil
-	})
-	return paths, err
-}
-
-func archiveSourceManifestDirectoryEntry(h io.Writer, root, path string) error {
-	rel, err := filepath.Rel(root, path)
+func archiveSourceManifestCollectDirectory(
+	directory storageworkspaces.DirectoryHandle,
+	prefix string,
+	records *[]archiveSourceManifestDirectoryRecord,
+) error {
+	entries, err := directory.ReadDir()
 	if err != nil {
 		return err
 	}
-	parent := filepath.Dir(path)
-	handle, err := openArchiveSourceDirectory(filepath.Dir(root), parent)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = handle.Close() }()
-	if err := handle.VerifyPath(parent); err != nil {
-		return err
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	_, _ = io.WriteString(h, rel+"\x00")
-	switch {
-	case info.Mode()&os.ModeSymlink != 0:
-		target, err := os.Readlink(path)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == ".git" {
+			continue
+		}
+		mode, err := directory.LstatEntry(name)
 		if err != nil {
 			return err
 		}
-		if err := handle.VerifyPath(parent); err != nil {
+		path := name
+		if prefix != "" {
+			path = filepath.Join(prefix, name)
+		}
+		if err := archiveSourceManifestCollectEntry(directory, name, path, mode, records); err != nil {
 			return err
 		}
-		_, _ = io.WriteString(h, "symlink:\x00"+target+"\x00")
-	case info.IsDir():
-		_, _ = io.WriteString(h, "directory\x00")
-	case info.Mode().IsRegular():
-		f, err := handle.OpenFile(filepath.Base(path))
-		if err != nil {
-			return err
-		}
-		digest, err := archiveSourceManifestReadDigest(f)
-		if err != nil {
-			return err
-		}
-		if err := handle.VerifyPath(parent); err != nil {
-			return err
-		}
-		_, _ = io.WriteString(h, "file:\x00"+digest+"\x00")
-	default:
-		return fmt.Errorf("submodule source path is not a regular file")
 	}
 	return nil
 }
 
+func archiveSourceManifestCollectEntry(
+	directory storageworkspaces.DirectoryHandle,
+	name, path string,
+	mode os.FileMode,
+	records *[]archiveSourceManifestDirectoryRecord,
+) error {
+	switch {
+	case mode&os.ModeSymlink != 0:
+		target, err := directory.ReadLink(name)
+		if err != nil {
+			return err
+		}
+		*records = append(*records, archiveSourceManifestDirectoryRecord{
+			path: path, kind: archiveSourceManifestKindSymlink, target: target,
+		})
+	case mode.IsDir():
+		return archiveSourceManifestCollectSubdirectory(directory, name, path, records)
+	case mode.IsRegular():
+		return archiveSourceManifestCollectFile(directory, name, path, records)
+	default:
+		return fmt.Errorf("directory source path is not a regular file, directory, or symlink")
+	}
+	return nil
+}
+
+func archiveSourceManifestCollectSubdirectory(
+	directory storageworkspaces.DirectoryHandle,
+	name, path string,
+	records *[]archiveSourceManifestDirectoryRecord,
+) error {
+	*records = append(*records, archiveSourceManifestDirectoryRecord{
+		path: path, kind: archiveSourceManifestKindDirectory,
+	})
+	child, err := directory.OpenSubdirectory(name)
+	if err != nil {
+		return err
+	}
+	collectErr := archiveSourceManifestCollectDirectory(child, path, records)
+	closeErr := child.Close()
+	if collectErr != nil {
+		return collectErr
+	}
+	return closeErr
+}
+
+func archiveSourceManifestCollectFile(
+	directory storageworkspaces.DirectoryHandle,
+	name, path string,
+	records *[]archiveSourceManifestDirectoryRecord,
+) error {
+	file, err := directory.OpenFile(name)
+	if err != nil {
+		return err
+	}
+	digest, err := archiveSourceManifestReadDigest(file)
+	if err != nil {
+		return err
+	}
+	*records = append(*records, archiveSourceManifestDirectoryRecord{
+		path: path, kind: archiveSourceManifestKindFile, digest: digest,
+	})
+	return nil
+}
+
+func archiveSourceManifestOpenParent(
+	root, path string,
+) (storageworkspaces.DirectoryHandle, string, error) {
+	if err := archiveSourceManifestPath(root, path); err != nil {
+		return nil, "", err
+	}
+	absolute, err := filepath.Abs(root)
+	if err != nil {
+		return nil, "", err
+	}
+	directory, err := openArchiveSourceDirectory(filepath.Dir(absolute), absolute)
+	if err != nil {
+		return nil, "", err
+	}
+	components := strings.Split(filepath.ToSlash(filepath.Clean(path)), "/")
+	for _, component := range components[:len(components)-1] {
+		child, err := directory.OpenSubdirectory(component)
+		if err != nil {
+			_ = directory.Close()
+			return nil, "", err
+		}
+		_ = directory.Close()
+		directory = child
+	}
+	return directory, components[len(components)-1], nil
+}
+
 func archiveSourceManifestFileDigest(root, path string) (string, error) {
-	parent := filepath.Clean(filepath.Dir(path))
-	parentRoot := filepath.Clean(filepath.Dir(root))
-	handle, err := openArchiveSourceDirectory(parentRoot, parent)
+	rootPath, err := filepath.Rel(root, filepath.Dir(path))
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = handle.Close() }()
-	f, err := handle.OpenFile(filepath.Base(path))
+	parent, err := openArchiveSourceDirectory(filepath.Dir(root), filepath.Join(root, rootPath))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = parent.Close() }()
+	mode, err := parent.LstatEntry(filepath.Base(path))
+	if err != nil {
+		return "", err
+	}
+	if !mode.IsRegular() {
+		return "", fmt.Errorf("source path is not a regular file")
+	}
+	f, err := parent.OpenFile(filepath.Base(path))
 	if err != nil {
 		return "", err
 	}
