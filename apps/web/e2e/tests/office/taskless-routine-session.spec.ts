@@ -7,7 +7,7 @@ type RoutineRun = {
   status: string;
 };
 
-type AgentRun = { id: string; reason: string };
+type AgentRun = { id: string; routine_id?: string };
 
 async function routineRuns(
   officeApi: { listRoutineRuns(id: string): Promise<Record<string, unknown>> },
@@ -70,19 +70,7 @@ async function findAgentRunForRoutine(
   seenRunIds: Set<string>,
 ): Promise<string> {
   const runs = await listAgentRuns(officeApi, agentId);
-  for (const run of runs) {
-    if (seenRunIds.has(run.id) || !run.reason.startsWith("routine_")) continue;
-    const response = await officeApi.rawRequest("GET", `/agents/${agentId}/runs/${run.id}`);
-    if (!response.ok) continue;
-    const detail = (await response.json()) as { context_snapshot?: string };
-    try {
-      const context = JSON.parse(detail.context_snapshot ?? "{}") as { routine_id?: string };
-      if (context.routine_id === routineId) return run.id;
-    } catch {
-      // Other routine runs may have legacy or empty context snapshots.
-    }
-  }
-  return "";
+  return runs.find((run) => !seenRunIds.has(run.id) && run.routine_id === routineId)?.id ?? "";
 }
 
 test.describe("Office taskless routine sessions", () => {

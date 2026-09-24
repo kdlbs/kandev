@@ -224,7 +224,7 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 }
 
 // TestResumeSession_ObservesWorkingSiblingOnAgentStart pins the wiring
-// half of AC-004.1 for resume admission and asynchronous process startup.
+// half of AC-004.1 for resume process startup.
 func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
@@ -238,27 +238,32 @@ func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFromZap: %v", err)
 	}
-	processStarted := make(chan struct{}, 1)
+	observedAtStart := make(chan int, 1)
+	finished := make(chan struct{})
 	agentMgr := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			return &LaunchAgentResponse{AgentExecutionID: "exec-new"}, nil
 		},
 		startAgentProcessFunc: func(context.Context, string) error {
-			processStarted <- struct{}{}
+			observedAtStart <- logs.FilterMessageSnippet("starting an agent while another session").Len()
 			return nil
 		},
 	}
 	exec := NewExecutor(agentMgr, repo, log, ExecutorConfig{ShellPrefs: &mockShellPrefs{}})
 	exec.SetCapabilities(&mockCapabilities{})
+	exec.SetOnAgentProcessStarted(func(context.Context, string, string, string) { close(finished) })
 	before := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume)
 
 	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
 		t.Fatalf("ResumeSession: %v", err)
 	}
 	select {
-	case <-processStarted:
+	case <-finished:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for the agent process to start")
+		t.Fatal("timed out waiting for resumed agent startup")
+	}
+	if observed := <-observedAtStart; observed != 1 {
+		t.Fatalf("co-residency observations before process start = %d, want 1", observed)
 	}
 
 	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume); after != before+1 {
@@ -267,6 +272,9 @@ func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	warnings := logs.FilterLevelExact(zapcore.WarnLevel).All()
 	if len(warnings) != 1 {
 		t.Fatalf("warning entries = %d, want 1; all=%v", len(warnings), logs.All())
+	}
+	if !strings.Contains(warnings[0].Message, "starting an agent while another session") {
+		t.Fatalf("warning message = %q, want the co-residency warning", warnings[0].Message)
 	}
 	fields := warnings[0].ContextMap()
 	if fields["site"] != sessionCoresidencySiteResume {

@@ -4,7 +4,6 @@ import { expect, type Page } from "@playwright/test";
 import type { BackendContext } from "../../fixtures/backend";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
@@ -599,7 +598,6 @@ export async function seedTaskCanvas(
   const canvas = await waitForTaskCanvas(apiClient, task.id, title);
 
   const publishedCanvas = await publishTaskCanvas({
-    page,
     apiClient,
     taskId: task.id,
     taskSessionId: task.session_id,
@@ -651,7 +649,6 @@ export async function waitForTaskCanvas(
 }
 
 type PublishTaskCanvasOptions = {
-  page: Page;
   apiClient: ApiClient;
   taskId: string;
   taskSessionId: string;
@@ -662,7 +659,6 @@ type PublishTaskCanvasOptions = {
 };
 
 export async function publishTaskCanvas({
-  page,
   apiClient,
   taskId,
   taskSessionId,
@@ -679,7 +675,6 @@ export async function publishTaskCanvas({
       canvas_id: canvas.id,
       source_path: sourcePath,
     })})`;
-    await waitForSessionAgentctlReady(page, taskSessionId);
     if (useMobileSubmit) {
       await session.sendMessageViaButton(publishScript);
     } else {
@@ -713,6 +708,7 @@ export async function publishTaskCanvas({
     return publishedCanvas;
   } finally {
     removeCanvasSource(workspacePath, canvas.id);
+
 
   }
 

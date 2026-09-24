@@ -4,7 +4,7 @@ type E2EStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
     getState: () => {
       taskSessions: { items: Record<string, Record<string, unknown>> };
-      tasks: { activeSessionId: string | null };
+      tasks: { activeTaskId: string | null; activeSessionId: string | null };
       quickChat: { activeSessionId: string | null };
       sessionAgentctl: { itemsBySessionId: Record<string, { status?: string }> };
       setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
@@ -100,6 +100,23 @@ export async function activeTaskSessionId(page: Page): Promise<string> {
   );
   if (!sessionId) throw new Error("No active task session is available in the E2E store");
   return sessionId;
+}
+
+/** Wait until the task route has selected the expected task and session. */
+export async function waitForActiveTaskSession(
+  page: Page,
+  taskId: string,
+  sessionId: string,
+  timeout = 30_000,
+): Promise<void> {
+  await page.waitForFunction(
+    ({ expectedTaskId, expectedSessionId }) => {
+      const tasks = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState().tasks;
+      return tasks?.activeTaskId === expectedTaskId && tasks.activeSessionId === expectedSessionId;
+    },
+    { expectedTaskId: taskId, expectedSessionId: sessionId },
+    { timeout, message: `task ${taskId} did not activate session ${sessionId}` },
+  );
 }
 
 export async function waitForActiveSessionForegroundActivity(

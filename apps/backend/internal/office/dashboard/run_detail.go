@@ -148,7 +148,11 @@ func sessionIDFromPayload(payload string) string {
 
 // buildRunSummaryDTO converts a Run row into the list-summary DTO.
 func buildRunSummaryDTO(run *models.Run) AgentRunSummaryDTO {
-	commentID, routineID := runLinkIDsFromPayload(run.Payload)
+	commentID, payloadRoutineID := runLinkIDsFromPayload(run.Payload)
+	routineID := run.RoutineID
+	if routineID == "" {
+		routineID = payloadRoutineID
+	}
 	dto := AgentRunSummaryDTO{
 		ID:           run.ID,
 		IDShort:      shortID(run.ID),
