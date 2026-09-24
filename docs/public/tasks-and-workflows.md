@@ -949,10 +949,17 @@ still show confirmed archives.
 
 Archive records the task as archived and removes it from active views immediately. Runtime stopping and physical cleanup then run in the background with a 60-second timeout. Cleanup is best-effort: a stop or deletion failure is logged and does not undo the archive, and Kandev preserves a runtime or environment when a nonterminal session cannot be stopped. Shared inherited environments and borrowed worktrees are also preserved while another active task still uses them.
 
+For Git worktrees, archive removes a worktree only when Git reports it clean.
+If it has tracked or untracked changes, Kandev keeps its directory and branch
+and records a durable recheck. The task cleanup worker checks it again after
+about 24 hours and removes it when it is clean. This task-lifecycle check runs
+even when scheduled storage cleanup is disabled. Git does not include ignored
+files in this check. Protect ignored work that must remain.
+
 | Executor      | Archive cleanup                                                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                                             |
-| Git worktree  | Attempts to remove the Kandev-owned worktree directory. It removes a managed local branch only when its exact head is already integrated; unpublished, external, ambiguous, shared, or borrowed work remains. Remote branches are untouched. |
+| Git worktree  | Removes clean worktrees. A worktree with tracked or untracked Git changes stays on disk until a later clean recheck. Unpublished or ambiguous local branches remain. Kandev can remove an integrated managed branch. Remote branches are untouched. |
 | Local Docker  | Attempts to stop and remove the container; the host repository remains.                                                                                                                                               |
 | Kubernetes    | Deletes only the recorded Pod and Kandev-managed PVC after exact UID and ownership checks. An existing claim is retained.                                                                                             |
 | Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                                             |
@@ -963,7 +970,7 @@ The archive confirmation is enabled by default at **Settings → Preferences →
 
 To restore a task, open **List**, enable **Show archived**, and choose **Unarchive**. You can also choose **Unarchive** in the open task view on desktop or a phone. If unarchive fails, the task stays archived and recovery stays disabled. If the parent was archived with its children, the cascade-owned children are restored with it.
 
-While a task is archived, Kandev shows its history but does not start its agent or restore its workspace. After a successful unarchive, the open task checks its existing session once and follows the normal start preference. It can resume the same session or restore its worktree while keeping the session and environment identity. If **Prevent auto-start on open** is enabled, select **Start agent** to begin recovery.
+While a task is archived, Kandev shows its history but does not start its agent or restore its workspace. Unarchive cancels a pending worktree recheck. If the recheck is running, Kandev rejects unarchive because removal is active. When cleanup stops, try unarchive again. After a successful unarchive, the open task checks its existing session once and follows the normal start preference. It can resume the same session or restore its worktree while keeping the session and environment identity. If **Prevent auto-start on open** is enabled, select **Start agent** to begin recovery.
 
 If session startup or resume fails, Kandev keeps the failure as a chronological entry in that session's chat. The current unresolved entry provides the valid recovery actions. After recovery and later agent output, the entry remains in the chat with its details, while older entries have no stale controls. History loading and new messages keep the normal chat scroll position.
 

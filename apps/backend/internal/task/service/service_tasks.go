@@ -4019,12 +4019,39 @@ func (s *Service) cleanupDestructiveTaskResources(
 		cleanupErr = cleaner.CleanupWorktrees(ctx, worktrees)
 	}
 	if cleanupErr != nil {
-		s.logger.Warn("failed to cleanup task worktrees",
-			zap.String("task_id", taskID),
-			zap.Error(cleanupErr))
-		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", cleanupErr))
+		if envCleanup.preserveBranches && onlyDirtyWorktreeCleanupErrors(cleanupErr) {
+			s.logger.Info("retaining archived worktree after final cleanliness check",
+				zap.String("task_id", taskID), zap.Error(cleanupErr))
+		} else {
+			s.logger.Warn("failed to cleanup task worktrees",
+				zap.String("task_id", taskID),
+				zap.Error(cleanupErr))
+			errs = append(errs, fmt.Errorf("cleanup worktrees: %w", cleanupErr))
+		}
 	}
 	return errs
+}
+
+func onlyDirtyWorktreeCleanupErrors(err error) bool {
+	if err == nil {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		causes := joined.Unwrap()
+		if len(causes) == 0 {
+			return false
+		}
+		for _, cause := range causes {
+			if !onlyDirtyWorktreeCleanupErrors(cause) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return onlyDirtyWorktreeCleanupErrors(wrapped.Unwrap())
+	}
+	return errors.Is(err, worktree.ErrDirtyWorktreeCleanup)
 }
 
 // filterDirtyWorktreesForArchive drops worktrees carrying uncommitted or

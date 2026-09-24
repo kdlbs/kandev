@@ -568,6 +568,12 @@ func (overviewWorkspaceInventory) LoadWorkspaceInventory(context.Context) (works
 	return workspaces.Inventory{Complete: true}, nil
 }
 
+type fixedWorkspaceInventory struct{ inventory workspaces.Inventory }
+
+func (i fixedWorkspaceInventory) LoadWorkspaceInventory(context.Context) (workspaces.Inventory, error) {
+	return i.inventory, nil
+}
+
 type overviewContainerInventory struct{}
 
 func (overviewContainerInventory) ContainerTaskRemovable(context.Context, string) (bool, error) {
@@ -889,12 +895,14 @@ func TestQuarantineControllerForceDeletesProtectedGoCache(t *testing.T) {
 func TestQuarantineControllerPurgeEligibleReportsProtectedAndDeleted(t *testing.T) {
 	home := t.TempDir()
 	settings, store := newStorageMaintenanceStores(t)
+	tasksRoot := filepath.Join(home, "tasks")
+	trashRoot := filepath.Join(home, "trash")
 	protected := storagepkg.QuarantineEntry{
 		ID: "protected-workspace", ResourceType: storagepkg.ResourceTypeTaskWorkspace,
 		OriginalPath:   filepath.Join(home, "tasks", "protected"),
 		QuarantinePath: filepath.Join(home, "trash", "tasks", "protected-workspace"),
 		SizeBytes:      17, State: storagepkg.QuarantineStateQuarantined,
-		QuarantinedAt: time.Now().UTC(), DeleteAfter: time.Now().UTC().Add(time.Hour),
+		QuarantinedAt: time.Now().UTC().Add(-2 * time.Hour), DeleteAfter: time.Now().UTC().Add(-time.Hour),
 	}
 	if err := os.MkdirAll(protected.QuarantinePath, 0o700); err != nil {
 		t.Fatal(err)
@@ -905,7 +913,18 @@ func TestQuarantineControllerPurgeEligibleReportsProtectedAndDeleted(t *testing.
 	eligible := createGoCacheQuarantineEntryWithID(
 		t, store, home, "eligible-cache", time.Now().UTC().Add(-time.Hour),
 	)
-	controller := &workspaceQuarantineController{settings: settings, store: store, homeDir: home}
+	controller := &workspaceQuarantineController{
+		settings: settings, store: store, homeDir: home,
+		factory: func(storagepkg.StorageMaintenanceSettings) *workspaces.Provider {
+			return workspaces.New(workspaces.Config{
+				TasksRoot: tasksRoot, TrashRoot: trashRoot, Store: store,
+				Inventory: fixedWorkspaceInventory{inventory: workspaces.Inventory{
+					Complete:      true,
+					WorktreePaths: []string{filepath.Join(protected.OriginalPath, "repo")},
+				}},
+			})
+		},
+	}
 
 	result, err := controller.Purge(context.Background(), storagepkg.QuarantinePurgeScopeEligible, "DELETE ELIGIBLE")
 	if err != nil {
@@ -922,6 +941,52 @@ func TestQuarantineControllerPurgeEligibleReportsProtectedAndDeleted(t *testing.
 	}
 	if _, err := os.Stat(protected.QuarantinePath); err != nil {
 		t.Fatalf("protected quarantine path changed: %v", err)
+	}
+}
+
+func TestQuarantineControllerForceClearKeepsActiveArchivedWorkspace(t *testing.T) {
+	home := t.TempDir()
+	tasksRoot := filepath.Join(home, "tasks")
+	trashRoot := filepath.Join(home, "trash")
+	settings, store := newStorageMaintenanceStores(t)
+	entry := storagepkg.QuarantineEntry{
+		ID: "active-archived-workspace", ResourceType: storagepkg.ResourceTypeTaskWorkspace,
+		OriginalPath:   filepath.Join(tasksRoot, "archived-task"),
+		QuarantinePath: filepath.Join(trashRoot, "tasks", "active-archived-workspace"),
+		SizeBytes:      23, State: storagepkg.QuarantineStateQuarantined,
+		QuarantinedAt: time.Now().UTC().Add(-2 * time.Hour), DeleteAfter: time.Now().UTC().Add(-time.Hour),
+	}
+	if err := os.MkdirAll(entry.QuarantinePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(entry.QuarantinePath, "artifact"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateQuarantineEntry(context.Background(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	controller := &workspaceQuarantineController{
+		settings: settings, store: store, homeDir: home,
+		factory: func(storagepkg.StorageMaintenanceSettings) *workspaces.Provider {
+			return workspaces.New(workspaces.Config{
+				TasksRoot: tasksRoot, TrashRoot: trashRoot, Store: store,
+				Inventory: fixedWorkspaceInventory{inventory: workspaces.Inventory{
+					Complete:      true,
+					WorktreePaths: []string{filepath.Join(entry.OriginalPath, "repo")},
+				}},
+			})
+		},
+	}
+
+	result, err := controller.Purge(context.Background(), storagepkg.QuarantinePurgeScopeAll, storagepkg.QuarantineConfirmationForce)
+	if err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	if result.Considered != 1 || result.Protected != 1 || result.ProtectedBytes != entry.SizeBytes || result.Deleted != 0 || result.Failed != 0 {
+		t.Fatalf("force purge result = %#v, want one protected active workspace", result)
+	}
+	if _, err := os.Stat(filepath.Join(entry.QuarantinePath, "artifact")); err != nil {
+		t.Fatalf("force purge removed active archived workspace: %v", err)
 	}
 }
 

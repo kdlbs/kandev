@@ -86,6 +86,11 @@ var ErrExternalIDConflict = errors.New("external_id already claimed by another t
 // inventory was captured under the same barrier.
 var ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
 
+// ErrArchiveCleanupInProgress reports that an archive cleanup job appeared
+// after unarchive's preflight cancellation scan. The caller can retry once the
+// archived task's cleanup has settled.
+var ErrArchiveCleanupInProgress = errors.New("archive cleanup in progress")
+
 // ErrWorkflowResolutionConflict reports that a caller's expected current
 // workflow (passed to guard a write against a concurrent reassignment) no
 // longer matches the task's persisted workflow_id, checked atomically inside

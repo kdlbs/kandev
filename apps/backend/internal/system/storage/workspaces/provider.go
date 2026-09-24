@@ -395,6 +395,9 @@ func (p *Provider) permanentDelete(
 	if err := p.validateEntryPaths(entry); err != nil {
 		return entry, err
 	}
+	if err := p.protectActiveWorktree(ctx, entry); err != nil {
+		return entry, err
+	}
 	if !force && p.config.Now().Before(entry.DeleteAfter) {
 		return entry, fmt.Errorf("%w: quarantine retention deadline has not elapsed", storage.ErrConflict)
 	}
@@ -416,6 +419,24 @@ func (p *Provider) permanentDelete(
 		return entry, fmt.Errorf("persist workspace deletion: %w", err)
 	}
 	return deleted, nil
+}
+
+func (p *Provider) protectActiveWorktree(ctx context.Context, entry storage.QuarantineEntry) error {
+	inventory, err := p.loadInventory(ctx)
+	if err != nil {
+		return err
+	}
+	protected, err := buildProtectedSet(p.cleanTasksRoot(), Inventory{
+		Complete:      true,
+		WorktreePaths: inventory.WorktreePaths,
+	})
+	if err != nil {
+		return err
+	}
+	if _, active := protected[filepath.Clean(entry.OriginalPath)]; !active {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", storage.ErrConflict, ErrActiveWorktree)
 }
 
 func (p *Provider) Reconcile(ctx context.Context) (ReconcileResult, error) {

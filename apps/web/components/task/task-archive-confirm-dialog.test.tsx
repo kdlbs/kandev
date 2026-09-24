@@ -7,6 +7,7 @@ import { expectCompactWarning } from "./task-confirm-dialog.test-helpers";
 
 const mockGetSubtaskCount = vi.fn();
 const ARCHIVE_CONFIRM_TEST_ID = "archive-confirm";
+const CLEANUP_EFFECTS_TEST_ID = "task-cleanup-effects";
 
 vi.mock("@/lib/api", () => ({
   getSubtaskCount: (...args: unknown[]) => mockGetSubtaskCount(...args),
@@ -104,6 +105,47 @@ describe("TaskArchiveConfirmDialog presentation", () => {
     expect(screen.getByTestId(ARCHIVE_CONFIRM_TEST_ID).className).toContain("w-full");
     expect(screen.getByTestId(ARCHIVE_CONFIRM_TEST_ID).getAttribute("data-variant")).toBe(
       "default",
+    );
+  });
+
+  it("explains conditional worktree cleanup and retained branches", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        confirmTestId={ARCHIVE_CONFIRM_TEST_ID}
+        onConfirm={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).textContent).toMatch(
+      /Git changes stays until it is clean/i,
+    );
+    expect(screen.getByTestId("task-cleanup-notes").textContent).toMatch(
+      /Unpublished local branches remain available/i,
+    );
+  });
+
+  it("uses grouped conditional cleanup copy for bulk worktree archives", () => {
+    renderDialog(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        isBulkOperation
+        count={2}
+        executorTypes={["worktree", "worktree"]}
+        confirmTestId={ARCHIVE_CONFIRM_TEST_ID}
+        onConfirm={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).textContent).toMatch(/2 Git worktree tasks/);
+    expect(screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).textContent).toMatch(
+      /checkouts with Git changes stay until they are clean/i,
     );
   });
 });
@@ -218,8 +260,8 @@ describe("TaskArchiveConfirmDialog direct outcome", () => {
     expect(screen.getByTestId("task-confirmation-outcome").textContent).toMatch(
       /Archive [“"]?My task[”"]?\./i,
     );
-    expect(screen.getByTestId("task-cleanup-effects").tagName).toBe("UL");
-    expect(screen.getByTestId("task-cleanup-effects").querySelectorAll("li")).toHaveLength(2);
+    expect(screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).tagName).toBe("UL");
+    expect(screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).querySelectorAll("li")).toHaveLength(2);
     expect(screen.getByTestId("task-cleanup-notes").tagName).toBe("DIV");
     expect(screen.queryByText(/Are you sure/i)).toBeNull();
   });
@@ -240,7 +282,7 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
     expect(screen.getByText(/directly in your repo/i)).toBeTruthy();
   });
 
-  it("renders worktree-executor copy about worktree + branch removal", () => {
+  it("renders conditional worktree cleanup and branch retention copy", () => {
     renderDialog(
       <TaskArchiveConfirmDialog
         open
@@ -251,7 +293,8 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
         onConfirm={() => {}}
       />,
     );
-    expect(screen.getByText(/worktree and its branch will be deleted/i)).toBeTruthy();
+    expect(screen.getByText(/Git changes stays until it is clean/i)).toBeTruthy();
+    expect(screen.getByText(/Unpublished local branches remain available/i)).toBeTruthy();
   });
 
   it("warns about sandbox destruction for sprites executor", () => {
@@ -295,7 +338,8 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
         onConfirm={() => {}}
       />,
     );
-    expect(screen.getByText(/2 worktrees/i)).toBeTruthy();
+    expect(screen.getByText(/For 2 Git worktree tasks/i)).toBeTruthy();
+    expect(screen.getByText(/Unpublished local branches remain available/i)).toBeTruthy();
     expect(screen.getByText(/1 Sprites sandbox/i)).toBeTruthy();
   });
 

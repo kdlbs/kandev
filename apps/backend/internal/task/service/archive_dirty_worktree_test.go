@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -269,6 +270,7 @@ func TestCleanupDestructiveTaskResourcesArchiveInspectionFailurePreservesWholeSe
 type recordingDirtyAwareArchiveCleanup struct {
 	dirty          []worktree.DirtyWorktree
 	preservedCalls [][]*worktree.Worktree
+	cleanupErr     error
 }
 
 func (*recordingDirtyAwareArchiveCleanup) OnTaskDeleted(context.Context, string) error { return nil }
@@ -285,7 +287,7 @@ func (c *recordingDirtyAwareArchiveCleanup) CleanupWorktreesPreservingBranches(
 	_ context.Context, worktrees []*worktree.Worktree,
 ) error {
 	c.preservedCalls = append(c.preservedCalls, worktrees)
-	return nil
+	return c.cleanupErr
 }
 
 func (c *recordingDirtyAwareArchiveCleanup) InspectDirtyWorktrees(
@@ -353,5 +355,50 @@ func TestCleanupDestructiveTaskResourcesArchivePreservesDirtyPathAlias(t *testin
 	got := cleanup.preservedCalls[0]
 	if len(got) != 1 || got[0].ID != "worktree-alias-clean" {
 		t.Fatalf("cleaned worktrees = %+v, want only the unrelated clean checkout", got)
+	}
+}
+
+func TestCleanupDestructiveTaskResourcesArchiveTreatsLateDirtyAsRetainedButKeepsOtherErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		cleanupErr error
+		wantErr    bool
+	}{
+		{
+			name: "dirty worktrees only",
+			cleanupErr: errors.Join(
+				fmt.Errorf("worktree one: %w", worktree.ErrDirtyWorktreeCleanup),
+				fmt.Errorf("worktree two: %w", worktree.ErrDirtyWorktreeCleanup),
+			),
+		},
+		{
+			name: "dirty checkout and genuine failure",
+			cleanupErr: errors.Join(
+				fmt.Errorf("worktree one: %w", worktree.ErrDirtyWorktreeCleanup),
+				errors.New("temporary git failure"),
+			),
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			svc, _, _ := createTestService(t)
+			cleanup := &recordingDirtyAwareArchiveCleanup{cleanupErr: test.cleanupErr}
+			svc.SetWorktreeCleanup(cleanup)
+			errs := svc.cleanupDestructiveTaskResources(
+				context.Background(), "task-archive-late-dirty", nil,
+				[]*worktree.Worktree{{ID: "worktree-late-dirty", TaskID: "task-archive-late-dirty"}},
+				taskEnvironmentCleanup{preserveBranches: true}, nil,
+			)
+			if test.wantErr && len(errs) == 0 {
+				t.Fatal("cleanup errors = none, want the genuine cleanup failure")
+			}
+			if !test.wantErr && len(errs) != 0 {
+				t.Fatalf("cleanup errors = %v, want late dirtiness retained without failing archive", errs)
+			}
+			if test.wantErr && !strings.Contains(errors.Join(errs...).Error(), "temporary git failure") {
+				t.Fatalf("cleanup errors = %v, want genuine failure preserved", errs)
+			}
+		})
 	}
 }

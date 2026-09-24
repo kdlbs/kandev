@@ -1,6 +1,6 @@
 ---
 created: 2026-09-24
-status: draft
+status: complete
 requirements:
   - REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-001
   - REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-002
@@ -30,7 +30,10 @@ keeps optional install-wide storage scheduling separate from this lifecycle.
   storage scheduler is disabled; defer dirty checkouts without counting them
   as failed archive jobs.
 - Revalidate archive identity, ownership, references, path, and Git changes at
-  removal. Preserve the current branch-compaction policy and multi-repository
+  removal, including a second cleanliness check after the repository cleanup
+  script. Fence archive and reclaim jobs for every cascade member before
+  unarchive mutation, and restore the exact cancelled jobs if mutation fails.
+  Preserve the current branch-compaction policy and multi-repository
   independence.
 - Correct the shared archive confirmation summary on desktop and phone, with
   supported translations and public lifecycle documentation.
@@ -136,7 +139,7 @@ navigation state is proposed.
 | --- | --- |
 | AC-TASKS-DIRTY-WORKTREE-ARCHIVE-002.5 | `storage_inventory_test.go`, `workspaces/provider_test.go`, `storage_maintenance_test.go`: archived active versus deleted rows; multi-repository root; pre-existing quarantine, purge, force, and inventory failure. |
 | AC-TASKS-DIRTY-WORKTREE-ARCHIVE-002.1-.3 | `resource_cleanup_jobs_test.go` and `sqlite/resource_cleanup_test.go`: dirty deferred state, due/fair batch, restart/backfill, clean per-repository removal with storage scheduling off, failure preservation. |
-| AC-TASKS-DIRTY-WORKTREE-ARCHIVE-002.4 | Service race tests: unarchive or ownership transfer before claim and while a claim runs; manager final clean-gate regression. |
+| AC-TASKS-DIRTY-WORKTREE-ARCHIVE-002.4 | Service race tests: single and cascade unarchive while reclaim runs, ownership transfer before claim, cancellation rollback; manager checks cleanliness both before and after cleanup scripts. |
 | AC-TASKS-DIRTY-WORKTREE-ARCHIVE-002.6 | `task-cleanup-summary.test.ts`, archive and delete confirmation component tests, locale checks, desktop and phone Playwright assertions. |
 
 ## E2E tests
@@ -153,9 +156,11 @@ navigation state is proposed.
 
 ## Work orders
 
-- [ ] [Task 01: Protect archived worktrees from storage purge](task-01-protect-archived-worktrees.md)
-- [ ] [Task 02: Reclaim clean archived worktrees through task lifecycle](task-02-reclaim-clean-archived-worktrees.md)
-- [ ] [Task 03: Explain retained worktrees in archive UI and docs](task-03-explain-archive-reclamation.md)
+- [x] [Task 01: Protect archived worktrees from storage purge](task-01-protect-archived-worktrees.md)
+- [x] [Task 02: Reclaim clean archived worktrees through task lifecycle](task-02-reclaim-clean-archived-worktrees.md)
+- [x] [Task 03: Explain retained worktrees in archive UI and docs](task-03-explain-archive-reclamation.md)
+- [x] Review fixes: cascade-wide cleanup fencing, post-script dirty retention,
+  and task-row serialization of reclaim backfill against unarchive.
 
 ## Dependency order
 
@@ -168,7 +173,16 @@ behavior only after the backend delivers it.
 
 ## Verification results
 
-Pending implementation. Each work order contains its targeted commands.
+- Task 01: `go test ./internal/backendapp ./internal/system/storage/workspaces` and `make lint` passed.
+- Task 02: `go test ./internal/task/service ./internal/task/repository/sqlite ./internal/worktree` and `make lint` passed. After the final service helper refactor, `go test ./internal/task/service` and `make lint` passed again.
+- Review fixes: focused cascade/reclaim, waiting-job cancellation, rollback,
+  post-script cleanliness, late-dirty retention, and mixed-error tests passed.
+  Full service and worktree package tests passed; SQLite package tests passed;
+  `make lint` passed with 0 issues.
+- Backfill/unarchive fence: full `go test ./internal/task/service -count=1`,
+  focused SQLite unarchive/cancellation tests, `make lint`, specification
+  catalog validation, and specification lint passed.
+- Task 03: 95 targeted Vitest tests, `pnpm run i18n:check`, desktop and phone E2E (3 and 2 tests), and public-doc validation passed.
 
 ## Risks
 
@@ -184,4 +198,8 @@ Pending implementation. Each work order contains its targeted commands.
   check inside the manager lock narrows this interval but cannot make external
   writers use Kandev's lock; preserve fail-closed ownership and path checks.
 - Follow-up jobs must not be classified as failed archive jobs or race a task
-  unarchive. The same lifecycle claim/cancellation path is required.
+  unarchive. The same lifecycle claim/cancellation path is required, including
+  cascade-wide fencing, atomic backfill/unarchive serialization, and restoration
+  of all cancelled jobs after a failed unarchive mutation. A late dirty refusal
+  is a retained worktree outcome; other cleanup errors must still reach retry
+  handling.

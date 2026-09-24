@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
@@ -4334,7 +4335,17 @@ func (r *Repository) UnarchiveTaskByCascade(ctx context.Context, id, cascadeID s
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
+	locked, err := r.lockTaskArchiveLifecycleForWrite(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
+	if !locked {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if err := r.ensureArchiveCleanupAbsentInTx(ctx, tx, id); err != nil {
 		return false, err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -4363,7 +4374,17 @@ func (r *Repository) UnarchiveTask(ctx context.Context, id string) (bool, error)
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
+	locked, err := r.lockTaskArchiveLifecycleForWrite(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
+	if !locked {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if err := r.ensureArchiveCleanupAbsentInTx(ctx, tx, id); err != nil {
 		return false, err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -4379,6 +4400,51 @@ func (r *Repository) UnarchiveTask(ctx context.Context, id string) (bool, error)
 		return false, err
 	}
 	return rows > 0, nil
+}
+
+// lockTaskArchiveLifecycleForWrite orders archive state changes and reclaim
+// insertion on the task row. lockTaskStepForWrite preserves the workflow-step
+// lock order on Postgres; the no-op task update also reserves SQLite's writer
+// before the archive-job check, matching recoveryclaim's cleanup insertion
+// lock on both drivers.
+func (r *Repository) lockTaskArchiveLifecycleForWrite(ctx context.Context, tx *sqlx.Tx, taskID string) (bool, error) {
+	if err := r.lockTaskStepForWrite(ctx, tx, taskID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET updated_at = updated_at WHERE id = ?
+	`), taskID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
+func (r *Repository) ensureArchiveCleanupAbsentInTx(ctx context.Context, tx *sqlx.Tx, taskID string) error {
+	var operationID string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT operation_id FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger IN (?, ?, ?)
+			AND state IN (?, ?, ?, ?, ?)
+		LIMIT 1
+	`), taskID,
+		models.TaskResourceCleanupTriggerArchive,
+		models.TaskResourceCleanupTriggerCascadeArchive,
+		models.TaskResourceCleanupTriggerArchiveReclaim,
+		models.TaskResourceCleanupStatePrepared,
+		models.TaskResourceCleanupStatePending,
+		models.TaskResourceCleanupStateRunning,
+		models.TaskResourceCleanupStateRetryWait,
+		models.TaskResourceCleanupStateWaitingForClean,
+	).Scan(&operationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check archive cleanup before unarchive: %w", err)
+	}
+	return fmt.Errorf("%w: task %s cleanup %s appeared during unarchive", repoerrors.ErrArchiveCleanupInProgress, taskID, operationID)
 }
 
 // ListTasksForAutoArchive returns tasks eligible for auto-archiving based on workflow step settings

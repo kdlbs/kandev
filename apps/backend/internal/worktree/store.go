@@ -336,13 +336,14 @@ func (s *SQLiteStore) checkTaskCleanupBarrierLocked(ctx context.Context, tx *sql
 	if err := tx.QueryRowContext(ctx, s.db.Rebind(`
 		SELECT EXISTS (
 			SELECT 1 FROM task_resource_cleanup_jobs
-			WHERE task_id = ? AND state IN (?, ?, ?, ?)
+			WHERE task_id = ? AND state IN (?, ?, ?, ?, ?)
 		)
 	`), taskID,
 		models.TaskResourceCleanupStatePrepared,
 		models.TaskResourceCleanupStatePending,
 		models.TaskResourceCleanupStateRunning,
 		models.TaskResourceCleanupStateRetryWait,
+		models.TaskResourceCleanupStateWaitingForClean,
 	).Scan(&active); err != nil {
 		return fmt.Errorf("check task cleanup barrier: %w", err)
 	}

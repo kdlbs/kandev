@@ -384,6 +384,11 @@ func (m *Manager) removeWorktreeWithReceipt(
 		repoLock.Unlock()
 		m.releaseRepoLock(wt.RepositoryPath)
 	}()
+	if options.ExpectedTaskID != "" {
+		if err := m.validateArchivedCleanupIdentity(ctx, wt, options); err != nil {
+			return receipt, err
+		}
+	}
 	// CountActiveWorktreeReferences already counts only sessions of OTHER
 	// tasks referencing the owning environment. No exclusions are passed:
 	// the worktree record returned by GetWorktreeByID carries an arbitrary
@@ -411,6 +416,11 @@ func (m *Manager) removeWorktreeWithReceipt(
 	// contents, and branch identity pass the audit. A script such as `git clean`
 	// must never erase changes before the audit can reject the cleanup.
 	m.runWorktreeCleanupScript(ctx, wt)
+	if options.RequireCleanCheckout && audit.pathPresent {
+		if err := m.verifyCheckoutClean(ctx, wt); err != nil {
+			return receipt, fmt.Errorf("verify worktree cleanliness after cleanup script %s: %w", wt.ID, err)
+		}
+	}
 
 	if err := m.completeAuditedWorktreeCleanup(ctx, wt, audit, removeBranch); err != nil {
 		return receipt, fmt.Errorf("complete worktree cleanup %s: %w", wt.ID, err)
@@ -646,8 +656,52 @@ func (m *Manager) CleanupWorktreesWithOptions(
 // only managed branches proven fully integrated. The historical name remains
 // for caller compatibility; unpublished and ambiguous branches are retained.
 func (m *Manager) CleanupWorktreesPreservingBranches(ctx context.Context, worktrees []*Worktree) error {
-	_, err := m.CleanupWorktreesWithReceipt(ctx, worktrees)
+	receipt, err := m.cleanupWorktreesWithReceipt(ctx, worktrees, false, WorktreeCleanupOptions{
+		RequireCleanCheckout: true,
+	})
+	m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
 	return err
+}
+
+// CleanupArchivedWorktree reclaims one archived checkout only while its
+// persisted owner and paths still match the durable task cleanup intent.
+func (m *Manager) CleanupArchivedWorktree(
+	ctx context.Context,
+	wt *Worktree,
+	taskID, worktreePath, repositoryPath string,
+) error {
+	if wt == nil {
+		return errors.New("archived worktree cleanup requires a worktree")
+	}
+	receipt, err := m.cleanupWorktreesWithReceipt(ctx, []*Worktree{wt}, false, WorktreeCleanupOptions{
+		RequireCleanCheckout:   true,
+		ExpectedTaskID:         taskID,
+		ExpectedWorktreePath:   worktreePath,
+		ExpectedRepositoryPath: repositoryPath,
+	})
+	m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
+	return err
+}
+
+func (m *Manager) validateArchivedCleanupIdentity(
+	ctx context.Context,
+	wt *Worktree,
+	options WorktreeCleanupOptions,
+) error {
+	current, err := m.store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		return fmt.Errorf("reload archived worktree identity %s: %w", wt.ID, err)
+	}
+	if current == nil || current.Status != StatusActive || current.TaskID != options.ExpectedTaskID {
+		return ErrArchivedWorktreeIdentityChanged
+	}
+	if filepath.Clean(current.Path) != filepath.Clean(options.ExpectedWorktreePath) ||
+		filepath.Clean(current.RepositoryPath) != filepath.Clean(options.ExpectedRepositoryPath) ||
+		filepath.Clean(wt.Path) != filepath.Clean(options.ExpectedWorktreePath) ||
+		filepath.Clean(wt.RepositoryPath) != filepath.Clean(options.ExpectedRepositoryPath) {
+		return ErrArchivedWorktreeIdentityChanged
+	}
+	return nil
 }
 
 func (m *Manager) CleanupWorktreesWithReceipt(

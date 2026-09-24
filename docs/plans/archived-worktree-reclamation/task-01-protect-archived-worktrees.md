@@ -1,7 +1,7 @@
 ---
 id: "01-protect-archived-worktrees"
 title: "Protect archived worktrees from storage purge"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -85,4 +85,5 @@ None.
 
 ## Results
 
-Pending.
+- `go test ./internal/backendapp ./internal/system/storage/workspaces` passed.
+- `make lint` passed with 0 issues.

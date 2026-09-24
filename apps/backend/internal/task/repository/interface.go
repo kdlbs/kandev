@@ -23,6 +23,7 @@ var ErrTaskPreviewFeedbackChanged = repoerrors.ErrTaskPreviewFeedbackChanged
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
+var ErrArchiveCleanupInProgress = repoerrors.ErrArchiveCleanupInProgress
 var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
 var ErrStepChanged = repoerrors.ErrStepChanged

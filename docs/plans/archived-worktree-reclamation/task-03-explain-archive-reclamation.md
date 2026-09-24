@@ -1,7 +1,7 @@
 ---
 id: "03-explain-archive-reclamation"
 title: "Explain retained worktrees in archive UI and docs"
-status: pending
+status: done
 wave: 3
 depends_on:
   - "02-reclaim-clean-archived-worktrees"
@@ -109,4 +109,8 @@ Task 02 delivers the behavior that this copy explains.
 
 ## Results
 
-Pending.
+- The targeted cleanup-summary and archive/delete component tests passed (95 tests).
+- `pnpm run i18n:check` passed for all required catalogs.
+- Desktop archive E2E passed (3 tests), including confirmation copy and preference bypass.
+- Phone archive E2E passed (2 tests), including the confirmation sheet and preference bypass.
+- Public-doc tests passed (62 tests), and the validator accepted all 47 published pages.

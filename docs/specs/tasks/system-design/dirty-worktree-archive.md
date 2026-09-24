@@ -142,11 +142,23 @@ repositories. Recheck the exact `archived_at` value, current owner, active
 references, path and Git registration, and cleanliness at the mutation
 boundary. `CancelArchiveTaskResourceCleanup` includes follow-up jobs: an
 unarchive cancels pending and waiting jobs and refuses to race one already
-running. A task that transfers ownership leaves the candidate set. The
-worktree manager holds its existing path and repository locks and applies a
-final cleanliness guard inside the audited archive removal path, close to
-physical removal. If the final check sees changes or fails, it leaves the
-checkout and active row intact. A successful removal uses
+running. Cascade unarchive applies this fence to every member before the first
+task mutation. If a later member cannot be restored, it restores the exact
+cleanup operations it cancelled so archived members remain eligible for
+cleanup. Candidate insertion and each unarchive mutation also serialize on the
+task row.
+Candidate insertion requires the exact archived generation while holding that
+lock. Unarchive checks for active archive jobs again in its transaction and
+aborts if a backfill inserted one after the service's cancellation scan. If
+unarchive wins the lock, a late backfill sees the task is active and skips the
+stale candidate. A task that transfers ownership leaves the candidate set.
+The worktree manager holds its existing path and repository locks and applies a
+final cleanliness guard inside the audited archive removal path after the
+repository cleanup script runs, close to physical removal. If that check
+finds changes, it retains the checkout and active row; this is a retained
+outcome for original archive cleanup, with its durable reclaim candidate
+preserved. Other cleanup errors still reach retry handling. A successful
+removal uses
 `CleanupWorktreesWithReceipt`/the branch-preserving archive policy and marks
 only that repository worktree deleted. Other repositories remain independent.
 The manager's audit, path identity, and branch-compaction rules remain in

@@ -601,13 +601,15 @@ type Service struct {
 	// tasks to a different source step in that window and prove the lock
 	// acquisition re-reads and corrects for it instead of locking a step the
 	// task has already left. Nil in production.
-	bulkMoveBeforeLockForTest func()
-	cleanupWorkerMu           sync.Mutex
-	cleanupWorkerCancel       context.CancelFunc
-	cleanupWorkerWG           sync.WaitGroup
-	cleanupWorkerWake         chan struct{}
-	cleanupRunsMu             sync.Mutex
-	cleanupRuns               map[*taskResourceCleanupRun]struct{}
+	bulkMoveBeforeLockForTest             func()
+	cleanupWorkerMu                       sync.Mutex
+	archiveReclaimBackfillMu              sync.Mutex
+	archiveReclaimBackfillAfterWorktreeID string
+	cleanupWorkerCancel                   context.CancelFunc
+	cleanupWorkerWG                       sync.WaitGroup
+	cleanupWorkerWake                     chan struct{}
+	cleanupRunsMu                         sync.Mutex
+	cleanupRuns                           map[*taskResourceCleanupRun]struct{}
 	// repoResolveMu serializes the check-then-create sections of
 	// FindOrCreateRepository and FindOrCreateRepositoryByLocalPath so two
 	// resolvers racing to register the same not-yet-known repository (by
