@@ -2373,6 +2373,7 @@
   "toolPayloadRemovedAt": "工具详细数据已于 {{date}} 删除。",
   "toolPayloadRemoved": "工具详细数据已删除。",
   "openTaskSwitcherFor": "打开任务切换器：{{title}}",
+  "editorActions": "编辑器和文件夹操作",
   "changeWorkflowTitle": "更改工作流...",
   "changeWorkflowDescription": "选择目标工作流、步骤和仅用于此任务的代理配置。",
   "changeWorkflowCurrentLabel": "当前",

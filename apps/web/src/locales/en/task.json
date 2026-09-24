@@ -2373,6 +2373,7 @@
   "toolPayloadRemovedAt": "Tool details removed on {{date}}.",
   "toolPayloadRemoved": "Tool details removed.",
   "openTaskSwitcherFor": "Open task switcher: {{title}}",
+  "editorActions": "Editor and folder actions",
   "changeWorkflowTitle": "Change workflow...",
   "changeWorkflowDescription": "Choose a destination workflow, step, and task-specific agent profiles.",
   "changeWorkflowCurrentLabel": "Current",

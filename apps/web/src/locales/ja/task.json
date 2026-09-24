@@ -2373,6 +2373,7 @@
   "toolPayloadRemovedAt": "ツール詳細は {{date}} に削除済み。",
   "toolPayloadRemoved": "ツール詳細は削除済み。",
   "openTaskSwitcherFor": "タスク切替を開く: {{title}}",
+  "editorActions": "エディターとフォルダーの操作",
   "changeWorkflowTitle": "ワークフローを変更...",
   "changeWorkflowDescription": "移動先のワークフロー、ステップ、このタスクだけで使うエージェントプロファイルを選びます。",
   "changeWorkflowCurrentLabel": "現在",
