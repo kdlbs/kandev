@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -176,6 +178,51 @@ func TestTaskLifecycleCleanup_MissingWorktree(t *testing.T) {
 				t.Fatalf("delete cleanup retained branch %q", fixture.worktreeB.Branch)
 			}
 		})
+	}
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.3
+func TestWorkspaceDeleteSourceManifestIsCoordinatorReadableButScopedCallsFailClosed(t *testing.T) {
+	ctx := context.Background()
+	taskSvc, repo := setupOfficeTest(t)
+	taskSvc.StopTaskResourceCleanupWorker()
+	fixture := newMissingWorktreeCleanupFixture(t, repo, "task-workspace-delete-source-manifest")
+	taskSvc.SetWorktreeCleanup(fixture.manager)
+	taskSvc.SetEnvironmentDestroyer(&managerEnvironmentDestroyer{mgr: fixture.manager})
+
+	workspaceID := "ws-" + fixture.taskID
+	task, err := repo.GetTask(ctx, fixture.taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	cleanup, err := taskSvc.prepareWorkspaceDeleteTaskCleanup(ctx, task)
+	if err != nil {
+		t.Fatalf("prepareWorkspaceDeleteTaskCleanup: %v", err)
+	}
+	if err := repo.DeleteWorkspace(ctx, workspaceID); err != nil {
+		t.Fatalf("DeleteWorkspace cascade: %v", err)
+	}
+	if err := taskSvc.StartPreparedTaskResourceCleanup(ctx, cleanup.cleanupJob.OperationID); err != nil {
+		t.Fatalf("StartPreparedTaskResourceCleanup: %v", err)
+	}
+	job := latestCleanupJob(t, repo, fixture.taskID, models.TaskResourceCleanupTriggerWorkspaceDelete)
+	if err := taskSvc.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
+		t.Fatalf("processTaskResourceCleanupJob: %v", err)
+	}
+	job = latestCleanupJob(t, repo, fixture.taskID, models.TaskResourceCleanupTriggerWorkspaceDelete)
+	if job.State != models.TaskResourceCleanupStateSucceeded {
+		t.Fatalf("workspace cleanup state = %q, want succeeded", job.State)
+	}
+
+	manifest, err := taskSvc.GetTaskSourceManifest(ctx, fixture.taskID)
+	if err != nil {
+		t.Fatalf("GetTaskSourceManifest as coordinator: %v", err)
+	}
+	if len(manifest) != 2 {
+		t.Fatalf("coordinator source manifest entries = %d, want both worktrees", len(manifest))
+	}
+	if _, err := taskSvc.GetTaskSourceManifest(ctxAs("user-a"), fixture.taskID); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		t.Fatalf("scoped source manifest error = %v, want ErrWorkspaceNotFound after workspace deletion", err)
 	}
 }
 

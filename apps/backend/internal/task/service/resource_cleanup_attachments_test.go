@@ -103,6 +103,9 @@ func TestWorkspaceDeleteCleanupSnapshotsAttachments(t *testing.T) {
 	if err := json.Unmarshal([]byte(cleanup.cleanupJob.ResourceSnapshot), &snapshot); err != nil {
 		t.Fatalf("decode cleanup snapshot: %v", err)
 	}
+	if snapshot.WorkspaceID != taskResult.Task.WorkspaceID {
+		t.Fatalf("snapshot workspace ID = %q, want %q", snapshot.WorkspaceID, taskResult.Task.WorkspaceID)
+	}
 	if len(snapshot.Attachments) != 1 ||
 		snapshot.Attachments[0].ID != attachment.ID ||
 		snapshot.Attachments[0].StorageKey != attachment.StorageKey {
