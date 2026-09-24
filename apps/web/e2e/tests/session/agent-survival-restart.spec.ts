@@ -122,6 +122,16 @@ test.describe("Agent survival across backend restart", () => {
       const kanban = new KanbanPage(testPage);
       await kanban.goto();
       const card = kanban.taskCard(task.id);
+      const sidebarLoadError = testPage.getByTestId("sidebar-task-load-error");
+      await expect
+        .poll(async () => (await card.isVisible()) || (await sidebarLoadError.isVisible()), {
+          timeout: 20_000,
+          message: "The task card or sidebar refresh error did not appear after restart",
+        })
+        .toBe(true);
+      if (await sidebarLoadError.isVisible()) {
+        await sidebarLoadError.getByRole("button", { name: "Retry" }).click();
+      }
       await expect(card).toBeVisible({ timeout: 20_000 });
       await expect(card.getByTestId("task-state-interrupted")).toHaveCount(0);
     } finally {
