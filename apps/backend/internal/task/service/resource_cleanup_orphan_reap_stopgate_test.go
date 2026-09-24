@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -70,6 +71,9 @@ func TestExecuteTaskResourceCleanupJobSkipsReapPhaseOnFailedStop(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("expected an error reporting the failed runtime stop")
+	}
+	if !strings.Contains(err.Error(), "runtime stop operations failed") {
+		t.Fatalf("cleanup error = %v, want the stable runtime stop failure description", err)
 	}
 	if len(snapshot.OrphanReapRoots) != 0 {
 		t.Fatalf("expected no reap roots recorded when a stop failed, got %+v", snapshot.OrphanReapRoots)

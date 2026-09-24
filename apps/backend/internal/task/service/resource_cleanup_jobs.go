@@ -786,7 +786,7 @@ func (s *Service) executeTaskResourceCleanupJob(
 	if cancelled, err := s.cancelIfTaskUnarchived(ctx, job); err != nil || cancelled {
 		return err
 	}
-	if err := s.captureAndPersistTaskSourceManifest(ctx, job, snapshot, len(failedStops) > 0); err != nil {
+	if err := s.captureAndPersistTaskSourceManifest(ctx, job, snapshot, len(failedStops)); err != nil {
 		return err
 	}
 	var errs []error
@@ -874,14 +874,14 @@ func (s *Service) captureAndPersistTaskSourceManifest(
 	ctx context.Context,
 	job *models.TaskResourceCleanupJob,
 	snapshot *taskResourceCleanupSnapshot,
-	runtimeStopFailed bool,
+	runtimeStopFailures int,
 ) error {
 	if !taskResourceCleanupCapturesSourceManifest(job.Trigger) || snapshot.ArchiveSourceManifestCaptured ||
 		len(snapshot.ArchiveSourceManifest) > 0 {
 		return nil
 	}
-	if runtimeStopFailed {
-		return fmt.Errorf("runtime stop incomplete; defer source manifest capture and cleanup")
+	if runtimeStopFailures > 0 {
+		return fmt.Errorf("%d runtime stop operations failed; defer source manifest capture and cleanup", runtimeStopFailures)
 	}
 	manifest, err := s.captureArchiveSourceManifest(ctx, job.ID, job.TaskID, snapshot.Worktrees)
 	if err != nil {

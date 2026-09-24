@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -34,6 +35,23 @@ type manifestBoundaryCleanup struct {
 	captureCount  int
 	cleanupErr    error
 	cleanupCalled bool
+}
+
+func TestCaptureManifestDefersOnRuntimeStopFailureWithStableReason(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	snapshot := &taskResourceCleanupSnapshot{}
+	err := svc.captureAndPersistTaskSourceManifest(
+		context.Background(),
+		&models.TaskResourceCleanupJob{Trigger: models.TaskResourceCleanupTriggerDelete},
+		snapshot,
+		1,
+	)
+	if err == nil || !strings.Contains(err.Error(), "runtime stop operations failed") {
+		t.Fatalf("capture error = %v, want stable runtime stop failure description", err)
+	}
+	if snapshot.ArchiveSourceManifestCaptured {
+		t.Fatal("manifest marked captured after an incomplete runtime stop")
+	}
 }
 
 func (c *manifestBoundaryCleanup) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
