@@ -2971,6 +2971,14 @@ func TestClassifyManagedRuntimeNpmStartFailureUsesStructuredError(t *testing.T) 
 	)) != nil {
 		t.Fatal("unstructured npm text must not select the managed runtime recovery card")
 	}
+
+	policy := classifyManagedRuntimeNpmStartFailure(fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.Code("managed_runtime_npm_policy"),
+		Details: "npm error code ETARGET\nnpm error notarget No matching version found with a date before <release-date>",
+	}))
+	if policy == nil || policy.Code != routingerr.Code("managed_runtime_npm_policy") {
+		t.Fatalf("policy startup failure = %#v, want managed runtime policy classification", policy)
+	}
 }
 
 func TestHandleAgentStartFailed(t *testing.T) {

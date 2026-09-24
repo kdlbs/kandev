@@ -18,9 +18,14 @@ package/default generation resets it during startup.
 | Muse | `@bex-co/muse-code-acp` | none |
 
 Normal capability probes, sessions, container commands, and one-shot inference
-use `npx --yes --prefer-offline package@<effective-version>` with the ACP
-arguments above. For example, an unmodified Claude installation launches
-`npx --yes --prefer-offline @agentclientprotocol/claude-agent-acp@<effective-version>`.
+use `npx --yes --prefer-offline --prefix ~/.kandev/managed-npm-runtime
+package@<effective-version>` with the ACP arguments above. The prefix directory
+is created under the npm child's home on its execution host before npm starts.
+The agent process still runs in the task workspace, but its project `.npmrc`
+does not control managed runtime package resolution. For example, an
+unmodified Claude installation launches
+`npx --yes --prefer-offline --prefix ~/.kandev/managed-npm-runtime
+@agentclientprotocol/claude-agent-acp@<effective-version>`.
 The `<effective-version>` placeholder resolves at launch to the exact Kandev
 default or the exact operator selection. OpenCode's error-only log flags
 are part of its managed command so agentctl can observe terminal provider

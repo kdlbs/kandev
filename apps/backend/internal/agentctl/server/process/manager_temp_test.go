@@ -90,6 +90,67 @@ func TestManager_BuildFinalCommandLeavesUnsetTempEnvironmentUnset(t *testing.T) 
 	assertNoAgentTempRoot(t, serviceTemp)
 }
 
+func TestManager_BuildFinalCommandPreparesManagedNpmPrefixFromAgentHome(t *testing.T) {
+	home := t.TempDir()
+	workDir := t.TempDir()
+	manager := NewManager(&config.InstanceConfig{
+		WorkDir: workDir,
+		AgentArgs: []string{
+			"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime",
+			"@scope/managed-acp@1.2.3",
+		},
+		AgentEnv: []string{"HOME=" + home},
+	}, newTestLogger(t))
+	manager.adapter = newStubAdapter()
+
+	if err := manager.buildFinalCommand(); err != nil {
+		t.Fatalf("buildFinalCommand() error = %v", err)
+	}
+	prefix := filepath.Join(home, ".kandev", "managed-npm-runtime")
+	info, err := os.Stat(prefix)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("managed npm prefix stat = (%v, %v), want an existing directory", info, err)
+	}
+	if manager.cmd.Dir != workDir {
+		t.Fatalf("managed runtime working directory = %q, want workspace %q", manager.cmd.Dir, workDir)
+	}
+}
+
+func TestManager_BuildFinalCommandFailsSafelyWhenManagedNpmPrefixIsUnavailable(t *testing.T) {
+	homeFile := filepath.Join(t.TempDir(), "not-a-home-directory")
+	if err := os.WriteFile(homeFile, []byte("home"), 0o600); err != nil {
+		t.Fatalf("write home file: %v", err)
+	}
+	workDir := t.TempDir()
+	agentEnv := []string{"HOME=" + homeFile, "KEEP_THIS=unchanged"}
+	manager := NewManager(&config.InstanceConfig{
+		WorkDir: workDir,
+		AgentArgs: []string{
+			"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime",
+			"@scope/managed-acp@1.2.3",
+		},
+		AgentEnv: agentEnv,
+	}, newTestLogger(t))
+	manager.adapter = newStubAdapter()
+
+	err := manager.buildFinalCommand()
+	if err == nil {
+		t.Fatal("buildFinalCommand() succeeded without an available npm prefix")
+	}
+	if strings.Contains(err.Error(), homeFile) {
+		t.Fatalf("prefix preparation error exposed child home path: %q", err)
+	}
+	if manager.cmd != nil {
+		t.Fatal("agent command was constructed despite unavailable npm prefix")
+	}
+	if got := envValue(manager.cfg.AgentEnv, "KEEP_THIS"); got != "unchanged" {
+		t.Fatalf("agent environment changed: KEEP_THIS=%q", got)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, ".kandev")); !os.IsNotExist(err) {
+		t.Fatalf("workspace received npm state, stat error = %v", err)
+	}
+}
+
 func TestManager_StartShellInheritsAgentEnvironment(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PTY-backed shell sessions are unsupported on Windows")

@@ -189,7 +189,7 @@ func TestHostRuntimeUpdaterInvalidatesOnlyManagedNPMExecutionTree(t *testing.T) 
 	if _, err := os.Stat(other); err != nil {
 		t.Fatalf("unrelated cache entry was removed: %v", err)
 	}
-	want := []string{"npm", "config", "get", "cache"}
+	want := []string{"npm", "--prefix", "~/.kandev/managed-npm-runtime", "config", "get", "cache"}
 	if got := strings.Join(executor.outputCommand, "\x00"); got != strings.Join(want, "\x00") {
 		t.Fatalf("command = %v, want %v", executor.outputCommand, want)
 	}
@@ -344,12 +344,12 @@ func TestAgentUpdatePreviewResolvesTrustedCommandWithoutStartingAJob(t *testing.
 		t.Fatalf("versions = %q -> %q", preview.CurrentVersion, preview.TargetVersion)
 	}
 	wantCommand := []string{
-		"npm", "exec", "--yes", "--prefer-online", "--package=@example/managed-acp", "--", "node", "-e", "",
+		"npm", "--prefix", "~/.kandev/managed-npm-runtime", "exec", "--yes", "--prefer-online", "--package=@example/managed-acp", "--", "node", "-e", "",
 	}
 	if got := strings.Join(preview.Command, "\x00"); got != strings.Join(wantCommand, "\x00") {
 		t.Fatalf("command = %q, want %q", got, strings.Join(wantCommand, "\x00"))
 	}
-	if preview.CommandString != `npm exec --yes --prefer-online --package=@example/managed-acp -- node -e ""` {
+	if preview.CommandString != `npm --prefix ~/.kandev/managed-npm-runtime exec --yes --prefer-online --package=@example/managed-acp -- node -e ""` {
 		t.Fatalf("command string = %q", preview.CommandString)
 	}
 
@@ -596,11 +596,11 @@ func TestAgentUpdateJobResolvesUpdatesRefreshesAndStreams(t *testing.T) {
 	if updater.resolvedPackage != "@example/managed-acp" {
 		t.Fatalf("resolved package = %q", updater.resolvedPackage)
 	}
-	wantUpdate := "npm exec --yes --prefer-online --package=@example/managed-acp -- node -e "
+	wantUpdate := "npm --prefix ~/.kandev/managed-npm-runtime exec --yes --prefer-online --package=@example/managed-acp -- node -e "
 	if got := strings.Join(updater.runCommand, " "); got != wantUpdate {
 		t.Fatalf("update command = %q, want %q", got, wantUpdate)
 	}
-	wantRefresh := "npx --yes --prefer-offline @example/managed-acp@1.1.0 --acp"
+	wantRefresh := "npx --yes --prefer-offline --prefix ~/.kandev/managed-npm-runtime @example/managed-acp@1.1.0 --acp"
 	if got := strings.Join(updater.refreshCommand, " "); got != wantRefresh {
 		t.Fatalf("refresh command = %q, want %q", got, wantRefresh)
 	}

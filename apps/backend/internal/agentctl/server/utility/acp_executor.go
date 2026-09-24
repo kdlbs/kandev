@@ -100,6 +100,9 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	cmd := exec.CommandContext(ctx, resolvedCmd, cmdArgs...)
 	cmd.Dir = workDir
 	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
+	if err := managedruntime.EnsureNPMProjectPrefixInEnvironment(args, cmd.Env); err != nil {
+		return &PromptResponse{Success: false, Error: "managed npm project prefix could not be prepared"}, nil
+	}
 	configureACPCommand(cmd, e.logger)
 
 	// Same reasoning as the probe: without this the child's own account of why
@@ -502,6 +505,9 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	cmd := exec.CommandContext(ctx, resolvedCmd, args[1:]...)
 	cmd.Dir = workDir
 	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
+	if err := managedruntime.EnsureNPMProjectPrefixInEnvironment(args, cmd.Env); err != nil {
+		return &ProbeResponse{Success: false, Error: "managed npm project prefix could not be prepared"}, nil
+	}
 	configureACPCommand(cmd, e.logger)
 
 	// Keep the child's stderr. A probe that dies before answering otherwise
@@ -569,17 +575,24 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 
 func managedRuntimeProbeFailureCode(command []string, stderr string) ProbeFailureCode {
 	packageSpec, ok := managedRuntimeProbePackageSpec(command)
-	if !ok || !npmresolution.MatchesExactPackage(stderr, packageSpec) {
+	if !ok {
+		return ""
+	}
+	if npmresolution.MatchesRawReleaseAgePolicy(stderr, packageSpec) {
+		return ProbeFailureManagedRuntimeNPMPolicy
+	}
+	if !npmresolution.MatchesExactPackage(stderr, packageSpec) {
 		return ""
 	}
 	return ProbeFailureManagedRuntimeNPMResolution
 }
 
 func managedRuntimeProbePackageSpec(command []string) (string, bool) {
-	if len(command) < 4 || command[0] != "npx" || command[1] != "--yes" || command[2] != "--prefer-offline" {
+	if len(command) < 6 || command[0] != "npx" || command[1] != "--yes" || command[2] != "--prefer-offline" ||
+		command[3] != "--prefix" || command[4] != managedruntime.NPMProjectPrefix {
 		return "", false
 	}
-	packageSpec := command[3]
+	packageSpec := command[5]
 	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
 		return "", false
 	}

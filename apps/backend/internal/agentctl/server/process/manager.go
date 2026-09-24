@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
@@ -1521,6 +1522,10 @@ func (m *Manager) buildFinalCommand() error {
 	cmdArgs = append(cmdArgs, extraArgs...)
 
 	m.finalCommand = strings.Join(append([]string{m.cfg.AgentArgs[0]}, cmdArgs...), " ")
+	finalArgs := append([]string{m.cfg.AgentArgs[0]}, cmdArgs...)
+	if err := managedruntime.EnsureNPMProjectPrefixInEnvironment(finalArgs, m.cfg.AgentEnv); err != nil {
+		return errors.New("managed npm project prefix could not be prepared")
+	}
 
 	m.logger.Debug("final agent command",
 		zap.String("binary", m.cfg.AgentArgs[0]),
