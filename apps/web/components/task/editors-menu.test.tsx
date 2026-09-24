@@ -71,7 +71,9 @@ async function chooseFolder() {
 describe("task folder action", () => {
   it("opens without any editor configuration", async () => {
     render(view("s1"));
-    expect((screen.getByTestId(EDITOR_MENU_TRIGGER_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId(EDITOR_MENU_TRIGGER_TEST_ID) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
     await chooseFolder();
     await waitFor(() =>
       expect(fixtures.openSessionFolder).toHaveBeenCalledWith(
@@ -83,7 +85,9 @@ describe("task folder action", () => {
   });
   it("disables opening without a session", () => {
     render(view(null));
-    expect((screen.getByTestId(EDITOR_MENU_TRIGGER_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId(EDITOR_MENU_TRIGGER_TEST_ID) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
   it("sends the only worktree explicitly", async () => {
     fixtures.worktrees = [{ id: "wt-1", repositoryId: "r1", path: "/repo-one", branch: "main" }];
