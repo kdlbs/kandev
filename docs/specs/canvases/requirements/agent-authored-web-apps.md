@@ -277,11 +277,11 @@ blocked by permissions, invalid, or using a prior release.
   runtime, distinct from the release-unavailable state of
   `AC-CANVASES-AGENT-WEB-APPS-007.1`.
 - **AC-CANVASES-AGENT-WEB-APPS-007.10:** The runtime-startup-failure
-  description shall distinguish at least three causes: a startup error
-  including an unobservable document load failure, an application unable to
-  reach its runtime API, and an absent acknowledgement by the
-  `AC-CANVASES-AGENT-WEB-APPS-007.5` deadline. An undetermined cause shall
-  not read as a release problem.
+  description shall distinguish at least three causes: guest-reported
+  `document_error`, an application unable to reach its runtime API, and
+  host-observed `timeout` without acknowledgement by the
+  `AC-CANVASES-AGENT-WEB-APPS-007.5` deadline. Pre-bootstrap failure uses
+  `timeout`. Unknown causes shall not blame releases.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-008: Bounded agent authoring
 

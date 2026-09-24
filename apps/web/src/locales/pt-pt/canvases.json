@@ -25,7 +25,7 @@
   "runtimeFailed": "Falha ao iniciar o motor de execução do canvas",
   "runtimeFailedDescription": "O motor de execução do canvas falhou ao iniciar.",
   "runtimeFailedDocumentErrorDescription": "A aplicação do canvas falhou ao carregar. Tente novamente.",
-  "runtimeFailedContextUnavailableDescription": "A aplicação do canvas não conseguiu inicializar. Tente novamente.",
+  "runtimeFailedContextUnavailableDescription": "A aplicação do canvas não conseguiu alcançar o runtime do Kandev. Tente novamente ou contacte o autor do canvas.",
   "runtimeFailedTimeoutDescription": "A aplicação do canvas demorou demasiado tempo a iniciar. Tente novamente.",
   "archived": "Canvas arquivado",
   "archivedDescription": "Restaure este canvas nas definições do workspace para o abrir novamente.",

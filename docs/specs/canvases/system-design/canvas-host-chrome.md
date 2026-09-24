@@ -58,13 +58,12 @@ cause to the state panel instead of collapsing every failure onto the
 release-unavailable state.
 
 Name the reported causes in one host-facing union owned by the web-app startup
-contract: an application error raised while starting, an unreachable runtime
-capability API, and an absent acknowledgement at the startup deadline. The first
-two come from the guest message; the last is observed by the host, which never
-invents a cause it did not observe. A browser failure to load the guest document
-is not a separate, host-observable cause: React attaches no DOM error listener to
-an `iframe`, so the host has no reachable signal for it distinct from the guest's
-own application-error report, and it is carried under that same cause.
+contract: a guest-reported `document_error`, an unreachable runtime capability
+API, and an absent acknowledgement at the startup deadline. The first two come
+from the guest message; the last is observed by the host, which never invents a
+cause it did not observe. A browser failure before the bootstrap runs produces
+no guest result, so `WebAppFrame` reports the host-observed `timeout`. The host
+cannot distinguish that case from another missing acknowledgement.
 
 `WebAppFrame` settles each startup attempt with either readiness or one of those
 causes, and its error callback carries the cause. `CanvasPage` forwards it
