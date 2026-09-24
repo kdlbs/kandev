@@ -357,7 +357,8 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         // Install a `git` shim that can sleep on `fetch`/`pull` before execing
         // the real git binary. Tests that need to simulate slow network git
         // operations write a millisecond value to `${tmpDir}/git-delay-ms`; the
-        // shim reads it on every invocation and sleeps the matching duration.
+        // shim reads it on every fetch/pull and sleeps for that duration. A
+        // structured gate also holds clone operations for fresh worktrees.
         // When the file is absent the shim is a transparent passthrough, so
         // other tests in the same worker are unaffected.
         //

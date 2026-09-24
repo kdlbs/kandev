@@ -13,7 +13,8 @@
 //   - If KANDEV_E2E_GIT_DELAY_FILE holds a positive ms value and the subcommand
 //     is `fetch`/`pull`, sleep that long before running real git (simulates slow
 //     network git so prepare-panel streaming stays observable). A JSON object
-//     with `startedFile` and `releaseFile` provides a deterministic test gate.
+//     with `startedFile` and `releaseFile` gates `clone`, `fetch`, or `pull` so
+//     fresh and reused worktrees can use the same deterministic test gate.
 //   - If the subcommand is `push` and KANDEV_E2E_GITLAB_PUSH_FILE matches the
 //     repo's origin remote, record the push args and exit 0 without pushing.
 //   - Otherwise exec the real git binary with the original args, restoring the
@@ -70,11 +71,12 @@ function runRealGit(args, extraEnv) {
   return 1; // terminated by signal
 }
 
-/** Sleeps before fetch/pull when a positive delay file is present. */
+/** Delays fetch/pull or gates clone/fetch/pull when configured. */
 function maybeDelay(subcommand) {
-  if (subcommand !== "fetch" && subcommand !== "pull") return;
+  const isFetchOrPull = subcommand === "fetch" || subcommand === "pull";
+  if (!isFetchOrPull && subcommand !== "clone") return;
   const raw = readFileSafe(process.env.KANDEV_E2E_GIT_DELAY_FILE);
-  if (/^[0-9]+$/.test(raw)) {
+  if (isFetchOrPull && /^[0-9]+$/.test(raw)) {
     const delayMs = Number(raw);
     if (delayMs > 0) sleepMs(delayMs);
     return;

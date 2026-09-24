@@ -37,10 +37,10 @@ test.describe("Setup script progress UX", () => {
   }) => {
     test.setTimeout(240_000);
 
-    // Hold repository preparation until the browser subscribes so its
+    // Hold repository checkout or sync until the browser subscribes so its
     // preparing state and streamed output stay observable. This test opts the
-    // shared fixture repository into the sync path, which guarantees that the
-    // cross-platform git shim can provide the gate before setup starts.
+    // shared fixture repository into the sync path, where the cross-platform
+    // git shim provides the gate before setup starts.
     const gateID = Date.now();
     const gitGateFile = path.join(backend.tmpDir, "git-delay-ms");
     const gitStartedFile = path.join(backend.tmpDir, `git-started-${gateID}`);

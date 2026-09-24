@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
-import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
 const VIEW_STORAGE_KEY = "kandev.taskListing.view.v1";
@@ -50,6 +50,7 @@ test.describe("Mobile task listing display preferences", () => {
     });
 
     const mobile = new MobileKanbanPage(testPage);
+    const ws = watchWs(testPage);
     await mobile.goto();
     await mobile.viewOptionsButton.click();
     const menu = testPage.getByRole("dialog", { name: "View options" });
@@ -83,10 +84,13 @@ test.describe("Mobile task listing display preferences", () => {
     await testPage.getByTestId("mobile-topbar-page-context").tap();
     const tasksMenu = testPage.getByRole("dialog", { name: "View options" });
     await expandDisplaySettingsGroup(testPage, "list-rows", "mobile");
+    const settingsSaved = ws.waitForResponse("user.settings.update", { timeout: 15_000 });
     await tasksMenu.getByText("Show task details", { exact: true }).click();
+    await settingsSaved;
     await expect
       .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_show_details, {
         message: "task detail preference was not persisted",
+        timeout: 15_000,
       })
       .toBe(true);
     await testPage.keyboard.press("Escape");
