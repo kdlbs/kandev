@@ -123,3 +123,12 @@ AC-UI-MOBILE-TASK-CHROME-001.6/.7.
 Plugins own their markup. Preserve opaque controls and separate workspace/task
 contexts rather than deduplicating contributions by appearance. Saved sidebar
 layouts already own destinations and must not gain duplicate links.
+
+## Subsequent toolbar-selection correction
+
+The [September 24 follow-up](../mobile-plugin-deduplication/plan.md) supersedes
+the Workspace/Task subheadings and simultaneous toolbar rendering described
+here. Phone navigation now selects each plugin's task toolbar when task actions
+exist, while preserving workspace-only controls and independent sidebar actions.
+The follow-up records current regression coverage and seeded screenshots; the
+results above remain the historical September 23 delivery record.

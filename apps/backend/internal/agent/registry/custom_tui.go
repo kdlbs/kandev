@@ -37,6 +37,9 @@ type CustomTUIAgentSpec struct {
 	// Protocol selects the runtime kandev drives the command with. Empty means
 	// terminal passthrough.
 	Protocol CustomAgentProtocol
+	// DisableBracketedPaste selects paced unframed delivery for terminal TUIs
+	// that do not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool
 }
 
 // ErrUnknownMCPStrategy is returned when a spec names a strategy key that no
@@ -89,14 +92,15 @@ func buildCustomAgent(spec CustomTUIAgentSpec) (agents.Agent, error) {
 			return nil, fmt.Errorf("%w: %q", ErrUnknownMCPStrategy, spec.MCPStrategyKey)
 		}
 		return agents.NewTUIAgent(agents.TUIAgentConfig{
-			AgentID:     spec.Slug,
-			AgentName:   spec.Slug,
-			Command:     binary,
-			Desc:        spec.Description,
-			Display:     spec.DisplayName,
-			WaitForTerm: true,
-			CommandArgs: args,
-			MCPStrategy: strategy,
+			AgentID:               spec.Slug,
+			AgentName:             spec.Slug,
+			Command:               binary,
+			Desc:                  spec.Description,
+			Display:               spec.DisplayName,
+			WaitForTerm:           true,
+			CommandArgs:           args,
+			MCPStrategy:           strategy,
+			DisableBracketedPaste: spec.DisableBracketedPaste,
 		}), nil
 	case CustomAgentProtocolACP:
 		if spec.MCPStrategyKey != mcpconfig.StrategyKeyNone {

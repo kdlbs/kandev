@@ -30,6 +30,9 @@ export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-f
 /**
  * Context for the `main-top-bar` slot. Phone listing contributions live in the
  * menu with 44px touch targets; interactions retain the slot's local state.
+ * On phones with task controls, the same plugin's chat-top-bar replaces this
+ * slot once it renders content. Null-rendering task controls retain this
+ * fallback. Listings and archived tasks retain the workspace toolbar.
  */
 export interface MainTopBarSlotProps {
   workspaceId: string | null;
@@ -41,6 +44,8 @@ export interface MainTopBarSlotProps {
 /**
  * Context for the `chat-top-bar` slot. Phone task contributions live in the
  * shared menu; tablet and desktop contributions remain inline in the top bar.
+ * When task controls are present, every registration in this slot renders
+ * instead of the same plugin's main-top-bar registrations in the phone menu.
  */
 export interface ChatTopBarSlotProps {
   /** Task the top bar belongs to, or null before one exists. */

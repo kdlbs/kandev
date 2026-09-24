@@ -16,6 +16,7 @@ import { Button } from "@kandev/ui/button";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { CanvasPage } from "@/components/plugins/canvas-page";
+import type { WebAppStartupFailureReason } from "@/components/plugins/web-app-startup";
 import {
   canvasCanEnableWorkspaceData,
   canvasHref,
@@ -40,7 +41,14 @@ export type CanvasHostState =
   | "offline"
   | "invalid_release"
   | "unavailable"
+  | "runtime_failed"
   | "archived";
+
+const RUNTIME_FAILED_DESCRIPTIONS: Record<WebAppStartupFailureReason, string> = {
+  document_error: "canvases:runtimeFailedDocumentErrorDescription",
+  context_unavailable: "canvases:runtimeFailedContextUnavailableDescription",
+  timeout: "canvases:runtimeFailedTimeoutDescription",
+};
 
 const STATE_COPY: Record<CanvasHostState, { title: string; description: string }> = {
   loading_metadata: {
@@ -66,6 +74,10 @@ const STATE_COPY: Record<CanvasHostState, { title: string; description: string }
     description: "canvases:invalidReleaseDescription",
   },
   unavailable: { title: "canvases:unavailable", description: "canvases:unavailableDescription" },
+  runtime_failed: {
+    title: "canvases:runtimeFailed",
+    description: "canvases:runtimeFailedDescription",
+  },
   archived: { title: "canvases:archived", description: "canvases:archivedDescription" },
 };
 
@@ -94,6 +106,7 @@ export function CanvasHostBody({
   state,
   runtimeUrl,
   error,
+  runtimeFailureReason,
   onRuntimeReady,
   onRuntimeError,
   onRetry,
@@ -103,8 +116,9 @@ export function CanvasHostBody({
   state: CanvasHostState;
   runtimeUrl: string | null;
   error: string | null;
+  runtimeFailureReason?: WebAppStartupFailureReason | null;
   onRuntimeReady: () => void;
-  onRuntimeError: () => void;
+  onRuntimeError: (reason: WebAppStartupFailureReason) => void;
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
@@ -134,7 +148,12 @@ export function CanvasHostBody({
           />
         </>
       ) : (
-        <CanvasHostStatePanel state={state} error={error} onRetry={onRetry} />
+        <CanvasHostStatePanel
+          state={state}
+          error={error}
+          runtimeFailureReason={runtimeFailureReason}
+          onRetry={onRetry}
+        />
       )}
     </div>
   );
@@ -194,14 +213,20 @@ export function CanvasHostHeader({
 export function CanvasHostStatePanel({
   state,
   error,
+  runtimeFailureReason,
   onRetry,
 }: {
   state: CanvasHostState;
   error: string | null;
+  runtimeFailureReason?: WebAppStartupFailureReason | null;
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
   const copy = STATE_COPY[state];
+  const descriptionKey =
+    state === "runtime_failed" && runtimeFailureReason
+      ? RUNTIME_FAILED_DESCRIPTIONS[runtimeFailureReason]
+      : copy.description;
   return (
     <div
       className="flex min-h-0 flex-1 items-center justify-center p-6 text-center"
@@ -211,7 +236,7 @@ export function CanvasHostStatePanel({
         <h2 className="text-lg font-semibold" data-testid="canvas-host-state">
           {t(copy.title)}
         </h2>
-        <p className="text-sm text-muted-foreground">{error || t(copy.description)}</p>
+        <p className="text-sm text-muted-foreground">{error || t(descriptionKey)}</p>
         {state !== "loading_metadata" && state !== "loading_runtime" && (
           <Button
             variant="outline"

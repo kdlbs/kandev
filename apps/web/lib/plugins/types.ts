@@ -127,6 +127,9 @@ export interface IntegrationSettingsRegistration {
  * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage,
  * presentation }`). On phones, `presentation` is "mobile": contributions
  * live in the listing topbar menu with 44px touch targets and 16px SVG icons.
+ * When task controls are present, each plugin's chat-top-bar registrations
+ * replace its main-top-bar registrations in that menu. Listings and archived
+ * tasks retain workspace controls; sidebar workspace actions stay independent.
  * Slots retain ownership of their controls and disclosure state; arbitrary
  * interactions do not dismiss the host menu. Desktop sizing stays unchanged.
  * "app-status-bar-left" / "app-status-bar-right" (receives

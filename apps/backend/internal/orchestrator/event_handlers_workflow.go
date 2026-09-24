@@ -5592,8 +5592,8 @@ type passthroughRunningPreparer interface {
 // deliverPassthroughPrompt writes a prompt to PTY stdin and marks the session as running.
 // Uses the per-agent PlanPassthroughStdinChunks so Claude's inter-chunk SubmitDelay is
 // honored here too (queued / workflow-auto-start path); other agents stay on the single
-// atomic write. Falls back to the simple "\r" append if config resolution fails so a
-// transient lookup error never silently swallows the prompt.
+// atomic write. Config resolution is required: an unknown agent contract must not fall
+// back to one unframed write, because a long prompt can be silently truncated.
 //
 // Callers that already hold the per-session cancellation guard must use
 // PreparePassthroughRunning + writePassthroughPrompt instead (see handleAgentReady); this
@@ -5618,15 +5618,10 @@ func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, conte
 func (s *Service) writePassthroughPrompt(ctx context.Context, sessionID, content string) error {
 	pt, cfgErr := s.agentManager.ResolvePassthroughConfig(ctx, sessionID)
 	if cfgErr != nil {
-		s.logger.Warn("failed to resolve passthrough config, falling back to \\r submit",
+		s.logger.Warn("failed to resolve passthrough config; refusing unsafe prompt write",
 			zap.String("session_id", sessionID),
 			zap.Error(cfgErr))
-	}
-	if cfgErr != nil {
-		if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, content+"\r"); err != nil {
-			return fmt.Errorf("write to passthrough stdin: %w", err)
-		}
-		return nil
+		return fmt.Errorf("resolve passthrough config: %w", cfgErr)
 	}
 	for _, chunk := range agents.PlanPassthroughStdinChunks(content, pt) {
 		if chunk.DelayBefore > 0 {

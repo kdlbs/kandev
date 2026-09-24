@@ -272,6 +272,40 @@ func TestRunLSPBridgeUsesCategoricalCloseWhenServerExits(t *testing.T) {
 	}
 }
 
+func TestRunLSPBridgeUsesTransportCloseWhenProcessMayStillBeRunning(t *testing.T) {
+	server := newTestServer(t)
+	processDone := make(chan struct{})
+	lspProcess := &lspServerProcess{
+		id:     "live-server-with-broken-output",
+		stdin:  discardLSPWriteCloser{},
+		stdout: io.NopCloser(strings.NewReader("")),
+		done:   processDone,
+	}
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		conn, err := server.upgrader.Upgrade(writer, request, nil)
+		if err == nil {
+			server.runLSPBridge(conn, "kotlin", lspProcess, nil)
+		}
+	}))
+	t.Cleanup(httpServer.Close)
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial bridge: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _, err = conn.ReadMessage()
+	closeErr, ok := err.(*websocket.CloseError)
+	if !ok {
+		t.Fatalf("transport failure = %T %v, want WebSocket close", err, err)
+	}
+	if closeErr.Code != 4009 {
+		t.Fatalf("transport close = %d, want 4009", closeErr.Code)
+	}
+	close(processDone)
+}
+
 func TestStopLSPServerTimeoutClosesStdoutBeforeJoiningForwarder(t *testing.T) {
 	server := newTestServer(t)
 	stdout := newOrderedLSPReadCloser()

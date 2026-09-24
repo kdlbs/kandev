@@ -76,12 +76,18 @@ vi.mock("@/components/page-shell", () => ({
 }));
 
 vi.mock("@/components/plugins/canvas-page", () => ({
-  CanvasPage: ({ runtimeUrl, onError }: { runtimeUrl?: string; onError?: () => void }) => (
+  CanvasPage: ({
+    runtimeUrl,
+    onError,
+  }: {
+    runtimeUrl?: string;
+    onError?: (reason: string) => void;
+  }) => (
     <button
       type="button"
       data-testid={FRAME_TEST_ID}
       data-runtime-url={runtimeUrl ?? ""}
-      onClick={onError}
+      onClick={() => onError?.("context_unavailable")}
     >
       frame
     </button>
@@ -172,8 +178,11 @@ describe("CanvasHostRoute runtime recovery", () => {
     fireEvent.click(screen.getByTestId(FRAME_TEST_ID));
 
     await waitFor(() =>
-      expect(screen.getByTestId("canvas-host-state").textContent).toContain("unavailable"),
+      expect(screen.getByTestId("canvas-host-state").textContent).toContain(
+        "Canvas runtime failed to start",
+      ),
     );
+    expect(screen.getByTestId("canvas-host-state").textContent).not.toContain("Canvas unavailable");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
 
     await waitFor(() => {
@@ -212,7 +221,9 @@ describe("CanvasHostRoute runtime recovery", () => {
       );
     });
   });
+});
 
+describe("CanvasHostRoute chrome and lifecycle", () => {
   it("passes raw desktop overflow items to the standalone page shell", async () => {
     mockRenderPageShellOverflow.value = true;
     render(<CanvasHostRoute canvasId="canvas-1" />);

@@ -9,6 +9,7 @@ import {
   IconMinus,
   IconPencil,
   IconPlus,
+  IconCopy,
 } from "@tabler/icons-react";
 import {
   DropdownMenu,
@@ -22,7 +23,7 @@ import { FileIcon } from "@/components/ui/file-icon";
 import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
 import { LineStat } from "@/components/diff-stat";
-import type { FileRowProps, FileRowContentProps } from "./changes-panel-file-row";
+import type { FileRowContentProps } from "./changes-panel-file-row";
 
 export function TouchFileRowContent(props: FileRowContentProps) {
   const { file, treeMode, indentPx, isPending, folder, name } = props;
@@ -64,11 +65,15 @@ export function TouchFileRowContent(props: FileRowContentProps) {
 function TouchFileRowActions({
   file,
   isPending,
+  onCopyPath,
   onStage,
   onUnstage,
   onEditFile,
   onDiscard,
-}: FileRowProps) {
+}: Pick<
+  FileRowContentProps,
+  "file" | "isPending" | "onCopyPath" | "onStage" | "onUnstage" | "onEditFile" | "onDiscard"
+>) {
   const { t } = useTranslation();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const StageIcon = file.staged ? IconMinus : IconPlus;
@@ -94,6 +99,10 @@ function TouchFileRowActions({
           {file.path}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem className="min-h-11 cursor-pointer" onSelect={onCopyPath}>
+          <IconCopy />
+          {t("task:copyPath")}
+        </DropdownMenuItem>
         <DropdownMenuItem
           className="min-h-11 cursor-pointer"
           disabled={isPending}

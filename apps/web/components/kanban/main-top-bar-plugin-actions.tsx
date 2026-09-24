@@ -42,8 +42,15 @@ export function MainTopBarPluginActions(props: {
   workspaceLabel?: string;
   currentPage: TaskListingPage;
   presentation?: MainTopBarSlotProps["presentation"];
+  excludePluginIds?: readonly string[];
 }) {
-  const { workspaceId, workspaceLabel, currentPage, presentation = "desktop" } = props;
+  const {
+    workspaceId,
+    workspaceLabel,
+    currentPage,
+    presentation = "desktop",
+    excludePluginIds,
+  } = props;
 
   const slotProps = useMemo<MainTopBarSlotProps>(
     () => ({
@@ -55,7 +62,9 @@ export function MainTopBarPluginActions(props: {
     [workspaceId, workspaceLabel, currentPage, presentation],
   );
 
-  const content = <PluginSlot name="main-top-bar" slotProps={slotProps} />;
+  const content = (
+    <PluginSlot name="main-top-bar" slotProps={slotProps} excludePluginIds={excludePluginIds} />
+  );
   if (presentation === "desktop") return content;
 
   return (

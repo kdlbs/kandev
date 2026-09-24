@@ -1068,6 +1068,8 @@ func startGatewayAndServe(
 		services.Auth,
 		cfg.ResolvedHomeDir(),
 		func(fn func() error) { addCleanup(fn) },
+		cfg.Features.LSPBrowserContinuity,
+		orchestratorSvc.AcquireSessionLifecycleFence,
 		cfg.Limits.LSPMaxConnections,
 	)
 	if terminalSvc != nil {

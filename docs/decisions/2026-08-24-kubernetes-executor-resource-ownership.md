@@ -4,6 +4,11 @@
 **Date:** 2026-08-24
 **Area:** backend, frontend, infra, security
 
+The session-scoped ownership choice is superseded for shared task pods
+by [task-owned compute](2026-09-21-kubernetes-task-pod-ownership.md).
+Its exact-resource safety invariants remain in force; existing legacy resources
+retain their recorded identity until safely adopted.
+
 ## Context
 
 The Kubernetes executor must combine an administrator-authored Pod template

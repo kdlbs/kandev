@@ -37,6 +37,13 @@
 # go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
 # maps them to `features.<name>` Viper keys automatically.
 features:
+  # Retains supported language-server leases across browser disconnects. The
+  # task-host and bounded lease lifecycle are opt-in while the feature settles.
+  KANDEV_FEATURES_LSP_BROWSER_CONTINUITY:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Office (autonomous agent surface). Off in prod until the feature
   # is user-ready; on in dev/e2e so contributors and tests exercise it.
   KANDEV_FEATURES_OFFICE:

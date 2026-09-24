@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 requirements:
   - REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-006
@@ -15,7 +15,7 @@ requirements:
 
 ## Bulk manual color editing
 
-This draft extends the [current personal-color design](sidebar-automatic-task-colors.md).
+This design extends the [current personal-color design](sidebar-automatic-task-colors.md).
 Delivery is tracked in the
 [bulk color plan](../../../plans/bulk-task-colors/plan.md). UI remains the owner
 because colors are personal presentation preferences, not shared task metadata.
