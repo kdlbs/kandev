@@ -161,6 +161,16 @@ func TestDeleteTaskWithDiscardConsentPersistsAndCleansDirtyWorktree(t *testing.T
 	if !snapshot.DiscardWorktreeChanges {
 		t.Fatal("cleanup snapshot omitted discard consent")
 	}
+	if len(snapshot.ArchiveSourceManifest) != 1 || snapshot.ArchiveSourceManifest[0].WorktreeID != wt.ID {
+		t.Fatalf("delete cleanup snapshot omitted task worktree source evidence: %+v", snapshot.ArchiveSourceManifest)
+	}
+	retrieved, err := svc.GetTaskSourceManifest(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTaskSourceManifest after delete: %v", err)
+	}
+	if len(retrieved) != 1 || retrieved[0].CleanupJobID == "" || retrieved[0].WorktreeID != wt.ID {
+		t.Fatalf("retrieved delete source manifest = %+v, want durable task evidence", retrieved)
+	}
 	var jobID string
 	if err := repo.DB().QueryRowContext(ctx, `
 		SELECT id FROM task_resource_cleanup_jobs

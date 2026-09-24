@@ -35,6 +35,10 @@ type taskResourceCleanupArchiveInspector interface {
 	ListArchiveTaskResourceCleanupJobs(ctx context.Context, taskID string) ([]*models.TaskResourceCleanupJob, error)
 }
 
+type taskResourceCleanupTaskInspector interface {
+	ListTaskResourceCleanupJobs(ctx context.Context, taskID string) ([]*models.TaskResourceCleanupJob, error)
+}
+
 var taskResourceCleanupRetryDelays = []time.Duration{
 	time.Minute,
 	5 * time.Minute,
@@ -109,6 +113,7 @@ type ArchiveSourceManifest struct {
 	RepositoryID      string                                `json:"repository_id"`
 	HeadOID           string                                `json:"head_oid"`
 	IndexTreeOID      string                                `json:"index_tree_oid"`
+	PathPresent       bool                                  `json:"path_present"`
 	Entries           []worktree.ArchiveSourceManifestEntry `json:"entries,omitempty"`
 }
 
@@ -171,7 +176,7 @@ func (s *Service) persistTaskResourceCleanup(
 		DeleteEnvironmentRow:   envCleanup.deleteRow,
 		LegacyWorktreeCleanup:  s.hasLegacyWorktreeCleanup(),
 	}
-	if trigger == models.TaskResourceCleanupTriggerArchive || trigger == models.TaskResourceCleanupTriggerCascadeArchive {
+	if taskResourceCleanupCapturesSourceManifest(trigger) {
 		manifest, err := s.captureArchiveSourceManifest(ctx, jobID, taskID, worktrees)
 		if err != nil {
 			return nil, fmt.Errorf("capture archive source manifest: %w", err)
@@ -240,32 +245,31 @@ func (s *Service) captureArchiveSourceManifest(
 			continue
 		}
 		manifest, found := captured[wt.ID]
-		if !found || manifest.TaskID != taskID || manifest.WorktreeID != wt.ID || manifest.RepositoryID != wt.RepositoryID {
+		if !found || manifest.TaskID != taskID || manifest.TaskEnvironmentID != wt.TaskEnvironmentID ||
+			manifest.WorktreeID != wt.ID || manifest.RepositoryID != wt.RepositoryID {
 			return nil, fmt.Errorf("archive source manifest does not match owned worktree %s", wt.ID)
 		}
 		manifests = append(manifests, ArchiveSourceManifest{
 			TaskID: manifest.TaskID, CleanupJobID: jobID, TaskEnvironmentID: manifest.TaskEnvironmentID,
 			WorktreeID: manifest.WorktreeID, RepositoryID: manifest.RepositoryID,
 			HeadOID: manifest.HeadOID, IndexTreeOID: manifest.IndexTreeOID, Entries: manifest.Entries,
+			PathPresent: manifest.PathPresent,
 		})
 	}
 	return manifests, nil
 }
 
-// GetArchiveSourceManifest returns evidence only for an archive cleanup job
-// owned by the authorized task. It never re-reads a live worktree, so it stays
-// valid after cleanup has removed the source path.
-func (s *Service) GetArchiveSourceManifest(ctx context.Context, taskID string) ([]ArchiveSourceManifest, error) {
-	if err := s.AuthorizeTaskAccess(ctx, taskID); err != nil {
-		return nil, err
-	}
-	inspector, ok := s.resourceCleanups.(taskResourceCleanupArchiveInspector)
+// GetTaskSourceManifest returns durable archive/delete evidence. Authorization
+// derives from the persisted workspace identity so delete evidence remains
+// readable after its task row has been removed.
+func (s *Service) GetTaskSourceManifest(ctx context.Context, taskID string) ([]ArchiveSourceManifest, error) {
+	inspector, ok := s.resourceCleanups.(taskResourceCleanupTaskInspector)
 	if !ok {
-		return nil, errors.New("archive source manifest retrieval is unavailable")
+		return nil, errors.New("task source manifest retrieval is unavailable")
 	}
-	jobs, err := inspector.ListArchiveTaskResourceCleanupJobs(ctx, taskID)
+	jobs, err := inspector.ListTaskResourceCleanupJobs(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("list archive cleanup jobs: %w", err)
+		return nil, fmt.Errorf("list task cleanup jobs: %w", err)
 	}
 	for i := len(jobs) - 1; i >= 0; i-- {
 		job := jobs[i]
@@ -279,14 +283,38 @@ func (s *Service) GetArchiveSourceManifest(ctx context.Context, taskID string) (
 		if len(snapshot.ArchiveSourceManifest) == 0 {
 			continue
 		}
+		if snapshot.WorkspaceID == "" {
+			return nil, errors.New("task source manifest lacks workspace identity")
+		}
+		if err := s.AuthorizeWorkspaceAccess(ctx, snapshot.WorkspaceID); err != nil {
+			return nil, err
+		}
 		for _, manifest := range snapshot.ArchiveSourceManifest {
 			if manifest.TaskID != taskID || manifest.CleanupJobID != job.ID {
 				return nil, errors.New("archive source manifest identity does not match cleanup job")
+			}
+			if !sourceManifestMatchesSnapshotWorktree(manifest, snapshot.Worktrees) {
+				return nil, errors.New("task source manifest does not match cleanup worktree inventory")
 			}
 		}
 		return snapshot.ArchiveSourceManifest, nil
 	}
 	return nil, taskrepo.ErrTaskNotFound
+}
+
+func sourceManifestMatchesSnapshotWorktree(manifest ArchiveSourceManifest, worktrees []*worktree.Worktree) bool {
+	for _, wt := range worktrees {
+		if wt != nil && manifest.WorktreeID == wt.ID && manifest.RepositoryID == wt.RepositoryID &&
+			manifest.TaskEnvironmentID == wt.TaskEnvironmentID && manifest.TaskID == wt.TaskID {
+			return true
+		}
+	}
+	return false
+}
+
+// GetArchiveSourceManifest is retained for the initial audit endpoint name.
+func (s *Service) GetArchiveSourceManifest(ctx context.Context, taskID string) ([]ArchiveSourceManifest, error) {
+	return s.GetTaskSourceManifest(ctx, taskID)
 }
 
 func captureWorktreeTaskDirNames(worktrees []*worktree.Worktree) map[string]string {
@@ -1111,6 +1139,10 @@ func (s *Service) PrepareTaskResourceCleanupWithOptions(
 	if job.State != models.TaskResourceCleanupStatePrepared {
 		return nil
 	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return cancelPrepared(fmt.Errorf("load task for cleanup source manifest: %w", err))
+	}
 	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		return cancelPrepared(fmt.Errorf("list task sessions for cleanup snapshot: %w", err))
@@ -1149,8 +1181,9 @@ func (s *Service) PrepareTaskResourceCleanupWithOptions(
 		DiscardWorktreeChanges: discardWorktreeChanges,
 		LegacyWorktreeCleanup:  s.hasLegacyWorktreeCleanup(),
 		SSHTaskDirs:            sshTaskDirs,
+		WorkspaceID:            task.WorkspaceID,
 	}
-	if job.Trigger == models.TaskResourceCleanupTriggerArchive || job.Trigger == models.TaskResourceCleanupTriggerCascadeArchive {
+	if taskResourceCleanupCapturesSourceManifest(job.Trigger) {
 		manifest, manifestErr := s.captureArchiveSourceManifest(ctx, job.ID, taskID, worktrees)
 		if manifestErr != nil {
 			return cancelPrepared(fmt.Errorf("capture archive source manifest: %w", manifestErr))
@@ -1165,6 +1198,18 @@ func (s *Service) PrepareTaskResourceCleanupWithOptions(
 		return cancelPrepared(fmt.Errorf("persist task resource cleanup snapshot: %w", err))
 	}
 	return nil
+}
+
+func taskResourceCleanupCapturesSourceManifest(trigger models.TaskResourceCleanupTrigger) bool {
+	switch trigger {
+	case models.TaskResourceCleanupTriggerArchive,
+		models.TaskResourceCleanupTriggerDelete,
+		models.TaskResourceCleanupTriggerCascadeArchive,
+		models.TaskResourceCleanupTriggerCascadeDelete:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) StartPreparedTaskResourceCleanup(ctx context.Context, operationID string) error {

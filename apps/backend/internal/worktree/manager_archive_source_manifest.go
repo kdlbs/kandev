@@ -19,6 +19,7 @@ type ArchiveSourceManifest struct {
 	RepositoryID      string                       `json:"repository_id"`
 	HeadOID           string                       `json:"head_oid"`
 	IndexTreeOID      string                       `json:"index_tree_oid"`
+	PathPresent       bool                         `json:"path_present"`
 	Entries           []ArchiveSourceManifestEntry `json:"entries,omitempty"`
 }
 
@@ -44,32 +45,71 @@ func (m *Manager) CaptureArchiveSourceManifests(
 		if wt.ID == "" || wt.TaskID == "" || wt.RepositoryID == "" || wt.Path == "" || wt.RepositoryPath == "" {
 			return nil, fmt.Errorf("archive source manifest has incomplete worktree identity")
 		}
-		if err := m.validateExistingWorktreePathOwner(wt.Path, wt); err != nil {
-			return nil, fmt.Errorf("validate archive source manifest owner for %s: %w", wt.ID, err)
-		}
-		head, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
+		pathPresent, err := cleanupPathPresent(wt.Path)
 		if err != nil {
-			return nil, fmt.Errorf("capture archive source HEAD for %s: %w", wt.ID, err)
+			return nil, fmt.Errorf("inspect archive source worktree path for %s: %w", wt.ID, err)
 		}
-		indexTree, err := m.runBoundedGitInspect(ctx, wt.Path, "write-tree")
-		if err != nil {
-			return nil, fmt.Errorf("capture archive source index for %s: %w", wt.ID, err)
+		if !pathPresent {
+			manifest, captureErr := m.captureAbsentArchiveSourceManifest(ctx, wt)
+			if captureErr != nil {
+				return nil, captureErr
+			}
+			manifests[wt.ID] = manifest
+			continue
 		}
-		status, err := m.runBoundedGitInspect(ctx, wt.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
-		if err != nil {
-			return nil, fmt.Errorf("capture archive source status for %s: %w", wt.ID, err)
+		manifest, captureErr := m.capturePresentArchiveSourceManifest(ctx, wt)
+		if captureErr != nil {
+			return nil, captureErr
 		}
-		entries, err := archiveSourceManifestEntries(wt.Path, status)
-		if err != nil {
-			return nil, fmt.Errorf("capture archive source entries for %s: %w", wt.ID, err)
-		}
-		manifests[wt.ID] = ArchiveSourceManifest{
-			TaskID: wt.TaskID, TaskEnvironmentID: wt.TaskEnvironmentID,
-			WorktreeID: wt.ID, RepositoryID: wt.RepositoryID,
-			HeadOID: strings.TrimSpace(head), IndexTreeOID: strings.TrimSpace(indexTree), Entries: entries,
-		}
+		manifests[wt.ID] = manifest
 	}
 	return manifests, nil
+}
+
+func (m *Manager) captureAbsentArchiveSourceManifest(ctx context.Context, wt *Worktree) (ArchiveSourceManifest, error) {
+	manifest := ArchiveSourceManifest{TaskID: wt.TaskID, TaskEnvironmentID: wt.TaskEnvironmentID, WorktreeID: wt.ID, RepositoryID: wt.RepositoryID}
+	branch := strings.TrimSpace(wt.Branch)
+	if branch == "" {
+		return manifest, nil
+	}
+	oid, found, err := m.captureCleanupBranchOID(ctx, wt.RepositoryPath, "refs/heads/"+branch)
+	if err != nil {
+		return ArchiveSourceManifest{}, fmt.Errorf("capture absent archive source branch for %s: %w", wt.ID, err)
+	}
+	if found {
+		manifest.HeadOID = oid
+	}
+	return manifest, nil
+}
+
+func (m *Manager) capturePresentArchiveSourceManifest(ctx context.Context, wt *Worktree) (ArchiveSourceManifest, error) {
+	if err := m.validateExistingWorktreePathOwner(wt.Path, wt); err != nil {
+		return ArchiveSourceManifest{}, fmt.Errorf("validate archive source manifest owner for %s: %w", wt.ID, err)
+	}
+	gitDir, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--git-dir")
+	if err != nil {
+		return ArchiveSourceManifest{}, fmt.Errorf("verify archive source worktree registration for %s: %w", wt.ID, err)
+	}
+	if filepath.Clean(strings.TrimSpace(gitDir)) == ".git" {
+		return ArchiveSourceManifest{}, fmt.Errorf("archive source manifest path is a primary repository, not a registered worktree")
+	}
+	head, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source HEAD for %s: %w", wt.ID, err)
+	}
+	indexTree, err := m.runBoundedGitInspect(ctx, wt.Path, "write-tree")
+	if err != nil {
+		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source index for %s: %w", wt.ID, err)
+	}
+	status, err := m.runBoundedGitInspect(ctx, wt.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	if err != nil {
+		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source status for %s: %w", wt.ID, err)
+	}
+	entries, err := archiveSourceManifestEntries(wt.Path, status)
+	if err != nil {
+		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source entries for %s: %w", wt.ID, err)
+	}
+	return ArchiveSourceManifest{TaskID: wt.TaskID, TaskEnvironmentID: wt.TaskEnvironmentID, WorktreeID: wt.ID, RepositoryID: wt.RepositoryID, HeadOID: strings.TrimSpace(head), IndexTreeOID: strings.TrimSpace(indexTree), PathPresent: true, Entries: entries}, nil
 }
 
 func archiveSourceManifestEntries(root, output string) ([]ArchiveSourceManifestEntry, error) {
@@ -91,6 +131,9 @@ func archiveSourceManifestEntries(root, output string) ([]ArchiveSourceManifestE
 		digest, err := archiveSourceManifestDigest(root, path)
 		if err != nil {
 			if os.IsNotExist(err) {
+				if field[0] != 'D' && field[1] != 'D' {
+					return nil, fmt.Errorf("source path disappeared before content identity was captured")
+				}
 				entries = append(entries, entry)
 				continue
 			}
