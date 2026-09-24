@@ -19,7 +19,9 @@ The task system owns the task-title preview contract and its interaction with Ka
 
 ## Selection-mode preview guard
 
-`KanbanCardShell` already receives `isMultiSelectMode` and forwards card clicks to selection handling. It also renders `KanbanCardBody`, whose `enableTitleHover` prop controls whether `CardTitle` mounts `TaskTitleHoverCard`. The shell should disable that prop when multi-select is active. The title remains visible as plain card content so a click reaches the card's existing selection handler.
+`KanbanCardShell` already receives `isMultiSelectMode` and forwards card clicks to selection handling. It also renders `KanbanCardBody`, whose `enableTitleHover` prop controls whether `CardTitle` mounts `TaskTitleHoverCard`. The shell disables that prop when multi-select is active. The title remains visible as plain card content so a click reaches the card's existing selection handler.
+
+The Pipeline view has a separate `PipelineRow` path. It passes the same mode into `RowInfoColumn`, which disables `CardTitle` hover when selection is active. This keeps the shared requirement true for every Kanban card presentation.
 
 When multi-select starts, unmounting `TaskTitleHoverCard` closes any open preview, including its pointer and keyboard trigger. When multi-select ends, the title can mount its normal preview again. This uses the existing component lifecycle and does not add a second selection state or change the shared preview component for other consumers.
 
@@ -27,4 +29,4 @@ The same shell serves responsive Kanban cards. Coarse pointers already render th
 
 ## Verification boundary
 
-A component regression should prove that selection mode removes the trigger and that it returns after the mode ends. A desktop browser regression should open a preview, enable multi-select, verify the preview closes and does not reopen on hover, and select a card through its title. Existing mobile Kanban coverage should continue to prove direct title navigation without a hover preview.
+A component regression should prove that selection mode removes the trigger on both the column-card and Pipeline-row paths and that it returns after the mode ends. A desktop browser regression should open a column-card preview, enable multi-select, verify the preview closes and does not reopen on hover, and select a card through its title. Existing mobile Kanban coverage should continue to prove direct title navigation without a hover preview.

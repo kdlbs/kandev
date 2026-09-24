@@ -12,7 +12,7 @@ legacy_specs: []
 
 ## Overview
 
-Kanban card titles currently keep an interactive preview while multi-select is active. The popover can cover adjacent cards and intercept selection clicks. One focused work order passes the existing selection state to the title-preview gate, then proves the mode transition and selection path in component and browser tests.
+Kanban card titles currently keep an interactive preview while multi-select is active. The popover can cover adjacent cards and intercept selection clicks. One focused work order passes the existing selection state to the title-preview gates in both column cards and Pipeline rows, then proves the mode transition and selection path in component and browser tests.
 
 ## Scope
 
@@ -29,7 +29,7 @@ Kanban card titles currently keep an interactive preview while multi-select is a
 
 ## Technical approach
 
-`apps/web/components/kanban-card-content.tsx` already suppresses card actions when `isMultiSelectMode` is true. In `KanbanCardShell`, pass the same state to the `enableTitleHover` prop of `KanbanCardBody`. Keep `CardTitle` and the shared `TaskTitleHoverCard` unchanged; their existing conditional render removes the trigger and closes an open popover. Retain the current `dispatchKanbanCardClick` path for title clicks and existing coarse-pointer navigation.
+`apps/web/components/kanban-card-content.tsx` already suppresses card actions when `isMultiSelectMode` is true. In `KanbanCardShell`, pass the same state to the `enableTitleHover` prop of `KanbanCardBody`. The Pipeline view has a separate `PipelineRow` → `RowInfoColumn` → `CardTitle` path, so pass its existing mode through that row and disable the same hover prop. Keep `CardTitle` and the shared `TaskTitleHoverCard` unchanged; their existing conditional render removes the trigger and closes an open popover. Retain the current click dispatch paths for title selection and existing coarse-pointer navigation.
 
 ## ASCII UI preview
 
@@ -59,10 +59,11 @@ The existing phone Kanban card is the mobile exemplar. Its card content remains 
 
 ## Tests
 
-| Criterion                                          | Evidence                                                                                                                        |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.2` and `.4` | `apps/web/components/kanban-card-regression.test.tsx`: full card trigger absent in multi-select and present when mode ends.     |
-| `AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.3`          | `apps/web/components/kanban-card-click.test.ts` already checks click dispatch; browser test below covers an actual title click. |
+| Criterion                                          | Evidence                                                                                                                                      |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.2` and `.4` | `apps/web/components/kanban-card-regression.test.tsx`: full card trigger absent in multi-select and present when mode ends.                   |
+| `.2`                                               | `apps/web/components/kanban/pipeline-kanban-shared-source.test.tsx`: Pipeline title trigger is absent in multi-select and present outside it. |
+| `AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.3`          | `apps/web/components/kanban-card-click.test.ts` already checks click dispatch; browser test below covers an actual title click.               |
 
 ## E2E tests
 
@@ -82,6 +83,9 @@ The existing phone Kanban card is the mobile exemplar. Its card content remains 
 - `pnpm run typecheck` - passed.
 - `pnpm e2e:run --host --project chromium tests/kanban/task-title-hover-subtasks.spec.ts` - passed (4 tests; managed host build and production Vite bundle).
 - `pnpm e2e:run --host --project mobile-chrome tests/kanban/mobile-task-title-hover-subtasks.spec.ts` - passed (1 test; managed host build and production Vite bundle).
+- Pipeline review fix: `pnpm exec vitest run components/kanban-card-regression.test.tsx components/kanban-card-click.test.ts components/kanban/pipeline-kanban-shared-source.test.tsx` - passed (3 files, 22 tests).
+- `pnpm run typecheck` after the Pipeline guard - passed.
+- `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all` after the design update - passed.
 
 ## Risks
 
