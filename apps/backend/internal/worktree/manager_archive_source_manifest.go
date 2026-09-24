@@ -222,17 +222,12 @@ func archiveSourceManifestDigest(root, path string) (string, error) {
 		return fmt.Sprintf("%x", sum), nil
 	}
 	if !info.Mode().IsRegular() {
-		if !info.IsDir() || !archiveSourceManifestIsSubmodule(fullPath) {
-			return "", fmt.Errorf("source path is not a regular file or git submodule")
+		if !info.IsDir() {
+			return "", fmt.Errorf("source path is not a regular file or directory")
 		}
 		return archiveSourceManifestDirectoryDigest(fullPath)
 	}
 	return archiveSourceManifestFileDigest(root, fullPath)
-}
-
-func archiveSourceManifestIsSubmodule(path string) bool {
-	info, err := os.Lstat(filepath.Join(path, ".git"))
-	return err == nil && (info.Mode().IsRegular() || info.IsDir())
 }
 
 func archiveSourceManifestDirectoryDigest(root string) (string, error) {

@@ -107,6 +107,44 @@ func TestArchiveManifestCapturesIgnoredUntrackedFile(t *testing.T) {
 	t.Fatalf("ignored untracked file has no path and digest in manifest: %+v", manifests["wt"].Entries)
 }
 
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.3
+func TestArchiveManifestCapturesIgnoredDirectoryContents(t *testing.T) {
+	repo := initGitRepoForWorktreeTest(t)
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("cache/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".gitignore")
+	runGit(t, repo, "commit", "-m", "ignore generated directory")
+	worktreePath := filepath.Join(t.TempDir(), "task-worktree")
+	runGit(t, repo, "worktree", "add", "-b", "feature/task", worktreePath)
+	cachePath := filepath.Join(worktreePath, "cache")
+	if err := os.Mkdir(cachePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cachePath, "data.txt"), []byte("local value"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if status := runGit(t, worktreePath, "status", "--porcelain"); status != "" {
+		t.Fatalf("fixture must be Git-clean, status = %q", status)
+	}
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifests, err := mgr.CaptureArchiveSourceManifests(context.Background(), []*Worktree{{
+		ID: "wt", TaskID: "task", RepositoryID: "repo", Path: worktreePath, RepositoryPath: repo,
+	}})
+	if err != nil {
+		t.Fatalf("capture ignored directory source: %v", err)
+	}
+	for _, entry := range manifests["wt"].Entries {
+		if (entry.Path == "cache/" || entry.Path == "cache/data.txt") && entry.ContentSHA256 != "" {
+			return
+		}
+	}
+	t.Fatalf("ignored directory has no path and content identity in manifest: %+v", manifests["wt"].Entries)
+}
+
 func TestArchiveManifestFileDigestRejectsSymlink(t *testing.T) {
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside.txt")
