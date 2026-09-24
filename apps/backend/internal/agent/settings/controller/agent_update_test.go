@@ -715,6 +715,38 @@ func TestAgentUpdateRepairsExecutionCacheAndRetriesOnce(t *testing.T) {
 	}
 }
 
+func TestAgentUpdateNpmReleaseAgePolicySkipsCacheRepair(t *testing.T) {
+	updater := &fakeRuntimeUpdater{
+		current:      hostutility.AgentCapabilities{AgentVersion: "0.80.0"},
+		currentFound: true,
+		target:       "0.81.0",
+		runErr:       errors.New("exit status 1"),
+		updateOutput: "npm error code ETARGET\nnpm error notarget No matching version found for @agentclientprotocol/claude-agent-acp@0.81.0 with a date before 9/22/2026, 12:28:47 PM.\n",
+	}
+	store, completed := newUpdateTestStore(updater, newMaintenanceCoordinator(), nil)
+	spec := agents.ManagedNPMRuntimeSpec{
+		Package:        "@agentclientprotocol/claude-agent-acp",
+		DefaultVersion: "0.81.0",
+		ACPArgs:        []string{"acp"},
+	}
+	job, err := store.Enqueue("claude-acp", spec)
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusFailed)
+	if !strings.Contains(final.Error, "release-age policy") {
+		t.Fatalf("Error = %q, want the npm release-age policy failure", final.Error)
+	}
+	if strings.Contains(final.Error, "12:28:47 PM") {
+		t.Fatalf("Error leaked the raw npm date: %q", final.Error)
+	}
+	updater.mu.Lock()
+	defer updater.mu.Unlock()
+	if updater.runCalls != 1 || updater.invalidateCalls != 0 || updater.refreshCalls != 0 {
+		t.Fatalf("policy failure calls: update=%d invalidation=%d refresh=%d, want 1, 0, 0", updater.runCalls, updater.invalidateCalls, updater.refreshCalls)
+	}
+}
+
 func TestAgentUpdateHardFailuresRemainFailed(t *testing.T) {
 	tests := []struct {
 		name        string

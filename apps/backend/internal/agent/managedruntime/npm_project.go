@@ -4,9 +4,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
+// NPMProjectPrefix keeps npm's project configuration out of the task workspace.
+// os/exec does not expand ~; npm does, and the launcher provisions that same
+// expanded directory before starting the child process.
 const NPMProjectPrefix = "~/.kandev/managed-npm-runtime"
 
 // NPMProjectPrefixArgs returns the trusted npm project root arguments used by
@@ -43,10 +47,7 @@ func hasNPMProjectPrefix(args []string) bool {
 }
 
 func homeFromMap(env map[string]string) string {
-	if home := strings.TrimSpace(env["HOME"]); home != "" {
-		return home
-	}
-	if home := strings.TrimSpace(env["USERPROFILE"]); home != "" {
+	if home := homeForNPM(runtime.GOOS, env["HOME"], env["USERPROFILE"]); home != "" {
 		return home
 	}
 	return defaultHome()
@@ -67,13 +68,24 @@ func homeFromEnvironment(env []string) string {
 			userProfile = value
 		}
 	}
-	if strings.TrimSpace(home) != "" {
+	if home := homeForNPM(runtime.GOOS, home, userProfile); home != "" {
 		return home
 	}
-	if strings.TrimSpace(userProfile) != "" {
-		return userProfile
-	}
 	return defaultHome()
+}
+
+func homeForNPM(goos, home, userProfile string) string {
+	first, second := home, userProfile
+	if goos == "windows" {
+		first, second = userProfile, home
+	}
+	if strings.TrimSpace(first) != "" {
+		return first
+	}
+	if strings.TrimSpace(second) != "" {
+		return second
+	}
+	return ""
 }
 
 func defaultHome() string {

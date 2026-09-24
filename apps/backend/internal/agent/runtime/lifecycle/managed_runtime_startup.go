@@ -125,12 +125,7 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 	initErr error,
 	agentConfig agents.Agent,
 ) (*managedRuntimeStartupRetry, bool) {
-	if execution == nil || !supportsManagedRuntimeCacheRepair(execution.RuntimeName) {
-		return nil, false
-	}
-	client, releaseClient := execution.AcquireAgentCtlClient()
-	releaseClient()
-	if client == nil {
+	if execution == nil {
 		return nil, false
 	}
 	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
@@ -152,6 +147,9 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 		}, true
 	}
 	if classification.Code != routingerr.CodeManagedRuntimeNpmResolution {
+		return nil, false
+	}
+	if !supportsManagedRuntimeCacheRepair(execution.RuntimeName) {
 		return nil, false
 	}
 	return &managedRuntimeStartupRetry{

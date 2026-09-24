@@ -46,8 +46,10 @@ Kandev backend.
 Managed npm command construction adds `--prefix ~/.kandev/managed-npm-runtime`
 as npm arguments. npm expands `~` in its own execution environment, so the
 same trusted command works on the backend host, in Docker, and over SSH without
-embedding a backend-host path. Provision that directory against the effective
-npm child `HOME` before npm starts; npm returns `ENOENT` for a missing prefix.
+embedding a backend-host path. Provision that directory against Node's home
+selection on the execution host before npm starts: `HOME` on POSIX and
+`USERPROFILE` on Windows. This keeps npm's `~` expansion aligned with the
+directory Kandev creates; npm returns `ENOENT` for a missing prefix.
 Apply the same prefix to exact-version cache preparation, capability probes,
 one-shot prompts, normal task launches, and online-preferred retries. The
 Kandev-owned prefix under the npm user's home is independent of an optional
@@ -136,9 +138,11 @@ second npm attempt fails, Kandev emits `managed_runtime_npm_resolution`.
 Both errors contain bounded sanitized details. The UI keeps the existing
 single **Retry runtime** action. Kandev does not change the active version.
 
-Unsupported runtime types do not call the repair endpoint. Native commands,
-passthrough commands, unrelated npm errors, and repeated failures remain on the
-normal terminal error path.
+Unsupported runtime types do not call the repair endpoint for ordinary npm
+resolution failures. Kandev classifies an exact release-date policy failure
+before checking repair support when the bounded diagnostic is available.
+Native commands, passthrough commands, unrelated npm errors, and repeated
+failures remain on the normal terminal error path.
 
 A host capability probe that cannot repair or fails its online retry publishes
 the final failure normally. Kandev does not hide a runtime that still cannot
@@ -161,6 +165,12 @@ scoped package or locale-formatted date as a path or opaque token. The persisted
 excerpt contains only a fixed policy message and the canonical date marker.
 Ordinary exact-version `ETARGET` retains the stale metadata repair path. The
 same distinction applies to host capability probes.
+
+Settings update jobs classify bounded output against the trusted exact package
+spec before invalidating the execution cache. Both legacy and exact-candidate
+updates fail with a safe policy error when the diagnostic matches; they do not
+retry or expose the raw locale-formatted date in the job error. Ordinary update
+failures retain the existing cache-repair path.
 
 The lifecycle manager publishes a stable policy failure code before cache
 repair. The orchestrator persists one sanitized recovery entry with a localized

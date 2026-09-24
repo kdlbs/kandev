@@ -66,12 +66,12 @@ operator-selected, successfully validated runtime from starting.
 
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-003.1:** When Kandev prepares, probes, or launches a built-in managed npm runtime, the task repository's project `.npmrc`, including `min-release-age` and `before`, shall not affect runtime package resolution. This shall hold for host utility probes and local PC, local Docker, and remote SSH launches.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-003.2:** Isolation shall preserve the agent's workspace working directory, exact selected package and version, configured registry, explicit npm environment overrides, ACP arguments, and existing npm execution-cache identity. Native and passthrough commands shall remain unchanged.
-- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-003.3:** When npm reports a release-date-qualified `ETARGET` for the exact selected managed package from configuration that still applies, Kandev shall report a distinct, actionable npm policy failure. It shall not invalidate the execution cache or attempt an online-preferred retry for that failure.
-- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-003.4:** The release-date failure shall retain bounded, sanitized technical details and one recovery explanation on desktop and phone. The explanation shall identify `min-release-age` or `before` as settings to check without claiming that cache repair was attempted. Unrelated packages, malformed diagnostics, and generic ACP disconnects shall not receive this classification.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-003.3:** When npm reports a release-date-qualified `ETARGET` for the exact selected managed package from configuration that still applies, during startup, a capability probe, or a Settings update, Kandev shall report a distinct, actionable npm policy failure. It shall not invalidate the execution cache or attempt an online-preferred retry for that failure.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-003.4:** The release-date failure shall retain bounded, sanitized technical details and one recovery explanation on desktop and phone. The explanation shall identify `min-release-age` or `before` as settings to check without claiming that cache repair was attempted. A Settings update error shall identify the policy without exposing the raw npm date. Unrelated packages, malformed diagnostics, and generic ACP disconnects shall not receive this classification.
 
 ## Out of scope
 
 - Automatic version rollback or selection of another package version.
 - Registry replacement, dependency substitution, or global npm cache cleanup.
 - Native runtimes, passthrough commands, unrelated npm errors, and a second online retry.
-- Sprites, remote Docker, Kubernetes, and future executors without the same authenticated executor-local repair contract.
+- Automatic cache repair and retry for Sprites, remote Docker, Kubernetes, and future executors without the same authenticated executor-local repair contract. Kandev still classifies a policy failure when bounded diagnostics are available for the exact trusted package.

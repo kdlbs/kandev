@@ -588,6 +588,7 @@ func managedRuntimeProbeFailureCode(command []string, stderr string) ProbeFailur
 }
 
 func managedRuntimeProbePackageSpec(command []string) (string, bool) {
+	// Accept only npx --yes --prefer-offline --prefix <fixed-prefix> <exact-spec>.
 	if len(command) < 6 || command[0] != "npx" || command[1] != "--yes" || command[2] != "--prefer-offline" ||
 		command[3] != "--prefix" || command[4] != managedruntime.NPMProjectPrefix {
 		return "", false

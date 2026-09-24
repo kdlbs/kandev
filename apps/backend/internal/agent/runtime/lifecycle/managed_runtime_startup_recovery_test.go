@@ -206,6 +206,58 @@ func TestManagedRuntimeReleaseAgePolicySkipsCacheRepair(t *testing.T) {
 	}
 }
 
+func TestManagedRuntimeReleaseAgePolicyIsClassifiedWithoutRepairSupport(t *testing.T) {
+	initialErr := errors.New("ACP session initialization failed")
+	for _, runtime := range []agentruntime.Runtime{agentruntime.RuntimeKubernetes, agentruntime.RuntimeSprites} {
+		t.Run(string(runtime), func(t *testing.T) {
+			mgr, execution, mock, _ := newManagedRuntimeRetryFixture(t, false)
+			agentConfig := agents.NewClaudeACP()
+			execution.AgentID = agentConfig.ID()
+			execution.RuntimeName = runtime
+			execution.AgentArgs = []string{
+				"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime",
+				"@agentclientprotocol/claude-agent-acp@0.81.0", "acp",
+			}
+			mock.stderrLines = []string{
+				"npm error code ETARGET",
+				"npm error notarget No matching version found for @agentclientprotocol/claude-agent-acp@0.81.0 with a date before 9/22/2026, 12:28:47 PM.",
+			}
+
+			attempted, err := mgr.retryManagedRuntimeStartup(
+				context.Background(), execution, initialErr, agentConfig, "", "", nil, nil,
+			)
+			if !attempted {
+				t.Fatal("policy failure should be classified without cache-repair support")
+			}
+			var startupErr *routingerr.ManagedRuntimeStartupError
+			if !errors.As(err, &startupErr) || startupErr.Code != routingerr.CodeManagedRuntimeNpmPolicy {
+				t.Fatalf("error = %v, want structured npm policy startup failure", err)
+			}
+			if actions := mock.getHTTPActions(); len(actions) != 0 {
+				t.Fatalf("unsupported runtime policy failure called repair endpoint: %#v", actions)
+			}
+
+			genericMgr, genericExecution, genericMock, _ := newManagedRuntimeRetryFixture(t, false)
+			genericExecution.AgentID = agentConfig.ID()
+			genericExecution.RuntimeName = runtime
+			genericExecution.AgentArgs = append([]string(nil), execution.AgentArgs...)
+			genericMock.stderrLines = []string{
+				"npm error code ETARGET",
+				"npm error notarget No matching version found for @agentclientprotocol/claude-agent-acp@0.81.0.",
+			}
+			attempted, err = genericMgr.retryManagedRuntimeStartup(
+				context.Background(), genericExecution, initialErr, agentConfig, "", "", nil, nil,
+			)
+			if attempted || !errors.Is(err, initialErr) {
+				t.Fatalf("ordinary resolution failure result = (%v, %v), want original generic error", attempted, err)
+			}
+			if actions := genericMock.getHTTPActions(); len(actions) != 0 {
+				t.Fatalf("unsupported runtime ordinary failure called repair endpoint: %#v", actions)
+			}
+		})
+	}
+}
+
 func TestRetryManagedRuntimeStartupLifecycle(t *testing.T) {
 	initialErr := errors.New("ACP session initialization failed")
 

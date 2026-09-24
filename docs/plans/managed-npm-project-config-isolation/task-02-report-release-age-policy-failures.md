@@ -135,6 +135,17 @@ fixed policy excerpt with the canonical date marker. Regression tests include
 the exact issue line at parser, sanitizer, lifecycle, routing-classifier, and
 agentctl probe boundaries, plus malformed-date and mismatched-package cases.
 
+Review correction: classification runs before the runtime cache-repair support
+gate, so Kubernetes and Sprites surface the exact trusted policy failure while
+ordinary resolution errors on those runtimes remain on the generic path.
+Settings update jobs also classify a bounded 64 KiB output tail against the
+trusted update spec before cache invalidation in both legacy and exact-candidate
+flows. A matching failure returns a safe typed policy error without retrying;
+ordinary update failures retain their existing repair behavior. Prefix
+provisioning selects `USERPROFILE` on Windows and `HOME` on POSIX to match
+npm's tilde expansion, including when both variables are set. Public Muse and
+Pi command examples now show the managed prefix.
+
 The targeted Go suites passed, including lifecycle, host probe, agentctl, npm
 matcher, routing, orchestrator, agent registration, and settings packages.
 `make -C apps/backend build` passed. Focused web tests, typecheck, changed-file
