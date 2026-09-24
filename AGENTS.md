@@ -201,8 +201,7 @@ When a Kandev system message references an MCP tool that is not visible in the a
 The user-started primary session owns durable artifacts, integration judgment,
 and user communication. Platform-provided investigation and explorer agents
 remain available. Launch planned native implementation subagents only after the
-user explicitly authorizes them; this repository does not prescribe their roles
-or model tiers.
+user explicitly authorizes them; this repository does not prescribe their roles or model tiers.
 The read-only `pr-poller` is the sole repository-defined exception: use it only
 after the user explicitly asks to wait for or monitor PR updates.
 
