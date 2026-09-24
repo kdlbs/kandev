@@ -143,7 +143,9 @@ composer draft. Both assertions now target the active chat's user-message
 bubble. The two-test serial group passed in the CI runtime image with its
 retry override temporarily disabled and Playwright retries set to zero. The
 full local replay was stopped after 41 of 255 tests, so it is not recorded as
-a full-shard pass; the PR workflow must provide the full-shard result.
+a full-shard pass. The PR workflow completed all 14 normal E2E shards and all
+6 container E2E shards, merged the reports, and passed the aggregate E2E gate
+on head `725b7d5dbf0f4e1932e859f5ae7c8e5835a32aca` (run `36022650892`).
 
 ## Risks
 
