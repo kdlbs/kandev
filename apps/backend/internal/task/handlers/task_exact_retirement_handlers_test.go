@@ -27,7 +27,7 @@ func TestHTTPPreviewExactRetirementReturnsNoStoreUnknownReceipt(t *testing.T) {
 	router.POST("/api/v1/tasks/:id/exact-retirement/preview", h.httpPreviewExactRetirement)
 	body := `{"replacement_task_id":"replacement","workspace_id":"workspace","expected_old_generation":"` + now.Format(time.RFC3339Nano) + `","expected_replacement_generation":"` + now.Format(time.RFC3339Nano) + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/old/exact-retirement/preview", strings.NewReader(body))
-	req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "test", Synthetic: true}))
+	req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "test", Role: authn.RoleAdmin, Synthetic: true}))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

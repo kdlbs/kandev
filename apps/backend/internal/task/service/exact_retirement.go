@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -92,6 +93,12 @@ func (s *Service) PreviewExactRetirement(ctx context.Context, request ExactRetir
 	}
 	replacementTask, err := s.GetTask(ctx, request.ReplacementTaskID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.AuthorizeTaskScope(ctx, oldTask.ID, authz.ScopeTaskWrite); err != nil {
+		return nil, err
+	}
+	if err := s.AuthorizeTaskScope(ctx, replacementTask.ID, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
 	if request.WorkspaceID == "" || oldTask.WorkspaceID != request.WorkspaceID || replacementTask.WorkspaceID != request.WorkspaceID {
