@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 )
 
 func TestTerminalRetentionPreventsArchiveCleanupUntilCleared(t *testing.T) {
@@ -163,4 +164,53 @@ func TestHeldChildPreventsParentCascadeArchive(t *testing.T) {
 			t.Fatalf("%s archived despite held child", id)
 		}
 	}
+}
+
+func TestTerminalRetentionAddedAfterArchivePreflightPreventsArchive(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	workspace, err := repo.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const taskID = "archive-hold-race"
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: taskID, WorkspaceID: workspace.ID, WorkflowID: workspace.OfficeWorkflowID, Title: taskID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc.tasks = holdBeforeArchiveRepository{TaskRepository: repo, taskID: taskID}
+
+	err = svc.ArchiveTask(ctx, taskID)
+	if !errors.Is(err, ErrTaskArchiveHeld) {
+		t.Fatalf("ArchiveTask error = %v, want terminal retention hold", err)
+	}
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.ArchivedAt != nil {
+		t.Fatal("task was archived after the retention hold committed")
+	}
+}
+
+type holdBeforeArchiveRepository struct {
+	taskrepo.TaskRepository
+	taskID string
+}
+
+func (r holdBeforeArchiveRepository) ArchiveTask(ctx context.Context, taskID string) error {
+	base := r.TaskRepository
+	task, err := base.GetTask(ctx, r.taskID)
+	if err != nil {
+		return err
+	}
+	if task.Metadata == nil {
+		task.Metadata = make(map[string]interface{})
+	}
+	task.Metadata[models.MetaKeyTerminalRetention] = true
+	if err := base.UpdateTask(ctx, task); err != nil {
+		return err
+	}
+	return base.ArchiveTask(ctx, taskID)
 }

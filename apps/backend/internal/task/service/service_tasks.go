@@ -77,7 +77,7 @@ var ErrTaskAlreadyArchived = errors.New("task is already archived")
 
 // ErrTaskArchiveHeld prevents cleanup of a task with an explicit terminal
 // retention hold until a scoped caller clears that hold.
-var ErrTaskArchiveHeld = errors.New("task has a terminal retention hold")
+var ErrTaskArchiveHeld = taskrepo.ErrTaskArchiveHeld
 
 // ErrAutoTitlePromptRequired is returned when auto-title creation has neither
 // a prompt nor a usable provisional title.

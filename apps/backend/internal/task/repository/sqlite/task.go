@@ -4235,13 +4235,14 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`), now, now, id)
+	query := `UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ? AND ` + taskNotTerminalRetentionHeldPredicate(r.db.DriverName(), "tasks")
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), now, now, id)
 	if err != nil {
 		return err
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+		return taskArchiveMutationMiss(ctx, tx, id)
 	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
 	if err != nil {
@@ -4255,6 +4256,51 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	}
 	r.notifyTaskQueuePurged(ctx, id)
 	return nil
+}
+
+func taskNotTerminalRetentionHeldPredicate(driverName, taskAlias string) string {
+	if dialect.IsPostgres(driverName) {
+		return fmt.Sprintf("COALESCE((%s.metadata::jsonb ->> '%s') = 'true', false) = false", taskAlias, models.MetaKeyTerminalRetention)
+	}
+	return fmt.Sprintf("COALESCE(json_extract(%s.metadata, '$.%s'), 0) <> 1", taskAlias, models.MetaKeyTerminalRetention)
+}
+
+func taskArchiveMutationMiss(ctx context.Context, tx *sqlx.Tx, taskID string) error {
+	var raw string
+	err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT metadata FROM tasks WHERE id = ?`), taskID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: %s", repoerrors.ErrTaskNotFound, taskID)
+	}
+	if err != nil {
+		return err
+	}
+	if taskMetadataHasTerminalRetention(raw) {
+		return fmt.Errorf("%w: %s", repoerrors.ErrTaskArchiveHeld, taskID)
+	}
+	return fmt.Errorf("%w: %s", repoerrors.ErrTaskNotFound, taskID)
+}
+
+func taskArchiveHoldIfPresent(ctx context.Context, tx *sqlx.Tx, taskID string) error {
+	var raw string
+	err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT metadata FROM tasks WHERE id = ?`), taskID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if taskMetadataHasTerminalRetention(raw) {
+		return fmt.Errorf("%w: %s", repoerrors.ErrTaskArchiveHeld, taskID)
+	}
+	return nil
+}
+
+func taskMetadataHasTerminalRetention(raw string) bool {
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return false
+	}
+	return models.IsTerminalRetentionHeld(metadata)
 }
 
 // ArchiveTaskIfActive is the CAS variant used by office task-handoffs
@@ -4292,6 +4338,7 @@ func (r *Repository) ArchiveTaskIfAutoArchiveEligible(
 		UPDATE tasks AS t
 		SET archived_at = ?, archived_by_cascade_id = ?, updated_at = ?
 		WHERE t.id = ? AND t.archived_at IS NULL AND t.updated_at = ?
+			AND %s
 			AND EXISTS (
 				SELECT 1
 				FROM workflow_steps ws
@@ -4299,13 +4346,16 @@ func (r *Repository) ArchiveTaskIfAutoArchiveEligible(
 					AND ws.auto_archive_after_hours > 0
 					AND t.updated_at <= %s
 			)
-	`, dialect.NowMinusHours(r.db.DriverName(), "ws.auto_archive_after_hours"))
+	`, taskNotTerminalRetentionHeldPredicate(r.db.DriverName(), "t"), dialect.NowMinusHours(r.db.DriverName(), "ws.auto_archive_after_hours"))
 	result, err := tx.ExecContext(ctx, r.db.Rebind(query), now, cascadeID, now, id, expectedUpdatedAt)
 	if err != nil {
 		return false, err
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		if err := taskArchiveHoldIfPresent(ctx, tx, id); err != nil {
+			return false, err
+		}
 		if err := tx.Commit(); err != nil {
 			return false, err
 		}
@@ -4348,15 +4398,18 @@ func (r *Repository) ArchiveTaskIfActiveWithVacatedStep(
 		return "", false, tx.Commit()
 	}
 	now := time.Now().UTC()
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+	query := `
 		UPDATE tasks SET archived_at = ?, archived_by_cascade_id = ?, updated_at = ?
-		WHERE id = ? AND archived_at IS NULL
-	`), now, cascadeID, now, id)
+		WHERE id = ? AND archived_at IS NULL AND ` + taskNotTerminalRetentionHeldPredicate(r.db.DriverName(), "tasks")
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), now, cascadeID, now, id)
 	if err != nil {
 		return "", false, err
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		if err := taskArchiveHoldIfPresent(ctx, tx, id); err != nil {
+			return "", false, err
+		}
 		return "", false, tx.Commit()
 	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)

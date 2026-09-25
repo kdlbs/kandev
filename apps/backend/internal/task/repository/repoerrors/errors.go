@@ -15,6 +15,9 @@ var ErrWorkflowNotFound = errors.New("workflow not found")
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
+// ErrTaskArchiveHeld prevents archive mutations while terminal resources are retained.
+var ErrTaskArchiveHeld = errors.New("task has a terminal retention hold")
+
 // ErrNoPrimarySession reports that a task exists but has no primary session.
 // Callers can repair that state without hiding other repository failures.
 var ErrNoPrimarySession = errors.New("no primary session")
