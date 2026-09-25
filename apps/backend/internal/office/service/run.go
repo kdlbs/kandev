@@ -407,6 +407,15 @@ func (s *Service) publishRunQueued(ctx context.Context, req *models.Run, idempot
 	}
 }
 
+// ErrAgentNotRunnable wraps a guardAgentStatus refusal caused by the
+// agent's own status (paused, stopped, or pending approval) — a
+// deterministic condition, unlike a transient lookup failure. Callers that
+// must distinguish "will never succeed on retry" from "might succeed later"
+// (e.g. paused-assignment replay's bounded recovery-tick backstop, R1-F1)
+// use errors.Is(err, ErrAgentNotRunnable) rather than string-matching the
+// message.
+var ErrAgentNotRunnable = errors.New("agent not runnable")
+
 // guardAgentStatus returns an error if the agent is paused or stopped,
 // and otherwise the resolved agent — callers that also need the pause
 // gate's workspace scope (checkPauseGateForAgent) reuse this fetch instead
@@ -418,11 +427,11 @@ func (s *Service) guardAgentStatus(ctx context.Context, agentInstanceID string) 
 	}
 	switch agent.Status {
 	case models.AgentStatusPaused:
-		return nil, fmt.Errorf("agent %s is paused", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is paused: %w", agentInstanceID, ErrAgentNotRunnable)
 	case models.AgentStatusStopped:
-		return nil, fmt.Errorf("agent %s is stopped", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is stopped: %w", agentInstanceID, ErrAgentNotRunnable)
 	case models.AgentStatusPendingApproval:
-		return nil, fmt.Errorf("agent %s is pending approval", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is pending approval: %w", agentInstanceID, ErrAgentNotRunnable)
 	}
 	return agent, nil
 }

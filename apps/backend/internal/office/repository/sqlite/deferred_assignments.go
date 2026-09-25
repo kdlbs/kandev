@@ -31,8 +31,15 @@ func (r *Repository) createDeferredAssignmentsTable() error {
 // none exists, or overwrites an existing row — resetting resolved_at/
 // outcome back to pending — when one does. A later occurrence (a
 // reassignment during the same pause, or a fresh pause after an earlier
-// deferral already resolved) always replaces the row, so replay acts on
-// the latest assigning occurrence (see models.DeferredAssignment).
+// deferral already resolved) replaces the row, so replay acts on the
+// latest assigning occurrence (see models.DeferredAssignment). The
+// overwrite only applies when the stored row is already resolved, or its
+// assignment_generation is <= the incoming one: two paused assignments can
+// interleave (A reads gen1, B commits and records gen2, A's write lands
+// last), and an unconditional overwrite would let A's stale write regress
+// a still-pending gen2 row back to gen1 — silently losing B's assignment
+// (R1-F3). A losing write is a silent no-op, matching this method's
+// existing best-effort contract (the caller logs, never propagates).
 func (r *Repository) RecordDeferredAssignment(
 	ctx context.Context, taskID, workspaceID, agentProfileID string, assignmentGeneration int64, pauseID string,
 ) error {
@@ -52,8 +59,8 @@ func (r *Repository) RecordDeferredAssignment(
 		UPDATE office_deferred_assignments
 		SET workspace_id = ?, agent_profile_id = ?, assignment_generation = ?, pause_id = ?, created_at = ?,
 		    resolved_at = NULL, outcome = ''
-		WHERE task_id = ?
-	`), workspaceID, agentProfileID, assignmentGeneration, pauseID, now, taskID)
+		WHERE task_id = ? AND (resolved_at IS NOT NULL OR assignment_generation <= ?)
+	`), workspaceID, agentProfileID, assignmentGeneration, pauseID, now, taskID, assignmentGeneration)
 	return err
 }
 
@@ -107,12 +114,21 @@ func (r *Repository) ListReplayablePendingDeferredAssignments(ctx context.Contex
 // ResolveDeferredAssignment CAS-resolves a pending row with the given
 // outcome ("replayed" or "dropped"). Returns whether this call won the
 // CAS — false means another writer (a concurrent Resume hook and recovery
-// tick, or two overlapping ticks) already resolved this row.
-func (r *Repository) ResolveDeferredAssignment(ctx context.Context, taskID, outcome string) (bool, error) {
+// tick, or two overlapping ticks) already resolved this row, OR the row
+// was overwritten (RecordDeferredAssignment) with a different identity
+// since the caller read it. The CAS keys on the full identity the caller
+// read — task_id, assignment_generation, agent_profile_id, and pause_id —
+// not task_id alone (R1-F2): a replay that read row (task, gen1) can race
+// a fresh RecordDeferredAssignment that upserts the same task_id to gen2
+// before the replay resolves; keying on task_id alone would let the gen1
+// resolve mark the gen2 row "replayed"/"dropped" and lose gen2 entirely.
+func (r *Repository) ResolveDeferredAssignment(
+	ctx context.Context, taskID string, assignmentGeneration int64, agentProfileID, pauseID, outcome string,
+) (bool, error) {
 	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE office_deferred_assignments SET resolved_at = ?, outcome = ?
-		WHERE task_id = ? AND resolved_at IS NULL
-	`), time.Now().UTC(), outcome, taskID)
+		WHERE task_id = ? AND assignment_generation = ? AND agent_profile_id = ? AND pause_id = ? AND resolved_at IS NULL
+	`), time.Now().UTC(), outcome, taskID, assignmentGeneration, agentProfileID, pauseID)
 	if err != nil {
 		return false, err
 	}

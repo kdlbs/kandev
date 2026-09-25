@@ -2,9 +2,12 @@ package service_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/service"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -302,5 +305,151 @@ func TestPausedAssignmentReplay_DropsOnUnassign(t *testing.T) {
 	}
 	if outcome := deferredAssignmentOutcome(t, svc, "task-1"); outcome != "dropped" {
 		t.Fatalf("deferred assignment outcome = %q, want \"dropped\"", outcome)
+	}
+}
+
+// TestPausedAssignmentReplay_UnrunnableAgentDoesNotStarveBackstop is the
+// R1-F1 regression: ListReplayablePendingDeferredAssignments selects the
+// global oldest maxRecoveryTickDeferredReplay (5) pending rows. Before the
+// fix, any non-pause queue error (guardAgentStatus refusing a paused,
+// stopped, or pending-approval agent) left the row pending with only a
+// Warn log — so once 5+ rows target an unrunnable agent, every recovery
+// tick re-selects the same 5 forever and a newer, perfectly replayable row
+// for a different, healthy agent is starved. The fix resolves a
+// deterministic agent-not-runnable refusal as "dropped" so it leaves the
+// bounded batch, letting the next tick reach the newer row.
+func TestPausedAssignmentReplay_UnrunnableAgentDoesNotStarveBackstop(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	pauseSvc := pause.NewService(
+		svc.RepoForTest(),
+		noopTaskCanceller{},
+		&fakeWorkspaceChecker{known: map[string]bool{"ws-1": true}},
+		logger.Default(),
+	)
+	svc.SetPauseGate(pauseSvc)
+	// Deliberately no SetAssignmentReplayer: this exercises only the
+	// bounded recovery-tick backstop (ReplayPendingDeferredAssignments),
+	// which is where the head-of-line blocking lives.
+
+	svc.ExecSQL(t, `INSERT INTO workspaces (id) VALUES ('ws-1')`)
+
+	const unrunnable = 5
+	for i := 1; i <= unrunnable; i++ {
+		agentID := fmt.Sprintf("agent-%d", i)
+		taskID := fmt.Sprintf("task-%d", i)
+		createTestAgent(t, svc, "ws-1", agentID)
+		svc.ExecSQL(t,
+			`INSERT INTO tasks (id, workspace_id, project_id, assignment_generation) VALUES (?, ?, 'proj-1', 1)`,
+			taskID, "ws-1")
+		setTestTaskAssignee(t, svc, taskID, agentID)
+	}
+	createTestAgent(t, svc, "ws-1", "agent-newer")
+	svc.ExecSQL(t,
+		`INSERT INTO tasks (id, workspace_id, project_id, assignment_generation) VALUES (?, ?, 'proj-1', 1)`,
+		"task-newer", "ws-1")
+	setTestTaskAssignee(t, svc, "task-newer", "agent-newer")
+
+	if _, err := pauseSvc.Pause(ctx, "ws-1", "regression test", "user-1", "user"); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+
+	gen := int64(1)
+	for i := 1; i <= unrunnable; i++ {
+		agentID := fmt.Sprintf("agent-%d", i)
+		taskID := fmt.Sprintf("task-%d", i)
+		if err := svc.QueueTaskAssignedRunForTest(ctx, taskID, agentID, &gen); err != nil {
+			t.Fatalf("QueueTaskAssignedRunForTest(%s) while paused: %v", taskID, err)
+		}
+		// Force strictly increasing created_at so these 5 sort ahead of
+		// task-newer under the backstop's ORDER BY created_at ASC LIMIT 5.
+		svc.ExecSQL(t,
+			`UPDATE office_deferred_assignments SET created_at = ? WHERE task_id = ?`,
+			time.Now().UTC().Add(-time.Duration(unrunnable-i+1)*time.Minute), taskID)
+	}
+	if err := svc.QueueTaskAssignedRunForTest(ctx, "task-newer", "agent-newer", &gen); err != nil {
+		t.Fatalf("QueueTaskAssignedRunForTest(task-newer) while paused: %v", err)
+	}
+
+	// By replay time the 5 oldest rows' agents have each independently
+	// become unrunnable (paused here; stopped/pending-approval/deleted are
+	// the same shape) — a deterministic refusal, not a transient one.
+	for i := 1; i <= unrunnable; i++ {
+		agentID := fmt.Sprintf("agent-%d", i)
+		if err := svc.UpdateAgentStatusFields(ctx, agentID, string(models.AgentStatusPaused), "test"); err != nil {
+			t.Fatalf("pause %s: %v", agentID, err)
+		}
+	}
+
+	if _, err := pauseSvc.Resume(ctx, "ws-1", "resolved", "user-1", "user"); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+
+	// Two bounded ticks: the first drops the 5 unrunnable rows (freeing the
+	// batch), the second reaches task-newer. The review round explicitly
+	// allows "one tick or a bounded number of ticks" for this proof.
+	for i := 0; i < 2; i++ {
+		if err := svc.ReplayPendingDeferredAssignments(ctx); err != nil {
+			t.Fatalf("ReplayPendingDeferredAssignments (tick %d): %v", i, err)
+		}
+	}
+
+	if got := countQueuedRuns(t, svc, "agent-newer", service.RunReasonTaskAssigned); got != 1 {
+		t.Fatalf("queued task_assigned runs for the newer, runnable agent = %d, want 1 "+
+			"(starved by head-of-line-blocked unrunnable rows)", got)
+	}
+	for i := 1; i <= unrunnable; i++ {
+		taskID := fmt.Sprintf("task-%d", i)
+		if outcome := deferredAssignmentOutcome(t, svc, taskID); outcome != "dropped" {
+			t.Fatalf("deferred assignment outcome for %s = %q, want \"dropped\"", taskID, outcome)
+		}
+	}
+}
+
+// TestPausedAssignmentReplay_RepeatedDeliveryDuringPauseReplaysOnce covers
+// the shared-entry-point gap the second Verify round flagged: the same
+// task_assigned wake delivered twice during a pause (a retried webhook, a
+// duplicate dispatch) must still produce exactly one run after resume, not
+// two.
+func TestPausedAssignmentReplay_RepeatedDeliveryDuringPauseReplaysOnce(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	pauseSvc := pause.NewService(
+		svc.RepoForTest(),
+		noopTaskCanceller{},
+		&fakeWorkspaceChecker{known: map[string]bool{"ws-1": true}},
+		logger.Default(),
+	)
+	svc.SetPauseGate(pauseSvc)
+	pauseSvc.SetAssignmentReplayer(svc)
+
+	svc.ExecSQL(t, `INSERT INTO workspaces (id) VALUES ('ws-1')`)
+	createTestAgent(t, svc, "ws-1", "agent-1")
+	svc.ExecSQL(t,
+		`INSERT INTO tasks (id, workspace_id, project_id, assignment_generation) VALUES (?, ?, 'proj-1', 1)`,
+		"task-1", "ws-1")
+	setTestTaskAssignee(t, svc, "task-1", "agent-1")
+
+	if _, err := pauseSvc.Pause(ctx, "ws-1", "regression test", "user-1", "user"); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+
+	gen := int64(1)
+	if err := svc.QueueTaskAssignedRunForTest(ctx, "task-1", "agent-1", &gen); err != nil {
+		t.Fatalf("QueueTaskAssignedRunForTest (first delivery) while paused: %v", err)
+	}
+	if err := svc.QueueTaskAssignedRunForTest(ctx, "task-1", "agent-1", &gen); err != nil {
+		t.Fatalf("QueueTaskAssignedRunForTest (repeated delivery) while paused: %v", err)
+	}
+
+	if _, err := pauseSvc.Resume(ctx, "ws-1", "resolved", "user-1", "user"); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+
+	if got := countQueuedRuns(t, svc, "agent-1", service.RunReasonTaskAssigned); got != 1 {
+		t.Fatalf("queued task_assigned runs after resume = %d, want exactly 1 "+
+			"(repeated delivery during the pause must not double-queue)", got)
 	}
 }

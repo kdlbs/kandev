@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -136,6 +137,16 @@ func (s *Service) replayDeferredAssignment(ctx context.Context, da *models.Defer
 			// pending so the next resume or tick retries it.
 			return
 		}
+		if errors.Is(err, ErrAgentNotRunnable) || errors.Is(err, sql.ErrNoRows) {
+			// A deterministic, non-retryable refusal: the assignee is
+			// paused/stopped/pending-approval, or no longer exists. This is
+			// not a transient failure that a later retry could resolve, so
+			// leaving it pending would head-of-line-block the bounded
+			// recovery-tick backstop forever (R1-F1) — drop it instead,
+			// same as the live wake path already refuses a paused agent.
+			s.resolveDeferredAssignment(ctx, da, deferredAssignmentOutcomeDropped, "agent_not_runnable")
+			return
+		}
 		s.logger.Warn("replay deferred assignment: queue run failed",
 			zap.String("task_id", da.TaskID), zap.Error(err))
 		return
@@ -145,9 +156,11 @@ func (s *Service) replayDeferredAssignment(ctx context.Context, da *models.Defer
 
 // resolveDeferredAssignment CAS-resolves a pending row and logs the paired
 // activity entry, only when this call actually won the CAS (a concurrent
-// replay from the other producer already resolved it otherwise).
+// replay from the other producer already resolved it, or a fresh
+// RecordDeferredAssignment overwrote it with a newer generation since da
+// was read, otherwise).
 func (s *Service) resolveDeferredAssignment(ctx context.Context, da *models.DeferredAssignment, outcome, dropReason string) {
-	won, err := s.repo.ResolveDeferredAssignment(ctx, da.TaskID, outcome)
+	won, err := s.repo.ResolveDeferredAssignment(ctx, da.TaskID, da.AssignmentGeneration, da.AgentProfileID, da.PauseID, outcome)
 	if err != nil {
 		s.logger.Warn("resolve deferred assignment failed",
 			zap.String("task_id", da.TaskID), zap.String("outcome", outcome), zap.Error(err))

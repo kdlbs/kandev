@@ -39,7 +39,7 @@ func TestPostgresRecordDeferredAssignment_UpsertsOnConflict(t *testing.T) {
 
 	// Resolve the pending row so the second call's reset-to-pending effect
 	// (resolved_at/outcome cleared) is observable, not just "still NULL".
-	resolved, err := repo.ResolveDeferredAssignment(ctx, "pg-task-1", "dropped")
+	resolved, err := repo.ResolveDeferredAssignment(ctx, "pg-task-1", 1, "agent-1", "pg-pause-1", "dropped")
 	if err != nil {
 		t.Fatalf("resolve before conflict: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestPostgresResolveDeferredAssignment_CASOnlyResolvesPendingOnce(t *testing
 		t.Fatalf("record deferred assignment: %v", err)
 	}
 
-	won, err := repo.ResolveDeferredAssignment(ctx, "pg-task-3", "replayed")
+	won, err := repo.ResolveDeferredAssignment(ctx, "pg-task-3", 1, "agent-1", "pg-pause-3", "replayed")
 	if err != nil {
 		t.Fatalf("first resolve: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestPostgresResolveDeferredAssignment_CASOnlyResolvesPendingOnce(t *testing
 		t.Fatal("expected the first resolve to win the CAS")
 	}
 
-	won, err = repo.ResolveDeferredAssignment(ctx, "pg-task-3", "dropped")
+	won, err = repo.ResolveDeferredAssignment(ctx, "pg-task-3", 1, "agent-1", "pg-pause-3", "dropped")
 	if err != nil {
 		t.Fatalf("second resolve: %v", err)
 	}
