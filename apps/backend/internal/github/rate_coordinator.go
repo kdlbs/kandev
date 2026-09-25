@@ -110,7 +110,7 @@ func (a *RateAdmission) snapshot(resource Resource, now time.Time) rateAdmission
 		decision.backgroundReason = rateLimitBlockSecondary
 		return decision
 	}
-	if rate, known := a.principal.tracker.Snapshot(resource); known && rate.ResetAt.After(now) {
+	if rate, known := a.principal.tracker.Snapshot(resource); known {
 		if primaryRateExhausted(rate) {
 			decision.interactiveAllowed = false
 			decision.backgroundAllowed = false
@@ -144,7 +144,8 @@ func (a *RateAdmission) snapshot(resource Resource, now time.Time) rateAdmission
 }
 
 func primaryRateExhausted(rate RateSnapshot) bool {
-	return rate.Remaining <= 0 && (rate.RemainingObserved || !rate.ParsedFromHeaders)
+	return rate.Remaining <= 0 && (rate.RemainingObserved || !rate.ParsedFromHeaders) &&
+		(rate.ResetAt.IsZero() || rate.ResetAt.After(time.Now()))
 }
 
 const defaultBackgroundPace = time.Second
@@ -320,7 +321,10 @@ func (a *RateAdmission) retryBoundary(
 		return secondary.RetryAt, secondary.RetrySource
 	case rateLimitBlockPrimary, rateLimitBlockPrimaryReserve:
 		if snapshot, known := a.principal.tracker.Snapshot(resource); known {
-			return snapshot.ResetAt, RetrySourcePrimaryReset
+			if snapshot.ResetAt.After(now) {
+				return snapshot.ResetAt, RetrySourcePrimaryReset
+			}
+			return now.Add(secondaryFallbackDelay).UTC(), RetrySourceConservativeFallback
 		}
 	}
 	if delay > 0 {
@@ -415,8 +419,7 @@ func (a *RateAdmission) interactiveWaitError(resource Resource, cause error) err
 	reason := rateLimitBlockProviderRetry
 	if secondary := a.principal.tracker.Secondary(resource); secondary.RetryAt.After(now) {
 		reason = rateLimitBlockSecondary
-	} else if snapshot, known := a.principal.tracker.Snapshot(resource); known &&
-		snapshot.ResetAt.After(now) && primaryRateExhausted(snapshot) {
+	} else if snapshot, known := a.principal.tracker.Snapshot(resource); known && primaryRateExhausted(snapshot) {
 		reason = rateLimitBlockPrimary
 	}
 	retryAt, retrySource := a.retryBoundary(resource, reason, now, a.principal.tracker.WaitDuration(resource))

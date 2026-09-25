@@ -86,6 +86,39 @@ func TestRateCoordinatorNonBlockingBackgroundAdmissionDefersWithoutHoldingWorker
 	}
 }
 
+func TestRateCoordinatorNonBlockingBackgroundAdmissionDefersForPrimaryWithoutReset(t *testing.T) {
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "missing-reset-user",
+	}, nil)
+	tracker.Record(RateSnapshot{
+		Resource:          ResourceCore,
+		Limit:             5000,
+		Remaining:         0,
+		RemainingObserved: true,
+		ParsedFromHeaders: true,
+		UpdatedAt:         time.Now().UTC(),
+	})
+
+	ctx := WithNonBlockingGitHubAdmission(
+		WithGitHubWorkClass(context.Background(), WorkClassBackground),
+	)
+	release, err := admission.acquire(ctx, ResourceCore)
+	if release != nil {
+		t.Fatal("primary exhaustion without a reset admitted background work")
+	}
+	var deferred *AdmissionDeferredError
+	if !errors.As(err, &deferred) {
+		t.Fatalf("acquire error = %v, want AdmissionDeferredError", err)
+	}
+	if deferred.Reason != rateLimitBlockPrimary {
+		t.Fatalf("deferral reason = %q, want %q", deferred.Reason, rateLimitBlockPrimary)
+	}
+	if deferred.RetrySource != RetrySourceConservativeFallback || !deferred.RetryAt.After(time.Now()) {
+		t.Fatalf("deferral retry = (%s, %s), want future conservative fallback", deferred.RetryAt, deferred.RetrySource)
+	}
+}
+
 func TestRateCoordinatorInteractiveAdmissionCancellationPreservesRateDetails(t *testing.T) {
 	coordinator := NewRateCoordinator(nil, nil)
 	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
