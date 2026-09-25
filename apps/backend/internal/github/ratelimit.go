@@ -54,12 +54,11 @@ type SecondaryRateLimitState struct {
 	Reason      string      `json:"reason,omitempty"`
 }
 
-// Exhausted returns true when the bucket has no quota left and ResetAt is in
-// the future. Limit may be unknown (0) when the snapshot was synthesized from
-// an out-of-band signal (e.g. `gh` stderr).
+// Exhausted returns true when the bucket has no quota left and its reset is
+// still unknown or in the future.
 func (s RateSnapshot) Exhausted() bool {
-	return s.Remaining <= 0 && s.ResetAt.After(time.Now()) &&
-		(s.RemainingObserved || !s.ParsedFromHeaders)
+	return s.Remaining <= 0 && (s.RemainingObserved || !s.ParsedFromHeaders) &&
+		(s.ResetAt.IsZero() || s.ResetAt.After(time.Now()))
 }
 
 // BackgroundReserve returns the quota retained for interactive requests.
@@ -237,6 +236,9 @@ func (r *RateTracker) WaitDuration(resource Resource) time.Duration {
 	retryAt := time.Time{}
 	if r.exhausted[resource] {
 		retryAt = r.snapshots[resource].ResetAt
+		if retryAt.IsZero() {
+			retryAt = time.Now().Add(secondaryFallbackDelay)
+		}
 	}
 	if secondary := r.secondary[resource]; secondary.RetryAt.After(retryAt) {
 		retryAt = secondary.RetryAt
