@@ -241,6 +241,7 @@ A step's Prompt field accepts `@name` references to [saved prompts](developer-to
 
 - The reference is resolved when the step prompt runs, not when it is saved. Editing the saved prompt's content later automatically changes what every step referencing it sends next time: there is nothing to update on the step itself.
 - The `@name` mention stays visible in the prompt/chat. Kandev attaches the referenced prompt's content as hidden context for the agent; it is not shown as part of the visible conversation.
+- Workflow entries keep that hidden context when they start a new profile session, reset the agent context, or recover with a fresh runtime. The saved message and agent prompt retain the same definition once for that entry.
 - `{{task_prompt}}` is only interpolated in the step prompt field itself. If a referenced saved prompt's content contains `{{task_prompt}}`, it is **not** expanded; it is sent to the agent as literal text.
 
 The same `@name` syntax and resolution apply to a GitHub Review Watch's prompt field. See [Integrations](integrations.md#configure-and-use-the-workspace).

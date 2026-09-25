@@ -75,6 +75,12 @@ the agent follows the instructions that I selected.
   an accepted saved definition, launch preparation without a workflow step
   shall preserve that definition exactly once, even if the saved prompt changes.
 
+- **AC-TASKS-SAVED-PROMPT-DELIVERY-001.12:** When a structured workflow entry
+  contains known saved-prompt references, the agent shall receive their definitions in one hidden expansion block.
+  This applies to reused sessions, new profile sessions, return moves, implicit profile-switch launches, and context resets.
+- **AC-TASKS-SAVED-PROMPT-DELIVERY-001.13:** When workflow dispatch requires a replacement session or a fresh runtime, the saved-prompt expansion shall remain available.
+  The stored message and dispatched prompt shall contain the same saved definitions without duplicate expansion blocks.
+
 ## Out of scope
 
 - Changes to saved-prompt creation, editing, naming, or storage.

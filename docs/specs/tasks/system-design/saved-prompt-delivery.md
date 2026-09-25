@@ -123,6 +123,36 @@ The MCP task-create handler continues to pass the task description and selected
 step into `LaunchSession`. It does not gain a separate expansion implementation.
 This repair does not infer a workflow step or change step-selection semantics.
 
+### Workflow entry and composed launches
+
+Workflow entry returns the composed prompt and its exact generated expansion
+context together. `buildWorkflowEntryPrompt` retains the context returned by
+`buildWorkflowPromptWithContext`. Its initial-description claim keeps its existing semantics.
+
+`launchAfterOnEnterDispatch` carries both values into `autoStartStepPrompt`.
+Created sessions and context resets pass the expansion context into both
+runtime-context injectors before message recording. Office and ordinary task
+injectors use the same exact-content trust rule.
+
+The private `startCreatedSessionWithComposedPrompt` entry point forwards the
+context to `startCreatedSession`. Skipping composition does not skip trusted-context
+propagation. The final `wrapCreatedSessionPrompt` receives the same value.
+
+`StartSessionForWorkflowStep`, missing-execution recovery, and replacement-session
+branches also carry the generated context to any downstream canonicalization.
+A replacement that rebuilds the step prompt uses the context from that rebuild.
+An immediate retry of an already prepared prompt retains its matching context.
+Do not infer provenance by extracting a block from prompt text.
+
+Keep queued-message storage and replay authority unchanged. If replay prepares
+references again, use the backend resolver before canonicalization. Never treat
+a serialized expansion-shaped block as a new trust source. This repair adds no
+queue schema or new acceptance-time snapshot contract for queued messages.
+
+Preserve task/session identity, completion instructions, mode transforms, entity
+references, handoff ordering, cancellation guards, and title ownership. Passthrough
+sessions continue to omit hidden expansions.
+
 ## Failure and recovery
 
 A saved-prompt lookup error remains non-fatal. Kandev logs a warning without
@@ -180,3 +210,9 @@ expansion reached the session during diagnosis.
 
 - [Keep Saved-Prompt Expansion Server-Owned](../../../decisions/2026-09-01-server-owned-saved-prompt-expansion.md)
 - [Apply Agent-Generated Titles to Quick Chat](../../../decisions/2026-08-26-quick-chat-agent-titles.md)
+
+## Implementation plans
+
+- [Quick Chat delivery](../../../plans/quick-chat-saved-prompt-delivery/plan.md): completed direct-message repair.
+- [Launch fallback](../../../plans/saved-prompt-launch-fallback/plan.md): completed no-workflow repair.
+- [Workflow entry delivery](../../../plans/workflow-entry-saved-prompts/plan.md): completed composed-launch repair.
