@@ -160,6 +160,7 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 				AgentID:                    "agent-456",
 				Name:                       "My Profile",
 				Model:                      "claude-3.5-sonnet",
+				CursorMCPAuthEnabled:       true,
 				AutoApprove:                true,
 				DangerouslySkipPermissions: false,
 			}, nil
@@ -188,6 +189,9 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 	}
 	if info.ProfileName != "My Profile" {
 		t.Errorf("expected ProfileName 'My Profile', got '%s'", info.ProfileName)
+	}
+	if !info.CursorMCPAuthEnabled {
+		t.Error("Cursor MCP auth preference was not resolved")
 	}
 	if info.AgentID != "agent-456" {
 		t.Errorf("expected AgentID 'agent-456', got '%s'", info.AgentID)

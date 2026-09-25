@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import {
   seedMoveOverrideFixture,
   waitForMoveRequest,
@@ -67,4 +68,44 @@ test("uses nested task commands and the move drawer on a phone", async ({
   await assertNoDocumentHorizontalOverflow(testPage);
   await testPage.screenshot({ path: "test-results/mobile-task-command-archive.png" });
   await cancel.tap();
+});
+
+test("opens the shared change workflow form from the phone command palette", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await testPage.setViewportSize({ width: 360, height: 780 });
+  const fixture = await seedMoveOverrideFixture(
+    testPage,
+    apiClient,
+    seedData,
+    "Phone palette change workflow",
+  );
+  const destination = await apiClient.createWorkflow(seedData.workspaceId, "Phone destination");
+  const destinationStep = await apiClient.createWorkflowStep(destination.id, "Incoming", 0);
+  await testPage.reload();
+
+  await testPage.keyboard.press("Control+k");
+  const palette = testPage.getByRole("dialog").filter({ has: testPage.getByRole("combobox") });
+  const search = palette.getByRole("combobox");
+  await search.fill("Change workflow...");
+  const command = palette
+    .getByRole("option")
+    .filter({ has: testPage.getByText("Change workflow...", { exact: true }) });
+  await expect(command).toBeVisible();
+  expect((await command.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await command.tap();
+
+  const form = new ChangeWorkflowPage(testPage, true);
+  await expect(form.phoneDrawer).toBeVisible();
+  await form.chooseWorkflow(destination.id);
+  await form.chooseStep(destinationStep.id);
+  const submit = form.form.getByTestId("change-workflow-submit");
+  await submit.scrollIntoViewIfNeeded();
+  expect((await submit.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await assertNoDocumentHorizontalOverflow(testPage, "phone command palette change workflow");
+  await form.form.getByTestId("change-workflow-cancel").tap();
+
+  expect((await apiClient.getTask(fixture.taskId)).workflow_id).toBe(fixture.workflowId);
 });

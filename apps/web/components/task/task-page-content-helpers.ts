@@ -9,11 +9,19 @@ import {
 import type { KanbanState } from "@/lib/state/slices";
 import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
 import { repositorySlug } from "@/lib/repository-slug";
+import { remoteRepositoryBrowserUrl } from "@/lib/utils/remote-repository-browser-url";
 import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 import { useAppStore } from "@/components/state-provider";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 
 const EMPTY_REPOSITORIES: Repository[] = [];
+
+export type TaskTopbarRepository = {
+  displayName: string;
+  fullName: string;
+  provider: string;
+  browserUrl: string | null;
+};
 
 export function selectWorkspaceRepositories(
   itemsByWorkspaceId: Record<string, Repository[]>,
@@ -336,6 +344,7 @@ export function resolveTaskProps(
      * repository filter use, never the local clone path.
      */
     repositoryLabel: repository ? repositorySlug(repository) : null,
+    topbarRepository: resolveTaskTopbarRepository(task, repository),
     ...pullRequestProps,
     /**
      * Total number of repositories linked to the task. Used by the top-bar
@@ -343,5 +352,28 @@ export function resolveTaskProps(
      * the task is multi-repo. 0 / 1 means single-repo (no chip).
      */
     repositoryCount: task?.repositories?.length ?? 0,
+  };
+}
+
+function resolveTaskTopbarRepository(
+  task: Task | null,
+  repository: Repository | null,
+): TaskTopbarRepository | null {
+  const linkedRepository = task?.repositories?.[0];
+  if (
+    task?.repositories?.length !== 1 ||
+    !repository ||
+    linkedRepository?.repository_id !== repository.id ||
+    repository.source_type !== "provider"
+  ) {
+    return null;
+  }
+
+  const displayName = repository.provider_name?.trim() || repository.name?.trim();
+  return {
+    displayName: displayName || repositorySlug(repository),
+    fullName: repositorySlug(repository),
+    provider: repository.provider,
+    browserUrl: remoteRepositoryBrowserUrl(repository.remote_url, repository.provider),
   };
 }

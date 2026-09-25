@@ -389,6 +389,21 @@
           "settings_href": "/settings/agents"
         },
         {
+          "key": "agent_profile.cursor_mcp_auth_enabled",
+          "field_path": "cursor_mcp_auth_enabled",
+          "label": "cursor_mcp_auth_enabled",
+          "description": "Share local Cursor MCP credentials. Defaults to true for new profiles.",
+          "json_type": "boolean",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "agent-settings",
+          "writable": true,
+          "validator": "agent-settings.profile",
+          "authority": "org.config.manage",
+          "change_timing": "future_sessions",
+          "settings_href": "/settings/agents"
+        },
+        {
           "key": "agent_profile.dynamic",
           "field_path": "dynamic",
           "label": "dynamic",
@@ -6261,6 +6276,7 @@
       "cli_passthrough",
       "command_prefix",
       "config_options",
+      "cursor_mcp_auth_enabled",
       "dynamic",
       "enabled",
       "env_vars",

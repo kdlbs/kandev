@@ -4,10 +4,10 @@ import { pluginCommandChoices, useTaskMoveChoices } from "./task-command-choices
 
 afterEach(cleanup);
 
-it("omits workflows without destinations while preserving both destination actions", () => {
+it("offers one task-scoped workflow-change command for every other workflow", () => {
   const openMoveOptions = vi.fn();
   const moveImmediately = vi.fn();
-  const target = { id: "review", title: "Review", color: "bg-blue-500" };
+  const onChangeWorkflow = vi.fn();
   const { result } = renderHook(() =>
     useTaskMoveChoices({
       task: { id: "task", title: "Task", workflowId: "current" },
@@ -17,17 +17,21 @@ it("omits workflows without destinations while preserving both destination actio
         { id: "missing", name: "Missing" },
         { id: "target", name: "Target" },
       ],
-      stepsByWorkflowId: { empty: [], target: [target] },
+      stepsByWorkflowId: { empty: [], target: [{ id: "review", title: "Review" }] },
       openMoveOptions,
       moveImmediately,
+      onChangeWorkflow,
     }),
   );
-  expect(result.current.workflows.map((item) => item.label)).toEqual(["Target"]);
-  const destination = result.current.workflows[0].children![0];
-  destination.action?.();
-  destination.immediateAction?.();
-  expect(openMoveOptions).toHaveBeenCalledWith({ ...target, workflow_id: "target" });
-  expect(moveImmediately).toHaveBeenCalledWith({ ...target, workflow_id: "target" });
+  expect(result.current.workflows).toHaveLength(1);
+  expect(result.current.workflows[0]).toMatchObject({
+    id: "task-change-workflow",
+    label: "Change workflow...",
+  });
+  result.current.workflows[0].action?.();
+  expect(onChangeWorkflow).toHaveBeenCalledOnce();
+  expect(openMoveOptions).not.toHaveBeenCalled();
+  expect(moveImmediately).not.toHaveBeenCalled();
 });
 
 /**

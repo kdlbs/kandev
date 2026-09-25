@@ -224,7 +224,8 @@ var (
 	// concurrent terminal session transition won the persistence race. Callers
 	// must not start the process and must arbitrate exact-execution teardown
 	// ownership before deciding whether to force-stop the registered runtime.
-	ErrSessionStateSuperseded = errors.New("session state superseded by terminal transition")
+	ErrSessionStateSuperseded   = errors.New("session state superseded by terminal transition")
+	errSessionAdvancedToRunning = errors.New("session state advanced to RUNNING before runtime persistence")
 	// ErrOrphanRecoveryIncomplete means StopByTaskID stopped every session it
 	// found but could not load at least one registry-only orphan's row, so the
 	// task-scoped stop is not fully confirmed. Callers that already observed a

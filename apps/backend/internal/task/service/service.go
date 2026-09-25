@@ -343,6 +343,12 @@ type WorkflowMovePreflight interface {
 	PreflightWorkflowStepMove(ctx context.Context, taskID string, currentSession *models.TaskSession, targetStep *wfmodels.WorkflowStep) error
 }
 
+// WorkflowChangeMovePreflight accepts the candidate task projection so
+// destination routing checks see the draft override map before it is persisted.
+type WorkflowChangeMovePreflight interface {
+	PreflightWorkflowStepChange(ctx context.Context, candidate *models.Task, currentSession *models.TaskSession, targetStep *wfmodels.WorkflowStep) error
+}
+
 // workflowStepLister is an optional extension used to find WIP steps that
 // pull work from a feeder when new work arrives in that feeder.
 type workflowStepLister interface {

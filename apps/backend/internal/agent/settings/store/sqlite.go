@@ -110,6 +110,7 @@ func (r *sqliteRepository) initSchema() error {
 		provider_kind TEXT NOT NULL DEFAULT '',
 		provider_base_url TEXT NOT NULL DEFAULT '',
 		provider_api_key_secret_id TEXT NOT NULL DEFAULT '',
+		cursor_mcp_auth_enabled INTEGER NOT NULL DEFAULT 1,
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	);
 
@@ -204,6 +205,7 @@ func (r *sqliteRepository) initSchema() error {
 	_ = r.migrate.Apply("agent_profiles.provider_base_url", `ALTER TABLE agent_profiles ADD COLUMN provider_base_url TEXT NOT NULL DEFAULT ''`)
 	_ = r.migrate.Apply("agent_profiles.provider_api_key_secret_id", `ALTER TABLE agent_profiles ADD COLUMN provider_api_key_secret_id TEXT NOT NULL DEFAULT ''`)
 	_ = r.migrate.Apply("agent_profiles.require_exact_model", `ALTER TABLE agent_profiles ADD COLUMN require_exact_model INTEGER NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("agent_profiles.cursor_mcp_auth_enabled", `ALTER TABLE agent_profiles ADD COLUMN cursor_mcp_auth_enabled INTEGER NOT NULL DEFAULT 1`)
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("required agent settings migration: %w", err)
 	}
@@ -335,6 +337,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	srcHasFallbackModel := columnExists(tx, "agent_profiles", "fallback_model")
 	srcHasAutoFallback := columnExists(tx, "agent_profiles", "auto_fallback")
 	srcHasRequireExactModel := columnExists(tx, "agent_profiles", "require_exact_model")
+	srcHasCursorMCPAuthEnabled := columnExists(tx, "agent_profiles", "cursor_mcp_auth_enabled")
 	srcCols := `id, agent_id, name, agent_display_name, model, mode, migrated_from,
 		auto_approve, dangerously_skip_permissions, allow_indexing,
 		cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at`
@@ -367,6 +370,10 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		srcCols += ", require_exact_model"
 		dstCols += ", require_exact_model"
 	}
+	if srcHasCursorMCPAuthEnabled {
+		srcCols += ", cursor_mcp_auth_enabled"
+		dstCols += ", cursor_mcp_auth_enabled"
+	}
 
 	if _, err := tx.Exec(`CREATE TABLE agent_profiles_new (
 		id TEXT PRIMARY KEY,
@@ -392,6 +399,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		fallback_model TEXT NOT NULL DEFAULT '',
 		auto_fallback INTEGER NOT NULL DEFAULT 0,
 		require_exact_model INTEGER NOT NULL DEFAULT 0,
+		cursor_mcp_auth_enabled INTEGER NOT NULL DEFAULT 1,
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	)`); err != nil {
 		return fmt.Errorf("create new table: %w", err)
@@ -1023,7 +1031,8 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			consecutive_failures, failure_threshold,
 			executor_preference, budget_monthly_cents, settings, permissions,
 			command_prefix, fallback_model, auto_fallback,
-			provider_kind, provider_base_url, provider_api_key_secret_id, require_exact_model
+			provider_kind, provider_base_url, provider_api_key_secret_id, require_exact_model,
+			cursor_mcp_auth_enabled
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
@@ -1035,7 +1044,8 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			?, ?,
 			?, ?, ?, ?,
 			?, ?, ?,
-			?, ?, ?, ?
+			?, ?, ?, ?,
+			?
 		)
 	`),
 		profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
@@ -1054,6 +1064,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 		dialect.BoolToInt(profile.AutoFallback),
 		profile.ProviderKind, profile.ProviderBaseURL, profile.ProviderAPIKeySecretID,
 		dialect.BoolToInt(profile.RequireExactModel),
+		dialect.BoolToInt(profile.CursorMCPAuthEnabled),
 	)
 	return err
 }
@@ -1325,7 +1336,8 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 			executor_preference = ?,
 			budget_monthly_cents = ?, settings = ?, permissions = ?,
 			command_prefix = ?, fallback_model = ?, auto_fallback = ?,
-			provider_kind = ?, provider_base_url = ?, provider_api_key_secret_id = ?, require_exact_model = ?
+			provider_kind = ?, provider_base_url = ?, provider_api_key_secret_id = ?, require_exact_model = ?,
+			cursor_mcp_auth_enabled = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
@@ -1344,6 +1356,7 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 		dialect.BoolToInt(profile.AutoFallback),
 		profile.ProviderKind, profile.ProviderBaseURL, profile.ProviderAPIKeySecretID,
 		dialect.BoolToInt(profile.RequireExactModel),
+		dialect.BoolToInt(profile.CursorMCPAuthEnabled),
 		profile.ID)
 	if err != nil {
 		return err
@@ -1416,7 +1429,8 @@ const agentProfileSelectColumns = `
 		COALESCE(command_prefix, ''),
 		COALESCE(fallback_model, ''), COALESCE(auto_fallback, 0),
 		COALESCE(provider_kind, ''), COALESCE(provider_base_url, ''),
-		COALESCE(provider_api_key_secret_id, ''), COALESCE(require_exact_model, 0)
+		COALESCE(provider_api_key_secret_id, ''), COALESCE(require_exact_model, 0),
+		COALESCE(cursor_mcp_auth_enabled, 1)
 	FROM agent_profiles`
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
@@ -1598,6 +1612,7 @@ func scanAgentProfile(scanner interface {
 	var failureThreshold int
 	var autoFallback int
 	var requireExactModel int
+	var cursorMCPAuthEnabled int
 	if err := scanner.Scan(
 		&profile.ID,
 		&profile.AgentID,
@@ -1644,6 +1659,7 @@ func scanAgentProfile(scanner interface {
 		&profile.ProviderBaseURL,
 		&profile.ProviderAPIKeySecretID,
 		&requireExactModel,
+		&cursorMCPAuthEnabled,
 	); err != nil {
 		return nil, err
 	}
@@ -1662,6 +1678,7 @@ func scanAgentProfile(scanner interface {
 	profile.SkipIdleRuns = skipIdleRuns == 1
 	profile.AutoFallback = autoFallback == 1
 	profile.RequireExactModel = requireExactModel == 1
+	profile.CursorMCPAuthEnabled = cursorMCPAuthEnabled == 1
 	profile.Role = models.AgentRole(role)
 	profile.Status = models.AgentStatus(status)
 	profile.ConfigOptions = configOptionsFromSettings(profile.Settings)

@@ -91,6 +91,7 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
 }) => {
   test.setTimeout(180_000);
   const { source, tail, firstLine } = oversizedMessage("MOBILE-OVERSIZED");
+  const slowPrompt = "/slow 30s";
   const firstTitle = `Mobile oversized message ${Date.now()}`;
   const task = await createTask(apiClient, seedData, firstTitle);
   if (!task.session_id) throw new Error("oversized mobile task has no session_id");
@@ -156,7 +157,7 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
     1,
   );
 
-  await session.sendMessageViaButton("/slow 10s");
+  await session.sendMessageViaButton(slowPrompt);
   await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
   await waitForComposerQueueMode(testPage);
   const queued = oversizedMessage("MOBILE-QUEUED");
@@ -210,7 +211,7 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
       async () => {
         const { messages } = await apiClient.listSessionMessages(task.session_id!);
         return messages.some(
-          (message) => message.author_type === "user" && message.content === "/slow 10s",
+          (message) => message.author_type === "user" && message.content === slowPrompt,
         );
       },
       { timeout: 30_000, message: "the mobile follow-up prompt should be stored" },

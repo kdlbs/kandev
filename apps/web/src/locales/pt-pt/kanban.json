@@ -89,7 +89,6 @@
   "selectRepository": "Selecionar repositório",
   "selectTask": "Selecionar a tarefa {{title}}",
   "selectWorkflow": "Selecionar fluxo de trabalho",
-  "sendToWorkflow": "Enviar para o fluxo de trabalho",
   "selectedFilterCount_one": "{{label}}: {{count}} selecionado",
   "selectedFilterCount_other": "{{label}}: {{count}} selecionados",
   "sentryIssue": "Issue do Sentry",
