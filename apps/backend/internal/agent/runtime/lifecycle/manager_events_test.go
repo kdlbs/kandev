@@ -91,6 +91,32 @@ func createTestExecution(id, taskID, sessionID string) *AgentExecution {
 	}
 }
 
+func TestHandleAgentEvent_DelayedCompletedPromptChunkDoesNotRearmExecution(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-delayed-chunk", "task-1", "session-1")
+	execution.Status = v1.AgentStatusReady
+	execution.promptGeneration = 3
+	execution.promptCompletionGeneration = 3
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             "message_chunk",
+		Text:             "late chunk from the completed turn",
+		PromptGeneration: 3,
+	})
+
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("execution status = %q, want %q after a completed turn's delayed chunk", execution.Status, v1.AgentStatusReady)
+	}
+	for _, published := range eventBus.PublishedEvents {
+		if published.Event != nil && published.Event.Type == events.AgentRunning {
+			t.Fatal("delayed completed-turn chunk published agent.running")
+		}
+	}
+}
+
 func TestHandleAgentEvent_UserMessageChunkNotBufferedAsAssistant(t *testing.T) {
 	mgr, eventBus := createTestManagerWithTracking()
 	execution := createTestExecution("exec-1", "task-1", "session-1")

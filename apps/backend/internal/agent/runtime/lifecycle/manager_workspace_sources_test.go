@@ -128,6 +128,141 @@ func TestRebindWorkspaceForSessionWaitsForRestartedAdapterBeforeLoadingSession(t
 	}
 }
 
+func TestRebindWorkspaceForSessionIgnoresLateDisconnectFromStoppedProcess(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
+	t.Cleanup(server.Close)
+	t.Cleanup(server.closeConnections)
+	eventBus := &MockEventBusWithTracking{}
+	mgr.eventPublisher = NewEventPublisher(eventBus, newTestLogger())
+	execution.Status = v1.AgentStatusReady
+	execution.ACPSessionID = "acp-existing"
+	execution.setSessionInitialized(true)
+	execution.promptGeneration = 1
+	oldGeneration := execution.beginStartupAttempt()
+	stopDisconnectDone := make(chan struct{})
+	server.mu.Lock()
+	server.onStop = func() {
+		go func() {
+			defer close(stopDisconnectDone)
+			mgr.handleStreamDisconnectWithStartupGeneration(
+				execution,
+				errors.New("old agent process stopped"),
+				1,
+				oldGeneration,
+			)
+		}()
+	}
+	server.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := mgr.RebindWorkspaceForSession(ctx, execution.SessionID, "/new-workspace"); err != nil {
+		t.Fatalf("RebindWorkspaceForSession: %v", err)
+	}
+	select {
+	case <-stopDisconnectDone:
+	case <-time.After(time.Second):
+		t.Fatal("old process disconnect callback did not finish")
+	}
+	if execution.startupAttemptSnapshot() == oldGeneration {
+		t.Fatal("workspace rebind did not advance the process startup generation")
+	}
+
+	// The old process can report its intentional stop after the replacement is
+	// already ready. Its callback must not fail the replacement execution.
+	mgr.handleStreamDisconnectWithStartupGeneration(
+		execution,
+		errors.New("old agent process stopped"),
+		execution.promptGenerationSnapshot(),
+		oldGeneration,
+	)
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("status after stale disconnect = %q, want %q", execution.Status, v1.AgentStatusReady)
+	}
+	if got := len(eventBus.PublishedEvents); got != 0 {
+		t.Fatalf("stale disconnect published %d events, want none", got)
+	}
+}
+
+func TestRebindWorkspaceForSessionStopFailureKeepsCurrentProcessGeneration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/stop" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		http.Error(w, "stop failed", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
+	execution.Status = v1.AgentStatusReady
+	execution.ACPSessionID = "acp-existing"
+	startupGeneration := execution.beginStartupAttempt()
+
+	if err := mgr.RebindWorkspaceForSession(context.Background(), execution.SessionID, "/new-workspace"); err == nil {
+		t.Fatal("RebindWorkspaceForSession unexpectedly succeeded")
+	}
+	if got := execution.startupAttemptSnapshot(); got != startupGeneration {
+		t.Fatalf("startup generation after failed stop = %d, want unchanged %d", got, startupGeneration)
+	}
+	if execution.isExpectedWorkspaceRebindDisconnect(startupGeneration) {
+		t.Fatal("failed stop left an expected-disconnect fence active")
+	}
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("status after failed stop = %q, want %q", execution.Status, v1.AgentStatusReady)
+	}
+}
+
+func TestRebindWorkspaceForSessionStopFailureSurfacesObservedDisconnect(t *testing.T) {
+	var onStop func()
+	var onStopMu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/stop" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		onStopMu.Lock()
+		callback := onStop
+		onStopMu.Unlock()
+		if callback != nil {
+			callback()
+		}
+		http.Error(w, "stop failed", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
+	eventBus := &MockEventBusWithTracking{}
+	mgr.eventPublisher = NewEventPublisher(eventBus, newTestLogger())
+	execution.Status = v1.AgentStatusReady
+	execution.ACPSessionID = "acp-existing"
+	execution.setSessionInitialized(true)
+	execution.promptGeneration = 1
+	startupGeneration := execution.beginStartupAttempt()
+	onStopMu.Lock()
+	onStop = func() {
+		mgr.handleStreamDisconnectWithStartupGeneration(
+			execution,
+			errors.New("agent stream closed during stop"),
+			1,
+			startupGeneration,
+		)
+	}
+	onStopMu.Unlock()
+
+	if err := mgr.RebindWorkspaceForSession(context.Background(), execution.SessionID, "/new-workspace"); err == nil {
+		t.Fatal("RebindWorkspaceForSession unexpectedly succeeded")
+	}
+	if execution.Status != v1.AgentStatusFailed {
+		t.Fatalf("status after unconfirmed stop with disconnect = %q, want %q", execution.Status, v1.AgentStatusFailed)
+	}
+	if got := execution.startupAttemptSnapshot(); got != startupGeneration {
+		t.Fatalf("startup generation after failed stop = %d, want unchanged %d", got, startupGeneration)
+	}
+	if len(eventBus.PublishedEvents) == 0 {
+		t.Fatal("observed disconnect during failed stop was not surfaced")
+	}
+}
+
 func TestRebindWorkspaceForSessionRequiresExplicitRecoveryWhenProviderCannotChangeResumeCWD(t *testing.T) {
 	server := newWorkspaceRebindAgentctlServer(t, false)
 
@@ -238,6 +373,7 @@ type workspaceRebindAgentctlServer struct {
 	loadedSessions  []string
 	actionLog       []string
 	connections     []*websocket.Conn
+	onStop          func()
 }
 
 func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceRebindAgentctlServer {
@@ -246,7 +382,15 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.HandleFunc("/api/v1/stop", workspaceRebindSuccess)
+	mux.HandleFunc("/api/v1/stop", func(w http.ResponseWriter, _ *http.Request) {
+		server.mu.Lock()
+		onStop := server.onStop
+		server.mu.Unlock()
+		if onStop != nil {
+			onStop()
+		}
+		workspaceRebindSuccess(w, nil)
+	})
 	mux.HandleFunc("/api/v1/workspace/rebind", func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			WorkDir string `json:"work_dir"`

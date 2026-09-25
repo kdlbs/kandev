@@ -376,8 +376,10 @@ type AgentExecution struct {
 	// generation. The execution ID can be reused by managed-runtime repair, so
 	// callbacks must use their captured generation identity instead of the
 	// execution's current mutable label.
-	startupAttemptIDs  map[uint64]string
-	startupLifecycleMu sync.Mutex
+	startupAttemptIDs                   map[uint64]string
+	startupLifecycleMu                  sync.Mutex
+	workspaceRebindDisconnectGeneration atomic.Uint64
+	workspaceRebindDisconnectObserved   atomic.Bool
 	// startupCallbackMu leases the complete callback mutation. Startup
 	// replacement and adopted-execution binding take its write lock, so a
 	// callback cannot validate one generation and mutate another after the
@@ -663,6 +665,28 @@ func (e *AgentExecution) beginStartupAttemptWithID(attemptID string) uint64 {
 	e.startupRecoveryStarted = false
 	e.recordStartupAttemptIDLocked(e.startupAttemptGeneration, attemptID)
 	return e.startupAttemptGeneration
+}
+
+func (e *AgentExecution) expectWorkspaceRebindDisconnect(generation uint64) {
+	e.workspaceRebindDisconnectObserved.Store(false)
+	e.workspaceRebindDisconnectGeneration.Store(generation + 1)
+}
+
+func (e *AgentExecution) clearWorkspaceRebindDisconnectExpectation() {
+	e.workspaceRebindDisconnectGeneration.Store(0)
+	e.workspaceRebindDisconnectObserved.Store(false)
+}
+
+func (e *AgentExecution) isExpectedWorkspaceRebindDisconnect(generation uint64) bool {
+	return e.workspaceRebindDisconnectGeneration.Load() == generation+1
+}
+
+func (e *AgentExecution) recordExpectedWorkspaceRebindDisconnect(generation uint64) bool {
+	if !e.isExpectedWorkspaceRebindDisconnect(generation) {
+		return false
+	}
+	e.workspaceRebindDisconnectObserved.Store(true)
+	return true
 }
 
 // beginStartupRecovery advances the startup generation exactly once. The
