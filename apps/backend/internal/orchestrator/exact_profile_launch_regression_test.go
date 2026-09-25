@@ -22,6 +22,30 @@ type exactProfileWorkflowSwitchTaskRepo struct {
 	once     sync.Once
 }
 
+type exactProfileAssignmentFenceRepo struct {
+	sessionExecutorStore
+	exactProfileAssignmentStore
+	currentCheckReached chan struct{}
+	assignmentActivated chan struct{}
+	assignmentReads     int
+	mu                  sync.Mutex
+}
+
+func (r *exactProfileAssignmentFenceRepo) GetExactProfileAssignment(
+	ctx context.Context,
+	taskID string,
+) (*models.ExactProfileAssignment, error) {
+	r.mu.Lock()
+	r.assignmentReads++
+	checkCurrent := r.assignmentReads == 2
+	r.mu.Unlock()
+	if checkCurrent {
+		close(r.currentCheckReached)
+		<-r.assignmentActivated
+	}
+	return r.exactProfileAssignmentStore.GetExactProfileAssignment(ctx, taskID)
+}
+
 func (r *exactProfileWorkflowSwitchTaskRepo) GetTask(ctx context.Context, taskID string) (*v1.Task, error) {
 	var switchErr error
 	r.once.Do(func() {
@@ -140,6 +164,87 @@ func TestStartCreatedSession_PersistsExactBindingOnWorkflowRedirect(t *testing.T
 	}
 	if redirected.AgentProfileID != "profile-exact" {
 		t.Fatalf("redirected profile = %q, want assigned exact profile", redirected.AgentProfileID)
+	}
+}
+
+func TestStartCreatedSession_RejectsSupersededExactAssignmentBeforeBinding(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	task, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.WorkspaceID = "ws1"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("set task workspace: %v", err)
+	}
+
+	revision := time.Unix(1_726_500_000, 0).UTC()
+	if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
+		TaskID:          "task1",
+		WorkspaceID:     "ws1",
+		AgentProfileID:  "profile-exact",
+		ProfileRevision: revision,
+		Generation:      1,
+	}); err != nil {
+		t.Fatalf("assign generation one: %v", err)
+	}
+
+	baseTaskRepo := newMockTaskRepo()
+	baseTaskRepo.tasks["task1"] = &v1.Task{
+		ID: "task1", WorkspaceID: "ws1", Title: "Test Task", Description: "desc", State: v1.TaskStateInProgress,
+	}
+	fenceRepo := &exactProfileAssignmentFenceRepo{
+		sessionExecutorStore:        repo,
+		exactProfileAssignmentStore: repo,
+		currentCheckReached:         make(chan struct{}),
+		assignmentActivated:         make(chan struct{}),
+	}
+	launched := make(chan struct{}, 1)
+	agentMgr := &mockAgentManager{
+		resolveProfileInfo: &executor.AgentProfileInfo{
+			ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: true, Revision: revision, Model: "gpt-exact",
+		},
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launched <- struct{}{}
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-stale"}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), baseTaskRepo, agentMgr)
+	svc.repo = fenceRepo
+
+	startErr := make(chan error, 1)
+	go func() {
+		_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile-exact", "start", false, false, false, nil, nil)
+		startErr <- err
+	}()
+	<-fenceRepo.currentCheckReached
+	if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
+		TaskID:          "task1",
+		WorkspaceID:     "ws1",
+		AgentProfileID:  "profile-exact",
+		ProfileRevision: revision,
+		Generation:      2,
+	}); err != nil {
+		t.Fatalf("assign generation two: %v", err)
+	}
+	close(fenceRepo.assignmentActivated)
+	if err := <-startErr; !errors.Is(err, ErrExactProfileAssignmentInvalid) {
+		t.Fatalf("StartCreatedSession error = %v, want invalid exact assignment", err)
+	}
+	select {
+	case <-launched:
+		t.Fatal("launch started with superseded exact assignment")
+	default:
+	}
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.ExactProfileGeneration != 0 || session.ExactProfileRevision != 0 {
+		t.Fatalf("session exact binding = (%d, %d), want unbound", session.ExactProfileGeneration, session.ExactProfileRevision)
 	}
 }
 

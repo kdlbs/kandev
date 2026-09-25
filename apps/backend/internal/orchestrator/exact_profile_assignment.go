@@ -202,8 +202,18 @@ func (s *Service) persistExactProfileSessionBinding(
 	session *models.TaskSession,
 	exact *ExactProfileLaunchDecision,
 ) error {
-	if exact == nil ||
-		(session.ExactProfileGeneration == exact.Generation && session.ExactProfileRevision == exact.Revision) {
+	if exact == nil {
+		return nil
+	}
+	current, err := s.resolveExactProfileAssignment(ctx, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("validate current exact profile assignment: %w", err)
+	}
+	if current == nil || current.AgentProfileID != exact.AgentProfileID ||
+		current.Generation != exact.Generation || current.Revision != exact.Revision {
+		return ErrExactProfileAssignmentInvalid
+	}
+	if session.ExactProfileGeneration == exact.Generation && session.ExactProfileRevision == exact.Revision {
 		return nil
 	}
 
