@@ -27,7 +27,7 @@ export function useCompactSwimlaneHeight(
     });
   }, [enabled, steps]);
   const naturalHeight = Math.max(0, ...steps.map((step) => heights[step.id] ?? 0));
-  const nextHeight = `clamp(12.5rem, ${naturalHeight}px, 25rem)`;
+  const nextHeight = `max(12.5rem, ${naturalHeight}px)`;
   const settledHeight = useRef(nextHeight);
   useLayoutEffect(() => {
     if (!isDragging) settledHeight.current = nextHeight;

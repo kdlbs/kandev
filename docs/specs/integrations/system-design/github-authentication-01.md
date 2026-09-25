@@ -133,8 +133,18 @@ automation under different GitHub Apps without operating separate Kandev deploym
 - Managed Git helper execution does not depend on the post-startup `PATH`: Git resolves an
   absolute Kandev-owned `agentctl` executable published before the first managed Git operation.
   Local and Worktree preparation binds the helper to the standalone launcher's absolute executable
-  before checkout or setup scripts run. Remote preparation binds it to the installed executor
-  binary before cloning, and a running `agentctl` publishes its own executable for child processes.
+  before Kandev-owned checkout operations run. Per-repository setup scripts retain resolved profile
+  and repository environment, user-owned indexed Git configuration, and Kandev's managed build
+  cache, but Kandev removes broker capabilities and generated Git and `gh` helper routing before
+  those scripts start. Remote preparation binds the helper to the installed executor binary before
+  cloning, and a running `agentctl` publishes its own executable for child processes.
+  The `gh` shim resolves the real CLI on a `PATH` with the managed shim directory removed and
+  skips any candidate inside a `kandev-github-cli-*` directory, whichever `agentctl` it links to
+  or copies, as well as any candidate that is the same file as the running `agentctl`. A stale
+  shim directory from an earlier `agentctl` therefore cannot make the shim launch itself. The
+  shim passes `KANDEV_GITHUB_CLI_SHIM_DEPTH` to the CLI it launches, incremented per shim level,
+  and refuses to run at depth 8. Nesting below that bound is legitimate: the real CLI can run a
+  Bash extension whose `BASH_ENV` restores the shim directory and calls `gh` again.
   Non-interactive Unix login shells that replace their inherited `PATH` restore the managed
   CLI-shim directory after profile initialization for broker-enabled tasks, while preserving
   pre-existing Bash environment hooks, including hook paths containing `$VAR` or `${VAR}`

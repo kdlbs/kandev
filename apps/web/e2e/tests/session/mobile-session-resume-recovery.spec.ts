@@ -1,17 +1,28 @@
 // Filename starts with "mobile-" so this runs on the mobile-chrome project.
 import { test, expect } from "../../fixtures/test-base";
+import fs from "node:fs";
+import path from "node:path";
 import type { SeedData } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import {
   cleanupDelayedResumeFixture,
+  countResumeBootMessages,
   createFailOnResumeProfile,
+  readSessionMessageIdsContaining,
+  readSessionRuntimeIdentity,
   seedDelayedResumeFixture,
+  waitForNewSessionMessage,
   waitForSessionReady,
 } from "../../helpers/session-resume-prompt-queue";
 import {
+  cleanupManagedCloneRelocationFixture,
+  countSimpleMockResponses,
+  readManagedCloneRecoveryConsumers,
   removeRecoveryBranch,
+  seedManagedCloneRelocationFixture,
   seedWorktreeRecoveryFixture,
 } from "../../helpers/session-resume-recovery";
 
@@ -51,7 +62,7 @@ test.describe("mobile: delayed resume cancellation", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(150_000);
+    test.setTimeout(180_000);
 
     const fixture = await seedDelayedResumeFixture(
       testPage,
@@ -87,10 +98,20 @@ test.describe("mobile: delayed resume cancellation", () => {
         { timeout: 30_000 },
       );
 
+      const priorResponses = await readSessionMessageIdsContaining(
+        apiClient,
+        fixture.identity.sessionId,
+        "simple mock response",
+      );
       await fixture.session.sendMessageViaButton("/e2e:simple-message");
-      await fixture.session.expectChatResponseVisible("simple mock response", 1, {
-        timeout: 60_000,
-      });
+      await waitForNewSessionMessage(
+        apiClient,
+        fixture.identity.sessionId,
+        priorResponses,
+        "simple mock response",
+        90_000,
+      );
+      await fixture.session.expectChatResponseVisible("simple mock response", 1);
       const responses = fixture.session
         .activeChat()
         .locator("[data-agent-message-body][data-message-id]")
@@ -99,6 +120,116 @@ test.describe("mobile: delayed resume cancellation", () => {
       await assertNoDocumentHorizontalOverflow(testPage, "mobile delayed cancel and retry");
     } finally {
       await cleanupDelayedResumeFixture(apiClient, fixture);
+    }
+  });
+
+  test("pausing an accepted lazy resume preserves the runtime for later turns", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(150_000);
+    await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
+
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Mobile accepted lazy resume pause recovery",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      if (!task.session_id) throw new Error("mobile accepted lazy resume task has no session_id");
+
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+        timeout: 30_000,
+      });
+      await session.waitForChatIdle({ timeout: 30_000 });
+
+      await backend.restart();
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(testPage.getByTestId("composer-agent-start-hint")).toBeVisible({
+        timeout: 60_000,
+      });
+
+      const resumeBootsBeforeMessage = await countResumeBootMessages(apiClient, task.session_id);
+
+      // Provider output proves that the resumed prompt crossed acceptance
+      // before the touch cancellation is sent.
+      await session.sendMessageViaButton("/slow 8s");
+      await expect(session.chat.getByText("Running slow response", { exact: false })).toBeVisible({
+        timeout: 30_000,
+      });
+      const initialRuntimeIdentity = await readSessionRuntimeIdentity(
+        apiClient,
+        task.id,
+        task.session_id,
+      );
+      await session.cancelAgentButton().tap();
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId: task.session_id,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for mobile accepted lazy resume cancellation",
+        timeout: 30_000,
+      });
+      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      const resumeBootsAfterFirstPause = await countResumeBootMessages(apiClient, task.session_id);
+      expect(resumeBootsAfterFirstPause).toBe(resumeBootsBeforeMessage + 1);
+
+      const slowResponseMessageIdsBeforeSecond = await readSessionMessageIdsContaining(
+        apiClient,
+        task.session_id,
+        "Running slow response",
+      );
+      expect(slowResponseMessageIdsBeforeSecond.size).toBeGreaterThan(0);
+      await session.sendMessageViaButton("/slow 8s");
+      await waitForNewSessionMessage(
+        apiClient,
+        task.session_id,
+        slowResponseMessageIdsBeforeSecond,
+        "Running slow response",
+      );
+      await session.cancelAgentButton().tap();
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId: task.session_id,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for the later mobile accepted pause",
+        timeout: 30_000,
+      });
+
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      expect(await countResumeBootMessages(apiClient, task.session_id)).toBe(
+        resumeBootsAfterFirstPause,
+      );
+
+      await session.sendMessageViaButton("/e2e:simple-message");
+      await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      expect(await countResumeBootMessages(apiClient, task.session_id)).toBe(
+        resumeBootsAfterFirstPause,
+      );
+      await assertNoDocumentHorizontalOverflow(testPage, "mobile accepted lazy resume pause");
+    } finally {
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
     }
   });
 });
@@ -196,24 +327,18 @@ test.describe("mobile: worktree branch resume recovery", () => {
     await expect(fixture.session.recoveryError()).toBeVisible({ timeout: 30_000 });
     await expect(fixture.session.recoveryError()).toContainText("no longer available");
     await expect(fixture.session.recoveryNewBranchButton()).toBeVisible();
-    await expect(fixture.session.recoveryRestoreWorkspaceButton()).toBeVisible();
-
-    for (const button of [
-      fixture.session.recoveryNewBranchButton(),
-      fixture.session.recoveryRestoreWorkspaceButton(),
-    ]) {
-      await expect(button).toBeInViewport();
-      const box = await button.boundingBox();
-      expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-    }
-    await fixture.session.recoveryRestoreWorkspaceButton().focus();
-    await expect(fixture.session.recoveryRestoreWorkspaceButton()).toBeFocused();
+    const branchButton = fixture.session.recoveryNewBranchButton();
+    await expect(branchButton).toBeInViewport();
+    expect((await branchButton.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    const restoreButton = testPage.getByTestId("recovery-restore-workspace-button");
+    await expect(restoreButton).toBeInViewport();
+    expect((await restoreButton.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await restoreButton.focus();
+    await expect(restoreButton).toBeFocused();
     await assertNoDocumentHorizontalOverflow(testPage, "mobile lost branch recovery error");
 
-    // The normal action remains retryable and cannot alter the persisted branch
-    // until the user taps the explicit replacement action.
-    await fixture.session.recoveryResumeButton().tap();
+    // A normal retry remains distinct from the explicit replacement action.
+    await testPage.getByTestId("recovery-resume-button").tap();
     await expect(fixture.session.recoveryError()).toBeVisible({ timeout: 30_000 });
     await expect
       .poll(
@@ -282,5 +407,171 @@ test.describe("mobile: worktree branch resume recovery", () => {
     await expect(fixture.session.branchRecreatedWarning()).toContainText(newBranch);
     await expect(fixture.session.recoveryError()).toHaveCount(0);
     await assertNoDocumentHorizontalOverflow(testPage, "reloaded mobile branch warning");
+  });
+});
+
+test.describe("mobile: dirty managed clone relocation", () => {
+  test.describe.configure({ retries: 0 });
+
+  test.afterEach(async ({ apiClient, seedData }) => {
+    await cleanupManagedCloneRelocationFixture(apiClient, seedData);
+  });
+
+  test("moves the dirty worktree through touch confirmation and resumes the session", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  }) => {
+    test.setTimeout(180_000);
+
+    const fixture = await seedManagedCloneRelocationFixture(
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      `Mobile managed clone relocation ${Date.now()}`,
+    );
+    const sessionId = fixture.task.session_id!;
+    const originalPath = fixture.repository.worktree_path!;
+    const beforeEnvironment = await apiClient.getTaskEnvironment(fixture.task.id);
+    const beforeRepository = beforeEnvironment?.repos?.find(
+      (repository) => repository.repository_id === seedData.repositoryId,
+    );
+
+    const stopResponse = await apiClient.stopSession({
+      session_id: sessionId,
+      reason: "mobile e2e managed clone relocation",
+      force: true,
+    });
+    expect(stopResponse.success).toBe(true);
+    await waitForSessionState(apiClient, {
+      taskId: fixture.task.id,
+      sessionId,
+      expectedState: "CANCELLED",
+      message: "Waiting for the mobile managed clone relocation session to stop",
+      timeout: 30_000,
+    });
+    await fixture.session.recoveryResumeButton().click();
+
+    const relocate = testPage.getByTestId("managed-clone-relocate-button");
+    await expect(relocate).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(
+        async () => {
+          const status = await apiClient.wsRequest<{
+            is_agent_running: boolean;
+          }>("task.session.status", { task_id: fixture.task.id, session_id: sessionId });
+          return status.is_agent_running;
+        },
+        {
+          timeout: 30_000,
+          intervals: [250, 500, 1_000],
+          message: "Waiting for the mobile stopped session runtime to exit",
+        },
+      )
+      .toBe(false);
+    await expect
+      .poll(() => readManagedCloneRecoveryConsumers(backend.tmpDir, fixture.environment.id), {
+        timeout: 30_000,
+        intervals: [250, 500, 1_000],
+        message: "Waiting for the mobile stopped resumable runtime to settle durably",
+      })
+      .toEqual([{ sessionId, state: "CANCELLED", runtimeStatus: "stopped" }]);
+    await expect(relocate).toBeInViewport();
+    expect((await relocate.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await expect(testPage.getByTestId("recovery-resume-button")).toHaveCount(0);
+    await expect(testPage.getByTestId("recovery-fresh-button")).toHaveCount(0);
+    await expect(testPage.getByTestId("recovery-restore-workspace-button")).toHaveCount(0);
+    if (prCapture.capturing) {
+      await prCapture.screenshot("managed-clone-relocation-card-phone", {
+        caption: "The phone recovery card keeps the repair action reachable.",
+      });
+    }
+    await relocate.tap();
+
+    const confirmation = testPage.getByTestId("managed-clone-relocation-confirmation");
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation).toContainText("snapshot");
+    await expect(confirmation).toContainText("staging choices");
+    const confirm = testPage.getByTestId("managed-clone-relocation-confirm");
+    await confirm.scrollIntoViewIfNeeded();
+    if (prCapture.capturing) {
+      await prCapture.screenshot("managed-clone-relocation-confirm-phone", {
+        caption: "The phone drawer explains the preserved files and staging limit.",
+      });
+    }
+    await expect(confirm).toBeInViewport();
+    expect((await confirm.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await confirm.tap();
+
+    await fixture.session.waitForChatIdle({ timeout: 60_000 });
+    let afterEnvironment: Awaited<ReturnType<typeof apiClient.getTaskEnvironment>> = null;
+    let afterRepository = beforeRepository;
+    await expect
+      .poll(
+        async () => {
+          afterEnvironment = await apiClient.getTaskEnvironment(fixture.task.id);
+          afterRepository = afterEnvironment?.repos?.find(
+            (repository) => repository.repository_id === seedData.repositoryId,
+          );
+          return afterRepository?.worktree_path ?? null;
+        },
+        { timeout: 30_000, message: "Waiting for the mobile relocated worktree identity" },
+      )
+      .not.toBe(originalPath);
+
+    const relocatedPath = afterRepository?.worktree_path;
+    expect(afterEnvironment?.id).toBe(beforeEnvironment?.id);
+    expect(afterRepository?.worktree_id).not.toBe(beforeRepository?.worktree_id);
+    expect(afterRepository?.worktree_branch).toBe(fixture.originalBranch);
+    const relocationRecord = JSON.parse(
+      fs.readFileSync(`${originalPath}.kandev-clone-relocation.json`, "utf8"),
+    ) as { original: string };
+    const retainedOriginal = relocationRecord.original;
+    expect(retainedOriginal).not.toBe(originalPath);
+    expect(retainedOriginal).toContain(`${path.sep}.kandev-recovery${path.sep}`);
+    expect(fs.existsSync(originalPath)).toBe(false);
+    expect(fs.readFileSync(path.join(retainedOriginal, fixture.dirtyFileName), "utf8")).toBe(
+      fixture.dirtyFileContent,
+    );
+    expect(fs.readFileSync(path.join(relocatedPath!, fixture.dirtyFileName), "utf8")).toBe(
+      fixture.dirtyFileContent,
+    );
+    const relocatedGit = new GitHelper(relocatedPath!, makeGitEnv(backend.tmpDir));
+    expect(relocatedGit.getCurrentSha()).toBe(fixture.originalHead);
+    expect(relocatedGit.exec("git rev-parse --git-common-dir").trim()).toBe(
+      path.join(fixture.destinationClonePath, ".git"),
+    );
+    await waitForSessionState(apiClient, {
+      taskId: fixture.task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Waiting for the mobile relocated session to resume",
+      timeout: 30_000,
+    });
+    await expect(fixture.session.agentStatus()).toHaveCount(0, { timeout: 30_000 });
+    await expect(
+      fixture.session.activeChat().locator('[data-placeholder="Preparing workspace..."]'),
+    ).toHaveCount(0);
+    const priorMockResponses = await countSimpleMockResponses(apiClient, sessionId);
+    await fixture.session.sendMessageViaButton("/e2e:simple-message");
+    await expect
+      .poll(() => countSimpleMockResponses(apiClient, sessionId), {
+        timeout: 60_000,
+        message: "Waiting for the relocated mobile session's follow-up response",
+      })
+      .toBeGreaterThan(priorMockResponses);
+    await expect(
+      fixture.session.activeChat().getByText("simple mock response", { exact: false }).last(),
+    ).toBeVisible({ timeout: 30_000 });
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
+    const expectedFilesPath = relocatedPath!.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
+    await expect(fixture.session.files.getByTestId("file-browser-workspace-path")).toHaveText(
+      expectedFilesPath,
+      { timeout: 30_000 },
+    );
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile managed clone relocation");
   });
 });

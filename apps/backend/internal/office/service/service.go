@@ -77,6 +77,39 @@ type TaskStarterWithLaunchContextSession interface {
 		launch LaunchContext) (sessionID string, err error)
 }
 
+// RunSessionLaunch is the durable identity returned by a run-owned runtime
+// launch. SessionID is the Office run-session ID, not a task_sessions row.
+type RunSessionLaunch struct {
+	SessionID          string
+	ExecutionID        string
+	ExecutionProfileID string
+	Adapter            string
+	Model              string
+	ACPSessionID       string
+}
+
+// RunSessionLauncher starts a run-owned execution without creating a task or
+// task session. A route is optional; when present it is the concrete provider
+// selection chosen by the routing dispatcher.
+type RunSessionLauncher interface {
+	StartRunSession(ctx context.Context, run *models.Run, agent *models.AgentInstance,
+		launch LaunchContext, route *RouteOverride) (RunSessionLaunch, error)
+}
+
+type RunSessionReconciler interface {
+	ReconcileRunSessions(ctx context.Context) error
+}
+
+// ReconcileRunSessions delegates startup recovery to the backend runtime
+// composition when taskless sessions are enabled.
+func (s *Service) ReconcileRunSessions(ctx context.Context) error {
+	reconciler, ok := s.runSessionLauncher.(RunSessionReconciler)
+	if !ok {
+		return nil
+	}
+	return reconciler.ReconcileRunSessions(ctx)
+}
+
 // LaunchContext mirrors scheduler.LaunchContext so the office.service
 // package can carry the Office-built launch context (prompt, env,
 // workflow step, attachments, plan-mode, profile) into the routing
@@ -95,6 +128,18 @@ type LaunchContext struct {
 	Env                  map[string]string
 	ProfileID            string
 	AdditionalSkillSlugs []string
+}
+
+// RouteOverride carries the provider-specific execution selection into either
+// the task starter or the run-session launcher.
+type RouteOverride struct {
+	ExecutionProfileID string
+	ProviderID         string
+	Model              string
+	Tier               string
+	Mode               string
+	Flags              []string
+	Env                map[string]string
 }
 
 // RoutingDispatcher is the seam the office scheduler integration uses to
@@ -129,6 +174,13 @@ type AgentTokenMinter interface {
 // TaskCanceller stops active agent execution for a task.
 type TaskCanceller interface {
 	CancelTaskExecution(ctx context.Context, taskID string, reason string, force bool) error
+}
+
+// RunExecutionStopper stops a run-owned shared-runtime execution by its
+// durable execution identity. Workspace deletion uses this exact identity
+// before removing the Office rows that make the process attributable.
+type RunExecutionStopper interface {
+	Stop(ctx context.Context, executionID string, reason string) error
 }
 
 // TaskWorkspaceService owns workspace/task rows outside the office schema.
@@ -261,13 +313,26 @@ type WorkspaceCreator interface {
 // interface to avoid a direct import of the task package.
 type TaskCreator interface {
 	CreateOfficeTask(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (taskID string, err error)
-	CreateOfficeTaskAsAgent(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (taskID string, err error)
+	// CreateOfficeTaskAsAgent's metadata carries the task-boundary causation
+	// carrier set (AC-OFFICE-RUN-CAUSATION-001.18) when the caller resolved
+	// one; nil when there is none to persist (e.g. no causing run).
+	CreateOfficeTaskAsAgent(
+		ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string,
+		metadata map[string]interface{},
+	) (taskID string, err error)
 }
 
 // SubtaskCreator creates child tasks in the kanban system.
 // Implemented by the production task adapter; optional in older tests.
+//
+// metadata carries the task-boundary causation carrier
+// (AC-OFFICE-RUN-CAUSATION-001.5/.18) when the caller resolved one; nil
+// for a caller with nothing to carry.
 type SubtaskCreator interface {
-	CreateOfficeSubtask(ctx context.Context, parentTaskID, assigneeAgentID, title, description string) (taskID string, err error)
+	CreateOfficeSubtask(
+		ctx context.Context, parentTaskID, assigneeAgentID, title, description string,
+		metadata map[string]interface{},
+	) (taskID string, err error)
 }
 
 // TaskPRLink is the minimal projection of a github_task_prs row needed to
@@ -292,6 +357,13 @@ type TaskPRLister interface {
 	ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]TaskPRLink, error)
 }
 
+// DeferredAssignmentQueue is the scheduler-owned queue seam used when a
+// deferred assignment is replayed. The scheduler owns the assignment wake
+// rate gate; the office service owns the deferred row and its lifecycle.
+type DeferredAssignmentQueue interface {
+	QueueDeferredAssignment(ctx context.Context, assignment models.DeferredAssignment) error
+}
+
 // ServiceOptions holds all dependencies for the office Service constructor.
 // Required fields: Repo and Logger. All other fields are optional and may be
 // set to nil/zero to disable the corresponding feature.
@@ -304,6 +376,7 @@ type ServiceOptions struct {
 	EventBus                bus.EventBus
 	TaskStarter             TaskStarter
 	TaskCanceller           TaskCanceller
+	RunExecutionStopper     RunExecutionStopper
 	TaskWorkspace           TaskWorkspaceService
 	TaskTreeDeleter         TaskTreeDeleter
 	WorkspaceGroupCleaner   WorkspaceGroupCleaner
@@ -328,6 +401,8 @@ type Service struct {
 	agentTypeResolver       AgentTypeResolver
 	projectSkillDirResolver ProjectSkillDirResolver
 	taskStarter             TaskStarter
+	runSessionLauncher      RunSessionLauncher
+	runStopper              RunExecutionStopper
 	routingDispatcher       RoutingDispatcher
 	taskCanceller           TaskCanceller
 	taskWorkspace           TaskWorkspaceService
@@ -371,7 +446,14 @@ type Service struct {
 	// (QueueRun) and finalize processing terminally (see
 	// scheduler_integration.go). Optional — nil means the kill switch
 	// gate is not wired (older tests, transitional deployments).
-	pauseGate shared.PauseGate
+	pauseGate               shared.PauseGate
+	deferredAssignmentQueue DeferredAssignmentQueue
+
+	// workflowStepGetter resolves a task's current workflow step so
+	// task_assigned wakes (queueTaskAssignedRun, the unstarted-task
+	// recovery sweep) can be gated to steps that actually auto-start an
+	// agent. Optional — nil fails open (see shared.IsAssignmentWakeEligible).
+	workflowStepGetter shared.AssignmentStepGetter
 }
 
 // RoutineRunSyncer is the surface the office service needs from the
@@ -430,9 +512,27 @@ func (s *Service) SetPricingLookup(p shared.PricingLookup) { s.pricingLookup = p
 // neither gate is enforced.
 func (s *Service) SetPauseGate(g shared.PauseGate) { s.pauseGate = g }
 
+// SetWorkflowStepGetter wires the workflow step lookup used to gate
+// task_assigned wakes to steps that auto-start an agent. Left nil, the
+// gate fails open (see shared.IsAssignmentWakeEligible).
+func (s *Service) SetWorkflowStepGetter(g shared.AssignmentStepGetter) { s.workflowStepGetter = g }
+
 // SetAgentTokenMinter wires the runtime token minter after feature services are constructed.
 func (s *Service) SetAgentTokenMinter(minter AgentTokenMinter) {
 	s.agentTokenMinter = minter
+}
+
+// SetRunSessionLauncher wires the shared-runtime adapter for taskless Office
+// runs. Keeping this optional preserves isolated service tests and keeps the
+// scheduler fail-closed when startup composition is incomplete.
+func (s *Service) SetRunSessionLauncher(launcher RunSessionLauncher) {
+	s.runSessionLauncher = launcher
+}
+
+// RunSessionLauncherHandle returns the shared-runtime taskless launch seam so
+// the provider-routing scheduler can use the same implementation.
+func (s *Service) RunSessionLauncherHandle() RunSessionLauncher {
+	return s.runSessionLauncher
 }
 
 // SetRoutingDispatcher wires the provider-routing dispatcher (the office
@@ -455,6 +555,14 @@ func (s *Service) RoutingDispatcherHandle() RoutingDispatcher {
 // in-package implementation that writes through the office repo.
 func (s *Service) SetRunsService(runs *runsservice.Service) {
 	s.runsService = runs
+}
+
+// SetDeferredAssignmentQueue wires the scheduler-owned queue seam used by
+// deferred assignment replay. Keeping this optional preserves isolated
+// service tests and the defensive task-boundary fallback used during startup
+// composition.
+func (s *Service) SetDeferredAssignmentQueue(q DeferredAssignmentQueue) {
+	s.deferredAssignmentQueue = q
 }
 
 // CancelTaskExecution delegates to the configured TaskCanceller (the
@@ -481,8 +589,8 @@ func NewService(opts ServiceOptions) *Service {
 	log := opts.Logger.WithFields(zap.String("component", "office-service"))
 	if opts.TaskStarter == nil {
 		log.Warn("office service constructed without a TaskStarter; " +
-			"every run the scheduler claims will fail immediately " +
-			"instead of launching an agent (WO-35)")
+			"task-bound runs the scheduler claims will fail immediately " +
+			"instead of launching an agent")
 	}
 	svc := &Service{
 		repo:                    opts.Repo,
@@ -493,6 +601,7 @@ func NewService(opts ServiceOptions) *Service {
 		eb:                      opts.EventBus,
 		taskStarter:             opts.TaskStarter,
 		taskCanceller:           opts.TaskCanceller,
+		runStopper:              opts.RunExecutionStopper,
 		taskWorkspace:           opts.TaskWorkspace,
 		taskTreeDeleter:         opts.TaskTreeDeleter,
 		workspaceGroupCleaner:   opts.WorkspaceGroupCleaner,
@@ -506,6 +615,12 @@ func NewService(opts ServiceOptions) *Service {
 	}
 	svc.relay = NewChannelRelay(svc)
 	return svc
+}
+
+// SetRunExecutionStopper wires the shared runtime stop seam used by
+// workspace deletion for taskless Office sessions.
+func (s *Service) SetRunExecutionStopper(stopper RunExecutionStopper) {
+	s.runStopper = stopper
 }
 
 // SetWorkspaceGroupCleaner wires the handoff cleanup service after startup
@@ -560,8 +675,19 @@ const defaultWorkspaceName = "default"
 // CreateOfficeTaskAsAgent checks can_create_tasks for the given caller before
 // delegating to the TaskCreator. Passing callerAgentID="" skips the check
 // (for internal/admin callers).
+//
+// causingRunID names the run this task creation happened inside (empty
+// when there is none, e.g. an internal/admin caller). When set, it is
+// resolved into the task-boundary causation carrier set
+// (AC-OFFICE-RUN-CAUSATION-001.5/.18) and persisted on the new task's
+// metadata. An unreadable causingRunID is not a task-creation failure —
+// the carrier is dropped and the task is still created; a run later
+// queued because of it simply finds no carrier and roots as usual
+// (AC-OFFICE-RUN-CAUSATION-001.10's per-value fallback already covers an
+// absent carrier).
 func (s *Service) CreateOfficeTaskAsAgent(
 	ctx context.Context, callerAgentID, workspaceID, projectID, assigneeAgentID, title, description string,
+	causingRunID string,
 ) (string, error) {
 	if err := s.requireTaskCreatePermission(ctx, callerAgentID); err != nil {
 		return "", err
@@ -569,13 +695,26 @@ func (s *Service) CreateOfficeTaskAsAgent(
 	if s.taskCreator == nil {
 		return "", fmt.Errorf("task creator not configured")
 	}
-	return s.taskCreator.CreateOfficeTaskAsAgent(ctx, workspaceID, projectID, assigneeAgentID, title, description)
+	var metadata map[string]interface{}
+	if causingRunID != "" {
+		if run, err := s.repo.GetRun(ctx, causingRunID); err == nil {
+			metadata = carrierMetadataFromRunForAgent(run, callerAgentID)
+		}
+	}
+	return s.taskCreator.CreateOfficeTaskAsAgent(ctx, workspaceID, projectID, assigneeAgentID, title, description, metadata)
 }
 
 // CreateOfficeSubtaskAsAgent checks can_create_tasks for the caller before
 // creating a child task under parentTaskID.
+//
+// causingRunID names the run this subtask creation happened inside (empty
+// when there is none). Resolved into the task-boundary causation carrier
+// set exactly like CreateOfficeTaskAsAgent's root-task path
+// (AC-OFFICE-RUN-CAUSATION-001.5/.18): an agent creating a subtask through
+// a runtime action is an Office trigger the same as creating a root task.
 func (s *Service) CreateOfficeSubtaskAsAgent(
 	ctx context.Context, callerAgentID, parentTaskID, assigneeAgentID, title, description string,
+	causingRunID string,
 ) (string, error) {
 	if err := s.requireTaskCreatePermission(ctx, callerAgentID); err != nil {
 		return "", err
@@ -587,7 +726,13 @@ func (s *Service) CreateOfficeSubtaskAsAgent(
 	if !ok {
 		return "", fmt.Errorf("subtask creator not configured")
 	}
-	return creator.CreateOfficeSubtask(ctx, parentTaskID, assigneeAgentID, title, description)
+	var metadata map[string]interface{}
+	if causingRunID != "" {
+		if run, err := s.repo.GetRun(ctx, causingRunID); err == nil {
+			metadata = carrierMetadataFromRunForAgent(run, callerAgentID)
+		}
+	}
+	return creator.CreateOfficeSubtask(ctx, parentTaskID, assigneeAgentID, title, description, metadata)
 }
 
 // GetTaskWorkspaceID returns the workspace that owns a task for runtime scope validation.

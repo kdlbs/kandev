@@ -78,7 +78,10 @@ test("nests multi-repository changes below each repository on desktop and mobile
   await expectTreeNestedUnderRepository(session.changes);
 
   await testPage.setViewportSize({ width: 393, height: 851 });
-  await testPage.getByRole("button", { name: "Changes" }).click();
+  await testPage
+    .getByRole("navigation")
+    .getByRole("button", { name: /Changes$/ })
+    .click();
   const mobilePanel = testPage.getByTestId("mobile-changes-panel");
   await expect(mobilePanel).toBeVisible();
   await expectTreeNestedUnderRepository(mobilePanel);

@@ -246,13 +246,16 @@ func TestPRDiscoveryHealth_CapacityReportsDegradedWithoutEvictingLiveScopes(t *t
 func TestPRDiscoveryHealth_RemovesFailedTargetAfterLastWatchConsumer(t *testing.T) {
 	_, service, _, store := setupBatchedPollerTest(t)
 	ctx := context.Background()
-	seedTask(t, store, "task-health-consumers", false)
+	seedTask(t, store, "task-health-consumers-a", false)
+	seedTask(t, store, "task-health-consumers-b", false)
+	// Both watches share one failed-target consumer set, but task-owned
+	// watch uniqueness requires one task per (repository, branch) target.
 	watchA := withTestWorkspace(&PRWatch{
-		SessionID: "session-health-consumer-a", TaskID: "task-health-consumers", Owner: "o", Repo: "r",
+		SessionID: "session-health-consumer-a", TaskID: "task-health-consumers-a", Owner: "o", Repo: "r",
 		Branch: "feature/health-consumers",
 	})
 	watchB := withTestWorkspace(&PRWatch{
-		SessionID: "session-health-consumer-b", TaskID: "task-health-consumers", Owner: "o", Repo: "r",
+		SessionID: "session-health-consumer-b", TaskID: "task-health-consumers-b", Owner: "o", Repo: "r",
 		Branch: "feature/health-consumers",
 	})
 	for _, watch := range []*PRWatch{watchA, watchB} {

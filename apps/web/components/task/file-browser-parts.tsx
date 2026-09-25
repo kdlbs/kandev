@@ -28,6 +28,7 @@ import type { FileInfo } from "@/lib/state/store";
 import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
 import type { FileBrowserRow } from "./file-browser-hooks";
 import { areTreeNodeRowPropsEqual, type TreeNodeRowProps } from "./file-tree-row-props";
+import { measureFileTreeElement } from "./file-tree-measurement";
 import { InlineFileInput } from "./inline-file-input";
 import {
   FileContextMenu,
@@ -415,6 +416,7 @@ export function SearchResultsList({
 export { FileBrowserToolbar } from "./file-browser-toolbar";
 
 export type FileBrowserContentAreaProps = {
+  sessionId?: string;
   isSearchActive: boolean;
   searchResults: string[] | null;
   isSessionFailed: boolean;
@@ -545,6 +547,7 @@ function VirtualizedFileTreeView(props: FileBrowserContentAreaProps) {
       const row = virtualRows[index];
       return row?.type === "create" ? `create:${row.parentPath}` : (row?.row.path ?? index);
     },
+    measureElement: measureFileTreeElement,
     overscan: 5,
   });
 

@@ -20,7 +20,6 @@ acceptance_criteria:
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.9
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.12
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.14
-  - AC-PLUGINS-PROMPT-HISTORY-HOST-002.15
   - AC-PLUGINS-PROMPT-HISTORY-HOST-004.1
   - AC-PLUGINS-PROMPT-HISTORY-HOST-004.2
   - AC-PLUGINS-PROMPT-HISTORY-HOST-004.3
@@ -29,6 +28,14 @@ system_design:
 ---
 
 # Task 04: Build Browser Conversation Host Facade
+
+## Replacement scope, 2026-09-16
+
+The [conversation storage replacement](../conversation-storage-replacement/plan.md) owns the next implementation.
+This file preserves historical scope and results. Do not execute its durable replay mechanics as new work.
+The replacement work orders preserve public behavior and provide new source-reconciliation, upgrade, and E2E evidence.
+
+
 ## Scope
 Implement `host.conversation` and the curated prompt-mention renderer behind the published SDK types. Own request/subscription races, pagination, lifecycle cleanup, DTO mapping, favorite reactivity, and private custom-prompt access inside the host.
 

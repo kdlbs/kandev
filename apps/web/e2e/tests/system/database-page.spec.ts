@@ -1,10 +1,15 @@
 import { test, expect } from "../../fixtures/test-base";
+import {
+  DATABASE_SETTINGS_ROUTE,
+  expectDatabaseControls,
+  routeDatabaseStatsSequence,
+} from "../../helpers/database-stats";
 
 test.describe("System Database page", () => {
   test("renders database stats and exposes maintenance buttons", async ({ testPage }) => {
     test.setTimeout(60_000);
 
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/data-storage?tab=database");
 
     await expect(testPage.getByTestId("system-page-title")).toHaveText("Data & Logs");
     await expect(testPage.getByTestId("system-database-card")).toBeVisible();
@@ -28,7 +33,7 @@ test.describe("System Database page", () => {
   }) => {
     test.setTimeout(60_000);
 
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/data-storage?tab=database");
     await expect(testPage.getByTestId("system-database-card")).toBeVisible();
 
     const vacuumButton = testPage.getByTestId("system-vacuum-button");
@@ -52,16 +57,58 @@ test.describe("System Database page", () => {
   });
 
   test("WAL row exposes an info tooltip trigger", async ({ testPage }) => {
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/data-storage?tab=database");
     await expect(testPage.getByTestId("system-database-card")).toBeVisible();
     await expect(testPage.getByTestId("system-db-wal-info")).toBeVisible();
   });
 
   test("clicking Factory Reset opens the confirmation modal", async ({ testPage }) => {
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/data-storage?tab=database");
     await expect(testPage.getByTestId("system-database-card")).toBeVisible();
 
     await testPage.getByTestId("system-factory-reset-button").click();
     await expect(testPage.getByTestId("system-factory-reset-dialog")).toBeVisible();
+  });
+
+  test("keeps metadata through reloads and recovers a stale logical snapshot", async ({
+    testPage,
+  }) => {
+    const scenario = await routeDatabaseStatsSequence(testPage);
+    try {
+      await testPage.goto(DATABASE_SETTINGS_ROUTE);
+      await expect(testPage.getByTestId("system-db-logical-stats-status")).toContainText(
+        "Measuring logical totals",
+      );
+      await expectDatabaseControls(testPage);
+
+      scenario.showRefreshing();
+      await testPage.reload();
+      await expect(testPage.getByTestId("system-db-logical-stats-status")).toContainText(
+        "Updating",
+      );
+      await expectDatabaseControls(testPage);
+
+      scenario.showStale();
+      await testPage.reload();
+      await expect(testPage.getByTestId("system-db-logical-stats-status")).toContainText(
+        "These values may be stale",
+      );
+      await expect(testPage.getByTestId("system-db-metadata-stale")).toBeVisible();
+      await expectDatabaseControls(testPage);
+
+      scenario.recover();
+      const retryRequest = testPage.waitForRequest(
+        (request) =>
+          request.url().includes("/api/v1/system/database/refresh") && request.method() === "POST",
+      );
+      await testPage.getByTestId("system-db-logical-stats-retry").click();
+      await retryRequest;
+      await expect(testPage.getByTestId("system-db-logical-stats-status")).toContainText(
+        "Logical totals measured at",
+      );
+      await expectDatabaseControls(testPage);
+    } finally {
+      await scenario.remove();
+    }
   });
 });

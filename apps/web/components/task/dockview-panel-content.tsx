@@ -16,7 +16,11 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { panelPortalManager, setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { BrowserPanel } from "./browser-panel";
-import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
+import type {
+  CommitDetailTarget,
+  CommitFileNavigationRequest,
+  OpenDiffOptions,
+} from "@/lib/state/diff-target-types";
 import { ChangesPanel } from "./changes-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
 import { FileEditorPanel } from "./file-editor-panel";
@@ -31,6 +35,7 @@ import { TerminalPanel } from "./terminal-panel";
 import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
+import { BackgroundWorkPanel } from "./chat/background-work/background-work-panel";
 import { useTranslation } from "react-i18next";
 
 /** Resolve the chat panel's tab title: the session's agent label when present,
@@ -208,7 +213,8 @@ function ChangesContent({ panelId }: { panelId: string }) {
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(
-    (target: CommitDetailTarget) => addCommitDetailPanel(target),
+    (target: CommitDetailTarget, fileNavigation?: CommitFileNavigationRequest) =>
+      addCommitDetailPanel(target, fileNavigation ? { fileNavigation } : undefined),
     [addCommitDetailPanel],
   );
   const handleOpenDiffAll = useCallback(() => addDiffViewerPanel(), [addDiffViewerPanel]);
@@ -251,7 +257,10 @@ function CanvasContent({ params }: { params: Record<string, unknown> }) {
       className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
       data-testid="canvas-panel-boundary"
     >
-      <CanvasHostRoute canvasId={typeof params.canvasId === "string" ? params.canvasId : ""} />
+      <CanvasHostRoute
+        canvasId={typeof params.canvasId === "string" ? params.canvasId : ""}
+        embedded
+      />
     </div>
   );
 }
@@ -309,6 +318,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
       presentation="desktop"
     />
   ),
+  "background-work": (panelId, params) => <BackgroundWorkPanel panelId={panelId} params={params} />,
 };
 
 /** Render a dockview panel's portal content by looking up its (alias-resolved)

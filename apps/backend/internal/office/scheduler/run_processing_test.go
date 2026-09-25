@@ -102,11 +102,12 @@ func TestSchedulerService_ClaimNextRun_ReturnsQueuedRun(t *testing.T) {
 	ctx := context.Background()
 
 	settingsAgent := &models.AgentInstance{
-		ID:          testAgentID,
-		WorkspaceID: testWorkspaceID,
-		Name:        "claim-next-agent",
-		Role:        models.AgentRoleWorker,
-		Status:      models.AgentStatusIdle,
+		ID:                    testAgentID,
+		WorkspaceID:           testWorkspaceID,
+		Name:                  "claim-next-agent",
+		Role:                  models.AgentRoleWorker,
+		Status:                models.AgentStatusIdle,
+		MaxConcurrentSessions: 1,
 	}
 	if err := repo.CreateAgentInstance(ctx, settingsAgent); err != nil {
 		t.Fatalf("create agent: %v", err)

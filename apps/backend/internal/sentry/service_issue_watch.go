@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/watchreset"
 )
 
@@ -71,9 +72,44 @@ func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*
 	return s.store.ListIssueWatches(ctx, workspaceID)
 }
 
-// ListAllIssueWatches returns every watch across all workspaces.
+// ListAllIssueWatches returns every watch the caller may see. For a scoped
+// caller that is only their own workspaces' watches; for an identity-less
+// internal caller (unscoped) it is every watch, as before auth.
 func (s *Service) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
-	return s.store.ListAllIssueWatches(ctx)
+	watches, err := s.store.ListAllIssueWatches(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.filterIssueWatchesByAccess(ctx, watches)
+}
+
+// filterIssueWatchesByAccess keeps only watches whose workspace the caller may
+// access. Access decisions are memoized per workspace so a long list costs one
+// authorize call per distinct workspace, not one per watch. Only an
+// ErrWorkspaceNotFound denial drops a watch; any other authorizer error (a
+// transient DB failure, say) is propagated so the caller sees the failure
+// rather than a silently truncated 200.
+func (s *Service) filterIssueWatchesByAccess(ctx context.Context, watches []*IssueWatch) ([]*IssueWatch, error) {
+	decision := make(map[string]bool)
+	visible := make([]*IssueWatch, 0, len(watches))
+	for _, w := range watches {
+		allowed, seen := decision[w.WorkspaceID]
+		if !seen {
+			switch err := s.authorizeWorkspaceAccess(ctx, w.WorkspaceID); {
+			case err == nil:
+				allowed = true
+			case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
+				allowed = false
+			default:
+				return nil, err
+			}
+			decision[w.WorkspaceID] = allowed
+		}
+		if allowed {
+			visible = append(visible, w)
+		}
+	}
+	return visible, nil
 }
 
 // GetIssueWatch returns a single watch by ID or ErrIssueWatchNotFound.
@@ -105,6 +141,9 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	// enable/disable toggle) must not fail on a legacy multi-status watch.
 	if req.Filter != nil {
 		if err := validateFilterStatuses(w.Filter); err != nil {
+			return nil, err
+		}
+		if err := validateFilterStatsPeriod(w.Filter); err != nil {
 			return nil, err
 		}
 	}
@@ -201,6 +240,19 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) (string, [
 		err := fmt.Errorf("%w: watch has no configured project", ErrInvalidConfig)
 		s.stampWatchError(w.ID, err.Error())
 		return "", nil, err
+	}
+	if w.Filter.StatsPeriod != "" {
+		if _, _, ok := parseStatsPeriodUnits(w.Filter.StatsPeriod); !ok {
+			// A stored lookback outside the supported syntax has no `age:` term
+			// to constrain the search, so fail the poll closed instead of
+			// matching (and creating tasks for) issues of any age. Watch rows
+			// created before the write guard reject such a value, and they are
+			// never rewritten here.
+			err := fmt.Errorf("%w: watch lookback period %q is not a whole number of hours, days, or weeks",
+				ErrInvalidConfig, w.Filter.StatsPeriod)
+			s.stampWatchError(w.ID, err.Error())
+			return "", nil, err
+		}
 	}
 	instanceID, err := s.resolveWatchInstanceID(ctx, w)
 	if err != nil {
@@ -428,6 +480,9 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if err := validateFilterStatuses(nf); err != nil {
 		return err
 	}
+	if err := validateFilterStatsPeriod(nf); err != nil {
+		return err
+	}
 	if err := validateMaxInflightTasks(req.MaxInflightTasks); err != nil {
 		return err
 	}
@@ -473,6 +528,21 @@ func validateFilter(f SearchFilter) error {
 func validateFilterStatuses(f SearchFilter) error {
 	if len(f.Statuses) > 1 {
 		return fmt.Errorf("%w: filter.statuses must contain at most one status because Sentry has no OR form for the is keyword", ErrInvalidConfig)
+	}
+	return nil
+}
+
+// validateFilterStatsPeriod rejects a non-empty lookback value that the shared
+// accepted syntax (see parseStatsPeriodUnits) cannot express. The field is
+// optional, so an empty value stays valid; like validateFilterStatuses this is
+// applied only when a filter is created or changed, never against an unchanged
+// stored one, so a legacy row cannot block an unrelated update.
+func validateFilterStatsPeriod(f SearchFilter) error {
+	if f.StatsPeriod == "" {
+		return nil
+	}
+	if _, _, ok := parseStatsPeriodUnits(f.StatsPeriod); !ok {
+		return fmt.Errorf("%w: filter.statsPeriod must be a whole number of hours, days, or weeks such as 24h or 7d", ErrInvalidConfig)
 	}
 	return nil
 }

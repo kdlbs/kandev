@@ -12,7 +12,9 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
   await apiClient.mockGitHubReset();
   await apiClient.mockGitHubSetUser("test-user");
   const { settings } = await apiClient.getUserSettings();
-  expect(typeof settings.sidebar_active_view_id).toBe("string");
+  expect(typeof settings.sidebar_views_by_workspace[seedData.workspaceId].active_view_id).toBe(
+    "string",
+  );
   const view = {
     id: "github-mobile-task-view",
     name: "My mobile tasks",
@@ -21,7 +23,13 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
     group: "none",
     collapsedGroups: [],
   };
-  await apiClient.saveUserSettings({ sidebar_views: [view], sidebar_active_view_id: view.id });
+  await apiClient.saveUserSettings({
+    sidebar_view_state: {
+      workspace_id: seedData.workspaceId,
+      views: [view],
+      active_view_id: view.id,
+    },
+  });
   const task = await apiClient.seedTask(seedData.workspaceId, "Task reachable from GitHub", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
@@ -31,13 +39,8 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
     await github.goto();
     const opener = testPage.getByTestId("app-nav-trigger");
     await opener.tap();
-    await testPage
-      .getByTestId("app-nav-sheet")
-      .getByRole("button", { name: "Task views", exact: true })
-      .tap();
-    const drawer = testPage.getByRole("dialog", { name: "Tasks", exact: true });
+    const drawer = testPage.getByTestId("app-nav-sheet");
     await expect(drawer).toBeVisible();
-    await expect(testPage.getByTestId("app-nav-sheet")).toBeHidden();
     await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(1);
     await expect(
       drawer.getByTestId("sidebar-view-chip").filter({ hasText: view.name }),
@@ -47,10 +50,6 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
     await expect(drawer).toBeHidden();
     await expect(opener).toBeFocused();
     await opener.tap();
-    await testPage
-      .getByTestId("app-nav-sheet")
-      .getByRole("button", { name: "Task views", exact: true })
-      .tap();
     await drawer.locator(`[data-task-row-id="${task.task_id}"]`).tap();
     await expect(testPage).toHaveURL(new RegExp(`/t/${task.task_id}`));
     await testPage.goBack();
@@ -58,12 +57,8 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
     await expect(github.mobileMenuButton).toBeVisible();
     // The task remains selected in shared state, but GitHub has no task-only providers.
     await opener.tap();
-    await testPage
-      .getByTestId("app-nav-sheet")
-      .getByRole("button", { name: "Task views", exact: true })
-      .tap();
     await expect(drawer.getByTestId("sidebar-filter-bar")).toBeVisible();
-    await drawer.getByRole("button", { name: "New", exact: true }).tap();
+    await drawer.getByRole("button", { name: "New task", exact: true }).tap();
     await expect(drawer).toBeHidden();
     await expect(testPage.getByRole("dialog")).toBeVisible();
     await expect(testPage.getByRole("dialog")).not.toHaveAccessibleName("Tasks");
@@ -73,8 +68,12 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
     await expect(titleInput).toHaveValue("Draft survives phone rotation");
   } finally {
     await apiClient.saveUserSettings({
-      sidebar_views: (settings.sidebar_views ?? []) as unknown[],
-      sidebar_active_view_id: settings.sidebar_active_view_id as string,
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views: (settings.sidebar_views_by_workspace[seedData.workspaceId].views ?? []) as unknown[],
+        active_view_id: settings.sidebar_views_by_workspace[seedData.workspaceId]
+          .active_view_id as string,
+      },
     });
   }
 });
@@ -85,11 +84,10 @@ test("Kanban navigation can open empty task views and return focus", async ({ te
   const kanban = new MobileKanbanPage(testPage);
   await kanban.goto();
   await kanban.mobileMenuButton.tap();
-  await kanban.menuCard.getByRole("button", { name: "Task views", exact: true }).tap();
-  const drawer = testPage.getByRole("dialog", { name: "Tasks", exact: true });
+  const drawer = testPage.getByTestId("app-nav-sheet");
   await expect(drawer.getByTestId("sidebar-filter-bar")).toBeVisible();
   await expect(drawer.locator('[data-slot="task-switcher-empty-state"]')).toBeVisible();
-  await expect(kanban.menuCard).toBeHidden();
+  await expect(kanban.menuCard).toBeVisible();
   await testPage.keyboard.press("Escape");
   await expect(drawer).toBeHidden();
   await expect(kanban.mobileMenuButton).toBeFocused();

@@ -2,7 +2,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatInputContainer } from "./chat-input-container";
 
-const { containerState } = vi.hoisted(() => ({
+const { bodyProps, containerState } = vi.hoisted(() => ({
+  bodyProps: { current: null as Record<string, unknown> | null },
   containerState: {
     showNewSessionDialog: false,
     setShowNewSessionDialog: vi.fn(),
@@ -41,7 +42,10 @@ vi.mock("./session-stopped-banner", () => ({
 }));
 
 vi.mock("./chat-input-body", () => ({
-  ChatInputBody: () => <div data-testid="chat-input-body" />,
+  ChatInputBody: (props: Record<string, unknown>) => {
+    bodyProps.current = props;
+    return <div data-testid="chat-input-body" />;
+  },
 }));
 
 vi.mock("@/hooks/domains/session/use-session-recovery-actions", () => ({
@@ -69,7 +73,8 @@ vi.mock("@/hooks/use-prompt-result-delivery", () => ({
   }),
 }));
 
-vi.mock("@/lib/i18n", () => ({
+vi.mock("@/lib/i18n", async (original) => ({
+  ...(await original<typeof import("@/lib/i18n")>()),
   t: (key: string) => key,
 }));
 
@@ -81,12 +86,16 @@ const baseProps = {
   planModeEnabled: false,
   onPlanModeChange: vi.fn(),
   isAgentBusy: false,
+  isWorking: false,
   isStarting: false,
   isSending: false,
   onCancel: vi.fn(),
 };
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  bodyProps.current = null;
+});
 
 describe("ChatInputContainer launch-error ownership", () => {
   it("hides the editor when the task launch card owns a failed session", () => {
@@ -108,5 +117,27 @@ describe("ChatInputContainer launch-error ownership", () => {
 
     expect(screen.getByTestId("chat-input-body")).toBeTruthy();
     expect(screen.queryByTestId("session-stopped-banner")).toBeNull();
+  });
+});
+
+describe("ChatInputContainer cancellation availability", () => {
+  it("shows cancel for a working direct-input session", () => {
+    render(<ChatInputContainer {...baseProps} isWorking />);
+
+    const editorAreaProps = bodyProps.current?.editorAreaProps as
+      | { canCancelAgent?: boolean; isAgentBusy?: boolean }
+      | undefined;
+    expect(editorAreaProps).toEqual(
+      expect.objectContaining({ canCancelAgent: true, isAgentBusy: false }),
+    );
+  });
+
+  it("can hide cancel when the surface callback only dismisses the composer", () => {
+    render(<ChatInputContainer {...baseProps} isWorking showCancelAgent={false} />);
+
+    const editorAreaProps = bodyProps.current?.editorAreaProps as
+      | { canCancelAgent?: boolean }
+      | undefined;
+    expect(editorAreaProps?.canCancelAgent).toBe(false);
   });
 });

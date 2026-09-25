@@ -15,6 +15,7 @@ import { AgentRoleBadge } from "../components/agent-role-badge";
 import { BudgetGauge } from "../components/budget-gauge";
 import { AgentRouteStrip } from "./components/agent-route-strip";
 import { AgentRecoveryControl } from "./components/agent-recovery-control";
+import { isRoutineFiring } from "../../lib/routine-status";
 import { Trans, useTranslation } from "react-i18next";
 
 type AgentDetailLayoutProps = {
@@ -137,12 +138,18 @@ function activeSlugFromPath(pathname: string | null, agentId: string): string {
  * navigates to /office/routines to install one. Workers / specialists
  * don't get this hint since they only run on assignment, not schedule.
  */
-function CoordinatorRoutineHint({ agentId, agentRole }: { agentId: string; agentRole: string }) {
+export function CoordinatorRoutineHint({
+  agentId,
+  agentRole,
+}: {
+  agentId: string;
+  agentRole: string;
+}) {
   const { t } = useTranslation();
   const routines = useAppStore((s) => s.office.routines);
   if (agentRole !== "ceo") return null;
   const hasActive = routines.some(
-    (r) => r.assigneeAgentProfileId === agentId && r.status === "active",
+    (r) => r.assigneeAgentProfileId === agentId && isRoutineFiring(r.status),
   );
   if (hasActive) return null;
   return (

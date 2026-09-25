@@ -44,6 +44,7 @@ type Manager struct {
 	eventBus        bus.EventBus
 	credsMgr        CredentialsManager
 	profileResolver ProfileResolver
+	ownerAdmission  OwnerAdmission
 	worktreeMgr     *worktree.Manager
 	mcpProvider     McpConfigProvider
 	logger          *logger.Logger
@@ -72,6 +73,9 @@ type Manager struct {
 
 	// Workspace info provider for on-demand instance creation
 	workspaceInfoProvider WorkspaceInfoProvider
+
+	// taskRuntimeFences serialize runtime creation with task-scoped cleanup.
+	taskRuntimeFences taskRuntimeOwnershipFences
 
 	// bootMessageService creates boot messages displayed in chat during agent startup.
 	bootMessageService BootMessageService
@@ -235,18 +239,36 @@ type Manager struct {
 	// runningWriter persists the executors_running row in lockstep with executionStore.
 	// See SetExecutorRunningWriter and persistence.go. The lifecycle manager is the
 	// only component allowed to write the lifecycle-owned columns of this table.
-	runningWriter ExecutorRunningWriter
+	runningWriter  ExecutorRunningWriter
+	runRecoveryErr error
 
 	// executorProfileReader resolves the executor profile bound to a task
 	// environment so user shell terminals can be given the same profile env
 	// vars the agent subprocess gets. See executor_profile_env.go. Nil → the
 	// terminal inherits only the backend process environment.
-	executorProfileReader ExecutorProfileReader
+	executorProfileReader       ExecutorProfileReader
+	pluginExecutorProfileLoader PluginExecutorProfileLoader
+	pluginExecutorCallbackMu    sync.Mutex
+	pluginExecutorCallbacks     map[string]*ExecutorCreateRequest
 
 	// agentProfileReader resolves the full agent_profiles row (including the
 	// office-enrichment fields added in ADR 0005 Wave A) for the launch-prep
 	// SkillDeployer hook. Nil → skill deploy is skipped.
 	agentProfileReader AgentProfileReader
+
+	// reachabilityReader resolves an ssh executor's stored reachability
+	// record for the launch-time session.launch.warning producer. Nil →
+	// no warning is ever published (feature not wired). See
+	// manager_launch_reachability_warning.go and SetSSHReachabilityWarningPolicy.
+	reachabilityReader ReachabilityReader
+	// reachabilityProbingEnabled mirrors whether the reachability poller's
+	// periodic sweep is on (interval != 0). When true, a stored unreachable
+	// record is always warning-eligible regardless of how old checked_at is.
+	reachabilityProbingEnabled bool
+	// reachabilityWarningWindowSeconds is 3x the reachability package's own
+	// default interval (not the configured/effective one), evaluated even
+	// with probing disabled per AC-EXECUTORS-SSH-REACHABILITY-001.28.
+	reachabilityWarningWindowSeconds int
 
 	// skillDeployer materialises per-profile skills + custom prompt before
 	// the agent process starts. Defaults to a no-op deployer; office wires
@@ -283,6 +305,13 @@ type Manager struct {
 	activityLeaseOwners map[string]uint64
 	activityPending     map[string]map[uint64]*executionActivityClaim
 	activityGeneration  uint64
+}
+
+// SetOwnerAdmission wires the durable owner gate used by run-owned launches.
+// Task launches keep their existing task/session admission when no owner gate
+// is configured.
+func (m *Manager) SetOwnerAdmission(admission OwnerAdmission) {
+	m.ownerAdmission = admission
 }
 
 // ManagedGoCacheEnvironmentProvider supplies the environment for one new
@@ -525,6 +554,14 @@ func (m *Manager) WorktreeManager() *worktree.Manager {
 // can connect before startup wiring installs the dispatcher.
 func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 	m.streamManager.setMCPHandler(handler)
+}
+
+// MCPHandlerFor returns the execution-bound MCP handler for one execution's stream.
+func (m *Manager) MCPHandlerFor(execution *AgentExecution) agentctl.MCPHandler {
+	if m == nil || m.streamManager == nil {
+		return nil
+	}
+	return m.streamManager.mcpHandlerFor(execution)
 }
 
 // SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
@@ -813,6 +850,7 @@ func (m *Manager) SetPreparerRegistry(registry *PreparerRegistry) {
 // SetSecretStore sets the secret store for encrypting runtime auth tokens.
 func (m *Manager) SetSecretStore(store secrets.SecretStore) {
 	m.secretStore = store
+	m.wireKubernetesEnvironmentStore()
 }
 
 // SetAgentProfileReader wires the reader the launch-prep SkillDeployer uses

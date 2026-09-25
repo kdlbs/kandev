@@ -26,7 +26,7 @@ test.describe("Mobile task list search", () => {
     await expect(taskList.getByText("List Beta Task")).toBeVisible();
     await expect(searchBar).not.toBeVisible();
 
-    await testPage.getByTestId("mobile-topbar-menu").tap();
+    await testPage.getByTestId("mobile-topbar-page-context").tap();
     await searchToggle.click();
     await expect(searchBar).toBeVisible();
     await expect(searchBar.getByPlaceholder("Search tasks...")).toBeFocused();
@@ -35,7 +35,7 @@ test.describe("Mobile task list search", () => {
     await expect(taskList.getByText("List Alpha Task")).toBeVisible({ timeout: 5000 });
     await expect(taskList.getByText("List Beta Task")).not.toBeVisible({ timeout: 5000 });
 
-    await testPage.getByTestId("mobile-topbar-menu").tap();
+    await testPage.getByTestId("mobile-topbar-page-context").tap();
     await searchToggle.click();
     await expect(searchBar).not.toBeVisible();
     await expect(taskList.getByText("List Alpha Task")).toBeVisible({ timeout: 5000 });
@@ -63,7 +63,7 @@ test.describe("Mobile task list search", () => {
 
     await testPage.goto("/tasks?group=none");
     await testPage.waitForLoadState("networkidle");
-    await testPage.getByTestId("mobile-topbar-menu").tap();
+    await testPage.getByTestId("mobile-topbar-page-context").tap();
     await testPage.getByTestId("mobile-search-toggle").click();
     await testPage
       .getByTestId("mobile-search-bar")
@@ -71,8 +71,8 @@ test.describe("Mobile task list search", () => {
       .fill("mobile sort");
 
     await expect(testPage.getByTestId("tasks-list-sort")).not.toBeVisible();
-    await testPage.getByRole("button", { name: "Open menu" }).tap();
-    const menu = testPage.getByRole("dialog", { name: "Menu" });
+    await testPage.getByTestId("mobile-topbar-page-context").tap();
+    const menu = testPage.getByRole("dialog", { name: "View options" });
     await menu.getByTestId("mobile-tasks-list-sort").tap();
     await testPage.getByRole("listbox").getByRole("option", { name: "Title Z-A" }).tap();
 

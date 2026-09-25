@@ -81,6 +81,22 @@ describe("useFileBrowserTree persisted expansion", () => {
     expect(result.current.expandedPaths).toEqual(new Set(EXPANDED_PATHS));
   });
 
+  it("discards invalid persisted paths while restoring valid siblings", async () => {
+    sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([CODEX_PATH, AGENTS_PATH, "/home/jcfs/project/public/assets"]),
+    );
+    const { result } = renderHook(() => useFileBrowserTree(SESSION, ENVIRONMENT));
+
+    await waitFor(() => expect(result.current.loadState).toBe("loaded"));
+
+    expect(requestFileTreeMock.mock.calls.map((call) => call[2])).toEqual([
+      ROOT_PATH,
+      ...EXPANDED_PATHS,
+    ]);
+    expect(result.current.expandedPaths).toEqual(new Set(EXPANDED_PATHS));
+  });
+
   it("retries a transient restored-folder failure without pruning persisted expansion", async () => {
     vi.useFakeTimers();
     let codexAttempts = 0;

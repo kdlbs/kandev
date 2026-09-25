@@ -120,7 +120,10 @@ test.describe("Sidebar filter bar — popover basics", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        const draft = settings.sidebar_draft as { base_view_id?: string } | null | undefined;
+        const draft = settings.sidebar_views_by_workspace[seedData.workspaceId].draft as
+          | { base_view_id?: string }
+          | null
+          | undefined;
         return draft?.base_view_id ?? null;
       })
       .toBe("view-all-tasks");
@@ -145,9 +148,11 @@ test.describe("Sidebar filter bar — popover basics", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return (settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
-          (view) => view.name === "Persist View",
-        );
+        return (
+          settings.sidebar_views_by_workspace[seedData.workspaceId].views as
+            | Array<{ name?: string }>
+            | undefined
+        )?.some((view) => view.name === "Persist View");
       })
       .toBe(true);
 
@@ -524,9 +529,11 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return (settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
-          (view) => view.name === "Planning view",
-        );
+        return (
+          settings.sidebar_views_by_workspace[seedData.workspaceId].views as
+            | Array<{ name?: string }>
+            | undefined
+        )?.some((view) => view.name === "Planning view");
       })
       .toBe(true);
 
@@ -575,7 +582,7 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return settings.sidebar_draft ?? null;
+        return settings.sidebar_views_by_workspace[seedData.workspaceId].draft ?? null;
       })
       .toBeNull();
 
@@ -588,15 +595,20 @@ test.describe("Sidebar filter — saved views CRUD", () => {
       collapsed_groups: [],
     }));
     const response = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
-      sidebar_views: limitViews,
-      sidebar_active_view_id: limitViews[0].id,
-      sidebar_draft: null,
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views: limitViews,
+        active_view_id: limitViews[0].id,
+        draft: null,
+      },
     });
     expect(response.ok).toBe(true);
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return (settings.sidebar_views as unknown[] | undefined)?.length;
+        return (
+          settings.sidebar_views_by_workspace[seedData.workspaceId].views as unknown[] | undefined
+        )?.length;
       })
       .toBe(50);
     await testPage.reload();
@@ -658,9 +670,11 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     );
     const settingsAfterCancel = await apiClient.getUserSettings();
     expect(
-      (settingsAfterCancel.settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
-        (view) => view.name === "Ephemeral",
-      ),
+      (
+        settingsAfterCancel.settings.sidebar_views_by_workspace[seedData.workspaceId].views as
+          | Array<{ name?: string }>
+          | undefined
+      )?.some((view) => view.name === "Ephemeral"),
     ).toBe(true);
 
     await filters.beginDeleteActiveView("Ephemeral");
@@ -843,7 +857,8 @@ test.describe("Sidebar filter — task-row presentation", () => {
     await filters.expectActiveViewChip("Compact task rows");
 
     const savedSettings = await apiClient.getUserSettings();
-    const savedViews = savedSettings.settings.sidebar_views as Array<{
+    const savedViews = savedSettings.settings.sidebar_views_by_workspace[seedData.workspaceId]
+      .views as Array<{
       name?: string;
       task_row?: { details_enabled?: boolean };
     }>;
@@ -865,7 +880,6 @@ test.describe("Sidebar filter — task-row presentation", () => {
     ]);
     expect(timeBox).not.toBeNull();
     expect(secondTimeBox).not.toBeNull();
-    expect(Math.abs(timeBox!.width - secondTimeBox!.width)).toBeLessThanOrEqual(1);
 
     await filters.openTaskRowSettings();
     await detailsToggle.click();

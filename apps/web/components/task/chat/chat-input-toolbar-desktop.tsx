@@ -119,7 +119,7 @@ function buildCollapsibleItems(props: DesktopToolbarProps): ToolbarItemConfig[] 
     {
       id: "model",
       section: "right",
-      render: () => <ModelSelector sessionId={props.sessionId} />,
+      render: () => <ModelSelector sessionId={props.sessionId} showAgentIcon />,
     },
     {
       id: "enhance",
@@ -148,6 +148,7 @@ function DesktopRightSection(props: {
   canCancelAgent?: boolean;
   hasContent: boolean;
   onImplementPlan?: (fresh: boolean) => void;
+  planActionDisabledReason?: string;
   isDisabled: boolean;
   submitDisabledReason?: string;
   isSending: boolean;
@@ -164,7 +165,11 @@ function DesktopRightSection(props: {
       )}
       <TokenUsageDisplay sessionId={props.sessionId} />
       {props.planModeEnabled && !props.isAgentBusy && props.onImplementPlan && (
-        <ImplementPlanButton onClick={props.onImplementPlan} />
+        <ImplementPlanButton
+          onClick={props.onImplementPlan}
+          disabled={Boolean(props.planActionDisabledReason)}
+          disabledReason={props.planActionDisabledReason}
+        />
       )}
       {!props.hideAgentControls && (
         <ChatInputPluginActions
@@ -274,6 +279,7 @@ export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
         canCancelAgent={props.canCancelAgent}
         hasContent={props.hasContent ?? false}
         onImplementPlan={props.onImplementPlan}
+        planActionDisabledReason={props.planActionDisabledReason}
         isDisabled={props.isDisabled}
         submitDisabledReason={props.submitDisabledReason}
         isSending={props.isSending}

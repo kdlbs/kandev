@@ -63,6 +63,24 @@ import {
 const NAV_ITEM_ID = "e2e-hello";
 const PLUGIN_ROUTE = "/plugins/e2e-hello";
 
+// @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3, AC-UI-CONTROL-SIZING-001.8
+test("plugin settings toolbar stays compact on desktop", async ({ testPage }) => {
+  await testPage.goto("/settings/plugins");
+  const install = testPage.getByTestId("install-plugin-trigger");
+  const sync = testPage.getByTestId("plugins-sync-button");
+  const check = testPage.getByTestId("plugins-check-updates-button");
+  await expect(install).toBeVisible();
+  const boxes = await Promise.all([install.boundingBox(), sync.boundingBox(), check.boundingBox()]);
+  for (const box of boxes) {
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeCloseTo(28, 0);
+    expect(box!.y).toBeCloseTo(boxes[0]!.y, 0);
+  }
+  await install.focus();
+  await testPage.keyboard.press("Enter");
+  await expect(testPage.getByTestId("install-plugin-dialog")).toBeVisible();
+});
+
 /** Every deliveries.jsonl `event_type` recorded so far, read straight off
  * disk from the plugin's real KANDEV_PLUGIN_DATA_DIR (no in-process mock —
  * this is the fixture Go binary's own gRPC OnEvent handler writing to its

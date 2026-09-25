@@ -1,7 +1,23 @@
 import { test, expect } from "../../fixtures/test-base";
 import { activeSessionId, seedClarificationSession } from "../../helpers/clarification";
-import { watchWs } from "../../helpers/causal-waits";
+import { dwell, waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { waitForSessionSettled } from "./quick-chat-helpers";
+
+type UpdateNotification = {
+  version: string;
+  title: string;
+  body: string;
+  occurrence_id: string;
+};
+
+type E2EStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      setUpdateAvailableNotification: (notification: UpdateNotification | null) => void;
+    };
+  };
+};
 
 /**
  * Mobile parity for the multiline custom clarification answer. On a coarse-pointer
@@ -11,6 +27,38 @@ import { waitForSessionSettled } from "./quick-chat-helpers";
  */
 test.describe("Mobile clarification multiline answer", () => {
   test.describe.configure({ timeout: 120_000 });
+
+  test("requires an offered choice when custom text is disabled", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Choice Only",
+      { scenario: "clarification-no-other" },
+    );
+
+    const overlay = session.clarificationOverlay();
+    await expect(overlay).toBeVisible({ timeout: 30_000 });
+    await expect(session.clarificationCustomInput()).toHaveCount(0);
+    if (prCapture.capturing) await waitForFiniteAnimations(overlay);
+    await prCapture.screenshot("mobile-clarification-choice-only", {
+      caption: "Mobile clarification offers only the choices allowed by Codex",
+    });
+    await session.clarificationOption("Fast").tap();
+
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("You answered");
+    await expect(
+      testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).resolves.toBe(true);
+  });
 
   test("Auto-run ON does not bypass a pending clarification on mobile", async ({
     testPage,
@@ -31,7 +79,49 @@ test.describe("Mobile clarification multiline answer", () => {
     await composer.pressSequentially("Queue this from phone 1", { timeout: 30_000 });
     await expect(composer).toContainText("Queue this from phone 1");
     await expect(session.clarificationOverlay()).toBeVisible();
-    await testPage.getByTestId("submit-message-button").tap();
+    await testPage.evaluate(
+      (notification) => {
+        const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+        if (!store) throw new Error("E2E app store is unavailable");
+        store.getState().setUpdateAvailableNotification(notification);
+      },
+      {
+        version: "e2e-mobile-toast",
+        title: "Kandev update available",
+        body: "A newer Kandev release is available.",
+        occurrence_id: "e2e-mobile-toast",
+      },
+    );
+    const updateToast = testPage
+      .getByTestId("toast-message")
+      .filter({ hasText: "Kandev update available" })
+      .last();
+    await expect(updateToast).toContainText("Kandev update available");
+    await expect(updateToast).toContainText("A newer Kandev release is available.");
+    const submit = testPage.getByTestId("submit-message-button");
+    const nav = testPage.getByTestId("session-mobile-bottom-nav");
+    const [submitBox, navBox, toastBox] = await Promise.all([
+      submit.boundingBox(),
+      nav.boundingBox(),
+      updateToast.boundingBox(),
+    ]);
+    if (!submitBox || !navBox || !toastBox) {
+      throw new Error("expected mobile send controls and update toast to be measurable");
+    }
+    expect(submitBox.y + submitBox.height).toBeLessThanOrEqual(navBox.y);
+    const toastOverlapsSubmit =
+      toastBox.x < submitBox.x + submitBox.width &&
+      toastBox.x + toastBox.width > submitBox.x &&
+      toastBox.y < submitBox.y + submitBox.height &&
+      toastBox.y + toastBox.height > submitBox.y;
+    expect(toastOverlapsSubmit).toBe(false);
+    const submitOwnsHitTarget = await submit.evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      const target = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      return target === button || button.contains(target);
+    });
+    expect(submitOwnsHitTarget).toBe(true);
+    await submit.tap();
 
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
     await expect(session.clarificationOverlay()).toBeVisible();
@@ -217,6 +307,113 @@ test.describe("Mobile clarification multiline answer", () => {
     await settled;
     await expect(session.idleInput()).toBeVisible();
     expect(attempt).toBe(2);
+  });
+
+  test("inactive dismissal removes the stale panel and does not retry on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Inactive Dismissal",
+      { scenario: "clarification" },
+    );
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    let attempts = 0;
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      attempts += 1;
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "not_active" }),
+      });
+    });
+
+    const inactiveResponse = waitForHttp(
+      testPage,
+      "POST",
+      /\/api\/v1\/clarification\/[^/]+\/respond$/,
+    );
+    await session.clarificationSkip().tap();
+    await expect((await inactiveResponse).status()).toBe(409);
+
+    await expect(session.clarificationOverlay()).not.toBeVisible();
+    await expect(session.anyIdleInput()).toBeVisible();
+    await dwell(
+      testPage,
+      250,
+      "negative-assertion",
+      "observe that an inactive clarification is not submitted a second time on mobile",
+    );
+    expect(attempts).toBe(1);
+  });
+
+  test("late answer from an inactive historical question sends a new message on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Late Answer",
+      { scenario: "clarification" },
+    );
+    const sessionId = await activeSessionId(testPage);
+    if (!sessionId) throw new Error("expected an active session for mobile late answer");
+
+    let responseAttempts = 0;
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      responseAttempts += 1;
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "not_active" }),
+      });
+    });
+
+    const inactiveResponse = waitForHttp(
+      testPage,
+      "POST",
+      /\/api\/v1\/clarification\/[^/]+\/respond$/,
+    );
+    await session.clarificationSkip().tap();
+    await expect((await inactiveResponse).status()).toBe(409);
+    await expect(session.clarificationOverlay()).not.toBeVisible();
+
+    const answerAction = testPage.getByTestId("clarification-answer-as-new-message");
+    await expect(answerAction).toBeVisible({ timeout: 15_000 });
+    await answerAction.tap();
+    await expect(testPage.getByTestId("clarification-late-submit")).toBeDisabled();
+    await testPage.getByTestId("clarification-option").filter({ hasText: "PostgreSQL" }).tap();
+    await expect(testPage.getByTestId("clarification-late-submit")).toBeEnabled();
+
+    await testPage.getByTestId("clarification-late-submit").tap();
+
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(sessionId);
+          return messages.some(
+            (message) =>
+              message.author_type === "user" &&
+              message.content.includes("Question 1") &&
+              message.content.includes("PostgreSQL"),
+          );
+        },
+        {
+          timeout: 30_000,
+          message: "mobile late clarification answer should be admitted as a message",
+        },
+      )
+      .toBe(true);
+    expect(responseAttempts).toBe(1);
   });
 
   test("keeps the over-limit counter inside the phone viewport", async ({

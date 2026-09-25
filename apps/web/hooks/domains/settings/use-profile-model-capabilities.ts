@@ -9,6 +9,10 @@ type ProfileModelSelection = {
   config_options?: Record<string, string>;
 };
 
+type ProfileModelCapabilitiesOptions = {
+  skipCapabilityProbe?: boolean;
+};
+
 function shouldResolveInitialModelConfig(modelConfig: ModelConfig, selectedModel: string): boolean {
   if (modelConfig.status && modelConfig.status !== "ok") {
     return false;
@@ -35,8 +39,11 @@ export function useProfileModelCapabilities(
   profile: ProfileModelSelection,
   modelConfig: ModelConfig,
   onChange?: (patch: { config_options: Record<string, string> }) => void,
+  options: ProfileModelCapabilitiesOptions = {},
 ) {
-  const capabilities = useAgentCapabilities(agentName, modelConfig);
+  const capabilities = useAgentCapabilities(agentName, modelConfig, {
+    enabled: !options.skipCapabilityProbe,
+  });
   const selectedModel =
     profile.model ||
     capabilities.currentModelId ||
@@ -46,7 +53,7 @@ export function useProfileModelCapabilities(
   const hasUserSelectedModel = useRef(false);
   const resolvedModelConfig = useResolvedModelConfig(agentName, selectedModel, {
     initialConfigOptions: modelConfig.config_options,
-    enabled: modelConfig.supports_dynamic_models,
+    enabled: modelConfig.supports_dynamic_models && !options.skipCapabilityProbe,
     resolveInitial: shouldResolveInitialModelConfig(modelConfig, selectedModel),
   });
 

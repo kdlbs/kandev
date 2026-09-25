@@ -4,6 +4,8 @@ import { useState, memo } from "react";
 import { IconBrain } from "@tabler/icons-react";
 import type { Message } from "@/lib/types/http";
 import type { RichMetadata } from "@/components/task/chat/types";
+import { ChatAnimatedText } from "@/components/shared/chat-markdown-motion";
+import { useChatTextMotion } from "../chat-motion";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { ExpandableRow } from "./expandable-row";
 import { useTranslation } from "react-i18next";
@@ -53,6 +55,7 @@ export const ThinkingMessage = memo(function ThinkingMessage({
   onOpenFile?: (path: string) => void;
 }) {
   const { t } = useTranslation();
+  const animateText = useChatTextMotion();
   const [isExpanded, setIsExpanded] = useState(false);
   const metadata = comment.metadata as RichMetadata | undefined;
   const text = metadata?.thinking ?? comment.content;
@@ -76,7 +79,7 @@ export const ThinkingMessage = memo(function ThinkingMessage({
             </span>
             {isShort && (
               <span className="min-w-0 break-words whitespace-normal text-xs text-muted-foreground/80">
-                {displayText}
+                <ChatAnimatedText text={displayText} enabled={animateText} />
               </span>
             )}
           </span>
@@ -85,7 +88,7 @@ export const ThinkingMessage = memo(function ThinkingMessage({
               data-testid="thinking-message-preview"
               className="min-w-0 flex-1 truncate text-xs text-muted-foreground/80"
             >
-              {preview}
+              <ChatAnimatedText text={preview} enabled={animateText} />
             </span>
           )}
         </div>
@@ -97,7 +100,12 @@ export const ThinkingMessage = memo(function ThinkingMessage({
       {!isShort && (
         <div className="pl-4 border-l-2 border-border/30">
           <div className="markdown-body max-w-none text-xs text-foreground/70 [&>*]:my-1 [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1 [&_strong]:text-foreground/80">
-            <MemoizedMarkdown content={text} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+            <MemoizedMarkdown
+              animateText={animateText && isExpanded}
+              content={text}
+              worktreePath={worktreePath}
+              onOpenFile={onOpenFile}
+            />
           </div>
         </div>
       )}

@@ -3,7 +3,13 @@ import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 import type { StateCreator } from "zustand";
 import { original } from "immer";
 import type { Message, TaskSession } from "@/lib/types/http";
-import type { QueueMeta, QueueOperationToken, SessionSlice, SessionSliceState } from "./types";
+import type {
+  QueueMeta,
+  QueueOperationToken,
+  SessionSlice,
+  SessionSliceState,
+  TaskSessionHydrationEpoch,
+} from "./types";
 import { buildTurnActions, isSettledSessionState, parseTurnTimestamp } from "./turn-actions";
 import {
   buildTaskSessionProjectionActions,
@@ -98,6 +104,10 @@ function mergeMessageAtIndex(messages: Message[], message: Message): void {
   messages[index] = merged;
 }
 
+function isTransientRetryNotice(message: Message): boolean {
+  return message.type === "status" && message.metadata?.retrying === true;
+}
+
 /** Return a new messages array with the message matching `messageId` removed. */
 function removeMessageByID(messages: Message[], messageId: string) {
   return messages.filter((message) => message.id !== messageId);
@@ -107,8 +117,10 @@ function removeMessageByID(messages: Message[], messageId: string) {
 function mergeTaskSessionSnapshot(
   existing: TaskSession | undefined,
   incoming: TaskSession,
-  currentActivityEpoch: number,
-  requestActivityEpoch: number | undefined,
+  epochs: {
+    current: { activity: number; readCursor: number };
+    request?: { activity: number; readCursor: number };
+  },
 ): TaskSession {
   const snapshot = {
     ...incoming,
@@ -120,17 +132,42 @@ function mergeTaskSessionSnapshot(
 
   const merged = mergeTaskSession(existing, snapshot);
   const activityChangedDuringRequest =
-    requestActivityEpoch === undefined
-      ? currentActivityEpoch > 0
-      : currentActivityEpoch > requestActivityEpoch;
-  if (!activityChangedDuringRequest) return merged;
+    epochs.request === undefined
+      ? epochs.current.activity > 0
+      : epochs.current.activity > epochs.request.activity;
+  const readCursorChangedDuringRequest =
+    epochs.request === undefined
+      ? epochs.current.readCursor > 0
+      : epochs.current.readCursor > epochs.request.readCursor;
+  if (!activityChangedDuringRequest && !readCursorChangedDuringRequest) return merged;
 
   return {
     ...merged,
-    foreground_activity: existing.foreground_activity,
-    active_subagent_count: existing.active_subagent_count,
-    supports_steering: existing.supports_steering,
+    ...(activityChangedDuringRequest
+      ? {
+          foreground_activity: existing.foreground_activity,
+          active_subagent_count: existing.active_subagent_count,
+          supports_steering: existing.supports_steering,
+        }
+      : {}),
+    ...(readCursorChangedDuringRequest
+      ? { last_read_message_id: existing.last_read_message_id }
+      : {}),
   };
+}
+
+function mergeTaskSessionActionSnapshot(
+  existing: TaskSession | undefined,
+  incoming: TaskSession,
+  currentEpoch: TaskSessionHydrationEpoch,
+  requestEpoch?: TaskSessionHydrationEpoch,
+): TaskSession {
+  if (!existing) return incoming;
+  if (!requestEpoch) return mergeTaskSession(existing, incoming);
+  return mergeTaskSessionSnapshot(existing, incoming, {
+    current: currentEpoch,
+    request: requestEpoch,
+  });
 }
 
 function reconcileMcpAttachmentHistory(
@@ -205,7 +242,7 @@ export const defaultSessionState: SessionSliceState = {
     reconcileEpochBySession: {},
     settledBoundaryBySession: {},
   },
-  taskSessions: { items: {}, activityEpochBySession: {} },
+  taskSessions: { items: {}, activityEpochBySession: {}, readCursorEpochBySession: {} },
   taskSessionsByTask: {
     itemsByTaskId: {},
     loadingByTaskId: {},
@@ -324,8 +361,15 @@ function buildMessageActions(set: ImmerSet) {
     updateMessages: (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
       set((draft) => {
         for (const message of messages) {
-          const sessionMessages = draft.messages.bySession[message.session_id];
-          if (sessionMessages) mergeMessageAtIndex(sessionMessages, message);
+          let sessionMessages = draft.messages.bySession[message.session_id];
+          if (!sessionMessages && isTransientRetryNotice(message)) {
+            sessionMessages = draft.messages.bySession[message.session_id] = [];
+          }
+          if (sessionMessages) {
+            const hasMessage = sessionMessages.some((entry) => entry.id === message.id);
+            if (hasMessage) mergeMessageAtIndex(sessionMessages, message);
+            else if (isTransientRetryNotice(message)) sessionMessages.push(message);
+          }
           updatePromptMessage(draft, message);
         }
       }),
@@ -626,6 +670,9 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       if (draft.taskSessions.activityEpochBySession) {
         delete draft.taskSessions.activityEpochBySession[sessionId];
       }
+      if (draft.taskSessions.readCursorEpochBySession) {
+        delete draft.taskSessions.readCursorEpochBySession[sessionId];
+      }
       const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
       if (sessionsByTask) {
         draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
@@ -677,18 +724,24 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
     setTaskSessionsForTask: (
       taskId: string,
       sessions: Parameters<SessionSlice["setTaskSessionsForTask"]>[1],
-      activityEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
+      hydrationEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
     ) =>
       set((draft) => {
         const merged = sessions.map((session) => {
           const existing = draft.taskSessions.items[session.id];
+          const requestEpoch = hydrationEpochsAtRequestStart[session.id];
           resetQueueStateForReincarnation(draft, existing, session);
-          const snapshot = mergeTaskSessionSnapshot(
-            existing,
-            session,
-            draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
-            activityEpochsAtRequestStart[session.id],
-          );
+          const snapshot = mergeTaskSessionSnapshot(existing, session, {
+            current: {
+              activity: draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
+              readCursor: draft.taskSessions.readCursorEpochBySession?.[session.id] ?? 0,
+            },
+            request: requestEpoch,
+          });
+          if (snapshot.last_read_message_id !== existing?.last_read_message_id) {
+            const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+            epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+          }
           return mergeOrphanPendingActionProjection(
             draft.pendingActionProjectionsBySessionId,
             snapshot,
@@ -730,6 +783,10 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
           draft.pendingActionProjectionsBySessionId,
           existing ? mergeTaskSession(existing, session) : session,
         );
+        if (merged.last_read_message_id !== existing?.last_read_message_id) {
+          const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+          epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+        }
         draft.taskSessions.items[session.id] = merged;
         const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
         if (list) {
@@ -748,14 +805,30 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
 /** Create the basic task-session set, read-cursor, removal, and loading actions. */
 function buildTaskSessionActions(set: ImmerSet) {
   return {
-    setTaskSession: (session: Parameters<SessionSlice["setTaskSession"]>[0]) =>
+    setTaskSession: (
+      session: Parameters<SessionSlice["setTaskSession"]>[0],
+      hydrationEpochAtRequestStart?: TaskSessionHydrationEpoch,
+    ) =>
       set((draft) => {
         const existingSession = draft.taskSessions.items[session.id];
         resetQueueStateForReincarnation(draft, existingSession, session);
+        const mergedSnapshot = mergeTaskSessionActionSnapshot(
+          existingSession,
+          session,
+          {
+            activity: draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
+            readCursor: draft.taskSessions.readCursorEpochBySession?.[session.id] ?? 0,
+          },
+          hydrationEpochAtRequestStart,
+        );
         const mergedSession = mergeOrphanPendingActionProjection(
           draft.pendingActionProjectionsBySessionId,
-          existingSession ? mergeTaskSession(existingSession, session) : session,
+          mergedSnapshot,
         );
+        if (mergedSession.last_read_message_id !== existingSession?.last_read_message_id) {
+          const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+          epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+        }
         draft.taskSessions.items[session.id] = mergedSession;
         const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
         if (sessionsByTask) {
@@ -770,6 +843,10 @@ function buildTaskSessionActions(set: ImmerSet) {
       set((draft) => {
         const session = draft.taskSessions.items[sessionId];
         if (!session) return;
+        if (session.last_read_message_id !== lastReadMessageId) {
+          const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+          epochs[sessionId] = (epochs[sessionId] ?? 0) + 1;
+        }
         session.last_read_message_id = lastReadMessageId;
         const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
         if (sessionsByTask) {

@@ -24,7 +24,7 @@ test.describe("mobile: command panel task navigation", () => {
     await testPage.goto(`/t/${source.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(testPage.getByTestId("mobile-session-menu")).toBeVisible();
+    await expect(testPage.getByTestId("mobile-task-picker-trigger")).toBeVisible();
     await expect(testPage.getByTestId("app-sidebar-layout")).toBeHidden();
 
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -40,7 +40,7 @@ test.describe("mobile: command panel task navigation", () => {
 
     await expect(testPage).toHaveURL(new RegExp(`/t/${destination.task_id}$`));
     const mobileTopBar = testPage
-      .getByTestId("mobile-session-menu")
+      .getByTestId("mobile-task-picker-trigger")
       .locator("xpath=ancestor::header");
     await expect(
       mobileTopBar.getByText("Mobile command destination task", { exact: true }),

@@ -26,6 +26,8 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       sessionWorktreesBySessionId: { itemsBySessionId: {} },
       workspaceFilesRefresh: { bySessionId: {} },
+      worktrees: { items: {} },
+      repositories: { itemsByWorkspaceId: {} },
     }),
   useAppStoreApi: () => ({
     getState: () => ({ workspaceRestoration: { byEnvironmentId: {} } }),

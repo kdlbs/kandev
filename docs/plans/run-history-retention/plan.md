@@ -25,7 +25,7 @@ was doing nothing useful. This plan adds one scheduled sweep, on its own interva
 (never the 5s Office tick), that bounds `office_routine_runs`, `runs`, and their
 satellites (`run_events`, `office_run_route_attempts`, `office_run_skills`) by age,
 with a per-owner floor, identical behavior on SQLite and PostgreSQL, and an operator
-surface (Settings > System > Data & Logs) that reports policy, counts, previews, and
+surface (Settings > System > Storage > Office retention) that reports policy, counts, previews, and
 warnings before and while rows are deleted.
 
 The two halves of the contract are split the same way the specs are split: the sweep
@@ -49,7 +49,7 @@ System page surface are
   deleted in the same transaction as their parent run.
 - A per-table preview (report, delete nothing) on each table's first evaluation, and
   `health.Issue` warnings before the cap and on sweep/count failure.
-- A `RetentionSettingsCard` on Settings > System > Data & Logs showing policy, retained
+- A `RetentionSettingsCard` on Settings > System > Storage > Office retention showing policy, retained
   counts, preview state, last sweep, and backlog/error warnings.
 - Expression indexes serving the sweep's filter/order on both engines.
 
@@ -62,3 +62,8 @@ System page surface are
 ## Tasks
 
 - [x] [Task 01: Bound run history with a scheduled retention sweep](task-01-bound-run-history-with-retention-sweep.md)
+
+## Follow-up presentation package
+
+The [settings storage tabs package](../settings-storage-tabs/plan.md) completed the header tabs and maintenance presentation changes.
+Its results remain historical inputs to the current route, copy, and regression verification.

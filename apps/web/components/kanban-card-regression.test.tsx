@@ -9,13 +9,13 @@
  * an explicit negative/positive pair.
  */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { t } from "@/lib/i18n";
 import { pluginRegistry } from "@/lib/plugins/registry";
-import { KanbanCard, type Task } from "@/components/kanban-card";
+import { KanbanCard, type KanbanCardProps, type Task } from "@/components/kanban-card";
 import { resolveTaskRepositoryChips } from "@/components/kanban-card-repositories";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { Repository } from "@/lib/types/http";
@@ -41,7 +41,11 @@ function baseTask(overrides: Partial<Task> = {}): Task {
   };
 }
 
-function renderCard(task: Task, repositories: Repository[] = []) {
+function renderCard(
+  task: Task,
+  repositories: Repository[] = [],
+  props: Partial<KanbanCardProps> = {},
+) {
   return render(
     <ToastProvider>
       <StateProvider>
@@ -53,6 +57,7 @@ function renderCard(task: Task, repositories: Repository[] = []) {
             repositoryChips={resolveTaskRepositoryChips(task, repositories)}
             steps={STEPS}
             onDelete={() => undefined}
+            {...props}
           />
         </TooltipProvider>
       </StateProvider>
@@ -201,4 +206,47 @@ describe("KanbanCard — title-preview disclosure widening (AC-UI-PIPELINE-ROW-0
     renderCard(baseTask({ description: "Some description content" }));
     expect(screen.getByTestId("task-title-preview-trigger")).not.toBeNull();
   });
+});
+
+describe("KanbanCard — title preview in multi-select mode", () => {
+  // @covers AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.2
+  it.each([
+    ["unselected", false],
+    ["selected", true],
+  ] as const)("does not mount a title preview for a %s card", (_label, isSelected) => {
+    renderCard(baseTask({ description: "Some description content" }), [], {
+      isMultiSelectMode: true,
+      isSelected,
+    });
+
+    expect(screen.queryByTestId("task-title-preview-trigger")).toBeNull();
+  });
+});
+
+// @covers AC-TASKS-MOBILE-KANBAN-SCROLL-001.1, AC-TASKS-MOBILE-KANBAN-SCROLL-001.4
+it.each(["Enter", " "])(
+  "phone cards open with %j without exposing or invoking drag pickup",
+  (key) => {
+    const onCardKeyDown = vi.fn();
+    const onClick = vi.fn();
+    renderCard(baseTask(), [], { presentation: "mobile", onCardKeyDown, onClick });
+    const card = screen.getByTestId("task-card-task-1");
+    expect(card.getAttribute("aria-roledescription")).toBeNull();
+    expect(card.getAttribute("aria-describedby")).toBeNull();
+    expect(card.tabIndex).toBe(0);
+    fireEvent.keyDown(card, { key });
+    fireEvent.keyDown(card, { key, repeat: true });
+    fireEvent.keyDown(screen.getByRole("button", { name: t("kanban:moreOptions") }), { key });
+    expect(onCardKeyDown).not.toHaveBeenCalled();
+    expect(onClick).toHaveBeenCalledTimes(1);
+  },
+);
+
+it("desktop cards retain keyboard reorder and drag instructions", () => {
+  const onCardKeyDown = vi.fn();
+  renderCard(baseTask(), [], { presentation: "desktop", onCardKeyDown });
+  const card = screen.getByTestId("task-card-task-1");
+  expect(card.getAttribute("aria-roledescription")).toBe("draggable");
+  fireEvent.keyDown(card, { key: "Enter" });
+  expect(onCardKeyDown).toHaveBeenCalledTimes(1);
 });

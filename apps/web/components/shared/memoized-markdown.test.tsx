@@ -16,6 +16,7 @@ vi.mock("@/components/shared/markdown-components", () => ({
   MarkdownFileLinkContext: createContext({}),
   MarkdownTaskContext: createContext(null),
   markdownComponents: {},
+  rehypePlugins: [],
   remarkPlugins: [],
 }));
 

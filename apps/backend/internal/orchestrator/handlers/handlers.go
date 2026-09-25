@@ -38,6 +38,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskSessionStatus, h.wsGetTaskSessionStatus)
 	d.RegisterFunc(ws.ActionAgentCancel, h.wsCancelAgent)
 	d.RegisterFunc(ws.ActionSessionLaunch, h.wsLaunchSession)
+	d.RegisterFunc(ws.ActionSessionFork, h.wsForkConversation)
 	d.RegisterFunc(ws.ActionSessionEnsure, h.wsEnsureSession)
 	d.RegisterFunc(ws.ActionSessionRecover, h.wsRecoverSession)
 	d.RegisterFunc(ws.ActionTaskLaunchRecover, h.wsRecoverTaskLaunch)
@@ -169,9 +170,45 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
+type wsForkConversationRequest struct {
+	TaskID          string `json:"task_id"`
+	SourceSessionID string `json:"session_id"`
+	TurnID          string `json:"turn_id"`
+	RequestID       string `json:"request_id"`
+}
+
+func (h *Handlers) wsForkConversation(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsForkConversationRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" || req.SourceSessionID == "" || req.TurnID == "" || req.RequestID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id, session_id, turn_id, and request_id are required", nil)
+	}
+	response, err := h.service.ForkConversation(ctx, orchestrator.ForkConversationRequest{
+		TaskID: req.TaskID, SourceSessionID: req.SourceSessionID,
+		TurnID: req.TurnID, RequestID: req.RequestID,
+	})
+	if err != nil {
+		if errors.Is(err, orchestrator.ErrCodexForkUnsupported) ||
+			errors.Is(err, orchestrator.ErrCodexForkActive) ||
+			errors.Is(err, orchestrator.ErrCodexForkUncertain) ||
+			errors.Is(err, orchestrator.ErrCodexForkInProgress) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
+		}
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found", nil)
+		}
+		h.logger.Warn("conversation fork failed", zap.String("session_id", req.SourceSessionID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "conversation fork failed", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
 type wsEnsureSessionRequest struct {
-	TaskID    string `json:"task_id"`
-	AutoStart *bool  `json:"auto_start,omitempty"`
+	TaskID           string                              `json:"task_id"`
+	AutoStart        *bool                               `json:"auto_start,omitempty"`
+	ActivationSource orchestrator.LaunchActivationSource `json:"activation_source,omitempty"`
 }
 
 // wsEnsureSession ensures a task has a session, honoring the auto_start override.
@@ -184,7 +221,9 @@ func (h *Handlers) wsEnsureSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
-	resp, err := h.service.EnsureSession(ctx, req.TaskID, orchestrator.EnsureSessionOptions{AutoStart: req.AutoStart})
+	resp, err := h.service.EnsureSession(ctx, req.TaskID, orchestrator.EnsureSessionOptions{
+		AutoStart: req.AutoStart, ActivationSource: req.ActivationSource,
+	})
 	if err != nil {
 		h.logger.Error("failed to ensure session",
 			zap.String("task_id", req.TaskID),
@@ -256,9 +295,18 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsRecoverSessionRequest struct {
-	TaskID    string `json:"task_id"`
-	SessionID string `json:"session_id"`
-	Action    string `json:"action"` // "resume", "resume_new_branch", "fresh_start", "runtime_retry", or "cancel_retry"
+	TaskID     string `json:"task_id"`
+	SessionID  string `json:"session_id"`
+	Action     string `json:"action"` // "resume", "resume_new_branch", "fresh_start", "runtime_retry", or "cancel_retry"
+	ErrorStamp string `json:"error_stamp,omitempty"`
+}
+
+func managedCloneRelocationConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	var recoveryErr *orchestrator.ManagedCloneRelocationRecoveryError
+	if !errors.As(err, &recoveryErr) {
+		return nil, nil
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), recoveryErr.Details())
 }
 
 func branchRecoveryConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
@@ -319,12 +367,18 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": cancelled})
 	}
 
-	if req.Action != "resume" && req.Action != "resume_new_branch" && req.Action != "fresh_start" && req.Action != "runtime_retry" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume', 'resume_new_branch', 'fresh_start', 'runtime_retry', or 'cancel_retry'", nil)
+	if req.Action != "resume" && req.Action != "resume_new_branch" && req.Action != "fresh_start" && req.Action != "runtime_retry" && req.Action != "relocate_and_resume" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "unsupported session recovery action", nil)
+	}
+	if req.Action == "relocate_and_resume" && req.ErrorStamp == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "error_stamp is required for managed clone recovery", nil)
 	}
 
-	resp, err := h.service.RecoverSession(ctx, req.TaskID, req.SessionID, req.Action)
+	resp, err := h.service.RecoverSession(ctx, req.TaskID, req.SessionID, req.Action, req.ErrorStamp)
 	if err != nil {
+		if recoveryResponse, responseErr := managedCloneRelocationConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
 		if recoveryResponse, responseErr := taskArchivedConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
 		}

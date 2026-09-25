@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type MouseEvent } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconPlayerPause, IconPlayerPlay } from "@tabler/icons-react";
 import {
@@ -46,9 +46,11 @@ export function codePointLength(value: string): number {
 export function PauseWorkspaceButton({
   onPause,
   disabled,
+  renderTrigger,
 }: {
   onPause: (reason: string) => Promise<WorkspacePauseActionResult>;
   disabled?: boolean;
+  renderTrigger?: (onOpen: () => void) => ReactNode;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -82,17 +84,21 @@ export function PauseWorkspaceButton({
 
   return (
     <>
-      <Button
-        size="sm"
-        variant="outline"
-        className="min-h-11 cursor-pointer gap-1.5 sm:min-h-0"
-        disabled={disabled}
-        data-testid="office-pause-workspace-button"
-        onClick={() => setOpen(true)}
-      >
-        <IconPlayerPause className="h-3.5 w-3.5" />
-        {t("office:pauseWorkspace")}
-      </Button>
+      {renderTrigger ? (
+        renderTrigger(() => setOpen(true))
+      ) : (
+        <Button
+          size="sm"
+          variant="outline"
+          className="min-h-11 cursor-pointer gap-1.5 sm:min-h-0"
+          disabled={disabled}
+          data-testid="office-pause-workspace-button"
+          onClick={() => setOpen(true)}
+        >
+          <IconPlayerPause className="h-3.5 w-3.5" />
+          {t("office:pauseWorkspace")}
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent data-testid="office-pause-workspace-dialog">
           <DialogHeader>
@@ -144,9 +150,11 @@ export function PauseWorkspaceButton({
 export function ResumeWorkspaceButton({
   onResume,
   disabled,
+  renderTrigger,
 }: {
   onResume: () => Promise<WorkspacePauseActionResult>;
   disabled?: boolean;
+  renderTrigger?: (onOpen: () => void) => ReactNode;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -176,16 +184,20 @@ export function ResumeWorkspaceButton({
 
   return (
     <>
-      <Button
-        size="sm"
-        className="min-h-11 cursor-pointer gap-1.5 sm:min-h-0"
-        disabled={disabled}
-        data-testid="office-resume-workspace-button"
-        onClick={() => setOpen(true)}
-      >
-        <IconPlayerPlay className="h-3.5 w-3.5" />
-        {t("office:resumeWorkspace")}
-      </Button>
+      {renderTrigger ? (
+        renderTrigger(() => setOpen(true))
+      ) : (
+        <Button
+          size="sm"
+          className="min-h-11 cursor-pointer gap-1.5 sm:min-h-0"
+          disabled={disabled}
+          data-testid="office-resume-workspace-button"
+          onClick={() => setOpen(true)}
+        >
+          <IconPlayerPlay className="h-3.5 w-3.5" />
+          {t("office:resumeWorkspace")}
+        </Button>
+      )}
       <AlertDialog open={open} onOpenChange={handleOpenChange}>
         <AlertDialogContent data-testid="office-resume-workspace-dialog">
           <AlertDialogHeader>

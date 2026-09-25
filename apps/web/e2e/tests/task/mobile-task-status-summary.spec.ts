@@ -58,7 +58,7 @@ test.describe("Mobile task status summary", () => {
     await testPage.goto(`/t/${navTask.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const sheet = testPage.getByRole("dialog");
     const targetRow = sheet.getByTestId("sidebar-task-item").filter({
       hasText: TARGET_TITLE,
@@ -118,7 +118,9 @@ test.describe("Mobile task status summary", () => {
 
     // The passive PR icon must not steal the row's native touch target.
     await targetRow.tap();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.task_id}$`));
+    await expect(testPage).toHaveURL(
+      new RegExp(`/t/${targetTask.task_id}\\?sessionId=${targetSession.session_id}$`),
+    );
     await session.waitForLoad();
     await expect(session.prStatusChip()).toBeVisible({ timeout: 15_000 });
     await session.tapPRStatusChip();

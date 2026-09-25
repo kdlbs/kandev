@@ -16,6 +16,13 @@ const state = {
     activeViewId: "all",
     draft: null,
   },
+  sidebarViewsByWorkspace: {
+    "ws-1": {
+      views: [{ id: "all", name: "All tasks" }],
+      activeViewId: "all",
+      draft: null,
+    },
+  },
   toggleAppSidebarSection: vi.fn(),
   setAppSidebarCollapsed: vi.fn(),
   setSidebarActiveView: vi.fn(),
@@ -23,6 +30,7 @@ const state = {
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
+  useAppStoreApi: () => ({ getState: () => state }),
 }));
 
 vi.mock("@/components/task/task-session-sidebar", () => ({
@@ -51,6 +59,7 @@ describe("TasksSection", () => {
     state.sidebarViews.views = [{ id: "all", name: "All tasks" }];
     state.sidebarViews.activeViewId = "all";
     state.sidebarViews.draft = null;
+    state.sidebarViewsByWorkspace["ws-1"] = state.sidebarViews;
     state.toggleAppSidebarSection.mockClear();
     state.setAppSidebarCollapsed.mockClear();
     state.setSidebarActiveView.mockClear();

@@ -17,8 +17,12 @@ const responsiveMock = vi.hoisted(() => ({
 const wsMock = vi.hoisted(() => ({
   client: null as { request: ReturnType<typeof vi.fn> } | null,
 }));
+const deleteTaskPRMock = vi.hoisted(() => vi.fn());
 const CHIP_TESTID = "pr-status-chip";
 const TOPBAR_BUTTON_TESTID = "pr-topbar-button";
+const CHECKS_FAILED = "Checks failed";
+const CHECKS_PASSED = "Checks passed";
+const CONFLICTS = "Conflicts";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({
@@ -51,6 +55,7 @@ vi.mock("@/lib/api/domains/github-api", async (importOriginal) => {
       pr_states: [],
     }),
     listWorkspaceTaskPRs: vi.fn().mockResolvedValue({ task_prs: {} }),
+    deleteTaskPR: deleteTaskPRMock,
   };
 });
 
@@ -125,6 +130,10 @@ function taskState(prs: TaskPR[], activeTask = false): Partial<AppState> {
   };
 }
 
+function ariaLabel(element: Element): string {
+  return element.getAttribute("aria-label") ?? "";
+}
+
 function setupRefresh(prs: TaskPR[]) {
   const pending = prs.map((pr) => ({ ...pr, checks_state: "pending" as const }));
   const request = vi.fn().mockResolvedValueOnce({ prs }).mockResolvedValueOnce({ prs: pending });
@@ -177,6 +186,18 @@ afterEach(() => {
 });
 
 describe("TaskPR refresh routes", () => {
+  it("shows only the left PR glyph and number, with localized failing-check and conflict text", () => {
+    const failed = makePR({ has_merge_conflicts: true });
+    setupRefresh([failed]);
+    renderWithStore(taskState([failed], true), <PRTopbarButton />);
+    const button = screen.getByTestId(TOPBAR_BUTTON_TESTID);
+    expect(button.textContent).toBe("#42");
+    expect(button.querySelectorAll("svg")).toHaveLength(2);
+    expect(button.querySelectorAll(":scope > svg")).toHaveLength(0);
+    expect(button.querySelector('[data-testid="pr-merge-conflict-warning"]')).not.toBeNull();
+    expect(ariaLabel(button)).toContain(CHECKS_FAILED);
+    expect(ariaLabel(button)).toContain(CONFLICTS);
+  });
   it("refreshes the stale single-PR chip when its mobile drawer opens", async () => {
     responsiveMock.breakpoint = "mobile";
     responsiveMock.isFinePointer = false;
@@ -251,8 +272,94 @@ describe("TaskPR refresh routes", () => {
     renderWithStore(taskState([failed, passing], true), <PRTopbarButton />);
     await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
     expectTopbarStatusIcon("text-red-500");
+    expect(screen.getByTestId(TOPBAR_BUTTON_TESTID).querySelectorAll("svg")).toHaveLength(2);
     fireEvent.mouseEnter(screen.getByTestId(TOPBAR_BUTTON_TESTID));
 
     await expectTopbarRefresh(request);
+  });
+});
+
+describe("multi-PR accessible status", () => {
+  it("names aggregate and per-PR status in the topbar and menu", async () => {
+    const failed = makePR({ id: "failed", has_merge_conflicts: true });
+    const passing = makePR({
+      id: "passing",
+      repo: "api",
+      pr_number: 77,
+      checks_state: "success",
+      mergeable_state: "clean",
+      review_state: "approved",
+    });
+    setupRefresh([failed, passing]);
+    renderWithStore(taskState([failed, passing], true), <PRTopbarButton />);
+
+    const button = screen.getByTestId(TOPBAR_BUTTON_TESTID);
+    expect(ariaLabel(button)).toContain(button.textContent);
+    expect(ariaLabel(button)).toContain(CHECKS_FAILED);
+    expect(ariaLabel(button)).toContain(CHECKS_PASSED);
+    expect(ariaLabel(button)).toContain(CONFLICTS);
+
+    fireEvent.pointerDown(button, { button: 0, ctrlKey: false, pointerType: "mouse" });
+    const failedRow = await screen.findByTestId("pr-topbar-menu-item-acme-demo-42");
+    const passingRow = screen.getByTestId("pr-topbar-menu-item-acme-api-77");
+    expect(ariaLabel(failedRow)).toContain(CHECKS_FAILED);
+    expect(ariaLabel(failedRow)).toContain(CONFLICTS);
+    expect(ariaLabel(passingRow)).toContain(CHECKS_PASSED);
+    expect(ariaLabel(passingRow)).not.toContain(CONFLICTS);
+  });
+});
+
+describe("PR topbar unlink context menu", () => {
+  beforeEach(() => {
+    deleteTaskPRMock.mockReset();
+    deleteTaskPRMock.mockResolvedValue(undefined);
+  });
+
+  // @covers AC-INTEGRATIONS-GITHUB-PR-UNLINK-MENUS-001.1, .3, .4, .7
+  it("unlinks the selected association when duplicate PR numbers belong to different repositories", async () => {
+    const webPR = makePR({
+      id: "web-association",
+      repo: "web",
+      repository_id: "web-repository",
+    });
+    const apiPR = makePR({
+      id: "api-association",
+      repo: "api",
+      repository_id: "api-repository",
+    });
+    setupRefresh([webPR, apiPR]);
+    renderWithStore(taskState([webPR, apiPR], true), <PRTopbarButton />);
+
+    const trigger = screen.getByTestId(TOPBAR_BUTTON_TESTID);
+    fireEvent.contextMenu(trigger);
+
+    const edit = await screen.findByRole("menuitem", { name: "Edit" });
+    fireEvent.pointerMove(edit, { pointerType: "mouse" });
+    const selected = await screen.findByRole("menuitem", {
+      name: "Remove acme/api #42 from task",
+    });
+    expect(screen.getByRole("menuitem", { name: "Remove acme/web #42 from task" })).toBeTruthy();
+    fireEvent.click(selected);
+
+    await waitFor(() => expect(deleteTaskPRMock).toHaveBeenCalledWith(apiPR.id, "ws-1"));
+    await waitFor(() => expect(screen.queryByTestId(TOPBAR_BUTTON_TESTID)).not.toBeNull());
+    expect(screen.queryByRole("menuitem", { name: "Remove acme/api #42 from task" })).toBeNull();
+  });
+
+  // @covers AC-INTEGRATIONS-GITHUB-PR-UNLINK-MENUS-001.1, .4
+  it("removes the topbar control after unlinking its final PR", async () => {
+    const pr = makePR({ id: "only-association" });
+    setupRefresh([pr]);
+    renderWithStore(taskState([pr], true), <PRTopbarButton />);
+
+    fireEvent.contextMenu(screen.getByTestId(TOPBAR_BUTTON_TESTID));
+    const edit = await screen.findByRole("menuitem", { name: "Edit" });
+    fireEvent.pointerMove(edit, { pointerType: "mouse" });
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Remove acme/demo #42 from task" }),
+    );
+
+    await waitFor(() => expect(deleteTaskPRMock).toHaveBeenCalledWith(pr.id, "ws-1"));
+    await waitFor(() => expect(screen.queryByTestId(TOPBAR_BUTTON_TESTID)).toBeNull());
   });
 });

@@ -23,17 +23,23 @@ export function SystemRouteShell({
   titleKey,
   descriptionKey,
   descriptionValues,
+  tabs,
   children,
 }: {
   titleKey: string;
   descriptionKey: string;
   /** Identifiers the description interpolates, so they survive translation. */
   descriptionValues?: Record<string, string>;
+  tabs?: ReactNode;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
   return (
-    <SystemPageShell title={t(titleKey)} description={t(descriptionKey, descriptionValues)}>
+    <SystemPageShell
+      title={t(titleKey)}
+      description={t(descriptionKey, descriptionValues)}
+      tabs={tabs}
+    >
       {children}
     </SystemPageShell>
   );

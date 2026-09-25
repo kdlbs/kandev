@@ -111,6 +111,52 @@ function deduplicateRecoveryMessages(messages: Message[]): Message[] {
   });
 }
 
+function agentPlanCorrelationKey(message: Message): string | null {
+  if (message.type !== "agent_plan") return null;
+  const metadata = message.metadata as { tool_call_id?: unknown } | undefined;
+  const toolCallId = metadata?.tool_call_id;
+  return typeof toolCallId === "string" && toolCallId.startsWith("agent-plan:") ? toolCallId : null;
+}
+
+function collapseCorrelatedAgentPlans(messages: Message[]): Message[] {
+  const latestIndexByCorrelation = new Map<string, number>();
+  for (const [index, message] of messages.entries()) {
+    const correlation = agentPlanCorrelationKey(message);
+    if (correlation) latestIndexByCorrelation.set(correlation, index);
+  }
+  if (latestIndexByCorrelation.size === 0) return messages;
+  return messages.filter((message, index) => {
+    const correlation = agentPlanCorrelationKey(message);
+    return !correlation || latestIndexByCorrelation.get(correlation) === index;
+  });
+}
+
+function collapseLegacyAgentPlanPrefixes(messages: Message[]): Message[] {
+  const collapsed: Message[] = [];
+  for (const message of messages) {
+    const previous = collapsed[collapsed.length - 1];
+    const isLegacyPrefix =
+      previous?.type === "agent_plan" &&
+      message.type === "agent_plan" &&
+      !agentPlanCorrelationKey(previous) &&
+      !agentPlanCorrelationKey(message) &&
+      Boolean(previous.turn_id) &&
+      previous.turn_id === message.turn_id &&
+      previous.content !== message.content &&
+      message.content.startsWith(previous.content);
+    if (isLegacyPrefix) {
+      collapsed[collapsed.length - 1] = message;
+    } else {
+      collapsed.push(message);
+    }
+  }
+  return collapsed;
+}
+
+function collapseAgentPlanSnapshots(messages: Message[]): Message[] {
+  return collapseLegacyAgentPlanPrefixes(collapseCorrelatedAgentPlans(messages));
+}
+
 export function isAgentBootResumeMessage(message: Message): boolean {
   if (message.type !== "script_execution") return false;
   const metadata = message.metadata as { script_type?: string; is_resuming?: boolean } | undefined;
@@ -359,10 +405,12 @@ export function filterVisibleMessages(
     if (message.type === "permission_request") return isPermissionVisible(message, toolCallIds);
     return false;
   });
-  return collapseTodoSnapshotsPerTurn(
-    dropSupersededEmptyTurnNotices(
-      deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered)),
-      messages,
+  return collapseAgentPlanSnapshots(
+    collapseTodoSnapshotsPerTurn(
+      dropSupersededEmptyTurnNotices(
+        deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered)),
+        messages,
+      ),
     ),
   );
 }

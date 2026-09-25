@@ -3,8 +3,16 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
+import { waitForStableActiveSession } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+import {
+  SAME_TASK_LONG_SENDER_NAME,
+  SAME_TASK_QUEUED_MESSAGE,
+  selectSameTaskSession,
+  seedSameTaskAttributionScenario,
+  startSameTaskReceiverSession,
+} from "./agent-message-attribution-helpers";
 
 registerSeparateQueueRows(test);
 
@@ -183,6 +191,7 @@ test.describe("Cross-task agent message attribution", () => {
     await expect(panel.getByTestId("sender-task-badge")).toHaveCount(10);
     await expect(panel.getByTestId("queue-entry-edit")).toHaveCount(0);
     await expect(panel.getByTestId("queue-entry-remove")).toHaveCount(10);
+    const queueIdentity = await apiClient.getQueueSessionIdentity(target.id, target.sessionId);
 
     const firstAgentEntry = panel.getByTestId("queue-entry").filter({
       has: testPage.getByTestId("queue-entry-text").filter({ hasText: /^agent queued 1$/ }),
@@ -192,8 +201,14 @@ test.describe("Cross-task agent message attribution", () => {
     await expect(panel).toContainText("9 of 10");
 
     await panel.getByTestId("queue-clear-all").click();
-    await expect(panel).not.toBeVisible({ timeout: 10_000 });
-    await expect(chat.getByTestId("queue-chip")).not.toBeVisible();
+    await expect(panel).not.toBeVisible({ timeout: 30_000 });
+    await expect(chat.getByTestId("queue-chip")).not.toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count), {
+        timeout: 30_000,
+        message: "Waiting for clear-all to commit before admitting a new message",
+      })
+      .toBe(0);
 
     await createSenderTaskingTarget(
       apiClient,
@@ -516,5 +531,98 @@ test.describe("Cross-task agent message attribution", () => {
     expect(recorded.content).toContain("after");
     // Sender attribution metadata still flows even when the body fights us.
     expect((recorded.metadata as Record<string, unknown>).sender_task_id).toBeTruthy();
+  });
+});
+
+test.describe("Same-task agent message attribution", () => {
+  test("queues a real sibling-session message and exposes full context to keyboard users", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const scenario = await seedSameTaskAttributionScenario(
+      apiClient,
+      seedData,
+      "Same-task sender attribution",
+    );
+    await testPage.goto(`/t/${scenario.taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const receiverSessionId = await startSameTaskReceiverSession(testPage, apiClient, scenario);
+    await selectSameTaskSession(testPage, session, scenario.senderSessionId);
+    await waitForStableActiveSession(testPage, scenario.senderSessionId);
+    await session.waitForChatIdle();
+
+    const identity = await apiClient.getQueueSessionIdentity(scenario.taskId, receiverSessionId);
+    await session.sendMessage(
+      mcpScript({
+        task_id: scenario.taskId,
+        session_id: receiverSessionId,
+        prompt: SAME_TASK_QUEUED_MESSAGE,
+      }),
+    );
+
+    let queuedEntry:
+      | Awaited<ReturnType<typeof apiClient.getQueueStatus>>["entries"][number]
+      | undefined;
+    await expect
+      .poll(
+        async () => {
+          const status = await apiClient.getQueueStatus(identity);
+          queuedEntry = status.entries.find((entry) =>
+            entry.content.includes(SAME_TASK_QUEUED_MESSAGE),
+          );
+          return queuedEntry
+            ? {
+                count: status.count,
+                queuedBy: queuedEntry.queued_by,
+                metadata: queuedEntry.metadata,
+              }
+            : null;
+        },
+        {
+          timeout: 30_000,
+          message: "message_task_kandev should persist the sender metadata on the sibling queue",
+        },
+      )
+      .toEqual({
+        count: 1,
+        queuedBy: "agent",
+        metadata: {
+          sender_task_id: scenario.taskId,
+          sender_task_title: scenario.title,
+          sender_session_id: scenario.senderSessionId,
+          sender_session_name: SAME_TASK_LONG_SENDER_NAME,
+        },
+      });
+
+    const receiverTab = session.sessionTabBySessionId(receiverSessionId);
+    await expect(receiverTab).toBeVisible();
+    await selectSameTaskSession(testPage, session, receiverSessionId);
+    const chat = session.activeChat();
+    const queueChip = chat.getByTestId("queue-chip");
+    await queueChip.click();
+    const queuedRow = chat.getByTestId("queue-entry").filter({ hasText: SAME_TASK_QUEUED_MESSAGE });
+    const senderBadge = queuedRow.getByTestId("sender-task-badge");
+    await expect(senderBadge).toHaveAttribute(
+      "aria-label",
+      `From session "${SAME_TASK_LONG_SENDER_NAME}" in task "${scenario.title}"`,
+    );
+
+    let focusedByTab = false;
+    for (let attempt = 0; attempt < 100 && !focusedByTab; attempt += 1) {
+      await testPage.keyboard.press("Tab");
+      focusedByTab = await senderBadge.evaluate((element) => element === document.activeElement);
+    }
+    expect(focusedByTab, "the sender chip should be reachable in normal tab order").toBe(true);
+    await testPage.keyboard.press("Space");
+    const context = testPage.getByTestId("sender-task-context");
+    await expect(context).toBeVisible();
+    await expect(context).toContainText(SAME_TASK_LONG_SENDER_NAME);
+    await expect(context).toContainText(scenario.title);
+    await prCapture.screenshot("same-task-agent-message-desktop", {
+      caption: "Desktop queue row: the sender chip opens the full session and task context.",
+    });
   });
 });

@@ -1,16 +1,18 @@
-export type InboxTab = "needs-you" | "failed";
+export type InboxTab = "needs-you" | "failed" | "history";
 
 export const INBOX_TAB_QUERY_PARAM = "tab";
 
 // AC-UI-INBOX-FAILED-001.2: the `tab` query parameter's only recognised
-// values are `needs-you` and `failed`. An absent, empty, repeated, or
-// unrecognised value renders Needs you rather than an error -- "repeated"
-// means exactly one occurrence is required, even if every repeated value is
-// individually valid.
+// values are `needs-you`, `failed`, and `history`. An absent, empty,
+// repeated, or unrecognised value renders Needs you rather than an error --
+// "repeated" means exactly one occurrence is required, even if every
+// repeated value is individually valid.
 export function resolveInboxTab(searchParams: URLSearchParams): InboxTab {
   const values = searchParams.getAll(INBOX_TAB_QUERY_PARAM);
   if (values.length !== 1) return "needs-you";
-  return values[0] === "failed" ? "failed" : "needs-you";
+  if (values[0] === "failed") return "failed";
+  if (values[0] === "history") return "history";
+  return "needs-you";
 }
 
 // Selecting a tab REPLACES the current history entry (AC-UI-INBOX-FAILED-001.2),

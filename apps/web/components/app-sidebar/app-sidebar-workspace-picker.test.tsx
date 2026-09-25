@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { StartupPage } from "@/lib/types/http-user-settings";
+import {
+  clearNavigationBlockerForTests,
+  setNavigationBlocker,
+} from "@/lib/routing/navigation-guard";
 
 // The sidebar write path scopes names with the API-origin port; pin it so the
 // captured write assertions are deterministic.
@@ -86,6 +90,7 @@ function resetWorkspaceSelectTest() {
 }
 
 function cleanupWorkspaceSelectTest() {
+  clearNavigationBlockerForTests();
   if (cookieDescriptor) {
     Object.defineProperty(document, "cookie", cookieDescriptor);
   }
@@ -174,6 +179,24 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(cookieWrites.some((c) => c.startsWith("office-active-workspace_8443=w2"))).toBe(true);
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w2");
     expect(navigationMock.push).not.toHaveBeenCalled();
+  });
+
+  it("waits for the navigation guard before changing the active workspace", () => {
+    let proceed: (() => void) | undefined;
+    const unregister = setNavigationBlocker((intent) => {
+      proceed = intent.proceed;
+    });
+    render(<AppSidebarWorkspacePicker />);
+
+    fireEvent.click(screen.getByTestId(OFFICE_WORKSPACE_ITEM));
+
+    expect(storeState.setActiveWorkspace).not.toHaveBeenCalled();
+    expect(navigationMock.push).not.toHaveBeenCalled();
+    expect(cookieWrites).toEqual([]);
+
+    proceed?.();
+    expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w2");
+    unregister();
   });
 
   it("clears stale kanban context and routes to another kanban workspace with office disabled", () => {

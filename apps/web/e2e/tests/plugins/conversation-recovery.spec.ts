@@ -2,7 +2,7 @@ import { expect, test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import {
-  routeMainWebSocketWithExpiredPluginSnapshot,
+  routeMainWebSocketWithConversationChangeDrop,
   routeMainWebSocketWithPromptDrop,
 } from "../../helpers/ws-drop";
 import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
@@ -116,25 +116,19 @@ test.describe("Conversation recovery", () => {
     expect(gatewayCloseCount, "core recovery must keep the gateway socket connected").toBe(0);
   });
 
-  test("rebinds an expired plugin continuation and keeps paging without remount", async ({
+  test("repairs a missed plugin change and keeps paging without remount", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     test.setTimeout(90_000);
     await installFixturePlugin(testPage);
-    const expiry = await routeMainWebSocketWithExpiredPluginSnapshot(testPage);
-    const renewalRequests: string[] = [];
-    testPage.on("request", (request) => {
-      if (request.url().includes("/conversation/continuation/renew")) {
-        renewalRequests.push(request.url());
-      }
-    });
+    const wsDrop = await routeMainWebSocketWithConversationChangeDrop(testPage);
 
     const { taskId, sessionId } = await createSeededConversation(
       apiClient,
       seedData,
-      "Plugin continuation recovery",
+      "Plugin source recovery",
     );
     for (const [index, content] of [
       "plugin recovery oldest prompt",
@@ -154,7 +148,6 @@ test.describe("Conversation recovery", () => {
     await testPage.goto(`/t/${taskId}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    expiry.expireNextPluginSnapshot();
     await session.addPanelButton().click();
     const panelMenuItem = session.addPanelPluginItem(PLUGIN_ID, PANEL_KEY);
     await expect(panelMenuItem).toBeVisible();
@@ -163,28 +156,45 @@ test.describe("Conversation recovery", () => {
     const panel = testPage.getByTestId("fixture-prompt-history-panel");
     await expect(panel).toBeVisible({ timeout: 15_000 });
     await expect(panel.getByTestId("fixture-prompt-history-row")).toHaveCount(2);
-    await expect.poll(expiry.modifiedCount).toBe(1);
 
-    await panel.getByTestId("fixture-prompt-history-load-more").click();
+    const skippedPrompt = "plugin recovery skipped prompt";
+    wsDrop.dropChange(skippedPrompt);
+    const skipped = await apiClient.seedSessionMessage(sessionId, {
+      type: "message",
+      content: skippedPrompt,
+      authorType: "user",
+      newTurn: true,
+      turnStartedAt: "2026-09-14T12:03:00Z",
+      turnCompletedAt: "2026-09-14T12:03:01Z",
+    });
     await expect
-      .poll(expiry.pluginSubscribeCount, {
-        timeout: 15_000,
-        message: "expected a fresh plugin subscription after expiry",
+      .poll(wsDrop.droppedCount, {
+        timeout: 10_000,
+        message: "expected one plugin conversation change to be dropped",
       })
-      .toBeGreaterThan(1);
-    await expect(panel.getByTestId("fixture-prompt-history-row")).toHaveCount(3);
-    expect(renewalRequests).toHaveLength(0);
+      .toBe(1);
 
     const laterLive = await apiClient.seedSessionMessage(sessionId, {
       type: "message",
       content: "plugin recovery later live prompt",
       authorType: "user",
       newTurn: true,
-      turnStartedAt: "2026-09-14T12:03:00Z",
-      turnCompletedAt: "2026-09-14T12:03:01Z",
+      turnStartedAt: "2026-09-14T12:04:00Z",
+      turnCompletedAt: "2026-09-14T12:04:01Z",
+    });
+    await expect
+      .poll(wsDrop.pluginSubscribeCount, {
+        timeout: 15_000,
+        message: "expected a fresh plugin subscription after the source gap",
+      })
+      .toBeGreaterThan(1);
+    await expect(panel.locator(`[data-message-id="${skipped.messageId}"]`)).toBeVisible({
+      timeout: 15_000,
     });
     await expect(panel.locator(`[data-message-id="${laterLive.messageId}"]`)).toBeVisible({
       timeout: 15_000,
     });
+    await panel.getByTestId("fixture-prompt-history-load-more").click();
+    await expect(panel.getByTestId("fixture-prompt-history-row")).toHaveCount(4);
   });
 });

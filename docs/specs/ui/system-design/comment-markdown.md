@@ -3,6 +3,7 @@ status: current
 system: ui
 requirements:
   - REQ-UI-COMMENT-MARKDOWN-001
+  - REQ-UI-COMMENT-MARKDOWN-002
 ---
 
 # Comment Markdown Rendering System Design
@@ -26,6 +27,100 @@ its persistence, materialization, or file-service contracts.
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-UI-COMMENT-MARKDOWN-001` | [Trusted file roots](#trusted-file-roots), [Link resolution](#link-resolution), [Responsive behavior](#responsive-behavior), [Failure behavior](#failure-behavior) |
+| `REQ-UI-COMMENT-MARKDOWN-002` | [Prose separator normalization](#prose-separator-normalization) |
+
+## Prose separator normalization
+
+This section defines the delivered extension. The existing file-link design remains current.
+The [implementation package](../../../plans/chat-markdown-separators/plan.md)
+records delivery. This extension adds no backend or storage contract.
+
+### Render boundary
+
+`AgentMessageContent` uses `MemoizedMarkdown`, which passes `normalizeCached(content)`
+to `ReactMarkdown`. The production remark plugins are GFM, breaks, and gemoji.
+The render-time boundary is `apps/web/lib/markdown/normalize-cache.ts`; its pure
+separator helper lives in `apps/web/lib/markdown/normalize-separators.ts`.
+Direct consumers include review finding bodies and walkthrough steps. They receive
+the same deterministic semantics. No task, provider, viewport, or message identity
+enters the transform or its raw-string LRU key. The cache limit remains 500.
+
+### Algorithm and protected contexts
+
+Keep tagged-wrapper strengthening first. Extend the existing line scan with a
+small separator predicate and protected-context state. Do not add a remark plugin.
+Before emitting an eligible hyphen line, emit exactly one empty line.
+Use the preceding emitted source line for the requirement's length and punctuation
+test. Do not count rendered text or combine earlier paragraph lines.
+
+Track homogeneous backtick and tilde fence runs and opener lengths. A fence closer
+must use the same character and at least the opener length. Mixed-character runs,
+shorter runs, or opposite-character runs do not close the protected region. An
+unclosed fence protects the remaining input. Fence openers after list or blockquote
+markers keep their container-owned region protected through blank lines and
+indented content. A list remains owned through a blank only for an indented
+continuation; an unindented line ends that ownership before prose eligibility is
+evaluated. Keep glued-close repair limited to its existing backtick behavior.
+Do not broaden tagged-wrapper eligibility or interpret bare fences as wrappers.
+
+Use conservative block guards before the prose predicate. Reject indentation of
+four spaces or a tab, ATX markers, ordered/unordered list markers, blockquote
+markers, table rows (including pipe rows without outer pipes), and rule/fence lines.
+Reset list or blockquote protection only at definite block boundaries, such as a
+top-level heading, rule, fence, or HTML block, so lazy continuations remain protected.
+Do not repair list/blockquote continuation regions or HTML blocks. Track these
+contexts conservatively when their source can resemble ordinary prose. Prefer a
+missed repair to a change in literal or nested content.
+
+Model HTML blocks by termination class. Basic and complete block tags, including
+void tags such as `hr`, remain protected until a blank line. Recognize arbitrary
+basic open and closing tags, not only a fixed allowlist, so custom elements and
+standalone closing tags receive the same protection. Raw tags such as `pre`,
+`script`, `style`, and `textarea` remain protected until their matching closing
+tag, including a close on the opening line. Comments, CDATA, processing
+instructions, and declarations remain protected until their explicit terminators.
+Closing tags do not end a basic block early. A leading front-matter-like region is
+also protected: when the first nonblank line is exactly
+`---`, preserve lines through the next standalone `---` or `...`. Indented
+lookalikes do not start that region. If there is no closer, preserve the remaining
+input. This is a conservative exclusion, not YAML parsing or support for front
+matter as a product feature.
+
+Preserve each original line terminator, including lone CR. For an inserted empty
+line, use the terminator immediately before the candidate. Uniform CRLF stays
+CRLF, and mixed input keeps its existing terminators. Preserve leading/trailing
+blanks and absence of a final newline. Do not globally trim, normalize newlines,
+or rewrite rule bytes.
+Existing wrapper and glued-fence expectations remain regression gates.
+
+### Rationale and limits
+
+The supplied incident identifies false-positive source lines of 70 to 292
+characters. A 70-character threshold includes the shortest reported example.
+The 40-character punctuation path admits medium-length sentences while retaining
+short labels such as `Done.`. Boundary fixtures at 39/40 and 69/70 make the choice
+explicit. Terminal punctuation alone is too aggressive for short headings.
+Length alone misses shorter sentences. Neither heuristic proves author intent.
+
+This is a local rendering exception within the existing pure-transform boundary.
+Requirements, this design, and boundary tests preserve its rationale. Under the
+record skill's criteria, a separate ADR is unnecessary. A parser plugin remains
+an alternative only if focused counterexamples defeat a maintainable string scan.
+Such a change requires revising this package before implementation.
+
+### Rendering and verification
+
+Use the existing transcript on both viewports. The closest phone exemplar is
+`e2e/tests/chat/mobile-markdown-wrap.spec.ts`, with `SessionPage.activeChat()`.
+The correction changes paragraph/heading semantics inside the current scroll owner.
+It adds no controls, navigation, strings for localization, or responsive branch.
+
+Unit tests assert exact normalized bytes, idempotence, protected contexts, and
+threshold boundaries. Parser integration uses the three production remark plugins
+and asserts paragraph text, heading text, and horizontal rules together.
+Desktop and phone browser checks seed an agent response, inspect the active chat,
+reload, and assert the same semantics. The message API must still return raw input.
+No new telemetry is needed for this deterministic transform.
 
 ## Components and responsibilities
 

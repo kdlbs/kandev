@@ -54,7 +54,7 @@ func TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt(t *testing.
 		t.Fatal(err)
 	}
 
-	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "scheduled:trig:1")
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), DedupKey("scheduled:trig:1"))
 	if err != nil {
 		t.Fatalf("FireTrigger returned error for a skip: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestFireTriggerAdmitsRunBeforePublishing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "scheduled:1")
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), DedupKey("scheduled:1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestFireTrigger_MergedPRConcurrencySkipLeavesDedupKeyEmpty(t *testing.T) {
 	}
 
 	const dedupKey = "pr_merged:task-1:acme/api#7"
-	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeGitHubPRMerged, json.RawMessage(`{}`), dedupKey)
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeGitHubPRMerged, json.RawMessage(`{}`), DedupKey(dedupKey))
 	if err != nil {
 		t.Fatalf("FireTrigger returned error: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestFireTrigger_ConcurrencyCapCheckError_DoesNotAdvanceLastEvaluatedAt(t *t
 		t.Fatal(err)
 	}
 
-	if _, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), ""); err == nil {
+	if _, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), DedupNotConfigured()); err == nil {
 		t.Fatal("expected FireTrigger to return the concurrency-cap check error")
 	}
 
@@ -363,7 +363,7 @@ func TestFireTrigger_ArchivedTaskRun_DoesNotBlockConcurrencyCap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "new-run")
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), DedupKey("new-run"))
 	if err != nil {
 		t.Fatalf("FireTrigger returned error: %v", err)
 	}

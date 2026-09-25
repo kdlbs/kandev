@@ -208,6 +208,20 @@ it("drops stale focus when navigation replaces the revealed contents", () => {
   expect(result.current.revealed).toBe(false);
 });
 
+it("requires a fresh pointer entry after a collapse state change", () => {
+  const { result, rerender } = setup();
+  act(() => result.current.handlers.onPointerEnter(pointer()));
+  act(() => vi.advanceTimersByTime(500));
+  expect(result.current.revealed).toBe(true);
+
+  rerender({ collapsed: false, pathname: "/" });
+  rerender({ collapsed: true, pathname: "/" });
+  act(() => result.current.handlers.onPointerEnter(pointer()));
+  act(() => vi.advanceTimersByTime(500));
+
+  expect(result.current.revealed).toBe(true);
+});
+
 // @covers AC-UI-SIDEBAR-HOVER-002.4
 it("honors disabled hover, custom dwell and setting changes", () => {
   const { result, rerender } = renderHook(

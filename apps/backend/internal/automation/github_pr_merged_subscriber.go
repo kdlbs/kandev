@@ -234,7 +234,7 @@ func (s *GitHubPRMergedSubscriber) checkMergedTrigger(
 	// runs for the same PR event. If the concurrent-run cap is reached inside
 	// FireTrigger, the skipped-run record is written with an empty key so the
 	// dedup slot is not consumed (see maybeSkipForConcurrencyCap).
-	if _, err := s.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubPRMerged, data, dedupKey); err != nil {
+	if _, err := s.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubPRMerged, data, DedupKey(dedupKey)); err != nil {
 		s.logger.Error("failed to fire github_pr_merged trigger",
 			zap.String("trigger_id", t.ID), zap.Error(err))
 	}

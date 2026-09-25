@@ -18,25 +18,6 @@ import { SessionPage } from "../../pages/session-page";
 
 // @covers AC-UI-SIDEBAR-EFFECTIVE-TASK-TREE-STATE-001.1, .3, .5
 test.describe("Sidebar subtasks — effective state sort", () => {
-  let originalSidebarSettings:
-    | { sidebar_views?: unknown[]; sidebar_active_view_id?: string }
-    | undefined;
-
-  test.beforeEach(async ({ apiClient }) => {
-    const { settings } = await apiClient.getUserSettings();
-    originalSidebarSettings = {
-      sidebar_views: Array.isArray(settings.sidebar_views) ? settings.sidebar_views : [],
-      sidebar_active_view_id:
-        typeof settings.sidebar_active_view_id === "string" ? settings.sidebar_active_view_id : "",
-    };
-  });
-
-  test.afterEach(async ({ apiClient }) => {
-    if (!originalSidebarSettings) return;
-    await apiClient.saveUserSettings(originalSidebarSettings);
-    originalSidebarSettings = undefined;
-  });
-
   test("a completed parent with an in-progress subtask uses the active tree state", async ({
     testPage,
     apiClient,
@@ -74,17 +55,20 @@ test.describe("Sidebar subtasks — effective state sort", () => {
     // view so the regression asserts the actual group heading as well as the
     // root ordering consumed by the rendered tree.
     await apiClient.saveUserSettings({
-      sidebar_views: [
-        {
-          id: "effective-state-view",
-          name: "Effective state",
-          filters: [],
-          sort: { key: "state", direction: "asc" },
-          group: "state",
-          collapsed_groups: [],
-        },
-      ],
-      sidebar_active_view_id: "effective-state-view",
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views: [
+          {
+            id: "effective-state-view",
+            name: "Effective state",
+            filters: [],
+            sort: { key: "state", direction: "asc" },
+            group: "state",
+            collapsed_groups: [],
+          },
+        ],
+        active_view_id: "effective-state-view",
+      },
     });
 
     await testPage.goto(`/t/${parent.id}`);

@@ -650,6 +650,32 @@ func TestService_Browse_RequireInstanceAndForwardsFilter(t *testing.T) {
 	}
 }
 
+func TestService_Browse_RejectsInvalidStatsPeriod(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	inst := f.seedInstance(t, "ws-1", "A", "t")
+	called := false
+	f.client.searchIssuesFn = func(_ SearchFilter, _ string) (*SearchResult, error) {
+		called = true
+		return &SearchResult{IsLast: true}, nil
+	}
+
+	for name, filter := range map[string]SearchFilter{
+		"project scoped":      {OrgSlug: "acme", ProjectSlugs: []string{"frontend"}, StatsPeriod: "nonsense"},
+		"organization scoped": {OrgSlug: "acme", StatsPeriod: "nonsense"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			called = false
+			if _, err := f.svc.SearchIssues(ctx, "ws-1", inst.ID, filter, ""); !errors.Is(err, ErrInvalidConfig) {
+				t.Fatalf("expected ErrInvalidConfig, got %v", err)
+			}
+			if called {
+				t.Fatal("invalid lookback must be rejected before the client search")
+			}
+		})
+	}
+}
+
 func TestService_GetIssue_NotConfiguredWhenNoSecret(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()

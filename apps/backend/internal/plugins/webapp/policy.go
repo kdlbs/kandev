@@ -46,7 +46,7 @@ func BuildContentSecurityPolicy(networkOrigins, frameAncestors []string) (string
 	images := append([]string{"'self'", "data:"}, network...)
 	fonts := append([]string{"'self'", "data:"}, network...)
 	return strings.Join([]string{
-		"sandbox allow-scripts allow-forms",
+		"sandbox allow-scripts allow-forms allow-same-origin",
 		"default-src 'none'",
 		"form-action 'none'",
 		"base-uri 'none'",

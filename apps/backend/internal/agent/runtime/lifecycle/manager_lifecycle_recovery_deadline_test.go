@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,9 @@ type deadlineRecoveringExecutor struct {
 	name               executor.Name
 	recovered          []*ExecutorInstance
 	stopWithRetryCalls []string
+	stopStarted        chan struct{}
+	allowStop          chan struct{}
+	stopStartOnce      sync.Once
 }
 
 func (e *deadlineRecoveringExecutor) Name() executor.Name               { return e.name }
@@ -39,6 +43,10 @@ func (e *deadlineRecoveringExecutor) ShouldApplyPreferredShell() bool           
 func (e *deadlineRecoveringExecutor) IsAlwaysResumable() bool                          { return false }
 func (e *deadlineRecoveringExecutor) stopWithRetry(_ context.Context, instanceID string) error {
 	e.stopWithRetryCalls = append(e.stopWithRetryCalls, instanceID)
+	if e.stopStarted != nil {
+		e.stopStartOnce.Do(func() { close(e.stopStarted) })
+		<-e.allowStop
+	}
 	return nil
 }
 

@@ -2,9 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -15,6 +18,8 @@ import (
 // this many consecutive failures before the sweep stops attempting and logs
 // once at ERROR, leaving the record deferred and retryable.
 const ceilingSurfaceRetryBudget = 5
+
+var errCeilingSurfaceSuperseded = errors.New("ceiling surface belongs to a superseded deferral")
 
 // attemptCeilingSurfaceWrite is AC-49's single surfacing actor for the
 // ordinary refusal path (seams 2-5; seam 1 has no session and is excluded).
@@ -78,6 +83,9 @@ func (s *Service) writeCeilingSurfaceNoteAndStamp(
 	record map[string]interface{}, prior interface{},
 ) bool {
 	writeErr := s.writeCeilingSurfaceNote(ctx, taskID, sessionID, deferral)
+	if errors.Is(writeErr, errCeilingSurfaceSuperseded) {
+		return true
+	}
 
 	updated := make(map[string]interface{}, len(record)+1)
 	for key, value := range record {
@@ -112,13 +120,33 @@ func (s *Service) writeCeilingSurfaceNoteAndStamp(
 }
 
 // writeCeilingSurfaceNote is AC-49's carrier: one session-anchored status
-// message row, written through the existing CreateSessionMessage entry point
-// createRecoveryStatusMessage already uses for a different variant. It
-// carries no recovery actions (AC-49d): a ceiling deferral clears itself on
-// its own.
+// message row, written through the idempotent message entry point. The
+// deferral identity is checked while holding task admission, so replacement
+// cannot race the external write with an obsolete card note.
 func (s *Service) writeCeilingSurfaceNote(ctx context.Context, taskID, sessionID string, deferral models.CeilingDeferral) error {
 	if s.messageCreator == nil {
 		return fmt.Errorf("no message creator is configured")
+	}
+	admissionCtx, release := s.lockCeilingEntryAdmission(ctx, taskID)
+	defer release()
+	currentRaw, _, err := s.repo.GetTaskDeferredLaunch(admissionCtx, taskID)
+	if err != nil {
+		return fmt.Errorf("reading deferred launch before surfacing ceiling refusal: %w", err)
+	}
+	current, readErr := models.ReadCeilingDeferral(currentRaw)
+	if readErr != nil {
+		return errCeilingSurfaceSuperseded
+	}
+	identityMatches, compareErr := sameCeilingSurfaceIdentity(current, deferral)
+	if compareErr != nil {
+		return fmt.Errorf("comparing deferred launch before surfacing ceiling refusal: %w", compareErr)
+	}
+	if !identityMatches {
+		return errCeilingSurfaceSuperseded
+	}
+	messageID, err := ceilingSurfaceMessageID(taskID, sessionID, deferral)
+	if err != nil {
+		return fmt.Errorf("building ceiling refusal message identity: %w", err)
 	}
 	metadata := map[string]interface{}{
 		metaKeyVariant:         metaVariantCeiling,
@@ -133,7 +161,45 @@ func (s *Service) writeCeilingSurfaceNote(ctx context.Context, taskID, sessionID
 		content = fmt.Sprintf("This session's launch is queued: %d of %d concurrent sessions are in use.",
 			deferral.Population, deferral.Ceiling)
 	}
-	return s.messageCreator.CreateSessionMessage(
-		ctx, taskID, content, sessionID, string(v1.MessageTypeStatus), "", metadata, false,
+	return s.messageCreator.CreateSessionMessageIdempotent(
+		admissionCtx, messageID, taskID, content, sessionID, string(v1.MessageTypeStatus), "", metadata, false,
 	)
+}
+
+func sameCeilingSurfaceIdentity(a, b models.CeilingDeferral) (bool, error) {
+	if a.ReasonCode != b.ReasonCode || a.Population != b.Population ||
+		a.PopulationKnown != b.PopulationKnown || a.Ceiling != b.Ceiling {
+		return false, nil
+	}
+	return sameCeilingDeferralIdentity(a, b)
+}
+
+func ceilingSurfaceMessageID(taskID, sessionID string, deferral models.CeilingDeferral) (string, error) {
+	identity, err := json.Marshal(struct {
+		TaskID          string
+		SessionID       string
+		Kind            models.CeilingLaunchKind
+		Payload         map[string]interface{}
+		Origin          string
+		ReasonCode      string
+		QueuedAt        string
+		Population      int
+		PopulationKnown bool
+		Ceiling         int
+	}{
+		TaskID:          taskID,
+		SessionID:       sessionID,
+		Kind:            deferral.Kind,
+		Payload:         deferral.Payload,
+		Origin:          deferral.Origin,
+		ReasonCode:      deferral.ReasonCode,
+		QueuedAt:        deferral.QueuedAt.UTC().Format(time.RFC3339),
+		Population:      deferral.Population,
+		PopulationKnown: deferral.PopulationKnown,
+		Ceiling:         deferral.Ceiling,
+	})
+	if err != nil {
+		return "", err
+	}
+	return uuid.NewSHA1(uuid.NameSpaceOID, append([]byte("ceiling-surface:"), identity...)).String(), nil
 }

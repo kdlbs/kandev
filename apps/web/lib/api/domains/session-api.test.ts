@@ -41,3 +41,33 @@ describe("renameSession", () => {
     await expect(renameSession("missing", "x")).rejects.toThrow("session not found");
   });
 });
+
+const { fetchJson } = vi.hoisted(() => ({ fetchJson: vi.fn() }));
+vi.mock("../client", () => ({ fetchJson }));
+const { openSessionFolder } = await import("./session-api");
+
+// @covers AC-TASKS-OPEN-FOLDER-001.2
+it("posts the selected folder worktree while preserving request options", async () => {
+  const controller = new AbortController();
+  await openSessionFolder(
+    "sess-1",
+    { cache: "no-store", init: { signal: controller.signal } },
+    { worktree_id: "wt-2" },
+  );
+  expect(fetchJson).toHaveBeenCalledWith("/api/v1/task-sessions/sess-1/open-folder", {
+    cache: "no-store",
+    init: {
+      method: "POST",
+      signal: controller.signal,
+      body: JSON.stringify({ worktree_id: "wt-2" }),
+    },
+  });
+});
+
+it("preserves bodyless default folder requests", async () => {
+  await openSessionFolder("sess-1", { cache: "no-store" });
+  expect(fetchJson).toHaveBeenLastCalledWith("/api/v1/task-sessions/sess-1/open-folder", {
+    cache: "no-store",
+    init: { method: "POST" },
+  });
+});

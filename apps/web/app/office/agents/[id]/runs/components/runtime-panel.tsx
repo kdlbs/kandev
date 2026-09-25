@@ -48,7 +48,8 @@ export function RuntimePanel({ runtime }: Props) {
           <div className="space-y-1" data-testid="runtime-skills">
             {runtime.skills.map((skill) => (
               <div key={skill.skill_id} className="text-xs font-mono break-all">
-                {skill.skill_id}{" "}
+                <span>{skill.display_name || skill.slug || t("office:skillUnavailable")}</span>{" "}
+                <span className="text-muted-foreground">({skill.skill_id})</span>{" "}
                 {skill.version && <span className="text-muted-foreground">v{skill.version}</span>}
                 {skill.content_hash && (
                   <span className="text-muted-foreground">

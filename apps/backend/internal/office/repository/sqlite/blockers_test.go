@@ -2,11 +2,13 @@ package sqlite_test
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
 func TestTaskBlocker_CRUD(t *testing.T) {
@@ -336,6 +338,93 @@ func TestListBlockersForTasks(t *testing.T) {
 	empty, err := repo.ListBlockersForTasks(ctx, nil)
 	if err != nil || len(empty) != 0 {
 		t.Errorf("empty input: err=%v map=%v", err, empty)
+	}
+}
+
+// ListBlockersForTasks must order its result by edge creation time ascending,
+// tiebroken by predecessor task id ascending, so depends_on has a total,
+// repeatable order. Timestamps are set directly so the tiebreak is exercised
+// deterministically rather than racing on time.Now() resolution.
+func TestListBlockersForTasks_OrdersByCreatedAtThenBlockerID(t *testing.T) {
+	repo, db := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	// Insertion order deliberately does not match the expected sorted order
+	// (task-z, task-a, task-c) below, so a query missing its ORDER BY clause
+	// would return rows in insertion/rowid order instead and fail this test.
+	for _, b := range []*models.TaskBlocker{
+		{TaskID: "task-1", BlockerTaskID: "task-c"}, // same time as task-a, higher id
+		{TaskID: "task-1", BlockerTaskID: "task-z"}, // earliest, but higher id
+		{TaskID: "task-1", BlockerTaskID: "task-a"}, // same time as task-c, lower id
+	} {
+		if err := repo.CreateTaskBlocker(ctx, b); err != nil {
+			t.Fatalf("create blocker: %v", err)
+		}
+	}
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for blockerID, ts := range map[string]time.Time{
+		"task-z": base,
+		"task-a": base.Add(time.Second),
+		"task-c": base.Add(time.Second), // ties task-a: must tiebreak on blocker id
+	} {
+		if _, err := db.ExecContext(ctx,
+			`UPDATE task_blockers SET created_at = ? WHERE task_id = 'task-1' AND blocker_task_id = ?`,
+			ts, blockerID); err != nil {
+			t.Fatalf("stamp created_at for %s: %v", blockerID, err)
+		}
+	}
+
+	m, err := repo.ListBlockersForTasks(ctx, []string{"task-1"})
+	if err != nil {
+		t.Fatalf("ListBlockersForTasks: %v", err)
+	}
+	want := []string{"task-z", "task-a", "task-c"}
+	if !slices.Equal(m["task-1"], want) {
+		t.Errorf("task-1 blockers = %v, want %v (created_at asc, blocker id tiebreak)", m["task-1"], want)
+	}
+}
+
+// A batched IN (...) query must stay below the database's bind-parameter
+// ceiling by chunking its input. 501 distinct task ids exceed
+// workspaceGroupMaxHostParams (500), so this must split into 2 chunks; that
+// split is asserted directly via sqlite.ChunkTaskIDsCount rather than relying
+// on the database to reject an unchunked query, since SQLite's own compiled
+// host-parameter ceiling sits far above 501 and would not reject it anyway.
+func TestListBlockersAndDependentsForTasks_ChunksPastHostParamCeiling(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	const n = 501
+	taskIDs := make([]string, n)
+	blockerIDs := make([]string, n)
+	for i := 0; i < n; i++ {
+		taskIDs[i] = fmt.Sprintf("dependent-%d", i)
+		blockerIDs[i] = fmt.Sprintf("blocker-%d", i)
+		if err := repo.CreateTaskBlocker(ctx, &models.TaskBlocker{
+			TaskID: taskIDs[i], BlockerTaskID: blockerIDs[i],
+		}); err != nil {
+			t.Fatalf("create blocker %d: %v", i, err)
+		}
+	}
+
+	if got := sqlite.ChunkTaskIDsCount(taskIDs); got != 2 {
+		t.Fatalf("ChunkTaskIDsCount(%d ids) = %d chunks, want 2", n, got)
+	}
+
+	blockers, err := repo.ListBlockersForTasks(ctx, taskIDs)
+	if err != nil {
+		t.Fatalf("ListBlockersForTasks over %d ids: %v", n, err)
+	}
+	if len(blockers) != n {
+		t.Fatalf("ListBlockersForTasks returned %d task entries, want %d", len(blockers), n)
+	}
+
+	dependents, err := repo.ListDependentsForTasks(ctx, blockerIDs)
+	if err != nil {
+		t.Fatalf("ListDependentsForTasks over %d ids: %v", n, err)
+	}
+	if len(dependents) != n {
+		t.Fatalf("ListDependentsForTasks returned %d blocker entries, want %d", len(dependents), n)
 	}
 }
 

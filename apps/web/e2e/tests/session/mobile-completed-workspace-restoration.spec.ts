@@ -48,7 +48,7 @@ test.describe("Completed workspace restoration on mobile", () => {
     await session.waitForLoad();
     await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     const workspaceUnavailable = testPage.getByTestId("workspace-unavailable");
     await expect(workspaceUnavailable).toBeVisible({ timeout: 30_000 });
     await expect(testPage.getByTestId("file-tree-waiting")).toHaveCount(0);
@@ -81,7 +81,10 @@ test.describe("Completed workspace restoration on mobile", () => {
     await viewer.getByRole("button", { name: "Close" }).tap();
     await expect(viewer).toHaveCount(0);
 
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
     const changes = testPage.getByTestId("mobile-changes-panel");
     await expect(changes).toBeVisible();
     await expect(changes.getByTestId("workspace-unavailable")).toHaveCount(0);
@@ -124,9 +127,9 @@ test.describe("Completed workspace restoration on mobile", () => {
     });
 
     await testPage.reload();
-    await testPage.getByRole("button", { name: "Chat" }).tap();
+    await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
     await session.waitForLoad();
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
     await expect(testPage.getByTestId("workspace-unavailable")).toHaveCount(0);
 

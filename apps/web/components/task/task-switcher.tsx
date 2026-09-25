@@ -158,12 +158,14 @@ function buildGroupSectionProps(
     pinnedSet: Set<string>;
     collapsedSet: Set<string>;
     showHeader: boolean;
+    getNestHierarchyTasks: () => TaskSwitcherProps["nestHierarchyTasks"];
   },
 ): GroupSectionProps {
-  const { group, rowProps, pinnedSet, collapsedSet, showHeader } = options;
+  const { group, rowProps, pinnedSet, collapsedSet, showHeader, getNestHierarchyTasks } = options;
   return {
     group,
     subTasksByParentId: grouped.subTasksByParentId,
+    getNestHierarchyTasks,
     rowProps,
     pinnedSet,
     isCollapsed: collapsedSet.has(group.key),
@@ -218,6 +220,11 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
     () => new Set(props.collapsedGroupKeys ?? []),
     [props.collapsedGroupKeys],
   );
+  const nestHierarchyTasksRef = useRef(props.nestHierarchyTasks);
+  useLayoutEffect(() => {
+    nestHierarchyTasksRef.current = props.nestHierarchyTasks;
+  }, [props.nestHierarchyTasks]);
+  const getNestHierarchyTasks = useMemo(() => () => nestHierarchyTasksRef.current, []);
 
   if (isLoading) return <TaskSwitcherSkeleton />;
 
@@ -249,6 +256,20 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
   return (
     <div>
       {loadErrorNotice}
+      {(props.selectedTaskIds?.size ?? 0) > 0 && props.onClearSelection && (
+        <div className="flex min-h-11 items-center justify-between gap-2 px-3 py-1 text-xs text-muted-foreground">
+          <span role="status">
+            {t("selectedTaskCount", { count: props.selectedTaskIds!.size })}
+          </span>
+          <button
+            type="button"
+            className="min-h-11 shrink-0 cursor-pointer underline underline-offset-2 [@media(pointer:fine)]:min-h-7"
+            onClick={props.onClearSelection}
+          >
+            {t("clearSelection")}
+          </button>
+        </div>
+      )}
       {grouped.groups.map((group) => (
         <GroupSection
           key={group.key}
@@ -258,6 +279,7 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
             pinnedSet,
             collapsedSet,
             showHeader: showHeaders,
+            getNestHierarchyTasks,
           })}
         />
       ))}

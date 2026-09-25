@@ -23,8 +23,10 @@ import (
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
 	"github.com/kandev/kandev/internal/system/storage/filescan"
 	"github.com/kandev/kandev/internal/system/storage/gocache"
+	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	"github.com/kandev/kandev/internal/system/storage/tempstore"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 func TestStorageOverviewIncludesQuarantineAndManagedContainers(t *testing.T) {
@@ -104,9 +106,60 @@ func TestSystemTemporaryConfigUsesDisposableE2ERoot(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KANDEV_E2E_SYSTEM_TEMP_ROOT", root)
 
-	configured := systemTemporaryConfig(filescan.NewLimiter(1))
+	configured := systemTemporaryConfig(filescan.NewLimiter(1), nil)
 	if configured.EffectiveRoot != root || configured.UnixRoot != root {
 		t.Fatalf("system temporary config = %#v, want disposable root %q", configured, root)
+	}
+}
+
+func TestSystemTemporaryCapacityRootsUseDisposableE2ERoot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KANDEV_E2E_SYSTEM_TEMP_ROOT", root)
+	provider := tempstore.New(systemTemporaryConfig(filescan.NewLimiter(1), nil))
+
+	roots, err := provider.CapacityRoots(context.Background())
+	if err != nil {
+		t.Fatalf("CapacityRoots: %v", err)
+	}
+	if len(roots) != 1 || roots[0].Path != root {
+		t.Fatalf("capacity roots = %#v, want only the disposable E2E root %q", roots, root)
+	}
+}
+
+func TestClassifyTemporaryArtifactOwnershipUsesExactPathAndMarker(t *testing.T) {
+	root := t.TempDir()
+	_, store := newStorageMaintenanceStores(t)
+	registry := tempartifacts.NewRegistry(tempartifacts.Config{Store: store, TempRoot: root})
+	lease, err := registry.Create(context.Background(), storagepkg.TemporaryArtifactKindHostUtility, nil)
+	if err != nil {
+		t.Fatalf("Create registered artifact: %v", err)
+	}
+	untracked := filepath.Join(root, "kandev-host-utility-lookalike")
+	if err := os.Mkdir(untracked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	registeredPath := lease.Path()
+	lookalikePath := registeredPath + "-suffix"
+	classified := classifyTemporaryArtifactOwnership(
+		context.Background(), registry, []string{registeredPath, untracked, lookalikePath},
+	)
+	if classified[registeredPath] != tempstore.EntryOwnershipRegisteredKandev {
+		t.Fatalf("registered ownership = %q, want registered_kandev", classified[registeredPath])
+	}
+	if classified[untracked] != tempstore.EntryOwnershipUntracked ||
+		classified[lookalikePath] != tempstore.EntryOwnershipUntracked {
+		t.Fatalf("untracked classifications = %#v, want exact-path untracked results", classified)
+	}
+
+	artifact := lease.Artifact()
+	marker := filepath.Join(registeredPath, tempartifacts.MarkerName)
+	if err := os.WriteFile(marker, []byte(`{"id":"wrong","kind":"host_utility","token":"wrong"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	classified = classifyTemporaryArtifactOwnership(context.Background(), registry, []string{artifact.Path})
+	if classified[artifact.Path] != tempstore.EntryOwnershipUnknown {
+		t.Fatalf("invalid marker ownership = %q, want unknown", classified[artifact.Path])
 	}
 }
 
@@ -339,13 +392,54 @@ func TestStorageCleanupProvidersIncludeWorkspaceDependencyCleanup(t *testing.T) 
 	workspaceFactory := func(storagepkg.StorageMaintenanceSettings) *workspaces.Provider {
 		return workspaces.New(workspaces.Config{TasksRoot: filepath.Join(home, "tasks"), Store: store})
 	}
-	providers := storageCleanupProviders(settings, workspaceFactory, nil, nil, nil)
+	providers := storageCleanupProviders(settings, workspaceFactory, nil, nil, nil, nil)
 	for _, provider := range providers {
 		if provider.Name() == workspaceDependenciesProviderName {
 			return
 		}
 	}
 	t.Fatalf("storage cleanup providers did not include %s", workspaceDependenciesProviderName)
+}
+
+func TestStorageCleanupProvidersIncludeArchivedManagedBranches(t *testing.T) {
+	const providerName = "archived_managed_branches"
+	providers := storageCleanupProviders(nil, nil, nil, nil, nil, nil)
+	for _, provider := range providers {
+		if provider.Name() == providerName {
+			return
+		}
+	}
+	t.Fatalf("storage cleanup providers did not include %s", providerName)
+}
+
+type recordingArchivedBranchMaintainer struct {
+	limit   int
+	receipt worktree.BranchCleanupReceipt
+}
+
+func (m *recordingArchivedBranchMaintainer) MaintainArchivedBranches(
+	_ context.Context, limit int,
+) (worktree.BranchCleanupReceipt, error) {
+	m.limit = limit
+	return m.receipt, nil
+}
+
+func TestArchivedManagedBranchesProviderUsesBoundedManagerReceipt(t *testing.T) {
+	maintainer := &recordingArchivedBranchMaintainer{receipt: worktree.BranchCleanupReceipt{
+		Attempted: 2, Deleted: 1, Retained: 1,
+		RetainedReasons: map[worktree.BranchRetentionReason]int{worktree.RetainedNotIntegrated: 1},
+	}}
+	provider := archivedManagedBranchesCleanupProvider{maintainer: maintainer}
+	result, err := provider.Cleanup(context.Background())
+	if err != nil {
+		t.Fatalf("archived branch cleanup: %v", err)
+	}
+	if maintainer.limit != worktree.ArchivedBranchMaintenanceBatchLimit {
+		t.Fatalf("maintenance limit = %d, want %d", maintainer.limit, worktree.ArchivedBranchMaintenanceBatchLimit)
+	}
+	if result["attempted"] != float64(2) || result["deleted"] != float64(1) || result["retained"] != float64(1) {
+		t.Fatalf("maintenance result = %#v", result)
+	}
 }
 
 func TestWorkspaceDependencyCleanupProviderIsDefaultOff(t *testing.T) {
@@ -357,7 +451,7 @@ func TestWorkspaceDependencyCleanupProviderIsDefaultOff(t *testing.T) {
 		return workspaces.New(workspaces.Config{TasksRoot: filepath.Join(home, "tasks"), Store: store})
 	}
 	var dependencyProvider storagepkg.CleanupProvider
-	for _, provider := range storageCleanupProviders(settings, workspaceFactory, nil, nil, nil) {
+	for _, provider := range storageCleanupProviders(settings, workspaceFactory, nil, nil, nil, nil) {
 		if provider.Name() == workspaceDependenciesProviderName {
 			dependencyProvider = provider
 			break
@@ -524,6 +618,12 @@ type overviewWorkspaceInventory struct{}
 
 func (overviewWorkspaceInventory) LoadWorkspaceInventory(context.Context) (workspaces.Inventory, error) {
 	return workspaces.Inventory{Complete: true}, nil
+}
+
+type fixedWorkspaceInventory struct{ inventory workspaces.Inventory }
+
+func (i fixedWorkspaceInventory) LoadWorkspaceInventory(context.Context) (workspaces.Inventory, error) {
+	return i.inventory, nil
 }
 
 type overviewContainerInventory struct{}
@@ -847,12 +947,14 @@ func TestQuarantineControllerForceDeletesProtectedGoCache(t *testing.T) {
 func TestQuarantineControllerPurgeEligibleReportsProtectedAndDeleted(t *testing.T) {
 	home := t.TempDir()
 	settings, store := newStorageMaintenanceStores(t)
+	tasksRoot := filepath.Join(home, "tasks")
+	trashRoot := filepath.Join(home, "trash")
 	protected := storagepkg.QuarantineEntry{
 		ID: "protected-workspace", ResourceType: storagepkg.ResourceTypeTaskWorkspace,
 		OriginalPath:   filepath.Join(home, "tasks", "protected"),
 		QuarantinePath: filepath.Join(home, "trash", "tasks", "protected-workspace"),
 		SizeBytes:      17, State: storagepkg.QuarantineStateQuarantined,
-		QuarantinedAt: time.Now().UTC(), DeleteAfter: time.Now().UTC().Add(time.Hour),
+		QuarantinedAt: time.Now().UTC().Add(-2 * time.Hour), DeleteAfter: time.Now().UTC().Add(-time.Hour),
 	}
 	if err := os.MkdirAll(protected.QuarantinePath, 0o700); err != nil {
 		t.Fatal(err)
@@ -863,7 +965,18 @@ func TestQuarantineControllerPurgeEligibleReportsProtectedAndDeleted(t *testing.
 	eligible := createGoCacheQuarantineEntryWithID(
 		t, store, home, "eligible-cache", time.Now().UTC().Add(-time.Hour),
 	)
-	controller := &workspaceQuarantineController{settings: settings, store: store, homeDir: home}
+	controller := &workspaceQuarantineController{
+		settings: settings, store: store, homeDir: home,
+		factory: func(storagepkg.StorageMaintenanceSettings) *workspaces.Provider {
+			return workspaces.New(workspaces.Config{
+				TasksRoot: tasksRoot, TrashRoot: trashRoot, Store: store,
+				Inventory: fixedWorkspaceInventory{inventory: workspaces.Inventory{
+					Complete:      true,
+					WorktreePaths: []string{filepath.Join(protected.OriginalPath, "repo")},
+				}},
+			})
+		},
+	}
 
 	result, err := controller.Purge(context.Background(), storagepkg.QuarantinePurgeScopeEligible, "DELETE ELIGIBLE")
 	if err != nil {
@@ -880,6 +993,52 @@ func TestQuarantineControllerPurgeEligibleReportsProtectedAndDeleted(t *testing.
 	}
 	if _, err := os.Stat(protected.QuarantinePath); err != nil {
 		t.Fatalf("protected quarantine path changed: %v", err)
+	}
+}
+
+func TestQuarantineControllerForceClearKeepsActiveArchivedWorkspace(t *testing.T) {
+	home := t.TempDir()
+	tasksRoot := filepath.Join(home, "tasks")
+	trashRoot := filepath.Join(home, "trash")
+	settings, store := newStorageMaintenanceStores(t)
+	entry := storagepkg.QuarantineEntry{
+		ID: "active-archived-workspace", ResourceType: storagepkg.ResourceTypeTaskWorkspace,
+		OriginalPath:   filepath.Join(tasksRoot, "archived-task"),
+		QuarantinePath: filepath.Join(trashRoot, "tasks", "active-archived-workspace"),
+		SizeBytes:      23, State: storagepkg.QuarantineStateQuarantined,
+		QuarantinedAt: time.Now().UTC().Add(-2 * time.Hour), DeleteAfter: time.Now().UTC().Add(-time.Hour),
+	}
+	if err := os.MkdirAll(entry.QuarantinePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(entry.QuarantinePath, "artifact"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateQuarantineEntry(context.Background(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	controller := &workspaceQuarantineController{
+		settings: settings, store: store, homeDir: home,
+		factory: func(storagepkg.StorageMaintenanceSettings) *workspaces.Provider {
+			return workspaces.New(workspaces.Config{
+				TasksRoot: tasksRoot, TrashRoot: trashRoot, Store: store,
+				Inventory: fixedWorkspaceInventory{inventory: workspaces.Inventory{
+					Complete:      true,
+					WorktreePaths: []string{filepath.Join(entry.OriginalPath, "repo")},
+				}},
+			})
+		},
+	}
+
+	result, err := controller.Purge(context.Background(), storagepkg.QuarantinePurgeScopeAll, storagepkg.QuarantineConfirmationForce)
+	if err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	if result.Considered != 1 || result.Protected != 1 || result.ProtectedBytes != entry.SizeBytes || result.Deleted != 0 || result.Failed != 0 {
+		t.Fatalf("force purge result = %#v, want one protected active workspace", result)
+	}
+	if _, err := os.Stat(filepath.Join(entry.QuarantinePath, "artifact")); err != nil {
+		t.Fatalf("force purge removed active archived workspace: %v", err)
 	}
 }
 
@@ -900,15 +1059,17 @@ func TestQuarantineCleanupProviderPurgesEligibleEntries(t *testing.T) {
 }
 
 func TestStorageCleanupProvidersIncludesQuarantineProvider(t *testing.T) {
-	providers := storageCleanupProviders(nil, nil, nil, nil, &recordingQuarantinePurger{})
-	if len(providers) != 7 {
-		t.Fatalf("provider count = %d, want 7", len(providers))
+	providers := storageCleanupProviders(nil, nil, nil, nil, &recordingQuarantinePurger{}, nil)
+	if len(providers) != 8 {
+		t.Fatalf("provider count = %d, want 8", len(providers))
 	}
 	if providers[0].Name() != "quarantine" {
 		t.Fatalf("first provider = %q, want quarantine", providers[0].Name())
 	}
-	if providers[1].Name() != "workspaces" || providers[2].Name() != workspaceDependenciesProviderName || providers[3].Name() != "go_cache" {
-		t.Fatalf("provider order = %q, %q, %q, want workspaces, workspace_dependencies, go_cache", providers[1].Name(), providers[2].Name(), providers[3].Name())
+	if providers[1].Name() != archivedManagedBranchesProviderName || providers[2].Name() != "workspaces" ||
+		providers[3].Name() != workspaceDependenciesProviderName || providers[4].Name() != "go_cache" {
+		t.Fatalf("provider order = %q, %q, %q, %q, want archived branches, workspaces, workspace_dependencies, go_cache",
+			providers[1].Name(), providers[2].Name(), providers[3].Name(), providers[4].Name())
 	}
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "@/lib/routing/client-dynamic";
-import Link from "@/components/routing/app-link";
+import TaskLink from "@/components/routing/task-link";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
@@ -47,13 +47,13 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
           </Label>
           <Switch id="advanced-toggle" checked onCheckedChange={() => onToggleSimple()} />
         </div>
-        <Link
-          href={`/t/${task.id}`}
+        <TaskLink
+          taskId={task.id}
           className="text-xs text-muted-foreground underline-offset-2 hover:underline cursor-pointer whitespace-nowrap"
           data-testid="task-cross-link"
         >
           {t("office:openInAdvancedView")}
-        </Link>
+        </TaskLink>
       </>
     ),
   });

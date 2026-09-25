@@ -120,7 +120,12 @@ test.describe("Mobile chat model selector", () => {
     const trigger = leftActions.getByRole("button", { name: "Session model settings" });
     await expect(trigger).toHaveText("Mock Fast", { timeout: 15_000 });
 
+    await expect(trigger.getByTestId("model-provider-icon")).toBeVisible();
+    expect((await trigger.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await trigger.tap();
+    await expect(
+      testPage.locator("[cmdk-group-heading]").getByTestId("model-provider-icon"),
+    ).toBeVisible();
     const modelListbox = testPage.getByRole("listbox");
     await expect(modelListbox.getByRole("option", { name: /Mock Smart/ })).toBeVisible({
       timeout: 5_000,

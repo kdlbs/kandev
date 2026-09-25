@@ -33,7 +33,29 @@ func newCodexACPDialect() acpDialect {
 		normalizePromptUsage: normalizeCodexPromptUsage,
 		mcpToolCall:          parseCodexMCPToolCall,
 		mcpToolResult:        normalizeCodexMCPToolResult,
+		responseAttemptReset: codexResponseAttemptResetMeta,
 	}
+}
+
+func codexResponseAttemptResetMeta(meta map[string]any) bool {
+	codex, ok := nestedMap(meta, "codex")
+	if !ok {
+		return false
+	}
+	errorMeta, ok := nestedMap(codex, "error")
+	if !ok {
+		return false
+	}
+	willRetry, ok := errorMeta["willRetry"].(bool)
+	if !ok || !willRetry {
+		return false
+	}
+	errorInfo, ok := nestedMap(errorMeta, "codexErrorInfo")
+	if !ok {
+		return false
+	}
+	_, ok = nestedMap(errorInfo, "responseStreamDisconnected")
+	return ok
 }
 
 // normalizeCodexPromptUsage marks codex-acp's typed usage frame as

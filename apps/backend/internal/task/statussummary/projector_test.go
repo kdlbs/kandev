@@ -45,8 +45,11 @@ func (s *projectorTestStore) CompareAndUpdateTaskStatusSummary(_ context.Context
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if previous := s.rows[stored.TaskID]; previous != nil && previous.Summary.Revision >= stored.Summary.Revision {
-		return false, nil
+	if previous := s.rows[stored.TaskID]; previous != nil {
+		if previous.Summary.Revision >= stored.Summary.Revision ||
+			(previous.WorkspaceID == stored.WorkspaceID && previous.Summary.SemanticEqual(stored.Summary)) {
+			return false, nil
+		}
 	}
 	copy := *stored
 	copy.Summary = *cloneSummary(&stored.Summary)
@@ -1279,5 +1282,23 @@ func TestPendingActionForMessagePrefersExactRequestType(t *testing.T) {
 			t.Errorf("pendingActionForMessage(%q, %t) = %q, want %q",
 				tc.messageType, tc.requestsInput, got, tc.want)
 		}
+	}
+}
+
+func TestEqualLaunchQueueComparesCapacityValues(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	left := &LaunchQueueSummary{
+		SessionID: "session-luna", QueuedAt: queuedAt,
+		Reason: LaunchQueueReasonSessionCapacity, Retrying: true,
+		Capacity: &LaunchQueueCapacity{InUse: 5, Limit: 5, ObservedAt: queuedAt},
+	}
+	right := *left
+	right.Capacity = &LaunchQueueCapacity{InUse: 5, Limit: 5, ObservedAt: queuedAt.Add(time.Minute)}
+	if !equalLaunchQueue(left, &right) {
+		t.Fatal("capacity observation-only changes should not create a new queue value")
+	}
+	right.Capacity.InUse = 4
+	if equalLaunchQueue(left, &right) {
+		t.Fatal("capacity value changes must remain observable")
 	}
 }

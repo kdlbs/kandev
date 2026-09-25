@@ -13,6 +13,10 @@ legacy_specs: []
 
 ## Overview
 
+Follow-up: [queued session ownership](../queued-session-ownership/plan.md) covers
+inspection and admission after recipient selection. Its new cases do not reopen
+this package's delivered routing work or reuse its test results as queue evidence.
+
 Allow Review to return to the task's initial agent or an earlier step's
 conversation. Keep **When this step starts** and **When this step ends** as
 independent controls. Keep lifecycle navigation visible above the recipient list.

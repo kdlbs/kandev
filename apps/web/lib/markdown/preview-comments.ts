@@ -5,6 +5,7 @@ import type { SourceLineRange } from "./source-line-ranges";
 export type BuildMarkdownPreviewCommentArgs = SourceLineRange & {
   filePath: string;
   repositoryId?: string;
+  repositoryName?: string;
   sessionId: string;
   selectedText: string;
   text: string;
@@ -13,6 +14,7 @@ export type BuildMarkdownPreviewCommentArgs = SourceLineRange & {
 export function buildMarkdownPreviewComment(args: BuildMarkdownPreviewCommentArgs): DiffComment {
   const comment = buildDiffComment({
     filePath: args.filePath,
+    repositoryName: args.repositoryName ?? "",
     sessionId: args.sessionId,
     startLine: args.startLine,
     endLine: args.endLine,

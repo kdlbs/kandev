@@ -28,6 +28,7 @@ Users inspecting a task's Files tab must currently return to the chat composer a
 - **AC-UI-FILE-TREE-CHAT-CONTEXT-001.7:** On phone, tablet, and coarse-pointer desktop-workbench compositions, each eligible file-tree row exposes a visible, accessible action trigger. The trigger opens the existing responsive menu treatment with a touch target at least 44px high; long press or right-click is not required.
 - **AC-UI-FILE-TREE-CHAT-CONTEXT-001.8:** All new visible labels and feedback use the existing localization catalogs.
 - **AC-UI-FILE-TREE-CHAT-CONTEXT-001.9:** File-tree rows shall retain compact single-line spacing in every responsive composition. A visible coarse-pointer action, including in the desktop workbench, shall not cause wrapping; long names shall truncate instead.
+- **AC-UI-FILE-TREE-CHAT-CONTEXT-001.10:** After the Files panel reopens or changes size, every row within its scroll viewport shall remain visible and ordered without blank gaps. Recovery shall not require a manual scroll, file operation, or page reload. This applies to desktop and touch layouts.
 
 ## Migrated source detail
 

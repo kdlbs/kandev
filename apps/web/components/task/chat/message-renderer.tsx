@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useCallback, type ReactElement } from "react";
+import { memo, useState, useCallback, useMemo, type ReactElement } from "react";
 import { IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/http";
@@ -11,6 +11,7 @@ import { isLaunchStateRegression } from "@/lib/session-state";
 import { buildStartCreatedRequest } from "@/lib/services/session-launch-helpers";
 import { useAppStore } from "@/components/state-provider";
 import { useTask } from "@/hooks/use-task";
+import { ChatMotionItem } from "./chat-motion";
 import { ChatMessage } from "@/components/task/chat/messages/chat-message";
 import { PermissionRequestMessage } from "@/components/task/chat/messages/permission-request-message";
 import { StatusMessage } from "@/components/task/chat/messages/status-message";
@@ -25,6 +26,7 @@ import { ThinkingMessage } from "@/components/task/chat/messages/thinking-messag
 import { TodoMessage } from "@/components/task/chat/messages/todo-message";
 import { ScriptExecutionMessage } from "@/components/task/chat/messages/script-execution-message";
 import { ClarificationRequestMessage } from "@/components/task/chat/messages/clarification-request-message";
+import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subagent-message";
 import { MonitorMessage } from "@/components/task/chat/messages/monitor-message";
 import { AgentPlanMessage } from "@/components/task/chat/messages/agent-plan-message";
@@ -215,6 +217,43 @@ type MessageAdapter = {
   render: (comment: Message, ctx: AdapterContext) => ReactElement;
 };
 
+function ClarificationRequestMessageAdapter({
+  comment,
+  isCurrentTurn,
+}: {
+  comment: Message;
+  isCurrentTurn: boolean;
+}) {
+  const lateAnswer = useLateClarificationMessage(comment);
+  const sessionMessages = useAppStore(
+    useCallback(
+      (state) => state.messages.bySession[comment.session_id] ?? [],
+      [comment.session_id],
+    ),
+  );
+  const bundle = useMemo(() => {
+    const pendingId = (comment.metadata as { pending_id?: string } | undefined)?.pending_id;
+    if (!pendingId) return [comment];
+    const matching = sessionMessages.filter(
+      (message) =>
+        message.type === "clarification_request" &&
+        (message.metadata as { pending_id?: string } | undefined)?.pending_id === pendingId,
+    );
+    return matching.length > 0 ? matching : [comment];
+  }, [comment, sessionMessages]);
+  return (
+    <ClarificationRequestMessage
+      comment={comment}
+      messages={bundle}
+      onLateAnswer={lateAnswer.send}
+      lateAnswerSnapshot={lateAnswer.state.snapshot}
+      lateAnswerState={lateAnswer.state}
+      onResetLateAnswer={lateAnswer.reset}
+      isCurrentTurn={isCurrentTurn}
+    />
+  );
+}
+
 const adapters: MessageAdapter[] = [
   {
     matches: (comment) =>
@@ -383,7 +422,12 @@ const adapters: MessageAdapter[] = [
   },
   {
     matches: (comment) => comment.type === "clarification_request",
-    render: (comment) => <ClarificationRequestMessage comment={comment} />,
+    render: (comment, ctx) => (
+      <ClarificationRequestMessageAdapter
+        comment={comment}
+        isCurrentTurn={Boolean(ctx.isContainingTurnActive)}
+      />
+    ),
   },
   {
     matches: (comment) => comment.type === "agent_plan",
@@ -487,5 +531,10 @@ export const MessageRenderer = memo(function MessageRenderer({
   };
   const adapter =
     adapters.find((entry) => entry.matches(comment, ctx)) ?? adapters[adapters.length - 1];
-  return adapter.render(comment, ctx);
+  const content = adapter.render(comment, ctx);
+  return isTaskDescription ? (
+    content
+  ) : (
+    <ChatMotionItem messageId={comment.id}>{content}</ChatMotionItem>
+  );
 });

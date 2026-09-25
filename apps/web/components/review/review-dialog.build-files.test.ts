@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { buildAllFiles, filterPendingDiffCommentsForSession } from "./review-dialog";
+import { buildAllFiles, filterPendingReviewCommentsForSession } from "./review-dialog";
 import {
   reviewDialogSourceKey,
   resolveReviewTransientState,
@@ -622,7 +622,7 @@ describe("buildAllFiles patchless source identity", () => {
   });
 });
 
-describe("filterPendingDiffCommentsForSession", () => {
+describe("filterPendingReviewCommentsForSession", () => {
   it("keeps only diff comments from the active session", () => {
     const comments = [
       pendingDiffComment({ id: "current", sessionId: "current" }),
@@ -638,7 +638,7 @@ describe("filterPendingDiffCommentsForSession", () => {
       },
     ] satisfies Comment[];
 
-    expect(filterPendingDiffCommentsForSession(comments, "current").map((c) => c.id)).toEqual([
+    expect(filterPendingReviewCommentsForSession(comments, "current").map((c) => c.id)).toEqual([
       "current",
     ]);
   });

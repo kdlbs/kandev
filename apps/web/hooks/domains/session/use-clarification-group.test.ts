@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- clarification lifecycle cases share one deterministic hook harness. */
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
@@ -7,9 +9,13 @@ vi.mock("@/lib/config", () => ({
 }));
 
 const mockUpdateMessage = vi.fn();
+let mockMessagesBySession: Record<string, Message[]> = {};
 vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({
-    getState: () => ({ updateMessage: mockUpdateMessage }),
+    getState: () => ({
+      updateMessage: mockUpdateMessage,
+      messages: { bySession: mockMessagesBySession },
+    }),
   }),
 }));
 
@@ -50,6 +56,7 @@ function successResponse(): Response {
 function setupFetchMock() {
   fetchMock.mockReset();
   mockUpdateMessage.mockReset();
+  mockMessagesBySession = {};
   fetchMock.mockResolvedValue(successResponse());
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 }
@@ -399,6 +406,7 @@ describe("useClarificationGroup — retry", () => {
 // pending bundle until the user refreshes. To stay robust against that we mark
 // each bundle message as answered/rejected in the store the moment the HTTP POST
 // resolves, mirroring the backend update the WS event would have delivered.
+// eslint-disable-next-line max-lines-per-function -- optimistic store update cases share one store harness.
 describe("useClarificationGroup — optimistic store update on resolve", () => {
   beforeEach(setupFetchMock);
 
@@ -466,6 +474,101 @@ describe("useClarificationGroup — optimistic store update on resolve", () => {
 
     expect(result.current.submitState).toBe("error");
     expect(mockUpdateMessage).not.toHaveBeenCalled();
+  });
+
+  it("skipAll expires only matching pending rows from the latest message cache", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: "not_active" }), { status: 409 }),
+    );
+    const submitted = clarMessage({
+      id: "m-pending",
+      pendingId: "p1",
+      questionId: "q1",
+      index: 0,
+      total: 1,
+    });
+    const latestSubmitted = {
+      ...submitted,
+      content: "newer content from the message cache",
+      metadata: { ...submitted.metadata, context: "newer context" },
+    };
+    const terminalSiblingPending = clarMessage({
+      id: "m-terminal",
+      pendingId: "p1",
+      questionId: "q2",
+      index: 1,
+      total: 2,
+    });
+    const terminalSibling = {
+      ...terminalSiblingPending,
+      metadata: { ...terminalSiblingPending.metadata, status: "rejected" as const },
+    };
+    const deletedSubmitted = clarMessage({
+      id: "m-deleted",
+      pendingId: "p1",
+      questionId: "q-deleted",
+      index: 1,
+      total: 2,
+    });
+    const unrelatedBundle = clarMessage({
+      id: "m-other",
+      pendingId: "p2",
+      questionId: "q-other",
+      index: 0,
+      total: 1,
+    });
+    mockMessagesBySession = {
+      [submitted.session_id]: [latestSubmitted, terminalSibling, unrelatedBundle],
+    };
+
+    const { result } = renderHook(() => useClarificationGroup([submitted, deletedSubmitted]));
+
+    await act(async () => {
+      await result.current.skipAll();
+    });
+
+    expect(result.current.submitState).toBe("expired");
+    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
+    expect(mockUpdateMessage).toHaveBeenCalledWith({
+      ...latestSubmitted,
+      metadata: { ...latestSubmitted.metadata, status: "expired" },
+    });
+  });
+
+  it("blocks direct retries after expiry until the same bundle is restored as pending", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 409 }));
+    fetchMock.mockResolvedValueOnce(successResponse());
+    const message = clarMessage({
+      id: "m1",
+      pendingId: "p1",
+      questionId: "q1",
+      index: 0,
+      total: 1,
+    });
+    mockMessagesBySession = { [message.session_id]: [message] };
+    const { result, rerender } = renderHook(({ msgs }) => useClarificationGroup(msgs), {
+      initialProps: { msgs: [message] },
+    });
+
+    await act(async () => {
+      await result.current.skipAll();
+      await result.current.retry();
+      await result.current.skipAll();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const expiredMessage = {
+      ...message,
+      metadata: { ...message.metadata, status: "expired" as const },
+    };
+    rerender({ msgs: [expiredMessage] });
+    rerender({ msgs: [message] });
+
+    await act(async () => {
+      await result.current.skipAll();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.submitState).toBe("ok");
   });
 });
 

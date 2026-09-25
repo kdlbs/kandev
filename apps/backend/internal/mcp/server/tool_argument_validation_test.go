@@ -29,7 +29,7 @@ func TestToolArgumentValidationRejectsUnknownTopLevelArgument(t *testing.T) {
 	content, ok := result.Content[0].(mcp.TextContent)
 	require.True(t, ok)
 	assert.Equal(t,
-		"invalid arguments for list_workspaces_kandev: validation failed at $ (keyword: additionalProperties)",
+		`invalid arguments for list_workspaces_kandev: validation failed at $ (keyword: additionalProperties; unknown arguments: "unexpected")`,
 		content.Text)
 }
 
@@ -57,6 +57,107 @@ func TestToolArgumentValidationNamesMissingWalkthroughStepProperty(t *testing.T)
 	assert.Contains(t, content.Text, "keyword: required")
 	assert.Contains(t, content.Text, `missing: "text"`)
 	assert.NotContains(t, content.Text, rejectedValue)
+}
+
+func TestToolArgumentValidationReportsUnknownAlongsideMissingRequired(t *testing.T) {
+	const rejectedValue = "private unknown value"
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+	const toolName = "required_and_unknown_tool"
+	s.mcpServer.AddTool(
+		mcp.NewToolWithRawSchema(
+			toolName,
+			"Validates required and unknown properties in one nested object.",
+			json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"target": {
+						"type": "object",
+						"properties": {"required": {"type": "string"}},
+						"required": ["required"],
+						"additionalProperties": false
+					}
+				},
+				"required": ["target"]
+			}`),
+		),
+		s.wrapHandler(toolName, s.listWorkspacesHandler()),
+	)
+	s.rebuildToolArgumentValidators()
+
+	result := callTool(t, s, toolName, map[string]interface{}{
+		"target": map[string]interface{}{"spurious": rejectedValue},
+	})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+	require.NotEmpty(t, result.Content)
+	content, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, content.Text, `/target`)
+	assert.Contains(t, content.Text, "keyword: required")
+	assert.Contains(t, content.Text, `missing: "required"`)
+	assert.Contains(t, content.Text, `unknown arguments: "spurious"`)
+	assert.NotContains(t, content.Text, rejectedValue)
+}
+
+func TestToolArgumentValidationKeepsRootUnknownPathWhenNestedFailureIsPrimary(t *testing.T) {
+	const rejectedValue = "private root value"
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "show_walkthrough_kandev", map[string]interface{}{
+		"spurious": rejectedValue,
+		"steps": []interface{}{
+			map[string]interface{}{"line": 1},
+		},
+	})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+	require.NotEmpty(t, result.Content)
+	content, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, content.Text, `/steps/0`)
+	assert.Contains(t, content.Text, `unknown arguments: "spurious" at $`)
+	assert.NotContains(t, content.Text, rejectedValue)
+}
+
+func TestToolArgumentValidationReportsRequiredPropertiesAcrossBranches(t *testing.T) {
+	const toolName = "multi_branch_required_tool"
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+	s.mcpServer.AddTool(
+		mcp.NewToolWithRawSchema(
+			toolName,
+			"Validates required properties at multiple object paths.",
+			json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"outer": {
+						"type": "object",
+						"properties": {"inner": {"type": "string"}},
+						"required": ["inner"]
+					}
+				},
+				"required": ["outer", "root"]
+			}`),
+		),
+		s.wrapHandler(toolName, s.listWorkspacesHandler()),
+	)
+	s.rebuildToolArgumentValidators()
+
+	result := callTool(t, s, toolName, map[string]interface{}{
+		"outer": map[string]interface{}{},
+	})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+	require.NotEmpty(t, result.Content)
+	content, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, content.Text, `missing: "root" at $`)
+	assert.Contains(t, content.Text, `"inner" at /outer`)
 }
 
 func TestToolArgumentValidationNamesEveryMissingWalkthroughStepProperty(t *testing.T) {
@@ -224,6 +325,28 @@ func TestToolArgumentValidationDoesNotExposeRejectedValues(t *testing.T) {
 	assert.NotContains(t, content.Text, secret)
 }
 
+func TestCompileToolArgumentSchemaRejectsRootCombinator(t *testing.T) {
+	for _, combinator := range []string{"oneOf", "allOf", "anyOf"} {
+		t.Run(combinator, func(t *testing.T) {
+			raw := `{"type":"object","properties":{"name":{"type":"string"}},"` +
+				combinator + `":[{"required":["name"]}]}`
+			tool := mcp.Tool{RawInputSchema: json.RawMessage(raw)}
+			schema, err := compileToolArgumentSchema("root_combinator_tool", tool)
+			assert.Error(t, err, "compileToolArgumentSchema must reject root %q", combinator)
+			assert.Nil(t, schema)
+		})
+	}
+}
+
+func TestCompileToolArgumentSchemaAcceptsNestedCombinator(t *testing.T) {
+	raw := `{"type":"object","properties":{"blocks":{"type":"object",` +
+		`"oneOf":[{"required":["a"]},{"required":["b"]}]}}}`
+	tool := mcp.Tool{RawInputSchema: json.RawMessage(raw)}
+	schema, err := compileToolArgumentSchema("nested_combinator_tool", tool)
+	require.NoError(t, err)
+	assert.NotNil(t, schema)
+}
+
 func TestAllRegisteredToolSchemasCompile(t *testing.T) {
 	for _, mode := range []string{ModeTask, ModeConfig, ModeExternal, ModeOffice} {
 		t.Run(mode, func(t *testing.T) {
@@ -239,6 +362,17 @@ func TestAllRegisteredToolSchemasCompile(t *testing.T) {
 				require.True(t, ok, "missing validator for %s", name)
 				assert.NoError(t, validator.err, "schema for %s must compile", name)
 				assert.NotNil(t, validator.schema, "schema for %s must compile", name)
+
+				raw := tools[name].Tool.RawInputSchema
+				if len(raw) == 0 {
+					continue
+				}
+				var doc map[string]any
+				require.NoError(t, json.Unmarshal(raw, &doc))
+				for _, combinator := range []string{"oneOf", "allOf", "anyOf"} {
+					assert.NotContains(t, doc, combinator,
+						"tool %s must not declare a root %q", name, combinator)
+				}
 			}
 		})
 	}

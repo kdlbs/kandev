@@ -368,8 +368,13 @@ func (s *Store) ListWorkItemWatchTasks(ctx context.Context, watchID string, gene
 	var rows []WorkItemWatchTask
 	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`SELECT id, watch_id, project_id, work_item_id,
 		work_item_url, task_id, generation, created_at
-		FROM azure_devops_work_item_watch_tasks
-		WHERE watch_id = ? AND generation = ? ORDER BY created_at`), watchID, generation)
+		FROM azure_devops_work_item_watch_tasks t
+		WHERE t.watch_id = ? AND t.generation = ?
+		  AND (t.task_id = '' OR EXISTS (
+			SELECT 1 FROM tasks task_row
+			 WHERE task_row.id = t.task_id AND task_row.archived_at IS NULL
+		  ))
+		ORDER BY t.created_at`), watchID, generation)
 	if err != nil {
 		return nil, err
 	}
@@ -384,8 +389,13 @@ func (s *Store) ListPullRequestWatchTasks(ctx context.Context, watchID string, g
 	var rows []PullRequestWatchTask
 	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`SELECT id, watch_id, project_id,
 		azure_repository_id, pull_request_id, pull_request_url, task_id, generation,
-		created_at FROM azure_devops_pull_request_watch_tasks
-		WHERE watch_id = ? AND generation = ? ORDER BY created_at`), watchID, generation)
+		created_at FROM azure_devops_pull_request_watch_tasks t
+		WHERE t.watch_id = ? AND t.generation = ?
+		  AND (t.task_id = '' OR EXISTS (
+			SELECT 1 FROM tasks task_row
+			 WHERE task_row.id = t.task_id AND task_row.archived_at IS NULL
+		  ))
+		ORDER BY t.created_at`), watchID, generation)
 	if err != nil {
 		return nil, err
 	}

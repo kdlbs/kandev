@@ -724,6 +724,43 @@ describe("useQueue clearAll", () => {
   });
 });
 
+describe("useQueue clearAll optimistic state", () => {
+  beforeEach(() => {
+    queueApiMock.clearQueue.mockReset();
+    queueApiMock.clearQueue.mockResolvedValue(undefined);
+  });
+
+  it("clears the visible queue before a slow clear request resolves", async () => {
+    const pendingClear = Promise.withResolvers<void>();
+    queueApiMock.clearQueue.mockReturnValueOnce(pendingClear.promise);
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    mockState.setQueueEntries.mockClear();
+
+    let clearPromise!: Promise<void>;
+    act(() => {
+      clearPromise = result.current.clearAll();
+    });
+
+    await waitFor(() =>
+      expect(mockState.setQueueEntries).toHaveBeenCalledWith(SESSION_ID, [], {
+        count: 0,
+        max: 0,
+        mergeEnabled: true,
+        autoRun: true,
+        taskId: TASK_ID,
+        sessionIncarnationId: IDENTITY.session_incarnation_id,
+      }),
+    );
+    expect(queueApiMock.clearQueue).toHaveBeenCalledWith(IDENTITY);
+
+    await act(async () => {
+      pendingClear.resolve();
+      await clearPromise;
+    });
+  });
+});
+
 describe("useQueue removeEntry", () => {
   beforeEach(() => {
     queueApiMock.removeQueuedEntry.mockReset();

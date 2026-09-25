@@ -130,9 +130,13 @@ function KanbanCardFrame({
   return (
     <>
       <div ref={menu.detachAnchorRef} className="w-full">
-        <KanbanCardContextMenu entries={menu.contextMenuEntries}>
+        <KanbanCardContextMenu
+          entries={menu.contextMenuEntries}
+          onOpenChange={menu.onPRMenuOpenChange}
+        >
           <KanbanCardShell
             task={task}
+            presentation={presentation}
             repositoryChips={repositoryChips}
             attributes={draggable.attributes}
             listeners={draggable.listeners}
@@ -147,6 +151,7 @@ function KanbanCardFrame({
             isArchiving={isArchiving}
             menuEntries={menu.dropdownMenuEntries}
             menuTriggerRef={menu.detachFocusReturnRef}
+            onPRMenuOpenChange={menu.onPRMenuOpenChange}
             onClick={onClick}
             onCheckboxClick={(e) => {
               e.stopPropagation();
@@ -210,7 +215,7 @@ export function KanbanCard({
 }: KanbanCardProps) {
   const draggable = useDraggable({
     id: task.id,
-    disabled: isMultiSelectMode,
+    disabled: presentation === "mobile" || isMultiSelectMode,
   });
   const isPreviewed = useAppStore((state) => state.kanbanPreviewedTaskId === task.id);
   const repositories = useActiveWorkspaceRepositories();

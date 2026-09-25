@@ -319,6 +319,8 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     setDiscoverReposLoaded: () => undefined,
     selectedWorkflowId: null,
     setSelectedWorkflowId: () => undefined,
+    workflowAgentOverrides: {},
+    setWorkflowAgentOverrides: () => undefined,
     fetchedSteps: null,
     setFetchedSteps: () => undefined,
     isCreatingSession: false,

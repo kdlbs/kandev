@@ -13,6 +13,7 @@ import { compareTreeNodes, sortRootChildren } from "./file-tree-utils";
 import { restoredExpandedPaths } from "./file-browser-restore";
 import { useTreeLoader } from "./file-browser-tree-loader";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { isWorkspaceTreePath } from "@/lib/workspace-file-path";
 
 const debugLoad = createDebugLogger("file-browser:load");
 const debugChanges = createDebugLogger("file-browser:changes");
@@ -153,6 +154,11 @@ function nearestExpandedFolder(parentPath: string, expandedPaths: ReadonlySet<st
   return "";
 }
 
+function isExpandedPathInRefreshScope(path: string, repositoryName?: string): boolean {
+  if (!isWorkspaceTreePath(path)) return false;
+  return !repositoryName || path === repositoryName || path.startsWith(`${repositoryName}/`);
+}
+
 /** Apply incoming file changes to the tree by refreshing affected folders. */
 export function applyFileChanges(ctx: {
   client: ReturnType<typeof getWebSocketClient>;
@@ -169,13 +175,14 @@ export function applyFileChanges(ctx: {
       foldersToRefresh.add("");
       const repo = change.repository_name;
       for (const exp of expandedPaths) {
-        if (!repo || exp === repo || exp.startsWith(repo + "/")) {
+        if (isExpandedPathInRefreshScope(exp, repo)) {
           foldersToRefresh.add(exp);
         }
       }
       continue;
     }
     const p = change.path;
+    if (!isWorkspaceTreePath(p)) continue;
     const lastSlash = p.lastIndexOf("/");
     const parent = lastSlash === -1 ? "" : p.substring(0, lastSlash);
     foldersToRefresh.add(nearestExpandedFolder(parent, expandedPaths));

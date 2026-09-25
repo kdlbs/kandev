@@ -55,12 +55,22 @@ func (s *Service) beginPromptAttempt(
 	if sessionID == "" {
 		return
 	}
+	state, release := s.acquireTransientRetryNoticeState(sessionID)
+	state.mu.Lock()
 	s.dynamicAttemptEvidence.Store(sessionID, &promptAttemptEvidence{
 		executionID:      executionID,
 		promptGeneration: promptGeneration,
 		evidenceKnown:    true,
 		dynamic:          dynamic,
 	})
+	// A new prompt must publish its complete execution identity before it opens
+	// a retired retry lifecycle to provider events. Initial launches have no
+	// execution yet; bindPromptAttempt clears the fence after launch acceptance.
+	if executionID != "" {
+		s.clearTransientRetryNoticeFenceLocked(sessionID, state)
+	}
+	state.mu.Unlock()
+	release()
 }
 
 func (s *Service) beginDynamicAttempt(sessionID string) {
@@ -117,6 +127,12 @@ func (s *Service) bindPromptAttempt(sessionID, executionID string, promptGenerat
 	if sessionID == "" || (executionID == "" && promptGeneration == 0) {
 		return
 	}
+	state, release := s.acquireTransientRetryNoticeState(sessionID)
+	state.mu.Lock()
+	defer func() {
+		state.mu.Unlock()
+		release()
+	}()
 	evidence, ok := s.promptAttemptForSession(sessionID)
 	if !ok {
 		return
@@ -136,6 +152,11 @@ func (s *Service) bindPromptAttempt(sessionID, executionID string, promptGenerat
 			return
 		}
 		evidence.promptGeneration = promptGeneration
+	}
+	if executionID != "" {
+		// The evidence lock is released only after the identity is complete, while
+		// state.mu still excludes late failure handling from reopening the fence.
+		s.clearTransientRetryNoticeFenceLocked(sessionID, state)
 	}
 }
 
@@ -173,11 +194,13 @@ func (s *Service) observePromptAttempt(
 func (s *Service) observeProviderDiagnostic(
 	sessionID, executionID string,
 	promptGeneration uint64,
+	providerID string,
 	message string,
 ) {
 	classified := routingerr.Classify(routingerr.Input{
-		Phase:  routingerr.PhasePromptSend,
-		Stderr: message,
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: providerID,
+		Stderr:     message,
 	})
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
 		s.observePromptAttempt(sessionID, executionID, promptGeneration, true, false)
@@ -208,6 +231,25 @@ func (s *Service) observeDynamicAttempt(sessionID, executionID string, output, e
 }
 
 func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher.AgentEventData {
+	if data.SessionID == "" {
+		return data
+	}
+	state, release := s.acquireTransientRetryNoticeState(data.SessionID)
+	state.mu.Lock()
+	defer func() {
+		state.mu.Unlock()
+		release()
+	}()
+	if state.retired.Load() {
+		data.EvidenceKnown = false
+		data.OutputObserved = false
+		data.EffectObserved = false
+		return data
+	}
+	return s.withPromptAttemptEvidenceLocked(data)
+}
+
+func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) watcher.AgentEventData {
 	if data.SessionID == "" {
 		return data
 	}
@@ -247,7 +289,7 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 		data.DynamicRouteAttempt = true
 	}
 	if lifecycleEvidenceKnown && lifecycleDiagnosticCandidate && !evidence.output && !evidence.effect {
-		s.observeLifecycleProviderDiagnosticLocked(evidence, lifecycleDiagnosticText)
+		s.observeLifecycleProviderDiagnosticLocked(evidence, data.AgentID, lifecycleDiagnosticText)
 	}
 	outputObserved := evidence.outputObservedLocked(data)
 	if lifecycleEvidenceKnown {
@@ -267,7 +309,7 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 // event may arrive after the terminal failure because those events use
 // separate subscriptions, so an absent or unclassifiable diagnostic fails
 // closed as ordinary output.
-func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, message string) {
+func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, providerID, message string) {
 	message = normalizeDiagnosticText(message)
 	if message == "" {
 		evidence.output = true
@@ -276,8 +318,9 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 		return
 	}
 	classified := routingerr.Classify(routingerr.Input{
-		Phase:  routingerr.PhasePromptSend,
-		Stderr: message,
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: providerID,
+		Stderr:     message,
 	})
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
 		evidence.output = true
@@ -323,8 +366,9 @@ func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
 		return ""
 	}
 	return routingerr.Classify(routingerr.Input{
-		Phase:  routingerr.PhasePromptSend,
-		Stderr: message,
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: data.AgentID,
+		Stderr:     message,
 	}).Code
 }
 
@@ -378,16 +422,26 @@ func (s *Service) promptAttemptForSession(sessionID string) (*promptAttemptEvide
 
 func (e *promptAttemptEvidence) promptIdentityMatchesLocked(executionID string, promptGeneration uint64) bool {
 	if e.executionID != "" {
-		if executionID == "" || e.executionID != executionID {
+		if executionID == "" {
 			e.evidenceKnown = false
+			return false
+		}
+		if e.executionID != executionID {
+			// A concrete event from another execution is stale. Leave the current
+			// attempt intact so that the stale event cannot poison its evidence.
 			return false
 		}
 	} else if executionID != "" {
 		e.executionID = executionID
 	}
 	if e.promptGeneration != 0 {
-		if promptGeneration == 0 || e.promptGeneration != promptGeneration {
+		if promptGeneration == 0 {
 			e.evidenceKnown = false
+			return false
+		}
+		if e.promptGeneration != promptGeneration {
+			// As with execution IDs, a concrete older generation is a delayed
+			// event and must not invalidate the current prompt's evidence.
 			return false
 		}
 	} else if promptGeneration != 0 {

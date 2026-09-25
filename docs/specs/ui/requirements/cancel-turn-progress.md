@@ -28,6 +28,17 @@ Cancelling an agent turn can outlive the chat component or browser page that sta
 - **AC-UI-CANCEL-TURN-PROGRESS-001.7:** Desktop and mobile chat composers expose the same behavior through their shared cancel control.
 - **AC-UI-CANCEL-TURN-PROGRESS-001.8:** **GIVEN** an agent turn is running, **WHEN** the user activates the cancel control, **THEN** the control is immediately disabled, shows progress, and the backend runs one guarded cancellation.
 
+
+- **AC-UI-CANCEL-TURN-PROGRESS-001.9:** A starting, generating, or background-working session shall expose cancellation in task and Quick Chat composers, regardless of steering capability, queued messages, or empty input. A fully idle session without a clarification shall not expose cancellation.
+- **AC-UI-CANCEL-TURN-PROGRESS-001.10:** A connected clarification shall retain its cancel control. A clarification whose agent disconnected shall suppress that control, including when the session still reports running.
+- **AC-UI-CANCEL-TURN-PROGRESS-001.11:** When Quick Chat is open, its active structured conversation shall own the palette's Cancel turn action. An underlying task or inactive chat shall not receive that action. Closing Quick Chat shall restore the task action when eligible. A terminal, setup tab, or idle conversation shall not expose an underlying task cancellation action.
+- **AC-UI-CANCEL-TURN-PROGRESS-001.12:** Cancellation visibility shall not change direct-send, steering, or queue behavior. Desktop and phone users shall reach cancellation without entering a message. The phone control shall have a touch target of at least 44 pixels in both dimensions and remain inside the composer.
+
+## Design and implementation
+
+- [Cancel control availability design](../system-design/cancel-turn-availability.md)
+- [Availability fix package](../../../plans/cancel-turn-availability/plan.md)
+
 ## Migrated source detail
 
 ## Why

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -366,6 +367,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	// Extract worktree info from metadata if available
 	metadata := execution.MetadataSnapshot()
 	var worktreeID, worktreePath, worktreeBranch string
+	var worktreeBranchOwner, worktreeIntegrationRef string
 	if metadata != nil {
 		if id, ok := metadata["worktree_id"].(string); ok {
 			worktreeID = id
@@ -376,6 +378,10 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		if branch, ok := metadata["worktree_branch"].(string); ok {
 			worktreeBranch = branch
 		}
+	}
+	if execution.PrepareResult != nil {
+		worktreeBranchOwner = execution.PrepareResult.WorktreeBranchOwner
+		worktreeIntegrationRef = execution.PrepareResult.WorktreeIntegrationRef
 	}
 
 	// Surface per-repo worktree results from the prepare step so the orchestrator
@@ -396,6 +402,8 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 				BranchSlug:                w.BranchSlug,
 				WorktreeID:                w.WorktreeID,
 				WorktreeBranch:            w.WorktreeBranch,
+				WorktreeBranchOwner:       w.WorktreeBranchOwner,
+				WorktreeIntegrationRef:    w.WorktreeIntegrationRef,
 				WorktreePath:              w.WorktreePath,
 				MainRepoGitDir:            w.MainRepoGitDir,
 				RequestedBaseBranch:       w.RequestedBaseBranch,
@@ -413,6 +421,8 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		WorktreeID:                worktreeID,
 		WorktreePath:              worktreePath,
 		WorktreeBranch:            worktreeBranch,
+		WorktreeBranchOwner:       worktreeBranchOwner,
+		WorktreeIntegrationRef:    worktreeIntegrationRef,
 		RequestedBaseBranch:       requestedBaseBranch,
 		BaseBranch:                baseBranch,
 		BaseBranchFallbackWarning: baseBranchFallbackWarning,
@@ -465,12 +475,15 @@ func buildLifecycleLaunchRequest(
 		TaskRepositoryID:              req.TaskRepositoryID,
 		RepositoryPath:                req.RepositoryPath,
 		BaseBranch:                    req.BaseBranch,
+		IntegrationRef:                req.IntegrationRef,
 		DefaultBranch:                 req.DefaultBranch,
 		CheckoutBranch:                req.CheckoutBranch,
 		PRNumber:                      req.PRNumber,
 		RemoteContribution:            req.RemoteContribution,
+		CheckoutOptions:               req.CheckoutOptions,
 		ContributionDestination:       req.ContributionDestination,
 		ComparisonTarget:              req.ComparisonTarget,
+		QualifiedPRBase:               req.QualifiedPRBase,
 		WorktreeBranchPrefix:          req.WorktreeBranchPrefix,
 		WorktreeBranchTemplate:        req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:          req.WorktreeBranchTicket,
@@ -529,12 +542,15 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 			RepositoryURL:              r.RepositoryURL,
 			RepoName:                   r.RepoName,
 			BaseBranch:                 r.BaseBranch,
+			IntegrationRef:             r.IntegrationRef,
 			DefaultBranch:              r.DefaultBranch,
 			CheckoutBranch:             r.CheckoutBranch,
 			PRNumber:                   r.PRNumber,
 			RemoteContribution:         r.RemoteContribution,
+			CheckoutOptions:            r.CheckoutOptions,
 			ContributionDestination:    r.ContributionDestination,
 			ComparisonTarget:           r.ComparisonTarget,
+			QualifiedPRBase:            r.QualifiedPRBase,
 			WorktreeID:                 r.WorktreeID,
 			AllowBranchReplacement:     r.AllowBranchReplacement,
 			WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
@@ -835,6 +851,12 @@ func (a *lifecycleAdapter) SetSessionModeBySessionID(ctx context.Context, sessio
 	return a.mgr.SetSessionModeBySessionID(ctx, sessionID, modeID)
 }
 
+// ForkSessionBySessionID asks an agent runtime with native fork support to
+// fork one of its completed provider turns.
+func (a *lifecycleAdapter) ForkSessionBySessionID(ctx context.Context, sessionID, providerTurnID string) (string, error) {
+	return a.mgr.ForkSessionBySessionID(ctx, sessionID, providerTurnID)
+}
+
 // RespondToPermissionBySessionID sends a response to a permission request for a session
 func (a *lifecycleAdapter) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	return a.mgr.RespondToPermissionBySessionID(sessionID, pendingID, optionID, cancelled)
@@ -947,6 +969,27 @@ func (a *lifecycleAdapter) ListExecutionsForTask(taskID string) []lifecycle.Exec
 	return a.mgr.ListExecutionsForTask(taskID)
 }
 
+// LiveSessionIDsForTask satisfies taskservice.SessionExecutionRegistry: the
+// session IDs under taskID that currently have a live in-memory execution
+// registered by the agent runtime. The session reconciliation sweep uses the
+// snapshot to tell an active session whose backing actor is alive from one
+// whose actor is gone. Pinned here so a signature drift is a build error.
+var _ taskservice.SessionExecutionRegistry = (*lifecycleAdapter)(nil)
+
+func (a *lifecycleAdapter) LiveSessionIDsForTask(taskID string) []string {
+	references := a.mgr.ListExecutionsForTask(taskID)
+	sessionIDs := make([]string, 0, len(references))
+	for _, reference := range references {
+		// ListExecutionsForTask includes workspace-only infrastructure created
+		// by file/shell access. Only an execution with an agent command (or a
+		// live passthrough process) owns the agent session lifecycle.
+		if reference.SessionID != "" && a.mgr.HasLiveAgentExecution(reference.SessionID) {
+			sessionIDs = append(sessionIDs, reference.SessionID)
+		}
+	}
+	return sessionIDs
+}
+
 func (a *lifecycleAdapter) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
 	status, ok := a.mgr.GetRemoteStatusBySessionID(ctx, sessionID)
 	if !ok || status == nil {
@@ -985,6 +1028,14 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		EnvVars:                    append([]models.ProfileEnvVar(nil), info.EnvVars...),
 		SupportsMCP:                info.SupportsMCP,
 	}, nil
+}
+
+// HasLiveExecution reports whether the session still has an agent execution
+// owned by the runtime. It backs the task service's orphan-session
+// reconciliation sweep; workspace-only infrastructure is not a live agent,
+// and this lookup must never lazily create an execution.
+func (a *lifecycleAdapter) HasLiveExecution(sessionID string) bool {
+	return a.mgr.HasLiveAgentExecution(sessionID)
 }
 
 // GetGitLog retrieves the git log for a session from baseCommit to HEAD.
@@ -1197,7 +1248,7 @@ func (a githubTaskIssueStoreAdapter) UpdateTaskRepositoryBaseBranch(
 	if err != nil {
 		return err
 	}
-	_, err = a.svc.UpdateRepositoryBaseBranch(ctx, taskservice.UpdateRepositoryBaseBranchRequest{
+	_, err = a.svc.UpdateRepositoryBaseBranchFromSystem(ctx, taskservice.UpdateRepositoryBaseBranchRequest{
 		TaskID: taskID, TaskRepositoryID: taskRepo.ID, BaseBranch: baseBranch,
 	})
 	return err
@@ -1420,6 +1471,15 @@ func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskI
 	return a.svc.UpdateToolCallMessageWithCreate(ctx, agentSessionID, toolCallID, parentToolCallID, status, result, title, normalized, taskID, turnID, msgType)
 }
 
+func (a *messageCreatorAdapter) UpsertAgentPlanMessage(
+	ctx context.Context,
+	taskID, sourceToolCallID, agentSessionID, content, turnID string,
+) error {
+	return a.svc.UpsertAgentPlanMessage(
+		ctx, taskID, sourceToolCallID, agentSessionID, content, turnID,
+	)
+}
+
 // CreateSessionMessage creates a message for non-chat session updates (status/progress/error/etc).
 func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
@@ -1457,7 +1517,7 @@ func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
 }
 
 // CreatePermissionRequestMessage creates a message for a permission request
-func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
 	metadata := map[string]interface{}{
 		"request_id":     requestID,
 		"pending_id":     pendingID,
@@ -1466,8 +1526,12 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		"action_type":    actionType,
 		"action_details": actionDetails,
 	}
+	if decision != nil {
+		metadata["permission_decision"] = decision
+		metadata["status"] = string(models.PermissionStatusApproved)
+	}
 
-	msg, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+	request := &taskservice.CreateMessageRequest{
 		TaskSessionID: sessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
@@ -1475,7 +1539,17 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		AuthorType:    "agent",
 		Type:          "permission_request",
 		Metadata:      metadata,
-	})
+	}
+	var msg *models.Message
+	var err error
+	if requestID == "" {
+		msg, err = a.svc.CreateMessage(ctx, request)
+	} else {
+		// A repeated bus delivery for one provider request must resolve to the
+		// same transcript row instead of creating duplicate audit entries.
+		messageID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("permission:"+taskID+":"+sessionID+":"+requestID)).String()
+		msg, err = a.svc.CreateMessageIdempotent(ctx, messageID, request)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -1509,6 +1583,19 @@ func (a *messageCreatorAdapter) GetPermissionResolutionAudit(ctx context.Context
 // in the bundle is deleted so we don't leave a half-rendered group dangling in
 // the chat. Best-effort: if cleanup itself fails the caller still receives the
 // original error and the orphan messages stay (logged at warn-level).
+func clarificationQuestionData(question clarification.Question, options []interface{}) map[string]interface{} {
+	data := map[string]interface{}{
+		"id":      question.ID,
+		"title":   question.Title,
+		"prompt":  question.Prompt,
+		"options": options,
+	}
+	if question.AllowCustomText != nil {
+		data["allow_custom_text"] = *question.AllowCustomText
+	}
+	return data
+}
+
 func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error) {
 	ids := make([]string, 0, len(questions))
 	total := len(questions)
@@ -1522,12 +1609,7 @@ func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.C
 			}
 		}
 
-		questionData := map[string]interface{}{
-			"id":      question.ID,
-			"title":   question.Title,
-			"prompt":  question.Prompt,
-			"options": options,
-		}
+		questionData := clarificationQuestionData(question, options)
 
 		metadata := map[string]interface{}{
 			"pending_id":     pendingID,

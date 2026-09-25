@@ -13,6 +13,8 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -26,12 +28,28 @@ type TaskStatusSummaryPRReader interface {
 	) (map[string][]statussummary.PullRequestInput, error)
 }
 
+// TaskStatusSummaryLaunchQueueReader supplies the task-owned launch queue
+// projection and may refresh shared admission observations once for a batch.
+// The task service does not depend on the orchestrator's controller type.
+type TaskStatusSummaryLaunchQueueReader func(
+	context.Context,
+	[]*models.Task,
+) map[string]*statussummary.LaunchQueueSummary
+
 // SetTaskStatusSummaryPRReader wires the optional provider-backed PR reader.
 // The task service keeps the interface narrow so it does not depend on the
 // GitHub package.
 func (s *Service) SetTaskStatusSummaryPRReader(reader TaskStatusSummaryPRReader) {
 	if s != nil {
 		s.statusSummaryPRs = reader
+	}
+}
+
+// SetTaskStatusSummaryLaunchQueueReader wires the optional live admission
+// observation used when boot and task-list summaries are rebuilt.
+func (s *Service) SetTaskStatusSummaryLaunchQueueReader(reader TaskStatusSummaryLaunchQueueReader) {
+	if s != nil {
+		s.statusSummaryLaunchQueue = reader
 	}
 }
 
@@ -54,8 +72,9 @@ func (s *Service) ReconcileTaskStatusSummaries(
 		return summaries, nil
 	}
 	activityByTask, activityObserved := s.loadSummaryActivity(ctx, taskIDs(tasks))
+	launchQueueByTask := s.launchQueueSummaries(ctx, tasks)
 	failedTaskIDs, reconcileErr := s.reconcileExistingSummaries(
-		ctx, tasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved,
+		ctx, tasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved, launchQueueByTask,
 	)
 	rebuildTasks := tasks
 	if len(failedTaskIDs) > 0 {
@@ -70,7 +89,7 @@ func (s *Service) ReconcileTaskStatusSummaries(
 		}
 	}
 	summaries = s.rebuildMissingSummaries(
-		ctx, rebuildTasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved,
+		ctx, rebuildTasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved, launchQueueByTask,
 	)
 	return summaries, reconcileErr
 }
@@ -83,6 +102,7 @@ func (s *Service) reconcileExistingSummaries(
 	summaries map[string]*statussummary.TaskStatusSummary,
 	activityByTask map[string]time.Time,
 	activityObserved bool,
+	launchQueueByTask map[string]*statussummary.LaunchQueueSummary,
 ) (map[string]struct{}, error) {
 	var reconcileErr error
 	failedTaskIDs := make(map[string]struct{})
@@ -99,6 +119,7 @@ func (s *Service) reconcileExistingSummaries(
 			action,
 			activityByTask[task.ID],
 			activityObserved,
+			launchQueueByTask[task.ID],
 		)
 		if err != nil {
 			if reconciled != nil {
@@ -134,6 +155,7 @@ func (s *Service) rebuildMissingSummaries(
 	summaries map[string]*statussummary.TaskStatusSummary,
 	activityByTask map[string]time.Time,
 	activityObserved bool,
+	launchQueueByTask map[string]*statussummary.LaunchQueueSummary,
 ) map[string]*statussummary.TaskStatusSummary {
 	missing := missingSummaryTasks(tasks, summaries)
 	if len(missing) == 0 {
@@ -147,6 +169,11 @@ func (s *Service) rebuildMissingSummaries(
 	now := time.Now().UTC()
 	for _, task := range missing {
 		activityAt := activityAtByTask[task.ID]
+		completionGate, completionGateObserved, gateErr := s.completionGateSummary(ctx, task.ID)
+		if gateErr != nil {
+			s.logSummaryRepairFailure(task.ID, "completion gate", gateErr)
+			continue
+		}
 		s.rebuildMissingSummary(ctx, task, summaries, s.rebuildInput(
 			taskLaunchErrorSummary(task),
 			sessionsByTask[task.ID],
@@ -157,6 +184,9 @@ func (s *Service) rebuildMissingSummaries(
 			prByTask[task.ID],
 			prObserved,
 			queuedByTask[task.ID],
+			launchQueueByTask[task.ID],
+			completionGate,
+			completionGateObserved,
 			activityAt,
 			activityObserved,
 			now,
@@ -188,6 +218,73 @@ func (s *Service) loadSummaryActivity(ctx context.Context, taskIDs []string) (ma
 		return nil, false
 	}
 	return activityByTask, true
+}
+
+func (s *Service) launchQueueSummaries(
+	ctx context.Context,
+	tasks []*models.Task,
+) map[string]*statussummary.LaunchQueueSummary {
+	if s.statusSummaryLaunchQueue != nil {
+		if queues := s.statusSummaryLaunchQueue(ctx, tasks); queues != nil {
+			return queues
+		}
+	}
+	queues := make(map[string]*statussummary.LaunchQueueSummary, len(tasks))
+	for _, task := range tasks {
+		if task == nil || task.ID == "" {
+			continue
+		}
+		queues[task.ID] = statussummary.LaunchQueueSummaryFromTask(task)
+	}
+	return queues
+}
+
+func cloneLaunchQueueForService(queue *statussummary.LaunchQueueSummary) *statussummary.LaunchQueueSummary {
+	if queue == nil {
+		return nil
+	}
+	copy := *queue
+	if queue.Capacity != nil {
+		capacity := *queue.Capacity
+		copy.Capacity = &capacity
+	}
+	return &copy
+}
+
+func statussummaryLaunchQueueEqual(left, right *statussummary.LaunchQueueSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if left.SessionID != right.SessionID || left.AgentProfileID != right.AgentProfileID ||
+		left.WorkflowStepID != right.WorkflowStepID || !left.QueuedAt.Equal(right.QueuedAt) ||
+		left.Reason != right.Reason || left.Retrying != right.Retrying {
+		return false
+	}
+	if left.Capacity == nil || right.Capacity == nil {
+		return left.Capacity == right.Capacity
+	}
+	// The sample time is an in-memory freshness overlay. Persist only changes
+	// to the queue's identity or capacity values.
+	return left.Capacity.InUse == right.Capacity.InUse &&
+		left.Capacity.Limit == right.Capacity.Limit
+}
+
+func (s *Service) completionGateSummary(
+	ctx context.Context,
+	taskID string,
+) (*statussummary.CompletionGateSummary, bool, error) {
+	reader, ok := s.tasks.(repository.TaskCompletionGateRepository)
+	if !ok {
+		return nil, false, nil
+	}
+	snapshot, err := reader.GetTaskCompletionGate(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskNotFound) {
+			return nil, false, nil
+		}
+		return nil, true, err
+	}
+	return statussummary.CompletionGateSummaryFromSnapshot(snapshot), true, nil
 }
 
 func (s *Service) rebuildMissingSummary(
@@ -241,10 +338,23 @@ func (s *Service) reconcileExistingSummary(
 	pendingAction string,
 	authoritativeActivity time.Time,
 	activityObserved bool,
+	launchQueueValues ...*statussummary.LaunchQueueSummary,
 ) (*statussummary.TaskStatusSummary, error) {
+	completionGate, completionGateObserved, err := s.completionGateSummary(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load completion gate: %w", err)
+	}
+	var launchQueue *statussummary.LaunchQueueSummary
+	// Older repair tests and partial task snapshots can omit Metadata entirely.
+	// In that shape there is no authoritative queue to compare, unless the
+	// persisted summary still advertises one that must be cleared.
+	launchQueueObserved := len(launchQueueValues) > 0 && (task.Metadata != nil || current.LaunchQueue != nil)
+	if launchQueueObserved {
+		launchQueue = launchQueueValues[0]
+	}
 	for attempt := 0; attempt < maxSummaryReconcileAttempts && current != nil; attempt++ {
-		if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved) {
-			return current, nil
+		if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, launchQueue, launchQueueObserved, completionGate, completionGateObserved) {
+			return overlayLaunchQueueObservation(current, launchQueue, launchQueueObserved), nil
 		}
 		if err := prepareSummaryReconcileAttempt(ctx, attempt, current.Revision); err != nil {
 			return nil, err
@@ -253,6 +363,10 @@ func (s *Service) reconcileExistingSummary(
 		next.PendingAction = pendingAction
 		if activityObserved && authoritativeActivity.After(time.Time{}) {
 			next.LastActivityAt = maxSummaryActivity(current.LastActivityAt, authoritativeActivity)
+		}
+		next.LaunchQueue = cloneLaunchQueueForService(launchQueue)
+		if completionGateObserved {
+			next.CompletionGate = cloneCompletionGateForService(completionGate)
 		}
 		next.Revision = current.Revision + 1
 		next.UpdatedAt = advancedSummaryTime(current.UpdatedAt, time.Now().UTC())
@@ -271,19 +385,45 @@ func (s *Service) reconcileExistingSummary(
 			s.publishReconciledSummary(ctx, task, next)
 			return &next, nil
 		}
-		current, pendingAction, err = s.reloadSummaryReconcileState(ctx, task.ID)
+		current, pendingAction, launchQueue, err = s.reloadSummaryReconcileState(ctx, task.ID, launchQueueObserved)
 		if err != nil {
 			return nil, err
 		}
 		if current == nil {
 			return nil, nil
 		}
+		completionGate, completionGateObserved, err = s.completionGateSummary(ctx, task.ID)
+		if err != nil {
+			return nil, fmt.Errorf("reload completion gate: %w", err)
+		}
 	}
-	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved) {
-		return current, nil
+	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, launchQueue, launchQueueObserved, completionGate, completionGateObserved) {
+		return overlayLaunchQueueObservation(current, launchQueue, launchQueueObserved), nil
 	}
 	s.logSummaryReconcileExhaustion(task.ID, current)
 	return nil, errors.New("exhausted compare-and-set retries")
+}
+
+// overlayLaunchQueueObservation returns a response-only copy when the live
+// queue has only a newer capacity sample. Observation time is intentionally
+// excluded from the durable equality contract, but task-list consumers still
+// need the fresh timestamp to render age and connectivity state accurately.
+func overlayLaunchQueueObservation(
+	current *statussummary.TaskStatusSummary,
+	observed *statussummary.LaunchQueueSummary,
+	observedEnabled bool,
+) *statussummary.TaskStatusSummary {
+	if !observedEnabled || current == nil || observed == nil || current.LaunchQueue == nil ||
+		!statussummaryLaunchQueueEqual(current.LaunchQueue, observed) {
+		return current
+	}
+	if current.LaunchQueue.Capacity == nil || observed.Capacity == nil ||
+		current.LaunchQueue.Capacity.ObservedAt.Equal(observed.Capacity.ObservedAt) {
+		return current
+	}
+	copy := *current
+	copy.LaunchQueue = cloneLaunchQueueForService(observed)
+	return &copy
 }
 
 func summaryNeedsReconcile(
@@ -291,6 +431,10 @@ func summaryNeedsReconcile(
 	pendingAction string,
 	authoritativeActivity time.Time,
 	activityObserved bool,
+	launchQueue *statussummary.LaunchQueueSummary,
+	launchQueueObserved bool,
+	completionGate *statussummary.CompletionGateSummary,
+	completionGateObserved bool,
 ) bool {
 	if current == nil {
 		return false
@@ -298,34 +442,64 @@ func summaryNeedsReconcile(
 	if current.PendingAction != pendingAction {
 		return true
 	}
+	if launchQueueObserved && !statussummaryLaunchQueueEqual(current.LaunchQueue, launchQueue) {
+		return true
+	}
+	if completionGateObserved && !equalCompletionGateSummary(current.CompletionGate, completionGate) {
+		return true
+	}
 	return activityObserved && authoritativeActivity.After(time.Time{}) &&
 		(current.LastActivityAt == nil || authoritativeActivity.After(*current.LastActivityAt))
+}
+
+func cloneCompletionGateForService(gate *statussummary.CompletionGateSummary) *statussummary.CompletionGateSummary {
+	if gate == nil {
+		return nil
+	}
+	copy := *gate
+	return &copy
+}
+
+func equalCompletionGateSummary(left, right *statussummary.CompletionGateSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func (s *Service) reloadSummaryReconcileState(
 	ctx context.Context,
 	taskID string,
-) (*statussummary.TaskStatusSummary, string, error) {
+	loadLaunchQueue bool,
+) (*statussummary.TaskStatusSummary, string, *statussummary.LaunchQueueSummary, error) {
 	rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{taskID})
 	if err != nil {
-		return nil, "", fmt.Errorf("reload after compare-and-set rejection: %w", err)
+		return nil, "", nil, fmt.Errorf("reload after compare-and-set rejection: %w", err)
 	}
 	current := rows[taskID]
 	if current == nil {
-		return nil, "", nil
+		return nil, "", nil, nil
 	}
 	if s.sessions == nil {
-		return nil, "", errors.New("reload sessions: session repository unavailable")
+		return nil, "", nil, errors.New("reload sessions: session repository unavailable")
 	}
 	refreshedSessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
-		return nil, "", fmt.Errorf("reload sessions: %w", err)
+		return nil, "", nil, fmt.Errorf("reload sessions: %w", err)
 	}
 	pendingBySession, err := s.GetPendingActionsForSessions(ctx, taskSessionIDs(refreshedSessions))
 	if err != nil {
-		return nil, "", fmt.Errorf("reload pending actions: %w", err)
+		return nil, "", nil, fmt.Errorf("reload pending actions: %w", err)
 	}
-	return current, pendingActionForTask(refreshedSessions, pendingBySession), nil
+	if !loadLaunchQueue {
+		return current, pendingActionForTask(refreshedSessions, pendingBySession), nil, nil
+	}
+	task, err := s.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("reload task for launch queue: %w", err)
+	}
+	queues := s.launchQueueSummaries(ctx, []*models.Task{task})
+	return current, pendingActionForTask(refreshedSessions, pendingBySession), queues[taskID], nil
 }
 
 func maxSummaryActivity(current *time.Time, candidate time.Time) *time.Time {
@@ -567,21 +741,27 @@ func (s *Service) rebuildInput(
 	prs []statussummary.PullRequestInput,
 	prObserved bool,
 	queuedPromptCount int,
+	launchQueue *statussummary.LaunchQueueSummary,
+	completionGate *statussummary.CompletionGateSummary,
+	completionGateObserved bool,
 	lastActivityAt time.Time,
 	activityObserved bool,
 	now time.Time,
 ) statussummary.RebuildInput {
 	input := statussummary.RebuildInput{
-		Sessions:          make([]statussummary.RebuildSession, 0, len(sessions)),
-		TaskError:         taskError,
-		PendingActions:    make(map[string]string),
-		ActivityObserved:  s.foregroundActivity != nil,
-		LastActivityAt:    nil,
-		PullRequests:      prs,
-		PRObserved:        prObserved,
-		GitObserved:       gitObserved,
-		QueuedPromptCount: maxInt(queuedPromptCount, 0),
-		Now:               now,
+		Sessions:               make([]statussummary.RebuildSession, 0, len(sessions)),
+		TaskError:              taskError,
+		PendingActions:         make(map[string]string),
+		ActivityObserved:       s.foregroundActivity != nil,
+		LastActivityAt:         nil,
+		PullRequests:           prs,
+		PRObserved:             prObserved,
+		GitObserved:            gitObserved,
+		QueuedPromptCount:      maxInt(queuedPromptCount, 0),
+		LaunchQueue:            cloneLaunchQueueForService(launchQueue),
+		CompletionGate:         cloneCompletionGateForService(completionGate),
+		CompletionGateObserved: completionGateObserved,
+		Now:                    now,
 	}
 	if activityObserved && !lastActivityAt.IsZero() {
 		activityCopy := lastActivityAt.UTC()

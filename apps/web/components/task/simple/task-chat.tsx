@@ -13,6 +13,7 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
+import { useChatMotion } from "@/hooks/use-chat-motion";
 import { useAppStore } from "@/components/state-provider";
 import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
@@ -504,6 +505,7 @@ function useChatAutoScroll(
  * the user when they scroll away.
  */
 function useCommentHashScroll(comments: TaskComment[]): void {
+  const motionEnabled = useChatMotion();
   const targetIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -517,9 +519,9 @@ function useCommentHashScroll(comments: TaskComment[]): void {
     if (!targetId) return;
     const el = document.getElementById(targetId);
     if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.scrollIntoView({ behavior: motionEnabled ? "smooth" : "auto", block: "center" });
     targetIdRef.current = null;
-  }, [comments]);
+  }, [comments, motionEnabled]);
 }
 
 function ChatEntries({

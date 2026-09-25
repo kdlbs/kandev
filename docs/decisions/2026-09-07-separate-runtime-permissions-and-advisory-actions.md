@@ -1,7 +1,7 @@
 # ADR-2026-09-07-separate-runtime-permissions-and-advisory-actions: Keep live advisory actions separate from runtime permissions
 
-**Status:** accepted  
-**Date:** 2026-09-07  
+**Status:** accepted
+**Date:** 2026-09-07
 **Area:** backend, protocol
 
 ## Context

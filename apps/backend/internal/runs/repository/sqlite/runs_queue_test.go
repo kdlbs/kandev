@@ -482,13 +482,34 @@ func TestCreateRun_DuplicateIdempotencyKeyIsRejected(t *testing.T) {
 
 // TestScheduleRetry_RequeuesAndClearsTerminalTimestamps asserts every
 // column the retry write owns, from a run that had already finished.
+// session_id is seeded to simulate a post-start failure (the run reached
+// a real launch before failing) and must come back empty: a relaunch
+// that resolved the prior attempt's session would mint its runtime JWT
+// and prompt against a session the new attempt never owns (review round
+// 1, R1-1). error_message is seeded the same way and must also come back
+// empty: a run that later finishes successfully must not still carry the
+// previous attempt's error into a status='finished' row, which the run
+// detail UI renders as an unconditional tooltip regardless of status
+// (review round 2, R2-2).
 func TestScheduleRetry_RequeuesAndClearsTerminalTimestamps(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
 	run := queueRunAt(t, repo, "retryable", "a1", now.Add(-time.Hour))
+	if err := repo.UpdateRunRuntimeSnapshot(ctx, run.ID, "{}", "{}", "session-from-failed-attempt"); err != nil {
+		t.Fatalf("seed session_id: %v", err)
+	}
+	if err := repo.SetRunErrorMessageForTest(ctx, run.ID, "connection reset by peer"); err != nil {
+		t.Fatalf("seed error_message: %v", err)
+	}
 	setStatus(t, repo, run.ID, "failed", timePtr(now.Add(-30*time.Minute)), timePtr(now))
 	untouched := queueRunAt(t, repo, "bystander", "a1", now.Add(-time.Hour))
+	if err := repo.UpdateRunRuntimeSnapshot(ctx, untouched.ID, "{}", "{}", "session-still-running"); err != nil {
+		t.Fatalf("seed bystander session_id: %v", err)
+	}
+	if err := repo.SetRunErrorMessageForTest(ctx, untouched.ID, "bystander error"); err != nil {
+		t.Fatalf("seed bystander error_message: %v", err)
+	}
 
 	retryAt := time.Date(2026, 7, 8, 9, 10, 11, 0, time.UTC)
 	if err := repo.ScheduleRetry(ctx, run.ID, retryAt, 4); err != nil {
@@ -507,6 +528,8 @@ func TestScheduleRetry_RequeuesAndClearsTerminalTimestamps(t *testing.T) {
 	if got.FinishedAt != nil {
 		t.Errorf("finished_at = %s, want nil", got.FinishedAt)
 	}
+	checkString(t, "session_id cleared", got.SessionID, "")
+	checkString(t, "error_message cleared", got.ErrorMessage, "")
 	checkString(t, "payload preserved", got.Payload, `{"task_id":"retryable"}`)
 
 	bystander := mustGetRun(t, repo, untouched.ID)
@@ -514,6 +537,8 @@ func TestScheduleRetry_RequeuesAndClearsTerminalTimestamps(t *testing.T) {
 	if bystander.ScheduledRetryAt != nil {
 		t.Errorf("bystander scheduled_retry_at = %s, want nil", bystander.ScheduledRetryAt)
 	}
+	checkString(t, "bystander session_id untouched", bystander.SessionID, "session-still-running")
+	checkString(t, "bystander error_message untouched", bystander.ErrorMessage, "bystander error")
 }
 
 // TestScheduleRetry_WritesTheAttemptCountVerbatim pins that the caller
@@ -528,6 +553,103 @@ func TestScheduleRetry_WritesTheAttemptCountVerbatim(t *testing.T) {
 			t.Fatalf("schedule retry %d: %v", count, err)
 		}
 		checkInt(t, "retry_count", mustGetRun(t, repo, run.ID).RetryCount, count)
+	}
+}
+
+// TestScheduleRetry_RestampsPriorityClassToRecoveryUnlessAlreadyHuman
+// covers AC-OFFICE-BACKPRESSURE-001.7: a retried run must re-enter the
+// queue at recovery priority so it is not starved behind the same class
+// of work it kept losing to, unless it was already human.
+func TestScheduleRetry_RestampsPriorityClassToRecoveryUnlessAlreadyHuman(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	periodic := mustCreateRun(t, repo, &models.Run{
+		ID: "retry-periodic", AgentProfileID: "a1", WorkspaceID: "ws-a1",
+		Reason: "routine_dispatch_cron", Payload: `{}`, Status: "queued",
+		CoalescedCount: 1, PriorityClass: models.PriorityClassPeriodic,
+	})
+	human := mustCreateRun(t, repo, &models.Run{
+		ID: "retry-human", AgentProfileID: "a1", WorkspaceID: "ws-a1",
+		Reason: "manual_resume_after_failure", Payload: `{}`, Status: "queued",
+		CoalescedCount: 1, PriorityClass: models.PriorityClassHuman,
+	})
+	setStatus(t, repo, periodic.ID, "failed", nil, timePtr(now))
+	setStatus(t, repo, human.ID, "failed", nil, timePtr(now))
+
+	if err := repo.ScheduleRetry(ctx, periodic.ID, now.Add(time.Minute), 1); err != nil {
+		t.Fatalf("schedule retry (periodic): %v", err)
+	}
+	if err := repo.ScheduleRetry(ctx, human.ID, now.Add(time.Minute), 1); err != nil {
+		t.Fatalf("schedule retry (human): %v", err)
+	}
+
+	if got := mustGetRun(t, repo, periodic.ID).PriorityClass; got != models.PriorityClassRecovery {
+		t.Errorf("periodic run's priority_class after retry = %v, want PriorityClassRecovery", got)
+	}
+	if got := mustGetRun(t, repo, human.ID).PriorityClass; got != models.PriorityClassHuman {
+		t.Errorf("human run's priority_class after retry = %v, want PriorityClassHuman (unchanged)", got)
+	}
+}
+
+// TestScheduleRetryIfClaimed_RequeuesWhenStillClaimed asserts the guarded
+// requeue behaves exactly like ScheduleRetry — same column writes, same
+// clearing of session_id/error_message — when the run is still the
+// 'claimed' status the caller read it as.
+func TestScheduleRetryIfClaimed_RequeuesWhenStillClaimed(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	run := queueRunAt(t, repo, "guarded", "a1", now.Add(-time.Hour))
+	setStatus(t, repo, run.ID, "claimed", timePtr(now.Add(-time.Minute)), nil)
+
+	wrote, err := repo.ScheduleRetryIfClaimed(ctx, run.ID, fixedRetryAt, 1)
+	if err != nil {
+		t.Fatalf("schedule retry if claimed: %v", err)
+	}
+	if !wrote {
+		t.Fatal("wrote = false, want true: run was still claimed")
+	}
+
+	got := mustGetRun(t, repo, run.ID)
+	checkString(t, "status", string(got.Status), "queued")
+	checkInt(t, "retry_count", got.RetryCount, 1)
+	if got.ClaimedAt != nil {
+		t.Errorf("claimed_at = %s, want nil", got.ClaimedAt)
+	}
+	if got.ScheduledRetryAt == nil || !got.ScheduledRetryAt.Equal(fixedRetryAt) {
+		t.Errorf("scheduled_retry_at = %v, want %s", got.ScheduledRetryAt, fixedRetryAt)
+	}
+}
+
+// TestScheduleRetryIfClaimed_NoopWhenNoLongerClaimed pins the guard this
+// method exists for: a run a concurrent writer already moved off
+// 'claimed' (simulating a task-tree cancel, workspace pause, or
+// participant eviction landing between the caller's read and this write)
+// must not be resurrected to 'queued', and none of its columns may move —
+// the caller has to see wrote=false and leave the row exactly as the
+// other writer left it.
+func TestScheduleRetryIfClaimed_NoopWhenNoLongerClaimed(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	run := queueRunAt(t, repo, "raced", "a1", now.Add(-time.Hour))
+	setStatus(t, repo, run.ID, "cancelled", timePtr(now.Add(-time.Minute)), timePtr(now))
+
+	wrote, err := repo.ScheduleRetryIfClaimed(ctx, run.ID, fixedRetryAt, 1)
+	if err != nil {
+		t.Fatalf("schedule retry if claimed: %v", err)
+	}
+	if wrote {
+		t.Fatal("wrote = true, want false: a concurrent writer already moved the run off claimed")
+	}
+
+	got := mustGetRun(t, repo, run.ID)
+	checkString(t, "status untouched", string(got.Status), "cancelled")
+	checkInt(t, "retry_count untouched", got.RetryCount, 0)
+	if got.ScheduledRetryAt != nil {
+		t.Errorf("scheduled_retry_at = %v, want nil (untouched)", got.ScheduledRetryAt)
 	}
 }
 
@@ -582,6 +704,40 @@ func TestRecoverStale_NothingToRecoverReportsZero(t *testing.T) {
 	}
 	if recovered != 0 {
 		t.Errorf("recovered = %d, want 0", recovered)
+	}
+}
+
+// TestRecoverStale_RestampsPriorityClassToRecoveryUnlessAlreadyHuman
+// covers AC-OFFICE-BACKPRESSURE-001.7 for the recovery-sweep path: a
+// stuck run returned to queued must re-enter at recovery priority so it
+// can drain the pool, unless it was already human.
+func TestRecoverStale_RestampsPriorityClassToRecoveryUnlessAlreadyHuman(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	cutoff := time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC)
+
+	periodic := mustCreateRun(t, repo, &models.Run{
+		ID: "stale-periodic", AgentProfileID: "a1", WorkspaceID: "ws-a1",
+		Reason: "heartbeat", Payload: `{}`, Status: "queued",
+		CoalescedCount: 1, PriorityClass: models.PriorityClassPeriodic,
+	})
+	human := mustCreateRun(t, repo, &models.Run{
+		ID: "stale-human", AgentProfileID: "a1", WorkspaceID: "ws-a1",
+		Reason: "manual_resume_after_failure", Payload: `{}`, Status: "queued",
+		CoalescedCount: 1, PriorityClass: models.PriorityClassHuman,
+	})
+	setStatus(t, repo, periodic.ID, "claimed", timePtr(cutoff.Add(-time.Minute)), nil)
+	setStatus(t, repo, human.ID, "claimed", timePtr(cutoff.Add(-time.Minute)), nil)
+
+	if _, err := repo.RecoverStale(ctx, cutoff); err != nil {
+		t.Fatalf("recover stale: %v", err)
+	}
+
+	if got := mustGetRun(t, repo, periodic.ID).PriorityClass; got != models.PriorityClassRecovery {
+		t.Errorf("periodic run's priority_class after recovery = %v, want PriorityClassRecovery", got)
+	}
+	if got := mustGetRun(t, repo, human.ID).PriorityClass; got != models.PriorityClassHuman {
+		t.Errorf("human run's priority_class after recovery = %v, want PriorityClassHuman (unchanged)", got)
 	}
 }
 

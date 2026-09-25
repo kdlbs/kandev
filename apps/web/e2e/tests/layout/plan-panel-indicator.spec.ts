@@ -15,7 +15,8 @@ const CREATE_PLAN_SCRIPT = [
 const UPDATE_PLAN_SCRIPT = [
   'e2e:thinking("updating plan")',
   "e2e:delay(100)",
-  'e2e:mcp:kandev:update_task_plan_kandev({"task_id":"{task_id}","content":"## Updated\\n\\nStep one\\nStep two"})',
+  'e2e:mcp:kandev:get_task_plan_kandev({"task_id":"{task_id}"})',
+  'e2e:mcp:kandev:update_task_plan_kandev({"task_id":"{task_id}","content":"## Updated\\n\\nStep one\\nStep two","expected_version":"{plan_version}"})',
   "e2e:delay(100)",
   'e2e:message("plan updated")',
 ].join("\n");

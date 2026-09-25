@@ -2,7 +2,7 @@
 status: active
 system: system-page
 created: 2026-07-14
-updated: 2026-09-12
+updated: 2026-09-22
 owners:
   - cfl
 ---
@@ -90,6 +90,7 @@ The existing application size-unit convention remains unchanged.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.7:** Analysis shall not read file contents, follow nested symlinks, cross nested mounts, change ownership, or remove files.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.8:** Desktop and phone users shall inspect sizes, long paths, and limitations without horizontal page scrolling. Copy shall use the selected language.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.9:** Existing storage access restrictions shall apply. Analysis requests shall not accept arbitrary paths from clients.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.10:** When the temporary-folder scan reaches its deadline, the expanded row shall show one localized timeout explanation and retain sampled bytes and partial status. Repeated deadline messages shall not appear. Other diagnostics shall remain bounded to ten distinct examples, with existing skipped-entry counts preserved.
 
 ### REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-004: Scheduled cleanup of owned temporary artifacts
 
@@ -114,7 +115,31 @@ Shared-file deletion, legacy-directory adoption, arbitrary cleanup paths, config
 new artifact producers, remote temporary folders, and changes to inherited agent temporary variables
 are outside this extension. Whole-host disk reconciliation remains outside storage analysis.
 
+### REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-005: Relative storage usage bars
+
+**Intent:** Operators can identify the largest measured categories without opening each storage row.
+
+#### Acceptance criteria
+
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.1:** Analysis rows shall sort by measured bytes, largest first. Equal sizes shall retain their existing category order. Unmeasured rows shall appear last in that order.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.2:** Each measured row shall show its size and a proportional bar in the collapsible header. Every bar shall use zero as its origin and the largest displayed measurement as its maximum.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.3:** Measured zero shall show an empty track and its size. Unknown, pending, failed, and not-applicable rows shall retain their status without a measured bar. Partial measurements shall use sampled bytes and retain visible partial status.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.4:** Rows shall retain independent expansion, keyboard activation, and existing detail actions. Sorting and refreshed measurements shall preserve expansion and focus for each remaining row.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.5:** Bars shall compare category footprints without changing Total counted or the separate filesystem-capacity indicator. Visible copy shall explain relative sizing and possible category overlap. Bar color shall not imply a cleanup recommendation or capacity threshold.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.6:** Desktop headers shall show label, bar, size, and chevron. Phone headers shall place the bar beneath the label and size. Labels and details shall wrap without horizontal page scrolling. Phone triggers shall have a touch target of at least 44 pixels.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.7:** Text shall communicate size, measurement status, and expansion without reliance on color. All new copy shall use the selected language. Bars shall not add keyboard stops or announce scan completion.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.8:** First-scan progress shall retain distinct unmeasured states as measured rows enter size order. A refresh shall keep the previous snapshot until its atomic replacement. Existing refresh and failure behavior shall remain available.
+
+#### Exclusions
+
+New categories, sorting controls, saved order preferences, per-file drilldown, cleanup policy changes,
+scan deadline changes, and host-wide disk attribution are outside this extension.
+
 ## System design
+
+The implemented usage bars and timeout feedback are defined in
+[Storage analysis presentation](../system-design/storage-analysis-presentation.md).
+The [plan package](../../../plans/storage-analysis-presentation/plan.md) records implementation and verification evidence.
 
 The implemented temporary-storage extension is defined in
 [Temporary storage visibility and cleanup](../system-design/storage-temporary-folders.md).

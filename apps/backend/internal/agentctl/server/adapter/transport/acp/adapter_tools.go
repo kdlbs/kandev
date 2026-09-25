@@ -819,6 +819,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 				a.sendUpdate(AgentEvent{
 					Type:        streams.EventTypeAgentPlan,
 					SessionID:   sessionID,
+					ToolCallID:  emittedToolCallID,
 					PlanContent: planContent,
 				})
 			}

@@ -100,14 +100,16 @@ func TestSQLiteStore_ProjectsStableTaskDirName(t *testing.T) {
 	}
 
 	wt := &Worktree{
-		ID:           "wt-stable-root",
-		SessionID:    "session-stable-root",
-		RepositoryID: "repo-stable-root",
-		Path:         "/tmp/stable-root/repo",
-		Branch:       "feature/stable-root",
-		Status:       StatusActive,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:              "wt-stable-root",
+		SessionID:       "session-stable-root",
+		RepositoryID:    "repo-stable-root",
+		Path:            "/tmp/stable-root/repo",
+		Branch:          "feature/stable-root",
+		SourceClonePath: "/managed/workspaces/workspace-1/github/acme/repo",
+		SourceCommonDir: "/managed/workspaces/workspace-1/github/acme/repo/.git",
+		Status:          StatusActive,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 	if err := store.CreateWorktree(ctx, wt); err != nil {
 		t.Fatalf("create worktree: %v", err)
@@ -122,6 +124,53 @@ func TestSQLiteStore_ProjectsStableTaskDirName(t *testing.T) {
 	}
 	if got.TaskDirName != "original-task-root_abc" {
 		t.Fatalf("TaskDirName = %q, want original-task-root_abc", got.TaskDirName)
+	}
+	if got.SourceClonePath != wt.SourceClonePath || got.SourceCommonDir != wt.SourceCommonDir {
+		t.Fatalf("source clone identity = (%q, %q), want (%q, %q)", got.SourceClonePath, got.SourceCommonDir, wt.SourceClonePath, wt.SourceCommonDir)
+	}
+}
+
+func TestSQLiteStore_CreateWorktreeRejectsReboundEnvironment(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	store.seedSessionWithEnvironment(t, "session-rebound", "task-original")
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES ('task-rebound', 'workspace', 'Rebound', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed rebound task: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO task_environments (id, task_id, executor_type, status, workspace_path, created_at, updated_at)
+		VALUES ('env-rebound', 'task-rebound', 'worktree', 'ready', '/tmp/rebound', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed rebound environment: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+		UPDATE task_sessions SET task_environment_id = 'env-rebound' WHERE id = 'session-rebound'
+	`); err != nil {
+		t.Fatalf("rebind session: %v", err)
+	}
+
+	wt := &Worktree{
+		ID:                "wt-rebound",
+		SessionID:         "session-rebound",
+		TaskEnvironmentID: "env-session-rebound",
+		RepositoryID:      "repo-rebound",
+		BranchSlug:        "branch-rebound",
+		Path:              "/tmp/rebound/repo",
+		Branch:            "feature/rebound",
+		Status:            StatusActive,
+	}
+	if err := store.CreateWorktree(ctx, wt); !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("CreateWorktree rebound error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	var count int
+	if err := store.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM task_environment_repos WHERE worktree_id = 'wt-rebound'`); err != nil {
+		t.Fatalf("count rebound inventory: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("rebound worktree inventory rows = %d, want 0", count)
 	}
 }
 
@@ -309,6 +358,64 @@ func TestSQLiteStore_ListActiveWorktreePaths(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_CountWorktreeBranchOwnersCountsPhysicalRepositoryClaimants(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	repoPath := filepath.Join(t.TempDir(), "repo")
+
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('workspace', 'workspace', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	for _, repoID := range []string{"repo-owner-a", "repo-owner-b"} {
+		if _, err := store.db.ExecContext(ctx, `
+			INSERT INTO repositories (
+				id, workspace_id, name, local_path, created_at, updated_at
+			) VALUES (?, 'workspace', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, repoID, repoID, repoPath); err != nil {
+			t.Fatalf("seed repository %s: %v", repoID, err)
+		}
+	}
+	for _, seed := range []struct {
+		sessionID string
+		taskID    string
+		repoID    string
+		wtID      string
+	}{
+		{"session-claimant-a", "task-claimant-a", "repo-owner-a", "wt-claimant-a"},
+		{"session-claimant-b", "task-claimant-b", "repo-owner-b", "wt-claimant-b"},
+	} {
+		store.seedSessionWithEnvironment(t, seed.sessionID, seed.taskID)
+		if err := store.CreateWorktree(ctx, &Worktree{
+			ID:             seed.wtID,
+			SessionID:      seed.sessionID,
+			RepositoryID:   seed.repoID,
+			RepositoryPath: repoPath,
+			Path:           filepath.Join(t.TempDir(), seed.wtID),
+			Branch:         "feature/shared",
+			BranchOwner:    BranchOwnerManaged,
+			IntegrationRef: "main",
+			Status:         StatusDeleted,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+			DeletedAt:      &now,
+		}); err != nil {
+			t.Fatalf("create %s: %v", seed.wtID, err)
+		}
+	}
+
+	got, err := store.CountWorktreeBranchOwners(ctx, repoPath, "feature/shared")
+	if err != nil {
+		t.Fatalf("count branch owners: %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("branch owners = %d, want 2", got)
+	}
+}
+
 func TestSQLiteStore_IgnoresInventoryOnlyRows(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -325,12 +432,14 @@ func TestSQLiteStore_IgnoresInventoryOnlyRows(t *testing.T) {
 	}
 
 	physical := &Worktree{
-		ID:           "wt-physical",
-		SessionID:    "session-inventory",
-		RepositoryID: "repo-physical",
-		Path:         "/tmp/physical-worktree",
-		Branch:       "feature/task",
-		Status:       StatusActive,
+		ID:              "wt-physical",
+		SessionID:       "session-inventory",
+		RepositoryID:    "repo-physical",
+		SourceClonePath: "/managed/source/repo",
+		SourceCommonDir: "/managed/source/repo/.git",
+		Path:            "/tmp/physical-worktree",
+		Branch:          "feature/task",
+		Status:          StatusActive,
 	}
 	if err := store.CreateWorktree(ctx, physical); err != nil {
 		t.Fatalf("create physical worktree: %v", err)
@@ -342,6 +451,10 @@ func TestSQLiteStore_IgnoresInventoryOnlyRows(t *testing.T) {
 	}
 	if len(byTask) != 1 || byTask[0].ID != physical.ID {
 		t.Fatalf("task worktrees = %+v, want only %q", byTask, physical.ID)
+	}
+	if byTask[0].SourceClonePath != physical.SourceClonePath || byTask[0].SourceCommonDir != physical.SourceCommonDir {
+		t.Fatalf("task worktree source identity = (%q, %q), want (%q, %q)",
+			byTask[0].SourceClonePath, byTask[0].SourceCommonDir, physical.SourceClonePath, physical.SourceCommonDir)
 	}
 
 	paths, err := store.ListActiveWorktreePaths(ctx)

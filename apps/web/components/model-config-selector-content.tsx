@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCheck, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 
@@ -200,6 +200,7 @@ function ConfigOptionSubSelector({
 }
 
 export type ModelConfigSelectorContentProps = {
+  providerIcon?: ReactNode;
   activeConfig: SelectConfigOption | undefined;
   modelOptions: ModelSelectorOption[];
   currentModelValue: string;
@@ -211,7 +212,19 @@ export type ModelConfigSelectorContentProps = {
   configOptionsLoading: boolean;
 };
 
+/** Adds provider branding while preserving the model group label. */
+function ModelGroupHeading({ providerIcon }: { providerIcon?: ReactNode }) {
+  const { t } = useTranslation();
+  return (
+    <span className="flex items-center gap-1.5">
+      {providerIcon}
+      {t("agents:modelHeading")}
+    </span>
+  );
+}
+
 export function ModelConfigSelectorContent({
+  providerIcon,
   activeConfig,
   modelOptions,
   currentModelValue,
@@ -259,7 +272,7 @@ export function ModelConfigSelectorContent({
         {showModelFilter && <CommandInput placeholder={t("agents:filterModels")} className="h-8" />}
         <CommandList className="max-h-60">
           <CommandEmpty>{t("agents:noModelsFound")}</CommandEmpty>
-          <CommandGroup heading={t("agents:modelHeading")}>
+          <CommandGroup heading={<ModelGroupHeading providerIcon={providerIcon} />}>
             {orderedModelOptions.map((model) => (
               <ModelRow
                 key={model.id}

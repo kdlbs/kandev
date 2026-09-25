@@ -1,13 +1,26 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type ReactNode,
+} from "react";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 
 const SCROLL_END_TOLERANCE_PX = 1;
 
-export function TaskSidebarScrollArea({ children }: { children: ReactNode }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
+export function TaskSidebarScrollArea({
+  children,
+  viewportRef,
+}: {
+  children: ReactNode;
+  viewportRef?: MutableRefObject<HTMLDivElement | null>;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const [canScrollDown, setCanScrollDown] = useState(false);
 
   const updateScrollCue = useCallback(() => {
@@ -42,7 +55,10 @@ export function TaskSidebarScrollArea({ children }: { children: ReactNode }) {
       type="auto"
       className="task-sidebar-scroll-root min-h-0 flex-1"
       viewportProps={{
-        ref: scrollRef,
+        ref: (element: HTMLDivElement | null) => {
+          scrollRef.current = element;
+          if (viewportRef) viewportRef.current = element;
+        },
         // Radix uses an intrinsic-width table wrapper so generic scroll areas
         // can grow horizontally. Sidebar rows must stay viewport-width instead:
         // otherwise a long title pushes its actions beyond the visible edge and

@@ -148,10 +148,10 @@ describe("Data & Logs composition", () => {
   it("keeps database, backups, and logs without the Storage section", () => {
     render(createElement(DataLogsSettings));
 
-    expect(screen.getByText(t("system:navDatabase"))).toBeTruthy();
-    expect(screen.getByText(t("system:navRetention"))).toBeTruthy();
-    expect(screen.getByText(t("system:navBackups"))).toBeTruthy();
-    expect(screen.getByText(t("system:navLogs"))).toBeTruthy();
+    expect(screen.getAllByText(t("system:navDatabase")).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(t("system:navRetention"))).toBeNull();
+    expect(screen.getByRole("heading", { name: t("system:navBackups") })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: t("system:navLogs") })).toBeTruthy();
     expect(screen.queryByText(t("system:storageTitle"))).toBeNull();
   });
 

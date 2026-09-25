@@ -99,9 +99,9 @@ const MetadataDeliveryReservationToken = "delivery_reservation_token"
 // expired owner can be replaced, but its stale token can no longer dispatch.
 const MetadataDeliveryReservationExpiresAt = "delivery_reservation_expires_at"
 
-// MetadataDeliveryAttempted is the durable at-most-once boundary for a
-// comment-bearing queue receipt. Once set, restart recovery removes the row
-// instead of risking a second external prompt delivery.
+// MetadataDeliveryAttempted records that external prompt delivery may have
+// started. Plan-comment recovery removes an attempted row; managed-input
+// recovery retains it so the owner can reconcile its receipt.
 const MetadataDeliveryAttempted = "delivery_attempted"
 
 // MetadataDurableTranscriptMessageID marks workflow-deferred prompts whose
@@ -158,6 +158,12 @@ var (
 	// ErrSessionIdentityMismatch means the supplied immutable session identity
 	// no longer names the authoritative task-session row.
 	ErrSessionIdentityMismatch = errors.New("queue session identity mismatch")
+	// ErrWorkflowEntryMismatch means a workflow prompt was admitted after its
+	// captured task-step entry had been superseded.
+	ErrWorkflowEntryMismatch = errors.New("queue workflow entry identity mismatch")
+	// ErrTaskManagementClaimChanged means an exact plugin effect was admitted
+	// after its observed task manager claim had changed.
+	ErrTaskManagementClaimChanged = errors.New("task management claim changed")
 	// ErrLifecycleCancelled means an archive/delete purge invalidated a
 	// previously accepted lifecycle entry before it could be retried.
 	ErrLifecycleCancelled = errors.New("lifecycle queue entry cancelled")
@@ -211,6 +217,24 @@ type QueueSessionIdentity struct {
 	TaskID               string `json:"task_id"`
 	SessionID            string `json:"session_id"`
 	SessionIncarnationID string `json:"session_incarnation_id"`
+}
+
+// WorkflowEntryIdentity is the immutable task workflow entry captured when a
+// workflow auto-start is launched. TransitionID fences leave-and-return
+// re-entry to the same step; LifecycleGeneration fences archive/delete purge
+// work that was captured before the destructive mutation.
+type WorkflowEntryIdentity struct {
+	WorkflowID                     string
+	WorkflowStepID                 string
+	TransitionID                   int64
+	LifecycleGeneration            int64
+	ExpectedTaskResourceVersion    string
+	ExpectedSessionResourceVersion string
+	RejectPendingMove              bool
+	EnforceTaskManagementClaim     bool
+	ManagementInstallationID       string
+	ManagementInstanceKey          string
+	ExpectedClaimGeneration        int64
 }
 
 // QueueAttachmentClaim carries authenticated staged-attachment ownership into
@@ -330,10 +354,10 @@ func (m *QueuedMessage) IsDurablePlanComment() bool {
 	return messageID != "" && messageFingerprint != ""
 }
 
-// IsDurableDelivery reports whether the row must survive dequeue until a
-// transcript record or executor acknowledgement closes its replay window.
+// IsDurableDelivery reports whether the row must survive dequeue until its
+// owner records the exact accepted turn or explicitly acknowledges delivery.
 func (m *QueuedMessage) IsDurableDelivery() bool {
-	return m != nil && (m.IsDurableLifecycle() || m.IsDurablePlanComment())
+	return m != nil && (m.IsDurableLifecycle() || m.IsDurablePlanComment() || isManagedInputQueueEntry(m))
 }
 
 // IsReservedInFlight reports whether this row was retained for an in-flight
@@ -346,8 +370,8 @@ func (m *QueuedMessage) IsReservedInFlight() bool {
 	return reserved
 }
 
-// IsDeliveryAttempted reports whether external prompt delivery may already
-// have happened and therefore must never be retried automatically.
+// IsDeliveryAttempted reports whether external prompt delivery may have
+// started. Recovery behavior depends on the durable receipt type.
 func (m *QueuedMessage) IsDeliveryAttempted() bool {
 	if m == nil {
 		return false

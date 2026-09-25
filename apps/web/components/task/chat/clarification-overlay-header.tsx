@@ -30,6 +30,8 @@ type ClarificationOverlayTopBarProps = {
   allAnswered: boolean;
   onSubmit: () => void;
   onSkip: () => void;
+  lateMode?: boolean;
+  onLateClose?: () => void;
   onCollapse?: () => void;
   collapseContentId?: string;
 };
@@ -48,6 +50,8 @@ export function ClarificationOverlayTopBar({
   allAnswered,
   onSubmit,
   onSkip,
+  lateMode = false,
+  onLateClose,
   onCollapse,
   collapseContentId,
 }: ClarificationOverlayTopBarProps) {
@@ -80,6 +84,8 @@ export function ClarificationOverlayTopBar({
         isSubmitting={isSubmitting}
         onSubmit={onSubmit}
         onSkip={onSkip}
+        lateMode={lateMode}
+        onLateClose={onLateClose}
         onCollapse={onCollapse}
         collapseContentId={collapseContentId}
       />
@@ -93,6 +99,8 @@ type ClarificationHeaderActionsProps = {
   isSubmitting: boolean;
   onSubmit: () => void;
   onSkip: () => void;
+  lateMode?: boolean;
+  onLateClose?: () => void;
   onCollapse?: () => void;
   collapseContentId?: string;
 };
@@ -131,16 +139,47 @@ function ClarificationSkipButton({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity -- header actions keep active and late-answer controls aligned.
 export function ClarificationHeaderActions({
   total,
   allAnswered,
   isSubmitting,
   onSubmit,
   onSkip,
+  lateMode = false,
+  onLateClose,
   onCollapse,
   collapseContentId,
 }: ClarificationHeaderActionsProps) {
   const { t } = useTranslation();
+  if (lateMode) {
+    return (
+      <div className="flex shrink-0 items-center justify-end gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="min-h-11 cursor-pointer md:min-h-0"
+          onClick={onLateClose}
+          disabled={isSubmitting}
+          data-testid="clarification-late-close"
+        >
+          {t("task:closeClarification")}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          className="min-h-11 cursor-pointer gap-1.5 md:min-h-0"
+          onClick={onSubmit}
+          disabled={!allAnswered || isSubmitting}
+          data-testid="clarification-late-submit"
+        >
+          {isSubmitting ? t("task:lateAnswerSending") : t("task:lateAnswerSend")}
+          {!isSubmitting && <IconCheck className="h-3 w-3" />}
+        </Button>
+      </div>
+    );
+  }
   return (
     <div
       className={cn(

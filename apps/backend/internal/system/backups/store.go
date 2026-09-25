@@ -64,6 +64,10 @@ type Service struct {
 	jobs         *jobs.Tracker
 	log          *logger.Logger
 
+	// PersistenceUnavailable marks required stores unhealthy before restore
+	// closes the pool and leaves the process awaiting restart.
+	PersistenceUnavailable func()
+
 	// RestoreQuiesce stops scheduling, active executions, and database-backed
 	// workers before restore closes the shared database pool. Wired by the
 	// backend composition root; tests may leave it nil.
@@ -209,6 +213,9 @@ func (s *Service) runRestore(ctx context.Context, snapshotPath string) (map[stri
 	if err := s.writeStagedRestore(snapshotPath, stagedPath); err != nil {
 		_ = os.Remove(stagedPath)
 		return nil, err
+	}
+	if s.PersistenceUnavailable != nil {
+		s.PersistenceUnavailable()
 	}
 	if s.RestoreQuiesce != nil {
 		if err := s.RestoreQuiesce(); err != nil {

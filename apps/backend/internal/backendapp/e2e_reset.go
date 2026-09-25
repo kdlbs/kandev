@@ -661,14 +661,15 @@ func handleE2ECreateHiddenWorkflow(taskSvc *taskservice.Service, log *logger.Log
 }
 
 type e2eCreateAutomationRequest struct {
-	WorkspaceID    string                            `json:"workspace_id"`
-	Name           string                            `json:"name"`
-	WorkflowID     string                            `json:"workflow_id"`
-	WorkflowStepID string                            `json:"workflow_step_id"`
-	TaskMode       automation.TaskMode               `json:"task_mode"`
-	RepositoryMode automation.RepositoryMode         `json:"repository_mode"`
-	RepositoryIDs  []string                          `json:"repository_ids"`
-	Repositories   []automation.AutomationRepository `json:"repositories"`
+	WorkspaceID        string                                     `json:"workspace_id"`
+	Name               string                                     `json:"name"`
+	WorkflowID         string                                     `json:"workflow_id"`
+	WorkflowStepID     string                                     `json:"workflow_step_id"`
+	TaskMode           automation.TaskMode                        `json:"task_mode"`
+	ManagedDestination *automation.ManagedConversationDestination `json:"managed_destination,omitempty"`
+	RepositoryMode     automation.RepositoryMode                  `json:"repository_mode"`
+	RepositoryIDs      []string                                   `json:"repository_ids"`
+	Repositories       []automation.AutomationRepository          `json:"repositories"`
 	// Prompt is the automation's standing instruction. Optional, but the run
 	// view only renders the instruction card when there is one, so a spec
 	// asserting on where that card lives has to seed it.
@@ -707,18 +708,19 @@ func handleE2ECreateAutomation(
 			return
 		}
 		a, err := svc.CreateAutomation(c.Request.Context(), &automation.CreateAutomationRequest{
-			WorkspaceID:       body.WorkspaceID,
-			Name:              body.Name,
-			WorkflowID:        body.WorkflowID,
-			WorkflowStepID:    body.WorkflowStepID,
-			TaskMode:          body.TaskMode,
-			RepositoryMode:    body.RepositoryMode,
-			RepositoryIDs:     body.RepositoryIDs,
-			Repositories:      body.Repositories,
-			Prompt:            body.Prompt,
-			AgentProfileID:    body.AgentProfileID,
-			ExecutorProfileID: body.ExecutorProfileID,
-			MaxConcurrentRuns: 10,
+			WorkspaceID:        body.WorkspaceID,
+			Name:               body.Name,
+			WorkflowID:         body.WorkflowID,
+			WorkflowStepID:     body.WorkflowStepID,
+			TaskMode:           body.TaskMode,
+			ManagedDestination: body.ManagedDestination,
+			RepositoryMode:     body.RepositoryMode,
+			RepositoryIDs:      body.RepositoryIDs,
+			Repositories:       body.Repositories,
+			Prompt:             body.Prompt,
+			AgentProfileID:     body.AgentProfileID,
+			ExecutorProfileID:  body.ExecutorProfileID,
+			MaxConcurrentRuns:  10,
 		})
 		if err != nil {
 			log.Error("e2e: failed to create automation", zap.Error(err))
@@ -1016,7 +1018,7 @@ func handleE2EAutomationManualTrigger(svc *automation.Service, log *logger.Logge
 		if len(a.Triggers) > 0 {
 			triggerID = a.Triggers[0].ID
 		}
-		result, fireErr := svc.FireTrigger(ctx, automationID, triggerID, "manual", data, "")
+		result, fireErr := svc.FireTrigger(ctx, automationID, triggerID, "manual", data, automation.DedupNotConfigured())
 		if fireErr != nil {
 			log.Error("e2e: manual trigger failed", zap.String("automation_id", automationID), zap.Error(fireErr))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: fireErr.Error()})
@@ -1024,6 +1026,17 @@ func handleE2EAutomationManualTrigger(svc *automation.Service, log *logger.Logge
 		}
 		if result.Skipped {
 			c.JSON(http.StatusOK, gin.H{"skipped": true, "reason": result.Reason})
+			return
+		}
+		if a.TaskMode == automation.TaskModeManagedConversation {
+			run, pollErr := e2ePollNewManagedRun(ctx, svc, automationID, beforeID)
+			if pollErr != nil {
+				log.Warn("e2e: timed out waiting for managed automation run after manual trigger",
+					zap.String("automation_id", automationID))
+				c.JSON(http.StatusGatewayTimeout, gin.H{errKey: pollErr.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"run_id": run.ID, "delivery_status": run.DeliveryStatus})
 			return
 		}
 
@@ -1036,6 +1049,26 @@ func handleE2EAutomationManualTrigger(svc *automation.Service, log *logger.Logge
 		}
 		c.JSON(http.StatusOK, gin.H{"run_task_id": taskID})
 	}
+}
+
+func e2ePollNewManagedRun(ctx context.Context, svc *automation.Service, automationID, beforeID string) (*automation.AutomationRun, error) {
+	deadline := time.Now().Add(15 * time.Second)
+	var candidate *automation.AutomationRun
+	for time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+		runs, err := svc.ListRuns(ctx, automationID, 1)
+		if err == nil && len(runs) > 0 && runs[0].ID != beforeID {
+			candidate = runs[0]
+			if candidate.DeliveryStatus != "" {
+				return candidate, nil
+			}
+		}
+	}
+	if candidate == nil {
+		return nil, fmt.Errorf("timeout waiting for a new managed automation run")
+	}
+	return nil, fmt.Errorf("timeout waiting for managed delivery receipt (run_id=%s status=%s delivery_status=%s task_id=%s error=%s)",
+		candidate.ID, candidate.Status, candidate.DeliveryStatus, candidate.TaskID, candidate.ErrorMessage)
 }
 
 // e2ePollNewRun blocks until a new run (with a different id than beforeID) has

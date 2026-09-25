@@ -10,9 +10,11 @@ import (
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -645,6 +647,7 @@ func TestWorkflowAutoStartCreatedTerminalizedGuard(t *testing.T) {
 // and assert the goroutine detects it and creates a replacement.
 type terminalizeImplicitSwitchRepo struct {
 	sessionExecutorStore
+	taskMetadataCarryTaker
 	targetSessionID string
 	promptCalled    chan struct{} // closed when autoStartStepPrompt is about to run
 	allowPrompt     chan struct{} // close to let autoStartStepPrompt proceed
@@ -694,6 +697,13 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 	assertCtx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-implicit-switch", "session-implicit-switch-source", "step-source")
+	const handoff = "Preserve this completion handoff."
+	const visiblePrompt = "Review @principles."
+	promptService := newPromptServiceForLaunchFallbackTest(t)
+	_, err := promptService.CreatePrompt(ctx, "principles", "Apply the repository principles.")
+	require.NoError(t, err)
+	_, promptReferenceContext := promptService.AppendReferenceExpansionsWithContext(ctx, visiblePrompt, nil)
+	require.NotEmpty(t, promptReferenceContext)
 
 	source, err := repo.GetTaskSession(ctx, "session-implicit-switch-source")
 	requireNoError(t, err)
@@ -723,10 +733,11 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 	seedExecutorRunning(t, repo, target.ID, target.TaskID, "execution-implicit-switch")
 
 	barrierRepo := &terminalizeImplicitSwitchRepo{
-		sessionExecutorStore: repo,
-		targetSessionID:      target.ID,
-		promptCalled:         make(chan struct{}, 1),
-		allowPrompt:          make(chan struct{}),
+		sessionExecutorStore:   repo,
+		taskMetadataCarryTaker: repo,
+		targetSessionID:        target.ID,
+		promptCalled:           make(chan struct{}, 1),
+		allowPrompt:            make(chan struct{}),
 	}
 
 	agentMgr := &mockAgentManager{
@@ -753,16 +764,36 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 		WorkflowID:     "wf1",
 		Name:           "Target",
 		AgentProfileID: target.AgentProfileID,
-		Prompt:         "review the task",
+		Prompt:         visiblePrompt,
 		// No auto_start_agent — implicit profile switch path.
 	}
+	dbTask, err := repo.GetTask(ctx, source.TaskID)
+	requireNoError(t, err)
+	dbTask.WorkflowStepID = step.ID
+	requireNoError(t, repo.UpdateTask(ctx, dbTask))
+	seedHandoffCarryToken(t, repo, source.TaskID, step.ID, handoff, "implicit-switch-handoff")
 	stepGetter.steps[step.ID] = step
 	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
 	svc.repo = barrierRepo
+	svc.promptExpander = promptService
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	type launchedPrompt struct {
+		sessionID  string
+		content    string
+		startAgent bool
+	}
+	launches := make(chan launchedPrompt, 8)
+	agentMgr.launchAgentFunc = func(_ context.Context, request *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		launches <- launchedPrompt{
+			sessionID: request.SessionID, content: request.TaskDescription, startAgent: request.StartAgent,
+		}
+		return &executor.LaunchAgentResponse{AgentExecutionID: "execution-implicit-replacement"}, nil
+	}
 
 	done := make(chan struct{})
 	go func() {
-		svc.processOnEnter(ctx, source.TaskID, source, step, "Test", 0, stepGetter.steps["step-source"])
+		svc.processOnEnter(ctx, source.TaskID, source, step, visiblePrompt, 0, stepGetter.steps["step-source"])
 		close(done)
 	}()
 
@@ -822,4 +853,77 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 	if finalSource.IsPrimary {
 		t.Error("source session must not be primary after the implicit switch")
 	}
+	containsSavedPrompt := func(content string) bool {
+		return strings.Contains(content, visiblePrompt) &&
+			strings.Contains(content, "Apply the repository principles.") &&
+			strings.Contains(content, handoff) &&
+			strings.Count(content, sysprompt.Wrap(promptReferenceContext)) == 1
+	}
+	var seenLaunches []launchedPrompt
+	var dispatchedContent, dispatchedLaunchSessionID string
+	ok := assert.Eventually(t, func() bool {
+		for {
+			select {
+			case launched := <-launches:
+				seenLaunches = append(seenLaunches, launched)
+			default:
+				goto launchesDrained
+			}
+		}
+	launchesDrained:
+		for _, launched := range seenLaunches {
+			if launched.sessionID == replacement.ID && launched.startAgent && containsSavedPrompt(launched.content) {
+				dispatchedContent = launched.content
+				dispatchedLaunchSessionID = launched.sessionID
+				return true
+			}
+		}
+		agentMgr.mu.Lock()
+		calls := append([]promptCall(nil), agentMgr.capturedPromptCalls...)
+		agentMgr.mu.Unlock()
+		for _, call := range calls {
+			if containsSavedPrompt(call.Prompt) {
+				dispatchedContent = call.Prompt
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 10*time.Millisecond)
+	if !ok {
+		agentMgr.mu.Lock()
+		calls := append([]promptCall(nil), agentMgr.capturedPromptCalls...)
+		agentMgr.mu.Unlock()
+		for _, launched := range seenLaunches {
+			t.Logf("launch start=%t session=%s visible=%t expansion_count=%d handoff=%t length=%d",
+				launched.startAgent, launched.sessionID, strings.Contains(launched.content, visiblePrompt),
+				strings.Count(launched.content, sysprompt.Wrap(promptReferenceContext)),
+				strings.Contains(launched.content, handoff), len(launched.content))
+		}
+		for _, call := range calls {
+			t.Logf("prompt execution=%s visible=%t expansion_count=%d handoff=%t length=%d",
+				call.ExecutionID, strings.Contains(call.Prompt, visiblePrompt),
+				strings.Count(call.Prompt, sysprompt.Wrap(promptReferenceContext)),
+				strings.Contains(call.Prompt, handoff), len(call.Prompt))
+		}
+		t.Fatalf("replacement workflow prompt did not dispatch: replacement_id=%s launch_count=%d prompt_calls=%d", replacement.ID, len(seenLaunches), len(calls))
+	}
+	finalReplacement, err := repo.GetTaskSession(assertCtx, replacement.ID)
+	requireNoError(t, err)
+	require.Equal(t, replacement.ID, finalReplacement.ID)
+	require.False(t, isTerminalSessionState(finalReplacement.State))
+	if dispatchedLaunchSessionID != "" {
+		require.Equal(t, replacement.ID, dispatchedLaunchSessionID)
+	}
+	require.Equal(t, 1, strings.Count(dispatchedContent, sysprompt.Wrap(promptReferenceContext)))
+	require.Len(t, messages.userMessages, 1)
+	require.Equal(t, replacement.ID, messages.userMessages[0].sessionID)
+	require.Contains(t, messages.userMessages[0].content, "Apply the repository principles.")
+	require.Contains(t, messages.userMessages[0].content, handoff)
+	require.Equal(t, 1, strings.Count(messages.userMessages[0].content, handoff))
+	require.Equal(t, 1, strings.Count(messages.userMessages[0].content, sysprompt.Wrap(promptReferenceContext)))
+	require.Contains(t, messages.userMessages[0].content, sysprompt.Wrap(promptReferenceContext))
+	require.Contains(t, dispatchedContent, sysprompt.Wrap(promptReferenceContext))
+	// The launch request may add a session-history preamble, so compare the
+	// saved-definition block and handoff contract in both prompt boundaries.
+	require.Equal(t, 1, strings.Count(dispatchedContent, handoff))
 }

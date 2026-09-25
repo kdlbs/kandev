@@ -43,9 +43,8 @@ guard themselves at the service layer:
 Wire the boundary with `SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)`
 in `backendapp/helpers.go`; nil (unit tests, auth disabled) means unscoped.
 Denials surface `repoerrors.ErrWorkspaceNotFound`, which handlers map to 404 (no
-existence leak). Jira/Linear/Slack follow this; **Sentry and GitLab's
-`ListAllIssueWatches` still need the same filter** — the WS gateway backstop does
-not read `workspace_id`, so GitLab's `workspace_id`-keyed WS list is unscoped too.
+existence leak). Jira, Linear, Sentry, and GitLab's `ListAllIssueWatches` all
+filter through this mechanism.
 
 ## Auto-link guarantee (GitHub pull requests / GitLab merge requests)
 

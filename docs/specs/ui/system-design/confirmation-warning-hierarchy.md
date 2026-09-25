@@ -68,6 +68,16 @@ archive popover and inline confirmation use the same ordered model with their
 established compact spacing. This removes copy drift without moving cleanup
 policy into a visual component.
 
+Single-task delete also accepts an inherited-parent workspace context. When
+that context is true, `getCleanupSummary` returns only the generic agent-session
+effect and the localized note that the parent task's worktree, branch, and files
+remain untouched. It does not return the worktree deletion effect or its
+single-worktree reassurance. `TaskDeleteConfirmDialog` receives this context
+from task-aware callers and, when a caller provides only `taskId`, resolves
+`workspaceMode` from `kanbanMulti.snapshots` with `kanban.tasks` as the fallback.
+If the task cannot be resolved, the existing executor-based summary remains the
+safe fallback.
+
 ### Full-dialog composition
 
 `TaskDeleteConfirmDialog` keeps Radix `AlertDialog` and the existing centered
@@ -253,6 +263,8 @@ disabled actions, single and bulk callback values, cascade behavior, and typed
 conflict feedback. Dialog and compact-surface tests assert equivalent structured
 content, semantic action variants, unchanged callbacks, and that a deferred
 positive descendant result does not expose a provisional fine-pointer popover.
+The inherited-parent cleanup path is covered at both the summary and rendered
+dialog boundaries, including the task-id resolution fallback.
 Pending-dismissal component cases cover Escape, trigger focus restoration, and
 outside pointer intent.
 Rendered desktop and phone checks cover viewport bounds, scroll ownership,

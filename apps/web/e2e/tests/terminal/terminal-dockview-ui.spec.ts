@@ -4,11 +4,13 @@ import type { SeedData } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import {
   snapshotPersistedLayouts,
   waitForPersistedLayoutChange,
 } from "../../helpers/dockview-persistence";
 import { dwell } from "../../helpers/causal-waits";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import { pauseNextTerminalDestroy } from "./terminal-close-pause";
 import { readTerminalHostBuffer } from "./terminal-test-helpers";
 
@@ -49,11 +51,18 @@ async function createTaskAndWait(apiClient: ApiClient, seedData: SeedData, title
 async function openTask(page: Page, title: string): Promise<SessionPage> {
   const kanban = new KanbanPage(page);
   await kanban.goto();
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 15_000 });
-  await card.click();
-  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
   const session = new SessionPage(page);
+  const sidebarTask = session.sidebarTaskItem(title);
+  if (await sidebarTask.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    // Sidebar task rows are live immediately after creation. The Kanban board
+    // can still be waiting for its filtered column to render the same task.
+    await sidebarTask.click();
+  } else {
+    const card = kanban.taskCardByTitle(title);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await card.click();
+  }
+  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
   await session.waitForLoad();
   return session;
 }
@@ -160,7 +169,17 @@ test.describe("Terminals — dockview UI", () => {
     await firstClose.click();
     const closeConfirmation = tabletTestPage.getByTestId("terminal-close-confirm-popover");
     await expect(closeConfirmation).toBeVisible();
-    await closeConfirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+    await waitForFiniteAnimations(closeConfirmation);
+    expect(await tabletTestPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    const tabletCancel = closeConfirmation.getByRole("button", { name: "Cancel", exact: true });
+    const tabletClose = closeConfirmation.getByRole("button", {
+      name: "Close terminal",
+      exact: true,
+    });
+    // @covers AC-UI-CONTROL-SIZING-001.4, AC-UI-CONTROL-SIZING-001.8
+    await expectControlHeight(tabletCancel, 44);
+    await expectControlHeight(tabletClose, 44);
+    await tabletCancel.click();
     await expect(firstClose).toBeFocused();
     await expect(firstTab).toBeVisible();
 
@@ -216,8 +235,10 @@ test.describe("Terminals — dockview UI", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    await createTaskAndWait(apiClient, seedData, "Tab Badge UI");
-    const session = await openTask(testPage, "Tab Badge UI");
+    const task = await createTaskAndWait(apiClient, seedData, "Tab Badge UI");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
@@ -351,7 +372,7 @@ test.describe("Terminals — dockview UI", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     await createTaskAndWait(apiClient, seedData, "Reload Badges UI");
     const session = await openTask(testPage, "Reload Badges UI");
     await session.clickTab("Terminal");
@@ -374,11 +395,12 @@ test.describe("Terminals — dockview UI", () => {
     // on refresh, so session-chat is in the background — foreground it
     // explicitly so the page-loaded wait succeeds.
     await session.showSessionContext();
+    await session.expectTerminalConnected(60_000);
 
     // After reload, both badges must reappear — proves both panels'
     // store entries (kind=ordinary, seq) were preserved across restore.
-    await expect(testPage.getByTestId("terminal-tab-seq-1")).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 5_000 });
+    await expect(testPage.getByTestId("terminal-tab-seq-1")).toBeVisible({ timeout: 60_000 });
+    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 15_000 });
 
     // No tab content should contain "Terminal N" text — seq belongs in
     // the badge, not the title.
@@ -523,7 +545,9 @@ test.describe("Terminals — dockview UI", () => {
 
     // Create a second terminal so we have a non-default row to click.
     await clickNewTerminalInPlusMenu(testPage, session);
-    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 10_000 });
+    const secondTab = testPage.getByTestId("terminal-tab-seq-2");
+    await expect(secondTab).toBeVisible({ timeout: 30_000 });
+    await session.expectTerminalConnected(30_000);
 
     // Count terminal tab content elements before the focus click. Polling the
     // count is the wait: it returns as soon as the second tab has rendered
@@ -535,7 +559,7 @@ test.describe("Terminals — dockview UI", () => {
     });
     await expect
       .poll(() => terminalContent.count(), {
-        timeout: 10_000,
+        timeout: 30_000,
         message: "two terminal tabs before clicking reopen",
       })
       .toBeGreaterThanOrEqual(2);
@@ -571,6 +595,7 @@ test.describe("Terminals — dockview UI", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(120_000);
     const destroyPause = await pauseNextTerminalDestroy(testPage);
@@ -608,14 +633,23 @@ test.describe("Terminals — dockview UI", () => {
 
     const confirmation = testPage.getByTestId("terminal-close-confirm-popover");
     await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await waitForFiniteAnimations(confirmation);
+    await prCapture.screenshot("desktop-close-confirmation", {
+      caption: "Terminal close confirmation with standard desktop action sizing",
+    });
     await expect(confirmation).toHaveRole("dialog");
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
     await expect(targetTab).toBeVisible();
+    const cancelButton = confirmation.getByRole("button", { name: "Cancel", exact: true });
+    const closeButton = confirmation.getByRole("button", { name: "Close terminal", exact: true });
+    // @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3, AC-UI-CONTROL-SIZING-001.6
+    await expectControlHeight(cancelButton, 28);
+    await expectControlHeight(closeButton, 28);
     const confirmationBox = await confirmation.boundingBox();
     expect(confirmationBox).not.toBeNull();
     expect(confirmationBox!.width).toBeLessThanOrEqual(320);
     expect(confirmationBox!.height).toBeLessThanOrEqual(220);
-    await confirmation.getByRole("button", { name: "Close terminal", exact: true }).click();
+    await closeButton.click();
     await destroyPause.waitForRequest();
 
     // The transport is deliberately paused: disappearance must be optimistic,

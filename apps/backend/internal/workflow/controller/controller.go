@@ -235,7 +235,7 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 	if req.PullFromStepID != nil {
 		step.PullFromStepID = strings.TrimSpace(*req.PullFromStepID)
 	}
-	if err := c.validateStepReferences(ctx, step); err != nil {
+	if err := c.ValidateStepReferences(ctx, step); err != nil {
 		return nil, err
 	}
 	demotedStartSteps, err := c.svc.CreateStepWithStartStepUpdates(ctx, step)
@@ -355,7 +355,7 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	if req.PullFromStepID != nil {
 		step.PullFromStepID = strings.TrimSpace(*req.PullFromStepID)
 	}
-	if err := c.validateStepReferences(ctx, step); err != nil {
+	if err := c.ValidateStepReferences(ctx, step); err != nil {
 		return nil, err
 	}
 	demotedStartSteps, err := c.svc.UpdateStepWithStartStepUpdates(ctx, step)
@@ -396,6 +396,22 @@ func (c *Controller) validateStepReferences(ctx context.Context, step *models.Wo
 		}
 	}
 	return nil
+}
+
+// ValidateStepReferences applies the same reference checks used by native
+// workflow CRUD before another trusted adapter writes a step.
+func (c *Controller) ValidateStepReferences(ctx context.Context, step *models.WorkflowStep) error {
+	return c.validateStepReferences(ctx, step)
+}
+
+// ValidateStepOrder checks whether the requested positions preserve every
+// workflow session-target invariant.
+func (c *Controller) ValidateStepOrder(ctx context.Context, workflowID string, stepIDs []string) error {
+	positions := make(map[string]int, len(stepIDs))
+	for position, stepID := range stepIDs {
+		positions[stepID] = position
+	}
+	return c.validateIncomingSessionTargets(ctx, workflowID, nil, positions)
 }
 
 func (c *Controller) validateSessionTarget(ctx context.Context, step *models.WorkflowStep) error {
@@ -633,11 +649,7 @@ func (c *Controller) ReorderSteps(ctx context.Context, req ReorderStepsRequest) 
 	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
 		return err
 	}
-	positions := make(map[string]int, len(req.StepIDs))
-	for position, stepID := range req.StepIDs {
-		positions[stepID] = position
-	}
-	if err := c.validateIncomingSessionTargets(ctx, req.WorkflowID, nil, positions); err != nil {
+	if err := c.ValidateStepOrder(ctx, req.WorkflowID, req.StepIDs); err != nil {
 		return err
 	}
 	return c.svc.ReorderSteps(ctx, req.WorkflowID, req.StepIDs)
@@ -665,8 +677,9 @@ func (c *Controller) ListHistoryBySession(ctx context.Context, req ListHistoryRe
 
 // ImportWorkflowsRequest carries import data.
 type ImportWorkflowsRequest struct {
-	WorkspaceID string                 `json:"workspace_id"`
-	Data        *models.WorkflowExport `json:"data"`
+	WorkspaceID         string                         `json:"workspace_id"`
+	Data                *models.WorkflowExport         `json:"data"`
+	StepProfileBindings []service.ImportProfileBinding `json:"step_profile_bindings,omitempty"`
 }
 
 // ExportWorkflow exports a single workflow.
@@ -684,5 +697,14 @@ func (c *Controller) ExportWorkflows(ctx context.Context, workspaceID string, wo
 
 // ImportWorkflows imports workflows into a workspace.
 func (c *Controller) ImportWorkflows(ctx context.Context, req ImportWorkflowsRequest) (*service.ImportResult, error) {
+	if req.StepProfileBindings != nil {
+		return c.svc.ImportWorkflowsWithBindings(ctx, req.WorkspaceID, req.Data, req.StepProfileBindings)
+	}
 	return c.svc.ImportWorkflows(ctx, req.WorkspaceID, req.Data)
+}
+
+// PreviewImportWorkflows validates a portable document and returns the
+// profile choices required before the browser can persist it.
+func (c *Controller) PreviewImportWorkflows(ctx context.Context, workspaceID string, data *models.WorkflowExport) (*service.ImportProfilePreview, error) {
+	return c.svc.PreviewImportWorkflows(ctx, workspaceID, data)
 }

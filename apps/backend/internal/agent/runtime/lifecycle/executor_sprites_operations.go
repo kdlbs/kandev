@@ -56,8 +56,8 @@ func (r *SpritesExecutor) createSprite(ctx context.Context, client *sprites.Clie
 	return sprite, nil
 }
 
-func (r *SpritesExecutor) uploadAgentctl(ctx context.Context, sprite *sprites.Sprite) error {
-	binaryPath, err := r.agentctlResolver.ResolveLinuxBinary()
+func (r *SpritesExecutor) uploadAgentctl(ctx, helperCtx context.Context, sprite *sprites.Sprite, onProgress PrepareProgressCallback) error {
+	binaryPath, err := r.agentctlResolver.ResolveLinuxBinaryContext(helperCtx, onProgress)
 	if err != nil {
 		return fmt.Errorf("agentctl binary not found: %w", err)
 	}
@@ -474,12 +474,13 @@ func (r *SpritesExecutor) createAgentInstance(
 
 func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInstanceRequest {
 	return agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: spritesWorkspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     agentTypeFromReq(req),
+		ID:                    req.InstanceID,
+		WorkspacePath:         spritesWorkspacePath,
+		SessionID:             req.SessionID,
+		TaskID:                req.TaskID,
+		Protocol:              req.Protocol,
+		CodexAppServerEnabled: req.CodexAppServerEnabled,
+		AgentType:             agentTypeFromReq(req),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
@@ -491,6 +492,7 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		RequiresProcessKill:        requiresProcessKillFromReq(req),
 		StripEnv:                   stripEnvFromReq(req),
+		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,

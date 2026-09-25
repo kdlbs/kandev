@@ -31,6 +31,7 @@ func (s *Service) runVacuum(ctx context.Context) (map[string]interface{}, error)
 	if _, err := s.pool.Writer().ExecContext(ctx, "VACUUM"); err != nil {
 		return nil, fmt.Errorf("vacuum: %w", err)
 	}
+	s.logicalStats.Invalidate(false)
 	after, _ := readDatabaseSize(s.pool.Reader())
 	reclaimed := before - after
 	if reclaimed < 0 {
@@ -64,6 +65,7 @@ func (s *Service) runOptimize(ctx context.Context) (map[string]interface{}, erro
 	if _, err := s.pool.Writer().ExecContext(ctx, "PRAGMA optimize"); err != nil {
 		return nil, fmt.Errorf("pragma optimize: %w", err)
 	}
+	s.logicalStats.Invalidate(false)
 	return map[string]interface{}{"status": "ok"}, nil
 }
 

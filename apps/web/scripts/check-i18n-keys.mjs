@@ -22,10 +22,11 @@
  * expect: pt-pt was 312 keys short and zh-hk/zh-tw 415, none of it visible in a
  * green build.
  *
- * The four catalogs are now complete, so the failure mode is the other one: a
- * PR that adds an `en` key and no translation silently re-opens the gap. This
- * gates, and the cost is that adding user-facing copy means adding it in five
- * languages. That is the actual cost of shipping five languages.
+ * The real-locale catalogs are now complete (`pt-pt`, `zh-cn`, `zh-hk`,
+ * `zh-tw`, `ja`), so the failure mode is the other one: a PR that adds an
+ * `en` key and no translation silently re-opens the gap. This gates, and the
+ * cost is that adding user-facing copy means adding it in six languages. That
+ * is the actual cost of shipping those languages.
  *
  * ## The identical-to-English check
  *

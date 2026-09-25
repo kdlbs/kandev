@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/routines"
 
 	"go.uber.org/zap"
 )
@@ -31,8 +32,11 @@ func NewReconciler(repo *sqlite.Repository, log *logger.Logger) *Reconciler {
 }
 
 // ReconcileAll runs every reconciliation step. Errors are logged, not returned,
-// so that startup is never blocked by a single reconciliation failure.
-func (r *Reconciler) ReconcileAll(ctx context.Context) {
+// so that startup is never blocked by a single reconciliation failure. The
+// returned signal proves to a caller such as the routine arming startup scan
+// that this pass has returned, whether or not every step succeeded
+// (AC-OFFICE-ROUTINE-ARMING-003.1).
+func (r *Reconciler) ReconcileAll(ctx context.Context) routines.ReconcileSignal {
 	if err := r.reconcileAgentWorkingStatus(ctx); err != nil {
 		r.logger.Warn("reconcile agent working status", zap.Error(err))
 	}
@@ -48,6 +52,7 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) {
 	if err := r.reconcileChannels(ctx); err != nil {
 		r.logger.Warn("reconcile channels", zap.Error(err))
 	}
+	return routines.SignalReconcileComplete()
 }
 
 // reconcileAgentWorkingStatus clears the display projection for runs that no
@@ -111,6 +116,17 @@ func (r *Reconciler) reconcileRoutineTriggers(ctx context.Context) error {
 	return nil
 }
 
+// createTriggersForNewRoutines backfills a "manual" trigger for any routine
+// this reconciler finds with no trigger row at all. Known residual: the
+// coordinator install (internal/office/repository/sqlite/coordinator_install.go)
+// commits its routine and canonical cron trigger in two separate
+// transactions. If a restart lands in that window — routine committed,
+// trigger not yet created — this method observes a routine with no trigger
+// and creates a spurious manual one. The coordinator's own next install call
+// still detects and creates the canonical cron trigger correctly
+// (hasAnyCronTrigger ignores manual-kind triggers), leaving the extra manual
+// trigger in place as a harmless one-time crash-recovery artifact, not a
+// misconfiguration to chase.
 func (r *Reconciler) createTriggersForNewRoutines(
 	ctx context.Context, routines []*models.Routine, dbIDs map[string]struct{},
 ) {

@@ -116,6 +116,7 @@ func (s *Service) requestReviewersWithClient(
 	key := scopedCacheKey(cacheScope, prStatusCacheKey(owner, repo, number))
 	s.prFeedbackCache.invalidateKey(key)
 	s.prStatusCache.invalidateKey(key)
+	s.invalidateWorkflowAttentionForPR(cacheScope, owner, repo, number, "")
 	return nil
 }
 
@@ -356,6 +357,13 @@ func (s *Service) getPRFeedback(
 	// consumed past the deadline.
 	fetchCtx, cancelFetch := derivedFetchContext(ctx)
 	defer cancelFetch()
+	fetchCtx = withWorkflowAttentionCollector(fetchCtx, func(
+		collectorCtx context.Context, collectorClient Client, collectorOwner, collectorRepo string, pr *PR,
+	) (*WorkflowAttention, error) {
+		return s.collectWorkflowAttention(
+			collectorCtx, collectorClient, cacheScope, collectorOwner, collectorRepo, pr,
+		)
+	})
 	key := scopedCacheKey(cacheScope, prStatusCacheKey(owner, repo, number))
 	v, err := s.prFeedbackCache.doOrFetch(key, func() (any, error) {
 		feedback, fetchErr := client.GetPRFeedback(fetchCtx, owner, repo, number)
@@ -407,6 +415,13 @@ func (s *Service) getPRStatus(
 	// GetPRFeedback for the cascading-cancel + deadline-preserve rationale.
 	fetchCtx, cancelFetch := derivedFetchContext(ctx)
 	defer cancelFetch()
+	fetchCtx = withWorkflowAttentionCollector(fetchCtx, func(
+		collectorCtx context.Context, collectorClient Client, collectorOwner, collectorRepo string, pr *PR,
+	) (*WorkflowAttention, error) {
+		return s.collectWorkflowAttention(
+			collectorCtx, collectorClient, cacheScope, collectorOwner, collectorRepo, pr,
+		)
+	})
 	key := scopedCacheKey(cacheScope, prStatusCacheKey(owner, repo, number))
 	v, err := s.prStatusCache.doOrFetch(key, func() (any, error) {
 		return client.GetPRStatus(fetchCtx, owner, repo, number)

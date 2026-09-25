@@ -20,16 +20,14 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 import { stripSystemTags } from "@/lib/utils/system-tags";
-import {
-  SenderTaskBadge,
-  type SenderTaskInfo,
-} from "@/components/task/chat/messages/sender-task-badge";
+import { SenderTaskBadge } from "@/components/task/chat/messages/sender-task-badge";
+import type { SenderTaskInfo } from "@/hooks/domains/session/use-sender-task-badge-model";
 import {
   WorkflowStepMessageBadge,
   workflowMessageInfoFromMetadata,
   type WorkflowStepMessageInfo,
 } from "@/components/task/chat/messages/workflow-step-message-badge";
-import { remarkPlugins } from "@/components/shared/markdown-components";
+import { rehypePlugins, remarkPlugins } from "@/components/shared/markdown-components";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import {
@@ -37,6 +35,7 @@ import {
   survivingEntityReferences,
 } from "@/lib/entity-references/message-references";
 import { buildEntityReferenceMarkdownComponents } from "@/components/task/chat/messages/entity-reference-chip";
+import { BoundedMessagePreview } from "@/components/task/chat/messages/bounded-message-preview";
 import { QueuedGhostRowActions } from "@/components/task/chat/queued-ghost-row-actions";
 import { useQueuedMessageOverflow } from "@/components/task/chat/use-queued-message-overflow";
 import { AttachmentRow, type QueuedAttachment } from "@/components/task/chat/queued-attachment-row";
@@ -244,22 +243,31 @@ function DisplayView({
       </span>
       <div className="flex-1 min-w-0 space-y-1">
         {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} size="xs" />}
-        {senderTask && <SenderTaskBadge sender={senderTask} size="xs" />}
+        {senderTask && (
+          <SenderTaskBadge sender={senderTask} destinationTaskId={entry.task_id} size="xs" />
+        )}
         {visible && (
-          <div
-            ref={previewRef}
-            data-testid="queue-entry-text"
-            data-expanded={expanded ? "true" : "false"}
-            className={cn(
+          <BoundedMessagePreview
+            source={visible}
+            fileName="kandev-queued-message.txt"
+            previewRef={previewRef}
+            previewTestId="queue-entry-text"
+            previewDataExpanded={expanded}
+            previewClassName={cn(
               "markdown-body max-w-none text-sm text-foreground/80 break-words overflow-hidden",
               "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
               expanded ? "max-h-[40rem]" : "max-h-[2.75rem]",
             )}
-          >
-            <ReactMarkdown remarkPlugins={remarkPlugins} components={referenceMarkdownComponents}>
-              {visible}
-            </ReactMarkdown>
-          </div>
+            renderContent={(preview) => (
+              <ReactMarkdown
+                remarkPlugins={remarkPlugins}
+                rehypePlugins={rehypePlugins}
+                components={referenceMarkdownComponents}
+              >
+                {preview}
+              </ReactMarkdown>
+            )}
+          />
         )}
         <AttachmentRow attachments={attachments} interactive={true} />
       </div>

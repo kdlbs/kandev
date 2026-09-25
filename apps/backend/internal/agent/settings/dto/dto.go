@@ -35,7 +35,21 @@ type AgentProfileDTO struct {
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string `json:"command_prefix,omitempty"`
-	UserModified  bool   `json:"user_modified"`
+	// ProviderKind is "" (native) or "openai_compatible". When
+	// "openai_compatible", Kandev injects ProviderBaseURL + the key behind
+	// ProviderAPIKeySecretID into the agent it runs.
+	ProviderKind string `json:"provider_kind,omitempty"`
+	// ProviderBaseURL is the absolute http(s) endpoint root of the
+	// OpenAI-compatible provider.
+	ProviderBaseURL string `json:"provider_base_url,omitempty"`
+	// ProviderAPIKeySecretID references the Kandev global secret holding the
+	// bearer key. The value is never returned.
+	ProviderAPIKeySecretID string `json:"provider_api_key_secret_id,omitempty"`
+	CursorMCPAuthEnabled   bool   `json:"cursor_mcp_auth_enabled"`
+	// ProviderSupported is computed at read time: true when the profile's
+	// agent advertises OpenAI-compatible provider support. Not persisted.
+	ProviderSupported bool `json:"provider_supported"`
+	UserModified      bool `json:"user_modified"`
 	// WorkspaceID scopes the profile to an office workspace. Empty for
 	// shallow kanban-only profiles. Surfaced so consumers (e.g. test
 	// cleanup helpers) can distinguish office-owned profiles from
@@ -130,6 +144,12 @@ type TUIConfigDTO struct {
 	WaitForTerminal bool     `json:"wait_for_terminal"`
 	// MCPStrategy is the selected MCP injection mechanism ("" = none).
 	MCPStrategy string `json:"mcp_strategy,omitempty"`
+	// Protocol is the runtime kandev drives the command with ("" = terminal
+	// passthrough, "acp" = ACP on stdin/stdout).
+	Protocol string `json:"protocol,omitempty"`
+	// DisableBracketedPaste selects paced unframed delivery for terminal TUIs
+	// that do not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool `json:"disable_bracketed_paste,omitempty"`
 }
 
 type AgentDTO struct {
@@ -445,11 +465,25 @@ type CommandPreviewRequest struct {
 	CommandPrefix      string          `json:"command_prefix,omitempty"`
 }
 
+// Flag destinations reported by CommandPreviewResponse.
+const (
+	// FlagDestinationAgentCLI means the flags reach the agent CLI itself.
+	FlagDestinationAgentCLI = "agent_cli"
+	// FlagDestinationACPBridge means the flags are appended to the launched ACP
+	// bridge process, which forwards no unrecognized argument to the agent CLI.
+	FlagDestinationACPBridge = "acp_bridge"
+)
+
 // CommandPreviewResponse is the response for the command preview endpoint
 type CommandPreviewResponse struct {
 	Supported     bool     `json:"supported"`
 	Command       []string `json:"command"`
 	CommandString string   `json:"command_string"`
+	// FlagDestination names the process the profile's CLI flags are appended
+	// to. Over ACP that is the bridge, not the agent CLI it wraps, and the
+	// difference is the whole reason a flag can look enabled and change
+	// nothing. Values: "agent_cli" or "acp_bridge".
+	FlagDestination string `json:"flag_destination,omitempty"`
 }
 
 // DynamicModelsResponse is the response for the /agent-models/:agentName endpoint.

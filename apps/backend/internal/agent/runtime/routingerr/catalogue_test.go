@@ -30,6 +30,7 @@ func TestClassForCodeCoversProviderCatalogue(t *testing.T) {
 		{CodePermissionDeniedByUser, ClassUnclassified},
 		{CodeNpxCacheCorrupted, ClassUnclassified},
 		{CodeManagedRuntimeNpmResolution, ClassUnclassified},
+		{CodeManagedRuntimeNpmPolicy, ClassUnclassified},
 		{CodeResumeCorrupted, ClassUnclassified},
 	}
 

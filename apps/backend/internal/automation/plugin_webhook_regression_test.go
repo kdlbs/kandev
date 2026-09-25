@@ -161,7 +161,7 @@ func TestPluginWebhookManualRunDoesNotInvalidateBinding(t *testing.T) {
 	_, err := s.store.db.Exec(`UPDATE automations SET max_concurrent_runs=2 WHERE id=?`, b.AutomationID)
 	require.NoError(t, err)
 
-	result, err := s.FireTrigger(ctx, b.AutomationID, b.TriggerID, TriggerType("manual"), json.RawMessage(`{"source":"manual"}`), "")
+	result, err := s.FireTrigger(ctx, b.AutomationID, b.TriggerID, TriggerType("manual"), json.RawMessage(`{"source":"manual"}`), DedupNotConfigured())
 	require.NoError(t, err)
 	require.False(t, result.Skipped)
 	require.Equal(t, 202, sendPluginWebhook(router, b.ID, `{}`, "valid").Code)
@@ -185,7 +185,7 @@ func TestPluginWebhookConcurrencySkipDoesNotInvalidateBinding(t *testing.T) {
 	}
 	require.NoError(t, s.store.CreateRun(ctx, active))
 
-	result, err := s.FireTrigger(ctx, b.AutomationID, b.TriggerID, TriggerType("manual"), json.RawMessage(`{"source":"manual"}`), "")
+	result, err := s.FireTrigger(ctx, b.AutomationID, b.TriggerID, TriggerType("manual"), json.RawMessage(`{"source":"manual"}`), DedupNotConfigured())
 	require.NoError(t, err)
 	require.True(t, result.Skipped)
 	require.Equal(t, 202, sendPluginWebhook(router, b.ID, `{}`, "valid").Code)

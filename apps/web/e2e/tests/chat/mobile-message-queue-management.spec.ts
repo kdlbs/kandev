@@ -40,8 +40,9 @@ async function expectTouchTarget(locator: Locator): Promise<void> {
   await expect(locator).toBeVisible();
   const box = await locator.boundingBox();
   expect(box).not.toBeNull();
-  expect(box!.width).toBeGreaterThanOrEqual(44);
-  expect(box!.height).toBeGreaterThanOrEqual(44);
+  // CSS layout can report 43.999... for a 44px device-pixel target.
+  expect(Math.round(box!.width)).toBeGreaterThanOrEqual(44);
+  expect(Math.round(box!.height)).toBeGreaterThanOrEqual(44);
 }
 
 async function expectEffectiveTouchTarget(locator: Locator): Promise<void> {
@@ -55,8 +56,8 @@ async function expectEffectiveTouchTarget(locator: Locator): Promise<void> {
       height: rect.height - px(after.top) - px(after.bottom),
     };
   });
-  expect(size.width).toBeGreaterThanOrEqual(44);
-  expect(size.height).toBeGreaterThanOrEqual(44);
+  expect(Math.round(size.width)).toBeGreaterThanOrEqual(44);
+  expect(Math.round(size.height)).toBeGreaterThanOrEqual(44);
 }
 
 function scriptedQueueMessage(marker: string, delayMs = 250): string {
@@ -278,12 +279,14 @@ test("mobile full queue stays usable while removing and clearing messages", asyn
   apiClient,
   seedData,
 }) => {
-  const { session } = await seedFullQueueTask(
+  const queueEvents = watchWs(testPage);
+  const { session, taskId, sessionId } = await seedFullQueueTask(
     testPage,
     apiClient,
     seedData,
     "Mobile queue management",
   );
+  const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
 
   await expectFullQueueScrolls(session);
 
@@ -312,8 +315,13 @@ test("mobile full queue stays usable while removing and clearing messages", asyn
   );
   await expect(chat.getByTestId("chat-input-editor-shell")).toBeVisible();
 
+  const clearResponse = queueEvents.waitForResponse("message.queue.cancel");
   await clear.tap();
-  await expect(panel).not.toBeVisible({ timeout: 10_000 });
+  expect((await clearResponse).payload.removed).toBe(9);
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count))
+    .toBe(0);
+  await expect(panel).not.toBeVisible();
   await expect(chat.getByTestId("queue-chip")).not.toBeVisible();
   await expect(chat.getByTestId("chat-input-editor-shell")).toBeVisible();
 });
@@ -325,6 +333,7 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
 }) => {
   test.setTimeout(120_000);
 
+  const gateway = watchWs(testPage);
   const { session, taskId, sessionId } = await seedBusyQueueTask(testPage, apiClient, seedData);
   const chat = session.activeChat();
   const markerA = "mobile targeted A response";
@@ -364,7 +373,12 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
 
   await assertNoDocumentHorizontalOverflow(testPage);
 
+  const sendNowResponse = gateway.waitForResponse("message.queue.send_now");
   await rowSendNow.tap();
+  await sendNowResponse;
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count))
+    .toBe(2);
   await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
   await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText(markerA);
   await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText(markerC);

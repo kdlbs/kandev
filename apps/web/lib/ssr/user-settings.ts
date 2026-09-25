@@ -67,6 +67,8 @@ export function createDefaultUserSettings(): UserSettingsState {
     lspStatusLocation: "toolbar",
     savedLayouts: [],
     sidebarViews: [],
+    sidebarViewsByWorkspace: {},
+    sidebarLayoutsByWorkspace: {},
     sidebarActiveViewId: null,
     sidebarDraft: null,
     threadViews: [DEFAULT_THREAD_VIEW],
@@ -317,6 +319,8 @@ export function buildCoreFields(
     ...buildBehaviorFields(s, current),
     ...buildAppearanceFields(s, current),
     savedLayouts: s.saved_layouts ?? current.savedLayouts,
+    sidebarViewsByWorkspace: s.sidebar_views_by_workspace ?? current.sidebarViewsByWorkspace,
+    sidebarLayoutsByWorkspace: s.sidebar_layouts_by_workspace ?? current.sidebarLayoutsByWorkspace,
     sidebarViews: mapDefined(s.sidebar_views, current.sidebarViews, (views) =>
       views.map(fromApiSidebarView),
     ) as SidebarView[],

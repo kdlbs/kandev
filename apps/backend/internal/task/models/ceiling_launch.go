@@ -30,6 +30,21 @@ const (
 	// the composed prompt and its attachments.
 	CeilingLaunchPayloadKey = "ceiling_launch_payload"
 
+	// CeilingLaunchClaimKey is a short-lived compare-and-set claim held by the
+	// replay or explicit Send Now dispatcher while it owns this exact deferred
+	// launch. It is prefixed with ceiling_ so WIP and ceiling owners can clear
+	// their own halves of the shared record independently.
+	CeilingLaunchClaimKey = "ceiling_launch_claim"
+
+	// CeilingLaunchClaimExpiresAtKey records the UTC lease deadline for an
+	// in-flight ceiling launch claim. A process that exits while holding a
+	// claim can therefore be recovered by a later dispatcher.
+	CeilingLaunchClaimExpiresAtKey = "expires_at"
+
+	// CeilingLaunchEntryBindingKey nests the exact workflow entry identity in
+	// a workflow-origin replay payload.
+	CeilingLaunchEntryBindingKey = "workflow_entry_binding"
+
 	// CeilingLaunchOriginKey stores the automatic/manual classification so a
 	// deferred automatic launch cannot be re-admitted later as a manual override.
 	CeilingLaunchOriginKey = "ceiling_launch_origin"

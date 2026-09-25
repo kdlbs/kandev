@@ -14,6 +14,7 @@ type TaskSwitcherComponentProps = ComponentProps<typeof TaskSwitcher>;
  */
 export function buildTaskSwitcherProps(args: {
   grouped: TaskSwitcherComponentProps["grouped"];
+  nestHierarchyTasks: TaskSwitcherComponentProps["nestHierarchyTasks"];
   workflows: TaskSwitcherComponentProps["workflows"];
   stepsByWorkflowId: TaskSwitcherComponentProps["stepsByWorkflowId"];
   highlightedTaskId: string | null;
@@ -49,6 +50,7 @@ export function buildTaskSwitcherProps(args: {
 }): TaskSwitcherComponentProps {
   return {
     grouped: args.grouped,
+    nestHierarchyTasks: args.nestHierarchyTasks,
     workflows: args.workflows,
     stepsByWorkflowId: args.stepsByWorkflowId,
     activeTaskId: args.highlightedTaskId,

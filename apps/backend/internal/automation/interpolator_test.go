@@ -113,6 +113,89 @@ func TestInterpolatePrompt_WebhookNestedPath(t *testing.T) {
 	}
 }
 
+// D1: a payload value containing backticks, a newline, and a literal
+// "{{data.x}}" token must survive as inert quoted text — never expanded a
+// second time, and never able to break out of its own fence.
+func TestInterpolateAgentPrompt_HostilePayloadValueStaysInert(t *testing.T) {
+	body := []byte(`{"x": "line one ` + "```" + ` and {{data.x}}\nline two"}`)
+	result := InterpolateAgentPrompt("value: {{data.x}}", TriggerTypeWebhook, body)
+
+	if strings.Contains(result, "{{data.x}}") == false {
+		t.Fatalf("expected the literal token text to survive unexpanded inside the fence, got %q", result)
+	}
+	// The value contains a newline, so quoteInline falls back to a fenced
+	// block; the fence itself must be strictly longer than the longest
+	// backtick run already present in the value (3 backticks -> 4-backtick fence).
+	if !strings.Contains(result, "````\n") {
+		t.Fatalf("expected a 4-backtick fence to escape the payload's own 3-backtick run, got %q", result)
+	}
+	// The template itself only had one placeholder occurrence; the engine
+	// must not have re-scanned its own substituted output for a second pass.
+	if strings.Count(result, "value:") != 1 {
+		t.Fatalf("expected exactly one substitution pass, got %q", result)
+	}
+}
+
+// A1: the default webhook prompt renders the payload via {{webhook.body}}
+// even when the payload has no top-level "body" field — it substitutes the
+// original bytes, not a lookup of a "body" key.
+func TestInterpolateAgentPrompt_DefaultWebhookPrompt_NoTopLevelBodyKey(t *testing.T) {
+	info := GetTriggerTypeInfo(TriggerTypeWebhook)
+	if info == nil {
+		t.Fatal("expected webhook trigger type info to be registered")
+	}
+	payload := []byte(`{"event":"deploy","env":"production"}`)
+	result := InterpolateAgentPrompt(info.DefaultPrompt, TriggerTypeWebhook, payload)
+
+	if !strings.Contains(result, `"event":"deploy"`) {
+		t.Fatalf("expected the raw payload to appear in the rendered prompt, got %q", result)
+	}
+	if strings.Contains(result, "{{webhook.body}}") {
+		t.Fatal("expected {{webhook.body}} to be replaced")
+	}
+}
+
+// A1: {{trigger.type}} and {{trigger.timestamp}} still render for the
+// webhook trigger under the quoting/hardening path.
+func TestInterpolateAgentPrompt_TriggerTypeAndTimestampStillRender(t *testing.T) {
+	result := InterpolateAgentPrompt("{{trigger.type}} at {{trigger.timestamp}}", TriggerTypeWebhook, json.RawMessage(`{}`))
+	if !strings.Contains(result, string(TriggerTypeWebhook)) {
+		t.Fatalf("expected trigger type in result, got %q", result)
+	}
+	if strings.Contains(result, "{{trigger.timestamp}}") {
+		t.Fatal("expected {{trigger.timestamp}} to be replaced")
+	}
+}
+
+// A1: a JSON-array-shaped webhook body renders as that array, not coerced
+// or unwrapped — {{webhook.body}} always substitutes the original bytes.
+func TestInterpolateAgentPrompt_ArrayBodyRendersAsArray(t *testing.T) {
+	payload := []byte(`[{"id":1},{"id":2}]`)
+	result := InterpolateAgentPrompt("{{webhook.body}}", TriggerTypeWebhook, payload)
+	if !strings.Contains(result, `[{"id":1},{"id":2}]`) {
+		t.Fatalf("expected the raw JSON array to appear verbatim, got %q", result)
+	}
+}
+
+// B6: github_pr_merged's default prompt renders {{data.task_id}} as a bare
+// id with no code span — prompt hardening is scoped to the webhook trigger
+// type only (InterpolateAgentPrompt gates quoting on TriggerTypeWebhook).
+func TestInterpolateAgentPrompt_GitHubPRMerged_NoCodeSpan(t *testing.T) {
+	info := GetTriggerTypeInfo(TriggerTypeGitHubPRMerged)
+	if info == nil {
+		t.Fatal("expected github_pr_merged trigger type info to be registered")
+	}
+	payload := []byte(`{"task_id":"t_01H8XK"}`)
+	result := InterpolateAgentPrompt(info.DefaultPrompt, TriggerTypeGitHubPRMerged, payload)
+
+	if !strings.Contains(result, "task id: t_01H8XK") {
+		t.Fatalf("expected the bare task id with no code span, got %q", result)
+	}
+	if strings.Contains(result, "`t_01H8XK`") {
+		t.Fatalf("expected no inline code span around the task id for a non-webhook trigger, got %q", result)
+	}
+}
+
 func TestInterpolatePrompt_PathPlaceholderCoercion(t *testing.T) {
 	// Non-string leaf values are coerced through toString. Booleans and
 	// integers should round-trip in the obvious way.

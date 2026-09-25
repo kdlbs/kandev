@@ -24,7 +24,7 @@ test.describe("Office manager reassignment on mobile", () => {
     await reportsTo.click();
     const listbox = testPage.getByRole("listbox");
     await expect(listbox).toBeVisible();
-    await listbox.getByRole("option", { name: "CEO" }).click();
+    await listbox.getByRole("option", { name: "CEO", exact: true }).click();
 
     const saved = waitForHttp(testPage, "PATCH", new RegExp(`/api/v1/office/agents/${workerId}$`));
     await testPage.getByRole("button", { name: "Save Configuration" }).click();

@@ -19,6 +19,7 @@ const snakeCaseWirePayload = {
   cli_flags: [{ flag: "--verbose", description: "v", enabled: true }],
   env_vars: [sampleEnvVar],
   cli_passthrough: false,
+  cursor_mcp_auth_enabled: false,
   enabled: false,
   workspace_id: WORKSPACE_ID,
   user_modified: true,
@@ -41,7 +42,9 @@ const expectedCamelCaseProfile = {
   cliFlags: [{ flag: "--verbose", description: "v", enabled: true }],
   envVars: [sampleEnvVar],
   cliPassthrough: false,
+  cursorMcpAuthEnabled: false,
   enabled: false,
+  providerSupported: false,
   workspaceId: WORKSPACE_ID,
   userModified: true,
   createdAt: "2026-01-01T00:00:00Z",
@@ -65,6 +68,7 @@ describe("normalizeAgentProfile", () => {
     expect(result.agentDisplayName).toBe("");
     // Legacy payloads without the flag are treated as enabled.
     expect(result.enabled).toBe(true);
+    expect(result.cursorMcpAuthEnabled).toBe(true);
   });
 
   it("preserves the office workspace scope when it is present", () => {
@@ -84,6 +88,17 @@ describe("normalizeAgentProfile", () => {
     expect(result.cliPassthrough).toBe(true);
   });
 
+  it("preserves the Cursor MCP auth preference through the wire round trip", () => {
+    const result = normalizeAgentProfile({
+      id: SAMPLE_ID,
+      name: "default",
+      cursor_mcp_auth_enabled: false,
+    });
+
+    expect(result.cursorMcpAuthEnabled).toBe(false);
+    expect(toAgentProfilePayload(result).cursor_mcp_auth_enabled).toBe(false);
+  });
+
   it("maps command_prefix to commandPrefix", () => {
     const result = normalizeAgentProfile({
       id: SAMPLE_ID,
@@ -91,6 +106,28 @@ describe("normalizeAgentProfile", () => {
       command_prefix: SAMPLE_PREFIX,
     });
     expect(result.commandPrefix).toBe(SAMPLE_PREFIX);
+  });
+
+  it("maps the OpenAI-compatible provider fields both ways", () => {
+    const result = normalizeAgentProfile({
+      id: SAMPLE_ID,
+      name: "default",
+      provider_kind: "openai_compatible",
+      provider_base_url: "http://localhost:20128/v1",
+      provider_api_key_secret_id: "sec-1",
+      provider_supported: true,
+    });
+    expect(result.providerKind).toBe("openai_compatible");
+    expect(result.providerBaseUrl).toBe("http://localhost:20128/v1");
+    expect(result.providerApiKeySecretId).toBe("sec-1");
+    expect(result.providerSupported).toBe(true);
+
+    const payload = toAgentProfilePayload(result);
+    expect(payload.provider_kind).toBe("openai_compatible");
+    expect(payload.provider_base_url).toBe("http://localhost:20128/v1");
+    expect(payload.provider_api_key_secret_id).toBe("sec-1");
+    // provider_supported is computed server-side; it must never be sent back.
+    expect(payload).not.toHaveProperty("provider_supported");
   });
 
   it("accepts already-camelCase commandPrefix", () => {

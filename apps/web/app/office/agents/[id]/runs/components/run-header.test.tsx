@@ -55,6 +55,12 @@ describe("RunHeader", () => {
     );
   });
 
+  it("renders the captured agent name independently from invocation details", () => {
+    render(<RunHeader run={{ ...baseRun, agent_name: "CEO" }} />);
+    expect(screen.getByTestId("run-agent-name").textContent).toBe("CEO");
+    expect(screen.getByTestId("run-adapter").textContent).toContain("claude_local");
+  });
+
   it("formats the duration in human-readable units", () => {
     render(<RunHeader run={baseRun} />);
     expect(screen.getByTestId("run-duration").textContent).toContain("30s");

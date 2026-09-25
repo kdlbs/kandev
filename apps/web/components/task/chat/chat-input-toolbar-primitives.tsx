@@ -12,6 +12,7 @@ import { GridSpinner } from "@/components/grid-spinner";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { Button } from "@kandev/ui/button";
+import { SurfaceAction } from "@/components/actions/surface-action";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -129,7 +130,7 @@ function SendSubmitButton({
 
 export function SubmitButton({
   isAgentBusy,
-  canCancelAgent = isAgentBusy,
+  canCancelAgent = false,
   sessionId,
   taskId,
   taskTitle,
@@ -187,10 +188,11 @@ export function SubmitButton({
               )}
               onClick={handleCancelClick}
               disabled={isCancelling}
+              aria-label={t("task:cancelAgent")}
               data-testid="cancel-agent-button"
             >
               {isCancelling ? (
-                <GridSpinner className="text-destructive" />
+                <GridSpinner className="text-destructive" ariaLabel={t("task:cancelling")} />
               ) : (
                 <IconPlayerPauseFilled className="h-3.5 w-3.5" />
               )}
@@ -271,25 +273,20 @@ export function AttachFilesButton({
   presentation?: "desktop" | "mobile";
 }) {
   const { t } = useTranslation();
+  const label = t("task:attachFiles");
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={cn(
-            presentation === "mobile"
-              ? "min-h-11 min-w-11 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
-              : "h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40",
-          )}
+        <SurfaceAction
+          surface="composer"
+          presentation={presentation}
+          label={label}
+          icon={<IconPaperclip />}
           onClick={onClick}
           data-testid="chat-attachments-button"
-        >
-          <IconPaperclip className="h-4 w-4" />
-        </Button>
+        />
       </TooltipTrigger>
-      <TooltipContent>{t("task:attachFiles")}</TooltipContent>
+      <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
 }

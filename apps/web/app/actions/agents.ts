@@ -68,6 +68,7 @@ export async function createAgentAction(payload: {
       kind?: AgentProfileKind;
       mode?: string;
       cli_passthrough: boolean;
+      cursor_mcp_auth_enabled?: boolean;
       cli_flags?: CLIFlag[];
       command_prefix?: string;
       env_vars?: ProfileEnvVar[];
@@ -113,8 +114,12 @@ export async function createAgentProfileAction(
     mode?: string;
     config_options?: Record<string, string>;
     cli_passthrough: boolean;
+    cursor_mcp_auth_enabled?: boolean;
     cli_flags?: CLIFlag[];
     command_prefix?: string;
+    provider_kind?: string;
+    provider_base_url?: string;
+    provider_api_key_secret_id?: string;
     env_vars?: ProfileEnvVar[];
     dynamic?: DynamicProfilePayload;
   } & ProfilePermissions,
@@ -143,9 +148,13 @@ export async function updateAgentProfileAction(
     allow_indexing?: boolean;
     auto_approve?: boolean;
     cli_passthrough?: boolean;
+    cursor_mcp_auth_enabled?: boolean;
     enabled?: boolean;
     cli_flags?: CLIFlag[];
     command_prefix?: string;
+    provider_kind?: string;
+    provider_base_url?: string;
+    provider_api_key_secret_id?: string;
     env_vars?: ProfileEnvVar[];
     dynamic?: DynamicProfilePayload;
   },
@@ -293,6 +302,11 @@ export type CommandPreviewResponse = {
   supported: boolean;
   command: string[];
   command_string: string;
+  /**
+   * Which process the profile's CLI flags are appended to. Over ACP that is the
+   * bridge, not the agent CLI it wraps.
+   */
+  flag_destination?: "agent_cli" | "acp_bridge";
 };
 
 export async function previewAgentCommandAction(

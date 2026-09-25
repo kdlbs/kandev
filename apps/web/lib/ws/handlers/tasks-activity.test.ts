@@ -325,6 +325,22 @@ describe("task.updated interrupted marker (live propagation + safe fallback)", (
     expect(interruptedFor(store, "t1")).toEqual({ kanban: false, multi: false });
   });
 
+  it("increments the marker generation for every explicit update", () => {
+    const store = storeWithTask({ id: "t1", interrupted: false, interruptedGeneration: 1 });
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(makeMessage({ ...makeTask("t1"), interrupted: true }));
+    handlers["task.updated"]!(makeMessage({ ...makeTask("t1"), interrupted: false }));
+
+    expect(store.getState().kanban.tasks.find((task) => task.id === "t1")).toMatchObject({
+      interrupted: false,
+      interruptedGeneration: 3,
+    });
+    expect(
+      store.getState().kanbanMulti.snapshots.wf1.tasks.find((task) => task.id === "t1"),
+    ).toMatchObject({ interrupted: false, interruptedGeneration: 3 });
+  });
+
   it("preserves the marker when a partial update omits interrupted", () => {
     // Clobber guard: a lightweight task.updated (e.g. a rename) must not wipe
     // the interruption reading between real marker events.

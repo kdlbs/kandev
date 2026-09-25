@@ -13,6 +13,7 @@ import { usePluginRegistry } from "@/lib/plugins/registry";
 import { cn } from "@/lib/utils";
 import { canvasHref, workspaceCanvasSettingsHref } from "@/lib/api/domains/canvas-api";
 import { isActiveWorkspaceCanvas, useWorkspaceCanvases } from "./sections/canvases-section";
+import { useHasSavedSidebarLayout } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
 
 /**
  * Props forwarded to every plugin component registered for the
@@ -44,38 +45,46 @@ export function AppSidebarWorkspaceActions(props: {
       className={cn(
         "flex shrink-0 items-center",
         presentation === "mobile"
-          ? "gap-2 [&_a]:min-h-11 [&_a]:min-w-11 [&_button]:min-h-11 [&_button]:min-w-11"
+          ? "min-w-0 max-w-full flex-wrap gap-2 [&_a:not([data-slot=surface-action])]:min-h-11 [&_a:not([data-slot=surface-action])]:min-w-11 [&_button:not([data-slot=surface-action])]:min-h-11 [&_button:not([data-slot=surface-action])]:min-w-11"
           : "gap-1",
       )}
       data-plugin-slot="sidebar-workspace-actions"
       data-presentation={presentation}
     >
-      <PluginSlot name="sidebar-workspace-actions" slotProps={slotProps} />
+      <PluginSlot
+        name="sidebar-workspace-actions"
+        slotProps={slotProps}
+        actionSurface={{ surface: "sidebar", presentation }}
+      />
     </div>
   );
 }
 
 /**
- * Shared phone navigation entry point for workspace-scoped plugin actions.
- * The same slot is mounted in the kanban drawer and at the top of the shared
- * app navigation sheet on other phone surfaces.
+ * Workspace canvases and optional plugin actions for navigation menus.
+ * Phone app navigation renders plugin actions in its dedicated Plugins section.
  */
 export function MobileWorkspaceActionsSection({
   workspaceId: providedWorkspaceId,
+  includePluginActions = true,
 }: {
   workspaceId?: string;
+  includePluginActions?: boolean;
 }) {
   const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((state) => state.workspaces?.activeId ?? null);
   const canvasesEnabled = useFeature("canvases");
+  const hasSavedSidebarLayout = useHasSavedSidebarLayout();
+  const showCanvases = canvasesEnabled && !hasSavedSidebarLayout;
   const registry = usePluginRegistry();
   const pathname = usePathname();
   const workspaceId = providedWorkspaceId ?? activeWorkspaceId;
-  const canvases = useWorkspaceCanvases(canvasesEnabled ? workspaceId : null);
+  const canvases = useWorkspaceCanvases(showCanvases ? workspaceId : null);
   const activeCanvases = canvases.filter(isActiveWorkspaceCanvas);
-  const hasPluginActions = registry.getSlotRegistrations("sidebar-workspace-actions").length > 0;
+  const hasPluginActions =
+    includePluginActions && registry.getSlotRegistrations("sidebar-workspace-actions").length > 0;
 
-  if (!workspaceId || (!hasPluginActions && !canvasesEnabled)) {
+  if (!workspaceId || (!hasPluginActions && !showCanvases)) {
     return null;
   }
 
@@ -86,7 +95,7 @@ export function MobileWorkspaceActionsSection({
       role="group"
       aria-label={t("common:workspace")}
     >
-      {canvasesEnabled && (
+      {showCanvases && (
         <div className="flex flex-col gap-1" data-testid="mobile-workspace-canvases">
           <div className="flex items-center gap-2 px-1 text-xs font-semibold text-muted-foreground">
             <IconLayoutGrid className="h-4 w-4" aria-hidden="true" />

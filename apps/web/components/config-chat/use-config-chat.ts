@@ -60,8 +60,8 @@ function useUpdateWorkspaceInStore() {
 }
 
 async function deleteSupersededConfigChatTask(taskId: string) {
-  const { deleteTask } = await import("@/lib/api/domains/kanban-api");
-  deleteTask(taskId).catch((error) =>
+  const { deleteTaskAfterUserAction } = await import("@/lib/api/domains/kanban-api");
+  deleteTaskAfterUserAction(taskId).catch((error) =>
     console.error("Failed to clean up superseded config chat task:", error),
   );
 }

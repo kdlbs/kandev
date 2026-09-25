@@ -3,6 +3,7 @@ package acp
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -177,6 +178,29 @@ func (a *Adapter) handleACPUpdate(
 	var event, leadingEvent *AgentEvent
 	if !suppressed {
 		event = a.convertNotification(n)
+		if a.observesResponseAttemptReset(promptGeneration, event) {
+			leadingEvent = &AgentEvent{
+				Type:             streams.EventTypeResponseAttemptReset,
+				SessionID:        sessionID,
+				PromptGeneration: promptGeneration,
+			}
+		}
+		if event != nil && event.Type == streams.EventTypeSessionModels && n.Update.ConfigOptionUpdate != nil {
+			if _, hasModeOption := modeConfigOption(event.ConfigOptions); hasModeOption {
+				a.mu.RLock()
+				availableModes := append([]streams.SessionModeInfo(nil), a.availableModes...)
+				activeSession := a.sessionID == sessionID && !a.closed
+				a.mu.RUnlock()
+				if activeSession {
+					leadingEvent = &AgentEvent{
+						Type:           streams.EventTypeSessionMode,
+						SessionID:      sessionID,
+						CurrentModeID:  currentModeFromConfig(event.ConfigOptions),
+						AvailableModes: availableModes,
+					}
+				}
+			}
+		}
 		if event != nil && (a.observeCodexProviderEvidence(promptGeneration, event) ||
 			a.observeCursorRetriableEvidence(promptGeneration, event)) {
 			// Suppress provider control/evidence chunks. The adapter emits one
@@ -240,6 +264,15 @@ func (a *Adapter) handleACPUpdate(
 	}
 }
 
+func (a *Adapter) observesResponseAttemptReset(promptGeneration uint64, event *AgentEvent) bool {
+	if event == nil || event.Type != streams.EventTypeSessionInfo || promptGeneration == 0 ||
+		!a.dialect.resetsResponseAttempt(event.SessionMeta) {
+		return false
+	}
+	turn := a.currentPromptTurn()
+	return turn != nil && turn.promptGeneration == promptGeneration
+}
+
 func (a *Adapter) observeCursorRetriableEvidence(promptGeneration uint64, event *AgentEvent) bool {
 	if a.agentID != acpcompat.CursorAgentID || event == nil || promptGeneration == 0 {
 		return false
@@ -279,6 +312,27 @@ func (a *Adapter) observeCodexProviderEvidence(promptGeneration uint64, event *A
 	turn := a.currentPromptTurn()
 	if turn == nil || turn.promptGeneration != promptGeneration {
 		return false
+	}
+	if event.Type == streams.EventTypeMessageChunk && event.ProviderDiagnosticCandidate {
+		classified := routingerr.Classify(routingerr.Input{
+			Phase:      routingerr.PhasePromptSend,
+			ProviderID: codexAgentID,
+			Stderr:     event.Text,
+		})
+		if classified.Code == routingerr.CodeQuotaLimited &&
+			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed {
+			message := streams.SanitizeProviderMessage(event.Text)
+			if message != "" {
+				providerError := streams.ProviderError{
+					Source:     streams.ProviderErrorSourceCodexACP,
+					ProviderID: codexAgentID,
+					Message:    message,
+					OccurredAt: time.Now().UTC(),
+					ResetAt:    classified.ResetHint,
+				}
+				turn.observeCodexUsageLimit(providerError)
+			}
+		}
 	}
 	systemError := event.Type == streams.EventTypeSessionInfo && codexSystemErrorMeta(event.SessionMeta)
 	capacity := event.Type == streams.EventTypeMessageChunk && codexModelCapacityMessage(event.Text)
@@ -387,6 +441,9 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		return a.convertAvailableCommands(sessionID, u.AvailableCommandsUpdate)
 
 	case u.CurrentModeUpdate != nil:
+		if !a.noteCurrentMode(sessionID, string(u.CurrentModeUpdate.CurrentModeId)) {
+			return nil
+		}
 		return &AgentEvent{
 			Type:          streams.EventTypeSessionMode,
 			SessionID:     sessionID,
@@ -401,9 +458,19 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			// session/new. Include the cached available models so the event
 			// doesn't overwrite the model list set during session init.
 			a.mu.Lock()
+			if a.sessionID != sessionID || a.closed {
+				a.mu.Unlock()
+				return nil
+			}
 			cachedModels := a.availableModels
 			a.availableConfigOptions = configOptions
+			if modes, found := sessionModesFromConfig(configOptions); found {
+				a.availableModes = modes
+			}
 			a.mu.Unlock()
+			if currentMode := currentModeFromConfig(configOptions); currentMode != "" {
+				a.noteCurrentMode(sessionID, currentMode)
+			}
 			return &AgentEvent{
 				Type:           streams.EventTypeSessionModels,
 				SessionID:      sessionID,

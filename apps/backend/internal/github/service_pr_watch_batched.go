@@ -27,6 +27,8 @@ type PRWatchSyncResult struct {
 	DiscoveryResolved bool
 }
 
+const prSyncExplicitRefreshKeySuffix = "|explicit-refresh"
+
 // SyncWatchesBatched runs the batched GraphQL queries for the supplied
 // watches and applies the resulting DB updates: timestamps, task PR sync,
 // watch PR-number promotion on detection, watch reset on merge/close.
@@ -41,13 +43,19 @@ type PRWatchSyncResult struct {
 // TriggerPRSyncAll / ListWorkspaceTaskPRs background refresh share, so a
 // 40-watch workspace fans out to ~2 gh subprocess calls instead of 40.
 func (s *Service) SyncWatchesBatched(ctx context.Context, watches []*PRWatch) ([]PRWatchSyncResult, error) {
-	return s.syncWatchesBatchedWithClient(ctx, s.client, "legacy", "", 0, watches)
+	return s.syncWatchesBatchedWithClient(ctx, s.client, "legacy", "", 0, watches, false)
 }
 
 // SyncWorkspaceWatchesBatched resolves one automation credential and rejects
 // mixed or missing workspace ownership before making a provider call.
 func (s *Service) SyncWorkspaceWatchesBatched(
 	ctx context.Context, workspaceID string, watches []*PRWatch,
+) ([]PRWatchSyncResult, error) {
+	return s.syncWorkspaceWatchesBatched(ctx, workspaceID, watches, false)
+}
+
+func (s *Service) syncWorkspaceWatchesBatched(
+	ctx context.Context, workspaceID string, watches []*PRWatch, explicitRefresh bool,
 ) ([]PRWatchSyncResult, error) {
 	if len(watches) == 0 {
 		return nil, nil
@@ -68,8 +76,11 @@ func (s *Service) SyncWorkspaceWatchesBatched(
 	if resolved.credential != nil {
 		credentialGeneration = resolved.credential.CredentialGeneration
 	}
+	if explicitRefresh {
+		s.invalidateWorkflowAttentionForResolvedWatches(resolved, watches)
+	}
 	return s.syncWatchesBatchedWithClient(
-		ctx, resolved.Client, resolved.CacheScope, workspaceID, credentialGeneration, watches,
+		ctx, resolved.Client, resolved.CacheScope, workspaceID, credentialGeneration, watches, explicitRefresh,
 	)
 }
 
@@ -83,7 +94,8 @@ type prWatchBatchGroup struct {
 }
 
 func (s *Service) syncWatchesBatchedWithClient(
-	ctx context.Context, client Client, cacheScope, workspaceID string, credentialGeneration int64, watches []*PRWatch,
+	ctx context.Context, client Client, cacheScope, workspaceID string, credentialGeneration int64,
+	watches []*PRWatch, explicitRefresh bool,
 ) ([]PRWatchSyncResult, error) {
 	if len(watches) == 0 {
 		return nil, nil
@@ -124,8 +136,8 @@ func (s *Service) syncWatchesBatchedWithClient(
 		for _, watch := range group.watches[1:] {
 			s.trackPRDiscoveryWatchConsumer(workspaceID, cacheScope, credentialGeneration, watch)
 		}
-		attempt, ok := s.beginPRDiscoveryWatch(
-			workspaceID, cacheScope, credentialGeneration, group.representative,
+		attempt, ok := s.beginPRDiscoveryWatchWithOptions(
+			workspaceID, cacheScope, credentialGeneration, group.representative, explicitRefresh,
 		)
 		if !ok {
 			continue
@@ -148,7 +160,9 @@ func (s *Service) syncWatchesBatchedWithClient(
 	var statuses *batchedWatchStatuses
 	if len(leaderGroups) > 0 {
 		numbered, searching := splitPRWatches(admitted)
-		statuses, err = s.fetchBatchedWatchStatuses(ctx, client, exec, cacheScope, numbered, searching)
+		statuses, err = s.fetchBatchedWatchStatuses(
+			ctx, client, exec, cacheScope, numbered, searching, explicitRefresh,
+		)
 		if err != nil {
 			if s.handleBatchedDiscoveryFetchError(
 				workspaceID, cacheScope, credentialGeneration, leaderGroups, admitted, numbered, searching, err,
@@ -435,10 +449,7 @@ func (s *Service) enrichBatchedWorkflowAttentionGroup(
 	}
 	defer func() { <-sem }()
 
-	key := workflowAttentionBatchKey(cacheScope, group.owner, group.repo, group.headSHA)
-	value, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
-		return client.ListWorkflowRuns(ctx, group.owner, group.repo, group.headSHA)
-	})
+	runs, err := s.cachedWorkflowRuns(ctx, client, cacheScope, group.owner, group.repo, group.headSHA)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Debug("workflow attention read unavailable",
@@ -447,16 +458,11 @@ func (s *Service) enrichBatchedWorkflowAttentionGroup(
 		markBatchedWorkflowAttentionUnknown(group)
 		return
 	}
-	runs, ok := value.([]WorkflowRun)
-	if !ok {
-		markBatchedWorkflowAttentionUnknown(group)
-		return
-	}
-	s.applyBatchedWorkflowAttention(ctx, client, group, runs)
+	s.applyBatchedWorkflowAttention(ctx, client, cacheScope, group, runs)
 }
 
 func (s *Service) applyBatchedWorkflowAttention(
-	ctx context.Context, client Client, group *workflowAttentionStatusGroup, runs []WorkflowRun,
+	ctx context.Context, client Client, cacheScope string, group *workflowAttentionStatusGroup, runs []WorkflowRun,
 ) {
 	jobs := make(map[workflowJobKey]struct {
 		value []WorkflowJob
@@ -467,7 +473,9 @@ func (s *Service) applyBatchedWorkflowAttention(
 		if cached, found := jobs[jobKey]; found {
 			return cached.value, cached.err
 		}
-		value, readErr := client.ListWorkflowRunJobs(jobCtx, group.owner, group.repo, runID, attempt)
+		value, readErr := s.cachedWorkflowJobs(
+			jobCtx, client, cacheScope, group.owner, group.repo, runID, attempt, true,
+		)
 		jobs[jobKey] = struct {
 			value []WorkflowJob
 			err   error
@@ -486,7 +494,7 @@ func (s *Service) applyBatchedWorkflowAttention(
 }
 
 func workflowAttentionBatchKey(cacheScope, owner, repo, headSHA string) string {
-	return scopedCacheKey(cacheScope, fmt.Sprintf("workflow-attention:%s/%s@%s", strings.ToLower(owner), strings.ToLower(repo), headSHA))
+	return workflowRunsCacheKey(cacheScope, owner, repo, headSHA)
 }
 
 // batchedWatchStatuses is the shared, read-only result of one batched fetch.
@@ -522,9 +530,13 @@ type batchedWatchStatuses struct {
 // GetPRFeedback / GetPRStatus. The leader's deadline is preserved so
 // the fetch can't outlive the request budget.
 func (s *Service) fetchBatchedWatchStatuses(
-	ctx context.Context, client Client, exec GraphQLExecutor, cacheScope string, numbered, searching []*PRWatch,
+	ctx context.Context, client Client, exec GraphQLExecutor, cacheScope string,
+	numbered, searching []*PRWatch, explicitRefresh bool,
 ) (*batchedWatchStatuses, error) {
 	key := scopedCacheKey(cacheScope, batchedFetchSingleflightKey(numbered, searching))
+	if explicitRefresh {
+		key += prSyncExplicitRefreshKeySuffix
+	}
 	fetchCtx, cancelFetch := derivedFetchContext(ctx)
 	defer cancelFetch()
 	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
@@ -696,7 +708,7 @@ func (s *Service) applyBatchedNumberedWatch(
 		prWatchFeedbackUpdatedSinceWatch(w, status)
 	commentAt := prWatchFeedbackWatermark(w, status)
 	if err := s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, commentAt, status.ChecksState, status.ReviewState); err != nil {
-		s.logger.Error("failed to update PR watch timestamps", zap.String("id", w.ID), zap.Error(err))
+		s.logSyncError("failed to update PR watch timestamps", err, zap.String("id", w.ID))
 	}
 	// A numbered watch found its PR before this fix existed (or before the
 	// discovering session's own group redirect took effect) keeps the
@@ -715,22 +727,22 @@ func (s *Service) applyBatchedNumberedWatch(
 	// status fields changed. That double event is harmless because clients
 	// re-fetch the task PR state.
 	if existing, err := s.store.GetTaskPRByRepoAndNumber(ctx, effectiveTaskID, w.RepositoryID, w.PRNumber); err != nil {
-		s.logger.Error("failed to load exact task PR",
+		s.logSyncError("failed to load exact task PR", err,
 			zap.String("task_id", effectiveTaskID), zap.String("repository_id", w.RepositoryID),
-			zap.Int("pr_number", w.PRNumber), zap.Error(err))
+			zap.Int("pr_number", w.PRNumber))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true}
 	} else if existing == nil && status.PR != nil {
 		if _, assocErr := s.associatePRWithTaskForSession(
 			ctx, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, status.PR,
 			false, false, TaskPRSourceWatch,
 		); assocErr != nil {
-			s.logger.Error("failed to associate numbered PR with task",
-				zap.String("task_id", w.TaskID), zap.Int("pr_number", w.PRNumber), zap.Error(assocErr))
+			s.logSyncError("failed to associate numbered PR with task", assocErr,
+				zap.String("task_id", w.TaskID), zap.Int("pr_number", w.PRNumber))
 			return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true}
 		}
 	}
 	if syncErr := s.SyncTaskPR(ctx, effectiveTaskID, status); syncErr != nil {
-		s.logger.Error("failed to sync task PR", zap.String("task_id", effectiveTaskID), zap.Error(syncErr))
+		s.logSyncError("failed to sync task PR", syncErr, zap.String("task_id", effectiveTaskID))
 		// SyncFailed=true so poller skips publishing PR feedback while the
 		// task_pr row is still stale — old applyPRStatus path early-returned
 		// on this error for the same reason.
@@ -743,14 +755,14 @@ func (s *Service) applyBatchedNumberedWatch(
 			ctx, effectiveTaskID, w.RepositoryID, w.PRNumber, status.PR.State,
 		)
 		if holdErr != nil {
-			s.logger.Error("failed to check terminal PR automation", zap.String("id", w.ID), zap.Error(holdErr))
+			s.logSyncError("failed to check terminal PR automation", holdErr, zap.String("id", w.ID))
 			// Fail conservatively like stale task-PR state: suppress feedback
 			// until terminal lifecycle retention can be determined safely.
 			return PRWatchSyncResult{Watch: w, Status: status, Found: true, Changed: changed, SyncFailed: true}
 		}
 		if !hold {
 			if resetErr := s.store.UpdatePRWatchPRNumber(ctx, w.ID, 0); resetErr != nil {
-				s.logger.Error("failed to reset completed PR watch", zap.String("id", w.ID), zap.Error(resetErr))
+				s.logSyncError("failed to reset completed PR watch", resetErr, zap.String("id", w.ID))
 			}
 		}
 	}
@@ -838,21 +850,21 @@ func (s *Service) applyBatchedSearchingWatch(
 		status = &PRStatus{PR: pr}
 	}
 	if err := s.rebindPRWatchRepository(ctx, w, status.PR); err != nil {
-		s.logger.Error("failed to rebind PR watch to detected repository",
-			zap.String("watch_id", w.ID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
+		s.logSyncError("failed to rebind PR watch to detected repository", err,
+			zap.String("watch_id", w.ID), zap.Int("pr_number", status.PR.Number))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true, DiscoveryResolved: discoveryResolved}
 	}
 	if err := s.store.UpdatePRWatchPRNumber(ctx, w.ID, status.PR.Number); err != nil {
-		s.logger.Error("failed to update PR watch with detected PR",
-			zap.String("watch_id", w.ID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
+		s.logSyncError("failed to update PR watch with detected PR", err,
+			zap.String("watch_id", w.ID), zap.Int("pr_number", status.PR.Number))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true, DiscoveryResolved: discoveryResolved}
 	}
 	if _, err := s.associatePRWithTaskForSession(
 		ctx, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, status.PR,
 		false, false, TaskPRSourceWatch,
 	); err != nil {
-		s.logger.Error("failed to associate detected PR with task",
-			zap.String("task_id", w.TaskID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
+		s.logSyncError("failed to associate detected PR with task", err,
+			zap.String("task_id", w.TaskID), zap.Int("pr_number", status.PR.Number))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true, DiscoveryResolved: discoveryResolved}
 	}
 	s.logger.Info("detected PR for session branch (batched)",

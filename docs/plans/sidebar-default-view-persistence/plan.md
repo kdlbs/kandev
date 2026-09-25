@@ -6,6 +6,13 @@ status: complete
 
 # Implementation Plan: Persist the Default Sidebar View
 
+## Workspace-scope continuation
+
+This completed package records the original global preference implementation.
+[Workspace sidebar task views](../workspace-sidebar-task-views/plan.md) owns its
+scoped persistence successor and updated browser fixtures. Historical validation
+results below remain unchanged.
+
 ## Overview
 
 Repair the clean-settings contract at its backend source of truth. The backend

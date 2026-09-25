@@ -273,6 +273,10 @@ func addQueuedAttachmentToClaim(
 		(attachment.QueueID != "" && attachment.QueueID != queueID) {
 		return models.ErrAttachmentClaimConflict
 	}
+	if attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
+		return models.ErrAttachmentTooLarge
+	}
+	selection.selectedSize += attachment.SizeBytes
 	return nil
 }
 
@@ -407,6 +411,10 @@ func addDirectAttachmentToClaim(
 		(attachment.MessageID != "" && attachment.MessageID != messageID) {
 		return models.ErrAttachmentClaimConflict
 	}
+	if attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
+		return models.ErrAttachmentTooLarge
+	}
+	selection.selectedSize += attachment.SizeBytes
 	return nil
 }
 

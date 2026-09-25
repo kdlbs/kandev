@@ -167,10 +167,18 @@ export async function openSessionInEditor(
   });
 }
 
-export async function openSessionFolder(sessionId: string, options?: ApiRequestOptions) {
+export async function openSessionFolder(
+  sessionId: string,
+  options?: ApiRequestOptions,
+  payload?: { worktree_id?: string },
+) {
   return fetchJson<{ success: boolean }>(`/api/v1/task-sessions/${sessionId}/open-folder`, {
     ...options,
-    init: { method: "POST", ...(options?.init ?? {}) },
+    init: {
+      method: "POST",
+      ...(payload ? { body: JSON.stringify(payload) } : {}),
+      ...(options?.init ?? {}),
+    },
   });
 }
 

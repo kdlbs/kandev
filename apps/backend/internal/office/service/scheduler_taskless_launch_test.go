@@ -22,10 +22,9 @@ import (
 // as a success. That is exactly the shape of the card's "323 consecutive
 // successful runs, zero agent sessions" measurement.
 //
-// The scheduler cannot currently launch a taskless run at all (that
-// requires a taskless session seam — task_sessions.task_id is NOT NULL —
-// which is a follow-up feature, not part of this card). So the correct
-// terminal state today is a loud, immediate failure, not silent success.
+// This isolated service test intentionally leaves the run-session launcher
+// unwired, so the scheduler must retain its fail-closed behavior rather than
+// reporting a successful launch that never happened.
 func TestSchedulerTick_TasklessRunFailsInsteadOfFinishing(t *testing.T) {
 	mock := &mockTaskStarter{}
 	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
@@ -71,6 +70,62 @@ func TestSchedulerTick_TasklessRunFailsInsteadOfFinishing(t *testing.T) {
 	}
 	if runs[0].SessionID != "" {
 		t.Errorf("session_id = %q, want empty — no agent was launched", runs[0].SessionID)
+	}
+}
+
+// TestSchedulerTick_WhitespaceOnlyTaskIDTreatedAsTaskless is the Review
+// round 3 regression test (R3REV-02): a run whose payload.task_id is
+// non-empty but whitespace-only (e.g. "   ") must be classified taskless
+// end-to-end, the same as an absent task_id, per the terminology REQ-003
+// and REQ-004 share ("absent, empty, or whitespace-only ... empty after
+// trimming"). Before the fix, extractTaskID returned the untrimmed value,
+// so checkoutTask's `taskID == ""` short-circuit never fired; the run
+// instead attempted an exact-match checkout against a task id that could
+// never exist and silently requeued (scheduled a retry) forever, rather
+// than reaching failTasklessRun's loud, immediate, correctly-classified
+// failure — exactly the "runs forever, does nothing, reports nothing"
+// pathology this card's WO-35 predecessor already fixed for the empty case.
+func TestSchedulerTick_WhitespaceOnlyTaskIDTreatedAsTaskless(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:                 "coordinator-r3rev02",
+		WorkspaceID:        "ws-1",
+		Name:               "coordinator-r3rev02",
+		Role:               models.AgentRoleCEO,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{"task_id":"   "}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	if mock.callCount() != 0 {
+		t.Fatalf("expected 0 StartTask calls for a whitespace-only task_id, got %d", mock.callCount())
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("run count = %d, want 1", len(runs))
+	}
+	if runs[0].Status != service.RunStatusFailed {
+		t.Fatalf("run status = %q, want %q — a whitespace-only task_id must be classified "+
+			"taskless and fail loudly on this tick, not silently requeue against a task id "+
+			"that can never exist", runs[0].Status, service.RunStatusFailed)
+	}
+	if runs[0].ErrorMessage == "" {
+		t.Error("expected a non-empty error_message explaining the run could not launch")
 	}
 }
 
@@ -220,9 +275,8 @@ func TestSchedulerTick_TaskBoundRunStillLaunches(t *testing.T) {
 }
 
 // TestSchedulerTick_TasklessRunsDoNotAutoPauseAgent is the WO-35 Review
-// round 1 regression test. A taskless run is a scheduler capability gap
-// (the taskless-launch seam does not exist yet — see failTasklessRun's
-// SCOPE-1 decision comment in scheduler_integration.go), not an agent
+// round 1 regression test. A taskless run without a configured launcher is a
+// wiring failure, not an agent
 // failure, so failing it must not touch the agent's consecutive-failure
 // counter. The pre-installed "Coordinator heartbeat" routine is taskless
 // by design and fires every 5 minutes

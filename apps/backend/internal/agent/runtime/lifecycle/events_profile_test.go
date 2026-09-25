@@ -41,9 +41,15 @@ func TestAgentEventPayloadCarriesProviderErrorAndAgentID(t *testing.T) {
 }
 
 func TestAgentEventPayloadCarriesRunID(t *testing.T) {
-	payload := newAgentEventPayload(&AgentExecution{ID: "exec-1", RunID: "run-1"})
+	payload := newAgentEventPayload(&AgentExecution{
+		ID: "exec-1", WorkspaceID: "ws-1", RunID: "run-1", RunSessionID: "run-session-1", RunAttempt: 2,
+	})
 	if payload.RunID != "run-1" {
 		t.Fatalf("run ID = %q, want run-1", payload.RunID)
+	}
+	if payload.OwnerKind != ExecutionOwnerRun || payload.WorkspaceID != "ws-1" ||
+		payload.RunSessionID != "run-session-1" || payload.RunAttempt != 2 {
+		t.Fatalf("run owner = %#v, want exact run identity", payload)
 	}
 }
 

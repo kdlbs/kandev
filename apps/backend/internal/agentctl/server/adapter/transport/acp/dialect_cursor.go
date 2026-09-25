@@ -4,32 +4,52 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 const (
-	cursorRetriableStreamResetPrefix                 = "Error: RetriableError:"
-	cursorRetriableStreamResetMessage                = "Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)"
-	cursorRetriableStreamResetLeadingCanceledMessage = "Error: RetriableError: [canceled] HTTP/2 stream closed with error code CANCEL (0x8)"
-	cursorRetriableStreamResetMaxTail                = 256
+	cursorAgentID                     = "cursor-acp"
+	cursorRetriableStreamResetPrefix  = "Error: RetriableError:"
+	cursorRetriableStreamResetMessage = "Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)"
+	cursorRetriableStreamResetMaxTail = 256
 )
 
-// isCursorRetriableStreamReset recognizes Cursor's complete transport control
-// chunk. The prefix check keeps the common per-token path allocation-free;
-// requiring the complete diagnostic prevents ordinary provider prose from
-// combining the control prefix with an unrelated transport fragment.
+func newCursorACPDialect() acpDialect {
+	return acpDialect{mcpToolCall: parseCursorMCPToolCall}
+}
+
+func parseCursorMCPToolCall(_ map[string]any, rawInput any) (mcpToolCallFrame, bool) {
+	input, ok := rawInput.(map[string]any)
+	if !ok {
+		return mcpToolCallFrame{}, false
+	}
+	provider, _ := input["providerIdentifier"].(string)
+	tool, _ := input["toolName"].(string)
+	arguments, ok := input["args"].(map[string]any)
+	provider = strings.TrimSpace(provider)
+	tool = strings.TrimSpace(tool)
+	if provider == "" || tool == "" || !ok {
+		return mcpToolCallFrame{}, false
+	}
+	return mcpToolCallFrame{name: provider + "/" + tool, arguments: arguments}, true
+}
+
+// isCursorRetriableStreamReset recognizes Cursor's bounded RetriableError
+// control chunk. The prefix check keeps the common per-token path
+// allocation-free; requiring a non-empty bounded suffix prevents a partial
+// marker from becoming transport evidence.
 func isCursorRetriableStreamReset(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	if len(trimmed) < len(cursorRetriableStreamResetPrefix) ||
 		!strings.EqualFold(trimmed[:len(cursorRetriableStreamResetPrefix)], cursorRetriableStreamResetPrefix) {
 		return false
 	}
-	if len(trimmed)-len(cursorRetriableStreamResetPrefix) > cursorRetriableStreamResetMaxTail {
+	suffix := strings.TrimSpace(trimmed[len(cursorRetriableStreamResetPrefix):])
+	if suffix == "" || len(suffix) > cursorRetriableStreamResetMaxTail || routingerr.IsCursorRetriableCancellation(suffix) {
 		return false
 	}
-	return strings.EqualFold(trimmed, cursorRetriableStreamResetMessage) ||
-		strings.EqualFold(trimmed, cursorRetriableStreamResetLeadingCanceledMessage) ||
-		strings.EqualFold(trimmed, cursorRetriableStreamResetMessage+" [canceled]")
+	return true
 }
 
 type cursorTaskMeta struct {

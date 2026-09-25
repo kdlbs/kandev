@@ -23,7 +23,10 @@ test.describe("Mobile PR file row containment", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
 
     const changes = testPage.getByTestId("mobile-changes-panel");
     await expect(changes).toBeVisible();

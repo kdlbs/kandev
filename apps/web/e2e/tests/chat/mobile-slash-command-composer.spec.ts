@@ -51,6 +51,13 @@ test.describe("Mobile slash command composer", () => {
     // composerReady may reload to reconcile stale startup state. Seed the
     // client-side command list only after that recovery so it is not discarded.
     await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
+    // @covers AC-UI-COMPOSER-FOCUS-HINT-001.1
+    await editor.fill("");
+    await editor.blur();
+    const composer = session.chat.filter({ visible: true });
+    await expect(composer.getByText("to focus", { exact: true })).not.toBeVisible();
+    await expect(composer.locator(".pr-28")).toHaveCount(0);
+    await testPage.screenshot({ path: test.info().outputPath("mobile-composer.png") });
     await editor.tap();
     await editor.fill("");
     await editor.pressSequentially("/s");

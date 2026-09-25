@@ -831,6 +831,8 @@ func TestLaunchModelSwitchAgent_CleansStartedExecutionAfterTerminalRace(t *testi
 		&callerSession,
 		&LaunchAgentRequest{},
 		nil,
+		nil,
+		nil,
 	)
 
 	if !errors.Is(err, ErrSessionStateSuperseded) {

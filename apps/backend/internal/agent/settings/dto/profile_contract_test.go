@@ -36,7 +36,7 @@ func TestProfileContractFieldsAreUniqueAndClassified(t *testing.T) {
 		}
 		seen[field.Path] = struct{}{}
 	}
-	for _, required := range []string{"name", "model", "fallback_model", "auto_fallback", "require_exact_model", "mode", "config_options", "cli_flags", "env_vars", "command_prefix", "enabled"} {
+	for _, required := range []string{"name", "model", "fallback_model", "auto_fallback", "require_exact_model", "mode", "config_options", "cli_flags", "env_vars", "command_prefix", "provider_kind", "provider_base_url", "provider_api_key_secret_id", "enabled"} {
 		if _, ok := seen[required]; !ok {
 			t.Fatalf("missing profile field %q", required)
 		}

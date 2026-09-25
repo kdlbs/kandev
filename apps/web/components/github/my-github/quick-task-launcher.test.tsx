@@ -292,7 +292,7 @@ describe("QuickTaskLauncher issue linking", () => {
         expect(mocks.upsertTaskIssue).toHaveBeenCalledWith(WORKSPACE_ID, link);
       });
       expect(mocks.push).toHaveBeenCalledTimes(autoFocus ? 1 : 0);
-      if (autoFocus) expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
+      if (autoFocus) expect(mocks.push).toHaveBeenCalledWith("/t/task-1");
     },
   );
 
@@ -302,7 +302,7 @@ describe("QuickTaskLauncher issue linking", () => {
 
     mocks.dialogProps?.onSuccess?.({ id: "task-1" } as Task);
 
-    expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
+    expect(mocks.push).toHaveBeenCalledWith("/t/task-1");
     await waitFor(() => expect(mocks.linkTaskIssue).toHaveBeenCalledTimes(1));
     expect(mocks.upsertTaskIssue).not.toHaveBeenCalled();
   });

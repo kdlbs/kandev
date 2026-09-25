@@ -8,13 +8,16 @@ const listTaskSessionsMock = vi.hoisted(() => vi.fn());
 const queueMock = vi.hoisted(() => vi.fn());
 const addMessageMock = vi.hoisted(() => vi.fn());
 const setTaskPlanCommentsMock = vi.hoisted(() => vi.fn());
+const setTaskPreviewFeedbackMock = vi.hoisted(() => vi.fn());
 const getTaskPlanCommentsMock = vi.hoisted(() => vi.fn());
+const getTaskPreviewFeedbackMock = vi.hoisted(() => vi.fn());
 const storeState = vi.hoisted(() => ({
   current: {
     taskSessions: { items: {} as Record<string, unknown> },
     queue: { metaBySessionId: {} as Record<string, { count: number }> },
     addMessage: addMessageMock,
     setTaskPlanComments: setTaskPlanCommentsMock,
+    setTaskPreviewFeedback: setTaskPreviewFeedbackMock,
   },
 }));
 
@@ -30,6 +33,9 @@ vi.mock("@/components/state-provider", () => ({
 vi.mock("@/lib/api/domains/plan-comment-api", () => ({
   getTaskPlanComments: getTaskPlanCommentsMock,
 }));
+vi.mock("@/lib/api/domains/preview-feedback-api", () => ({
+  getTaskPreviewFeedback: getTaskPreviewFeedbackMock,
+}));
 vi.mock("./domains/session/use-queue", () => ({
   useQueue: () => ({ queue: queueMock }),
 }));
@@ -37,6 +43,7 @@ vi.mock("./domains/session/use-queue", () => ({
 const TASK_ID = "task-1";
 const SESSION_ID = "session-1";
 const COMMENT_ID = "comment-1";
+const PREVIEW_ID = "preview-1";
 const MESSAGE_ADD_ACTION = "message.add";
 
 function selectedSession(state: string, foregroundActivity?: string) {
@@ -69,6 +76,11 @@ beforeEach(() => {
     revision: 3,
     comments: [],
   });
+  getTaskPreviewFeedbackMock.mockResolvedValue({
+    task_id: TASK_ID,
+    revision: 4,
+    items: [],
+  });
 });
 
 describe("sendMessageRequest task plan comments", () => {
@@ -93,6 +105,29 @@ describe("sendMessageRequest task plan comments", () => {
         plan_mode: true,
         plan_comment_refs: [{ id: COMMENT_ID, version: 4 }],
         require_primary_session: true,
+      }),
+      10000,
+    );
+  });
+
+  it("forwards exact preview feedback references", async () => {
+    const request = vi.fn().mockResolvedValue(undefined);
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await sendMessageRequest({
+      taskId: TASK_ID,
+      resolvedSessionId: SESSION_ID,
+      finalMessage: "",
+      modelToSend: undefined,
+      planMode: false,
+      previewFeedbackRefs: [{ id: PREVIEW_ID, version: 3 }],
+    });
+
+    expect(request).toHaveBeenCalledWith(
+      MESSAGE_ADD_ACTION,
+      expect.objectContaining({
+        content: "",
+        preview_feedback_refs: [{ id: PREVIEW_ID, version: 3 }],
       }),
       10000,
     );
@@ -163,6 +198,27 @@ describe("useMessageHandler queued plan comments", () => {
       false,
     );
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("queues preview feedback with the same idempotent admission", async () => {
+    selectedSession("RUNNING", "generating");
+    const { result } = renderMessageHandler();
+
+    await act(async () => {
+      await result.current.handleSendMessage({
+        message: "Use this preview feedback",
+        previewFeedbackRefs: [{ id: PREVIEW_ID, version: 5 }],
+      } as never);
+    });
+
+    expect(queueMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: TASK_ID,
+        clientQueueId: expect.any(String),
+        previewFeedbackRefs: [{ id: PREVIEW_ID, version: 5 }],
+      }),
+    );
+    expect(getTaskPreviewFeedbackMock).toHaveBeenCalledWith(TASK_ID);
   });
 
   it("queues displayed task plan references as one idempotent admission", async () => {
@@ -324,6 +380,48 @@ describe("useMessageHandler direct plan comments", () => {
     expect(sent.plan_comment_refs).toEqual([{ id: COMMENT_ID, version: 2 }]);
   });
 
+  it("reconciles a stale preview snapshot and returns a deterministic error", async () => {
+    selectedSession("WAITING_FOR_INPUT");
+    const snapshot = { task_id: TASK_ID, revision: 9, items: [] };
+    const request = vi.fn().mockRejectedValue(
+      new WebSocketRequestError("Task preview feedback changed", "preview_feedback_changed", {
+        snapshot,
+      }),
+    );
+    getWebSocketClientMock.mockReturnValue({ request });
+    const { result } = renderMessageHandler();
+
+    await expect(
+      result.current.handleSendMessage({
+        message: "Keep my draft",
+        previewFeedbackRefs: [{ id: PREVIEW_ID, version: 1 }],
+      } as never),
+    ).rejects.toMatchObject({ code: "preview-feedback-changed" });
+
+    expect(setTaskPreviewFeedbackMock).toHaveBeenCalledWith(TASK_ID, snapshot);
+  });
+
+  it("refreshes preview feedback after direct acceptance", async () => {
+    selectedSession("WAITING_FOR_INPUT");
+    const request = vi.fn().mockResolvedValue(undefined);
+    getWebSocketClientMock.mockReturnValue({ request });
+    const { result } = renderMessageHandler();
+
+    await result.current.handleSendMessage({
+      message: "Apply it",
+      previewFeedbackRefs: [{ id: PREVIEW_ID, version: 2 }],
+    } as never);
+
+    expect(getTaskPreviewFeedbackMock).toHaveBeenCalledWith(TASK_ID);
+    expect(setTaskPreviewFeedbackMock).toHaveBeenCalledWith(TASK_ID, {
+      task_id: TASK_ID,
+      revision: 4,
+      items: [],
+    });
+  });
+});
+
+describe("useMessageHandler direct admission identity", () => {
   it("reconciles a stale snapshot and returns a deterministic error", async () => {
     selectedSession("WAITING_FOR_INPUT");
     const snapshot = { task_id: TASK_ID, plan_id: "plan-1", revision: 7, comments: [] };

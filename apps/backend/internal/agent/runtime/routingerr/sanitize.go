@@ -411,6 +411,15 @@ func SanitizeCredentials(s string) string {
 	return applyRedactions(s, credentialRedactions)
 }
 
+// SanitizeCredentialsUnbounded applies the same rule set as
+// SanitizeCredentials but without the MaxRawExcerptBytes output cap. Use
+// this for user-authored text that must reach its destination whole, such
+// as a task's primary launch prompt, where truncation would silently drop
+// instructions rather than only redact credentials.
+func SanitizeCredentialsUnbounded(s string) string {
+	return applyRedactionsUnbounded(s, credentialRedactions)
+}
+
 // SanitizeFullUnbounded applies the same rule set as Sanitize but without the
 // MaxRawExcerptBytes output cap. Use this only when the caller will apply its
 // own tail truncation afterward (see dynamic.sanitizedTail): sanitizing

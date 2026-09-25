@@ -182,8 +182,9 @@ func TestProcessOnEnter_LedgerOwnedKinds_DoNotWarnAndWriteNoMarker(t *testing.T)
 		}},
 	}
 
-	// Allocate a real step-entry so GetStepEntryMarkerState has an entryID
-	// to check markers against — processOnEnter never allocates one itself.
+	// Allocate a real step-entry so GetStepEntryMarkerState has a marker ID to
+	// check. processOnEnter receives the separate transition identity, and this
+	// direct test has no transition callback to validate.
 	task, err := repo.GetTask(ctx, "task-ledger-owned")
 	if err != nil {
 		t.Fatalf("load task: %v", err)
@@ -206,7 +207,7 @@ func TestProcessOnEnter_LedgerOwnedKinds_DoNotWarnAndWriteNoMarker(t *testing.T)
 		t.Fatalf("expected a real entryID to be allocated")
 	}
 
-	svc.processOnEnter(ctx, "task-ledger-owned", session, step, "", holder.EntryID, nil)
+	svc.processOnEnter(ctx, "task-ledger-owned", session, step, "", 0, nil)
 
 	var warnings []observer.LoggedEntry
 	for _, e := range logs.All() {

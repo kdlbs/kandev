@@ -274,6 +274,9 @@ export type RichOutputMotionState = {
   savedEnabled: boolean;
 };
 
+/** Chat text and scroll motion, independently saved per device. */
+export type ChatMotionState = { enabled: boolean; savedEnabled: boolean };
+
 /** Unified AppSidebar collapse + per-section expand state (localStorage). */
 export type AppSidebarState = {
   collapsed: boolean;
@@ -322,6 +325,7 @@ export type UISliceState = {
   updateAvailableNotification: UpdateAvailableNotification | null;
   bottomTerminal: BottomTerminalState;
   sidebarViews: SidebarSliceState;
+  sidebarViewsByWorkspace: Record<string, SidebarSliceState>;
   threadViews: ThreadViewSliceState;
   /** Parent task IDs whose subtasks are collapsed in the sidebar. Tab-scoped (sessionStorage). */
   collapsedSubtaskParents: string[];
@@ -335,6 +339,7 @@ export type UISliceState = {
   settingsMenu: SettingsMenuState;
   /** Agent rich-output chart animation preference (localStorage). */
   richOutputMotion: RichOutputMotionState;
+  chatMotion: ChatMotionState;
   /**
    * Most recently dismissed `last_agent_error` stamp per sessionId. Shared by
    * the chat banner and the sidebar error icon so dismissing the banner also
@@ -456,7 +461,7 @@ export type UISliceActions = {
   reorderSidebarViews: (activeViewId: string, overViewId: string) => void;
   toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
-  clearSidebarSyncError: () => void;
+  clearSidebarSyncError: (workspaceId?: string) => void;
   setThreadActiveView: (viewId: string) => void;
   createThreadView: () => string | null;
   updateThreadViewDraft: (
@@ -521,6 +526,9 @@ export type UISliceActions = {
   commitRichOutputAnimations: (enabled: boolean) => void;
   /** Restore the persisted rich-output chart motion preference. */
   restoreRichOutputAnimations: () => void;
+  previewChatAnimations: (enabled: boolean) => void;
+  commitChatAnimations: (enabled: boolean) => void;
+  restoreChatAnimations: () => void;
   /** Record multiple sidebar badge acknowledgements with one localStorage merge. */
   acknowledgeAgentErrors: (stamps: Record<string, string>) => void;
   /** Record that `stamp` has been dismissed for `sessionId`. */

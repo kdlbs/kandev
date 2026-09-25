@@ -183,3 +183,8 @@ Wave 4 (desktop/mobile E2E after Task 03):
 Wave 5 (docs after behavior is implemented):
 
 - [x] [Task 05 — Temporary-artifact operations documentation](task-05-storage-temp-artifact-docs.md)
+
+## Follow-up presentation package
+
+The [settings storage tabs package](../settings-storage-tabs/plan.md) owns the planned header tabs and maintenance presentation changes.
+This package retains its historical implementation results. The follow-up owns new route, copy, and regression verification.

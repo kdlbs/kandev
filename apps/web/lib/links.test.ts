@@ -19,6 +19,23 @@ describe("task links", () => {
     expect(linkToTask("task-123", "plan")).toBe("/t/task-123?layout=plan");
   });
 
+  it("encodes the raw task id once and merges task query context", () => {
+    const searchParams = new URLSearchParams([
+      ["layout", "old"],
+      ["tag", "first"],
+      ["tag", "second"],
+    ]);
+
+    expect(
+      linkToTask("task/123%raw", {
+        searchParams,
+        layout: "plan",
+        sessionId: "session 123",
+      }),
+    ).toBe("/t/task%2F123%25raw?layout=plan&tag=first&tag=second&sessionId=session+123");
+    expect(searchParams.toString()).toBe("layout=old&tag=first&tag=second");
+  });
+
   it("keeps /tasks for the task list route", () => {
     expect(linkToTasks()).toBe("/tasks");
     expect(linkToTasks("workspace-123")).toBe("/tasks?workspace=workspace-123");

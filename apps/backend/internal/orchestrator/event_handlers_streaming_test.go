@@ -311,6 +311,15 @@ func (m *serviceBackedMessageCreator) UpdateToolCallMessage(
 	)
 }
 
+func (m *serviceBackedMessageCreator) UpsertAgentPlanMessage(
+	ctx context.Context,
+	taskID, sourceToolCallID, agentSessionID, content, turnID string,
+) error {
+	return m.svc.UpsertAgentPlanMessage(
+		ctx, taskID, sourceToolCallID, agentSessionID, content, turnID,
+	)
+}
+
 func newServiceBackedMessageCreator(repo *sqliterepo.Repository) *serviceBackedMessageCreator {
 	services := taskservice.NewService(taskservice.Repos{
 		Workspaces:       repo,
@@ -376,6 +385,28 @@ func (b *recordingEventBus) Request(context.Context, string, *bus.Event, time.Du
 }
 func (b *recordingEventBus) Close()            {}
 func (b *recordingEventBus) IsConnected() bool { return true }
+
+// @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.1
+func TestHandleAgentPlanEventUsesCorrelatedMessageUpdate(t *testing.T) {
+	messages := &mockMessageCreator{}
+	service := &Service{messageCreator: messages, logger: testLogger()}
+	service.activeTurns.Store("session-plan", "turn-plan")
+
+	service.handleAgentPlanEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task-plan",
+		SessionID: "session-plan",
+		Data: &lifecycle.AgentStreamEventData{
+			ToolCallID:  "call-plan",
+			PlanContent: "# Plan\n\n1. Read",
+		},
+	})
+
+	require.Zero(t, messages.sessionMessageAttempts)
+	require.Zero(t, messages.toolUpdateWrites)
+	require.Equal(t, 1, messages.agentPlanUpserts)
+	require.Equal(t, "call-plan", messages.lastAgentPlanToolCallID)
+	require.Equal(t, "# Plan\n\n1. Read", messages.lastAgentPlanContent)
+}
 
 func TestUpdateTaskSessionStatePublishesPersistedUpdatedAt(t *testing.T) {
 	ctx := context.Background()
@@ -472,6 +503,7 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 		ctx,
 		"t1",
 		"s1",
+		nil,
 		models.TaskSessionStateCancelled,
 		"coordinator stop",
 		nil,
@@ -484,6 +516,31 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
 	require.Equal(t, []string{"s1"}, canceller.expiredSessions)
 	require.Equal(t, []bool{true}, canceller.expireContextDeadline)
+}
+
+func TestTransitionTaskSessionStateRejectsUnexpectedSourceState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+	expectedState := models.TaskSessionStateStarting
+
+	changed, finalState, err := svc.transitionTaskSessionState(
+		ctx,
+		"t1",
+		"s1",
+		&expectedState,
+		models.TaskSessionStateFailed,
+		"resume failed",
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, models.TaskSessionStateRunning, finalState)
+	require.Empty(t, eb.events)
 }
 
 func TestTransitionTaskSessionStatePublishesMetadataWrittenByHook(t *testing.T) {
@@ -504,6 +561,7 @@ func TestTransitionTaskSessionStatePublishesMetadataWrittenByHook(t *testing.T) 
 		ctx,
 		"t1",
 		"s1",
+		nil,
 		models.TaskSessionStateFailed,
 		errorValue.Message,
 		func() {
@@ -539,6 +597,7 @@ func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {
 		ctx,
 		"t1",
 		"s1",
+		nil,
 		models.TaskSessionStateCancelled,
 		"coordinator stop",
 		nil,
@@ -866,6 +925,30 @@ func TestPersistTurnPromptMetadata(t *testing.T) {
 	require.Equal(t, float64(123), usage["provider_reported_cost_subcents"])
 	require.Equal(t, true, usage["output_tokens_present"])
 	require.Equal(t, true, usage["estimated"])
+}
+
+func TestPersistNativeCodexTurnIDBindsProviderTurnToActiveKandevTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.AgentProfileSnapshot = map[string]interface{}{"agent_id": "codex-app-server"}
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.config.CodexAppServerEnabled = true
+	svc.turnService = &repoTurnService{repo: repo}
+	turn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+
+	svc.persistNativeCodexTurnID(ctx, &lifecycle.AgentStreamEventPayload{
+		SessionID: "s1",
+		Data:      &lifecycle.AgentStreamEventData{Type: streams.EventTypeTurnStarted, OperationID: "native-turn-1"},
+	})
+
+	stored, err := repo.GetTurn(ctx, turn.ID)
+	require.NoError(t, err)
+	require.Equal(t, "native-turn-1", stored.Metadata[models.TurnMetaKeyCodexNativeTurnID])
 }
 
 // TestToolEventsWakeSessionAndTaskTogether locks in the fix for the
@@ -1767,6 +1850,61 @@ func TestUsageEventIDFor(t *testing.T) {
 	// under-count cost, so it must keep falling back to a random id.
 	require.NotEqual(t, usageEventIDFor("s1", "exec-1", 0), usageEventIDFor("s1", "exec-1", 0),
 		"promptGeneration==0 must not derive a stable id")
+}
+
+func TestPublishNativeUsageObservationUsesStableProviderIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-native-usage", "session-native-usage", "")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+	cacheWrite := int64(7)
+	observation := &streams.NativeUsageObservation{
+		SchemaVersion: 1, Source: "response", ProviderThreadID: "native-root",
+		ProviderTurnID: "native-turn", ProviderResponseID: "response-1", Scope: "direct",
+		Completeness: "exact", Model: "gpt-5-codex", ReportedCacheWriteTokens: &cacheWrite,
+		PriceSuppressed: true,
+	}
+	frame := &lifecycle.AgentStreamEventPayload{
+		TaskID: "task-native-usage", SessionID: "session-native-usage", ExecutionID: "execution-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: streams.EventTypeUsageObservation, TurnID: "turn-kandev-1",
+			Usage: &streams.PromptUsage{InputTokens: 10, OutputTokens: 5}, UsageObservation: observation,
+		},
+	}
+	svc.publishNativeUsageObservation(ctx, frame)
+	svc.publishNativeUsageObservation(ctx, frame)
+	if len(eb.events) != 2 {
+		t.Fatalf("published events = %d, want 2", len(eb.events))
+	}
+	first := eb.events[0].event.Data.(lifecycle.SessionPromptUsageEventPayload)
+	second := eb.events[1].event.Data.(lifecycle.SessionPromptUsageEventPayload)
+	if first.UsageEventID == "" || first.UsageEventID != second.UsageEventID {
+		t.Fatalf("usage event IDs = %q and %q, want stable non-empty ID", first.UsageEventID, second.UsageEventID)
+	}
+	if first.TurnID != "turn-kandev-1" || first.Model != "gpt-5-codex" || first.UsageObservation != observation || !first.Usage.PriceSuppressed {
+		t.Fatalf("published native usage payload = %#v", first)
+	}
+	if eb.events[0].subject != events.BuildSessionPromptUsageSubject("session-native-usage") {
+		t.Fatalf("subject = %q", eb.events[0].subject)
+	}
+
+	child := *observation
+	child.ProviderThreadID = "native-child"
+	child.ProviderResponseID = "response-child"
+	child.Scope = "child"
+	child.Model = ""
+	childFrame := *frame
+	childData := *frame.Data
+	childData.UsageObservation = &child
+	childData.CurrentModelID = "must-not-infer"
+	childFrame.Data = &childData
+	svc.publishNativeUsageObservation(ctx, &childFrame)
+	third := eb.events[2].event.Data.(lifecycle.SessionPromptUsageEventPayload)
+	if third.Model != "" || third.UsageEventID == first.UsageEventID {
+		t.Fatalf("child usage attribution model/id = %q/%q, want no inferred parent model and distinct identity", third.Model, third.UsageEventID)
+	}
 }
 
 // TestPublishPromptUsage_RepublishedCompletionReusesUsageEventID is the
@@ -2727,10 +2865,10 @@ func seedInterruptedMarker(t *testing.T, repo *sqliterepo.Repository, taskID str
 	}
 }
 
-func TestSessionStartClearsInterruptedMarker(t *testing.T) {
+func TestSessionStartKeepsInterruptedMarkerUntilRecovery(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("state hook transition to STARTING clears and republishes", func(t *testing.T) {
+	t.Run("state hook transition to STARTING keeps the marker", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		seedInterruptedMarker(t, repo, "t1")
@@ -2748,12 +2886,12 @@ func TestSessionStartClearsInterruptedMarker(t *testing.T) {
 		task, err := repo.GetTask(ctx, "t1")
 		require.NoError(t, err)
 		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
-		require.False(t, marked, "marker must be cleared when the session enters STARTING")
-		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
-			"task.updated must be republished after clearing the marker")
+		require.True(t, marked, "marker must survive the STARTING transition")
+		require.Empty(t, publisher.updatedTaskIDs,
+			"STARTING must not publish a marker-clearing task.updated")
 	})
 
-	t.Run("launch path via setSessionStarting clears and republishes", func(t *testing.T) {
+	t.Run("launch path via setSessionStarting keeps the marker", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		seedInterruptedMarker(t, repo, "t1")
@@ -2773,9 +2911,151 @@ func TestSessionStartClearsInterruptedMarker(t *testing.T) {
 		task, err := repo.GetTask(ctx, "t1")
 		require.NoError(t, err)
 		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
-		require.False(t, marked, "marker must be cleared on the launch path")
+		require.True(t, marked, "the launch attempt must not clear the marker")
+		require.Empty(t, publisher.updatedTaskIDs,
+			"the launch attempt must not publish a marker-clearing task.updated")
+	})
+
+	t.Run("confirmed boot recovery clears and republishes", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedInterruptedMarker(t, repo, "t1")
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		marker, ok := task.Metadata[models.MetaKeyInterruptedAt].(string)
+		require.True(t, ok)
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, interruptedMarkerSnapshot{value: marker, captured: true}, true))
+
+		task, err = repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
+		require.False(t, marked, "successful boot recovery must clear the marker")
 		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
-			"task.updated must be republished after clearing the marker")
+			"successful boot recovery must publish the marker-clearing task.updated")
+	})
+
+	t.Run("stale recovery preserves a newer interruption marker", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "old-marker"))
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, interruptedMarkerSnapshot{value: "old-marker", captured: true}, true))
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
+		require.Empty(t, publisher.updatedTaskIDs,
+			"a stale recovery callback must not publish a marker-clearing update")
+	})
+
+	t.Run("recovery callback with no marker snapshot fails closed", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		// A recovery attempt can finish after its task snapshot failed to load.
+		// An uncaptured snapshot must remain a guarded no-op.
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, interruptedMarkerSnapshot{}, true))
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
+		require.Empty(t, publisher.updatedTaskIDs)
+	})
+
+	t.Run("finished recovery attempt with absent marker preserves a newer marker", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		registry := newResumeAttemptRegistry()
+		svc.resumeAttemptsMu.Lock()
+		svc.resumeAttempts = registry
+		svc.resumeAttemptsMu.Unlock()
+		attempt, owner := registry.begin(ctx, "t1", "s1")
+		require.True(t, owner)
+		attempt.setInterruptedMarkerSnapshot("", true)
+		attempt.finish(registry)
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		snapshot, known := svc.interruptedMarkerSnapshotForResumeAttempt("s1", attempt.identity())
+		require.True(t, known)
+		require.True(t, snapshot.captured)
+		require.Empty(t, snapshot.value)
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, snapshot, known))
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
+	})
+
+	t.Run("finished recovery attempt with failed marker read preserves a newer marker", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		registry := newResumeAttemptRegistry()
+		svc.resumeAttemptsMu.Lock()
+		svc.resumeAttempts = registry
+		svc.resumeAttemptsMu.Unlock()
+		attempt, owner := registry.begin(ctx, "t1", "s1")
+		require.True(t, owner)
+		// Leave the snapshot uncaptured to model a failed GetTask read.
+		attempt.finish(registry)
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		snapshot, known := svc.interruptedMarkerSnapshotForResumeAttempt("s1", attempt.identity())
+		require.True(t, known)
+		require.False(t, snapshot.captured)
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, snapshot, known))
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
+	})
+
+	t.Run("finished recovery attempt retains its immutable marker snapshot", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "old-marker"))
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		registry := newResumeAttemptRegistry()
+		svc.resumeAttemptsMu.Lock()
+		svc.resumeAttempts = registry
+		svc.resumeAttemptsMu.Unlock()
+		attempt, owner := registry.begin(ctx, "t1", "s1")
+		require.True(t, owner)
+		attempt.setInterruptedMarkerSnapshot("old-marker", true)
+		attempt.finish(registry)
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		marker := svc.interruptedMarkerForResumeAttempt("s1", attempt.identity())
+		require.Equal(t, "old-marker", marker)
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, interruptedMarkerSnapshot{value: marker, captured: true}, true))
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
 	})
 
 	t.Run("no marker means no republish", func(t *testing.T) {
@@ -2961,7 +3241,7 @@ func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
 			},
 		))
 
-		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", snapshot))
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", snapshot, interruptedMarkerSnapshot{}, false))
 
 		stored, err := repo.GetTaskSession(ctx, "s1")
 		require.NoError(t, err)
@@ -3026,6 +3306,7 @@ func TestTransitionBootstrapFailurePersistsSessionHistory(t *testing.T) {
 		"exec-1",
 		models.TaskSessionStateStarting,
 		"",
+		"",
 		failure,
 	)
 	require.NoError(t, err)
@@ -3043,7 +3324,7 @@ func TestTransitionBootstrapFailurePersistsSessionHistory(t *testing.T) {
 
 	reloaded, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
 	require.NoError(t, err)
-	resolvedAt := svc.markRecoveryResolved(ctx, reloaded.ID, reloaded)
+	resolvedAt := svc.markRecoveryResolved(ctx, reloaded.ID, reloaded, interruptedMarkerSnapshot{}, false)
 	require.NotNil(t, resolvedAt)
 
 	afterRecovery, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
@@ -3119,6 +3400,7 @@ func TestTransitionBootstrapFailureReturnsRepairableHistoryError(t *testing.T) {
 		"bootstrap-repair-session",
 		"exec-repair",
 		models.TaskSessionStateStarting,
+		"",
 		"",
 		failure,
 	)

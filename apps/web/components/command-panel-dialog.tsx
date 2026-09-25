@@ -13,7 +13,7 @@ export function CommandPanelDialog(props: ComponentProps<typeof CommandDialog>) 
         <CommandDialog
           {...props}
           className={cn(props.className, active && "flex max-h-[calc(100dvh-2rem)] flex-col")}
-          contentProps={{ ...contentProps, enterConfirms: !active }}
+          contentProps={{ ...contentProps, ...props.contentProps, enterConfirms: !active }}
         >
           <MobileConfirmationHostBody>{props.children}</MobileConfirmationHostBody>
         </CommandDialog>

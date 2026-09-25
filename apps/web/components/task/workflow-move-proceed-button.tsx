@@ -21,6 +21,8 @@ import { useHoverPopover } from "@/components/integrations/use-hover-popover";
 import { WorkflowMoveOptions, WorkflowMoveOptionsForm } from "./workflow-move-options";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
+import type { WorkflowMovePreviewTarget } from "./workflow-move-preview-footer";
+
 export const WORKFLOW_MOVE_LONG_PRESS_MS = 450;
 export const WORKFLOW_MOVE_LONG_PRESS_SLOP_PX = 10;
 
@@ -121,6 +123,7 @@ export function useWorkflowMoveLongPress(onLongPress: () => void): {
 }
 
 type ProceedSurfaceCommon = {
+  previewTarget?: WorkflowMovePreviewTarget;
   nextStepName: string;
   isMoving: boolean;
   className?: string;
@@ -137,6 +140,7 @@ type ProceedSurfaceCommon = {
  * can retarget onto the Drawer submit button.
  */
 function CoarseProceedSurface({
+  previewTarget,
   nextStepName,
   isMoving,
   className,
@@ -171,6 +175,7 @@ function CoarseProceedSurface({
         <IconArrowRight className="h-3.5 w-3.5" />
       </Button>
       <WorkflowMoveOptions
+        previewTarget={previewTarget}
         open={optionsOpen}
         onOpenChange={onOptionsOpenChange}
         targetStepName={nextStepName}
@@ -191,6 +196,7 @@ function CoarseProceedSurface({
  * plain click still moves immediately. A failed move keeps the form open.
  */
 function FineProceedSurface({
+  previewTarget,
   nextStepName,
   isMoving,
   className,
@@ -261,6 +267,7 @@ function FineProceedSurface({
           {t("task:workflowMoveOptionsTitle", { step: nextStepName })}
         </div>
         <WorkflowMoveOptionsForm
+          previewTarget={previewTarget}
           isMoving={isMoving}
           isTouchSurface={false}
           instructionsRows={3}
@@ -302,6 +309,7 @@ function useDrawerFocusReturn() {
 }
 
 type WorkflowMoveProceedButtonProps = {
+  previewTarget?: WorkflowMovePreviewTarget;
   nextStepName: string;
   onProceed: (options?: WorkflowMoveEntryOptions) => boolean | void | Promise<boolean | void>;
   isMoving: boolean;
@@ -316,6 +324,7 @@ type WorkflowMoveProceedButtonProps = {
  * Drawer. A failed move keeps the form and its draft open.
  */
 export function WorkflowMoveProceedButton({
+  previewTarget,
   nextStepName,
   onProceed,
   isMoving,
@@ -382,6 +391,7 @@ export function WorkflowMoveProceedButton({
   if (usesTouchDrawer) {
     return (
       <CoarseProceedSurface
+        previewTarget={previewTarget}
         nextStepName={nextStepName}
         isMoving={isMoving}
         className={className}
@@ -399,6 +409,7 @@ export function WorkflowMoveProceedButton({
 
   return (
     <FineProceedSurface
+      previewTarget={previewTarget}
       nextStepName={nextStepName}
       isMoving={isMoving}
       className={className}

@@ -174,6 +174,9 @@ func TestMigration_LegacyDB_PreservesAllColumns(t *testing.T) {
 	if !profile.CLIPassthrough {
 		t.Error("cli_passthrough: got false, want true")
 	}
+	if profile.ProviderKind != "" || profile.ProviderBaseURL != "" || profile.ProviderAPIKeySecretID != "" {
+		t.Errorf("provider fields should default empty after legacy migration: %+v", profile)
+	}
 
 	// Update the profile to set mode (new column).
 	profile.Mode = "plan"

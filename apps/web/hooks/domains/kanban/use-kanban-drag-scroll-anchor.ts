@@ -18,7 +18,7 @@ function findStepElement(board: HTMLDivElement, stepId: string): HTMLElement | u
 
 function findScrollWindow(board: HTMLDivElement): HTMLElement | null {
   return board.querySelector<HTMLElement>(
-    '[data-testid="desktop-kanban-scroll-window"], [data-testid="tablet-kanban-layout"]',
+    '[data-testid="desktop-kanban-scroll-window"], [data-testid="tablet-kanban-scroll-window"]',
   );
 }
 

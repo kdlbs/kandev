@@ -11,6 +11,7 @@ import {
   executorProfileDiscoveryTarget,
   workspaceDiscoveryTarget,
 } from "./dynamic-targets";
+import { executorProfileSettingsPath } from "../settings/executor-settings-routes";
 
 function workspaceDefinitions(
   workspaces: SettingsDiscoveryContext["workspaces"],
@@ -147,7 +148,7 @@ function executorProfileDefinitions(
   for (const [executorIndex, executor] of executors.entries()) {
     for (const [profileIndex, profile] of (executor.profiles ?? []).entries()) {
       const profileId = `executor-profile:${profile.id}`;
-      const href = `/settings/executors/${encodeURIComponent(profile.id)}`;
+      const href = executorProfileSettingsPath(profile.id);
       const order = 30_000 + executorIndex * 100 + profileIndex * 10;
       entries.push({
         id: profileId,

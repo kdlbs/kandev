@@ -28,6 +28,41 @@ Agents and external MCP clients need a failed tool call to be distinguishable fr
 - **AC-INTEGRATIONS-MCP-TOOL-ARGUMENT-VALIDATION-001.7:** `create_task_kandev` advertises `prompt` for the text delivered to a newly started agent. It accepts the former `description` name as an unadvertised compatibility alias, without adding a second field or explanation to the tool schema. A call containing both names fails rather than choosing one silently.
 - **AC-INTEGRATIONS-MCP-TOOL-ARGUMENT-VALIDATION-001.8:** The backend task action continues receiving the text in its existing `description` field; this naming convergence changes only the MCP boundary.
 
+### REQ-INTEGRATIONS-MCP-TOOL-SCHEMA-PORTABILITY-001: MCP Tool Schema Portability
+
+**Intent:** An agent forwards each advertised Kandev MCP tool schema to its own
+model provider as a function definition. Model provider function-calling
+validators are stricter than JSON Schema Draft 7 and do not share one dialect, so
+a schema that Kandev accepts locally can still make the provider reject the whole
+request and prevent any turn from running. Kandev tool schemas must stay within a
+portable subset that every supported model provider accepts, and any constraint
+that subset cannot express must still be enforced.
+
+#### Acceptance criteria
+
+- **AC-INTEGRATIONS-MCP-TOOL-SCHEMA-PORTABILITY-001.1:** Every built-in and
+  plugin MCP tool schema that Kandev advertises through `tools/list` declares no
+  `oneOf`, `allOf`, or `anyOf` keyword at the root of the schema object.
+- **AC-INTEGRATIONS-MCP-TOOL-SCHEMA-PORTABILITY-001.2:** When a tool schema
+  declares `oneOf`, `allOf`, or `anyOf` at its root, schema compilation fails
+  closed: a plugin snapshot carrying such a tool is rejected before it is
+  advertised, a built-in tool with such a schema is flagged at registration, and
+  a call to a tool whose registered schema is invalid returns a tool error
+  without invoking its handler.
+- **AC-INTEGRATIONS-MCP-TOOL-SCHEMA-PORTABILITY-001.3:** Cross-field and
+  mutually-exclusive argument constraints that the portable subset cannot express
+  at the root are enforced in the tool handler before any handler or backend side
+  effect, returning a tool error that identifies the violated constraint without
+  returning sensitive argument values.
+- **AC-INTEGRATIONS-MCP-TOOL-SCHEMA-PORTABILITY-001.4:** The
+  `manage_task_change_request_kandev` and
+  `update_task_change_request_automation_kandev` tools reject the same invalid
+  argument combinations that their prior top-level `oneOf`/`allOf` schemas
+  rejected, including old-identity fields on a non-replace operation, missing old
+  identity on a replace, an association target that also supplies task-provider
+  selection or the reverse, and an `auto_fix_prompt_override` on an association
+  target.
+
 ## Migrated source detail
 
 Decision: [ADR-2026-08-01-validate-mcp-tool-arguments](../../../decisions/2026-08-01-validate-mcp-tool-arguments.md)
@@ -90,3 +125,8 @@ Validation failures are returned as MCP tool error results. They identify the in
 - Changing MCP transport, authorization, tool availability by mode, or backend action payloads.
 - Adding automatic tool-call retries or agent-client-specific schema rewriting.
 - Duplicating every registered tool schema in the first-turn task context.
+
+## Implementation Plans
+
+- [MCP tool argument validation](../../../plans/mcp-tool-argument-validation/plan.md): original implementation package.
+- [MCP validation diagnostic repair](../../../plans/mcp-tool-argument-validation-repair/plan.md): follow-up package for complete unknown-argument diagnostics.

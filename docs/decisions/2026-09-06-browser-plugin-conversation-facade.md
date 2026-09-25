@@ -36,3 +36,9 @@ Add a typed browser `host.conversation` facade and scoped task-panel navigation 
 - **Require a plugin backend to proxy Host gRPC reads.** Rejected: it adds a process and network hop to a browser-only panel, still does not solve native navigation or browser-local favorites, and prevents a UI-only package.
 - **Add prompt-history-specific REST and React components as one monolithic Host widget.** Rejected: it would move the feature into a differently named core component rather than establish reusable conversation and panel boundaries.
 - **Move mobile scroll-target state into global Zustand.** Rejected: the current mobile layout owns its active full-height surface and exact scroll target locally. A scoped injected adapter preserves that ownership and prevents stale global navigation.
+
+## Storage decision, 2026-09-16
+
+The [source reconciliation decision](2026-09-16-conversation-source-reconciliation.md) retains the browser facade boundary.
+It selects source reads and revision checks instead of mandatory conversation payload history.
+The replacement implementation remains pending in its linked plan.

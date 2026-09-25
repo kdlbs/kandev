@@ -206,6 +206,25 @@ describe("AddWorkspaceSourcesDialog repository discovery", () => {
   });
 });
 
+describe("AddWorkspaceSourcesDialog touch activation", () => {
+  it("opens the repository menu after touch release without selecting a source", async () => {
+    isMobile = true;
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    const trigger = screen.getByRole("button", { name: "Add repository" });
+    const workspaceRepository = { name: "Workspace repository" };
+    fireEvent.pointerDown(trigger, { button: 0, pointerType: "touch" });
+    expect(screen.queryByRole("menuitem", workspaceRepository)).toBeNull();
+    fireEvent.pointerUp(trigger, { button: 0, pointerType: "touch" });
+    expect(screen.queryByRole("menuitem", workspaceRepository)).toBeNull();
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("menuitem", workspaceRepository)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove source" })).toBeNull();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Local Git repository" }));
+    expect(screen.getByRole("button", { name: "Remove source" })).toBeTruthy();
+  });
+});
+
 describe("AddWorkspaceSourcesDialog", () => {
   it("uses a touch-sized repository menu without tabs or discarded mixed source rows", async () => {
     isMobile = true;

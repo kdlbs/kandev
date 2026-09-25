@@ -312,6 +312,37 @@ func TestAssociatePRByURL_WatchAndAssociationAgreeOnRedirectedOwner(t *testing.T
 	}
 }
 
+func TestCreatePRWatch_RedirectedMemberReusesOwnerCanonicalWatch(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+
+	issueStore := newMultiTaskIssueStore()
+	issueStore.addTask(&taskmodels.Task{ID: "member1"}, "repo-canonical")
+	issueStore.addTask(&taskmodels.Task{ID: "owner1"}, "repo-canonical")
+	svc.SetTaskIssueStore(issueStore)
+	svc.SetWorkspaceGroupOwnerResolver(&fakeWorkspaceGroupOwnerResolver{ownerTaskID: "owner1"})
+
+	ctx := context.Background()
+	existing, err := svc.CreatePRWatch(ctx, "owner-session", "owner1", "repo-canonical", "org", "repo", 0, "feature-x")
+	if err != nil {
+		t.Fatalf("create owner watch: %v", err)
+	}
+
+	got, err := svc.CreatePRWatch(ctx, "member-session", "member1", "repo-canonical", "org", "repo", 0, "feature-x")
+	if err != nil {
+		t.Fatalf("create redirected member watch: %v", err)
+	}
+	if got.ID != existing.ID {
+		t.Fatalf("watch ID = %q, want existing owner watch %q", got.ID, existing.ID)
+	}
+	watches, err := store.ListPRWatchesByTask(ctx, "owner1")
+	if err != nil {
+		t.Fatalf("list owner watches: %v", err)
+	}
+	if len(watches) != 1 {
+		t.Fatalf("owner watches = %+v, want exactly one canonical watch", watches)
+	}
+}
+
 // TestCheckSinglePRWatch_LegacyMemberWatchSyncsOwnersTaskPR covers a watch
 // that already carries a member task's ID — either written before this fix
 // existed, or (per apps/backend/CLAUDE.md's "PR status sync coverage") any

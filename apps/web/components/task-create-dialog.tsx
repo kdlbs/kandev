@@ -205,6 +205,14 @@ function DialogFormBody(props: DialogFormBodyProps) {
         priority={props.fs.priority}
         onPriorityChange={props.fs.setPriority}
         dependenciesDisabled={props.isCreatingSession || props.isCreatingTask}
+        workflowAgentOverrideRows={props.workflowAgentOverrideRows}
+        workflowAgentOverrideOptions={props.workflowAgentOverrideOptions}
+        workflowAgentOverridesLoading={props.workflowAgentOverridesLoading}
+        workflowAgentOverridesInvalid={props.workflowAgentOverridesInvalid}
+        workflowAgentOverridesError={props.workflowAgentOverridesError}
+        onWorkflowAgentOverrideChange={props.onWorkflowAgentOverrideChange}
+        onResetWorkflowAgentOverrides={props.onResetWorkflowAgentOverrides}
+        onRetryWorkflowAgentOverrides={props.onRetryWorkflowAgentOverrides}
       />
       {props.isEditMode && (
         <TaskEditDialogDependencies

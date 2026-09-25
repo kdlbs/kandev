@@ -75,6 +75,7 @@ export class OfficeApiClient {
       name: string;
       role: string;
       agent_profile_id?: string;
+      executor_preference?: string;
     },
   ): Promise<Record<string, unknown>> {
     const res = await this.request<{ agent: Record<string, unknown> }>(
@@ -565,7 +566,16 @@ export class OfficeApiClient {
 
   async createRoutine(
     wsId: string,
-    data: { name: string; description?: string; catch_up_policy?: string },
+    data: {
+      name: string;
+      description?: string;
+      catch_up_policy?: string;
+      assignee_agent_profile_id?: string;
+      concurrency_policy?: string;
+      catch_up_max?: number;
+      task_template?: string;
+      variables?: string;
+    },
   ): Promise<Record<string, unknown>> {
     const res = await this.request<{ routine: Record<string, unknown> }>(
       "POST",
@@ -580,9 +590,21 @@ export class OfficeApiClient {
     return res.routine ?? (res as unknown as Record<string, unknown>);
   }
 
+  async listRoutineRuns(routineId: string): Promise<Record<string, unknown>> {
+    return this.request("GET", `/routines/${routineId}/runs`);
+  }
+
   /** Manual fire (AC-OFFICE-KILL-SWITCH-002.4). Raw: a paused workspace answers 409. */
   async runRoutine(routineId: string): Promise<Response> {
     return this.rawRequest("POST", `/routines/${routineId}/run`);
+  }
+
+  async listRoutineTriggers(routineId: string): Promise<Record<string, unknown>[]> {
+    const res = await this.request<{ triggers: Record<string, unknown>[] | null }>(
+      "GET",
+      `/routines/${routineId}/triggers`,
+    );
+    return res.triggers ?? [];
   }
 
   // --- Workspace pause (kill switch) ---

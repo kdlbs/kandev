@@ -2,6 +2,7 @@ export const SETTINGS_TARGET_ATTRIBUTE = "data-settings-target";
 export const SETTINGS_TARGET_FOCUS_ATTRIBUTE = "data-settings-target-focus";
 export const SETTINGS_TARGET_HIGHLIGHT_ATTRIBUTE = "data-settings-target-highlight";
 export const SETTINGS_TARGET_REQUEST_EVENT = "kandev:settings-target";
+export const SETTINGS_TARGET_DISCLOSURE_OPEN_EVENT = "kandev:settings-target-disclosure-open";
 
 export type SettingsTargetRequestDetail = { targetId: string };
 
@@ -48,11 +49,16 @@ export function createSettingsTargetRegistry(
   const targets = new Map<string, HTMLElement>();
   let pendingTargetId: string | null = null;
 
+  const isHidden = (element: HTMLElement) =>
+    element.hidden ||
+    element.closest("[hidden]") !== null ||
+    element.closest('[aria-hidden="true"]') !== null;
+
   return {
     register(targetId, element) {
       targets.set(targetId, element);
       element.setAttribute(SETTINGS_TARGET_ATTRIBUTE, targetId);
-      if (pendingTargetId === targetId) {
+      if (pendingTargetId === targetId && !isHidden(element)) {
         pendingTargetId = null;
         reveal(element);
       }
@@ -69,6 +75,10 @@ export function createSettingsTargetRegistry(
         pendingTargetId = targetId;
         return false;
       }
+      if (isHidden(element)) {
+        pendingTargetId = targetId;
+        return false;
+      }
       pendingTargetId = null;
       reveal(element);
       return true;
@@ -77,6 +87,7 @@ export function createSettingsTargetRegistry(
 }
 
 export function revealSettingsTarget(element: HTMLElement, options: RevealOptions = {}): void {
+  openEnclosingDetails(element);
   const reducedMotion = options.reducedMotion ?? prefersReducedMotion();
   element.scrollIntoView?.({
     behavior: reducedMotion ? "auto" : "smooth",
@@ -86,6 +97,17 @@ export function revealSettingsTarget(element: HTMLElement, options: RevealOption
   focusTargetWithin(element);
   restartTargetHighlight(element, options.highlightDurationMs ?? DEFAULT_HIGHLIGHT_DURATION_MS);
   keepTargetCentered(element, options.settleDurationMs ?? DEFAULT_SETTLE_DURATION_MS);
+}
+
+function openEnclosingDetails(element: HTMLElement): void {
+  const ancestors: HTMLDetailsElement[] = [];
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    if (node instanceof HTMLDetailsElement) ancestors.push(node);
+  }
+  for (const details of ancestors.reverse()) {
+    details.open = true;
+    details.dispatchEvent(new Event(SETTINGS_TARGET_DISCLOSURE_OPEN_EVENT));
+  }
 }
 
 let cancelActiveSettle: (() => void) | null = null;
@@ -136,7 +158,7 @@ function focusTargetWithin(element: HTMLElement): void {
   const focusTarget =
     element.querySelector<HTMLElement>(`[${SETTINGS_TARGET_FOCUS_ATTRIBUTE}]`) ??
     element.querySelector<HTMLElement>(
-      `input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])`,
+      `input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]):not([data-settings-info]), a[href], [tabindex]:not([tabindex="-1"]):not([data-settings-info])`,
     );
   const target = focusTarget ?? element;
   if (!focusTarget && !element.hasAttribute("tabindex")) element.tabIndex = -1;

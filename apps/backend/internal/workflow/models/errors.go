@@ -8,6 +8,9 @@ import (
 // ErrWIPLimitExceeded identifies a workflow-step capacity rejection.
 var ErrWIPLimitExceeded = errors.New("workflow step WIP limit exceeded")
 
+// ErrWorkflowStepNotFound reports that no workflow step row matched the supplied id.
+var ErrWorkflowStepNotFound = errors.New("workflow step not found")
+
 // WIPLimitError carries workflow-step capacity details while preserving
 // errors.Is(err, ErrWIPLimitExceeded) classification at service boundaries.
 type WIPLimitError struct {

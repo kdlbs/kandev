@@ -53,10 +53,14 @@ func RegisterSessionStreamNotifications(ctx context.Context, eventBus bus.EventB
 	b.subscribe(eventBus, events.BuildSessionModelsWildcardSubject(), ws.ActionSessionModelsUpdated)
 	b.subscribe(eventBus, events.BuildSessionModelFallbackWildcardSubject(), ws.ActionSessionModelFallback)
 	b.subscribe(eventBus, events.BuildSessionModelSelectionWarningWildcardSubject(), ws.ActionSessionModelSelectionWarning)
+	b.subscribe(eventBus, events.BuildSessionLaunchWarningWildcardSubject(), ws.ActionSessionLaunchWarning)
 	b.subscribe(eventBus, events.BuildSessionMCPStatusWildcardSubject(), ws.ActionSessionMCPStatusUpdated)
 	b.subscribe(eventBus, events.BuildSessionInfoWildcardSubject(), ws.ActionSessionInfoUpdated)
 	b.subscribe(eventBus, events.BuildSessionTodosWildcardSubject(), ws.ActionSessionTodosUpdated)
 	b.subscribe(eventBus, events.BuildSessionPromptUsageWildcardSubject(), ws.ActionSessionPromptUsage)
+	b.subscribe(eventBus, events.BuildSessionUsageUpdatedWildcardSubject(), ws.ActionSessionUsageUpdated)
+	b.subscribe(eventBus, events.BuildBackgroundWorkUpdatedWildcardSubject(), ws.ActionSessionBackgroundWorkUpdated)
+	b.subscribe(eventBus, events.BuildBackgroundWorkOutputWildcardSubject(), ws.ActionSessionBackgroundWorkOutput)
 
 	go func() {
 		<-ctx.Done()
@@ -93,6 +97,10 @@ func (b *SessionStreamBroadcaster) subscribe(eventBus bus.EventBus, subject, act
 		msg, err := ws.NewNotification(action, event.Data)
 		if err != nil {
 			b.logger.Error("failed to build websocket notification", zap.String("action", action), zap.Error(err))
+			return nil
+		}
+		if action == ws.ActionSessionLaunchWarning {
+			b.hub.rememberAndBroadcastSessionLaunchWarning(sessionID, msg)
 			return nil
 		}
 		b.hub.BroadcastToSession(sessionID, msg)

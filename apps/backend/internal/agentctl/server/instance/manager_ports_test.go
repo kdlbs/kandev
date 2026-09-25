@@ -41,16 +41,16 @@ func TestAllocatePortAndListenerRetriesAddressInUse(t *testing.T) {
 	}, newTestLogger(t))
 	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
 
-	port, listener, err := mgr.allocatePortAndListener("retry")
+	lease, listener, err := mgr.allocatePortAndListener("retry")
 	if err != nil {
 		t.Fatalf("allocatePortAndListener: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = listener.Close()
-		mgr.portAlloc.Release(port)
+		mgr.portAlloc.Release(lease)
 	})
 
-	if port != base+1 {
-		t.Fatalf("allocated port = %d, want retry on %d", port, base+1)
+	if lease.Port != base+1 {
+		t.Fatalf("allocated port = %d, want retry on %d", lease.Port, base+1)
 	}
 }

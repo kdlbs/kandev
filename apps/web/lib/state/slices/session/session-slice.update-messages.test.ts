@@ -86,6 +86,24 @@ describe("updateMessages", () => {
     expect(store.getState().messages.bySession["session-2"][0]).toBe(otherSessionMessage);
   });
 
+  it("upserts a retry notice when its reused row is outside the loaded window", () => {
+    const store = makeStore();
+    store.getState().updateMessages([
+      makeMessage("retry", "Model at capacity", SESSION, {
+        type: "status",
+        metadata: { retrying: true, attempt: 2 },
+      }),
+    ]);
+
+    expect(store.getState().messages.bySession[SESSION]).toEqual([
+      expect.objectContaining({
+        id: "retry",
+        type: "status",
+        metadata: { retrying: true, attempt: 2 },
+      }),
+    ]);
+  });
+
   it("fans batched updates into the prompt cache", () => {
     const store = makeStore();
     store.getState().addMessage(

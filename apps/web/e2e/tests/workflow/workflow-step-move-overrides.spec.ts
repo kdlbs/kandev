@@ -1,3 +1,4 @@
+import { expectPreviewFooter } from "./workflow-move-preview-assertions";
 import { expect, test } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import {
@@ -62,7 +63,7 @@ async function openStepperMoveOptions(testPage: Parameters<typeof waitForMoveReq
   await expect(testPage.getByTestId("workflow-move-instructions")).toBeVisible();
 }
 
-test("moves in place with one-shot options from the desktop stepper", async ({
+test("moves with Ctrl+Enter and one-shot options from the desktop stepper", async ({
   testPage,
   apiClient,
   seedData,
@@ -81,7 +82,7 @@ test("moves in place with one-shot options from the desktop stepper", async ({
   await openStepperMoveOptions(testPage);
   await fillMoveOverrides(testPage);
   const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
-  await testPage.getByTestId("workflow-step-move-here").click();
+  await testPage.getByTestId("workflow-move-instructions").press("Control+Enter");
 
   expect((await moveRequest).postDataJSON()).toEqual({
     workflow_id: expect.any(String),
@@ -130,6 +131,10 @@ test("uses the desktop next-step anchored form for the same one-shot move contra
   await expect(nextStepButton).toBeVisible();
   await nextStepButton.hover();
   await expect(testPage.getByTestId("proceed-next-step-options")).toBeVisible();
+  await expectPreviewFooter(
+    testPage.getByTestId("proceed-next-step-options"),
+    "workflow-move-submit",
+  );
   await fillMoveOverrides(testPage);
   const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
   await testPage.getByTestId("workflow-move-submit").click();
@@ -167,6 +172,7 @@ test("keeps the desktop next-step form open when clicking a checkbox label", asy
   const form = testPage.getByTestId("proceed-next-step-options");
   await expect(form).toBeVisible();
 
+  await form.hover();
   await form.getByText("Skip the step prompt", { exact: true }).click();
 
   await expect(form).toBeVisible();

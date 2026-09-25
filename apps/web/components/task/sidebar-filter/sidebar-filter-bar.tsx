@@ -1,5 +1,7 @@
 "use client";
 
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+
 import { useMemo, useRef } from "react";
 import { IconAdjustments, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -50,9 +52,10 @@ function useSidebarCommands(
 export function SidebarFilterBar() {
   const { t } = useTranslation();
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
-  const draft = useAppStore((s) => s.sidebarViews.draft);
-  const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
-  const views = useAppStore((s) => s.sidebarViews.views);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const draft = useAppStore((s) => selectSidebarViews(s).draft);
+  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
+  const views = useAppStore((s) => selectSidebarViews(s).views);
   const setActiveView = useAppStore((s) => s.setSidebarActiveView);
   const hasDraft = !!draft && draft.baseViewId === activeViewId;
   const {
@@ -65,6 +68,8 @@ export function SidebarFilterBar() {
   } = useSidebarViewPopover();
 
   useRegisterCommands(useSidebarCommands(views, onOpenChange, setActiveView));
+
+  if (!workspaceId) return null;
 
   return (
     <div
@@ -109,6 +114,7 @@ export function SidebarFilterBar() {
         {t("task:newView")}
       </Button>
       <SidebarFilterPopover
+        key={workspaceId}
         open={open}
         onOpenChange={onOpenChange}
         renameRequestedViewId={renameRequestedViewId}

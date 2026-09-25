@@ -21,8 +21,8 @@ func (c *Controller) registerIssueWatchRoutes(api *gin.RouterGroup) {
 }
 
 // httpListIssueWatches returns watches scoped to one workspace when
-// `workspace_id` is supplied, or every watch across all workspaces when it is
-// absent (used by the install-wide settings page).
+// `workspace_id` is supplied, or all watches visible to the caller when it is
+// absent.
 func (c *Controller) httpListIssueWatches(ctx *gin.Context) {
 	workspaceID := ctx.Query("workspace_id")
 	var (

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Pre-commit supplies repository-relative Go filenames. Lint their complete
+# packages for type information; CI owns the full-backend scan.
+set -euo pipefail
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE \
+	GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+packages=()
+for file in "$@"; do
+	case "$file" in
+		apps/backend/*.go) ;;
+		*) continue ;;
+	esac
+	package="./${file#apps/backend/}"
+	package=${package%/*}
+	for existing in ${packages[@]+"${packages[@]}"}; do
+		if [ "$existing" = "$package" ]; then
+			continue 2
+		fi
+	done
+	packages+=("$package")
+done
+
+[ "${#packages[@]}" -gt 0 ] || exit 0
+
+base=$(scripts/resolve-go-lint-base --comparison-base)
+cd apps/backend
+exec golangci-lint run "${packages[@]}" --new-from-rev="$base" --timeout=5m

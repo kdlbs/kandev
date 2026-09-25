@@ -63,20 +63,29 @@ const (
 	PrepareStepSkipped   PrepareStepStatus = "skipped"
 )
 
+const PrepareStepKindRemoteHelperDownload = "remote_helper_download"
+
 // RepoPrepareSpec describes one repository for multi-repo environment preparation.
 // Mirrors the per-repo prepare fields that EnvPrepareRequest historically
 // carried at the top level. When EnvPrepareRequest.Repositories is non-empty,
 // each entry produces one prepared worktree under the shared TaskDirName.
 type RepoPrepareSpec struct {
-	TaskRepositoryID   string
-	RepositoryID       string
+	TaskRepositoryID string
+	RepositoryID     string
+	// CopyFiles is the repository's seeding spec. Carried here only so the
+	// preparer can report a seed the agent cannot reach in a multi-repository
+	// layout; materialization itself still happens in the worktree manager.
+	CopyFiles          string
 	RepositoryPath     string
 	RepoName           string
 	BaseBranch         string
+	IntegrationRef     string
 	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch     string
 	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase    *models.PRBase
 	RemoteContribution *models.RemoteContribution
+	CheckoutOptions    *models.RepositoryCheckoutOptions
 	WorktreeID         string
 	// WorkspaceReuseRequired makes preparation attach to the exact canonical
 	// environment. It forbids worktree creation/recreation and all repository
@@ -125,10 +134,13 @@ type EnvPrepareRequest struct {
 	SetupScript             string
 	RepoSetupScript         string // Repository-level setup script (e.g. "make install")
 	BaseBranch              string
+	IntegrationRef          string
 	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch          string
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase         *models.PRBase
 	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	WorktreeID              string
 	WorktreeBranch          string
@@ -185,10 +197,13 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		RepositoryPath:             r.RepositoryPath,
 		RepoName:                   r.RepoName,
 		BaseBranch:                 r.BaseBranch,
+		IntegrationRef:             r.IntegrationRef,
 		DefaultBranch:              r.DefaultBranch,
 		CheckoutBranch:             r.CheckoutBranch,
 		PRNumber:                   r.PRNumber,
+		QualifiedPRBase:            r.QualifiedPRBase,
 		RemoteContribution:         r.RemoteContribution,
+		CheckoutOptions:            r.CheckoutOptions,
 		WorktreeID:                 r.WorktreeID,
 		WorkspaceReuseRequired:     r.WorkspaceReuseRequired,
 		AllowBranchReplacement:     r.AllowBranchReplacement,
@@ -210,15 +225,18 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 
 // PrepareStep represents a single step in the preparation process.
 type PrepareStep struct {
-	Name          string            `json:"name"`
-	Command       string            `json:"command,omitempty"`
-	Status        PrepareStepStatus `json:"status"`
-	Output        string            `json:"output,omitempty"`
-	Error         string            `json:"error,omitempty"`
-	Warning       string            `json:"warning,omitempty"`
-	WarningDetail string            `json:"warning_detail,omitempty"`
-	StartedAt     *time.Time        `json:"started_at,omitempty"`
-	EndedAt       *time.Time        `json:"ended_at,omitempty"`
+	Name           string            `json:"name"`
+	Kind           string            `json:"kind,omitempty"`
+	RemotePlatform string            `json:"remote_platform,omitempty"`
+	FailureCode    string            `json:"failure_code,omitempty"`
+	Command        string            `json:"command,omitempty"`
+	Status         PrepareStepStatus `json:"status"`
+	Output         string            `json:"output,omitempty"`
+	Error          string            `json:"error,omitempty"`
+	Warning        string            `json:"warning,omitempty"`
+	WarningDetail  string            `json:"warning_detail,omitempty"`
+	StartedAt      *time.Time        `json:"started_at,omitempty"`
+	EndedAt        *time.Time        `json:"ended_at,omitempty"`
 }
 
 // RepoWorktreeResult is the per-repository outcome of environment preparation.
@@ -230,6 +248,8 @@ type RepoWorktreeResult struct {
 	BranchSlug                string `json:"branch_slug,omitempty"`
 	WorktreeID                string `json:"worktree_id,omitempty"`
 	WorktreeBranch            string `json:"worktree_branch,omitempty"`
+	WorktreeBranchOwner       string `json:"-"`
+	WorktreeIntegrationRef    string `json:"-"`
 	WorktreePath              string `json:"worktree_path,omitempty"`
 	MainRepoGitDir            string `json:"main_repo_git_dir,omitempty"`
 	RequestedBaseBranch       string `json:"requested_base_branch,omitempty"`
@@ -250,6 +270,8 @@ type EnvPrepareResult struct {
 	// Legacy single-worktree fields; for multi-repo results they mirror Worktrees[0].
 	WorktreeID                string `json:"worktree_id,omitempty"`
 	WorktreeBranch            string `json:"worktree_branch,omitempty"`
+	WorktreeBranchOwner       string `json:"-"`
+	WorktreeIntegrationRef    string `json:"-"`
 	MainRepoGitDir            string `json:"main_repo_git_dir,omitempty"`
 	RequestedBaseBranch       string `json:"requested_base_branch,omitempty"`
 	BaseBranch                string `json:"base_branch,omitempty"`
@@ -312,6 +334,15 @@ func SerializePrepareResult(result *EnvPrepareResult) map[string]interface{} {
 		entry := map[string]interface{}{
 			"name": step.Name, "status": string(step.Status),
 			"output": output, "command": step.Command,
+		}
+		if step.Kind != "" {
+			entry["kind"] = step.Kind
+		}
+		if step.RemotePlatform != "" {
+			entry["remote_platform"] = step.RemotePlatform
+		}
+		if step.FailureCode != "" {
+			entry["failure_code"] = step.FailureCode
 		}
 		if step.Error != "" {
 			entry["error"] = step.Error

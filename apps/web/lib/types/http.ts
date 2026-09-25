@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- HTTP DTO definitions intentionally co-locate protocol shapes. */
 
-import type { ExecutorType } from "./executor";
+import type { ExecutorProvider, ExecutorType } from "./executor";
 import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
 import type {
@@ -23,7 +23,7 @@ import type { AgentGoalReconciliation } from "@/lib/agent-goal";
 
 export type { TaskStatusSummary } from "./task-status-summary";
 
-export type { ExecutorType } from "./executor";
+export type { ExecutorProvider, ExecutorProviderCapabilities, ExecutorType } from "./executor";
 export type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 export type {
   SavedLayout,
@@ -235,6 +235,17 @@ export type WorkflowProfileSessionStartPolicy = "reuse" | "new";
 export type WorkflowProfileSessionEndPolicy = "complete" | "park";
 export type WorkflowSessionTarget = { kind: "initial" } | { kind: "step"; step_id: string };
 
+export type WorkflowAgentOverrideBinding = {
+  step_id: string;
+  source_profile_id: string;
+  replacement_profile_id: string;
+};
+
+export type WorkflowAgentOverrides = {
+  workflow_id: string;
+  steps: WorkflowAgentOverrideBinding[];
+};
+
 export function normalizeWorkflowProfileSessionStartPolicy(
   value: unknown,
 ): WorkflowProfileSessionStartPolicy {
@@ -422,6 +433,8 @@ export type Task = ActiveSubagentCountFields & {
   workspace_id: WorkspaceId;
   workflow_id: WorkflowId;
   workflow_step_id: string;
+  /** Task-only replacements for fixed workflow step agent profiles. */
+  workflow_agent_overrides?: WorkflowAgentOverrides;
   position: number;
   title: string;
   description: string;
@@ -567,6 +580,7 @@ export type WorkflowStepDTO = {
 export type MoveTaskResponse = {
   task: Task;
   workflow_step: WorkflowStepDTO;
+  workflow_entry_identity?: string;
   move_id?: string;
   entry_options?: {
     reset_context?: boolean;
@@ -759,6 +773,7 @@ export type EditorOption = {
 };
 
 export type EditorsResponse = {
+  folder_opening_available?: boolean;
   editors: EditorOption[];
 };
 
@@ -794,6 +809,52 @@ export type ListWorkflowsResponse = {
 export type ListTasksResponse = {
   tasks: Task[];
   total: number;
+};
+
+export type SidebarTaskQuery = {
+  filters: Array<{
+    dimension: string;
+    op: string;
+    value: string | string[] | boolean;
+  }>;
+  sort: { key: string; direction: string };
+  group: string;
+  collapsed_group_keys: string[];
+  collapsed_task_ids: string[];
+  page: number;
+  page_size: number;
+  locale: string;
+};
+
+export type SidebarTaskPageEntry = {
+  kind: "task" | "group" | "continuation";
+  task_id?: string;
+  task?: Task;
+  group_key?: string;
+  group_label?: string;
+  workflow_name?: string;
+  workflow_step_name?: string;
+  workflow_step_color?: string;
+  depth?: number;
+  parent_id?: string;
+  parent_title?: string;
+  continuation?: boolean;
+  matching_count?: number;
+  wip_queue_position?: number;
+  wip_queue_total?: number;
+  subtask_count?: number;
+};
+
+export type SidebarTaskPageResponse = {
+  query_key: string;
+  page: number;
+  page_size: number;
+  total_entries: number;
+  total_tasks: number;
+  total_visible_tasks: number;
+  has_previous: boolean;
+  has_next: boolean;
+  entries: SidebarTaskPageEntry[];
 };
 
 export type ListRepositorySetsResponse = {
@@ -891,6 +952,7 @@ export type Executor = {
   is_system: boolean;
   config?: Record<string, string>;
   profiles?: ExecutorProfile[];
+  provider?: ExecutorProvider;
   created_at: string;
   updated_at: string;
 };
@@ -909,6 +971,8 @@ export type ExecutorProfile = {
   name: string;
   mcp_policy?: string;
   config?: Record<string, string>;
+  secret_fields?: Record<string, boolean>;
+  provider?: ExecutorProvider;
   prepare_script: string;
   cleanup_script: string;
   env_vars?: ProfileEnvVar[];
@@ -1061,6 +1125,57 @@ export type StepPortable = {
 };
 
 export type ImportWorkflowsResult = { created: string[]; skipped: string[] };
+
+export type WorkflowImportProfileCandidate = {
+  id: string;
+  name: string;
+  agent_name: string;
+  model: string;
+  mode: string;
+  updated_at: string;
+};
+
+export type WorkflowImportProfileMatch = {
+  id: string;
+  updated_at: string;
+};
+
+export type WorkflowImportProfileStep = {
+  workflow_index: number;
+  workflow_name: string;
+  step_position: number;
+  step_name: string;
+  requested_profile: AgentProfilePortable;
+  matched_profile?: WorkflowImportProfileMatch;
+};
+
+export type WorkflowImportPreview = {
+  skipped: string[];
+  profiles: WorkflowImportProfileCandidate[];
+  steps: WorkflowImportProfileStep[];
+};
+
+export type WorkflowImportProfileBinding = {
+  workflow_index: number;
+  step_position: number;
+  requested_profile: AgentProfilePortable;
+  profile_id: string;
+  profile_updated_at: string;
+};
+
+export type WorkflowImportProfileConflict = {
+  workflow_index: number;
+  step_position: number;
+  workflow_name: string;
+  step_name: string;
+  reason: "missing_selection" | "unavailable_profile" | "changed_profile" | string;
+};
+
+export type WorkflowImportProfilesRequiredResponse = {
+  code: "workflow_import_profiles_required";
+  error: string;
+  steps: WorkflowImportProfileConflict[];
+};
 
 // Helper function to check if a step has a specific on_enter action
 export function stepHasOnEnterAction(

@@ -15,7 +15,9 @@ import (
 )
 
 // queueRunAt seeds a queued run for an agent and backdates it so
-// ordering assertions are deterministic.
+// ordering assertions are deterministic. The run's workspace follows
+// the claimTestWorkspace convention so it lines up with a profile
+// seeded by seedClaimAgent for the same agentID.
 func queueRunAt(
 	t *testing.T, repo *runssqlite.Repository, id, agentID string, requestedAt time.Time,
 ) *models.Run {
@@ -23,6 +25,7 @@ func queueRunAt(
 	run := mustCreateRun(t, repo, &models.Run{
 		ID:             id,
 		AgentProfileID: agentID,
+		WorkspaceID:    claimTestWorkspace(agentID),
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"` + id + `"}`,
 		Status:         "queued",
@@ -30,6 +33,26 @@ func queueRunAt(
 	})
 	setRequestedAt(t, repo, run.ID, requestedAt)
 	return run
+}
+
+// claimTestWorkspace derives a per-agent workspace id for this file's
+// tests, so distinct agents don't collide in the workspace ceiling's
+// count unless a test deliberately shares one via seedClaimAgent.
+func claimTestWorkspace(agentID string) string {
+	return "ws-" + agentID
+}
+
+// seedClaimAgent seeds an agent_profiles row for agentID (via this
+// package's own seedAgentProfile helper, base_test.go) in its
+// claimTestWorkspace, so ClaimNextEligibleRun's agent ceiling
+// (LEFT JOIN-free: a per-candidate lookup keyed on agent_profile_id)
+// resolves a real max_concurrent_sessions instead of deferring every
+// candidate for an agent id with no profile
+// (AC-OFFICE-LAUNCH-SAFETY-001.8's "missing profile defers" is exactly
+// what every ClaimNextEligibleRun test in this file would otherwise hit).
+func seedClaimAgent(t *testing.T, repo *runssqlite.Repository, agentID string) {
+	t.Helper()
+	seedAgentProfile(t, repo.Writer(), agentID, claimTestWorkspace(agentID))
 }
 
 // TestClaimRun_ClaimsTheOldestQueuedRunForTheAgent asserts which run
@@ -123,6 +146,8 @@ func TestClaimNextEligibleRun_PicksTheOldestEligibleRun(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	seedClaimAgent(t, repo, "a1")
+	seedClaimAgent(t, repo, "a2")
 
 	queueRunAt(t, repo, "newer", "a1", base.Add(time.Minute))
 	oldest := queueRunAt(t, repo, "older", "a2", base)
@@ -146,6 +171,8 @@ func TestClaimNextEligibleRun_SkipsAgentThatAlreadyHasAClaimedRun(t *testing.T) 
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	seedClaimAgent(t, repo, "a1")
+	seedClaimAgent(t, repo, "a2")
 
 	busy := queueRunAt(t, repo, "busy-agent-inflight", "a1", base.Add(-time.Hour))
 	setStatus(t, repo, busy.ID, "claimed", timePtr(base), nil)
@@ -168,6 +195,8 @@ func TestClaimNextEligibleRun_HonoursScheduledRetryWindow(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	seedClaimAgent(t, repo, "a1")
+	seedClaimAgent(t, repo, "a2")
 
 	future := queueRunAt(t, repo, "retry-future", "a1", base)
 	if err := repo.ScheduleRetry(ctx, future.ID, time.Now().UTC().Add(time.Hour), 1); err != nil {
@@ -201,6 +230,8 @@ func TestClaimNextEligibleRun_SkipsRoutingBlockedRuns(t *testing.T) {
 	repo, writer := newTestRepoWithDB(t)
 	ctx := context.Background()
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	seedClaimAgent(t, repo, "a1")
+	seedClaimAgent(t, repo, "a2")
 
 	parked := queueRunAt(t, repo, "parked", "a1", base)
 	if _, err := writer.Exec(
@@ -240,6 +271,9 @@ func TestClaimNextEligibleRun_ConcurrentClaimsRespectOnePerAgent(t *testing.T) {
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
 	agents := []string{"a1", "a2", "a3"}
+	for _, agent := range agents {
+		seedClaimAgent(t, repo, agent)
+	}
 	for i, agent := range agents {
 		for run := range 2 {
 			queueRunAt(t, repo, agent+"-"+string(rune('0'+run)), agent,

@@ -23,7 +23,7 @@ export const GATING_MEMBER = {
   displayName: "Sam Member",
 };
 
-export const DATA_STORAGE_ROUTE = "/settings/system/data-storage";
+export const DATA_STORAGE_ROUTE = "/settings/system/data-storage?tab=database";
 export const STORAGE_ROUTE = "/settings/system/storage";
 
 /** Creates the member account from an authenticated admin context. */

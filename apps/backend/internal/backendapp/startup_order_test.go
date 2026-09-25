@@ -95,6 +95,25 @@ func TestPublishReadinessFlipsReadyBeforeSwappingHandler(t *testing.T) {
 	}
 }
 
+// TestMarkStartupReadySetsPhaseBeforePublishingReadiness is the regression
+// test for AC-PLATFORM-STARTUP-PROGRESS-002.3: a GET /ready request racing
+// startGatewayAndServe's completion must never observe a successful status
+// against a snapshot that still reports an earlier phase, so the phase must
+// reach Ready before the readiness flag flips, never the reverse.
+func TestMarkStartupReadySetsPhaseBeforePublishingReadiness(t *testing.T) {
+	var order []string
+
+	markStartupReady(
+		func() { order = append(order, "phase") },
+		func() { order = append(order, "publish") },
+	)
+
+	want := []string{"phase", "publish"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("markStartupReady order = %v, want %v", order, want)
+	}
+}
+
 func TestShouldLogStartupOrchestratorErrorSkipsExpectedShutdownErrors(t *testing.T) {
 	for _, test := range []struct {
 		name string

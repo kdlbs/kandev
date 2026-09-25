@@ -1,11 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, memo } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  memo,
+  type MutableRefObject,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { IconCheck, IconNetwork, IconPlus } from "@tabler/icons-react";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
+import { SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
-import { TaskSwitcherDrawer } from "./task-switcher-drawer";
+import { useTaskSheetSelectionController } from "./task-sheet-selection-context";
+export { useTaskSheetSelectionController } from "./task-sheet-selection-context";
+import type { TaskSheetSelectionController } from "./session-task-switcher-sheet-selection";
+import { useTaskReadStatus } from "./session-task-switcher-sheet-read-status";
+import { TaskPickerSurface, InlineTaskHeader } from "./task-picker-surface";
 import { Button } from "@kandev/ui/button";
 import { QuickChatSheetButton } from "./quick-chat-sheet-button";
 import { TaskSwitcher } from "../task-switcher";
@@ -26,24 +38,26 @@ import {
 } from "../task-session-sidebar-link-actions";
 import { useSidebarTaskLinking } from "../task-session-sidebar-task-linking";
 import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hooks";
-import {
-  createTaskSheetSelectionController,
-  handleTaskSheetOpenChange,
-} from "./session-task-switcher-sheet-selection";
+import { handleTaskSheetOpenChange } from "./session-task-switcher-sheet-selection";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useMobileTaskRename } from "./use-mobile-task-rename";
 import { useSidebarTaskEdit } from "../task-session-sidebar-edit";
 import { useOptionalPortForwardingVisibility } from "../port-forwarding-visibility-provider";
 import { buildMobileTaskSwitcherProps } from "./session-task-switcher-sheet-props";
 import { TaskSwitcherDialogs } from "./session-task-switcher-sheet-dialogs";
+import { SidebarTaskPagination } from "../sidebar-task-pagination";
+import { groupSidebarTaskPage } from "../task-session-sidebar-grouped-view";
+import type { SidebarTaskPageEntry, SidebarTaskPageResponse } from "@/lib/types/http";
 type SessionTaskSwitcherSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workspaceId: string | null;
   workflowId: string | null;
   presentation?: "sheet" | "drawer";
-  navigate?: (taskId: string) => void;
+  navigate?: (taskId: string, sessionId?: string) => void;
   onCloseAutoFocus?: (event: Event) => void;
+  renderInline?: (body: ReactNode) => ReactNode;
+  selection?: TaskSheetSelectionController;
 };
 function useTaskSheetOpener(open: boolean) {
   const [opener, setOpener] = useState({ open: false, current: null as HTMLElement | null });
@@ -59,16 +73,6 @@ function useTaskSheetOpener(open: boolean) {
   return opener;
 }
 
-export function useTaskSheetSelectionController() {
-  const [selectionController] = useState(createTaskSheetSelectionController);
-  useEffect(
-    () => () => {
-      selectionController.invalidate();
-    },
-    [selectionController],
-  );
-  return selectionController;
-}
 export function useMobileTaskLinking(workspaceId: string | null) {
   const store = useAppStoreApi();
   const actions = useSidebarLinkActions(store);
@@ -97,6 +101,7 @@ export type MobileTaskListProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onRequestMoveOptions?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onBeforeMoveOptionsOpen?: () => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
@@ -119,6 +124,13 @@ export type MobileTaskListProps = {
   loadError?: string | null;
   onRetryLoad?: () => void;
   retryLabel?: string;
+  pageEntries?: SidebarTaskPageEntry[];
+  page?: SidebarTaskPageResponse | null;
+  pagePending?: boolean;
+  pageError?: string | null;
+  onPageChange?: (page: number, afterSuccess: () => void) => void;
+  onPageRetry?: () => void;
+  scrollContainerRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
 /**
@@ -140,15 +152,29 @@ export function MobileTaskList(props: MobileTaskListProps) {
   const handleToggleGroup = useSidebarGroupToggle(view.id);
   // See useGroupedSidebarView: the executorType group label is catalog-backed.
   const { i18n } = useTranslation();
-  const grouped = useMemo(
-    () =>
-      applyView(props.tasks, view, {
-        pinnedTaskIds,
-        orderedTaskIds,
+  const grouped = useMemo(() => {
+    if (props.pageEntries !== undefined) {
+      return groupSidebarTaskPage(
+        props.tasks,
+        props.pageEntries,
+        view.group,
         subtaskOrderByParentId,
-      }),
-    [props.tasks, view, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId, i18n.language],
-  );
+      );
+    }
+    return applyView(props.tasks, view, {
+      pinnedTaskIds,
+      orderedTaskIds,
+      subtaskOrderByParentId,
+    });
+  }, [
+    i18n.language,
+    pinnedTaskIds,
+    orderedTaskIds,
+    props.pageEntries,
+    props.tasks,
+    subtaskOrderByParentId,
+    view,
+  ]);
   const switcherProps = buildMobileTaskSwitcherProps(props, {
     grouped,
     collapsedGroupKeys: view.collapsedGroups,
@@ -162,7 +188,23 @@ export function MobileTaskList(props: MobileTaskListProps) {
     showActivityTime: view.sort.key === "lastActivityAt",
     taskRowPresentation: view.taskRow,
   });
-  return <TaskSwitcher {...switcherProps} />;
+  return (
+    <>
+      <TaskSwitcher {...switcherProps} />
+      <SidebarTaskPagination
+        page={props.page ?? null}
+        pending={props.pagePending ?? false}
+        error={props.pageError ?? null}
+        onPageChange={(nextPage) =>
+          props.onPageChange?.(nextPage, () =>
+            props.scrollContainerRef?.current?.scrollTo({ top: 0 }),
+          )
+        }
+        onRetry={props.onPageRetry ?? (() => undefined)}
+        touchTargets
+      />
+    </>
+  );
 }
 
 function TaskSwitcherSurfaceHeader({
@@ -304,6 +346,9 @@ type TaskSwitcherSurfaceContentProps = {
   onOpenChange: (open: boolean) => void;
   onQuickChat: () => void;
   onNewTask: () => void;
+  inline?: boolean;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
   onCreateSubtask: (taskId: string, taskTitle: string) => void;
   data: ReturnType<typeof useSheetData>;
   actions: ReturnType<typeof useSheetActions>;
@@ -311,6 +356,19 @@ type TaskSwitcherSurfaceContentProps = {
   edit: ReturnType<typeof useSidebarTaskEdit>;
   linking: ReturnType<typeof useMobileTaskLinking>;
 };
+
+function mobileMoveActions(
+  presentation: "sheet" | "drawer",
+  moveOptions: ReturnType<typeof useMobileTaskMoveOptions>,
+  onOpenChange: (open: boolean) => void,
+) {
+  if (presentation !== "drawer") return {};
+  return {
+    onMoveToStep: moveOptions.handleMove,
+    onRequestMoveOptions: moveOptions.handleRequest,
+    onBeforeMoveOptionsOpen: () => onOpenChange(false),
+  };
+}
 
 // eslint-disable-next-line max-lines-per-function -- this surface keeps the existing mobile scroll owner intact
 function TaskSwitcherSurfaceContent({
@@ -326,21 +384,16 @@ function TaskSwitcherSurfaceContent({
   rename,
   edit,
   linking,
+  inline = false,
+  expanded,
+  onExpandedChange,
 }: TaskSwitcherSurfaceContentProps) {
   const { t } = useTranslation();
-  let taskLoadError: string | null = null;
-  if (data.workspaceContextError) {
-    taskLoadError = data.workspaceContextAccessDenied
-      ? t("sidebar:workspaceContextAccessDenied")
-      : t("sidebar:workspaceContextRefreshFailed");
-  } else if (data.archivedError) {
-    taskLoadError = t("sidebar:archivedLoadFailed");
-  }
-  const retryTaskLoad = data.workspaceContextError
-    ? data.retryWorkspaceContext
-    : data.retryArchivedTasks;
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const { taskLoadError, retryTaskLoad } = useTaskReadStatus(data);
   const moveOptions = useMobileTaskMoveOptions({
     open,
+    activeTaskId: data.activeTaskId,
     stepsByWorkflowId: data.stepsByWorkflowId,
   });
   if (moveOptions.moveOptionsStep && moveOptions.request) {
@@ -364,53 +417,75 @@ function TaskSwitcherSurfaceContent({
   });
   return (
     <>
-      <TaskSwitcherSurfaceHeader
-        presentation={presentation}
-        workspaceId={workspaceId}
-        workspaces={data.workspaces.map((w) => ({ id: w.id, name: w.name }))}
-        onWorkspaceChange={actions.handleWorkspaceChange}
-        onQuickChat={onQuickChat}
-        onNewTask={onNewTask}
-      />
-      {data.activeTaskId && (
-        <PortForwardingTaskAction
-          onClose={() => onOpenChange(false)}
-          activeTaskId={data.activeTaskId}
+      {inline ? (
+        <InlineTaskHeader
+          expanded={expanded}
+          onExpandedChange={onExpandedChange}
+          onNewTask={onNewTask}
+        />
+      ) : (
+        <TaskSwitcherSurfaceHeader
+          presentation={presentation}
+          workspaceId={workspaceId}
+          workspaces={data.workspaces.map((w) => ({ id: w.id, name: w.name }))}
+          onWorkspaceChange={actions.handleWorkspaceChange}
+          onQuickChat={onQuickChat}
+          onNewTask={onNewTask}
         />
       )}
-      <div className="shrink-0">
-        <SidebarFilterBar />
-      </div>
-      <div className="flex-1 min-h-0 overflow-y-auto p-2" data-testid="mobile-task-switcher-list">
-        <PluginTaskLinkActionSurfaceProvider
-          beforePluginRun={presentation === "drawer" ? () => onOpenChange(false) : undefined}
-        >
-          <MobileTaskList
-            tasks={data.tasksWithRepositories}
-            workflows={data.workflows}
-            stepsByWorkflowId={data.stepsByWorkflowId}
+      <div
+        id={inline ? "mobile-navigation-task-body" : undefined}
+        hidden={inline && !expanded}
+        className={inline ? undefined : "flex min-h-0 flex-1 flex-col"}
+      >
+        {data.activeTaskId && (
+          <PortForwardingTaskAction
+            onClose={() => onOpenChange(false)}
             activeTaskId={data.activeTaskId}
-            selectedTaskId={data.selectedTaskId}
-            onSelectTask={actions.handleSelectTask}
-            onRequestMoveOptions={presentation === "drawer" ? moveOptions.handleRequest : undefined}
-            onBeforeMoveOptionsOpen={
-              presentation === "drawer" ? () => onOpenChange(false) : undefined
-            }
-            {...taskListActions}
-            onCreateSubtask={onCreateSubtask}
-            onNestTask={actions.handleNestTask}
-            deletingTaskId={actions.deletingTaskId}
-            archivingTaskId={actions.archivingTaskId}
-            isArchiving={actions.isArchiving}
-            isLoading={
-              data.tasksLoading ||
-              (data.workspaceContextPending && data.tasksWithRepositories.length === 0)
-            }
-            loadError={taskLoadError}
-            onRetryLoad={retryTaskLoad}
-            retryLabel={t("sidebar:retry")}
           />
-        </PluginTaskLinkActionSurfaceProvider>
+        )}
+        <div className="shrink-0">
+          <SidebarFilterBar />
+        </div>
+        <div
+          className={inline ? "p-2" : "flex-1 min-h-0 overflow-y-auto p-2"}
+          data-testid="mobile-task-switcher-list"
+          ref={listScrollRef}
+        >
+          <PluginTaskLinkActionSurfaceProvider
+            beforePluginRun={presentation === "drawer" ? () => onOpenChange(false) : undefined}
+          >
+            <MobileTaskList
+              tasks={data.tasksWithRepositories}
+              workflows={data.workflows}
+              stepsByWorkflowId={data.stepsByWorkflowId}
+              activeTaskId={data.activeTaskId}
+              selectedTaskId={data.selectedTaskId}
+              onSelectTask={actions.handleSelectTask}
+              {...mobileMoveActions(presentation, moveOptions, onOpenChange)}
+              {...taskListActions}
+              onCreateSubtask={onCreateSubtask}
+              onNestTask={actions.handleNestTask}
+              deletingTaskId={actions.deletingTaskId}
+              archivingTaskId={actions.archivingTaskId}
+              isArchiving={actions.isArchiving}
+              isLoading={
+                data.tasksLoading ||
+                (data.workspaceContextPending && data.tasksWithRepositories.length === 0)
+              }
+              loadError={taskLoadError}
+              onRetryLoad={retryTaskLoad}
+              retryLabel={t("sidebar:retry")}
+              pageEntries={data.pageEntries}
+              page={data.page.response}
+              pagePending={data.page.requestedPage !== null}
+              pageError={data.page.error}
+              onPageChange={data.page.goToPage}
+              onPageRetry={data.page.retry}
+              scrollContainerRef={listScrollRef}
+            />
+          </PluginTaskLinkActionSurfaceProvider>
+        </div>
       </div>
     </>
   );
@@ -457,13 +532,17 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   presentation = "sheet",
   navigate,
   onCloseAutoFocus,
+  renderInline,
+  selection,
 }: SessionTaskSwitcherSheetProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const opener = useTaskSheetOpener(open);
   const autoFocusNewTasks = useAppStore((state) => state.userSettings.autoFocusNewTasks) !== false;
   const [subtaskTarget, setSubtaskTarget] = useState<{ id: string; title: string } | null>(null);
   const data = useSheetData(workspaceId);
-  const selectionController = useTaskSheetSelectionController();
+  const localSelection = useTaskSheetSelectionController();
+  const selectionController = selection ?? localSelection;
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => handleTaskSheetOpenChange(selectionController, nextOpen, onOpenChange),
     [onOpenChange, selectionController],
@@ -488,6 +567,9 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const surfaceContent = (
     <TaskSwitcherSurfaceContent
       open={open}
+      inline={!!renderInline}
+      expanded={expanded}
+      onExpandedChange={setExpanded}
       presentation={presentation}
       workspaceId={workspaceId}
       onOpenChange={handleOpenChange}
@@ -505,27 +587,19 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     />
   );
 
-  const surface =
-    presentation === "drawer" ? (
-      <TaskSwitcherDrawer
-        key={workspaceId}
-        open={open}
-        onOpenChange={handleOpenChange}
-        onCloseAutoFocus={onCloseAutoFocus}
-      >
-        {surfaceContent}
-      </TaskSwitcherDrawer>
-    ) : (
-      <Sheet open={open} onOpenChange={handleOpenChange}>
-        <SheetContent
-          showCloseButton={false}
-          side="left"
-          className="w-[85vw] max-w-sm p-0 flex flex-col"
-        >
-          {surfaceContent}
-        </SheetContent>
-      </Sheet>
-    );
+  const surface = renderInline ? (
+    renderInline(surfaceContent)
+  ) : (
+    <TaskPickerSurface
+      presentation={presentation}
+      workspaceId={workspaceId}
+      open={open}
+      onOpenChange={handleOpenChange}
+      onCloseAutoFocus={onCloseAutoFocus}
+    >
+      {surfaceContent}
+    </TaskPickerSurface>
+  );
 
   return (
     <>

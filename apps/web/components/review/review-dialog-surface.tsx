@@ -100,6 +100,14 @@ export function ReviewDialogSurface(props: ReviewDialogSurfaceProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="!max-w-[100vw] !w-[100vw] md:!max-w-[80vw] md:!w-[80vw] max-h-[85vh] h-[85vh] p-0 gap-0 flex flex-col shadow-2xl"
+        onEscapeKeyDown={(event) => {
+          if (
+            event.target instanceof Element &&
+            event.target.closest('[data-testid="review-file-comments"]')?.querySelector("textarea")
+          ) {
+            event.preventDefault();
+          }
+        }}
         showCloseButton={false}
         overlayClassName="bg-black/40"
       >

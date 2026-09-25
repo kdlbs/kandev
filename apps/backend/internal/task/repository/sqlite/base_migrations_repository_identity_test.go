@@ -32,7 +32,7 @@ func TestBaseMigrationsDoNotInferProviderHostFromPartialRepositoryIdentity(t *te
 		t.Fatalf("create repository: %v", err)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("run migrations: %v", err)
 	}
 	stored, err := repo.GetRepository(context.Background(), repository.ID)

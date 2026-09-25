@@ -15,6 +15,7 @@ import type {
   ProfileEnvVar,
 } from "@/lib/types/http";
 import { arePermissionsDirty, permissionsToProfilePatch } from "@/lib/agent-permissions";
+import { isProviderConfigDirty } from "@/components/settings/agent-profile-dirty";
 import { areCLIFlagsEqual } from "@/lib/cli-flags";
 import { areConfigOptionsEqual } from "@/lib/config-options";
 import { t } from "@/lib/i18n";
@@ -44,9 +45,27 @@ export function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<Ag
   if (patch.allow_indexing !== undefined) next.allowIndexing = patch.allow_indexing;
   if (patch.auto_approve !== undefined) next.autoApprove = patch.auto_approve;
   if (patch.cli_passthrough !== undefined) next.cliPassthrough = patch.cli_passthrough;
+  if (patch.cursor_mcp_auth_enabled !== undefined) {
+    next.cursorMcpAuthEnabled = patch.cursor_mcp_auth_enabled;
+  }
   if (patch.cli_flags !== undefined) next.cliFlags = patch.cli_flags;
   if (patch.command_prefix !== undefined) next.commandPrefix = patch.command_prefix;
+  if (patch.provider_kind !== undefined) next.providerKind = patch.provider_kind;
   return next;
+}
+
+/**
+ * OpenAI-compatible provider fields for a profile save payload. The backend
+ * normalizes them (clears everything when the kind is not
+ * `openai_compatible`), so sending the cleared triple is safe and lets a
+ * switch back to Native persist.
+ */
+function providerPayloadFields(profile: DraftProfile) {
+  return {
+    provider_kind: profile.providerKind ?? "",
+    provider_base_url: profile.providerBaseUrl ?? "",
+    provider_api_key_secret_id: profile.providerApiKeySecretId ?? "",
+  };
 }
 
 function areEnvVarsEqual(a?: ProfileEnvVar[], b?: ProfileEnvVar[]): boolean {
@@ -226,8 +245,10 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       config_options: profile.configOptions ?? {},
       ...permissionsToProfilePatch(profile),
       cli_passthrough: profile.cliPassthrough ?? false,
+      cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
       cli_flags: profile.cliFlags ?? [],
       command_prefix: profile.commandPrefix ?? "",
+      ...providerPayloadFields(profile),
       env_vars: profile.envVars ?? [],
       dynamic: dynamicProfilePayload(profile),
     })),
@@ -306,8 +327,13 @@ async function savePersistedProfile(
       config_options: profile.configOptions ?? {},
       ...permissionsToProfilePatch(profile),
       cli_passthrough: profile.cliPassthrough ?? false,
+      cursor_mcp_auth_enabled:
+        (profile.cursorMcpAuthEnabled ?? true) === (savedProfile.cursorMcpAuthEnabled ?? true)
+          ? undefined
+          : (profile.cursorMcpAuthEnabled ?? true),
       cli_flags: profile.cliFlags ?? [],
       command_prefix: profile.commandPrefix ?? "",
+      ...providerPayloadFields(profile),
       env_vars: profile.envVars ?? [],
       dynamic: dynamicProfilePayload(profile),
     });
@@ -342,8 +368,10 @@ async function saveExistingProfiles(
           config_options: profile.configOptions ?? {},
           ...permissionsToProfilePatch(profile),
           cli_passthrough: profile.cliPassthrough ?? false,
+          cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
           cli_flags: profile.cliFlags ?? [],
           command_prefix: profile.commandPrefix ?? "",
+          ...providerPayloadFields(profile),
           env_vars: profile.envVars ?? [],
           dynamic: dynamicProfilePayload(profile),
         });
@@ -516,6 +544,7 @@ function isProfileCliConfigDirty(draft: DraftProfile, saved: AgentProfile): bool
     draft.cliPassthrough !== saved.cliPassthrough ||
     !areCLIFlagsEqual(draft.cliFlags ?? [], saved.cliFlags ?? []) ||
     (draft.commandPrefix ?? "") !== (saved.commandPrefix ?? "") ||
+    isProviderConfigDirty(draft, saved) ||
     !areEnvVarsEqual(draft.envVars, saved.envVars)
   );
 }
@@ -535,6 +564,7 @@ function isProfileIdentityDirty(draft: DraftProfile, saved: AgentProfile): boole
 function isProfileSettingsDirty(draft: DraftProfile, saved: AgentProfile): boolean {
   return (
     areConfigOptionsEqual(draft.configOptions, saved.configOptions) === false ||
+    (draft.cursorMcpAuthEnabled ?? true) !== (saved.cursorMcpAuthEnabled ?? true) ||
     arePermissionsDirty(draft, saved)
   );
 }

@@ -1452,6 +1452,7 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 		ExecutorProfileID: "exec-1",
 	}
 	settings.JiraSavedViews = json.RawMessage(`[{"id":"view-1"}]`)
+	settings.JiraDefaultViewID = "view-1"
 	settings.GitLabSavedPresets = json.RawMessage(`[{"id":"preset-1"}]`)
 	settings.SidebarDraft = &models.SidebarViewDraft{
 		BaseViewID: "view-1",
@@ -1486,6 +1487,9 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 	}
 	if string(got.JiraSavedViews) != `[{"id":"view-1"}]` {
 		t.Fatalf("expected Jira saved views to round-trip, got %s", string(got.JiraSavedViews))
+	}
+	if got.JiraDefaultViewID != "view-1" {
+		t.Fatalf("expected Jira default view ID to round-trip, got %q", got.JiraDefaultViewID)
 	}
 	if string(got.GitLabSavedPresets) != `[{"id":"preset-1"}]` {
 		t.Fatalf("expected GitLab presets to round-trip, got %s", string(got.GitLabSavedPresets))

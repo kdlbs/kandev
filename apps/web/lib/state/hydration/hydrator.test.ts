@@ -425,6 +425,46 @@ describe("mergeInitialState — sidebar views from boot settings", () => {
   });
 });
 
+describe("hydrateState — settings agent profiles", () => {
+  it("normalizes fallback fields from nested boot hydration", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      hydrateState(draft, {
+        settingsAgents: {
+          items: [
+            {
+              profiles: [
+                {
+                  id: "explicit-profile",
+                  fallback_model: "provider/model",
+                  auto_fallback: false,
+                },
+                {
+                  id: "automatic-profile",
+                  fallback_model: "",
+                  auto_fallback: true,
+                },
+              ],
+            },
+          ],
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.settingsAgents.items[0]?.profiles).toMatchObject([
+      {
+        id: "explicit-profile",
+        fallbackModel: "provider/model",
+        autoFallback: false,
+      },
+      {
+        id: "automatic-profile",
+        fallbackModel: "",
+        autoFallback: true,
+      },
+    ]);
+  });
+});
+
 describe("hydrateState — user settings revisions", () => {
   it("applies a newer boot snapshot after an earlier websocket update", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {

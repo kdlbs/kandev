@@ -458,6 +458,7 @@ func seedPullRequestReservation(t *testing.T, store *Store, watch *PullRequestWa
 	if taskID == "" {
 		return
 	}
+	seedAzureTask(t, store, taskID, watch.WorkspaceID)
 	if err := store.AssignPullRequestWatchTaskID(
 		t.Context(), watch.ID, watch.Generation, watch.ProjectID,
 		watch.AzureRepositoryID, pullRequestID, taskID,

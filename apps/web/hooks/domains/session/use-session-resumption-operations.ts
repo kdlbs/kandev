@@ -34,6 +34,8 @@ export type SessionStatus = {
   is_agent_running: boolean;
   is_resumable: boolean;
   needs_resume: boolean;
+  auto_resume_allowed?: boolean;
+  auto_resume_blocked_reason?: string;
   needs_workspace_restore?: boolean;
   resume_reason?: string;
   acp_session_id?: string;
@@ -66,6 +68,7 @@ export type SessionRecoveryFailure =
       outcome: "recovery_failed";
       resumeError: string;
       restoreError: string;
+      workspaceAttemptId?: string;
     }
   | {
       outcome: "status_unavailable";
@@ -198,9 +201,13 @@ type ResumeResponse = {
   worktree_path?: string;
   worktree_branch?: string;
   error?: string;
+  activation_disposition?: "queued" | "suppressed";
+  activation_reason?: string;
 };
 
-type LaunchAttempt = { ok: true } | { ok: false; error: Error; archived?: boolean };
+type LaunchAttempt =
+  | { ok: true; waiting?: boolean }
+  | { ok: false; error: Error; archived?: boolean; workspaceAttemptId?: string };
 type FailedLaunchAttempt = Extract<LaunchAttempt, { ok: false }>;
 
 export function isTaskArchivedConflict(error: unknown): boolean {
@@ -293,6 +300,16 @@ function applyLaunchSuccess(
   request: LaunchSessionRequest,
   context: ResumeLaunchContext,
 ): LaunchAttempt {
+  if (
+    response.activation_disposition === "queued" ||
+    response.activation_disposition === "suppressed"
+  ) {
+    context.setters.setRecoveryFailure?.(null);
+    context.setters.setResumptionState("idle");
+    context.setters.setError(null);
+    context.setters.setNotice?.(null);
+    return { ok: true, waiting: true };
+  }
   applyResumeResponse(
     response,
     context.taskId,
@@ -317,7 +334,11 @@ function applyLaunchFailure(
   if (isWorkspaceRestoreRequest(request)) {
     settleWorkspaceRestoreFailure(workspaceAttempt, error, context);
   }
-  return { ok: false, error };
+  return {
+    ok: false,
+    error,
+    ...(workspaceAttempt?.attemptId ? { workspaceAttemptId: workspaceAttempt.attemptId } : {}),
+  };
 }
 
 function handleLaunchException(
@@ -334,7 +355,12 @@ function handleLaunchException(
   if (isWorkspaceRestoreRequest(request)) {
     settleWorkspaceRestoreFailure(workspaceAttempt, error, context);
   }
-  return { ok: false, error: toLaunchError(error), archived: false };
+  return {
+    ok: false,
+    error: toLaunchError(error),
+    archived: false,
+    ...(workspaceAttempt?.attemptId ? { workspaceAttemptId: workspaceAttempt.attemptId } : {}),
+  };
 }
 
 /** Launch a session via a request builder and apply the response. */
@@ -349,7 +375,7 @@ async function resumeViaLaunch(
   const { request } = buildRequest(taskId, sessionId);
   const launchAttempt = await tryLaunch(request, context);
   if (!canContinue()) return false;
-  if (launchAttempt.ok) return true;
+  if (launchAttempt.ok) return !launchAttempt.waiting;
   if (launchAttempt.archived) {
     clearArchiveRecovery(setters);
     return false;
@@ -388,32 +414,28 @@ async function restoreAfterResumeFailure(
     outcome: "recovery_failed",
     resumeError: resumeAttempt.error.message,
     restoreError: restoreAttempt.error.message,
+    ...(restoreAttempt.workspaceAttemptId
+      ? { workspaceAttemptId: restoreAttempt.workspaceAttemptId }
+      : {}),
   });
   setters.setError(t("task:sessionRecoveryFailed"));
   return false;
 }
 
-/** Attempt resume, silently falling back to restore_workspace on any failure. */
-export async function resumeWithSilentFallback(
-  taskId: string,
-  sessionId: string,
-  session: SessionLike,
-  setters: ResumeStateSetter,
-  canContinue: () => boolean = () => true,
+async function finishSilentResume(
+  context: ResumeLaunchContext,
+  startingProjection: ResumeStartingProjection | null,
+  resumeAttempt: LaunchAttempt,
 ): Promise<boolean> {
-  if (!canContinue()) return false;
-  const startingProjection = markSessionStarting(taskId, sessionId, session, setters);
-  setters.setResumptionState("resuming");
-  setters.setRecoveryFailure?.(null);
-  const context = { taskId, sessionId, session, setters, canContinue };
-  const resumeAttempt = await tryLaunch(buildResumeRequest(taskId, sessionId).request, context);
+  const { setters, canContinue } = context;
   if (!canContinue()) {
     startingProjection?.rollback();
     return false;
   }
   if (resumeAttempt.ok) {
     setters.setNotice?.(null);
-    return true;
+    if (resumeAttempt.waiting) startingProjection?.rollback();
+    return !resumeAttempt.waiting;
   }
   if (resumeAttempt.archived) {
     clearArchiveRecovery(setters);
@@ -435,6 +457,26 @@ export async function resumeWithSilentFallback(
   const restored = await restoreAfterResumeFailure(context, resumeAttempt);
   if (!restored) startingProjection?.rollback();
   return restored;
+}
+
+/** Attempt resume, silently falling back to restore_workspace on any failure. */
+export async function resumeWithSilentFallback(
+  taskId: string,
+  sessionId: string,
+  session: SessionLike,
+  setters: ResumeStateSetter,
+  canContinue: () => boolean = () => true,
+): Promise<boolean> {
+  if (!canContinue()) return false;
+  const startingProjection = markSessionStarting(taskId, sessionId, session, setters);
+  setters.setResumptionState("resuming");
+  setters.setRecoveryFailure?.(null);
+  const context = { taskId, sessionId, session, setters, canContinue };
+  const resumeAttempt = await tryLaunch(
+    buildResumeRequest(taskId, sessionId, { activationSource: "session_open" }).request,
+    context,
+  );
+  return finishSilentResume(context, startingProjection, resumeAttempt);
 }
 
 /** Run a single launch attempt and retain its failure for the fallback notice. */
@@ -476,6 +518,7 @@ export type ResumeAction = "running" | "skip" | "resume" | "restore" | "idle";
 
 export function decideResumeAction(status: SessionStatus, preventAutoStart: boolean): ResumeAction {
   if (status.is_agent_running) return "running";
+  if (status.auto_resume_allowed === false) return "idle";
   // Completed sessions remain passive until the user explicitly chooses the
   // completed-chat Resume action. Workspace recovery is separate and does not
   // revive the agent conversation.

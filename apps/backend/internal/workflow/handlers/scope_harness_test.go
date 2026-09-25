@@ -316,6 +316,15 @@ func doRawAs(t *testing.T, h *scopedHarness, ctx context.Context, method, path, 
 	return rec
 }
 
+func doRawYAMLAs(t *testing.T, h *scopedHarness, ctx context.Context, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/x-yaml")
+	rec := httptest.NewRecorder()
+	h.router.ServeHTTP(rec, req)
+	return rec
+}
+
 // dispatchAs routes one WS message through the registered handlers under ctx's
 // identity, the way the gateway dispatches an authenticated client's action.
 func dispatchAs(t *testing.T, h *scopedHarness, ctx context.Context, action string, payload any) *ws.Message {

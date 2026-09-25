@@ -81,12 +81,36 @@ func RegisterRoutes(api *gin.RouterGroup, h *Handler) {
 }
 
 func (h *Handler) listRoutines(c *gin.Context) {
-	routines, err := h.svc.ListRoutinesFromConfig(c.Request.Context(), c.Param("wsId"))
+	ctx := c.Request.Context()
+	routines, err := h.svc.ListRoutinesFromConfig(ctx, c.Param("wsId"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, RoutineListResponse{Routines: routines})
+	withSchedule, err := h.svc.AttachScheduleState(ctx, routines)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, RoutineListResponse{Routines: withSchedule})
+}
+
+// withScheduleState classifies a single routine's schedule state, for the
+// single-routine response shapes (create/get/update).
+func (h *Handler) withScheduleState(c *gin.Context, routine *Routine) (*RoutineWithSchedule, error) {
+	withSchedule, err := h.svc.AttachScheduleState(c.Request.Context(), []*Routine{routine})
+	if err != nil {
+		return nil, err
+	}
+	return withSchedule[0], nil
+}
+
+// jsonErrorKey is the JSON body key used for error responses in this package.
+const jsonErrorKey = "error"
+
+// respondInternalError writes a 500 response carrying err's message.
+func respondInternalError(c *gin.Context, err error) {
+	c.JSON(http.StatusInternalServerError, gin.H{jsonErrorKey: err.Error()})
 }
 
 func (h *Handler) createRoutine(c *gin.Context) {
@@ -127,10 +151,15 @@ func (h *Handler) createRoutine(c *gin.Context) {
 		Variables:              req.Variables,
 	}
 	if err := h.svc.CreateRoutine(c.Request.Context(), routine); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, RoutineResponse{Routine: routine})
+	withSchedule, err := h.withScheduleState(c, routine)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, RoutineResponse{Routine: withSchedule})
 }
 
 func (h *Handler) getRoutine(c *gin.Context) {
@@ -139,7 +168,12 @@ func (h *Handler) getRoutine(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, RoutineResponse{Routine: routine})
+	withSchedule, err := h.withScheduleState(c, routine)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, RoutineResponse{Routine: withSchedule})
 }
 
 func (h *Handler) updateRoutine(c *gin.Context) {
@@ -148,7 +182,12 @@ func (h *Handler) updateRoutine(c *gin.Context) {
 		c.JSON(statusCode, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, RoutineResponse{Routine: routine})
+	withSchedule, err := h.withScheduleState(c, routine)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, RoutineResponse{Routine: withSchedule})
 }
 
 func (h *Handler) doUpdateRoutine(c *gin.Context) (*Routine, int, error) {
@@ -188,6 +227,11 @@ func (h *Handler) runRoutine(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 	run, err := h.svc.FireManual(c.Request.Context(), c.Param("id"), req.Variables)
 	if err != nil {
+		var notFiring *RoutineNotFiringError
+		if errors.As(err, &notFiring) {
+			c.JSON(http.StatusConflict, routineNotFiringBody(notFiring.Status))
+			return
+		}
 		writeDispatchError(c, err)
 		return
 	}
@@ -293,6 +337,10 @@ func (h *Handler) fireWebhookTrigger(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "routine not found"})
 		return
 	}
+	if !models.RoutineStatus(routine.Status).CanFire() {
+		c.JSON(http.StatusConflict, routineNotFiringBody(routine.Status))
+		return
+	}
 
 	run, err := h.svc.DispatchRoutineRunWithIdempotencyKey(
 		ctx, routine, trigger, "webhook", vars, c.GetHeader("Idempotency-Key"))
@@ -301,6 +349,20 @@ func (h *Handler) fireWebhookTrigger(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"run_id": run.ID, "status": run.Status})
+}
+
+// routineNotFiringBody is the shared 409 body for a fire refused on
+// routine status, returned identically by the manual and webhook routes.
+// `error` is a human-readable fallback for a caller with no localized
+// copy; `error_code` is what a surface recognizes to select its own
+// localized message; `status` is the observed value, verbatim, so the
+// surface can interpolate it.
+func routineNotFiringBody(status string) gin.H {
+	return gin.H{
+		"error":      fmt.Sprintf("routine cannot fire: status is %q", status),
+		"error_code": RoutineNotFiringErrorCode,
+		"status":     status,
+	}
 }
 
 // redactTriggerSecrets clears the Secret field on each trigger to prevent

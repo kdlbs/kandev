@@ -8,7 +8,7 @@ import { useChatInputState } from "./use-chat-input-state";
 import type { TipTapInputHandle } from "./tiptap-input";
 import type { ContextItem } from "@/lib/types/context";
 import type { Message } from "@/lib/types/http";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type {
   ChatSubmitPayload,
   ChatSubmitResult,
@@ -26,6 +26,7 @@ import type { ComposerActivity } from "./use-composer-disclosure";
 type UseChatInputContainerParams = {
   ref: React.ForwardedRef<ChatInputContainerHandle>;
   sessionId: string | null;
+  taskId: string | null;
   workspaceId?: string | null;
   isSending: boolean;
   isStarting: boolean;
@@ -52,7 +53,7 @@ type UseChatInputContainerParams = {
   contextItems: ContextItem[];
   pendingClarification: Message | null | undefined;
   onClarificationResolved: (() => void) | undefined;
-  pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
+  pendingCommentsByFile: Record<string, ReviewComment[]> | undefined;
   hasContextComments: boolean;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss: (() => void) | undefined;
@@ -136,7 +137,7 @@ function computeDerivedState(params: {
   executorUnavailable: boolean;
   pendingClarification: Message | null | undefined;
   onClarificationResolved: (() => void) | undefined;
-  pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
+  pendingCommentsByFile: Record<string, ReviewComment[]> | undefined;
   allItemsLength: number;
   hasPendingAttachmentUploads: boolean;
   isInputFocused: boolean;

@@ -4,6 +4,13 @@ Always use the exact tool names shown below (they include the _kandev suffix).
 
 Session ID: {session_id}
 
+AUTOMATION CREATION:
+- create_automation_kandev: Create an enabled workspace automation with optional initial triggers. Required: workspace_id, name. Discover exact workspace, workflow, repository, agent and executor profile IDs with the existing list tools or list_settings_resources_kandev; never invent IDs. Inspect the tool schema for optional fields and trigger config shapes.
+- Hidden automation_run is the default task_mode; workflow and repositories are optional. normal_task requires a workflow. Empty repositories means no repository attachment. Omitted continuation_policy uses new_task and max_concurrent_runs defaults to 1.
+- Each trigger has type, config, and enabled. Set enabled explicitly to true when the user wants it active; omission leaves that trigger disabled. Creation does not manually run the automation, but enabled triggers can fire normally after it is saved.
+- Scheduled example: {"workspace_id":"<workspace ID>","name":"Daily report","prompt":"Summarize progress","triggers":[{"type":"scheduled","config":{"cron_expression":"0 9 * * *","timezone":"UTC"},"enabled":true}]}.
+- Report the returned automation ID and saved triggers. Creation is not idempotent: after an uncertain result, inspect saved automations through settings discovery before retrying. The create result includes the webhook secret once; subsequent reads redact it. Existing settings tools can read and edit saved automations.
+
 WORKFLOW TOOLS:
 - list_workspaces_kandev: List all workspaces to get workspace IDs.
 - list_workflows_kandev: List workflows in a workspace. Required: workspace_id.

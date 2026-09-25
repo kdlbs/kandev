@@ -3,6 +3,9 @@
 // designed for quick tasks like generating commit messages or PR descriptions.
 package utility
 
+import "github.com/kandev/kandev/internal/common/acpprovider"
+import "github.com/kandev/kandev/pkg/agent"
+
 // PromptRequest is the request for executing an inference prompt.
 type PromptRequest struct {
 	// Prompt is the fully resolved prompt text to send to the LLM.
@@ -142,6 +145,9 @@ const (
 	// ProbeFailureManagedRuntimeNPMResolution means the trusted top-level npm
 	// package failed exact-version resolution with ETARGET.
 	ProbeFailureManagedRuntimeNPMResolution ProbeFailureCode = "managed_runtime_npm_resolution"
+	// ProbeFailureManagedRuntimeNPMPolicy means npm rejected the trusted exact
+	// package version under a date-qualified release policy.
+	ProbeFailureManagedRuntimeNPMPolicy ProbeFailureCode = "managed_runtime_npm_policy"
 )
 
 // ProbeAuthMethod is a single advertised authentication method.
@@ -202,7 +208,9 @@ type ProbePromptCapabilities struct {
 
 // InferenceConfigDTO is the inference configuration passed from backend to agentctl.
 type InferenceConfigDTO struct {
-	// Command is the ACP command for one-shot inference.
+	// Protocol selects the one-shot inference transport. Empty means ACP.
+	Protocol agent.Protocol `json:"protocol,omitempty"`
+	// Command is the protocol command for one-shot inference.
 	// e.g., ["npx", "-y", "@agentclientprotocol/claude-agent-acp"]
 	Command []string `json:"command"`
 	// ModelFlag is the flag template for specifying the model.
@@ -216,6 +224,17 @@ type InferenceConfigDTO struct {
 	StripEnv      []string `json:"strip_env,omitempty"`
 	CLIFlags      []string `json:"cli_flags,omitempty"`
 	CommandPrefix []string `json:"command_prefix,omitempty"`
+	// ProviderGatewayAuth, when set, makes the probe/inference subprocess
+	// authenticate against a Kandev-configured OpenAI-compatible provider
+	// (base URL + bearer key) right after the ACP initialize handshake, the
+	// same mechanism the live session adapter uses.
+	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
+	// OperatorDefined marks a command that came from a custom agent the
+	// install operator registered in Settings rather than from an agent
+	// definition compiled into the binary. Such a command cannot appear in
+	// the probe allow-list, because it does not exist until the operator
+	// types it. See resolveSpawnCommand.
+	OperatorDefined bool `json:"operator_defined,omitempty"`
 }
 
 // PromptResponse is the response from executing a utility prompt.

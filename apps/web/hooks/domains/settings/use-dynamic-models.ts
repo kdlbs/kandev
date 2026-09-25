@@ -301,8 +301,9 @@ async function resolveModelConfig(
 export function useAgentCapabilities(
   agentName: string | undefined,
   initial: ModelConfig,
+  options: { enabled?: boolean } = {},
 ): UseAgentCapabilitiesState {
-  const supportsDynamicModels = initial.supports_dynamic_models;
+  const supportsDynamicModels = options.enabled !== false && initial.supports_dynamic_models;
   const [models, setModels] = useState<ModelEntry[]>(initial.available_models);
   const [modes, setModes] = useState<ModeEntry[]>(initial.available_modes ?? []);
   const [commands, setCommands] = useState<CommandEntry[]>(initial.available_commands ?? []);

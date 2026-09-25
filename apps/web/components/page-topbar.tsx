@@ -12,26 +12,21 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@kandev/ui/breadcrumb";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { cn } from "@kandev/ui/lib/utils";
+import {
+  ParentCrumbLabel,
+  ParentCrumbMenuItem,
+  type ParentCrumb,
+} from "@/components/page-topbar-parent-crumb";
+export type { ParentCrumb } from "@/components/page-topbar-parent-crumb";
 import { AppStatusDrawerTrigger } from "@/components/app-status-bar/app-status-surface-provider";
 import { useTopbarPressure } from "@/hooks/use-topbar-pressure";
 import { linkToTaskOverview } from "@/lib/links";
+import { macTauriDragRegionProps } from "@/lib/desktop/window-chrome";
 
 /** The one bar height. Bespoke bars adopt this token instead of redeclaring it. */
 export const TOPBAR_HEIGHT_CLASSNAME = "h-10 min-h-11 md:min-h-10";
-
-/**
- * A middle breadcrumb between the leading crumb and the page title. No `href`
- * means orientation rather than navigation; `phoneOnlyLink` keeps the crumb
- * clickable below `md` (where the sidebar is hidden) and static above it.
- */
-export type ParentCrumb = { label: string; href?: string; phoneOnlyLink?: boolean };
 
 type PageTopbarProps = {
   /** Page title shown as the rightmost (current) breadcrumb */
@@ -74,6 +69,10 @@ type PageTopbarProps = {
    * they unmount and remount when the fold engages.
    */
   overflowActions?: ReactNode;
+  /** Raw menu items shown only when the action budget is exceeded. */
+  overflowMenuItems?: ReactNode;
+  /** Primary action retained beside the overflow menu when it is open. */
+  overflowPrimaryAction?: ReactNode;
   className?: string;
   /**
    * Which zone absorbs the bar's leftover width. "lead" (default) lets the
@@ -102,6 +101,14 @@ type PageTopbarProps = {
   /** Optional `data-testid` on the header element. */
   testId?: string;
 };
+
+function shouldMeasureTopbarPressure({
+  parents,
+  overflowActions,
+  overflowMenuItems,
+}: Pick<PageTopbarProps, "parents" | "overflowActions" | "overflowMenuItems">): boolean {
+  return (parents?.length ?? 0) > 0 || overflowActions != null || overflowMenuItems != null;
+}
 
 function BackLink({
   href,
@@ -247,40 +254,6 @@ function TitleCrumb({
   );
 }
 
-function ParentCrumbLabel({ crumb }: { crumb: ParentCrumb }) {
-  if (crumb.href) {
-    return (
-      <>
-        <BreadcrumbLink asChild>
-          <Link
-            href={crumb.href}
-            className={cn(
-              "max-w-40 truncate cursor-pointer text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline",
-              crumb.phoneOnlyLink && "md:hidden",
-            )}
-          >
-            {crumb.label}
-          </Link>
-        </BreadcrumbLink>
-        {crumb.phoneOnlyLink && (
-          <span className="hidden max-w-40 cursor-default truncate text-muted-foreground/60 md:inline">
-            {crumb.label}
-          </span>
-        )}
-      </>
-    );
-  }
-  // Static crumb: orientation only, dimmed so it does not read as a link. The
-  // `title` is what makes a name longer than `max-w-40` readable at all, since
-  // truncation is the only thing standing between a long label and a squeezed
-  // page title.
-  return (
-    <span title={crumb.label} className="max-w-40 cursor-default truncate text-muted-foreground/60">
-      {crumb.label}
-    </span>
-  );
-}
-
 /**
  * Middle crumbs: the full chain from `md` up; below `md` everything except the
  * last parent collapses into a `…` dropdown so deep paths stay one row —
@@ -328,17 +301,12 @@ function ParentCrumbs({
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
-                {collapsed.map((p) =>
-                  p.href ? (
-                    <DropdownMenuItem key={p.href} asChild>
-                      <Link href={p.href}>{p.label}</Link>
-                    </DropdownMenuItem>
-                  ) : (
-                    <DropdownMenuItem key={p.label} disabled>
-                      {p.label}
-                    </DropdownMenuItem>
-                  ),
-                )}
+                {collapsed.map((p, index) => (
+                  <ParentCrumbMenuItem
+                    key={`${p.externalUrl ?? p.href ?? p.label}-${index}`}
+                    crumb={p}
+                  />
+                ))}
               </DropdownMenuContent>
             </DropdownMenu>
           </BreadcrumbItem>
@@ -364,6 +332,15 @@ function GhostSeparator() {
  */
 function GhostLabel({ label, className }: { label: string; className?: string }) {
   return <span data-label={label} className={cn("before:content-[attr(data-label)]", className)} />;
+}
+
+function GhostParentLabel({ crumb }: { crumb: ParentCrumb }) {
+  return (
+    <span className="flex max-w-40 min-w-0 items-center gap-1.5">
+      {crumb.icon && <span aria-hidden className="size-3.5 shrink-0" />}
+      <GhostLabel label={crumb.label} className="min-w-0 truncate" />
+    </span>
+  );
 }
 
 type TopbarGhostProps = {
@@ -422,7 +399,7 @@ function TopbarGhost({
         {lead}
         {chain.map((p, index) => (
           <span key={`${p.href ?? p.label}-${index}`} className="flex items-center gap-1.5">
-            <GhostLabel label={p.label} className="max-w-40 truncate" />
+            <GhostParentLabel crumb={p} />
             <GhostSeparator />
           </span>
         ))}
@@ -437,7 +414,7 @@ function TopbarGhost({
         )}
         {lastParent && (
           <>
-            <GhostLabel label={lastParent.label} className="max-w-40 truncate" />
+            <GhostParentLabel crumb={lastParent} />
             <GhostSeparator />
           </>
         )}
@@ -472,22 +449,55 @@ type TopbarRightZoneProps = {
   zoneRef: RefObject<HTMLDivElement | null>;
   actions?: ReactNode;
   overflowActions?: ReactNode;
+  overflowMenuItems?: ReactNode;
+  overflowPrimaryAction?: ReactNode;
   actionsOverflowed: boolean;
   actionsClassName?: string;
   claimsFreeWidth: boolean;
   showStatusTrigger: boolean;
 };
 
+function TopbarActionCluster({
+  actions,
+  overflowActions,
+  overflowMenuItems,
+  overflowPrimaryAction,
+  actionsOverflowed,
+  actionsClassName,
+}: Pick<
+  TopbarRightZoneProps,
+  | "actions"
+  | "overflowActions"
+  | "overflowMenuItems"
+  | "overflowPrimaryAction"
+  | "actionsOverflowed"
+  | "actionsClassName"
+>) {
+  const showOverflowMenu = overflowMenuItems != null && actionsOverflowed;
+  return (
+    <div className={cn("relative z-10 flex shrink-0 items-center gap-2", actionsClassName)}>
+      {!actionsOverflowed && overflowActions}
+      {showOverflowMenu ? overflowPrimaryAction : actions}
+      {actionsOverflowed && overflowActions != null && (
+        <TopbarActionsOverflow>{overflowActions}</TopbarActionsOverflow>
+      )}
+      {showOverflowMenu && <TopbarActionsOverflow>{overflowMenuItems}</TopbarActionsOverflow>}
+    </div>
+  );
+}
+
 function TopbarRightZone({
   zoneRef,
   actions,
   overflowActions,
+  overflowMenuItems,
+  overflowPrimaryAction,
   actionsOverflowed,
   actionsClassName,
   claimsFreeWidth,
   showStatusTrigger,
 }: TopbarRightZoneProps) {
-  const hasCluster = Boolean(actions || overflowActions);
+  const hasCluster = Boolean(actions || overflowActions || overflowMenuItems);
   if (!hasCluster && !showStatusTrigger) return null;
   return (
     // Default: no `min-w-0`, so the zone's automatic minimum is its min-content
@@ -502,13 +512,14 @@ function TopbarRightZone({
       className={cn("flex items-center gap-3", claimsFreeWidth ? "min-w-0 grow" : "shrink")}
     >
       {hasCluster && (
-        <div className={cn("relative z-10 flex shrink-0 items-center gap-2", actionsClassName)}>
-          {!actionsOverflowed && overflowActions}
-          {actions}
-          {actionsOverflowed && overflowActions != null && (
-            <TopbarActionsOverflow>{overflowActions}</TopbarActionsOverflow>
-          )}
-        </div>
+        <TopbarActionCluster
+          actions={actions}
+          overflowActions={overflowActions}
+          overflowMenuItems={overflowMenuItems}
+          overflowPrimaryAction={overflowPrimaryAction}
+          actionsOverflowed={actionsOverflowed}
+          actionsClassName={actionsClassName}
+        />
       )}
       {showStatusTrigger ? (
         <AppStatusDrawerTrigger className={cn(hasCluster && "ml-1", "shrink-0")} />
@@ -555,6 +566,8 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
     leftActions,
     actions,
     overflowActions,
+    overflowMenuItems,
+    overflowPrimaryAction,
     className,
     freeWidth = "lead",
     centerClassName,
@@ -570,14 +583,14 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
   const ghostRef = useRef<HTMLDivElement>(null);
   const rightZoneRef = useRef<HTMLDivElement>(null);
   const actionsClaimFreeWidth = freeWidth === "actions";
-  // Measurement only matters once there is something that can fold.
-  const measured = (parents?.length ?? 0) > 0 || overflowActions != null;
+  const measured = shouldMeasureTopbarPressure({ parents, overflowActions, overflowMenuItems });
   const pressure = useTopbarPressure(
     { leadZone: leadZoneRef, ghost: ghostRef, rightZone: rightZoneRef },
     measured,
   );
   return (
     <header
+      {...macTauriDragRegionProps()}
       ref={ref}
       data-testid={testId}
       data-window-controls-overlay-region="content"
@@ -631,6 +644,8 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
         zoneRef={rightZoneRef}
         actions={actions}
         overflowActions={overflowActions}
+        overflowMenuItems={overflowMenuItems}
+        overflowPrimaryAction={overflowPrimaryAction}
         actionsOverflowed={pressure.actionsOverflowed}
         actionsClassName={actionsClassName}
         claimsFreeWidth={actionsClaimFreeWidth}

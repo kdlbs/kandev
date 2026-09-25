@@ -30,14 +30,23 @@ type RunRoutineRequest struct {
 	Variables map[string]string `json:"variables"`
 }
 
+// RoutineWithSchedule pairs a routine's intent (Status, unchanged) with
+// Task 01's schedule-state classification, so a caller never has to
+// correlate two separate reads to see both (AC-OFFICE-ROUTINE-ARMING-002.1).
+type RoutineWithSchedule struct {
+	*Routine
+	ScheduleState       ScheduleState        `json:"schedule_state"`
+	UnarmedCronTriggers []UnarmedCronTrigger `json:"unarmed_cron_triggers"`
+}
+
 // RoutineResponse wraps a single routine.
 type RoutineResponse struct {
-	Routine *Routine `json:"routine"`
+	Routine *RoutineWithSchedule `json:"routine"`
 }
 
 // RoutineListResponse wraps a list of routines.
 type RoutineListResponse struct {
-	Routines []*Routine `json:"routines"`
+	Routines []*RoutineWithSchedule `json:"routines"`
 }
 
 // CreateTriggerRequest is the request body for creating a routine trigger.

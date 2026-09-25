@@ -15,11 +15,10 @@ type repoWithoutAdmittedLister struct{}
 // wiring: the controller the service holds must read the persisted half of the
 // population, not just its own reservations.
 func TestNewSessionCeilingForRepoBindsARepositoryThatCanCount(t *testing.T) {
-	t.Setenv(maxConcurrentSessionsEnvVar, "4")
 	lister := &fakeAdmittedLister{}
 	lister.set("s1", "s2")
 
-	controller := newSessionCeilingForRepo(lister, zap.NewNop())
+	controller := newSessionCeilingForRepo(lister, 4, zap.NewNop())
 	if controller == nil {
 		t.Fatal("newSessionCeilingForRepo returned nil")
 	}
@@ -41,10 +40,9 @@ func TestNewSessionCeilingForRepoBindsARepositoryThatCanCount(t *testing.T) {
 // persisted session. That is the one failure here that is invisible at runtime,
 // so it is announced rather than accepted silently.
 func TestNewSessionCeilingForRepoWarnsWhenTheRepositoryCannotCount(t *testing.T) {
-	t.Setenv(maxConcurrentSessionsEnvVar, "4")
 	core, logs := observer.New(zapcore.WarnLevel)
 
-	controller := newSessionCeilingForRepo(repoWithoutAdmittedLister{}, zap.New(core))
+	controller := newSessionCeilingForRepo(repoWithoutAdmittedLister{}, 4, zap.New(core))
 	if controller == nil {
 		t.Fatal("newSessionCeilingForRepo returned nil")
 	}

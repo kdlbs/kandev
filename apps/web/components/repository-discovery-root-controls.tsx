@@ -12,11 +12,54 @@ export type RepositoryDiscoveryRootControlsProps = {
   isLoading: boolean;
   discoveryRoots: DesktopDiscoveryRoot[];
   homeConfirmationRequired: boolean;
+  isConfirmingHomeDiscovery?: boolean;
+  onConfirmHomeDiscovery: () => void;
   onChooseDiscoveryRoot: (path: string) => void;
   onRefreshDiscovery: () => void;
   onReconnectDiscoveryRoot: (oldPath: string, newPath: string) => void;
   onRemoveDiscoveryRoot: (path: string) => void;
 };
+
+function SavedDiscoveryRootList({
+  discoveryRoots,
+  onReconnectDiscoveryRoot,
+  onRemoveDiscoveryRoot,
+}: {
+  discoveryRoots: DesktopDiscoveryRoot[];
+  onReconnectDiscoveryRoot: (oldPath: string, newPath: string) => void;
+  onRemoveDiscoveryRoot: (path: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {discoveryRoots.map((root) => (
+        <div
+          key={root.id || root.path}
+          className="flex min-w-0 flex-wrap items-center gap-2 rounded border border-border/50 p-2 text-xs"
+        >
+          <span className="min-w-0 flex-1 truncate font-mono" title={root.path}>
+            {root.display_path || root.path}
+          </span>
+          {root.state === "reconnect_required" && (
+            <FolderPicker
+              value=""
+              placeholder={t("workspaces:reconnectDiscoveryRoot")}
+              onChange={(newPath) => onReconnectDiscoveryRoot(root.path, newPath)}
+            />
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            className="[@media(pointer:coarse)]:h-11"
+            onClick={() => onRemoveDiscoveryRoot(root.path)}
+          >
+            {t("workspaces:removeDiscoveryRoot")}
+          </Button>
+        </div>
+      ))}
+    </>
+  );
+}
 
 export function RepositoryDiscoveryRootControls({
   className,
@@ -24,6 +67,8 @@ export function RepositoryDiscoveryRootControls({
   isLoading,
   discoveryRoots,
   homeConfirmationRequired,
+  isConfirmingHomeDiscovery = false,
+  onConfirmHomeDiscovery,
   onChooseDiscoveryRoot,
   onRefreshDiscovery,
   onReconnectDiscoveryRoot,
@@ -71,39 +116,28 @@ export function RepositoryDiscoveryRootControls({
         <div className="rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
           <p>{t("workspaces:homeDiscoveryConfirmationDescription")}</p>
           <div className="mt-2">
-            <FolderPicker
-              value=""
-              placeholder={t("workspaces:continueHomeDiscovery")}
-              onChange={onChooseDiscoveryRoot}
-            />
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isLoading || isConfirmingHomeDiscovery}
+              aria-busy={isConfirmingHomeDiscovery}
+              onClick={onConfirmHomeDiscovery}
+            >
+              {t("workspaces:continueHomeDiscovery")}
+            </Button>
+            {isConfirmingHomeDiscovery && (
+              <span className="sr-only" role="status">
+                {t("common:loading")}
+              </span>
+            )}
           </div>
         </div>
       )}
-      {discoveryRoots.map((root) => (
-        <div
-          key={root.id || root.path}
-          className="flex min-w-0 flex-wrap items-center gap-2 rounded border border-border/50 p-2 text-xs"
-        >
-          <span className="min-w-0 flex-1 truncate font-mono" title={root.path}>
-            {root.display_path || root.path}
-          </span>
-          {root.state === "reconnect_required" && (
-            <FolderPicker
-              value=""
-              placeholder={t("workspaces:reconnectDiscoveryRoot")}
-              onChange={(newPath) => onReconnectDiscoveryRoot(root.path, newPath)}
-            />
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            className="[@media(pointer:coarse)]:h-11"
-            onClick={() => onRemoveDiscoveryRoot(root.path)}
-          >
-            {t("workspaces:removeDiscoveryRoot")}
-          </Button>
-        </div>
-      ))}
+      <SavedDiscoveryRootList
+        discoveryRoots={discoveryRoots}
+        onReconnectDiscoveryRoot={onReconnectDiscoveryRoot}
+        onRemoveDiscoveryRoot={onRemoveDiscoveryRoot}
+      />
     </div>
   );
 }

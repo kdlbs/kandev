@@ -14,9 +14,11 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
+	agenttypes "github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -170,6 +172,21 @@ type ExecutorBackend interface {
 	IsAlwaysResumable() bool
 }
 
+// RecoveryCandidateOutcome represents the classified recovery outcome for one candidate record.
+type RecoveryCandidateOutcome string
+
+const (
+	RecoveryOutcomeNoMatchingInstance RecoveryCandidateOutcome = "no_matching_instance"
+	RecoveryOutcomeEnumerationFailed  RecoveryCandidateOutcome = "enumeration_failed"
+	RecoveryOutcomeUnknown            RecoveryCandidateOutcome = "unknown"
+)
+
+// DetailedRecoveryBackend is an optional extension for ExecutorBackend implementations
+// that report detailed per-candidate recovery outcomes.
+type DetailedRecoveryBackend interface {
+	RecoverInstancesDetailed(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error)
+}
+
 // McpServerConfig holds configuration for an MCP server.
 // Type alias for agentctl.McpServerConfig to avoid conversion boilerplate.
 type McpServerConfig = agentctl.McpServerConfig
@@ -193,14 +210,19 @@ const (
 	MetadataKeyRemoteContributions      = "remote_contributions"
 	MetadataKeyContributionDestinations = "contribution_destinations"
 	MetadataKeyComparisonTargets        = "comparison_targets"
+	MetadataKeyExecutorType             = "executor_type"
 	MetadataKeyIsRemote                 = "is_remote"
 	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
 	MetadataKeyAgentConfigBundles       = "agent_config_bundles"
 	MetadataKeyExecutorProfileID        = "executor_profile_id"
+	MetadataKeyPluginExecutor           = "plugin_executor"
 	MetadataKeyGitUserName              = "git_user_name"
 	MetadataKeyGitUserEmail             = "git_user_email"
 	MetadataKeyImageTagOverride         = "image_tag_override"
 	MetadataKeyAllowUserNamespaces      = "allow_user_namespaces"
+	MetadataKeyDockerNetwork            = "docker_network"
+	MetadataKeyDockerNetworkGwPriority  = "docker_network_gw_priority"
+	MetadataKeyDockerAdditionalNetworks = "docker_additional_networks"
 	MetadataKeyContainerID              = "container_id"
 	MetadataKeySpriteName               = "sprite_name"
 	MetadataKeySpriteState              = "sprite_state"
@@ -342,37 +364,40 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHReclaimTaskDir:       true,
 
 	// Kubernetes connection and exact resource inventory.
-	MetadataKeyKubernetesAuthMode:              true,
-	MetadataKeyKubernetesKubeconfigPath:        true,
-	MetadataKeyKubernetesKubeContext:           true,
-	MetadataKeyKubernetesConfigNamespace:       true,
-	MetadataKeyKubernetesRequestTimeoutSeconds: true,
-	MetadataKeyKubernetesNamespace:             true,
-	MetadataKeyKubernetesPodName:               true,
-	MetadataKeyKubernetesPodUID:                true,
-	MetadataKeyKubernetesMainContainer:         true,
-	MetadataKeyKubernetesPlatform:              true,
-	MetadataKeyKubernetesRuntimeWorkspaceMode:  true,
-	MetadataKeyKubernetesPVCName:               true,
-	MetadataKeyKubernetesPVCUID:                true,
-	MetadataKeyKubernetesPVCCreated:            true,
-	MetadataKeyKubernetesAgentctlRemotePort:    true,
-	MetadataKeyKubernetesAgentctlInstanceID:    true,
-	MetadataKeyKubernetesContainerRestartCount: true,
-	MetadataKeyKubernetesResourceInstanceID:    true,
-	MetadataKeyKubernetesResourceExecutorID:    true,
-	MetadataKeyKubernetesResourceProfileID:     true,
-	MetadataKeyKubernetesResourceTaskID:        true,
-	MetadataKeyKubernetesResourceSessionID:     true,
-	MetadataKeyKubernetesResourceEnvironmentID: true,
-	MetadataKeyKubernetesExecutorConfigHash:    true,
-	MetadataKeyKubernetesProfileConfigHash:     true,
-	MetadataKeyKubernetesTemplateHash:          true,
-	MetadataKeyKubernetesProfileSnapshot:       true,
-	MetadataKeyKubernetesInventoryState:        true,
+	MetadataKeyKubernetesAuthMode:               true,
+	MetadataKeyKubernetesKubeconfigPath:         true,
+	MetadataKeyKubernetesKubeContext:            true,
+	MetadataKeyKubernetesConfigNamespace:        true,
+	MetadataKeyKubernetesRequestTimeoutSeconds:  true,
+	MetadataKeyKubernetesNamespace:              true,
+	MetadataKeyKubernetesPodName:                true,
+	MetadataKeyKubernetesPodUID:                 true,
+	MetadataKeyKubernetesMainContainer:          true,
+	MetadataKeyKubernetesPlatform:               true,
+	MetadataKeyKubernetesRuntimeWorkspaceMode:   true,
+	MetadataKeyKubernetesPVCName:                true,
+	MetadataKeyKubernetesPVCUID:                 true,
+	MetadataKeyKubernetesPVCCreated:             true,
+	MetadataKeyKubernetesAgentctlRemotePort:     true,
+	MetadataKeyKubernetesAgentctlInstanceID:     true,
+	MetadataKeyKubernetesContainerRestartCount:  true,
+	metadataKubernetesTaskOwned:                 true,
+	agentkubernetes.MetadataKeyOwnershipVersion: true,
+	MetadataKeyKubernetesResourceInstanceID:     true,
+	MetadataKeyKubernetesResourceExecutorID:     true,
+	MetadataKeyKubernetesResourceProfileID:      true,
+	MetadataKeyKubernetesResourceTaskID:         true,
+	MetadataKeyKubernetesResourceSessionID:      true,
+	MetadataKeyKubernetesResourceEnvironmentID:  true,
+	MetadataKeyKubernetesExecutorConfigHash:     true,
+	MetadataKeyKubernetesProfileConfigHash:      true,
+	MetadataKeyKubernetesTemplateHash:           true,
+	MetadataKeyKubernetesProfileSnapshot:        true,
+	MetadataKeyKubernetesInventoryState:         true,
 
 	// Executor type marker
-	MetadataKeyIsRemote: true,
+	MetadataKeyExecutorType: true,
+	MetadataKeyIsRemote:     true,
 
 	// Executor profile / auth config
 	MetadataKeyCleanupScript:            true,
@@ -386,8 +411,12 @@ var persistentMetadataKeys = map[string]bool{
 	"executor_mcp_policy":               true,
 	"sprites_network_policy_rules":      true,
 	MetadataKeyExecutorProfileID:        true,
+	MetadataKeyPluginExecutor:           true,
 	MetadataKeyImageTagOverride:         true,
 	MetadataKeyAllowUserNamespaces:      true,
+	MetadataKeyDockerNetwork:            true,
+	MetadataKeyDockerNetworkGwPriority:  true,
+	MetadataKeyDockerAdditionalNetworks: true,
 	MetadataKeyContainerID:              true,
 	MetadataKeyWorktreeBranch:           true,
 	metadataCheckoutBranch:              true,
@@ -416,42 +445,44 @@ var sessionScopedMetadataKeys = map[string]bool{
 	// must not be inherited by a sibling session sharing the environment.
 	MetadataKeyOfficeAgentProfileID: true,
 
-	MetadataKeySSHRemoteSessionDir:             true,
-	MetadataKeySSHRemoteAgentctlPort:           true,
-	MetadataKeySSHRemoteAgentctlPID:            true,
-	MetadataKeySSHAgentctlInstanceID:           true,
-	MetadataKeySSHLocalForwardPort:             true,
-	MetadataKeySSHRemoteAgentctlURL:            true,
-	MetadataKeySSHRuntimeAPILocalURL:           true,
-	MetadataKeySSHRuntimeAPIRemotePort:         true,
-	MetadataKeyKubernetesAuthMode:              true,
-	MetadataKeyKubernetesKubeconfigPath:        true,
-	MetadataKeyKubernetesKubeContext:           true,
-	MetadataKeyKubernetesConfigNamespace:       true,
-	MetadataKeyKubernetesRequestTimeoutSeconds: true,
-	MetadataKeyKubernetesNamespace:             true,
-	MetadataKeyKubernetesPodName:               true,
-	MetadataKeyKubernetesPodUID:                true,
-	MetadataKeyKubernetesMainContainer:         true,
-	MetadataKeyKubernetesPlatform:              true,
-	MetadataKeyKubernetesRuntimeWorkspaceMode:  true,
-	MetadataKeyKubernetesPVCName:               true,
-	MetadataKeyKubernetesPVCUID:                true,
-	MetadataKeyKubernetesPVCCreated:            true,
-	MetadataKeyKubernetesAgentctlRemotePort:    true,
-	MetadataKeyKubernetesAgentctlInstanceID:    true,
-	MetadataKeyKubernetesContainerRestartCount: true,
-	MetadataKeyKubernetesResourceInstanceID:    true,
-	MetadataKeyKubernetesResourceExecutorID:    true,
-	MetadataKeyKubernetesResourceProfileID:     true,
-	MetadataKeyKubernetesResourceTaskID:        true,
-	MetadataKeyKubernetesResourceSessionID:     true,
-	MetadataKeyKubernetesResourceEnvironmentID: true,
-	MetadataKeyKubernetesExecutorConfigHash:    true,
-	MetadataKeyKubernetesProfileConfigHash:     true,
-	MetadataKeyKubernetesTemplateHash:          true,
-	MetadataKeyKubernetesProfileSnapshot:       true,
-	MetadataKeyKubernetesInventoryState:        true,
+	MetadataKeySSHRemoteSessionDir:              true,
+	MetadataKeySSHRemoteAgentctlPort:            true,
+	MetadataKeySSHRemoteAgentctlPID:             true,
+	MetadataKeySSHAgentctlInstanceID:            true,
+	MetadataKeySSHLocalForwardPort:              true,
+	MetadataKeySSHRemoteAgentctlURL:             true,
+	MetadataKeySSHRuntimeAPILocalURL:            true,
+	MetadataKeySSHRuntimeAPIRemotePort:          true,
+	MetadataKeyKubernetesAuthMode:               true,
+	MetadataKeyKubernetesKubeconfigPath:         true,
+	MetadataKeyKubernetesKubeContext:            true,
+	MetadataKeyKubernetesConfigNamespace:        true,
+	MetadataKeyKubernetesRequestTimeoutSeconds:  true,
+	MetadataKeyKubernetesNamespace:              true,
+	MetadataKeyKubernetesPodName:                true,
+	MetadataKeyKubernetesPodUID:                 true,
+	MetadataKeyKubernetesMainContainer:          true,
+	MetadataKeyKubernetesPlatform:               true,
+	MetadataKeyKubernetesRuntimeWorkspaceMode:   true,
+	MetadataKeyKubernetesPVCName:                true,
+	MetadataKeyKubernetesPVCUID:                 true,
+	MetadataKeyKubernetesPVCCreated:             true,
+	MetadataKeyKubernetesAgentctlRemotePort:     true,
+	MetadataKeyKubernetesAgentctlInstanceID:     true,
+	MetadataKeyKubernetesContainerRestartCount:  true,
+	metadataKubernetesTaskOwned:                 true,
+	agentkubernetes.MetadataKeyOwnershipVersion: true,
+	MetadataKeyKubernetesResourceInstanceID:     true,
+	MetadataKeyKubernetesResourceExecutorID:     true,
+	MetadataKeyKubernetesResourceProfileID:      true,
+	MetadataKeyKubernetesResourceTaskID:         true,
+	MetadataKeyKubernetesResourceSessionID:      true,
+	MetadataKeyKubernetesResourceEnvironmentID:  true,
+	MetadataKeyKubernetesExecutorConfigHash:     true,
+	MetadataKeyKubernetesProfileConfigHash:      true,
+	MetadataKeyKubernetesTemplateHash:           true,
+	MetadataKeyKubernetesProfileSnapshot:        true,
+	MetadataKeyKubernetesInventoryState:         true,
 }
 
 // ShouldPersistMetadataKey returns true if the given metadata key should
@@ -586,7 +617,10 @@ type RemoteInstanceRefresher interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID        string
+	InstanceID string
+	// ExecutorType is retained in execution metadata so recovered sessions can
+	// safely re-check host-local filesystem eligibility.
+	ExecutorType      string
 	TaskID            string
 	TaskTitle         string
 	SessionID         string
@@ -600,6 +634,7 @@ type ExecutorCreateRequest struct {
 	WorkspacePath          string
 	WorkspaceSourceRoots   []string
 	Protocol               string
+	CodexAppServerEnabled  bool
 	Env                    map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
@@ -616,7 +651,11 @@ type ExecutorCreateRequest struct {
 	ContributionDestinations map[string]models.ContributionDestination
 	ComparisonTargets        map[string]models.ComparisonTarget
 	McpServers               []McpServerConfig
-	AgentConfig              agents.Agent // Agent type info needed by runtimes
+	// ProviderGatewayAuth authenticates the ACP agent against an
+	// OpenAI-compatible gateway right after initialize. Resolved from the
+	// launching profile's OpenAI-compatible provider fields.
+	ProviderGatewayAuth *acpprovider.GatewayAuth
+	AgentConfig         agents.Agent // Agent type info needed by runtimes
 	// ManagedRuntimeVersion is the effective exact version resolved for this
 	// launch. Remote executors use it during preflight before agentctl receives
 	// the final command.
@@ -641,6 +680,24 @@ type ExecutorCreateRequest struct {
 	// ReleaseRuntimeInventory removes this launch's provisional row after every
 	// created resource was rolled back. Implementations must use execution CAS.
 	ReleaseRuntimeInventory func(context.Context) error
+	// PluginExecutor contains a host-authorized provider/profile snapshot. Secret
+	// values are transient and must never be copied to runtime metadata.
+	PluginExecutor *PluginExecutorLaunch
+}
+
+func codexAppServerEnabledForAgent(agentConfig agents.Agent) bool {
+	if agentConfig == nil || !agentConfig.Enabled() {
+		return false
+	}
+	runtime := agentConfig.Runtime()
+	return runtime != nil && runtime.Protocol == agenttypes.ProtocolCodexAppServer
+}
+
+func protocolForAgent(agentConfig agents.Agent) string {
+	if agentConfig == nil || agentConfig.Runtime() == nil {
+		return ""
+	}
+	return string(agentConfig.Runtime().Protocol)
 }
 
 // ExecutorInstance represents an agentctl instance created by a runtime.
@@ -723,6 +780,12 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	for k, v := range ri.Metadata {
 		metadata[k] = v
 	}
+	executorType := req.ExecutorType
+	if executorType != "" {
+		metadata[MetadataKeyExecutorType] = executorType
+	} else {
+		delete(metadata, MetadataKeyExecutorType)
+	}
 
 	workspacePath := ri.WorkspacePath
 	if workspacePath == "" {
@@ -741,6 +804,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 
 	execution := &AgentExecution{
 		ID:                   ri.InstanceID,
+		ExecutorType:         executorType,
 		RunID:                req.Env["KANDEV_RUN_ID"],
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,

@@ -6,6 +6,7 @@ import { QueueAdmissionError, QueueFullError } from "@/lib/api/domains/queue-api
 
 const toastMock = vi.fn();
 const handleSendMessageMock = vi.fn();
+const fetchTaskMock = vi.hoisted(() => vi.fn());
 const useKeyboardShortcutMock = vi.hoisted(() => vi.fn());
 const MESSAGE_NOT_SENT_TITLE = "Message not sent";
 let mockProceedStepName: string | null = null;
@@ -17,6 +18,7 @@ const mockState = {
   kanban: { workflowId: null, tasks: [], steps: [] },
   kanbanMulti: { snapshots: {} },
   workflows: { items: [] },
+  office: { tasks: { items: [] } },
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -51,6 +53,11 @@ vi.mock("@/components/task/share/share-button", () => ({
 
 vi.mock("@/components/task/chat/chat-input-container", () => ({
   ChatInputContainer: () => <textarea aria-label="Draft" />,
+}));
+
+vi.mock("@/lib/api/domains/kanban-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/kanban-api")>()),
+  fetchTask: fetchTaskMock,
 }));
 
 vi.mock("@/components/task/chat/queued-ghost-list", () => ({
@@ -147,6 +154,7 @@ beforeEach(() => {
   handleSendMessageMock.mockReset();
   handleSendMessageMock.mockResolvedValue(undefined);
   useKeyboardShortcutMock.mockReset();
+  fetchTaskMock.mockReset().mockResolvedValue({ workspace_id: "task-workspace" });
 });
 
 afterEach(() => {
@@ -166,6 +174,7 @@ function panelState(overrides = {}) {
     isAgentBusy: false,
     activeDocument: null,
     planComments: [],
+    previewFeedback: [],
     pendingPRFeedback: [],
     walkthroughComments: [],
     messageComments: [],
@@ -254,6 +263,15 @@ it("keeps the composer mounted and focused as the queue fills and drains", () =>
     expect(document.activeElement).toBe(editor);
   }
 });
+
+it.each(["direct", "queue"] as const)(
+  "projects the derived %s input mode on the composer surface",
+  (inputMode) => {
+    renderComposer({ inputMode });
+
+    expect(screen.getByTestId("chat-input-area").getAttribute("data-input-mode")).toBe(inputMode);
+  },
+);
 
 describe("resolveInputPlaceholder", () => {
   it("invites queueing while a clarification remains pending", () => {
@@ -447,7 +465,9 @@ describe("useSubmitHandler task plan comments", () => {
       });
     },
   );
+});
 
+describe("useSubmitHandler task feedback references", () => {
   it("submits displayed IDs and versions without clearing the shared snapshot locally", async () => {
     const clearSessionPlanComments = vi.fn();
     const comment = {
@@ -480,6 +500,32 @@ describe("useSubmitHandler task plan comments", () => {
       planCommentRefs: [{ id: "plan-comment-1", version: 3 }],
     });
     expect(clearSessionPlanComments).not.toHaveBeenCalled();
+  });
+
+  it("freezes the displayed preview feedback versions for the shared send", async () => {
+    const { result } = renderHook(() =>
+      useSubmitHandler(
+        panelState({
+          previewFeedback: [
+            {
+              id: "preview-1",
+              version: 6,
+              kind: "text",
+              comment: "Keep this runtime text",
+            },
+          ],
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "" });
+    });
+
+    expect(handleSendMessageMock).toHaveBeenCalledWith({
+      message: "",
+      previewFeedbackRefs: [{ id: "preview-1", version: 6 }],
+    });
   });
 });
 

@@ -86,11 +86,20 @@ Do not expose provider-specific request unions to agents.
 
 Use raw JSON Schema with object roots, `additionalProperties: false`, and nested
 closed objects. Require nonempty strings and integers with minimum 1.
-Declare every root property before applying `oneOf` branches for operations and targets.
-The existing schema compiler closes root objects, so branch-only properties would be rejected.
-Use enum values for providers and operations. Reject null instead of treating it as omission.
-Schema validation and backend validation must agree, including direct backend calls.
-Backend authorization must not depend on successful agentctl validation.
+Declare every root property. Use enum values for providers and operations.
+Reject null instead of treating it as omission.
+
+Tool schemas stay within the portable subset defined in the
+[MCP tool schema portability design](mcp-tool-schema-portability.md): the schema
+root declares no `oneOf`, `allOf`, or `anyOf`. Operation-, target-, and
+prompt-exclusivity constraints that the root cannot express are enforced in the
+handlers before any backend side effect, not through top-level combinators.
+`manage_task_change_request_kandev` rejects `old_*` fields on link and unlink and
+requires the full old identity on replace. `update_task_change_request_automation_kandev`
+rejects a mixed association/task target and rejects `auto_fix_prompt_override` on
+an association target. Schema validation and handler validation must agree,
+including direct backend calls. Backend authorization must not depend on
+successful agentctl validation.
 
 ## GitHub caller identity
 

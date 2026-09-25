@@ -11,6 +11,17 @@ const (
 	InstructionsEnd     = "<!-- /one-time-workflow-move-instructions -->"
 )
 
+// ShouldAutoStartAgent reports whether entering a step can start an agent for
+// this move. A missing auto_start_agent action leaves a task without a
+// session, and skip_step_prompt without instructions removes the only turn
+// that could be started for a new session.
+func ShouldAutoStartAgent(step *models.WorkflowStep, opts *EntryOptions) bool {
+	if step == nil || !step.HasOnEnterAction(models.OnEnterAutoStartAgent) {
+		return false
+	}
+	return opts == nil || !opts.SkipStepPrompt || strings.TrimSpace(opts.Instructions) != ""
+}
+
 // OverlayStep returns a copy of step with one-shot move-entry options applied.
 // The original step is never mutated. Reset is OR-ed onto the copy and never
 // disables an existing reset_agent_context action.

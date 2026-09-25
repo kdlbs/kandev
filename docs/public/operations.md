@@ -29,7 +29,7 @@ See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-se
 
 ## Prevent host sleep during active tasks
 
-Administrators can open **Settings > Preferences > Task Behavior** and enable
+Administrators can open **Settings > Preferences > Task Behavior > Runtime** and enable
 **Prevent host sleep while tasks run**. The install-wide setting is off by
 default and is saved with the Kandev database. It applies only to the machine
 running the backend; it does not change executor or node power policy.
@@ -56,7 +56,9 @@ availability policy instead. Enabling the preference is safe when moving the
 database between hosts: Kandev reacquires a native request only after startup
 if the new backend can provide it and a working task still exists.
 
-![Settings > Preferences > Task Behavior showing task title, archive, unread message, and host sleep controls.](../screenshots/settings-task-behavior.png)
+Task Behavior uses **Tasks**, **Conversation**, and **Runtime** tabs on one page.
+Each setting has a short description. Use its info button for technical details.
+On touch devices, the info button opens a drawer. **Save changes** saves drafts across all three tabs.
 
 ## Health and readiness
 
@@ -151,7 +153,7 @@ Add `--system` to both commands for a system service.
 
 ## Message queue settings
 
-Open **Settings > Task Behavior > Message Queue** to manage install-wide queue behavior. The default capacity is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting. At or above the new limit, only an eligible direct automatic fold into the existing tail can still succeed; other work is rejected until messages run or are removed. Staged attachments are rejected before a fold or claim. Delivery retries for work accepted before the change are not discarded by the lower cap.
+Open **Settings > Preferences > Task Behavior > Runtime** to manage install-wide queue behavior. The default capacity is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting. At or above the new limit, only an eligible direct automatic fold into the existing tail can still succeed; other work is rejected until messages run or are removed. Staged attachments are rejected before a fold or claim. Delivery retries for work accepted before the change are not discarded by the lower cap.
 
 `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence than the saved capacity. A valid environment value makes only that field read-only; zero or a negative value means unlimited. Invalid text is logged and ignored in favor of the saved setting or default. Environment changes require a backend restart, while UI changes do not.
 
@@ -179,7 +181,7 @@ To recover capacity in one session, expand its queue chip in the task workbench.
 
 Database snapshots do not contain Git worktrees, clones, the master key, service metadata, or provider-side objects. Native agent and `gh` login files also normally live in the service user's home outside `~/.kandev` (for example `~/.codex` and `~/.config/gh`). The official container instead sets `HOME=/data/home`, so those CLI credentials live on its mounted volume.
 
-The System Database and Backups pages use the configured SQLite file path. They use `backups/` under the parent directory of that file. The default remains `<home>/data/kandev.db` with snapshots in `<home>/data/backups/`. A custom path can place the database and snapshots outside the Kandev home. Kandev does not move snapshots from another directory automatically.
+The **Data & Logs > Database** tab and its Backups section use the configured SQLite file path. They use `backups/` under the parent directory of that file. The default remains `<home>/data/kandev.db` with snapshots in `<home>/data/backups/`. A custom path can place the database and snapshots outside the Kandev home. Kandev does not move snapshots from another directory automatically.
 
 ### Canvas artifacts and recovery
 
@@ -211,8 +213,8 @@ or cleanup jobs still exist.
 <details>
 <summary>Storage maintenance details</summary>
 
-Open **Settings > System > Storage** to inspect Kandev-managed disk usage and
-configure cleanup.
+Open **Settings > System > Storage > Host** to inspect Kandev-managed disk usage and
+configure cleanup. Open **Storage > Office retention** for Office history policy and status.
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
 while another maintenance run owns the cleanup gate. If task resources are active, the page names
 the active work and offers **Run anyway** after an explicit disruption warning. Use that override
@@ -260,6 +262,13 @@ permanent deletion. Each entry shows its `delete_after` retention deadline: **De
 time, not an exact promise, the first successful scheduled or full manual maintenance run after the
 deadline performs the purge, subject to the idle gate and any preemption.
 
+Each full maintenance run also revisits at most 100 Kandev-managed local branches retained when a
+task was archived before its work was integrated. Kandev considers only durable rows that still
+belong to archived tasks with inactive worktrees; it does not scan branch-name patterns or fetch
+remote state. The branch is removed only after the same ownership, liveness, and local integration
+checks used during archive cleanup. Remote refs and branches with unpublished or ambiguous work
+remain untouched.
+
 ![Settings > System > Storage showing the maintenance policy, schedule, workspace cleanup, and folder allowlist.](../screenshots/system-maintenance-policy.png)
 
 Use **Clear eligible** to remove only entries whose deadlines have passed. It reports protected
@@ -284,6 +293,14 @@ prove which cache generation is currently live.
 If scheduled cleanup is disabled, no independent quarantine sweeper runs: use a full **Run now** or
 one of the quarantine actions when you want cleanup.
 
+Archived Git worktrees use the task cleanup worker, not the optional storage schedule. A clean
+worktree can be removed during archive. A worktree with tracked or untracked Git changes remains
+on disk and gets a durable recheck after about 24 hours. The worker removes it after Git reports it
+clean, even when scheduled storage cleanup is disabled. Git-ignored files are outside this check.
+Active archived worktree paths protect their task workspace from storage quarantine and purge,
+including **Force clear all**. An older Kandev version can move an active worktree into quarantine.
+If this happens, choose **Restore** to return the workspace to its original path.
+
 The Workspaces policy includes an off-by-default **Remove dependencies from archived or deleted
 task workspaces** option. When enabled, a scheduled cleanup or the matching manual action can
 recursively remove only these directories from eligible, unprotected Kandev task workspaces:
@@ -304,20 +321,54 @@ Do not enable those rules on a daemon shared with unrelated workloads.
 
 ![Settings > System > Storage showing Docker cleanup controls, cache retention, unused image cleanup, and quarantine safety.](../screenshots/system-docker-cleanup.png)
 
+The Host tab reports capacity for the filesystem containing Kandev home and for the service's
+effective temporary folder. On Unix, it also reports `/tmp` when it resolves to a separate root.
+Capacity loads independently of the folder analysis and refreshes every 30 seconds while the Host
+tab is visible. A warning starts at 80% used; a critical warning starts at 90% used or when no space
+is available. Temporary-file operations can fail when this filesystem is full, even if task
+workspaces have free space. When Kandev can identify a shared filesystem, the page shows the
+relationship and does not add its capacity twice. These measurements do not change temporary
+directory or tool-cache settings.
+
 The Storage page also reports **System temporary folders** as a read-only footprint. It measures the
 service's effective temporary folder and, on Unix, `/tmp` when it resolves to a distinct folder.
 Resolved roots, measured size, and partial or unavailable status are shown. This footprint is
 informational and can overlap counted categories, so it is excluded from **Total counted**. It has
-no cleanup action and does not claim ownership of any path.
+no direct cleanup action. The analysis rows use the measured byte
+values to order categories from largest to smallest. A decorative bar compares each displayed
+measurement with the largest displayed measurement; zero measurements have an empty bar, and
+unknown or unavailable measurements have no bar. These bars compare footprints and do not change
+**Total counted**, capacity thresholds, or cleanup behavior. Overlapping categories can therefore
+appear in more than one row.
 
-The page separately reports **Kandev temporary artifacts** created by services that need a short-lived
-directory under the host temporary root. Each current artifact is registered in the Kandev database
-and carries an owner-only marker in its exact directory. Active artifacts and artifacts created
-within the last 24 hours are protected. The **Clean stale Kandev temporary artifacts** policy is off
+A temporary-folder scan that reaches its deadline keeps the sampled bytes, partial status, and
+skipped-entry counts. The expanded row shows one timeout explanation and keeps a bounded set of
+other diagnostic examples. A timeout does not authorize cleanup or indicate that the sampled size
+is a final folder total.
+
+The expanded **System temporary folders** row can show up to 20 largest direct entries for each
+selected root. These sizes are apparent regular-file bytes, not allocated filesystem blocks. Sparse
+files, hard links, metadata, deleted open files, and reserved blocks can make them differ from the
+capacity measurement. Partial entries keep only their observed bytes; unreadable or unvisited usage
+is unknown and is not added to the displayed remainder. Names and sizes identify large paths, but
+do not identify a task or process. Temporary folders can also contain tool caches, browser profiles,
+archives, and test data.
+
+An entry is marked as registered only when its exact path matches this installation's artifact
+registry and its owner-only marker validates. Registration alone does not make a file eligible for
+cleanup. **Review Kandev cleanup** opens the existing registered-artifact row, where the current
+eligibility and confirmation rules remain in effect. It does not start cleanup or pass the selected
+entry to a delete action. Reported candidate bytes do not predict how much filesystem capacity
+cleanup will free.
+
+The Host tab separately reports **Temporary Kandev files** created by services that need a short-lived
+directory under the host temporary root. Each current file is registered in the Kandev database
+and carries an owner-only marker in its exact directory. Active files and files created within the
+last 24 hours are protected. The **Clean inactive Kandev temporary files** policy is off
 by default. When enabled, scheduled maintenance and a full **Run now** may move eligible, registered
-artifacts into Kandev quarantine. Kandev uses a same-filesystem rename when possible. If the
+files into Kandev quarantine. Kandev uses a same-filesystem rename when possible. If the
 quarantine is on another filesystem, it stages and verifies a copy before publishing it and removes
-the original only after revalidating its identity. An explicit **Clean stale artifacts** action is
+the original only after revalidating its identity. An explicit **Clean inactive files** action is
 available even when the policy is off. Quarantine entries can be restored during the configured
 retention period; this action does not permanently delete them or immediately free disk space.
 The action does not inspect or claim arbitrary `/tmp` entries, shared caches, Node or Playwright
@@ -350,7 +401,7 @@ the Kandev service first provides the clearest maintenance boundary.
 
 ## Office run history retention
 
-Open **Settings > System > Data & Logs** to manage automatic deletion of old
+Open **Settings > System > Storage > Office retention** to manage automatic deletion of old
 Office run history. Deletion is enabled by default. The first sweep starts five
 minutes after the backend starts or after you enable deletion.
 
@@ -360,7 +411,7 @@ Deletion is permanent. Back up the database before you enable deletion if you
 need to keep old history outside the configured window.
 
 The retention window controls the age of rows that can be deleted. The minimum
-kept per owner control keeps the newest rows for each routine or agent, even
+per routine and minimum per agent profile controls keep the newest rows for each owner, even
 when those rows are older than the window. A floor of zero removes this extra
 protection. Run event, route attempt, and skill rows are deleted with their
 parent run.
@@ -371,15 +422,15 @@ is disabled, so you can monitor growth before you enable it again.
 
 To disable automatic deletion:
 
-1. Open **Settings > System > Data & Logs**.
-2. Clear **Delete eligible run history**.
+1. Open **Settings > System > Storage > Office retention**.
+2. Turn off **Automatic cleanup**.
 3. Select **Save changes**.
 4. Check the retention status. It must show that deletion is disabled.
 
 ## Messages compaction
 
-Open **Settings > System > Data & Logs** to reduce old tool details in a SQLite
-database. **Messages compaction** is independent of Office run history retention
+Open **Settings > System > Data & Logs > Database** to reduce old tool details in a SQLite
+database. **Message compaction** is independent of Office run history retention
 and is disabled by default. The initial period is three calendar months.
 
 1. Set **Tasks inactive for** to whole weeks or calendar months.
@@ -445,13 +496,60 @@ explicit path skips legacy discovery. When both defaults contain task history,
 Kandev keeps the current default and does not merge the databases. Use a
 verified snapshot or a later deliberate recovery procedure to reconcile them.
 
-Open **Settings > System > Database** to see database size, WAL size, schema version, path, and the newest modification time among regular entries in the sibling `backups/` directory. That timestamp is a filesystem hint, not proof of a valid snapshot: an unrelated or temporary file in the directory can affect it. SQLite exposes three maintenance actions:
+Open **Settings > System > Data & Logs > Database** to see database size, WAL size, schema version, path, and the newest modification time among regular entries in the sibling `backups/` directory. That timestamp is a filesystem hint, not proof of a valid snapshot: an unrelated or temporary file in the directory can affect it. SQLite exposes three maintenance actions:
+
+Logical storage totals are measured in the background and shown with their last
+measurement time. During the first scan, the page still shows database details
+and available maintenance actions. If a refresh fails, the last complete totals
+remain visible as stale; select **Retry measurement** when the page offers it.
+The logical snapshot is held by the backend for 15 minutes and is lost when the
+backend restarts. The page reports the metadata measurement time separately if
+the live metadata read could not refresh.
 
 - **Optimize** runs `PRAGMA optimize`. It is quick and updates planner statistics.
 - **Vacuum** runs `VACUUM`, compacts the file, and reports bytes reclaimed. It can need substantial temporary disk and can block writes, so run it during a quiet period.
 - **Factory reset** is destructive and is described below.
 
 These actions run as background system jobs. Closing the browser does not cancel a job. Check the page or logs for its terminal state before starting another maintenance operation.
+
+Conversation history uses the task database as its source. A storage cutover
+can remove the retired conversation journal tables and triggers in one startup
+migration, after the normal pre-migration backup. The migration is transactional
+and safe to retry after a failed attempt. Stop older Kandev backends before the
+upgrade; a mixed old and new writer set is not supported. The cutover does not
+run `VACUUM`, so use the existing **Vacuum** action later if you need to reduce
+the SQLite file size.
+
+#### Compact SQLite after the conversation upgrade
+
+Compaction is an explicit maintenance operation, separate from backup, migration,
+and readiness. Startup does not compact the live database. The pre-migration
+snapshot uses `VACUUM INTO` to create a separate backup; it does not shrink the
+live file.
+
+1. Wait for the upgraded backend to become ready. Check history before proceeding.
+2. Copy the verified pre-upgrade backup outside the automatic retention directory
+   for rollback. Create and verify a current snapshot to preserve newer work.
+3. Schedule a quiet maintenance period and pause agent runs. Ensure sufficient
+   free disk space for temporary files, the WAL, and retained backups.
+4. Open **Settings > System > Data & Logs > Database** and select **Vacuum**.
+   Wait for the job to finish before starting other maintenance or resuming runs.
+5. Check the reported reclaimed bytes, `/ready`, and conversation history.
+   Existing backup files are not compacted by this operation.
+
+For offline maintenance, stop every backend that uses the database, including
+supervised services. Then run the following against the configured SQLite path:
+
+```bash
+sqlite3 "/absolute/path/to/kandev.db" 'VACUUM;'
+sqlite3 "/absolute/path/to/kandev.db" 'PRAGMA integrity_check;'
+```
+
+The integrity check must return `ok` before you restart Kandev. Do not delete
+`-wal` or `-shm` files manually. `PRAGMA optimize` and a WAL checkpoint do not
+replace compaction. SQLite documents a worst-case requirement of twice the
+original database size in additional free space for
+[VACUUM](https://www.sqlite.org/lang_vacuum.html).
 
 ### PostgreSQL
 
@@ -481,6 +579,48 @@ the upgrade against the unchanged database.
 The normalized schema is intentionally incompatible with older binaries. To downgrade, stop all instances and restore the pre-upgrade backup; never start an older binary against a post-cutover database. SQLite restores from the verified manual snapshot created before the upgrade; PostgreSQL restores your verified `pg_dump` backup.
 
 Switching `database.driver` does not migrate data. PostgreSQL and shared NATS remove two single-process data constraints, but they do not make Kandev horizontally scalable: WebSocket subscriptions, execution lifecycle/control state, and task workspaces remain process- or filesystem-local. The current product and supplied deployment validate one backend replica only; do not add replicas based on the database and event bus alone.
+
+### Upgrading past the canonical PR-watch migration
+
+A release that makes GitHub PR watches task-owned instead of session-owned (see
+[ADR-2026-08-31-task-owned-pr-watch-identity](../decisions/2026-08-31-task-owned-pr-watch-identity.md))
+runs a one-time, idempotent, transactional cleanup of `github_pr_watches`
+during SQLite startup, after the existing version-change snapshot described
+above. A failed snapshot or a failed migration aborts startup before any
+destructive change; a database that has already been migrated, or a fresh
+install, skips it entirely. The migration only ever removes duplicate rows
+for the same task/repository/branch (keeping the newest check/comment/review
+status and any discovered PR number) and rows orphaned by a deleted task or a
+detached repository; it never removes normal conversation messages, snapshots,
+or plans, and Review-task monitoring survives the originating session's
+completion.
+
+To upgrade safely:
+
+1. Take and verify a SQLite backup as described above (manual snapshot from
+   **Settings > System > Backups**, or `sqlite3` `VACUUM INTO`); the automatic
+   pre-migration snapshot is taken during the new binary's startup, so it
+   cannot be verified beforehand.
+2. Stop all backend writers before starting the new binary; do not run a
+   mixed-version fleet across the upgrade.
+3. Start exactly one instance of the new binary and let it reach a healthy
+   state. Check **System > Status** or `/health`, then spot-check a task that
+   has an open pull request and a Review-stage task whose originating session
+   already completed: both should still show a monitored PR.
+4. Optionally, after confirming health, run `kandev maintenance database`
+   (dry run first) to review and, if desired, reclaim storage from the
+   superseded rows the migration and prior duplicate polling left behind; see
+   [Database maintenance](cli.md#database-maintenance) for its full dry-run,
+   execute, compact, and rollback behavior. The maintenance command never
+   deletes ordinary human/agent conversation messages, and its own retention
+   deletes still require an explicit `--execute` plus a verified backup
+   independent of the migration's own snapshot.
+
+If startup aborts during the migration, the pre-migration snapshot in
+`backups/` is untouched and the live database was never partially modified:
+restore from that snapshot only if you need to run an older binary again,
+otherwise fix the reported cause and restart the same new binary; the
+migration is safe to retry because it is idempotent.
 
 </details>
 
@@ -593,7 +733,7 @@ When reporting an incident, record timestamp/timezone, Kandev version and commit
 
 **Settings > System > Status** walks `data`, worktrees, repositories, sessions, tasks, quick chat, and the default `data/backups` directory. Results are cached for two hours; **Refresh** forces a new single-flight walk. Permission failures appear as warnings. Backup files outside the resolved home are not included in the total. The displayed total intentionally counts `data/backups` both inside the `data` row and again as the separate `backups` row, so use filesystem or volume metrics for quota enforcement.
 
-Archiving or deleting a task stops active sessions and starts durable asynchronous cleanup. Archive can remove a managed worktree directory, but it keeps the local task branch and environment identity. Delete can also remove the local task branch. Other cleanup can remove a container, delete the exact Kubernetes Pod and Kandev-managed PVC while retaining an existing claim, destroy a Sprite, reap a host-local agent process tree, or stop a remote SSH controller. SSH cleanup removes only the per-session runtime directory. Failed cleanup remains retryable across a backend restart. Kandev does not sweep arbitrary files from the shared temporary directory during archive or delete. The remote SSH task directory and existing Kubernetes claims remain for deliberate cleanup. The task can disappear from the UI before cleanup finishes.
+Archiving or deleting a task stops active sessions and starts durable asynchronous cleanup. Archive removes a Git worktree only when Git reports it clean. A worktree with tracked or untracked Git changes stays on disk and receives a task-lifecycle recheck after about 24 hours. This recheck runs independently of the optional scheduled storage cleanup. When Git reports a worktree clean, Kandev removes its directory. Unpublished and ambiguous local branches remain. Kandev can remove an integrated managed branch. The environment identity remains for later recovery. Delete can also remove the local task branch. Other cleanup can remove a container, the exact Kubernetes Pod, and a Kandev-managed PVC. It keeps an existing claim. It can destroy a Sprite, reap a host-local agent process tree, or stop a remote SSH controller. SSH cleanup removes only the per-session runtime directory. Failed cleanup remains retryable across a backend restart. Kandev does not sweep arbitrary files from the shared temporary directory during archive or delete. The remote SSH task directory and existing Kubernetes claims remain for deliberate cleanup. The task can disappear from the UI before cleanup finishes.
 
 **Reset Environment** uses a separate teardown path. For Sprites, the current reset request can lose the profile credential context and report success while leaving the provider sandbox behind. After a Sprites reset, inspect **Settings > Executors > Sprites.dev** and explicitly destroy the old sandbox there if it remains. See [Executors](executors.md#spritesdev) for the executor-specific lifecycle.
 
@@ -654,6 +794,8 @@ After restart, verify `/ready`, **System > About**, **System > Status**, the dat
 
 Configure sampling at **Settings > Preferences > Appearance > Resource Metrics**. Defaults are CPU, memory, and disk percentage every five seconds, backend disk path `/`, and execution-environment collection off. Valid intervals are 1–300 seconds; at least one of CPU, memory, disk, CPU temperature, or 1-minute system load remains selected. System load is the average number of tasks running or waiting for CPU during the last minute; compare it with the host's CPU core count. Enable **Simplified metrics** to show only each metric icon and value in the status bar, fallback top bar, or phone Status drawer, without the Host marker or percentage progress bars.
 
+On phones, detailed readings appear together in a **System metrics** card, with labelled CPU, memory, and disk readings on one row. Additional enabled metrics continue below. Open **Status** when the status bar is enabled, or **Menu** when **Show status bar** is off but host metrics are enabled.
+
 Collection starts only while at least one connected client displays metrics in the status bar, fallback top bar, or an open phone Status drawer. Phone clients subscribe only while their Status drawer is open. The built-in status surface renders the Kandev host source only. Enabling execution metrics also adds active Docker, Kubernetes, SSH, and Sprites `agentctl` sources to the metrics stream for separately owned consumers such as plugins; execution disk sampling uses `/`. A provider hook also exists for remote Docker, but creating that runtime currently returns a not-implemented error. Missing platform APIs, container permissions, an invalid disk path, a disconnected executor, macOS/Windows temperature support, or Windows load-average support produce unavailable samples rather than quotas.
 
 These metrics are lightweight UI observability. Set alerts, retention, CPU/memory limits, and disk quotas in the host, container platform, or external monitoring stack.
@@ -675,11 +817,18 @@ Kandev warns when its live WebSocket connection has not recovered for three seco
 **Settings > System > Feature Toggles** currently exposes:
 
 - **Office mode**: experimental, medium risk, and off in the production profile by default.
-- **Office session identity**: experimental, high risk, and on in every profile by default. The live `(task_id, agent_profile_id)` pair is guarded in-transaction on the Office session creation path, not by a table-level index; pre-existing duplicate rows are retained and resolved by selection. Two Kandev processes must not write the same SQLite file. It gives each Office participant a separate task conversation and requires a restart. Disabling the toggle restores the pre-graduation runner-seat binding and task-active-session decision re-evaluation.
 - **App status bar**: stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins. Urgent WebSocket connectivity warnings still remain visible while the feature is off.
 - **Claude background prompt handoff**: experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
-- **Unread divider**: a per-user setting at **Settings > General > Task Actions**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
+- **Unread divider**: a per-user setting at **Settings > Preferences > Task Behavior > Conversation**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
 - **Debug mode**: high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
+
+Office session identity is graduated and always active. Each Office participant
+uses its own task conversation, and an agent decision is evaluated against the
+calling session. A live `(task_id, agent_profile_id)` pair is guarded
+in-transaction on the Office session creation path; pre-existing duplicate rows
+are retained and resolved by selection. Two Kandev processes must not write
+the same SQLite file. Its runtime toggle and environment variable are retired,
+so old false values do not disable participant sessions.
 
 Each feature toggle requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.
 

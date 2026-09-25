@@ -20,6 +20,13 @@ This document is the migrated task-system source for the capability. The source 
 #### Acceptance criteria
 
 - **AC-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001.2:** When explicit cancellation settles, an eligible task shall leave its active runtime state even if another task starts concurrently. If no session owns active work and no valid deferred destination remains, the task shall become `REVIEW`. A valid deferred destination preserves `SCHEDULING`. A working sibling, terminal transition, archive, or Office ownership retains its existing precedence. Disabling cancellation-driven workflow completion shall not disable this runtime reconciliation.
+
+Criterion 001.2 makes the existing review-ready outcome explicit. It does not
+change workflow movement or the cancellation setting.
+
+The [task reconciliation design](../system-design/queued-session-ownership.md#replay-and-reconciliation-locking)
+defines concurrency at this boundary.
 
 ## Migrated source detail
 

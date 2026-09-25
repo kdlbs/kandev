@@ -1,10 +1,10 @@
 ---
-status: draft
+status: current
 system: platform
 requirements:
   - REQ-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001
 created: 2026-08-01
-updated: 2026-08-29
+updated: 2026-09-17
 owners:
   - kandev
 ---
@@ -87,6 +87,14 @@ remain during migration, but switchers use the summary when present.
 
 ## Derivation rules
 
+For a late `message.queue.status_changed` event, `Projector.handleEvent` treats
+an authoritative task-not-found result from either workspace resolution or
+`LoadLaunchQueue` as deletion. It drops cached projection state under the
+task lock and publishes nothing. A different lookup error remains an error;
+the read model cannot infer deletion from a transient database failure. This
+extends AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.11 to projectors that
+already cached the task's workspace before deletion.
+
 - Pending permission outranks pending clarification for the row's primary
   state icon. Both outrank generating/background activity, which outranks
   coarse lifecycle state. This is the existing task-row precedence.
@@ -142,6 +150,12 @@ remain during migration, but switchers use the summary when present.
   Integration option updates refresh the authoritative keyed pull-request
   observations through the existing task-summary projector.
 - A semantic no-op does not increment `revision` or emit an update.
+- For valid summaries, `TaskStatusSummary.SemanticEqual` uses the same
+  canonical semantic payload as `SemanticJSON` and the repository's no-op
+  comparison. Nil and empty omitted error collections are equivalent;
+  Go-only timestamp metadata does not create a change when serialized values
+  are identical. Revision and projection time remain excluded. Invalid values
+  must not short-circuit validation as successful no-ops.
 - Clients ignore a summary delta whose revision is not newer than the stored
   revision.
 - `last_activity_at` is separate from projection freshness. Task creation,
@@ -189,6 +203,12 @@ remain during migration, but switchers use the summary when present.
 - Summary persistence and revision changes are serialized per task. A
   compare-and-update or equivalent transaction prevents concurrent source
   events from publishing duplicate revisions or losing a newer value.
+- `CompareAndUpdateTaskStatusSummary` can return false for a stale revision
+  or an unchanged semantic payload. After reloading a rejected write, the
+  projector rebases authoritative observations and compares again using the
+  same payload semantics. An already-current value succeeds without another
+  write or publication; genuine contention retains the bounded retry and
+  error path. Test stores must preserve both repository rejection conditions.
 - Missing rows are rebuilt from authoritative records. List and boot loaders
   batch summary reads and may batch repairs; they do not perform an N+1 query.
 - Existing rows are repaired after startup recovery changes authoritative session state. Missing-row
@@ -405,3 +425,7 @@ intermediate replacement.
   [`../../plans/backend-runtime-state-ownership/plan.md`](../../../plans/backend-runtime-state-ownership/plan.md)
 - Deleted-session error repair:
   [`../../plans/deleted-session-error-summary/plan.md`](../../../plans/deleted-session-error-summary/plan.md)
+- Semantic no-op equality repair:
+  [Task-summary semantic equality](../../../plans/task-summary-semantic-equality/plan.md)
+- Late deleted-task queue event repair:
+  [Recent runtime log remediation](../../../plans/recent-runtime-log-remediation/plan.md)

@@ -9,6 +9,8 @@ import type { ChatPanelState } from "./use-chat-panel-state";
 type ComposerPropsArgs = {
   panelState: ChatPanelState;
   composerWorkspaceId: string | null;
+  workspaceResolutionFailed: boolean;
+  onRetryWorkspaceResolution: () => void;
   isMoving: boolean;
   implementPlanHandler: ((fresh: boolean) => Promise<void> | Promise<boolean>) | undefined;
   executor: { unavailable: boolean; reason?: string };
@@ -35,6 +37,8 @@ export function useComposerProps(args: ComposerPropsArgs) {
   const {
     panelState,
     composerWorkspaceId,
+    workspaceResolutionFailed,
+    onRetryWorkspaceResolution,
     isMoving,
     implementPlanHandler,
     executor,
@@ -51,11 +55,13 @@ export function useComposerProps(args: ComposerPropsArgs) {
     hideAgentControls,
     hidePlanMode,
   } = args;
-  const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled } = panelState;
+  const { resolvedSessionId, taskId, isAgentBusy, isWorking, needsRecovery, planModeEnabled } =
+    panelState;
   const canQueueWhileStarting = panelState.inputMode === "queue" && panelState.isQueueReady;
   const supportsSteering = panelState.supportsSteering;
   const hasContextComments =
     panelState.planComments.length > 0 ||
+    (panelState.previewFeedback?.length ?? 0) > 0 ||
     panelState.pendingPRFeedback.length > 0 ||
     panelState.walkthroughComments.length > 0 ||
     panelState.messageComments.length > 0;
@@ -64,6 +70,8 @@ export function useComposerProps(args: ComposerPropsArgs) {
     sessionId: resolvedSessionId,
     taskId,
     workspaceId: composerWorkspaceId,
+    workspaceResolutionFailed,
+    onRetryWorkspaceResolution,
     entityReferencesEnabled: true as const,
     taskTitle: panelState.task?.title,
     taskDescription: panelState.taskDescription ?? "",
@@ -73,6 +81,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     mcpAttachmentHistory: panelState.mcpAttachmentHistory,
     onPlanModeChange: panelState.handlePlanModeChange,
     isAgentBusy,
+    isWorking,
     supportsSteering,
     isStarting: panelState.isStarting,
     canQueueWhileStarting,

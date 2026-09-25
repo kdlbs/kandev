@@ -20,6 +20,7 @@ func TestHandledLaunchFailureLeavesTypedErrorOwnerWithoutLegacyGuidance(t *testi
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 	svc.messageCreator = messages
 	err := errors.New("environment preparation failed: fatal: couldn't find remote ref feature/deleted")
+	svc.rememberTurnPrompt("session1", "retry payload", "", false, nil)
 	if got := svc.handleSessionLaunchFailure(ctx, "task1", "session1", err); !errors.Is(got, err) {
 		t.Fatalf("handleSessionLaunchFailure error = %v, want %v", got, err)
 	}
@@ -29,6 +30,12 @@ func TestHandledLaunchFailureLeavesTypedErrorOwnerWithoutLegacyGuidance(t *testi
 	}
 	if _, suppressed := svc.suppressToast.Load("session1"); suppressed {
 		t.Fatal("typed launch failure must not suppress the pointer toast")
+	}
+	if _, cached := svc.lastTurnPrompt.Load("session1"); cached {
+		t.Fatal("launch failure retained the cached prompt")
+	}
+	if got := transientRetryNoticeStateCount(svc); got != 0 {
+		t.Fatalf("notice state entries after launch failure = %d, want 0", got)
 	}
 	session, getErr := repo.GetTaskSession(ctx, "session1")
 	if getErr != nil {

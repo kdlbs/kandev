@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconArrowLeft, IconArrowRight } from "@tabler/icons-react";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { coerceCatchUpMax } from "../lib/catch-up-max";
 import { useTranslation } from "react-i18next";
 
 type CreateRoutineDialogProps = {
@@ -27,7 +28,7 @@ type CreateRoutineDialogProps = {
     triggerKind: string;
     cronExpression: string;
     timezone: string;
-  }) => void;
+  }) => Promise<boolean>;
 };
 
 type RoutineFormState = {
@@ -38,7 +39,7 @@ type RoutineFormState = {
   assignee: string;
   concurrency: string;
   catchUpPolicy: string;
-  catchUpMax: number;
+  catchUpMax: string;
   triggerKind: string;
   cronExpr: string;
   timezone: string;
@@ -52,7 +53,7 @@ const INITIAL_ROUTINE_STATE: RoutineFormState = {
   assignee: "",
   concurrency: "coalesce_if_active",
   catchUpPolicy: "summarize_missed",
-  catchUpMax: 25,
+  catchUpMax: "25",
   triggerKind: "cron",
   cronExpr: "",
   timezone: "UTC",
@@ -306,7 +307,8 @@ function PolicyFields({
             type="number"
             min={1}
             value={state.catchUpMax}
-            onChange={(e) => onUpdate({ catchUpMax: Number(e.target.value) || 25 })}
+            onChange={(e) => onUpdate({ catchUpMax: e.target.value })}
+            onBlur={(e) => onUpdate({ catchUpMax: String(coerceCatchUpMax(e.target.value)) })}
             className="mt-1.5"
           />
           <p className="text-xs text-muted-foreground mt-1.5">
@@ -339,6 +341,62 @@ function canAdvance(step: number, state: RoutineFormState): boolean {
   return true;
 }
 
+function buildSubmitPayload(state: RoutineFormState) {
+  return {
+    name: state.name,
+    description: state.description,
+    taskTitle: state.taskTitle,
+    taskDescription: state.taskDesc,
+    assigneeAgentProfileId: state.assignee,
+    concurrencyPolicy: state.concurrency,
+    catchUpPolicy: state.catchUpPolicy,
+    catchUpMax: coerceCatchUpMax(state.catchUpMax),
+    triggerKind: state.triggerKind,
+    cronExpression: state.cronExpr,
+    timezone: state.timezone,
+  };
+}
+
+// Owns the dialog's step/form state plus submission, keeping
+// CreateRoutineDialog itself under the per-function line ceiling.
+function useCreateRoutineDialogState(
+  onOpenChange: (open: boolean) => void,
+  onSubmit: CreateRoutineDialogProps["onSubmit"],
+) {
+  const [step, setStep] = useState(0);
+  const [state, setState] = useState<RoutineFormState>(INITIAL_ROUTINE_STATE);
+  // Guards against a second `handleSubmit` firing (double-click, or a
+  // repeated Enter activation per the dialog's Enter-to-confirm behavior)
+  // while the first `onSubmit` call is still in flight — the backend has no
+  // create idempotency guard, so two concurrent submits persist two routines.
+  const [submitting, setSubmitting] = useState(false);
+  const update = (patch: Partial<RoutineFormState>) => setState((prev) => ({ ...prev, ...patch }));
+
+  function handleOpenChange(next: boolean) {
+    if (!next) {
+      setState(INITIAL_ROUTINE_STATE);
+      setStep(0);
+    }
+    onOpenChange(next);
+  }
+
+  async function handleSubmit() {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const succeeded = await onSubmit(buildSubmitPayload(state));
+      // A rejected create leaves the dialog open (per onSubmit's contract) for
+      // the user to correct and retry; resetting the form on that path would
+      // silently discard what they just typed.
+      if (succeeded) handleOpenChange(false);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return { step, setStep, state, update, submitting, handleOpenChange, handleSubmit };
+}
+
 function StepContent({
   step,
   state,
@@ -362,36 +420,8 @@ export function CreateRoutineDialog({
   onSubmit,
 }: CreateRoutineDialogProps) {
   const { t } = useTranslation();
-  const [step, setStep] = useState(0);
-  const [state, setState] = useState<RoutineFormState>(INITIAL_ROUTINE_STATE);
-  const update = (patch: Partial<RoutineFormState>) => setState((prev) => ({ ...prev, ...patch }));
-
-  function reset() {
-    setState(INITIAL_ROUTINE_STATE);
-    setStep(0);
-  }
-
-  function handleOpenChange(next: boolean) {
-    if (!next) reset();
-    onOpenChange(next);
-  }
-
-  function handleSubmit() {
-    onSubmit({
-      name: state.name,
-      description: state.description,
-      taskTitle: state.taskTitle,
-      taskDescription: state.taskDesc,
-      assigneeAgentProfileId: state.assignee,
-      concurrencyPolicy: state.concurrency,
-      catchUpPolicy: state.catchUpPolicy,
-      catchUpMax: state.catchUpMax,
-      triggerKind: state.triggerKind,
-      cronExpression: state.cronExpr,
-      timezone: state.timezone,
-    });
-    reset();
-  }
+  const { step, setStep, state, update, submitting, handleOpenChange, handleSubmit } =
+    useCreateRoutineDialogState(onOpenChange, onSubmit);
 
   const isLast = step === STEP_COUNT - 1;
   const advanceEnabled = canAdvance(step, state);
@@ -435,7 +465,11 @@ export function CreateRoutineDialog({
               {t("common:cancel")}
             </Button>
             {isLast ? (
-              <Button onClick={handleSubmit} disabled={!advanceEnabled} className="cursor-pointer">
+              <Button
+                onClick={handleSubmit}
+                disabled={!advanceEnabled || submitting}
+                className="cursor-pointer"
+              >
                 {t("office:create")}
               </Button>
             ) : (

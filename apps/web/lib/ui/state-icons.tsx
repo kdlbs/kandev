@@ -117,12 +117,11 @@ const PENDING_PERMISSION_ICON: IconConfig = {
 };
 
 // The task-level interrupted affordance: the session was mid-turn when the
-// backend died and the task has not been resumed. A red alert circle — red is
-// otherwise the error/cancelled hue, but the alert shape plus the REVIEW/idle
-// coarse state it replaces keeps it distinct from the terminal X affordances.
+// backend died and the task has not been resumed. Use the shared warning
+// triangle styling so this durable marker reads as attention-needed state.
 const TASK_INTERRUPTED_ICON: IconConfig = {
-  Icon: IconAlertCircle,
-  className: STYLE_ERROR,
+  Icon: IconAlertTriangle,
+  className: STYLE_WARNING,
 };
 
 // The task-level auto-start-failed affordance: a workflow step's
@@ -214,7 +213,7 @@ export function isTerminalInterruptedState(
 }
 
 /**
- * Shared red alert affordance for a task whose session was mid-turn when the
+ * Shared warning affordance for a task whose session was mid-turn when the
  * backend died. Carries the accessible "Interrupted by restart" label and
  * tooltip, so every surface that renders the interrupted state (sidebar rows,
  * board cards, graph nodes, open-task header) presents it consistently.
@@ -227,12 +226,12 @@ export function InterruptedTaskIcon({ className }: { className?: string }) {
         <span
           aria-label={t("common:interruptedByRestart")}
           tabIndex={0}
-          className="flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-1"
+          className="flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-500 focus-visible:ring-offset-1"
         >
-          <IconAlertCircle
+          <IconAlertTriangle
             aria-hidden="true"
             data-testid="task-state-interrupted"
-            className={cn("text-red-500", className)}
+            className={cn(STYLE_WARNING, className)}
           />
         </span>
       </TooltipTrigger>

@@ -1,6 +1,7 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileTree } from "@/lib/ws/workspace-files";
 import type { FileTreeNode } from "@/lib/types/backend";
+import { isWorkspaceTreePath } from "@/lib/workspace-file-path";
 import { findNodeByPath, mergeTreeNodes } from "./file-tree-utils";
 import type { TreeLoadOwner } from "./file-browser-tree-loader";
 export type RestoredTree = {
@@ -12,7 +13,7 @@ export type RestoredTree = {
 export function restoredExpandedPaths(paths: string[]): string[] {
   const restored = new Set<string>();
   for (const path of paths) {
-    if (!path) continue;
+    if (!path || !isWorkspaceTreePath(path)) continue;
     const parts = path.split("/");
     for (let i = 1; i <= parts.length; i++) restored.add(parts.slice(0, i).join("/"));
   }

@@ -25,6 +25,7 @@ function runnerEnv(binDir: string, extra: Record<string, string> = {}): NodeJS.P
   delete env.KANDEV_E2E_CONTAINERS;
   delete env.KANDEV_E2E_DOCKER;
   delete env.CAPTURE_PR_ASSETS;
+  delete env.BASH_ENV;
   return env;
 }
 
@@ -51,6 +52,46 @@ function isRunningProcess(pid: number): boolean {
 }
 
 describe("run-e2e.sh", () => {
+  it("mounts the published coordinator template for Docker tests", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-coordinator-runner-"));
+    tempDirs.push(root);
+    const scriptsDir = path.join(root, "kandev/apps/web/e2e/scripts");
+    const pluginDir = path.join(root, "kandev-plugin-coordinator-template");
+    const binDir = path.join(root, "bin");
+    const resultFile = path.join(root, "docker-args.txt");
+    for (const dir of [scriptsDir, pluginDir, binDir]) fs.mkdirSync(dir, { recursive: true });
+    for (const name of ["run-e2e.sh", "resource-guard.sh"]) {
+      fs.copyFileSync(path.join(__dirname, name), path.join(scriptsDir, name));
+    }
+    fakeExecutable(
+      binDir,
+      "docker",
+      '#!/usr/bin/env sh\nif [ "$1" = "run" ]; then printf \'%s\\n\' "$@" > "$KANDEV_RUNNER_RESULT_FILE"; exit 0; fi\nexit 1\n',
+    );
+
+    const result = spawnSync(
+      "bash",
+      [
+        path.join(scriptsDir, "run-e2e.sh"),
+        "--docker",
+        "--no-build",
+        "--project",
+        "containers",
+        "--",
+        "tests/plugins/reference-coordinator.spec.ts",
+      ],
+      {
+        encoding: "utf8",
+        env: runnerEnv(binDir, { KANDEV_RUNNER_RESULT_FILE: resultFile }),
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(fs.readFileSync(resultFile, "utf8").split("\n")).toContain(
+      `${root}/kandev/../kandev-plugin-coordinator-template:/work/kandev-plugin-coordinator-template:ro`,
+    );
+  });
+
   it("marks a managed containers run before invoking Playwright", () => {
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
     tempDirs.push(binDir);
@@ -206,11 +247,7 @@ describe("run-e2e.sh", () => {
 
     const result = spawnSync("bash", [rawScriptPath, "--project=docker", "--help"], {
       encoding: "utf8",
-      env: {
-        ...process.env,
-        KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM: "",
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      },
+      env: runnerEnv(binDir),
     });
 
     expect(result.status).toBe(0);
@@ -229,17 +266,15 @@ describe("run-e2e.sh", () => {
     );
     fs.chmodSync(pnpmPath, 0o755);
 
+    const env = runnerEnv(binDir);
+    env.KANDEV_E2E_CONTAINERS = "1";
+    env.KANDEV_E2E_DOCKER = "1";
     const result = spawnSync(
       "bash",
       [scriptPath, "--host", "--no-build", "--project", "chromium", "--", "--help"],
       {
         encoding: "utf8",
-        env: {
-          ...process.env,
-          PATH: `${binDir}:${process.env.PATH ?? ""}`,
-          KANDEV_E2E_CONTAINERS: "1",
-          KANDEV_E2E_DOCKER: "1",
-        },
+        env,
       },
     );
 

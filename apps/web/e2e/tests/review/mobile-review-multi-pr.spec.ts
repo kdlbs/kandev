@@ -64,7 +64,10 @@ async function openMobileReview(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await waitForMultiPRFixture(testPage, session, taskId);
-      await testPage.getByRole("button", { name: "Changes" }).tap();
+      await testPage
+        .getByRole("navigation")
+        .getByRole("button", { name: /Changes$/ })
+        .tap();
       const changesPanel = testPage.getByTestId("mobile-changes-panel");
       await expect(changesPanel).toBeVisible({ timeout: 15_000 });
       const prFiles = changesPanel.getByTestId("pr-files-section");

@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -118,6 +119,9 @@ type Config struct {
 	// NotificationQueueCapacity is the resolved ACP inbound notification
 	// queue capacity for every instance created by this server.
 	NotificationQueueCapacity int
+
+	// PromptCancelJoinTimeout overrides ACP cancellation acknowledgement only for the E2E profile.
+	PromptCancelJoinTimeout time.Duration
 
 	// OTLPEndpoint is the resolved endpoint used by agentctl transport tracing.
 	OTLPEndpoint string
@@ -256,11 +260,6 @@ type InstanceConfig struct {
 	// AutoApprovePermissions auto-approves permission requests
 	AutoApprovePermissions bool
 
-	// ApprovalPolicy controls when the agent requests approval.
-	// Valid values: "untrusted" (always), "on-failure", "on-request", "never".
-	// Defaults to "on-request" if empty.
-	ApprovalPolicy string
-
 	// ShellEnabled enables auto-shell feature
 	ShellEnabled bool
 
@@ -277,12 +276,19 @@ type InstanceConfig struct {
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
 
+	// InjectedKandevMCP records that this instance configuration was created
+	// with the host-owned Kandev MCP server injected into McpServers.
+	InjectedKandevMCP bool `json:"-"`
+
 	// ProcessBufferMaxBytes caps per-process output buffer size
 	ProcessBufferMaxBytes int64
 
 	// NotificationQueueCapacity is the ACP inbound notification queue size
 	// inherited from the server startup contract.
 	NotificationQueueCapacity int
+
+	// PromptCancelJoinTimeout is inherited from the server startup configuration.
+	PromptCancelJoinTimeout time.Duration
 
 	// DetachedEventLimit bounds the per-instance retained-event count
 	// (AC-EXECUTORS-SURVIVAL-001.6), inherited from the server startup
@@ -344,6 +350,10 @@ type InstanceConfig struct {
 	// StripEnv lists environment variables to strip from the agent's child
 	// process environment entirely (not just set to empty).
 	StripEnv []string
+
+	// ProviderGatewayAuth authenticates the ACP agent against an
+	// OpenAI-compatible gateway right after initialize.
+	ProviderGatewayAuth *acpprovider.GatewayAuth
 
 	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
 	// stats. The empty key "" applies to the root / single-repo tracker.
@@ -410,10 +420,27 @@ func StartupConfigFromEnv() (commonconfig.AgentctlStartupConfig, bool, error) {
 	return startup, true, nil
 }
 
+func directE2EPromptCancelJoinTimeout() time.Duration {
+	if !isProfileTruthy(os.Getenv("KANDEV_E2E_MOCK")) {
+		return 0
+	}
+	return getEnvDuration("KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT", 0)
+}
+
+func isProfileTruthy(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 	idleTimeout := getEnvDuration("KANDEV_ACP_IDLE_TIMEOUT", time.Hour)
 	idleReaperInterval := getEnvDuration("KANDEV_ACP_IDLE_REAPER_INTERVAL", time.Minute)
 	notificationQueueCapacity := getEnvInt("KANDEV_ACP_NOTIF_QUEUE", 131072)
+	promptCancelJoinTimeout := directE2EPromptCancelJoinTimeout()
 	otlpEndpoint := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	unownedPeriod := getEnvDuration("KANDEV_ACP_UNOWNED_PERIOD", defaultUnownedPeriod)
 	detachedEventLimit := getEnvInt("KANDEV_ACP_DETACHED_EVENT_LIMIT", defaultDetachedEventLimit)
@@ -424,6 +451,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		idleReaperInterval = startup.IdleReaperInterval
 		notificationQueueCapacity = startup.NotificationQueueCapacity
 		otlpEndpoint = startup.OTLPEndpoint
+		promptCancelJoinTimeout = startup.PromptCancelJoinTimeout
 		// Zero means the caller did not resolve these (an older backend, or
 		// one built before agent survival existed) — keep the env/built-in
 		// value already computed above rather than adopting zero.
@@ -463,6 +491,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		IdleTimeout:               idleTimeout,
 		IdleReaperInterval:        idleReaperInterval,
 		NotificationQueueCapacity: notificationQueueCapacity,
+		PromptCancelJoinTimeout:   promptCancelJoinTimeout,
 		OTLPEndpoint:              otlpEndpoint,
 		UnownedPeriod:             unownedPeriod,
 		DetachedEventLimit:        detachedEventLimit,
@@ -598,6 +627,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		LogFormat:                 c.LogFormat,
 		ProcessBufferMaxBytes:     c.Defaults.ProcessBufferMaxBytes,
 		NotificationQueueCapacity: c.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:   c.PromptCancelJoinTimeout,
 		DetachedEventLimit:        c.DetachedEventLimit,
 		VscodeCommand:             c.VscodeCommand,
 		McpMode:                   "task",
@@ -613,6 +643,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 	// to forward tool calls to the backend.
 	if port > 0 {
 		cfg.McpServers = injectKandevMcpServer(cfg.McpServers, port)
+		cfg.InjectedKandevMCP = true
 	}
 
 	// Parse agent command into args
@@ -675,7 +706,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 		cfg.McpProviders = mcpproviders.Normalize(overrides.McpProviders)
 	}
 	if overrides.McpProfile != nil {
-		profileContext := *overrides.McpProfile
+		profileContext := mcpprofile.Normalize(*overrides.McpProfile)
 		cfg.McpProfile = &profileContext
 	}
 	if overrides.NamespacesMCPToolsByServer {
@@ -686,6 +717,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	}
 	if len(overrides.StripEnv) > 0 {
 		cfg.StripEnv = overrides.StripEnv
+	}
+	if overrides.ProviderGatewayAuth != nil {
+		cfg.ProviderGatewayAuth = overrides.ProviderGatewayAuth
 	}
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
@@ -716,9 +750,6 @@ func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.AutoApprovePermissions != nil {
 		cfg.AutoApprovePermissions = *overrides.AutoApprovePermissions
 	}
-	if overrides.ApprovalPolicy != "" {
-		cfg.ApprovalPolicy = overrides.ApprovalPolicy
-	}
 }
 
 // InstanceOverrides allows overriding default values when creating an instance
@@ -730,7 +761,6 @@ type InstanceOverrides struct {
 	AutoStart                  *bool
 	Env                        []string
 	AutoApprovePermissions     *bool
-	ApprovalPolicy             string
 	AgentType                  string
 	McpServers                 []McpServerConfig
 	SessionID                  string
@@ -744,6 +774,7 @@ type InstanceOverrides struct {
 	NamespacesMCPToolsByServer bool
 	RequiresProcessKill        bool
 	StripEnv                   []string
+	ProviderGatewayAuth        *acpprovider.GatewayAuth
 	BaseBranches               map[string]string
 	ComparisonTargets          map[string]models.ComparisonTarget
 	RemoteContributions        map[string]models.RemoteContribution

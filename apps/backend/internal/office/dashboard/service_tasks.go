@@ -111,6 +111,7 @@ func (s *DashboardService) UpdateTaskProjectID(ctx context.Context, taskID, proj
 		}
 	}
 	s.publishTaskUpdated(ctx, taskID, []string{"project_id"})
+	s.publishCanonicalTaskUpdated(ctx, taskID)
 	return nil
 }
 

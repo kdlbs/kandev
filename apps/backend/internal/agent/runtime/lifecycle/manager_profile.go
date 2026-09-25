@@ -28,26 +28,34 @@ func (m *Manager) ResolveAgentProfile(ctx context.Context, profileID string) (*A
 // getAgentConfigForExecution retrieves the agent configuration for an execution.
 // The execution must have AgentCommand set (which includes the agent type).
 func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (agents.Agent, error) {
+	agentConfig, _, err := m.getAgentConfigAndProfileForExecution(context.Background(), execution)
+	return agentConfig, err
+}
+
+func (m *Manager) getAgentConfigAndProfileForExecution(ctx context.Context, execution *AgentExecution) (agents.Agent, *AgentProfileInfo, error) {
 	if execution.AgentProfileID == "" {
-		return nil, fmt.Errorf("execution %s has no agent profile ID", execution.ID)
+		return nil, nil, fmt.Errorf("execution %s has no agent profile ID", execution.ID)
 	}
 
 	if m.profileResolver == nil {
-		return nil, fmt.Errorf("profile resolver not configured")
+		return nil, nil, fmt.Errorf("profile resolver not configured")
 	}
 
-	profileInfo, err := m.profileResolver.ResolveProfile(context.Background(), execution.AgentProfileID)
+	profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve profile: %w", err)
+		return nil, nil, fmt.Errorf("failed to resolve profile: %w", err)
+	}
+	if profileInfo == nil {
+		return nil, nil, errors.New("failed to resolve profile: empty profile")
 	}
 
 	agentTypeName := profileInfo.AgentName
 	agentConfig, ok := m.registry.Get(agentTypeName)
 	if !ok {
-		return nil, fmt.Errorf("agent type not found: %s", agentTypeName)
+		return nil, nil, fmt.Errorf("agent type not found: %s", agentTypeName)
 	}
 
-	return agentConfig, nil
+	return agentConfig, profileInfo, nil
 }
 
 // resolveMcpServers centralizes MCP resolution for a session:
@@ -283,11 +291,39 @@ func (m *Manager) effectiveSessionRuntimeConfigWithPresence(
 // reverting to the profile default. Falls back to profileMode when no provider
 // is wired, the lookup fails, or no session mode is set. See issue #1183.
 func (m *Manager) effectiveSessionMode(ctx context.Context, execution *AgentExecution, profileMode string) string {
+	mode, _ := m.effectiveSessionModeWithSource(ctx, execution, profileMode)
+	return mode
+}
+
+// ModeSource names which layer supplied the effective session mode.
+type ModeSource string
+
+const (
+	// ModeSourceAgentProfile means the mode came from the agent profile.
+	ModeSourceAgentProfile ModeSource = "agent_profile"
+	// ModeSourceSessionOverride means a persisted session_mode won. It is
+	// written both by the user's mode toggle and by a set_session_mode
+	// workflow action, so a profile mode losing here is expected, not a bug —
+	// but it has to be visible.
+	ModeSourceSessionOverride ModeSource = "session_override"
+	// ModeSourceNone means no layer requested a mode.
+	ModeSourceNone ModeSource = "none"
+)
+
+// effectiveSessionModeWithSource returns the effective mode and the layer that
+// supplied it. Without the source, a profile mode that lost to a persisted
+// override is invisible: the session simply runs in a mode nobody can trace.
+func (m *Manager) effectiveSessionModeWithSource(
+	ctx context.Context, execution *AgentExecution, profileMode string,
+) (string, ModeSource) {
 	info := m.sessionWorkspaceInfo(ctx, execution)
-	if info == nil || info.SessionMode == "" {
-		return profileMode
+	if info != nil && info.SessionMode != "" {
+		return info.SessionMode, ModeSourceSessionOverride
 	}
-	return info.SessionMode
+	if profileMode == "" {
+		return "", ModeSourceNone
+	}
+	return profileMode, ModeSourceAgentProfile
 }
 
 func (m *Manager) sessionWorkspaceInfo(ctx context.Context, execution *AgentExecution) *WorkspaceInfo {

@@ -59,7 +59,9 @@ vi.mock("@/hooks/domains/session/load-message-window", () => ({
 import {
   isMessageRowRendered,
   usePendingMessageScroll,
+  usePendingScrollToStart,
   useScrollTargetConsumption,
+  cancelOlderTranscriptNavigation,
   type PendingMessageScrollTarget,
 } from "./task-chat-panel";
 import type { RenderItem } from "@/hooks/use-processed-messages";
@@ -79,6 +81,199 @@ describe("isMessageRowRendered", () => {
 
     expect(isMessageRowRendered(items, "grouped-prompt")).toBe(false);
     expect(isMessageRowRendered(items, "direct-prompt")).toBe(true);
+  });
+});
+
+const NAVIGATION_SESSION_ID = "navigation-current-session";
+const OTHER_NAVIGATION_SESSION_ID = "navigation-other-session";
+const NAVIGATION_PANEL_ID = "navigation-current-panel";
+const MOBILE_NAVIGATION_PANEL_ID = "navigation-mobile-panel";
+
+describe("cancelOlderTranscriptNavigation", () => {
+  it("clears only current-owner targets and cancels pending older navigation", () => {
+    vi.clearAllMocks();
+    const dockviewTarget = {
+      sessionId: NAVIGATION_SESSION_ID,
+      messageId: "old-message",
+      token: 7,
+      hostPanelId: NAVIGATION_PANEL_ID,
+    };
+    mockDockviewState.scrollTarget = dockviewTarget;
+    const consumePendingMessage = vi.fn();
+    const cancelPendingMessage = vi.fn();
+    const cancelPendingScrollToStart = vi.fn();
+    const clearPendingScrollToStart = vi.fn();
+
+    cancelOlderTranscriptNavigation({
+      sessionId: NAVIGATION_SESSION_ID,
+      panelId: NAVIGATION_PANEL_ID,
+      dockviewTarget,
+      clearDockviewTarget: mockDockviewState.clearScrollTarget,
+      pendingScrollTarget: {
+        sessionId: NAVIGATION_SESSION_ID,
+        messageId: "pending-message",
+        token: 3,
+        hostPanelId: MOBILE_NAVIGATION_PANEL_ID,
+      },
+      consumePendingMessage,
+      cancelPendingMessage,
+      cancelPendingScrollToStart,
+      clearPendingScrollToStart,
+    });
+
+    expect(mockDockviewState.clearScrollTarget).toHaveBeenCalledWith(7);
+    expect(mockDockviewState.scrollTarget).toBeNull();
+    expect(consumePendingMessage).toHaveBeenCalledWith("pending-message");
+    expect(cancelPendingMessage).toHaveBeenCalledOnce();
+    expect(cancelPendingScrollToStart).toHaveBeenCalledOnce();
+    expect(clearPendingScrollToStart).toHaveBeenCalledOnce();
+  });
+
+  it("leaves another session's Dockview and message targets untouched", () => {
+    vi.clearAllMocks();
+    const dockviewTarget = {
+      sessionId: OTHER_NAVIGATION_SESSION_ID,
+      messageId: "other-message",
+      token: 8,
+      hostPanelId: "session:session-2",
+    };
+    mockDockviewState.scrollTarget = dockviewTarget;
+    const consumePendingMessage = vi.fn();
+    const cancelPendingMessage = vi.fn();
+
+    cancelOlderTranscriptNavigation({
+      sessionId: NAVIGATION_SESSION_ID,
+      panelId: NAVIGATION_PANEL_ID,
+      dockviewTarget,
+      clearDockviewTarget: mockDockviewState.clearScrollTarget,
+      pendingScrollTarget: {
+        sessionId: OTHER_NAVIGATION_SESSION_ID,
+        messageId: "other-pending-message",
+        token: 4,
+        hostPanelId: MOBILE_NAVIGATION_PANEL_ID,
+      },
+      pendingScrollToMessageId: "legacy-message",
+      consumePendingMessage,
+      cancelPendingMessage,
+      cancelPendingScrollToStart: vi.fn(),
+      clearPendingScrollToStart: vi.fn(),
+    });
+
+    expect(mockDockviewState.clearScrollTarget).not.toHaveBeenCalled();
+    expect(mockDockviewState.scrollTarget).toEqual(dockviewTarget);
+    expect(consumePendingMessage).not.toHaveBeenCalled();
+    expect(cancelPendingMessage).not.toHaveBeenCalled();
+    mockDockviewState.scrollTarget = null;
+  });
+});
+
+const FIRST_PROMPT_MESSAGE_ID = "first-prompt";
+
+describe("usePendingScrollToStart", () => {
+  it("cancels a queued target attempt before Jump to latest takes ownership", async () => {
+    const scrollToMessage = vi.fn().mockReturnValue(true);
+    const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
+    const onComplete = vi.fn();
+    const { result } = renderHook(() =>
+      usePendingScrollToStart({
+        messageListRef,
+        firstMessageId: FIRST_PROMPT_MESSAGE_ID,
+        hasMore: false,
+        pending: true,
+        requestKey: 1,
+        onComplete,
+      }),
+    );
+
+    act(() => result.current());
+    await flushFrames();
+
+    expect(scrollToMessage).not.toHaveBeenCalled();
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it("retries after the first prompt row is not mounted yet", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const scrollToMessage = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+    const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
+    const onComplete = vi.fn();
+
+    renderHook(() =>
+      usePendingScrollToStart({
+        messageListRef,
+        firstMessageId: FIRST_PROMPT_MESSAGE_ID,
+        hasMore: false,
+        pending: true,
+        requestKey: 1,
+        onComplete,
+      }),
+    );
+
+    await flushFrames();
+    expect(scrollToMessage).toHaveBeenCalledTimes(1);
+    expect(onComplete).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(scrollToMessage).toHaveBeenCalledTimes(2);
+    expect(scrollToMessage).toHaveBeenLastCalledWith(FIRST_PROMPT_MESSAGE_ID, {
+      align: "start",
+    });
+    expect(onComplete).toHaveBeenCalledWith(true);
+  });
+
+  it("waits for pagination to finish before attempting the target", async () => {
+    const messageListRef = { current: scrollHandle(true) };
+    const onComplete = vi.fn();
+    const { rerender } = renderHook(
+      ({ hasMore }: { hasMore: boolean }) =>
+        usePendingScrollToStart({
+          messageListRef,
+          firstMessageId: FIRST_PROMPT_MESSAGE_ID,
+          hasMore,
+          pending: true,
+          requestKey: 1,
+          onComplete,
+        }),
+      { initialProps: { hasMore: true } },
+    );
+
+    await flushFrames();
+    expect(messageListRef.current?.scrollToMessage).not.toHaveBeenCalled();
+
+    rerender({ hasMore: false });
+    await flushFrames();
+    expect(messageListRef.current?.scrollToMessage).toHaveBeenCalledWith(FIRST_PROMPT_MESSAGE_ID, {
+      align: "start",
+    });
+    expect(onComplete).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("usePendingMessageScroll cancellation", () => {
+  it("invalidates an already queued prompt attempt synchronously", async () => {
+    const scrollToMessage = vi.fn();
+    const messageListRef = { current: scrollHandle(false) };
+    messageListRef.current.scrollToMessage = scrollToMessage;
+    const onConsumed = vi.fn();
+    const { result, rerender } = renderHook(() =>
+      usePendingMessageScroll({
+        messageListRef,
+        sessionId: "session-1",
+        messageId: "message-1",
+        onConsumed,
+        readinessKey: "ready",
+        isInitialMessagesLoading: false,
+      }),
+    );
+
+    act(() => result.current.cancel());
+    rerender();
+    await flushFrames();
+
+    expect(scrollToMessage).not.toHaveBeenCalled();
+    expect(onConsumed).not.toHaveBeenCalled();
   });
 });
 
@@ -118,7 +313,7 @@ const DELETED_TARGET_RESULT: LoadMessageWindowResult = {
 
 /** Builds a MessageListHandle whose scrollToMessage mock returns the given value. */
 function scrollHandle(returns: boolean): MessageListHandle {
-  return { scrollToMessage: vi.fn(() => returns) };
+  return { scrollToMessage: vi.fn(() => returns), scrollToLatest: vi.fn(() => true) };
 }
 
 const PROPS = {
@@ -329,7 +524,7 @@ describe("usePendingMessageScroll — non-Dockview target loading", () => {
     vi.mocked(loadMessageWindowAround).mockReturnValue(pending.promise);
     mockAppStoreState.messages.bySession["session-1"] = [];
     const scrollToMessage = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
-    const messageListRef = { current: { scrollToMessage } };
+    const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
     const onConsumed = vi.fn();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { rerender } = renderHook(
@@ -346,7 +541,7 @@ describe("usePendingMessageScroll — non-Dockview target loading", () => {
     );
 
     await flushFrames();
-    messageListRef.current = { scrollToMessage };
+    messageListRef.current = { scrollToMessage, scrollToLatest: vi.fn() };
     scrollToMessage.mockReturnValue(true);
     rerender({ readinessKey: "b" });
     await flushFrames();
@@ -370,7 +565,7 @@ describe("usePendingMessageScroll — non-Dockview target loading", () => {
     vi.mocked(loadMessageWindowAround).mockReturnValue(pending.promise);
     mockAppStoreState.messages.bySession["session-1"] = [];
     const scrollToMessage = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
-    const messageListRef = { current: { scrollToMessage } };
+    const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
     const onConsumed = vi.fn();
     const { rerender } = renderHook(
       ({ readinessKey }) =>
@@ -386,7 +581,7 @@ describe("usePendingMessageScroll — non-Dockview target loading", () => {
     );
 
     await flushFrames();
-    messageListRef.current = { scrollToMessage };
+    messageListRef.current = { scrollToMessage, scrollToLatest: vi.fn() };
     scrollToMessage.mockReturnValue(true);
     rerender({ readinessKey: "b" });
     await flushFrames();
@@ -459,7 +654,7 @@ describe("usePendingMessageScroll — non-Dockview target loading", () => {
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(true)
       .mockReturnValue(false);
-    const messageListRef = { current: { scrollToMessage } };
+    const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
     const onConsumed = vi.fn();
     const { rerender } = renderHook(
       ({ readinessKey, messageId }) =>
@@ -739,7 +934,7 @@ it("reasserts a Dockview target when merged loading settles before scroll", asyn
   vi.mocked(loadMessageWindowAround).mockReturnValue(pending.promise);
   mockDockviewState.scrollTarget = target({ messageId: "target" });
   const scrollToMessage = vi.fn().mockReturnValue(false);
-  const messageListRef = { current: { scrollToMessage } };
+  const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
   const { rerender } = renderHook(
     ({ renderedMessageCount }) =>
       useScrollTargetConsumption({
@@ -835,7 +1030,7 @@ it("reasserts a Dockview target when merged loading settles after scroll", async
   vi.mocked(loadMessageWindowAround).mockReturnValue(pending.promise);
   mockDockviewState.scrollTarget = target({ messageId: "target" });
   const scrollToMessage = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
-  const messageListRef = { current: { scrollToMessage } };
+  const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
   const { rerender } = renderHook(
     ({ renderedMessageCount }) =>
       useScrollTargetConsumption({
@@ -870,7 +1065,7 @@ it("clears a deleted Dockview target after the first scroll", async () => {
   vi.mocked(loadMessageWindowAround).mockReturnValue(pending.promise);
   mockDockviewState.scrollTarget = target({ messageId: DELETED_MESSAGE_ID });
   const scrollToMessage = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
-  const messageListRef = { current: { scrollToMessage } };
+  const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
   const { rerender } = renderHook(
     ({ renderedMessageCount }) =>
       useScrollTargetConsumption({
@@ -1357,7 +1552,7 @@ describe("useScrollTargetConsumption — canonical-host unmount ownership", () =
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(true)
       .mockReturnValue(false);
-    const messageListRef = { current: { scrollToMessage } };
+    const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
     const { rerender } = renderHook(
       ({ renderedMessageCount }) =>
         useScrollTargetConsumption({

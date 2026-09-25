@@ -97,6 +97,13 @@ No new route. Task-session responses add `pending_action_revision` beside the ex
   still owned by the in-memory clarification store. The chat Skip control uses `/respond` with
   `rejected=true`, including for detached requests.
 
+## Late conversation replies
+
+The tool-response contract above does not prohibit an ordinary user message
+about an earlier question. See [late-answer delivery](clarification-response-reliability.md#inactive-response-reconciliation-and-late-answers)
+for transcript actions and inactive-response fallback. That path does not claim
+the historical bundle or revive its operational authority.
+
 ## State machine
 
 One clarification bundle has five operational states:

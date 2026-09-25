@@ -7,7 +7,7 @@ import type { SeedData } from "../fixtures/test-base";
 import type { ToolPayloadRetentionStatus } from "../../lib/types/tool-payload-retention";
 
 export const RETENTION_API = "/api/v1/system/database/tool-payload-retention";
-export const RETENTION_ROUTE = "/settings/system/data-storage";
+export const RETENTION_ROUTE = "/settings/system/data-storage?tab=database";
 export const PAYLOAD_TEXT = "retention fixture output\n".repeat(1024);
 export const TOOL_COMMAND = "printf retention-fixture";
 
@@ -129,6 +129,112 @@ export async function resetRetention(page: Page) {
     data: { ...policy, enabled: false, age: { value: 3, unit: "months" } },
   });
   expect(response.ok(), await response.text()).toBe(true);
+}
+
+export async function seedRetentionAnalysis(page: Page) {
+  const { policy } = await retentionStatus(page);
+  const accepted = await page.request.post(`${RETENTION_API}/analyze`, {
+    data: { age: policy.age },
+  });
+  const body = (await accepted.json()) as { operation_id?: string; code?: string };
+  expect(accepted.status(), JSON.stringify(body)).toBe(202);
+  const id = body.operation_id;
+  expect(id).toBeTruthy();
+  await expect
+    .poll(
+      async () => {
+        const status = await retentionStatus(page);
+        return status.last_analysis?.id === id ? status.last_analysis.state : "pending";
+      },
+      { timeout: 30_000 },
+    )
+    .toBe("succeeded");
+}
+
+export async function failNextRetentionStatusRead(page: Page) {
+  const pattern = `**${RETENTION_API}`;
+  let reads = 0;
+  await page.route(pattern, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    reads += 1;
+    if (reads === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "persistence_unavailable" }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+  return async () => page.unroute(pattern);
+}
+
+export async function reloadRetentionWithFakeClock(page: Page) {
+  await page.clock.install();
+  await page.reload();
+  await expect(page.getByTestId("tool-payload-enabled")).toBeVisible();
+}
+
+export async function recoverRetentionStatusPolling(page: Page, preserveError = false) {
+  const failed = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === RETENTION_API &&
+      response.request().method() === "GET" &&
+      response.status() === 503,
+  );
+  await page.clock.runFor(30_000);
+  await failed;
+  const error = page.getByTestId("tool-payload-error");
+  await expect(error).toBeVisible();
+  await expect(error).toContainText("Current status is unavailable");
+  await expect(page.getByTestId("tool-payload-estimate")).toContainText("Completed");
+  if (!preserveError) {
+    await expect(error).not.toContainText("operation could not complete");
+  }
+
+  const recovered = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === RETENTION_API &&
+      response.request().method() === "GET" &&
+      response.status() === 200,
+  );
+  await page.clock.runFor(30_000);
+  await recovered;
+  if (preserveError) {
+    await expect(error).toContainText("operation could not complete");
+    await expect(error).not.toContainText("Current status is unavailable");
+  } else {
+    await expect(error).toHaveCount(0);
+  }
+}
+
+export async function failRetentionAnalysis(page: Page, touch = false) {
+  const pattern = `**${RETENTION_API}/analyze`;
+  await page.route(pattern, async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "persistence_unavailable" }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+  const failed = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === `${RETENTION_API}/analyze` &&
+      response.request().method() === "POST" &&
+      response.status() === 503,
+  );
+  await press(page.getByTestId("tool-payload-analyze"), touch);
+  await failed;
+  await expect(page.getByTestId("tool-payload-error")).toBeVisible();
+  return async () => page.unroute(pattern);
 }
 
 export async function press(locator: Locator, touch = false) {

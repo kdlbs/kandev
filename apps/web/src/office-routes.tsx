@@ -18,6 +18,7 @@ import type { SetupWizardRouteProps } from "@/app/office/setup/setup-route-data"
 import ProviderRoutingPage from "@/app/office/workspace/routing/page";
 import { RoutinesPageClient } from "@/app/office/routines/routines-page-client";
 import SettingsPage from "@/app/office/workspace/settings/page";
+import ExportPage from "@/app/office/workspace/settings/export/page";
 import SyncPage from "@/app/office/workspace/settings/sync/page";
 import OrgPage from "@/app/office/workspace/org/page";
 import IssueDetailPage from "@/app/office/tasks/[id]/page";
@@ -68,6 +69,7 @@ const OFFICE_ROUTES: Record<string, RouteRenderer> = {
       <SettingsPage />
     </SettingsSaveProvider>
   ),
+  "/office/workspace/settings/export": () => <ExportPage />,
   "/office/workspace/settings/sync": () => <SyncPage />,
   "/office/workspace/org": () => <OrgPage />,
 };

@@ -4,6 +4,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { StoreApi } from "zustand";
 import { ActionMessage } from "./action-message";
+
+const MANAGED_RUNTIME_RETRY_TEST_ID = "managed-runtime-npm-retry-button";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -619,7 +621,7 @@ describe("ActionMessage — managed npm runtime recovery", () => {
             {
               type: "ws_request",
               label: "backend label is ignored",
-              test_id: "managed-runtime-npm-retry-button",
+              test_id: MANAGED_RUNTIME_RETRY_TEST_ID,
               params: {
                 method: SESSION_RECOVER_METHOD,
                 payload: {
@@ -640,18 +642,66 @@ describe("ActionMessage — managed npm runtime recovery", () => {
     expect(card.textContent).toContain("Kandev refreshed package data");
     expect(card.textContent).not.toMatch(/ACP/i);
     expect(screen.getByText(TECHNICAL_DETAILS).closest("details")?.open).toBe(false);
-    expect(screen.getAllByRole("button")).toHaveLength(1);
-    expect(screen.getByTestId("managed-runtime-npm-retry-button").textContent).toContain(
+    expect(
+      screen
+        .getAllByRole("button")
+        .filter((button) => button.getAttribute("data-testid") === MANAGED_RUNTIME_RETRY_TEST_ID),
+    ).toHaveLength(1);
+    expect(screen.getByTestId(MANAGED_RUNTIME_RETRY_TEST_ID).textContent).toContain(
       "Retry runtime",
     );
 
-    fireEvent.click(screen.getByTestId("managed-runtime-npm-retry-button"));
+    fireEvent.click(screen.getByTestId(MANAGED_RUNTIME_RETRY_TEST_ID));
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(SESSION_RECOVER_METHOD, {
         task_id: TEST_TASK_ID,
         session_id: TEST_SESSION_ID,
         action: "runtime_retry",
       }),
+    );
+  });
+
+  it("explains when npm's release-age policy blocks the selected runtime", () => {
+    renderAction(
+      retryMessage({
+        content: "managed runtime is blocked by npm policy",
+        metadata: {
+          variant: "error",
+          recovery_actions: true,
+          failure_kind: "managed_runtime_npm_policy",
+          error_output:
+            "npm error notarget No matching version found for @example/agent@1.2.3. A minimum release age policy is in effect.\n  @example/agent@1.2.3 release date: <release-date>",
+          actions: [
+            {
+              type: "ws_request",
+              label: "backend label is ignored",
+              test_id: MANAGED_RUNTIME_RETRY_TEST_ID,
+              params: {
+                method: SESSION_RECOVER_METHOD,
+                payload: {
+                  task_id: TEST_TASK_ID,
+                  session_id: TEST_SESSION_ID,
+                  action: "runtime_retry",
+                },
+              },
+            },
+          ],
+        },
+      } as Partial<Message>),
+      "WAITING_FOR_INPUT",
+    );
+
+    const card = screen.getByTestId("managed-runtime-npm-recovery");
+    expect(card.textContent).toContain("npm blocked this runtime version");
+    expect(card.textContent).toContain(
+      "Check npm's min-release-age or before setting. Wait until this version is eligible or select an older version, then retry.",
+    );
+    expect(card.textContent).not.toContain("refreshed package data");
+    expect(card.textContent).not.toContain("2026-09-20T10:30:00Z");
+    expect(screen.getByText(TECHNICAL_DETAILS).closest("details")?.open).toBe(false);
+    expect(screen.getAllByTestId(MANAGED_RUNTIME_RETRY_TEST_ID)).toHaveLength(1);
+    expect(screen.getByTestId(MANAGED_RUNTIME_RETRY_TEST_ID).textContent).toContain(
+      "Retry runtime",
     );
   });
 });
@@ -719,4 +769,15 @@ describe("ActionMessage — remediation link", () => {
     expect(screen.queryByTestId("remediation-link")).toBeNull();
     expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
   });
+});
+
+it("moves unsafe long legacy summaries into redacted technical details", () => {
+  const comment = {
+    ...recoveryMessage(true),
+    content: "failed: token=synthetic-private-value\n" + "nested diagnostic ".repeat(100),
+  };
+  const { container } = renderAction(comment, "FAILED");
+  expect(container.textContent).not.toContain("synthetic-private-value");
+  expect(screen.getByText("An error occurred")).toBeTruthy();
+  expect(container.querySelector("pre")?.textContent).toContain("nested diagnostic");
 });

@@ -94,9 +94,9 @@ func TestDesktopDiscoveryWithoutRootDoesNotScanHome(t *testing.T) {
 	svc := newDiscoveryService(t, home)
 	svc.discoveryConfig = RepositoryDiscoveryConfig{DesktopRuntime: true, MaxDepth: 6}
 	var scanCalls int
-	svc.discoveryScanRoot = func(context.Context, string, int) ([]LocalRepository, error) {
+	svc.discoveryScanRoot = func(context.Context, string, int) (repositoryDiscoveryScanResult, error) {
 		scanCalls++
-		return nil, nil
+		return repositoryDiscoveryScanResult{}, nil
 	}
 
 	result, err := svc.GetLocalRepositoryDiscovery(context.Background(), "")
@@ -135,8 +135,8 @@ func TestRepositoryDiscoveryScanUsesValidatedTrigger(t *testing.T) {
 			}
 			svc.logger = observedLogger
 			svc.discoveryConfig = RepositoryDiscoveryConfig{Roots: []string{root}, MaxDepth: 6}
-			svc.discoveryScanRoot = func(context.Context, string, int) ([]LocalRepository, error) {
-				return nil, nil
+			svc.discoveryScanRoot = func(context.Context, string, int) (repositoryDiscoveryScanResult, error) {
+				return repositoryDiscoveryScanResult{}, nil
 			}
 
 			if _, err := svc.refreshLocalRepositoryDiscovery(
@@ -196,13 +196,15 @@ func TestDesktopDiscoveryRefreshSharesOneScan(t *testing.T) {
 	release := make(chan struct{})
 	var callsMu sync.Mutex
 	calls := 0
-	svc.discoveryScanRoot = func(context.Context, string, int) ([]LocalRepository, error) {
+	svc.discoveryScanRoot = func(context.Context, string, int) (repositoryDiscoveryScanResult, error) {
 		callsMu.Lock()
 		calls++
 		callsMu.Unlock()
 		close(started)
 		<-release
-		return []LocalRepository{{Path: filepath.Join(root, "project"), Name: "project"}}, nil
+		return repositoryDiscoveryScanResult{
+			repositories: []LocalRepository{{Path: filepath.Join(root, "project"), Name: "project"}},
+		}, nil
 	}
 
 	results := make(chan RepositoryDiscoveryResult, 2)
@@ -250,7 +252,7 @@ func TestDesktopDiscoveryCancelledFlightDoesNotPoisonWaitingCaller(t *testing.T)
 	release := make(chan struct{})
 	var callsMu sync.Mutex
 	calls := 0
-	svc.discoveryScanRoot = func(ctx context.Context, _ string, _ int) ([]LocalRepository, error) {
+	svc.discoveryScanRoot = func(ctx context.Context, _ string, _ int) (repositoryDiscoveryScanResult, error) {
 		callsMu.Lock()
 		calls++
 		callNumber := calls
@@ -258,9 +260,11 @@ func TestDesktopDiscoveryCancelledFlightDoesNotPoisonWaitingCaller(t *testing.T)
 		if callNumber == 1 {
 			close(started)
 			<-release
-			return nil, ctx.Err()
+			return repositoryDiscoveryScanResult{}, ctx.Err()
 		}
-		return []LocalRepository{{Path: filepath.Join(root, "project"), Name: "project"}}, nil
+		return repositoryDiscoveryScanResult{
+			repositories: []LocalRepository{{Path: filepath.Join(root, "project"), Name: "project"}},
+		}, nil
 	}
 
 	ownerCtx, cancelOwner := context.WithCancel(context.Background())
@@ -304,7 +308,7 @@ func TestDesktopDiscoveryCancelledFlightDoesNotPoisonWaitingCaller(t *testing.T)
 	}
 }
 
-func TestRepoWalkerPropagatesAccessDenied(t *testing.T) {
+func TestRepoWalkerPropagatesRootAccessDeniedButSkipsChild(t *testing.T) {
 	root := t.TempDir()
 	walker := &repoWalker{root: root, ctx: context.Background()}
 
@@ -312,8 +316,8 @@ func TestRepoWalkerPropagatesAccessDenied(t *testing.T) {
 		t.Fatalf("root access error = %v, want permission denied", err)
 	}
 	child := filepath.Join(root, "private")
-	if _, err := walker.visit(child, nil, os.ErrPermission); !errors.Is(err, os.ErrPermission) {
-		t.Fatalf("child access error = %v, want permission denied", err)
+	if _, err := walker.visit(child, nil, os.ErrPermission); err != nil {
+		t.Fatalf("child access error = %v, want skipped child", err)
 	}
 }
 
@@ -356,11 +360,13 @@ func TestDesktopDiscoveryFailurePreservesCachedRepositories(t *testing.T) {
 	svc := newDiscoveryService(t, root)
 	svc.discoveryConfig = RepositoryDiscoveryConfig{DesktopRuntime: true, MaxDepth: 6}
 	var fail bool
-	svc.discoveryScanRoot = func(context.Context, string, int) ([]LocalRepository, error) {
+	svc.discoveryScanRoot = func(context.Context, string, int) (repositoryDiscoveryScanResult, error) {
 		if fail {
-			return nil, os.ErrPermission
+			return repositoryDiscoveryScanResult{}, os.ErrPermission
 		}
-		return []LocalRepository{{Path: repositoryPath, Name: "project"}}, nil
+		return repositoryDiscoveryScanResult{
+			repositories: []LocalRepository{{Path: repositoryPath, Name: "project"}},
+		}, nil
 	}
 
 	if _, err := svc.AddDesktopDiscoveryRoot(context.Background(), root); err != nil {

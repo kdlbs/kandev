@@ -67,14 +67,13 @@ test.describe("Native code review — on demand", () => {
     const changesTab = testPage.getByTestId("dockview-tab-changes");
     await expect(changesTab).toBeVisible();
     await changesTab.click();
-    await expect(testPage.getByTestId(`file-row-${REVIEWED_FILE}`)).toBeVisible({
+    await expect(
+      testPage.getByTestId("unstaged-file-tree").getByTestId(`file-row-${REVIEWED_FILE}`),
+    ).toBeVisible({
       timeout: 30_000,
     });
 
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible();
@@ -143,14 +142,10 @@ test.describe("Native code review — on demand", () => {
     const changesTabAfterReload = testPage.getByTestId("dockview-tab-changes");
     await expect(changesTabAfterReload).toBeVisible({ timeout: 30_000 });
     await changesTabAfterReload.click();
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const reopened = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(reopened).toBeVisible();
-
     // The dialog renders only findings that can be anchored to the refreshed
     // diff. Verify the persisted disposition through the same task-review
     // snapshot used by the page backfill so an anchor refresh cannot hide a
@@ -202,13 +197,12 @@ test.describe("Native code review — on demand", () => {
     git.createFile(REVIEWED_FILE, "export const unreviewable = 1;\n");
 
     await testPage.getByTestId("dockview-tab-changes").click();
-    await expect(testPage.getByTestId(`file-row-${REVIEWED_FILE}`)).toBeVisible({
+    await expect(
+      testPage.getByTestId("unstaged-file-tree").getByTestId(`file-row-${REVIEWED_FILE}`),
+    ).toBeVisible({
       timeout: 30_000,
     });
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible();

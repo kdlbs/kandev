@@ -614,8 +614,10 @@ export function useLazyLoadSentinel(
   const onUserGesture = useCallback(() => {
     if (!disarmedRef.current || !intersectingRef.current) return;
     const { hasMore, blocked, isLoadingMore } = stateRef.current;
-    const { joinInFlightWhileLoading } = optionsRef.current;
+    const { joinInFlightWhileLoading, isCurrentGeometryEligible } = optionsRef.current;
     if (!hasMore || blocked || (isLoadingMore && !joinInFlightWhileLoading)) return;
+    // Prepend anchoring can emit a scroll before the observer reports its exit.
+    if (isCurrentGeometryEligible && !isCurrentGeometryEligible()) return;
     void fireLoad();
   }, [fireLoad]);
 

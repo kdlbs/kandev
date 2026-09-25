@@ -1,5 +1,7 @@
 "use client";
 
+import { TaskFolderPicker } from "./task-folder-picker";
+
 import React, {
   useEffect,
   useMemo,
@@ -451,6 +453,7 @@ function FileBrowserTreeContent({
       }}
     >
       <FileBrowserContentArea
+        sessionId={data.sessionId}
         isSearchActive={search.isSearchActive}
         searchResults={search.searchResults}
         isSessionFailed={isSessionFailed}
@@ -511,6 +514,7 @@ export function FileBrowser({
   addSourcesDisabledReason,
 }: FileBrowserProps) {
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const { t } = useTranslation();
   const showTouchActions = shouldShowFileTreeTouchActions(isMobile, isFinePointer);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -524,7 +528,7 @@ export function FileBrowser({
     scrollAreaRef,
     containerRef,
   });
-  const { openFolder, copied, copyPath, search, treeState, fullPath, displayPath } = data;
+  const { folderAction, copied, copyPath, search, treeState, fullPath, displayPath } = data;
   const workspaceBlocked =
     data.workspaceRestoration.status !== null && data.workspaceRestoration.status !== "ready";
   const { openPicker, uploads, elements } = useFileUploadEntryPoints(sessionId);
@@ -550,7 +554,9 @@ export function FileBrowser({
           expandedPathsSize={treeState.expandedPaths.size}
           onCopyPath={copyPath}
           onStartCreate={!workspaceBlocked && onCreateFile ? handlers.handleStartCreate : undefined}
-          onOpenFolder={openFolder}
+          onOpenFolder={folderAction.open}
+          isOpeningFolder={folderAction.isLoading}
+          isFolderDisabled={folderAction.disabled}
           onCollapseAll={treeState.collapseAll}
           showCreateButton={!workspaceBlocked && Boolean(onCreateFile)}
           onUploadFiles={!workspaceBlocked && sessionId ? handleToolbarUpload : undefined}
@@ -573,6 +579,10 @@ export function FileBrowser({
           onUploadFilesHere={sessionId ? handleUploadHere : undefined}
           showTouchActions={showTouchActions}
         />
+        <span role="status" className="sr-only">
+          {folderAction.isLoading ? t("editors:openingFolder") : ""}
+        </span>
+        <TaskFolderPicker action={folderAction} />
         <FileUploadStatusList uploads={uploads} />
         {elements}
       </div>

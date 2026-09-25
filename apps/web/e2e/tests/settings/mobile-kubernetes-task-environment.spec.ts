@@ -52,6 +52,7 @@ test("Kubernetes task disclosure exposes live Pod details and safe actions by to
   let taskId = "";
   let navigationTaskId = "";
   let sessionReads = 0;
+  let statusUnauthorized = true;
 
   try {
     const task = await apiClient.createTaskWithAgent(
@@ -110,6 +111,7 @@ test("Kubernetes task disclosure exposes live Pod details and safe actions by to
               pod_phase: "Running",
               container_state: "running",
               restarts: 0,
+              failure_reason: statusUnauthorized ? "Unauthorized" : undefined,
               workspace_kind: "empty_dir",
               created_at: "2026-08-25T10:00:00Z",
             },
@@ -118,14 +120,20 @@ test("Kubernetes task disclosure exposes live Pod details and safe actions by to
       },
     );
 
+    await testPage.clock.install();
     await testPage.goto(`/t/${navigationTaskId}`);
     await new SessionPage(testPage).waitForLoad(30_000);
 
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const taskSwitcher = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = taskSwitcher.locator(`[data-task-row-id="${task.id}"]`);
     const statusTrigger = taskRow.getByTestId("remote-executor-status-trigger");
     await expect.poll(() => sessionReads).toBeGreaterThan(0);
+    await expect(statusTrigger).toHaveClass(/text-destructive/);
+    statusUnauthorized = false;
+    const beforeRefresh = sessionReads;
+    await testPage.clock.fastForward(90_001);
+    await expect.poll(() => sessionReads).toBeGreaterThan(beforeRefresh);
     await expect(statusTrigger).toHaveClass(/text-emerald-500/);
     await expect(statusTrigger).toHaveAttribute("aria-haspopup", "dialog");
     await expectExpandedTouchTarget(statusTrigger, "Mobile task executor status action");
@@ -140,6 +148,8 @@ test("Kubernetes task disclosure exposes live Pod details and safe actions by to
     await expect(testPage).toHaveURL(new RegExp(`/t/${navigationTaskId}$`));
     await statusDrawer.getByRole("button", { name: "Close" }).tap();
     await expect(statusDrawer).toBeHidden();
+    await expect(statusTrigger).toBeFocused();
+    await assertNoDocumentHorizontalOverflow(testPage);
     await expect(testPage).toHaveURL(new RegExp(`/t/${navigationTaskId}$`));
     await testPage.goto(`/t/${task.id}`);
     await new SessionPage(testPage).waitForLoad(30_000);

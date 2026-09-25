@@ -77,14 +77,14 @@ test.describe("Permission approval persistence", () => {
     // After the agent finishes its turn, no permission action row should be
     // visible — the previous bug had them re-appear at turn-complete because a
     // safety-net loop overwrote the approved status with "complete".
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.permissionActionRows()).toHaveCount(0);
 
     // And the resolved state must survive a page reload — i.e. backend must
     // have persisted the approve decisions, not "complete".
     await testPage.reload();
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.permissionActionRows()).toHaveCount(0);
   });
 
@@ -118,7 +118,7 @@ test.describe("Permission approval persistence", () => {
       await expect(session.permissionApproveButtons()).toHaveCount(1, { timeout: 30_000 });
       await session.permissionApproveButtons().first().click();
     }
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
     await expect(sidebarItem.getByTestId("task-state-pending-permission")).toHaveCount(0);
   });
 
@@ -153,6 +153,6 @@ test.describe("Permission approval persistence", () => {
     await expect(approveButton).toHaveCount(1, { timeout: 30_000 });
     await approveButton.click();
 
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
   });
 });

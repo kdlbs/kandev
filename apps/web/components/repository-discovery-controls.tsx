@@ -15,10 +15,9 @@ type RepositoryDiscoveryControlsProps = {
 };
 
 /**
- * The shared consent and recovery surface for every repository selector.
- * Keeping the discovery lease and root actions together prevents a picker
- * from showing an empty result without also offering the action that can
- * establish or repair its filesystem access.
+ * Renders desktop discovery-root consent and recovery controls. Browser and
+ * phone selectors keep their existing repository-list actions while discovery
+ * diagnostics remain outside the selector UI.
  */
 export function RepositoryDiscoveryControls({
   workspaceId,
@@ -40,6 +39,8 @@ export function RepositoryDiscoveryControls({
       isLoading={discovery.isLoading || discovery.isRefreshing}
       discoveryRoots={discovery.rootStates.filter((root) => Boolean(root.id))}
       homeConfirmationRequired={discovery.homeConfirmationRequired}
+      onConfirmHomeDiscovery={actions.handleConfirmHomeDiscovery}
+      isConfirmingHomeDiscovery={actions.isConfirmingHomeDiscovery}
       onChooseDiscoveryRoot={actions.handleChooseDiscoveryRoot}
       onRefreshDiscovery={actions.refreshDiscovery}
       onReconnectDiscoveryRoot={actions.handleReconnectDiscoveryRoot}

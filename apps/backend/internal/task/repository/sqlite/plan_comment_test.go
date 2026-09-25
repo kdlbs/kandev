@@ -133,10 +133,10 @@ func TestPlanCommentSchemaReplaysOnLegacyDatabase(t *testing.T) {
 	if err := repo.initPlansSchema(); err != nil {
 		t.Fatalf("initialize plan children on legacy schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("migrate legacy schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay migrations: %v", err)
 	}
 

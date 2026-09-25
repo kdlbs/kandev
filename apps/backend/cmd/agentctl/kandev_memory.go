@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -38,10 +39,14 @@ func memoryGet(args []string) int {
 
 	agentID := os.Getenv("KANDEV_AGENT_ID")
 	path := fmt.Sprintf("/api/v1/office/agents/%s/memory", agentID)
-	return getWithParams(path, "KANDEV_AGENT_ID", agentID, map[string]string{
-		"layer": *layerFlag,
-		"key":   *keyFlag,
-	})
+	values := url.Values{}
+	if *layerFlag != "" {
+		values.Set("layer", *layerFlag)
+	}
+	if *keyFlag != "" {
+		values.Set("key", *keyFlag)
+	}
+	return getWithParams(path, "KANDEV_AGENT_ID", agentID, values)
 }
 
 // memorySet upserts a memory entry for the current agent.

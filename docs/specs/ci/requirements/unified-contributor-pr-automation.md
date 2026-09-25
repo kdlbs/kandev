@@ -90,6 +90,12 @@ changes, including the changes that previously skipped walkthrough generation.
 - **AC-CI-PR-WALK-003.4:** The workflow shall verify that fetched contributor
   data matches the exact event head SHA before preparing context or publishing
   a result.
+- **AC-CI-PR-WALK-003.5:** When GitHub delivers multiple supported events for
+  one pull request, a run whose event does not satisfy the walkthrough
+  generation gate, including an unauthorized fork event, a draft event, or an
+  event received while walkthrough generation is disabled, shall not cancel or
+  supersede an eligible walkthrough run for the same pull request. Eligible
+  walkthrough runs shall retain latest-run cancellation behavior.
 
 ### REQ-CI-PR-REVIEW-004: Existing review and preview capabilities
 

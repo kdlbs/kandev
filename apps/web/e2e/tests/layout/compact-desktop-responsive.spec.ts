@@ -61,7 +61,7 @@ test.describe("compact desktop responsive layout", () => {
     await expect(testPage.getByTestId("dockview-task-layout")).toHaveCount(0);
     await expect(testPage.getByTestId("tablet-task-layout")).toHaveCount(0);
     await expect(testPage.getByTestId("app-sidebar")).toBeHidden();
-    await expect(testPage.getByTestId("mobile-session-menu")).toBeVisible();
+    await expect(testPage.getByTestId("mobile-task-picker-trigger")).toBeVisible();
     await expect(session.activeChat()).toBeVisible();
 
     await testPage.getByRole("button", { name: "Status", exact: true }).click();
@@ -74,13 +74,35 @@ test.describe("compact desktop responsive layout", () => {
     seedData,
   }) => {
     await testPage.setViewportSize(COMPACT_DESKTOP_VIEWPORT);
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: seedData.workflowId,
+      kanban_hidden_step_ids: {},
+      workflow_ids_with_auto_hide_empty_steps: [],
+    });
 
+    const laneTasks: Array<{ taskId: string; stepId: string }> = [];
     for (const step of seedData.steps) {
-      await apiClient.createTask(seedData.workspaceId, `Compact ${step.title}`, {
+      const task = await apiClient.createTask(seedData.workspaceId, `Compact ${step.name}`, {
         workflow_id: seedData.workflowId,
         workflow_step_id: step.id,
       });
+      laneTasks.push({ taskId: task.id, stepId: step.id });
     }
+    // The board hides empty columns. Wait for the task snapshot to include
+    // every seeded step before opening the page, so a slow WS projection
+    // cannot make a populated column look empty.
+    await expect
+      .poll(
+        async () => {
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          return seedData.steps.every((step) =>
+            tasks.some((task) => task.workflow_step_id === step.id),
+          );
+        },
+        { timeout: 30_000, message: "Waiting for one task in every workflow step" },
+      )
+      .toBe(true);
     const parent = await apiClient.createTask(
       seedData.workspaceId,
       "A deliberately long parent task title in compact kanban card",
@@ -98,6 +120,11 @@ test.describe("compact desktop responsive layout", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
+    for (const laneTask of laneTasks) {
+      await expect(kanban.taskCard(laneTask.taskId)).toBeVisible({ timeout: 15_000 });
+      await expect(kanban.columnByStepId(laneTask.stepId)).toBeAttached({ timeout: 15_000 });
+    }
+
     const desktopLayout = testPage.getByTestId("desktop-kanban-layout");
     await expect(desktopLayout).toHaveCount(1);
     await expect(desktopLayout).toBeVisible();
@@ -111,9 +138,6 @@ test.describe("compact desktop responsive layout", () => {
     await expect(testPage.getByRole("button", { name: "Quick Chat" })).toBeVisible();
     await expect(kanban.viewTogglePipeline).toBeVisible();
 
-    for (const step of seedData.steps) {
-      await expect(kanban.columnByStepId(step.id)).toBeAttached();
-    }
     const firstColumnBox = await kanban.columnByStepId(seedData.steps[0].id).boundingBox();
     expect(firstColumnBox).not.toBeNull();
     expect(firstColumnBox!.width).toBeGreaterThanOrEqual(280);

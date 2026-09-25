@@ -5,8 +5,13 @@ import {
   activateRetention,
   analyzeRetention,
   PAYLOAD_TEXT,
+  failNextRetentionStatusRead,
+  failRetentionAnalysis,
   readRetentionMessage,
+  recoverRetentionStatusPolling,
+  reloadRetentionWithFakeClock,
   resetRetention,
+  seedRetentionAnalysis,
   retentionStatus,
   RETENTION_ROUTE,
   runRetention,
@@ -15,6 +20,34 @@ import {
 } from "../../helpers/tool-payload-retention";
 
 test.describe("Tool payload retention", () => {
+  test("recovers a status polling error without manual refresh", async ({ testPage: page }) => {
+    await resetRetention(page);
+    await seedRetentionAnalysis(page);
+    await page.goto(RETENTION_ROUTE);
+    await reloadRetentionWithFakeClock(page);
+    const removeStatusRoute = await failNextRetentionStatusRead(page);
+    try {
+      await recoverRetentionStatusPolling(page);
+    } finally {
+      await removeStatusRoute();
+    }
+  });
+
+  test("preserves an action failure after status recovery", async ({ testPage: page }) => {
+    await resetRetention(page);
+    await seedRetentionAnalysis(page);
+    await page.goto(RETENTION_ROUTE);
+    await reloadRetentionWithFakeClock(page);
+    const removeStatusRoute = await failNextRetentionStatusRead(page);
+    const removeActionRoute = await failRetentionAnalysis(page);
+    try {
+      await recoverRetentionStatusPolling(page, true);
+    } finally {
+      await removeActionRoute();
+      await removeStatusRoute();
+    }
+  });
+
   for (const choice of ["backup", "skip"] as const) {
     test(`analyzes while disabled and cleans old payloads after explicit ${choice}`, async ({
       testPage: page,

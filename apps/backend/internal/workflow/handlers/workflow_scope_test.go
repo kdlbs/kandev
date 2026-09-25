@@ -78,7 +78,7 @@ func TestWorkflowKeyedRoutesDenyForeignOwner(t *testing.T) {
 		h := setupScopedRouter(t)
 		h.queries.reset()
 
-		rec := doRawAs(t, h, asUser(userB), http.MethodPost, "/api/v1/workspaces/ws-a/workflows/import", importYAML)
+		rec := doRawYAMLAs(t, h, asUser(userB), http.MethodPost, "/api/v1/workspaces/ws-a/workflows/import", importYAML)
 		requireNotFound(t, rec)
 		requireStepTableUntouched(t, h)
 		if len(h.provider.created) != 0 {
@@ -247,7 +247,7 @@ func TestWorkflowScopeOwnerKeepsFullAccess(t *testing.T) {
 		map[string]any{"template_id": "template-1"}), http.StatusCreated)
 	requireStatus(t, doAs(t, h, ctx, http.MethodDelete, "/api/v1/workflow/steps/"+newStepID, nil), http.StatusOK)
 
-	requireStatus(t, doRawAs(t, h, ctx, http.MethodPost,
+	requireStatus(t, doRawYAMLAs(t, h, ctx, http.MethodPost,
 		"/api/v1/workspaces/ws-a/workflows/import", importYAML), http.StatusOK)
 	if len(h.provider.created) != 1 || h.provider.created[0] != "Smuggled" {
 		t.Fatalf("owner import created %v, want the imported workflow", h.provider.created)
@@ -294,7 +294,7 @@ func TestWorkflowScopeNoOpsWithAuthDisabled(t *testing.T) {
 			requireStatus(t, doAs(t, h, tc.ctx, http.MethodPut, "/api/v1/workflow/steps/"+h.stepB,
 				map[string]any{"name": "Renamed"}), http.StatusOK)
 			requireStatus(t, doAs(t, h, tc.ctx, http.MethodDelete, "/api/v1/workflow/steps/"+h.stepB, nil), http.StatusOK)
-			requireStatus(t, doRawAs(t, h, tc.ctx, http.MethodPost,
+			requireStatus(t, doRawYAMLAs(t, h, tc.ctx, http.MethodPost,
 				"/api/v1/workspaces/ws-b/workflows/import", importYAML), http.StatusOK)
 
 			var wsListed controller.ListStepsResponse

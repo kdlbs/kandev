@@ -401,6 +401,49 @@ See
 Destination queue admission for task moves:
 [`../../decisions/2026-08-12-queue-task-moves-at-wip-capacity.md`](../../../decisions/2026-08-12-queue-task-moves-at-wip-capacity.md).
 
+## Limit updates and queue explanations
+
+The [opt-in ceiling follow-up](../../../plans/session-ceiling-opt-in/plan.md)
+adds explicit queue scope/navigation and regression coverage for live updates.
+This section maps AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.7-.9.
+
+The current `event_handlers_workflow_queue.go` subscribes to
+`events.WorkflowStepUpdated` and calls `pullNextTaskOnVacate`. That path reads
+the current step and its admitted occupants from the task service, then promotes
+eligible work in existing order. Keep this event-driven application after a
+successful settings save, including zero/unlimited. HTTP and MCP step updates
+already publish the shared event; do not add a browser-only promotion path.
+Verify increased, removed, and decreased limits through this actual boundary.
+No backend restart or additional task move is required. Promotion remains
+asynchronous; do not promise that an agent has started when the save returns.
+
+Add a shared WIP explanation to task details, including the no-session detail
+surface. Derive its target from `queued_for_step_id` and the authorized workflow
+catalog, not from the task's feeder/current column or the selected session.
+Show "Workflow WIP limit", workflow and destination step names, and count units
+as tasks. Reuse authoritative admitted counts where available. A partial board
+snapshot must not produce a supposedly complete count; omit or mark unavailable
+instead. Keep existing queue positions only where the existing WIP projection
+actually provides them; never reuse them for global session capacity.
+
+Link to the existing `/settings/workspaces/{workspaceId}/workflows` route.
+Encode identifiers and resolve the target workflow within that workspace. Add
+a stable Settings target for its workflow card so navigation reveals the right
+card after loading. The link must land at that workflow rather than whichever
+workspace happens to be selected globally. Display the destination step name in
+the link/context so its WIP control is easy to locate. Reuse the workflow
+editor's existing step selection; an additional step-specific deep-link API is
+not required for this change. Missing or inaccessible workflow identity leaves
+an explicit unavailable explanation with no guessed configuration URL.
+
+The [queued-session design](queued-session-ownership.md#limit-scope-and-configuration-navigation)
+owns the global banner and shared placement rules. A WIP save can promote a
+task that then waits for global session capacity. Publish and render the new
+reason from normal task/summary events. Saving one limit does not release work
+still blocked by the other. The phone banner/link uses the dedicated task
+layout and existing workflow Settings page with no hover requirement or extra
+modal. The follow-up plan contains desktop/mobile previews and tests.
+
 ## Implementation plan
 
 See

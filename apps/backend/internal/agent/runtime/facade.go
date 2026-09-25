@@ -6,6 +6,14 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+)
+
+// Recovery stop reasons preserve runtime-specific teardown semantics through
+// the public runtime boundary.
+const (
+	StopReasonRecoverableAgentFailure = lifecycle.StopReasonRecoverableAgentFailure
+	StopReasonAgentBootstrapFailed    = lifecycle.StopReasonAgentBootstrapFailed
 )
 
 // New returns a Runtime backed by the supplied Backend (typically a
@@ -35,12 +43,56 @@ type facade struct {
 // multi-repo specs, attachments) reach the runtime in Phase 1 without
 // canonicalising them onto LaunchSpec yet.
 func (f *facade) Launch(ctx context.Context, spec LaunchSpec) (ExecutionRef, error) {
+	if spec.Owner.Kind == ExecutionOwnerRun {
+		if spec.OwnerAdmission == nil {
+			return ExecutionRef{}, fmt.Errorf("execution owner %q has no admission provider", spec.Owner.Kind)
+		}
+		if err := spec.OwnerAdmission.AdmitExecution(ctx, spec.Owner); err != nil {
+			return ExecutionRef{}, err
+		}
+	}
 	req := launchRequestFromSpec(spec)
 	exec, err := f.backend.Launch(ctx, req)
 	if err != nil {
 		return ExecutionRef{}, err
 	}
 	return executionRefFromAgentExecution(exec), nil
+}
+
+// Start launches and starts an execution. The lifecycle manager owns initial
+// prompt delivery because it already coordinates ACP session initialization;
+// the facade only provides the atomic launch/start envelope and rolls back a
+// registered execution when startup fails.
+func (f *facade) Start(ctx context.Context, spec LaunchSpec) (ExecutionRef, error) {
+	ref, err := f.Launch(ctx, spec)
+	if err != nil {
+		return ExecutionRef{}, err
+	}
+	if err := f.StartExecution(ctx, ref.ID); err != nil {
+		cleanupErr := f.Stop(context.WithoutCancel(ctx), ref.ID, "runtime_start_failed")
+		return ExecutionRef{}, errors.Join(err, cleanupErr)
+	}
+	return ref, nil
+}
+
+// StartExecution starts a registered execution after rechecking its durable
+// owner admission. The lifecycle manager repeats the same check immediately
+// before process creation, so a pause or reassignment cannot be crossed by a
+// late process start.
+func (f *facade) StartExecution(ctx context.Context, executionID string) error {
+	if executionID == "" {
+		return fmt.Errorf("runtime: executionID is required")
+	}
+	execution, ok := f.backend.GetExecution(executionID)
+	if !ok || execution == nil {
+		return ErrNotFound
+	}
+	if execution.Owner.Kind == ExecutionOwnerRun && execution.OwnerAdmission != nil {
+		if err := execution.OwnerAdmission.AdmitExecution(ctx, execution.Owner); err != nil {
+			return err
+		}
+	}
+	return f.backend.StartAgentProcess(ctx, executionID)
 }
 
 // Resume sends a follow-up prompt to an existing execution. Attachments
@@ -97,6 +149,20 @@ func (f *facade) SetMcpMode(ctx context.Context, executionID string, mode string
 	return f.backend.SetMcpMode(ctx, executionID, mode)
 }
 
+// ExecuteBackgroundWorkAction delegates to the backend.
+func (f *facade) ExecuteBackgroundWorkAction(ctx context.Context, executionID string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error) {
+	if executionID == "" {
+		return streams.BackgroundWorkActionResponse{
+			Success: false,
+			WorkID:  req.WorkID,
+			RunID:   req.RunID,
+			Action:  req.Action,
+			Error:   "runtime: executionID is required",
+		}, nil
+	}
+	return f.backend.ExecuteBackgroundWorkAction(ctx, executionID, req)
+}
+
 // launchRequestFromSpec builds the lifecycle.LaunchRequest the backend
 // expects. If the caller supplies a pre-built *lifecycle.LaunchRequest
 // in Metadata["launch_request"], we use it as the base and overlay the
@@ -130,6 +196,10 @@ func launchRequestFromSpec(spec LaunchSpec) *lifecycle.LaunchRequest {
 	}
 	if spec.McpMode != "" {
 		req.McpMode = spec.McpMode
+	}
+	if spec.Owner.Kind != "" {
+		req.Owner = spec.Owner
+		req.OwnerAdmission = spec.OwnerAdmission
 	}
 	if len(spec.Metadata) > 0 {
 		if req.Metadata == nil {
@@ -174,6 +244,7 @@ func executionFromAgentExecution(exec *lifecycle.AgentExecution) *Execution {
 		ExitCode:       exec.ExitCode,
 		ErrorMessage:   exec.ErrorMessage,
 		ACPSessionID:   exec.ACPSessionID,
+		Owner:          exec.OwnerSnapshot(),
 		Metadata:       exec.MetadataSnapshot(),
 	}
 	return out

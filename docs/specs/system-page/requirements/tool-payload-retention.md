@@ -120,6 +120,17 @@ rules, so that I understand the first cleanup and its recovery limits.
 - **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-003.6:** The first version shall support
   SQLite. Other database engines shall show an unavailable state and reject
   analysis and mutation requests without side effects.
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-003.7:** After a status request fails,
+  the next successful background status request shall clear that request error
+  without a manual refresh. Saved policy and unsaved edits shall remain intact.
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-003.8:** A successful status request
+  shall not dismiss an unresolved user-action error or a recorded failed operation.
+  Recovery shall not retry mutations or enable compaction automatically.
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-003.9:** A failed status read shall say
+  that current status is unavailable while retaining the last known analysis
+  and its timestamp. It shall not describe a still-running analysis as a failed
+  operation. A persisted failed operation and a failed user action shall retain
+  their distinct failure feedback.
 
 ## Out of scope
 
@@ -132,3 +143,5 @@ rules, so that I understand the first cleanup and its recovery limits.
 
 - [System design](../system-design/tool-payload-retention.md)
 - [Implementation plan](../../../plans/tool-payload-retention/plan.md)
+- [Vacuum and status recovery fix](../../../plans/vacuum-compaction-status/plan.md)
+- [Database statistics resilience plan](../../../plans/database-statistics-resilience/plan.md)

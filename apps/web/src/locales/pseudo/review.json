@@ -93,5 +93,8 @@
   "severityBlocker": "Ɓĺōćķēŕ",
   "severityMajor": "Ḿàĵōŕ",
   "severityMinor": "Ḿĩńōŕ",
-  "severityNit": "Ńĩţ"
+  "severityNit": "Ńĩţ",
+  "commentOnFile": "Ćōḿḿēńţ ōń ƒĩĺē",
+  "fileComment": "Ƒĩĺē ćōḿḿēńţ",
+  "fileComments": "Ƒĩĺē ćōḿḿēńţś"
 }

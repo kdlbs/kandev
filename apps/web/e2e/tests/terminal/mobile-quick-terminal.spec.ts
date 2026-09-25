@@ -42,7 +42,7 @@ async function closeSurvivingQuickTerminals(page: Page) {
   const dialog = page.getByRole("dialog", { name: "Quick Chat" });
   if (!(await dialog.isVisible().catch(() => false))) {
     const launcher = page.getByTestId("mobile-quick-chat-button");
-    const menu = page.getByTestId("mobile-topbar-menu");
+    const menu = page.getByTestId("app-nav-trigger");
     if (!(await menu.isVisible())) return;
     if ((await menu.getAttribute("aria-expanded")) !== "true") await menu.tap();
     await expect(menu).toHaveAttribute("aria-expanded", "true");
@@ -69,7 +69,7 @@ test.describe("mobile quick terminal tabs", () => {
     try {
       const terminalButton = testPage.getByTestId("mobile-quick-terminal-button");
       const quickChatButton = testPage.getByTestId("mobile-quick-chat-button");
-      const menuButton = testPage.getByTestId("mobile-topbar-menu");
+      const menuButton = testPage.getByTestId("app-nav-trigger");
       await expect(menuButton).toBeVisible();
       const headerMenuBox = await menuButton.boundingBox();
       expect(headerMenuBox).not.toBeNull();

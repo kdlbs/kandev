@@ -57,6 +57,24 @@ export async function waitForSessionDone(
   );
 }
 
+export async function waitForWorkspacePath(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+  timeout = 30_000,
+): Promise<string> {
+  return pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(taskId);
+      const session = sessions.find((candidate) => candidate.id === sessionId);
+      return session?.workspace_path ?? session?.worktree_path ?? "";
+    },
+    (workspacePath) => workspacePath.length > 0,
+    timeout,
+    "Waiting for task workspace path",
+  );
+}
+
 export async function waitForAgentMessage(
   apiClient: ApiClient,
   sessionId: string,

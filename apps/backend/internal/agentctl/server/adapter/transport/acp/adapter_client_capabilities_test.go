@@ -109,12 +109,12 @@ func TestInitialize_LeavesOtherAgentsHandshakeUnchanged(t *testing.T) {
 }
 
 func TestClientCapabilitiesForAgent(t *testing.T) {
-	cursor := clientCapabilitiesForAgent(acpcompat.CursorAgentID)
+	cursor := clientCapabilitiesForAgent(acpcompat.CursorAgentID, false)
 	if cursor.Meta[acpcompat.ParameterizedModelPickerMetaKey] != true {
 		t.Errorf("cursor meta = %v, want %q true", cursor.Meta, acpcompat.ParameterizedModelPickerMetaKey)
 	}
 
-	other := clientCapabilitiesForAgent("claude-acp")
+	other := clientCapabilitiesForAgent("claude-acp", false)
 	if _, ok := other.Meta[acpcompat.ParameterizedModelPickerMetaKey]; ok {
 		t.Errorf("non-cursor meta = %v, want no %q", other.Meta, acpcompat.ParameterizedModelPickerMetaKey)
 	}

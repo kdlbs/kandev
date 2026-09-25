@@ -44,8 +44,12 @@ type PendingAllocation struct {
 // it onto the context via WithResultHolder, and reads it back after the
 // write-site transaction commits. It is populated by the repository layer.
 type AllocationResult struct {
-	EntryID  int64
-	EntrySeq int64
+	// TransitionID is the immutable workflow-step transition ledger identity.
+	// It is distinct from EntryID, which identifies the marker-bearing step
+	// entry row allocated for this arrival.
+	TransitionID int64
+	EntryID      int64
+	EntrySeq     int64
 }
 
 // MarkerState is a step-entry marker's terminal (or in-progress) state.

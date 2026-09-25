@@ -3,7 +3,8 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { replaceTaskUrl } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
+import { useRouter } from "@/lib/routing/client-router";
 import { fetchWorkflowSnapshot, listWorkflows } from "@/lib/api";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
 import {
@@ -15,7 +16,7 @@ import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useNestTaskByDrag } from "@/hooks/use-nest-task";
 import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
-import { type Repository, type Task } from "@/lib/types/http";
+import { type Repository, type SidebarTaskPageResponse, type Task } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
@@ -27,9 +28,6 @@ import {
 } from "./session-task-switcher-sheet-selection";
 import { taskPendingSelectionSnapshot } from "../task-select-helpers";
 import { useTranslation } from "react-i18next";
-import { useArchivedTaskState } from "../task-archived-context";
-import { buildArchivedSidebarItem } from "../task-session-sidebar-archived-item";
-import type { SidebarItemContext } from "../task-session-sidebar-item";
 import type { TaskSwitcherItem } from "../task-switcher";
 import {
   classifyWorkspaceContextReadError,
@@ -37,6 +35,8 @@ import {
   retryAfterMilliseconds,
 } from "@/lib/state/workspace-context";
 import { generateUUID } from "@/lib/utils";
+import type { AggregatedSidebarTasks } from "../task-session-sidebar-aggregate";
+import { applySidebarPageMetadata } from "../sidebar-page-metadata";
 
 function findSheetTask(
   state: ReturnType<ReturnType<typeof useAppStoreApi>["getState"]>,
@@ -51,13 +51,77 @@ function findSheetTask(
   return undefined;
 }
 
+function buildSheetItems(params: {
+  workspaceId: string | null;
+  repositoriesByWorkspace: Record<string, Repository[]>;
+  allTasks: AggregatedSidebarTasks["allTasks"];
+  allSteps: AggregatedSidebarTasks["allSteps"];
+  pageEntries: SidebarTaskPageResponse["entries"];
+  workflows: Array<{ id: string; name: string }>;
+  wipQueueByTaskId: NonNullable<ReturnType<typeof useWorkspaceSidebarTasks>["wipQueueByTaskId"]>;
+  acknowledgedAgentErrors: Record<string, string>;
+  dismissedAgentErrors: Record<string, string>;
+  automaticColorSettings: SheetItemCtx["automaticColorSettings"];
+  pendingArchiveTaskIds: ReadonlySet<string>;
+  workspaceContextAccessDenied: boolean;
+}): TaskSwitcherItem[] {
+  const {
+    workspaceId,
+    repositoriesByWorkspace,
+    allTasks,
+    allSteps,
+    pageEntries,
+    workflows,
+    wipQueueByTaskId,
+    acknowledgedAgentErrors,
+    dismissedAgentErrors,
+    automaticColorSettings,
+    pendingArchiveTaskIds,
+    workspaceContextAccessDenied,
+  } = params;
+  if (workspaceContextAccessDenied) return [];
+  const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
+  const repositoriesById = new Map(
+    Object.values(repositoriesByWorkspace)
+      .flat()
+      .map((repo) => [repo.id, repo]),
+  );
+  const workflowNameById = new Map(workflows.map((workflow) => [workflow.id, workflow.name]));
+  const stepTitleById = new Map(allSteps.map((step) => [step.id, step.title]));
+  const stepColorById = new Map(allSteps.map((step) => [step.id, step.color]));
+  const titleById = new Map(allTasks.map((task) => [task.id, task.title]));
+  applySidebarPageMetadata(pageEntries, {
+    titleById,
+    workflowNameById,
+    stepTitleById,
+    stepColorById,
+  });
+  const context: SheetItemCtx = {
+    repositoryPathsById: new Map(repositories.map((repo) => [repo.id, repositorySlug(repo)])),
+    workflowNameById,
+    stepTitleById,
+    acknowledgedAgentErrors,
+    dismissedAgentErrors,
+    wipQueueByTaskId,
+    workspaceId: workspaceId ?? undefined,
+    repositoriesById,
+    stepColorById,
+    automaticColorSettings,
+    pendingArchiveTaskIds,
+  };
+  return allTasks.map((task) => toSheetItem(task, context));
+}
+
 // eslint-disable-next-line max-lines-per-function -- task projection and recovery status share one memoized view model
 export function useSheetData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const {
     allTasks,
+    pendingArchiveTaskIds,
     allSteps,
     stepsByWorkflowId,
+    page,
+    pageEntries,
     wipQueueByTaskId,
     workflows,
     isLoading: tasksLoading,
@@ -76,69 +140,40 @@ export function useSheetData(workspaceId: string | null) {
   );
   const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
   const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
-  const archivedState = useArchivedTaskState();
 
   const selectedTaskId = activeTaskId;
 
-  const tasksWithRepositories = useMemo(() => {
-    const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
-    const repositoriesById = new Map(
-      Object.values(repositoriesByWorkspace)
-        .flat()
-        .map((repo: Repository) => [repo.id, repo]),
-    );
-    const ctx: SheetItemCtx = {
-      repositoryPathsById: new Map(
-        repositories.map((repo: Repository) => [repo.id, repositorySlug(repo)]),
-      ),
-      workflowNameById: new Map(workflows.map((w) => [w.id, w.name])),
-      stepTitleById: new Map(allSteps.map((s) => [s.id, s.title])),
+  const tasksWithRepositories = useMemo(
+    () =>
+      buildSheetItems({
+        workspaceId,
+        repositoriesByWorkspace,
+        allTasks,
+        allSteps,
+        pageEntries,
+        workflows,
+        wipQueueByTaskId,
+        acknowledgedAgentErrors,
+        dismissedAgentErrors,
+        automaticColorSettings,
+        pendingArchiveTaskIds,
+        workspaceContextAccessDenied,
+      }),
+    [
+      repositoriesByWorkspace,
+      allTasks,
+      pageEntries,
+      allSteps,
+      workflows,
+      workspaceId,
       acknowledgedAgentErrors,
       dismissedAgentErrors,
       wipQueueByTaskId,
-      workspaceId: workspaceId ?? undefined,
-      repositoriesById,
-      stepColorById: new Map(allSteps.map((step) => [step.id, step.color])),
       automaticColorSettings,
-    };
-    const items: TaskSwitcherItem[] = workspaceContextAccessDenied
-      ? []
-      : allTasks.map((task) => toSheetItem(task, ctx));
-    if (
-      !workspaceContextAccessDenied &&
-      archivedState.isArchived &&
-      archivedState.archivedTaskId &&
-      !items.some((task) => task.id === archivedState.archivedTaskId)
-    ) {
-      const archivedContext: SidebarItemContext = {
-        repositorySlugById: ctx.repositoryPathsById,
-        titleById: new Map(allTasks.map((task) => [task.id, task.title])),
-        workflowNameById: ctx.workflowNameById,
-        stepTitleById: ctx.stepTitleById,
-        wipQueueByTaskId: ctx.wipQueueByTaskId,
-        acknowledgedAgentErrors: ctx.acknowledgedAgentErrors,
-        dismissedAgentErrors: ctx.dismissedAgentErrors,
-        workspaceId: ctx.workspaceId,
-        repositoriesById: ctx.repositoriesById,
-        stepColorById: ctx.stepColorById,
-        automaticColorSettings: ctx.automaticColorSettings,
-      };
-      items.unshift(buildArchivedSidebarItem(archivedState, archivedContext));
-    }
-    return items;
-  }, [
-    repositoriesByWorkspace,
-    allTasks,
-    allSteps,
-    workflows,
-    workspaceId,
-    acknowledgedAgentErrors,
-    dismissedAgentErrors,
-    wipQueueByTaskId,
-    automaticColorSettings,
-    archivedState,
-    workspaceContextAccessDenied,
-  ]);
+      pendingArchiveTaskIds,
+      workspaceContextAccessDenied,
+    ],
+  );
 
   const dialogSteps = useMemo(
     () =>
@@ -166,12 +201,14 @@ export function useSheetData(workspaceId: string | null) {
     workspaceContextAccessDenied,
     retryWorkspaceContext,
     tasksWithRepositories,
+    page,
+    pageEntries,
     dialogSteps,
   };
 }
 
 type SheetNavOptions = {
-  navigate: (taskId: string) => void;
+  navigate: (taskId: string, sessionId?: string) => void;
   workspaceId: string | null;
   store: ReturnType<typeof useAppStoreApi>;
   loadTaskSessionsForTask: (
@@ -628,8 +665,19 @@ export function useSheetActions(
   workspaceId: string | null,
   onOpenChange: (open: boolean) => void,
   selection: TaskSheetSelectionController,
-  navigate: (taskId: string) => void = replaceTaskUrl,
+  navigate?: (taskId: string, sessionId?: string) => void,
 ) {
+  const router = useRouter();
+  const navigateTask = useCallback(
+    (taskId: string, sessionId?: string) => {
+      if (navigate) {
+        navigate(taskId, sessionId);
+        return;
+      }
+      router.replace(linkToTask(taskId, { sessionId }));
+    },
+    [navigate, router],
+  );
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const store = useAppStoreApi();
@@ -662,7 +710,7 @@ export function useSheetActions(
           const selectedTask = findSheetTask(store.getState(), selectedTaskId);
           return selectedTask ? taskPendingSelectionSnapshot(selectedTask) : undefined;
         },
-        navigate,
+        navigate: navigateTask,
         onOpenChange,
       });
     },
@@ -673,12 +721,12 @@ export function useSheetActions(
       store,
       onOpenChange,
       selection,
-      navigate,
+      navigateTask,
     ],
   );
 
   const { handleWorkspaceChange, handleTaskCreated } = useWorkspaceAndTaskCreatedActions({
-    navigate,
+    navigate: navigateTask,
     workspaceId,
     store,
     loadTaskSessionsForTask,

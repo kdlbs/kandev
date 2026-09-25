@@ -280,17 +280,21 @@ function useClearAllAction({
     let mutationFailed = false;
     let mutationError: unknown;
     try {
+      // Close the panel as soon as the user commits the action. Invalidate
+      // older refetches first so a response that was already in flight cannot
+      // restore the pre-clear list while the mutation is pending. The
+      // authoritative refetch below restores the list if the request fails.
+      invalidateRefetch(sessionId);
+      setQueueEntries(sessionId, [], {
+        count: 0,
+        max: metaMax ?? 0,
+        mergeEnabled: metaMergeEnabled ?? true,
+        autoRun: metaAutoRun ?? true,
+        taskId: identity.task_id,
+        sessionIncarnationId: incarnationId,
+      });
       try {
         await clearQueue(identity);
-        invalidateRefetch(sessionId);
-        setQueueEntries(sessionId, [], {
-          count: 0,
-          max: metaMax ?? 0,
-          mergeEnabled: metaMergeEnabled ?? true,
-          autoRun: metaAutoRun ?? true,
-          taskId: identity.task_id,
-          sessionIncarnationId: incarnationId,
-        });
       } catch (err) {
         mutationFailed = true;
         mutationError = err;

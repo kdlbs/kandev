@@ -181,6 +181,61 @@ func rateLimitMessage(status GitHubRateLimitStatus) string {
 	return fmt.Sprintf("PR/issue checks are paused; resets in %s.", wait)
 }
 
+// WorkflowSyncChecker checks whether any configured workflow-sync target has
+// an open auth/config circuit (internal/common/authcircuit) — a credential
+// or repository/branch/path that will keep failing until a human fixes it,
+// as opposed to a transient blip that resolves on its own.
+type WorkflowSyncChecker struct {
+	provider WorkflowSyncStatusProvider
+}
+
+// NewWorkflowSyncChecker creates a checker for workflow-sync circuit health.
+// The provider may be nil if the workflow-sync service was not initialized;
+// the checker then produces no issues (workflow sync is optional).
+func NewWorkflowSyncChecker(provider WorkflowSyncStatusProvider) *WorkflowSyncChecker {
+	return &WorkflowSyncChecker{provider: provider}
+}
+
+// Name returns the user-facing label for this check.
+func (c *WorkflowSyncChecker) Name() string { return "Workflow sync" }
+
+// Category returns the issue category this checker emits issues under.
+func (c *WorkflowSyncChecker) Category() string { return "workflow_sync" }
+
+func (c *WorkflowSyncChecker) Check(ctx context.Context) []Issue {
+	if c.provider == nil {
+		return nil
+	}
+	summary, err := c.provider.WorkflowSyncCircuitSummary(ctx)
+	if err != nil {
+		return []Issue{{
+			ID:       "workflow_sync_status_unavailable",
+			Category: "workflow_sync",
+			Title:    "Workflow sync status unavailable",
+			Message:  "Kandev could not read workflow sync circuit status.",
+			Severity: SeverityWarning,
+			FixURL:   "/settings/system/status",
+			FixLabel: "View status",
+		}}
+	}
+	degraded := summary.OpenAuth + summary.OpenConfig
+	if degraded == 0 {
+		return nil
+	}
+	return []Issue{{
+		ID:       "workflow_sync_circuit_open",
+		Category: "workflow_sync",
+		Title:    "Workflow sync needs attention",
+		Message: fmt.Sprintf(
+			"%d of %d workflow sync targets are paused pending a fix (%d auth, %d config).",
+			degraded, summary.Total, summary.OpenAuth, summary.OpenConfig,
+		),
+		Severity: SeverityWarning,
+		FixURL:   "/settings/system/status",
+		FixLabel: "View status",
+	}}
+}
+
 // GitExecutableChecker checks whether the host git executable is available.
 type GitExecutableChecker struct {
 	lookPath func(string) (string, error)

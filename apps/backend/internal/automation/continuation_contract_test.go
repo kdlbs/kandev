@@ -203,7 +203,7 @@ func TestAutomationRunBindsAndSettlesExactTurn(t *testing.T) {
 	if err := store.CreateRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.BindRunTask(ctx, run.ID, "task-shared"); err != nil {
+	if err := store.BindRunTask(ctx, run.ID, "task-shared", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.BindRun(ctx, run.ID, "task-shared", "session-shared", "turn-1", ThreadActionResumed, "reused continuation"); err != nil {

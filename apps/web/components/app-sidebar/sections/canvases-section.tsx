@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/domains/canvas-api";
 import { cn } from "@/lib/utils";
 import { useCanvasLifecycleRevision } from "@/lib/canvas-lifecycle";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
   APP_SIDEBAR_SECTION_IDS,
   SIDEBAR_ITEM_ACTIVE,
@@ -156,7 +157,8 @@ export function CanvasesSection({ collapsed }: { collapsed: boolean }) {
   const pathname = usePathname();
   const enabled = useFeature("canvases");
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const workspaceId = enabled ? activeWorkspaceId : null;
+  const { isMobile } = useResponsiveBreakpoint();
+  const workspaceId = enabled && !isMobile ? activeWorkspaceId : null;
   const { canvases, ready } = useWorkspaceCanvasesState(workspaceId);
   const activeCanvases = canvases.filter(isActiveWorkspaceCanvas);
   const sectionHeaderRef = useRef<HTMLButtonElement>(null);

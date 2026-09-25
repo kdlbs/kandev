@@ -4,6 +4,7 @@ import {
   seedResetContextSession,
   seedStaleContextWindow,
 } from "./reset-context-confirmation-helpers";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 test.describe.configure({ timeout: 120_000 });
 
@@ -37,6 +38,8 @@ test("mobile reset context opens a sheet and preserves composer controls", async
   await expect(testPage.getByRole("dialog")).toHaveAttribute("data-slot", "drawer-content");
   await expect(session.resetContextButton()).toBeAttached();
   await expect(testPage.getByTestId("submit-message-button")).toBeAttached();
+  await waitForFiniteAnimations(testPage.getByRole("dialog"));
+  await warning.scrollIntoViewIfNeeded();
   await prCapture.screenshot("mobile-reset-context-confirmation", {
     caption: "Mobile context reset preserves the composer behind its compact sheet",
   });
@@ -53,8 +56,9 @@ test("mobile reset context opens a sheet and preserves composer controls", async
   expect(warningBox!.x + warningBox!.width).toBeLessThanOrEqual(viewportWidth);
   const warningIsTopmost = await warning.evaluate((element) => {
     const rect = element.getBoundingClientRect();
+    const y = rect.top + Math.min(8, Math.max(1, rect.height / 2));
     return [0.25, 0.5, 0.75].every((ratio) => {
-      const hit = document.elementFromPoint(rect.left + rect.width * ratio, rect.top + 8);
+      const hit = document.elementFromPoint(rect.left + rect.width * ratio, y);
       return hit === element || element.contains(hit);
     });
   });

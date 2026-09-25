@@ -1,6 +1,7 @@
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
 import { useCallback } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { mergeGroupOrder } from "@/lib/sidebar/apply-view";
+import { mergeVisibleOrder } from "@/lib/sidebar/apply-view";
 
 /**
  * Read sidebar pin/order prefs and expose drag/pin handlers.
@@ -27,8 +28,8 @@ export function useSidebarTaskPrefs() {
     (groupTaskIds: string[]) => {
       const state = store.getState();
       const current = state.sidebarTaskPrefs.orderedTaskIds;
-      setSidebarTaskOrder(mergeGroupOrder(current, groupTaskIds));
-      const sliceState = state.sidebarViews;
+      setSidebarTaskOrder(mergeVisibleOrder(current, groupTaskIds));
+      const sliceState = selectSidebarViews(state);
       const baseSort =
         sliceState.draft?.sort ??
         sliceState.views.find((v) => v.id === sliceState.activeViewId)?.sort;
@@ -40,9 +41,10 @@ export function useSidebarTaskPrefs() {
 
   const handleReorderSubtasks = useCallback(
     (parentTaskId: string, orderedSubtaskIds: string[]) => {
-      setSubtaskOrder(parentTaskId, orderedSubtaskIds);
+      const current = store.getState().sidebarTaskPrefs.subtaskOrderByParentId[parentTaskId] ?? [];
+      setSubtaskOrder(parentTaskId, mergeVisibleOrder(current, orderedSubtaskIds));
     },
-    [setSubtaskOrder],
+    [setSubtaskOrder, store],
   );
 
   return {

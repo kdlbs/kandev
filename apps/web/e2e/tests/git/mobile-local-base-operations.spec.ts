@@ -43,7 +43,10 @@ test.describe("Mobile local-only Git operations", () => {
     const session = await openTaskSession(testPage, task.id);
     await session.waitForChatIdle({ timeout: 45_000 });
 
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
     const changes = testPage.getByTestId("mobile-changes-panel");
     const pullMenuTrigger = changes.getByRole("button", { name: /^Pull/ });
     await expect(pullMenuTrigger).toBeVisible();

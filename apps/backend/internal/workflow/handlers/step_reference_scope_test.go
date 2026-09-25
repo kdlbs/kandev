@@ -318,7 +318,7 @@ workflows:
 	t.Run("another user's task is refused and nothing is written", func(t *testing.T) {
 		h := setupScopedRouter(t)
 		h.queries.reset()
-		rec := doRawAs(t, h, asUser(userB), http.MethodPost, "/api/v1/workspaces/ws-b/workflows/import",
+		rec := doRawYAMLAs(t, h, asUser(userB), http.MethodPost, "/api/v1/workspaces/ws-b/workflows/import",
 			fmt.Sprintf(queueRunYAML, "task-a"))
 		if rec.Code == http.StatusOK {
 			t.Fatalf("import accepted a foreign task reference: %s", rec.Body.String())
@@ -331,7 +331,7 @@ workflows:
 
 	t.Run("the caller's own task still imports", func(t *testing.T) {
 		h := setupScopedRouter(t)
-		rec := doRawAs(t, h, asUser(userB), http.MethodPost, "/api/v1/workspaces/ws-b/workflows/import",
+		rec := doRawYAMLAs(t, h, asUser(userB), http.MethodPost, "/api/v1/workspaces/ws-b/workflows/import",
 			fmt.Sprintf(queueRunYAML, "task-b"))
 		requireStatus(t, rec, http.StatusOK)
 		steps, err := h.repo.ListStepsByWorkflow(context.Background(), "created-Smuggled")
@@ -345,7 +345,7 @@ workflows:
 
 	t.Run("position-based transition targets still import", func(t *testing.T) {
 		h := setupScopedRouter(t)
-		rec := doRawAs(t, h, asUser(userB), http.MethodPost, "/api/v1/workspaces/ws-b/workflows/import", positionalYAML)
+		rec := doRawYAMLAs(t, h, asUser(userB), http.MethodPost, "/api/v1/workspaces/ws-b/workflows/import", positionalYAML)
 		requireStatus(t, rec, http.StatusOK)
 		steps, err := h.repo.ListStepsByWorkflow(context.Background(), "created-Positional")
 		if err != nil {

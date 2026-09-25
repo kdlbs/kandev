@@ -12,7 +12,11 @@ import (
 type AgentEventPayload struct {
 	AgentExecutionID   string                 `json:"agent_execution_id"`
 	AttemptID          string                 `json:"attempt_id,omitempty"`
+	OwnerKind          ExecutionOwnerKind     `json:"owner_kind,omitempty"`
+	WorkspaceID        string                 `json:"workspace_id,omitempty"`
 	RunID              string                 `json:"run_id,omitempty"`
+	RunSessionID       string                 `json:"run_session_id,omitempty"`
+	RunAttempt         int                    `json:"run_attempt,omitempty"`
 	TaskID             string                 `json:"task_id"`
 	SessionID          string                 `json:"session_id,omitempty"`
 	TaskEnvironmentID  string                 `json:"task_environment_id,omitempty"`
@@ -77,17 +81,22 @@ type AgentStalledPayload struct {
 
 // AgentctlEventPayload is the payload for agentctl lifecycle events (starting, ready, error).
 type AgentctlEventPayload struct {
-	TaskID            string `json:"task_id"`
-	SessionID         string `json:"session_id"`
-	TaskEnvironmentID string `json:"task_environment_id,omitempty"`
-	AgentExecutionID  string `json:"agent_execution_id"`
-	AttemptID         string `json:"attempt_id,omitempty"`
-	ErrorMessage      string `json:"error_message,omitempty"`
-	FailureCode       string `json:"failure_code,omitempty"`
-	FailureDetails    string `json:"failure_details,omitempty"`
-	WorktreeID        string `json:"worktree_id,omitempty"`
-	WorktreePath      string `json:"worktree_path,omitempty"`
-	WorktreeBranch    string `json:"worktree_branch,omitempty"`
+	OwnerKind         ExecutionOwnerKind `json:"owner_kind,omitempty"`
+	WorkspaceID       string             `json:"workspace_id,omitempty"`
+	RunID             string             `json:"run_id,omitempty"`
+	RunSessionID      string             `json:"run_session_id,omitempty"`
+	RunAttempt        int                `json:"run_attempt,omitempty"`
+	TaskID            string             `json:"task_id"`
+	SessionID         string             `json:"session_id"`
+	TaskEnvironmentID string             `json:"task_environment_id,omitempty"`
+	AgentExecutionID  string             `json:"agent_execution_id"`
+	AttemptID         string             `json:"attempt_id,omitempty"`
+	ErrorMessage      string             `json:"error_message,omitempty"`
+	FailureCode       string             `json:"failure_code,omitempty"`
+	FailureDetails    string             `json:"failure_details,omitempty"`
+	WorktreeID        string             `json:"worktree_id,omitempty"`
+	WorktreePath      string             `json:"worktree_path,omitempty"`
+	WorktreeBranch    string             `json:"worktree_branch,omitempty"`
 	// TaskWorkspacePath is the task root that contains every per-repo
 	// worktree as a sibling subdir, populated when the event signals a
 	// sibling worktree being added (multi-branch add_branch flow) rather
@@ -113,21 +122,24 @@ type ACPSessionCreatedPayload struct {
 
 // PrepareProgressEventPayload is the payload for environment preparation progress events.
 type PrepareProgressEventPayload struct {
-	TaskID        string     `json:"task_id"`
-	SessionID     string     `json:"session_id"`
-	ExecutionID   string     `json:"execution_id"`
-	StepName      string     `json:"step_name"`
-	StepCommand   string     `json:"step_command,omitempty"`
-	StepIndex     int        `json:"step_index"`
-	TotalSteps    int        `json:"total_steps"`
-	Status        string     `json:"status"`
-	Output        string     `json:"output,omitempty"`
-	Error         string     `json:"error,omitempty"`
-	Warning       string     `json:"warning,omitempty"`
-	WarningDetail string     `json:"warning_detail,omitempty"`
-	StartedAt     *time.Time `json:"started_at,omitempty"`
-	EndedAt       *time.Time `json:"ended_at,omitempty"`
-	Timestamp     string     `json:"timestamp"`
+	TaskID         string     `json:"task_id"`
+	SessionID      string     `json:"session_id"`
+	ExecutionID    string     `json:"execution_id"`
+	StepName       string     `json:"step_name"`
+	StepKind       string     `json:"step_kind,omitempty"`
+	RemotePlatform string     `json:"remote_platform,omitempty"`
+	FailureCode    string     `json:"failure_code,omitempty"`
+	StepCommand    string     `json:"step_command,omitempty"`
+	StepIndex      int        `json:"step_index"`
+	TotalSteps     int        `json:"total_steps"`
+	Status         string     `json:"status"`
+	Output         string     `json:"output,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	Warning        string     `json:"warning,omitempty"`
+	WarningDetail  string     `json:"warning_detail,omitempty"`
+	StartedAt      *time.Time `json:"started_at,omitempty"`
+	EndedAt        *time.Time `json:"ended_at,omitempty"`
+	Timestamp      string     `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).
@@ -155,8 +167,11 @@ func (p PrepareCompletedEventPayload) GetSessionID() string {
 
 // AgentStreamEventData contains the nested event data within AgentStreamEventPayload.
 type AgentStreamEventData struct {
-	Type                        string                 `json:"type"`
-	ACPSessionID                string                 `json:"acp_session_id,omitempty"`
+	Type         string `json:"type"`
+	ACPSessionID string `json:"acp_session_id,omitempty"`
+	// OperationID carries a provider operation identity when the protocol
+	// emits one. Native Codex turn IDs use it at turn boundaries.
+	OperationID                 string                 `json:"operation_id,omitempty"`
 	Text                        string                 `json:"text,omitempty"`
 	ProviderDiagnosticCandidate bool                   `json:"provider_diagnostic_candidate,omitempty"`
 	ToolCallID                  string                 `json:"tool_call_id,omitempty"`
@@ -173,6 +188,10 @@ type AgentStreamEventData struct {
 	// ParentToolCallID identifies the parent Task tool call when this event
 	// comes from a subagent. Used for visual nesting in the UI.
 	ParentToolCallID string `json:"parent_tool_call_id,omitempty"`
+
+	// RequestedModeID is set on a session_mode event when the session is not in
+	// the mode Kandev asked for.
+	RequestedModeID string `json:"requested_mode_id,omitempty"`
 
 	// PendingID identifies a permission request (for "permission_cancelled" events).
 	PendingID string `json:"pending_id,omitempty"`
@@ -195,6 +214,9 @@ type AgentStreamEventData struct {
 	IsAppend bool `json:"is_append,omitempty"`
 	// MessageType distinguishes between "message" and "thinking" content types
 	MessageType string `json:"message_type,omitempty"`
+	// RetractedMessageIDs lists abandoned assistant and thinking records in
+	// allocation order for a response-attempt reset.
+	RetractedMessageIDs []string `json:"retracted_message_ids,omitempty"`
 
 	// AvailableCommands contains the slash commands available from the agent.
 	// Populated when Type is "available_commands".
@@ -253,7 +275,8 @@ type AgentStreamEventData struct {
 	SessionMeta      map[string]any `json:"session_meta,omitempty"`
 
 	// Usage (attached to "complete" event)
-	Usage *streams.PromptUsage `json:"usage,omitempty"`
+	Usage            *streams.PromptUsage            `json:"usage,omitempty"`
+	UsageObservation *streams.NativeUsageObservation `json:"usage_observation,omitempty"`
 
 	// Plan entries (from "plan" event — ACP/Codex agent todos)
 	PlanEntries []streams.PlanEntry `json:"plan_entries,omitempty"`
@@ -266,6 +289,12 @@ type AgentStreamEventData struct {
 
 	// MCPAttachmentAttempt starts a new backend-owned MCP evidence timeline.
 	MCPAttachmentAttempt *streams.MCPAttachmentAttempt `json:"mcp_attachment_attempt,omitempty"`
+
+	// BackgroundWork contains background workload observation data.
+	BackgroundWork *streams.WorkloadRunObservation `json:"background_work,omitempty"`
+
+	// BackgroundWorkOutput contains background workload output chunk data.
+	BackgroundWorkOutput *streams.WorkloadOutputChunk `json:"background_work_output,omitempty"`
 }
 
 // AgentStreamEventPayload is the payload for agent stream events (WebSocket streaming).
@@ -277,10 +306,16 @@ type AgentStreamEventData struct {
 type AgentStreamEventPayload struct {
 	Type           string                `json:"type"` // Always "agent/event"
 	Timestamp      string                `json:"timestamp"`
-	AgentID        string                `json:"agent_id"`                   // Historical: execution.ID. Prefer ExecutionID.
-	ExecutionID    string                `json:"execution_id"`               // Lifecycle execution ID; stable across the payload's lifetime.
-	AttemptID      string                `json:"attempt_id,omitempty"`       // Immutable recovery attempt that owns this callback.
+	AgentID        string                `json:"agent_id"`             // Historical: execution.ID. Prefer ExecutionID.
+	ExecutionID    string                `json:"execution_id"`         // Lifecycle execution ID; stable across the payload's lifetime.
+	AttemptID      string                `json:"attempt_id,omitempty"` // Immutable recovery attempt that owns this callback.
+	OwnerKind      ExecutionOwnerKind    `json:"owner_kind,omitempty"`
+	WorkspaceID    string                `json:"workspace_id,omitempty"`
+	RunID          string                `json:"run_id,omitempty"`
+	RunSessionID   string                `json:"run_session_id,omitempty"`
+	RunAttempt     int                   `json:"run_attempt,omitempty"`
 	AgentProfileID string                `json:"agent_profile_id,omitempty"` // Stable Office identity (execution.officeProfileID()); the agent that is actually running, not the task's assignee.
+	AgentType      string                `json:"agent_type,omitempty"`
 	TaskID         string                `json:"task_id"`
 	SessionID      string                `json:"session_id"` // Task session ID
 	Data           *AgentStreamEventData `json:"data"`
@@ -444,18 +479,25 @@ type PermissionOption struct {
 
 // PermissionRequestEventPayload is the payload when an agent requests permission.
 type PermissionRequestEventPayload struct {
-	Type          string                 `json:"type"` // Always "permission_request"
-	Timestamp     string                 `json:"timestamp"`
-	AgentID       string                 `json:"agent_id"`
-	TaskID        string                 `json:"task_id"`
-	SessionID     string                 `json:"session_id"`
-	RequestID     string                 `json:"request_id"`
-	PendingID     string                 `json:"pending_id"`
-	ToolCallID    string                 `json:"tool_call_id"`
-	Title         string                 `json:"title"`
-	Options       []PermissionOption     `json:"options"`
-	ActionType    string                 `json:"action_type"`
-	ActionDetails map[string]interface{} `json:"action_details,omitempty"`
+	Type       string             `json:"type"` // Always "permission_request"
+	Timestamp  string             `json:"timestamp"`
+	AgentID    string             `json:"agent_id"`
+	TaskID     string             `json:"task_id"`
+	SessionID  string             `json:"session_id"`
+	RequestID  string             `json:"request_id"`
+	PendingID  string             `json:"pending_id"`
+	ToolCallID string             `json:"tool_call_id"`
+	Title      string             `json:"title"`
+	Options    []PermissionOption `json:"options"`
+	ActionType string             `json:"action_type"`
+	// AutoApprovedOptionID names the option agentctl already selected. A
+	// nonempty value makes this payload an audit record of an answered
+	// request rather than a prompt awaiting a person.
+	AutoApprovedOptionID   string                 `json:"auto_approved_option_id,omitempty"`
+	AutoApprovalPending    bool                   `json:"auto_approval_pending,omitempty"`
+	AutoApprovedOptionKind string                 `json:"auto_approved_option_kind,omitempty"`
+	AutoApprovalSource     string                 `json:"auto_approval_source,omitempty"`
+	ActionDetails          map[string]interface{} `json:"action_details,omitempty"`
 }
 
 // ShellOutputEventPayload is the payload for shell output events.
@@ -560,7 +602,11 @@ type SessionModeEventPayload struct {
 	AgentID        string                    `json:"agent_id"`
 	CurrentModeID  string                    `json:"current_mode_id"`
 	AvailableModes []streams.SessionModeInfo `json:"available_modes,omitempty"`
-	Timestamp      string                    `json:"timestamp"`
+	// RequestedModeID is set only when the session is not in the mode Kandev
+	// asked for. It lets the UI say which mode was requested instead of
+	// silently showing a different one.
+	RequestedModeID string `json:"requested_mode_id,omitempty"`
+	Timestamp       string `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).
@@ -749,16 +795,17 @@ func (p SessionTodosEventPayload) GetSessionID() string {
 // Both are empty when unavailable (e.g. no active turn), never a synthesized
 // placeholder.
 type SessionPromptUsageEventPayload struct {
-	TaskID         string               `json:"task_id"`
-	SessionID      string               `json:"session_id"`
-	AgentID        string               `json:"agent_id"`
-	AgentProfileID string               `json:"agent_profile_id,omitempty"`
-	AgentType      string               `json:"agent_type,omitempty"`
-	Model          string               `json:"model,omitempty"`
-	Usage          *streams.PromptUsage `json:"usage"`
-	Timestamp      string               `json:"timestamp"`
-	TurnID         string               `json:"turn_id,omitempty"`
-	UsageEventID   string               `json:"usage_event_id,omitempty"`
+	TaskID           string                          `json:"task_id"`
+	SessionID        string                          `json:"session_id"`
+	AgentID          string                          `json:"agent_id"`
+	AgentProfileID   string                          `json:"agent_profile_id,omitempty"`
+	AgentType        string                          `json:"agent_type,omitempty"`
+	Model            string                          `json:"model,omitempty"`
+	Usage            *streams.PromptUsage            `json:"usage"`
+	UsageObservation *streams.NativeUsageObservation `json:"usage_observation,omitempty"`
+	Timestamp        string                          `json:"timestamp"`
+	TurnID           string                          `json:"turn_id,omitempty"`
+	UsageEventID     string                          `json:"usage_event_id,omitempty"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

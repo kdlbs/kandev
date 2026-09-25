@@ -7,7 +7,7 @@ import {
   setStoredAppSidebarSectionExpanded,
   setStoredAppSidebarWidth,
 } from "@/lib/local-storage-app-sidebar";
-import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
+import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/lib/layout/app-sidebar-geometry";
 import type { AppSidebarState, UISlice } from "./types";
 
 /** Keep primary navigation and entity groups open by default so first-time

@@ -1,5 +1,8 @@
 "use client";
 
+import { useSidebarWorkspaceGuard } from "@/hooks/domains/sidebar/use-sidebar-workspace-guard";
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+
 import { useRef, type ComponentProps, type RefObject } from "react";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@kandev/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
@@ -49,16 +52,17 @@ export function SidebarFilterPopover({
   renameRequestedViewId,
   onRenameRequestHandled,
 }: Props) {
+  const guard = useSidebarWorkspaceGuard();
   const { t } = useTranslation();
-  const views = useAppStore((s) => s.sidebarViews.views);
-  const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
-  const storedDraft = useAppStore((s) => s.sidebarViews.draft);
-  const updateDraft = useAppStore((s) => s.updateSidebarDraft);
-  const saveAs = useAppStore((s) => s.saveSidebarDraftAs);
-  const saveOverwrite = useAppStore((s) => s.saveSidebarDraftOverwrite);
-  const discard = useAppStore((s) => s.discardSidebarDraft);
-  const deleteView = useAppStore((s) => s.deleteSidebarView);
-  const renameView = useAppStore((s) => s.renameSidebarView);
+  const views = useAppStore((s) => selectSidebarViews(s).views);
+  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
+  const storedDraft = useAppStore((s) => selectSidebarViews(s).draft);
+  const updateDraft = guard(useAppStore((s) => s.updateSidebarDraft));
+  const saveAs = guard(useAppStore((s) => s.saveSidebarDraftAs));
+  const saveOverwrite = guard(useAppStore((s) => s.saveSidebarDraftOverwrite));
+  const discard = guard(useAppStore((s) => s.discardSidebarDraft));
+  const deleteView = guard(useAppStore((s) => s.deleteSidebarView));
+  const renameView = guard(useAppStore((s) => s.renameSidebarView));
   const { usesDesktopWorkbench, isFinePointer } = useResponsiveBreakpoint();
   const deletion = useSavedTaskViewDeleteConfirmation<HTMLButtonElement>(views);
   const popoverContentRef = useRef<HTMLDivElement>(null);

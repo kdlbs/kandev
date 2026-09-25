@@ -9,16 +9,23 @@ requirements:
 
 # Tool Payload Retention System Design
 
+## Presentation allocation
+
+The [settings storage tabs design](../../system-page/system-design/system-data-storage-pages.md)
+defines the shipped page allocation. Office retention lives at Storage > Office retention.
+Message compaction remains in Data & Logs > Database.
+Policy, API, and persistence contracts remain unchanged.
+
 ## Purpose and boundaries
 
 This capability belongs to system-page. It uses task persistence to
 remove selected payload fields and retains the original conversation structure.
 The [requirements](../requirements/tool-payload-retention.md) define the outcomes.
 
-The existing `DataLogsSettings` mounts `DatabaseStatsCard`,
-`RetentionSettingsCard`, `BackupsTable`, and `LogViewer`. Its existing retention
-card controls Office run history through contributor `system:retention`.
-The tool payload card uses a separate policy and save contributor.
+The Database tab of `DataLogsSettings` mounts `DatabaseStatsCard`,
+`ToolPayloadRetentionCard`, `BackupsTable`, and `LogViewer`. Office run history
+is owned by the separate Storage > Office retention tab through contributor
+`system:retention`. The tool payload card uses a separate policy and save contributor.
 
 The [Data & Logs route design](system-data-storage-pages.md) describes the route
 split and the separate save contributors for database retention settings.
@@ -251,6 +258,34 @@ database card supplies an explicit compaction action and its before/after result
 Payload bytes are not a prediction of compacted file bytes or backup duration.
 
 ## Settings surface and security
+
+### Status error recovery
+
+`useToolPayloadRetention` keeps status-read errors separate from action errors.
+A current successful GET clears only the status-read error. An action error
+takes display precedence and survives successful background reads. Explicit
+Refresh status clears only the status-read error and preserves `actionError`.
+Starting a new user action clears both error channels; a failed action sets
+`actionError` to its new failure. Persisted operation failures remain part of
+the returned status.
+
+The existing lifetime epoch and mutation generation checks apply to both error
+channels. A stale GET cannot clear a newer error or overwrite a mutation result.
+Polling continues at the existing cadence without automatic mutation retries.
+Expose the error source to `RetentionError`: a failed status GET says that
+current status is unavailable and labels retained analysis as last known;
+an action error retains the operation-failure copy. The hook still keeps the
+last accepted status and its timestamps while polling recovers.
+Draft ownership stays in `useToolPayloadRetentionDraft`.
+
+The [platform health design](../../platform/system-design/postgres-domain-store-parity.md#sqlite-maintenance-coordination)
+owns maintenance admission and readiness. The card does not infer database
+health from a local vacuum button state or suppress all HTTP 503 errors.
+Existing desktop and phone composition, focus behavior, and translated copy
+remain unchanged. The [fix package](../../../plans/vacuum-compaction-status/plan.md)
+defines regression coverage and the recovered-state preview.
+
+### Controls and permissions
 
 Add `ToolPayloadRetentionCard` beside existing retention settings, with its own
 `system:tool-payload-retention` save contributor. Reuse draft/save conflict

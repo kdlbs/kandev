@@ -18,7 +18,7 @@ test("phone navigation stays available by tap with no hover rail", async ({
   await testPage.goto(`/t/${first.id}`);
   await new SessionPage(testPage).waitForLoad();
   await expect(testPage.getByTestId("app-sidebar")).toBeHidden();
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
   const drawer = testPage.getByRole("dialog", { name: "Tasks", exact: true });
   await expect(drawer).toBeVisible();
   await drawer.evaluate(async (element) => {

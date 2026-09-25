@@ -6,6 +6,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+import { chooseCapture, saveDraft } from "../preview/preview-feedback-helpers";
 
 const SAVED_HTML = "<!doctype html><html><body><p>Saved source</p></body></html>";
 const SVG_ASSET =
@@ -203,6 +204,36 @@ test.describe("HTML preview", () => {
     await expect(
       testPage.locator(".monaco-editor:visible").first().locator(".view-lines"),
     ).toContainText("Republished native preview");
+  });
+
+  test("opens HTML preview feedback in its shared collection", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const { session } = await setupDesktopHtmlPreviewTest({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      title: "HTML Preview Feedback Collection",
+    });
+
+    await testPage.getByTestId("html-preview-toggle").first().click();
+    const preview = testPage.getByTestId("html-preview").first();
+    const frame = preview.frameLocator("iframe");
+    await expect(frame.locator("#increment")).toBeVisible({ timeout: 15_000 });
+
+    await chooseCapture(testPage, "Select element");
+    await frame.locator("#increment").click();
+    await saveDraft(testPage, "Keep this HTML preview action visible");
+
+    await session.clickSessionChatTab();
+    await session.activeChat().getByRole("button", { name: "1 preview feedback item" }).click();
+
+    await expect(session.browserPanel).toHaveCount(0);
+    await expect(testPage.getByText("Keep this HTML preview action visible")).toBeVisible();
   });
 
   test("shows a retryable error when the session publish endpoint fails", async ({

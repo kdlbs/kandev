@@ -24,6 +24,12 @@ export type CoreSessionStream = {
   recoveryGeneration: number;
   recoveryWatermark?: number;
   recoveryHydration?: Promise<boolean>;
+  conversationScopeId: string;
+  conversationEpoch?: string;
+  conversationAppliedRevision?: string;
+  conversationRecoveryRevision?: string;
+  conversationPendingChanges: unknown[];
+  conversationCheckTimer?: ReturnType<typeof setTimeout>;
 };
 
 const ORDERED_EVENT_ACTIONS: Readonly<Record<string, BackendMessageType>> = {

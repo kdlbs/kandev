@@ -59,6 +59,15 @@ plugins:
   - id: kandev-plugin-deepseek-balance
     repo: Fclem/kandev-plugin-deepseek-balance
     categories: [analytics]
+  - id: kandev-plugin-redmine
+    repo: yattdev/kandev-plugin-redmine
+    categories: [integrations]
+  - id: kandev-plugin-prompt-history
+    repo: Fclem/kandev-plugin-prompt-history
+    categories: [tools]
+  - id: kandev-plugin-forgejo
+    repo: naerymdan/kandev-plugin-forgejo
+    categories: [integrations]
 # Example entry (copy, uncomment, and fill in when adding a plugin):
 #
 # plugins:

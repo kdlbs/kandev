@@ -59,6 +59,10 @@ func (s *Service) runFactoryReset(ctx context.Context) (map[string]interface{}, 
 	if err := s.requireSQLiteMaintenance("factory reset"); err != nil {
 		return nil, err
 	}
+	if s.PersistenceUnavailable != nil {
+		s.PersistenceUnavailable()
+	}
+	s.InvalidateDatabase()
 
 	if s.OrchestratorShutdown != nil {
 		s.OrchestratorShutdown()

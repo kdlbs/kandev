@@ -130,9 +130,10 @@ func acItoa(n int) string {
 }
 
 type acFakeSessionRepo struct {
-	mu       sync.Mutex
-	sessions map[string]*models.TaskSession
-	nextIdx  int
+	mu        sync.Mutex
+	sessions  map[string]*models.TaskSession
+	nextIdx   int
+	createErr error
 }
 
 func newACFakeSessionRepo() *acFakeSessionRepo {
@@ -153,6 +154,9 @@ func (f *acFakeSessionRepo) GetPrimarySessionByTaskID(_ context.Context, taskID 
 func (f *acFakeSessionRepo) CreateTaskSession(_ context.Context, session *models.TaskSession) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.createErr != nil {
+		return f.createErr
+	}
 	if session.ID == "" {
 		f.nextIdx++
 		session.ID = "session-" + acItoa(f.nextIdx)

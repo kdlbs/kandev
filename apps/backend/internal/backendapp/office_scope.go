@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/office"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -546,10 +547,11 @@ func mountOfficeRoutes(
 	taskSvc *taskservice.Service,
 	officeRepo *officesqlite.Repository,
 	handoffSvc *taskservice.HandoffService,
+	handoffDeps officeruntime.HandoffDependencies,
 	log *logger.Logger,
 ) {
 	api := router.Group(officeRoutePrefix)
 	api.Use(officeagents.AgentAuthMiddleware(svcs.Agents))
 	api.Use(officeWorkspaceScopeMiddleware(authSvc, taskSvc, officeRepo))
-	office.RegisterAllRoutes(api, svcs, handoffSvc, log)
+	office.RegisterAllRoutes(api, svcs, handoffSvc, handoffDeps, log)
 }

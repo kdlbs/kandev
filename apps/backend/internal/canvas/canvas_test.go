@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -80,6 +81,35 @@ func TestGetExposesPendingFirstRelease(t *testing.T) {
 	}
 	if got.ActiveReleaseID != "" {
 		t.Fatalf("active release ID = %q, want empty", got.ActiveReleaseID)
+	}
+}
+
+func TestRenameOnlyChangesTitleAndEmitsUpdate(t *testing.T) {
+	service, _, _ := newCanvasService(t)
+	created := createCanvas(t, service, CreateCanvasRequest{WorkspaceID: "workspace-1", TaskID: "task-1", Title: "Before"})
+	var event LifecycleEvent
+	service.SetEventPublisher(func(_ context.Context, value LifecycleEvent) { event = value })
+	updated, err := service.Rename(context.Background(), created.ID, "  After  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != "After" || updated.ID != created.ID || updated.PluginInstanceID != created.PluginInstanceID || updated.TaskID != created.TaskID {
+		t.Fatalf("unexpected rename projection: %+v", updated)
+	}
+	if event.Type != EventUpdated || event.Title != "After" || event.WorkspaceID != created.WorkspaceID {
+		t.Fatalf("unexpected update event: %+v", event)
+	}
+	if _, err := service.Rename(context.Background(), created.ID, "  "); !errors.Is(err, ErrInvalidCanvas) {
+		t.Fatalf("blank rename = %v", err)
+	}
+	if _, err := service.Rename(context.Background(), created.ID, strings.Repeat("x", MaxTitleLength+1)); !errors.Is(err, ErrInvalidCanvas) {
+		t.Fatalf("long rename = %v", err)
+	}
+	if err := service.Remove(context.Background(), created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Rename(context.Background(), created.ID, "Restored"); !errors.Is(err, ErrCanvasNotFound) {
+		t.Fatalf("removed rename = %v", err)
 	}
 }
 

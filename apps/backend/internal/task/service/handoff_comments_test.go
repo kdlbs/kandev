@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
 
 // fakeCommentReader is a minimal in-memory CommentReader. Comments for a
@@ -363,5 +366,83 @@ func TestListCommentsForCallerClampsLimitAtServiceBoundary(t *testing.T) {
 				t.Fatalf("limit passed to ListTaskCommentsWindow = %d, want %d", reader.lastLimit, tc.want)
 			}
 		})
+	}
+}
+
+// erroringTaskLookup is a repository.TaskRepository stub whose GetTask
+// always fails with a caller-supplied error. Embeds the full interface
+// (never invoked) so only GetTask needs a body.
+type erroringTaskLookup struct {
+	repository.TaskRepository
+	err error
+}
+
+func (e *erroringTaskLookup) GetTask(_ context.Context, _ string) (*models.Task, error) {
+	return nil, e.err
+}
+
+// TestListCommentsForTasklessRun covers AC-OFFICE-AGENT-COMMENT-READS-009.1-3:
+// a taskless run caller (no caller task identity) reads by workspace
+// membership alone, rather than the caller-task relation ListCommentsForCaller
+// requires.
+func TestListCommentsForTasklessRun(t *testing.T) {
+	svc, _ := newDocumentHandoffService(t, nil)
+	reader := &fakeCommentReader{}
+	reader.seed("parent", 2, 10)
+	svc.SetCommentReader(reader)
+	ctx := context.Background()
+
+	// AC-009.1: any task in the caller's own workspace is readable, even one
+	// with no relation (parent/child/sibling/blocker) to any caller task —
+	// there is no caller task at all.
+	w, err := svc.ListCommentsForTasklessRun(ctx, "ws-handoff", "parent", 20)
+	if err != nil {
+		t.Fatalf("same-workspace read: %v", err)
+	}
+	if w.Total != 2 || w.Returned != 2 {
+		t.Fatalf("window = %+v, want total=2 returned=2", w)
+	}
+
+	// AC-009.2: a foreign-workspace target and a nonexistent target both
+	// deny identically.
+	if _, err := svc.ListCommentsForTasklessRun(ctx, "ws-handoff", "foreign", 20); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("foreign workspace target = %v, want ErrAccessDenied", err)
+	}
+	if _, err := svc.ListCommentsForTasklessRun(ctx, "ws-handoff", "does-not-exist", 20); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("nonexistent target = %v, want ErrAccessDenied", err)
+	}
+	// Empty workspace or target claim denies rather than matching everything.
+	if _, err := svc.ListCommentsForTasklessRun(ctx, "", "parent", 20); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("empty workspace = %v, want ErrAccessDenied", err)
+	}
+	if _, err := svc.ListCommentsForTasklessRun(ctx, "ws-handoff", "", 20); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("empty target = %v, want ErrAccessDenied", err)
+	}
+
+	// AC-009.3: a lookup failure (not a not-found) is returned as-is, not
+	// normalized to ErrAccessDenied — an outage must not read as a refusal.
+	lookupErr := errors.New("db unavailable")
+	failing := NewHandoffService(&erroringTaskLookup{err: lookupErr}, nil, nil, nil, nil, accessTestLogger(t))
+	failing.SetCommentReader(reader)
+	if _, err := failing.ListCommentsForTasklessRun(ctx, "ws-handoff", "parent", 20); !errors.Is(err, lookupErr) {
+		t.Fatalf("lookup error = %v, want %v unwrapped", err, lookupErr)
+	}
+}
+
+// AC-009.4: a task-bound caller (non-empty caller task) keeps
+// ListCommentsForCaller's relation guard unchanged by this feature — it does
+// not gain the taskless run's workspace-wide reach.
+// (TestListCommentsForCallerEnforcesReadAccess already pins the denial for
+// an unrelated same-workspace task; this test exists so the AC has its own
+// named regression anchor.)
+func TestListCommentsForCallerStillDeniesUnrelatedSameWorkspaceTask(t *testing.T) {
+	svc, _ := newDocumentHandoffService(t, nil)
+	reader := &fakeCommentReader{}
+	reader.seed("stranger", 1, 10)
+	svc.SetCommentReader(reader)
+	ctx := context.Background()
+
+	if _, err := svc.ListCommentsForCaller(ctx, "child-a", "stranger", 20); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("task-bound caller reading unrelated same-workspace task = %v, want ErrAccessDenied", err)
 	}
 }

@@ -1,5 +1,6 @@
 ---
 created: 2026-09-10
+updated: 2026-09-26
 status: done
 requirements:
   - REQ-CI-PR-DOCS-001
@@ -14,12 +15,12 @@ legacy_specs: []
 
 ## Overview
 
-Build a deterministic coverage validator, integrate PR status reporting, then add merge-queue evaluation and contributor guidance.
+Build a deterministic coverage validator, integrate PR status reporting, add merge-queue evaluation and contributor guidance, then refine narrow path exemptions from observed repository-maintenance cases.
 The CI system owns this package because it controls repository checks and label exceptions.
 
 ## Scope
 
-In scope: narrow exemptions, linked artifact validation, the exact `no-docs-allow` override, current-revision statuses, queue compatibility, and actionable summaries.
+In scope: narrow exemptions including the canonical plugin registry source, linked artifact validation, the exact `no-docs-allow` override, current-revision statuses, queue compatibility, and actionable summaries.
 
 Out of scope: AI classification, application UI, automatic label management, publishing a PR, and live ruleset mutations.
 Public user documentation remains governed by the existing contribution checklist.
@@ -30,6 +31,7 @@ Use the proposed `.github/scripts/pr-docs.cjs` module for pure policy functions 
 Use `.github/workflows/pr-docs.yml` for base-controlled execution and the `PR documentation coverage` commit status.
 Reuse the existing Node runtime from GitHub-hosted runners and the built-in test runner; no pnpm dependency installation is needed.
 Register Node and workflow contract tests in `.github/workflows/lint-action-pinning.yml`.
+Keep `plugin-registry/plugins.yaml` as an exact path exemption in the classifier; do not broaden the rule to the full registry tree.
 
 Existing patterns: `.github/workflows/pr-size-label.yml` for metadata pagination,
 `.github/scripts/pr-size-label-workflow-contract_test.py` for workflow checks, and
@@ -42,6 +44,7 @@ All named test suites below are proposed files.
 | Criteria | Evidence |
 | --- | --- |
 | AC-CI-PR-DOCS-001.2 through .6 | `pr-docs.test.cjs`: classification and artifact graph fixtures |
+| AC-CI-PR-DOCS-001.7 | `pr-docs.test.cjs`: exact registry-source exemption and mixed-path trigger fixture |
 | AC-CI-PR-DOCS-001.1; AC-CI-PR-DOCS-002.1 through .4 | Fake GitHub adapter exercises draft/fork events and label transitions |
 | AC-CI-PR-DOCS-003.1 through .3 | API failures, pagination caps, stale head/label reads, path and content restrictions |
 | AC-CI-PR-DOCS-003.4 through .5 | Per-member queue evaluation, active prefix reevaluation, mismatched queue boundaries, override removal, and rollout checklist |
@@ -61,6 +64,9 @@ Live smoke tests and required-check activation are deployment steps, not complet
 - [x] [Task 01: Validate documentation coverage](task-01-coverage-validator.md)
 - [x] [Task 02: Report pull request coverage](task-02-pr-workflow.md)
 - [x] [Task 03: Support merge queue coverage](task-03-queue-coverage.md)
+- [x] [Task 04: Exempt the canonical plugin registry source](task-04-exempt-plugin-registry-source.md)
+- [x] [Task 05: Exempt CI infrastructure paths](task-05-exempt-ci-paths.md)
+- [x] [Task 06: Exempt architecture-lint tooling](task-06-exempt-architecture-lint-tooling.md)
 
 Execute sequentially. No subagents are authorized.
 
@@ -98,9 +104,69 @@ Implementation verification on 2026-09-10:
 Repository-wide `zizmor .github/workflows` still reports existing findings in
 unrelated workflows; the new workflow has no reported findings.
 
+## Amendment: canonical plugin registry source
+
+The original three work orders remain complete. This amendment adds one exact
+path exemption for the curated `plugin-registry/plugins.yaml` pointer source.
+The implementation preserves normal coverage for every other registry path and
+for any pull request that combines the exempt source with a non-exempt path.
+
+Task 04 verification completed on 2026-09-16:
+
+- 77 validator tests, 7 workflow contract tests, and 9 action-pinning tests passed.
+- All 24 workflow files passed action-pinning lint.
+- `zizmor .github/workflows/pr-docs.yml` reported no findings.
+- The specification catalog and linter passed; `git diff --check` passed.
+
+## Amendment: CI infrastructure paths
+
+The original four work orders remain complete. This amendment exempts the CI
+infrastructure paths `.github/workflows/**`, `.github/scripts/**`, and
+`.github/actions/**` from requiring a delivery package. CI pipeline changes do
+not ship product behavior and are already covered by workflow contract tests,
+so requiring delivery context for them adds process without design value. The
+exemption is directory-scoped; workflows, scripts, or actions outside `.github/`
+still require coverage.
+
+Task 05 implements the exemption and updates the path classifier tests,
+requirement, system design, decision record, and plan.
+
+Task 05 verification completed on 2026-09-21:
+
+- 80 validator tests, 7 workflow contract tests, and 9 action-pinning tests passed.
+- All 24 workflow files passed action-pinning lint.
+- `zizmor .github/workflows/pr-docs.yml` reported no findings.
+- The specification catalog and linter passed; `git diff --check` passed.
+
+## Amendment: architecture-lint tooling
+
+The accepted architecture-lint decision places shared linter implementation
+under `scripts/` and reviewed baselines under `config/`, where local Make,
+pre-commit, and GitHub Actions use the same repository tooling. The existing CI
+infrastructure exemption covers only `.github/`, so architecture-lint paths
+otherwise require a delivery package because of location alone.
+
+Task 06 adds exact exemptions for `scripts/architecture_lint/**`,
+`scripts/architecture_lint_tests/**`, and `config/architecture-lint/**`, plus
+`scripts/lint-architecture.py` and `scripts/lint-architecture.test.py`. Other
+scripts and configuration remain covered, and any mixed change with a
+non-exempt path still requires linked delivery context. Renames continue to
+classify both old and new paths, and merge-group members remain independent.
+
+Task 06 verification completed on 2026-09-26:
+
+- 87 validator tests and 7 workflow contract tests passed.
+- The specification catalog validated 309 decisions and 1183 specifications;
+  the specification linter and `git diff --check` passed.
+- A read-only fixture from PR #2234 head
+  `ada835c937ed6e57822ba5b8a7fa7239be0834fa` classified all 21 changed paths
+  as exempt. GitHub reported the PR as merged during this check. The fixture
+  does not publish a GitHub status.
+
 ## Risks
 
 - Conservative defaults require labels for some small fixes, refactors, and dependency manifest changes.
+- An overly broad registry match could allow schema, generator, or generated-catalog changes to bypass delivery context; exact-path tests constrain this risk.
 - The target-branch event queue retains up to 100 pending runs; higher bursts can still cancel new runs.
 - Structural validation cannot establish semantic relevance or planning chronology.
 - Merge queue boundary resolution needs real payload validation before mandatory rollout.
@@ -112,3 +178,4 @@ unrelated workflows; the new workflow has no reported findings.
 - [Requirements](../../specs/ci/requirements/pull-request-documentation-coverage.md)
 - [System design](../../specs/ci/system-design/pull-request-documentation-coverage.md)
 - [Decision](../../decisions/2026-09-10-pr-documentation-coverage.md)
+- [Absent merge queue label reevaluation follow-up](../pr-docs-absent-queue/plan.md)

@@ -80,7 +80,7 @@ func TestPostgresExecutorRunningLocalPIDMigration(t *testing.T) {
 	if _, err := db.Exec(`ALTER TABLE executors_running DROP COLUMN local_pid`); err != nil {
 		t.Fatalf("simulate legacy schema (drop local_pid): %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations on legacy postgres DB: %v", err)
 	}
 
@@ -185,10 +185,10 @@ func TestPostgresImproveKandevWorkflowIndexMigration(t *testing.T) {
 			t.Fatalf("seed legacy workflow %q: %v", id, err)
 		}
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("migrate legacy postgres workflow duplicates: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay postgres improve kandev migration: %v", err)
 	}
 	var count int
@@ -304,10 +304,10 @@ func TestPostgresExecutionProfileMigration(t *testing.T) {
 			t.Fatalf("drop %s.execution_profile_id: %v", table, err)
 		}
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations on legacy postgres schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay postgres migrations: %v", err)
 	}
 
@@ -586,10 +586,10 @@ func TestPostgresRepositorySecretBindingsSchemaReplay(t *testing.T) {
 	if _, err := db.Exec("DROP TABLE repository_secret_bindings"); err != nil {
 		t.Fatalf("drop repository secret bindings table: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay repository secret bindings migration: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay repository secret bindings migration twice: %v", err)
 	}
 

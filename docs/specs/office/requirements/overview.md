@@ -42,3 +42,20 @@ scheduler, costs, routines, inbox, assistant) live in sibling specs under `docs/
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/overview-01.md), [part 2](../system-design/overview-02.md).
+
+## Workspace configuration export
+
+### REQ-OFFICE-CONFIG-EXPORT-001: Preview and download Office configuration
+
+**Intent:** Operators can export workspace configuration from Preferences and
+verify the exact files before downloading them.
+
+#### Acceptance criteria
+
+- **AC-OFFICE-CONFIG-EXPORT-001.1:** Preferences shall open the export page through navigation and direct URL entry for the selected workspace. Loading, no-workspace, empty and failed-load states shall be explicit; a failed request shall offer retry.
+- **AC-OFFICE-CONFIG-EXPORT-001.2:** Preview paths and content shall match downloaded ZIP entries. Download shall contain exactly the selected files; no selection shall disable download. Export shall not modify configuration or expose secret/runtime-only data.
+- **AC-OFFICE-CONFIG-EXPORT-001.3:** Workspace changes shall clear the previous preview and selection immediately. A late response shall not display or download another workspace's files. Download failures shall be visible without losing the current selection.
+- **AC-OFFICE-CONFIG-EXPORT-001.4:** Phone users shall select files, inspect one preview at a time, return to the list and download with the same semantics as desktop. Controls shall be touch-accessible and content shall stay within the viewport.
+
+The [configuration export design](../system-design/config-export.md) owns the
+preview/download contract. Import and config-sync mutation behavior are unchanged.

@@ -18,23 +18,57 @@ import {
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useRetentionSettings } from "@/hooks/domains/system/use-retention-settings";
-import { formatDateTime } from "@/lib/i18n/formats";
 import { SYSTEM_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/system";
-import type {
-  RetentionSettings,
-  RetentionStatus,
-  RetentionTableCensus,
-  RetentionTableSweepResult,
-  RetentionSweptTableResult,
-  RetentionUnknownStatusCount,
-} from "@/lib/types/system";
+import type { RetentionSettings } from "@/lib/types/system";
+import { StorageSettingHelp } from "./storage/storage-setting-help";
+import { RetentionStatusCard } from "./retention-status-card";
+
+type Translate = ReturnType<typeof useTranslation>["t"];
+
+function getRetentionInvalidFieldMessage(t: Translate): string {
+  return t("system:retentionInvalidField");
+}
 
 function serialize(settings: RetentionSettings | null): string {
   return settings ? JSON.stringify(settings) : "loading";
 }
 
-function formatUnknownStatuses(unknown: RetentionUnknownStatusCount[]): string {
-  return unknown.map((u) => `${u.status} (${u.count})`).join(", ");
+type RetentionFieldId =
+  | "retention-sweep-interval"
+  | "retention-batch-limit"
+  | "retention-routine-runs-window-days"
+  | "retention-routine-runs-floor-per-owner"
+  | "retention-runs-window-days"
+  | "retention-runs-floor-per-owner"
+  | "retention-routine-runs-warn-rows"
+  | "retention-runs-warn-rows"
+  | "retention-run-events-warn-rows";
+
+function isOutsideRange(value: number, min: number, max?: number): boolean {
+  return !Number.isFinite(value) || value < min || (max !== undefined && value > max);
+}
+
+function invalidRetentionFields(settings: RetentionSettings): Set<RetentionFieldId> {
+  const invalid = new Set<RetentionFieldId>();
+  const addIfInvalid = (field: RetentionFieldId, value: number, min: number, max?: number) => {
+    if (isOutsideRange(value, min, max)) invalid.add(field);
+  };
+
+  addIfInvalid("retention-sweep-interval", settings.sweep_interval_hours, 1, 168);
+  addIfInvalid("retention-batch-limit", settings.batch_limit, 100, 100000);
+  addIfInvalid("retention-routine-runs-window-days", settings.routine_runs.window_days, 1, 3650);
+  addIfInvalid(
+    "retention-routine-runs-floor-per-owner",
+    settings.routine_runs.floor_per_owner,
+    0,
+    10000,
+  );
+  addIfInvalid("retention-runs-window-days", settings.runs.window_days, 1, 3650);
+  addIfInvalid("retention-runs-floor-per-owner", settings.runs.floor_per_owner, 0, 10000);
+  addIfInvalid("retention-routine-runs-warn-rows", settings.routine_runs.warn_rows, 0);
+  addIfInvalid("retention-runs-warn-rows", settings.runs.warn_rows, 0);
+  addIfInvalid("retention-run-events-warn-rows", settings.run_events.warn_rows, 0);
+  return invalid;
 }
 
 function NumberField({
@@ -44,6 +78,8 @@ function NumberField({
   min,
   max,
   disabled,
+  invalid,
+  invalidMessage,
   onChange,
   testId,
 }: {
@@ -53,12 +89,17 @@ function NumberField({
   min: number;
   max?: number;
   disabled?: boolean;
+  invalid?: boolean;
+  invalidMessage?: string;
   onChange: (value: number) => void;
   testId: string;
 }) {
   return (
     <div className="min-w-0 space-y-1">
-      <SettingsFieldLabel htmlFor={testId}>{label}</SettingsFieldLabel>
+      <div className="flex items-center gap-1">
+        <SettingsFieldLabel htmlFor={testId}>{label}</SettingsFieldLabel>
+        <StorageSettingHelp label={label}>{help}</StorageSettingHelp>
+      </div>
       <Input
         id={testId}
         type="number"
@@ -67,10 +108,20 @@ function NumberField({
         disabled={disabled}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
-        className={settingsControlClassName("h-11")}
+        className={settingsControlClassName()}
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? `${testId}-error` : undefined}
         data-testid={testId}
       />
-      <SettingsFieldDescription>{help}</SettingsFieldDescription>
+      {invalid && (
+        <p
+          id={`${testId}-error`}
+          className="text-xs text-destructive"
+          data-testid={`${testId}-error`}
+        >
+          {invalidMessage}
+        </p>
+      )}
     </div>
   );
 }
@@ -80,6 +131,7 @@ function useRetentionDraft(remote: ReturnType<typeof useRetentionSettings>, isAd
   const [draft, setDraft] = useState<RetentionSettings | null>(null);
   const previousSaved = useRef<RetentionSettings | null>(null);
   const saved = remote.status?.settings ?? null;
+  const invalidFields = draft ? invalidRetentionFields(draft) : new Set<RetentionFieldId>();
 
   useEffect(() => {
     if (!saved) return;
@@ -93,17 +145,24 @@ function useRetentionDraft(remote: ReturnType<typeof useRetentionSettings>, isAd
 
   const isDirty = Boolean(draft && saved && serialize(draft) !== serialize(saved));
   const canEdit = isAdmin && !remote.isLoading && Boolean(saved);
-  const invalidReason = !isAdmin ? t("system:retentionAdminOnly") : undefined;
+  const canSave = canEdit && invalidFields.size === 0;
+  let invalidReason: string | undefined;
+  if (!isAdmin) {
+    invalidReason = t("system:retentionAdminOnly");
+  } else if (invalidFields.size > 0) {
+    invalidReason = t("system:retentionInvalidFields");
+  }
 
   useSettingsSaveContributor({
     id: "system:retention",
     order: 25,
     revision: serialize(draft),
     isDirty,
-    canSave: canEdit,
+    canSave,
     invalidReason,
     save: async () => {
       if (!draft) return;
+      if (invalidFields.size > 0) throw new Error(t("system:retentionInvalidFields"));
       await remote.save(draft);
     },
     discard: () => {
@@ -111,7 +170,7 @@ function useRetentionDraft(remote: ReturnType<typeof useRetentionSettings>, isAd
     },
   });
 
-  return { draft, setDraft, saved, canEdit };
+  return { draft, setDraft, saved, canEdit, canSave, invalidFields };
 }
 
 function RetentionEnabledRow({
@@ -149,10 +208,12 @@ function RetentionEnabledRow({
 function RetentionScheduleFields({
   settings,
   disabled,
+  invalidFields,
   onChange,
 }: {
   settings: RetentionSettings;
   disabled: boolean;
+  invalidFields: ReadonlySet<RetentionFieldId>;
   onChange: (settings: RetentionSettings) => void;
 }) {
   const { t } = useTranslation();
@@ -165,6 +226,8 @@ function RetentionScheduleFields({
         min={1}
         max={168}
         disabled={disabled}
+        invalid={invalidFields.has("retention-sweep-interval")}
+        invalidMessage={getRetentionInvalidFieldMessage(t)}
         onChange={(sweep_interval_hours) => onChange({ ...settings, sweep_interval_hours })}
         testId="retention-sweep-interval"
       />
@@ -175,6 +238,8 @@ function RetentionScheduleFields({
         min={100}
         max={100000}
         disabled={disabled}
+        invalid={invalidFields.has("retention-batch-limit")}
+        invalidMessage={getRetentionInvalidFieldMessage(t)}
         onChange={(batch_limit) => onChange({ ...settings, batch_limit })}
         testId="retention-batch-limit"
       />
@@ -197,7 +262,7 @@ function TableSection({
         <p className="text-sm font-medium">{title}</p>
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
-      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">{children}</div>
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">{children}</div>
     </div>
   );
 }
@@ -210,6 +275,7 @@ function WindowedTableSection({
   description,
   settings,
   disabled,
+  invalidFields,
   onChange,
 }: {
   tableKey: WindowedTableKey;
@@ -217,6 +283,7 @@ function WindowedTableSection({
   description: string;
   settings: RetentionSettings;
   disabled: boolean;
+  invalidFields: ReadonlySet<RetentionFieldId>;
   onChange: (settings: RetentionSettings) => void;
 }) {
   const { t } = useTranslation();
@@ -231,57 +298,28 @@ function WindowedTableSection({
         min={1}
         max={3650}
         disabled={disabled}
+        invalid={invalidFields.has(`${testPrefix}-window-days` as RetentionFieldId)}
+        invalidMessage={getRetentionInvalidFieldMessage(t)}
         onChange={(window_days) => onChange({ ...settings, [tableKey]: { ...table, window_days } })}
         testId={`${testPrefix}-window-days`}
       />
       <NumberField
-        label={t("system:retentionFloorPerOwnerLabel")}
+        label={t(
+          tableKey === "routine_runs"
+            ? "system:retentionRoutineFloorLabel"
+            : "system:retentionAgentFloorLabel",
+        )}
         help={t("system:retentionFloorPerOwnerHelp")}
         value={table.floor_per_owner}
         min={0}
         max={10000}
         disabled={disabled}
+        invalid={invalidFields.has(`${testPrefix}-floor-per-owner` as RetentionFieldId)}
+        invalidMessage={getRetentionInvalidFieldMessage(t)}
         onChange={(floor_per_owner) =>
           onChange({ ...settings, [tableKey]: { ...table, floor_per_owner } })
         }
         testId={`${testPrefix}-floor-per-owner`}
-      />
-      <NumberField
-        label={t("system:retentionWarnRowsLabel")}
-        help={t("system:retentionWarnRowsHelp")}
-        value={table.warn_rows}
-        min={0}
-        disabled={disabled}
-        onChange={(warn_rows) => onChange({ ...settings, [tableKey]: { ...table, warn_rows } })}
-        testId={`${testPrefix}-warn-rows`}
-      />
-    </TableSection>
-  );
-}
-
-function RunEventsSection({
-  settings,
-  disabled,
-  onChange,
-}: {
-  settings: RetentionSettings;
-  disabled: boolean;
-  onChange: (settings: RetentionSettings) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <TableSection
-      title={t("system:retentionRunEventsSectionTitle")}
-      description={t("system:retentionRunEventsSectionDescription")}
-    >
-      <NumberField
-        label={t("system:retentionWarnRowsLabel")}
-        help={t("system:retentionRunEventsWarnRowsHelp")}
-        value={settings.run_events.warn_rows}
-        min={0}
-        disabled={disabled}
-        onChange={(warn_rows) => onChange({ ...settings, run_events: { warn_rows } })}
-        testId="retention-run-events-warn-rows"
       />
     </TableSection>
   );
@@ -290,10 +328,12 @@ function RunEventsSection({
 function RoutineRunsAndRunsSections({
   settings,
   disabled,
+  invalidFields,
   onChange,
 }: {
   settings: RetentionSettings;
   disabled: boolean;
+  invalidFields: ReadonlySet<RetentionFieldId>;
   onChange: (settings: RetentionSettings) => void;
 }) {
   const { t } = useTranslation();
@@ -301,32 +341,151 @@ function RoutineRunsAndRunsSections({
     <>
       <WindowedTableSection
         tableKey="routine_runs"
-        title={t("system:retentionRoutineRunsSectionTitle")}
-        description={t("system:retentionRoutineRunsSectionDescription")}
+        title={t("system:retentionRoutineHistoryLabel")}
+        description={t("system:retentionRoutineHistoryDescription")}
         settings={settings}
         disabled={disabled}
+        invalidFields={invalidFields}
         onChange={onChange}
       />
       <WindowedTableSection
         tableKey="runs"
-        title={t("system:retentionRunsSectionTitle")}
-        description={t("system:retentionRunsSectionDescription")}
+        title={t("system:retentionAgentRunHistoryLabel")}
+        description={t("system:retentionAgentRunHistoryDescription")}
         settings={settings}
         disabled={disabled}
+        invalidFields={invalidFields}
         onChange={onChange}
       />
-      <RunEventsSection settings={settings} disabled={disabled} onChange={onChange} />
     </>
+  );
+}
+
+function WarningThresholdFields({
+  settings,
+  disabled,
+  invalidFields,
+  onChange,
+}: {
+  settings: RetentionSettings;
+  disabled: boolean;
+  invalidFields: ReadonlySet<RetentionFieldId>;
+  onChange: (settings: RetentionSettings) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-3 border-t pt-3">
+      <div>
+        <p className="text-sm font-medium">{t("system:retentionWarningThresholdsTitle")}</p>
+        <p className="text-xs text-muted-foreground">
+          {t("system:retentionWarningThresholdsDescription")}
+        </p>
+      </div>
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
+        <NumberField
+          label={t("system:retentionRoutineHistoryLabel")}
+          help={t("system:retentionWarnRowsHelp")}
+          value={settings.routine_runs.warn_rows}
+          min={0}
+          disabled={disabled}
+          invalid={invalidFields.has("retention-routine-runs-warn-rows")}
+          invalidMessage={getRetentionInvalidFieldMessage(t)}
+          onChange={(warn_rows) =>
+            onChange({ ...settings, routine_runs: { ...settings.routine_runs, warn_rows } })
+          }
+          testId="retention-routine-runs-warn-rows"
+        />
+        <NumberField
+          label={t("system:retentionAgentRunHistoryLabel")}
+          help={t("system:retentionWarnRowsHelp")}
+          value={settings.runs.warn_rows}
+          min={0}
+          disabled={disabled}
+          invalid={invalidFields.has("retention-runs-warn-rows")}
+          invalidMessage={getRetentionInvalidFieldMessage(t)}
+          onChange={(warn_rows) => onChange({ ...settings, runs: { ...settings.runs, warn_rows } })}
+          testId="retention-runs-warn-rows"
+        />
+        <NumberField
+          label={t("system:retentionRunEventsLabel")}
+          help={t("system:retentionRunEventsWarnRowsHelp")}
+          value={settings.run_events.warn_rows}
+          min={0}
+          disabled={disabled}
+          invalid={invalidFields.has("retention-run-events-warn-rows")}
+          invalidMessage={getRetentionInvalidFieldMessage(t)}
+          onChange={(warn_rows) => onChange({ ...settings, run_events: { warn_rows } })}
+          testId="retention-run-events-warn-rows"
+        />
+      </div>
+    </div>
+  );
+}
+
+function AdvancedRetentionSettings({
+  settings,
+  disabled,
+  invalidFields,
+  onChange,
+}: {
+  settings: RetentionSettings;
+  disabled: boolean;
+  invalidFields: ReadonlySet<RetentionFieldId>;
+  onChange: (settings: RetentionSettings) => void;
+}) {
+  const { t } = useTranslation();
+  const advancedFieldIds: RetentionFieldId[] = [
+    "retention-sweep-interval",
+    "retention-batch-limit",
+    "retention-routine-runs-warn-rows",
+    "retention-runs-warn-rows",
+    "retention-run-events-warn-rows",
+  ];
+  const hasInvalidAdvancedField = advancedFieldIds.some((field) => invalidFields.has(field));
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (hasInvalidAdvancedField) setOpen(true);
+  }, [hasInvalidAdvancedField]);
+  return (
+    <details
+      className="border-t pt-3"
+      data-testid="retention-advanced-settings"
+      open={open || hasInvalidAdvancedField}
+      onToggle={(event) => {
+        if (!hasInvalidAdvancedField) setOpen(event.currentTarget.open);
+      }}
+    >
+      <summary className="cursor-pointer text-sm font-medium">
+        {t("system:retentionAdvancedSettingsTitle")}
+      </summary>
+      <p className="pt-2 text-xs text-muted-foreground">
+        {t("system:retentionAdvancedSettingsDescription")}
+      </p>
+      <RetentionScheduleFields
+        settings={settings}
+        disabled={disabled}
+        invalidFields={invalidFields}
+        onChange={onChange}
+      />
+      <WarningThresholdFields
+        settings={settings}
+        disabled={disabled}
+        invalidFields={invalidFields}
+        onChange={onChange}
+      />
+    </details>
   );
 }
 
 function RetentionPolicyCard({
   draft,
   canEdit,
+  invalidFields,
   onChange,
 }: {
   draft: RetentionSettings;
   canEdit: boolean;
+  invalidFields: ReadonlySet<RetentionFieldId>;
   onChange: (settings: RetentionSettings) => void;
 }) {
   const { t } = useTranslation();
@@ -343,164 +502,23 @@ function RetentionPolicyCard({
       />
       <CardContent>
         <RetentionEnabledRow settings={draft} disabled={disabled} onChange={onChange} />
-        <RetentionScheduleFields settings={draft} disabled={disabled} onChange={onChange} />
-        <RoutineRunsAndRunsSections settings={draft} disabled={disabled} onChange={onChange} />
+        <RoutineRunsAndRunsSections
+          settings={draft}
+          disabled={disabled}
+          invalidFields={invalidFields}
+          onChange={onChange}
+        />
+        <AdvancedRetentionSettings
+          settings={draft}
+          disabled={disabled}
+          invalidFields={invalidFields}
+          onChange={onChange}
+        />
+        <p className="border-t pt-3 text-xs text-muted-foreground">
+          {t("system:retentionActiveWorkProtection")}
+        </p>
         {!canEdit && (
           <p className="pt-3 text-xs text-muted-foreground">{t("system:retentionAdminOnly")}</p>
-        )}
-      </CardContent>
-    </SettingsCard>
-  );
-}
-
-function SweptTableRow({ label, result }: { label: string; result: RetentionSweptTableResult }) {
-  const { t } = useTranslation();
-  return (
-    <div
-      className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1 text-xs"
-      data-testid={`retention-swept-row-${label}`}
-    >
-      <span className="min-w-0 font-medium text-foreground">{label}</span>
-      <span className="text-muted-foreground">
-        {t("system:retentionDeletedLabel")}: {result.deleted}
-      </span>
-      {result.previewed && (
-        <span className="text-muted-foreground">
-          {t("system:retentionWouldDeleteLabel")}: {result.would_delete}
-        </span>
-      )}
-      {result.backlog && (
-        <span className="text-amber-600" data-testid={`retention-backlog-${label}`}>
-          {t("system:retentionBacklogLabel")}
-        </span>
-      )}
-      {result.error && (
-        <span className="text-destructive">
-          {t("system:retentionTableErrorLabel")}: {result.error}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function SatelliteTableRow({
-  label,
-  result,
-}: {
-  label: string;
-  result: RetentionTableSweepResult;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1 text-xs">
-      <span className="min-w-0 font-medium text-foreground">{label}</span>
-      <span className="text-muted-foreground">
-        {t("system:retentionDeletedLabel")}: {result.deleted}
-      </span>
-      {result.error && (
-        <span className="text-destructive">
-          {t("system:retentionTableErrorLabel")}: {result.error}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function LastSweepSection({ status }: { status: RetentionStatus }) {
-  const { t } = useTranslation();
-  const lastSweep = status.last_sweep;
-  if (!lastSweep) {
-    return (
-      <p className="text-sm text-muted-foreground" data-testid="retention-never-swept">
-        {t("system:retentionNeverSweptMessage")}
-      </p>
-    );
-  }
-  return (
-    <div className="space-y-2" data-testid="retention-last-sweep">
-      <p className="text-xs text-muted-foreground">
-        {t("system:retentionSweepStartedAtLabel")}: {formatDateTime(lastSweep.started_at)}
-        {" · "}
-        {t("system:retentionSweepFinishedAtLabel")}: {formatDateTime(lastSweep.finished_at)}
-      </p>
-      <SweptTableRow label="office_routine_runs" result={lastSweep.office_routine_runs} />
-      <SweptTableRow label="runs" result={lastSweep.runs} />
-      <SatelliteTableRow label="run_events" result={lastSweep.run_events} />
-      <SatelliteTableRow label="office_run_route_attempts" result={lastSweep.route_attempts} />
-      <SatelliteTableRow label="office_run_skills" result={lastSweep.run_skills} />
-    </div>
-  );
-}
-
-function RetainedCountRow({ label, census }: { label: string; census: RetentionTableCensus }) {
-  const { t } = useTranslation();
-  if (census.state === "not_computed") {
-    return (
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1 text-xs">
-        <span className="min-w-0 font-medium text-foreground">{label}</span>
-        <span className="text-muted-foreground">{t("system:retentionCensusNotComputed")}</span>
-      </div>
-    );
-  }
-  return (
-    <div
-      className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1 text-xs"
-      data-testid={`retention-retained-${label}`}
-    >
-      <span className="min-w-0 font-medium text-foreground">{label}</span>
-      <span className="text-muted-foreground">{census.retained_count}</span>
-      <span className="text-muted-foreground">
-        {t("system:retentionCensusAsOfLabel")}: {formatDateTime(census.as_of)}
-      </span>
-      {census.state === "stale" && (
-        <span className="text-amber-600">{t("system:retentionCensusStale")}</span>
-      )}
-      {census.unknown_statuses && census.unknown_statuses.length > 0 && (
-        <span className="text-amber-600">
-          {t("system:retentionUnknownStatusesLabel")}:{" "}
-          {formatUnknownStatuses(census.unknown_statuses)}
-        </span>
-      )}
-      {census.top_routine_id && (
-        <span className="text-muted-foreground">
-          {t("system:retentionTopRoutineShareLabel")}:{" "}
-          {Math.round((census.top_routine_share ?? 0) * 100)}% ({census.top_routine_id})
-        </span>
-      )}
-    </div>
-  );
-}
-
-function RetentionStatusCard({ status }: { status: RetentionStatus | null }) {
-  const { t } = useTranslation();
-  if (!status) return null;
-  return (
-    <SettingsCard className="min-w-0" data-testid="retention-status-card">
-      <SettingsCardHeader
-        title={t("system:retentionStatusTitle")}
-        description={t("system:retentionStatusDescription")}
-      />
-      <CardContent className="space-y-4">
-        <LastSweepSection status={status} />
-        <div>
-          <p className="text-sm font-medium">{t("system:retentionRetainedCountsTitle")}</p>
-          <RetainedCountRow
-            label="office_routine_runs"
-            census={status.retained_counts.office_routine_runs}
-          />
-          <RetainedCountRow label="runs" census={status.retained_counts.runs} />
-          <RetainedCountRow label="run_events" census={status.retained_counts.run_events} />
-        </div>
-        {status.skip_count > 0 && (
-          <p className="text-xs text-muted-foreground" data-testid="retention-skip-count">
-            {t("system:retentionSkipCountLabel")}: {status.skip_count}
-            {status.last_skip_at && (
-              <>
-                {" · "}
-                {t("system:retentionLastSkipAtLabel")}: {formatDateTime(status.last_skip_at)}
-              </>
-            )}
-          </p>
         )}
       </CardContent>
     </SettingsCard>
@@ -534,7 +552,7 @@ function RetentionSettingsLoadError({ error }: { error: string }) {
 export function RetentionSettingsCard() {
   const remote = useRetentionSettings();
   const isAdmin = useIsAdmin();
-  const { draft, setDraft, canEdit } = useRetentionDraft(remote, isAdmin);
+  const { draft, setDraft, canEdit, invalidFields } = useRetentionDraft(remote, isAdmin);
   const { t } = useTranslation();
 
   if (remote.isLoading && !remote.status) return <RetentionSettingsLoading />;
@@ -542,8 +560,15 @@ export function RetentionSettingsCard() {
 
   return (
     <div className="min-w-0 space-y-4" data-testid="retention-settings">
-      {draft && <RetentionPolicyCard draft={draft} canEdit={canEdit} onChange={setDraft} />}
       <RetentionStatusCard status={remote.status} />
+      {draft && (
+        <RetentionPolicyCard
+          draft={draft}
+          canEdit={canEdit}
+          invalidFields={invalidFields}
+          onChange={setDraft}
+        />
+      )}
       {remote.saveError && (
         <Alert variant="destructive" data-testid="retention-save-error">
           <IconAlertCircle className="size-4" />

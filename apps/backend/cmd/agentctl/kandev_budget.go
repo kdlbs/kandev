@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 )
 
@@ -41,9 +42,9 @@ func budgetGet(args []string) int {
 	if *agentID == "" {
 		return getWithParams(
 			fmt.Sprintf("/api/v1/office/workspaces/%s/costs/summary", wsID),
-			"KANDEV_WORKSPACE_ID", wsID, nil)
+			"KANDEV_WORKSPACE_ID", wsID, url.Values{})
 	}
 	return getWithParams(
 		fmt.Sprintf("/api/v1/office/workspaces/%s/costs/by-agent", wsID),
-		"KANDEV_WORKSPACE_ID", wsID, map[string]string{"agent_id": *agentID})
+		"KANDEV_WORKSPACE_ID", wsID, url.Values{"agent_id": {*agentID}})
 }

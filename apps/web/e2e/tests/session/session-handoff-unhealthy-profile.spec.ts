@@ -1,5 +1,4 @@
 import { test, expect, type Page } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -110,9 +109,10 @@ test.describe("Session handoff filters unhealthy profiles", () => {
     const { sessions } = await apiClient.listTaskSessions(task.id);
     const session1Id = sessions[0].id;
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Handoff Filter Task").click();
+    // The handoff flow does not depend on Kanban rendering. Navigate directly
+    // to the task so a slow board refresh cannot consume the test timeout
+    // before the session menu is exercised.
+    await testPage.goto(`/t/${task.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);

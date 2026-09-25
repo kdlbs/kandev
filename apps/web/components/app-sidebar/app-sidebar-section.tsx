@@ -2,7 +2,7 @@
 
 import type { RefObject } from "react";
 import { IconChevronRight } from "@tabler/icons-react";
-import type { Icon as TablerIcon } from "@tabler/icons-react";
+import type { DestinationIcon } from "@/lib/navigation/types";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
@@ -12,7 +12,7 @@ type AppSidebarSectionProps = {
   id: string;
   label: string;
   collapsed: boolean;
-  icon: TablerIcon;
+  icon: DestinationIcon;
   children: React.ReactNode;
   /** Optional control rendered between the label and the collapse chevron. */
   headerAction?: React.ReactNode;

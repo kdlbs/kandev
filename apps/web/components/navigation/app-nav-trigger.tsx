@@ -6,6 +6,9 @@ import { IconMenu2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
 import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-status-item";
+import { useAppStore } from "@/components/state-provider";
+import { useQuickChatActivity } from "@/components/quick-chat/use-quick-chat-activity";
+import { QuickChatActivityIndicator } from "@/components/quick-chat/quick-chat-activity-indicator";
 import { cn } from "@/lib/utils";
 
 type AppNavTriggerProps = ComponentProps<typeof Button>;
@@ -23,6 +26,8 @@ export const AppNavTrigger = forwardRef<HTMLButtonElement, AppNavTriggerProps>(
     const { t } = useTranslation();
     const { issueSeverity } = useAppStatusDrawer();
     const issue = useConnectionIssueCopy(issueSeverity);
+    const workspaceId = useAppStore((s) => s.workspaces.activeId);
+    const { activity, label } = useQuickChatActivity(workspaceId ?? undefined);
     return (
       <Button
         ref={ref}
@@ -41,10 +46,12 @@ export const AppNavTrigger = forwardRef<HTMLButtonElement, AppNavTriggerProps>(
             ? t("common:openNavigationMenuWithConnectionIssue", { description: issue.description })
             : t("common:openNavigationMenu")
         }
+        aria-description={activity ? label : undefined}
         data-testid="app-nav-trigger"
         data-legacy-testid="settings-mobile-menu-button"
         data-connection-severity={issueSeverity === "none" ? undefined : issueSeverity}
       >
+        <QuickChatActivityIndicator activity={activity} className="right-1.5 bottom-1.5 top-auto" />
         <IconMenu2 className="h-4 w-4" />
         {issue && (
           <span

@@ -19,7 +19,6 @@ test.describe("Workspace selection isolation", () => {
       workflow_filter_id: seedData.workflowId,
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
-      sidebar_views: [],
     });
 
     // Navigate to the "add workspace" wizard.
@@ -84,7 +83,6 @@ test.describe("Workspace selection isolation", () => {
       workflow_filter_id: seedData.workflowId,
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
-      sidebar_views: [],
     });
 
     // Navigate to /office with an explicit workspaceId param.

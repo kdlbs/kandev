@@ -19,6 +19,20 @@ type WorktreeRecoveryError struct {
 	Reason           string
 }
 
+// ManagedCloneRelocationRequiredError identifies a verified dirty worktree
+// that can move only after the user confirms the staged-content limitation.
+type ManagedCloneRelocationRequiredError struct {
+	TaskID string
+}
+
+func (e *ManagedCloneRelocationRequiredError) Error() string {
+	return "managed repository worktree needs an explicit file-preserving recovery"
+}
+
+func managedCloneRelocationRequiredError(taskID string) error {
+	return &ManagedCloneRelocationRequiredError{TaskID: taskID}
+}
+
 func (e *WorktreeRecoveryError) Error() string {
 	return fmt.Sprintf("%s: task %q checkout %q: %s", ErrWorktreeCorrupted, e.TaskID, e.Checkout, e.Reason)
 }
@@ -96,8 +110,8 @@ var (
 	ErrInvalidRepoName = errors.New("repo name has no usable characters after sanitization")
 
 	// ErrBranchUnrecoverable is returned by recreate when the worktree's
-	// branch no longer exists locally (archive deletes it via `git branch
-	// -D`) and could not be fetched from origin either. Callers can treat
+	// branch no longer exists locally, has no exact managed recovery head,
+	// and could not be fetched from origin either. Callers can treat
 	// this as "prior work is gone" and fall back to a fresh worktree.
 	ErrBranchUnrecoverable = errors.New("worktree branch no longer exists locally or on origin")
 
@@ -117,6 +131,11 @@ var (
 	// the just-created physical worktree instead of admitting it after
 	// cleanup inventory was captured.
 	ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
+
+	// ErrManagedCloneRelocationAuthorizationStale means the error stamp that
+	// authorized a dirty clone relocation no longer identifies the current
+	// session failure.
+	ErrManagedCloneRelocationAuthorizationStale = errors.New("managed-clone relocation authorization is stale")
 
 	// ErrReuseWorktreeUnavailable is returned when an attach-only launch cannot
 	// find a valid canonical worktree. Callers must surface this as a workspace

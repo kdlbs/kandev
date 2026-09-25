@@ -1,3 +1,4 @@
+import { mapSidebarWorkspaces } from "@/lib/state/slices/ui/sidebar-workspace-state";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { UserSettingsUpdatedPayload } from "@/lib/types/backend";
@@ -35,6 +36,11 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
         return {
           ...state,
           sidebarViews: buildSidebarViewsState(state, message.payload),
+          sidebarViewsByWorkspace: mapSidebarWorkspaces(
+            message.payload.sidebar_views_by_workspace,
+            state.sidebarViewsByWorkspace,
+            message.payload.revision,
+          ),
           threadViews: buildThreadViewsState(state, message.payload),
           sidebarTaskPrefs: buildSidebarTaskPrefsState(state, message.payload),
           userSettings: buildUserSettingsState(state, message.payload),

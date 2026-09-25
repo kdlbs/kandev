@@ -16,6 +16,7 @@ type resolvedServiceClient struct {
 	Principal    AuthPrincipal
 	CacheScope   string
 	Capabilities map[GitHubAppCapability]bool
+	RateTracker  *RateTracker
 	credential   *ResolvedCredential
 }
 
@@ -77,6 +78,7 @@ func (s *Service) resolveServiceClient(
 		Principal:    resolved.Principal,
 		CacheScope:   credentialCacheScope(resolved, purpose),
 		Capabilities: resolved.Capabilities,
+		RateTracker:  resolved.RateTracker,
 		credential:   resolved,
 	}, nil
 }

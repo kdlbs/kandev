@@ -7,14 +7,17 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
 type stubEnvRepo struct {
-	env     *models.TaskEnvironment
-	deleted bool
-	getErr  error
-	delErr  error
+	env           *models.TaskEnvironment
+	deleted       bool
+	getErr        error
+	delErr        error
+	resetJobID    string
+	resetReleased models.TaskResourceCleanupState
 }
 
 func (s *stubEnvRepo) CreateTaskEnvironment(context.Context, *models.TaskEnvironment) error {
@@ -55,6 +58,13 @@ func (s *stubEnvRepo) DeleteTaskEnvironment(context.Context, string) error {
 	return nil
 }
 func (s *stubEnvRepo) DeleteTaskEnvironmentsByTask(context.Context, string) error { return nil }
+func (s *stubEnvRepo) ClaimTaskEnvironmentReset(context.Context, string, string, int64, string) (string, error) {
+	return s.resetJobID, nil
+}
+func (s *stubEnvRepo) ReleaseTaskEnvironmentReset(_ context.Context, _ string, state models.TaskResourceCleanupState, _ string) error {
+	s.resetReleased = state
+	return nil
+}
 
 type stubDestroyer struct {
 	containerCalls           []string
@@ -67,10 +77,13 @@ type stubDestroyer struct {
 	sandboxErr               error
 	worktreeErr              error
 	pushErr                  error
+	pluginCalls              []string
+	pluginErr                error
+	pluginCleanupJob         recoveryclaim.TaskCleanupJob
 }
 
-func (s *stubDestroyer) DestroyContainer(_ context.Context, id string) error {
-	s.containerCalls = append(s.containerCalls, id)
+func (s *stubDestroyer) DestroyContainer(_ context.Context, env *models.TaskEnvironment) error {
+	s.containerCalls = append(s.containerCalls, env.ContainerID)
 	if s.cancelAfterContainer != nil {
 		s.cancelAfterContainer()
 	}
@@ -91,8 +104,13 @@ func (s *stubDestroyer) PushEnvironmentBranch(context.Context, *models.TaskEnvir
 	s.pushCalls++
 	return s.pushErr
 }
-func (s *stubDestroyer) GetContainerLiveStatus(context.Context, string) (*ContainerLiveStatus, error) {
+func (s *stubDestroyer) GetContainerLiveStatus(context.Context, *models.TaskEnvironment) (*ContainerLiveStatus, error) {
 	return nil, nil
+}
+func (s *stubDestroyer) DestroyPluginExecutorEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+	s.pluginCalls = append(s.pluginCalls, env.ID)
+	s.pluginCleanupJob, _ = recoveryclaim.TaskCleanupJobFromContext(ctx)
+	return s.pluginErr
 }
 
 type stubRunningChecker struct {
@@ -221,6 +239,29 @@ func TestResetTaskEnvironment_DestroysEachResourceTypeAndDeletesRow(t *testing.T
 	}
 }
 
+func TestResetTaskEnvironmentDestroysPluginExecutorUnderResetClaim(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-plugin-reset", TaskID: "task-plugin-reset", ExecutorType: string(models.ExecutorTypePluginRemote), OwnershipGeneration: 9,
+	}, resetJobID: "reset-job-plugin"}
+	destroyer := &stubDestroyer{}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{running: false})
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	if err := svc.ResetTaskEnvironment(context.Background(), "task-plugin-reset", ResetOptions{}); err != nil {
+		t.Fatalf("ResetTaskEnvironment(): %v", err)
+	}
+	if len(destroyer.pluginCalls) != 1 || destroyer.pluginCalls[0] != "env-plugin-reset" {
+		t.Fatalf("plugin environment destroy calls = %v", destroyer.pluginCalls)
+	}
+	if destroyer.pluginCleanupJob.ID != "reset-job-plugin" || destroyer.pluginCleanupJob.TaskID != "task-plugin-reset" {
+		t.Fatalf("plugin cleanup authority = %+v", destroyer.pluginCleanupJob)
+	}
+	if !repo.deleted || repo.resetReleased != models.TaskResourceCleanupStateSucceeded {
+		t.Fatalf("reset completion deleted=%v state=%q", repo.deleted, repo.resetReleased)
+	}
+}
+
 func TestTeardownEnvironmentResources_CancellationStopsBeforeNextResource(t *testing.T) {
 	svc := newResetTestService(t, &stubEnvRepo{})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -338,6 +379,33 @@ func TestCleanupTaskEnvironment_CancellationPreservesEnvironmentRow(t *testing.T
 	}
 	if repo.deleted {
 		t.Fatal("environment row deleted after cancellation")
+	}
+}
+
+func TestCleanupDestructiveTaskResources_DoesNotDuplicateBatchWorktreeCleanup(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{ID: "env-1", TaskID: "task-1"}}
+	svc := newResetTestService(t, repo)
+	destroyer := &stubDestroyer{}
+	cleaner := &policyRecordingWorktreeCleanup{}
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetWorktreeCleanup(cleaner)
+	wt := &worktree.Worktree{ID: "wt-once", TaskID: "task-1"}
+
+	errs := svc.cleanupDestructiveTaskResources(
+		context.Background(), "task-1", nil, []*worktree.Worktree{wt},
+		taskEnvironmentCleanup{
+			env:              &models.TaskEnvironment{ID: "env-1", TaskID: "task-1", Repos: []*models.TaskEnvironmentRepo{{WorktreeID: wt.ID}}},
+			preserveBranches: true,
+		}, nil,
+	)
+	if len(errs) != 0 {
+		t.Fatalf("cleanup errors = %v", errs)
+	}
+	if len(destroyer.worktreeCalls) != 0 {
+		t.Fatalf("destroyer worktree calls = %v, want none", destroyer.worktreeCalls)
+	}
+	if cleaner.preservingCalls != 1 {
+		t.Fatalf("batch preserving calls = %d, want 1", cleaner.preservingCalls)
 	}
 }
 

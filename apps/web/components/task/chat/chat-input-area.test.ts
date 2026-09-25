@@ -117,3 +117,27 @@ describe("resolveStatusRowTaskId", () => {
     expect(resolveStatusRowTaskId(null, null)).toBeNull();
   });
 });
+
+it("includes whole-file feedback with ordinary composer text", () => {
+  const result = buildSubmitMessage({
+    message: "Continue.",
+    pendingPRFeedback: [],
+    planComments: [],
+    reviewComments: [
+      {
+        id: "file",
+        source: "review-file",
+        sessionId: "s",
+        repositoryName: "api",
+        filePath: "README.md",
+        text: "Split this file",
+        createdAt: "now",
+        status: "pending",
+      },
+    ],
+  });
+  expect(result).toContain("**api/README.md**");
+  expect(result).toContain("> Split this file");
+  expect(result).toContain("Continue.");
+  expect(result).not.toContain("undefined");
+});

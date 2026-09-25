@@ -26,11 +26,12 @@ function send(message) {
   process.stdout.write(payload);
 }
 
-function diagnostic(uri, message) {
+function diagnostic(uri, message, version) {
   send({
     method: "textDocument/publishDiagnostics",
     params: {
       uri,
+      ...(Number.isSafeInteger(version) ? { version } : {}),
       diagnostics: [
         {
           range: {
@@ -135,6 +136,11 @@ function handleInitialize(message) {
 
   const mode = JSON.parse(fs.readFileSync(initializeModePath, "utf8"));
   const token = sendInitializeProgress(message, mode.progress);
+  if (mode.keepProgress) {
+    send(initializeResult(message.id));
+    log("initialize completed with active progress", { id: message.id, token });
+    return;
+  }
   log("initialize held", { id: message.id, token });
   const finish = () => {
     if (!fs.existsSync(initializeReleasePath)) return false;
@@ -228,7 +234,7 @@ function handleDidOpen(message) {
   const uri = message.params?.textDocument?.uri;
   if (uri) {
     openDocumentUris.add(uri);
-    diagnostic(uri, "Fake Kotlin diagnostic");
+    diagnostic(uri, "Fake Kotlin diagnostic", message.params?.textDocument?.version);
   }
   if (fs.existsSync(crashOnOpenPath)) {
     log("crashing", { reason: "didOpen" });
@@ -239,7 +245,7 @@ function handleDidOpen(message) {
 function handleDidChange(message) {
   const uri = message.params?.textDocument?.uri;
   if (uri && openDocumentUris.has(uri)) {
-    diagnostic(uri, "Fake Kotlin diagnostic after edit");
+    diagnostic(uri, "Fake Kotlin diagnostic after edit", message.params?.textDocument?.version);
   }
 }
 

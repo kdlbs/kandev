@@ -105,6 +105,9 @@ Each required store must initialize before Kandev becomes ready. External provid
 - **AC-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.3:** When a stateful caller reaches an unhealthy backend, it shall receive `503` with the stable code `persistence_unavailable` and a recovery action.
 - **AC-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.4:** When runtime database health recovers, readiness and stateful requests shall recover without a process restart.
 - **AC-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.5:** Required-store health shall not change the liveness contract of `GET /health`.
+- **AC-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.6:** Managed SQLite maintenance alone shall not change healthy persistence to unhealthy because it occupies the database writer.
+- **AC-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.7:** A deferred maintenance-time health check shall preserve each store's previous state and last check time. It shall not establish startup readiness or clear an existing failure.
+- **AC-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.8:** After maintenance releases the database, periodic health checks shall resume within the normal check interval. Actual database failures shall retain the existing readiness and caller error behavior.
 
 ### REQ-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-008: Contributor workflow
 

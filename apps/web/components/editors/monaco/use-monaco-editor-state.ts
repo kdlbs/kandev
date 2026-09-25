@@ -76,7 +76,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   const updateComment = useCommentsStore((state) => state.updateComment);
   const editingCommentId = useCommentsStore((state) => state.editingCommentId);
   const setEditingComment = useCommentsStore((state) => state.setEditingComment);
-  const comments = useDiffFileComments(sessionId ?? "", path);
+  const comments = useDiffFileComments(sessionId ?? "", path, undefined, repo ?? "");
   const commentedLines = useCommentedLines(comments);
 
   const handleGutterSelectionComplete = useCallback(
@@ -342,6 +342,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
       if (!formZoneRange || !sessionId) return null;
       const comment = buildDiffComment({
         filePath: path,
+        repositoryName: repo ?? "",
         sessionId,
         startLine: formZoneRange.startLine,
         endLine: formZoneRange.endLine,
@@ -365,7 +366,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
       }
       return comment;
     },
-    [formZoneRange, sessionId, path, addComment, clearGutterSelection],
+    [formZoneRange, sessionId, path, repo, addComment, clearGutterSelection],
   );
 
   const handleCommentSubmit = useCallback(

@@ -77,8 +77,7 @@ func (ss *SchedulerService) HandlePostStartFailure(
 // to candidate switching by default; a selected dynamic policy can add a
 // retry through the shared runtime evaluator.
 func officeShortRetryAllowed(classified *routingerr.Error) bool {
-	return classified != nil && classified.FallbackAllowed &&
-		classified.Class == routingerr.ClassTransient && classified.AutoRetryable
+	return classified.ShouldShortRetry()
 }
 
 const officeShortRetryMaxAttempts = 3

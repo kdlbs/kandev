@@ -302,7 +302,7 @@ test.describe("Mobile GitLab parity", () => {
     await session.waitForLoad();
     await expect(testPage.getByTestId("mr-topbar-button")).toHaveCount(0);
 
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const taskDrawer = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = taskDrawer.getByTestId("sidebar-task-item").filter({ hasText: title });
     await expect(taskRow).toBeVisible({ timeout: 10_000 });
@@ -477,7 +477,10 @@ test.describe("Mobile GitLab parity", () => {
     ).toBeVisible({
       timeout: 45_000,
     });
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
     const changes = testPage.getByTestId("mobile-changes-panel");
     const createMR = changes.getByTestId("commits-repo-create-pr");
     await expect(createMR).toBeVisible();

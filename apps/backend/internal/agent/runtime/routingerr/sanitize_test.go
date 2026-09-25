@@ -631,6 +631,84 @@ func TestSanitizeCredentials_IdempotentFuzz(t *testing.T) {
 	}
 }
 
+// TestSanitizeCredentialsUnbounded_PreservesLengthAndContent proves the
+// unbounded credential tier used for the primary launch prompt neither
+// truncates nor mangles non-credential content, on an input well past
+// MaxRawExcerptBytes.
+func TestSanitizeCredentialsUnbounded_PreservesLengthAndContent(t *testing.T) {
+	body := strings.Repeat(
+		"Fix bug in /Users/alice/work/repo/main.go at commit "+
+			"94e7b02458b6c1a2d3e4f5061728394a5b6c7d8; see "+
+			"https://example.com/org/repo/pull/123?tab=files#discussion_r42 "+
+			"and task 3f9a1c2e-4b5d-4e6f-8a9b-0c1d2e3f4a5b. ",
+		100,
+	)
+	if len(body) <= MaxRawExcerptBytes {
+		t.Fatalf("test input must exceed MaxRawExcerptBytes=%d, got %d", MaxRawExcerptBytes, len(body))
+	}
+
+	got := SanitizeCredentialsUnbounded(body)
+
+	if len(got) != len(body) {
+		t.Fatalf("expected unbounded output length %d, got %d", len(body), len(got))
+	}
+	if got != body {
+		t.Fatalf("expected non-credential content to survive unchanged")
+	}
+	for _, want := range []string{
+		"/Users/alice/work/repo/main.go",
+		"94e7b02458b6c1a2d3e4f5061728394a5b6c7d8",
+		"https://example.com/org/repo/pull/123?tab=files#discussion_r42",
+		"3f9a1c2e-4b5d-4e6f-8a9b-0c1d2e3f4a5b",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected output to retain %q, got %q", want, got)
+		}
+	}
+}
+
+// TestSanitizeCredentialsUnbounded_RedactsCredentials proves the unbounded
+// credential tier still redacts credential-shaped patterns, matching
+// SanitizeCredentials' behavior minus truncation.
+func TestSanitizeCredentialsUnbounded_RedactsCredentials(t *testing.T) {
+	cases := []struct {
+		name        string
+		in          string
+		mustNotHave string
+		mustHave    string
+	}{
+		{
+			name:        "anthropic-style key",
+			in:          "use sk-abcdef1234567890QQQQ to call",
+			mustNotHave: "sk-abcdef1234567890",
+			mustHave:    "sk-***",
+		},
+		{
+			name:        "github classic pat",
+			in:          "token ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA leaks",
+			mustNotHave: "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+			mustHave:    "ghp_***",
+		},
+		{
+			name:        "api key assignment",
+			in:          "API_KEY=sk-abcdEFGH12345678ijklMNOPqrstUVWX in the env",
+			mustNotHave: "sk-abcdEFGH12345678ijklMNOPqrstUVWX",
+			mustHave:    "API_KEY: ***",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := SanitizeCredentialsUnbounded(c.in)
+			if strings.Contains(got, c.mustNotHave) {
+				t.Fatalf("expected %q to be redacted, got %q", c.mustNotHave, got)
+			}
+			if !strings.Contains(got, c.mustHave) {
+				t.Fatalf("expected %q in output, got %q", c.mustHave, got)
+			}
+		})
+	}
+}
+
 // TestSanitize_TruncatesOnRuneBoundary proves Sanitize never splits a
 // multi-byte rune when cutting to MaxRawExcerptBytes. Vietnamese (3-byte) and
 // CJK (3-byte) runes are repeated at every byte alignment relative to

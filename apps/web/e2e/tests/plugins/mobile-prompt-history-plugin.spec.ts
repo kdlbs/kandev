@@ -43,7 +43,7 @@ test.describe("Mobile prompt-history fixture", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    const panelsButton = testPage.getByRole("button", { name: "Panels" });
+    const panelsButton = testPage.getByRole("button", { name: "Panels", exact: true });
     await expect(panelsButton).toBeVisible({ timeout: 15_000 });
     expect((await panelsButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await panelsButton.tap();

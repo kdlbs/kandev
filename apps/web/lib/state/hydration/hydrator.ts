@@ -1,7 +1,9 @@
+import { mapSidebarWorkspaces } from "../slices/ui/sidebar-workspace-state";
 /* eslint-disable max-lines -- Hydration owns the cross-slice merge boundary. */
 import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
 import type { KanbanState } from "../slices/kanban/types";
+import type { TaskSessionHydrationEpoch } from "../slices/session/types";
 import { migrateSidebarViewDraft, migrateView } from "../slices/ui/ui-slice";
 import { normalizeThreadViews } from "../slices/ui/thread-view-builtins";
 import {
@@ -26,6 +28,7 @@ import {
   readMcpAttachmentHistory,
   shouldReplaceMcpAttachmentHistory,
 } from "@/lib/state/slices/session-runtime/mcp-attachment-reconciliation";
+import { normalizeAgentProfiles } from "@/lib/api/domains/agent-profile-normalize";
 import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
@@ -40,6 +43,8 @@ export type HydrationOptions = {
   skipSessionRuntime?: boolean;
   /** Force merge this session even if it's active (for navigation refresh) */
   forceMergeSessionId?: string | null;
+  /** Session generations captured when the hydration request started. */
+  taskSessionHydrationEpochsAtRequestStart?: Readonly<Record<string, TaskSessionHydrationEpoch>>;
 };
 
 /** Deep-merge a field with optional loading state preservation. */
@@ -169,7 +174,10 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   const preserveLiveAgentProfiles =
     (state.agentProfiles?.version ?? 0) < draft.agentProfiles.version;
   if (state.settingsAgents && !preserveLiveAgentProfiles) {
-    deepMerge(draft.settingsAgents, state.settingsAgents);
+    deepMerge(draft.settingsAgents, {
+      ...state.settingsAgents,
+      items: state.settingsAgents.items.map(normalizeAgentProfiles),
+    });
   }
   if (state.agentProfiles) {
     // Preserve a newer profile mutation delivered over WebSocket while this
@@ -217,6 +225,11 @@ function bridgeSidebarViewsFromUserSettings(
   draft: Draft<AppState>,
   userSettings: Partial<AppState["userSettings"]>,
 ): void {
+  draft.sidebarViewsByWorkspace = mapSidebarWorkspaces(
+    userSettings.sidebarViewsByWorkspace,
+    draft.sidebarViewsByWorkspace,
+    userSettings.revision,
+  );
   const serverViews = userSettings.sidebarViews;
   const normalized = serverViews?.map(migrateView) ?? [];
   if (normalized.length > 0) {
@@ -441,12 +454,77 @@ function seedHydrationSettledBoundaries(
   );
 }
 
+/** Merge route session rows without replacing a read cursor changed after fetch began. */
+function hasNewerReadCursor(
+  currentEpoch: number,
+  requestEpoch: TaskSessionHydrationEpoch | undefined,
+): boolean {
+  return requestEpoch ? currentEpoch > requestEpoch.readCursor : currentEpoch > 0;
+}
+
+function hydrateTaskSessions(
+  draft: Draft<AppState>,
+  incoming: NonNullable<HydrationState["taskSessions"]>,
+  requestEpochs: Readonly<Record<string, TaskSessionHydrationEpoch>> | undefined,
+): void {
+  const incomingItems = incoming.items ?? {};
+  const items = { ...incomingItems };
+  const previousCursors = new Map<string, string | undefined>();
+
+  for (const [sessionId, session] of Object.entries(incomingItems)) {
+    const existing = draft.taskSessions.items[sessionId];
+    const requestEpoch = requestEpochs?.[sessionId];
+    const currentEpoch = draft.taskSessions.readCursorEpochBySession?.[sessionId] ?? 0;
+    previousCursors.set(sessionId, existing?.last_read_message_id);
+    if (existing && hasNewerReadCursor(currentEpoch, requestEpoch)) {
+      items[sessionId] = {
+        ...session,
+        last_read_message_id: existing.last_read_message_id,
+      };
+    }
+  }
+
+  deepMerge(draft.taskSessions, { ...incoming, items });
+
+  for (const [sessionId, previousCursor] of previousCursors) {
+    if (draft.taskSessions.items[sessionId]?.last_read_message_id !== previousCursor) {
+      const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+      epochs[sessionId] = (epochs[sessionId] ?? 0) + 1;
+    }
+  }
+}
+
+/** Keep task-list session copies aligned with the canonical hydrated session rows. */
+function hydrateTaskSessionsByTask(
+  draft: Draft<AppState>,
+  incoming: NonNullable<HydrationState["taskSessionsByTask"]>,
+  hydratedSessionIds: ReadonlySet<string>,
+): void {
+  const itemsByTaskId = Object.fromEntries(
+    Object.entries(incoming.itemsByTaskId ?? {}).map(([taskId, sessions]) => [
+      taskId,
+      sessions.map((session) => {
+        const canonical = hydratedSessionIds.has(session.id)
+          ? draft.taskSessions.items[session.id]
+          : undefined;
+        return canonical
+          ? { ...session, last_read_message_id: canonical.last_read_message_id }
+          : session;
+      }),
+    ]),
+  );
+  deepMerge(draft.taskSessionsByTask, { ...incoming, itemsByTaskId });
+}
+
 /** Hydrate session slices, protecting active sessions. */
 function hydrateSession(
   draft: Draft<AppState>,
   state: HydrationState,
   activeSessionId: string | null,
   forceMergeSessionId: string | null,
+  taskSessionHydrationEpochsAtRequestStart:
+    | Readonly<Record<string, TaskSessionHydrationEpoch>>
+    | undefined,
 ): void {
   if (state.messages) {
     if (state.messages.bySession)
@@ -469,13 +547,19 @@ function hydrateSession(
   // first or a pre-boundary active marker survives (see
   // clearHydratedRetiredActiveMarkers).
   if (state.taskSessions) {
-    deepMerge(draft.taskSessions, state.taskSessions);
+    hydrateTaskSessions(draft, state.taskSessions, taskSessionHydrationEpochsAtRequestStart);
     seedHydrationSettledBoundaries(draft, state.taskSessions);
   }
   if (state.turns) {
     hydrateTurnState(draft, state.turns, activeSessionId, forceMergeSessionId);
   }
-  if (state.taskSessionsByTask) deepMerge(draft.taskSessionsByTask, state.taskSessionsByTask);
+  if (state.taskSessionsByTask) {
+    hydrateTaskSessionsByTask(
+      draft,
+      state.taskSessionsByTask,
+      new Set(Object.keys(state.taskSessions?.items ?? {})),
+    );
+  }
   if (state.sessionAgentctl) {
     mergeSessionMap(
       draft.sessionAgentctl.itemsBySessionId,
@@ -810,11 +894,18 @@ export function hydrateState(
     activeSessionId = null,
     skipSessionRuntime = false,
     forceMergeSessionId = null,
+    taskSessionHydrationEpochsAtRequestStart,
   } = options;
 
   hydrateKanbanAndWorkspace(draft, state);
   hydrateSettings(draft, state);
-  hydrateSession(draft, state, activeSessionId, forceMergeSessionId);
+  hydrateSession(
+    draft,
+    state,
+    activeSessionId,
+    forceMergeSessionId,
+    taskSessionHydrationEpochsAtRequestStart,
+  );
 
   if (!skipSessionRuntime) {
     hydrateSessionRuntime(draft, state, activeSessionId, forceMergeSessionId);

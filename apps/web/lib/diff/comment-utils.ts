@@ -5,6 +5,7 @@ import type { DiffComment, DiffCommentUpdate } from "./types";
 export function buildDiffComment(params: {
   filePath: string;
   sessionId: string;
+  repositoryName?: string;
   startLine: number;
   endLine: number;
   side: DiffComment["side"];
@@ -16,6 +17,7 @@ export function buildDiffComment(params: {
     source: "diff",
     sessionId: params.sessionId,
     filePath: params.filePath,
+    repositoryName: params.repositoryName,
     startLine: Math.min(params.startLine, params.endLine),
     endLine: Math.max(params.startLine, params.endLine),
     side: params.side,

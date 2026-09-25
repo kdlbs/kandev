@@ -10,7 +10,7 @@ import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 const PRIORITY_TOKENS = ["critical", "high", "medium", "low"] as const;
 
 async function openMobileMenu(page: import("@playwright/test").Page) {
-  await page.getByRole("button", { name: "Open menu" }).tap();
+  await page.getByTestId("mobile-topbar-page-context").tap();
   const card = page.getByTestId("mobile-home-menu-card");
   await card.waitFor({ state: "visible" });
   return card;

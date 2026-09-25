@@ -1,7 +1,13 @@
 package registry
 
 import (
+	"errors"
+	"slices"
 	"testing"
+
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/pkg/agent"
 )
 
 func TestRegisterCustomTUIAgent_Success(t *testing.T) {
@@ -103,6 +109,33 @@ func TestRegisterCustomTUIAgent_CommandArgs(t *testing.T) {
 	}
 }
 
+func TestRegisterCustomTUIAgent_DisableBracketedPaste(t *testing.T) {
+	log := newTestLogger()
+	reg := NewRegistry(log)
+
+	err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{
+		Slug:                  "raw-tui",
+		DisplayName:           "Raw TUI",
+		Command:               "raw-tui",
+		DisableBracketedPaste: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ag, ok := reg.Get("raw-tui")
+	if !ok {
+		t.Fatal("expected agent to be registered")
+	}
+	pt, ok := ag.(agents.PassthroughAgent)
+	if !ok {
+		t.Fatal("custom terminal agent does not implement PassthroughAgent")
+	}
+	if !pt.PassthroughConfig().DisableBracketedPaste {
+		t.Error("DisableBracketedPaste = false, want true")
+	}
+}
+
 func TestRegisterCustomTUIAgent_EmptyCommand(t *testing.T) {
 	log := newTestLogger()
 	reg := NewRegistry(log)
@@ -121,5 +154,104 @@ func TestRegisterCustomTUIAgent_DuplicateID(t *testing.T) {
 	err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{Slug: "dup-agent", DisplayName: "Second", Command: "second-cli", Description: "", Model: ""})
 	if err == nil {
 		t.Error("expected error for duplicate registration")
+	}
+}
+
+// A spec that names the ACP protocol must produce an agent kandev drives over
+// ACP, not a terminal passthrough one. The protocol is part of the stored
+// definition, so this is what a restart replays.
+func TestRegisterCustomTUIAgent_ACPProtocol(t *testing.T) {
+	log := newTestLogger()
+	reg := NewRegistry(log)
+
+	err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{
+		Slug:        "my-agent",
+		DisplayName: "My Agent",
+		Command:     "my-agent --acp",
+		Protocol:    CustomAgentProtocolACP,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ag, ok := reg.Get("my-agent")
+	if !ok {
+		t.Fatal("expected agent to be registered")
+	}
+	if agents.IsPassthroughOnly(ag) {
+		t.Error("ACP custom agent classified as passthrough-only")
+	}
+	if ag.Runtime().Protocol != agent.ProtocolACP {
+		t.Errorf("Runtime().Protocol = %q, want %q", ag.Runtime().Protocol, agent.ProtocolACP)
+	}
+	want := []string{"my-agent", "--acp"}
+	if got := ag.Runtime().Cmd.Args(); !slices.Equal(got, want) {
+		t.Errorf("Runtime().Cmd = %#v, want %#v", got, want)
+	}
+}
+
+// The empty protocol is what every definition stored before the field existed
+// decodes to, so it has to keep meaning terminal passthrough.
+func TestRegisterCustomTUIAgent_DefaultProtocolStaysTerminal(t *testing.T) {
+	log := newTestLogger()
+	reg := NewRegistry(log)
+
+	if err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{
+		Slug:        "legacy-agent",
+		DisplayName: "Legacy Agent",
+		Command:     "legacy-agent",
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ag, ok := reg.Get("legacy-agent")
+	if !ok {
+		t.Fatal("expected agent to be registered")
+	}
+	if !agents.IsPassthroughOnly(ag) {
+		t.Error("a spec with no protocol is no longer terminal passthrough")
+	}
+}
+
+// An unknown protocol is a typo from an older client or a value removed by an
+// upgrade. Registering it as a terminal agent would silently ignore the user's
+// choice, so it has to fail loudly — same stance as an unknown MCP strategy.
+func TestRegisterCustomTUIAgent_UnknownProtocol(t *testing.T) {
+	log := newTestLogger()
+	reg := NewRegistry(log)
+
+	err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{
+		Slug:        "bad-agent",
+		DisplayName: "Bad Agent",
+		Command:     "bad-agent",
+		Protocol:    "websocket",
+	})
+	if !errors.Is(err, ErrUnknownCustomAgentProtocol) {
+		t.Fatalf("error = %v, want ErrUnknownCustomAgentProtocol", err)
+	}
+	if reg.Exists("bad-agent") {
+		t.Error("agent registered despite an unknown protocol")
+	}
+}
+
+// The ACP path must not silently drop the MCP strategy field: an ACP agent
+// gets kandev's tools through session/new, so a passthrough strategy is a
+// contradiction rather than a no-op.
+func TestRegisterCustomTUIAgent_ACPRejectsMCPStrategy(t *testing.T) {
+	log := newTestLogger()
+	reg := NewRegistry(log)
+
+	err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{
+		Slug:           "strategy-acp",
+		DisplayName:    "Strategy ACP",
+		Command:        "strategy-acp --acp",
+		Protocol:       CustomAgentProtocolACP,
+		MCPStrategyKey: mcpconfig.StrategyKeyClaude,
+	})
+	if !errors.Is(err, ErrMCPStrategyNotApplicable) {
+		t.Fatalf("error = %v, want ErrMCPStrategyNotApplicable", err)
+	}
+	if reg.Exists("strategy-acp") {
+		t.Error("agent registered despite an inapplicable MCP strategy")
 	}
 }

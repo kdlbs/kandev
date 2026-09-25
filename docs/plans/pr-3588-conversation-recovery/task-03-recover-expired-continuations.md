@@ -1,7 +1,7 @@
 ---
 id: "03-recover-expired-continuations"
 title: "Recover expired plugin continuations"
-status: complete
+status: done
 wave: 3
 depends_on:
   - "02-restore-core-snapshots"
@@ -15,14 +15,20 @@ acceptance_criteria:
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.6
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.7
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.10
-  - AC-PLUGINS-PROMPT-HISTORY-HOST-002.13
-  - AC-PLUGINS-PROMPT-HISTORY-HOST-002.15
   - AC-PLUGINS-PROMPT-HISTORY-HOST-005.3
 system_design:
   - "../../specs/plugins/system-design/conversation-recovery.md"
 ---
 
 # Task 03: Recover expired plugin continuations
+
+
+## Replacement scope, 2026-09-16
+
+The [conversation storage replacement](../conversation-storage-replacement/plan.md) owns the next implementation.
+This file preserves historical scope and results. Do not execute its durable replay mechanics as new work.
+The replacement work orders preserve public behavior and provide new source-reconciliation, upgrade, and E2E evidence.
+
 
 ## Summary
 

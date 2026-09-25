@@ -32,7 +32,10 @@ const NOTHING_LOADED: LoadedAutomations = {
   automations: EMPTY_AUTOMATIONS,
 };
 
-export function useWorkspaceAutomations(workspaceId: string | undefined) {
+export function useWorkspaceAutomations(
+  workspaceId: string | undefined,
+  { active = true }: { active?: boolean } = {},
+) {
   const [loaded, setLoaded] = useState<LoadedAutomations>(NOTHING_LOADED);
   const [loading, setLoading] = useState(Boolean(workspaceId));
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +48,9 @@ export function useWorkspaceAutomations(workspaceId: string | undefined) {
     // previous workspace cannot land and repopulate a list that should be empty.
     const requestId = ++requestRef.current;
 
-    if (!workspaceId) {
+    if (!workspaceId || !active) {
+      setLoaded({ workspaceId, automations: EMPTY_AUTOMATIONS });
+      setError(null);
       setLoading(false);
       return;
     }
@@ -65,7 +70,7 @@ export function useWorkspaceAutomations(workspaceId: string | undefined) {
         if (requestRef.current !== requestId) return;
         setLoading(false);
       });
-  }, [workspaceId]);
+  }, [active, workspaceId]);
 
   useEffect(() => {
     refresh();

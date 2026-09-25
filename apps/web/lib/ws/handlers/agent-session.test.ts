@@ -33,6 +33,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     setActiveSessionAuto: vi.fn(),
     setSessionAgentctlStatus: vi.fn(),
     setResumeSkipped: vi.fn(),
+    clearLaunchWarning: vi.fn(),
     setSessionFailureNotification: vi.fn(),
     setContextWindow: vi.fn(),
     clearContextWindow: vi.fn(),
@@ -2079,6 +2080,7 @@ describe("session.state_changed resume-skipped clearing", () => {
   it("clears the resume-skipped marker on a RUNNING transition", () => {
     handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "RUNNING" }));
     expect(store.getState().setResumeSkipped).toHaveBeenCalledWith("s-1", false);
+    expect(store.getState().clearLaunchWarning).toHaveBeenCalledWith("s-1");
   });
 
   it("does NOT clear the marker on a STARTING transition (failed resumes keep the retry button)", () => {

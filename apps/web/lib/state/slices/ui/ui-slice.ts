@@ -1,3 +1,4 @@
+import { buildChatMotionActions, loadChatMotionState } from "./chat-motion-actions";
 import type { StateCreator } from "zustand";
 import {
   getStoredCollapsedSubtaskParents,
@@ -18,7 +19,7 @@ import {
   loadRichOutputMotionState,
 } from "./rich-output-motion-actions";
 import { DEFAULT_SETTINGS_MENU_MODE } from "@/lib/settings/settings-menu-mode";
-import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
+import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/lib/layout/app-sidebar-geometry";
 import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { buildSidebarViewActions } from "./sidebar-view-actions";
 import { buildThreadViewActions } from "./thread-view-actions";
@@ -161,6 +162,7 @@ export const defaultUIState: UISliceState = {
   updateAvailableNotification: null,
   bottomTerminal: { isOpen: false, pendingCommand: null },
   sidebarViews: createDefaultSidebarState(),
+  sidebarViewsByWorkspace: {},
   threadViews: createDefaultThreadViewState(),
   collapsedSubtaskParents: [],
   kanbanPreviewedTaskId: null,
@@ -178,6 +180,7 @@ export const defaultUIState: UISliceState = {
     savedMode: DEFAULT_SETTINGS_MENU_MODE,
     expandedKeys: [],
   },
+  chatMotion: { enabled: true, savedEnabled: true },
   richOutputMotion: {
     enabled: true,
     savedEnabled: true,
@@ -377,9 +380,11 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   appSidebar: loadAppSidebarState(),
   settingsMenu: loadSettingsMenuState(),
   richOutputMotion: loadRichOutputMotionState(),
+  chatMotion: loadChatMotionState(),
   ...buildAppSidebarActions(set),
   ...buildSettingsMenuActions(set),
   ...buildRichOutputMotionActions(set),
+  ...buildChatMotionActions(set),
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),

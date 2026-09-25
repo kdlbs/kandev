@@ -22,7 +22,7 @@ import (
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/mcp/toolschema"
 	"github.com/kandev/kandev/internal/mcp/tooltokens"
-	"github.com/kandev/kandev/internal/task/service"
+	taskcontract "github.com/kandev/kandev/internal/task/contract"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -60,6 +60,8 @@ const (
 	// ModeAutomation registers the fixed workspace coordinator catalog for
 	// scheduled automation agents.
 	ModeAutomation = mcpmode.Automation
+	// ModeManagedConversation exposes only the selected plugin agent tools.
+	ModeManagedConversation = "managed-conversation"
 )
 
 const pluginToolArgumentsKey = "arguments"
@@ -225,7 +227,7 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 }
 
 func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, profileContext mcpprofile.Context, options ...ServerOption) *Server {
-	profileContext = mcpprofile.New(profileContext.Surface, profileContext.Capabilities, profileContext.Providers)
+	profileContext = mcpprofile.Normalize(profileContext)
 	if setter, ok := backend.(backendSessionSetter); ok {
 		setter.SetSessionID(sessionID)
 	}
@@ -339,6 +341,8 @@ func (s *Server) restoreCanonicalToolName(request *mcp.CallToolRequest) {
 
 func modeForProfile(profileContext mcpprofile.Context) string {
 	switch profileContext.Surface {
+	case mcpprofile.SurfaceManagedConversation:
+		return ModeManagedConversation
 	case mcpprofile.SurfaceConfiguration:
 		return ModeConfig
 	case mcpprofile.SurfaceExternal:
@@ -725,6 +729,9 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 func (s *Server) SetMode(mode string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
+		return
+	}
 
 	normalizedMode := normalizeMode(mode)
 	if s.mode == normalizedMode {
@@ -788,7 +795,7 @@ func (s *Server) SetProviders(providerValues []string) {
 func (s *Server) Profile() mcpprofile.Context {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return mcpprofile.New(s.profile.Surface, s.profile.Capabilities, s.profile.Providers)
+	return mcpprofile.Normalize(s.profile)
 }
 
 // SetProfile replaces the complete profile and rebuilds the tool registry in
@@ -798,7 +805,10 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	profileContext = mcpprofile.New(profileContext.Surface, profileContext.Capabilities, profileContext.Providers)
+	profileContext = mcpprofile.Normalize(profileContext)
+	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
+		return
+	}
 	if sameProfile(s.profile, profileContext) {
 		return
 	}
@@ -827,6 +837,18 @@ func sameProfile(left, right mcpprofile.Context) bool {
 	}
 	for i := range left.Providers {
 		if left.Providers[i] != right.Providers[i] {
+			return false
+		}
+	}
+	if (left.ManagedToolPolicy == nil) != (right.ManagedToolPolicy == nil) {
+		return false
+	}
+	if left.ManagedToolPolicy != nil {
+		leftPolicy, rightPolicy := left.ManagedToolPolicy, right.ManagedToolPolicy
+		if leftPolicy.PluginID != rightPolicy.PluginID || leftPolicy.InstallationID != rightPolicy.InstallationID ||
+			leftPolicy.WorkspaceID != rightPolicy.WorkspaceID || leftPolicy.InstanceKey != rightPolicy.InstanceKey ||
+			leftPolicy.ConversationRevision != rightPolicy.ConversationRevision || leftPolicy.ApprovalRevision != rightPolicy.ApprovalRevision ||
+			leftPolicy.ManifestDigest != rightPolicy.ManifestDigest || !slices.Equal(leftPolicy.AgentToolNames, rightPolicy.AgentToolNames) {
 			return false
 		}
 	}
@@ -913,7 +935,7 @@ func validatePluginToolSurfaces(name string, surfaces []string) error {
 	}
 	seen := make(map[string]struct{}, len(surfaces))
 	for _, surface := range surfaces {
-		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice {
+		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice && surface != plugintools.SurfaceManaged {
 			return fmt.Errorf("%s has unsupported surface %q", name, surface)
 		}
 		if _, ok := seen[surface]; ok {
@@ -965,6 +987,10 @@ func (s *Server) registerPluginTools() {
 		if !pluginToolSupportsSurface(definition, string(s.profile.Surface)) {
 			continue
 		}
+		if s.profile.Surface == mcpprofile.SurfaceManagedConversation &&
+			(s.profile.ManagedToolPolicy == nil || !s.profile.ManagedToolPolicy.Allows(definition.PluginID, definition.LocalName)) {
+			continue
+		}
 		tool := mcp.NewToolWithRawSchema(definition.ExposedName, definition.Description, definition.InputSchema)
 		tool.RawOutputSchema = append(json.RawMessage(nil), definition.OutputSchema...)
 		tool.Annotations = mcp.ToolAnnotation{
@@ -989,7 +1015,11 @@ func (s *Server) registerPluginTools() {
 				return nil, err
 			}
 			if result.IsError {
-				return mcp.NewToolResultError(result.Text), nil
+				response := mcp.NewToolResultError(result.Text)
+				if result.StructuredContent != nil {
+					response.StructuredContent = result.StructuredContent
+				}
+				return response, nil
 			}
 			if result.StructuredContent != nil {
 				return mcp.NewToolResultStructured(result.StructuredContent, result.Text), nil
@@ -1070,7 +1100,11 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 	office := surfaceEnabled(mcpprofile.SurfaceOfficeTask)
 	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
 	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
+	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
+		return nil
+	}
 	return []profileToolGroup{
+		{name: "configuration-automations", enabled: config, register: func(s *Server) { s.registerConfigAutomationTools() }},
 		{name: "automation", enabled: automation, register: func(s *Server) { s.registerAutomationTools() }},
 		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
 		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},
@@ -1255,7 +1289,7 @@ func (s *Server) registerKanbanTools() {
 		mcp.NewTool("update_task_kandev",
 			mcp.WithDescription("Update an existing task."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
-			mcp.WithString("title", mcp.MaxLength(service.TaskTitleMaxLength), mcp.Description("New concise task title (maximum 60 characters)")),
+			mcp.WithString("title", mcp.MaxLength(taskcontract.TaskTitleMaxLength), mcp.Description("New concise task title (maximum 60 characters)")),
 			mcp.WithString("description", mcp.Description("New description")),
 			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
 			mcp.WithString("deferred_launch_prompt", mcp.Description("Replace the prompt a not-yet-started task will launch with. Only valid for a task created with blocked_by (+ start_agent), whose launch is still waiting on its dependencies — use it to refresh a brief that went stale while the chain ran. Rejected once the task has started; send new context with message_task_kandev instead. When this is rejected, no other field in the same call is applied.")),
@@ -1264,12 +1298,12 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("move_task_kandev",
-			mcp.WithDescription(`Move a task to a different workflow step. When the source session is mid-turn (RUNNING), the move is deferred to turn-end automatically — prompt is optional (use it for cross-agent hand-offs). Idle-session and admin moves apply immediately. Returns a move-result envelope: "disposition" is "applied" when the move committed immediately or "deferred" when it was recorded for turn-end, "task" is the moved (or target-step) task, and an optioned move also returns "move_id" and the accepted "entry_options" so you can correlate the one-shot override with the eventual entry.`),
+			mcp.WithDescription(`Move a task to a different workflow step. A request naming the task's current workflow and step, without entry options, returns "applied" with the stored task because the destination already holds; no retry is needed. Only an actual step change is deferred to turn-end while the source session is RUNNING or STARTING. Idle-session and admin step changes apply immediately. Returns a move-result envelope: "disposition" is "applied" for a completed move or current-step no-op, or "deferred" when a step change was recorded for turn-end; "task" is the stored or moved task. An optioned step change also returns "move_id" and the accepted "entry_options" so you can correlate the one-shot override with the eventual entry.`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
 			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
-			mcp.WithNumber("position", mcp.Description("Position within the step (0-based)")),
-			mcp.WithString("prompt", mcp.Description("Optional hand-off message for the receiving agent at the new step. Mid-turn moves are always deferred; include a prompt when the next agent needs context (e.g. QA → review). Omit for self-moves like Work → Done.")),
+			mcp.WithNumber("position", mcp.Description("Requested position (0-based); the server determines arrival order, and a current-step request preserves the stored position.")),
+			mcp.WithString("prompt", mcp.Description("Optional hand-off message for the receiving agent at a new step. Only actual step changes are deferred during an active turn; non-empty prompts are invalid for a current-step request.")),
 			moveTaskEntryOptionsToolOption(),
 		),
 		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
@@ -1363,7 +1397,7 @@ func (s *Server) registerPRAutomationTools() {
 func (s *Server) registerTaskPRLinkTools() {
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("get_task_change_requests_kandev",
-			"Get the current task's linked GitHub pull requests and GitLab merge requests, automation settings, and provider capabilities.",
+			"Get the current task's linked GitHub pull requests and GitLab merge requests, automation settings, and provider capabilities. The task is bound to the calling session and is not a tool argument.",
 			json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 		),
 		s.wrapHandler("get_task_change_requests_kandev", s.getTaskChangeRequestsHandler()),
@@ -1377,7 +1411,7 @@ func (s *Server) registerTaskPRLinkTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("update_task_change_request_automation_kandev",
-			"Update automation switches for one linked change request or for explicitly selected providers on the current task. Task prompts are provider-scoped and task-level; association targets cannot set a prompt.",
+			"Update automation switches for one linked change request or for explicitly selected providers on the current task. Task prompts are provider-scoped and task-level; association targets cannot set a prompt. The task is bound to the calling session and is not a tool argument.",
 			taskChangeRequestAutomationToolSchema(),
 		),
 		s.wrapHandler("update_task_change_request_automation_kandev", s.updateTaskChangeRequestAutomationHandler()),
@@ -1404,23 +1438,7 @@ func taskChangeRequestAutomationToolSchema() json.RawMessage {
           "items": {"type": "string", "enum": ["github", "gitlab"]}
         }
       },
-      "required": ["scope"],
-      "oneOf": [
-        {
-          "properties": {"scope": {"const": "association"}},
-          "required": ["provider", "repository_id", "number"],
-          "not": {"required": ["providers"]}
-        },
-        {
-          "properties": {"scope": {"const": "task"}},
-          "required": ["providers"],
-          "not": {"anyOf": [
-            {"required": ["provider"]},
-            {"required": ["repository_id"]},
-            {"required": ["number"]}
-          ]}
-        }
-      ]
+      "required": ["scope"]
     },
     "patch": {
       "type": "object",
@@ -1436,25 +1454,7 @@ func taskChangeRequestAutomationToolSchema() json.RawMessage {
       }
     }
   },
-  "required": ["target", "patch"],
-  "allOf": [{
-    "if": {
-      "properties": {
-        "target": {
-          "properties": {"scope": {"const": "association"}},
-          "required": ["scope"]
-        }
-      },
-      "required": ["target"]
-    },
-    "then": {
-      "properties": {
-        "patch": {
-          "not": {"required": ["auto_fix_prompt_override"]}
-        }
-      }
-    }
-  }]
+  "required": ["target", "patch"]
 }`)
 }
 
@@ -1472,29 +1472,7 @@ func taskChangeRequestToolSchema() json.RawMessage {
     "old_repository_id": {"type": "string", "minLength": 1},
     "old_number": {"type": "integer", "minimum": 1}
   },
-  "required": ["operation", "task_id", "provider", "repository_id", "number"],
-  "oneOf": [
-    {
-      "properties": {"operation": {"const": "link"}},
-      "not": {"anyOf": [
-        {"required": ["old_provider"]},
-        {"required": ["old_repository_id"]},
-        {"required": ["old_number"]}
-      ]}
-    },
-    {
-      "properties": {"operation": {"const": "unlink"}},
-      "not": {"anyOf": [
-        {"required": ["old_provider"]},
-        {"required": ["old_repository_id"]},
-        {"required": ["old_number"]}
-      ]}
-    },
-    {
-      "properties": {"operation": {"const": "replace"}},
-      "required": ["old_provider", "old_repository_id", "old_number"]
-    }
-  ]
+  "required": ["operation", "task_id", "provider", "repository_id", "number"]
 }`)
 }
 
@@ -1505,12 +1483,12 @@ func taskChangeRequestToolSchema() json.RawMessage {
 func (s *Server) registerCreateTaskTool() {
 	toolDesc := `Create a persistent Kandev task or subtask and optionally start its agent. Use only for user-requested Kandev-tracked work; use the host's native subagent mechanism for ordinary delegation. Set parent_id="self" for a subtask of the current task and omit it for an unrelated top-level task. Subtasks inherit the parent's workspace, workflow, repository, profiles, executor, and materialized workspace unless the matching input overrides them. external_id provides create-if-absent idempotency and is not a lookup.`
 	parentDesc := "Parent task ID for subtasks. Use 'self' for a user-requested Kandev subtask or plan phase. Omit only for unrelated top-level tasks."
-	agentProfileDesc := "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task uses the verified creating session's profile and effective model, mode, and dynamic options for a session-bound call, then falls back to the current/source or parent profile without verified session context. workspace_default skips those task profiles and the creating session, then uses workflow profiles before the target workspace default. Explicit profiles do not copy creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start. agent_profile_id is the launch profile only and does not set an Office task's assignee; set the Office assignee through the Office UI or PATCH /api/v1/office/tasks/:id with an assignee_agent_profile_id field in the request body. Agent callers need can_assign_tasks for this PATCH operation (agent_profile_id there is not recognized)."
+	agentProfileDesc := "Accepts an agent profile ID only. An ID that names no profile is rejected and creates nothing; the words current_task and workspace_default are values of the mcp_task_agent_profile_default user setting, not accepted arguments, so omit this argument to use the configured policy. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks an explicit ID; otherwise an explicit agent_profile_id wins. When both are absent, the current_task policy uses the verified creating session's profile and effective model, mode, and dynamic options for a session-bound call, then falls back to the current/source or parent profile without verified session context. The workspace_default policy skips those task profiles and the creating session, then uses workflow profiles before the target workspace default. Explicit profiles do not copy creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start. agent_profile_id is the launch profile only and does not set an Office task's assignee; set the Office assignee through the Office UI or PATCH /api/v1/office/tasks/:id with an assignee_agent_profile_id field in the request body. Agent callers need can_assign_tasks for this PATCH operation (agent_profile_id there is not recognized)."
 
 	if s.mode == ModeExternal {
 		toolDesc = `Create a persistent Kandev task and optionally start its agent from an external client. Use only for user-requested Kandev-tracked work; use the host's native subagent mechanism for ordinary delegation. Provide a repository for a top-level task; parent_id may target a known task when the user requested a subtask. external_id provides create-if-absent idempotency and is not a lookup.`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
-		agentProfileDesc = "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task uses the parent task profile because external mode has no creating session or current/source task context; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode never copies creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start. agent_profile_id is the launch profile only and does not set an Office task's assignee; set the Office assignee through the Office UI or PATCH /api/v1/office/tasks/:id with an assignee_agent_profile_id field in the request body. Agent callers need can_assign_tasks for this PATCH operation (agent_profile_id there is not recognized)."
+		agentProfileDesc = "Accepts an agent profile ID only. An ID that names no profile is rejected and creates nothing; the words current_task and workspace_default are values of the mcp_task_agent_profile_default user setting, not accepted arguments, so omit this argument to use the configured policy. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks an explicit ID; otherwise an explicit agent_profile_id wins. When both are absent, the current_task policy uses the parent task profile because external mode has no creating session or current/source task context; the workspace_default policy skips the parent profile, then uses workflow profiles before the target workspace default. External mode never copies creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start. agent_profile_id is the launch profile only and does not set an Office task's assignee; set the Office assignee through the Office UI or PATCH /api/v1/office/tasks/:id with an assignee_agent_profile_id field in the request body. Agent callers need can_assign_tasks for this PATCH operation (agent_profile_id there is not recognized)."
 	}
 
 	s.mcpServer.AddTool(
@@ -1521,7 +1499,7 @@ func (s *Server) registerCreateTaskTool() {
 			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Auto-resolved if the workspace has only one workflow. Defaulted from parent for subtasks when workspace_id is also omitted; if supplied, it must belong to the effective workspace_id.")),
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted; for subtasks, pass only with an explicit workflow_id)")),
 			mcp.WithString("workspace_mode", mcp.Enum("inherit_parent", "new_workspace"), mcp.Description("Optional materialized-workspace mode. Omit for subtasks to inherit the parent's workspace/worktree. inherit_parent requires parent_id and reuses the parent's materialized workspace/worktree; new_workspace requests a separate workspace/worktree.")),
-			mcp.WithString("title", mcp.Required(), mcp.MaxLength(service.TaskTitleMaxLength), mcp.Description("A concise, few-word task title (maximum 60 characters).")),
+			mcp.WithString("title", mcp.Required(), mcp.MaxLength(taskcontract.TaskTitleMaxLength), mcp.Description("A concise, few-word task title (maximum 60 characters).")),
 			mcp.WithString("prompt", mcp.Description("The initial prompt for the task agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. For auto-started subtasks, provide a specific and detailed prompt; omitting it starts the task agent without task-specific context.")),
 			mcp.WithBoolean("autopilot", mcp.Description("Start this task in autopilot mode. Default: false. The value is fixed at creation and is not inherited by subtasks. The agent does not ask the user directly; it asks its direct parent only for critical decisions.")),
 			mcp.WithString("agent_profile_id", mcp.Description(agentProfileDesc)),
@@ -1792,7 +1770,7 @@ func (s *Server) updateRepositoryBaseBranchHandler() server.ToolHandlerFunc {
 func (s *Server) registerStepCompleteTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("step_complete_kandev",
-			mcp.WithDescription(`Signal that every requirement for the current workflow step is complete. Call this as the step's final action; do not call before asking the user or during partial work. If you cannot make further progress without input, describe the issue in blockers. The signal is idempotent within a step, and any configured transition runs asynchronously at turn end. A new user message cancels a pending signal. The summary is shown to the user and is recorded on the step-transition history.`),
+			mcp.WithDescription(`Complete the current workflow step as your final action. Do not call before asking the user or during partial work; put blockers in blockers. The signal is idempotent, transitions run asynchronously, and a new user message cancels it. If the response says the workflow step changed, this turn is stale: retries cannot recover. End it and ask the user to resume the session for the current step, then complete it in the new turn. This differs from already_signaled, which means the signal was accepted. Do not move the task solely to bypass a stale-turn error.`),
 			mcp.WithString("summary", mcp.Required(), mcp.Description("One-paragraph plain-text summary of what was done in this step. Shown to the user.")),
 			mcp.WithString("handoff", mcp.Description("Optional context for the immediately-following step's agent, delivered once in that step's first prompt and not carried beyond it. Up to 8,192 bytes; longer values are truncated.")),
 			mcp.WithString("blockers", mcp.Description("Optional list of known unresolved issues. Recorded on this step's transition history, not delivered to the next step's agent — do not use it to pass context forward. Use sparingly, only when you cannot make further progress without input. Up to 8,192 bytes; longer values are truncated.")),
@@ -1884,11 +1862,11 @@ const askUserQuestionOutputSchema = `{
 func (s *Server) registerInteractionTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("ask_user_question_kandev",
-			mcp.WithDescription(`Ask the user 1-4 related questions and wait for all answers. Each question requires a prompt and 2-6 concrete options with short labels and descriptions; use a stable id when response keys matter. Call only when required input cannot be inferred, and bundle related questions in one call. Returns answers keyed by question id; a rejected bundle includes rejected=true and may include reject_reason.`),
+			mcp.WithDescription(`Ask the user 1-4 related questions and wait for all answers. Each question requires a prompt and 2-6 concrete options with short labels and descriptions; use a stable id when response keys matter. Set allow_custom_text=false when the user must choose an offered option. Call only when required input cannot be inferred, and bundle related questions in one call. Returns answers keyed by question id; a rejected bundle includes rejected=true and may include reject_reason.`),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithRawOutputSchema(json.RawMessage(askUserQuestionOutputSchema)),
 			mcp.WithArray(questionsArg, mcp.Required(),
-				mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier in the response map; auto-generated if omitted), "title" (≤12 chars short label).`),
+				mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier in the response map; auto-generated if omitted), "title" (≤12 chars short label), "allow_custom_text" (boolean, defaults to true).`),
 				mcp.MinItems(1),
 				mcp.MaxItems(4),
 				mcp.Items(buildQuestionSchemaItem()),
@@ -1928,10 +1906,12 @@ This tool is available only to autopilot child tasks. It sends a durable questio
 func (s *Server) registerPlanTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task_plan_kandev",
-			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). This tool always replaces the plan's entire content and has no append mode; it rejects any non-empty mode argument. If a plan already exists and you only want to add a section, use update_task_plan_kandev with mode=\"append\" instead — it composes your addition onto the stored plan without you reading and resending it. To replace the whole document here, read it first with get_task_plan_kandev if you need to preserve any of it."),
+			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). This tool replaces the entire content. For an existing plan, expected_version from get_task_plan_kandev or a successful write is required; a suspicious reduction is rejected unless allow_truncation=true confirms an intentional reduction. Use edit_task_plan_kandev for a local change or update_task_plan_kandev with mode=\"append\" for a new section."),
 			mcp.WithString("task_id", mcp.Description("The task ID to create a plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
-			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format. This REPLACES any existing plan whole. To add a section to an existing plan without resending it, use update_task_plan_kandev with mode=\"append\" instead. To replace the whole document here, call get_task_plan_kandev first and include its content plus your additions in this call. Capped at 262,144 bytes (256 KiB) of UTF-8 content; a write over that limit is rejected and stores nothing.")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format. This replaces existing content after expected_version is checked. Capped at 262,144 bytes (256 KiB) of UTF-8 content; a write over that limit is rejected and stores nothing.")),
 			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
+			mcp.WithString("expected_version", mcp.Description("Required when replacing an existing plan. Use the version returned by get_task_plan_kandev or a prior successful write.")),
+			mcp.WithBoolean("allow_truncation", mcp.Description("Acknowledge an intentional large reduction. Requires a matching expected_version; the previous snapshot remains in a new revision.")),
 			// Declared (not just rejected in the handler) so the server's
 			// generic MCP argument-schema validator - which rejects any
 			// property absent from a tool's schema before the handler ever
@@ -1952,7 +1932,7 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_plan_kandev",
-			mcp.WithDescription(`Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). Set mode="replace" (the default) to submit the whole document, or mode="append" to submit only an addition. In replace mode this call OVERWRITES THE ENTIRE PLAN: sending only a new section instead of the whole document will silently delete everything else, so call get_task_plan_kandev first and send the full document (prior content plus your changes), never just the new section. In append mode you do not need to read the plan first: the server reads the stored plan and stores it, then one blank line, then your content. append is not idempotent — resubmitting the same call adds your content again.`),
+			mcp.WithDescription(`Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). Set mode="replace" (the default) to submit the whole document, or mode="append" to submit only an addition. Replace mode requires expected_version from get_task_plan_kandev or a successful write for an existing plan. A suspicious reduction is rejected before mutation; use edit_task_plan_kandev for a local change, or set allow_truncation=true only when the reduction is intentional and the matching version is current. In append mode you do not need to read the plan first: the server reads the stored plan and stores it, then one blank line, then your content. append is not idempotent — resubmitting the same call adds your content again.`),
 			mcp.WithString("task_id", mcp.Description("The task ID to update the plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 			// Deliberately not mcp.Required(): mode validity is checked before
 			// task-reach authorization, ahead of
@@ -1963,24 +1943,64 @@ func (s *Server) registerPlanTools() {
 			// run either - both would report the wrong failure for a call
 			// invalid on more than one axis. content-required is instead
 			// enforced by PlanService.UpdatePlan, after authorization.
-			mcp.WithString("content", mcp.Description(`In mode="replace" (default): the full plan content in markdown format that REPLACES the entire existing plan. Sending only a new section instead of the whole document will silently delete everything else. Read the current plan with get_task_plan_kandev first and include its content here plus your additions. In mode="append": only the fragment to add — do not include the existing plan; the server composes it onto the stored content for you. Capped at 262,144 bytes (256 KiB) of UTF-8 content measured after composition; a write over that limit is rejected and stores nothing.`)),
+			mcp.WithString("content", mcp.Description(`In mode="replace" (default): the full plan content in markdown format. expected_version is checked before this document replaces the existing plan. In mode="append": only the fragment to add — do not include the existing plan; the server composes it onto the stored content for you. Capped at 262,144 bytes (256 KiB) of UTF-8 content measured after composition; a write over that limit is rejected and stores nothing.`)),
 			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
+			mcp.WithString("expected_version", mcp.Description("Required for replace mode. Use the version returned by get_task_plan_kandev or a prior successful write. Optional for append mode.")),
+			mcp.WithBoolean("allow_truncation", mcp.Description("Acknowledge an intentional large reduction in replace mode. Requires a matching expected_version; the previous snapshot remains in a new revision.")),
 			// Deliberately no mcp.Enum here: the server's generic MCP
 			// argument-schema validator enforces a declared enum strictly
 			// (compiled with additionalProperties:false) and would then
 			// reject an out-of-enum value itself, with a generic message
 			// that never names either accepted value - before
-			// service.ParsePlanWriteMode ever runs. The rejection must name both,
+			// taskcontract.ParsePlanWriteMode ever runs. The rejection must name both,
 			// so the two accepted
 			// values are documented in the description text (advisory to
 			// well-behaved clients) and enforced, with that exact message,
 			// by the handler instead.
 			mcp.WithString("mode",
-				mcp.DefaultString(string(service.PlanWriteModeReplace)),
+				mcp.DefaultString(string(taskcontract.PlanWriteModeReplace)),
 				mcp.Description(`"replace" (default) submits the whole document and overwrites the stored plan. "append" submits only a fragment, which the server appends after one blank line without you needing to read the plan first; append is not idempotent, so resubmitting the same call adds the fragment again. Any other value is rejected and leaves the stored plan unchanged.`),
 			),
 		),
 		s.wrapHandler("update_task_plan_kandev", s.updateTaskPlanHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("edit_task_plan_kandev",
+			mcp.WithDescription("Apply one exact text edit to a task plan. Provide the current expected_version, a non-empty old_text that occurs exactly once, and new_text. The edit preserves all surrounding bytes, including line endings; use an empty new_text to delete the match. Ambiguous or stale edits are rejected without a write. For a new section, use update_task_plan_kandev with mode=\"append\"."),
+			mcp.WithString("task_id", mcp.Description("The task ID whose plan to edit. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
+			mcp.WithString("expected_version", mcp.Required(), mcp.Description("The version returned by get_task_plan_kandev or a prior successful plan write.")),
+			mcp.WithString("old_text", mcp.Required(), mcp.Description("The exact non-empty text to replace. It must occur exactly once, including overlapping matches.")),
+			mcp.WithString("new_text", mcp.Required(), mcp.Description("The exact replacement text. Use an empty string to delete old_text.")),
+			mcp.WithBoolean("allow_truncation", mcp.Description("Acknowledge an intentional large reduction caused by this edit. Requires the matching expected_version and verified revision history.")),
+		),
+		s.wrapHandler("edit_task_plan_kandev", s.editTaskPlanHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_task_plan_revisions_kandev",
+			mcp.WithDescription("List bounded metadata for a task plan's revisions, newest first. Responses contain IDs, authors, timestamps, titles, and byte sizes, but no revision content. Use get_task_plan_revision_kandev for one exact snapshot before a deliberate restore."),
+			mcp.WithString("task_id", mcp.Description("The task ID whose plan history to list. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
+			mcp.WithInteger("before_revision_number", mcp.Min(0), mcp.Description("Optional exclusive revision-number cursor from the previous response; zero starts at the newest revision.")),
+			mcp.WithInteger("limit", mcp.Min(1), mcp.Max(taskcontract.MaxPlanRevisionPageLimit), mcp.Description("Optional page size. Defaults to 20 and cannot exceed 100.")),
+		),
+		s.wrapHandler("list_task_plan_revisions_kandev", s.listTaskPlanRevisionsHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_task_plan_revision_kandev",
+			mcp.WithDescription("Fetch one exact task-plan revision, including its title and unchanged content plus a revision_version for conditional restore. The revision must belong to the addressed task."),
+			mcp.WithString("task_id", mcp.Description("The task ID that owns the revision. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
+			mcp.WithString("revision_id", mcp.Required(), mcp.Description("The revision ID returned by list_task_plan_revisions_kandev.")),
+		),
+		s.wrapHandler("get_task_plan_revision_kandev", s.getTaskPlanRevisionHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("restore_task_plan_revision_kandev",
+			mcp.WithDescription("Restore one identified task-plan revision as a new agent-attributed revision. Requires the current plan version and the selected revision_version. It rejects intervening edits or changed source content, preserves the source and current history, and reports already_current without writing."),
+			mcp.WithString("task_id", mcp.Description("The task ID whose plan to restore. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
+			mcp.WithString("revision_id", mcp.Required(), mcp.Description("The task-scoped revision to restore.")),
+			mcp.WithString("expected_version", mcp.Required(), mcp.Description("The current plan version returned by get_task_plan_kandev or a successful write.")),
+			mcp.WithString("expected_revision_version", mcp.Required(), mcp.Description("The revision_version returned by get_task_plan_revision_kandev for the selected source.")),
+		),
+		s.wrapHandler("restore_task_plan_revision_kandev", s.restoreTaskPlanRevisionHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("delete_task_plan_kandev",
@@ -2125,6 +2145,10 @@ func buildQuestionSchemaItem() map[string]any {
 			idArg:     str("Stable identifier used as the key in the response map. Auto-assigned (q1, q2, ...) if omitted."),
 			titleArg:  str("Optional short label (≤12 chars) shown above the prompt."),
 			promptArg: str("The question text shown to the user."),
+			allowCustomTextArg: map[string]any{
+				typeKey:        "boolean",
+				descriptionArg: "Allow a free-text answer in addition to the offered options. Defaults to true.",
+			},
 			optionsArg: map[string]any{
 				typeKey:        "array",
 				descriptionArg: "2-6 concrete, actionable choices.",

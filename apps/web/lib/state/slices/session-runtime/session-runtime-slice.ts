@@ -48,10 +48,15 @@ function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: stri
   delete state.sessionModels.bySessionId[sessionId];
   delete state.sessionMcpStatus.bySessionId[sessionId];
   delete state.promptUsage.bySessionId[sessionId];
+  delete state.usageInvalidation.bySessionId[sessionId];
   delete state.sessionTodos.bySessionId[sessionId];
   delete state.prepareProgress.bySessionId[sessionId];
+  delete state.launchWarning.bySessionId[sessionId];
   delete state.sessionPollMode.bySessionId[sessionId];
   delete state.embeddedVscodeSupport.bySessionId[sessionId];
+  delete state.backgroundWork.workloadsBySessionId[sessionId];
+  delete state.backgroundWork.activeWorkIdBySessionId[sessionId];
+  delete state.backgroundWork.loadingBySessionId[sessionId];
 }
 
 /** Process status + output for every process owned by the session. */
@@ -118,13 +123,20 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionModels: { bySessionId: {} },
   sessionMcpStatus: { bySessionId: {} },
   promptUsage: { bySessionId: {} },
+  usageInvalidation: { bySessionId: {} },
   sessionTodos: { bySessionId: {} },
   userShells: { byEnvironmentId: {}, dismissedByEnvironmentId: {}, loading: {}, loaded: {} },
   prepareProgress: { bySessionId: {} },
+  launchWarning: { bySessionId: {} },
   sessionPollMode: { bySessionId: {} },
   embeddedVscodeSupport: { bySessionId: {} },
   workspaceFilesRefresh: { bySessionId: {} },
   workspaceRestoration: { byEnvironmentId: {} },
+  backgroundWork: {
+    workloadsBySessionId: {},
+    activeWorkIdBySessionId: {},
+    loadingBySessionId: {},
+  },
 };
 
 type ImmerSet = Parameters<typeof createSessionRuntimeSlice>[0];
@@ -227,6 +239,19 @@ function buildSessionCommitActions(set: ImmerSet) {
       set((draft) => {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
         const existing = draft.sessionCommits.byEnvironmentId[envKey] || [];
+        const duplicateIndex = existing.findIndex(
+          (current) =>
+            current.commit_sha === commit.commit_sha &&
+            (current.repository_name ?? "") === (commit.repository_name ?? ""),
+        );
+        // A commit_created notification can arrive again while a refetch is
+        // replacing the list. Update the fetched row in place so the same
+        // commit is never rendered twice.
+        if (duplicateIndex >= 0) {
+          existing[duplicateIndex] = { ...existing[duplicateIndex], ...commit };
+          draft.sessionCommits.byEnvironmentId[envKey] = existing;
+          return;
+        }
         // For amend: only replace HEAD (first entry) if it has the same parent
         if (existing.length > 0 && existing[0].parent_sha === commit.parent_sha) {
           existing[0] = commit;
@@ -315,6 +340,104 @@ function buildUserShellActions(set: ImmerSet) {
     setSessionPollMode: (sessionId: string, mode: SessionPollMode) =>
       set((draft) => {
         draft.sessionPollMode.bySessionId[sessionId] = mode;
+      }),
+  };
+}
+
+function isTerminalRunState(s?: string) {
+  return s === "completed" || s === "failed" || s === "interrupted" || s === "ended";
+}
+
+function buildBackgroundWorkActions(set: ImmerSet) {
+  return {
+    setBackgroundWorkloads: (
+      sessionId: string,
+      workloads: Parameters<SessionRuntimeSlice["setBackgroundWorkloads"]>[1],
+    ) =>
+      set((draft) => {
+        const existingList = draft.backgroundWork.workloadsBySessionId[sessionId] ?? [];
+        const existingMap = new Map(existingList.map((w) => [w.work_id, w]));
+        const merged = workloads.map((incoming) => {
+          const existing = existingMap.get(incoming.work_id);
+          if (!existing) return incoming;
+          if (existing.revision > incoming.revision) {
+            return existing;
+          }
+          if (isTerminalRunState(existing.state) && !isTerminalRunState(incoming.state)) {
+            return {
+              ...incoming,
+              state: existing.state,
+              exit_code: existing.exit_code,
+              finished_at: existing.finished_at,
+              revision: Math.max(incoming.revision, existing.revision),
+            };
+          }
+          return incoming;
+        });
+        draft.backgroundWork.workloadsBySessionId[sessionId] = merged;
+        draft.backgroundWork.loadingBySessionId[sessionId] = false;
+      }),
+    updateBackgroundWorkload: (
+      sessionId: string,
+      workload: Parameters<SessionRuntimeSlice["updateBackgroundWorkload"]>[1],
+    ) =>
+      set((draft) => {
+        const list = draft.backgroundWork.workloadsBySessionId[sessionId] ?? [];
+        const idx = list.findIndex((w) => w.work_id === workload.work_id);
+        if (idx >= 0) {
+          const existing = list[idx]!;
+          if (existing.revision > workload.revision) {
+            return;
+          }
+          if (isTerminalRunState(existing.state) && !isTerminalRunState(workload.state)) {
+            return;
+          }
+          list[idx] = {
+            ...existing,
+            ...workload,
+            output: workload.output !== undefined ? workload.output : existing.output,
+          };
+        } else {
+          list.push(workload);
+        }
+        draft.backgroundWork.workloadsBySessionId[sessionId] = list;
+      }),
+    appendBackgroundWorkloadOutput: (
+      sessionId: string,
+      chunk: Parameters<SessionRuntimeSlice["appendBackgroundWorkloadOutput"]>[1],
+    ) =>
+      set((draft) => {
+        const list = draft.backgroundWork.workloadsBySessionId[sessionId] ?? [];
+        const workload = list.find((w) => w.work_id === chunk.work_id);
+        if (workload && chunk.chunk) {
+          const currentOutput = workload.output || "";
+          const newOutput = currentOutput + chunk.chunk;
+          const maxLen = 200 * 1024;
+          if (newOutput.length > maxLen) {
+            workload.output = newOutput.slice(newOutput.length - maxLen);
+            workload.output_truncated = true;
+          } else {
+            workload.output = newOutput;
+          }
+          workload.output_offset = chunk.offset;
+          if (chunk.truncated) {
+            workload.output_truncated = true;
+          }
+        }
+      }),
+    setActiveBackgroundWorkload: (sessionId: string, workId: string) =>
+      set((draft) => {
+        draft.backgroundWork.activeWorkIdBySessionId[sessionId] = workId;
+      }),
+    clearBackgroundWork: (sessionId: string) =>
+      set((draft) => {
+        delete draft.backgroundWork.workloadsBySessionId[sessionId];
+        delete draft.backgroundWork.activeWorkIdBySessionId[sessionId];
+        delete draft.backgroundWork.loadingBySessionId[sessionId];
+      }),
+    setBackgroundWorkLoading: (sessionId: string, loading: boolean) =>
+      set((draft) => {
+        draft.backgroundWork.loadingBySessionId[sessionId] = loading;
       }),
   };
 }
@@ -485,12 +608,13 @@ export const createSessionRuntimeSlice: StateCreator<
     set((draft) => {
       delete draft.availableCommands.bySessionId[sessionId];
     }),
-  setSessionMode: (sessionId, modeId, availableModes) =>
+  setSessionMode: (sessionId, modeId, availableModes, requestedModeId) =>
     set((draft) => {
       const existing = draft.sessionMode.bySessionId[sessionId];
       draft.sessionMode.bySessionId[sessionId] = {
         currentModeId: modeId,
         availableModes: availableModes ?? existing?.availableModes ?? [],
+        requestedModeId,
       };
     }),
   clearSessionMode: (sessionId) =>
@@ -517,9 +641,23 @@ export const createSessionRuntimeSlice: StateCreator<
     set((draft) => {
       draft.promptUsage.bySessionId[sessionId] = usage;
     }),
+  bumpSessionUsageInvalidation: (sessionId) =>
+    set((draft) => {
+      draft.usageInvalidation.bySessionId[sessionId] =
+        (draft.usageInvalidation.bySessionId[sessionId] ?? 0) + 1;
+    }),
   setSessionTodos: (sessionId, entries) =>
     set((draft) => {
       draft.sessionTodos.bySessionId[sessionId] = entries;
     }),
+  setLaunchWarning: (sessionId, entry) =>
+    set((draft) => {
+      draft.launchWarning.bySessionId[sessionId] = entry;
+    }),
+  clearLaunchWarning: (sessionId) =>
+    set((draft) => {
+      delete draft.launchWarning.bySessionId[sessionId];
+    }),
+  ...buildBackgroundWorkActions(set),
   ...buildUserShellActions(set),
 });

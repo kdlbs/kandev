@@ -47,7 +47,7 @@ test.describe("Mobile plugin task panel", () => {
     await session.waitForLoad();
 
     // Mobile groups all plugin panels behind one bounded bottom-nav action.
-    const panelsNavButton = testPage.getByRole("button", { name: "Panels" });
+    const panelsNavButton = testPage.getByRole("button", { name: "Panels", exact: true });
     await expect(panelsNavButton).toBeVisible({ timeout: 15_000 });
     expect((await panelsNavButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await panelsNavButton.tap();
@@ -106,7 +106,9 @@ test.describe("Mobile plugin task panel", () => {
     await expect(testPage.getByTestId("mobile-prompt-history-option")).toBeVisible();
     await testPage.keyboard.press("Escape");
     await expect(testPage.getByRole("dialog", { name: "Panels" })).toHaveCount(0);
-    await expect(testPage.getByRole("button", { name: "Chat" })).toHaveClass(/text-primary/);
+    await expect(testPage.getByRole("button", { name: "Chat", exact: true })).toHaveClass(
+      /text-primary/,
+    );
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -139,6 +141,48 @@ test.describe("Mobile plugin task panel", () => {
           const res = await apiClient.rawRequest(
             "GET",
             `/api/plugins/${PLUGIN_ID}/user-state/task/${task.id}/menu-presentation`,
+          );
+          if (res.status !== 200) return null;
+          const body = (await res.json()) as { value: string };
+          return body.value;
+        },
+        { timeout: 10_000, intervals: [250, 500, 1000] },
+      )
+      .toBe("mobile");
+  });
+
+  test("opens and selects a primary plugin submenu by touch", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    await installFixturePlugin(testPage);
+
+    const task = await apiClient.createTask(seedData.workspaceId, "Mobile plugin submenu task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+    await mobile.taskCard(task.id).getByRole("button", { name: "More options" }).tap();
+
+    const menu = testPage.locator('[data-slot="dropdown-menu-content"]:visible');
+    const submenu = menu.getByRole("menuitem", { name: "Task shortcuts", exact: true });
+    await expect(submenu).toBeVisible();
+
+    await submenu.tap();
+    const child = testPage.getByRole("menuitem", { name: "Record menu presentation", exact: true });
+    await expect(child).toBeVisible();
+    await child.tap();
+
+    await expect
+      .poll(
+        async () => {
+          const res = await apiClient.rawRequest(
+            "GET",
+            `/api/plugins/${PLUGIN_ID}/user-state/task/${task.id}/primary-submenu-presentation`,
           );
           if (res.status !== 200) return null;
           const body = (await res.json()) as { value: string };

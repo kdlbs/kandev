@@ -38,7 +38,7 @@ test.describe("Mobile sidebar workflow completion icons", () => {
     await testPage.goto(`/t/${workflowCompleteTask.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const turnFinishedRow = drawer.getByTestId("sidebar-task-item").filter({

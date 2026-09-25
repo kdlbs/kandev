@@ -188,6 +188,14 @@ type RunResolver interface {
 	ResolveRunForTask(ctx context.Context, taskID string) string
 }
 
+// RunEventAppender records runtime behavior against a run's event stream.
+// Satisfied by the office service; mirrors the runtime action surface's own
+// seam (internal/office/runtime.RunEventAppender) so a refused agent read
+// can be recorded the same way a refused runtime action already is.
+type RunEventAppender interface {
+	AppendRunEvent(ctx context.Context, runID, eventType, level string, payload map[string]interface{})
+}
+
 // TaskCanceller hard-cancels a task's active execution. Used by the
 // reactivity pipeline when a task is moved to "cancelled" status.
 type TaskCanceller interface {
@@ -427,20 +435,9 @@ type DashboardService struct {
 	routingProvider       RoutingProvider                 // optional; nil disables /routing endpoints (503)
 	attemptLister         RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
 	runResolver           RunResolver                     // optional; nil means status-change activity rows have no run_id
+	runEvents             RunEventAppender                // optional; nil means a refused agent comment read is not recorded on its run
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
-	// officeSessionIdentity gates RecordAgentDecision's use of the caller's
-	// own session id. Defaults false (zero value); set via
-	// SetOfficeSessionIdentity, wired from features.officeSessionIdentity.
-	officeSessionIdentity bool
-}
-
-// SetOfficeSessionIdentity wires the features.officeSessionIdentity flag.
-// When true, RecordAgentDecision forwards the decider's own calling session
-// id so RecordDecision re-evaluates against it instead of the task's
-// most-recently-started ("active") session. Defaults false.
-func (s *DashboardService) SetOfficeSessionIdentity(enabled bool) {
-	s.officeSessionIdentity = enabled
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the
@@ -555,11 +552,53 @@ func (s *DashboardService) SetRunResolver(r RunResolver) {
 	s.runResolver = r
 }
 
+// SetRunEventAppender wires the seam used to record a refused agent comment
+// read on the caller's run. Optional; when unset, refusals are not recorded
+// anywhere but the response.
+func (s *DashboardService) SetRunEventAppender(r RunEventAppender) {
+	s.runEvents = r
+}
+
+// appendDeniedCommentReadEvent records a refused agent comment read on the
+// caller's run, mirroring the runtime action surface's runtime.denied shape
+// (REQ-OFFICE-AGENT-COMMENT-READS-009). No-ops when no appender is wired or
+// the caller's JWT carries no run identifier; never changes the response or
+// the run's outcome.
+func (s *DashboardService) appendDeniedCommentReadEvent(
+	ctx context.Context, runID, targetTaskID, agentID, sessionID string, err error,
+) {
+	if s.runEvents == nil || runID == "" {
+		return
+	}
+	s.runEvents.AppendRunEvent(ctx, runID, string(models.RunEventTypeRuntimeDenied), string(models.RunEventLevelWarn), map[string]interface{}{
+		"action":      "read_comments",
+		"target_type": "task",
+		"target_id":   targetTaskID,
+		"agent_id":    agentID,
+		"session_id":  sessionID,
+		errorKey:      err.Error(),
+	})
+}
+
 // SetProjectBudgetEvaluator wires the seam used to re-evaluate a
 // destination project's budget policies on task reassignment. Optional;
 // when unset, UpdateTaskProjectID does not check budgets.
 func (s *DashboardService) SetProjectBudgetEvaluator(e ProjectBudgetEvaluator) {
 	s.projectBudget = e
+}
+
+// LogActivityWithRun passes through to the wired activity logger. A no-op
+// when no logger is wired. Exposed so MCP handlers (which only hold a
+// *DashboardService reference, not the underlying office service) can log
+// activity rows attributed to a run.
+func (s *DashboardService) LogActivityWithRun(
+	ctx context.Context,
+	workspaceID, actorType, actorID, action, targetType, targetID, details, runID, sessionID string,
+) {
+	if s.activity == nil {
+		return
+	}
+	s.activity.LogActivityWithRun(ctx, workspaceID, actorType, actorID, action, targetType, targetID, details, runID, sessionID)
 }
 
 // LogTaskStateChange records a task state transition for Office tasks before
@@ -753,10 +792,20 @@ func (s *DashboardService) SetRoutineLister(rl RoutineLister) {
 
 // ListActivityFiltered returns activity entries filtered by optional type.
 func (s *DashboardService) ListActivityFiltered(ctx context.Context, wsID, filterType string, limit int) ([]*models.ActivityEntry, error) {
+	var (
+		entries []*models.ActivityEntry
+		err     error
+	)
 	if filterType == "" || filterType == "all" {
-		return s.repo.ListActivityEntries(ctx, wsID, limit)
+		entries, err = s.repo.ListActivityEntries(ctx, wsID, limit)
+	} else {
+		entries, err = s.repo.ListActivityEntriesByType(ctx, wsID, filterType, limit)
 	}
-	return s.repo.ListActivityEntriesByType(ctx, wsID, filterType, limit)
+	if err != nil {
+		return nil, err
+	}
+	s.enrichActivityLabels(ctx, wsID, entries, nil)
+	return entries, nil
 }
 
 // ListActivityForTarget returns activity entries scoped to one target entity.

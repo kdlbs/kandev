@@ -149,14 +149,28 @@ func TestHandleAgentEvent_CompleteCarriesPromptTurnID(t *testing.T) {
 	t.Fatal("no complete stream event published")
 }
 
+func TestUsageObservationUsesItsPromptGenerationTurnID(t *testing.T) {
+	execution := &AgentExecution{}
+	execution.setPromptTurnID("turn-a")
+	generationA := beginExecutionPrompt(execution)
+	execution.setPromptTurnID("turn-b")
+	beginExecutionPrompt(execution)
+
+	manager := &Manager{}
+	event := manager.handleAgentEventState(execution, agentctl.AgentEvent{
+		Type: streams.EventTypeUsageObservation, PromptGeneration: generationA,
+	})
+	if event.TurnID != "turn-a" {
+		t.Fatalf("usage turn ID = %q, want turn-a for prompt generation %d", event.TurnID, generationA)
+	}
+}
+
 // TestHandleAgentEvent_CompleteCarriesActingAgentOfficeIdentity pins that the
 // stream event's AgentProfileID is the acting agent's own office identity
 // (execution.officeProfileID()), not the concrete AgentProfileID the CLI
 // happens to run under. This is what lets office/service attribute a
 // session-bridged comment to the agent that actually ran the turn instead of
-// the task's assignee, without depending on task_sessions.agent_profile_id
-// (which only holds the acting agent when features.officeSessionIdentity is
-// on — off by default in every shipped profile).
+// the task's assignee, without depending on task_sessions.agent_profile_id.
 func TestHandleAgentEvent_CompleteCarriesActingAgentOfficeIdentity(t *testing.T) {
 	mgr, eventBus := createTestManagerWithTracking()
 	execution := createTestExecution("exec-office-identity", "task-1", "session-1")

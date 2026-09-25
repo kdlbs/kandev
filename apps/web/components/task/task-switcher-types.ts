@@ -12,6 +12,7 @@ import type { SidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-t
 import type { TaskMarkerPresentation } from "@/lib/task-color-presentation";
 import type { AutomaticTaskColorSource } from "@/lib/sidebar/task-color-rules";
 import type { TaskRepositoryRuleIdentity } from "@/lib/sidebar/repository-rule-identity";
+import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
 
 export type StepDef = {
   id: string;
@@ -62,15 +63,23 @@ export type TaskSwitcherItem = {
   lastActivityAt?: string;
   createdAt?: string;
   isArchived?: boolean;
+  /** True while an accepted archive request is still in flight. */
+  isPendingArchive?: boolean;
+  isFromOffice?: boolean;
   primarySessionId?: string | null;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
   parentTaskTitle?: string;
   parentTaskId?: string;
+  continuationParentTitle?: string;
+  /** Number of filtered descendants reported by the paged sidebar query. */
+  subtaskCount?: number;
   workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */
   queuedCount?: number;
+  /** Automatic session launch waiting for capacity or ownership. */
+  launchQueue?: TaskStatusSummaryLaunchQueue | null;
   /** Destination-resident WIP queue position, separate from queued prompts. */
   wipQueue?: WipQueueStatus;
   isPRReview?: boolean;
@@ -81,6 +90,8 @@ export type TaskSwitcherItem = {
 
 export type TaskSwitcherProps = {
   grouped: GroupedSidebarList;
+  /** Complete unfiltered task set used only to validate hierarchy constraints. */
+  nestHierarchyTasks?: TaskSwitcherItem[];
   workflows?: TaskMoveWorkflow[];
   stepsByWorkflowId?: Record<string, StepDef[]>;
   activeTaskId: string | null;

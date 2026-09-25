@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -199,12 +200,13 @@ func buildStandaloneCreateInstanceRequest(
 	stripEnv []string,
 ) *agentctl.CreateInstanceRequest {
 	return &agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: req.WorkspacePath,
-		AgentCommand:  "", // Agent command set via Configure endpoint
-		Protocol:      req.Protocol,
-		AgentType:     agentType,
-		Env:           env,
+		ID:                    req.InstanceID,
+		WorkspacePath:         req.WorkspacePath,
+		AgentCommand:          "", // Agent command set via Configure endpoint
+		Protocol:              req.Protocol,
+		CodexAppServerEnabled: req.CodexAppServerEnabled,
+		AgentType:             agentType,
+		Env:                   env,
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
@@ -222,6 +224,7 @@ func buildStandaloneCreateInstanceRequest(
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
+		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
@@ -358,11 +361,17 @@ func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *Executo
 // rather than treating an enumeration failure as though every instance were
 // an orphan.
 func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
+	instances, _, err := r.RecoverInstancesDetailed(ctx, records)
+	return instances, err
+}
+
+// RecoverInstancesDetailed performs standalone recovery and classifies per-candidate outcomes.
+func (r *StandaloneExecutor) RecoverInstancesDetailed(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
 	instances, err := r.listInstancesWithRetry(ctx)
 	if err != nil {
 		r.logger.Warn("failed to enumerate standalone instances for recovery; leaving every record to the existing repair path",
 			zap.Error(err))
-		return nil, nil
+		return nil, enumerationFailedOutcomes(ctx, records), nil
 	}
 
 	correlation := CorrelateRecoveryInstances(records, instances)
@@ -383,7 +392,73 @@ func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*mo
 	tracker := &jointFailureTracker{exec: r, winners: winnersBySession}
 	r.collectRecoveryStops(ctx, results, correlation.Winners, pending, tracker)
 
-	return r.buildRecoveredInstances(correlation.Winners, indexRecordsBySession(records)), nil
+	outcomes := r.classifyNonWinningOutcomes(ctx, records, instances, correlation.Winners, winnersBySession)
+	return r.buildRecoveredInstances(correlation.Winners, indexRecordsBySession(records)), outcomes, nil
+}
+
+func enumerationFailedOutcomes(ctx context.Context, records []*models.ExecutorRunning) map[string]RecoveryCandidateOutcome {
+	outcome := RecoveryOutcomeEnumerationFailed
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		outcome = RecoveryCandidateOutcome("deadline")
+	case errors.Is(ctx.Err(), context.Canceled):
+		outcome = RecoveryCandidateOutcome("canceled")
+	}
+	outcomes := make(map[string]RecoveryCandidateOutcome, len(records))
+	for _, rec := range records {
+		if rec != nil && rec.SessionID != "" {
+			outcomes[rec.SessionID] = outcome
+		}
+	}
+	return outcomes
+}
+
+func (r *StandaloneExecutor) classifyNonWinningOutcomes(
+	ctx context.Context,
+	records []*models.ExecutorRunning,
+	instances []*agentctl.InstanceInfo,
+	winners map[string]*agentctl.InstanceInfo,
+	initialWinners map[string]*agentctl.InstanceInfo,
+) map[string]RecoveryCandidateOutcome {
+	outcomes := make(map[string]RecoveryCandidateOutcome)
+	instancesBySession := make(map[string]bool, len(instances))
+	for _, inst := range instances {
+		if inst != nil && inst.SessionID != "" {
+			instancesBySession[inst.SessionID] = true
+		}
+	}
+	for _, rec := range records {
+		if rec == nil || rec.SessionID == "" {
+			continue
+		}
+		if _, isWinner := winners[rec.SessionID]; isWinner {
+			continue
+		}
+		outcomes[rec.SessionID] = r.classifyDroppedOrNonWinningCandidate(ctx, rec.SessionID, instancesBySession, initialWinners)
+	}
+	return outcomes
+}
+
+func (r *StandaloneExecutor) classifyDroppedOrNonWinningCandidate(
+	ctx context.Context,
+	sessionID string,
+	instancesBySession map[string]bool,
+	initialWinners map[string]*agentctl.InstanceInfo,
+) RecoveryCandidateOutcome {
+	if _, wasWinner := initialWinners[sessionID]; wasWinner {
+		switch {
+		case errors.Is(ctx.Err(), context.DeadlineExceeded):
+			return RecoveryCandidateOutcome("deadline")
+		case errors.Is(ctx.Err(), context.Canceled):
+			return RecoveryCandidateOutcome("canceled")
+		default:
+			return RecoveryOutcomeUnknown
+		}
+	}
+	if !instancesBySession[sessionID] {
+		return RecoveryOutcomeNoMatchingInstance
+	}
+	return RecoveryOutcomeUnknown
 }
 
 // recoveryStopOutcome is one instance's bounded stop attempt result.

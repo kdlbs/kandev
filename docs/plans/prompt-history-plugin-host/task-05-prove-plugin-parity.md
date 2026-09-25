@@ -19,6 +19,14 @@ system_design:
 
 # Task 05: Prove Prompt-History Plugin Parity
 
+
+## Replacement scope, 2026-09-16
+
+The [conversation storage replacement](../conversation-storage-replacement/plan.md) owns the next implementation.
+This file preserves historical scope and results. Do not execute its durable replay mechanics as new work.
+The replacement work orders preserve public behavior and provide new source-reconciliation, upgrade, and E2E evidence.
+
+
 ## Scope
 
 Add a test-only external-style fixture plugin that implements prompt history through `@kandev/plugin-sdk` and the published Host APIs only. Use it to prove the prerequisite boundary; do not ship it as the production plugin or delete core code.

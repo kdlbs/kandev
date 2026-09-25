@@ -71,7 +71,7 @@ test("saves, discards, copies and reloads both presentation choices without chan
 }, testInfo) => {
   test.setTimeout(240_000);
   const original = await captureThreadSettings(apiClient);
-  const sidebar = (await apiClient.getUserSettings()).settings.sidebar_views;
+  const sidebar = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace;
   try {
     await testPage.setViewportSize({ width: 1440, height: 1100 });
     for (const name of ["A display settings", "B display settings", "C display settings"]) {
@@ -144,7 +144,9 @@ test("saves, discards, copies and reloads both presentation choices without chan
     expect(
       saved.thread_views.find((view) => view.id === saved.thread_active_view_id),
     ).toMatchObject({ layout: "grid", auto_hide_composer: true, max_columns: 2 });
-    expect((await apiClient.getUserSettings()).settings.sidebar_views).toEqual(sidebar);
+    expect((await apiClient.getUserSettings()).settings.sidebar_views_by_workspace).toEqual(
+      sidebar,
+    );
     await assertNoHorizontalOverflow(testPage, "desktop saved presentation round trip");
   } finally {
     await apiClient.saveUserSettings(original);

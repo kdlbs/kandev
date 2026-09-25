@@ -93,5 +93,8 @@
   "severityBlocker": "阻斷",
   "severityMajor": "嚴重",
   "severityMinor": "次要",
-  "severityNit": "細節"
+  "severityNit": "細節",
+  "commentOnFile": "評論檔案",
+  "fileComment": "檔案評論",
+  "fileComments": "檔案評論"
 }

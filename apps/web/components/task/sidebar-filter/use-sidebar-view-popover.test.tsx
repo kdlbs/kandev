@@ -12,29 +12,38 @@ const ALL_VIEW: SidebarView = {
 };
 
 const mockState = vi.hoisted(() => ({
-  sidebarViews: {
-    views: [] as SidebarView[],
-    activeViewId: "view-all",
-    draft: null as { baseViewId: string } | null,
+  workspaces: { activeId: "ws" as string | null },
+  sidebarViewsByWorkspace: {
+    ws: {
+      views: [] as SidebarView[],
+      activeViewId: "view-all",
+      draft: null as { baseViewId: string } | null,
+      syncError: null,
+    },
   },
   createSidebarView: vi.fn<() => string | null>(),
 }));
 
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({ getState: () => mockState }),
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
 }));
 
 import { getNewViewDisabledReason, useSidebarViewPopover } from "./use-sidebar-view-popover";
 
 beforeEach(() => {
-  mockState.sidebarViews.views = [ALL_VIEW];
-  mockState.sidebarViews.activeViewId = ALL_VIEW.id;
-  mockState.sidebarViews.draft = null;
+  mockState.workspaces.activeId = "ws";
+  mockState.sidebarViewsByWorkspace.ws.views = [ALL_VIEW];
+  mockState.sidebarViewsByWorkspace.ws.activeViewId = ALL_VIEW.id;
+  mockState.sidebarViewsByWorkspace.ws.draft = null;
   mockState.createSidebarView.mockReset();
   mockState.createSidebarView.mockImplementation(() => {
     const created = { ...ALL_VIEW, id: "view-new", name: "New view" };
-    mockState.sidebarViews.views = [...mockState.sidebarViews.views, created];
-    mockState.sidebarViews.activeViewId = created.id;
+    mockState.sidebarViewsByWorkspace.ws.views = [
+      ...mockState.sidebarViewsByWorkspace.ws.views,
+      created,
+    ];
+    mockState.sidebarViewsByWorkspace.ws.activeViewId = created.id;
     return created.id;
   });
 });
@@ -63,7 +72,7 @@ describe("useSidebarViewPopover", () => {
     expect(result.current.renameRequestedViewId).toBeNull();
 
     act(() => expect(result.current.startNewView()).toBe(true));
-    mockState.sidebarViews.views = [ALL_VIEW];
+    mockState.sidebarViewsByWorkspace.ws.views = [ALL_VIEW];
     rerender();
     await waitFor(() => expect(result.current.renameRequestedViewId).toBeNull());
   });
@@ -72,14 +81,14 @@ describe("useSidebarViewPopover", () => {
     expect(getNewViewDisabledReason(1, true)).toMatch(/save or discard/i);
     expect(getNewViewDisabledReason(50, false)).toMatch(/50/);
 
-    mockState.sidebarViews.draft = { baseViewId: ALL_VIEW.id };
+    mockState.sidebarViewsByWorkspace.ws.draft = { baseViewId: ALL_VIEW.id };
     const { result, rerender } = renderHook(() => useSidebarViewPopover());
     expect(result.current.newViewDisabledReason).toMatch(/save or discard/i);
     act(() => expect(result.current.startNewView()).toBe(false));
     expect(mockState.createSidebarView).not.toHaveBeenCalled();
 
-    mockState.sidebarViews.draft = null;
-    mockState.sidebarViews.views = Array.from({ length: 50 }, (_, index) => ({
+    mockState.sidebarViewsByWorkspace.ws.draft = null;
+    mockState.sidebarViewsByWorkspace.ws.views = Array.from({ length: 50 }, (_, index) => ({
       ...ALL_VIEW,
       id: `view-${index}`,
       name: `View ${index}`,
@@ -89,4 +98,21 @@ describe("useSidebarViewPopover", () => {
     act(() => expect(result.current.startNewView()).toBe(false));
     expect(mockState.createSidebarView).not.toHaveBeenCalled();
   });
+});
+
+it("dismisses an editor when workspace changes even with identical view IDs", () => {
+  const { result, rerender } = renderHook(() => useSidebarViewPopover());
+  act(() => result.current.onOpenChange(true));
+  expect(result.current.open).toBe(true);
+  mockState.workspaces.activeId = "other";
+  rerender();
+  expect(result.current.open).toBe(false);
+});
+
+it("ignores a create callback retained from a previous workspace", () => {
+  const { result } = renderHook(() => useSidebarViewPopover());
+  const stale = result.current.startNewView;
+  mockState.workspaces.activeId = "other";
+  act(() => expect(stale()).toBe(false));
+  expect(mockState.createSidebarView).not.toHaveBeenCalled();
 });

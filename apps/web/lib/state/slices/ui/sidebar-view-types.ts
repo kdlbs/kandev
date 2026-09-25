@@ -49,6 +49,9 @@ export type SidebarView = {
 };
 
 export type SidebarSliceState = {
+  syncPending?: boolean;
+  serverRevision?: number | null;
+  deferredServerState?: SidebarSliceState | null;
   views: SidebarView[];
   activeViewId: string;
   draft: SidebarViewDraft | null;

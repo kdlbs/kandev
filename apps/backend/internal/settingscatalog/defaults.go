@@ -637,11 +637,11 @@ func userSettingsDomain() DomainDescriptor {
 		"show_scroll_to_start", "scroll to start", "boolean", "show_transcript_auto_scroll_control", "transcript scroll control", "boolean", "show_todo_list_panel", "todo list panel", "boolean",
 		"show_todo_list_panel_only_when_not_empty", "todo list empty state", "boolean", "show_release_notification", "release notification", "boolean", "release_notes_last_seen_version", "release notes version", "string",
 		"lsp_auto_start_languages", "LSP auto start", "array", "lsp_auto_install_languages", "LSP auto install", "array", "lsp_server_configs", "LSP server configs", "object",
-		"lsp_status_location", "LSP status location", "string", "saved_layouts", "saved layouts", "array", "sidebar_views", "sidebar views", "array",
+		"lsp_status_location", "LSP status location", "string", "saved_layouts", "saved layouts", "array", "sidebar_views", "sidebar views", "array", "sidebar_layout_state", "sidebar layout state", "object",
 		"sidebar_active_view_id", "active sidebar view", "string", "sidebar_draft", "sidebar draft", "object", "thread_views", "thread views", "array",
 		"thread_active_view_id", "active thread view", "string", "thread_view_draft", "thread draft", "object", "sidebar_task_prefs", "sidebar task preferences", "object",
 		"sidebar_task_color_automation", "sidebar color automation", "object", "sidebar_task_colors", "sidebar task colors", "object", "sidebar_task_color_patch", "sidebar task color patch", "object", "task_create_last_used", "last task create values", "object",
-		"jira_saved_views", "Jira saved views", "object", "jira_task_presets", "Jira task presets", "object", "github_saved_presets", "GitHub saved presets", "object",
+		"jira_saved_views", "Jira saved views", "object", "jira_default_view_id", "Jira default view", "string", "jira_task_presets", "Jira task presets", "object", "github_saved_presets", "GitHub saved presets", "object",
 		"github_default_query_presets", "GitHub query presets", "object", "gitlab_saved_presets", "GitLab saved presets", "object", "azure_devops_browse_preferences", "Azure DevOps browse preferences", "object",
 		"default_utility_agent_id", "default utility agent", "string", "default_utility_model", "default utility model", "string", "default_utility_agent_profile_id", "default utility profile", "string",
 		"keyboard_shortcuts", "keyboard shortcuts", "object", "terminal_link_behavior", "terminal link behavior", "string", "terminal_font_family", "terminal font family", "string",
@@ -654,6 +654,13 @@ func userSettingsDomain() DomainDescriptor {
 	fields := make([]FieldDescriptor, 0, len(values)/3)
 	for index := 0; index+2 < len(values); index += 3 {
 		field := preferenceField(values[index], values[index+1], values[index+2])
+		if values[index] == "sidebar_layout_state" {
+			// The update key is an atomic workspace-scoped operation. Reads
+			// project the complete persisted map so settings discovery can
+			// inspect it without exposing a whole-map replacement contract.
+			field.FieldPath = "sidebar_layouts_by_workspace"
+			field.Schema = map[string]any{"type": "object"}
+		}
 		switch values[index] {
 		case "keyboard_shortcuts":
 			field.Schema = keyboardShortcutsSchema()
@@ -748,6 +755,7 @@ func profileDomain() DomainDescriptor {
 			profileWritable("agent_profile.allow_indexing", "allow_indexing", "Allow indexing", "boolean", "Legacy compatibility permission.", false),
 			profileWritable("agent_profile.auto_approve", "auto_approve", "Auto approve", "boolean", "Automatically approve supported agent permissions.", false),
 			profileWritable("agent_profile.cli_passthrough", "cli_passthrough", "CLI passthrough", "boolean", "Enable CLI passthrough mode.", false),
+			profileWritableWithDefault("agent_profile.cursor_mcp_auth_enabled", "cursor_mcp_auth_enabled", "Share Cursor MCP credentials", "boolean", "Reuse local Cursor MCP credentials when a Cursor profile launches.", "true for new profiles"),
 			profileWritable("agent_profile.enabled", "enabled", "Enabled", "boolean", "Allow this profile for new work.", false),
 			profileWritable("agent_profile.cli_flags", "cli_flags", "CLI flags", "array", "Complete replacement list of validated CLI flags.", true),
 			profileWritableSensitive("agent_profile.env_vars", "env_vars", "Environment variables", "array", "Complete replacement list. Secret values remain references.", true),
@@ -800,6 +808,12 @@ func profileWritable(key, path, label, jsonType, description string, replacement
 			"x-kandev-dynamic":     "provider_config_options",
 		}
 	}
+	return field
+}
+
+func profileWritableWithDefault(key, path, label, jsonType, description, defaultBehavior string) FieldDescriptor {
+	field := profileWritable(key, path, label, jsonType, description, false)
+	field.DefaultBehavior = defaultBehavior
 	return field
 }
 

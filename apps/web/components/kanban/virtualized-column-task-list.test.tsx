@@ -21,6 +21,7 @@ import {
   computeKeyboardInsertionEdge,
   DroppableTaskRow,
   findTaskIndex,
+  getCompactTaskPrefixHeight,
   type KeyboardReorderDraft,
 } from "./virtualized-column-task-list";
 
@@ -63,6 +64,40 @@ describe("findTaskIndex", () => {
     expect(findTaskIndex(orderedTasks, "missing")).toBeNull();
     expect(findTaskIndex(orderedTasks, null)).toBeNull();
     expect(findTaskIndex(orderedTasks, undefined)).toBeNull();
+  });
+});
+
+describe("getCompactTaskPrefixHeight", () => {
+  it("uses measured rows when available and estimates the rest of the six-row prefix", () => {
+    const taskIds = ["a", "b", "c", "d", "e", "f", "g"];
+    const estimateSize = (index: number) => 10 + index;
+
+    expect(
+      getCompactTaskPrefixHeight(
+        taskIds,
+        [
+          { index: 0, key: "a", size: 111 },
+          { index: 3, key: "d", size: 222 },
+          { index: 6, key: "g", size: 900 },
+        ],
+        estimateSize,
+      ),
+    ).toBe(385);
+  });
+
+  it("keeps the queued divider estimate in its logical row and excludes later tasks", () => {
+    const taskIds = ["a", "b", "c", "queued", "e", "f", "g"];
+    const estimateSize = (index: number) => (index === 3 ? 136 : 96);
+
+    expect(getCompactTaskPrefixHeight(taskIds, [], estimateSize)).toBe(616);
+  });
+
+  it("ignores sparse virtualizer measurement holes", () => {
+    const measurements = [] as Array<{ index: number; key: string; size: number }>;
+    measurements[0] = { index: 0, key: "a", size: 111 };
+    measurements[2] = { index: 2, key: "c", size: 333 };
+
+    expect(getCompactTaskPrefixHeight(["a", "b", "c"], measurements, () => 96)).toBe(540);
   });
 });
 

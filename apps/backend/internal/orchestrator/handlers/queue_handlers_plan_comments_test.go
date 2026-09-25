@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
+	"github.com/kandev/kandev/internal/task/repository/previewfeedbacktx"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
@@ -57,6 +58,15 @@ type recordingPlanCommentAttachmentPreparer struct {
 	prepared []string
 	claim    messagequeue.QueueAttachmentClaim
 	err      error
+	preview  []v1.MessageAttachment
+}
+
+func (p *recordingPlanCommentAttachmentPreparer) PreviewFeedbackAttachments(
+	_ context.Context,
+	_ string,
+	_ []models.TaskPreviewFeedbackRef,
+) ([]v1.MessageAttachment, error) {
+	return p.preview, p.err
 }
 
 func (*recordingPlanCommentAttachmentPreparer) ClaimMessageAttachments(
@@ -134,6 +144,31 @@ func TestWsQueueMessageAdmitsPlanCommentsAndPublishesSnapshot(t *testing.T) {
 	require.Same(t, snapshot, eventBus.events[0].Data)
 }
 
+func TestWsQueueMessageAdmitsPreviewFeedbackAndPublishesSnapshot(t *testing.T) {
+	handlers, service, eventBus := newPlanCommentQueueHandlers(t)
+	handlers.SetAttachmentClaimer(&recordingPlanCommentAttachmentPreparer{})
+	refs := []models.TaskPreviewFeedbackRef{{ID: "preview", Version: 3}}
+	snapshot := &models.TaskPreviewFeedbackSnapshot{TaskID: "task", Revision: 7}
+	service.result = &messagequeue.PlanCommentQueueResult{
+		Message: &messagequeue.QueuedMessage{
+			ID: "client-queue", SessionID: "session", TaskID: "task",
+			Content: "resolved feedback", QueuedBy: messagequeue.QueuedByUser,
+		},
+		PreviewSnapshot: snapshot,
+	}
+
+	response, err := handlers.wsQueueMessage(context.Background(), createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
+		"session_id": "session", "task_id": "task", "session_incarnation_id": "incarnation",
+		"client_queue_id": "client-queue", "preview_feedback_refs": refs,
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	require.NotNil(t, service.request)
+	require.Equal(t, refs, service.request.PreviewFeedbackRefs)
+	require.Equal(t, []string{events.TaskPreviewFeedbackChanged, events.MessageQueueStatusChanged}, eventBus.subjects)
+	require.Same(t, snapshot, eventBus.events[0].Data)
+}
+
 func TestWsQueueMessageValidatesPlanCommentAdmission(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -191,6 +226,13 @@ func TestWsQueueMessageMapsPlanCommentConflicts(t *testing.T) {
 			code: ws.ErrorCodePlanCommentsChanged,
 		},
 		{
+			name: "preview feedback changed",
+			err: &previewfeedbacktx.FeedbackChangedError{Snapshot: &models.TaskPreviewFeedbackSnapshot{
+				TaskID: "task", Revision: 9,
+			}},
+			code: ws.ErrorCodePreviewFeedbackChanged,
+		},
+		{
 			name: "primary changed",
 			err: &plancommenttx.PrimarySessionChangedError{
 				SessionID: "new-primary", State: models.TaskSessionStateWaitingForInput,
@@ -210,6 +252,7 @@ func TestWsQueueMessageMapsPlanCommentConflicts(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			handlers, service, eventBus := newPlanCommentQueueHandlers(t)
+			handlers.SetAttachmentClaimer(&recordingPlanCommentAttachmentPreparer{})
 			service.err = test.err
 			response, err := handlers.wsQueueMessage(context.Background(), createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
 				"session_id": "session", "task_id": "task", "client_queue_id": "queue",

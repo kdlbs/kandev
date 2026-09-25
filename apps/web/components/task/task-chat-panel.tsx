@@ -12,6 +12,7 @@ import {
   type MutableRefObject,
   type RefObject,
 } from "react";
+import { SessionRecoveryProvider } from "./chat/session-recovery-context";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { ComposerFooterAllocation } from "./chat/composer-disclosure";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
@@ -54,10 +55,15 @@ import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
 import { useTranslation } from "react-i18next";
 
 import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-window";
+import { LaunchWarning } from "./launch-warning";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
 import { statusSummaryTaskError } from "@/lib/task-status-summary";
+import { LaunchQueueStatus } from "./launch-queue-status";
+import { WipQueueStatus } from "./wip-queue-status";
+import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
+import { JumpToLatestButton } from "./chat/jump-to-latest-button";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -79,6 +85,52 @@ export type PendingMessageScrollTarget = {
   token: number;
   hostPanelId: string;
 };
+
+export function cancelOlderTranscriptNavigation(params: {
+  sessionId: string | null;
+  panelId: string | null;
+  dockviewTarget: TranscriptScrollTarget | null;
+  clearDockviewTarget: (token: number) => void;
+  pendingScrollTarget?: PendingMessageScrollTarget | null;
+  pendingScrollToMessageId?: string | null;
+  consumePendingMessage: (messageId: string) => void;
+  cancelPendingMessage: () => void;
+  cancelPendingScrollToStart: () => void;
+  clearPendingScrollToStart: () => void;
+}): void {
+  const {
+    sessionId,
+    panelId,
+    dockviewTarget,
+    clearDockviewTarget,
+    pendingScrollTarget,
+    pendingScrollToMessageId,
+    consumePendingMessage,
+    cancelPendingMessage,
+    cancelPendingScrollToStart,
+    clearPendingScrollToStart,
+  } = params;
+  if (
+    sessionId &&
+    panelId &&
+    dockviewTarget?.sessionId === sessionId &&
+    dockviewTarget.hostPanelId === panelId
+  ) {
+    clearDockviewTarget(dockviewTarget.token);
+  }
+
+  let pendingMessageId = pendingScrollToMessageId ?? null;
+  if (pendingScrollTarget) {
+    pendingMessageId =
+      pendingScrollTarget.sessionId === sessionId ? pendingScrollTarget.messageId : null;
+  }
+  if (pendingMessageId) {
+    cancelPendingMessage();
+    consumePendingMessage(pendingMessageId);
+  }
+  cancelPendingScrollToStart();
+  clearPendingScrollToStart();
+}
 /** Reports whether a target has a dedicated DOM row in the transcript. */
 export function isMessageRowRendered(items: readonly RenderItem[], messageId: string): boolean {
   return items.some((item) => item.type === "message" && item.message.id === messageId);
@@ -199,6 +251,7 @@ type PendingMessageScrollEffectOptions = {
     requestKeys: MutableRefObject<Set<string>>;
     completedAround: MutableRefObject<Set<string>>;
     targetIdentity: MutableRefObject<string | null>;
+    cancelledTargetKey: MutableRefObject<string | null>;
     scrollSucceededTarget: MutableRefObject<string | null>;
     reassertionTimer: MutableRefObject<number | null>;
     reassertionAttempted: MutableRefObject<Set<string>>;
@@ -321,10 +374,15 @@ function usePendingMessageScrollEffect(options: PendingMessageScrollEffectOption
     }
     if (!effectiveSessionId || !effectiveMessageId || !effectiveTargetKey) {
       refs.targetIdentity.current = null;
+      refs.cancelledTargetKey.current = null;
       refs.completedAround.current.clear();
       cancelReassertion();
       setIsLoading(false);
       return;
+    }
+    if (refs.cancelledTargetKey.current === effectiveTargetKey) return;
+    if (refs.cancelledTargetKey.current !== effectiveTargetKey) {
+      refs.cancelledTargetKey.current = null;
     }
     if (refs.targetIdentity.current !== effectiveTargetKey) {
       refs.targetIdentity.current = effectiveTargetKey;
@@ -393,6 +451,7 @@ export function usePendingMessageScroll({
       requestKeys: { current: new Set<string>() },
       completedAround: { current: new Set<string>() },
       targetIdentity: { current: null as string | null },
+      cancelledTargetKey: { current: null as string | null },
       scrollSucceededTarget: { current: null as string | null },
       reassertionTimer: { current: null as number | null },
       reassertionAttempted: { current: new Set<string>() },
@@ -437,7 +496,89 @@ export function usePendingMessageScroll({
     refs,
     setIsLoading,
   });
-  return { isLoading };
+  const cancel = useCallback(() => {
+    if (effectiveTargetKey) refs.cancelledTargetKey.current = effectiveTargetKey;
+    refs.targetIdentity.current = null;
+    refs.lifecycle.current = { ...refs.lifecycle.current, messageId: null, target: null };
+    refs.completedAround.current.clear();
+    cancelTargetReassertion(refs.reassertionTimer);
+    setIsLoading(false);
+  }, [effectiveTargetKey, refs]);
+  return { isLoading, cancel };
+}
+
+const SCROLL_TO_START_RETRY_DELAY_MS = 50;
+const MAX_SCROLL_TO_START_ATTEMPTS = 120;
+
+type PendingScrollToStartOptions = {
+  messageListRef: RefObject<MessageListHandle | null>;
+  firstMessageId: string | null;
+  hasMore: boolean;
+  pending: boolean;
+  requestKey: number;
+  onComplete: (didScroll: boolean) => void;
+};
+
+/** Keeps a scroll-to-start request alive until the final page's row is mounted. */
+export function usePendingScrollToStart({
+  messageListRef,
+  firstMessageId,
+  hasMore,
+  pending,
+  requestKey,
+  onComplete,
+}: PendingScrollToStartOptions) {
+  const cancelRef = useRef<(() => void) | null>(null);
+  const cancel = useCallback(() => cancelRef.current?.(), []);
+  useEffect(() => {
+    if (!pending || hasMore) return;
+    if (!firstMessageId) {
+      onComplete(false);
+      return;
+    }
+
+    let cancelled = false;
+    let frameId: number | null = null;
+    let timeoutId: number | null = null;
+    let attempts = 0;
+    const stop = () => {
+      cancelled = true;
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      frameId = null;
+      timeoutId = null;
+    };
+    cancelRef.current = stop;
+    const finish = (didScroll: boolean) => {
+      stop();
+      if (cancelRef.current === stop) cancelRef.current = null;
+      onComplete(didScroll);
+    };
+    const attempt = () => {
+      frameId = null;
+      timeoutId = null;
+      if (cancelled) return;
+      attempts += 1;
+      const didScroll = Boolean(
+        messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" }),
+      );
+      if (didScroll || attempts >= MAX_SCROLL_TO_START_ATTEMPTS) {
+        finish(didScroll);
+        return;
+      }
+      timeoutId = window.setTimeout(() => {
+        timeoutId = null;
+        attempt();
+      }, SCROLL_TO_START_RETRY_DELAY_MS);
+    };
+
+    frameId = requestAnimationFrame(attempt);
+    return () => {
+      stop();
+      if (cancelRef.current === stop) cancelRef.current = null;
+    };
+  }, [firstMessageId, hasMore, messageListRef, onComplete, pending, requestKey]);
+  return cancel;
 }
 
 /** Computes the render-item key the unread "New" divider should appear
@@ -568,9 +709,13 @@ type TaskChatPanelProps = {
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
   /** Callback to open a file at a specific line (for comment clicks) */
-  onOpenFileAtLine?: (filePath: string) => void;
+  onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
   /** Hide the sessions dropdown (session tabs in dockview replace it) */
   hideSessionsDropdown?: boolean;
+  /** Mobile layout renders the task queue above its session picker. */
+  hideLaunchQueueStatus?: boolean;
+  /** Mobile layout renders the WIP queue above its session picker. */
+  hideWipQueueStatus?: boolean;
   /**
    * Embedded multi-panel hosts do not own the global workbench or shortcuts.
    * They keep the conversation and composer, but suppress those side effects.
@@ -996,13 +1141,16 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   pendingScrollToMessageId = null,
   pendingScrollTarget,
   onPendingScrollConsumed,
+  hideLaunchQueueStatus = false,
+  hideWipQueueStatus = false,
 }: TaskChatPanelProps) {
   const isArchived = useIsTaskArchived();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
   const launchErrorContext = useTaskLaunchErrorContext();
+  const summaryTaskId = statusTaskId ?? taskIdHint ?? launchErrorContext?.taskId ?? null;
   const launchStatusSummary = useTaskStatusSummary(
-    launchErrorContext?.taskId,
-    launchErrorContext?.statusSummary,
+    summaryTaskId,
+    launchErrorContext?.taskId === summaryTaskId ? launchErrorContext.statusSummary : undefined,
   );
   const { t } = useTranslation();
   useSettingsData(true);
@@ -1035,6 +1183,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarificationGroup,
   } = panelState;
   const taskLaunchError = statusSummaryTaskError(launchStatusSummary);
+  const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
   const launchErrorOwned = Boolean(taskLaunchError);
   const showAgentStartHint = useComposerAgentStartHint(
     resolvedSessionId,
@@ -1073,18 +1222,19 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     ),
     renderedMessageCount: allMessages.length,
   });
-  const { isLoading: isPendingJumpLoading } = usePendingMessageScroll({
-    messageListRef,
-    sessionId: resolvedSessionId,
-    messageId: pendingScrollToMessageId,
-    target: pendingScrollTarget,
-    onConsumed: onPendingScrollConsumed,
-    readinessKey: `${allMessages.length}:${isInitialMessagesLoading}:${
-      allMessages[0]?.id ?? ""
-    }:${allMessages.at(-1)?.id ?? ""}`,
-    isInitialMessagesLoading,
-    isVisible,
-  });
+  const { isLoading: isPendingJumpLoading, cancel: cancelPendingMessageScroll } =
+    usePendingMessageScroll({
+      messageListRef,
+      sessionId: resolvedSessionId,
+      messageId: pendingScrollToMessageId,
+      target: pendingScrollTarget,
+      onConsumed: onPendingScrollConsumed,
+      readinessKey: `${allMessages.length}:${isInitialMessagesLoading}:${
+        allMessages[0]?.id ?? ""
+      }:${allMessages.at(-1)?.id ?? ""}`,
+      isInitialMessagesLoading,
+      isVisible,
+    });
   const isJumpLoading = isDockviewJumpLoading || isPendingJumpLoading;
   const lastPromptMessageId = useMemo(() => getLastUserMessageId(allMessages), [allMessages]);
   const lastPromptMessage = useMemo(
@@ -1095,6 +1245,15 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     [allMessages, lastPromptMessageId],
   );
   const [lastPromptEdge, setLastPromptEdge] = useState<LastPromptEdge>("visible");
+  const [latestVisibilitySessionId, setLatestVisibilitySessionId] = useState<string | null>(null);
+  const onLatestVisibilityChange = useCallback(
+    (isVisible: boolean) => {
+      setLatestVisibilitySessionId(isVisible ? resolvedSessionId : null);
+    },
+    [resolvedSessionId],
+  );
+  const showJumpToLatest =
+    Boolean(resolvedSessionId) && latestVisibilitySessionId === resolvedSessionId;
   const showAnchoredPromptBar = useAppStore((state) => state.userSettings.showAnchoredPromptBar);
   const showScrollToLastPrompt = useAppStore((state) => state.userSettings.showScrollToLastPrompt);
   const showScrollToStart = useAppStore((state) => state.userSettings.showScrollToStart);
@@ -1124,25 +1283,63 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   // which grows as pages prepend) has settled on the true first prompt by the
   // time the scroll fires.
   const [pendingScrollToStart, setPendingScrollToStart] = useState(false);
+  const [scrollToStartRequest, setScrollToStartRequest] = useState(0);
   useDrainOlderMessages(resolvedSessionId, pendingScrollToStart && hasMore);
-  useEffect(() => {
-    if (!pendingScrollToStart || hasMore) return;
+  const completeScrollToStart = useCallback((didScroll: boolean) => {
     setPendingScrollToStart(false);
-    if (firstMessageId) {
-      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
-    }
-  }, [pendingScrollToStart, hasMore, firstMessageId]);
+    if (didScroll) setIsFirstMessageHidden(false);
+  }, []);
+  const cancelPendingScrollToStart = usePendingScrollToStart({
+    messageListRef,
+    firstMessageId,
+    hasMore,
+    pending: pendingScrollToStart,
+    requestKey: scrollToStartRequest,
+    onComplete: completeScrollToStart,
+  });
   const scrollToStart = useCallback(() => {
-    if (hasMore) {
-      setPendingScrollToStart(true);
-      return;
-    }
-    if (firstMessageId) {
-      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
-    }
-  }, [hasMore, firstMessageId]);
+    messageListRef.current?.claimReaderPosition?.();
+    setScrollToStartRequest((request) => request + 1);
+    setPendingScrollToStart(true);
+  }, []);
+  const jumpToLatest = useCallback(() => {
+    const dockviewState = useDockviewStore.getState();
+    cancelOlderTranscriptNavigation({
+      sessionId: resolvedSessionId,
+      panelId,
+      dockviewTarget: dockviewState.scrollTarget,
+      clearDockviewTarget: dockviewState.clearScrollTarget,
+      pendingScrollTarget,
+      pendingScrollToMessageId,
+      consumePendingMessage: (messageId) => onPendingScrollConsumed?.(messageId),
+      cancelPendingMessage: cancelPendingMessageScroll,
+      cancelPendingScrollToStart,
+      clearPendingScrollToStart: () => setPendingScrollToStart(false),
+    });
+    messageListRef.current?.scrollToLatest();
+  }, [
+    cancelPendingMessageScroll,
+    cancelPendingScrollToStart,
+    messageListRef,
+    onPendingScrollConsumed,
+    panelId,
+    pendingScrollTarget,
+    pendingScrollToMessageId,
+    resolvedSessionId,
+  ]);
   // Search can target backend rows before the visible transcript boundary.
-  const search = useSessionSearch(resolvedSessionId, loadMoreRaw);
+  const navigateSearchHit = useCallback(
+    (id: string) => {
+      if (!messageListRef.current?.scrollToMessage(id, { align: "center" })) return null;
+      return (
+        panelRef.current?.querySelector<HTMLElement>(
+          `.chat-message-list [id="msg-${CSS.escape(id)}"]`,
+        ) ?? null
+      );
+    },
+    [messageListRef],
+  );
+  const search = useSessionSearch(resolvedSessionId, loadMoreRaw, navigateSearchHit);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({
     containerRef: panelRef,
@@ -1160,110 +1357,140 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     [],
   );
   return (
-    <PanelRoot
-      ref={panelRef}
-      data-testid="session-chat"
-      data-panel-kind="session"
-      data-session-id={resolvedSessionId ?? undefined}
-      tabIndex={-1}
-      onMouseDown={handlePanelMouseDown}
-      className="outline-none"
+    <SessionRecoveryProvider
+      messagesLoading={messagesLoading}
+      session={session}
+      messages={[...allMessages, ...footerActionMessages]}
+      taskId={taskId}
+      enabled={!isArchived && !launchErrorOwned}
     >
-      <PanelBody padding={false} scroll={false} className="relative overflow-hidden">
-        <TaskMarkdownFileLinkProvider
-          taskId={taskId}
-          sessionId={resolvedSessionId}
-          worktreePath={getSessionWorkspacePath(session)}
-          onOpenFile={onOpenFile}
+      <PanelRoot
+        ref={panelRef}
+        data-testid="session-chat"
+        data-panel-kind="session"
+        data-session-id={resolvedSessionId ?? undefined}
+        tabIndex={-1}
+        onMouseDown={handlePanelMouseDown}
+        className="outline-none"
+      >
+        {!hideLaunchQueueStatus && <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />}
+        {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
+        <PanelBody
+          padding={false}
+          scroll={false}
+          className="relative flex min-h-0 flex-col overflow-hidden"
         >
-          <MessageList
-            ref={messageListRef}
-            items={groupedItems}
-            messages={allMessages}
-            footerActionMessages={footerActionMessages}
-            permissionsByToolCallId={permissionsByToolCallId}
-            childrenByParentToolCallId={childrenByParentToolCallId}
-            taskId={taskId ?? undefined}
-            sessionId={resolvedSessionId}
-            messagesLoading={messagesLoading}
-            historyRefreshPending={historyRefreshPending}
-            historyStatus={historyStatus}
-            historyError={historyError}
-            onRetryHistory={retryHistory}
-            isWorking={isWorking}
-            sessionState={session?.state}
-            worktreePath={getSessionWorkspacePath(session)}
-            onOpenFile={onOpenFile}
-            dividerBeforeItemKey={dividerBeforeItemKey}
-            lastPromptMessageId={lastPromptMessageId}
-            onLastPromptEdgeChange={setLastPromptEdge}
-            firstMessageId={firstMessageId}
-            onFirstMessageHiddenChange={setIsFirstMessageHidden}
-            anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
-            isVisible={transcriptIsVisible}
-            launchErrorOwned={launchErrorOwned}
-            launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
-            launchErrorOccurredAt={launchErrorOwned ? taskLaunchError?.occurred_at : undefined}
-            stickyPromptBar={
-              showAnchoredBar && lastPromptMessage ? (
-                <AnchoredLastPromptBar
-                  promptText={lastPromptMessage.content}
-                  isVisible={anchoredBarVisible}
-                  onScrollUp={scrollToLastPrompt}
-                  showScrollToLastPrompt={showScrollToLastPrompt}
-                  onHeightChange={setAnchoredBarHeight}
+          <div className="flex min-h-0 flex-1 flex-col">
+            {resolvedSessionId ? (
+              <div className="shrink-0 px-2">
+                <LaunchWarning sessionId={resolvedSessionId} />
+              </div>
+            ) : null}
+            <div className="min-h-0 flex-1">
+              <TaskMarkdownFileLinkProvider
+                taskId={taskId}
+                sessionId={resolvedSessionId}
+                worktreePath={getSessionWorkspacePath(session)}
+                onOpenFile={onOpenFile}
+              >
+                <MessageList
+                  ref={messageListRef}
+                  items={groupedItems}
+                  messages={allMessages}
+                  footerActionMessages={footerActionMessages}
+                  permissionsByToolCallId={permissionsByToolCallId}
+                  childrenByParentToolCallId={childrenByParentToolCallId}
+                  taskId={taskId ?? undefined}
+                  sessionId={resolvedSessionId}
+                  messagesLoading={messagesLoading}
+                  historyRefreshPending={historyRefreshPending}
+                  historyStatus={historyStatus}
+                  historyError={historyError}
+                  onRetryHistory={retryHistory}
+                  isWorking={isWorking}
+                  sessionState={session?.state}
+                  worktreePath={getSessionWorkspacePath(session)}
+                  onOpenFile={onOpenFile}
+                  dividerBeforeItemKey={dividerBeforeItemKey}
+                  lastPromptMessageId={lastPromptMessageId}
+                  onLastPromptEdgeChange={setLastPromptEdge}
+                  onLatestVisibilityChange={onLatestVisibilityChange}
+                  firstMessageId={firstMessageId}
+                  onFirstMessageHiddenChange={setIsFirstMessageHidden}
+                  anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
+                  isVisible={transcriptIsVisible}
+                  launchErrorOwned={launchErrorOwned}
+                  launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
+                  launchErrorOccurredAt={
+                    launchErrorOwned ? taskLaunchError?.occurred_at : undefined
+                  }
+                  stickyPromptBar={
+                    showAnchoredBar && lastPromptMessage ? (
+                      <AnchoredLastPromptBar
+                        promptText={lastPromptMessage.content}
+                        isVisible={anchoredBarVisible}
+                        onScrollUp={scrollToLastPrompt}
+                        showScrollToLastPrompt={showScrollToLastPrompt}
+                        onHeightChange={setAnchoredBarHeight}
+                      />
+                    ) : undefined
+                  }
                 />
-              ) : undefined
-            }
-          />
-        </TaskMarkdownFileLinkProvider>
-        {isJumpLoading && (
-          <div
-            data-testid="transcript-jump-loading"
-            role="status"
-            aria-live="polite"
-            className="absolute right-3 top-3 rounded-md bg-background px-2 py-1 text-xs text-muted-foreground shadow"
-          >
-            {t("task:loading")}
+              </TaskMarkdownFileLinkProvider>
+            </div>
           </div>
-        )}
-        <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
-      </PanelBody>
-      <ComposerFooterAllocation>
-        {!isArchived && (
-          <ClarificationPanelSection
-            pending={Boolean(pendingClarification)}
-            messages={pendingClarificationGroup}
-            agentDisconnected={session?.pending_action === null}
-            onResolved={handleClarificationResolved}
-            shortcutScopeRef={panelRef}
-            maxHeightVh={50}
+          {isJumpLoading && (
+            <div
+              data-testid="transcript-jump-loading"
+              role="status"
+              aria-live="polite"
+              className="absolute right-3 top-3 rounded-md bg-background px-2 py-1 text-xs text-muted-foreground shadow"
+            >
+              {t("task:loading")}
+            </div>
+          )}
+          <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
+        </PanelBody>
+        <ComposerFooterAllocation>
+          {!isArchived && (
+            <ClarificationPanelSection
+              pending={Boolean(pendingClarification)}
+              messages={pendingClarificationGroup}
+              agentDisconnected={session?.pending_action === null}
+              onResolved={handleClarificationResolved}
+              onLateAnswer={lateAnswer.send}
+              lateAnswerState={lateAnswer.state}
+              shortcutScopeRef={panelRef}
+              maxHeightVh={50}
+            />
+          )}
+          <ChatFooter
+            isArchived={isArchived}
+            chatInputRef={chatInputRef}
+            clarificationKey={clarificationKey}
+            onClarificationResolved={handleClarificationResolved}
+            handleSubmit={handleSubmit}
+            handleCancelTurn={handleCancelTurn}
+            showRequestChangesTooltip={showRequestChangesTooltip}
+            onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
+            panelState={panelState}
+            isSending={isSending}
+            hideSessionsDropdown={hideSessionsDropdown}
+            hidePlanMode={embedded}
+            showScrollToLastPrompt={showScrollButton}
+            onScrollToLastPrompt={scrollToLastPrompt}
+            lastPromptScrollDirection={scrollDirection}
+            showJumpToLatest={showJumpToLatest}
+            onJumpToLatest={jumpToLatest}
+            showScrollToStart={showScrollToStartButton}
+            onScrollToStart={scrollToStart}
+            statusTaskId={statusTaskId ?? taskIdHint}
+            showAgentStartHint={showAgentStartHint}
+            launchErrorOwned={launchErrorOwned}
           />
-        )}
-        <ChatFooter
-          isArchived={isArchived}
-          chatInputRef={chatInputRef}
-          clarificationKey={clarificationKey}
-          onClarificationResolved={handleClarificationResolved}
-          handleSubmit={handleSubmit}
-          handleCancelTurn={handleCancelTurn}
-          showRequestChangesTooltip={showRequestChangesTooltip}
-          onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
-          panelState={panelState}
-          isSending={isSending}
-          hideSessionsDropdown={hideSessionsDropdown}
-          hidePlanMode={embedded}
-          showScrollToLastPrompt={showScrollButton}
-          onScrollToLastPrompt={scrollToLastPrompt}
-          lastPromptScrollDirection={scrollDirection}
-          showScrollToStart={showScrollToStartButton}
-          onScrollToStart={scrollToStart}
-          statusTaskId={statusTaskId ?? taskIdHint}
-          showAgentStartHint={showAgentStartHint}
-          launchErrorOwned={launchErrorOwned}
-        />
-      </ComposerFooterAllocation>
-    </PanelRoot>
+        </ComposerFooterAllocation>
+      </PanelRoot>
+    </SessionRecoveryProvider>
   );
 });
 
@@ -1285,6 +1512,8 @@ type ChatFooterProps = {
   showScrollToLastPrompt: boolean;
   onScrollToLastPrompt: () => void;
   lastPromptScrollDirection: "up" | "down";
+  showJumpToLatest: boolean;
+  onJumpToLatest: () => void;
   showScrollToStart: boolean;
   onScrollToStart: () => void;
   statusTaskId: string | null;
@@ -1314,6 +1543,8 @@ function ChatFooter({
   showScrollToLastPrompt,
   onScrollToLastPrompt,
   lastPromptScrollDirection,
+  showJumpToLatest,
+  onJumpToLatest,
   showScrollToStart,
   onScrollToStart,
   statusTaskId,
@@ -1323,8 +1554,9 @@ function ChatFooter({
   const { t } = useTranslation();
   if (isArchived) {
     return (
-      <div className="bg-muted/50 flex-shrink-0 px-4 py-3 text-center text-sm text-muted-foreground border-t">
-        {t("task:thisTaskIsArchivedAndRead")}
+      <div className="bg-muted/50 flex flex-shrink-0 items-center border-t px-4 py-2 text-sm text-muted-foreground">
+        <span className="flex-1 text-center">{t("task:thisTaskIsArchivedAndRead")}</span>
+        <JumpToLatestButton isVisible={showJumpToLatest} onClick={onJumpToLatest} />
       </div>
     );
   }
@@ -1344,6 +1576,8 @@ function ChatFooter({
       showScrollToLastPrompt={showScrollToLastPrompt}
       onScrollToLastPrompt={onScrollToLastPrompt}
       lastPromptScrollDirection={lastPromptScrollDirection}
+      showJumpToLatest={showJumpToLatest}
+      onJumpToLatest={onJumpToLatest}
       showScrollToStart={showScrollToStart}
       onScrollToStart={onScrollToStart}
       statusTaskId={statusTaskId}

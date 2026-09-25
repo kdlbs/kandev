@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	fixURL   = "/settings/system/data-storage"
+	fixURL   = "/settings/system/storage?tab=office-retention"
 	fixLabel = "Review retention settings"
 )
 

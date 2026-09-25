@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -286,6 +287,20 @@ func (s *Service) dispatchSendNowSelection(
 		}
 		return len(entries), nil
 	}
+	if sessionState == models.TaskSessionStateCreated {
+		// A queued destination has no running provider for promptTask to reach.
+		// Send Now is an explicit user action, so its worker starts the prepared
+		// session through the manual admission path. A failed start returns the
+		// claim to the queue, preserving the pending message for retry.
+		dispatched, err := s.claimAndDispatchSendNow(ctx, identity, sessionID, scope, entries)
+		if err != nil {
+			return 0, err
+		}
+		if !dispatched {
+			return 0, ErrSendNowQueueChanged
+		}
+		return len(entries), nil
+	}
 	if !errors.Is(promptabilityErr, ErrAgentPromptInProgress) {
 		return 0, promptabilityErr
 	}
@@ -558,6 +573,7 @@ func (s *Service) claimSendNowExecution(sessionID, dispatchID string) error {
 	return nil
 }
 
+//nolint:nestif // Send Now keeps transcript, ceiling, and created-session ownership in one dispatch boundary.
 func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.SendNowClaim) (bool, error) {
 	sessionID := claim.Dispatch.SessionID
 	deliveryAttempted := false
@@ -569,18 +585,233 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 	if err := s.prepareSendNowTranscript(ctx, claim, attachments, durablePlanComments); err != nil {
 		return false, err
 	}
+	ceilingClaim, ceilingQueued, err := s.claimCeilingDeferredLaunch(
+		ctx, claim.Dispatch.TaskID, sessionID, ceilingClaimOwnerSendNow,
+	)
+	if err != nil {
+		return false, err
+	}
+	if ceilingQueued && ceilingClaim == nil {
+		return false, ErrCeilingLaunchClaimed
+	}
+	var currentTask *models.Task
+	if ceilingClaim != nil {
+		defer ceilingClaim.releaseIfHeld(ctx)
+		var taskErr error
+		currentTask, taskErr = s.repo.GetTask(ctx, claim.Dispatch.TaskID)
+		if taskErr != nil {
+			return false, fmt.Errorf("reload task before send now launch: %w", taskErr)
+		}
+		originalDeferral := ceilingClaim.deferral
+		boundDeferral, bindErr := s.enrichCeilingDeferralBinding(ctx, currentTask, originalDeferral)
+		if bindErr != nil {
+			return false, fmt.Errorf("bind deferred workflow entry before send now launch: %w", bindErr)
+		}
+		matches, compareErr := ceilingDeferralsEquivalentForAdmission(boundDeferral, originalDeferral)
+		if compareErr != nil {
+			return false, fmt.Errorf("compare deferred workflow entry before send now launch: %w", compareErr)
+		}
+		if !matches {
+			return false, fmt.Errorf("%w: deferred launch changed before Send Now", ErrCeilingLaunchSuperseded)
+		}
+		ceilingClaim.deferral = boundDeferral
+		ctx = withCeilingDispatchClaim(ctx, ceilingClaim)
+		if disposition, detail, validationErr := s.validateCeilingEntry(ctx, currentTask, ceilingClaim.deferral); validationErr != nil {
+			return false, validationErr
+		} else if disposition != ceilingEntryValid {
+			if detail == "" {
+				detail = "deferred workflow entry ownership is unavailable"
+			}
+			return false, fmt.Errorf("%w: %s", ErrCeilingLaunchSuperseded, detail)
+		}
+	}
+	var deferredLaunch *models.CeilingDeferral
+	if ceilingClaim != nil {
+		deferredLaunch = &ceilingClaim.deferral
+	}
 
-	_, err := s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
+	if session, err := s.repo.GetTaskSession(ctx, sessionID); err != nil {
+		return false, fmt.Errorf("load session before send now launch: %w", err)
+	} else if session != nil && session.State == models.TaskSessionStateCreated {
+		startOptions := startCreatedSessionOptions{}
+		createdPrompt := promptContent
+		createdSkipMessageRecord := false
+		createdPlanMode := claim.Dispatch.PlanMode
+		createdAttachments := attachments
+		createdReferences := []v1.EntityReference(nil)
+		createdPromptReferenceContext := ""
+		if ceilingClaim != nil {
+			binding, bindingPresent, bindingErr := models.ReadCeilingWorkflowEntryBinding(ceilingClaim.deferral.Payload)
+			if bindingErr != nil {
+				return false, bindingErr
+			}
+			if bindingPresent {
+				startOptions.ceilingEntryBinding = &binding
+				// Mark this as a durable ceiling replay that Send Now has
+				// explicitly claimed. startCreatedSession must keep the strict
+				// committed-route validation; it must not use the prepared
+				// callback compatibility path for this exact record.
+				ctx = withCeilingEntryKind(ctx, ceilingClaim.deferral.Kind)
+			}
+			if deferredLaunch != nil {
+				input := sendNowCreatedLaunchInput(
+					currentTask,
+					deferredLaunch,
+					promptContent,
+					attachments,
+					claim.Dispatch.PlanMode,
+				)
+				createdPrompt = input.prompt
+				createdSkipMessageRecord = input.skipMessageRecord
+				createdPlanMode = input.planMode
+				createdAttachments = input.attachments
+				createdReferences = input.references
+				createdPromptReferenceContext = input.promptReferenceContext
+				startOptions.skipTaskDescriptionFallback = input.skipTaskDescriptionFallback
+				startOptions.promptAlreadyComposed = input.promptAlreadyComposed
+				startOptions.retryPrompt = input.retryPrompt
+				startOptions.preserveDirectPrompt = input.preserveDirectPrompt
+				if input.recordQueueMessage {
+					if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
+						return false, fmt.Errorf("record Send Now continuation before created-session launch: %w", err)
+					}
+					markSendNowSourcesRecorded(claim)
+				}
+			}
+		}
+		execution, startErr := s.startCreatedSession(
+			ctx,
+			claim.Dispatch.TaskID,
+			sessionID,
+			"",
+			createdPrompt,
+			createdSkipMessageRecord || durablePlanComments,
+			createdPlanMode,
+			false,
+			createdAttachments,
+			createdReferences,
+			createdPromptReferenceContext,
+			startOptions,
+		)
+		if startErr != nil {
+			var acceptedDispatch *acceptedPromptDispatchError
+			if ceilingClaim != nil && errors.As(startErr, &acceptedDispatch) {
+				// The created-session path can return a handled post-dispatch
+				// error after agentctl accepted the prompt. The exact ceiling
+				// record is no longer replayable once that boundary was crossed.
+				ceilingClaim.settle(ctx)
+			}
+			return false, startErr
+		}
+		if execution == nil {
+			return false, errors.New("send-now launch did not dispatch a created session")
+		}
+		if ceilingClaim != nil {
+			ceilingClaim.settle(ctx)
+		}
+		s.processSendNowTurnStart(ctx, claim)
+		return true, nil
+	}
+
+	_, err = s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
 		claim.Dispatch.PlanMode, attachments, false, launchOriginManual, promptTaskOptions{
-			claimEntryID:         claim.Dispatch.ID,
-			afterClaim:           s.sendNowAfterClaim(ctx, claim, attachments, durablePlanComments),
-			beforeDispatch:       s.sendNowDeliveryBoundary(ctx, claim, durablePlanComments, &deliveryAttempted),
-			disableDispatchRetry: durablePlanComments,
+			claimEntryID:           claim.Dispatch.ID,
+			afterClaim:             s.sendNowAfterClaim(ctx, claim, attachments, durablePlanComments),
+			afterDispatchAdmission: s.sendNowDeliveryBoundary(ctx, claim, durablePlanComments, &deliveryAttempted),
+			disableDispatchRetry:   durablePlanComments,
 			afterDispatch: func() error {
 				return s.markSendNowClaimAcceptedWithRetry(ctx, claim)
 			},
 		})
+	var acceptedDispatch *acceptedPromptDispatchError
+	if err == nil || deliveryAttempted || errors.As(err, &acceptedDispatch) {
+		if ceilingClaim != nil {
+			ceilingClaim.settle(ctx)
+		}
+	}
 	return deliveryAttempted, err
+}
+
+type sendNowCreatedLaunchDetails struct {
+	prompt                      string
+	skipMessageRecord           bool
+	planMode                    bool
+	attachments                 []v1.MessageAttachment
+	references                  []v1.EntityReference
+	promptReferenceContext      string
+	skipTaskDescriptionFallback bool
+	promptAlreadyComposed       bool
+	retryPrompt                 string
+	preserveDirectPrompt        bool
+	recordQueueMessage          bool
+}
+
+// sendNowCreatedLaunchInput folds the pending Continue into the exact
+// workflow launch that was waiting for capacity. The workflow prompt may
+// already be recorded and composed, so it must not be discarded or composed a
+// second time. The queue message is recorded separately when the original
+// launch already owns its transcript row.
+func sendNowCreatedLaunchInput(
+	task *models.Task,
+	deferral *models.CeilingDeferral,
+	continuation string,
+	queueAttachments []v1.MessageAttachment,
+	queuePlanMode bool,
+) sendNowCreatedLaunchDetails {
+	input := sendNowCreatedLaunchDetails{
+		prompt:      continuation,
+		planMode:    queuePlanMode,
+		attachments: append([]v1.MessageAttachment(nil), queueAttachments...),
+		references:  nil,
+	}
+	if deferral == nil {
+		return input
+	}
+
+	payload := deferral.Payload
+	input.skipMessageRecord = boolField(payload, "skip_message_record")
+	input.skipTaskDescriptionFallback = boolField(payload, "skip_task_description_fallback")
+	input.promptAlreadyComposed = boolField(payload, "prompt_already_composed")
+	input.preserveDirectPrompt = boolField(payload, "preserve_direct_prompt")
+	input.planMode = input.planMode || boolField(payload, metaKeyPlanMode)
+	input.promptReferenceContext = stringField(payload, "prompt_reference_context")
+
+	originalPrompt := stringField(payload, metaKeyPrompt)
+	input.retryPrompt = stringField(payload, "retry_prompt")
+	if input.promptAlreadyComposed && originalPrompt == "" {
+		originalPrompt = input.retryPrompt
+	}
+	if originalPrompt == "" && !input.skipTaskDescriptionFallback && task != nil {
+		originalPrompt = task.Description
+	}
+	input.prompt = appendSendNowPrompt(originalPrompt, continuation)
+	if input.retryPrompt == "" {
+		input.retryPrompt = originalPrompt
+	}
+	input.retryPrompt = appendSendNowPrompt(input.retryPrompt, continuation)
+
+	var originalAttachments []v1.MessageAttachment
+	decodeCeilingPayloadField(payload[metaKeyAttachments], &originalAttachments)
+	input.attachments = append(originalAttachments, input.attachments...)
+	decodeCeilingPayloadField(payload["references"], &input.references)
+
+	// A workflow auto-start records its own prompt before admission and sets
+	// skip_message_record. Record the queued Continue before launching so a
+	// failed launch can restore the queue without losing its transcript receipt.
+	input.recordQueueMessage = input.skipMessageRecord &&
+		(strings.TrimSpace(continuation) != "" || len(queueAttachments) > 0)
+	return input
+}
+
+func appendSendNowPrompt(original, continuation string) string {
+	switch {
+	case strings.TrimSpace(original) == "":
+		return continuation
+	case strings.TrimSpace(continuation) == "":
+		return original
+	default:
+		return original + "\n\n" + continuation
+	}
 }
 
 func (s *Service) prepareSendNowTranscript(

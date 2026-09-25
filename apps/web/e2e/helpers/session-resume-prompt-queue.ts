@@ -182,3 +182,80 @@ export async function waitForQueuedCount(
     })
     .toBe(count);
 }
+
+export type SessionRuntimeIdentity = {
+  executionId: string;
+  acpSessionId: string;
+};
+
+/** Read the durable execution and provider conversation identities for a session. */
+export async function readSessionRuntimeIdentity(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+): Promise<SessionRuntimeIdentity> {
+  const { sessions } = await apiClient.listTaskSessions(taskId);
+  const session = sessions.find((candidate) => candidate.id === sessionId);
+  const status = await apiClient.wsRequest<{ acp_session_id?: string }>("task.session.status", {
+    task_id: taskId,
+    session_id: sessionId,
+  });
+  if (!session?.agent_execution_id) {
+    throw new Error(`Session ${sessionId} has no durable agent execution identity`);
+  }
+  if (!status.acp_session_id) {
+    throw new Error(`Session ${sessionId} has no durable ACP conversation identity`);
+  }
+  return {
+    executionId: session.agent_execution_id,
+    acpSessionId: status.acp_session_id,
+  };
+}
+
+/** Read message IDs whose persisted content contains a turn-specific marker. */
+export async function readSessionMessageIdsContaining(
+  apiClient: ApiClient,
+  sessionId: string,
+  marker: string,
+): Promise<Set<string>> {
+  const { messages } = await apiClient.listSessionMessages(sessionId);
+  return new Set(
+    messages.filter((message) => message.content.includes(marker)).map((message) => message.id),
+  );
+}
+
+/** Wait until a new persisted message contains the marker. */
+export async function waitForNewSessionMessage(
+  apiClient: ApiClient,
+  sessionId: string,
+  previousMessageIds: ReadonlySet<string>,
+  marker: string,
+  timeout = 30_000,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.some(
+          (message) => !previousMessageIds.has(message.id) && message.content.includes(marker),
+        );
+      },
+      {
+        timeout,
+        message: `Waiting for a new session message containing ${marker}`,
+      },
+    )
+    .toBe(true);
+}
+
+/** Count persisted resume boot messages without relying on the UI deduplication. */
+export async function countResumeBootMessages(
+  apiClient: ApiClient,
+  sessionId: string,
+): Promise<number> {
+  const { messages } = await apiClient.listSessionMessages(sessionId);
+  return messages.filter(
+    (message) =>
+      message.metadata?.script_type === "agent_boot" && message.metadata?.is_resuming === true,
+  ).length;
+}

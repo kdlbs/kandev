@@ -132,6 +132,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 }
 
 func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	mgr := newTestManager(t)
 	tests := []struct {
 		name  string
@@ -162,11 +163,30 @@ func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			want := strings.Join(tt.agent.(agents.ManagedNPMRuntimeAgent).ManagedNPMRuntime().CachedACPCommand().Args(), " ")
+			if tt.name == "opencode" {
+				want = strings.Join(tt.agent.(agents.ManagedNPMRuntimeAgent).ManagedNPMRuntime().NativeCommand().Args(), " ")
+			}
 			cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, tt.agent, true)
 			require.NoError(t, err)
 			require.Equal(t, want, cmds.initial)
 		})
 	}
+
+	// opencode-acp opts into NativeBinaryAgent: when the lifecycle probe finds
+	// the standalone binary on PATH the launch uses it directly (the same
+	// binary-first pattern as CodeNomad), and falls back to the managed npx
+	// runtime when it is absent (containers, remotes, fresh hosts).
+	t.Run("opencode-native", func(t *testing.T) {
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), true)
+		require.NoError(t, err)
+		require.Equal(t, "opencode acp --print-logs --log-level ERROR", cmds.initial)
+	})
+	t.Run("opencode-npx-fallback", func(t *testing.T) {
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), false)
+		require.NoError(t, err)
+		want := strings.Join(agents.NewOpenCodeACP().ManagedNPMRuntime().CachedACPCommand().Args(), " ")
+		require.Equal(t, want, cmds.initial)
+	})
 }
 
 // cliFlagTestAgent is a minimal BuildCommand that produces a stable prefix
@@ -486,22 +506,36 @@ func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {
 	}
 }
 
-func TestBuildEnvForExecution_FailsClosedWhenProfileSecretIsUnavailable(t *testing.T) {
+// A broken secret reference on one profile env var must not blank the agent's
+// whole launch environment: the bad var is dropped, the rest are delivered
+// (AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-004.1).
+func TestBuildEnvForExecution_DropsOnlyTheUnresolvableProfileSecretVar(t *testing.T) {
 	mgr := newTestManager(t)
-	mgr.secretStore = newInMemorySecretStore()
+	store := newInMemorySecretStore()
+	_ = store.Create(context.Background(), &secrets.SecretWithValue{
+		Secret: secrets.Secret{ID: "sec-ok", Name: "ok"},
+		Value:  "revealed",
+	})
+	mgr.secretStore = store
 
-	_, err := mgr.buildEnvForExecution(
+	env, err := mgr.buildEnvForExecution(
 		context.Background(),
 		"exec-1",
 		&LaunchRequest{AgentProfileID: "profile-1"},
 		nil,
-		&AgentProfileInfo{EnvVars: []settingsmodels.ProfileEnvVar{{
-			Key:      "PROFILE_TOKEN",
-			SecretID: "missing-secret",
-		}}},
+		&AgentProfileInfo{EnvVars: []settingsmodels.ProfileEnvVar{
+			{Key: "GOOD_TOKEN", SecretID: "sec-ok"},
+			{Key: "BROKEN_TOKEN", SecretID: "missing-secret"},
+		}},
 	)
-	if err == nil {
-		t.Fatal("buildEnvForExecution succeeded with an unavailable profile secret")
+	if err != nil {
+		t.Fatalf("buildEnvForExecution: %v", err)
+	}
+	if env["GOOD_TOKEN"] != "revealed" {
+		t.Errorf("GOOD_TOKEN = %q, want revealed", env["GOOD_TOKEN"])
+	}
+	if _, present := env["BROKEN_TOKEN"]; present {
+		t.Errorf("BROKEN_TOKEN should have been dropped, got %q", env["BROKEN_TOKEN"])
 	}
 }
 
@@ -899,7 +933,7 @@ func TestConfigureAndStartAgent_DoesNotSendTaskDescriptionEnv(t *testing.T) {
 		agentctl: client,
 	}
 
-	bootCommand, err := mgr.configureAndStartAgent(context.Background(), execution, "never")
+	bootCommand, err := mgr.configureAndStartAgent(context.Background(), execution)
 	if err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
@@ -932,7 +966,7 @@ func TestConfigureAndStartAgentUsesRuntimeSnapshotWhenProfileSecretIsUnavailable
 	}
 	execution.setRuntimeEnvironment(map[string]string{"PROFILE_ONLY": "captured-value"})
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
 	if configuredEnv["PROFILE_ONLY"] != "captured-value" {
@@ -970,7 +1004,7 @@ func TestConfigureAndStartAgentSendsComposedRuntimeEnvironmentAsOverlay(t *testi
 		"GIT_CONFIG_VALUE_2": "!f() { : kandev-host-gh-bridge; '/old/gh' auth git-credential \"$@\"; }; f",
 	})
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
 	if replaced {
@@ -1000,7 +1034,7 @@ func TestConfigureAndStartAgent_SendsStructuredArgv(t *testing.T) {
 		agentctl:       client,
 	}
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err != nil {
 		t.Fatalf("configure and start agent: %v", err)
 	}
 	want := []string{"runner", "two words", "", `C:\tools\agent.exe`}
@@ -1031,7 +1065,7 @@ func TestConfigureAndStartAgent_SpillsLargeWakePayloadEnv(t *testing.T) {
 		agentctl: client,
 	}
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
 	if _, exists := configuredEnv["KANDEV_WAKE_PAYLOAD_JSON"]; exists {

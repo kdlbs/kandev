@@ -546,9 +546,8 @@ export function TemporaryArtifactsSection({
         }
       />
       <div className="space-y-1 pt-3 text-xs text-muted-foreground">
-        <p>{t("system:storageTemporaryArtifactsPolicyAge")}</p>
+        <p>{t("system:storageTemporaryArtifactsPolicySummary")}</p>
         <p>{t("system:storageTemporaryArtifactsPolicyQuarantine")}</p>
-        <p>{t("system:storageTemporaryArtifactsPolicyShared")}</p>
       </div>
       {onCleanTemporaryArtifacts && (
         <StorageActionButton

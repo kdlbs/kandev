@@ -29,6 +29,35 @@ var (
 	ErrDeferredLaunchPromptEmpty = errors.New("deferred launch prompt must not be empty")
 )
 
+// ReadCeilingDeferredLaunch returns the authoritative ceiling record used by
+// message admission and task-state reconciliation. An absent record is a
+// valid negative result. A repository failure, or a record that explicitly
+// claims the ceiling half but cannot be decoded, is returned so a caller
+// never changes task state while queue ownership is uncertain.
+func (s *Service) ReadCeilingDeferredLaunch(
+	ctx context.Context, taskID string,
+) (models.CeilingDeferral, bool, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return models.CeilingDeferral{}, false, err
+	}
+	record, _, err := s.tasks.GetTaskDeferredLaunch(ctx, taskID)
+	if err != nil {
+		return models.CeilingDeferral{}, false, err
+	}
+	if record == nil {
+		return models.CeilingDeferral{}, false, nil
+	}
+	ceilingFlag, hasCeilingFlag := record[models.CeilingDeferredKey]
+	if !hasCeilingFlag || ceilingFlag != true {
+		return models.CeilingDeferral{}, false, nil
+	}
+	deferral, err := models.ReadCeilingDeferral(record)
+	if err != nil {
+		return models.CeilingDeferral{}, false, err
+	}
+	return deferral, true, nil
+}
+
 // UpdateDeferredLaunchPrompt rewrites the prompt a task will be launched with
 // once its gate opens (dependencies resolve, or WIP capacity frees up).
 //
