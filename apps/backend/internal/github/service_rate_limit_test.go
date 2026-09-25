@@ -69,6 +69,79 @@ func TestServiceGetWorkspaceRateLimitSnapshotReportsPrimarySecondaryDisagreement
 	}
 }
 
+func TestServiceGetWorkspaceRateLimitSnapshotReportsActivePrimaryRetryAfter(t *testing.T) {
+	store := newTestStore(t)
+	seedConnectionWorkspaces(t, store, "workspace-1")
+	if err := store.UpsertWorkspaceConnection(context.Background(), &WorkspaceConnection{
+		WorkspaceID: "workspace-1", Source: ConnectionSourcePAT,
+		GitHubHost: defaultGitHubHost, Login: "yattdev", Status: ConnectionStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(nil, AuthMethodPAT, nil, store, nil, testLogger(t))
+	t.Cleanup(svc.Stop)
+	tracker, _ := svc.rateCoordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Source: ConnectionSourcePAT,
+		Login: "yattdev", WorkspaceID: "workspace-1",
+	}, nil)
+	now := time.Now().UTC()
+	tracker.Record(RateSnapshot{
+		Resource: ResourceCore, Limit: 5000, Remaining: 5000,
+		ResetAt: now.Add(time.Hour), UpdatedAt: now,
+	})
+	tracker.Record(RateSnapshot{
+		Resource: ResourceGraphQL, Limit: 5000, Remaining: 5000,
+		ResetAt: now.Add(time.Hour), UpdatedAt: now,
+	})
+	tracker.ObservePrimary(ResourceCore, now.Add(2*time.Minute), RetrySourceRetryAfter)
+
+	snapshot, err := svc.GetWorkspaceRateLimitSnapshot(context.Background(), "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.InteractiveAllowed || snapshot.BackgroundAllowed || snapshot.BlockingReason != "primary_rate_limit" {
+		t.Fatalf("active primary retry admission snapshot = %+v", snapshot)
+	}
+
+	tracker.ObserveSecondary(ResourceCore, now.Add(time.Minute), RetrySourceRetryAfter, "secondary")
+	snapshot, err = svc.GetWorkspaceRateLimitSnapshot(context.Background(), "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.InteractiveAllowed || snapshot.BackgroundAllowed || snapshot.BlockingReason != "observed_secondary_rate_limit" {
+		t.Fatalf("secondary should retain precedence over primary retry: %+v", snapshot)
+	}
+}
+
+func TestServiceGetWorkspaceRateLimitSnapshotKeepsPrimaryReserveBackgroundOnly(t *testing.T) {
+	store := newTestStore(t)
+	seedConnectionWorkspaces(t, store, "workspace-1")
+	if err := store.UpsertWorkspaceConnection(context.Background(), &WorkspaceConnection{
+		WorkspaceID: "workspace-1", Source: ConnectionSourcePAT,
+		GitHubHost: defaultGitHubHost, Login: "yattdev", Status: ConnectionStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(nil, AuthMethodPAT, nil, store, nil, testLogger(t))
+	t.Cleanup(svc.Stop)
+	tracker, _ := svc.rateCoordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Source: ConnectionSourcePAT,
+		Login: "yattdev", WorkspaceID: "workspace-1",
+	}, nil)
+	now := time.Now().UTC()
+	tracker.Record(RateSnapshot{
+		Resource: ResourceCore, Limit: 5000, Remaining: 500, ResetAt: now.Add(time.Hour), UpdatedAt: now,
+	})
+
+	snapshot, err := svc.GetWorkspaceRateLimitSnapshot(context.Background(), "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.InteractiveAllowed || snapshot.BackgroundAllowed || snapshot.BlockingReason != "primary_reserve" {
+		t.Fatalf("primary reserve admission snapshot = %+v", snapshot)
+	}
+}
+
 func TestServiceGetWorkspaceRateLimitSnapshotColdStateDoesNotRequireProvider(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "workspace-1")

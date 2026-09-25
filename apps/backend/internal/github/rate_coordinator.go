@@ -110,6 +110,13 @@ func (a *RateAdmission) snapshot(resource Resource, now time.Time) rateAdmission
 		decision.backgroundReason = rateLimitBlockSecondary
 		return decision
 	}
+	if primary := a.principal.tracker.PrimaryRetry(resource); primary.RetryAt.After(now) {
+		decision.interactiveAllowed = false
+		decision.backgroundAllowed = false
+		decision.interactiveReason = rateLimitBlockPrimary
+		decision.backgroundReason = rateLimitBlockPrimary
+		return decision
+	}
 	if rate, known := a.principal.tracker.Snapshot(resource); known {
 		if primaryRateExhausted(rate) {
 			decision.interactiveAllowed = false
@@ -320,6 +327,12 @@ func (a *RateAdmission) retryBoundary(
 		return secondary.RetryAt, secondary.RetrySource
 	case rateLimitBlockPrimary, rateLimitBlockPrimaryReserve:
 		primary := a.principal.tracker.PrimaryRetry(resource)
+		if primary.RetryAt.After(now) {
+			if snapshot, known := a.principal.tracker.Snapshot(resource); known && snapshot.ResetAt.After(primary.RetryAt) {
+				return snapshot.ResetAt, RetrySourcePrimaryReset
+			}
+			return primary.RetryAt, primary.RetrySource
+		}
 		if snapshot, known := a.principal.tracker.Snapshot(resource); known {
 			if snapshot.ResetAt.After(now) {
 				if primary.RetryAt.After(snapshot.ResetAt) {
