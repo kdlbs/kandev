@@ -226,14 +226,14 @@ func (r *Repository) BindExactProfileSessionIfAssignmentCurrent(
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
 		SET exact_profile_generation = ?, exact_profile_revision = ?, updated_at = ?
-		WHERE id = ? AND task_id = ? AND state = ?
+		WHERE id = ? AND task_id = ? AND state = ? AND agent_profile_id = ?
 		  AND EXISTS (
 			SELECT 1
 			FROM task_exact_profile_assignments
 			WHERE task_id = ? AND agent_profile_id = ? AND generation = ?
 			  AND profile_revision = ? AND active = ?
 		  )
-	`), generation, revision, r.exactProfileAssignmentNow(), sessionID, taskID, string(expectedState),
+	`), generation, revision, r.exactProfileAssignmentNow(), sessionID, taskID, string(expectedState), agentProfileID,
 		taskID, agentProfileID, generation, time.Unix(0, revision).UTC(), dialect.BoolToInt(true))
 	if err != nil {
 		return false, fmt.Errorf("bind exact profile session: %w", err)
