@@ -58,7 +58,17 @@ type SecondaryRateLimitState struct {
 // still unknown or in the future.
 func (s RateSnapshot) Exhausted() bool {
 	return s.Remaining <= 0 && (s.RemainingObserved || !s.ParsedFromHeaders) &&
-		(s.ResetAt.IsZero() || s.ResetAt.After(time.Now()))
+		s.primaryRetryAt().After(time.Now())
+}
+
+func (s RateSnapshot) primaryRetryAt() time.Time {
+	if !s.ResetAt.IsZero() {
+		return s.ResetAt
+	}
+	if s.UpdatedAt.IsZero() {
+		return time.Now().Add(secondaryFallbackDelay)
+	}
+	return s.UpdatedAt.Add(secondaryFallbackDelay)
 }
 
 // BackgroundReserve returns the quota retained for interactive requests.
@@ -235,10 +245,7 @@ func (r *RateTracker) WaitDuration(resource Resource) time.Duration {
 	defer r.mu.RUnlock()
 	retryAt := time.Time{}
 	if r.exhausted[resource] {
-		retryAt = r.snapshots[resource].ResetAt
-		if retryAt.IsZero() {
-			retryAt = time.Now().Add(secondaryFallbackDelay)
-		}
+		retryAt = r.snapshots[resource].primaryRetryAt()
 	}
 	if secondary := r.secondary[resource]; secondary.RetryAt.After(retryAt) {
 		retryAt = secondary.RetryAt
@@ -356,7 +363,11 @@ func parseRateHeadersAt(resp *http.Response, defaultResource Resource, now time.
 	}
 	limit, _ := strconv.Atoi(limitStr)
 	remaining, _ := strconv.Atoi(remainingStr)
-	reset, _ := strconv.ParseInt(resetStr, 10, 64)
+	reset, err := strconv.ParseInt(strings.TrimSpace(resetStr), 10, 64)
+	resetAt := time.Time{}
+	if err == nil && reset > 0 {
+		resetAt = time.Unix(reset, 0).UTC()
+	}
 
 	resource := defaultResource
 	if r := resp.Header.Get("X-RateLimit-Resource"); r != "" {
@@ -368,7 +379,7 @@ func parseRateHeadersAt(resp *http.Response, defaultResource Resource, now time.
 		Remaining:         remaining,
 		RemainingObserved: remainingStr != "",
 		ParsedFromHeaders: true,
-		ResetAt:           time.Unix(reset, 0).UTC(),
+		ResetAt:           resetAt,
 		UpdatedAt:         now,
 	}, true
 }

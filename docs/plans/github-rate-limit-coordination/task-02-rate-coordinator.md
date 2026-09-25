@@ -39,3 +39,8 @@ system_design:
 - Background calls serialize and pace per resource, retain a ten-percent
   primary reserve, and remain behind active interactive work.
 - Focused and race validation passed with task-local Go caches.
+- Follow-up: a missing-reset primary wait is anchored to the observation time,
+  so background admission reopens after the one-minute fallback expires.
+- Follow-up verification passed: the elapsed-fallback coordinator regression
+  under `go test -race ./internal/github`, and diff-scoped `golangci-lint` found
+  zero issues against base `3aa3233c7833c8f3c034083e10d76999af3a010d`.

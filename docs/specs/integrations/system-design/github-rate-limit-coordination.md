@@ -39,6 +39,9 @@ A reset header with positive remaining quota is primary metadata, not evidence
 of primary exhaustion. `GET /rate_limit` updates primary buckets but does not
 clear the independent secondary state. A later accepted provider response can
 clear the secondary state before its conservative retry estimate.
+When a zero-remaining response omits a valid reset, the parsed snapshot keeps
+an unknown reset. The operation reports a conservative one-minute retry from
+observation time, and admission uses that same fixed boundary before reopening.
 
 ## Principal-wide coordinator
 
