@@ -40,7 +40,12 @@ func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, work
 		return fmt.Errorf("workspace rebind is unsupported for this session; start a new session after attaching sources")
 	}
 	execution.promptLifecycleMu.Lock()
-	defer execution.promptLifecycleMu.Unlock()
+	promptLifecycleLocked := true
+	defer func() {
+		if promptLifecycleLocked {
+			execution.promptLifecycleMu.Unlock()
+		}
+	}()
 	if execution.Status != v1.AgentStatusReady {
 		return fmt.Errorf("workspace rebind requires an idle ready execution")
 	}
@@ -82,50 +87,96 @@ func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, work
 	// Stop before changing agentctl's workdir: a successful rebind must never
 	// leave a child running in the old CWD. If stop cannot be proven, do not
 	// attempt adoption or start a duplicate process.
-	client, releaseClient = execution.AcquireAgentCtlClient()
-	err := client.Stop(ctx)
-	releaseClient()
-	if err != nil {
-		execution.Status = v1.AgentStatusReady
+	if unexpectedDisconnect, err := m.stopWorkspaceRebindProcess(ctx, execution, &promptLifecycleLocked); err != nil {
+		if !unexpectedDisconnect {
+			execution.Status = v1.AgentStatusReady
+		}
 		return fmt.Errorf("stop agent before workspace rebind: %w", err)
 	}
 	execution.WorkspaceSourceRoots = newRoots
 	client, releaseClient = execution.AcquireAgentCtlClient()
-	err = client.RebindWorkspace(ctx, workspacePath, newRoots)
+	err := client.RebindWorkspace(ctx, workspacePath, newRoots)
 	releaseClient()
 	if err != nil {
-		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, acpID, fmt.Errorf("rebind agentctl workspace: %w", err))
+		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, acpID, &promptLifecycleLocked, fmt.Errorf("rebind agentctl workspace: %w", err))
 	}
 	execution.WorkspacePath = workspacePath
 	client, releaseClient = execution.AcquireAgentCtlClient()
 	_, err = client.Start(ctx)
 	releaseClient()
 	if err != nil {
-		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, acpID, fmt.Errorf("restart agent after workspace rebind: %w", err))
+		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, acpID, &promptLifecycleLocked, fmt.Errorf("restart agent after workspace rebind: %w", err))
 	}
 	if err := m.restoreReboundACPSession(ctx, execution, acpID); err != nil {
-		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, acpID, fmt.Errorf("restore ACP session after workspace rebind: %w", err))
+		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, acpID, &promptLifecycleLocked, fmt.Errorf("restore ACP session after workspace rebind: %w", err))
 	}
 	execution.Status = v1.AgentStatusReady
 	return nil
 }
 
-func (m *Manager) rollbackWorkspaceRebind(ctx context.Context, execution *AgentExecution, oldPath string, oldRoots []string, acpID string, cause error) error {
+func (m *Manager) stopWorkspaceRebindProcess(ctx context.Context, execution *AgentExecution, promptLifecycleLocked *bool) (bool, error) {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		return false, fmt.Errorf("agentctl client is unavailable")
+	}
+	startupGeneration := execution.startupAttemptSnapshot()
+	execution.expectWorkspaceRebindDisconnect(startupGeneration)
+	err := client.Stop(ctx)
+	releaseClient()
+	if err != nil {
+		// Drain callbacks observed during the uncertain stop before clearing the
+		// fence. Releasing the prompt lock lets callbacks finish without inversion.
+		execution.promptLifecycleMu.Unlock()
+		*promptLifecycleLocked = false
+		execution.startupCallbackMu.Lock()
+		unexpectedDisconnect := execution.workspaceRebindDisconnectObserved.Swap(false)
+		execution.clearWorkspaceRebindDisconnectExpectation()
+		execution.startupCallbackMu.Unlock()
+		execution.promptLifecycleMu.Lock()
+		*promptLifecycleLocked = true
+		if unexpectedDisconnect {
+			execution.Status = v1.AgentStatusFailed
+			m.publishStreamDisconnectErrorWithAttempt(
+				execution,
+				fmt.Errorf("agent stream disconnected while workspace rebind stop failed: %w", err),
+				execution.currentStartupAttemptID(),
+			)
+		}
+		return unexpectedDisconnect, err
+	}
+
+	// A disconnect callback can be waiting for promptLifecycleMu while the old
+	// process stops. Let it observe the expected-stop fence before advancing the
+	// startup generation, whose callback lease waits for active callbacks.
+	execution.promptLifecycleMu.Unlock()
+	*promptLifecycleLocked = false
+	execution.beginStartupAttemptWithID(execution.currentStartupAttemptID())
+	client, releaseClient = execution.AcquireAgentCtlClient()
+	if client != nil {
+		client.CloseUpdatesStream()
+	}
+	releaseClient()
+	execution.clearWorkspaceRebindDisconnectExpectation()
+	execution.promptLifecycleMu.Lock()
+	*promptLifecycleLocked = true
+	return false, nil
+}
+
+func (m *Manager) rollbackWorkspaceRebind(ctx context.Context, execution *AgentExecution, oldPath string, oldRoots []string, acpID string, promptLifecycleLocked *bool, cause error) error {
 	rollbackCtx := context.WithoutCancel(ctx)
 	// Restore the authoritative in-memory policy first, even if an I/O failure
 	// prevents the best-effort child rollback below.
 	execution.WorkspaceSourceRoots = append([]string(nil), oldRoots...)
-	client, releaseClient := execution.AcquireAgentCtlClient()
-	if client == nil {
-		return fmt.Errorf("%w; rollback agentctl client is unavailable", cause)
-	}
-	err := client.Stop(rollbackCtx)
-	releaseClient()
+	unexpectedDisconnect, err := m.stopWorkspaceRebindProcess(rollbackCtx, execution, promptLifecycleLocked)
 	if err != nil {
+		if unexpectedDisconnect {
+			m.executionStore.UpdateError(execution.ID, fmt.Sprintf("%v; rollback stop failed after stream disconnect: %v", cause, err))
+			return fmt.Errorf("%w; rollback stop failed after stream disconnect: %v", cause, err)
+		}
 		m.executionStore.UpdateError(execution.ID, fmt.Sprintf("%v; rollback stop failed: %v", cause, err))
 		return fmt.Errorf("%w; rollback stop failed: %v", cause, err)
 	}
-	client, releaseClient = execution.AcquireAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
 		return fmt.Errorf("%w; rollback agentctl client is unavailable", cause)
 	}
