@@ -1762,10 +1762,6 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, err
 	}
 
-	if startAgent {
-		e.observeSessionCoresidency(launchCtx, sessionCoresidencySiteLaunch, task.ID, sessionID)
-	}
-
 	// Fast path: workspace already launched (executors_running row exists).
 	// The selected-environment recovery gate above must run first, including
 	// when this path only starts an agent process on an existing workspace.
