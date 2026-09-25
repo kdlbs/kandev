@@ -43,6 +43,7 @@ queue](../../tasks/requirements/run-scheduling.md) and
 - **AC-OFFICE-SCHEDULER-001.10:** A cron routine trigger's wall-clock slot fires at most once across a DST transition: a slot that does not exist (spring-forward) is skipped, a slot that occurs twice (fall-back) fires only on its first occurrence, and no existing slot is ever lost. This holds for every IANA zone, including `Australia/Lord_Howe`, the only zone with a 30-minute DST shift.
 - **AC-OFFICE-SCHEDULER-001.11:** A cron routine trigger that can never fire (an impossible date, or an empty expression) is rejected at trigger-create time with a client error, not accepted as a silent no-op or a wrong daily fallback.
 - **AC-OFFICE-SCHEDULER-001.12:** A routine trigger's timezone defaults to UTC when not supplied; there is no workspace-level timezone.
+- **AC-OFFICE-SCHEDULER-001.13:** A routine run in `task_created` with no linked task is not an active run. The next dispatch that finds it for its fingerprint closes it as `failed` and does not skip or coalesce into it. A heavy run whose linked task is live still gates its fingerprint.
 
 ## System design
 
