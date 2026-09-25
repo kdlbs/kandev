@@ -20,6 +20,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -76,6 +77,7 @@ type GitCredentialProvider interface {
 // separate so resolvers can enforce same-origin routing before returning a
 // transient secret.
 type GitCredentialRequest struct {
+	CheckoutOptions      *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
 	WorkspaceID          string
 	TaskID               string
 	SessionID            string
@@ -227,8 +229,13 @@ func (c *Cloner) WorkspaceProviderRepoPath(
 }
 
 // WorkspaceProviderRepositoryPath isolates managed clones using the provider's
-// opaque connection scope and immutable repository ID. Legacy callers that do
-// not yet carry both fields retain the origin/owner/name layout.
+// opaque connection scope and immutable repository ID. A non-empty scope
+// selects this isolated layout and requires a paired repository ID (the path
+// segment needs both to stay unique); a bare repository ID with no scope is
+// the normal shape for every built-in provider (GitHub, GitLab, Azure
+// DevOps) — none of them resolve a provider connection scope — so it falls
+// through to the legacy origin/owner/name layout below, same as when both
+// are empty.
 func (c *Cloner) WorkspaceProviderRepositoryPath(
 	workspaceID, provider, providerHost, providerScope, providerRepositoryID, owner, name string,
 ) (string, error) {
@@ -245,9 +252,9 @@ func (c *Cloner) WorkspaceProviderRepositoryPath(
 			return "", err
 		}
 	}
-	if providerScope != "" || providerRepositoryID != "" {
-		if strings.TrimSpace(providerScope) == "" || strings.TrimSpace(providerRepositoryID) == "" {
-			return "", errors.New("provider scope and repository ID must be supplied together")
+	if providerScope != "" {
+		if strings.TrimSpace(providerRepositoryID) == "" {
+			return "", errors.New("provider scope requires a paired repository ID")
 		}
 		return filepath.Join(
 			basePath, managedWorkspacesDir, workspaceID, provider, "_scopes",
@@ -431,6 +438,10 @@ func (c *Cloner) EnsureWorkspaceClonedForProvider(
 func (c *Cloner) EnsureWorkspaceClonedWithCredentialRequest(
 	ctx context.Context, request GitCredentialRequest, credentialOrigin, token string,
 ) (string, error) {
+	if hasCheckoutOptions(request) {
+		path, _, err := c.ensureWorkspaceCheckoutCache(ctx, request, credentialOrigin, token)
+		return path, err
+	}
 	targetPath, err := c.WorkspaceProviderRepositoryPath(
 		request.WorkspaceID, request.Provider, request.ProviderHost, request.ProviderScope,
 		request.ProviderRepositoryID, request.Owner, request.Name,
@@ -459,6 +470,13 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithCredentialRequest(
 		request.WorkspaceID, request.Provider, request.ProviderHost, request.ProviderScope,
 		request.ProviderRepositoryID, request.Owner, request.Name,
 	)
+	if err == nil && hasCheckoutOptions(request) {
+		options, validationErr := models.NormalizeRepositoryCheckoutOptions(request.CheckoutOptions)
+		if validationErr != nil {
+			return validationErr
+		}
+		targetPath, err = c.checkoutCachePath(request, options)
+	}
 	if err != nil {
 		return err
 	}

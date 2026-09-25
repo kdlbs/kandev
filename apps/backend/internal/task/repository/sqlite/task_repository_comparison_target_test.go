@@ -48,7 +48,7 @@ func TestTaskRepositoryComparisonTargetMutationsAreAtomic(t *testing.T) {
 	}
 
 	target := comparisonTargetForRepositoryTest()
-	updated, changed, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, id, &target, nil)
+	updated, changed, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, id, &target, nil, false)
 	if err != nil {
 		t.Fatalf("set comparison target: %v", err)
 	}
@@ -69,10 +69,10 @@ func TestTaskRepositoryComparisonTargetMutationsAreAtomic(t *testing.T) {
 
 	other := target
 	other.Number++
-	if _, changed, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, id, nil, &other); err != nil || changed {
+	if _, changed, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, id, nil, &other, false); err != nil || changed {
 		t.Fatalf("source-aware removal = changed=%v err=%v, want no-op", changed, err)
 	}
-	if _, changed, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, id, nil, &target); err != nil || !changed {
+	if _, changed, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, id, nil, &target, false); err != nil || !changed {
 		t.Fatalf("owned removal = changed=%v err=%v, want change", changed, err)
 	}
 	loaded, err = repo.GetTaskRepository(ctx, id)
@@ -98,11 +98,11 @@ func TestTaskRepositoryManualBaseBranchClearsTargetEvenWhenBranchIsUnchanged(t *
 		t.Fatalf("insert task repository: %v", err)
 	}
 	target := comparisonTargetForRepositoryTest()
-	if _, changed, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, id, &target, nil); err != nil || !changed {
+	if _, changed, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, id, &target, nil, false); err != nil || !changed {
 		t.Fatalf("seed comparison target: changed=%v err=%v", changed, err)
 	}
 
-	updated, changed, err := repo.UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx, id, "main")
+	updated, changed, err := repo.UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx, id, "main", true)
 	if err != nil {
 		t.Fatalf("manual same-branch update: %v", err)
 	}
@@ -112,11 +112,46 @@ func TestTaskRepositoryManualBaseBranchClearsTargetEvenWhenBranchIsUnchanged(t *
 	if _, ok, err := models.LoadComparisonTarget(updated.Metadata); err != nil || ok {
 		t.Fatalf("comparison target remains after manual update: present=%v err=%v", ok, err)
 	}
+	if updated.Metadata["manual_base_branch_override"] != true {
+		t.Fatalf("manual base override marker = %#v, want true", updated.Metadata["manual_base_branch_override"])
+	}
 	if updated.Metadata["unrelated"] != nil {
 		t.Fatalf("unexpected metadata in empty row: %#v", updated.Metadata)
 	}
-	if _, changed, err := repo.UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx, id, "main"); err != nil || changed {
+	if _, changed, err := repo.UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx, id, "main", true); err != nil || changed {
 		t.Fatalf("repeated manual same-branch update = changed=%v err=%v, want no-op", changed, err)
+	}
+	if _, changed, err := repo.UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx, id, "release", false); err != nil || changed {
+		t.Fatalf("provider base update replaced manual selection = changed=%v err=%v, want no-op", changed, err)
+	}
+	if _, changed, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, id, &target, nil, true); err != nil || !changed {
+		t.Fatalf("explicit PR association did not clear manual selection = changed=%v err=%v", changed, err)
+	}
+	if updated, err := repo.GetTaskRepository(ctx, id); err != nil || models.HasManualBaseBranchOverride(updated.Metadata) {
+		t.Fatalf("manual override remained after explicit PR association: row=%#v err=%v", updated, err)
+	}
+}
+
+func TestTaskRepositoryManualSameBranchSelectionPersistsOverrideWithoutExistingTarget(t *testing.T) {
+	repo, db := newTaskExternalIDTestRepo(t)
+	ctx := context.Background()
+	id := "task-repository-manual-base-no-target"
+	now := time.Now().UTC()
+	seedComparisonTargetAttachment(t, repo, "task-manual-base-no-target", "repository-manual-base-no-target", now)
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_repositories
+			(id, task_id, repository_id, base_branch, checkout_branch, position, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), id, "task-manual-base-no-target", "repository-manual-base-no-target", "main", "feature/cursor-cost", 0, `{}`, now, now); err != nil {
+		t.Fatalf("insert task repository: %v", err)
+	}
+
+	updated, changed, err := repo.UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx, id, "main", true)
+	if err != nil {
+		t.Fatalf("manual same-branch selection: %v", err)
+	}
+	if !changed || updated.Metadata["manual_base_branch_override"] != true {
+		t.Fatalf("manual same-branch selection = changed=%v metadata=%#v, want durable override", changed, updated.Metadata)
 	}
 }
 

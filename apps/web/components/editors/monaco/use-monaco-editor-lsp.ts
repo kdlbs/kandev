@@ -195,7 +195,7 @@ export function useMonacoEditorLsp(opts: UseMonacoLspOpts) {
     lspLanguage,
     toggle: toggleLsp,
   } = useLsp(lspSessionId, language);
-  const hasLspActive = lspStatus.state === "ready";
+  const hasLspActive = lspStatus.state === "ready" || lspStatus.state === "reconnecting";
   const lspWorkspaceUri = lspSessionId
     ? lspClientManager.getWorkspaceUriForSession(lspSessionId)
     : null;

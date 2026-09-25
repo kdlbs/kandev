@@ -1,3 +1,4 @@
+import { expectPreviewFooter } from "./workflow-move-preview-assertions";
 import { expect, test } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
@@ -85,7 +86,7 @@ test("short-taps the existing mobile next-step button for a direct move", async 
   ).toBeVisible({ timeout: 30_000 });
 });
 
-test("long-presses the existing mobile next-step button for move options", async ({
+test("submits mobile move options with an attached keyboard", async ({
   testPage,
   apiClient,
   seedData,
@@ -101,9 +102,14 @@ test("long-presses the existing mobile next-step button for move options", async
   await longPress(testPage, nextStepButton);
 
   await expectMoveOptionsDrawer(testPage);
+  await expectPreviewFooter(
+    testPage.getByTestId("workflow-move-options"),
+    "workflow-move-submit",
+    true,
+  );
   await fillMoveOverrides(testPage);
   const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
-  await testPage.getByTestId("workflow-move-submit").tap();
+  await testPage.getByTestId("workflow-move-instructions").press("Meta+Enter");
 
   expect((await moveRequest).postDataJSON()).toEqual({
     workflow_id: expect.any(String),
@@ -129,7 +135,7 @@ test("opens move options from the mobile task-switcher context menu", async ({
     seedData,
     "Mobile Task Switcher Move",
   );
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
   const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
   const taskRow = taskSheet

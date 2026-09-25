@@ -37,6 +37,13 @@
 # go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
 # maps them to `features.<name>` Viper keys automatically.
 features:
+  # Retains supported language-server leases across browser disconnects. The
+  # task-host and bounded lease lifecycle are opt-in while the feature settles.
+  KANDEV_FEATURES_LSP_BROWSER_CONTINUITY:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Office (autonomous agent surface). Off in prod until the feature
   # is user-ready; on in dev/e2e so contributors and tests exercise it.
   KANDEV_FEATURES_OFFICE:
@@ -226,6 +233,17 @@ ui:
 # don't belong in dev (would mask real interactions) and never in
 # prod (would leak test-only behaviour).
 e2eTuning:
+  # Holds a mock ACP cancellation through navigation and hydration without
+  # changing production cancellation behavior.
+  KANDEV_E2E_CANCEL_HOLD_DURATION:
+    prod: ""
+    dev:  ""
+    e2e:  "8s"
+  KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT:
+    prod: ""
+    dev:  ""
+    e2e:  "3s"
+
   # Auto-approve every permission request in agentctl so e2e specs
   # don't have to script the approval UI. Read by the agentctl child
   # process; the backend forwards its env to children, so setting it

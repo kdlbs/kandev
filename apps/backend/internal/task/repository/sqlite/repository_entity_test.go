@@ -671,10 +671,10 @@ func TestDeleteRepositoryIfNoActiveTaskSessions(t *testing.T) {
 // failures by design).
 func TestRunMigrations_Idempotent(t *testing.T) {
 	repo := newRepoForEntityTests(t)
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("second runMigrations call returned error: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("third runMigrations call returned error: %v", err)
 	}
 }
@@ -698,10 +698,10 @@ func TestRunnerProjectionWorkflowStepColumnsReplayMigration(t *testing.T) {
 			t.Fatalf("drop legacy workflow_steps.%s: %v", column.name, err)
 		}
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations on legacy workflow_steps schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay runMigrations: %v", err)
 	}
 
@@ -741,10 +741,10 @@ func TestRunnerProjectionParticipantCreatedAtReplayMigration(t *testing.T) {
 	if _, err := repo.db.Exec(`ALTER TABLE workflow_step_participants DROP COLUMN created_at`); err != nil {
 		t.Fatalf("drop legacy workflow_step_participants.created_at: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations on legacy workflow_step_participants schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay runMigrations: %v", err)
 	}
 

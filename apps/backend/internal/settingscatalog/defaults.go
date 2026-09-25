@@ -637,7 +637,7 @@ func userSettingsDomain() DomainDescriptor {
 		"show_scroll_to_start", "scroll to start", "boolean", "show_transcript_auto_scroll_control", "transcript scroll control", "boolean", "show_todo_list_panel", "todo list panel", "boolean",
 		"show_todo_list_panel_only_when_not_empty", "todo list empty state", "boolean", "show_release_notification", "release notification", "boolean", "release_notes_last_seen_version", "release notes version", "string",
 		"lsp_auto_start_languages", "LSP auto start", "array", "lsp_auto_install_languages", "LSP auto install", "array", "lsp_server_configs", "LSP server configs", "object",
-		"lsp_status_location", "LSP status location", "string", "saved_layouts", "saved layouts", "array", "sidebar_views", "sidebar views", "array",
+		"lsp_status_location", "LSP status location", "string", "saved_layouts", "saved layouts", "array", "sidebar_views", "sidebar views", "array", "sidebar_layout_state", "sidebar layout state", "object",
 		"sidebar_active_view_id", "active sidebar view", "string", "sidebar_draft", "sidebar draft", "object", "thread_views", "thread views", "array",
 		"thread_active_view_id", "active thread view", "string", "thread_view_draft", "thread draft", "object", "sidebar_task_prefs", "sidebar task preferences", "object",
 		"sidebar_task_color_automation", "sidebar color automation", "object", "sidebar_task_colors", "sidebar task colors", "object", "sidebar_task_color_patch", "sidebar task color patch", "object", "task_create_last_used", "last task create values", "object",
@@ -654,6 +654,13 @@ func userSettingsDomain() DomainDescriptor {
 	fields := make([]FieldDescriptor, 0, len(values)/3)
 	for index := 0; index+2 < len(values); index += 3 {
 		field := preferenceField(values[index], values[index+1], values[index+2])
+		if values[index] == "sidebar_layout_state" {
+			// The update key is an atomic workspace-scoped operation. Reads
+			// project the complete persisted map so settings discovery can
+			// inspect it without exposing a whole-map replacement contract.
+			field.FieldPath = "sidebar_layouts_by_workspace"
+			field.Schema = map[string]any{"type": "object"}
+		}
 		switch values[index] {
 		case "keyboard_shortcuts":
 			field.Schema = keyboardShortcutsSchema()

@@ -10,6 +10,7 @@
  * indicators, so nothing here participates in composing or sending a message.
  */
 
+import type { WorkflowMovePreviewTarget } from "../workflow-move-preview-footer";
 import { useMemo, type ReactNode } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { WorkflowMoveProceedButton } from "@/components/task/workflow-move-proceed-button";
@@ -117,6 +118,7 @@ export type ChatStatusBarProps = {
   taskId: string | null;
   sessionId: string | null;
   sessionState: string | null;
+  previewTarget?: WorkflowMovePreviewTarget;
   nextStepName: string | null;
   onProceed: (options?: WorkflowMoveEntryOptions) => boolean | void | Promise<boolean | void>;
   isAgentBusy: boolean;
@@ -156,6 +158,7 @@ export function ChatStatusBar({
   taskId,
   sessionId,
   sessionState,
+  previewTarget,
   nextStepName,
   onProceed,
   isAgentBusy,
@@ -241,6 +244,7 @@ export function ChatStatusBar({
       )}
       {showProceed && nextStepName && (
         <WorkflowMoveProceedButton
+          previewTarget={previewTarget}
           nextStepName={nextStepName}
           onProceed={onProceed}
           isMoving={isMoving}

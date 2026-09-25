@@ -1037,6 +1037,10 @@ type fakeDeleteRepo struct {
 	*fakeCascadeRepo
 }
 
+func (r *fakeDeleteRepo) ListUnarchivedTasksWithActiveSessions(ctx context.Context) ([]*models.Task, error) {
+	return nil, nil
+}
+
 func (r *fakeDeleteRepo) DeleteTask(ctx context.Context, id string) error {
 	_, err := r.DeleteTaskWithVacatedStep(ctx, id)
 	return err

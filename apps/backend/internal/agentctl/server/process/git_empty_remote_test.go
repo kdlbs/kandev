@@ -339,6 +339,7 @@ func setupEmptyRemoteTaskRepo(t *testing.T) (string, string, *GitOperator) {
 	originDir := filepath.Join(root, "origin.git")
 	repoDir := filepath.Join(root, "repo")
 	runGit(t, root, "init", "--bare", "--initial-branch=main", originDir)
+	runGit(t, originDir, "config", "core.hooksPath", filepath.Join(originDir, "hooks"))
 	runGit(t, root, "init", "-b", "main", repoDir)
 	runGit(t, repoDir, "config", "user.name", "Task User")
 	runGit(t, repoDir, "config", "user.email", "task@example.com")

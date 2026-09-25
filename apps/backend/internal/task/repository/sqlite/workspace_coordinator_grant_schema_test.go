@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -84,10 +85,10 @@ func TestWorkspaceCoordinatorGrantMigrationRepairsLegacyForeignKeyBeforeTaskMuta
 		t.Fatalf("seed legacy coordinator designation: %v", err)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("migrate legacy coordinator designation schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay legacy coordinator designation migration: %v", err)
 	}
 	if _, err := repo.db.Exec(repo.db.Rebind(`

@@ -34,7 +34,7 @@
  * a tiny listener set, so it survives across route navigations (the page
  * component unmounts/remounts as the user navigates away and back).
  */
-/* eslint-disable max-lines, max-lines-per-function, sonarjs/no-duplicate-string -- The fixture is the literal self-contained, dependency-free browser bundle exercised and hashed by E2E. */
+/* eslint-disable max-lines, max-lines-per-function -- The fixture is the literal self-contained, dependency-free browser bundle exercised and hashed by E2E. */
 (function () {
   var moduleCount = 0;
   var listeners = new Set();
@@ -70,6 +70,9 @@
     return count;
   }
 
+  var FIXTURE_REPOSITORY_ID = "fixture-repository";
+  var FIXTURE_HELLO_PATH = "/plugins/e2e-hello";
+  var FIXTURE_SIDEBAR_SECTION = "sidebar-footer";
   var PROVIDER_ID = "fixture-source-control";
   var PULL_REQUEST_URL =
     "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/42";
@@ -77,8 +80,8 @@
 
   function fixtureRepository() {
     return {
-      id: "fixture-repository",
-      repositoryId: "fixture-repository",
+      id: FIXTURE_REPOSITORY_ID,
+      repositoryId: FIXTURE_REPOSITORY_ID,
       owner: "TEAM",
       ownerOrProject: "TEAM",
       name: "fixture",
@@ -275,6 +278,48 @@
             jsx("path", { d: "M5 12h14M12 5l7 7l-7 7" }),
           ),
           jsx("span", { className: "sr-only" }, label),
+        );
+      }
+
+      function ChatTopBarStatus(props) {
+        var slotProps = props.slotProps || {};
+        if (slotProps.presentation !== "mobile") return null;
+        return jsx(
+          "span",
+          {
+            "data-testid": "e2e-chat-top-bar-status",
+            "data-task-id": slotProps.taskId || "",
+            "data-workspace-id": slotProps.workspaceId || "",
+            "data-active-session-id": slotProps.activeSessionId || "",
+            "data-session-ids": (slotProps.sessionIds || []).join(","),
+            "data-presentation": slotProps.presentation || "unknown",
+            className:
+              "min-w-0 max-w-full truncate rounded-md border px-3 py-2 text-xs text-muted-foreground",
+          },
+          "Fixture archive synchronization is ready",
+        );
+      }
+
+      function ChatTopBarAction(props) {
+        var slotProps = props.slotProps || {};
+        var activeState = React.useState(false);
+        var active = activeState[0];
+        var setActive = activeState[1];
+        if (slotProps.presentation !== "mobile") return null;
+        return jsx(
+          ui.Button,
+          {
+            type: "button",
+            variant: "outline",
+            className: "cursor-pointer",
+            "data-testid": "e2e-chat-top-bar-action",
+            "data-presentation": slotProps.presentation || "unknown",
+            "data-activated": active ? "true" : "false",
+            onClick: function () {
+              setActive(true);
+            },
+          },
+          active ? "Fixture action complete" : "Run fixture task action",
         );
       }
 
@@ -731,14 +776,14 @@
       registry.registerNavItem({
         id: "e2e-hello",
         label: "Hello E2E",
-        path: "/plugins/e2e-hello",
+        path: FIXTURE_HELLO_PATH,
         section: "main",
       });
       registry.registerNavItem({
         id: "e2e-insights-tools",
         label: "E2E Insights Tools",
-        path: "/plugins/e2e-hello",
-        section: "sidebar-footer",
+        path: FIXTURE_HELLO_PATH,
+        section: FIXTURE_SIDEBAR_SECTION,
       });
       // Three more sidebar-footer items so this one plugin install alone
       // produces P = 4 (budget MAX_INLINE_PLUGIN_FOOTER_ITEMS = 3, plus one
@@ -754,24 +799,26 @@
       registry.registerNavItem({
         id: "e2e-insights-tools-2",
         label: "E2E Overflow Item 2",
-        path: "/plugins/e2e-hello",
-        section: "sidebar-footer",
+        path: FIXTURE_HELLO_PATH,
+        section: FIXTURE_SIDEBAR_SECTION,
       });
       registry.registerNavItem({
         id: "e2e-insights-tools-3",
         label: "E2E Overflow Item 3",
-        path: "/plugins/e2e-hello",
-        section: "sidebar-footer",
+        path: FIXTURE_HELLO_PATH,
+        section: FIXTURE_SIDEBAR_SECTION,
       });
       registry.registerNavItem({
         id: "e2e-insights-tools-4",
         label: "E2E Overflow Item 4",
-        path: "/plugins/e2e-hello",
-        section: "sidebar-footer",
+        path: FIXTURE_HELLO_PATH,
+        section: FIXTURE_SIDEBAR_SECTION,
       });
-      registry.registerRoute("/plugins/e2e-hello", PluginPage);
+      registry.registerRoute(FIXTURE_HELLO_PATH, PluginPage);
       registry.registerComponent("task-sidebar", SidebarSlot);
       registry.registerComponent("main-top-bar", MainTopBarSlot);
+      registry.registerComponent("chat-top-bar", ChatTopBarStatus);
+      registry.registerComponent("chat-top-bar", ChatTopBarAction);
       registry.registerComponent("app-status-bar-left", StatusSlot);
       registry.registerComponent("app-status-bar-right", StatusSlot);
       registry.registerWsHandler("task.created", function () {
@@ -801,7 +848,7 @@
             providerId: PROVIDER_ID,
             providerHost: "bitbucket.example.test",
             ownerOrProject: "TEAM",
-            repositoryId: "fixture-repository",
+            repositoryId: FIXTURE_REPOSITORY_ID,
             repositoryName: "fixture",
             cloneUrl: REPOSITORY_URL,
             defaultBranch: "main",
@@ -835,7 +882,7 @@
               title: "Bitbucket Pull Request #42",
               url: PULL_REQUEST_URL,
               connectionScope: "https://bitbucket.example.test",
-              repositoryId: "fixture-repository",
+              repositoryId: FIXTURE_REPOSITORY_ID,
               changeRequestNumber: 42,
               state: "OPEN",
               statusBadge: { label: "Open" },
@@ -847,7 +894,7 @@
               title: "Bitbucket Pull Request #43",
               url: "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/43",
               connectionScope: "https://bitbucket.example.test",
-              repositoryId: "fixture-repository",
+              repositoryId: FIXTURE_REPOSITORY_ID,
               changeRequestNumber: 43,
               state: "OPEN",
               statusBadge: { label: "Open" },
@@ -967,6 +1014,35 @@
             "task",
             context.taskId,
             "primary-menu-presentation",
+            context.presentation,
+          );
+        },
+      });
+      registry.registerTaskMenuAction({
+        id: "task-shortcuts",
+        label: "Task shortcuts",
+        group: "primary",
+        items: function () {
+          return [
+            {
+              id: "record-presentation",
+              label: "Record menu presentation",
+              run: function (childContext) {
+                return host.storage.set(
+                  "task",
+                  childContext.taskId,
+                  "primary-submenu-presentation",
+                  childContext.presentation,
+                );
+              },
+            },
+          ];
+        },
+        run: function (context) {
+          return host.storage.set(
+            "task",
+            context.taskId,
+            "primary-submenu-presentation",
             context.presentation,
           );
         },

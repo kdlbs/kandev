@@ -46,6 +46,17 @@ func (c *prFeedbackStub) GetPRFeedback(_ context.Context, _, _ string, _ int) (*
 	return &PRFeedback{PR: &PR{State: c.state}}, nil
 }
 
+func (c *prFeedbackStub) GetPR(_ context.Context, owner, repo string, number int) (*PR, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	return &PR{Number: number, State: c.state, RepoOwner: owner, RepoName: repo}, nil
+}
+
+func (c *prFeedbackStub) ListPRReviews(context.Context, string, string, int) ([]PRReview, error) {
+	return nil, c.err
+}
+
 func reviewTaskFixture() *ReviewPRTask {
 	return &ReviewPRTask{
 		ID:            "rpt-1",
@@ -258,6 +269,7 @@ func TestCleanupAllOrphanedReviewTasks_DisabledWatch_StillCleansUp(t *testing.T)
 	if err := store.CreateReviewWatch(ctx, watch); err != nil {
 		t.Fatalf("CreateReviewWatch: %v", err)
 	}
+	seedTask(t, store, "task-88", false)
 	rpt := &ReviewPRTask{
 		ReviewWatchID: watch.ID,
 		RepoOwner:     "acme",
@@ -343,6 +355,7 @@ func TestCleanupAllOrphanedReviewTasks_SkipsEnabledWatchRows(t *testing.T) {
 	if err := store.CreateReviewWatch(ctx, watch); err != nil {
 		t.Fatalf("CreateReviewWatch: %v", err)
 	}
+	seedTask(t, store, "task-111", false)
 	rpt := &ReviewPRTask{
 		ReviewWatchID: watch.ID,
 		RepoOwner:     "acme",
@@ -432,6 +445,7 @@ func TestCheckReviewWatches_RunsOrphanSweepWhenNoEnabledWatches(t *testing.T) {
 	if err := store.CreateReviewWatch(ctx, watch); err != nil {
 		t.Fatalf("CreateReviewWatch: %v", err)
 	}
+	seedTask(t, store, "task-9001", false)
 	rpt := &ReviewPRTask{
 		ReviewWatchID: watch.ID,
 		RepoOwner:     "acme",
@@ -446,6 +460,7 @@ func TestCheckReviewWatches_RunsOrphanSweepWhenNoEnabledWatches(t *testing.T) {
 
 	rec := &recordingTaskDeleter{}
 	svc.SetTaskDeleter(rec)
+	svc.SetTaskSessionChecker(&recordingSessionChecker{})
 
 	poller.checkReviewWatches(ctx)
 
@@ -466,6 +481,7 @@ func TestCheckIssueWatches_RunsOrphanSweepWhenNoEnabledWatches(t *testing.T) {
 	if err := store.CreateIssueWatch(ctx, watch); err != nil {
 		t.Fatalf("CreateIssueWatch: %v", err)
 	}
+	seedTask(t, store, "task-9002", false)
 	_, _ = store.ReserveIssueWatchTask(ctx, watch.ID, "acme", "widget", 9002, "https://example/9002")
 	if err := store.AssignIssueWatchTaskID(ctx, watch.ID, "acme", "widget", 9002, "task-9002"); err != nil {
 		t.Fatalf("AssignIssueWatchTaskID: %v", err)
@@ -556,6 +572,7 @@ func TestCleanupAllOrphanedIssueTasks_DisabledWatch_StillCleansUp(t *testing.T) 
 	if err := store.CreateIssueWatch(ctx, watch); err != nil {
 		t.Fatalf("CreateIssueWatch: %v", err)
 	}
+	seedTask(t, store, "task-88", false)
 	_, _ = store.ReserveIssueWatchTask(ctx, watch.ID, "acme", "widget", 88, "https://example/88")
 	if err := store.AssignIssueWatchTaskID(ctx, watch.ID, "acme", "widget", 88, "task-88"); err != nil {
 		t.Fatalf("AssignIssueWatchTaskID: %v", err)
@@ -622,6 +639,7 @@ func TestCleanupAllOrphanedIssueTasks_SkipsEnabledWatchRows(t *testing.T) {
 	if err := store.CreateIssueWatch(ctx, watch); err != nil {
 		t.Fatalf("CreateIssueWatch: %v", err)
 	}
+	seedTask(t, store, "task-111", false)
 	_, _ = store.ReserveIssueWatchTask(ctx, watch.ID, "acme", "widget", 111, "https://example/111")
 	if err := store.AssignIssueWatchTaskID(ctx, watch.ID, "acme", "widget", 111, "task-111"); err != nil {
 		t.Fatalf("AssignIssueWatchTaskID: %v", err)
@@ -759,6 +777,7 @@ func TestDeleteReviewWatchesByWorkspace(t *testing.T) {
 		if err := store.CreateReviewWatch(ctx, w); err != nil {
 			t.Fatalf("CreateReviewWatch: %v", err)
 		}
+		seedTask(t, store, "task-"+w.ID, false)
 		rpt := &ReviewPRTask{
 			ReviewWatchID: w.ID,
 			RepoOwner:     "acme",
@@ -867,4 +886,15 @@ func (c *switchingFeedbackClient) GetPRFeedback(_ context.Context, _, _ string, 
 		return nil, c.err
 	}
 	return &PRFeedback{PR: &PR{State: c.state}}, nil
+}
+
+func (c *switchingFeedbackClient) GetPR(_ context.Context, owner, repo string, number int) (*PR, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	return &PR{Number: number, State: c.state, RepoOwner: owner, RepoName: repo}, nil
+}
+
+func (c *switchingFeedbackClient) ListPRReviews(context.Context, string, string, int) ([]PRReview, error) {
+	return nil, c.err
 }

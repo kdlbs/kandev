@@ -3,10 +3,12 @@
 package probe
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -92,7 +94,7 @@ func linuxBootTime() (time.Time, error) {
 func readLinuxProcessStat(pid int, bootTime time.Time) (processInfo, bool, error) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		if os.IsNotExist(err) {
+		if isLinuxProcessGone(err) {
 			return processInfo{}, false, nil
 		}
 		return processInfo{}, false, err
@@ -128,4 +130,8 @@ func readLinuxProcessStat(pid int, bootTime time.Time) (processInfo, bool, error
 		StartTime: startTime,
 		Zombie:    fields[0] == linuxZombieState,
 	}, true, nil
+}
+
+func isLinuxProcessGone(err error) bool {
+	return os.IsNotExist(err) || errors.Is(err, syscall.ESRCH)
 }

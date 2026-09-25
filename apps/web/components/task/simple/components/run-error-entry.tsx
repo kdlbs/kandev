@@ -300,7 +300,10 @@ export function RunErrorEntry({
     );
   }
 
-  if (error.failureCode === "managed_runtime_npm_resolution") {
+  if (
+    error.failureCode === "managed_runtime_npm_resolution" ||
+    error.failureCode === "managed_runtime_npm_policy"
+  ) {
     return (
       <ManagedRuntimeNpmRunError
         error={error}

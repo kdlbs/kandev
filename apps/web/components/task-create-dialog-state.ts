@@ -47,7 +47,7 @@ type FormResetEffectsArgs = {
   setDraftDescription: (v: string) => void;
   setCurrentDefaults: (v: { name: string; description: string }) => void;
   setOpenCycle: React.Dispatch<React.SetStateAction<number>>;
-  prevOpenRef: React.RefObject<boolean>;
+  prevDialogRef: React.RefObject<{ open: boolean; workspaceId: string | null }>;
   lockedWorkflow: boolean;
 };
 
@@ -60,14 +60,14 @@ function useFormResetEffects({
   setDraftDescription,
   setCurrentDefaults,
   setOpenCycle,
-  prevOpenRef,
+  prevDialogRef,
   lockedWorkflow,
 }: FormResetEffectsArgs) {
   useEffect(() => {
-    const wasOpen = prevOpenRef.current;
-    (prevOpenRef as React.MutableRefObject<boolean>).current = open;
+    const previous = prevDialogRef.current;
+    (prevDialogRef as React.MutableRefObject<typeof previous>).current = { open, workspaceId };
 
-    if (!open || wasOpen) return;
+    if (!open || (previous.open && previous.workspaceId === workspaceId)) return;
 
     setOpenCycle((c) => c + 1);
 
@@ -295,7 +295,7 @@ function useFormStateValues(workflowId: string | null) {
   const [openCycle, setOpenCycle] = useState(0);
   // Start as false so a fresh mount with open=true is detected as a rising edge
   // (callers like QuickTaskLauncher conditionally mount the dialog already-open).
-  const prevOpenRef = useRef(false);
+  const prevDialogRef = useRef({ open: false, workspaceId: null as string | null });
 
   // currentDefaults stores the loaded draft/initial values for this open cycle
   const [currentDefaults, setCurrentDefaults] = useState<{ name: string; description: string }>({
@@ -315,6 +315,7 @@ function useFormStateValues(workflowId: string | null) {
   const [executorId, setExecutorId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
   const [selectedWorkflowId, setSelectedWorkflowId] = useState(workflowId);
+  const [workflowAgentOverrides, setWorkflowAgentOverrides] = useState<Record<string, string>>({});
   const [fetchedSteps, setFetchedSteps] = useState<StepType[] | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
@@ -346,6 +347,8 @@ function useFormStateValues(workflowId: string | null) {
     setExecutorProfileId,
     selectedWorkflowId,
     setSelectedWorkflowId,
+    workflowAgentOverrides,
+    setWorkflowAgentOverrides,
     fetchedSteps,
     setFetchedSteps,
     isCreatingSession,
@@ -356,7 +359,7 @@ function useFormStateValues(workflowId: string | null) {
     setOpenCycle,
     currentDefaults,
     setCurrentDefaults,
-    prevOpenRef,
+    prevDialogRef,
     noRepository,
     setNoRepository,
     preferLocalExecutor,
@@ -414,7 +417,7 @@ export function useDialogFormState(
     setDraftDescription: form.setDraftDescription,
     setCurrentDefaults: form.setCurrentDefaults,
     setOpenCycle: form.setOpenCycle,
-    prevOpenRef: form.prevOpenRef,
+    prevDialogRef: form.prevDialogRef,
     lockedWorkflow,
     resetters: {
       setBlockedBy: dependencies.setBlockedBy,
@@ -429,6 +432,7 @@ export function useDialogFormState(
       setExecutorId: form.setExecutorId,
       setExecutorProfileId: form.setExecutorProfileId,
       setSelectedWorkflowId: form.setSelectedWorkflowId,
+      setWorkflowAgentOverrides: form.setWorkflowAgentOverrides,
       setFetchedSteps: form.setFetchedSteps,
       setDiscoveredRepositories: discovery.setDiscoveredRepositories,
       setDiscoverReposLoaded: discovery.setDiscoverReposLoaded,
@@ -654,6 +658,19 @@ export function useTaskCreateDialogData({
   const settingsData = useAppStore((state) => state.settingsData);
   const availableAgentsLoaded = useAppStore((state) => state.availableAgents.loaded);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const workspaceSnapshotWorkspaceId = useAppStore(
+    (state) => state.workspaceContextRead.workspaceId,
+  );
+  const workspaceSnapshotPending = useAppStore(
+    (state) => state.workspaceContextRead.snapshotPending,
+  );
+  const workspaceSnapshotError = useAppStore((state) => state.workspaceContextRead.snapshotError);
+  const workspaceSnapshotRead = {
+    workspaceId: workspaceSnapshotWorkspaceId,
+    pending: workspaceSnapshotPending,
+    error: workspaceSnapshotError,
+  };
+  const refreshWorkspaceSnapshots = useAppStore((state) => state.requestWorkspaceContextRefresh);
   const taskCreateUserSettings = useEnsureUserSettings(open);
 
   useSettingsData(open);
@@ -695,6 +712,8 @@ export function useTaskCreateDialogData({
     agentProfiles,
     executors,
     snapshots,
+    workspaceSnapshotRead,
+    refreshWorkspaceSnapshots,
     repositories,
     repositoriesLoading,
     refreshRepositories,

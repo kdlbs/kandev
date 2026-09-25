@@ -37,6 +37,21 @@ An empty value uses the workflow profile, then the active session profile.
 A selected profile stays attached to its own `task_sessions.agent_profile_id`.
 Routing never rewrites a live session to impersonate another profile.
 
+Task creation can add a task-owned substitution record. The record stores the
+original workflow ID and one replacement binding for each fixed step ID. The
+create UI groups rows by source profile, but persistence expands each choice
+to the matching step IDs so later workflow edits cannot rematch the task to a
+different set of steps. For a task in that original workflow,
+`resolveStepAgentProfileForTask` checks the exact binding before the step
+profile and workflow default. A binding is ignored after the task moves to a
+different workflow and becomes active again if the task returns. It never
+changes the shared workflow or passes to a child task.
+
+An unavailable replacement stops validation or routing. Kandev does not fall
+back to the original workflow profile. Explicit initial-session and
+earlier-step targets remain authoritative and do not use this substitution
+record.
+
 The planned explicit initial-session and earlier-step targets extend this
 profile-only path. Their contract, persistence, and same-profile session
 replacement rules are owned by
@@ -54,7 +69,7 @@ The destination session inherits the current task environment and executor profi
 
 ## Control flow
 
-1. Before committing a workflow transition, resolve the destination step's effective profile and preflight its reusable or prospective session against managed Git credential requirements.
+1. Before committing a workflow transition, resolve the destination step's task-aware effective profile and preflight its reusable or prospective session against managed Git credential requirements.
 2. After the destination step is selected and before any entry action runs, resolve the effective profile and normalized start policy from that step and the source step's normalized end policy.
 3. If the effective profile is empty or matches the active session, keep that session and make it primary when needed.
 4. If the profile differs, select reuse or new-session behavior from the destination step's normalized start policy.

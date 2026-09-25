@@ -58,7 +58,7 @@ func TestCoordinatorAuditPrincipalMigrationReplaysOnLegacyDatabase(t *testing.T)
 	if _, err := repo.db.Exec(`ALTER TABLE task_coordinator_audit_events DROP COLUMN principal_id`); err != nil {
 		t.Fatalf("simulate legacy audit schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(ctx); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
 	events, err := repo.ListCoordinatorAuditEvents(ctx, "ws-1", "actor", 10)

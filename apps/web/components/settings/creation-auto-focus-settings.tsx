@@ -1,17 +1,22 @@
 "use client";
+import { SettingsInfo } from "./settings-info";
 
 import { useEffect, useRef, useState } from "react";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import { SettingsCard } from "./settings-card";
+import { SettingsRow, type SettingsPresentation } from "./settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { useTranslation } from "react-i18next";
 
-export function CreationAutoFocusSettings() {
+export function CreationAutoFocusSettings({
+  presentation = "card",
+}: {
+  presentation?: SettingsPresentation;
+}) {
   const { t } = useTranslation();
   const autoFocusNewTasks = useAppStore((state) => state.userSettings.autoFocusNewTasks);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
@@ -45,6 +50,38 @@ export function CreationAutoFocusSettings() {
     discard: () => setDraft(saved),
   });
 
+  const row = (
+    <SettingsRow
+      label={
+        presentation === "row"
+          ? t("settings:openNewTasksAutomatically")
+          : t("settings:autoFocusNewTasks")
+      }
+      description={t("settings:autoFocusShort")}
+      info={
+        <SettingsInfo label={t("settings:openNewTasksAutomatically")}>
+          {t("settings:autoFocusNewTasksHelp")}
+        </SettingsInfo>
+      }
+      controlId="creation-auto-focus"
+      data-testid="creation-auto-focus-row"
+      touchTarget="switch"
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.creationAutoFocus}
+      isDirty={isDirty}
+      control={
+        <Switch
+          id="creation-auto-focus"
+          checked={draft}
+          data-settings-dirty={isDirty}
+          onCheckedChange={setDraft}
+          className="shrink-0 cursor-pointer [@media(pointer:coarse)]:after:-inset-y-3.5"
+        />
+      }
+    />
+  );
+
+  if (presentation === "row") return row;
+
   return (
     <SettingsCard
       isDirty={isDirty}
@@ -54,21 +91,7 @@ export function CreationAutoFocusSettings() {
       <CardHeader>
         <CardTitle className="text-base">{t("settings:autoFocusNewTasks")}</CardTitle>
       </CardHeader>
-      <CardContent>
-        <div className="flex min-h-11 items-center justify-between gap-4">
-          <div className="min-w-0 space-y-0.5">
-            <Label htmlFor="creation-auto-focus">{t("settings:autoFocusNewTasks")}</Label>
-            <p className="text-xs text-muted-foreground">{t("settings:autoFocusNewTasksHelp")}</p>
-          </div>
-          <Switch
-            id="creation-auto-focus"
-            checked={draft}
-            data-settings-dirty={isDirty}
-            onCheckedChange={setDraft}
-            className="shrink-0 cursor-pointer [@media(pointer:coarse)]:after:-inset-y-3.5"
-          />
-        </div>
-      </CardContent>
+      <CardContent>{row}</CardContent>
     </SettingsCard>
   );
 }

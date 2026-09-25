@@ -29,6 +29,7 @@ type ReviewDiffHeaderProps = ReviewExternalLinkContext & {
   hasStickyRepoHeader?: boolean;
   onCheckboxChange: (checked: boolean | "indeterminate") => void;
   onDiscard: () => void;
+  onCommentFile?: () => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
   markdownPreview?: boolean;
   onToggleMarkdownPreview?: () => void;
@@ -267,6 +268,7 @@ export function ReviewDiffHeader({
   sessionId,
   onCheckboxChange,
   onDiscard,
+  onCommentFile,
   onOpenFile,
   markdownPreview,
   onToggleMarkdownPreview,
@@ -288,7 +290,6 @@ export function ReviewDiffHeader({
     (file.repository_name ? undefined : fallbackBaseBranch);
   const toolbar = (
     <FileDiffToolbar
-      diff={file.diff}
       filePath={file.path}
       sessionId={sessionId}
       source={file.source}
@@ -301,6 +302,7 @@ export function ReviewDiffHeader({
       wordWrap={wordWrap}
       expandUnchanged={expandUnchanged}
       onDiscard={onDiscard}
+      onCommentFile={onCommentFile}
       onOpenFile={onOpenFile}
       markdownPreview={markdownPreview}
       onToggleMarkdownPreview={onToggleMarkdownPreview}

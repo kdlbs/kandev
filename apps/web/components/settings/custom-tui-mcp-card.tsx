@@ -36,11 +36,14 @@ export function CustomTUIMcpCard({ agent }: CustomTUIMcpCardProps) {
   // Gated: this card is rendered once per agent on the index, and hooks run
   // before the early return below, so an unconditional fetch would issue one
   // identical request per built-in agent as well.
-  const isCustomTUIAgent = Boolean(agent?.tui_config);
+  // An ACP custom agent receives kandev's resolved MCP servers in session/new,
+  // so there is no wrapped-CLI config file for a strategy to write. Offering
+  // the picker would present a choice the backend rejects.
+  const isCustomTUIAgent = Boolean(agent?.tui_config) && agent?.tui_config?.protocol !== "acp";
   const strategies = useMCPStrategies(isCustomTUIAgent);
   const [saving, setSaving] = useState(false);
 
-  if (!agent?.tui_config) return null;
+  if (!isCustomTUIAgent || !agent?.tui_config) return null;
 
   const handleChange = async (strategy: string) => {
     setSaving(true);

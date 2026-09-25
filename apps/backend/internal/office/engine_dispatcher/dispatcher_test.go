@@ -6,10 +6,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -289,12 +291,30 @@ func newDispatcherRunsService(t *testing.T) (*runsservice.Service, *runssqlite.R
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
+
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("settings store init: %v", err)
+	}
 
 	officeRepo, err := officesqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init office repo: %v", err)
 	}
+
+	// This suite's stubbed run requests always attribute to "agent-primary"
+	// (see stubPrimary above); seed it so resolveCausation's workspace
+	// lookup (AC-OFFICE-RUN-CAUSATION-001.20) succeeds.
+	now := time.Now().UTC()
+	if _, err := db.Exec(`
+		INSERT INTO agent_profiles (
+			id, agent_id, name, agent_display_name, created_at, updated_at, workspace_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, "agent-primary", "test-agent", "agent-primary", "agent-primary", now, now, "ws-test"); err != nil {
+		t.Fatalf("seed agent profile: %v", err)
+	}
+
 	log := logger.Default()
 	runsRepo := officeRepo.RunsRepository()
 	svc := runsservice.New(runsRepo, bus.NewMemoryEventBus(log), log, nil)

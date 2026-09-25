@@ -321,11 +321,11 @@ export function buildAgentsBranch(
 /**
  * One node per executor, holding its profiles.
  *
- * Most executors use the scoped legacy spellings so their executor breadcrumb
- * matches the branch. A configured Kubernetes executor only discloses its
- * profile children: connection, diagnostics, sessions and workload settings
- * all live on that profile page. Its standalone connection route remains
- * reachable only when there is no profile to recover through.
+ * Profile children always open the canonical profile editor. A configured
+ * Kubernetes executor only discloses its profile children: connection,
+ * diagnostics, sessions and workload settings all live on that profile page.
+ * Its standalone connection route remains reachable only when there is no
+ * profile to recover through.
  */
 export function buildExecutorsBranch(executors: ReadonlyArray<BranchExecutor>): SettingsMenuNode[] {
   return executors.map((executor) => {
@@ -342,7 +342,7 @@ export function buildExecutorsBranch(executors: ReadonlyArray<BranchExecutor>): 
       // Same split as agents: the executor ships with kandev, the profiles do not.
       children: profiles.map((profile) => ({
         key: `executor:${executor.id}:profile:${profile.id}`,
-        href: executorProfileSettingsPath(executor, profile.id),
+        href: executorProfileSettingsPath(profile.id),
         label: { text: profile.name },
         isUserRecord: true,
       })),

@@ -18,6 +18,7 @@ import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
 import { RUNNER_INELIGIBLE_REASON_KEYS } from "@/components/task-create-dialog-helpers";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 import { useTranslation } from "react-i18next";
 
 type SelectorOption = {
@@ -89,7 +90,7 @@ type AgentColumnProps = Pick<
 >;
 
 function credentialsHref(executorProfileId: string): string {
-  return executorProfileId ? `/settings/executors/${executorProfileId}` : "/settings/executors";
+  return executorProfileId ? executorProfileSettingsPath(executorProfileId) : "/settings/executors";
 }
 
 function useExecutorTarget(executorProfileName: string | null): string {

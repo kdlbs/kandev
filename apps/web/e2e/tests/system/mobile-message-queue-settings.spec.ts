@@ -7,6 +7,7 @@ import {
   requestMessageQueueSettings,
   restoreMessageQueueSettings,
 } from "../../helpers/message-queue-settings";
+import { openTaskBehaviorRuntime } from "../../helpers/settings-composition";
 
 let baseline: MessageQueueSettingsValue | undefined;
 
@@ -26,8 +27,8 @@ test("mobile navigation reaches the Message Queue section with touch-safe shared
   const mobile = new MobileKanbanPage(testPage);
   await mobile.goto();
   await mobile.mobileMenuButton.click();
-  const homeMenu = testPage.getByTestId("mobile-home-menu-card");
-  await homeMenu.getByRole("link", { name: "Settings" }).click();
+  const homeMenu = testPage.getByTestId("app-nav-sheet");
+  await homeMenu.getByRole("link", { name: "Settings", exact: true }).click();
   // Settings lands on the /settings index; the queue lives on Task behavior.
   const index = testPage.getByTestId("settings-index");
   await index.getByRole("link", { name: /^Task Behavior/ }).click();
@@ -35,6 +36,7 @@ test("mobile navigation reaches the Message Queue section with touch-safe shared
   await expect(testPage).toHaveURL(
     (url) => new URL(url).pathname === "/settings/preferences/task-behavior",
   );
+  await openTaskBehaviorRuntime(testPage);
   await expect(testPage.getByText("Message Queue").first()).toBeVisible();
 
   const input = testPage.getByTestId("message-queue-max-per-session");
@@ -83,6 +85,7 @@ test("mobile navigation reaches the Message Queue section with touch-safe shared
   await saveBar.getByRole("button", { name: "Save changes" }).tap();
   expect((await saveResponse).request().postDataJSON()).toEqual({ auto_merge_enabled: expected });
   await testPage.reload();
+  await openTaskBehaviorRuntime(testPage);
   await expect(testPage.getByTestId("message-queue-auto-merge-enabled")).toHaveAttribute(
     "aria-checked",
     String(expected),
@@ -117,15 +120,16 @@ test("mobile configuration lock keeps the source and accessible controls consist
   await mobile.goto();
   await mobile.mobileMenuButton.click();
   await testPage
-    .getByTestId("mobile-home-menu-card")
-    .getByRole("link", { name: "Settings" })
+    .getByTestId("app-nav-sheet")
+    .getByRole("link", { name: "Settings", exact: true })
     .click();
   await testPage
     .getByTestId("settings-index")
     .getByRole("link", { name: /^Task Behavior/ })
     .click();
+  await openTaskBehaviorRuntime(testPage);
 
-  const input = testPage.getByLabel("Maximum messages per session");
+  const input = testPage.getByLabel("Maximum messages per session", { exact: true });
   await expect(input).toBeDisabled();
   await expect(testPage.getByTestId("message-queue-source")).toHaveText("Configuration");
   await expect(testPage.getByText(/Managed by configuration/)).toBeVisible();

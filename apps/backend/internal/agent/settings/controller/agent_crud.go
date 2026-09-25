@@ -33,6 +33,7 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 	}
 	c.applyCapabilityStatus(&result, agent.Name)
 	c.applyBillingType(&result, agent.Name)
+	c.applyProviderSupport(&result, agent.Name)
 	return &result, nil
 }
 
@@ -53,6 +54,7 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 		}
 		c.applyCapabilityStatus(&entry, agent.Name)
 		c.applyBillingType(&entry, agent.Name)
+		c.applyProviderSupport(&entry, agent.Name)
 		payload = append(payload, entry)
 	}
 	c.sortAgentsByDisplayOrder(payload)
@@ -217,6 +219,16 @@ func (c *Controller) applyBillingType(d *dto.AgentDTO, agentName string) {
 	}
 }
 
+// applyProviderSupport populates the computed ProviderSupported flag on each
+// profile in the DTO from the registered agent implementation. Mirrors
+// applyBillingType — a read-time capability lookup, never persisted.
+func (c *Controller) applyProviderSupport(d *dto.AgentDTO, agentName string) {
+	supported := c.providerSupported(agentName)
+	for i := range d.Profiles {
+		d.Profiles[i].ProviderSupported = supported
+	}
+}
+
 func (c *Controller) findMatchedAvailability(name string, results []discovery.Availability) (*discovery.Availability, error) {
 	for _, result := range results {
 		if result.Name == name {
@@ -327,7 +339,8 @@ func (c *Controller) DeleteAgent(ctx context.Context, id string) error {
 		}
 		return err
 	}
-	if agent.TUIConfig != nil {
+	custom := agent.TUIConfig != nil
+	if custom {
 		_ = c.agentRegistry.Unregister(agent.Name)
 	}
 
@@ -336,6 +349,12 @@ func (c *Controller) DeleteAgent(ctx context.Context, id string) error {
 			return ErrAgentNotFound
 		}
 		return err
+	}
+	if custom {
+		// Installed Agents is rendered from the cached discovery sweep, which
+		// reports the registry. Without this the deleted agent keeps its card
+		// until the cache expires, and Rescan re-detects its binary.
+		c.InvalidateDiscoveryCache()
 	}
 	return nil
 }

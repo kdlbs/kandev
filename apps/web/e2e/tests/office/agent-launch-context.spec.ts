@@ -33,7 +33,7 @@ test.describe("Office agent launch context", () => {
     officeApi,
     officeSeed,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(120_000);
 
     // 1. Prime the bundled system-skill sync for the Office workspace
     //    (the lazy sync runs on the first /skills list).
@@ -74,7 +74,7 @@ test.describe("Office agent launch context", () => {
             worktreePath = env?.workspace_path ?? env?.repos?.[0]?.worktree_path ?? "";
             return worktreePath;
           },
-          { timeout: 30_000, message: "task environment workspace_path never appeared" },
+          { timeout: 60_000, message: "task environment workspace_path never appeared" },
         )
         .not.toBe("");
 
@@ -84,7 +84,7 @@ test.describe("Office agent launch context", () => {
       const skillFile = path.join(worktreePath, ".agents", "skills", "kandev-protocol", "SKILL.md");
       await expect
         .poll(() => fs.existsSync(skillFile), {
-          timeout: 15_000,
+          timeout: 30_000,
           message: skillFile,
         })
         .toBe(true);

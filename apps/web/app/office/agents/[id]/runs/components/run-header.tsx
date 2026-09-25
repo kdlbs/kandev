@@ -146,6 +146,11 @@ function TopRow({ run }: { run: RunDetail }) {
       <Badge variant={STATUS_VARIANT[run.status] ?? "secondary"} data-testid="run-status-badge">
         {run.status}
       </Badge>
+      {run.agent_name && (
+        <span className="text-sm text-muted-foreground" data-testid="run-agent-name">
+          {run.agent_name}
+        </span>
+      )}
       {run.invocation.adapter && (
         <span className="text-sm text-muted-foreground" data-testid="run-adapter">
           {run.invocation.adapter}

@@ -17,10 +17,14 @@ describe("programmatic external links", () => {
     expect(contents).not.toContain("window.open(");
   });
 
-  it.each([
-    ["../../hooks/use-open-session-in-editor.ts", "editor custom schemes"],
-    ["../../app/office/workspace/settings/export/export-preview.tsx", "downloads"],
-  ])("preserves WebView-owned window.open for %s", (path) => {
-    expect(source(path)).toContain("window.open(");
+  it("preserves WebView-owned window.open for editor custom schemes", () => {
+    expect(source("../../hooks/use-open-session-in-editor.ts")).toContain("window.open(");
+  });
+
+  it("uses the browser-owned download flow for selected Office exports", () => {
+    const contents = source("../../app/office/workspace/settings/export/export-preview.tsx");
+
+    expect(contents).toContain("anchor.download");
+    expect(contents).toContain("anchor.click()");
   });
 });

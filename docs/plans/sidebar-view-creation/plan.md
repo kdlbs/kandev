@@ -6,6 +6,13 @@ status: completed
 
 # Implementation Plan: Direct Sidebar View Creation
 
+## Workspace-scope continuation
+
+This completed package records the original global preference implementation.
+[Workspace sidebar task views](../workspace-sidebar-task-views/plan.md) owns its
+scoped persistence successor and updated browser fixtures. Historical validation
+results below remain unchanged.
+
 ## Overview
 
 Add a guarded optimistic `createSidebarView()` state action first, then connect it to desktop and mobile controls through one shared popover/rename controller. Finish with production-build Playwright journeys proving immediate creation, optional rename, persistence, blocked states, and mobile touch parity. Existing user-settings contracts remain unchanged.

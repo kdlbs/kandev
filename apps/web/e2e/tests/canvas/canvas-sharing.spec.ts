@@ -47,9 +47,7 @@ test.describe("Canvas sharing", () => {
 
       const dialog = testPage.getByRole("dialog").last();
       await expect(dialog).toBeVisible();
-      await expect(
-        dialog.getByText("Kandev creates bounded archives", { exact: false }),
-      ).toBeVisible();
+      await expect(dialog.getByText("Package details", { exact: true })).toBeVisible();
       await dialog.getByRole("button", { name: "Prepare downloads", exact: true }).click();
 
       const review = dialog.getByTestId("canvas-export-review");

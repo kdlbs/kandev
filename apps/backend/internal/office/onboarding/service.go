@@ -53,10 +53,12 @@ type WorkspaceCreator interface {
 // CreateOfficeTask routes the task through the workspace's office workflow
 // (workspaces.office_workflow_id). CreateOfficeTaskInWorkflow targets a
 // specific workflow id explicitly — used by the routines dispatcher to
-// pin tasks to the dedicated routine workflow.
+// pin tasks to the dedicated routine workflow; onboarding never calls it,
+// but must still declare the same signature as routines.RoutineTaskCreator
+// because both interfaces are satisfied by the same concrete adapter.
 type TaskCreator interface {
 	CreateOfficeTask(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (taskID string, err error)
-	CreateOfficeTaskInWorkflow(ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description string) (taskID string, err error)
+	CreateOfficeTaskInWorkflow(ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description, routineID string) (taskID string, err error)
 }
 
 // AgentCreator creates a new agent instance with validation.

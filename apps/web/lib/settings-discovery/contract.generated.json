@@ -343,6 +343,52 @@
           "settings_href": "/settings/agents"
         },
         {
+          "key": "agent_profile.provider_kind",
+          "field_path": "provider_kind",
+          "label": "provider_kind",
+          "description": "Provider routing kind.",
+          "json_type": "string",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "agent-settings",
+          "writable": true,
+          "validator": "agent-settings.profile",
+          "authority": "org.config.manage",
+          "change_timing": "future_sessions",
+          "settings_href": "/settings/agents"
+        },
+        {
+          "key": "agent_profile.provider_base_url",
+          "field_path": "provider_base_url",
+          "label": "provider_base_url",
+          "description": "OpenAI-compatible provider base URL.",
+          "json_type": "string",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "agent-settings",
+          "writable": true,
+          "validator": "agent-settings.profile",
+          "authority": "org.config.manage",
+          "change_timing": "future_sessions",
+          "settings_href": "/settings/agents"
+        },
+        {
+          "key": "agent_profile.provider_api_key_secret_id",
+          "field_path": "provider_api_key_secret_id",
+          "label": "provider_api_key_secret_id",
+          "description": "Global secret reference for the provider API key.",
+          "json_type": "string",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "agent-settings",
+          "writable": true,
+          "validator": "agent-settings.profile",
+          "authority": "org.config.manage",
+          "sensitive": true,
+          "change_timing": "future_sessions",
+          "settings_href": "/settings/agents"
+        },
+        {
           "key": "agent_profile.dynamic",
           "field_path": "dynamic",
           "label": "dynamic",
@@ -4820,6 +4866,24 @@
           "settings_href": "/settings/preferences"
         },
         {
+          "key": "user_settings.sidebar_layout_state",
+          "field_path": "sidebar_layouts_by_workspace",
+          "label": "sidebar layout state",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "object",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences",
+          "schema": {
+            "type": "object"
+          }
+        },
+        {
           "key": "user_settings.sidebar_active_view_id",
           "field_path": "sidebar_active_view_id",
           "label": "active sidebar view",
@@ -6204,6 +6268,9 @@
       "mode",
       "model",
       "name",
+      "provider_api_key_secret_id",
+      "provider_base_url",
+      "provider_kind",
       "require_exact_model"
     ],
     "user_settings": [
@@ -6256,6 +6323,7 @@
       "sidebar_draft",
       "sidebar_hover_delay_ms",
       "sidebar_hover_enabled",
+      "sidebar_layouts_by_workspace",
       "sidebar_task_color_automation",
       "sidebar_task_color_patch",
       "sidebar_task_colors",

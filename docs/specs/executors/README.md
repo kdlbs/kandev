@@ -45,6 +45,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Kubernetes startup timing](requirements/kubernetes-startup-timing.md)
 - [Kubernetes retained compute visibility](requirements/kubernetes-retained-compute.md)
 - [SSH Session Transport Liveness](requirements/ssh-transport-liveness.md)
+- [SSH Host Reachability](requirements/ssh-reachability.md)
 
 ### System design
 
@@ -64,6 +65,8 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Kubernetes startup timing](system-design/kubernetes-startup-timing.md)
 - [Kubernetes retained compute visibility](system-design/kubernetes-retained-compute.md)
 - [SSH Session Transport Liveness](system-design/ssh-transport-liveness.md)
+- [SSH Host Reachability](system-design/ssh-reachability.md)
+- [SSH Host Reachability Surfaces](system-design/ssh-reachability-surfaces.md)
 
 ## Migration record
 
@@ -72,11 +75,18 @@ canonical requirement and system-design documents. Use the catalog command to
 find current sources.
 
 The [Kubernetes executor foundation](../kubernetes-executor/spec.md) remains
-the current lifecycle contract. The three Kubernetes pairs own additive
-presets, launch diagnostics, and retained-compute visibility. They do not
-replace the foundation's resource ownership, recovery, or cleanup rules.
+the shipped lifecycle contract. Kubernetes capability pairs extend it. The
+[task-pod requirements](requirements/kubernetes-task-pod.md) and
+[design](system-design/kubernetes-task-pod.md) define task-owned compute and
+replace session ownership. Other foundation
+security, admission, and recovery guarantees remain applicable.
 
 ## Related systems
 
 - [Agents](../agents/README.md): supplies the agent command and profile.
 - [Tasks](../tasks/README.md): owns task-scoped execution lifecycle.
+
+The compact task indicator contract is extracted into
+[requirements](requirements/task-status-indicators.md) and
+[design](system-design/task-status-indicators.md), including automatic freshness
+and desktop/touch disclosure. The foundation retains task-page controls.

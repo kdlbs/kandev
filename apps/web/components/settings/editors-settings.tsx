@@ -7,7 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
-import { SettingsTarget } from "@/components/settings/settings-target";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { EditableCard } from "@/components/settings/editable-card";
@@ -49,6 +49,7 @@ import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
  * an LSP method breaks the thing it names.
  */
 const LSP_CONFIG_METHOD = "workspace/configuration";
+const EDITORS_TITLE_KEY = "settings:editors";
 
 type LspServerConfigSectionProps = {
   lspConfigStrings: Record<string, string>;
@@ -308,6 +309,7 @@ function CustomEditorsList({
 
 type EditorsSectionProps = {
   embedded: boolean;
+  showHeading?: boolean;
   defaultOptions: ComboboxOption[];
   defaultEditorId: string;
   baselineDefaultId: string;
@@ -326,6 +328,7 @@ type EditorsSectionProps = {
 
 function EditorsSection({
   embedded,
+  showHeading = true,
   defaultOptions,
   defaultEditorId,
   baselineDefaultId,
@@ -344,13 +347,14 @@ function EditorsSection({
   const { t } = useTranslation();
   return (
     <div className="space-y-6">
-      {embedded ? (
-        <h3 className={SETTINGS_TYPOGRAPHY.sectionTitle}>{t("settings:editors")}</h3>
-      ) : (
-        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {t("settings:editors")}
-        </div>
-      )}
+      {showHeading &&
+        (embedded ? (
+          <h3 className={SETTINGS_TYPOGRAPHY.sectionTitle}>{t(EDITORS_TITLE_KEY)}</h3>
+        ) : (
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t(EDITORS_TITLE_KEY)}
+          </div>
+        ))}
       <div className="space-y-2">
         <div className="text-sm font-medium text-foreground">{t("settings:default")}</div>
         <div
@@ -447,7 +451,7 @@ export function EditorsSettings({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <SettingsPageTemplate
-      title={t("settings:editors")}
+      title={t(EDITORS_TITLE_KEY)}
       description={t("settings:configureTheIncludedCodeEditorAnd")}
       // Explicit, because the template otherwise derives the save-contributor id
       // from `title` — which is now translated, and an identity must not be.
@@ -461,12 +465,14 @@ export function EditorsSettings({ embedded = false }: { embedded?: boolean }) {
       }
       onSave={() => saveDefaultRequest.run()}
       showPageChrome={!embedded}
+      contentFrame="none"
     >
       <div className="space-y-6">
-        <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.fileEditor} className="space-y-4">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {t("settings:fileEditor")}
-          </div>
+        <SettingsGroup
+          title={t("settings:fileEditor")}
+          discoveryTargetId={GENERAL_SETTINGS_TARGETS.fileEditor}
+          contentClassName="space-y-4 divide-y-0"
+        >
           <LspLanguageCards
             lspAutoStartLanguages={state.lspAutoStartLanguages}
             lspAutoInstallLanguages={state.lspAutoInstallLanguages}
@@ -488,25 +494,28 @@ export function EditorsSettings({ embedded = false }: { embedded?: boolean }) {
             setExpandedConfigLang={state.setExpandedConfigLang}
             updateLspConfigString={updateLspConfigString}
           />
-        </SettingsTarget>
+        </SettingsGroup>
         <Separator />
-        <EditorsSection
-          embedded={embedded}
-          defaultOptions={defaultOptions}
-          defaultEditorId={state.defaultEditorId}
-          baselineDefaultId={state.baselineDefaultId}
-          availableEditors={availableEditors}
-          builtInEditors={builtInEditors}
-          onDefaultEditorChange={state.setDefaultEditorId}
-          customEditors={customEditors}
-          editingId={state.editingId}
-          setEditingId={state.setEditingId}
-          isAdding={state.isAdding}
-          setIsAdding={state.setIsAdding}
-          createRequest={createRequest}
-          updateRequest={updateRequest}
-          deleteRequest={deleteRequest}
-        />
+        <SettingsGroup title={t(EDITORS_TITLE_KEY)} contentClassName="space-y-4 divide-y-0">
+          <EditorsSection
+            embedded={embedded}
+            showHeading={false}
+            defaultOptions={defaultOptions}
+            defaultEditorId={state.defaultEditorId}
+            baselineDefaultId={state.baselineDefaultId}
+            availableEditors={availableEditors}
+            builtInEditors={builtInEditors}
+            onDefaultEditorChange={state.setDefaultEditorId}
+            customEditors={customEditors}
+            editingId={state.editingId}
+            setEditingId={state.setEditingId}
+            isAdding={state.isAdding}
+            setIsAdding={state.setIsAdding}
+            createRequest={createRequest}
+            updateRequest={updateRequest}
+            deleteRequest={deleteRequest}
+          />
+        </SettingsGroup>
       </div>
     </SettingsPageTemplate>
   );

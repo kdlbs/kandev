@@ -41,7 +41,7 @@ func insertPromptRowWithRawTimestamp(t *testing.T, repo *Repository, id, session
 // serve after migration.
 func backfillPromptSeqForTest(t *testing.T, repo *Repository) {
 	t.Helper()
-	if err := repo.backfillPromptSeq(); err != nil {
+	if err := repo.backfillPromptSeq(context.Background()); err != nil {
 		t.Fatalf("backfill prompt_seq: %v", err)
 	}
 }

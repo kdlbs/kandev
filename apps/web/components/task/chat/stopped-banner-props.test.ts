@@ -18,6 +18,7 @@ function composerArgs(errorMessage: string) {
       mcpAttachmentHistory: [],
       handlePlanModeChange: vi.fn(),
       isAgentBusy: false,
+      isWorking: false,
       supportsSteering: false,
       isStarting: false,
       isPreparingEnvironment: false,

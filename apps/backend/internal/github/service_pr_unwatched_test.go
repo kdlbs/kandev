@@ -137,6 +137,105 @@ func TestTriggerPRSyncAll_RefreshesTaskPRWithNoWatchAtAll(t *testing.T) {
 	}
 }
 
+func TestTriggerPRSyncAllExplicitRefreshesUnwatchedWorkflowAttention(t *testing.T) {
+	_, svc, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-explicit-unwatched", false)
+	seedUnwatchedTaskPR(t, store, "task-explicit-unwatched", 143, "feature/approval")
+
+	mockClient.AddPR(&PR{
+		Number:        143,
+		Title:         "Workflow approval attention",
+		State:         prStateOpen,
+		RepoOwner:     "owner",
+		RepoName:      "repo",
+		HeadSHA:       "workflow-head-143",
+		HeadBranch:    "feature/approval",
+		HeadRepoOwner: "contributor",
+		HeadRepoName:  "repo-fork",
+		BaseBranch:    "main",
+	})
+	mockClient.ReplaceWorkflowRuns("owner", "repo", "workflow-head-143", []WorkflowRun{{
+		ID: 34494307522, RunAttempt: 1, WorkflowID: 93444456632,
+		Name: "Run tests", Event: workflowEventPullRequest, Status: workflowStatusCompleted,
+		Conclusion: workflowConclusionActionRequired, HeadSHA: "workflow-head-143",
+		HeadBranch: "feature/approval", HeadRepoOwner: "contributor", HeadRepoName: "repo-fork",
+		PullRequests: []WorkflowRunPullRequest{{
+			Number: 143, HeadSHA: "workflow-head-143", HeadBranch: "feature/approval",
+			HeadRepoOwner: "contributor", HeadRepoName: "repo-fork",
+		}},
+	}})
+
+	if _, _, err := svc.TriggerPRSyncAllPermanentWithOptions(ctx, "task-explicit-unwatched", true); err != nil {
+		t.Fatalf("initial explicit refresh: %v", err)
+	}
+	got, err := store.GetTaskPR(ctx, "task-explicit-unwatched")
+	if err != nil || got == nil || got.WorkflowAttention == nil {
+		t.Fatalf("load initial workflow attention: err=%v row=%+v", err, got)
+	}
+	if got.WorkflowAttention.State != WorkflowAttentionApprovalRequired {
+		t.Fatalf("initial workflow attention = %q, want approval_required", got.WorkflowAttention.State)
+	}
+
+	mockClient.ReplaceWorkflowRuns("owner", "repo", "workflow-head-143", nil)
+	if _, _, err := svc.TriggerPRSyncAllPermanentWithOptions(ctx, "task-explicit-unwatched", true); err != nil {
+		t.Fatalf("follow-up explicit refresh: %v", err)
+	}
+	got, err = store.GetTaskPR(ctx, "task-explicit-unwatched")
+	if err != nil || got == nil || got.WorkflowAttention == nil {
+		t.Fatalf("load refreshed workflow attention: err=%v row=%+v", err, got)
+	}
+	if got.WorkflowAttention.State != WorkflowAttentionNone {
+		t.Fatalf("refreshed workflow attention = %q, want none", got.WorkflowAttention.State)
+	}
+}
+
+func TestTriggerPRSyncAllExplicitRefreshesUnwatchedWorkflowAttentionBatch(t *testing.T) {
+	_, svc, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-explicit-unwatched-batch", false)
+	seedUnwatchedTaskPR(t, store, "task-explicit-unwatched-batch", 144, "feature/approval")
+
+	const headSHA = "workflow-head-144"
+	gh.prResponses = []string{
+		batchedOpenPRResponse("feature/approval", headSHA),
+		batchedOpenPRResponse("feature/approval", headSHA),
+	}
+	gh.ReplaceWorkflowRuns("owner", "repo", headSHA, []WorkflowRun{{
+		ID: 34494307523, RunAttempt: 1, WorkflowID: 93444456633,
+		Name: "Run tests", Event: workflowEventPullRequest, Status: workflowStatusCompleted,
+		Conclusion: workflowConclusionActionRequired, HeadSHA: headSHA,
+		HeadBranch: "feature/approval", HeadRepoOwner: "contributor", HeadRepoName: "repo-fork",
+		PullRequests: []WorkflowRunPullRequest{{
+			Number: 144, HeadSHA: headSHA, HeadBranch: "feature/approval",
+			HeadRepoOwner: "contributor", HeadRepoName: "repo-fork",
+		}},
+	}})
+
+	if _, _, err := svc.TriggerPRSyncAllPermanentWithOptions(ctx, "task-explicit-unwatched-batch", true); err != nil {
+		t.Fatalf("initial explicit batch refresh: %v", err)
+	}
+	got, err := store.GetTaskPR(ctx, "task-explicit-unwatched-batch")
+	if err != nil || got == nil || got.WorkflowAttention == nil {
+		t.Fatalf("load initial batch workflow attention: err=%v row=%+v", err, got)
+	}
+	if got.WorkflowAttention.State != WorkflowAttentionApprovalRequired {
+		t.Fatalf("initial batch workflow attention = %q, want approval_required", got.WorkflowAttention.State)
+	}
+
+	gh.ReplaceWorkflowRuns("owner", "repo", headSHA, nil)
+	if _, _, err := svc.TriggerPRSyncAllPermanentWithOptions(ctx, "task-explicit-unwatched-batch", true); err != nil {
+		t.Fatalf("follow-up explicit batch refresh: %v", err)
+	}
+	got, err = store.GetTaskPR(ctx, "task-explicit-unwatched-batch")
+	if err != nil || got == nil || got.WorkflowAttention == nil {
+		t.Fatalf("load refreshed batch workflow attention: err=%v row=%+v", err, got)
+	}
+	if got.WorkflowAttention.State != WorkflowAttentionNone {
+		t.Fatalf("refreshed batch workflow attention = %q, want none", got.WorkflowAttention.State)
+	}
+}
+
 // TestRefreshStaleWorkspaceWatches_HealsUnwatchedRow covers the surface the
 // kanban board and the topbar aggregate read from: the workspace-wide
 // background refresh (driven by ListWorkspaceTaskPRs) fans in watches only,
@@ -298,6 +397,20 @@ func batchedMergedPRResponse(headBranch, mergedAt string) string {
 		"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
 		"mergedAt": "` + mergedAt + `",
 		"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+		"commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}
+	}}}}`
+}
+
+func batchedOpenPRResponse(headBranch, headSHA string) string {
+	return `{"data":{"repo0":{"pr0":{
+		"state": "OPEN", "title": "PR", "url": "https://x/1",
+		"isDraft": false, "mergeable": "UNKNOWN", "mergeStateStatus": "UNKNOWN",
+		"headRefName": "` + headBranch + `", "baseRefName": "main", "headRefOid": "` + headSHA + `",
+		"headRepository": {"id": "1", "name": "repo-fork", "nameWithOwner": "contributor/repo-fork", "url": "https://github.com/contributor/repo-fork"},
+		"headRepositoryOwner": {"login": "contributor"},
+		"author": {"login": "alice"}, "mergedAt": null, "closedAt": null,
+		"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+		"reviewThreads": {"totalCount": 0, "nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}},
 		"commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}
 	}}}}`
 }
@@ -490,7 +603,7 @@ func TestUnwatchedTaskPRs_Selection(t *testing.T) {
 		nil,
 	}
 
-	got := unwatchedTaskPRs(rows, watches, now)
+	got := unwatchedTaskPRs(rows, watches, now, false)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 selected rows, got %d (%+v)", len(got), got)
 	}

@@ -16,6 +16,7 @@
  */
 
 import Link from "@/components/routing/app-link";
+import TaskLink from "@/components/routing/task-link";
 import { TaskPageContent } from "@/components/task/task-page-content";
 import { TaskBody, resolveTaskBodyMode } from "@/components/task/TaskBody";
 import { TaskHeader } from "@/components/task/TaskHeader";
@@ -153,11 +154,21 @@ function SimpleTaskHeaderRow({ task }: { task: Task | null }) {
 
 function CrossLinkRow({ taskId, target }: { taskId: string; target: "office" | "kanban" }) {
   const { t } = useTranslation();
-  const href = target === "office" ? `/office/tasks/${taskId}` : `/t/${taskId}`;
   const label = target === "office" ? t("tasks:openInOfficeView") : t("tasks:openInAdvancedView");
+  if (target === "kanban") {
+    return (
+      <TaskLink
+        taskId={taskId}
+        className="text-xs text-muted-foreground underline-offset-2 hover:underline cursor-pointer"
+        data-testid="task-cross-link"
+      >
+        {label}
+      </TaskLink>
+    );
+  }
   return (
     <Link
-      href={href}
+      href={`/office/tasks/${taskId}`}
       className="text-xs text-muted-foreground underline-offset-2 hover:underline cursor-pointer"
       data-testid="task-cross-link"
     >

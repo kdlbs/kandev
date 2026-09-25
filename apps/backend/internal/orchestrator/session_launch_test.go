@@ -174,6 +174,220 @@ func TestResolveIntent(t *testing.T) {
 	}
 }
 
+func TestValidateLaunchActivationSource(t *testing.T) {
+	for _, source := range []LaunchActivationSource{
+		"",
+		LaunchActivationSourceUserAction,
+		LaunchActivationSourceSessionOpen,
+	} {
+		if err := validateLaunchActivationSource(source); err != nil {
+			t.Errorf("validateLaunchActivationSource(%q) = %v", source, err)
+		}
+	}
+	if err := validateLaunchActivationSource("background_recovery"); err == nil {
+		t.Fatal("unknown launch activation source was accepted")
+	}
+}
+
+func TestPassiveLaunchResponseAllowsParkedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.IsPrimary = false
+	session.Metadata[models.SessionMetaKeyWorkflowParking] = models.WorkflowParking{
+		Stamp:           "parking-1",
+		ParkedAt:        time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC),
+		SourceSessionID: "session1",
+	}
+	parking := session.Metadata[models.SessionMetaKeyWorkflowParking]
+	delete(session.Metadata, models.SessionMetaKeyWorkflowParking)
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "session1", models.SessionMetaKeyWorkflowParking, parking); err != nil {
+		t.Fatalf("set parking metadata: %v", err)
+	}
+
+	service := &Service{repo: repo}
+	response := service.passiveLaunchResponse(ctx, &LaunchSessionRequest{
+		TaskID:           "task1",
+		SessionID:        "session1",
+		Intent:           IntentResume,
+		ActivationSource: LaunchActivationSourceSessionOpen,
+	}, IntentResume)
+	if response != nil {
+		t.Fatalf("passive parked launch response = %#v, want no suppression", response)
+	}
+	updated, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if _, ok := models.LoadWorkflowParking(updated.Metadata); !ok {
+		t.Fatal("passive inspection cleared the parking marker")
+	}
+}
+
+func TestPassiveLaunchResponseReportsQueuedDestination(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	record := models.CeilingRecordKeys(models.CeilingDeferral{
+		Kind:     models.CeilingLaunchStartCreated,
+		Payload:  map[string]interface{}{metaKeySessionID: "session1", metaKeyAgentProfileID: "profile-luna"},
+		Origin:   string(launchOriginAutomatic),
+		QueuedAt: queuedAt,
+	})
+	if err := repo.SetTaskMetadataKey(ctx, "task1", models.MetaKeyDeferredLaunch, record); err != nil {
+		t.Fatalf("set deferred launch: %v", err)
+	}
+
+	service := &Service{repo: repo}
+	response, err := service.LaunchSession(ctx, &LaunchSessionRequest{
+		TaskID:           "task1",
+		SessionID:        "session1",
+		Intent:           IntentResume,
+		ActivationSource: LaunchActivationSourceSessionOpen,
+	})
+	if err != nil {
+		t.Fatalf("LaunchSession: %v", err)
+	}
+	if response == nil || response.ActivationDisposition != "queued" {
+		t.Fatalf("passive queued launch response = %#v, want queued disposition", response)
+	}
+	if response.SessionID != "session1" || response.ActivationReason != autoResumeBlockedLaunchQueued {
+		t.Fatalf("passive queued response = %#v", response)
+	}
+}
+
+func TestPassiveLaunchResponseResolvesSessionlessQueuedDestinationFromRoute(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	route := models.WorkflowSessionRoute{
+		OperationID:       "workflow-route-1",
+		DestinationStepID: "implement",
+		EntryIdentity:     "entry:00000000000000000001",
+		TargetKind:        "new_session",
+		DestinationID:     "session1",
+		Phase:             "committed",
+	}
+	if err := repo.SetTaskMetadataKey(ctx, "task1", models.MetaKeyWorkflowSessionRoute, route); err != nil {
+		t.Fatalf("set workflow route: %v", err)
+	}
+	record := models.CeilingRecordKeys(models.CeilingDeferral{
+		Kind: models.CeilingLaunchStart,
+		Payload: map[string]interface{}{
+			metaKeyWorkflowStepID: "implement",
+		},
+		Origin:   string(launchOriginAutomatic),
+		QueuedAt: queuedAt,
+	})
+	if err := repo.SetTaskMetadataKey(ctx, "task1", models.MetaKeyDeferredLaunch, record); err != nil {
+		t.Fatalf("set deferred launch: %v", err)
+	}
+
+	service := &Service{repo: repo}
+	response, err := service.LaunchSession(ctx, &LaunchSessionRequest{
+		TaskID:           "task1",
+		Intent:           IntentStart,
+		ActivationSource: LaunchActivationSourceSessionOpen,
+	})
+	if err != nil {
+		t.Fatalf("LaunchSession: %v", err)
+	}
+	if response == nil || response.ActivationDisposition != "queued" || response.SessionID != "session1" {
+		t.Fatalf("sessionless passive queued response = %#v, want queued session1", response)
+	}
+}
+
+func TestClearWorkflowParkingForSessionPreservesNewerMarkerAndStopIntent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", string(models.TaskSessionStateWaitingForInput))
+	old := models.WorkflowParking{
+		Stamp:           "parking-old",
+		ParkedAt:        time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC),
+		SourceSessionID: "session1",
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "session1", models.SessionMetaKeyWorkflowParking, old); err != nil {
+		t.Fatalf("set old parking marker: %v", err)
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "session1", models.SessionMetaKeyWorkflowProfileSwitchStopIntent,
+		models.WorkflowProfileSwitchStopIntent{ExecutionID: "execution-old", Stamp: old.Stamp}); err != nil {
+		t.Fatalf("set stop intent: %v", err)
+	}
+
+	service := &Service{repo: repo, logger: testLogger()}
+	service.clearWorkflowParkingForSession(ctx, "session1", old.Stamp)
+	updated, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("reload after exact parking clear: %v", err)
+	}
+	if _, ok := models.LoadWorkflowParking(updated.Metadata); ok {
+		t.Fatal("matching launch did not clear the current parking marker")
+	}
+	if _, ok := workflowProfileSwitchStopIntentFromMetadata(updated.Metadata); !ok {
+		t.Fatal("clearing parking removed the execution stop-intent tombstone")
+	}
+
+	newMarker := old
+	newMarker.Stamp = "parking-new"
+	newMarker.RouteOperationID = "route-new"
+	if err := repo.SetSessionMetadataKey(ctx, "session1", models.SessionMetaKeyWorkflowParking, newMarker); err != nil {
+		t.Fatalf("set newer parking marker: %v", err)
+	}
+	service.clearWorkflowParkingForSession(ctx, "session1", old.Stamp)
+	updated, err = repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("reload after stale parking clear: %v", err)
+	}
+	parking, ok := models.LoadWorkflowParking(updated.Metadata)
+	if !ok || parking.Stamp != newMarker.Stamp {
+		t.Fatalf("stale launch clear replaced newer parking marker: %#v", updated.Metadata)
+	}
+}
+
+func TestPassiveLaunchResponseAllowsLegacyStopIntent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.IsPrimary = false
+	session.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent] = models.WorkflowProfileSwitchStopIntent{
+		ExecutionID: "execution-1",
+		Stamp:       "legacy-parking-1",
+		Consumed:    true,
+	}
+	legacyIntent := session.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent]
+	delete(session.Metadata, models.SessionMetaKeyWorkflowProfileSwitchStopIntent)
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "session1", models.SessionMetaKeyWorkflowProfileSwitchStopIntent, legacyIntent); err != nil {
+		t.Fatalf("set legacy parking metadata: %v", err)
+	}
+
+	service := &Service{repo: repo}
+	response := service.passiveLaunchResponse(ctx, &LaunchSessionRequest{
+		TaskID:           "task1",
+		SessionID:        "session1",
+		Intent:           IntentResume,
+		ActivationSource: LaunchActivationSourceSessionOpen,
+	}, IntentResume)
+	if response != nil {
+		t.Fatalf("legacy stop-intent passive response = %#v, want no suppression", response)
+	}
+}
+
 func TestLaunchSession_RejectsAttachmentClaimBeforeStart(t *testing.T) {
 	wantErr := errors.New("attachment is not available")
 	claimer := &rejectingLaunchAttachmentClaimer{wantErr: wantErr}

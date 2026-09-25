@@ -235,6 +235,17 @@ export type WorkflowProfileSessionStartPolicy = "reuse" | "new";
 export type WorkflowProfileSessionEndPolicy = "complete" | "park";
 export type WorkflowSessionTarget = { kind: "initial" } | { kind: "step"; step_id: string };
 
+export type WorkflowAgentOverrideBinding = {
+  step_id: string;
+  source_profile_id: string;
+  replacement_profile_id: string;
+};
+
+export type WorkflowAgentOverrides = {
+  workflow_id: string;
+  steps: WorkflowAgentOverrideBinding[];
+};
+
 export function normalizeWorkflowProfileSessionStartPolicy(
   value: unknown,
 ): WorkflowProfileSessionStartPolicy {
@@ -422,6 +433,8 @@ export type Task = ActiveSubagentCountFields & {
   workspace_id: WorkspaceId;
   workflow_id: WorkflowId;
   workflow_step_id: string;
+  /** Task-only replacements for fixed workflow step agent profiles. */
+  workflow_agent_overrides?: WorkflowAgentOverrides;
   position: number;
   title: string;
   description: string;
@@ -567,6 +580,7 @@ export type WorkflowStepDTO = {
 export type MoveTaskResponse = {
   task: Task;
   workflow_step: WorkflowStepDTO;
+  workflow_entry_identity?: string;
   move_id?: string;
   entry_options?: {
     reset_context?: boolean;
@@ -759,6 +773,7 @@ export type EditorOption = {
 };
 
 export type EditorsResponse = {
+  folder_opening_available?: boolean;
   editors: EditorOption[];
 };
 
@@ -1061,6 +1076,57 @@ export type StepPortable = {
 };
 
 export type ImportWorkflowsResult = { created: string[]; skipped: string[] };
+
+export type WorkflowImportProfileCandidate = {
+  id: string;
+  name: string;
+  agent_name: string;
+  model: string;
+  mode: string;
+  updated_at: string;
+};
+
+export type WorkflowImportProfileMatch = {
+  id: string;
+  updated_at: string;
+};
+
+export type WorkflowImportProfileStep = {
+  workflow_index: number;
+  workflow_name: string;
+  step_position: number;
+  step_name: string;
+  requested_profile: AgentProfilePortable;
+  matched_profile?: WorkflowImportProfileMatch;
+};
+
+export type WorkflowImportPreview = {
+  skipped: string[];
+  profiles: WorkflowImportProfileCandidate[];
+  steps: WorkflowImportProfileStep[];
+};
+
+export type WorkflowImportProfileBinding = {
+  workflow_index: number;
+  step_position: number;
+  requested_profile: AgentProfilePortable;
+  profile_id: string;
+  profile_updated_at: string;
+};
+
+export type WorkflowImportProfileConflict = {
+  workflow_index: number;
+  step_position: number;
+  workflow_name: string;
+  step_name: string;
+  reason: "missing_selection" | "unavailable_profile" | "changed_profile" | string;
+};
+
+export type WorkflowImportProfilesRequiredResponse = {
+  code: "workflow_import_profiles_required";
+  error: string;
+  steps: WorkflowImportProfileConflict[];
+};
 
 // Helper function to check if a step has a specific on_enter action
 export function stepHasOnEnterAction(

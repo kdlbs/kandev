@@ -25,6 +25,7 @@ vi.mock("@/components/task/port-forward-dialog", () => ({
 
 vi.mock("@/components/task/task-top-bar-plugin-actions", () => ({
   TaskTopBarPluginActions: () => null,
+  useHasTaskTopBarPluginActions: () => false,
 }));
 
 vi.mock("@/components/gitlab/mr-topbar-button", () => ({
@@ -48,7 +49,8 @@ function renderTopBar(props: Record<string, unknown> = {}) {
             workspaceId="ws-1"
             taskTitle="Pin the RDS engine version"
             sessionId="session-1"
-            onMenuClick={vi.fn()}
+            onTaskPickerClick={vi.fn()}
+            taskPickerOpen={false}
             {...props}
           />
         </TooltipProvider>

@@ -74,6 +74,10 @@ type PageTopbarProps = {
    * they unmount and remount when the fold engages.
    */
   overflowActions?: ReactNode;
+  /** Raw menu items shown only when the action budget is exceeded. */
+  overflowMenuItems?: ReactNode;
+  /** Primary action retained beside the overflow menu when it is open. */
+  overflowPrimaryAction?: ReactNode;
   className?: string;
   /**
    * Which zone absorbs the bar's leftover width. "lead" (default) lets the
@@ -472,22 +476,55 @@ type TopbarRightZoneProps = {
   zoneRef: RefObject<HTMLDivElement | null>;
   actions?: ReactNode;
   overflowActions?: ReactNode;
+  overflowMenuItems?: ReactNode;
+  overflowPrimaryAction?: ReactNode;
   actionsOverflowed: boolean;
   actionsClassName?: string;
   claimsFreeWidth: boolean;
   showStatusTrigger: boolean;
 };
 
+function TopbarActionCluster({
+  actions,
+  overflowActions,
+  overflowMenuItems,
+  overflowPrimaryAction,
+  actionsOverflowed,
+  actionsClassName,
+}: Pick<
+  TopbarRightZoneProps,
+  | "actions"
+  | "overflowActions"
+  | "overflowMenuItems"
+  | "overflowPrimaryAction"
+  | "actionsOverflowed"
+  | "actionsClassName"
+>) {
+  const showOverflowMenu = overflowMenuItems != null && actionsOverflowed;
+  return (
+    <div className={cn("relative z-10 flex shrink-0 items-center gap-2", actionsClassName)}>
+      {!actionsOverflowed && overflowActions}
+      {showOverflowMenu ? overflowPrimaryAction : actions}
+      {actionsOverflowed && overflowActions != null && (
+        <TopbarActionsOverflow>{overflowActions}</TopbarActionsOverflow>
+      )}
+      {showOverflowMenu && <TopbarActionsOverflow>{overflowMenuItems}</TopbarActionsOverflow>}
+    </div>
+  );
+}
+
 function TopbarRightZone({
   zoneRef,
   actions,
   overflowActions,
+  overflowMenuItems,
+  overflowPrimaryAction,
   actionsOverflowed,
   actionsClassName,
   claimsFreeWidth,
   showStatusTrigger,
 }: TopbarRightZoneProps) {
-  const hasCluster = Boolean(actions || overflowActions);
+  const hasCluster = Boolean(actions || overflowActions || overflowMenuItems);
   if (!hasCluster && !showStatusTrigger) return null;
   return (
     // Default: no `min-w-0`, so the zone's automatic minimum is its min-content
@@ -502,13 +539,14 @@ function TopbarRightZone({
       className={cn("flex items-center gap-3", claimsFreeWidth ? "min-w-0 grow" : "shrink")}
     >
       {hasCluster && (
-        <div className={cn("relative z-10 flex shrink-0 items-center gap-2", actionsClassName)}>
-          {!actionsOverflowed && overflowActions}
-          {actions}
-          {actionsOverflowed && overflowActions != null && (
-            <TopbarActionsOverflow>{overflowActions}</TopbarActionsOverflow>
-          )}
-        </div>
+        <TopbarActionCluster
+          actions={actions}
+          overflowActions={overflowActions}
+          overflowMenuItems={overflowMenuItems}
+          overflowPrimaryAction={overflowPrimaryAction}
+          actionsOverflowed={actionsOverflowed}
+          actionsClassName={actionsClassName}
+        />
       )}
       {showStatusTrigger ? (
         <AppStatusDrawerTrigger className={cn(hasCluster && "ml-1", "shrink-0")} />
@@ -555,6 +593,8 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
     leftActions,
     actions,
     overflowActions,
+    overflowMenuItems,
+    overflowPrimaryAction,
     className,
     freeWidth = "lead",
     centerClassName,
@@ -571,7 +611,8 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
   const rightZoneRef = useRef<HTMLDivElement>(null);
   const actionsClaimFreeWidth = freeWidth === "actions";
   // Measurement only matters once there is something that can fold.
-  const measured = (parents?.length ?? 0) > 0 || overflowActions != null;
+  const measured =
+    (parents?.length ?? 0) > 0 || overflowActions != null || overflowMenuItems != null;
   const pressure = useTopbarPressure(
     { leadZone: leadZoneRef, ghost: ghostRef, rightZone: rightZoneRef },
     measured,
@@ -631,6 +672,8 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
         zoneRef={rightZoneRef}
         actions={actions}
         overflowActions={overflowActions}
+        overflowMenuItems={overflowMenuItems}
+        overflowPrimaryAction={overflowPrimaryAction}
         actionsOverflowed={pressure.actionsOverflowed}
         actionsClassName={actionsClassName}
         claimsFreeWidth={actionsClaimFreeWidth}

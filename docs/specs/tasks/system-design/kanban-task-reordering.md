@@ -450,6 +450,9 @@ that makes the ordering-key alignment above mandatory rather than cosmetic.
 
 ## Surfaces
 
+Phone-only interaction contract: [mobile scrolling](mobile-kanban-scroll.md).
+Desktop/tablet ordering and backend contracts remain as described here.
+
 **The board ships exactly two views, and they are named in the registry.**
 `lib/kanban/view-registry.ts` enables `kanban` (`SwimlaneKanbanContent`) and
 `graph2`, labelled **Pipeline** (`SwimlaneGraph2Content`). Those two, and no
@@ -469,7 +472,7 @@ criteria mean.
 **Kanban view.** `components/kanban-column.tsx` is the only component that
 partitions a step into bands and renders the queued divider, and it backs both
 the desktop/tablet path (`swimlane-kanban-content.tsx`) and the mobile path
-(`swipeable-columns.tsx`). It is the surface that accepts a reorder.
+(`swipeable-columns.tsx`). Only its desktop/tablet presentation accepts a reorder.
 
 **Pipeline view.** It renders one row per task rather than a column per step:
 `SwimlaneGraph2Content` sorts every task in the workflow by step index and then

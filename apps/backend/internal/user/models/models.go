@@ -143,6 +143,9 @@ type UserSettings struct {
 	LspServerConfigs                  map[string]map[string]interface{} `json:"lsp_server_configs"`
 	LspStatusLocation                 string                            `json:"lsp_status_location"`
 	SavedLayouts                      []SavedLayout                     `json:"saved_layouts"`
+	SidebarViewsByWorkspace           map[string]SidebarWorkspaceState  `json:"sidebar_views_by_workspace"`
+	SidebarLayoutsByWorkspace         map[string]SidebarLayout          `json:"sidebar_layouts_by_workspace"`
+	SidebarWorkspaceVersion           int                               `json:"sidebar_workspace_version"`
 	SidebarViews                      []SidebarView                     `json:"sidebar_views"`
 	SidebarActiveViewID               string                            `json:"sidebar_active_view_id"`
 	SidebarDraft                      *SidebarViewDraft                 `json:"sidebar_draft"`
