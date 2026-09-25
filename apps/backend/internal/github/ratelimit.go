@@ -337,13 +337,11 @@ func (r *RateTracker) ObserveSuccess(resource Resource) {
 	now := time.Now().UTC()
 	r.mu.Lock()
 	previous, observed := r.secondary[resource]
-	_, primaryObserved := r.primary[resource]
-	if !observed && !primaryObserved {
+	if !observed {
 		r.mu.Unlock()
 		return
 	}
 	delete(r.secondary, resource)
-	delete(r.primary, resource)
 	r.signalChangedLocked()
 	r.mu.Unlock()
 	early := previous.RetryAt.After(now)
