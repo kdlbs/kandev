@@ -333,6 +333,31 @@ func TestRateCoordinatorAdmissionGivesInteractiveWorkPriorityAfterRetryWindow(t 
 	})
 }
 
+func TestConcurrentSuccessResponseClearsSecondaryButPreservesPrimaryRetryAfter(t *testing.T) {
+	retryAt := time.Now().Add(2 * time.Minute).UTC()
+	tracker := NewRateTracker(nil, nil)
+	tracker.ObservePrimary(ResourceCore, retryAt, RetrySourceRetryAfter)
+	tracker.ObserveSecondary(ResourceCore, retryAt, RetrySourceRetryAfter, "concurrent refusal")
+
+	responseHandled := make(chan struct{})
+	go func() {
+		tracker.ObserveSuccess(ResourceCore)
+		close(responseHandled)
+	}()
+	<-responseHandled
+
+	if secondary := tracker.Secondary(ResourceCore); secondary.Active {
+		t.Fatalf("secondary state remained active after success: %+v", secondary)
+	}
+	primary := tracker.PrimaryRetry(ResourceCore)
+	if !primary.RetryAt.Equal(retryAt) || primary.RetrySource != RetrySourceRetryAfter {
+		t.Fatalf("primary retry = %+v, want Retry-After boundary %s", primary, retryAt)
+	}
+	if wait := tracker.WaitDuration(ResourceCore); wait < time.Minute {
+		t.Fatalf("primary Retry-After wait = %s, want at least one minute", wait)
+	}
+}
+
 func TestRateCoordinatorPrincipalKeysShareOnlyTheSameUpstreamIdentity(t *testing.T) {
 	coordinator := NewRateCoordinator(nil, nil)
 	first, _ := coordinator.coordinate("github.com", AuthPrincipal{
