@@ -413,7 +413,11 @@ func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
 func (m *Manager) newNonInteractiveGitCmd(ctx context.Context, repoPath string, args ...string) *exec.Cmd {
 	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repoPath
-	cmd.Env = subproc.PrepareGitEnvironment(os.Environ())
+	env := cmd.Env
+	if env == nil {
+		env = os.Environ()
+	}
+	cmd.Env = subproc.PrepareGitEnvironment(env)
 	// After the context cancels and the process is killed, child processes
 	// (e.g. credential helpers) may still hold stdout/stderr pipes open.
 	// WaitDelay bounds how long CombinedOutput waits for those pipes to close.
@@ -527,6 +531,7 @@ func (m *Manager) handleBaseFetchFailure(
 	onProgress SyncProgressCallback,
 ) (string, string, error) {
 	reason := classifyGitFallbackReason(err, string(output), execCtxErr)
+	m.logRefreshDiagnostic("fetch", repoPath, baseBranch, reason, output, err, execCtxErr)
 	if required {
 		fallback := strings.TrimSpace(fallbackBaseBranch)
 		if reason == gitFallbackReasonMissingRemoteRef && fallback != "" && fallback != baseBranch {
@@ -697,6 +702,7 @@ func (m *Manager) pullCurrentBranchOrFallback(
 	output, err, execCtxErr := m.runGitCombinedAfterAcquire(ctx, m.pullTimeout, repoPath, "pull", "--ff-only", "origin", baseBranch)
 	if err != nil {
 		reason := classifyGitFallbackReason(err, string(output), execCtxErr)
+		m.logRefreshDiagnostic("pull", repoPath, baseBranch, reason, output, err, execCtxErr)
 		resolved, selectErr := m.selectContainingRef(ctx, repoPath, baseBranch, remoteRef)
 		if selectErr != nil {
 			if !localBaseExists {
@@ -766,9 +772,8 @@ func (m *Manager) selectContainingRef(
 }
 
 // syncFailureCause intentionally suppresses cmdErr because Git output can
-// contain credentials. Callers expose only a bounded failure class and keep
-// raw command output in internal logs where the existing redaction policy
-// applies.
+// contain credentials. Callers expose only a bounded failure class and never
+// include the command output in errors or progress.
 func syncFailureCause(reason string, _ error, contextErr error) error {
 	if contextErr != nil {
 		return contextErr

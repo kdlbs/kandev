@@ -47,14 +47,18 @@ func (r *Repository) updateMessageWithPayloadGuardTx(ctx context.Context, tx *sq
 			return fmt.Errorf("message not found: %s", message.ID)
 		}
 	}
-	query := `SELECT metadata,type,updated_at FROM task_session_messages WHERE id = ?`
+	query := `SELECT metadata,type,updated_at,payload_digest,payload_size FROM task_session_messages WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += forUpdateClause
 	}
 	var raw string
 	var storedType models.MessageType
 	var storedUpdatedAt time.Time
-	if err := tx.QueryRowContext(ctx, tx.Rebind(query), message.ID).Scan(&raw, &storedType, &storedUpdatedAt); err != nil {
+	var storedPayloadDigest string
+	var storedPayloadSize int64
+	if err := tx.QueryRowContext(ctx, tx.Rebind(query), message.ID).Scan(
+		&raw, &storedType, &storedUpdatedAt, &storedPayloadDigest, &storedPayloadSize,
+	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) && dialect.IsPostgres(r.db.DriverName()) {
 			return fmt.Errorf("message not found: %s", message.ID)
 		}
@@ -71,8 +75,10 @@ func (r *Repository) updateMessageWithPayloadGuardTx(ctx context.Context, tx *sq
 	updatedAt := message.UpdatedAt
 	if sanitized != nil {
 		updatedAt = storedUpdatedAt
+		message.PayloadDigest = storedPayloadDigest
+		message.PayloadSize = storedPayloadSize
 	}
-	_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?, updated_at = ? WHERE id = ?`), message.Content, requestsInput, string(nextType), string(metadataJSON), updatedAt, message.ID)
+	_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?, payload_digest = ?, payload_size = ?, updated_at = ? WHERE id = ?`), message.Content, requestsInput, string(nextType), string(metadataJSON), message.PayloadDigest, message.PayloadSize, updatedAt, message.ID)
 	if err != nil {
 		return err
 	}

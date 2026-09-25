@@ -14,7 +14,30 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/startup"
 )
+
+// migrateMessagePayloadStorage adds digest-backed external storage for large
+// tool-message payloads (currently shell command stdout/stderr) so
+// task_session_messages.metadata stays bounded while preserving lazy,
+// integrity-verified detail loading. See externalizeMessagePayload (write
+// path) and RehydrateMessagePayload (explicit authorized read path) in
+// message_payload.go. task_message_payloads is content-addressed by SHA-256
+// digest, so an identical payload referenced by more than one message is
+// stored exactly once.
+func (r *Repository) migrateMessagePayloadStorage() {
+	_ = r.migrate.Apply("task_session_messages.payload_digest", `ALTER TABLE task_session_messages ADD COLUMN payload_digest TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_session_messages.payload_size", `ALTER TABLE task_session_messages ADD COLUMN payload_size INTEGER NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("idx_messages_payload_digest", `CREATE INDEX IF NOT EXISTS idx_messages_payload_digest ON task_session_messages(payload_digest)`)
+	_ = r.migrate.Apply("task_message_payloads.table", fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS task_message_payloads (
+			digest TEXT PRIMARY KEY,
+			compressed_content %s NOT NULL,
+			uncompressed_size INTEGER NOT NULL,
+			compressed_size INTEGER NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		)`, dialect.BlobType(r.db.DriverName())))
+}
 
 // migrateExecutorProfiles adds mcp_policy column and drops is_default from executor_profiles.
 func (r *Repository) migrateExecutorProfiles() error {
@@ -53,7 +76,9 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 }
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
-func (r *Repository) runMigrations() error {
+//
+//nolint:cyclop,funlen,maintidx // Legacy flat list of ~60 independent idempotent migration steps predating startup-step instrumentation; splitting it is out of scope here.
+func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrateTaskPriorityToTextPostgres(); err != nil {
 		return err
 	}
@@ -116,6 +141,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
 	}
+	// Store task-local fixed-step profile substitutions after the workflow-FK
+	// rebuild so legacy databases cannot lose the column during that recreate.
+	_ = r.migrate.Apply("tasks.workflow_agent_overrides", `ALTER TABLE tasks ADD COLUMN workflow_agent_overrides TEXT`)
 	// Must run AFTER migrateTasksRemoveWorkflowFK: that migration recreates
 	// tasks from an explicit column list. Adding this column beforehand would
 	// have it silently dropped by the recreate on any database still carrying
@@ -211,7 +239,9 @@ func (r *Repository) runMigrations() error {
 	// explicitly in CreateMessage/UpdateMessage. The backfill UPDATE is idempotent
 	// (WHERE updated_at IS NULL).
 	r.migrate.Apply("task_session_messages.updated_at", `ALTER TABLE task_session_messages ADD COLUMN updated_at TIMESTAMP`)
+	startup.BeginStep(ctx, startup.StepMessageTimestampsBackfill)
 	r.migrate.Apply("task_session_messages.updated_at.backfill", `UPDATE task_session_messages SET updated_at = created_at WHERE updated_at IS NULL`)
+	startup.EndStep(ctx, startup.StepMessageTimestampsBackfill)
 	r.migrate.Apply("idx_messages_session_updated", `CREATE INDEX IF NOT EXISTS idx_messages_session_updated ON task_session_messages(task_session_id, updated_at)`)
 
 	// task_session_commits gains a uniqueness constraint before its writer
@@ -375,7 +405,7 @@ func (r *Repository) runMigrations() error {
 	// table is not part of the supported upgrade path, so there is no
 	// intermediate-shape rebuild to run here. Only the historical-message
 	// backfill belongs in the migration phase.
-	r.migrateSubagentContextBackfill()
+	r.migrateSubagentContextBackfill(ctx)
 
 	// Durable per-session prompt ordinals. prompt_seq is allocated from a
 	// per-session sequence counter inside the create write boundary, so an
@@ -394,7 +424,19 @@ func (r *Repository) runMigrations() error {
 			task_session_id TEXT PRIMARY KEY,
 			last_seq INTEGER NOT NULL
 		)`)
-	if err := r.backfillPromptSeq(); err != nil {
+	if err := r.backfillPromptSeq(ctx); err != nil {
+		return err
+	}
+
+	// Bounded operational payload storage (PR-watch/storage-bounds plan,
+	// wave 2): digest-backed external storage for large tool-message
+	// payloads (currently shell command stdout/stderr - see
+	// externalizeMessagePayload/RehydrateMessagePayload) and a content
+	// digest on git snapshots so content-equivalent rows become
+	// identifiable via ListDuplicateGitSnapshotCandidates for a later,
+	// explicit maintenance pass to prune.
+	r.migrateMessagePayloadStorage()
+	if err := r.migrateGitSnapshotContentDigest(); err != nil {
 		return err
 	}
 
@@ -415,11 +457,33 @@ func (r *Repository) runMigrations() error {
 	// allocated.
 	_ = r.migrate.Apply("workflow_step_entries.marker_positions", `ALTER TABLE workflow_step_entries ADD COLUMN marker_positions TEXT NOT NULL DEFAULT ''`)
 
+	// One row per SSH executor holding observed reachability — deliberately
+	// not columns on executors, which holds user-authored config and a
+	// user-controlled status switch. No foreign key: deletion is explicit
+	// (DeleteExecutor deletes the row in the same transaction as the soft
+	// delete), not a cascade.
+	_ = r.migrate.Apply("executor_reachability.table", `
+		CREATE TABLE IF NOT EXISTS executor_reachability (
+			executor_id          TEXT PRIMARY KEY,
+			state                TEXT NOT NULL DEFAULT 'unknown',
+			reason               TEXT NOT NULL DEFAULT '',
+			message              TEXT NOT NULL DEFAULT '',
+			consecutive_failures INTEGER NOT NULL DEFAULT 0,
+			host                 TEXT NOT NULL DEFAULT '',
+			checked_at           TIMESTAMP,
+			last_success_at      TIMESTAMP,
+			updated_at           TIMESTAMP NOT NULL
+		)`)
+
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
 	// instead of leaving a schema that allocateStepEntryIfPending can't write to.
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("required task migration: %w", err)
+	}
+
+	if _, err := r.db.ExecContext(ctx, kubernetesEnvironmentSchemaDDL); err != nil {
+		return fmt.Errorf("create Kubernetes environment inventory: %w", err)
 	}
 
 	return nil
@@ -501,7 +565,7 @@ func (r *Repository) backfillTaskSessionQueueIncarnations() error {
 // session's sequence counter at its backfilled maximum. Idempotent: user rows
 // already carrying a nonzero prompt_seq are untouched, and the counter seed
 // ignores existing rows.
-func (r *Repository) backfillPromptSeq() error {
+func (r *Repository) backfillPromptSeq(ctx context.Context) error {
 	nmU := dialect.NormalizedMicrosecond(r.db.DriverName(), "u.created_at")
 	nmM := dialect.NormalizedMicrosecond(r.db.DriverName(), "task_session_messages.created_at")
 	update := fmt.Sprintf(`
@@ -513,7 +577,8 @@ func (r *Repository) backfillPromptSeq() error {
 			  AND (%s < %s OR (%s = %s AND u.id <= task_session_messages.id))
 		)
 		WHERE author_type = 'user' AND prompt_seq = 0`, nmU, nmM, nmU, nmM)
-	ctx := r.migrationContext()
+	startup.BeginStep(ctx, startup.StepPromptSeqBackfill)
+	defer startup.EndStep(ctx, startup.StepPromptSeqBackfill)
 	if _, err := r.db.ExecContext(ctx, update); err != nil {
 		return fmt.Errorf("backfill prompt_seq: %w", err)
 	}

@@ -340,7 +340,7 @@ func TestPreflightRemoteContributionPushesUsesOneBudgetForAllRepositories(t *tes
 			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
 		case 2:
 			close(secondStarted)
-			timer := time.NewTimer(70 * time.Millisecond)
+			timer := time.NewTimer(650 * time.Millisecond)
 			defer timer.Stop()
 			select {
 			case <-timer.C:
@@ -355,7 +355,7 @@ func TestPreflightRemoteContributionPushesUsesOneBudgetForAllRepositories(t *tes
 	})
 
 	mgr := newTestManager(t)
-	mgr.remoteContributionPreflightTimeout = 80 * time.Millisecond
+	mgr.remoteContributionPreflightTimeout = time.Second
 	execution := newContributionPreflightExecution(t, server.URL, "exec-multi-preflight-timeout", "", "",
 		map[string]models.RemoteContribution{
 			"a": contributionPreflightTestBinding(),
@@ -369,7 +369,7 @@ func TestPreflightRemoteContributionPushesUsesOneBudgetForAllRepositories(t *tes
 	case <-time.After(time.Second):
 		t.Fatal("first contribution preflight did not start")
 	}
-	timer := time.NewTimer(10 * time.Millisecond)
+	timer := time.NewTimer(650 * time.Millisecond)
 	<-timer.C
 	timer.Stop()
 	releaseFirst()

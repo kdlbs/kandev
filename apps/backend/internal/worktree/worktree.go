@@ -161,6 +161,7 @@ type Worktree struct {
 
 // CreateRequest contains the parameters for creating a new worktree.
 type CreateRequest struct {
+	CheckoutOptions *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
 	// TaskID is the unique task identifier (required).
 	TaskID string
 
@@ -233,6 +234,11 @@ type CreateRequest struct {
 	// on the base repo, so the refspec form works for same-repo and fork PRs
 	// uniformly without needing to add the fork as a remote.
 	PRNumber int
+
+	// QualifiedPRBase is the validated provider target for a PR-linked
+	// checkout. Its exact repository and branch take precedence over all
+	// branch-only fallback behavior.
+	QualifiedPRBase *models.PRBase
 
 	// RemoteContribution identifies an existing provider contribution whose
 	// source branch must be fetched from its own remote and verified by SHA.
@@ -320,6 +326,9 @@ type CreateRequest struct {
 	// secrets stay out of the DB.
 	ScriptEnv map[string]string
 
+	// CheckoutEnv contains only managed Git credentials and their scoped configuration.
+	CheckoutEnv map[string]string
+
 	// OnSyncProgress receives progress updates for pre-worktree branch sync.
 	OnSyncProgress SyncProgressCallback
 
@@ -344,6 +353,12 @@ func (r *CreateRequest) Validate() error {
 	if err := r.validateRemoteContribution(); err != nil {
 		return err
 	}
+	if err := r.normalizeQualifiedPRBase(); err != nil {
+		return err
+	}
+	if err := models.ValidatePRBaseContributionIdentity(r.QualifiedPRBase, r.RemoteContribution); err != nil {
+		return fmt.Errorf("qualified PR base and contribution identity mismatch: %w", err)
+	}
 	if r.ContributionDestination != nil {
 		if err := r.ContributionDestination.Validate(); err != nil {
 			return fmt.Errorf("invalid contribution destination: %w", err)
@@ -358,6 +373,35 @@ func (r *CreateRequest) Validate() error {
 			return ErrInvalidBaseBranch
 		}
 		r.BaseBranch = r.FallbackBaseBranch
+	}
+	return nil
+}
+
+func (r *CreateRequest) normalizeQualifiedPRBase() error {
+	if r.QualifiedPRBase == nil {
+		return nil
+	}
+	if err := r.QualifiedPRBase.Validate(); err != nil {
+		return fmt.Errorf("invalid qualified PR base: %w", err)
+	}
+	target := r.QualifiedPRBase.Target
+	if r.BaseBranch == "" {
+		r.BaseBranch = target.TargetBranch
+	}
+	if r.BaseBranch != target.TargetBranch {
+		return ErrInvalidBaseBranch
+	}
+	if r.PRNumber == 0 {
+		r.PRNumber = target.Number
+	}
+	if r.PRNumber != target.Number {
+		return fmt.Errorf("PR number does not match qualified base")
+	}
+	if r.CheckoutBranch == "" {
+		r.CheckoutBranch = target.HeadBranch
+	}
+	if r.CheckoutBranch != target.HeadBranch {
+		return fmt.Errorf("checkout branch does not match qualified PR head")
 	}
 	return nil
 }

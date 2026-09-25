@@ -5,7 +5,12 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { IconMessagePlus, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
+import {
+  markdownComponents,
+  rehypePlugins,
+  remarkPlugins,
+} from "@/components/shared/markdown-components";
+import { withMarkdownMathSanitizeSchema } from "@/lib/markdown/math-sanitize-schema";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
@@ -165,17 +170,17 @@ export function AddToContextButton({
 }
 
 /** Sanitization schema: default safe tags + details/summary for collapsible sections. */
-const sanitizeSchema = {
+const sanitizeSchema = withMarkdownMathSanitizeSchema({
   ...defaultSchema,
   tagNames: [...(defaultSchema.tagNames ?? []), "details", "summary"],
-};
+});
 
 export function PRMarkdownBody({ body }: { body: string }) {
   return (
     <div className="markdown-body max-w-none text-sm">
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], ...rehypePlugins]}
         components={markdownComponents}
       >
         {body}

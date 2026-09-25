@@ -19,6 +19,7 @@ type Capabilities struct {
 	CanModifyAgents     bool     `json:"modify_agents"`
 	CanDeleteSkills     bool     `json:"delete_skills"`
 	CanListTasks        bool     `json:"list_tasks"`
+	CanHandoffTasks     bool     `json:"handoff_task"`
 	AllowedTaskIDs      []string `json:"allowed_task_ids"`
 	// TaskScopeSource marks which source produced AllowedTaskIDs — "payload"
 	// or "runner_set" (both final), or "unavailable" (provisional). Empty for

@@ -18,12 +18,10 @@ import {
   type WorkspaceFileLocation,
 } from "@/lib/lsp/file-uri";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { normalizeWorkspaceFilePath } from "@/lib/workspace-file-path";
 
 export function toWorkspaceRelativePath(filePath: string, workspacePath: string | null): string {
-  const normalizedWorkspacePath = workspacePath?.replace(/\/+$/, "") ?? "";
-  if (!normalizedWorkspacePath) return filePath;
-  const workspacePrefix = `${normalizedWorkspacePath}/`;
-  return filePath.startsWith(workspacePrefix) ? filePath.slice(workspacePrefix.length) : filePath;
+  return normalizeWorkspaceFilePath(filePath, workspacePath);
 }
 
 export function preserveExistingEditorLocation(

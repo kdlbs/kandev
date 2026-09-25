@@ -5,6 +5,7 @@ package sqlite
 // existing task gains no rows, and the schema-init step is replay-safe.
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -69,10 +70,10 @@ func TestStepTransitionsSchemaCreatesTableAndIsReplaySafe(t *testing.T) {
 	if err := repo.initStepTransitionsSchema(); err != nil {
 		t.Fatalf("replay initStepTransitionsSchema twice: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay runMigrations: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay runMigrations twice: %v", err)
 	}
 

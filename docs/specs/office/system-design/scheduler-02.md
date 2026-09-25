@@ -374,7 +374,10 @@ The scheduler reads all `queued` and unexpired-retry wakeup requests on boot and
 ## Taskless execution implementation contract
 
 The [run-session design](taskless-run-sessions.md) defines durable session
-ownership, runtime admission, process startup, routing, cancellation and restart
-reconciliation for the taskless runs described above. It completes the documented
+ownership, runtime admission, process startup and routing for the taskless runs
+described above. Stop controls and restart reconciliation remain required by
+`REQ-OFFICE-TASKLESS-001` and are recorded as outstanding follow-up work under
+[Outstanding: stop controls and restart recovery](../requirements/taskless-run-sessions.md#outstanding-stop-controls-and-restart-recovery).
+They are not implemented by the current coverage change. The design completes the documented
 behavior without creating task records. Its exact run/session/attempt attribution
 applies to new executions; legacy agent-only attribution is compatibility only.

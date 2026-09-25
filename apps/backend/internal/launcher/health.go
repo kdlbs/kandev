@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/i18n"
 	"github.com/kandev/kandev/internal/startup"
 )
 
@@ -22,6 +23,12 @@ const (
 	healthPollInterval = 300 * time.Millisecond
 	healthProbeTimeout = 2 * time.Second
 )
+
+// startupProgressReportFloor is the maximum interval between AC-PLATFORM-
+// STARTUP-PROGRESS-003.5 progress lines when neither phase, sequence number,
+// nor stall state has changed. A package-level var (not const) so tests can
+// override it instead of waiting out 15 real seconds.
+var startupProgressReportFloor = 15 * time.Second
 
 // healthProbeClient bounds every individual health request. http.DefaultClient
 // has no timeout, so a backend that accepts the connection but never answers
@@ -362,27 +369,38 @@ func safeProbeError(err error) string {
 // in flight. Do not fold this into waitForHealth's timeout — that would
 // recreate the crash loop docs/specs/startup-listener-before-recovery/spec.md
 // exists to fix.
+//
+// Per AC-PLATFORM-STARTUP-PROGRESS-003.5, a line is written on a phase
+// change, a sequence-number change (every step start/end), or a stall-state
+// transition, and otherwise at most once per startupProgressReportFloor.
 func waitForReady(ctx context.Context, baseURL string, proc childState) error {
 	readyURL := baseURL + "/ready"
 	var last startup.Snapshot
+	var lastStalled bool
 	var reported time.Time
 	exitError := func(code int) error {
-		if label := last.Phase.Label(); label != "" {
-			return fmt.Errorf("backend exited (code %d) during %s (elapsed %.1fs); check backend logs for the initialization error", code, label, float64(last.ElapsedMS)/1000)
+		label := last.Phase.Label()
+		if label == "" {
+			return fmt.Errorf("backend exited (code %d) before it reported ready; check backend logs for the initialization error", code)
 		}
-		return fmt.Errorf("backend exited (code %d) before it reported ready; check backend logs for the initialization error", code)
+		if last.Step != nil {
+			label = fmt.Sprintf("%s (%s)", label, i18n.T(i18n.DefaultLocale, last.Step.LabelKey))
+		}
+		return fmt.Errorf("backend exited (code %d) during %s (elapsed %.1fs); check backend logs for the initialization error", code, label, float64(last.ElapsedMS)/1000)
 	}
 	for ctx.Err() == nil {
 		if exited, code := proc.Exited(); exited {
 			return exitError(code)
 		}
-		isReady, snapshot := probeReadyStatus(ctx, readyURL)
+		isReady, snapshot := probeReadyStatusFn(ctx, readyURL)
 		if snapshot.Phase.Label() != "" {
-			if snapshot.Phase != last.Phase || time.Since(reported) >= 15*time.Second {
-				fmt.Fprintf(os.Stderr, "[kandev] %s (elapsed %.1fs; phase %.1fs)\n", snapshot.Phase.Label(), float64(snapshot.ElapsedMS)/1000, float64(snapshot.PhaseElapsedMS)/1000)
+			stalled := snapshot.Step != nil && snapshot.Step.Stalled
+			if snapshot.Phase != last.Phase || snapshot.Seq != last.Seq || stalled != lastStalled || time.Since(reported) >= startupProgressReportFloor {
+				fmt.Fprintf(os.Stderr, "[kandev] %s\n", formatStartupLine(snapshot))
 				reported = time.Now()
 			}
 			last = snapshot
+			lastStalled = stalled
 		}
 		if isReady {
 			if err := ctx.Err(); err != nil {
@@ -401,6 +419,60 @@ func waitForReady(ctx context.Context, baseURL string, proc childState) error {
 	return fmt.Errorf("backend readiness wait canceled at %s: %w", readyURL, ctx.Err())
 }
 
+// formatStartupLine renders one AC-PLATFORM-STARTUP-PROGRESS-003.5 progress
+// line: phase, elapsed time, and — when a step is active — its name plus
+// whichever of done, total, rate, and estimate the snapshot carries, rather
+// than only for a `counted` step, since a `counting` step (for example
+// database.backup) carries a done count and a rate with no total. An opaque
+// step states plainly that it cannot report progress
+// (AC-PLATFORM-STARTUP-PROGRESS-001.5) instead of a bar at any position, and
+// a stalled step states how long it has gone without progress
+// (AC-PLATFORM-STARTUP-PROGRESS-004.6).
+func formatStartupLine(snapshot startup.Snapshot) string {
+	line := fmt.Sprintf("%s (elapsed %.1fs; phase %.1fs)", snapshot.Phase.Label(), float64(snapshot.ElapsedMS)/1000, float64(snapshot.PhaseElapsedMS)/1000)
+	step := snapshot.Step
+	if step == nil {
+		return line
+	}
+	name := i18n.T(i18n.DefaultLocale, step.LabelKey)
+	if step.Measure == startup.MeasureOpaque {
+		return fmt.Sprintf("%s: %s (progress not available)", line, name)
+	}
+	detail := name
+	switch {
+	case step.Done != nil && step.Total != nil:
+		detail += fmt.Sprintf(": %d/%d", *step.Done, *step.Total)
+	case step.Done != nil:
+		detail += fmt.Sprintf(": %d", *step.Done)
+	}
+	if step.RatePerSecond != nil {
+		detail += fmt.Sprintf(" (%.1f/s)", *step.RatePerSecond)
+	}
+	if step.ETAMS != nil {
+		detail += fmt.Sprintf(", ~%s remaining", formatDurationEstimate(*step.ETAMS))
+	}
+	if step.Stalled && step.SinceAdvanceMS != nil {
+		detail += fmt.Sprintf(", stalled for %s", formatDurationEstimate(*step.SinceAdvanceMS))
+	}
+	return fmt.Sprintf("%s: %s", line, detail)
+}
+
+// formatDurationEstimate renders a millisecond duration per
+// AC-PLATFORM-STARTUP-PROGRESS-003.10: 60000ms or less renders in whole
+// seconds rounded up with a floor of one second, anything longer in whole
+// minutes rounded up, never sub-second.
+func formatDurationEstimate(ms int64) string {
+	if ms <= 60000 {
+		seconds := (ms + 999) / 1000
+		if seconds < 1 {
+			seconds = 1
+		}
+		return fmt.Sprintf("%ds", seconds)
+	}
+	minutes := (ms + 59999) / 60000
+	return fmt.Sprintf("%dm", minutes)
+}
+
 // probeReady reports whether a single readiness request returned 2xx. Unlike
 // probeHealth, it does not check the desktop health token: readyHandler never
 // sets X-Kandev-Desktop-Health-Token (that header is /health-only, see
@@ -409,6 +481,11 @@ func probeReady(ctx context.Context, readyURL string) bool {
 	ready, _ := probeReadyStatus(ctx, readyURL)
 	return ready
 }
+
+// probeReadyStatusFn is a seam for waitForReady's polling loop, overridden in
+// tests that need a synctest-safe stub: real HTTP I/O sits outside the
+// synctest fake-time bubble and would prevent synctest.Wait from settling.
+var probeReadyStatusFn = probeReadyStatus
 
 func probeReadyStatus(ctx context.Context, readyURL string) (bool, startup.Snapshot) {
 	var body struct {

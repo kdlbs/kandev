@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // ErrSessionWorkspaceNotReady indicates the task session exists but does not yet
@@ -494,6 +495,45 @@ func (m *Manager) IsAgentCommandConfigured(executionID string) bool {
 		configured = execution.AgentCommand != ""
 	})
 	return configured
+}
+
+// HasLiveAgentExecution reports whether a session owns an agent execution that
+// can still protect its durable lifecycle row from orphan reconciliation.
+// Workspace-only executions have no agent command and do not count. Terminal
+// executions do not count even when they remain in the store briefly. A live
+// passthrough process protects its session through the interactive runner.
+func (m *Manager) HasLiveAgentExecution(sessionID string) bool {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists || execution == nil {
+		return false
+	}
+
+	var agentCommand, passthroughProcessID string
+	var status v1.AgentStatus
+	if err := m.executionStore.WithRLock(execution.ID, func(current *AgentExecution) {
+		agentCommand = current.AgentCommand
+		passthroughProcessID = current.PassthroughProcessID
+		status = current.Status
+	}); err != nil {
+		return false
+	}
+	if isTerminalStatus(status) {
+		return false
+	}
+	if agentCommand != "" {
+		return true
+	}
+	if passthroughProcessID == "" {
+		return false
+	}
+	runner := m.GetInteractiveRunner()
+	if runner == nil {
+		// The process handle is evidence of agent ownership, but an unavailable
+		// runner cannot prove that the process is gone. Keep the session safe
+		// from destructive orphan cleanup until the runtime can answer.
+		return true
+	}
+	return runner.IsProcessReadyOrPending(passthroughProcessID)
 }
 
 // EnsurePassthroughExecution ensures an execution exists for a passthrough session
@@ -1165,6 +1205,7 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 			RepositoryPath: repository.RepositoryPath, BaseBranch: repository.BaseBranch,
 			IntegrationRef:     repository.IntegrationRef,
 			FallbackBaseBranch: repository.DefaultBranch, CheckoutBranch: repository.CheckoutBranch,
+			PRNumber: repository.PRNumber, QualifiedPRBase: repository.QualifiedPRBase,
 			WorktreeID: repository.WorktreeID, TaskDirName: info.TaskDirName, WorkspaceID: info.WorkspaceID,
 			RepoName: repository.RepoName, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
@@ -1433,6 +1474,19 @@ func (m *Manager) persistRuntimeSecretResult(
 	if instance == nil || execution == nil || m.secretStore == nil {
 		return false, errors.New("runtime secret persistence is unavailable")
 	}
+	if getMetadataBool(instance.Metadata, metadataKubernetesTaskOwned) {
+		// The shared control connection owns token rotation. A session snapshot
+		// must not overwrite a newer token published by a sibling refresh.
+		secretID := getMetadataString(instance.Metadata, metadataKey)
+		if secretID == "" {
+			return false, errors.New("kubernetes environment secret reference is missing")
+		}
+		if _, err := m.secretStore.Reveal(ctx, secretID); err != nil {
+			return false, err
+		}
+		execution.setMetadataValue(metadataKey, secretID)
+		return false, nil
+	}
 	secretID := execution.metadataString(metadataKey)
 	if secretID == "" {
 		resourceInstanceID := execution.metadataString(MetadataKeyKubernetesResourceInstanceID)
@@ -1494,6 +1548,9 @@ func (m *Manager) deleteCreatedRuntimeSecrets(
 }
 
 func (m *Manager) deleteKubernetesRuntimeSecrets(ctx context.Context, metadata map[string]interface{}) error {
+	if getMetadataBool(metadata, metadataKubernetesTaskOwned) {
+		return nil
+	}
 	secretIDs := kubernetesRuntimeSecretIDs(metadata)
 	if secretIDs[0] == "" && secretIDs[1] == "" {
 		return nil

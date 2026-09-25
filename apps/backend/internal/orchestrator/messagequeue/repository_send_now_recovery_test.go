@@ -113,6 +113,201 @@ func TestSQLiteTransferSessionMovesPendingSendNowClaim(t *testing.T) {
 	}
 }
 
+func TestSQLiteTransferSessionIdentitiesRebindsPendingSendNowClaim(t *testing.T) {
+	for _, accepted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("accepted=%t", accepted), func(t *testing.T) {
+			ctx := context.Background()
+			repo := newTestSQLiteRepo(t).(*sqliteRepository)
+			sourceIdentity := QueueSessionIdentity{
+				TaskID:               "task-1",
+				SessionID:            "session-old",
+				SessionIncarnationID: "incarnation-old",
+			}
+			destinationIdentity := QueueSessionIdentity{
+				TaskID:               "task-1",
+				SessionID:            "session-new",
+				SessionIncarnationID: "incarnation-new",
+			}
+			seedQueueSessionIdentity(t, repo, sourceIdentity)
+			seedQueueSessionIdentity(t, repo, destinationIdentity)
+			destinationPrime := &QueuedMessage{
+				ID: "destination-prime", TaskID: destinationIdentity.TaskID, SessionID: destinationIdentity.SessionID,
+				Content: "already settled", QueuedBy: QueuedByUser,
+			}
+			if err := repo.InsertForSession(ctx, destinationIdentity, destinationPrime, DefaultMaxPerSession); err != nil {
+				t.Fatal(err)
+			}
+			primeClaim, err := repo.ClaimSendNowForSession(ctx, destinationIdentity, []QueuedMessage{*destinationPrime})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.AcknowledgeSendNowClaim(ctx, primeClaim); err != nil {
+				t.Fatal(err)
+			}
+			source := &QueuedMessage{
+				ID: "source", TaskID: sourceIdentity.TaskID, SessionID: sourceIdentity.SessionID,
+				Content: "durable source", QueuedBy: QueuedByWorkflow,
+				Metadata: map[string]interface{}{MetadataLifecycleDurable: true},
+			}
+			if err := repo.InsertForSession(ctx, sourceIdentity, source, DefaultMaxPerSession); err != nil {
+				t.Fatal(err)
+			}
+			claim, err := repo.ClaimSendNowForSession(ctx, sourceIdentity, []QueuedMessage{*source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceGeneration := claim.OperationGeneration
+			if accepted {
+				if err := repo.MarkPendingSendNowClaimAccepted(ctx, claim); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if err := repo.TransferSessionIdentities(ctx, sourceIdentity, destinationIdentity); err != nil {
+				t.Fatal(err)
+			}
+
+			pending, err := repo.ListPendingSendNowClaims(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(pending) != 1 {
+				t.Fatalf("pending claims = %#v, want one transferred claim", pending)
+			}
+			transferred := pending[0]
+			if transferred.Claim.Identity != destinationIdentity {
+				t.Fatalf("transferred claim identity = %#v, want %#v", transferred.Claim.Identity, destinationIdentity)
+			}
+			if transferred.Claim.OperationGeneration != transferred.Claim.SessionGeneration {
+				t.Fatalf("transferred claim generations = operation %d, session %d", transferred.Claim.OperationGeneration, transferred.Claim.SessionGeneration)
+			}
+			if transferred.Claim.OperationGeneration <= sourceGeneration {
+				t.Fatalf("transferred operation generation = %d, want greater than source %d", transferred.Claim.OperationGeneration, sourceGeneration)
+			}
+			if accepted {
+				err = repo.AcknowledgeSendNowClaim(ctx, &transferred.Claim)
+			} else {
+				err = repo.RestoreSendNowClaim(ctx, &transferred.Claim)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestTransferredSendNowClaimFencesOriginalSourceActions(t *testing.T) {
+	transfers := []struct {
+		name string
+		run  func(context.Context, *sqliteRepository, QueueSessionIdentity, QueueSessionIdentity) error
+	}{
+		{
+			name: "direct",
+			run: func(ctx context.Context, repo *sqliteRepository, source, destination QueueSessionIdentity) error {
+				return repo.TransferSessionIdentities(ctx, source, destination)
+			},
+		},
+		{
+			name: "durable",
+			run: func(ctx context.Context, repo *sqliteRepository, source, destination QueueSessionIdentity) error {
+				service := newAutoMergeTestServiceWithRepository(t, repo, DefaultMaxPerSession)
+				return service.TransferSessionWithDurableAttachmentPreparation(
+					ctx, source.TaskID, source.SessionID, destination.SessionID, nil, nil,
+				)
+			},
+		},
+	}
+	actions := []struct {
+		name string
+		run  func(context.Context, *sqliteRepository, *SendNowClaim) error
+	}{
+		{name: "restore", run: func(ctx context.Context, repo *sqliteRepository, claim *SendNowClaim) error {
+			return repo.RestoreSendNowClaim(ctx, claim)
+		}},
+		{name: "acknowledge", run: func(ctx context.Context, repo *sqliteRepository, claim *SendNowClaim) error {
+			return repo.AcknowledgeSendNowClaim(ctx, claim)
+		}},
+		{name: "accept", run: func(ctx context.Context, repo *sqliteRepository, claim *SendNowClaim) error {
+			return repo.MarkPendingSendNowClaimAccepted(ctx, claim)
+		}},
+		{name: "startup discard", run: func(ctx context.Context, repo *sqliteRepository, claim *SendNowClaim) error {
+			return repo.DeletePendingSendNowClaim(ctx, claim)
+		}},
+	}
+
+	for _, transfer := range transfers {
+		for _, accepted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/accepted=%t", transfer.name, accepted), func(t *testing.T) {
+				ctx := context.Background()
+				repo := newTestSQLiteRepo(t).(*sqliteRepository)
+				sourceIdentity := QueueSessionIdentity{
+					TaskID:               "task-1",
+					SessionID:            "session-old",
+					SessionIncarnationID: "incarnation-old",
+				}
+				destinationIdentity := QueueSessionIdentity{
+					TaskID:               sourceIdentity.TaskID,
+					SessionID:            "session-new",
+					SessionIncarnationID: "incarnation-new",
+				}
+				seedQueueSessionIdentity(t, repo, sourceIdentity)
+				seedQueueSessionIdentity(t, repo, destinationIdentity)
+				for _, source := range []*QueuedMessage{
+					{ID: "first", TaskID: sourceIdentity.TaskID, SessionID: sourceIdentity.SessionID, Content: "first", QueuedBy: QueuedByUser},
+					{ID: "second", TaskID: sourceIdentity.TaskID, SessionID: sourceIdentity.SessionID, Content: "second", QueuedBy: QueuedByUser},
+				} {
+					if err := repo.InsertForSession(ctx, sourceIdentity, source, DefaultMaxPerSession); err != nil {
+						t.Fatal(err)
+					}
+				}
+				sources, err := repo.ListBySession(ctx, sourceIdentity.SessionID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				claim, err := repo.ClaimSendNowForSession(ctx, sourceIdentity, sources)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if accepted {
+					if err := repo.MarkPendingSendNowClaimAccepted(ctx, claim); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := transfer.run(ctx, repo, sourceIdentity, destinationIdentity); err != nil {
+					t.Fatal(err)
+				}
+
+				for _, action := range actions {
+					t.Run(action.name, func(t *testing.T) {
+						err := action.run(ctx, repo, claim)
+						if !errors.Is(err, ErrSendNowClaimChanged) && !errors.Is(err, ErrSessionIdentityMismatch) {
+							t.Fatalf("old source %s = %v, want claim fencing error", action.name, err)
+						}
+						pending, err := repo.ListPendingSendNowClaims(ctx)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if len(pending) != 1 {
+							t.Fatalf("pending claims after stale %s = %#v, want successor claim", action.name, pending)
+						}
+						transferred := pending[0]
+						if transferred.Claim.ClaimID != claim.ClaimID || transferred.Claim.Identity != destinationIdentity || transferred.Accepted != accepted {
+							t.Fatalf("transferred claim after stale %s = %#v", action.name, transferred)
+						}
+						if len(transferred.Claim.Sources) != 2 ||
+							transferred.Claim.Sources[0].Content != "first" ||
+							transferred.Claim.Sources[1].Content != "second" ||
+							transferred.Claim.Sources[0].SessionID != destinationIdentity.SessionID ||
+							transferred.Claim.Sources[1].SessionID != destinationIdentity.SessionID {
+							t.Fatalf("transferred FIFO sources after stale %s = %#v", action.name, transferred.Claim.Sources)
+						}
+					})
+				}
+			})
+		}
+	}
+}
+
 func TestSQLitePurgeRemovesDurableSendNowClaims(t *testing.T) {
 	for _, purge := range []struct {
 		name string

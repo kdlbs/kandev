@@ -3,6 +3,7 @@ package tempstore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -285,5 +286,70 @@ func TestAnalyzeTemporaryDeadlineReturnsPartialSample(t *testing.T) {
 	}
 	if analysis.Reason != "deadline" || analysis.Roots[0].Reason != "deadline" {
 		t.Fatalf("analysis = %#v, want deadline reason", analysis)
+	}
+}
+
+func TestAnalyzeTemporaryDeadlineNormalizesJoinedWarnings(t *testing.T) {
+	firstRoot := t.TempDir()
+	secondRoot := t.TempDir()
+	provider := NewProvider(Config{
+		GOOS:     "linux",
+		Mounts:   testMountReader{},
+		Deadline: time.Nanosecond,
+		RootResolver: func(context.Context) ([]RootCandidate, error) {
+			return []RootCandidate{
+				{RequestedPath: firstRoot},
+				{RequestedPath: secondRoot},
+			}, nil
+		},
+		Scanner: testScanner{measure: func(
+			ctx context.Context,
+			_ []filescan.Root,
+			_ filescan.MeasureOptions,
+			_ func(filescan.Progress),
+		) []filescan.Result {
+			<-ctx.Done()
+			return []filescan.Result{
+				{
+					Bytes:        17,
+					SkippedCount: 2,
+					Err: fmt.Errorf(
+						"wrapped scan result: %w",
+						errors.Join(context.DeadlineExceeded, errors.New("permission denied")),
+					),
+				},
+				{
+					Bytes:        23,
+					SkippedCount: 3,
+					Err: errors.Join(
+						context.DeadlineExceeded,
+						errors.New("permission denied"),
+						errors.New("root disappeared"),
+					),
+				},
+			}
+		}},
+	})
+
+	analysis, err := provider.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if analysis.Status != StatusPartial || analysis.SizeBytes == nil || *analysis.SizeBytes != 40 {
+		t.Fatalf("analysis = %#v, want a 40-byte partial sample", analysis)
+	}
+	if analysis.Warnings == nil || len(analysis.Warnings) != 2 {
+		t.Fatalf("analysis warnings = %#v, want two distinct diagnostics", analysis.Warnings)
+	}
+	if analysis.Warnings[0] != "permission denied" || analysis.Warnings[1] != "root disappeared" {
+		t.Fatalf("analysis warnings = %#v, want normalized diagnostics", analysis.Warnings)
+	}
+	for _, warning := range analysis.Warnings {
+		if warning == context.DeadlineExceeded.Error() {
+			t.Fatalf("analysis warnings contain the deadline marker: %#v", analysis.Warnings)
+		}
+	}
+	if analysis.Roots[0].SkippedCount != 2 || analysis.Roots[1].SkippedCount != 3 {
+		t.Fatalf("root skipped counts = %#v, want 2 and 3", analysis.Roots)
 	}
 }

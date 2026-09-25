@@ -4,6 +4,11 @@
 **Date:** 2026-09-02
 **Area:** backend, frontend, protocol, persistence
 
+> Amended by
+> [ADR-2026-09-15-task-owned-web-preview-feedback](2026-09-15-task-owned-web-preview-feedback.md):
+> web-preview feedback now has a separate task-owned collection that shares the
+> exact-reference message-admission boundary.
+
 ## Context
 
 A task plan is shared by every Agent session in a task, but pending comments on
@@ -37,9 +42,10 @@ message or queued prompt. An acceptance failure preserves them. Successful
 delivery removes them task-wide; the transcript or queue entry is the durable
 record, not a second sent-comment archive.
 
-Only plan comments adopt task ownership. Diff, file, pull-request,
-walkthrough, and agent-message comments retain their current session-scoped
-lifecycles.
+Plan comments and, under the later web-preview-feedback decision, preview
+feedback adopt task ownership in separate collections. Diff, file,
+pull-request, walkthrough, and agent-message comments retain their current
+session-scoped lifecycles.
 
 ### Amendment: admission and replay hardening (2026-09-09)
 

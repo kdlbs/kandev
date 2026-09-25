@@ -43,6 +43,11 @@ must express owner identity without importing Office packages. The Office design
 owns the vertical behavior; shared runtime code implements the admission seam.
 Existing task tables, task-session foreign keys and task-only APIs stay strict.
 
+The current coverage change delivers the launch and observation path. Pause,
+cleanup controls and restart reconciliation remain requirements for a follow-up;
+the implementation plan records them as pending work and does not claim them as
+delivered here.
+
 A successful taskless turn ends that session. The next fire or retry starts a new
 session and consumes only the existing bounded continuation summary. Persisted
 failed runs from the old unsupported-launch path remain history; they are not

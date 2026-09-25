@@ -110,7 +110,9 @@ function modelSummaryParts(t: Translation, preview: WorkflowMovePreviewResponse)
   }
 
   let label: string;
-  if (before.known && before.label && before.label !== after.label) {
+  if (!before.known && preview.model.after_source === "profile") {
+    label = t("task:workflowMovePreviewModelPlanned", { model: after.label });
+  } else if (before.known && before.label && before.label !== after.label) {
     label = t("task:workflowMovePreviewModelChange", {
       before: before.label,
       after: after.label,

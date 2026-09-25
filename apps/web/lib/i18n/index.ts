@@ -18,7 +18,15 @@ import { writeLocaleCookie } from "./cookie";
  */
 export const DEFAULT_LOCALE = "en";
 export const DEFAULT_NAMESPACE = "common";
-export const SUPPORTED_LOCALES = ["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk", "pseudo"] as const;
+export const SUPPORTED_LOCALES = [
+  "en",
+  "pt-pt",
+  "zh-cn",
+  "zh-tw",
+  "zh-hk",
+  "ja",
+  "pseudo",
+] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 /** Human-readable labels for the language switcher. */
@@ -29,6 +37,7 @@ export const LOCALE_LABELS: Record<SupportedLocale, string> = {
   "zh-cn": "简体中文",
   "zh-tw": "繁體中文（台灣）",
   "zh-hk": "繁體中文（香港）",
+  ja: "日本語",
   pseudo: "Pseudo (QA)",
 };
 
@@ -38,24 +47,48 @@ function canonicalLocale(value: string): string {
 }
 
 /**
+ * Collapse a region-suffixed locale onto its base when the base is unambiguous
+ * (`ja-JP` → `ja`). `zh` and `pt` stay exact: those bases have multiple
+ * shipped variants and must not share a catalog.
+ */
+function collapseRegion(canonical: string): string {
+  const dash = canonical.indexOf("-");
+  if (dash < 0) return canonical;
+  const base = canonical.slice(0, dash);
+  if ((SUPPORTED_LOCALES as readonly string[]).includes(base) && base !== "zh" && base !== "pt") {
+    return base;
+  }
+  return canonical;
+}
+
+function resolveSupportedLocale(canonical: string): SupportedLocale | null {
+  if ((SUPPORTED_LOCALES as readonly string[]).includes(canonical)) {
+    return canonical as SupportedLocale;
+  }
+  const collapsed = collapseRegion(canonical);
+  return (SUPPORTED_LOCALES as readonly string[]).includes(collapsed)
+    ? (collapsed as SupportedLocale)
+    : null;
+}
+
+/**
  * Whether `value` names a shipped locale. Accepts case variants such as
- * `zh-CN`; prefer `normalizeLocale` when you need the canonical id to pass on.
+ * `zh-CN` and unambiguous region suffixes such as `ja-JP`; prefer
+ * `normalizeLocale` when you need the canonical id to pass on.
  */
 export function isSupportedLocale(value: unknown): boolean {
   if (typeof value !== "string") return false;
-  return (SUPPORTED_LOCALES as readonly string[]).includes(canonicalLocale(value));
+  return resolveSupportedLocale(canonicalLocale(value)) !== null;
 }
 
 /**
  * Coerce any value to a supported canonical locale, defaulting to `en`.
- * Case-insensitive so a hand-edited `zh-CN` cookie matches the backend.
+ * Case-insensitive so a hand-edited `zh-CN` cookie matches the backend;
+ * `ja-JP` collapses onto `ja` the same way Go does.
  */
 export function normalizeLocale(value: unknown): SupportedLocale {
   if (typeof value !== "string") return DEFAULT_LOCALE;
-  const canonical = canonicalLocale(value);
-  return (SUPPORTED_LOCALES as readonly string[]).includes(canonical)
-    ? (canonical as SupportedLocale)
-    : DEFAULT_LOCALE;
+  return resolveSupportedLocale(canonicalLocale(value)) ?? DEFAULT_LOCALE;
 }
 
 /**

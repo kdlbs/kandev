@@ -9,9 +9,16 @@ import type {
   WorkflowProfileSessionEndPolicy,
   WorkflowProfileSessionStartPolicy,
   WorkflowSessionTarget,
+  WorkflowAgentOverrides,
 } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { BeginTaskRemovalInput, TaskRemovalState } from "@/lib/state/task-removal";
+import type {
+  WorkflowSessionFocusCancelScope,
+  WorkflowSessionFocusState,
+  WorkflowSessionFocusStart,
+  WorkflowSessionFocusTaskProjection,
+} from "@/lib/state/workflow-session-focus";
 
 export type KanbanStepEvents = {
   on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -90,6 +97,7 @@ export type KanbanState = {
     // wrong workflow. Ephemeral tasks are filtered out before this point.
     workflowId: string;
     workflowStepId: string;
+    workflowAgentOverrides?: WorkflowAgentOverrides;
     title: string;
     description?: string;
     autopilot?: boolean;
@@ -134,6 +142,8 @@ export type KanbanState = {
     foregroundActivity?: ForegroundActivity | null;
     /** True when the task's session was mid-turn when the backend died. */
     interrupted?: boolean;
+    /** Monotonic client generation for explicit interruption-marker updates. */
+    interruptedGeneration?: number;
     /** True when a workflow step's auto_start_agent on_enter action failed to
      *  launch a run for this task. */
     autoStartFailed?: boolean;
@@ -326,6 +336,8 @@ export type KanbanSliceState = {
   workspaceContextGeneration: number;
   workspaceContextRead: WorkspaceContextReadState;
   tasks: TaskState;
+  /** Browser-local one-shot focus handoff for an explicitly moved task. */
+  workflowSessionFocus: WorkflowSessionFocusState;
   /** Browser-local removal intent. It is deliberately excluded from hydration. */
   taskRemoval: TaskRemovalState;
 };
@@ -361,6 +373,18 @@ export type KanbanSliceActions = {
   // it explicitly after checking no non-terminal manual pin should be preserved.
   setActiveSessionAuto: (taskId: string, sessionId: string) => void;
   clearActiveSession: () => void;
+  beginWorkflowSessionFocus: (input: WorkflowSessionFocusStart) => number | null;
+  bindWorkflowSessionFocus: (input: {
+    requestId: number;
+    presentationToken: number;
+    entryIdentity: string;
+  }) => void;
+  reconcileWorkflowSessionFocus: (
+    taskId: string,
+    responseProjection?: WorkflowSessionFocusTaskProjection,
+  ) => void;
+  cancelWorkflowSessionFocus: (scope?: WorkflowSessionFocusCancelScope) => void;
+  acknowledgeWorkflowSessionFocus: (requestId: number) => void;
   // setResumeSkipped records/clears the resume-skipped marker for a session.
   // Recording is guarded at the call site (the session-resumption hook reads
   // the live session row with typed store access), so a stale status response

@@ -46,6 +46,13 @@ type TUIConfigJSON struct {
 	// user's CLI definition, and because tui_config is JSON: adding the field
 	// needs no migration.
 	MCPStrategy string `json:"mcp_strategy,omitempty"`
+	// Protocol selects the runtime kandev drives the command with
+	// (registry.CustomAgentProtocol*). Empty — the value every row written
+	// before this field existed decodes to — means terminal passthrough.
+	Protocol string `json:"protocol,omitempty"`
+	// DisableBracketedPaste selects paced unframed delivery for terminal TUIs
+	// that do not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool `json:"disable_bracketed_paste,omitempty"`
 }
 
 type AgentProfile struct {

@@ -143,6 +143,12 @@ type TUIConfigDTO struct {
 	WaitForTerminal bool     `json:"wait_for_terminal"`
 	// MCPStrategy is the selected MCP injection mechanism ("" = none).
 	MCPStrategy string `json:"mcp_strategy,omitempty"`
+	// Protocol is the runtime kandev drives the command with ("" = terminal
+	// passthrough, "acp" = ACP on stdin/stdout).
+	Protocol string `json:"protocol,omitempty"`
+	// DisableBracketedPaste selects paced unframed delivery for terminal TUIs
+	// that do not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool `json:"disable_bracketed_paste,omitempty"`
 }
 
 type AgentDTO struct {

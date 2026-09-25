@@ -1,6 +1,6 @@
 import type { QueueStatus, QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
-import type { Message, TaskPlanCommentRef } from "@/lib/types/http";
+import type { Message, TaskPlanCommentRef, TaskPreviewFeedbackRef } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { WebSocketRequestError } from "@/lib/ws/request-error";
 // i18n-exempt: precondition diagnostic for a programmer error; callers branch
@@ -214,6 +214,7 @@ export type QueueMessageParams = {
   user_id?: string;
   client_queue_id?: string;
   plan_comment_refs?: TaskPlanCommentRef[];
+  preview_feedback_refs?: TaskPreviewFeedbackRef[];
   require_primary_session?: boolean;
 };
 
@@ -321,7 +322,9 @@ async function reconcileUncertainQueueAdmission(
   originalError: unknown,
   request: () => Promise<QueuedMessage>,
 ) {
-  const scanOlderTranscriptPages = Boolean(params.plan_comment_refs?.length);
+  const scanOlderTranscriptPages = Boolean(
+    params.plan_comment_refs?.length || params.preview_feedback_refs?.length,
+  );
   const accepted = await findAcceptedQueueAdmission(client, params, scanOlderTranscriptPages);
   if (accepted) return accepted;
   if (!(await waitForQueueConnection(client))) throw originalError;

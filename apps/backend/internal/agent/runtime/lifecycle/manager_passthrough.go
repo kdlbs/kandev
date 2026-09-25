@@ -943,9 +943,28 @@ func (m *Manager) resumePassthroughCommand(ctx context.Context, execution *Agent
 // without --resume, effectively clearing the agent's conversation context.
 // The workflow step prompt is delivered afterwards via stdin (autoStartPassthroughPrompt).
 func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *AgentExecution) error {
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		return fmt.Errorf("interactive runner not available")
+	}
 	execution.passthroughLifecycleMu.Lock()
-	defer execution.passthroughLifecycleMu.Unlock()
+	processID, err := m.replacePassthroughProcess(ctx, execution, interactiveRunner)
+	execution.passthroughLifecycleMu.Unlock()
+	if err != nil {
+		return err
+	}
 
+	// First-idle callbacks acquire the lifecycle lock. Settle startup outside
+	// that lock before a workflow prompt can claim the next running turn.
+	readyCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	if err := interactiveRunner.WaitForFirstIdle(readyCtx, processID); err != nil {
+		return fmt.Errorf("wait for restarted passthrough readiness: %w", err)
+	}
+	return nil
+}
+
+func (m *Manager) replacePassthroughProcess(ctx context.Context, execution *AgentExecution, interactiveRunner *process.InteractiveRunner) (string, error) {
 	m.logger.Info("restarting passthrough process for context reset",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
@@ -953,19 +972,14 @@ func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *Agen
 
 	// 1. Resolve the replacement command and environment before touching the
 	// current PTY. A profile-secret failure must leave the active session usable.
-	interactiveRunner := m.GetInteractiveRunner()
-	if interactiveRunner == nil {
-		return fmt.Errorf("interactive runner not available")
-	}
-
 	// Build fresh command (no SessionID, no Resume, no Prompt).
 	pt, rt, cmd, err := m.freshPassthroughCommand(ctx, execution)
 	if err != nil {
-		return err
+		return "", err
 	}
 	env, err := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// 2. Stop the current PTY process. Clear PassthroughProcessID before
@@ -989,7 +1003,7 @@ func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *Agen
 	processInfo, err := interactiveRunner.Start(ctx, startReq)
 	if err != nil {
 		m.updateExecutionError(execution.ID, "failed to restart passthrough session: "+err.Error())
-		return fmt.Errorf("failed to restart passthrough session: %w", err)
+		return "", fmt.Errorf("failed to restart passthrough session: %w", err)
 	}
 
 	// 4. Update execution with new process ID
@@ -1013,7 +1027,7 @@ func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *Agen
 	// 6. Publish context reset event
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentContextReset, execution)
 
-	return nil
+	return processInfo.ID, nil
 }
 
 // ResumePassthroughSession restarts a passthrough session after backend restart.
@@ -1707,8 +1721,12 @@ func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, executio
 			zap.Error(err))
 	}
 	for _, chunk := range agents.PlanPassthroughStdinChunks(description, pt) {
-		if chunk.DelayBefore > 0 {
-			time.Sleep(chunk.DelayBefore)
+		if err := waitPassthroughChunkDelay(ctx, chunk.DelayBefore); err != nil {
+			m.logger.Warn("autoInjectInitialPrompt delay interrupted",
+				zap.String("execution_id", execution.ID),
+				zap.String("process_id", processID),
+				zap.Error(err))
+			return
 		}
 		if err := runner.WriteStdin(processID, chunk.Data); err != nil {
 			m.logger.Warn("autoInjectInitialPrompt write failed",
@@ -1722,6 +1740,20 @@ func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, executio
 		zap.String("execution_id", execution.ID),
 		zap.String("process_id", processID),
 		zap.Int("description_len", len(description)))
+}
+
+func waitPassthroughChunkDelay(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // ResolvePassthroughConfig returns the PassthroughConfig for a session's agent.

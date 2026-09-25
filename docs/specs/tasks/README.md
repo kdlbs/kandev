@@ -38,6 +38,7 @@ signals, and task-scoped scheduling contracts.
 
 - [Initial task brief](requirements/initial-task-brief.md)
 
+- [Bounded Session History Storage](requirements/bounded-session-history.md)
 - [Task completion, conversation follow-ups, and workspace access](requirements/task-completion.md)
 
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
@@ -93,6 +94,8 @@ signals, and task-scoped scheduling contracts.
 - [Task Terminal Persistence](requirements/task-terminal-persistence.md)
 - [Runtime Task-State Publication Order](requirements/runtime-state-publication-order.md)
 - [Session Delete Preserves Task Workspaces](requirements/session-delete-resource-cleanup.md)
+- [Task Cleanup Source Manifest](requirements/archive-source-manifest.md)
+- [Restart-Orphaned Session Terminalization](requirements/restart-orphaned-session-terminalization.md)
 - [Sidebar Task Editing](requirements/sidebar-task-edit.md)
 - [Task Actions Menu on Preview and Detail Surfaces](requirements/task-actions-menu.md)
 - [Task menu grouping](requirements/task-menu-grouping.md)
@@ -114,6 +117,7 @@ signals, and task-scoped scheduling contracts.
 - [Task Dependencies and Auto-Start Chains](requirements/task-dependencies.md)
 - [Dependency Gate Skip Visibility](requirements/dependency-gate-skip-visibility.md)
 - [Session Launch Repository Resolution](requirements/launch-repository-resolution.md)
+- [Session stall visibility and orphan healing](requirements/session-stall-visibility.md)
 - [Task Launch Failure Recovery](requirements/task-launch-failure-recovery.md)
 - [Worktree metadata recovery](requirements/worktree-metadata-recovery.md)
 - [Task priority visibility](requirements/task-priority-visibility.md)
@@ -147,6 +151,7 @@ signals, and task-scoped scheduling contracts.
 
 ### System design
 
+- [Bounded Session History Storage](system-design/bounded-session-history.md)
 - [Initial task brief](system-design/initial-task-brief.md)
 
 - [Task completion, conversation follow-ups, and workspace access](system-design/task-completion.md)
@@ -190,10 +195,12 @@ signals, and task-scoped scheduling contracts.
 - [Queued Run Scheduling](system-design/run-scheduling.md)
 - [Resume prompt queue](system-design/resume-prompt-queue.md)
 - [Session Delete Preserves Task Workspaces](system-design/session-delete-resource-cleanup.md)
+- [Task Cleanup Source Manifest](system-design/archive-source-manifest.md)
 - [Task Dependencies and Auto-Start Chains](system-design/task-dependencies.md)
 - [Dependency Gate Skip Visibility](system-design/dependency-gate-skip-visibility.md)
 - [Edit task dependencies](system-design/task-dependency-detail-editing.md)
 - [Session Launch Repository Resolution](system-design/launch-repository-resolution.md)
+- [Session stall visibility and orphan healing](system-design/session-stall-visibility.md)
 - [Task Launch Failure Recovery](system-design/task-launch-failure-recovery.md)
 - [Worktree metadata recovery](system-design/worktree-metadata-recovery.md)
 - [Task Create Launch Preview](system-design/task-create-launch-preview.md)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"runtime"
 	"strings"
 	"sync"
@@ -156,6 +157,54 @@ func TestCheckSinglePRWatch_MergedPR_SyncsThenResets(t *testing.T) {
 	}
 }
 
+func TestCheckPRWatches_MergedPR_SyncsThenResets(t *testing.T) {
+	poller, _, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	now := time.Now().UTC()
+	mergedAt := now.Add(-time.Hour)
+	mockClient.AddPR(&PR{
+		Number:     42,
+		Title:      "Feature PR",
+		State:      prStateMerged,
+		HeadSHA:    "abc123",
+		HeadBranch: "feature-branch",
+		RepoOwner:  "owner",
+		RepoName:   "repo",
+		MergedAt:   &mergedAt,
+	})
+
+	watch := withTestWorkspace(&PRWatch{
+		SessionID: "sess-1",
+		TaskID:    "task-1",
+		Owner:     "owner",
+		Repo:      "repo",
+		PRNumber:  42,
+		Branch:    "feature-branch",
+	})
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "task-1", Owner: "owner", Repo: "repo", PRNumber: 42,
+		PRURL: "https://github.com/owner/repo/pull/42", PRTitle: "Feature PR",
+		HeadBranch: "feature-branch", BaseBranch: "main", State: prStateOpen,
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	poller.checkPRWatches(ctx)
+
+	updated, err := store.GetTaskPR(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get task PR: %v", err)
+	}
+	if updated == nil || updated.State != prStateMerged {
+		t.Fatalf("expected merged task PR after poll, got %#v", updated)
+	}
+}
+
 func TestCheckSinglePRWatch_OpenPR_SyncsOnChange(t *testing.T) {
 	poller, _, mockClient, store := setupPollerTest(t)
 	ctx := context.Background()
@@ -239,13 +288,21 @@ func TestCheckSinglePRWatch_OpenPR_SyncsOnChange(t *testing.T) {
 
 // mockTaskBranchProvider implements TaskBranchProvider for testing.
 type mockTaskBranchProvider struct {
-	tasks    []TaskBranchInfo
-	err      error
-	branches map[string]string // sessionID -> branch
+	tasks      []TaskBranchInfo
+	err        error
+	branches   map[string]string   // repositoryID -> branch
+	branchSets map[string][]string // repositoryID -> branches
 }
 
 func (m *mockTaskBranchProvider) ListTasksNeedingPRWatch(_ context.Context) ([]TaskBranchInfo, error) {
 	return m.tasks, m.err
+}
+
+func (m *mockTaskBranchProvider) ResolveBranchForRepository(_ context.Context, _, repositoryID string) string {
+	if m.branches != nil {
+		return m.branches[repositoryID]
+	}
+	return ""
 }
 
 func (m *mockTaskBranchProvider) ResolveBranchForWatch(_ context.Context, watch *PRWatch) string {
@@ -253,6 +310,13 @@ func (m *mockTaskBranchProvider) ResolveBranchForWatch(_ context.Context, watch 
 		return m.branches[watch.SessionID]
 	}
 	return ""
+}
+
+func (m *mockTaskBranchProvider) ResolveBranchesForRepository(_ context.Context, _, repositoryID string) []string {
+	if m.branchSets != nil {
+		return m.branchSets[repositoryID]
+	}
+	return nil
 }
 
 func TestReconcileWatches_CreatesWatchesForTasks(t *testing.T) {
@@ -415,21 +479,23 @@ func TestRefreshStaleBranches_UpdatesBranchWhenChanged(t *testing.T) {
 	// Create a watch with pr_number=0 on old branch.
 	seedTask(t, store, "t1", false)
 	watch := &PRWatch{
-		SessionID: "s1",
-		TaskID:    "t1",
-		Owner:     "myorg",
-		Repo:      "myrepo",
-		PRNumber:  0,
-		Branch:    "old-branch",
+		SessionID:    "s1",
+		TaskID:       "t1",
+		RepositoryID: "repo-1",
+		Owner:        "myorg",
+		Repo:         "myrepo",
+		PRNumber:     0,
+		Branch:       "old-branch",
 	}
 	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
-	// Provider resolves a different branch for this session.
+	// Provider resolves a different branch for this repository, independent
+	// of session identity.
 	prov := &mockTaskBranchProvider{
 		branches: map[string]string{
-			"s1": "new-branch",
+			"repo-1": "new-branch",
 		},
 	}
 	poller.SetTaskBranchProvider(prov)
@@ -449,18 +515,143 @@ func TestRefreshStaleBranches_UpdatesBranchWhenChanged(t *testing.T) {
 	}
 }
 
+// TestRefreshStaleBranches_ResolvesByRepositoryNotSession locks in the fix for
+// a real multi-repo correctness bug: the branch resolver must be scoped to
+// watch.RepositoryID, not resolved once per session and reused for every
+// repository. Two still-searching watches on the SAME session but DIFFERENT
+// repositories must each pick up their own repository's branch.
+func TestRefreshStaleBranches_ResolvesByRepositoryNotSession(t *testing.T) {
+	poller, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	seedTask(t, store, "t1", false)
+	watchA := &PRWatch{
+		SessionID:    "s1",
+		TaskID:       "t1",
+		RepositoryID: "repo-a",
+		Owner:        "myorg",
+		Repo:         "repo-a-name",
+		PRNumber:     0,
+		Branch:       "old-a",
+	}
+	watchB := &PRWatch{
+		SessionID:    "s1",
+		TaskID:       "t1",
+		RepositoryID: "repo-b",
+		Owner:        "myorg",
+		Repo:         "repo-b-name",
+		PRNumber:     0,
+		Branch:       "old-b",
+	}
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watchA)); err != nil {
+		t.Fatalf("create PR watch A: %v", err)
+	}
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watchB)); err != nil {
+		t.Fatalf("create PR watch B: %v", err)
+	}
+
+	prov := &mockTaskBranchProvider{
+		branches: map[string]string{
+			"repo-a": "new-a",
+			"repo-b": "new-b",
+		},
+	}
+	poller.SetTaskBranchProvider(prov)
+
+	poller.refreshStaleBranches(ctx)
+
+	updatedA, err := store.GetPRWatchBySessionAndRepo(ctx, "s1", "repo-a")
+	if err != nil {
+		t.Fatalf("get watch A: %v", err)
+	}
+	if updatedA.Branch != "new-a" {
+		t.Errorf("expected repo-a branch %q, got %q", "new-a", updatedA.Branch)
+	}
+	updatedB, err := store.GetPRWatchBySessionAndRepo(ctx, "s1", "repo-b")
+	if err != nil {
+		t.Fatalf("get watch B: %v", err)
+	}
+	if updatedB.Branch != "new-b" {
+		t.Errorf("expected repo-b branch %q, got %q", "new-b", updatedB.Branch)
+	}
+}
+
+func TestRefreshStaleBranches_PreservesSameRepositoryMultiBranchWatches(t *testing.T) {
+	poller, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	seedTask(t, store, "t1", false)
+	watchA := &PRWatch{
+		SessionID: "s1", TaskID: "t1", RepositoryID: "repo-1",
+		Owner: "myorg", Repo: "myrepo", PRNumber: 0, Branch: "feature-a",
+	}
+	watchB := &PRWatch{
+		SessionID: "s2", TaskID: "t1", RepositoryID: "repo-1",
+		Owner: "myorg", Repo: "myrepo", PRNumber: 0, Branch: "feature-b",
+	}
+	for _, watch := range []*PRWatch{watchA, watchB} {
+		if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
+			t.Fatalf("create PR watch %s: %v", watch.Branch, err)
+		}
+	}
+
+	prov := &mockTaskBranchProvider{
+		branches:   map[string]string{"repo-1": "feature-a"},
+		branchSets: map[string][]string{"repo-1": []string{"feature-a", "feature-b"}},
+	}
+	poller.SetTaskBranchProvider(prov)
+
+	poller.refreshStaleBranches(ctx)
+
+	watches, err := store.ListPRWatchesByTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	got := map[string]bool{}
+	for _, watch := range watches {
+		got[watch.Branch] = true
+	}
+	if !got["feature-a"] || !got["feature-b"] || len(watches) != 2 {
+		t.Fatalf("watches after refresh = %+v, want both same-repository branches preserved", watches)
+	}
+}
+
+func TestRefreshStaleBranches_RemovesSearchingWatchMissingFromMultiBranchSet(t *testing.T) {
+	poller, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "t1", false)
+	for _, watch := range []*PRWatch{
+		{SessionID: "s1", TaskID: "t1", RepositoryID: "repo-1", Owner: "myorg", Repo: "myrepo", Branch: "feature-a"},
+		{SessionID: "s2", TaskID: "t1", RepositoryID: "repo-1", Owner: "myorg", Repo: "myrepo", Branch: "feature-b"},
+	} {
+		if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
+			t.Fatalf("create PR watch %s: %v", watch.Branch, err)
+		}
+	}
+	poller.SetTaskBranchProvider(&mockTaskBranchProvider{branches: map[string]string{"repo-1": "feature-a"}, branchSets: map[string][]string{"repo-1": {"feature-a", "feature-c"}}})
+	poller.refreshStaleBranches(ctx)
+	watches, err := store.ListPRWatchesByTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if len(watches) != 1 || watches[0].Branch != "feature-a" {
+		t.Fatalf("watches after removing obsolete branch = %+v, want only feature-a", watches)
+	}
+}
+
 func TestRefreshStaleBranches_SkipsWhenBranchUnchanged(t *testing.T) {
 	poller, _, _, store := setupPollerTest(t)
 	ctx := context.Background()
 
 	seedTask(t, store, "t1", false)
 	watch := &PRWatch{
-		SessionID: "s1",
-		TaskID:    "t1",
-		Owner:     "myorg",
-		Repo:      "myrepo",
-		PRNumber:  0,
-		Branch:    "same-branch",
+		SessionID:    "s1",
+		TaskID:       "t1",
+		RepositoryID: "repo-1",
+		Owner:        "myorg",
+		Repo:         "myrepo",
+		PRNumber:     0,
+		Branch:       "same-branch",
 	}
 	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
@@ -468,7 +659,7 @@ func TestRefreshStaleBranches_SkipsWhenBranchUnchanged(t *testing.T) {
 
 	prov := &mockTaskBranchProvider{
 		branches: map[string]string{
-			"s1": "same-branch",
+			"repo-1": "same-branch",
 		},
 	}
 	poller.SetTaskBranchProvider(prov)
@@ -488,12 +679,13 @@ func TestRefreshStaleBranches_SkipsWatchesWithPR(t *testing.T) {
 	// Watch that already found a PR (pr_number > 0).
 	seedTask(t, store, "t1", false)
 	watch := &PRWatch{
-		SessionID: "s1",
-		TaskID:    "t1",
-		Owner:     "myorg",
-		Repo:      "myrepo",
-		PRNumber:  42,
-		Branch:    "old-branch",
+		SessionID:    "s1",
+		TaskID:       "t1",
+		RepositoryID: "repo-1",
+		Owner:        "myorg",
+		Repo:         "myrepo",
+		PRNumber:     42,
+		Branch:       "old-branch",
 	}
 	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
@@ -501,7 +693,7 @@ func TestRefreshStaleBranches_SkipsWatchesWithPR(t *testing.T) {
 
 	prov := &mockTaskBranchProvider{
 		branches: map[string]string{
-			"s1": "new-branch",
+			"repo-1": "new-branch",
 		},
 	}
 	poller.SetTaskBranchProvider(prov)
@@ -521,12 +713,13 @@ func TestRefreshStaleBranches_SkipsWhenResolverReturnsEmpty(t *testing.T) {
 
 	seedTask(t, store, "t1", false)
 	watch := &PRWatch{
-		SessionID: "s1",
-		TaskID:    "t1",
-		Owner:     "myorg",
-		Repo:      "myrepo",
-		PRNumber:  0,
-		Branch:    "old-branch",
+		SessionID:    "s1",
+		TaskID:       "t1",
+		RepositoryID: "repo-1",
+		Owner:        "myorg",
+		Repo:         "myrepo",
+		PRNumber:     0,
+		Branch:       "old-branch",
 	}
 	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
@@ -550,6 +743,7 @@ func TestRefreshStaleBranches_SkipsWhenResolverReturnsEmpty(t *testing.T) {
 // exercise the batched poll path without hitting the network.
 type graphQLMockClient struct {
 	*MockClient
+	mu              sync.Mutex
 	prResponses     []string // FIFO; one entry consumed per ExecuteGraphQL call carrying "Batch"
 	branchResponses []string // FIFO; consumed for "Branches" queries
 	prErr           error    // returned for the next "Batch" call
@@ -559,13 +753,21 @@ type graphQLMockClient struct {
 	// onExecute, if set, is called at the top of every ExecuteGraphQL before
 	// canned responses are consumed. Used by the singleflight coalescing
 	// test to block the first in-flight call while a second one races.
-	onExecute func()
+	onExecute   func()
+	statusCalls int
+}
+
+func (m *graphQLMockClient) GetPRStatus(ctx context.Context, owner, repo string, number int) (*PRStatus, error) {
+	m.statusCalls++
+	return m.MockClient.GetPRStatus(ctx, owner, repo, number)
 }
 
 func (m *graphQLMockClient) ExecuteGraphQL(_ context.Context, query string, _ map[string]any, out any) error {
 	if m.onExecute != nil {
 		m.onExecute()
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if strings.Contains(query, "query Branches") {
 		m.branchQueries = append(m.branchQueries, query)
 		if m.branchErr != nil {
@@ -635,7 +837,7 @@ func TestTryBatchedPRWatchCheck_NumberedWatch_AppliesStatus(t *testing.T) {
 		t.Fatalf("create task PR: %v", err)
 	}
 
-	if !poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if !batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Fatalf("expected batched path to succeed")
 	}
 
@@ -903,7 +1105,7 @@ func TestPollerFallbackAfterUnavailableBatchDoesNotPauseDiscovery(t *testing.T) 
 		URL: "https://x/52", BaseBranch: "main",
 	})
 	client.branchErr = errors.New("graphql transport unavailable")
-	if poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Fatal("unavailable batch unexpectedly succeeded")
 	}
 	// The poller's per-watch fallback must be able to acquire the released
@@ -994,7 +1196,7 @@ func TestTryBatchedPRWatchCheck_PersistsExactReviewThreadCount(t *testing.T) {
 		t.Fatalf("create task PR: %v", err)
 	}
 
-	if !poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if !batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Fatal("expected batched path to succeed")
 	}
 
@@ -1033,7 +1235,7 @@ func TestTryBatchedPRWatchCheck_PreservesReviewThreadCountOnPaginationFailure(t 
 		t.Fatalf("create task PR: %v", err)
 	}
 
-	if poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Fatal("expected batched path to fail")
 	}
 	updated, err := store.GetTaskPR(ctx, "t1")
@@ -1101,7 +1303,7 @@ func TestTryBatchedPRWatchCheck_PublishesOnPRFeedbackWatermarkChange(t *testing.
 		t.Fatalf("create task PR: %v", err)
 	}
 
-	if !poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if !batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Fatalf("expected batched path to succeed")
 	}
 	select {
@@ -1256,7 +1458,7 @@ func TestTryBatchedPRWatchCheck_SearchingWatch_DetectsPR(t *testing.T) {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
-	if !poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if !batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Fatalf("expected batched path to succeed")
 	}
 
@@ -1279,9 +1481,237 @@ func TestTryBatchedPRWatchCheck_FallsBackOnUnsupportedClient(t *testing.T) {
 	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
-	if poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+	if batchedPRWatchCompleted(poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch})) {
 		t.Errorf("expected false when client does not implement GraphQLExecutor")
 	}
+}
+
+func batchedPRWatchCompleted(outcomes []prWatchWorkspaceBatchOutcome) bool {
+	if len(outcomes) == 0 {
+		return false
+	}
+	for _, outcome := range outcomes {
+		if outcome.state != prWatchBatchCompleted {
+			return false
+		}
+	}
+	return true
+}
+
+type fallbackProbeClient struct {
+	Client
+	mu       sync.Mutex
+	findErr  error
+	branches []string
+}
+
+func (c *fallbackProbeClient) FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error) {
+	c.mu.Lock()
+	c.branches = append(c.branches, branch)
+	err := c.findErr
+	c.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return c.Client.FindPRByBranch(ctx, owner, repo, branch)
+}
+
+func (c *fallbackProbeClient) fallbackBranches() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.branches...)
+}
+
+func TestPRWatchFallbackBudgetAndFairness(t *testing.T) {
+	poller, service, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	unsupported := &fallbackProbeClient{Client: NewMockClient()}
+	transientGraphQL := &graphQLMockClient{
+		MockClient: NewMockClient(),
+		branchErr:  errors.New("graphql transport unavailable"),
+	}
+	transient := &fallbackProbeClient{Client: transientGraphQL}
+	successful := &graphQLMockClient{
+		MockClient: NewMockClient(),
+		prResponses: []string{
+			`{"data":{"repo0":{"pr0":{"state":"OPEN","title":"batched","url":"https://x/42","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefName":"feat","baseRefName":"main","headRefOid":"abc","author":{"login":"alice"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","reviews":{"nodes":[]},"reviewRequests":{"totalCount":0},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}`,
+			`{"data":{"repo0":{"pr0":{"state":"OPEN","title":"batched","url":"https://x/42","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefName":"feat","baseRefName":"main","headRefOid":"abc","author":{"login":"alice"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","reviews":{"nodes":[]},"reviewRequests":{"totalCount":0},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}`,
+		},
+	}
+
+	service.resolver = NewCredentialResolver(testConnectionReader{workspaces: map[string]*WorkspaceConnection{
+		"workspace-a": {WorkspaceID: "workspace-a", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost, Login: "a", Status: ConnectionStatusActive, CredentialGeneration: 1},
+		"workspace-b": {WorkspaceID: "workspace-b", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost, Login: "b", Status: ConnectionStatusActive, CredentialGeneration: 1},
+		"workspace-c": {WorkspaceID: "workspace-c", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost, Login: "c", Status: ConnectionStatusActive, CredentialGeneration: 1},
+	}}, nil)
+	service.resolver.SetAutomationProvider(workspaceAutomationCredentialProvider{clients: map[string]Client{
+		"workspace-a": unsupported,
+		"workspace-b": transient,
+		"workspace-c": successful,
+	}})
+
+	for _, workspaceID := range []string{"workspace-a", "workspace-b"} {
+		for index := 0; index < 6; index++ {
+			taskID := fmt.Sprintf("%s-task-%d", workspaceID, index)
+			seedTask(t, store, taskID, false)
+			if err := store.CreatePRWatch(ctx, &PRWatch{
+				WorkspaceID: workspaceID,
+				SessionID:   taskID + "-session",
+				TaskID:      taskID,
+				Owner:       "o",
+				Repo:        "r",
+				Branch:      fmt.Sprintf("%s-branch-%d", workspaceID, index),
+			}); err != nil {
+				t.Fatalf("create %s watch %d: %v", workspaceID, index, err)
+			}
+		}
+	}
+	seedTask(t, store, "workspace-c-task", false)
+	if err := store.CreatePRWatch(ctx, &PRWatch{
+		WorkspaceID: "workspace-c", SessionID: "workspace-c-session", TaskID: "workspace-c-task",
+		Owner: "o", Repo: "r", PRNumber: 42, Branch: "feat", LastCheckStatus: "pending",
+	}); err != nil {
+		t.Fatalf("create successful workspace watch: %v", err)
+	}
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "workspace-c-task", Owner: "o", Repo: "r", PRNumber: 42, State: "open",
+	}); err != nil {
+		t.Fatalf("create successful workspace task PR: %v", err)
+	}
+
+	eventsSeen := 0
+	if _, err := poller.eventBus.Subscribe(events.GitHubPRFeedback, func(context.Context, *bus.Event) error {
+		eventsSeen++
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe PR feedback: %v", err)
+	}
+
+	poller.checkPRWatches(ctx)
+	firstUnsupported := unsupported.fallbackBranches()
+	firstTransient := transient.fallbackBranches()
+	if len(firstUnsupported) > 5 || len(firstTransient) > 5 || len(firstUnsupported)+len(firstTransient) > 10 {
+		t.Fatalf("first fallback cycle exceeded budget: unsupported=%d transient=%d", len(firstUnsupported), len(firstTransient))
+	}
+	if len(firstUnsupported) == 0 || len(firstTransient) == 0 {
+		t.Fatalf("first fallback cycle starved a workspace: unsupported=%d transient=%d", len(firstUnsupported), len(firstTransient))
+	}
+	if successful.statusCalls != 0 {
+		t.Fatalf("successful batched workspace repeated through fallback: status calls=%d", successful.statusCalls)
+	}
+	if eventsSeen != 1 {
+		t.Fatalf("successful batched workspace events=%d, want 1", eventsSeen)
+	}
+
+	poller.checkPRWatches(ctx)
+	secondUnsupported := unsupported.fallbackBranches()
+	secondTransient := transient.fallbackBranches()
+	if len(secondUnsupported) > 10 || len(secondTransient) > 10 || len(secondUnsupported)+len(secondTransient) > 20 {
+		t.Fatalf("second fallback cycles exceeded cumulative budget: unsupported=%d transient=%d", len(secondUnsupported), len(secondTransient))
+	}
+	if !containsFallbackBranch(secondUnsupported, "workspace-a-branch-5") || !containsFallbackBranch(secondTransient, "workspace-b-branch-5") {
+		t.Fatalf("fallback target rotation starved the last target: unsupported=%v transient=%v", secondUnsupported, secondTransient)
+	}
+	if successful.statusCalls != 0 {
+		t.Fatalf("successful batched workspace repeated through fallback on second cycle: status calls=%d", successful.statusCalls)
+	}
+	if eventsSeen != 1 {
+		t.Fatalf("successful batched workspace events=%d after second cycle, want the original event only", eventsSeen)
+	}
+}
+
+func TestPRWatchFallbackDeduplicatesSharedTargetsAndFansOut(t *testing.T) {
+	poller, service, _, store := setupPollerTest(t)
+	client := &fallbackProbeClient{Client: NewMockClient()}
+	configureTestWorkspaceAuth(t, service, client, testWorkspaceID)
+	watches := seedSearchingFallbackWatches(t, store, 5)
+	watches[1].Branch = watches[0].Branch
+
+	poller.runPRWatchFallback(context.Background(), watches)
+	branches := client.fallbackBranches()
+	if len(branches) != 4 {
+		t.Fatalf("fallback calls = %d, want one per unique target", len(branches))
+	}
+	sharedCalls := 0
+	for _, branch := range branches {
+		if branch == watches[0].Branch {
+			sharedCalls++
+		}
+	}
+	if sharedCalls != 1 {
+		t.Fatalf("shared target calls = %d, want one", sharedCalls)
+	}
+	for _, watch := range watches {
+		updated, err := store.GetPRWatch(context.Background(), watch.ID)
+		if err != nil {
+			t.Fatalf("get watch %q: %v", watch.ID, err)
+		}
+		if updated == nil || updated.LastCheckedAt == nil {
+			t.Fatalf("watch %q did not receive the shared fallback result", watch.ID)
+		}
+	}
+}
+
+func containsFallbackBranch(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func seedSearchingFallbackWatches(t *testing.T, store *Store, count int) []*PRWatch {
+	t.Helper()
+	ctx := context.Background()
+	watches := make([]*PRWatch, 0, count)
+	for index := 0; index < count; index++ {
+		taskID := fmt.Sprintf("fallback-task-%d", index)
+		seedTask(t, store, taskID, false)
+		watch := withTestWorkspace(&PRWatch{
+			SessionID: fmt.Sprintf("fallback-session-%d", index),
+			TaskID:    taskID,
+			Owner:     "o",
+			Repo:      "r",
+			Branch:    fmt.Sprintf("fallback-branch-%d", index),
+		})
+		if err := store.CreatePRWatch(ctx, watch); err != nil {
+			t.Fatalf("create fallback watch %d: %v", index, err)
+		}
+		watches = append(watches, watch)
+	}
+	return watches
+}
+
+func TestPRWatchFallbackStopsOnRateLimitAndCancellation(t *testing.T) {
+	t.Run("rate limit stops workspace", func(t *testing.T) {
+		poller, service, _, store := setupPollerTest(t)
+		rateClient := &fallbackProbeClient{
+			Client:  NewMockClient(),
+			findErr: rateLimitAPIError(429, "secondary limit"),
+		}
+		configureTestWorkspaceAuth(t, service, rateClient, testWorkspaceID)
+
+		poller.runPRWatchFallback(context.Background(), seedSearchingFallbackWatches(t, store, 3))
+		if got := len(rateClient.fallbackBranches()); got != 1 {
+			t.Fatalf("rate-limited fallback calls = %d, want one affected workspace probe", got)
+		}
+	})
+
+	t.Run("cancellation stops the cycle", func(t *testing.T) {
+		poller, service, _, store := setupPollerTest(t)
+		cancelClient := &fallbackProbeClient{
+			Client:  NewMockClient(),
+			findErr: context.Canceled,
+		}
+		configureTestWorkspaceAuth(t, service, cancelClient, testWorkspaceID)
+
+		poller.runPRWatchFallback(context.Background(), seedSearchingFallbackWatches(t, store, 3))
+		if got := len(cancelClient.fallbackBranches()); got != 1 {
+			t.Fatalf("cancelled fallback calls = %d, want one probe before cycle stop", got)
+		}
+	})
 }
 
 // TestSyncWatchesBatched_ManyWatches_TwoGraphQLCalls is the regression test
@@ -1489,6 +1919,10 @@ func TestRefreshStaleWorkspaceWatches_CoalescesConcurrentCalls(t *testing.T) {
 	}
 
 	// A fresh refresh must start (key was cleared in the defer).
+	// The adaptive selector still honors the one-minute fast tier after the
+	// first empty search, so move the injected service clock past that due
+	// boundary before asserting a later refresh can run.
+	svc.SetClock(func() time.Time { return time.Now().UTC().Add(searchFastPollInterval) })
 	release2 := make(chan struct{})
 	gh.onExecute = func() {
 		started <- struct{}{}

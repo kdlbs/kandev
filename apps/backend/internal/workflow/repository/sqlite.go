@@ -770,7 +770,7 @@ func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowSt
 
 	step, err := r.scanStep(row)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("workflow step not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", models.ErrWorkflowStepNotFound, id)
 	}
 	if err != nil {
 		return nil, err

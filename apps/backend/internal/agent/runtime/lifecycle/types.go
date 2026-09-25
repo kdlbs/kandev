@@ -1114,7 +1114,9 @@ type RepoLaunchSpec struct {
 	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch     string
 	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase    *models.PRBase
 	RemoteContribution *models.RemoteContribution
+	CheckoutOptions    *models.RepositoryCheckoutOptions
 	WorktreeID         string // Existing worktree ID to reuse (skip creation if set)
 	// AllowBranchReplacement permits the explicit new-branch recovery action for
 	// this repository while retaining its environment record.
@@ -1161,6 +1163,8 @@ type WorkspaceRepositorySpec struct {
 	BaseBranch             string
 	DefaultBranch          string
 	CheckoutBranch         string
+	PRNumber               int
+	QualifiedPRBase        *models.PRBase
 	ComparisonTarget       *models.ComparisonTarget
 	WorktreeID             string
 	WorktreeBranchPrefix   string
@@ -1272,7 +1276,9 @@ type LaunchRequest struct {
 	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase        *models.PRBase
 	RemoteContribution     *models.RemoteContribution
+	CheckoutOptions        *models.RepositoryCheckoutOptions
 	ComparisonTarget       *models.ComparisonTarget
 	WorktreeBranchPrefix   string // Branch prefix for worktree branches
 	WorktreeBranchTemplate string // Branch name template for worktree branches
@@ -1327,7 +1333,9 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		DefaultBranch:              r.DefaultBranch,
 		CheckoutBranch:             r.CheckoutBranch,
 		PRNumber:                   r.PRNumber,
+		QualifiedPRBase:            r.QualifiedPRBase,
 		RemoteContribution:         r.RemoteContribution,
+		CheckoutOptions:            r.CheckoutOptions,
 		ComparisonTarget:           r.ComparisonTarget,
 		ContributionDestination:    r.ContributionDestination,
 		WorktreeID:                 r.WorktreeID,

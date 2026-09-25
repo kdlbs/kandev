@@ -9,12 +9,15 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/service"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // newChildrenCompletedTestScheduler wires a real *service.Service (not
 // nil, unlike newReactivityTestScheduler) because these tests exercise
 // QueueRunCtx end to end — QueueRun's guardAgentStatus calls
-// svc.GetAgentFromConfig, which panics on a nil Service.
+// svc.GetAgentFromConfig, which panics on a nil Service. It also wires a
+// runs/service.Service, since AC-OFFICE-ENQUEUE-CONSOLIDATION-001.6
+// requires QueueRun/QueueRunCtx to fail closed with none configured.
 func newChildrenCompletedTestScheduler(t *testing.T, repo *officesqlite.Repository) *SchedulerService {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
@@ -22,7 +25,9 @@ func newChildrenCompletedTestScheduler(t *testing.T, repo *officesqlite.Reposito
 		t.Fatalf("logger: %v", err)
 	}
 	svc := service.NewService(service.ServiceOptions{Repo: repo, Logger: log})
-	return NewSchedulerService(repo, log, svc)
+	ss := NewSchedulerService(repo, log, svc)
+	ss.SetRunsService(runsservice.New(repo.RunsRepository(), nil, log, nil))
+	return ss
 }
 
 // createChildrenCompletedAgent registers an idle agent instance so

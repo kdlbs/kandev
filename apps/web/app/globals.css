@@ -1120,6 +1120,20 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   margin-top: 0.5em;
 }
 
+.katex-display {
+  max-width: 100%;
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.125rem 0.25rem;
+  text-align: left;
+}
+
+.katex-display > .katex {
+  display: inline-block;
+  min-width: max-content;
+}
+
 .tiptap-plan-wrapper .ProseMirror::after {
   content: "";
   display: block;

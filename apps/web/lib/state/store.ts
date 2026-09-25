@@ -27,6 +27,7 @@ import {
   createReviewSlice,
   createNeedsYouInboxSlice,
   createFailedInboxSlice,
+  createPreviewFeedbackSlice,
   createInboxHistorySlice,
 } from "./slices";
 
@@ -86,6 +87,7 @@ export function createAppStore(initialState?: HydrationState) {
       ...createReviewSlice(set as any),
       ...createNeedsYouInboxSlice(set),
       ...createFailedInboxSlice(set, get),
+      ...createPreviewFeedbackSlice(set),
       ...createInboxHistorySlice(set),
       // Re-assert merged initial state so caller-supplied values win over slice defaults.
       ...buildStateOverrides(merged),

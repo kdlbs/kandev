@@ -12,14 +12,11 @@ import {
   IconListCheck,
   IconHome,
 } from "@tabler/icons-react";
-import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { SettingsCard } from "@/components/settings/settings-card";
-import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { settingsControlClassName } from "@/components/settings/settings-control";
+import { SettingsRow } from "@/components/settings/settings-group";
 import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -69,31 +66,29 @@ function ThemeSettingsCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard
+    <SettingsRow
       isDirty={isDirty}
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.colorTheme}
       data-testid="theme-settings-card"
-    >
-      <SettingsCardHeader title={t("settings:colorTheme")} />
-      <CardContent>
-        <div className="space-y-2">
-          <Select value={theme} onValueChange={(value) => onChange(value as Theme)}>
-            <SelectTrigger
-              id="theme"
-              className={settingsControlClassName()}
-              data-settings-dirty={isDirty}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="system">{t("common:system")}</SelectItem>
-              <SelectItem value="light">{t("settings:light")}</SelectItem>
-              <SelectItem value="dark">{t("settings:dark")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </CardContent>
-    </SettingsCard>
+      label={t("settings:colorTheme")}
+      controlId="theme"
+      control={
+        <Select value={theme} onValueChange={(value) => onChange(value as Theme)}>
+          <SelectTrigger
+            id="theme"
+            className={settingsControlClassName()}
+            data-settings-dirty={isDirty}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="system">{t("common:system")}</SelectItem>
+            <SelectItem value="light">{t("settings:light")}</SelectItem>
+            <SelectItem value="dark">{t("settings:dark")}</SelectItem>
+          </SelectContent>
+        </Select>
+      }
+    />
   );
 }
 
@@ -108,34 +103,34 @@ function ChatSubmitKeyCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard
+    <SettingsRow
       isDirty={isDirty}
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.submitShortcut}
       data-testid="chat-submit-key-card"
-    >
-      <CardHeader>
-        <CardTitle className="text-base">{t("settings:submitShortcut")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <Label htmlFor="chat-submit-key">{t("settings:messageSubmitKey")}</Label>
-          <Select value={value} onValueChange={(next) => onChange(next as "enter" | "cmd_enter")}>
-            <SelectTrigger id="chat-submit-key" data-settings-dirty={isDirty}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="cmd_enter">{t("settings:cmdCtrlEnterToSend")}</SelectItem>
-              <SelectItem value="enter">{t("settings:enterToSend")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            {value === "cmd_enter"
-              ? t("settings:pressCmdCtrlEnterToSend")
-              : t("settings:pressEnterToSendMessagesPress")}
-          </p>
-        </div>
-      </CardContent>
-    </SettingsCard>
+      label={t("settings:messageSubmitKey")}
+      description={
+        value === "cmd_enter"
+          ? t("settings:pressCmdCtrlEnterToSend")
+          : t("settings:pressEnterToSendMessagesPress")
+      }
+      controlId="chat-submit-key"
+      descriptionId="chat-submit-key-description"
+      control={
+        <Select value={value} onValueChange={(next) => onChange(next as "enter" | "cmd_enter")}>
+          <SelectTrigger
+            id="chat-submit-key"
+            aria-describedby="chat-submit-key-description"
+            data-settings-dirty={isDirty}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="cmd_enter">{t("settings:cmdCtrlEnterToSend")}</SelectItem>
+            <SelectItem value="enter">{t("settings:enterToSend")}</SelectItem>
+          </SelectContent>
+        </Select>
+      }
+    />
   );
 }
 
@@ -219,19 +214,17 @@ function AppearanceThemeSection({
       title={t("settings:appearance")}
       description={t("settings:customizeHowTheApplicationLooks")}
     >
-      <div className="space-y-4">
-        <ThemeSettingsCard theme={theme} isDirty={isThemeDirty} onChange={onThemeChange} />
-        <RichOutputMotionSettingsCard
-          enabled={richOutputAnimationsEnabled}
-          isDirty={isRichOutputMotionDirty}
-          onChange={onRichOutputMotionChange}
-        />
-        <ChatMotionSettingsCard
-          enabled={chatAnimationsEnabled}
-          isDirty={isChatMotionDirty}
-          onChange={onChatMotionChange}
-        />
-      </div>
+      <ThemeSettingsCard theme={theme} isDirty={isThemeDirty} onChange={onThemeChange} />
+      <RichOutputMotionSettingsCard
+        enabled={richOutputAnimationsEnabled}
+        isDirty={isRichOutputMotionDirty}
+        onChange={onRichOutputMotionChange}
+      />
+      <ChatMotionSettingsCard
+        enabled={chatAnimationsEnabled}
+        isDirty={isChatMotionDirty}
+        onChange={onChatMotionChange}
+      />
     </SettingsSection>
   );
 }

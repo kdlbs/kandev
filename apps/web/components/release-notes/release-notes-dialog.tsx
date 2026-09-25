@@ -12,7 +12,11 @@ import { ScrollArea } from "@kandev/ui/scroll-area";
 import { Badge } from "@kandev/ui/badge";
 import { Separator } from "@kandev/ui/separator";
 import { IconExternalLink } from "@tabler/icons-react";
-import { remarkPlugins, markdownComponents } from "@/components/shared/markdown-components";
+import {
+  markdownComponents,
+  rehypePlugins,
+  remarkPlugins,
+} from "@/components/shared/markdown-components";
 import { getReleaseUrl } from "@/lib/release-notes";
 import type { ChangelogEntry } from "@/lib/changelog";
 import type { TFunction } from "i18next";
@@ -66,7 +70,11 @@ export function ReleaseNotesDialog({
                   </div>
                 )}
                 <div className="markdown-body text-sm">
-                  <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+                  <ReactMarkdown
+                    remarkPlugins={remarkPlugins}
+                    rehypePlugins={rehypePlugins}
+                    components={markdownComponents}
+                  >
                     {entry.notes}
                   </ReactMarkdown>
                 </div>

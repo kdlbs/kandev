@@ -39,8 +39,9 @@ describe("SystemMetricsSettingsCard", () => {
     );
 
     const simplified = screen.getByRole("switch", { name: "Simplified metrics" });
+    const settingsRoot = screen.getByTestId("system-metrics-settings-card");
     expect(simplified.getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
-    expect(simplified.closest('[data-slot="card"]')?.getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
+    expect(settingsRoot.getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
     expect(
       screen.getByText(
         "Removes the Host marker and progress bars while retaining metric icons and values.",
@@ -72,13 +73,14 @@ describe("SystemMetricsSettingsCard", () => {
 
     expect(updateSystemMetricsSettingsMock).not.toHaveBeenCalled();
     expect(cpuMetric.getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
-    expect(cpuMetric.closest('[data-slot="card"]')?.getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
+    const settingsRoot = screen.getByTestId("system-metrics-settings-card");
+    expect(settingsRoot.getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
 
     fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSystemMetricsSettingsMock).toHaveBeenCalledTimes(1));
     expect(updateSystemMetricsSettingsMock.mock.calls[0]?.[0].metrics).not.toContain("cpu_percent");
     await waitFor(() => expect(cpuMetric.getAttribute(DIRTY_ATTRIBUTE)).toBe("false"));
-    expect(cpuMetric.closest('[data-slot="card"]')?.getAttribute(DIRTY_ATTRIBUTE)).toBe("false");
+    expect(settingsRoot.getAttribute(DIRTY_ATTRIBUTE)).toBe("false");
   });
 });

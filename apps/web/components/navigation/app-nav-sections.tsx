@@ -11,12 +11,16 @@ import {
   IconLayoutList,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import Link from "@/components/routing/app-link";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
 import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-status-item";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
 import { DestinationRows } from "@/components/navigation/destination-rows";
-import { MobilePluginNavSection } from "@/components/plugins/mobile-plugin-nav-section";
+import {
+  MobilePluginNavSection,
+  type MobilePluginWorkspaceContext,
+} from "@/components/plugins/mobile-plugin-nav-section";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
 import { useTheme } from "@/components/theme/app-theme";
 import { getThemeToggleLabelKey, getThemeToggleTarget } from "@/components/theme/theme-toggle";
@@ -29,6 +33,9 @@ import type { NavSection } from "@/lib/navigation/types";
 import { useRouter } from "@/lib/routing/client-router";
 import { cn } from "@/lib/utils";
 import { useTaskViewNavigation } from "./use-task-view-navigation";
+import { MobileSidebarLayoutNavigation } from "./mobile-sidebar-layout-navigation";
+import { useHasSavedSidebarLayout } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
+import { SIDEBAR_LAYOUT_TAB_HREF } from "@/lib/settings-discovery/catalog/preferences";
 
 /**
  * Overlay-backed rows in the shared nav block (Task views, Improve Kandev, Health issues).
@@ -46,8 +53,11 @@ export type AppNavDialogControls = {
   dialogs: ReactNode;
 };
 
-export function useAppNavDialogs(closeMenu: () => void): AppNavDialogControls {
-  const taskViews = useTaskViewNavigation(closeMenu);
+export function useAppNavDialogs(
+  closeMenu: () => void,
+  onOpenTaskViews?: () => void,
+): AppNavDialogControls {
+  const taskViews = useTaskViewNavigation(closeMenu, onOpenTaskViews);
   const router = useRouter();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const health = useSystemHealthIndicator();
@@ -117,6 +127,13 @@ type AppNavSectionsProps = {
   omitDestinations?: string[];
   /** Optional workspace-scoped plugin actions for the current phone surface. */
   workspaceActions?: ReactNode;
+  /** Optional page-scoped controls rendered with plugin destinations. */
+  pluginActions?: ReactNode;
+  pluginWorkspaceContext?: MobilePluginWorkspaceContext;
+  resources?: ReactNode;
+  afterPrimary?: ReactNode;
+  quickActions?: ReactNode;
+  phoneNavigation?: boolean;
   controls: AppNavDialogControls;
 };
 
@@ -131,15 +148,37 @@ export function AppNavSections({
   omitSections = [],
   omitDestinations = [],
   workspaceActions,
+  pluginActions,
+  pluginWorkspaceContext,
+  resources,
+  afterPrimary,
+  quickActions,
+  phoneNavigation = false,
   controls,
 }: AppNavSectionsProps) {
   const { t } = useTranslation();
   const omit = new Set(omitSections);
+  const hasSavedSidebarLayout = useHasSavedSidebarLayout();
   return (
     <>
-      {workspaceActions}
-      {!omit.has("primary") && (
-        <PrimaryNavSection onNavigate={onNavigate} omitDestinations={omitDestinations} />
+      {hasSavedSidebarLayout ? (
+        <MobileSidebarLayoutNavigation
+          onNavigate={onNavigate}
+          omitSections={omit}
+          omitDestinations={omitDestinations}
+          quickActions={quickActions}
+          homeCoversListings={phoneNavigation}
+          afterPrimary={afterPrimary}
+        />
+      ) : (
+        !omit.has("primary") && (
+          <PrimaryNavSection
+            onNavigate={onNavigate}
+            omitDestinations={omitDestinations}
+            phoneNavigation={phoneNavigation}
+            quickActions={quickActions}
+          />
+        )
       )}
       {controls.openTaskViews && (
         <Button
@@ -151,9 +190,29 @@ export function AppNavSections({
           {t("sidebar:taskViews")}
         </Button>
       )}
-      {!omit.has("plugins") && <MobilePluginNavSection onNavigate={onNavigate} />}
-      {!omit.has("integrations") && <MobileIntegrationsSection onNavigate={onNavigate} />}
-      <UtilityNavSection onNavigate={onNavigate} controls={controls} />
+      {!hasSavedSidebarLayout && afterPrimary}
+      {workspaceActions}
+      {!omit.has("plugins") && (
+        <MobilePluginNavSection
+          actions={pluginActions}
+          workspaceContext={pluginWorkspaceContext}
+          includeDestinations={!hasSavedSidebarLayout}
+          onNavigate={onNavigate}
+        />
+      )}
+      {!hasSavedSidebarLayout && !omit.has("integrations") && (
+        <MobileIntegrationsSection
+          onNavigate={onNavigate}
+          showSetup={phoneNavigation}
+          collapsible={phoneNavigation}
+        />
+      )}
+      {resources}
+      <UtilityNavSection
+        onNavigate={onNavigate}
+        controls={controls}
+        phoneNavigation={phoneNavigation}
+      />
     </>
   );
 }
@@ -161,20 +220,29 @@ export function AppNavSections({
 function PrimaryNavSection({
   onNavigate,
   omitDestinations,
+  phoneNavigation,
+  quickActions,
 }: {
   onNavigate: () => void;
   omitDestinations: string[];
+  phoneNavigation: boolean;
+  quickActions?: ReactNode;
 }) {
   const all = useStaticDestinations("mobileMenu", "primary");
   const destinations = all.filter((destination) => !omitDestinations.includes(destination.id));
   if (destinations.length === 0) return null;
   return (
-    <div className="flex flex-col gap-3" data-testid="app-nav-primary">
+    <div
+      className={cn("flex flex-col", phoneNavigation ? "gap-2" : "gap-3")}
+      data-testid="app-nav-primary"
+    >
       <DestinationRows
         destinations={destinations}
         onNavigate={onNavigate}
-        className="gap-3 px-3 text-sm"
+        homeCoversListings={phoneNavigation}
+        className="gap-3 px-3 text-sm aria-[current=page]:bg-primary/10"
       />
+      {quickActions}
     </div>
   );
 }
@@ -182,16 +250,29 @@ function PrimaryNavSection({
 function UtilityNavSection({
   onNavigate,
   controls,
+  phoneNavigation,
 }: {
+  phoneNavigation: boolean;
   onNavigate: () => void;
   controls: AppNavDialogControls;
 }) {
   const { t } = useTranslation();
-  const destinations = useStaticDestinations("mobileMenu", MOBILE_MENU_UTILITY_SECTIONS);
+  const allDestinations = useStaticDestinations("mobileMenu", MOBILE_MENU_UTILITY_SECTIONS);
+  const destinations = phoneNavigation
+    ? [
+        ...allDestinations.filter((item) => item.id === "settings"),
+        ...allDestinations.filter((item) => item.id !== "settings"),
+      ]
+    : allDestinations;
   const { resolvedTheme, setTheme } = useTheme();
   const utilityRowClass = "h-11 w-full cursor-pointer justify-start gap-3 px-3 text-sm";
   return (
-    <div className="mt-auto flex flex-col gap-3 border-t border-border pt-4">
+    <div
+      className={cn(
+        "flex flex-col gap-3 border-t border-border pt-4",
+        !phoneNavigation && "mt-auto",
+      )}
+    >
       <div className="text-sm font-medium">{t("common:utilities")}</div>
       <StatusRow closeMenu={onNavigate} />
       <DestinationRows
@@ -199,6 +280,18 @@ function UtilityNavSection({
         onNavigate={onNavigate}
         className="gap-3 px-3 text-sm"
       />
+      <Button
+        asChild
+        type="button"
+        variant="outline"
+        className={utilityRowClass}
+        data-testid="mobile-customize-sidebar-button"
+      >
+        <Link href={SIDEBAR_LAYOUT_TAB_HREF} onClick={onNavigate}>
+          <IconLayoutList className="h-4 w-4 shrink-0" />
+          {t("settings:sidebar")}
+        </Link>
+      </Button>
       {/* #2514 put this on the kanban drawer's own utility rows; that surface
           now draws this shared block instead, so the toggle lives here and
           every mobile menu gets it rather than only the board's. */}

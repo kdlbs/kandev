@@ -10,7 +10,86 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/steptelemetry"
+	"github.com/kandev/kandev/internal/task/models"
 )
+
+// ListTaskStepTransitions reads newest-first ledger rows using immutable IDs.
+func (r *Repository) ListTaskStepTransitions(ctx context.Context, taskID string, beforeID int64, limit int) ([]models.StepTransition, error) {
+	query := `SELECT id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, occurred_at
+		FROM task_step_transitions WHERE task_id = ?`
+	args := []any{taskID}
+	if beforeID > 0 {
+		query += ` AND id < ?`
+		args = append(args, beforeID)
+	}
+	query += ` ORDER BY id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list task step transitions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]models.StepTransition, 0)
+	for rows.Next() {
+		var item models.StepTransition
+		var fromWorkflow, fromStep, toWorkflow, toStep sql.NullString
+		if err := rows.Scan(&item.ID, &fromWorkflow, &fromStep, &toWorkflow, &toStep, &item.Trigger, &item.OccurredAt); err != nil {
+			return nil, fmt.Errorf("scan task step transition: %w", err)
+		}
+		item.FromWorkflowID = nullableValue(fromWorkflow)
+		item.FromWorkflowStepID = nullableValue(fromStep)
+		item.ToWorkflowID = nullableValue(toWorkflow)
+		item.ToWorkflowStepID = nullableValue(toStep)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func nullableValue(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
+}
+
+// ListWorkflowTransitionGroups counts retained routes involving one workflow.
+// Rows remain present when a step is removed because the ledger stores IDs.
+func (r *Repository) ListWorkflowTransitionGroups(ctx context.Context, workspaceID, workflowID, afterKey string, limit int) ([]models.TransitionGroup, error) {
+	const query = `WITH scoped AS (
+		SELECT CASE WHEN h.from_workflow_id = ? AND h.to_workflow_id = ? THEN 'within'
+			WHEN h.to_workflow_id = ? THEN 'entry' ELSE 'exit' END AS kind,
+			CASE WHEN h.from_workflow_id = ? THEN h.from_workflow_step_id END AS from_step_id,
+			CASE WHEN h.to_workflow_id = ? THEN h.to_workflow_step_id END AS to_step_id
+		FROM task_step_transitions h JOIN tasks t ON t.id = h.task_id
+		WHERE t.workspace_id = ? AND (h.from_workflow_id = ? OR h.to_workflow_id = ?)
+	), grouped AS (
+		SELECT kind, from_step_id, to_step_id, COUNT(*) AS route_count
+		FROM scoped GROUP BY kind, from_step_id, to_step_id
+	), ordered AS (
+		SELECT kind, from_step_id, to_step_id, route_count,
+			kind || '|' || COALESCE(from_step_id, '') || '|' || COALESCE(to_step_id, '') AS route_key
+		FROM grouped
+	)
+	SELECT kind, from_step_id, to_step_id, route_count FROM ordered
+	WHERE route_key > ? ORDER BY route_key LIMIT ?`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), workflowID, workflowID, workflowID,
+		workflowID, workflowID, workspaceID, workflowID, workflowID, afterKey, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list workflow transition groups: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]models.TransitionGroup, 0)
+	for rows.Next() {
+		var item models.TransitionGroup
+		var fromStep, toStep sql.NullString
+		if err := rows.Scan(&item.Kind, &fromStep, &toStep, &item.Count); err != nil {
+			return nil, fmt.Errorf("scan workflow transition group: %w", err)
+		}
+		item.FromStepID, item.ToStepID = nullableValue(fromStep), nullableValue(toStep)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
 
 // stepTransitionTx is satisfied by both *sql.Tx and *sqlx.Tx, the two
 // transaction types the mutation paths in this package use.

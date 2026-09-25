@@ -15,11 +15,16 @@ package/default generation resets it during startup.
 | Copilot | `@github/copilot` | `--acp` |
 | Gemini | `@google/gemini-cli` | `--acp` |
 | Pi | `pi-acp` | none |
+| Muse | `@bex-co/muse-code-acp` | none |
 
 Normal capability probes, sessions, container commands, and one-shot inference
-use `npx --yes --prefer-offline package@<effective-version>` with the ACP
-arguments above. For example, an unmodified Claude installation launches
-`npx --yes --prefer-offline @agentclientprotocol/claude-agent-acp@<effective-version>`.
+use `npx --yes --prefer-offline --prefix ~/.kandev/managed-npm-runtime
+package@<effective-version>` with the ACP arguments above. The prefix directory
+is a canonical marker that the execution host replaces with a private,
+user-scoped directory under its system temporary root before npm starts. It
+stays outside the task workspace and mounted agent home. The agent process
+still runs in the task workspace, but its project `.npmrc` does not control
+managed runtime package resolution.
 The `<effective-version>` placeholder resolves at launch to the exact Kandev
 default or the exact operator selection. OpenCode's error-only log flags
 are part of its managed command so agentctl can observe terminal provider

@@ -1151,7 +1151,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	}
 	backendForce := force
 	stopCtx := ctx
-	if shouldPreserveFailedKubernetesResume(execution, reason) {
+	if shouldPreserveKubernetesRuntime(execution, reason) {
 		backendForce = false
 		var cancelStop context.CancelFunc
 		stopCtx, cancelStop = kubernetesDurableContext(ctx)
@@ -1245,11 +1245,6 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
 
 	return nil
-}
-
-func shouldPreserveFailedKubernetesResume(execution *AgentExecution, reason string) bool {
-	return execution != nil && execution.RuntimeName == executor.NameKubernetes &&
-		execution.isResumedSession && reason == StopReasonAgentBootstrapFailed
 }
 
 // detachAgentExecution implements the AC-EXECUTORS-SURVIVAL survivable-detach

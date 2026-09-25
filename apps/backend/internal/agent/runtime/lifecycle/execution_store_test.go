@@ -2,10 +2,34 @@ package lifecycle
 
 import (
 	"errors"
+	"expvar"
 	"testing"
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func TestActiveRuntimeGaugePublished(t *testing.T) {
+	if expvar.Get("agent_active_runtimes") == nil {
+		t.Fatal("agent_active_runtimes expvar is not published")
+	}
+}
+
+func TestActiveRuntimeGaugeTracksExecutionOwnership(t *testing.T) {
+	store := NewExecutionStore()
+	if err := store.Add(&AgentExecution{ID: "runtime-metric-1"}); err != nil {
+		t.Fatalf("Add(first): %v", err)
+	}
+	if err := store.Add(&AgentExecution{ID: "runtime-metric-2"}); err != nil {
+		t.Fatalf("Add(second): %v", err)
+	}
+	if got := agentActiveRuntimes.Value(); got != 2 {
+		t.Fatalf("active runtime gauge = %d, want 2", got)
+	}
+	store.Remove("runtime-metric-1")
+	if got := agentActiveRuntimes.Value(); got != 1 {
+		t.Fatalf("active runtime gauge after remove = %d, want 1", got)
+	}
+}
 
 // TestExecutionStore_AddRejectsDuplicateSession is the regression test for the
 // process-leak bug where two paths created executions for the same session

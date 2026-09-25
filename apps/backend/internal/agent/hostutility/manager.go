@@ -339,7 +339,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 		LastCheckedAt: time.Now(),
 	})
 
-	cfg := ia.InferenceConfig()
+	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil || !cfg.Supported {
 		m.cache.set(AgentCapabilities{
 			AgentType:     agentType,
@@ -754,10 +754,11 @@ func managedRuntimeProbeRetry(
 	spec agents.ManagedNPMRuntimeSpec,
 ) (agents.Command, string, bool) {
 	args := command.Args()
-	if len(args) < 4 || args[0] != "npx" || args[1] != "--yes" || args[2] != "--prefer-offline" {
+	if len(args) < 6 || args[0] != "npx" || args[1] != "--yes" || args[2] != "--prefer-offline" ||
+		args[3] != "--prefix" || args[4] != managedruntime.NPMProjectPrefix {
 		return agents.Command{}, "", false
 	}
-	packageSpec := args[3]
+	packageSpec := args[5]
 	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
 		return agents.Command{}, "", false
 	}
@@ -831,7 +832,7 @@ func (m *Manager) resolveInferenceCommand(
 	if !override.IsEmpty() {
 		return override, nil
 	}
-	cfg := ia.InferenceConfig()
+	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil || !cfg.Supported {
 		return agents.Command{}, errors.New("inference config not available")
 	}
@@ -845,6 +846,9 @@ func (m *Manager) resolveInferenceCommand(
 		return command, nil
 	}
 	spec := managed.ManagedNPMRuntime()
+	if spec.NativeBinaryOnPath() {
+		return spec.NativeCommand(), nil
+	}
 	selection, found, err := m.managedRuntimeSelections.Get(ctx, agentType, spec.Package)
 	if err != nil {
 		return agents.Command{}, fmt.Errorf("resolve active managed runtime version for %s: %w", agentType, err)
@@ -863,7 +867,7 @@ func buildProbeRequest(
 	refresh bool,
 	command agents.Command,
 ) *agentctlutil.ProbeRequest {
-	cfg := ia.InferenceConfig()
+	cfg := inferenceConfigForHostUtility(ia)
 	probeCommand := cfg.Command
 	if !command.IsEmpty() {
 		probeCommand = command
@@ -872,13 +876,21 @@ func buildProbeRequest(
 		AgentID: inst.agentType,
 		Refresh: refresh,
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
-			Command:   probeCommand.Args(),
-			ModelFlag: cfg.ModelFlag.Args(),
-			WorkDir:   inst.workDir,
-			Env:       agents.RuntimeEnvFor(ia),
-			StripEnv:  agents.StripEnvFor(ia),
+			Command:         probeCommand.Args(),
+			ModelFlag:       cfg.ModelFlag.Args(),
+			WorkDir:         inst.workDir,
+			Env:             agents.RuntimeEnvFor(ia),
+			StripEnv:        agents.StripEnvFor(ia),
+			OperatorDefined: cfg.OperatorDefined,
 		},
 	}
+}
+
+func inferenceConfigForHostUtility(ia agents.InferenceAgent) *agents.InferenceConfig {
+	if hostAgent, ok := ia.(agents.HostUtilityInferenceAgent); ok {
+		return hostAgent.HostUtilityInferenceConfig()
+	}
+	return ia.InferenceConfig()
 }
 
 func probeFailureCapabilities(

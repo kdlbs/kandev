@@ -106,6 +106,10 @@ type LaunchSessionRequest struct {
 	// kept off the wire protocol (`json:"-"`) — a client must not be able to
 	// suppress the upgrade and strand a passthrough session without a PTY.
 	DeferredStart bool `json:"-"`
+	// InitialCreatePrompt marks the one eligible, prompt-bearing explicit-step
+	// create flow. It is server-side provenance, so clients cannot turn the
+	// generic launch path into a workflow turn-start admission.
+	InitialCreatePrompt bool `json:"-"`
 	// InitialPromptPreview is supplied only by task creation after attachment claim.
 	InitialPromptPreview *models.InitialPromptPreview `json:"-"`
 	Attachments          []v1.MessageAttachment       `json:"attachments,omitempty"`
@@ -492,6 +496,9 @@ func (s *Service) shouldBlockAutoStart(ctx context.Context, req *LaunchSessionRe
 
 // launchStartCreated starts agent execution on an existing CREATED session.
 func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	if req.InitialCreatePrompt {
+		return s.launchInitialCreatePrompt(ctx, req)
+	}
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
 	execution, err := s.StartCreatedSession(

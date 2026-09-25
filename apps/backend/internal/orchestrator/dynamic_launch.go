@@ -974,7 +974,9 @@ func (s *Service) runDetachedDynamicSuccessorLaunch(
 		errMsg = "dynamic successor launch failed"
 	}
 	s.finalizeAutomationRun(failureCtx, data.TaskID, false, errMsg)
-	s.handleRecoverableFailureLocked(failureCtx, data)
+	if dispatch := s.handleRecoverableFailureLockedState(failureCtx, data, agentruntime.StopReasonRecoverableAgentFailure); dispatch != nil {
+		s.startAgentFailureRecovery(dispatch)
+	}
 }
 
 func (s *Service) resetDynamicSuccessorWorkers() {
@@ -1225,6 +1227,9 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 }
 
 func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecutionID string) bool {
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForExecution(agentExecutionID)
+	}
 	err := s.executor.StopExecution(ctx, agentExecutionID, "dynamic route fallback", true)
 	if err == nil {
 		return true

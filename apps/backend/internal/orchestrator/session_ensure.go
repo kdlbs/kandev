@@ -426,20 +426,20 @@ func (s *Service) tryEnsureExecutionWithBinding(
 }
 
 // resolveTaskAgentProfile applies the 5-step resolution chain on the backend:
-// 1) task.metadata.agent_profile_id, 2) workflow step override,
+// 1) workflow step override, 2) task.metadata.agent_profile_id,
 // 3) workflow default, 4) Office task assignee, 5) workspace default. Returns the resolved profile id
 // (or "" when none resolve) along with the workflow step it loaded (or nil).
 // Returning the step lets callers reuse it (e.g. to gate auto-start) without a
 // second DB lookup.
 func (s *Service) resolveTaskAgentProfile(ctx context.Context, task *models.Task) (string, *wfmodels.WorkflowStep) {
 	step := s.lookupWorkflowStep(ctx, task.WorkflowStepID)
-	if v, ok := task.Metadata["agent_profile_id"].(string); ok && v != "" {
-		return v, step
-	}
 	if step != nil {
-		if id := s.resolveStepAgentProfile(ctx, step); id != "" {
+		if id := s.resolveStepAgentProfileForTask(ctx, task, step); id != "" {
 			return id, step
 		}
+	}
+	if v, ok := task.Metadata["agent_profile_id"].(string); ok && v != "" {
+		return v, step
 	}
 	if task.AssigneeAgentProfileID != "" {
 		return task.AssigneeAgentProfileID, step

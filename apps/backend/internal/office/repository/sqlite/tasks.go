@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -91,6 +92,32 @@ func (r *Repository) GetTaskExecutionFields(ctx context.Context, taskID string) 
 		return nil, err
 	}
 	return &fields, nil
+}
+
+// GetTaskMetadata returns the raw metadata map for a task, read directly
+// off the tasks.metadata JSON column for the task-boundary causation
+// carrier (AC-OFFICE-RUN-CAUSATION-001.18). Returns a nil map, not an
+// error, when metadata is empty, absent, or fails to parse — the caller
+// treats a nil map as "no carrier to read" rather than a lookup failure.
+func (r *Repository) GetTaskMetadata(ctx context.Context, taskID string) (map[string]interface{}, error) {
+	var raw sql.NullString
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT metadata FROM tasks WHERE id = ?
+	`), taskID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !raw.Valid || raw.String == "" {
+		return nil, nil
+	}
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(raw.String), &metadata); err != nil {
+		return nil, nil
+	}
+	return metadata, nil
 }
 
 // GetTaskProjectID returns the project_id for a task, or an empty string if unset.

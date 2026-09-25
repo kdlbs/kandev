@@ -32,5 +32,6 @@ export function resolveTaskMenuTarget(
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     primarySessionId: task.primarySessionId,
     parentTaskId: task.parentTaskId ?? undefined,
+    workspaceMode: task.workspaceMode,
   };
 }
