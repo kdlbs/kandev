@@ -73,3 +73,5 @@ Depends on Task 01's settings field. `useSavedViews` currently stages mutations 
 ## Result
 
 Saved views and the default ID hydrate from the same response. An available built-in or custom view restores its saved filters and exact custom JQL before the first ticket search. Missing IDs use the existing Assigned to me filters with the workspace default project key. Selection and filter edits made during hydration win over the late response. Default writes publish only after acknowledgment; deleting the default clears its ID and saved-view row in one PATCH, and a failed write retains both.
+
+Review follow-up keeps saved structured statuses when any selected project-status lookup fails, and holds the results in a loading state until initial selection resolves. A newer selection or filter edit also wins when an earlier save or default deletion finishes later. These cases pass in the focused six-file web suite.

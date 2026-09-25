@@ -18,6 +18,7 @@ import {
   type JiraLaunchPayload,
 } from "@/components/jira/my-jira/quick-task-launcher";
 import { DEFAULT_FILTERS } from "@/components/jira/my-jira/filter-model";
+import { isInitialJiraSearchLoading } from "@/components/jira/my-jira/jira-default-view";
 import { useJiraFilterState } from "@/components/jira/my-jira/use-jira-filter-state";
 import {
   reconcileStatusesForQuery,
@@ -283,17 +284,20 @@ function AuthenticatedView({
     state.effectiveJql,
     state.initialSelectionResolved,
   );
-  const { options: statusOptions, loaded: statusesLoaded } = useProjectStatuses(
-    state.filters.projectKeys,
-    workspaceId,
-  );
+  const searchState = isInitialJiraSearchLoading(search.loading, state.initialSelectionResolved)
+    ? { ...search, loading: true }
+    : search;
+  const {
+    options: statusOptions,
+    loaded: statusesLoaded,
+    authoritative: statusesAuthoritative,
+  } = useProjectStatuses(state.filters.projectKeys, workspaceId);
 
   // When the available status union changes (project selection changed, or
   // statuses finished loading), drop unavailable selections from structured
   // filters. Saved custom JQL remains the exact query the user chose.
-  // Gate on statusesLoaded so a saved view's statuses aren't stripped on the
-  // first render, before useProjectStatuses has fetched the current project's
-  // statuses (options is still [] until then).
+  // Gate on completed, authoritative lookups so a saved view's statuses aren't
+  // stripped before metadata arrives or when the status endpoint fails.
   const { filters, updateFilters } = state;
   useEffect(() => {
     const reconciled = reconcileStatusesForQuery(
@@ -301,16 +305,24 @@ function AuthenticatedView({
       state.customJql,
       filters.statuses,
       statusOptions,
+      statusesAuthoritative,
     );
     if (reconciled !== filters.statuses) {
       updateFilters({ ...filters, statuses: reconciled });
     }
-  }, [statusesLoaded, statusOptions, filters, state.customJql, updateFilters]);
+  }, [
+    statusesLoaded,
+    statusesAuthoritative,
+    statusOptions,
+    filters,
+    state.customJql,
+    updateFilters,
+  ]);
 
   return (
     <AuthenticatedJiraContent
       state={state}
-      search={search}
+      search={searchState}
       statusOptions={statusOptions}
       projects={projects}
       presets={presets}

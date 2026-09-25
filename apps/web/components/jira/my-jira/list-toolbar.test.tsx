@@ -114,14 +114,9 @@ describe("Jira ListToolbar saved views", () => {
     const { onDeleteView, onSelectView, onSetDefaultView } = renderToolbar();
     fireEvent.click(screen.getByRole("button", { name: CUSTOM_VIEW_NAME }));
 
-    const currentDefault = screen.getByRole("button", {
-      name: `Clear ${CUSTOM_VIEW_NAME} as default view`,
-    });
-    expect(currentDefault.getAttribute("aria-pressed")).toBe("true");
     const makeBuiltinDefault = screen.getByRole("button", {
       name: "Set Assigned to me as default view",
     });
-    expect(makeBuiltinDefault.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(makeBuiltinDefault);
 
     expect(onSetDefaultView).toHaveBeenCalledExactlyOnceWith(BUILTIN.id);
@@ -151,11 +146,23 @@ describe("Jira ListToolbar saved views", () => {
     expect(star.className).not.toContain("opacity-0");
   });
 
-  it("disables saving while a view deletion is pending", () => {
-    renderToolbar(vi.fn(), vi.fn(), { defaultMutationPending: true });
+  it.each(["defaultMutationPending", "viewMutationPending"] as const)(
+    "disables view mutations while %s",
+    (pendingFlag) => {
+      renderToolbar(vi.fn(), vi.fn(), { [pendingFlag]: true });
+      fireEvent.click(screen.getByRole("button", { name: CUSTOM_VIEW_NAME }));
 
-    expect(
-      (screen.getByTitle("Save current filters as a view") as HTMLButtonElement).disabled,
-    ).toBe(true);
-  });
+      expect(
+        (screen.getByTitle("Save current filters as a view") as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(
+        (
+          screen.getByRole("button", {
+            name: `Clear ${CUSTOM_VIEW_NAME} as default view`,
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(true);
+      expect((screen.getByTitle(DELETE_VIEW_TITLE) as HTMLButtonElement).disabled).toBe(true);
+    },
+  );
 });

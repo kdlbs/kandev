@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { SavedView } from "./use-saved-views";
 import { DEFAULT_VIEW } from "./use-saved-views";
-import { initialFilters, resolveInitialJiraView } from "./jira-default-view";
+import {
+  initialFilters,
+  isInitialJiraSearchLoading,
+  resolveInitialJiraView,
+} from "./jira-default-view";
 
 const customView: SavedView = {
   id: "custom:triaged",
@@ -17,6 +21,12 @@ const customView: SavedView = {
 };
 
 describe("Jira default view resolution", () => {
+  it("keeps the search result loading until the initial view is resolved", () => {
+    expect(isInitialJiraSearchLoading(false, false)).toBe(true);
+    expect(isInitialJiraSearchLoading(false, true)).toBe(false);
+    expect(isInitialJiraSearchLoading(true, true)).toBe(true);
+  });
+
   it("restores an available saved custom view without changing its filters or JQL", () => {
     expect(resolveInitialJiraView(customView.id, [DEFAULT_VIEW, customView], "PROJ")).toEqual({
       filters: customView.filters,

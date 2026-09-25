@@ -126,10 +126,6 @@ async function hydrateSavedViewSettings(state: SavedViewsHydrationState): Promis
   if (activeRequest) {
     await activeRequest;
     if (state.hydrated.current || !state.mounted.current) return;
-    if (state.hydrationRequest.current) {
-      await state.hydrationRequest.current;
-      return;
-    }
   }
 
   const request = (async () => {

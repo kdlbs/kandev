@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 const PROJECT_KEY = "CLIP";
 const VIEW_ID = "jira-default-open-tickets";
@@ -63,12 +64,9 @@ test.describe("Jira default view", () => {
     const setDefault = testPage.getByRole("button", {
       name: `Set ${VIEW_NAME} as default view`,
     });
-    const saveDefault = testPage.waitForResponse(
-      (response) =>
-        response.ok() &&
-        response.request().method() === "PATCH" &&
-        response.url().includes("/api/v1/user/settings"),
-    );
+    const saveDefault = waitForHttp(testPage, "PATCH", /^\/api\/v1\/user\/settings$/, {
+      predicate: (response) => response.ok(),
+    });
     await setDefault.click();
     await saveDefault;
 
@@ -96,12 +94,9 @@ test.describe("Jira default view", () => {
     const deleteView = testPage.getByRole("button", { name: `Delete ${VIEW_NAME}` });
     await deleteView.click();
     const confirmation = testPage.getByTestId("saved-task-view-delete-confirmation");
-    const deleteResponse = testPage.waitForResponse(
-      (response) =>
-        response.ok() &&
-        response.request().method() === "PATCH" &&
-        response.url().includes("/api/v1/user/settings"),
-    );
+    const deleteResponse = waitForHttp(testPage, "PATCH", /^\/api\/v1\/user\/settings$/, {
+      predicate: (response) => response.ok(),
+    });
     await confirmation.getByRole("button", { name: `Delete ${VIEW_NAME}` }).click();
     await deleteResponse;
 

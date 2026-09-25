@@ -46,6 +46,7 @@ export function useJiraFilterState(defaultProjectKey: string) {
   const [customJql, setCustomJql] = useState<string | null>(null);
   const [showJqlEditor, setShowJqlEditor] = useState(false);
   const manualInteraction = useRef(false);
+  const selectionRevision = useRef(0);
   const initialSelectionResolved = useInitialDefaultSelection(
     defaultProjectKey,
     savedViews,
@@ -55,9 +56,11 @@ export function useJiraFilterState(defaultProjectKey: string) {
 
   const composedJql = useMemo(() => filtersToJql(filters), [filters]);
   const effectiveJql = customJql ?? composedJql;
+  const setDefaultView = savedViews.setDefaultView;
 
   const updateFilters = useCallback((next: FilterState) => {
     manualInteraction.current = true;
+    selectionRevision.current += 1;
     setFilters(next);
     setActiveViewId(null);
     setCustomJql(null);
@@ -68,6 +71,7 @@ export function useJiraFilterState(defaultProjectKey: string) {
       const view = savedViews.views.find((candidate) => candidate.id === id);
       if (!view) return;
       manualInteraction.current = true;
+      selectionRevision.current += 1;
       setFilters(view.filters);
       setActiveViewId(id);
       const savedCustomJql = view.customJql ?? null;
@@ -79,28 +83,22 @@ export function useJiraFilterState(defaultProjectKey: string) {
 
   const saveCurrentAsView = useCallback(
     async (name: string) => {
+      const revision = selectionRevision.current;
       manualInteraction.current = true;
       const view = await savedViews.save(name, filters, customJql);
-      setActiveViewId(view.id);
+      if (revision === selectionRevision.current) setActiveViewId(view.id);
       return view;
     },
     [customJql, filters, savedViews],
   );
 
-  const setDefaultView = useCallback(
-    (id: string) => {
-      manualInteraction.current = true;
-      return savedViews.setDefaultView(id);
-    },
-    [savedViews.setDefaultView],
-  );
-
   const deleteView = useCallback(
     async (id: string) => {
+      const revision = selectionRevision.current;
       const deletesActiveDefault = activeViewId === id && savedViews.defaultViewId === id;
       manualInteraction.current = true;
       const removed = await savedViews.remove(id);
-      if (removed && deletesActiveDefault) {
+      if (removed && deletesActiveDefault && revision === selectionRevision.current) {
         const fallback = resolveInitialJiraView("", [], defaultProjectKey);
         setFilters(fallback.filters);
         setActiveViewId(fallback.activeViewId);
@@ -114,11 +112,13 @@ export function useJiraFilterState(defaultProjectKey: string) {
 
   const applyCustomJql = useCallback((value: string | null) => {
     manualInteraction.current = true;
+    selectionRevision.current += 1;
     setCustomJql(value);
   }, []);
 
   const resetCustomJql = useCallback(() => {
     manualInteraction.current = true;
+    selectionRevision.current += 1;
     setCustomJql(null);
   }, []);
 

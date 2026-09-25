@@ -1,5 +1,6 @@
 import { expect, test } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 const VIEW_ID = "jira-mobile-default-open-tickets";
 const VIEW_NAME = "My open tickets";
@@ -63,12 +64,9 @@ test.describe("Mobile Jira default view", () => {
     const setBox = await setDefault.boundingBox();
     expect(setBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     expect(setBox?.width ?? 0).toBeGreaterThanOrEqual(44);
-    const saveDefault = testPage.waitForResponse(
-      (response) =>
-        response.ok() &&
-        response.request().method() === "PATCH" &&
-        response.url().includes("/api/v1/user/settings"),
-    );
+    const saveDefault = waitForHttp(testPage, "PATCH", /^\/api\/v1\/user\/settings$/, {
+      predicate: (response) => response.ok(),
+    });
     await setDefault.tap();
     await saveDefault;
     await expect(assignedView).toBeVisible({ timeout: 15_000 });
@@ -98,12 +96,9 @@ test.describe("Mobile Jira default view", () => {
     const clearBox = await clearDefault.boundingBox();
     expect(clearBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     expect(clearBox?.width ?? 0).toBeGreaterThanOrEqual(44);
-    const clearResponse = testPage.waitForResponse(
-      (response) =>
-        response.ok() &&
-        response.request().method() === "PATCH" &&
-        response.url().includes("/api/v1/user/settings"),
-    );
+    const clearResponse = waitForHttp(testPage, "PATCH", /^\/api\/v1\/user\/settings$/, {
+      predicate: (response) => response.ok(),
+    });
     await clearDefault.tap();
     await clearResponse;
     await expect(restoredView).toBeVisible({ timeout: 15_000 });

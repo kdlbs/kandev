@@ -80,7 +80,7 @@ Depends on Task 02's mutation and selection API. The current picker is narrow; v
 
 ## Result
 
-The Jira saved-view picker now marks the active default and provides a sibling set/clear action for built-in and custom views. The action has a localized accessible name and pressed state, does not select or delete its row, and stays at least 48px square on phones. The picker owns vertical scrolling. Default writes publish only after persistence succeeds; pending writes disable conflicting star and delete actions. Save and delete failures show localized retryable feedback. Jira project discovery no longer blocks the page while the initial view resolves, and status reconciliation reports readiness only for the current workspace/project key set so it cannot clear a newly restored status or custom JQL.
+The Jira saved-view picker now marks the active default and provides a sibling set/clear action for built-in and custom views. The action has a localized accessible name without a duplicate toggle-state announcement, does not select or delete its row, and stays at least 48px square on phones. The active default star remains visible on fine-pointer desktop. The picker owns vertical scrolling. Default writes publish only after persistence succeeds; pending writes disable save, star, and delete controls. Save and delete failures show localized retryable feedback. Jira project discovery no longer blocks the page while the initial view resolves, and status reconciliation prunes saved statuses only after authoritative metadata arrives for the current workspace and project set.
 
 The public Jira guide now explains how to set or clear the default. The required Jira copy is present in English, Portuguese, Simplified Chinese, both generated Traditional Chinese catalogs, Japanese, and the pseudo-locale.
 
@@ -115,21 +115,23 @@ The broad `pnpm run i18n:zh-hant` command was blocked by two pre-existing Simpli
 
 ## Review follow-up
 
-Follow-up review fixes preserve a saved custom JQL query when its project-status lookup fails, serialize saved-view list mutations, publish a new view only after its settings write succeeds, and keep the active default star visible on fine-pointer desktop. Save is disabled during settings mutations; rejected saves leave no local view to mark default and show localized failure feedback.
+Follow-up review fixes preserve saved structured statuses and custom JQL when project-status metadata is unavailable. They serialize saved-view list mutations, publish a new view only after its settings write succeeds, and keep the active default star visible on fine-pointer desktop. A newer selection or filter edit also wins over a pending save or deletion response. Save is disabled during settings mutations; rejected saves leave no local view to mark default and show localized failure feedback. The desktop and mobile browser specs use the causal HTTP wait helper for settings writes.
 
-The added regressions first failed against the reviewed implementation, then passed with the fixes. The failure cases cover a saved custom-JQL default with a rejected status lookup, save during a deferred default deletion, a rejected save followed by an attempt to set its ID as default, and desktop default-star visibility.
+The focused regressions cover failed status lookups for saved queries, a deferred save or deletion followed by a newer selection, rejected saves followed by an attempt to set the missing ID as default, both pending-mutation states, active desktop-star visibility, and initial-search loading.
 
 ```text
-pnpm exec vitest run components/jira/my-jira/use-project-statuses.test.ts components/jira/my-jira/use-saved-views.test.ts components/jira/my-jira/list-toolbar.test.tsx app/jira/jira-page-client.test.tsx
-4 files passed, 34 tests passed
+pnpm exec vitest run components/jira/my-jira/use-project-statuses.test.ts components/jira/my-jira/use-saved-views.test.ts components/jira/my-jira/jira-default-view.test.ts components/jira/my-jira/use-jira-search.test.ts components/jira/my-jira/list-toolbar.test.tsx app/jira/jira-page-client.test.tsx
+6 files passed, 47 tests passed
 pnpm run typecheck
 PASS
+pnpm exec eslint app/jira/jira-page-client.tsx app/jira/jira-page-client.test.tsx components/jira/my-jira/jira-default-view.ts components/jira/my-jira/jira-default-view.test.ts components/jira/my-jira/jira-default-view-action.tsx components/jira/my-jira/list-toolbar.test.tsx components/jira/my-jira/use-jira-filter-state.ts components/jira/my-jira/use-project-statuses.ts components/jira/my-jira/use-project-statuses.test.ts components/jira/my-jira/use-saved-views.ts e2e/tests/integrations/jira-default-view.spec.ts e2e/tests/integrations/mobile-jira-default-view.spec.ts
+PASS
 pnpm run i18n:check
+PASS
+pnpm run e2e:sleep-ratchet
 PASS
 pnpm e2e:run tests/integrations/jira-default-view.spec.ts
 1 passed
 pnpm e2e:run --project mobile-chrome tests/integrations/mobile-jira-default-view.spec.ts
 1 passed
-make build-web
-PASS
 ```

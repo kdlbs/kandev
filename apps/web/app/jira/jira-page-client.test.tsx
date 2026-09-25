@@ -131,6 +131,7 @@ describe("Jira page status lookup", () => {
       result.current.filterState.customJql,
       result.current.filterState.filters.statuses,
       result.current.statuses.options,
+      result.current.statuses.authoritative,
     );
     if (reconciled !== result.current.filterState.filters.statuses) {
       act(() =>
@@ -143,6 +144,42 @@ describe("Jira page status lookup", () => {
 
     expect(result.current.filterState.customJql).toBe(CUSTOM_STATUS_JQL);
     expect(result.current.filterState.effectiveJql).toBe(CUSTOM_STATUS_JQL);
+    expect(result.current.filterState.filters.statuses).toEqual([READY_STATUS]);
+  });
+
+  it("preserves structured saved statuses when their status lookup fails", async () => {
+    listJiraProjectStatusesMock.mockRejectedValueOnce(new Error("status lookup unavailable"));
+    mockDefaultViewSettings();
+
+    const { result } = renderHook(() => {
+      const filterState = useJiraFilterState(PROJECT_KEY);
+      const statuses = useProjectStatuses(filterState.filters.projectKeys, "workspace");
+      return { filterState, statuses };
+    });
+    await waitFor(() => {
+      expect(result.current.filterState.initialSelectionResolved).toBe(true);
+      expect(result.current.statuses.loaded).toBe(true);
+    });
+    expect(result.current.statuses.authoritative).toBe(false);
+
+    const reconciled = reconcileStatusesForQuery(
+      result.current.statuses.loaded,
+      result.current.filterState.customJql,
+      result.current.filterState.filters.statuses,
+      result.current.statuses.options,
+      result.current.statuses.authoritative,
+    );
+    if (reconciled !== result.current.filterState.filters.statuses) {
+      act(() =>
+        result.current.filterState.updateFilters({
+          ...result.current.filterState.filters,
+          statuses: reconciled,
+        }),
+      );
+    }
+
+    expect(result.current.filterState.customJql).toBeNull();
+    expect(result.current.filterState.effectiveJql).toContain(`status in ("${READY_STATUS}")`);
     expect(result.current.filterState.filters.statuses).toEqual([READY_STATUS]);
   });
 });
@@ -186,5 +223,51 @@ describe("Jira page default mutations", () => {
       projectKeys: [PROJECT_KEY],
       assignee: "me",
     });
+  });
+
+  it("keeps a later view selection when saving the prior view finishes", async () => {
+    mockDefaultViewSettings();
+    const { result } = renderHook(() => useJiraFilterState(PROJECT_KEY));
+    await waitFor(() => expect(result.current.activeViewId).toBe(DEFAULT_VIEW_ID));
+
+    const write = deferred<Awaited<ReturnType<typeof updateUserSettings>>>();
+    vi.mocked(updateUserSettings).mockReturnValueOnce(write.promise);
+    let savePromise!: Promise<unknown>;
+    act(() => {
+      savePromise = result.current.saveCurrentAsView("Saved snapshot");
+    });
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalled());
+
+    act(() => result.current.selectView(UNASSIGNED_VIEW_ID));
+    await act(async () => {
+      write.resolve({ settings: {} } as Awaited<ReturnType<typeof updateUserSettings>>);
+      await savePromise;
+    });
+
+    expect(result.current.activeViewId).toBe(UNASSIGNED_VIEW_ID);
+    expect(result.current.filters.assignee).toBe("unassigned");
+  });
+
+  it("keeps a later view selection when deleting the active default finishes", async () => {
+    mockDefaultViewSettings();
+    const { result } = renderHook(() => useJiraFilterState(PROJECT_KEY));
+    await waitFor(() => expect(result.current.activeViewId).toBe(DEFAULT_VIEW_ID));
+
+    const write = deferred<Awaited<ReturnType<typeof updateUserSettings>>>();
+    vi.mocked(updateUserSettings).mockReturnValueOnce(write.promise);
+    let deletePromise!: Promise<boolean>;
+    act(() => {
+      deletePromise = result.current.deleteView(DEFAULT_VIEW_ID);
+    });
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalled());
+
+    act(() => result.current.selectView(UNASSIGNED_VIEW_ID));
+    await act(async () => {
+      write.resolve({ settings: {} } as Awaited<ReturnType<typeof updateUserSettings>>);
+      await deletePromise;
+    });
+
+    expect(result.current.activeViewId).toBe(UNASSIGNED_VIEW_ID);
+    expect(result.current.filters.assignee).toBe("unassigned");
   });
 });

@@ -77,6 +77,12 @@ describe("reconcileStatuses", () => {
 
     expect(reconcileStatusesForQuery(false, null, selected, [])).toBe(selected);
   });
+
+  it("does not reconcile against an empty list from a failed status lookup", () => {
+    const selected = ["Ready"];
+
+    expect(reconcileStatusesForQuery(true, null, selected, [], false)).toBe(selected);
+  });
 });
 
 describe("useProjectStatuses", () => {
@@ -84,6 +90,7 @@ describe("useProjectStatuses", () => {
     const { result } = renderHook(() => useProjectStatuses([]));
     await waitFor(() => expect(result.current.loaded).toBe(true));
     expect(result.current.options).toEqual([]);
+    expect(result.current.authoritative).toBe(true);
     expect(listJiraProjectStatusesMock).not.toHaveBeenCalled();
   });
 
@@ -109,6 +116,16 @@ describe("useProjectStatuses", () => {
     expect(listJiraProjectStatusesMock).toHaveBeenCalledWith("CLIP", {
       workspaceId: WORKSPACE_ID,
     });
+  });
+
+  it("marks failed project lookups as non-authoritative", async () => {
+    listJiraProjectStatusesMock.mockRejectedValueOnce(new Error("status lookup unavailable"));
+
+    const { result } = renderHook(() => useProjectStatuses(["CLIP"], WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.authoritative).toBe(false);
+    expect(result.current.options).toEqual([]);
   });
 
   it("does not report stale options as loaded after project keys change", async () => {

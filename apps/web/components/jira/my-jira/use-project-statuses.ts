@@ -23,8 +23,11 @@ export function reconcileStatusesForQuery(
   customJql: string | null,
   selected: string[],
   available: JiraStatus[],
+  statusesAuthoritative = true,
 ): string[] {
-  return statusesLoaded && customJql === null ? reconcileStatuses(selected, available) : selected;
+  return statusesLoaded && statusesAuthoritative && customJql === null
+    ? reconcileStatuses(selected, available)
+    : selected;
 }
 
 // unionByName merges status lists from several projects, de-duping by name.
@@ -52,20 +55,26 @@ function unionByName(lists: JiraStatus[][]): JiraStatus[] {
 export type ProjectStatuses = {
   options: JiraStatus[];
   loaded: boolean;
+  authoritative: boolean;
+};
+
+type CachedProjectStatuses = {
+  options: JiraStatus[];
+  authoritative: boolean;
 };
 
 // useProjectStatuses fetches the workflow statuses for the selected project
 // keys, unions and de-dupes them by name, and caches per project key for the
 // lifetime of the component so re-selecting a project never refetches. A fetch
-// failure for one project is non-fatal: that project contributes no options
-// and the rest still load.
+// failure is non-fatal, but the incomplete union is not authoritative for
+// pruning saved status filters.
 export function useProjectStatuses(
   projectKeys: string[],
   workspaceId?: string | null,
 ): ProjectStatuses {
   const [options, setOptions] = useState<JiraStatus[]>([]);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
-  const cacheRef = useRef<Map<string, JiraStatus[]>>(new Map());
+  const cacheRef = useRef<Map<string, CachedProjectStatuses>>(new Map());
 
   const workspaceKey = workspaceId?.trim() ?? "";
   const projectKeySet = [...projectKeys].sort().join(",");
@@ -89,15 +98,17 @@ export function useProjectStatuses(
               const { statuses } = await listJiraProjectStatuses(key, {
                 workspaceId: workspaceKey || undefined,
               });
-              cache.set(statusCacheKey(key), statuses ?? []);
+              cache.set(statusCacheKey(key), { options: statuses ?? [], authoritative: true });
             } catch {
-              // Non-fatal: cache an empty list so we don't refetch on every render.
-              cache.set(statusCacheKey(key), []);
+              // Keep failed lookups cached without treating the empty result as authoritative.
+              cache.set(statusCacheKey(key), { options: [], authoritative: false });
             }
           }),
       );
       if (cancelled) return;
-      setOptions(unionByName(projectKeys.map((key) => cache.get(statusCacheKey(key)) ?? [])));
+      setOptions(
+        unionByName(projectKeys.map((key) => cache.get(statusCacheKey(key))?.options ?? [])),
+      );
       setLoadedKey(cacheKey);
     }
     void load();
@@ -108,5 +119,10 @@ export function useProjectStatuses(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cacheKey]);
 
-  return { options, loaded: loadedKey === cacheKey };
+  const loaded = loadedKey === cacheKey;
+  const authoritative =
+    loaded &&
+    projectKeys.every((key) => cacheRef.current.get(`${workspaceKey}\u0000${key}`)?.authoritative);
+
+  return { options, loaded, authoritative };
 }

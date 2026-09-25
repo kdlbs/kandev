@@ -8,6 +8,10 @@ export type InitialJiraView = {
   showJqlEditor: boolean;
 };
 
+export function isInitialJiraSearchLoading(searchLoading: boolean, selectionResolved: boolean) {
+  return searchLoading || !selectionResolved;
+}
+
 export function initialFilters(defaultProjectKey: string): FilterState {
   const key = defaultProjectKey.trim();
   if (!key) return DEFAULT_VIEW.filters;
