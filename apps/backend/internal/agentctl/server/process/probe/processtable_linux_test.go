@@ -92,6 +92,38 @@ func TestParseFirstEnvVar_TrailingEmptyFieldIsNotAnEntry(t *testing.T) {
 	}
 }
 
+// AC-DW-ORPHAN-001.10: exact equality against the real environ blob — a
+// value that merely shares a prefix, or differs only in case, must not
+// match. TestOrphanScan_SessionIDPrefixDoesNotMatch (probe_orphan_test.go)
+// exercises this same rule only through the fake reader's own separate `==`
+// check; this drives prefix and case mismatches through the real Linux
+// HasSessionID implementation, over a real subprocess's environment.
+func TestLinuxHasSessionID_PrefixOrCaseMismatch(t *testing.T) {
+	tests := []struct {
+		name      string
+		stored    string
+		requested string
+	}{
+		{"stored value has an extra suffix", "sess-1-extra", "sess-1"},
+		{"requested value has an extra suffix", "sess-1", "sess-1-extra"},
+		{"case differs", "Sess-1", "sess-1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pid := spawnChildWithEnv(t, "KANDEV_SESSION_ID="+tt.stored)
+
+			reader := linuxProcessTableReader{}
+			matched, err := reader.HasSessionID(pid, tt.requested)
+			if err != nil {
+				t.Fatalf("HasSessionID: %v", err)
+			}
+			if matched {
+				t.Errorf("expected stored value %q to not match requested value %q", tt.stored, tt.requested)
+			}
+		})
+	}
+}
+
 // AC-DW-ORPHAN-002.2: a candidate that has already exited yields an error,
 // not a match — the caller treats this as "skip", never "unknown".
 func TestLinuxHasSessionID_ExitedProcess_ReturnsError(t *testing.T) {

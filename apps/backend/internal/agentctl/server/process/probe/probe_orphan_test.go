@@ -263,10 +263,15 @@ func TestOrphanScan_DescendantHitSkipsIdentityPass(t *testing.T) {
 
 // AC-DW-ORPHAN-001.9: the agent process and its ancestors never contribute,
 // even when one carries a matching, in-turn session identity, and their
-// environments are never read.
+// environments are never read. The agent's own StartTime is deliberately
+// in-turn (not pre-turn, as an earlier version of this test had it) — a
+// pre-turn agent would already be filtered out by the turn-start check
+// regardless of whether the ancestor-exclusion logic (excludedCandidatePIDs /
+// ancestorsAndSelf) does anything at all, which would make this test pass
+// even with that exclusion removed.
 func TestOrphanScan_AgentAndAncestorsExcluded(t *testing.T) {
 	turnStart := time.Unix(1000, 0)
-	agent := processInfo{PID: testAgentPID, PPID: 50, StartTime: time.Unix(0, 0)}
+	agent := processInfo{PID: testAgentPID, PPID: 50, StartTime: turnStart, StartTimeDatum: 77}
 	ancestor := processInfo{PID: 50, PPID: 1, StartTime: turnStart, StartTimeDatum: 99}
 	reader := &envCapableReader{
 		fakeProcessTableReader: fakeProcessTableReader{
@@ -274,7 +279,7 @@ func TestOrphanScan_AgentAndAncestorsExcluded(t *testing.T) {
 			table:      []processInfo{agent, ancestor},
 		},
 		sessionIDs: map[int]string{50: "sess-1", testAgentPID: "sess-1"},
-		datums:     map[int]int64{50: 99},
+		datums:     map[int]int64{50: 99, testAgentPID: 77},
 	}
 
 	got, err := probeWithReader(reader, testAgentPID, turnStart, "sess-1")
@@ -430,6 +435,38 @@ func TestOrphanScan_EnumerationOrderIndependent(t *testing.T) {
 				t.Errorf("got %q, want %q regardless of enumeration order", got, ResultLive)
 			}
 		})
+	}
+}
+
+// AC-80: mirrors TestProbeWithReader_TruncationBoundary (probe_test.go), but
+// for the orphan-identity path — probe.go:113 computes truncatedTurnStart
+// once and probe.go:128 passes that same value into orphanCarriesSessionID.
+// A candidate that started before the raw recorded turn start, but within
+// the same truncated-resolution bucket, must still count as in-turn; an
+// implementation that passed the raw turnStart into the orphan scan instead
+// of the truncated value would wrongly settle here.
+func TestOrphanScan_TruncationBoundary(t *testing.T) {
+	resolution := 10 * time.Millisecond
+	turnStart := time.Unix(1000, 4*int64(time.Millisecond)) // 4ms into a 10ms bucket
+	candidateStart := turnStart.Truncate(resolution)        // before the raw turn start, at the truncated boundary
+	reader := &envCapableReader{
+		fakeProcessTableReader: fakeProcessTableReader{
+			resolution: resolution,
+			table: []processInfo{
+				rootEntry,
+				{PID: 500, PPID: 1, StartTime: candidateStart, StartTimeDatum: 42},
+			},
+		},
+		sessionIDs: map[int]string{500: "sess-1"},
+		datums:     map[int]int64{500: 42},
+	}
+
+	got, err := probeWithReader(reader, testAgentPID, turnStart, "sess-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != ResultLive {
+		t.Errorf("got %q, want %q — the orphan scan must compare against the truncated turn start, not the raw one", got, ResultLive)
 	}
 }
 
