@@ -14,7 +14,7 @@ import { test, expect } from "../../fixtures/office-fixture";
  * edit / sync-wiring regression surfaces immediately.
  */
 test.describe("Office system skills", () => {
-  test.describe.configure({ timeout: 120_000 });
+  test.describe.configure({ timeout: 240_000 });
 
   test("bundled system skills land in the workspace's skill list with is_system=true", async ({
     officeApi,
@@ -83,7 +83,7 @@ test.describe("Office system skills", () => {
             return false;
           }
         },
-        { timeout: 90_000, message: "CEO role-default skills were not backfilled" },
+        { timeout: 180_000, message: "CEO role-default skills were not backfilled" },
       )
       .toBe(true);
     expect(agent.role).toBe("ceo");

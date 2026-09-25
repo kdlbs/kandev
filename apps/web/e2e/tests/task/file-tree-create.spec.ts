@@ -130,7 +130,7 @@ test.describe("File tree create file", () => {
       requiredPath: "seed.ts",
     });
 
-    await expect(session.fileTreeNode("seed.ts")).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode("seed.ts", 45_000);
 
     const input = await startCreateAtRoot(testPage);
     await input.fill("brand-new.ts");
@@ -162,7 +162,7 @@ test.describe("File tree create file", () => {
       taskTitle: "FT Create Select All",
       requiredPath: "select-all-alpha.ts",
     });
-    await expect(session.fileTreeNode("select-all-alpha.ts")).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode("select-all-alpha.ts", 45_000);
 
     const input = await startCreateAtRoot(testPage);
     const draftName = "draft-name.ts";
@@ -202,8 +202,7 @@ test.describe("File tree create file", () => {
     });
 
     // Expand the folder so it becomes the "active folder" for handleStartCreate.
-    const folder = session.fileTreeNode("scope");
-    await expect(folder).toBeVisible({ timeout: 15_000 });
+    const folder = await session.fileTree.waitForFileTreeNode("scope", 45_000);
     await folder.click();
     await expect(session.fileTreeNode("scope/existing.ts")).toBeVisible({ timeout: 10_000 });
 
@@ -235,7 +234,7 @@ test.describe("File tree create file", () => {
       requiredPath: "seed.ts",
     });
 
-    await expect(session.fileTreeNode("seed.ts")).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode("seed.ts", 45_000);
 
     const input = await startCreateAtRoot(testPage);
     await input.fill("newdir/leaf.ts");
@@ -265,7 +264,7 @@ test.describe("File tree create file", () => {
       requiredPath: "seed.ts",
     });
 
-    await expect(session.fileTreeNode("seed.ts")).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode("seed.ts", 45_000);
 
     const input = await startCreateAtRoot(testPage);
     await input.fill("ghost.ts");

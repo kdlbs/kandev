@@ -66,6 +66,13 @@ type AgentCreator interface {
 	CreateAgentInstance(ctx context.Context, agent *models.AgentInstance) error
 }
 
+// AgentDefaultSkillBackfiller lets onboarding retry default-skill attachment
+// after the new workspace and agent rows are committed. The optional hook
+// covers workspaces created after the backend startup system-skill sync.
+type AgentDefaultSkillBackfiller interface {
+	BackfillDefaultSkillsForWorkspace(ctx context.Context, workspaceID string)
+}
+
 // CoordinatorRoutineInstaller installs the pre-baked coordinator-heartbeat
 // routine for a freshly created coordinator agent. The routines service's
 // CreateDefaultCoordinatorRoutine method satisfies this directly. Optional —
@@ -568,6 +575,9 @@ func (s *OnboardingService) createOnboardingAgent(ctx context.Context, wsID stri
 	}
 	if err := s.agentCreator.CreateAgentInstance(ctx, agent); err != nil {
 		return "", err
+	}
+	if backfiller, ok := s.agentCreator.(AgentDefaultSkillBackfiller); ok {
+		backfiller.BackfillDefaultSkillsForWorkspace(ctx, wsID)
 	}
 	s.installCoordinatorRoutine(ctx, wsID, agent.ID, agent.Role)
 	return agent.ID, nil

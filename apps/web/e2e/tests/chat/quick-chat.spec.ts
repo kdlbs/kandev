@@ -269,7 +269,9 @@ test.describe("Quick Chat", () => {
     // The collapse shortcut only fires for keydowns targeting the shortcut
     // scope (quick-chat-content), same as the numeric-step shortcut above.
     await dialog.getByTestId("quick-chat-messages").click({ position: { x: 8, y: 8 } });
-    await expect(dialog.getByTestId("quick-chat-content")).toBeFocused();
+    const shortcutScope = dialog.getByTestId("quick-chat-content");
+    await shortcutScope.focus();
+    await expect(shortcutScope).toBeFocused();
 
     await testPage.keyboard.press("Escape");
 

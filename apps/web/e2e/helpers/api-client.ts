@@ -1471,8 +1471,10 @@ export class ApiClient {
       const body = await response.text();
       const transientWorktreeInspection =
         response.status === 500 &&
-        body.includes("inspect worktrees before delete") &&
-        body.includes("exit status 128");
+        body.includes("exit status 128") &&
+        (body.includes("inspect worktrees before delete") ||
+          body.includes("capture worktree cleanup identities") ||
+          body.includes("capture cleanup identity"));
       if (!transientWorktreeInspection || attempt === 3) {
         throw new Error(`API DELETE ${path} failed (${response.status}): ${body}`);
       }
