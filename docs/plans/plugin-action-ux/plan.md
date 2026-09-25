@@ -340,6 +340,15 @@ gates, two E2E gates, and one E2E shard:
 The backend and E2E aggregate failures were downstream of the named leaf
 failures. No backend product behavior or public authoring contract changed.
 
+## Final PR-head verification (2026-09-25)
+
+The final fixup head `c9280cf237c3d38aa67c25b4af5fbf49eaf5e625` reached a
+terminal PR check snapshot with 60 passed, 0 failed, and 0 pending. The
+documentation coverage workflow initially hit GitHub Code Search HTTP 429;
+rerunning its failed job succeeded. The backend, frontend, E2E, and aggregate
+checks all passed on this exact head. All seven review threads are resolved,
+the branch is clean, and GitHub reports the PR mergeable with a clean state.
+
 ## Risks
 
 - Legacy plugins retain visual differences until their authors adopt Action.
