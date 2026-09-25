@@ -42,9 +42,13 @@ function useManagedDescriptor(
   const [status, setStatus] = useState<WorkspaceAgentChatStatus>("loading");
   useEffect(() => {
     const controller = new AbortController();
+    let active = true;
     if (!pluginId) {
       setStatus("unavailable");
-      return () => controller.abort();
+      return () => {
+        active = false;
+        controller.abort();
+      };
     }
     setDescriptor(null);
     setStatus("loading");
@@ -76,6 +80,7 @@ function useManagedDescriptor(
           !next.managedConversationToken
         )
           throw new Error(permissionDeniedStatus);
+        if (!active || controller.signal.aborted) return;
         setDescriptor(next);
         setStatus("ready");
       })
@@ -87,7 +92,10 @@ function useManagedDescriptor(
               : "unavailable",
           );
       });
-    return () => controller.abort();
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, [conversationId, pluginId, resourceVersion, workspaceId]);
   return { descriptor, status };
 }

@@ -8,6 +8,7 @@ const transport = vi.hoisted(() => ({
   fetch: vi.fn(),
   dispatch: vi.fn(),
   messages: [{ id: "m-1", content: "existing transcript" }],
+  messageTaskIds: [] as string[],
   removed: false,
   transcriptError: null as { code: string } | null,
 }));
@@ -23,12 +24,15 @@ vi.mock("@/lib/plugins/conversation-scope", () => ({
 }));
 vi.mock("@/lib/plugins/conversation-host", () => ({
   pluginConversationApi: {
-    useSessionMessages: () => ({
-      messages: transport.messages,
-      loading: false,
-      removed: transport.removed,
-      error: transport.transcriptError,
-    }),
+    useSessionMessages: ({ taskId }: { taskId: string }) => {
+      transport.messageTaskIds.push(taskId);
+      return {
+        messages: transport.messages,
+        loading: false,
+        removed: transport.removed,
+        error: transport.transcriptError,
+      };
+    },
   },
 }));
 
@@ -40,6 +44,7 @@ describe("WorkspaceAgentChat", () => {
     transport.dispatch.mockResolvedValue(undefined);
     transport.transcriptError = null;
     transport.removed = false;
+    transport.messageTaskIds = [];
     vi.stubGlobal("fetch", transport.fetch);
   });
 
@@ -153,6 +158,65 @@ describe("WorkspaceAgentChat", () => {
     );
     await screen.findByTestId("workspace-agent-chat");
     expect(transport.fetch.mock.calls[1][0]).toContain("/managed/session-2?workspace_id=ws-1");
+  });
+
+  it("ignores a stale descriptor body after a replacement descriptor is ready", async () => {
+    let resolveOldBody!: (descriptor: {
+      taskId: string;
+      sessionId: string;
+      workspaceId: string;
+      managedConversationToken: string;
+    }) => void;
+    transport.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          new Promise((resolve) => {
+            resolveOldBody = resolve;
+          }),
+      })
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            taskId: "task-new",
+            sessionId: "session-1",
+            workspaceId: "ws-1",
+            managedConversationToken: "new-token",
+          }),
+          { status: 200 },
+        ),
+      );
+    const view = render(
+      <WorkspaceAgentChat
+        pluginId="plugin-1"
+        workspaceId="ws-1"
+        conversationId="session-1"
+        resourceVersion="1"
+      />,
+    );
+    await waitFor(() => expect(resolveOldBody).toBeDefined());
+    view.rerender(
+      <WorkspaceAgentChat
+        pluginId="plugin-1"
+        workspaceId="ws-1"
+        conversationId="session-1"
+        resourceVersion="2"
+      />,
+    );
+    await screen.findByTestId("workspace-agent-chat");
+    await waitFor(() => expect(transport.fetch).toHaveBeenCalledTimes(2));
+
+    await React.act(async () => {
+      resolveOldBody({
+        taskId: "task-old",
+        sessionId: "session-1",
+        workspaceId: "ws-1",
+        managedConversationToken: "old-token",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(transport.messageTaskIds.at(-1)).toBe("task-new");
   });
 
   it("keeps the prompt and announces a failed dispatch", async () => {
