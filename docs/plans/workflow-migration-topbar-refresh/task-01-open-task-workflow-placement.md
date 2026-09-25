@@ -121,9 +121,9 @@ None.
 ## Results
 
 - Focused unit tests: 7 files, 108 tests passed.
-- PR fixup regression tests: 3 files, 53 tests passed, covering strict
-  projection freshness, task-detail refresh on reconnect, and retry after a
-  failed placeholder fetch.
+- PR fixup regression tests: 4 files, 97 tests passed, covering strict
+  projection freshness, task-detail refresh on reconnect, retry after a failed
+  placeholder fetch, and valid timestamps on live projection fixtures.
 - `pnpm run typecheck` passed.
 - `pnpm run build:vite` passed. Vite reported existing chunk-size,
   deprecated option, and ineffective dynamic import warnings.
