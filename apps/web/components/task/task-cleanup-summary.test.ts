@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { i18n } from "@/lib/i18n";
-import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
+import {
+  getArchiveCleanupSummary,
+  getBulkArchiveCleanupSummary,
+  getCleanupSummary,
+  getBulkCleanupSummary,
+} from "./task-cleanup-summary";
 
 const AGENT_STOP_EFFECT = "Any running agent sessions will be stopped.";
 
@@ -102,6 +107,28 @@ describe("getCleanupSummary (single task)", () => {
   });
 });
 
+describe("archive cleanup summaries", () => {
+  it("explains conditional worktree removal and branch retention", () => {
+    const { effects, notes } = getArchiveCleanupSummary("worktree");
+    expect(effects[0]).toMatch(/clean Git worktrees are removed/i);
+    expect(effects[0]).toMatch(/Git changes stays until it is clean/i);
+    expect(notes.join(" ")).toMatch(/unpublished local branches remain available/i);
+    expect(notes.join(" ")).not.toMatch(/all branches/i);
+  });
+
+  it("keeps non-worktree archive summaries unchanged", () => {
+    expect(getArchiveCleanupSummary("local")).toEqual(getCleanupSummary("local"));
+  });
+
+  it("groups bulk archive worktrees without promising branch deletion", () => {
+    const { effects, notes } = getBulkArchiveCleanupSummary(["worktree", "worktree", "local"]);
+    expect(effects[0]).toMatch(/2 Git worktree tasks/);
+    expect(effects[0]).toMatch(/checkouts with Git changes stay until they are clean/i);
+    expect(notes.join(" ")).toMatch(/unpublished local branches remain available/i);
+    expect(effects).toContain(AGENT_STOP_EFFECT);
+  });
+});
+
 describe("getBulkCleanupSummary", () => {
   it("groups by executor type and counts each group", () => {
     const { effects, notes } = getBulkCleanupSummary([
@@ -183,6 +210,12 @@ describe("localization", () => {
     await i18n.changeLanguage("pseudo");
     const { effects, notes } = getCleanupSummary("worktree");
     // Every item, not just the first. The generic trailer must follow locale switches too.
+    for (const line of [...effects, ...notes]) expect(line).toMatch(/[^\p{ASCII}]/u);
+  });
+
+  it("localizes archive worktree summaries at call time", async () => {
+    await i18n.changeLanguage("pseudo");
+    const { effects, notes } = getBulkArchiveCleanupSummary(["worktree", "worktree"]);
     for (const line of [...effects, ...notes]) expect(line).toMatch(/[^\p{ASCII}]/u);
   });
 

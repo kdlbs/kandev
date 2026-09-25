@@ -178,6 +178,7 @@ func TestHandoffUnarchiveTaskTree_ManualRoot_ClearsOrphanMarkerOnChildren(t *tes
 
 	handoff := NewHandoffService(repo, repo, nil, nil, nil, nil)
 	handoff.SetTaskEventPublisher(svc)
+	handoff.SetTaskResourceCleaner(svc)
 	bus.ClearEvents()
 
 	if _, err := handoff.UnarchiveTaskTree(ctx, parentID); err != nil {

@@ -78,6 +78,11 @@ func (c *workspaceQuarantineController) Purge(
 			deleted, payloadRemoved, err = c.permanentDeleteWithPayload(ctx, entry.ID, storagepkg.QuarantineConfirmationDelete, false)
 		}
 		if err != nil {
+			if errors.Is(err, workspaces.ErrActiveWorktree) {
+				result.Protected++
+				result.ProtectedBytes += entry.SizeBytes
+				continue
+			}
 			result.Failed++
 			result.FailedBytes += entry.SizeBytes
 			result.Failures = append(result.Failures, storagepkg.QuarantinePurgeFailure{ID: entry.ID, Error: err.Error()})

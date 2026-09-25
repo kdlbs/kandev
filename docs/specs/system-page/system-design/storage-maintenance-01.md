@@ -168,10 +168,14 @@ Retention override:
   configured orphan grace period.
 - The authoritative inventory covers both task layouts:
   `tasks/<semantic-task-dir>/<repo>` and `tasks/<workspace-id>/<task-id>`.
-- Ready environment rows and active worktree rows protect files while their owning task exists and
-  is not archived. A ready environment owned by an archived or deleted task remains protected while
-  a live session of an unarchived task borrows it. Other rows retained for archived-task branch
-  recovery are historical metadata, not live workspace references.
+- Ready environment rows protect files while their owning task exists and is
+  not archived. An active physical worktree row protects its path regardless
+  of the owner's archive marker; its checkout can still contain local work.
+  A ready environment owned by an archived or deleted task also remains
+  protected while a live session of an unarchived task borrows it. Deleted
+  worktree rows retained for branch recovery are historical metadata, not
+  live workspace references. See the
+  [task-owned reclamation decision](../../../decisions/2026-09-24-archived-worktree-reclamation.md).
 - New task roots contain a Kandev ownership marker with the task ID, workspace ID, task directory
   name, layout version, and creation time. Legacy unmarked directories remain eligible only when
   the authoritative inventory and grace-period checks positively classify them as unreferenced.
@@ -183,7 +187,9 @@ Retention override:
 - The default orphan grace period is seven days and the default quarantine retention is seven
   additional days. Both are configurable in whole hours and apply to scheduled and manual runs.
 - Quarantine never deletes a Git branch. Permanent deletion removes the quarantined files and
-  prunes stale Git worktree registration only after the retention deadline.
+  prunes stale Git worktree registration only after the retention deadline
+  and a fresh inventory proves that no active worktree row owns a descendant.
+  The force-clear action bypasses retention only, not this ownership check.
 - Scheduled and full manual maintenance include a quarantine provider that permanently deletes
   entries whose deadlines have elapsed. A resource-specific manual run, such as **Clean Go cache**,
   does not purge unrelated quarantine entries.

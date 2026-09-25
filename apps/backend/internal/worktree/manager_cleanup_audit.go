@@ -85,10 +85,18 @@ func (m *Manager) auditCleanupBranchDisposition(
 	removeBranch bool,
 	options WorktreeCleanupOptions,
 ) (bool, error) {
+	if pathPresent && options.RequireCleanCheckout {
+		if err := m.verifyCheckoutClean(ctx, wt); err != nil {
+			return false, err
+		}
+	}
 	if !removeBranch || branchRef == "" || branchOID == "" {
 		return false, nil
 	}
 	if pathPresent && !options.DiscardWorktreeChanges {
+		if options.RequireCleanCheckout {
+			return m.verifyCleanupBranchRedundant(ctx, wt, branchRef)
+		}
 		return m.verifyCleanRedundantCheckout(ctx, wt, branchRef)
 	}
 	return m.verifyCleanupBranchRedundant(ctx, wt, branchRef)
@@ -175,14 +183,21 @@ func (m *Manager) cleanupBranchIdentity(
 func (m *Manager) verifyCleanRedundantCheckout(
 	ctx context.Context, wt *Worktree, branchRef string,
 ) (bool, error) {
-	status, err := m.runBoundedGitInspect(ctx, wt.Path, "status", "--porcelain=v1", "--untracked-files=normal")
-	if err != nil {
-		return false, fmt.Errorf("inspect worktree changes before cleanup: %w", err)
-	}
-	if strings.TrimSpace(status) != "" {
-		return false, fmt.Errorf("%w: %q contains uncommitted or untracked work", ErrDirtyWorktreeCleanup, wt.Path)
+	if err := m.verifyCheckoutClean(ctx, wt); err != nil {
+		return false, err
 	}
 	return m.verifyCleanupBranchRedundant(ctx, wt, branchRef)
+}
+
+func (m *Manager) verifyCheckoutClean(ctx context.Context, wt *Worktree) error {
+	status, err := m.runBoundedGitInspect(ctx, wt.Path, "status", "--porcelain=v1", "--untracked-files=normal")
+	if err != nil {
+		return fmt.Errorf("inspect worktree changes before cleanup: %w", err)
+	}
+	if strings.TrimSpace(status) != "" {
+		return fmt.Errorf("%w: %q contains uncommitted or untracked work", ErrDirtyWorktreeCleanup, wt.Path)
+	}
+	return nil
 }
 
 func (m *Manager) verifyCleanupBranchRedundant(

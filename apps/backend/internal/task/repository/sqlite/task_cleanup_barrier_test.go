@@ -68,6 +68,29 @@ func TestTaskCleanupBarrier_RejectsSessionCreation(t *testing.T) {
 	}
 }
 
+func TestTaskCleanupBarrier_RejectsSessionCreationWhileArchiveReclaimWaits(t *testing.T) {
+	repo := newBarrierTestRepo(t)
+	ctx := context.Background()
+	seedBarrierTask(t, repo, "task-barrier-waiting-reclaim")
+	job := &models.TaskResourceCleanupJob{
+		OperationID: "archive_reclaim:task-barrier-waiting-reclaim:wt-1:archive-generation",
+		TaskID:      "task-barrier-waiting-reclaim",
+		Trigger:     models.TaskResourceCleanupTriggerArchiveReclaim,
+		State:       models.TaskResourceCleanupStateWaitingForClean,
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatalf("create waiting reclaim barrier: %v", err)
+	}
+
+	err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-barrier-waiting-reclaim", TaskID: "task-barrier-waiting-reclaim",
+		State: models.TaskSessionStateCreated,
+	})
+	if !errors.Is(err, repoerrors.ErrTaskCleanupInProgress) {
+		t.Fatalf("CreateTaskSession error = %v, want ErrTaskCleanupInProgress", err)
+	}
+}
+
 func TestTaskCleanupBarrier_RejectsEnvironmentCreation(t *testing.T) {
 	repo := newBarrierTestRepo(t)
 	ctx := context.Background()

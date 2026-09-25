@@ -123,6 +123,98 @@ func TestCaptureCleanupHeadOIDs_MissingWorktree(t *testing.T) {
 	}
 }
 
+func TestCaptureCleanupHeadOIDs_WaitsForWorktreeRemoval(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "checkout")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	wantOID := strings.TrimSpace(runGit(t, worktreePath, "rev-parse", "HEAD"))
+
+	mgr := newCaptureTestManager(t)
+	releasePath, err := acquireWorktreeTargetPath(context.Background(), worktreePath)
+	if err != nil {
+		t.Fatalf("acquire cleanup path lock: %v", err)
+	}
+	defer releasePath()
+	repoLock := mgr.getRepoLock(repoPath)
+	repoLock.Lock()
+	repoLockHeld := true
+	defer func() {
+		if repoLockHeld {
+			repoLock.Unlock()
+			mgr.releaseRepoLock(repoPath)
+		}
+	}()
+
+	type captureResult struct {
+		identities map[string]string
+		err        error
+	}
+	result := make(chan captureResult, 1)
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		identities, captureErr := mgr.CaptureCleanupHeadOIDs(context.Background(), []*Worktree{{
+			ID:             "worktree-being-removed",
+			RepositoryPath: repoPath,
+			Path:           worktreePath,
+			Branch:         "feature/pr-branch",
+		}})
+		result <- captureResult{identities: identities, err: captureErr}
+	}()
+
+	awaitTargetPathLockReference(t, worktreePath, 2, returned)
+	runGit(t, repoPath, "worktree", "remove", "--force", worktreePath)
+	repoLock.Unlock()
+	mgr.releaseRepoLock(repoPath)
+	repoLockHeld = false
+	releasePath()
+
+	captured := <-result
+	if captured.err != nil {
+		t.Fatalf("CaptureCleanupHeadOIDs() error after cleanup: %v", captured.err)
+	}
+	if got := captured.identities["worktree-being-removed"]; got != wantOID {
+		t.Fatalf("captured identity = %q, want branch identity %q", got, wantOID)
+	}
+}
+
+func awaitTargetPathLockReference(
+	t *testing.T,
+	path string,
+	wantRefs int,
+	returned <-chan struct{},
+) {
+	t.Helper()
+
+	key, err := normalizedWorktreeTargetPath(path)
+	if err != nil {
+		t.Fatalf("normalize target path: %v", err)
+	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	for {
+		worktreeTargetPathLocks.mu.Lock()
+		entry := worktreeTargetPathLocks.entries[key]
+		refs := 0
+		if entry != nil {
+			refs = entry.refs
+		}
+		worktreeTargetPathLocks.mu.Unlock()
+		if refs >= wantRefs {
+			return
+		}
+		select {
+		case <-returned:
+			t.Fatal("CaptureCleanupHeadOIDs() returned before acquiring the cleanup path lock")
+		case <-timeout.C:
+			t.Fatalf("capture did not reference target path lock; refs = %d, want at least %d", refs, wantRefs)
+		case <-ticker.C:
+		}
+	}
+}
+
 func TestCaptureCleanupHeadOIDs_FailsClosed(t *testing.T) {
 	t.Run("invalid repository", func(t *testing.T) {
 		mgr := newCaptureTestManager(t)
