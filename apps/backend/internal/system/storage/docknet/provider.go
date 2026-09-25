@@ -207,7 +207,7 @@ func (p *Provider) reclaim(
 		if !due {
 			continue // mark persisted; the quarantine window runs to a later cycle
 		}
-		revalidated, err := p.revalidate(ctx, item.Network.ID)
+		revalidated, err := p.revalidate(ctx, item, t)
 		if err != nil {
 			result.Skipped++
 			p.recordSkip(ctx, item.Network.ID, err.Error())
@@ -215,7 +215,7 @@ func (p *Provider) reclaim(
 		}
 		if !revalidated {
 			result.Skipped++
-			p.recordSkip(ctx, item.Network.ID, "concurrent attachment detected on revalidation")
+			p.recordSkip(ctx, item.Network.ID, "network eligibility changed on revalidation")
 			continue
 		}
 		if err := p.docker.RemoveNetwork(ctx, item.Network.ID); err != nil {
@@ -267,10 +267,10 @@ func (p *Provider) advanceQuarantine(
 	return !p.now().Before(*marked.DeleteAfter), markRecorded, true
 }
 
-// revalidation re-lists and re-inspects the network inside the same cycle
-// right before removal (AC7): the network must still be listed and a fresh
-// inspect must show zero connected containers, else abort this network.
-func (p *Provider) revalidate(ctx context.Context, networkID string) (bool, error) {
+// revalidate re-lists, re-inspects, and reclassifies the network immediately
+// before removal. A changed owner or lost eligibility keeps the network.
+func (p *Provider) revalidate(ctx context.Context, item ClassifiedNetwork, t thresholds) (bool, error) {
+	networkID := item.Network.ID
 	current, err := p.docker.ListNetworks(ctx, agentdocker.NetworkListOptions{Driver: "bridge"})
 	if err != nil {
 		return false, fmt.Errorf("re-list networks: %w", err)
@@ -289,7 +289,15 @@ func (p *Provider) revalidate(ctx context.Context, networkID string) (bool, erro
 	if err != nil {
 		return false, fmt.Errorf("re-inspect network %s: %w", networkID, err)
 	}
-	if len(detail.Containers) > 0 {
+	if detail.ID != networkID {
+		return false, fmt.Errorf("re-inspected network %s has a different ID", networkID)
+	}
+	entry, err := p.ledger.store.GetNetworkLedgerEntry(ctx, networkID)
+	if err != nil {
+		return false, fmt.Errorf("read network %s ledger: %w", networkID, err)
+	}
+	currentClass := Classify(ctx, detail, p.oracle, entry.FirstSeenAt, t.graceWindow, t.staleAge, ClassifyOptions{Now: p.now})
+	if !Eligible(currentClass.Class) || currentClass.Evidence.OwnershipKey != item.Evidence.OwnershipKey {
 		return false, nil
 	}
 	return true, nil

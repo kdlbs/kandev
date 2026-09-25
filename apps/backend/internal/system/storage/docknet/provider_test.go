@@ -531,6 +531,69 @@ func TestCleanupRevalidationAbortSkipsNetwork(t *testing.T) {
 	}
 }
 
+func TestCleanupRevalidationProtectsNewlyActiveOwner(t *testing.T) {
+	h := newHarness(t)
+	h.oracle.lookups["gone"] = TaskLookupInactive
+	h.docker.addNetwork(netWithContainers("kd_reactivated", map[string]string{"kandev.task_id": "gone"}, nil))
+	h.ledger.entries["net-kd_reactivated"] = storage.NetworkLedgerEntry{
+		NetworkID: "net-kd_reactivated", FirstSeenAt: h.now.Add(-48 * time.Hour),
+		State: storage.NetworkLedgerStateObserved,
+	}
+	markAllElapsed(t, h, h.now.Add(-2*time.Hour))
+	settings := enabledTestSettings()
+	settings.DockerNetworks.ProbeEnabled = false
+	h.provider.settings.(*fakeSettings).settings = settings
+	h.docker.inspectMutate = func(network agentdocker.NetworkInfo) agentdocker.NetworkInfo {
+		if h.docker.inspectCount == 2 {
+			h.oracle.lookups["gone"] = TaskLookupActive
+		}
+		return network
+	}
+
+	result, err := h.provider.Cleanup(context.Background())
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if result["removed"] != float64(0) || result["skipped"] != float64(1) {
+		t.Fatalf("result = %#v, want active owner protected", result)
+	}
+	if _, ok := h.docker.networks["net-kd_reactivated"]; !ok {
+		t.Fatal("network with newly active owner was removed")
+	}
+}
+
+func TestCleanupRevalidationProtectsChangedOwner(t *testing.T) {
+	h := newHarness(t)
+	h.oracle.lookups["gone"] = TaskLookupInactive
+	h.oracle.lookups["other"] = TaskLookupInactive
+	h.docker.addNetwork(netWithContainers("kd_reowned", map[string]string{"kandev.task_id": "gone"}, nil))
+	h.ledger.entries["net-kd_reowned"] = storage.NetworkLedgerEntry{
+		NetworkID: "net-kd_reowned", FirstSeenAt: h.now.Add(-48 * time.Hour),
+		State: storage.NetworkLedgerStateObserved,
+	}
+	markAllElapsed(t, h, h.now.Add(-2*time.Hour))
+	settings := enabledTestSettings()
+	settings.DockerNetworks.ProbeEnabled = false
+	h.provider.settings.(*fakeSettings).settings = settings
+	h.docker.inspectMutate = func(network agentdocker.NetworkInfo) agentdocker.NetworkInfo {
+		if h.docker.inspectCount == 2 {
+			network.Labels = map[string]string{"kandev.task_id": "other"}
+		}
+		return network
+	}
+
+	result, err := h.provider.Cleanup(context.Background())
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if result["removed"] != float64(0) || result["skipped"] != float64(1) {
+		t.Fatalf("result = %#v, want changed owner protected", result)
+	}
+	if _, ok := h.docker.networks["net-kd_reowned"]; !ok {
+		t.Fatal("network with changed owner was removed")
+	}
+}
+
 func TestCleanupIgnoresFailureOfOthers(t *testing.T) {
 	// Provider errors degrade this provider only: settings failure is a
 	// warning, never a panic; a failed removal is skipped not fatal.

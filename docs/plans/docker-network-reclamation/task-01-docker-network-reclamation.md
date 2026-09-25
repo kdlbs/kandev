@@ -49,3 +49,11 @@ Implemented the Docker network provider, persisted ledger, lease/revalidation ga
 Storage UI, localized copy, public Docker operations guidance, focused backend tests, and a real-Docker
 containers E2E scenario. No task-side Docker authority, daemon-wide network prune, Docker restart, or
 daemon configuration mutation was added.
+
+PR fixup: Revalidation now checks current task ownership and preserves the candidate's ownership key
+before removal. Focused regressions cover an owner becoming active and ownership changing after the
+census; both networks remain intact.
+
+Fixup validation: `go test -race ./internal/system/storage/docknet/... -count=1` and
+`go test ./internal/backendapp/... -count=1` passed from `apps/backend`. Public documentation passed
+`node --test scripts/validate-public-docs.test.mjs` and `node scripts/validate-public-docs.mjs`.

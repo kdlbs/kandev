@@ -327,7 +327,7 @@ Any new Compose project, `docker compose run`, or `docker network create` then f
 Kandev's in-product answer is **Settings > System > Data storage > Docker network reclamation**. It is always-on analysis (a read-only census of every bridge network on the daemon, classifying each one as active, attached, orphaned, safely stale, or uncertain) plus an opt-in reclaimer:
 
 - Networks with a connected container or an active task are never removal candidates.
-- A finished task's network is only reclaimed after a grace window, through a persisted quarantine ledger (which itself waits a quarantine window), and only after a fresh list+inspect revalidation immediately before the deletion. Removals are per-network, by ID; Kandev never calls any daemon-wide network prune.
+- A finished task's network is only reclaimed after a grace window, through a persisted quarantine ledger (which itself waits a quarantine window), and only after a fresh list, inspection, and ownership check immediately before deletion. Removals are per-network, by ID; Kandev never calls any daemon-wide network prune.
 - A network whose owning task cannot be resolved is reclaimed only after it has been observed untouched for the full stable-age window (168 hours by default).
 - After each reclaim cycle, a capacity probe creates a throwaway bridge network, asserts the daemon allocated it a subnet, and removes it again. The probe result is recorded with the run.
 
