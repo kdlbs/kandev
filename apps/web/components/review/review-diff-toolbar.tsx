@@ -302,7 +302,7 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
         data-testid="review-file-actions-menu"
         aria-label={t("review:actionsFor", { filePath })}
         align="end"
-        className="w-64"
+        className="w-64 mobile-review-file-actions-menu"
       >
         <DropdownMenuLabel className="truncate font-medium text-foreground" title={filePath}>
           {filePath.split("/").pop() || filePath}
