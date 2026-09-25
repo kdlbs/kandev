@@ -22,6 +22,8 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/projects"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 type handlerHarness struct {
@@ -31,6 +33,7 @@ type handlerHarness struct {
 	status     *recordingTaskStatusUpdater
 	projects   *recordingProjectManager
 	tasks      *handlerTaskCreator
+	runs       *recordingRunSpawner
 	runEvents  *recordingRunEvents
 	decisions  *recordingDecisionRecorder
 	agentSvc   *agents.AgentService
@@ -112,6 +115,7 @@ func (r *handlerTaskCreator) CreateOfficeTaskAsAgent(
 	assigneeAgentID string,
 	_ string,
 	_ string,
+	_ string,
 ) (string, error) {
 	r.calls++
 	r.rootWorkspaces = append(r.rootWorkspaces, workspaceID)
@@ -125,6 +129,7 @@ func (r *handlerTaskCreator) CreateOfficeSubtaskAsAgent(
 	_ string,
 	_ string,
 	assigneeAgentID string,
+	_ string,
 	_ string,
 	_ string,
 ) (string, error) {
@@ -237,6 +242,88 @@ func TestRuntimeHandler_CreateAgentBindsSnakeCasePayload(t *testing.T) {
 		t.Fatalf("snake-case fields did not bind: %+v", body.Agent)
 	}
 	assertActionRunEvent(t, h.runEvents, "create_agent", "agent", body.Agent.ID)
+}
+
+// TestRuntimeHandler_SpawnAgentRunAcceptsRegistryReason exercises the
+// AC-OFFICE-LAUNCH-SAFETY-004.3 registry check's positive path through the
+// real HTTP route (POST /runtime/agents/:id/runs), not just the Actions
+// layer: a registry-member reason reaches the run spawner and the caller
+// gets 202 Accepted.
+func TestRuntimeHandler_SpawnAgentRunAcceptsRegistryReason(t *testing.T) {
+	h := newRuntimeHandlerHarness(t, Capabilities{CanSpawnAgentRun: true})
+
+	resp := h.request(t, http.MethodPost, "/runtime/agents/agent-1/runs", map[string]interface{}{
+		"reason": string(shared.RunReasonHeartbeat),
+	})
+
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusAccepted, resp.Body.String())
+	}
+	if len(h.runs.calls) != 1 || h.runs.calls[0].Reason != string(shared.RunReasonHeartbeat) {
+		t.Fatalf("run spawner calls = %+v, want one call for reason %q", h.runs.calls, shared.RunReasonHeartbeat)
+	}
+}
+
+// TestRuntimeHandler_SpawnAgentRunRejectsReasonOutsideRegistryAndLogsRunEvent
+// pins AC-OFFICE-LAUNCH-SAFETY-004.3 end to end through the HTTP route: a
+// reason outside shared.WakeReasonRegistry (the empty string included)
+// must be rejected with 400, must never reach the run spawner, and must be
+// recorded as a denied run event — the same observable contract already
+// proven for errTaskTitleRequired/ErrProjectRequired on other actions.
+func TestRuntimeHandler_SpawnAgentRunRejectsReasonOutsideRegistryAndLogsRunEvent(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reason string
+	}{
+		{name: "unregistered reason", reason: "whatever-reason-the-agent-invents"},
+		{name: "empty reason", reason: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRuntimeHandlerHarness(t, Capabilities{CanSpawnAgentRun: true})
+
+			resp := h.request(t, http.MethodPost, "/runtime/agents/agent-1/runs", map[string]interface{}{
+				"reason": tc.reason,
+			})
+
+			if resp.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusBadRequest, resp.Body.String())
+			}
+			if len(h.runs.calls) != 0 {
+				t.Fatalf("run spawner called for reason outside the registry: %+v", h.runs.calls)
+			}
+			assertDeniedRunEvent(t, h.runEvents, "spawn_agent_run", "agent", "agent-1")
+		})
+	}
+}
+
+func TestRuntimeHandler_SpawnAgentRunReturnsPolicyRefusal(t *testing.T) {
+	h := newRuntimeHandlerHarness(t, Capabilities{CanSpawnAgentRun: true})
+	h.runs.err = &runsservice.RefusalError{
+		Gate:   runsservice.RefusalCausationDepth,
+		Reason: "causation depth exceeds configured limit",
+	}
+
+	resp := h.request(t, http.MethodPost, "/runtime/agents/agent-1/runs", map[string]interface{}{
+		"reason": string(shared.RunReasonHeartbeat),
+	})
+
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusConflict, resp.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+		Gate  string `json:"gate"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Error != "run enqueue refused" || body.Gate != string(runsservice.RefusalCausationDepth) {
+		t.Fatalf("response = %#v, want a safe policy refusal", body)
+	}
+	assertDeniedRunEvent(t, h.runEvents, "spawn_agent_run", "agent", "agent-1")
+	if got := h.runEvents.events[0].payload["error"]; got != "run enqueue refused" {
+		t.Fatalf("denied event error = %#v, want sanitized refusal", got)
+	}
 }
 
 func TestRuntimeHandler_ListProjectsUsesTokenWorkspace(t *testing.T) {
@@ -871,6 +958,7 @@ func newRuntimeHandlerHarnessWithProjectManagerAndLogger(
 	comments := &handlerCommentWriter{}
 	status := &recordingTaskStatusUpdater{}
 	tasks := &handlerTaskCreator{}
+	runs := &recordingRunSpawner{}
 	projects := &recordingProjectManager{}
 	var projectManager ProjectManager = projects
 	if projectManagerFactory != nil {
@@ -887,12 +975,14 @@ func newRuntimeHandlerHarnessWithProjectManagerAndLogger(
 			TaskStatus:    status,
 			Agents:        agentSvc,
 			Projects:      projectManager,
+			Runs:          runs,
 			AgentModifier: agentSvc,
 		}),
 		nil,
 		runEvents,
 		decisions,
 		log,
+		nil,
 	))
 	return &handlerHarness{
 		router:     router,
@@ -901,6 +991,7 @@ func newRuntimeHandlerHarnessWithProjectManagerAndLogger(
 		status:     status,
 		projects:   projects,
 		tasks:      tasks,
+		runs:       runs,
 		runEvents:  runEvents,
 		decisions:  decisions,
 		agentSvc:   agentSvc,

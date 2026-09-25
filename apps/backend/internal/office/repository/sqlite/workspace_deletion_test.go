@@ -35,6 +35,7 @@ func TestDeleteWorkspaceDataDeletesOwnedOfficeRows(t *testing.T) {
 		"run_events",
 		"office_run_route_attempts",
 		"office_run_skills",
+		"office_run_sessions",
 		"agent_wakeup_requests",
 		"agent_continuation_summaries",
 		"office_routine_triggers",
@@ -133,6 +134,7 @@ func seedWorkspaceDeletionRows(t *testing.T, repo *sqlite.Repository, workspaceI
 	execRaw(t, repo, `INSERT INTO run_events (run_id, seq, event_type, payload, created_at) VALUES (?, 1, 'queued', '{}', ?)`, runID, now)
 	execRaw(t, repo, `INSERT INTO office_run_route_attempts (run_id, seq, provider_id, model, tier, outcome, started_at) VALUES (?, 1, 'codex', 'gpt', 'balanced', 'failed', ?)`, runID, now)
 	execRaw(t, repo, `INSERT INTO office_run_skills (run_id, skill_id, version, content_hash, materialized_path) VALUES (?, ?, 'v1', 'hash', '/tmp/skill')`, runID, workspaceID+"-skill")
+	execRaw(t, repo, `INSERT INTO office_run_sessions (id, workspace_id, agent_profile_id, run_id, attempt, state, created_at) VALUES (?, ?, ?, ?, 1, 'finished', ?)`, workspaceID+"-run-session", workspaceID, agentID, runID, now)
 	execRaw(t, repo, `INSERT INTO agent_wakeup_requests (id, agent_profile_id, source, status, requested_at) VALUES (?, ?, 'test', 'queued', ?)`, workspaceID+"-wakeup", agentID, now)
 	execRaw(t, repo, `INSERT INTO agent_continuation_summaries (agent_profile_id, scope, content) VALUES (?, 'workspace', 'summary')`, agentID)
 	execRaw(t, repo, `INSERT INTO office_agent_pause_recoveries (agent_id, task_id, failed_run_id) VALUES (?, ?, ?)`, agentID, taskID, runID)

@@ -33,7 +33,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${source.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const targetRow = drawer.getByTestId("sidebar-task-item").filter({ hasText: target.title });
     await expect(targetRow).toBeVisible();
@@ -198,7 +198,7 @@ test.describe("Mobile sidebar task actions", () => {
       timeout: 30_000,
     });
 
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const destinationRow = drawer
       .getByTestId("sidebar-task-item")
@@ -209,7 +209,7 @@ test.describe("Mobile sidebar task actions", () => {
     await expect(drawer).toBeHidden();
     await expect(testPage).toHaveURL(new RegExp(`/t/${destination.id}$`));
     const mobileTopBar = testPage
-      .getByTestId("mobile-session-menu")
+      .getByTestId("mobile-task-picker-trigger")
       .locator("xpath=ancestor::header");
     await expect(mobileTopBar.getByText(destinationTitle, { exact: true })).toBeVisible();
     await expect(session.chat.getByText(destinationResponse).last()).toBeVisible({
@@ -263,7 +263,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const row = drawer.getByTestId("sidebar-task-item").filter({ hasText: task.title });
@@ -285,7 +285,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const surface = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(surface).toBeVisible();
@@ -322,7 +322,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const drawerId = await drawer.getAttribute("id");
@@ -387,7 +387,7 @@ test.describe("Mobile sidebar task actions", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await waitForActiveSessionForegroundActivity(testPage, "generating");
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const drawerId = await drawer.getAttribute("id");
@@ -533,7 +533,7 @@ test.describe("Mobile sidebar task actions", () => {
       timeout: 60_000,
     });
 
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
     const diffStats = taskRow.getByTestId("sidebar-task-diff-stats");
@@ -656,7 +656,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = drawer
@@ -745,7 +745,7 @@ test.describe("Mobile sidebar task actions", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = taskSheet.getByTestId("sidebar-task-item").filter({ hasText: parentTitle });
@@ -843,7 +843,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${activeTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
     const parentRow = taskSheet
@@ -877,7 +877,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = sheet
@@ -963,7 +963,7 @@ test.describe("Mobile sidebar task actions", () => {
       const session = new SessionPage(testPage);
       await session.waitForLoad();
       await session.waitForChatIdle({ timeout: 30_000 });
-      await testPage.getByTestId("mobile-session-menu").tap();
+      await testPage.getByTestId("mobile-task-picker-trigger").tap();
       const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
       const taskRow = taskSheet.getByTestId("sidebar-task-item").filter({ hasText: parentTitle });
       await taskRow.getByRole("button", { name: "Task actions" }).tap();

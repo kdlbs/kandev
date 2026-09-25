@@ -5,7 +5,6 @@ import { IconArrowLeft } from "@tabler/icons-react";
 import { Trans, useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import Link from "@/components/routing/app-link";
@@ -13,7 +12,7 @@ import { useRouter } from "@/lib/routing/client-router";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
-import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { PluginConfigForm } from "./plugin-config-form";
 import { PluginManifestCard } from "./plugin-manifest-card";
@@ -173,14 +172,14 @@ type PluginSettingsCardProps = {
 function PluginSettingsCard({ plugin, form, busy }: PluginSettingsCardProps) {
   const { t } = useTranslation();
   return (
-    <SettingsCard isDirty={form.isDirty} data-testid="plugin-settings-card">
-      <CardHeader>
-        <CardTitle className="text-base">{t("plugins:settings")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <PluginSettingsBody plugin={plugin} form={form} busy={busy} />
-      </CardContent>
-    </SettingsCard>
+    <SettingsGroup
+      title={t("plugins:settings")}
+      isDirty={form.isDirty}
+      data-testid="plugin-settings-card"
+      contentClassName="divide-y-0"
+    >
+      <PluginSettingsBody plugin={plugin} form={form} busy={busy} />
+    </SettingsGroup>
   );
 }
 

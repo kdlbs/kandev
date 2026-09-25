@@ -2,10 +2,12 @@
 
 import { useRef } from "react";
 import {
+  buildCardPluginEntries,
   buildKanbanCardMenuEntries,
   useKanbanCardMoveTargets,
 } from "@/components/kanban-card-menu-items";
 import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar-link-actions";
+import { cleanupSharesParentWorkspace } from "@/components/task/task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import {
   TaskExternalLinkDialog,
@@ -219,6 +221,18 @@ export function useKanbanCardMenus({
   };
 
   const pluginMenuContext = buildPluginMenuContext(task, workspaceId, presentation);
+  // Both variants below share every input the plugin entries depend on -- the
+  // processing flags, the edit handler and the context -- so build them once:
+  // passing one result to both keeps each plugin action's items() to a single
+  // evaluation per card per render (see buildCardPluginEntries).
+  const pluginEntries = buildCardPluginEntries({
+    disabled: menuBase.disabled,
+    isDeleting: menuBase.isDeleting,
+    isArchiving: menuBase.isArchiving,
+    isDetaching: menuBase.isDetaching,
+    onEdit: menuBase.onEdit,
+    pluginMenuContext,
+  });
 
   return {
     ...dialogs,
@@ -227,12 +241,14 @@ export function useKanbanCardMenus({
       onMoveToStep: moveMenu.moveToStepFromDropdown,
       onSendToWorkflow: moveMenu.sendTaskToWorkflow,
       pluginMenuContext,
+      pluginEntries,
     }),
     contextMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
       onMoveToStep: moveMenu.moveSelectedToStep,
       onSendToWorkflow: moveMenu.sendSelectionToWorkflow,
       pluginMenuContext,
+      pluginEntries,
     }),
     isDetaching,
     detachAnchorRef,
@@ -269,6 +285,7 @@ export function KanbanCardDialogs({
         taskTitle={task.title}
         taskId={task.id}
         executorType={task.primaryExecutorType}
+        sharesParentWorkspace={cleanupSharesParentWorkspace(task.workspaceMode)}
         isDeleting={isDeleting}
         onConfirm={(opts) => onDelete?.(task, opts)}
       />

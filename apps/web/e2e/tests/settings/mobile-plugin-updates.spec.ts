@@ -7,6 +7,7 @@ import {
   uploadPackage,
 } from "../plugins/plugin-test-helpers";
 
+// @covers AC-UI-CONTROL-SIZING-001.3, AC-UI-CONTROL-SIZING-001.4, AC-UI-CONTROL-SIZING-001.5, AC-UI-CONTROL-SIZING-001.8
 test.describe("Mobile plugin updates", () => {
   test.afterEach(async ({ apiClient }) => {
     await uninstallPluginFixture(apiClient);
@@ -14,6 +15,7 @@ test.describe("Mobile plugin updates", () => {
 
   test("checks and updates marketplace state from the mobile settings flow", async ({
     testPage,
+    prCapture,
   }) => {
     await openInstallDialog(testPage);
     await uploadPackage(testPage, PACKAGE_PATH);
@@ -81,6 +83,19 @@ test.describe("Mobile plugin updates", () => {
     expect(buttonBox).not.toBeNull();
     expect(buttonBox!.height).toBeGreaterThanOrEqual(44);
 
+    await prCapture.screenshot("plugin-settings", { caption: "Plugin settings on a phone" });
+    const syncBox = await testPage.getByTestId("plugins-sync-button").boundingBox();
+    const installBox = await testPage.getByTestId("install-plugin-trigger").boundingBox();
+    const headingBox = await testPage
+      .getByRole("heading", { name: "Installed plugins", exact: true })
+      .boundingBox();
+    expect(syncBox).not.toBeNull();
+    expect(installBox).not.toBeNull();
+    expect(headingBox).not.toBeNull();
+    expect(syncBox!.y).toBeCloseTo(buttonBox!.y, 0);
+    expect(installBox!.y).toBeLessThan(headingBox!.y + headingBox!.height);
+    expect(installBox!.width).toBeLessThan(testPage.viewportSize()!.width / 2);
+
     await checkButton.tap();
 
     await expect.poll(() => refreshRequests).toBe(1);
@@ -124,5 +139,26 @@ test.describe("Mobile plugin updates", () => {
         },
       ),
     ).toBe(true);
+    for (const width of [320, 767, 768]) {
+      await testPage.setViewportSize({ width, height: 851 });
+      const sync = testPage.getByTestId("plugins-sync-button");
+      const install = testPage.getByTestId("install-plugin-trigger");
+      await expect(sync).toBeVisible();
+      await expect(install).toBeVisible();
+      const [syncBounds, checkBounds, installBounds] = await Promise.all([
+        sync.boundingBox(),
+        checkButton.boundingBox(),
+        install.boundingBox(),
+      ]);
+      expect(syncBounds!.y).toBeCloseTo(checkBounds!.y, 0);
+      for (const box of [syncBounds!, checkBounds!, installBounds!]) {
+        expect(box.height).toBeGreaterThanOrEqual(44);
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(width);
+      }
+      expect(
+        await testPage.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(width);
+    }
   });
 });

@@ -45,15 +45,17 @@ informational or optional suggestion; or give concrete code/spec/architecture
 reasoning for an invalid finding. Do not treat a label, internal note, or lack
 of code change as a completed disposition.
 
-When the user requests complete cleanup, including wording such as "clean up
-all review threads" or "leave no threads unresolved", reply to and resolve
-every unresolved thread after its disposition. This includes informational and
+An explicit request to run PR fixup authorizes a concise reply and resolution
+for every unresolved review thread returned by `scripts/pr-resolve list <PR>`,
+after that thread's disposition is complete. This includes informational and
 optional threads, which need an acknowledgement, and invalid threads, which
-need the concrete pushback reply before resolution. A request limited to
-selected actionable comments does not authorize writes to other threads. If
-thread writes are not authorized, report each disposition and keep the thread
-unresolved; never report the review state as clean. An invalid finding must
-never be silently ignored.
+need the concrete pushback reply before resolution. The listed review threads
+define the fixup's write scope; do not extend writes to comments outside that
+list. A request limited to selected actionable comments authorizes writes only
+to those threads. A review-only request authorizes no writes. If thread writes
+are not authorized, report each disposition and keep the thread unresolved;
+never report the review state as clean. An invalid finding must never be
+silently ignored.
 
 If `gh`, `scripts/pr-state`, or `scripts/pr-resolve` fails with an
 authentication or transport error (including a broker 401), do not treat empty

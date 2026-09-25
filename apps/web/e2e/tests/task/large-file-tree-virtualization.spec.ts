@@ -2,9 +2,13 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   LARGE_FILE_TREE_FOLDER,
   LARGE_FILE_TREE_COUNT,
+  expectContiguousVisibleFileTreeRows,
+  expectVisibleFileTreePaths,
   largeFileTreePath,
   scrollToLastLargeFile,
   setupLargeFileTreeTask,
+  visibleFileTreePaths,
+  waitForFileTreeLayoutSettle,
 } from "./large-file-tree-virtualization-helpers";
 
 test.describe("Large file tree virtualization", () => {
@@ -81,5 +85,67 @@ test.describe("Large file tree virtualization", () => {
     const input = testPage.getByPlaceholder("filename...");
     await expect(input).toBeVisible({ timeout: 15_000 });
     await expect(input).toBeFocused({ timeout: 5_000 });
+  });
+
+  test("restores contiguous rows after Files is hidden and reopened", async ({
+    apiClient,
+    seedData,
+    backend,
+    testPage,
+  }) => {
+    test.setTimeout(120_000);
+    const session = await setupLargeFileTreeTask({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      title: "Large file tree restoration",
+    });
+
+    await session.clickTab("Files");
+    const folder = session.fileTreeNode(LARGE_FILE_TREE_FOLDER);
+    const viewport = session.fileTreeScrollViewport();
+    await expect(folder).toBeVisible({ timeout: 15_000 });
+    await expect(viewport).toBeVisible({ timeout: 15_000 });
+    await waitForFileTreeLayoutSettle(testPage);
+    await expectContiguousVisibleFileTreeRows(viewport);
+    const collapsedPaths = await visibleFileTreePaths(viewport);
+
+    await session.clickTab("Changes");
+    await expect(session.files).toBeHidden();
+    await waitForFileTreeLayoutSettle(testPage);
+    await session.clickTab("Files");
+    await expect(viewport).toBeVisible({ timeout: 15_000 });
+    await expect(folder).toBeVisible({ timeout: 15_000 });
+    await expectContiguousVisibleFileTreeRows(viewport);
+    await expectVisibleFileTreePaths(viewport, collapsedPaths);
+
+    await folder.click();
+    const firstFile = largeFileTreePath(0);
+    await expect(session.fileTreeNode(firstFile)).toBeVisible({ timeout: 15_000 });
+    await expectContiguousVisibleFileTreeRows(viewport);
+    const expandedTopPaths = await visibleFileTreePaths(viewport);
+
+    await session.clickTab("Changes");
+    await expect(session.files).toBeHidden();
+    await waitForFileTreeLayoutSettle(testPage);
+    await session.clickTab("Files");
+    await expect(session.fileTreeNode(firstFile)).toBeVisible({ timeout: 15_000 });
+    await expectContiguousVisibleFileTreeRows(viewport);
+    await expectVisibleFileTreePaths(viewport, expandedTopPaths);
+
+    const lastFile = largeFileTreePath(LARGE_FILE_TREE_COUNT - 1);
+    await scrollToLastLargeFile(session.fileTreeNode(lastFile), viewport);
+    await expect(session.fileTreeNode(lastFile)).toBeVisible({ timeout: 15_000 });
+    await expectContiguousVisibleFileTreeRows(viewport);
+    const scrolledPaths = await visibleFileTreePaths(viewport);
+
+    await session.clickTab("Changes");
+    await expect(session.files).toBeHidden();
+    await waitForFileTreeLayoutSettle(testPage);
+    await session.clickTab("Files");
+    await expect(session.fileTreeNode(lastFile)).toBeVisible({ timeout: 15_000 });
+    await expectContiguousVisibleFileTreeRows(viewport);
+    await expectVisibleFileTreePaths(viewport, scrolledPaths);
   });
 });

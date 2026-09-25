@@ -2,10 +2,11 @@
 
 import { useRef, type MouseEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { PageTopbar } from "@/components/page-topbar";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import { MobileListingContext } from "./mobile-listing-context";
-import { MobileListingMenuButton } from "./mobile-listing-menu-button";
+import { AppNavSheet } from "@/components/navigation/app-nav-sheet";
 import { MobileListingMenuActions } from "./mobile-listing-menu-actions";
 import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
 import { useAppStore } from "@/components/state-provider";
@@ -21,6 +22,7 @@ type KanbanHeaderMobileProps = {
   isSearchLoading?: boolean;
   tasksListOptions?: TasksListDisplayOptions;
   taskListingControls?: ReactNode;
+  mobileListingStatus?: ReactNode;
 };
 
 const MODE_LABELS: Record<TaskListingPage, string> = {
@@ -39,6 +41,7 @@ export function KanbanHeaderMobile({
   isSearchLoading = false,
   tasksListOptions,
   taskListingControls,
+  mobileListingStatus,
 }: KanbanHeaderMobileProps) {
   const { t } = useTranslation();
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
@@ -79,28 +82,27 @@ export function KanbanHeaderMobile({
         title={title}
         testId={currentPage === "threads" ? "threads-mobile-topbar" : undefined}
         titleSlot={
-          currentPage === "threads" ? (
-            taskListingControls
-          ) : (
+          <div className="flex min-w-0 items-center">
             <MobileListingContext
               context={workspaceLabel}
               label={t(MODE_LABELS[currentPage])}
+              status={currentPage === "threads" ? <ThreadViewSyncStatus /> : undefined}
               onClick={openMenu}
               aria-haspopup="dialog"
               aria-expanded={isMenuOpen}
               data-testid="mobile-topbar-page-context"
             />
-          )
+            {mobileListingStatus}
+          </div>
         }
         className="h-14 min-h-14"
         showStatusTrigger={false}
         homeAffordance="none"
         freeWidth="lead"
-        actions={
-          <MobileListingMenuButton workspaceId={workspaceId} open={isMenuOpen} onClick={openMenu} />
-        }
+        actions={<AppNavSheet />}
       />
       <MobileMenuSheet
+        listingOnly
         open={isMenuOpen}
         onOpenChange={setMenuOpen}
         onCloseAutoFocus={restoreMenuFocus}
@@ -110,8 +112,10 @@ export function KanbanHeaderMobile({
         onSearchChange={onSearchChange}
         isSearchLoading={isSearchLoading}
         tasksListOptions={tasksListOptions}
+        listingControls={taskListingControls}
         pageActions={
           <MobileListingMenuActions
+            showWorkspaceActions={false}
             workspaceId={workspaceId}
             workspaceLabel={workspaceLabel}
             currentPage={currentPage}
@@ -124,5 +128,21 @@ export function KanbanHeaderMobile({
         }
       />
     </>
+  );
+}
+
+function ThreadViewSyncStatus() {
+  const { t } = useTranslation();
+  const error = useAppStore((state) => state.threadViews.syncError);
+  if (!error) return null;
+  return (
+    <span
+      role="status"
+      className="shrink-0 text-destructive"
+      data-testid="threads-mobile-view-sync-status"
+    >
+      <IconAlertTriangle aria-hidden="true" className="size-4" />
+      <span className="sr-only">{t("threads:failedToSyncViews")}</span>
+    </span>
   );
 }

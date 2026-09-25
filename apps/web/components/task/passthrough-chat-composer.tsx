@@ -13,7 +13,7 @@ import {
   type MessageAttachment,
 } from "./chat/chat-input-container";
 import type { useChatPanelState } from "./chat/use-chat-panel-state";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
@@ -31,6 +31,7 @@ import type { TaskPlanCommentRef } from "@/lib/types/http";
 import { isMessageSendError, MessageSendError } from "@/lib/chat/message-send-error";
 import { t as translate } from "@/lib/i18n";
 import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
+import { PreviewFeedbackCollectionSurface } from "@/components/task/inspector/preview-feedback-collection";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -80,6 +81,18 @@ export function PassthroughComposerPanel({
       }}
     >
       <PlanCommentMigrationNotice {...panelState.planCommentMigration} />
+      {panelState.previewFeedbackState && (
+        <PreviewFeedbackCollectionSurface
+          taskId={taskId}
+          collection={panelState.previewFeedbackState}
+          open={panelState.previewFeedbackOpen ?? false}
+          onOpenChange={panelState.setPreviewFeedbackOpen ?? (() => undefined)}
+          showTrigger={Boolean(
+            panelState.previewFeedback.length > 0 &&
+            (!panelState.resolvedSessionId || panelState.isCompleted),
+          )}
+        />
+      )}
       <ChatInputContainer
         ref={refHandle}
         onSubmit={onSubmit}
@@ -95,6 +108,8 @@ export function PassthroughComposerPanel({
         mcpAttachmentHistory={panelState.mcpAttachmentHistory}
         onPlanModeChange={panelState.handlePlanModeChange}
         isAgentBusy={false}
+        isWorking={panelState.isWorking}
+        showCancelAgent={false}
         isCompleted={panelState.isCompleted}
         isStarting={panelState.isStarting}
         isPreparingEnvironment={panelState.isPreparingEnvironment}
@@ -121,15 +136,15 @@ export function PassthroughComposerPanel({
 
 type PassthroughFinalMessage = {
   content: string;
-  commentsToSend: Array<DiffComment | AgentMessageComment>;
+  commentsToSend: Array<ReviewComment | AgentMessageComment>;
   contextFilesMeta?: Array<{ path: string; name: string }>;
   planCommentRefs: TaskPlanCommentRef[];
 };
 
 export function formatPassthroughBaseMessage(
   content: string,
-  reviewComments: DiffComment[] | undefined,
-  pendingComments: DiffComment[],
+  reviewComments: ReviewComment[] | undefined,
+  pendingComments: ReviewComment[],
   panelState: ReturnType<typeof useChatPanelState>,
 ) {
   const commentsToSend = reviewComments ?? pendingComments;
@@ -211,8 +226,8 @@ export async function buildPassthroughFinalMessage({
 }: {
   taskId: string | null;
   content: string;
-  reviewComments?: DiffComment[];
-  pendingComments: DiffComment[];
+  reviewComments?: ReviewComment[];
+  pendingComments: ReviewComment[];
   panelState: ReturnType<typeof useChatPanelState>;
   inlineMentions?: ContextFile[];
   inlineTaskMentions?: TaskMentionData[];
@@ -310,7 +325,7 @@ export function useSendPassthroughMessage({
 }: {
   taskId: string | null;
   sessionId: string | null | undefined;
-  pendingComments: DiffComment[];
+  pendingComments: ReviewComment[];
   panelState: ReturnType<typeof useChatPanelState>;
   onSent: () => void;
 }) {

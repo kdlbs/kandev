@@ -125,6 +125,7 @@ func RegisterRoutes(
 		g.POST("/run-skills", seedRunSkillSnapshotHandler(officeRepo, log))
 		g.POST("/cost-events", seedCostEventHandler(officeRepo, log))
 		g.POST("/activity", seedActivityHandler(officeRepo, log))
+		g.POST("/routine-triggers", seedRoutineTriggerHandler(officeRepo, log))
 	}
 	if agentSvc != nil {
 		g.POST("/runtime-token", mintRuntimeTokenHandler(agentSvc, log))
@@ -830,7 +831,8 @@ func seedMessageHandler(
 		if req.CreatedAt != nil {
 			msg.CreatedAt = req.CreatedAt.UTC()
 		}
-		if err := repo.CreateMessage(ctx, msg); err != nil {
+		receipt, err := repo.CreateMessageWithConversationReceipt(ctx, msg)
+		if err != nil {
 			log.Error("test harness: create message failed", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -848,12 +850,12 @@ func seedMessageHandler(
 		}
 
 		if taskSvc != nil {
-			if err := taskSvc.PublishMessageEvent(ctx, events.MessageAdded, msg); err != nil {
+			if err := taskSvc.PublishMessageEvent(ctx, events.MessageAdded, msg, receipt); err != nil {
 				log.Warn("test harness: publish message added failed; using fallback", zap.Error(err))
-				publishMessageAddedFallback(ctx, eventBus, msg, log)
+				publishMessageAddedFallback(ctx, eventBus, msg, receipt, log)
 			}
 		} else {
-			publishMessageAddedFallback(ctx, eventBus, msg, log)
+			publishMessageAddedFallback(ctx, eventBus, msg, receipt, log)
 		}
 		c.JSON(http.StatusOK, gin.H{testMessageIDKey: msg.ID, testTurnIDKey: msg.TurnID})
 	}
@@ -864,7 +866,13 @@ func seedMessageHandler(
 // carries the raw message fields (prompt_index, RFC3339Nano created_at) but
 // none of the session-scoped pending_action projection taskSvc.PublishMessageEvent
 // computes — callers exercising AC-34/AC-51 must supply a real taskSvc instead.
-func publishMessageAddedFallback(ctx context.Context, eventBus bus.EventBus, msg *models.Message, log *logger.Logger) {
+func publishMessageAddedFallback(
+	ctx context.Context,
+	eventBus bus.EventBus,
+	msg *models.Message,
+	receipt *models.ConversationMutationReceipt,
+	log *logger.Logger,
+) {
 	if eventBus == nil {
 		return
 	}
@@ -888,6 +896,9 @@ func publishMessageAddedFallback(ctx context.Context, eventBus bus.EventBus, msg
 	}
 	if msg.Metadata != nil {
 		data["metadata"] = msg.Metadata
+	}
+	if receipt != nil {
+		data["conversation_receipt"] = receipt
 	}
 	publishMessageEvent(ctx, eventBus, events.MessageAdded, data, log)
 }
@@ -927,11 +938,13 @@ func updateMessageHandler(
 		}
 		message.Content = request.Content
 		message.UpdatedAt = time.Now().UTC()
-		if err := repo.UpdateMessage(c.Request.Context(), message); err != nil {
+		receipt, err := repo.UpdateMessageWithConversationReceipt(c.Request.Context(), message)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		data := messageEventData(message)
+		data["conversation_receipt"] = receipt
 		publishMessageEvent(c.Request.Context(), eventBus, events.MessageUpdated, data, log)
 		c.JSON(http.StatusOK, gin.H{"message_id": message.ID, "updated_at": data["updated_at"]})
 	}
@@ -948,11 +961,13 @@ func deleteMessageHandler(
 			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
 			return
 		}
-		if err := repo.DeleteMessage(c.Request.Context(), message.ID); err != nil {
+		receipt, err := repo.DeleteMessageWithConversationReceipt(c.Request.Context(), message.ID)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		data := messageEventData(message)
+		data["conversation_receipt"] = receipt
 		publishMessageEvent(c.Request.Context(), eventBus, events.MessageDeleted, data, log)
 		c.JSON(http.StatusOK, gin.H{testMessageIDKey: message.ID})
 	}
@@ -983,7 +998,8 @@ func completeTurnHandler(
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		turnID := c.Param("id")
-		if err := repo.CompleteTurn(c.Request.Context(), turnID); err != nil {
+		receipt, err := repo.CompleteTurnWithConversationReceipt(c.Request.Context(), turnID)
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "turn not found"})
 			return
 		}
@@ -1001,6 +1017,7 @@ func completeTurnHandler(
 		if turn.CompletedAt != nil {
 			data[testCompletedAtKey] = turn.CompletedAt.UTC().Format(time.RFC3339Nano)
 		}
+		data["conversation_receipt"] = receipt
 		if eventBus != nil {
 			if err := eventBus.Publish(
 				c.Request.Context(),

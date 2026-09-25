@@ -164,10 +164,14 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
 
 import { AppSidebarFooter, MAX_INLINE_PLUGIN_FOOTER_ITEMS } from "./app-sidebar-footer";
 
-function renderFooter(collapsed = false) {
+function renderFooter(collapsed = false, layoutManaged = false) {
   return render(
     <TooltipProvider>
-      <AppSidebarFooter collapsed={collapsed} onToggleSettingsMode={mocks.toggleSettingsMode} />
+      <AppSidebarFooter
+        collapsed={collapsed}
+        onToggleSettingsMode={mocks.toggleSettingsMode}
+        layoutManaged={layoutManaged}
+      />
     </TooltipProvider>,
   );
 }
@@ -218,6 +222,25 @@ describe("AppSidebarFooter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stats" }));
 
     expect(mocks.routerPush).toHaveBeenCalledWith("/stats");
+  });
+
+  it("leaves plugin insight destinations to the saved sidebar layout", () => {
+    insightDestinations = [
+      STATS_DESTINATION,
+      {
+        id: "plugin:acme:board",
+        label: "Acme Board",
+        icon: IconChartBar,
+        section: "insights",
+        href: "/plugins/acme",
+        source: "plugin",
+      },
+    ];
+
+    renderFooter(false, true);
+
+    expect(screen.getByRole("button", { name: "Stats" })).not.toBeNull();
+    expect(screen.queryByTestId("sidebar-plugin:acme:board-button")).toBeNull();
   });
 
   it("does not render a mode switch button", () => {

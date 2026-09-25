@@ -10,10 +10,28 @@ import (
 // seam4ResumePayload builds the AC-42 "resume" replay row from
 // ResumeTaskSessionWithOptions's own frame, at the point the gate is consulted.
 func seam4ResumePayload(sessionID string, options executor.ResumeOptions) map[string]interface{} {
-	return map[string]interface{}{
+	return seam4ResumePayloadWithBinding(sessionID, options, nil)
+}
+
+func seam4ResumePayloadWithBinding(
+	sessionID string,
+	options executor.ResumeOptions,
+	binding *models.CeilingWorkflowEntryBinding,
+) map[string]interface{} {
+	payload := map[string]interface{}{
 		metaKeySessionID:           sessionID,
 		"allow_branch_replacement": options.AllowBranchReplacement,
 	}
+	if binding != nil {
+		payload[models.CeilingLaunchEntryBindingKey] = map[string]interface{}{
+			"workflow_id":            binding.WorkflowID,
+			"destination_step_id":    binding.DestinationStepID,
+			"route_operation_id":     binding.RouteOperationID,
+			"entry_identity":         binding.EntryIdentity,
+			"destination_session_id": binding.DestinationSessionID,
+		}
+	}
+	return payload
 }
 
 // admitOrDeferSeam4 is Service.ResumeTaskSessionWithOptions's gate: consulted

@@ -92,7 +92,10 @@ test("proves Kubernetes API compatibility and an agentctl round-trip", async ({
     JSON.stringify(exactPod.spec ?? {}).includes(credential),
     "agent Pod spec contains host kubeconfig credential: false expected",
   ).toBe(false);
-  expect(exactPod.spec?.automountServiceAccountToken).toBe(false);
+  expect(exactPod.spec).toMatchObject({
+    serviceAccountName: "kandev-workload",
+    automountServiceAccountToken: false,
+  });
   expect(
     kubernetesContainerLogsContainCredential(cluster, exactPod, credential),
     "agent Pod logs contain host kubeconfig credential: false expected",

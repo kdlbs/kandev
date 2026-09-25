@@ -22,6 +22,10 @@ type Snapshot = {
 };
 
 type MockState = {
+  taskRemoval: {
+    pendingTokenByTaskId: Record<string, string>;
+    operationsByToken: Record<string, unknown>;
+  };
   kanbanMulti: {
     snapshots: Record<string, Snapshot>;
     isLoading: boolean;
@@ -48,13 +52,19 @@ type MockState = {
 };
 
 let mockState: MockState = {
+  taskRemoval: { pendingTokenByTaskId: {}, operationsByToken: {} },
   kanbanMulti: { snapshots: {}, isLoading: false },
   workflows: { items: [] },
   kanban: { workflowId: null, tasks: [], steps: [] },
 };
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
+  useAppStore: (selector: (s: MockState) => unknown) =>
+    selector({
+      ...mockState,
+      workspaces: { activeId: "ws-1" },
+      sidebarViewsByWorkspace: {},
+    } as MockState),
   useAppStoreApi: () => ({ getState: () => mockState }),
 }));
 
@@ -66,6 +76,7 @@ import { mergeSidebarArchivedTasks, useWorkspaceSidebarTasks } from "./use-works
 
 function setMockState(patch: Partial<MockState>) {
   mockState = {
+    taskRemoval: { ...mockState.taskRemoval, ...(patch.taskRemoval ?? {}) },
     kanbanMulti: { ...mockState.kanbanMulti, ...(patch.kanbanMulti ?? {}) },
     workflows: { ...mockState.workflows, ...(patch.workflows ?? {}) },
     kanban: { ...mockState.kanban, ...(patch.kanban ?? {}) },
@@ -94,6 +105,7 @@ describe("useWorkspaceSidebarTasks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState = {
+      taskRemoval: { pendingTokenByTaskId: {}, operationsByToken: {} },
       kanbanMulti: { snapshots: {}, isLoading: false },
       workflows: { items: [] },
       kanban: { workflowId: null, tasks: [], steps: [] },
@@ -222,6 +234,7 @@ describe("useWorkspaceSidebarTasks reference stability", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState = {
+      taskRemoval: { pendingTokenByTaskId: {}, operationsByToken: {} },
       kanbanMulti: { snapshots: {}, isLoading: false },
       workflows: { items: [] },
       kanban: { workflowId: null, tasks: [], steps: [] },
@@ -282,6 +295,7 @@ describe("useWorkspaceSidebarTasks reference stability", () => {
 describe("useWorkspaceSidebarTasks WIP queue", () => {
   beforeEach(() => {
     mockState = {
+      taskRemoval: { pendingTokenByTaskId: {}, operationsByToken: {} },
       kanbanMulti: { snapshots: {}, isLoading: false },
       workflows: { items: [] },
       kanban: { workflowId: null, tasks: [], steps: [] },
@@ -401,6 +415,7 @@ describe("useWorkspaceSidebarTasks — loading", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState = {
+      taskRemoval: { pendingTokenByTaskId: {}, operationsByToken: {} },
       kanbanMulti: { snapshots: {}, isLoading: false },
       workflows: { items: [] },
       kanban: { workflowId: null, tasks: [], steps: [] },

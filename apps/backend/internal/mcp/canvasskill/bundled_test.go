@@ -20,8 +20,23 @@ func TestEnsureMaterialized_WritesKandevOwnedCanvasSkill(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(skill), "./_kandev/v1")
 	require.Contains(t, string(skill), "browser storage")
+	require.Contains(t, string(skill), "trusted same-origin")
+	require.NotContains(t, string(skill), "opaque origin")
 	require.FileExists(t, filepath.Join(root, "references", "browser-api.md"))
 	require.NoDirExists(t, filepath.Join(home, "skills", Slug))
+}
+
+func TestAuthoringSecurityReferenceDescribesSameOriginTrust(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, EnsureMaterialized(home))
+
+	security, err := ReadMaterialized(home, "references/security.md")
+	require.NoError(t, err)
+	securitySource := string(security)
+	require.Contains(t, securitySource, "same-origin")
+	require.Contains(t, securitySource, "ordinary user-session authority")
+	require.Contains(t, securitySource, "Capability grants still govern Kandev protocol operations")
+	require.NotContains(t, securitySource, "opaque origin")
 }
 
 func TestReadMaterialized_UsesAllowlistedInventory(t *testing.T) {
@@ -32,7 +47,7 @@ func TestReadMaterialized_UsesAllowlistedInventory(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, content)
 	require.Equal(t, Version, MaterializedVersion(home))
-	require.Equal(t, "2", MaterializedVersion(home))
+	require.Equal(t, "3", MaterializedVersion(home))
 
 	for _, path := range []string{"../outside.txt", filepath.Join(string(os.PathSeparator), "etc", "passwd"), "missing.md"} {
 		_, err := ReadMaterialized(home, path)

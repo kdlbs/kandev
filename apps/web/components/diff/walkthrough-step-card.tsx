@@ -15,6 +15,7 @@ import { useToast } from "@/components/toast-provider";
 import {
   markdownComponents,
   normalizeMarkdown,
+  rehypePlugins,
   remarkPlugins,
 } from "@/components/shared/markdown-components";
 import type { TaskWalkthrough, WalkthroughStep } from "@/lib/types/http";
@@ -49,7 +50,11 @@ function StepBody({ step, onOpenFile }: { step: WalkthroughStep; onOpenFile: () 
         <span className="shrink-0 text-muted-foreground">:{lineLabel}</span>
       </button>
       <div className={WALKTHROUGH_STEP_BODY_CLASS} data-testid="walkthrough-step-body">
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+        <ReactMarkdown
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins}
+          components={markdownComponents}
+        >
           {normalizeMarkdown(step.text)}
         </ReactMarkdown>
       </div>

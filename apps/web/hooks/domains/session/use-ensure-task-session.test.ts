@@ -90,7 +90,9 @@ describe("useEnsureTaskSession", () => {
     const { result } = renderHook(() => useEnsureTaskSession(TASK));
 
     expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
-    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", undefined);
+    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", {
+      activationSource: "session_open",
+    });
     expect(result.current.status).toBe("preparing");
     await flushMicrotasks();
     expect(result.current.status).toBe("idle");
@@ -220,7 +222,9 @@ describe("useEnsureTaskSession failed gate changes", () => {
 
     await flushMicrotasks();
     expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
-    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", undefined);
+    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", {
+      activationSource: "session_open",
+    });
 
     mockStoreState.kanban.steps = [{ id: "step-1", position: 0 }];
     rerender();
@@ -264,7 +268,9 @@ describe("useEnsureTaskSession — task changes", () => {
     expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
     rerender({ task: { id: "task-2" } });
     expect(mockEnsureTaskSession).toHaveBeenCalledTimes(2);
-    expect(mockEnsureTaskSession).toHaveBeenLastCalledWith("task-2", undefined);
+    expect(mockEnsureTaskSession).toHaveBeenLastCalledWith("task-2", {
+      activationSource: "session_open",
+    });
   });
 });
 
@@ -319,7 +325,10 @@ describe("useEnsureTaskSession prevent-auto-start gate", () => {
       useEnsureTaskSession({ id: "task-1", workflowStepId: "step-done", workflowId: "wf-active" }),
     );
     await flushMicrotasks();
-    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", { autoStart: false });
+    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", {
+      autoStart: false,
+      activationSource: "session_open",
+    });
     expect(result.current.status).toBe("idle");
   });
 
@@ -340,7 +349,9 @@ describe("useEnsureTaskSession prevent-auto-start gate", () => {
       useEnsureTaskSession({ id: "task-1", workflowStepId: "step-1", workflowId: "wf-active" }),
     );
     await flushMicrotasks();
-    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", undefined);
+    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", {
+      activationSource: "session_open",
+    });
   });
 
   it("does NOT gate a task whose workflow id is missing even when its step id matches the active workflow's terminal step", async () => {
@@ -361,7 +372,9 @@ describe("useEnsureTaskSession prevent-auto-start gate", () => {
     // auto-start the user expects. Missing workflow id → no gate.
     renderHook(() => useEnsureTaskSession({ id: "task-1", workflowStepId: "step-done" }));
     await flushMicrotasks();
-    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", undefined);
+    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", {
+      activationSource: "session_open",
+    });
   });
 
   it("resolves the step list from the multi-workflow snapshot for a cross-workflow task", async () => {
@@ -391,7 +404,10 @@ describe("useEnsureTaskSession prevent-auto-start gate", () => {
       }),
     );
     await flushMicrotasks();
-    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-2", { autoStart: false });
+    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-2", {
+      autoStart: false,
+      activationSource: "session_open",
+    });
   });
 
   it("does not gate when the preference is off", async () => {
@@ -411,7 +427,9 @@ describe("useEnsureTaskSession prevent-auto-start gate", () => {
       useEnsureTaskSession({ id: "task-1", workflowStepId: "step-done", workflowId: "wf-active" }),
     );
     await flushMicrotasks();
-    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", undefined);
+    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", {
+      activationSource: "session_open",
+    });
   });
 });
 
@@ -454,7 +472,10 @@ describe("useEnsureTaskSession late step hydration", () => {
 
     // Exactly one ensure, gated: never an ungated call.
     expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
-    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", { autoStart: false });
+    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", {
+      autoStart: false,
+      activationSource: "session_open",
+    });
   });
 });
 
@@ -501,6 +522,9 @@ describe("useEnsureTaskSession placeholder snapshot", () => {
     await flushMicrotasks();
 
     expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
-    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-2", { autoStart: false });
+    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-2", {
+      autoStart: false,
+      activationSource: "session_open",
+    });
   });
 });

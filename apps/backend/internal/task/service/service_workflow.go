@@ -384,9 +384,10 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 		task.Metadata = make(map[string]interface{})
 	}
 	for k, v := range metadata {
-		// Deferred launch ownership is server-managed. Preserve it even if a
-		// future metadata endpoint forwards the whole request map here.
-		if k == models.MetaKeyDeferredLaunch || k == models.MetaKeyStepHandoffCarry {
+		// Lifecycle and handoff provenance are server-managed. Preserve them even
+		// if a future metadata endpoint forwards the whole request map here.
+		if k == models.MetaKeyDeferredLaunch || k == models.MetaKeyStepHandoffCarry ||
+			k == models.MetaKeyHandoffSource || k == models.MetaKeyHandoffs {
 			continue
 		}
 		task.Metadata[k] = v
@@ -420,6 +421,9 @@ type MoveTaskResult struct {
 	// this call's earlier pre-move snapshot — see Task.FromStepID's doc.
 	FromStepID   string
 	Transitioned bool
+	// WorkflowEntryIdentity identifies the committed workflow-step entry that
+	// accepted this move. Empty when the write did not transition the task.
+	WorkflowEntryIdentity string
 	// MoveID correlates the one-shot entry options carried on the transient
 	// move marker with the target-step entry. Empty for an option-less move.
 	MoveID string
@@ -732,6 +736,10 @@ func (s *Service) MoveTaskWithOptions(
 	resultFromWorkflowID := task.FromWorkflowID
 	resultFromStepID := task.FromStepID
 	resultTransitioned := task.WorkflowStepTransitionID != 0
+	workflowEntryIdentity := ""
+	if resultTransitioned && task.WorkflowStepTransitionID > 0 {
+		workflowEntryIdentity = fmt.Sprintf("entry:%020d", task.WorkflowStepTransitionID)
+	}
 	if resultTransitioned && resultFromWorkflowID == "" {
 		// Keep compatibility with repository implementations that predate the
 		// transient source-workflow field. SQLite populates it from the write
@@ -797,7 +805,14 @@ func (s *Service) MoveTaskWithOptions(
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Int("position", position))
 
-	result := &MoveTaskResult{Task: task, FromStepID: resultFromStepID, Transitioned: resultTransitioned, MoveID: moveID, EntryOptions: entryOptions}
+	result := &MoveTaskResult{
+		Task:                  task,
+		FromStepID:            resultFromStepID,
+		Transitioned:          resultTransitioned,
+		WorkflowEntryIdentity: workflowEntryIdentity,
+		MoveID:                moveID,
+		EntryOptions:          entryOptions,
+	}
 
 	// Fetch the workflow step info if getter is available
 	if s.workflowStepGetter != nil {

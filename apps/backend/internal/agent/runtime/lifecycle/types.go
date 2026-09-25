@@ -37,10 +37,17 @@ type AgentExecution struct {
 	// RunID identifies the Office run that launched this execution. It is
 	// retained after runtime environment cleanup so delayed stop events can
 	// still be attributed to the correct run.
-	RunID             string
+	RunID        string
+	RunSessionID string
+	RunAttempt   int
+	Owner        ExecutionOwner
+	// OwnerAdmission is retained with the execution so the registration gate
+	// uses the same durable owner authority as the pre-allocation gate.
+	OwnerAdmission    OwnerAdmission
 	TaskID            string
 	SessionID         string
 	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
+	WorkspaceID       string
 	// AgentProfileID is the concrete profile used by the running CLI. The
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.
@@ -225,6 +232,9 @@ type AgentExecution struct {
 	// reusing the same source ID cannot merge visible and reasoning content.
 	protocolMessageIDs  map[string]string
 	protocolThinkingIDs map[string]string
+	// responseAttemptMessageIDs preserves allocation order for assistant and
+	// thinking records created since the latest committed response boundary.
+	responseAttemptMessageIDs []string
 	// assistantHistoryBuffer accumulates assistant chunks in wire order for
 	// history-context injection. Tool and completion boundaries persist it as
 	// one segment before recording the boundary event.
@@ -271,6 +281,13 @@ type AgentExecution struct {
 	// asynchronously, so its transport-level gate alone cannot provide this.
 	promptMu                sync.Mutex
 	dispatchedPromptPending atomic.Bool
+	// Initial-prompt callbacks are installed before StartAgentProcess for
+	// model-switch launches. Lifecycle sends the initial prompt asynchronously,
+	// so they must be captured before startup begins and consumed once that
+	// prompt is accepted or fails before acceptance.
+	initialPromptDispatchCallback   func()
+	initialPromptFailureCallback    func()
+	initialPromptDispatchCallbackMu sync.Mutex
 
 	// Closed when the current SendPrompt returns, so CancelAgent can wait
 	// for the in-flight prompt to finish before the caller retries.
@@ -331,6 +348,44 @@ type AgentExecution struct {
 	startupCallbackMu sync.RWMutex
 }
 
+// OwnerSnapshot returns the immutable durable owner carried by this
+// execution. The value is copied so restart reconciliation cannot mutate the
+// lifecycle store through a runtime observation.
+func (e *AgentExecution) OwnerSnapshot() ExecutionOwner {
+	if e == nil {
+		return ExecutionOwner{}
+	}
+	return e.Owner
+}
+
+// ExecutionOwnerKind identifies the durable coordinator that owns a runtime
+// execution. Task and run owners have different admission and event rules.
+type ExecutionOwnerKind string
+
+const (
+	ExecutionOwnerTask ExecutionOwnerKind = "task"
+	ExecutionOwnerRun  ExecutionOwnerKind = "run"
+)
+
+// ExecutionOwner is immutable identity carried through launch and lifecycle
+// callbacks. Run-owned executions never need a synthetic task ID.
+type ExecutionOwner struct {
+	Kind           ExecutionOwnerKind
+	WorkspaceID    string
+	TaskID         string
+	SessionID      string
+	RunID          string
+	RunSessionID   string
+	Attempt        int
+	AgentProfileID string
+}
+
+// OwnerAdmission is supplied by the durable owner (for example Office) and
+// must fail closed when the owner is missing, stale, paused or unreadable.
+type OwnerAdmission interface {
+	AdmitExecution(ctx context.Context, owner ExecutionOwner) error
+}
+
 func (e *AgentExecution) isSessionInitialized() bool {
 	e.sessionInitializedMu.RLock()
 	defer e.sessionInitializedMu.RUnlock()
@@ -341,6 +396,23 @@ func (e *AgentExecution) setSessionInitialized(value bool) {
 	e.sessionInitializedMu.Lock()
 	e.sessionInitialized = value
 	e.sessionInitializedMu.Unlock()
+}
+
+func (e *AgentExecution) setInitialPromptDispatchCallbacks(onDispatched, onFailure func()) {
+	e.initialPromptDispatchCallbackMu.Lock()
+	e.initialPromptDispatchCallback = onDispatched
+	e.initialPromptFailureCallback = onFailure
+	e.initialPromptDispatchCallbackMu.Unlock()
+}
+
+func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func(), func()) {
+	e.initialPromptDispatchCallbackMu.Lock()
+	onDispatched := e.initialPromptDispatchCallback
+	onFailure := e.initialPromptFailureCallback
+	e.initialPromptDispatchCallback = nil
+	e.initialPromptFailureCallback = nil
+	e.initialPromptDispatchCallbackMu.Unlock()
+	return onDispatched, onFailure
 }
 
 type activeTopLevelTool struct {
@@ -1038,10 +1110,13 @@ type RepoLaunchSpec struct {
 	RepositoryURL      string // Clone URL for remote executors that need to clone
 	RepoName           string // Repository name used as subdirectory inside TaskDirName
 	BaseBranch         string
+	IntegrationRef     string
 	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch     string
 	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase    *models.PRBase
 	RemoteContribution *models.RemoteContribution
+	CheckoutOptions    *models.RepositoryCheckoutOptions
 	WorktreeID         string // Existing worktree ID to reuse (skip creation if set)
 	// AllowBranchReplacement permits the explicit new-branch recovery action for
 	// this repository while retaining its environment record.
@@ -1084,9 +1159,12 @@ type WorkspaceRepositorySpec struct {
 	RepositoryID           string
 	RepositoryPath         string
 	RepoName               string
+	IntegrationRef         string
 	BaseBranch             string
 	DefaultBranch          string
 	CheckoutBranch         string
+	PRNumber               int
+	QualifiedPRBase        *models.PRBase
 	ComparisonTarget       *models.ComparisonTarget
 	WorktreeID             string
 	WorktreeBranchPrefix   string
@@ -1174,6 +1252,8 @@ type LaunchRequest struct {
 	McpMode             string            // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	McpProviders        []string          // Normalized provider capabilities attached to the task
 	McpProfile          *mcpprofile.Context
+	Owner               ExecutionOwner
+	OwnerAdmission      OwnerAdmission
 
 	// Environment preparation
 	SetupScript string // Setup script to run before agent starts
@@ -1192,10 +1272,13 @@ type LaunchRequest struct {
 	TaskRepositoryID       string // Exact task_repositories row for worktree recovery
 	RepositoryPath         string // Path to the main repository (for worktree creation)
 	BaseBranch             string // Base branch for the worktree (e.g., "main")
+	IntegrationRef         string // Verified terminal integration target for managed branch compaction
 	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase        *models.PRBase
 	RemoteContribution     *models.RemoteContribution
+	CheckoutOptions        *models.RepositoryCheckoutOptions
 	ComparisonTarget       *models.ComparisonTarget
 	WorktreeBranchPrefix   string // Branch prefix for worktree branches
 	WorktreeBranchTemplate string // Branch name template for worktree branches
@@ -1246,10 +1329,13 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		RepositoryPath:             r.RepositoryPath,
 		RepoName:                   r.RepoName,
 		BaseBranch:                 r.BaseBranch,
+		IntegrationRef:             r.IntegrationRef,
 		DefaultBranch:              r.DefaultBranch,
 		CheckoutBranch:             r.CheckoutBranch,
 		PRNumber:                   r.PRNumber,
+		QualifiedPRBase:            r.QualifiedPRBase,
 		RemoteContribution:         r.RemoteContribution,
+		CheckoutOptions:            r.CheckoutOptions,
 		ComparisonTarget:           r.ComparisonTarget,
 		ContributionDestination:    r.ContributionDestination,
 		WorktreeID:                 r.WorktreeID,
@@ -1321,6 +1407,12 @@ type AgentProfileInfo struct {
 	CommandPrefix string
 	// EnvVars are user-configured environment variables for this profile.
 	EnvVars []settingsmodels.ProfileEnvVar
+
+	// ProviderKind / ProviderBaseURL / ProviderAPIKeySecretID configure an
+	// injected OpenAI-compatible provider (empty ProviderKind = native).
+	ProviderKind           string
+	ProviderBaseURL        string
+	ProviderAPIKeySecretID string
 
 	// Deprecated: legacy permission fields, no longer consulted by the launch
 	// path. Kept so existing call sites compile during the transition.

@@ -6,6 +6,7 @@ import {
   RICH_OUTPUT_FILE_CONTENT,
   seedRichOutputTask,
 } from "./rich-output-helpers";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 test("renders and persists native rich output with an explicit file preview", async ({
   testPage,
@@ -33,7 +34,9 @@ test("renders and persists native rich output with an explicit file preview", as
   await expect(lineChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(lineChart.locator(".recharts-xAxis")).toContainText("Aug 12");
   await barChart.scrollIntoViewIfNeeded();
-  await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible();
+  await waitForFiniteAnimations(barChart);
+  await expect(barChart.locator("svg")).toBeVisible({ timeout: 30_000 });
+  await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible({ timeout: 30_000 });
   await expect(barChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(barChart.locator(".recharts-xAxis")).toContainText("/api");
 

@@ -120,7 +120,7 @@ export function PluginRow({
   return (
     <div
       data-testid={`plugin-row-${plugin.id}`}
-      className="group relative rounded-lg border border-border/70 bg-background p-4 transition-colors hover:border-border hover:bg-muted"
+      className="group relative min-w-0 py-4 transition-colors hover:bg-muted/40"
     >
       <PluginRowContent
         plugin={plugin}
@@ -214,7 +214,7 @@ function PluginRowContent({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <PluginRowIdentity plugin={plugin} needsSetup={needsSetup} update={update} />
 
-          <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:shrink-0">
+          <div className="flex w-full min-w-0 max-w-full items-center gap-2 sm:w-auto sm:shrink-0">
             {canManage && (
               <PluginRowActions
                 plugin={plugin}
@@ -320,7 +320,7 @@ function PluginRowIdentity({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="min-w-0 space-y-1">
+    <div className="min-w-0 max-w-full space-y-1">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-foreground truncate group-hover:underline">
           {plugin.display_name}
@@ -349,9 +349,10 @@ function PluginRowIdentity({
         )}
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <span className="font-mono truncate">
-          {plugin.id} · v{plugin.version}
+        <span className="font-mono truncate" title={plugin.id}>
+          {plugin.id}
         </span>
+        <span className="shrink-0 font-mono">v{plugin.version}</span>
         <PluginRepoLink url={plugin.repo_url} className="relative z-10" />
         <PluginUpdateInfo pluginId={plugin.id} update={update} />
       </div>

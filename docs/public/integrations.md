@@ -109,6 +109,19 @@ The **PR discovery failed** warning is separate from the quota values:
 
 When discovery succeeds, the warning clears and the status revision advances. If the warning remains after a quota refresh, wait for the retry time or verify the selected connection and repository scope.
 
+#### Pull request watch freshness
+
+Background checks for a known pull request run at least once per minute. A
+watch that is still searching for a pull request also checks once per minute
+while its task is running or has activity within the last two hours. Searching
+checks use a 15-minute interval after two hours of inactivity and a 30-minute
+interval after 24 hours. The checks continue at the 30-minute interval, so a
+pull request opened later on an unchanged branch remains discoverable.
+
+Passive workspace refreshes follow these intervals. An explicit pull request
+refresh checks immediately, subject to the workspace's authentication and
+GitHub rate limits.
+
 ### Automation and personal identity
 
 PAT and CLI connections are human identities. They provide both workspace automation and the fallback identity for **My GitHub** views and user-triggered actions. Settings show this shared identity inside **Workspace GitHub access** instead of repeating it as a separate **My GitHub identity** section.
@@ -321,7 +334,9 @@ Long query names shorten to one line in the **Views** button; open the drawer to
 
 Result rows provide touch-sized task actions and show a linked task's workflow step without hovering. Tap the page chooser between the previous/next buttons to open a bottom drawer with the current page marked. Select a page to jump directly to it, up to GitHub's first 1,000 search results, or tap **Done** to keep the current page.
 
-To use saved **task** filters from this page, open the app navigation menu and choose **Task views**. This opens the same task-view picker and filter editor as the task sidebar, for the active Kanban workspace. These task views are separate from GitHub saved queries and Threads views. Open a task from this drawer and use browser Back to return to the GitHub dashboard.
+To use saved **task** filters from this page, open the app navigation menu and choose **Task views**. This opens the same task-view picker and filter editor as the task sidebar, for the active Kanban workspace. Task views are personal and saved separately for each workspace, including the selected view and draft filters. Switching workspaces restores that workspace's views. These task views are separate from GitHub saved queries and Threads views. Open a task from this drawer and use browser Back to return to the GitHub dashboard.
+
+When upgrading from global task views, your existing views are copied once into each workspace you can access at migration time. Later edits stay independent. New workspaces start with **All tasks**. Refresh older open browser tabs before editing views after the upgrade.
 
 A **Review Watch** polls a GitHub search and creates review work. It requires a workflow, starting step, prompt, and workspace. The default query is `type:pr state:open review-requested:@me -is:draft`; add repository filters or replace the query as needed. An optional agent or executor profile overrides the selected step's defaults. The poll interval defaults to 300 seconds and accepts 60–3,600 seconds. The prompt field accepts `@name` references to saved prompts, resolved the same way as in a workflow step; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 
@@ -329,7 +344,7 @@ When a review watch is created, Kandev saves its verified target GitHub login. A
 
 An **Issue Watch** behaves similarly for issues. Its default search is `type:issue state:open`. Choose labels or provide a custom GitHub query; the custom query takes precedence over label selection.
 
-Both watch types default to the **Auto** cleanup policy: delete merged/closed tasks only when the user has not typed a message. For a GitHub Review Watch task with any PR lifecycle prompt enabled, **Auto** instead retains the terminal task so that lifecycle delivery can finish. **Always delete** is the explicit override and deletes even after user engagement or enabled lifecycle prompts; **Never** retains every task. You can pause a watch, poll immediately, or clean completed work. Deleting a GitHub review or issue watch best-effort cascade-deletes the tasks it owns. **Reset** is also destructive: after its preview, it permanently cascade-deletes every watch-created task, including archived tasks, and clears cursor/deduplication state so current matches become eligible again. Review-watch reset schedules a re-import; issue-watch reset re-imports on its next poll. Reset is not a way to keep old tasks and rerun a query.
+Both watch types default to the **Auto** cleanup policy: delete merged/closed tasks only when the user has not typed a message. For a GitHub Review Watch task with any PR lifecycle prompt enabled, **Auto** instead retains the terminal task so that lifecycle delivery can finish. **Always delete** is the explicit override and deletes even after user engagement or enabled lifecycle prompts; **Never** retains every task. Routine cleanup pauses while a review task is archived and resumes when you unarchive it. The task and its review-watch record stay in place while archived. You can pause a watch, poll immediately, or clean completed work. Explicit cleanup still applies the watch policy to archived tasks. Deleting a GitHub review or issue watch best-effort cascade-deletes the tasks it owns. **Reset** is also destructive: after its preview, it permanently cascade-deletes every watch-created task, including archived tasks, and clears cursor/deduplication state so current matches become eligible again. Review-watch reset schedules a re-import; issue-watch reset re-imports on its next poll. Reset is not a way to keep old tasks and rerun a query.
 
 Repository scope, authentication, and watch filters are workspace-specific. Repository scope constrains Kandev operations in addition to the repositories allowed by the selected credential; it cannot grant access the credential lacks. Explicit executor profile tokens remain a separate override and should be scoped independently. GitHub workspace configuration can be copied, but credentials, App installation bindings, personal identities, and watches are deliberately not copied.
 
@@ -338,6 +353,17 @@ Repository scope, authentication, and watch filters are workspace-specific. Repo
 For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls, **Auto-fix CI & address comments**, **Auto-merge or requeue when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**, are scoped to whichever linked PR's tab is selected. Enabling a control for one linked PR does not enable it for the task's other linked PRs; Kandev tracks delivery and deduplication separately for each linked PR. The saved auto-fix prompt override applies to every linked PR.
 
 If a current pull-request head has a GitHub Actions workflow that requires maintainer approval, the PR status control shows **Awaiting maintainer approval**, even when GitHub reports no checks. Detailed desktop and mobile views show the workflow name, the reason, and a link to GitHub. Approval-only workflow attention is not a failed check, does not start **Auto-fix CI & address comments**, and does not make the pull request ready for **Auto-merge or requeue when ready**. If GitHub does not provide enough evidence, Kandev keeps the workflow state unavailable or marks the last same-head observation as stale instead of claiming approval.
+
+Kandev refreshes GitHub Actions observations for empty, running, changing, or
+attention-required results within 30 seconds. Nonempty completed results with
+no attention requirement remain cached for up to five minutes. The cache is
+Run observations are scoped to the selected credential, repository, and head
+SHA. Job observations are scoped to the selected credential, repository, run
+ID, and workflow attempt.
+An explicit pull request refresh clears the relevant observation immediately.
+Reruns on the same SHA appear after the completed-result cache expires or after
+an explicit refresh. Provider errors are retried and are not stored as an
+empty workflow result.
 
 This is a GitHub-only lifecycle feature. Kandev reuses the existing lightweight task PR poller, which checks watched linked PRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked PRs without waiting for the next poll.
 

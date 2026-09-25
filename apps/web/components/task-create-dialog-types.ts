@@ -1,3 +1,4 @@
+import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import type React from "react";
 import type { RefObject } from "react";
 import type {
@@ -160,6 +161,7 @@ export type TaskRepositorySnapshot = {
  * single `url` field, with `source` only used for UI affordance.
  */
 export type TaskRemoteRepoRow = {
+  checkoutOptions?: RepositoryCheckoutOptions;
   key: string; // stable client-side React key
   url: string; // canonical https://… or paste-as-typed
   /** Exact credential-free clone URL returned by provider URL inspection. */
@@ -377,6 +379,10 @@ export type TaskCreateEffectsArgs = {
 };
 
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
+import type {
+  WorkflowAgentOverrideOption,
+  WorkflowAgentOverrideRow,
+} from "@/components/task-create-dialog-workflow-agent-overrides";
 
 export type TaskFormInputsHandle = {
   getValue: () => string;
@@ -467,6 +473,9 @@ export type DialogFormState = {
   setDiscoverReposLoaded: (v: boolean) => void;
   selectedWorkflowId: string | null;
   setSelectedWorkflowId: (v: string | null) => void;
+  /** Task-only replacement profile by fixed workflow source profile. */
+  workflowAgentOverrides: Record<string, string>;
+  setWorkflowAgentOverrides: (v: Record<string, string>) => void;
   fetchedSteps: StepType[] | null;
   setFetchedSteps: (v: StepType[] | null) => void;
   isCreatingSession: boolean;
@@ -593,6 +602,10 @@ export type SubmitHandlersDeps = {
   workspacePath: string;
   /** Priority to submit with the created task. Defaults to `medium`. */
   priority: TaskPriority;
+  /** Task-only replacements for fixed workflow step agent profiles. */
+  workflowAgentOverrides: Record<string, string>;
+  /** Create-mode validation shared by the footer and every submit entry point. */
+  workflowAgentOverridesBlockedReason?: string;
   /**
    * Optional async transform applied to the trimmed description before the
    * API payload is built. Used by feature wrappers (e.g. Improve Kandev) to
@@ -709,6 +722,14 @@ export type DialogFormBodyProps = {
   descriptionPlaceholder?: string;
   /** When true, hides the workflow picker so the enforced workflow can't be swapped. */
   workflowLocked?: boolean;
+  workflowAgentOverrideRows: WorkflowAgentOverrideRow[];
+  workflowAgentOverrideOptions: WorkflowAgentOverrideOption[];
+  workflowAgentOverridesLoading: boolean;
+  workflowAgentOverridesInvalid: boolean;
+  workflowAgentOverridesError: boolean;
+  onWorkflowAgentOverrideChange: (sourceProfileId: string, replacementProfileId: string) => void;
+  onResetWorkflowAgentOverrides: () => void;
+  onRetryWorkflowAgentOverrides: () => void;
   /**
    * Called by a plugin composer action after it inserted text into the
    * description and wants the form submitted the native way. The dialog

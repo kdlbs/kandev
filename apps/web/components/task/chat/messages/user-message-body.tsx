@@ -1,13 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Components } from "react-markdown";
 import { IconChevronRight } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
+import { BoundedMessagePreview } from "./bounded-message-preview";
 import { cn } from "@/lib/utils";
 import { t } from "@/lib/i18n";
+import {
+  getMessagePreview,
+  MESSAGE_PREVIEW_MAX_CODE_UNITS,
+  MESSAGE_PREVIEW_MAX_LINES,
+} from "@/lib/utils/message-preview";
 import { splitMessageSegments } from "@/lib/utils/workflow-instructions";
 
 type UserMessageBodyOptions = {
@@ -78,12 +84,18 @@ function CollapsedInstructions({
         <span>{label}</span>
       </CollapsibleTrigger>
       <CollapsibleContent className="pt-2">
-        <UserMessageMarkdown
-          content={instructions}
-          promptMentionComponents={promptMentionComponents}
-          taskId={taskId}
-          worktreePath={worktreePath}
-          onOpenFile={onOpenFile}
+        <BoundedMessagePreview
+          source={instructions}
+          fileName="kandev-workflow-instructions.txt"
+          renderContent={(preview) => (
+            <UserMessageMarkdown
+              content={preview}
+              promptMentionComponents={promptMentionComponents}
+              taskId={taskId}
+              worktreePath={worktreePath}
+              onOpenFile={onOpenFile}
+            />
+          )}
         />
       </CollapsibleContent>
     </Collapsible>
@@ -104,19 +116,42 @@ function MessageSegments({
   onOpenFile?: (path: string) => void;
 }) {
   const { t } = useTranslation();
-  const segments = splitMessageSegments(content);
+  const segments = useMemo(() => {
+    let remainingLines = MESSAGE_PREVIEW_MAX_LINES;
+    let remainingCodeUnits = MESSAGE_PREVIEW_MAX_CODE_UNITS;
+    return splitMessageSegments(content).map((segment) => {
+      if (segment.type === "instructions") {
+        return { segment, preview: getMessagePreview(segment.content) };
+      }
+      const preview = getMessagePreview(segment.content, {
+        maxLines: remainingLines,
+        maxCodeUnits: remainingCodeUnits,
+      });
+      remainingLines = Math.max(0, remainingLines - preview.logicalLines);
+      remainingCodeUnits = Math.max(0, remainingCodeUnits - preview.codeUnits);
+      return { segment, preview };
+    });
+  }, [content]);
   return (
     <div className="space-y-2">
-      {segments.map((segment, index) => {
+      {segments.map(({ segment, preview }, index) => {
         if (segment.type === "text") {
           return (
-            <UserMessageMarkdown
+            <BoundedMessagePreview
               key={`text-${index}`}
-              content={segment.content}
-              promptMentionComponents={promptMentionComponents}
-              taskId={taskId}
-              worktreePath={worktreePath}
-              onOpenFile={onOpenFile}
+              source={segment.content}
+              downloadSource={content}
+              fileName="kandev-message.txt"
+              preview={preview}
+              renderContent={(previewContent) => (
+                <UserMessageMarkdown
+                  content={previewContent}
+                  promptMentionComponents={promptMentionComponents}
+                  taskId={taskId}
+                  worktreePath={worktreePath}
+                  onOpenFile={onOpenFile}
+                />
+              )}
             />
           );
         }
@@ -154,7 +189,16 @@ export function renderUserMessageBody({
   onOpenFile,
 }: UserMessageBodyOptions): React.ReactNode {
   if (hasContent && showRaw) {
-    return <pre className="whitespace-pre-wrap font-mono text-xs">{rawContent || content}</pre>;
+    const raw = rawContent || content;
+    return (
+      <BoundedMessagePreview
+        source={raw}
+        fileName="kandev-message.txt"
+        renderContent={(preview) => (
+          <pre className="whitespace-pre-wrap font-mono text-xs">{preview}</pre>
+        )}
+      />
+    );
   }
   if (hasContent) {
     return (

@@ -6,24 +6,18 @@ import { test, expect } from "../../fixtures/office-fixture";
  * `summarize_missed`, with the old value accepted forever as a deprecated
  * alias on write and normalized away on read.
  *
- * NOTE ON SCOPE: `apps/web/lib/state/slices/office/types.ts`'s `Routine`
- * type (pre-existing, unchanged by this diff) declares every multi-word
- * field in camelCase (`catchUpPolicy`, `catchUpMax`, `concurrencyPolicy`,
- * `assigneeAgentProfileId`, `taskTemplate`, `workspaceId`), but the backend
- * (`apps/backend/internal/office/models/models.go`) serializes and binds
- * all of them in snake_case. Neither the Create Routine dialog's submit
- * nor the detail view's Save round-trips any of those fields — they're
- * silently dropped on write and read back as `undefined` (falling through
- * to each field's hardcoded UI default) regardless of what's actually
- * persisted. This is pre-existing (present unchanged at the merge base)
- * and spans the whole Routines feature, not just catch-up policy — filed
- * as a follow-up, not fixed here. Consequence for this spec: the create
- * dialog's and detail view's catch-up-policy controls can only be proven
- * correct through pure client-side interaction (matching AC-003.8's own
- * "component test, not a flow" framing) — a real "seed via API, load the
- * page, expect the persisted policy to render" round trip is not currently
- * possible for either surface. The alias-normalization contract itself
- * (AC-003.1) is still verified for real over HTTP, via the API layer.
+ * The catch-up-policy controls below are still proven through pure
+ * client-side interaction (matching AC-003.8's own "component test, not a
+ * flow" framing) — that needs no server round trip and stays as-is.
+ *
+ * HISTORICAL NOTE, now closed: `apps/web/lib/state/slices/office/types.ts`'s
+ * `Routine` type declared every multi-word field in camelCase while the
+ * backend bound and serialized all of them snake_case, so neither the
+ * Create Routine dialog's submit nor the detail view's Save round-tripped
+ * any of those fields, and a real "seed via API, load the page, expect the
+ * persisted policy to render" test was not possible for either surface.
+ * `docs/specs/office/requirements/routine-wire-contract.md` fixed the wire
+ * boundary; the last test below is that round trip, now that it exists.
  */
 
 const RETIRED_LABEL = /enqueue.?missed.?with.?cap/i;
@@ -43,11 +37,11 @@ async function assertCatchUpPolicyToggles(page: Page, catchUpMaxInput: () => Pro
   await catchUpMaxInput();
 
   await catchUpPolicyCombobox(page).click();
-  await page.getByRole("option", { name: "Skip missed" }).click();
+  await page.getByRole("option", { name: "Skip missed", exact: true }).click();
   await expect(page.getByText("Catch-up max", { exact: true })).toHaveCount(0);
 
   await catchUpPolicyCombobox(page).click();
-  await page.getByRole("option", { name: SUMMARIZE_MISSED_LABEL }).click();
+  await page.getByRole("option", { name: SUMMARIZE_MISSED_LABEL, exact: true }).click();
   await catchUpMaxInput();
 
   await expect(page.getByText(RETIRED_LABEL)).toHaveCount(0);
@@ -67,7 +61,7 @@ test.describe("Routine catch-up policy UI", () => {
       .locator("..")
       .getByRole("combobox")
       .click();
-    await testPage.getByRole("option", { name: "CEO" }).click();
+    await testPage.getByRole("option", { name: "CEO", exact: true }).click();
     await testPage.getByRole("button", { name: "Next" }).click();
     await testPage.getByRole("button", { name: "Next" }).click();
 
@@ -92,7 +86,7 @@ test.describe("Routine catch-up policy UI", () => {
     expect(routine.id).toBeTruthy();
 
     await testPage.goto(`/office/routines/${routine.id}`);
-    await expect(testPage.getByText("E2E Catch-up Detail Toggle")).toBeVisible({
+    await expect(testPage.getByText("E2E Catch-up Detail Toggle").last()).toBeVisible({
       timeout: 10_000,
     });
 
@@ -127,5 +121,46 @@ test.describe("Routine catch-up policy UI", () => {
     await testPage.goto(`/office/routines/${routine.id}`);
     await expect(testPage.getByText("E2E Catch-up Legacy Alias")).toBeVisible({ timeout: 10_000 });
     await expect(testPage.getByText(RETIRED_LABEL)).toHaveCount(0);
+  });
+
+  test("detail view: seeded non-default catch-up policy renders and Save persists a change", async ({
+    officeApi,
+    officeSeed,
+    testPage,
+  }) => {
+    // AC-OFFICE-ROUTINE-WIRE-003.1: seeded via the raw snake_case wire key,
+    // read back through the fixed adapter rather than the hardcoded
+    // `summarize_missed` UI default every routine rendered as before.
+    const routine = (await officeApi.createRoutine(officeSeed.workspaceId, {
+      name: "E2E Catch-up Wire Round Trip",
+      catch_up_policy: "skip_missed",
+    })) as { id: string };
+    expect(routine.id).toBeTruthy();
+
+    await testPage.goto(`/office/routines/${routine.id}`);
+    await expect(testPage.getByText("E2E Catch-up Wire Round Trip")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(catchUpPolicyCombobox(testPage)).toHaveText("Skip missed");
+    await expect(testPage.getByText("Catch-up max", { exact: true })).toHaveCount(0);
+
+    // AC-OFFICE-ROUTINE-WIRE-001.4: Save round-trips the change back to the
+    // server under the wire's snake_case key.
+    await catchUpPolicyCombobox(testPage).click();
+    await testPage.getByRole("option", { name: SUMMARIZE_MISSED_LABEL }).click();
+    await testPage.getByRole("button", { name: "Save" }).click();
+    // A successful save calls `router.refresh()` (`window.location.reload()`
+    // in this SPA — pre-existing, unchanged by this capability), which races
+    // the success toast off the page before it can be observed. Wait for the
+    // reload and read the freshly-seeded form instead, which also proves the
+    // read path round-trips what this save just wrote.
+    await testPage.waitForLoadState("load");
+    await expect(testPage.getByText("E2E Catch-up Wire Round Trip")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(catchUpPolicyCombobox(testPage)).toHaveText(SUMMARIZE_MISSED_LABEL);
+
+    const stored = await officeApi.getRoutine(routine.id);
+    expect(stored["catch_up_policy"]).toBe("summarize_missed");
   });
 });

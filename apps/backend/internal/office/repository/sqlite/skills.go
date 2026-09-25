@@ -428,9 +428,16 @@ func (r *Repository) CreateRunSkillSnapshots(ctx context.Context, snapshots []mo
 	}
 	defer func() { _ = tx.Rollback() }()
 	stmt, err := tx.PreparexContext(ctx, r.db.Rebind(`
-		INSERT OR REPLACE INTO office_run_skills (
-			run_id, skill_id, version, content_hash, materialized_path
-		) VALUES (?, ?, ?, ?, ?)
+		INSERT INTO office_run_skills (
+			run_id, skill_id, display_name, slug, label_source, version, content_hash, materialized_path
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (run_id, skill_id) DO UPDATE SET
+			display_name = excluded.display_name,
+			slug = excluded.slug,
+			label_source = excluded.label_source,
+			version = excluded.version,
+			content_hash = excluded.content_hash,
+			materialized_path = excluded.materialized_path
 	`))
 	if err != nil {
 		return err
@@ -438,8 +445,8 @@ func (r *Repository) CreateRunSkillSnapshots(ctx context.Context, snapshots []mo
 	defer func() { _ = stmt.Close() }()
 	for _, snap := range snapshots {
 		if _, err := stmt.ExecContext(ctx,
-			snap.RunID, snap.SkillID, snap.Version,
-			snap.ContentHash, snap.MaterializedPath,
+			snap.RunID, snap.SkillID, snap.DisplayName, snap.Slug,
+			snap.LabelSource, snap.Version, snap.ContentHash, snap.MaterializedPath,
 		); err != nil {
 			return err
 		}

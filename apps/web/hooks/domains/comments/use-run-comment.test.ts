@@ -7,6 +7,13 @@ import type {
   PlanComment,
   WalkthroughComment,
 } from "@/lib/state/slices/comments";
+import {
+  makeDiffComment,
+  makePlanComment,
+  makeWalkthroughComment,
+  makeAgentMessageComment,
+  makeReviewFileComment,
+} from "./use-run-comment.test-helpers";
 import { WebSocketRequestError } from "@/lib/ws/request-error";
 
 // ---------------------------------------------------------------------------
@@ -150,78 +157,6 @@ function makeStoreState(sessionState: string, planMode = false, foregroundActivi
   };
 }
 
-function makeDiffComment(text = "fix this"): DiffComment {
-  return {
-    id: "c-1",
-    source: "diff",
-    sessionId: "sess-1",
-    filePath: "src/app.ts",
-    startLine: 10,
-    endLine: 12,
-    side: "additions",
-    codeContent: "const x = 1;",
-    text,
-    createdAt: new Date().toISOString(),
-    status: "pending",
-  };
-}
-
-function makePlanComment(text = "split step 2"): PlanComment {
-  return {
-    id: "c-2",
-    source: "plan",
-    sessionId: "",
-    taskId: "task-1",
-    planId: "plan-1",
-    version: 2,
-    text,
-    selectedText: "step 2",
-    createdAt: new Date().toISOString(),
-    status: "pending",
-  };
-}
-
-function makeWalkthroughComment(text = "explain this step"): WalkthroughComment {
-  return {
-    id: "c-3",
-    source: "walkthrough",
-    sessionId: "sess-1",
-    taskId: "task-1",
-    walkthroughId: "wt-1",
-    walkthroughTitle: "Tour",
-    stepIndex: 0,
-    stepCount: 2,
-    filePath: "src/app.ts",
-    startLine: 10,
-    endLine: 12,
-    stepText: "Agent explanation",
-    text,
-    createdAt: new Date().toISOString(),
-    status: "pending",
-  };
-}
-
-function makeAgentMessageComment(text = "expand this answer"): AgentMessageComment {
-  return {
-    id: "c-4",
-    source: "agent-message",
-    sessionId: "sess-1",
-    messageId: "reply-1",
-    selectedText: "settled answer",
-    anchor: {
-      messageId: "reply-1",
-      start: 0,
-      end: 14,
-      selectedText: "settled answer",
-      prefix: "",
-      suffix: "",
-    },
-    text,
-    createdAt: new Date().toISOString(),
-    status: "pending",
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -248,28 +183,32 @@ function setup() {
 describe("useRunComment — idle agent sends directly", () => {
   beforeEach(setup);
 
-  it("sends directly via message.add when agent is idle", async () => {
-    mockStoreState = makeStoreState("WAITING_FOR_INPUT");
-    const { result } = renderCommentHook();
+  it.each(["diff", "review-file"] as const)(
+    "sends %s directly via message.add when agent is idle",
+    async (source) => {
+      mockStoreState = makeStoreState("WAITING_FOR_INPUT");
+      const { result } = renderCommentHook();
 
-    let res: { queued: boolean } | undefined;
-    await act(async () => {
-      res = await result.current.runComment(makeDiffComment());
-    });
-
-    expect(res).toEqual({ queued: false });
-    expect(mockRequest).toHaveBeenCalledWith(
-      "message.add",
-      expect.objectContaining({
-        task_id: "task-1",
-        session_id: "sess-1",
-        has_review_comments: true,
-      }),
-      10000,
-    );
-    expect(mockAppendToQueue).not.toHaveBeenCalled();
-    expect(mockMarkCommentsSent).toHaveBeenCalledWith(["c-1"]);
-  });
+      await act(async () => {
+        await expect(
+          result.current.runComment(
+            source === "diff" ? makeDiffComment() : makeReviewFileComment(),
+          ),
+        ).resolves.toEqual({ queued: false });
+      });
+      expect(mockRequest).toHaveBeenCalledWith(
+        "message.add",
+        expect.objectContaining({
+          task_id: "task-1",
+          session_id: "sess-1",
+          has_review_comments: true,
+        }),
+        10000,
+      );
+      expect(mockAppendToQueue).not.toHaveBeenCalled();
+      expect(mockMarkCommentsSent).toHaveBeenCalledWith(["c-1"]);
+    },
+  );
 
   it("sends directly for a CREATED session so its first prompt can start the agent", async () => {
     mockStoreState = makeStoreState("CREATED");

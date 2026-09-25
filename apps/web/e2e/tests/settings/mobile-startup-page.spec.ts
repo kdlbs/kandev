@@ -66,9 +66,9 @@ test.describe("Mobile Threads Home default", () => {
     await expect(radio).toBeChecked();
     await testPage.getByRole("link", { name: "Home", exact: true }).tap();
     await expectThreadsHome(testPage, seedData.workspaceId);
-    await mobile.mobileMenuButton.tap();
+    await mobile.viewOptionsButton.tap();
     await testPage
-      .getByRole("dialog", { name: "Menu" })
+      .getByRole("dialog", { name: "View options" })
       .getByRole("radio", { name: "List", exact: true })
       .tap();
     await expectEmptyList(testPage);

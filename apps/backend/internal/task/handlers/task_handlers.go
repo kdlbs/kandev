@@ -33,6 +33,7 @@ type handlerRepo interface {
 type TaskHandlers struct {
 	service                       *service.Service
 	orchestrator                  OrchestratorStarter
+	movePreviewer                 WorkflowMovePreviewer
 	foregroundActivity            dto.ForegroundActivityProvider
 	cancellationPending           dto.CancellationPendingProvider
 	parkedProjection              dto.ParkedProvider
@@ -139,6 +140,13 @@ type OrchestratorStarter interface {
 	EnsureSession(ctx context.Context, taskID string, opts ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error)
 }
 
+// WorkflowMovePreviewer is deliberately separate from OrchestratorStarter so
+// existing launch/ensure fakes and plugin adapters do not need to implement a
+// read-only advisory surface.
+type WorkflowMovePreviewer interface {
+	PreviewWorkflowMove(context.Context, orchestrator.WorkflowMovePreviewRequest) (*orchestrator.WorkflowMovePreview, error)
+}
+
 func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
 	h := &TaskHandlers{
 		service:      svc,
@@ -146,6 +154,9 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 		repo:         repo,
 		planService:  planService,
 		logger:       log.WithFields(zap.String("component", "task-task-handlers")),
+	}
+	if previewer, ok := orchestrator.(WorkflowMovePreviewer); ok {
+		h.movePreviewer = previewer
 	}
 	// The orchestrator also surfaces the in-memory fine-grained busy substate
 	// (ADR-0049). Derive the narrow provider from it so the
@@ -185,6 +196,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workspaces/:id/tasks/by-external-id", h.httpGetTaskByExternalID)
 	api.DELETE("/workspaces/:id/tasks/by-external-id", h.httpReleaseTaskExternalID)
 	api.GET("/tasks/:id", h.httpGetTask)
+	api.GET("/tasks/:id/archive-source-manifest", h.httpGetArchiveSourceManifest)
 	api.GET("/tasks/:id/context", h.httpGetTaskContext)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.POST("/task-sessions/:id/last-agent-error/dismiss", h.httpDismissLastAgentError)
@@ -203,6 +215,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/workspace-sources", h.httpAttachWorkspaceSources)
 	api.PATCH("/tasks/:id/repositories/:repo_id", h.httpUpdateTaskRepository)
 	api.POST("/tasks/:id/move", h.httpMoveTask)
+	api.POST("/tasks/:id/move-preview", h.httpMoveTaskPreview)
 	api.DELETE("/tasks/:id", h.httpDeleteTask)
 	api.POST("/tasks/:id/archive", h.httpArchiveTask)
 	api.POST("/tasks/:id/unarchive", h.httpUnarchiveTask)
@@ -272,6 +285,11 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentCreate, h.wsCreateTaskPlanComment)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentUpdate, h.wsUpdateTaskPlanComment)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentDelete, h.wsDeleteTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackList, h.wsListTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackCreate, h.wsCreateTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackUpdate, h.wsUpdateTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackDelete, h.wsDeleteTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackClear, h.wsClearTaskPreviewFeedback)
 }
 
 // convertToServiceRepos converts dto.TaskRepositoryInput slice to service.TaskRepositoryInput slice.
@@ -279,6 +297,7 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 	result := make([]service.TaskRepositoryInput, len(repos))
 	for i, r := range repos {
 		result[i] = service.TaskRepositoryInput{
+			CheckoutOptions:    r.CheckoutOptions,
 			RepositoryID:       r.RepositoryID,
 			BaseBranch:         r.BaseBranch,
 			CheckoutBranch:     r.CheckoutBranch,

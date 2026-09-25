@@ -44,7 +44,7 @@ describe("MainTopBarPluginActions", () => {
     expect(screen.getByTestId("plugin-app-bar").textContent).toBe("null");
   });
 
-  it("passes mobile presentation and applies the native icon-button contract", () => {
+  it("passes mobile presentation and preserves touch targets for labeled controls", () => {
     pluginRegistry.forPlugin("plugin-a").registerComponent(SLOT, ({ slotProps }) => {
       const ctx = slotProps as MainTopBarSlotProps;
       return (
@@ -59,7 +59,7 @@ describe("MainTopBarPluginActions", () => {
 
     expect(screen.getByTestId("plugin-button").textContent).toBe("mobile");
     expect(screen.getByTestId("mobile-main-top-bar-plugin-actions").className).toContain(
-      "[&_[data-slot=button]]:!size-8",
+      "[&_[data-slot=button]]:!min-h-11",
     );
   });
 });

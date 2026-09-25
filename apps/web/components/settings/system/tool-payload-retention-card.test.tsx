@@ -1,7 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SettingsSaveContributor } from "@/components/settings/settings-save-provider";
-import type { ToolPayloadRetentionStatus } from "@/lib/types/tool-payload-retention";
+import type {
+  ToolPayloadOperation,
+  ToolPayloadRetentionStatus,
+} from "@/lib/types/tool-payload-retention";
 import * as api from "@/lib/api/domains/tool-payload-retention-api";
 import { ToolPayloadRetentionCard } from "./tool-payload-retention-card";
 vi.mock("@/lib/api/domains/tool-payload-retention-api");
@@ -15,6 +18,9 @@ vi.mock("@/components/settings/settings-save-provider", () => ({
 }));
 const ENABLED_TEST_ID = "tool-payload-enabled";
 const AGE_TEST_ID = "tool-payload-age";
+const ERROR_TEST_ID = "tool-payload-error";
+const ANALYZE_TEST_ID = "tool-payload-analyze";
+const LAST_RUN_TEST_ID = "tool-payload-last-run";
 
 const baseline: ToolPayloadRetentionStatus = {
   supported: true,
@@ -31,6 +37,79 @@ async function open() {
   render(<ToolPayloadRetentionCard />);
   await screen.findByTestId(ENABLED_TEST_ID);
 }
+
+it("clears a recovered status polling error without manual refresh", async () => {
+  vi.useFakeTimers();
+  try {
+    const readError = new Error("status unavailable");
+    vi.mocked(api.fetchToolPayloadRetention)
+      .mockResolvedValueOnce(baseline)
+      .mockRejectedValueOnce(readError)
+      .mockResolvedValueOnce(baseline);
+    render(<ToolPayloadRetentionCard />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId(ENABLED_TEST_ID)).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.getByTestId(ERROR_TEST_ID)).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.queryByTestId(ERROR_TEST_ID)).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("preserves an action failure after status recovery", async () => {
+  vi.useFakeTimers();
+  try {
+    const actionError = new Error("analysis failed");
+    const failedRun: ToolPayloadOperation = {
+      id: "failed-run",
+      kind: "cleanup",
+      state: "failed",
+      scanned: 0,
+      eligible_tasks: 0,
+      eligible_messages: 0,
+      removed_messages: 0,
+      payload_bytes: 0,
+      skipped: {},
+      cutoff: "2026-01-01T00:00:00.000Z",
+      started_at: "2026-01-01T00:00:00.000Z",
+      finished_at: "2026-01-01T00:01:00.000Z",
+      error: "cleanup_failed",
+      age: baseline.policy.age,
+    };
+    vi.mocked(api.fetchToolPayloadRetention)
+      .mockResolvedValueOnce(baseline)
+      .mockResolvedValueOnce({ ...baseline, last_run: failedRun });
+    vi.mocked(api.analyzeToolPayloadRetention).mockRejectedValueOnce(actionError);
+    render(<ToolPayloadRetentionCard />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId(ENABLED_TEST_ID)).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId(ANALYZE_TEST_ID));
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId(ERROR_TEST_ID)).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.getByTestId(ERROR_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(LAST_RUN_TEST_ID).textContent).toMatch(/failed/i);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("requires an explicit backup choice before saving enablement and displays preparing", async () => {
   await open();
   fireEvent.click(screen.getByTestId(ENABLED_TEST_ID));
@@ -58,7 +137,7 @@ it("analyzes a disabled draft without saving or enabling", async () => {
   await open();
   fireEvent.change(screen.getByTestId(AGE_TEST_ID), { target: { value: "4" } });
   vi.mocked(api.analyzeToolPayloadRetention).mockResolvedValue({ operation_id: "analysis-1" });
-  fireEvent.click(screen.getByTestId("tool-payload-analyze"));
+  fireEvent.click(screen.getByTestId(ANALYZE_TEST_ID));
   await waitFor(() =>
     expect(api.analyzeToolPayloadRetention).toHaveBeenCalledWith({ value: 4, unit: "months" }),
   );
@@ -69,14 +148,14 @@ it("keeps member controls read only", async () => {
   admin = false;
   await open();
   expect(screen.getByTestId(ENABLED_TEST_ID).hasAttribute("disabled")).toBe(true);
-  expect(screen.getByTestId("tool-payload-analyze").hasAttribute("disabled")).toBe(true);
+  expect(screen.getByTestId(ANALYZE_TEST_ID).hasAttribute("disabled")).toBe(true);
   expect(api.analyzeToolPayloadRetention).not.toHaveBeenCalled();
 });
 it("rejects invalid ages without losing the disabled default", async () => {
   await open();
   fireEvent.change(screen.getByTestId(AGE_TEST_ID), { target: { value: "0" } });
   expect(contributor.canSave).toBe(false);
-  expect(screen.getByTestId("tool-payload-analyze").hasAttribute("disabled")).toBe(true);
+  expect(screen.getByTestId(ANALYZE_TEST_ID).hasAttribute("disabled")).toBe(true);
 });
 
 it("preserves edits made during a pending save against its normalized response", async () => {

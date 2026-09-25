@@ -1,7 +1,8 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-09-10
+updated: 2026-09-17
 owners:
   - kandev
 ---
@@ -79,6 +80,52 @@ removal, replacement eligibility, and recovery depend on the task lifecycle.
   restart a session because removal empties its session list. After confirmed
   failure, ordinary task behavior shall resume only for an available task.
 
+### REQ-TASKS-REMOVAL-NAVIGATION-003: Immediate archive visibility
+
+**Intent:** Show accepted archive targets as busy until they are removed from
+active task navigation after the archive operation completes.
+
+#### Acceptance criteria
+
+- **AC-TASKS-REMOVAL-NAVIGATION-003.1:** After archive acceptance, every visible
+  active task in the removal set shall remain in the desktop sidebar and phone
+  task picker in a dimmed, busy state with a spinner on the next render, before
+  the archive request, destination lookup, or live event completes. The row
+  shall keep its place and expose no stale interactive state. Opening or
+  cancelling confirmation shall leave rows unchanged.
+- **AC-TASKS-REMOVAL-NAVIGATION-003.2:** Refreshes and live updates during the
+  operation shall preserve the pending presentation. Successful targets shall
+  be removed after completion and failed targets that remain active shall return
+  to their normal presentation without overwriting newer task data or user
+  navigation. Bulk partial failure shall restore only failed targets.
+- **AC-TASKS-REMOVAL-NAVIGATION-003.3:** Archiving an unselected task shall leave
+  the selected task and route unchanged. Non-cascade archive shall not hide
+  surviving subtasks. Existing archived-inclusive saved views shall continue to
+  show confirmed archived tasks according to their filters; pending archive
+  intent shall not manufacture a confirmed archived task.
+
+### REQ-TASKS-REMOVAL-NAVIGATION-004: Archive progress feedback
+
+**Intent:** Give users persistent, truthful feedback when a user-initiated
+archive request takes time to finish.
+
+#### Acceptance criteria
+
+- **AC-TASKS-REMOVAL-NAVIGATION-004.1:** When a user accepts an archive action
+  from any desktop or phone task surface, the system shall show one localized
+  loading toast for that operation or bulk batch in the existing bottom-right
+  toast stack. The English source copy shall read `Archiving in progress`, the
+  toast shall include a loading indicator, and the existing polite live region
+  shall announce it.
+- **AC-TASKS-REMOVAL-NAVIGATION-004.2:** The archive progress toast shall not
+  auto-dismiss while any archive request in its operation or batch remains
+  pending. After every request settles, the progress toast shall disappear and
+  the existing success or failure feedback shall remain the only terminal
+  notification.
+- **AC-TASKS-REMOVAL-NAVIGATION-004.3:** Cancelling or dismissing archive
+  confirmation shall show no progress toast and issue no request. Programmatic,
+  API, CLI, MCP, and agent-driven archive operations shall remain unchanged.
+
 ## Compatibility and exclusions
 
 Existing archive confirmation preferences and cascade choices remain governed
@@ -88,7 +135,7 @@ This adds local user-action presentation guarantees; it does not change task API
 permissions, session-only deletion, Quick Chat expiration/close, or server cleanup.
 Remote/API/MCP removal retains existing lifecycle reconciliation and redirects.
 Cold unavailable task routes retain [their current contract](missing-task-route-recovery.md).
-Undo, animations, new settings, and a new mobile navigation composition are excluded.
+Undo, new settings, and a new mobile navigation composition are excluded.
 
 ## System design
 
@@ -97,3 +144,6 @@ Undo, animations, new settings, and a new mobile navigation composition are excl
 ## Implementation plans
 
 - [Task removal navigation](../../../plans/task-removal-navigation/plan.md)
+
+- [Immediate sidebar archive](../../../plans/immediate-sidebar-archive/plan.md)
+- [Archive progress feedback](../../../plans/archive-progress-feedback/plan.md)

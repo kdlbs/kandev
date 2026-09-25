@@ -64,9 +64,12 @@ func TestUpdateTaskPlanKandev_ToolDescription_CoversAC006(t *testing.T) {
 		assert.Contains(t, desc, "only an addition")
 	})
 
-	t.Run("006.2 retains the destructive warning scoped to replace", func(t *testing.T) {
-		assert.Contains(t, desc, "replace mode")
-		assert.Contains(t, desc, "silently delete everything else")
+	t.Run("006.2 describes guarded replace correction", func(t *testing.T) {
+		assert.Contains(t, desc, "Replace mode")
+		assert.Contains(t, desc, "expected_version")
+		assert.Contains(t, desc, "rejected before mutation")
+		assert.Contains(t, desc, "edit_task_plan_kandev")
+		assert.NotContains(t, desc, "silently delete everything else")
 	})
 
 	t.Run("006.3 states the blank-line separator", func(t *testing.T) {
