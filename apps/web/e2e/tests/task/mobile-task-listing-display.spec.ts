@@ -94,7 +94,10 @@ test.describe("Mobile task listing display preferences", () => {
     const taskDetailsToggle = tasksMenu.getByTestId("mobile-display-task-details-toggle");
     const settingsSaved = ws.waitForResponse("user.settings.update", { timeout: 15_000 });
     await taskDetailsToggle.tap();
-    await settingsSaved;
+    const savedSettings = await settingsSaved;
+    expect(savedSettings.payload).toMatchObject({
+      settings: { tasks_list_show_details: true },
+    });
     await expect(taskDetailsToggle).toHaveAttribute("aria-checked", "true");
     await expect
       .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_show_details, {
@@ -104,6 +107,10 @@ test.describe("Mobile task listing display preferences", () => {
       .toBe(true);
     await testPage.keyboard.press("Escape");
     await expect(tasksMenu).toHaveCount(0);
+
+    await testPage.reload();
+    await expect(testPage.getByTestId("tasks-list")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/tasks/);
 
     const row = testPage.getByTestId("tasks-list-row").filter({ hasText: TASK_TITLE });
     await expect(row).toContainText(SEEDED_REPOSITORY_LABEL);

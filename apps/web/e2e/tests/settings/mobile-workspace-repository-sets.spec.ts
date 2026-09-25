@@ -115,21 +115,26 @@ test.describe("Mobile workspace repository sets", () => {
       "Add repositories in task order. Base branches are optional.",
     );
     const addRepository = testPage.getByTestId("repository-set-add-repository");
-    const membersLayout = await membersHint.evaluate((hint) => {
-      const addControl = document.querySelector<HTMLElement>(
-        '[data-testid="repository-set-add-repository"]',
-      );
-      if (!addControl) return null;
-      const hintBox = hint.getBoundingClientRect();
-      const addBox = addControl.getBoundingClientRect();
-      return {
-        hint: { y: hintBox.y, height: hintBox.height, width: hintBox.width },
-        add: { y: addBox.y, width: addBox.width },
-      };
-    });
-    if (!membersLayout) throw new Error("repository section controls are not mounted");
-    expect(membersLayout.add.y).toBeGreaterThan(membersLayout.hint.y + membersLayout.hint.height);
-    expect(membersLayout.add.width).toBeCloseTo(membersLayout.hint.width, 0);
+    await waitForFiniteAnimations(surface);
+    await expect
+      .poll(
+        async () => {
+          const [hintBox, addBox] = await Promise.all([
+            membersHint.boundingBox(),
+            addRepository.boundingBox(),
+          ]);
+          return Boolean(hintBox && addBox && addBox.y > hintBox.y + hintBox.height);
+        },
+        { timeout: 10_000, message: "repository selector should follow its task-order hint" },
+      )
+      .toBe(true);
+    const [membersHintBox, addRepositoryBox] = await Promise.all([
+      membersHint.boundingBox(),
+      addRepository.boundingBox(),
+    ]);
+    expect(membersHintBox).not.toBeNull();
+    expect(addRepositoryBox).not.toBeNull();
+    expect(addRepositoryBox!.width).toBeCloseTo(membersHintBox!.width, 0);
     await testPage.getByTestId(`repository-set-remove-${seedData.repositoryId}`).tap();
     await addRepository.tap();
     await testPage.getByRole("option", { name: /E2E Repo/ }).tap();
