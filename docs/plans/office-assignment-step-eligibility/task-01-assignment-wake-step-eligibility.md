@@ -8,9 +8,15 @@ plan: "plan.md"
 requirements:
   - REQ-OFFICE-SCHEDULER-002
   - REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001
+acceptance_criteria:
+  - AC-OFFICE-SCHEDULER-002.1
+  - AC-OFFICE-SCHEDULER-002.2
+  - AC-OFFICE-SCHEDULER-002.3
+  - AC-OFFICE-SCHEDULER-002.4
+  - AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001.2
 system_design:
-  - docs/specs/office/system-design/scheduler-01.md
-  - docs/specs/tasks/system-design/workflow-explicit-completion-signal.md
+  - ../../specs/office/system-design/scheduler-01.md
+  - ../../specs/tasks/system-design/workflow-explicit-completion-signal.md
 ---
 
 # Task 01: Gate assignment wakes on workflow step auto-start eligibility

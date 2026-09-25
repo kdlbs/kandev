@@ -1,5 +1,11 @@
 ---
-spec: docs/specs/office/requirements/scheduler.md
+system: office
+requirements:
+  - REQ-OFFICE-SCHEDULER-002
+  - REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001
+system_design:
+  - ../../specs/office/system-design/scheduler-01.md
+  - ../../specs/tasks/system-design/workflow-explicit-completion-signal.md
 created: 2026-09-26
 status: done
 ---
