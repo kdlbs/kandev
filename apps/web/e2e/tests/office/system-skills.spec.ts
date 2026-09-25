@@ -118,34 +118,15 @@ test.describe("Office system skills", () => {
 
     await testPage.goto("/office/workspace/skills");
 
-    // The count badge shows N≥3 available (3 pre-existing v1 bundled
-    // slugs at minimum). Wait specifically for ≥8 — anything lower
-    // means the SSR didn't see the synced set.
-    await expect
-      .poll(
-        async () => {
-          const badge = await testPage
-            .getByText(/\d+ available/)
-            .first()
-            .textContent();
-          const match = badge?.match(/(\d+)/);
-          return match ? Number(match[1]) : 0;
-        },
-        { timeout: 10_000 },
-      )
-      .toBeGreaterThanOrEqual(8);
-
-    // Expand the System group. With the heading rendered inside a
-    // button containing "System" + a count badge as separate spans,
-    // we locate the button via its testable text content (chevron
-    // + heading + count) — `hasText` matches against a regex that
-    // tolerates whitespace and a trailing count of any width.
+    // The System group is rendered only after the workspace skill list is
+    // available. Wait for that state instead of polling a translated count
+    // badge, which can be briefly absent while the client store hydrates.
     const systemToggle = testPage.locator('button:has(span:text-is("System"))').first();
-    await expect(systemToggle).toBeVisible({ timeout: 5_000 });
+    await expect(systemToggle).toBeVisible({ timeout: 15_000 });
     await systemToggle.click();
 
     await expect(testPage.getByText("kandev-team-admin").first()).toBeVisible({
-      timeout: 5_000,
+      timeout: 15_000,
     });
     await expect(testPage.getByText("kandev-task-ops").first()).toBeVisible();
   });

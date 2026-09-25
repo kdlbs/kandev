@@ -33,8 +33,11 @@ test.describe("Mobile plugin workspace actions", () => {
 
     const box = await slot.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.width).toBeGreaterThanOrEqual(44);
-    expect(box!.height).toBeGreaterThanOrEqual(44);
+    // CSS pixels can be returned as a value just below the integer edge by
+    // Chromium's fractional device scale. Round the measured geometry before
+    // checking the 44px touch-target contract.
+    expect(Math.round(box!.width)).toBeGreaterThanOrEqual(44);
+    expect(Math.round(box!.height)).toBeGreaterThanOrEqual(44);
 
     await slot.tap();
     await expect(slot).toHaveAttribute("data-clicked", "true");

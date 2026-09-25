@@ -45,11 +45,14 @@ async function createTaskAndWaitForDone(
   return task;
 }
 
-/** Navigate via the kanban board to a task by title and wait for the session view. */
-async function navigateToTaskViaKanban(page: Page, title: string): Promise<SessionPage> {
+/** Navigate via the kanban board to a task and wait for the session view. */
+async function navigateToTaskViaKanban(page: Page, taskId: string): Promise<SessionPage> {
   const kanban = new KanbanPage(page);
   await kanban.goto();
-  const card = kanban.taskCardByTitle(title);
+  // The API task id is stable while the card title can be translated or still
+  // be settling in the board projection after the task reaches a terminal
+  // state.
+  const card = kanban.taskCard(taskId);
   await expect(card).toBeVisible({ timeout: 15_000 });
   await card.click();
   await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
@@ -79,9 +82,9 @@ test.describe("Terminal hangs on Connecting", () => {
     seedData,
   }) => {
     test.setTimeout(60_000);
-    await createTaskAndWaitForDone(apiClient, seedData, "Cold Load Terminal Task");
+    const task = await createTaskAndWaitForDone(apiClient, seedData, "Cold Load Terminal Task");
 
-    const session = await navigateToTaskViaKanban(testPage, "Cold Load Terminal Task");
+    const session = await navigateToTaskViaKanban(testPage, task.id);
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
   });
@@ -101,19 +104,19 @@ test.describe("Terminal hangs on Connecting", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    await createTaskAndWaitForDone(apiClient, seedData, "Switch Task Alpha");
-    await createTaskAndWaitForDone(apiClient, seedData, "Switch Task Beta");
+    const alpha = await createTaskAndWaitForDone(apiClient, seedData, "Switch Task Alpha");
+    const beta = await createTaskAndWaitForDone(apiClient, seedData, "Switch Task Beta");
 
-    const session = await navigateToTaskViaKanban(testPage, "Switch Task Alpha");
+    const session = await navigateToTaskViaKanban(testPage, alpha.id);
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
     // Now switch to task Beta via the kanban board — full client-side nav.
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    const beta = kanban.taskCardByTitle("Switch Task Beta");
-    await expect(beta).toBeVisible({ timeout: 15_000 });
-    await beta.click();
+    const betaCard = kanban.taskCard(beta.id);
+    await expect(betaCard).toBeVisible({ timeout: 15_000 });
+    await betaCard.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const sessionB = new SessionPage(testPage);

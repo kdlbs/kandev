@@ -60,8 +60,21 @@ async function setupTask({
     .poll(
       async () => {
         const environment = await apiClient.getTaskEnvironment(task.id);
-        workspacePath = environment?.workspace_path ?? environment?.repos?.[0]?.worktree_path ?? "";
-        return Boolean(workspacePath && fs.existsSync(path.join(workspacePath, requiredPath)));
+        const repositoryWorktree = environment?.repos?.find(
+          (repository) => repository.repository_id === seedData.repositoryId,
+        )?.worktree_path;
+        // The environment root and the repository checkout are separate
+        // paths. The executor can publish either path first, so check every
+        // advertised candidate and keep the one that contains the fixture.
+        const candidatePaths = [
+          repositoryWorktree,
+          environment?.workspace_path,
+          environment?.worktree_path,
+        ].filter((candidate): candidate is string => Boolean(candidate));
+        workspacePath =
+          candidatePaths.find((candidate) => fs.existsSync(path.join(candidate, requiredPath))) ??
+          "";
+        return workspacePath !== "";
       },
       { timeout: 60_000, message: `Waiting for ${requiredPath} in the ${taskTitle} worktree` },
     )
