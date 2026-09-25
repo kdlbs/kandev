@@ -340,7 +340,12 @@ func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.C
 			if !ok {
 				return
 			}
-			if deliveryStreamID != "" && notification.DeliveryStreamID == deliveryStreamID && notification.DeliverySequence > 0 && notification.DeliverySequence <= after {
+			if deliveryStreamID != "" && notification.DeliveryStreamID == deliveryStreamID && notification.DeliverySequence > 0 {
+				var stop bool
+				after, stop = s.writeDurableAgentStreamEvent(ctx, after, deliveryStreamID, notification, writeMessage)
+				if stop {
+					return
+				}
 				continue
 			}
 			if !s.writeAgentStreamNotification(notification, writeMessage, false) {
@@ -356,6 +361,63 @@ func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.C
 			}
 		}
 	}
+}
+
+func (s *Server) writeDurableAgentStreamEvent(
+	ctx context.Context,
+	after uint64,
+	deliveryStreamID string,
+	notification adapter.AgentEvent,
+	writeMessage func([]byte) error,
+) (uint64, bool) {
+	if notification.DeliverySequence <= after {
+		return after, false
+	}
+	if notification.DeliverySequence-after > 1 {
+		return s.replayAgentStreamGap(ctx, after, deliveryStreamID, notification, writeMessage)
+	}
+	if !s.writeAgentStreamNotification(notification, writeMessage, false) {
+		return after, true
+	}
+	return notification.DeliverySequence, false
+}
+
+func (s *Server) replayAgentStreamGap(
+	ctx context.Context,
+	after uint64,
+	deliveryStreamID string,
+	notification adapter.AgentEvent,
+	writeMessage func([]byte) error,
+) (uint64, bool) {
+	replayedAfter, err := s.replayAgentStream(ctx, after, func(replayed adapter.AgentEvent) error {
+		if !s.writeAgentStreamNotification(replayed, writeMessage, true) {
+			return errAgentStreamReplayStopped
+		}
+		return nil
+	})
+	if err != nil {
+		s.logAgentStreamReplayFailure(err, deliveryStreamID, after, notification.DeliverySequence)
+		return after, true
+	}
+	if replayedAfter < notification.DeliverySequence {
+		s.logger.Error("durable replay did not reach live agent event",
+			zap.String("delivery_stream_id", deliveryStreamID),
+			zap.Uint64("replay_cursor", replayedAfter),
+			zap.Uint64("live_sequence", notification.DeliverySequence))
+		return after, true
+	}
+	return replayedAfter, false
+}
+
+func (s *Server) logAgentStreamReplayFailure(err error, deliveryStreamID string, after, liveSequence uint64) {
+	if errors.Is(err, errAgentStreamReplayStopped) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
+	s.logger.Error("failed to repair live agent delivery gap",
+		zap.String("delivery_stream_id", deliveryStreamID),
+		zap.Uint64("replay_cursor", after),
+		zap.Uint64("live_sequence", liveSequence),
+		zap.Error(err))
 }
 
 func (s *Server) writeAgentStreamNotification(notification adapter.AgentEvent, writeMessage func([]byte) error, replay bool) bool {

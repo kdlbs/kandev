@@ -509,9 +509,35 @@ test.describe("Code walkthrough", () => {
         await startButton.click();
         const sessionId = await activeTaskSessionId(testPage);
         await waitForSessionAgentctlReady(testPage, sessionId, 60_000);
-        await expect(
-          session.activeChat().getByText("reemit-first-done", { exact: false }),
-        ).toBeVisible({ timeout: 45_000 });
+        try {
+          await expect(
+            session.activeChat().getByText("reemit-first-done", { exact: false }),
+          ).toBeVisible({ timeout: 45_000 });
+        } catch (error) {
+          const [{ messages }, { sessions }] = await Promise.all([
+            apiClient.listSessionMessages(sessionId),
+            apiClient.listTaskSessions(task.id),
+          ]);
+          const failedSession = sessions.find((candidate) => candidate.id === sessionId);
+          const diagnostic = {
+            session: failedSession && {
+              id: failedSession.id,
+              state: failedSession.state,
+              updated_at: failedSession.updated_at,
+              agent_execution_id: failedSession.agent_execution_id,
+            },
+            messages: messages.map((message) => ({
+              author_type: message.author_type,
+              type: message.type,
+              content: message.content,
+              created_at: message.created_at,
+            })),
+          };
+          throw new Error(
+            `${error instanceof Error ? error.message : String(error)}\n` +
+              `First turn server state: ${JSON.stringify(diagnostic)}`,
+          );
+        }
 
         const { sessions } = await apiClient.listTaskSessions(task.id);
         const primarySession = sessions.find((candidate) => candidate.is_primary);

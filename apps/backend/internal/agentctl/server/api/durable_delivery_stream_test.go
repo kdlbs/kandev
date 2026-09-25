@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -142,6 +143,53 @@ func TestAgentStreamReplayLiveHandoff(t *testing.T) {
 		if sequence != uint64(i+1) {
 			t.Fatalf("handoff sequence at index %d = %d, want %d", i, sequence, i+1)
 		}
+	}
+}
+
+func TestAgentStreamWriterRepairsOutOfOrderDurableEvents(t *testing.T) {
+	server, _, deliveryJournal := newDurableDeliveryTestServer(t)
+	ctx := context.Background()
+
+	updates := make([]adapter.AgentEvent, 0, 3)
+	for _, text := range []string{"first", "second", "third"} {
+		payload, err := json.Marshal(adapter.AgentEvent{Type: adapter.EventTypeMessageChunk, Text: text})
+		if err != nil {
+			t.Fatalf("marshal %q: %v", text, err)
+		}
+		committed, err := deliveryJournal.Append(ctx, journal.Event{
+			SessionID: "session-1", IncarnationID: "session-1", HarnessGeneration: 1,
+			StreamID: "session-1", Type: adapter.EventTypeMessageChunk, Payload: payload,
+		})
+		if err != nil {
+			t.Fatalf("append %q: %v", text, err)
+		}
+		updates = append(updates, adapter.AgentEvent{
+			Type: adapter.EventTypeMessageChunk, Text: text,
+			DeliveryStreamID: committed.StreamID, DeliverySequence: committed.Sequence,
+		})
+	}
+
+	updatesCh := make(chan adapter.AgentEvent, len(updates))
+	updatesCh <- updates[0]
+	updatesCh <- updates[2]
+	updatesCh <- updates[1]
+
+	var got []uint64
+	writeMessage := func(data []byte) error {
+		var event adapter.AgentEvent
+		if err := json.Unmarshal(data, &event); err != nil {
+			return err
+		}
+		got = append(got, event.DeliverySequence)
+		if len(got) == len(updates) {
+			close(updatesCh)
+		}
+		return nil
+	}
+	server.runAgentStreamWriterLoop(ctx, nil, "stream-1", 0, "session-1", updatesCh, nil, writeMessage)
+
+	if want := []uint64{1, 2, 3}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("published durable sequence order = %v, want %v", got, want)
 	}
 }
 

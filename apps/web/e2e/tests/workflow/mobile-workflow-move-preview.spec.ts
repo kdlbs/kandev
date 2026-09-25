@@ -53,10 +53,20 @@ test.describe("mobile: workflow move preview", () => {
     if (!targetStep) throw new Error("mobile move preview requires an adjacent target");
 
     const kanban = new KanbanPage(tabletTestPage);
-    await kanban.goto();
     const { settings } = await apiClient.getUserSettings();
     const previousPreviewOnClick = settings.enable_preview_on_click === true;
     await apiClient.saveUserSettings({ enable_preview_on_click: true });
+    const isMovePreviewRequest = movePreviewRequestPredicate(task.id, targetStep.id);
+    let requestCount = 0;
+    let requestPhase = "loading-board";
+    const previewRequestEvents: Array<{ phase: string; body: unknown }> = [];
+    const requestListener = (request: Request) => {
+      if (isMovePreviewRequest(request)) {
+        requestCount += 1;
+        previewRequestEvents.push({ phase: requestPhase, body: request.postDataJSON() });
+      }
+    };
+    tabletTestPage.on("request", requestListener);
     try {
       await kanban.goto();
       const card = kanban.taskCardByTitle("Mobile Move Preview Task");
@@ -69,10 +79,9 @@ test.describe("mobile: workflow move preview", () => {
       const trigger = previewPanel.getByTestId("workflow-stepper-minimal");
       await expect(trigger).toBeVisible({ timeout: 15_000 });
 
-      // The preview revision includes the task-session projection. Wait for
-      // that projection before opening the drawer, so its initial load cannot
-      // invalidate the first request and look like a refresh caused by the
-      // harmless bookkeeping updates below.
+      // Wait for the preview task-session and model projections before opening
+      // the drawer, so their initial loads cannot trigger a preview refresh.
+      const sessionId = task.primary_session_id ?? task.session_id ?? "";
       await tabletTestPage.waitForFunction(
         ({ taskId, sessionId }) => {
           const store = (window as PreviewStoreWindow).__KANDEV_E2E_STORE__;
@@ -90,137 +99,133 @@ test.describe("mobile: workflow move preview", () => {
             modelCatalog.models.length > 0
           );
         },
-        { taskId: task.id, sessionId: task.primary_session_id ?? task.session_id ?? "" },
+        { taskId: task.id, sessionId },
         { timeout: 15_000 },
       );
+      const requestsBeforeOpeningDisclosure = requestCount;
 
-      const isMovePreviewRequest = movePreviewRequestPredicate(task.id, targetStep.id);
-      let requestCount = 0;
-      const requestListener = (request: Request) => {
-        if (isMovePreviewRequest(request)) {
-          requestCount += 1;
-        }
-      };
-      tabletTestPage.on("request", requestListener);
+      requestPhase = "opening-disclosure";
+      await trigger.tap();
+      requestPhase = "disclosure-open";
 
-      try {
-        await trigger.tap();
+      const drawer = tabletTestPage.locator('[data-slot="drawer-content"][data-state="open"]');
+      await expect(drawer).toBeVisible();
+      const row = drawer.getByTestId(`workflow-step-disclosure-row-${targetStep.id}`);
+      await expect(row).toBeVisible();
+      const preview = row.getByTestId("workflow-move-preview");
+      await expect(preview).toBeVisible({ timeout: 15_000 });
+      await expect(preview).toContainText("Reuse current session");
+      await expect(preview).toContainText("mock-fast");
+      expect(
+        requestCount - requestsBeforeOpeningDisclosure,
+        `Move-preview requests: ${JSON.stringify(previewRequestEvents)}`,
+      ).toBe(1);
 
-        const drawer = tabletTestPage.locator('[data-slot="drawer-content"][data-state="open"]');
-        await expect(drawer).toBeVisible();
-        const row = drawer.getByTestId(`workflow-step-disclosure-row-${targetStep.id}`);
-        await expect(row).toBeVisible();
-        const preview = row.getByTestId("workflow-move-preview");
-        await expect(preview).toBeVisible({ timeout: 15_000 });
-        await expect(preview).toContainText("Reuse current session");
-        await expect(preview).toContainText("mock-fast");
-        expect(requestCount).toBe(1);
+      const move = row.getByTestId(`workflow-step-disclosure-move-${targetStep.id}`);
+      await expect(move).toBeVisible();
+      await expect(row.getByTestId("workflow-move-preview-details")).toHaveCount(0);
+      const labelBox = await row.getByText(targetStep.name, { exact: true }).boundingBox();
+      const moveBox = await move.boundingBox();
+      expect(labelBox).not.toBeNull();
+      expect(moveBox).not.toBeNull();
+      // Text glyph bounds and the 44px touch target use different font
+      // metrics on Chromium. Allow the normal glyph offset while still catching
+      // a row that is visibly off-center.
+      expect(
+        Math.abs(labelBox!.y + labelBox!.height / 2 - moveBox!.y - moveBox!.height / 2),
+      ).toBeLessThan(8);
+      await expect(preview).toHaveCSS("text-align", "left");
+      const detailsToggle = row.getByTestId(`workflow-step-disclosure-options-${targetStep.id}`);
+      const toggleBox = await detailsToggle.boundingBox();
+      expect(toggleBox).not.toBeNull();
+      if (!toggleBox) return;
+      expect(toggleBox.height).toBeGreaterThanOrEqual(44);
+      expect(toggleBox.width).toBeGreaterThanOrEqual(44);
+      requestPhase = "opening-options";
+      await detailsToggle.tap();
+      requestPhase = "options-open";
+      await expect(row.getByTestId("workflow-move-preview-details")).toBeVisible();
+      await dwell(
+        tabletTestPage,
+        500,
+        "negative-assertion",
+        "observe no duplicate preview request when opening move options",
+      );
+      expect(
+        requestCount - requestsBeforeOpeningDisclosure,
+        `Move-preview requests: ${JSON.stringify(previewRequestEvents)}`,
+      ).toBe(1);
 
-        const move = row.getByTestId(`workflow-step-disclosure-move-${targetStep.id}`);
-        await expect(move).toBeVisible();
-        await expect(row.getByTestId("workflow-move-preview-details")).toHaveCount(0);
-        const labelBox = await row.getByText(targetStep.name, { exact: true }).boundingBox();
-        const moveBox = await move.boundingBox();
-        expect(labelBox).not.toBeNull();
-        expect(moveBox).not.toBeNull();
-        // Text glyph bounds and the 44px touch target use different font
-        // metrics on Chromium. Keep the check strict enough to catch a row
-        // that is visibly off-center while allowing the normal glyph offset.
-        expect(
-          Math.abs(labelBox!.y + labelBox!.height / 2 - moveBox!.y - moveBox!.height / 2),
-        ).toBeLessThan(8);
-        await expect(preview).toHaveCSS("text-align", "left");
-        const detailsToggle = row.getByTestId(`workflow-step-disclosure-options-${targetStep.id}`);
-        const toggleBox = await detailsToggle.boundingBox();
-        expect(toggleBox).not.toBeNull();
-        if (!toggleBox) return;
-        expect(toggleBox.height).toBeGreaterThanOrEqual(44);
-        expect(toggleBox.width).toBeGreaterThanOrEqual(44);
-        await detailsToggle.tap();
-        await expect(row.getByTestId("workflow-move-preview-details")).toBeVisible();
-        await dwell(
-          tabletTestPage,
-          500,
-          "negative-assertion",
-          "observe no duplicate preview request when opening move options",
-        );
-        expect(requestCount).toBe(1);
-
-        let unexpectedRequest = false;
-        void tabletTestPage
-          .waitForRequest(isMovePreviewRequest)
-          .then(() => {
-            unexpectedRequest = true;
-          })
-          .catch(() => undefined);
-        for (const revision of [1, 2, 3]) {
-          await applyHarmlessPreviewUpdate(tabletTestPage, task.id, revision);
-        }
-        await dwell(
-          tabletTestPage,
-          500,
-          "negative-assertion",
-          "observe no move-preview refresh after harmless touch updates",
-        );
-        expect(unexpectedRequest).toBe(false);
-        expect(requestCount).toBe(1);
-        await expect(row.getByTestId("workflow-move-preview-details")).toBeVisible();
-        await expect(row.getByTestId("workflow-move-preview-loading")).toHaveCount(0);
-
-        const movePreviewUrl = `**/api/v1/tasks/${task.id}/move-preview`;
-        let releaseHeldRequest: (() => void) | undefined;
-        let resolveHeldRequest!: () => void;
-        const heldRequest = new Promise<void>((resolve) => {
-          resolveHeldRequest = resolve;
-        });
-        let held = false;
-        await tabletTestPage.route(movePreviewUrl, async (route) => {
-          if (isMovePreviewRequest(route.request()) && !held) {
-            held = true;
-            resolveHeldRequest();
-            await new Promise<void>((resolve) => {
-              releaseHeldRequest = resolve;
-            });
-          }
-          await route.continue();
-        });
-        try {
-          const currentTask = await apiClient.getTask(task.id);
-          const modelUpdate = apiClient.setSessionModel(
-            currentTask.primary_session_id,
-            "mock-slow",
-          );
-          await heldRequest;
-          expect(requestCount).toBe(2);
-          await expect(row.getByTestId("workflow-move-preview-loading")).toBeVisible();
-          releaseHeldRequest?.();
-          await modelUpdate;
-          await expect(preview).toContainText("mock-slow");
-        } finally {
-          releaseHeldRequest?.();
-          await tabletTestPage.unroute(movePreviewUrl);
-        }
-
-        for (const testId of [
-          "workflow-step-disclosure-options-" + targetStep.id,
-          "workflow-step-disclosure-move-" + targetStep.id,
-        ]) {
-          const box = await drawer.getByTestId(testId).boundingBox();
-          expect(box).not.toBeNull();
-          if (!box) return;
-          expect(box.height).toBeGreaterThanOrEqual(44);
-        }
-        await assertNoDocumentHorizontalOverflow(tabletTestPage);
-
-        await tabletTestPage.keyboard.press("Escape");
-        await expect(
-          tabletTestPage.locator('[data-slot="drawer-content"][data-state="open"]'),
-        ).toHaveCount(0);
-        await expect(trigger).toBeFocused();
-      } finally {
-        tabletTestPage.off("request", requestListener);
+      let unexpectedRequest = false;
+      void tabletTestPage
+        .waitForRequest(isMovePreviewRequest)
+        .then(() => {
+          unexpectedRequest = true;
+        })
+        .catch(() => undefined);
+      for (const revision of [1, 2, 3]) {
+        await applyHarmlessPreviewUpdate(tabletTestPage, task.id, revision);
       }
+      await dwell(
+        tabletTestPage,
+        500,
+        "negative-assertion",
+        "observe no move-preview refresh after harmless touch updates",
+      );
+      expect(unexpectedRequest).toBe(false);
+      expect(requestCount - requestsBeforeOpeningDisclosure).toBe(1);
+      await expect(row.getByTestId("workflow-move-preview-details")).toBeVisible();
+      await expect(row.getByTestId("workflow-move-preview-loading")).toHaveCount(0);
+
+      const movePreviewUrl = `**/api/v1/tasks/${task.id}/move-preview`;
+      let releaseHeldRequest: (() => void) | undefined;
+      let resolveHeldRequest!: () => void;
+      const heldRequest = new Promise<void>((resolve) => {
+        resolveHeldRequest = resolve;
+      });
+      let held = false;
+      await tabletTestPage.route(movePreviewUrl, async (route) => {
+        if (isMovePreviewRequest(route.request()) && !held) {
+          held = true;
+          resolveHeldRequest();
+          await new Promise<void>((resolve) => {
+            releaseHeldRequest = resolve;
+          });
+        }
+        await route.continue();
+      });
+      try {
+        const currentTask = await apiClient.getTask(task.id);
+        const modelUpdate = apiClient.setSessionModel(currentTask.primary_session_id, "mock-slow");
+        await heldRequest;
+        expect(requestCount - requestsBeforeOpeningDisclosure).toBe(2);
+        await expect(row.getByTestId("workflow-move-preview-loading")).toBeVisible();
+        releaseHeldRequest?.();
+        await modelUpdate;
+        await expect(preview).toContainText("mock-slow");
+      } finally {
+        releaseHeldRequest?.();
+        await tabletTestPage.unroute(movePreviewUrl);
+      }
+
+      for (const testId of [
+        "workflow-step-disclosure-options-" + targetStep.id,
+        "workflow-step-disclosure-move-" + targetStep.id,
+      ]) {
+        const box = await drawer.getByTestId(testId).boundingBox();
+        expect(box).not.toBeNull();
+        if (!box) return;
+        expect(box.height).toBeGreaterThanOrEqual(44);
+      }
+      await assertNoDocumentHorizontalOverflow(tabletTestPage);
+
+      await tabletTestPage.keyboard.press("Escape");
+      await expect(
+        tabletTestPage.locator('[data-slot="drawer-content"][data-state="open"]'),
+      ).toHaveCount(0);
+      await expect(trigger).toBeFocused();
     } finally {
+      tabletTestPage.off("request", requestListener);
       await apiClient.saveUserSettings({ enable_preview_on_click: previousPreviewOnClick });
     }
   });

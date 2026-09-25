@@ -256,6 +256,7 @@ function CompactWorkflowStepDisclosure({
       taskId={taskId}
       workflowId={workflowId}
       movingToStepId={movingToStepId}
+      previewEnabled={controls.open}
       isTouchSurface={usesTouchDrawer}
       progressByStepId={progressByStepId}
       agentLabelsByProfileId={agentLabelsByProfileId}
@@ -403,6 +404,7 @@ function StepDisclosureBody({
   taskId,
   workflowId,
   movingToStepId,
+  previewEnabled,
   isTouchSurface,
   progressByStepId,
   agentLabelsByProfileId,
@@ -414,6 +416,7 @@ function StepDisclosureBody({
   taskId: string;
   workflowId: string;
   movingToStepId: string | null;
+  previewEnabled: boolean;
   isTouchSurface: boolean;
   progressByStepId: Readonly<Record<string, WorkflowStepProgress>>;
   agentLabelsByProfileId: Readonly<Record<string, string>>;
@@ -452,7 +455,7 @@ function StepDisclosureBody({
             isTouchSurface={isTouchSurface}
             taskId={taskId}
             workflowId={workflowId}
-            previewEnabled={canMove}
+            previewEnabled={previewEnabled && canMove}
             progress={progressByStepId[step.id]}
             agentLabelsByProfileId={agentLabelsByProfileId}
             onMove={onMove}
