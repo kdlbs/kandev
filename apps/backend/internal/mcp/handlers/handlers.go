@@ -1936,7 +1936,11 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "parent task authority is required for terminal retention", nil)
 		}
 		target, err := h.taskSvc.GetTask(ctx, req.TaskID)
-		if err != nil || target == nil || target.ParentID != principal.CallerTaskID || target.WorkspaceID != principal.WorkspaceID {
+		if err != nil {
+			h.logger.Error("failed to load terminal retention target", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to load task", nil)
+		}
+		if target == nil || target.ParentID != principal.CallerTaskID || target.WorkspaceID != principal.WorkspaceID {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "parent task authority is required for terminal retention", nil)
 		}
 	}

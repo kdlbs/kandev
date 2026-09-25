@@ -130,3 +130,37 @@ func TestTerminalRetentionCannotBeSeededByTaskMetadata(t *testing.T) {
 		t.Fatalf("created metadata = %v, want ordinary key without retention hold", created)
 	}
 }
+
+func TestHeldChildPreventsParentCascadeArchive(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	workspace, err := repo.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range []*models.Task{
+		{ID: "retention-parent", WorkspaceID: workspace.ID, WorkflowID: workspace.OfficeWorkflowID, Title: "Parent"},
+		{ID: "retention-child", WorkspaceID: workspace.ID, WorkflowID: workspace.OfficeWorkflowID, ParentID: "retention-parent", Title: "Child"},
+	} {
+		if err := repo.CreateTask(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	held := true
+	if _, err := svc.UpdateTask(ctx, "retention-child", &UpdateTaskRequest{TerminalRetention: &held}); err != nil {
+		t.Fatal(err)
+	}
+	handoff := NewHandoffService(repo, repo, nil, nil, nil, nil)
+	if _, err := handoff.ArchiveTaskTree(ctx, "retention-parent", true); !errors.Is(err, ErrTaskArchiveHeld) {
+		t.Fatalf("cascade archive error = %v, want retention hold", err)
+	}
+	for _, id := range []string{"retention-parent", "retention-child"} {
+		task, err := repo.GetTask(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task.ArchivedAt != nil {
+			t.Fatalf("%s archived despite held child", id)
+		}
+	}
+}

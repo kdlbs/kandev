@@ -796,6 +796,9 @@ func (h *Handlers) handleArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 	if h.handoffSvc != nil {
 		out, err := h.handoffSvc.ArchiveTaskTree(ctx, taskID, false)
 		if err != nil {
+			if errors.Is(err, service.ErrTaskArchiveHeld) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
+			}
 			var postCommitErr *service.CascadePostCommitError
 			if !errors.As(err, &postCommitErr) {
 				h.logger.Error("failed to archive task", zap.Error(err))
@@ -816,6 +819,9 @@ func (h *Handlers) handleArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewResponse(msg.ID, msg.Action, response)
 	}
 	if err := h.taskSvc.ArchiveTask(ctx, taskID); err != nil {
+		if errors.Is(err, service.ErrTaskArchiveHeld) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
+		}
 		// Archiving is a goal-state operation: a task that is already archived
 		// is in the requested state, so report success instead of an opaque
 		// internal error. The flag lets the caller tell a no-op from a real

@@ -68,6 +68,9 @@ func wsHandleIDRequest(
 		if errors.Is(err, repository.ErrTaskNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
 		}
+		if errors.Is(err, service.ErrTaskArchiveHeld) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, errMsg, nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
