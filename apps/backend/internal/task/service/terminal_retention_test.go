@@ -67,3 +67,66 @@ func TestTerminalRetentionPreventsArchiveCleanupUntilCleared(t *testing.T) {
 		t.Fatalf("archive after clearing hold: %v", err)
 	}
 }
+
+func TestTerminalRetentionCannotBeChangedThroughOrdinaryMetadata(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	workspace, err := repo.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const taskID = "metadata-retention-task"
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: taskID, WorkspaceID: workspace.ID, WorkflowID: workspace.OfficeWorkflowID, Title: "Task",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	metadata := map[string]interface{}{models.MetaKeyTerminalRetention: true, "ordinary": "kept"}
+	updated, err := svc.UpdateTask(ctx, taskID, &UpdateTaskRequest{Metadata: metadata})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if models.IsTerminalRetentionHeld(updated.Metadata) || updated.Metadata["ordinary"] != "kept" {
+		t.Fatalf("replacement metadata = %v, want ordinary key without retention hold", updated.Metadata)
+	}
+	updated, err = svc.UpdateTaskMetadata(ctx, taskID, metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if models.IsTerminalRetentionHeld(updated.Metadata) {
+		t.Fatalf("merged metadata created retention hold: %v", updated.Metadata)
+	}
+	held := true
+	updated, err = svc.UpdateTask(ctx, taskID, &UpdateTaskRequest{TerminalRetention: &held})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !models.IsTerminalRetentionHeld(updated.Metadata) {
+		t.Fatal("scoped retention update did not set hold")
+	}
+	updated, err = svc.UpdateTask(ctx, taskID, &UpdateTaskRequest{Metadata: map[string]interface{}{
+		models.MetaKeyTerminalRetention: false,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !models.IsTerminalRetentionHeld(updated.Metadata) {
+		t.Fatalf("replacement metadata cleared retention hold: %v", updated.Metadata)
+	}
+	updated, err = svc.UpdateTaskMetadata(ctx, taskID, map[string]interface{}{models.MetaKeyTerminalRetention: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !models.IsTerminalRetentionHeld(updated.Metadata) {
+		t.Fatalf("merged metadata cleared retention hold: %v", updated.Metadata)
+	}
+}
+
+func TestTerminalRetentionCannotBeSeededByTaskMetadata(t *testing.T) {
+	created := protectedTaskMetadataForCreate(map[string]interface{}{
+		models.MetaKeyTerminalRetention: true, "ordinary": "kept",
+	}, false)
+	if models.IsTerminalRetentionHeld(created) || created["ordinary"] != "kept" {
+		t.Fatalf("created metadata = %v, want ordinary key without retention hold", created)
+	}
+}
