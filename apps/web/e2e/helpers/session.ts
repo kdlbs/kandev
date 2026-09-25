@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
 import type { SessionPage } from "../pages/session-page";
@@ -73,6 +73,29 @@ export async function waitForWorkspacePath(
     timeout,
     "Waiting for task workspace path",
   );
+}
+
+export async function waitForWorkspaceFile(
+  apiClient: ApiClient,
+  sessionId: string,
+  filePath: string,
+  timeout = 30_000,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        try {
+          const response = await apiClient.wsRequest<{
+            root?: { children?: Array<{ path?: string }> } | null;
+          }>("workspace.tree.get", { session_id: sessionId, path: "", depth: 1 });
+          return response.root?.children?.some((child) => child.path === filePath) ?? false;
+        } catch {
+          return false;
+        }
+      },
+      { timeout, message: `Waiting for ${filePath} in the task workspace` },
+    )
+    .toBe(true);
 }
 
 export async function waitForAgentMessage(
