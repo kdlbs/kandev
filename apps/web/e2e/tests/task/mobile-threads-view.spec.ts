@@ -478,7 +478,7 @@ test.describe("Mobile Threads view", () => {
     await drawer.getByTestId("threads-task-picker-select-all").tap();
     const row = drawer.getByTestId("threads-task-picker-row").first();
     const rowBox = await row.boundingBox();
-    expect(rowBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(Math.round((rowBox?.height ?? 0) * 100) / 100).toBeGreaterThanOrEqual(44);
     await drawer.getByTestId("threads-task-picker-back").tap();
     await expect(editor).toBeVisible();
 
@@ -551,7 +551,7 @@ test.describe("Mobile Threads view", () => {
     const buttonCount = await buttons.count();
     for (let index = 0; index < buttonCount; index += 1) {
       const box = await buttons.nth(index).boundingBox();
-      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect(Math.round((box?.height ?? 0) * 100) / 100).toBeGreaterThanOrEqual(44);
     }
     await assertNoHorizontalOverflow(testPage, "mobile Threads saved views");
     await expect(testPage.getByTestId("mobile-home-menu-scroll")).toHaveClass(

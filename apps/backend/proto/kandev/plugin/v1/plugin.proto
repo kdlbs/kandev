@@ -99,6 +99,12 @@ service Host {
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListSessionCodeStats(ListSessionCodeStatsRequest) returns (ListSessionCodeStatsResponse);
 
+  // Source-aware token usage — api_read:session_usage and
+  // api_write:session_usage. The source namespace is assigned by Kandev from
+  // the connected plugin identity; plugins cannot impersonate another source.
+  rpc UpsertSessionUsage(UpsertSessionUsageRequest) returns (UpsertSessionUsageResponse);
+  rpc ListSessionUsage(ListSessionUsageRequest) returns (ListSessionUsageResponse);
+
   // Conversation content — capability api_read:messages. Historical
   // user/agent message content for a session or task, filterable by a time
   // range (e.g. "yesterday"). Content is sanitized: kandev-injected
@@ -700,11 +706,14 @@ message Session {
   string started_at = 8;
   optional string ended_at = 9;
   string agent_profile_name = 10; // profile name from the snapshot at run time
+  string updated_at = 11;          // canonical session change timestamp
 }
 message SessionFilter {
   repeated string task_ids = 1;
   repeated string workspace_ids = 2;
   repeated string states = 3;
+  repeated string session_ids = 4;
+  optional string updated_since = 5;
 }
 message ListSessionsRequest {
   SessionFilter filter = 1;
@@ -742,6 +751,87 @@ message ListSessionCodeStatsRequest {
 }
 message ListSessionCodeStatsResponse {
   repeated SessionCodeStats stats = 1;
+  PageInfo page_info = 2;
+}
+
+// SessionUsageMeasurement is a source-owned cumulative observation or a
+// dated bucket. Optional numeric values preserve the difference between an
+// unreported category and a reported zero.
+message SessionUsageMeasurement {
+  string id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string session_id = 4;
+  string transcript_id = 5;
+  string source_record_id = 6;
+  string usage_identity = 7;
+  string model = 8;
+  string provider = 9;
+  string source_version = 10;
+  int64 revision = 11;
+  string payload_digest = 12;
+  string observed_at = 13;
+  string collected_at = 14;
+  optional int64 input_tokens = 15;
+  optional int64 output_tokens = 16;
+  optional int64 cache_read_tokens = 17;
+  optional int64 cache_write_tokens = 18;
+  optional int64 reasoning_tokens = 19;
+  optional int64 total_tokens = 20;
+  optional int64 cost_subcents = 21;
+  string currency = 22;
+  string cost_basis = 23;
+  string coverage = 24;
+  string source_timezone = 25;
+  string attribution_status = 26;
+  optional string coverage_start = 27;
+  optional string coverage_end = 28;
+  string source_date = 29;
+  string coverage_key = 30;
+	bool estimated = 31;
+	bool stale = 32;
+	optional int64 turns = 33;
+	string cost_coverage = 34;
+}
+message UpsertSessionUsageRequest {
+  string workspace_id = 1;
+  repeated SessionUsageMeasurement measurements = 2;
+}
+message SessionUsageWriteResult {
+  string source_record_id = 1;
+  string usage_identity = 2;
+  string model = 3;
+  string provider = 4;
+  string status = 5;
+  SessionUsageMeasurement measurement = 6;
+  string error = 7;
+}
+message UpsertSessionUsageResponse {
+  repeated SessionUsageWriteResult results = 1;
+}
+message SessionUsageFilter {
+  string workspace_id = 1;
+  repeated string session_ids = 2;
+  repeated string task_ids = 3;
+  string model = 4;
+  string provider = 5;
+  optional string start = 6;
+  optional string end = 7;
+  string timezone = 8;
+  string group_by = 9;
+  string sort_by = 10;
+	string sort_direction = 11;
+	bool include_undated = 12;
+	// Authorized read of canonical native/collector values. Write ownership
+	// remains derived from the connected plugin identity.
+	bool canonical = 13;
+}
+message ListSessionUsageRequest {
+  SessionUsageFilter filter = 1;
+  Page page = 2;
+}
+message ListSessionUsageResponse {
+  repeated SessionUsageMeasurement measurements = 1;
   PageInfo page_info = 2;
 }
 

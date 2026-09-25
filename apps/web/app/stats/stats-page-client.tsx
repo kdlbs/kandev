@@ -3,7 +3,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { PageShell } from "@/components/page-shell";
-import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
@@ -47,9 +46,9 @@ import {
   getRangeLabel,
   getSubtitle,
   isRangeKey,
-  RANGE_KEYS,
   type RangeKey,
 } from "./stats-utils";
+import { RANGE_LABEL_KEYS, StatsNavigation, StatsRangeToggle } from "./stats-navigation";
 import {
   composeStatsResponse,
   firstError,
@@ -65,12 +64,6 @@ interface StatsPageClientProps {
   activeRange?: RangeKey;
   initialError?: string | null;
 }
-
-const RANGE_LABEL_KEYS: Record<RangeKey, string> = {
-  week: "stats:rangeLastWeek",
-  month: "stats:rangeLastMonth",
-  all: "stats:rangeAllTime",
-};
 
 function StatsEmptyState({ message }: { message: string }) {
   const { t } = useTranslation();
@@ -117,30 +110,13 @@ function StatsShell({
       scroll="none"
       actions={
         <>
-          <ToggleGroup
-            type="single"
-            value={range}
-            onValueChange={(v) => {
-              if (v) onRangeChange(v as RangeKey);
-            }}
-            variant="outline"
-            className="h-7"
-          >
-            {RANGE_KEYS.map((key) => (
-              <ToggleGroupItem
-                key={key}
-                value={key}
-                className="cursor-pointer h-7 px-2 text-xs data-[state=on]:bg-muted data-[state=on]:text-foreground"
-              >
-                {t(RANGE_LABEL_KEYS[key])}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
+          <StatsNavigation />
+          <StatsRangeToggle range={range} onChange={onRangeChange} />
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="h-7 px-2 text-xs cursor-pointer"
+            className="h-11 cursor-pointer px-2 text-xs md:h-7"
             onClick={onCopy}
             disabled={copyDisabled}
           >

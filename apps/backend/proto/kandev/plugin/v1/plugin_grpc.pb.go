@@ -513,6 +513,8 @@ const (
 	Host_ListRepositories_FullMethodName              = "/kandev.plugin.v1.Host/ListRepositories"
 	Host_ListSessions_FullMethodName                  = "/kandev.plugin.v1.Host/ListSessions"
 	Host_ListSessionCodeStats_FullMethodName          = "/kandev.plugin.v1.Host/ListSessionCodeStats"
+	Host_UpsertSessionUsage_FullMethodName            = "/kandev.plugin.v1.Host/UpsertSessionUsage"
+	Host_ListSessionUsage_FullMethodName              = "/kandev.plugin.v1.Host/ListSessionUsage"
 	Host_ListMessages_FullMethodName                  = "/kandev.plugin.v1.Host/ListMessages"
 	Host_ListPendingInteractions_FullMethodName       = "/kandev.plugin.v1.Host/ListPendingInteractions"
 	Host_GetInteraction_FullMethodName                = "/kandev.plugin.v1.Host/GetInteraction"
@@ -598,6 +600,11 @@ type HostClient interface {
 	// not the raw commit/snapshot rows, whose JSON schema churns.
 	ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error)
 	ListSessionCodeStats(ctx context.Context, in *ListSessionCodeStatsRequest, opts ...grpc.CallOption) (*ListSessionCodeStatsResponse, error)
+	// Source-aware token usage — api_read:session_usage and
+	// api_write:session_usage. The source namespace is assigned by Kandev from
+	// the connected plugin identity; plugins cannot impersonate another source.
+	UpsertSessionUsage(ctx context.Context, in *UpsertSessionUsageRequest, opts ...grpc.CallOption) (*UpsertSessionUsageResponse, error)
+	ListSessionUsage(ctx context.Context, in *ListSessionUsageRequest, opts ...grpc.CallOption) (*ListSessionUsageResponse, error)
 	// Conversation content — capability api_read:messages. Historical
 	// user/agent message content for a session or task, filterable by a time
 	// range (e.g. "yesterday"). Content is sanitized: kandev-injected
@@ -892,6 +899,26 @@ func (c *hostClient) ListSessionCodeStats(ctx context.Context, in *ListSessionCo
 	return out, nil
 }
 
+func (c *hostClient) UpsertSessionUsage(ctx context.Context, in *UpsertSessionUsageRequest, opts ...grpc.CallOption) (*UpsertSessionUsageResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpsertSessionUsageResponse)
+	err := c.cc.Invoke(ctx, Host_UpsertSessionUsage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListSessionUsage(ctx context.Context, in *ListSessionUsageRequest, opts ...grpc.CallOption) (*ListSessionUsageResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSessionUsageResponse)
+	err := c.cc.Invoke(ctx, Host_ListSessionUsage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) ListMessages(ctx context.Context, in *ListMessagesRequest, opts ...grpc.CallOption) (*ListMessagesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListMessagesResponse)
@@ -1128,6 +1155,11 @@ type HostServer interface {
 	// not the raw commit/snapshot rows, whose JSON schema churns.
 	ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error)
 	ListSessionCodeStats(context.Context, *ListSessionCodeStatsRequest) (*ListSessionCodeStatsResponse, error)
+	// Source-aware token usage — api_read:session_usage and
+	// api_write:session_usage. The source namespace is assigned by Kandev from
+	// the connected plugin identity; plugins cannot impersonate another source.
+	UpsertSessionUsage(context.Context, *UpsertSessionUsageRequest) (*UpsertSessionUsageResponse, error)
+	ListSessionUsage(context.Context, *ListSessionUsageRequest) (*ListSessionUsageResponse, error)
 	// Conversation content — capability api_read:messages. Historical
 	// user/agent message content for a session or task, filterable by a time
 	// range (e.g. "yesterday"). Content is sanitized: kandev-injected
@@ -1267,6 +1299,12 @@ func (UnimplementedHostServer) ListSessions(context.Context, *ListSessionsReques
 }
 func (UnimplementedHostServer) ListSessionCodeStats(context.Context, *ListSessionCodeStatsRequest) (*ListSessionCodeStatsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSessionCodeStats not implemented")
+}
+func (UnimplementedHostServer) UpsertSessionUsage(context.Context, *UpsertSessionUsageRequest) (*UpsertSessionUsageResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpsertSessionUsage not implemented")
+}
+func (UnimplementedHostServer) ListSessionUsage(context.Context, *ListSessionUsageRequest) (*ListSessionUsageResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListSessionUsage not implemented")
 }
 func (UnimplementedHostServer) ListMessages(context.Context, *ListMessagesRequest) (*ListMessagesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListMessages not implemented")
@@ -1736,6 +1774,42 @@ func _Host_ListSessionCodeStats_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_UpsertSessionUsage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpsertSessionUsageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).UpsertSessionUsage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_UpsertSessionUsage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).UpsertSessionUsage(ctx, req.(*UpsertSessionUsageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListSessionUsage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSessionUsageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListSessionUsage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListSessionUsage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListSessionUsage(ctx, req.(*ListSessionUsageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_ListMessages_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListMessagesRequest)
 	if err := dec(in); err != nil {
@@ -2136,6 +2210,14 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListSessionCodeStats",
 			Handler:    _Host_ListSessionCodeStats_Handler,
+		},
+		{
+			MethodName: "UpsertSessionUsage",
+			Handler:    _Host_UpsertSessionUsage_Handler,
+		},
+		{
+			MethodName: "ListSessionUsage",
+			Handler:    _Host_ListSessionUsage_Handler,
 		},
 		{
 			MethodName: "ListMessages",

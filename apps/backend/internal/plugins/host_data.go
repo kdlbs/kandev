@@ -46,6 +46,7 @@ const (
 	resourceExecutorProfiles = "executor_profiles"
 	resourceRepositories     = "repositories"
 	resourceMessages         = "messages"
+	resourceSessionUsage     = "session_usage"
 	resourceInteractions     = "interactions"
 )
 
@@ -147,6 +148,13 @@ type taskDataSource interface {
 	BuildDependencyViewsBounded(ctx context.Context, tasks []*taskmodels.Task) (map[string]taskservice.DependencyView, error)
 }
 
+// pluginSessionDataSource is the optional SQL-backed cross-task session
+// query. It stays separate from taskDataSource so existing focused test
+// sources remain valid while production task service wiring can opt in.
+type pluginSessionDataSource interface {
+	ListSessionsForPlugin(ctx context.Context, filter taskmodels.PluginSessionFilter) ([]*taskmodels.TaskSession, error)
+}
+
 // workflowLister is the narrow slice of internal/task/service.Service the
 // Workflows().List RPC needs (workflows themselves are owned by the task
 // service, not internal/workflow/service — only steps are).
@@ -187,6 +195,15 @@ type sessionCodeStatsSource interface {
 	ListSessionCodeStats(ctx context.Context, filter analyticsmodels.SessionCodeStatsFilter) ([]*analyticsmodels.SessionCodeStats, error)
 }
 
+// sessionUsageSource is the narrow analytics service seam for the source-aware
+// usage Host API. The plugin id is supplied separately so the service can
+// derive the source namespace at the host boundary.
+type sessionUsageSource interface {
+	UpsertPluginSessionUsage(ctx context.Context, pluginID, workspaceID string, records []analyticsmodels.SessionUsageMeasurement) ([]analyticsmodels.SessionUsageUpsertResult, error)
+	ListPluginSessionUsageMeasurements(ctx context.Context, pluginID string, filter analyticsmodels.SessionUsageFilter) ([]analyticsmodels.SessionUsageMeasurement, error)
+	ListCanonicalSessionUsageMeasurements(ctx context.Context, filter analyticsmodels.SessionUsageFilter) ([]analyticsmodels.SessionUsageMeasurement, error)
+}
+
 // messageDataSource is the narrow slice of internal/task/service.Service the
 // Messages().List RPC needs. ListMessagesForPlugin filters by session/task
 // ids and a created_at time range, returning oldest-first with SQL-level
@@ -224,6 +241,19 @@ func (h *pluginHost) Sessions() pluginsdk.SessionReader {
 		return h.UnimplementedHostData.Sessions()
 	}
 	return sessionReader{host: h}
+}
+
+func (h *pluginHost) Usage() pluginsdk.UsageReader {
+	if !h.capabilities.CanRead(resourceSessionUsage) && !h.capabilities.CanWrite(resourceSessionUsage) {
+		return deniedUsageReader{}
+	}
+	if h.usageDep == nil {
+		return h.UnimplementedHostData.Usage()
+	}
+	if h.usageDep() == nil {
+		return h.UnimplementedHostData.Usage()
+	}
+	return usageReader{host: h}
 }
 
 func (h *pluginHost) Workspaces() pluginsdk.WorkspaceReader {
@@ -290,6 +320,20 @@ type deniedSessionReader struct{}
 
 func (deniedSessionReader) List(context.Context, pluginsdk.SessionFilter, pluginsdk.Page) ([]pluginsdk.Session, *pluginsdk.PageInfo, error) {
 	return nil, nil, permissionDenied(apiReadCapability(resourceSessions))
+}
+
+type deniedUsageReader struct{}
+
+func (deniedUsageReader) UpsertBatch(context.Context, string, []pluginsdk.SessionUsageMeasurement) ([]pluginsdk.SessionUsageWriteResult, error) {
+	return nil, permissionDenied(apiWriteCapability(resourceSessionUsage))
+}
+
+func (deniedUsageReader) List(context.Context, pluginsdk.SessionUsageFilter, pluginsdk.Page) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error) {
+	return nil, nil, permissionDenied(apiReadCapability(resourceSessionUsage))
+}
+
+func (deniedUsageReader) ListCanonical(context.Context, pluginsdk.SessionUsageFilter, pluginsdk.Page) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error) {
+	return nil, nil, permissionDenied(apiReadCapability(resourceSessionUsage))
 }
 
 func (deniedSessionReader) CodeStats(context.Context, pluginsdk.SessionFilter, pluginsdk.Page) ([]pluginsdk.SessionCodeStats, *pluginsdk.PageInfo, error) {
@@ -475,6 +519,198 @@ func (r taskReader) Get(ctx context.Context, id string) (*pluginsdk.Task, error)
 
 type sessionReader struct{ host *pluginHost }
 
+type usageReader struct{ host *pluginHost }
+
+func (r usageReader) source() sessionUsageSource {
+	if r.host.usageDep == nil {
+		return nil
+	}
+	return r.host.usageDep()
+}
+
+func (r usageReader) UpsertBatch(ctx context.Context, workspaceID string, items []pluginsdk.SessionUsageMeasurement) ([]pluginsdk.SessionUsageWriteResult, error) {
+	if !r.host.capabilities.CanWrite(resourceSessionUsage) {
+		return nil, permissionDenied(apiWriteCapability(resourceSessionUsage))
+	}
+	source := r.source()
+	if source == nil {
+		return r.host.UnimplementedHostData.Usage().UpsertBatch(ctx, workspaceID, items)
+	}
+	records := make([]analyticsmodels.SessionUsageMeasurement, len(items))
+	for i, item := range items {
+		record, err := usageMeasurementFromDTO(workspaceID, item)
+		if err != nil {
+			return nil, err
+		}
+		records[i] = record
+	}
+	results, err := source.UpsertPluginSessionUsage(ctx, r.host.pluginID, workspaceID, records)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]pluginsdk.SessionUsageWriteResult, len(results))
+	for i, result := range results {
+		out[i] = pluginsdk.SessionUsageWriteResult{
+			SourceRecordID: result.SourceRecordID, UsageIdentity: result.UsageIdentity,
+			Model: result.Model, Provider: result.Provider, Status: string(result.Status), Error: result.Error,
+		}
+		if result.Measurement != nil {
+			converted := usageMeasurementToDTO(*result.Measurement)
+			out[i].Measurement = &converted
+		}
+	}
+	return out, nil
+}
+
+func (r usageReader) List(ctx context.Context, filter pluginsdk.SessionUsageFilter, page pluginsdk.Page) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error) {
+	return r.list(ctx, filter, page, false)
+}
+
+func (r usageReader) ListCanonical(ctx context.Context, filter pluginsdk.SessionUsageFilter, page pluginsdk.Page) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error) {
+	return r.list(ctx, filter, page, true)
+}
+
+func (r usageReader) list(ctx context.Context, filter pluginsdk.SessionUsageFilter, page pluginsdk.Page, canonical bool) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error) {
+	if !r.host.capabilities.CanRead(resourceSessionUsage) {
+		return nil, nil, permissionDenied(apiReadCapability(resourceSessionUsage))
+	}
+	// The method selected by the SDK is authoritative. Do not let a stale
+	// compatibility bit in the filter turn a source-owned List into a
+	// canonical read (or vice versa).
+	filter.Canonical = canonical
+	source := r.source()
+	if source == nil {
+		if canonical {
+			return r.host.UnimplementedHostData.Usage().ListCanonical(ctx, filter, page)
+		}
+		return r.host.UnimplementedHostData.Usage().List(ctx, filter, page)
+	}
+	internalFilter, err := usageFilterFromDTO(filter)
+	if err != nil {
+		return nil, nil, err
+	}
+	limit := normalizePageLimit(page.Limit)
+	offset := pageOffset(page.Cursor)
+	internalFilter.Limit = limit + 1
+	internalFilter.Offset = offset
+	var items []analyticsmodels.SessionUsageMeasurement
+	var listErr error
+	if canonical {
+		items, listErr = source.ListCanonicalSessionUsageMeasurements(ctx, internalFilter)
+	} else {
+		items, listErr = source.ListPluginSessionUsageMeasurements(ctx, r.host.pluginID, internalFilter)
+	}
+	if listErr != nil {
+		return nil, nil, listErr
+	}
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	out := make([]pluginsdk.SessionUsageMeasurement, len(items))
+	for i, item := range items {
+		out[i] = usageMeasurementToDTO(item)
+	}
+	info := &pluginsdk.PageInfo{HasMore: hasMore}
+	if hasMore {
+		info.NextCursor = strconv.Itoa(offset + limit)
+	}
+	return out, info, nil
+}
+
+func usageMeasurementFromDTO(workspaceID string, item pluginsdk.SessionUsageMeasurement) (analyticsmodels.SessionUsageMeasurement, error) {
+	start, err := parseOptionalPluginTime(item.CoverageStart)
+	if err != nil {
+		return analyticsmodels.SessionUsageMeasurement{}, err
+	}
+	end, err := parseOptionalPluginTime(item.CoverageEnd)
+	if err != nil {
+		return analyticsmodels.SessionUsageMeasurement{}, err
+	}
+	return analyticsmodels.SessionUsageMeasurement{
+		ID: item.ID, WorkspaceID: workspaceID, TaskID: item.TaskID, SessionID: item.SessionID,
+		TranscriptID: item.TranscriptID, SourceRecordID: item.SourceRecordID, UsageIdentity: item.UsageIdentity,
+		Model: item.Model, Provider: item.Provider, SourceVersion: item.SourceVersion, Revision: item.Revision,
+		PayloadDigest: item.PayloadDigest, ObservedAt: parsePluginTimeOrZero(item.ObservedAt),
+		CollectedAt: parsePluginTimeOrZero(item.CollectedAt), InputTokens: item.InputTokens, OutputTokens: item.OutputTokens,
+		CacheReadTokens: item.CacheReadTokens, CacheWriteTokens: item.CacheWriteTokens,
+		ReasoningTokens: item.ReasoningTokens, TotalTokens: item.TotalTokens, Turns: item.Turns, CostSubcents: item.CostSubcents,
+		Currency: item.Currency, CostBasis: item.CostBasis, CostCoverage: item.CostCoverage, Coverage: item.Coverage,
+		SourceTimezone: item.SourceTimezone, AttributionStatus: item.AttributionStatus,
+		CoverageStart: start, CoverageEnd: end, SourceDate: item.SourceDate, CoverageKey: item.CoverageKey,
+		Estimated: item.Estimated, Stale: item.Stale,
+	}, nil
+}
+
+func usageMeasurementToDTO(item analyticsmodels.SessionUsageMeasurement) pluginsdk.SessionUsageMeasurement {
+	return pluginsdk.SessionUsageMeasurement{
+		ID: item.ID, WorkspaceID: item.WorkspaceID, TaskID: item.TaskID, SessionID: item.SessionID,
+		TranscriptID: item.TranscriptID, SourceRecordID: item.SourceRecordID, UsageIdentity: item.UsageIdentity,
+		Model: item.Model, Provider: item.Provider, SourceVersion: item.SourceVersion, Revision: item.Revision,
+		PayloadDigest: item.PayloadDigest, ObservedAt: formatPluginTime(item.ObservedAt), CollectedAt: formatPluginTime(item.CollectedAt),
+		InputTokens: item.InputTokens, OutputTokens: item.OutputTokens, CacheReadTokens: item.CacheReadTokens,
+		CacheWriteTokens: item.CacheWriteTokens, ReasoningTokens: item.ReasoningTokens, TotalTokens: item.TotalTokens, Turns: item.Turns,
+		CostSubcents: item.CostSubcents, Currency: item.Currency, CostBasis: item.CostBasis, CostCoverage: item.CostCoverage, Coverage: item.Coverage,
+		SourceTimezone: item.SourceTimezone, AttributionStatus: item.AttributionStatus,
+		CoverageStart: formatPluginTimePtr(item.CoverageStart), CoverageEnd: formatPluginTimePtr(item.CoverageEnd),
+		SourceDate: item.SourceDate, CoverageKey: item.CoverageKey, Estimated: item.Estimated, Stale: item.Stale,
+	}
+}
+
+func usageFilterFromDTO(filter pluginsdk.SessionUsageFilter) (analyticsmodels.SessionUsageFilter, error) {
+	start, err := parseOptionalPluginTime(filter.Start)
+	if err != nil {
+		return analyticsmodels.SessionUsageFilter{}, err
+	}
+	end, err := parseOptionalPluginTime(filter.End)
+	if err != nil {
+		return analyticsmodels.SessionUsageFilter{}, err
+	}
+	return analyticsmodels.SessionUsageFilter{
+		WorkspaceID: filter.WorkspaceID, SessionIDs: filter.SessionIDs, TaskIDs: filter.TaskIDs,
+		Model: filter.Model, Provider: filter.Provider, Start: start, End: end, Timezone: filter.Timezone,
+		GroupBy: filter.GroupBy, SortBy: filter.SortBy, SortDirection: filter.SortDirection,
+		IncludeUndated: filter.IncludeUndated, Canonical: filter.Canonical,
+	}, nil
+}
+
+func parseOptionalPluginTime(value *string) (*time.Time, error) {
+	if value == nil || *value == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, *value)
+	if err != nil {
+		return nil, invalidArgument("time values must use RFC3339")
+	}
+	return &parsed, nil
+}
+
+func parsePluginTimeOrZero(value string) time.Time {
+	if value == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}
+
+func formatPluginTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func formatPluginTimePtr(value *time.Time) *string {
+	if value == nil {
+		return nil
+	}
+	formatted := formatPluginTime(*value)
+	return &formatted
+}
+
 // List paginates the raw, already-sorted sessions BEFORE converting to DTOs:
 // sessionToDTO resolves ACPSessionID via resolveACPSessionID, which issues a
 // GetExecutorRunningBySessionID query for any session lacking the id in its
@@ -482,7 +718,38 @@ type sessionReader struct{ host *pluginHost }
 // returned page) would turn that into an O(N) fan-out of DB queries per read
 // instead of O(limit).
 func (r sessionReader) List(ctx context.Context, filter pluginsdk.SessionFilter, page pluginsdk.Page) ([]pluginsdk.Session, *pluginsdk.PageInfo, error) {
+	if optimized, ok := r.host.taskData.(pluginSessionDataSource); ok {
+		internalFilter, err := pluginSessionFilterFromDTO(filter)
+		if err != nil {
+			return nil, nil, err
+		}
+		limit := normalizePageLimit(page.Limit)
+		offset := pageOffset(page.Cursor)
+		internalFilter.Limit = limit + 1
+		internalFilter.Offset = offset
+		sessions, err := optimized.ListSessionsForPlugin(ctx, internalFilter)
+		if err != nil {
+			return nil, nil, err
+		}
+		hasMore := len(sessions) > limit
+		if hasMore {
+			sessions = sessions[:limit]
+		}
+		dtos := make([]pluginsdk.Session, len(sessions))
+		for i, session := range sessions {
+			dtos[i] = r.host.sessionToDTO(ctx, session)
+		}
+		info := &pluginsdk.PageInfo{HasMore: hasMore}
+		if hasMore {
+			info.NextCursor = strconv.Itoa(offset + limit)
+		}
+		return dtos, info, nil
+	}
 	sessions, err := r.host.fetchSessionsForFilter(ctx, filter)
+	if err != nil {
+		return nil, nil, err
+	}
+	sessions, err = filterSessionsByIdentity(sessions, filter)
 	if err != nil {
 		return nil, nil, err
 	}

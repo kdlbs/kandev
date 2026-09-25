@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 
@@ -136,11 +137,32 @@ func tasksToDTOs(tasks []*taskmodels.Task) []pluginsdk.Task {
 	return out
 }
 
-// fetchSessionsForFilter resolves the task ids to list sessions for (see
-// resolveSessionTaskIDs) and lists each task's sessions — a Host data API
-// session read is, unavoidably, an N+1 fan-out over the resolved tasks in v1
-// (no session listing endpoint spans multiple tasks directly at the service
-// layer today).
+func pluginSessionFilterFromDTO(filter pluginsdk.SessionFilter) (taskmodels.PluginSessionFilter, error) {
+	var updatedSince *time.Time
+	if filter.UpdatedSince != nil {
+		parsed, err := time.Parse(time.RFC3339Nano, *filter.UpdatedSince)
+		if err != nil {
+			return taskmodels.PluginSessionFilter{}, invalidArgument("updated_since must use RFC3339")
+		}
+		updatedSince = &parsed
+	}
+	states := make([]taskmodels.TaskSessionState, len(filter.States))
+	for i, state := range filter.States {
+		states[i] = taskmodels.TaskSessionState(state)
+	}
+	return taskmodels.PluginSessionFilter{
+		WorkspaceIDs:    append([]string(nil), filter.WorkspaceIDs...),
+		TaskIDs:         append([]string(nil), filter.TaskIDs...),
+		SessionIDs:      append([]string(nil), filter.SessionIDs...),
+		States:          states,
+		UpdatedSince:    updatedSince,
+		ExcludeInternal: len(filter.TaskIDs) == 0,
+	}, nil
+}
+
+// fetchSessionsForFilter is the compatibility fallback for task service
+// implementations that do not provide the optimized cross-task query. The
+// production task service applies the same filters and pagination in SQL.
 func (h *pluginHost) fetchSessionsForFilter(ctx context.Context, filter pluginsdk.SessionFilter) ([]*taskmodels.TaskSession, error) {
 	taskIDs, err := h.resolveSessionTaskIDs(ctx, filter)
 	if err != nil {
@@ -227,6 +249,32 @@ func filterSessionsByState(sessions []*taskmodels.TaskSession, states []string) 
 		}
 	}
 	return out
+}
+
+func filterSessionsByIdentity(sessions []*taskmodels.TaskSession, filter pluginsdk.SessionFilter) ([]*taskmodels.TaskSession, error) {
+	if len(filter.SessionIDs) == 0 && filter.UpdatedSince == nil {
+		return sessions, nil
+	}
+	ids := toSet(filter.SessionIDs)
+	var since time.Time
+	if filter.UpdatedSince != nil {
+		parsed, err := time.Parse(time.RFC3339Nano, *filter.UpdatedSince)
+		if err != nil {
+			return nil, invalidArgument("updated_since must use RFC3339")
+		}
+		since = parsed
+	}
+	out := make([]*taskmodels.TaskSession, 0, len(sessions))
+	for _, session := range sessions {
+		if len(ids) > 0 && !ids[session.ID] {
+			continue
+		}
+		if filter.UpdatedSince != nil && session.UpdatedAt.Before(since) {
+			continue
+		}
+		out = append(out, session)
+	}
+	return out, nil
 }
 
 // sortSessionsNewestFirst mirrors sortTasksNewestFirst's ID tie-break, for

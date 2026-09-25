@@ -269,6 +269,13 @@ func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, executi
 	sort.Strings(keys)
 	for _, key := range keys {
 		result, err := client.GitPushPreflight(preflightCtx, key, agentctl.PushOptions{})
+		// The HTTP client can return a successful response at the same time the
+		// shared budget expires. Check the budget after the request as well as
+		// relying on request cancellation so a late response cannot extend the
+		// operation beyond its single deadline.
+		if err == nil {
+			err = preflightCtx.Err()
+		}
 		if err != nil {
 			return &BootstrapFailure{
 				Operation: bootstrapOperation(execution),

@@ -66,6 +66,7 @@ type pluginHost struct {
 	workflowSteps    workflowStepLister
 	agentProfiles    agentProfileDataSource
 	sessionCodeStats sessionCodeStatsSource
+	usageDep         func() sessionUsageSource
 	messageData      messageDataSource
 	interactionData  interactionDataSource
 	taskPRs          taskPRSource

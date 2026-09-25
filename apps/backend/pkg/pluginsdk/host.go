@@ -89,6 +89,10 @@ type Host interface {
 	// session-code-stats RPCs (capability api_read:sessions).
 	Sessions() SessionReader
 
+	// Usage returns the source-aware token usage reader. Reads require
+	// api_read:session_usage and writes require api_write:session_usage.
+	Usage() UsageReader
+
 	// Workspaces returns the reader for the Host data API's workspace RPCs
 	// (capability api_read:workspaces).
 	Workspaces() WorkspaceReader
@@ -422,6 +426,8 @@ func (h *grpcHostClient) EmitEvent(ctx context.Context, name string, payload map
 func (h *grpcHostClient) Tasks() TaskReader { return grpcTaskReader{client: h.client} }
 
 func (h *grpcHostClient) Sessions() SessionReader { return grpcSessionReader{client: h.client} }
+
+func (h *grpcHostClient) Usage() UsageReader { return grpcUsageReader{client: h.client} }
 
 func (h *grpcHostClient) Workspaces() WorkspaceReader { return grpcWorkspaceReader{client: h.client} }
 
@@ -1138,6 +1144,7 @@ type UnimplementedHostData struct{}
 
 func (UnimplementedHostData) Tasks() TaskReader           { return unimplementedTaskReader{} }
 func (UnimplementedHostData) Sessions() SessionReader     { return unimplementedSessionReader{} }
+func (UnimplementedHostData) Usage() UsageReader          { return unimplementedUsageReader{} }
 func (UnimplementedHostData) Workspaces() WorkspaceReader { return unimplementedWorkspaceReader{} }
 func (UnimplementedHostData) Workflows() WorkflowReader   { return unimplementedWorkflowReader{} }
 func (UnimplementedHostData) AgentProfiles() AgentProfileReader {
@@ -1206,6 +1213,20 @@ func (unimplementedSessionReader) List(context.Context, SessionFilter, Page) ([]
 
 func (unimplementedSessionReader) CodeStats(context.Context, SessionFilter, Page) ([]SessionCodeStats, *PageInfo, error) {
 	return nil, nil, errUnimplementedHostData("sessions")
+}
+
+type unimplementedUsageReader struct{}
+
+func (unimplementedUsageReader) UpsertBatch(context.Context, string, []SessionUsageMeasurement) ([]SessionUsageWriteResult, error) {
+	return nil, errUnimplementedHostData("session_usage")
+}
+
+func (unimplementedUsageReader) List(context.Context, SessionUsageFilter, Page) ([]SessionUsageMeasurement, *PageInfo, error) {
+	return nil, nil, errUnimplementedHostData("session_usage")
+}
+
+func (unimplementedUsageReader) ListCanonical(context.Context, SessionUsageFilter, Page) ([]SessionUsageMeasurement, *PageInfo, error) {
+	return nil, nil, errUnimplementedHostData("session_usage")
 }
 
 type unimplementedWorkspaceReader struct{}

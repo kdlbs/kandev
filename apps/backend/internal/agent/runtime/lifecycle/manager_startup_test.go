@@ -318,12 +318,20 @@ func TestPreflightRemoteContributionPushesBoundsDirectCaller(t *testing.T) {
 func TestPreflightRemoteContributionPushesUsesOneBudgetForAllRepositories(t *testing.T) {
 	firstStarted := make(chan struct{})
 	secondStarted := make(chan struct{})
+	secondResponse := make(chan struct{})
 	firstRelease := make(chan struct{})
 	firstReleased := false
+	secondReleased := false
 	releaseFirst := func() {
 		if !firstReleased {
 			firstReleased = true
 			close(firstRelease)
+		}
+	}
+	releaseSecond := func() {
+		if !secondReleased {
+			secondReleased = true
+			close(secondResponse)
 		}
 	}
 	requestCount := 0
@@ -340,17 +348,13 @@ func TestPreflightRemoteContributionPushesUsesOneBudgetForAllRepositories(t *tes
 			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
 		case 2:
 			close(secondStarted)
-			timer := time.NewTimer(650 * time.Millisecond)
-			defer timer.Stop()
-			select {
-			case <-timer.C:
-				_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
-			case <-r.Context().Done():
-			}
+			<-secondResponse
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
 		}
 	}))
 	t.Cleanup(func() {
 		releaseFirst()
+		releaseSecond()
 		server.Close()
 	})
 
@@ -387,6 +391,7 @@ func TestPreflightRemoteContributionPushesUsesOneBudgetForAllRepositories(t *tes
 	case <-time.After(time.Second):
 		t.Fatal("preflight did not finish at the shared budget")
 	}
+	releaseSecond()
 	if requestCount != 2 {
 		t.Fatalf("preflight request count = %d, want both repositories checked", requestCount)
 	}

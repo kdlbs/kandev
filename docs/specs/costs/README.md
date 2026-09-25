@@ -18,6 +18,8 @@ budgets, and cost-aware model routing.
 
 This system owns usage events, cost projections, quota state, budget policy,
 and cheap-model profiles used by task and Office execution.
+It also owns source-aware session measurements and native usage statistics.
+The existing task event ledger retains its immutable event-recording contract.
 
 ## Exclusions
 
@@ -34,3 +36,5 @@ find them.
 
 - [Agents](../agents/README.md): supplies model and profile identity.
 - [Office](../office/README.md): consumes cost-aware routing.
+- [Tasks](../tasks/README.md): owns session identity and the existing event ledger.
+- [Plugins](../plugins/README.md): supplies collector permissions and lifecycle.

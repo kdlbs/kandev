@@ -3375,6 +3375,77 @@ func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*mo
 	return r.loadWorktreesBatch(ctx, sessions)
 }
 
+// ListTaskSessionsForPlugin applies the cross-task session filters in SQL.
+// The plugin Host asks for one row past its page size; the extra row lets it
+// report HasMore without loading every task's sessions into memory.
+func (r *Repository) ListTaskSessionsForPlugin(ctx context.Context, filter models.PluginSessionFilter) ([]*models.TaskSession, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTaskSessionsForPlugin")
+	defer span.End()
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > sqliteMaxHostParams-8 {
+		limit = sqliteMaxHostParams - 8
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := `SELECT ` + taskSessionSelectCols + ` ` + taskSessionFromClause + `
+		JOIN tasks t ON t.id = ts.task_id
+		WHERE 1 = 1`
+	args := make([]interface{}, 0, len(filter.WorkspaceIDs)+len(filter.TaskIDs)+len(filter.SessionIDs)+len(filter.States)+3)
+	appendIn := func(column string, values []string) {
+		placeholders, inArgs := buildInPlaceholders(values)
+		query += " AND " + column + " IN (" + placeholders + ")"
+		args = append(args, inArgs...)
+	}
+	if len(filter.WorkspaceIDs) > 0 {
+		appendIn("t.workspace_id", filter.WorkspaceIDs)
+	}
+	if len(filter.TaskIDs) > 0 {
+		appendIn("ts.task_id", filter.TaskIDs)
+	}
+	if len(filter.SessionIDs) > 0 {
+		appendIn("ts.id", filter.SessionIDs)
+	}
+	if len(filter.States) > 0 {
+		states := make([]string, len(filter.States))
+		for i, state := range filter.States {
+			states[i] = string(state)
+		}
+		appendIn("ts.state", states)
+	}
+	if filter.UpdatedSince != nil {
+		query += " AND ts.updated_at >= ?"
+		args = append(args, *filter.UpdatedSince)
+	}
+	if filter.ExcludeInternal {
+		query += " AND " + excludeConfigModePredicate(r.ro.DriverName(), "t.metadata")
+		query += andNotAutomationOriginT
+	}
+	query += " ORDER BY ts.started_at DESC, ts.id ASC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+
+	if len(args) > sqliteMaxHostParams {
+		return nil, fmt.Errorf("plugin session filter has too many values")
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	sessions, err := r.scanTaskSessions(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	return r.loadWorktreesBatch(ctx, sessions)
+}
+
 // ListTaskSessionsByTaskEnvironment returns every session bound to an
 // environment, including inherited sessions whose task differs from the
 // environment owner's task. The environment binding, rather than task row

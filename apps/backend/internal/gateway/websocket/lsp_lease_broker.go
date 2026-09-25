@@ -31,7 +31,6 @@ func (l *lspLease) gracefulRelease(generation uint64, reason, requestID string) 
 	if _, err := l.sendBrokerRequest(ctx, "shutdown", nil); err != nil {
 		l.manager.logger.Debug("LSP shutdown request did not complete before release", zap.String("language", l.language), zap.Error(err))
 	}
-	_ = l.writeUpstream(jsonRPCNotification("exit", nil))
 	if err := l.writeBrowser(generation, map[string]any{
 		lspControlField: lspControlKind,
 		"action":        lspControlAck,
@@ -40,6 +39,11 @@ func (l *lspLease) gracefulRelease(generation uint64, reason, requestID string) 
 	}); err != nil {
 		return err
 	}
+	// Send the acknowledgement before asking the upstream bridge to close.
+	// The bridge can close its WebSocket as soon as it receives exit; its
+	// reader would then race terminate with this browser write and could hide
+	// the acknowledgement from the editor.
+	_ = l.writeUpstream(jsonRPCNotification("exit", nil))
 	code := websocket.CloseNormalClosure
 	text := "language server stopped"
 	if reason == lspLeaseReleaseEditorIdle {

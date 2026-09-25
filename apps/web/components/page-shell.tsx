@@ -43,6 +43,8 @@ type PageShellProps = {
   contentClassName?: string;
   /** `data-testid` on the scroll container (e2e anchors like `settings-scroll-container`). */
   contentTestId?: string;
+  freeWidth?: "lead" | "actions";
+  actionsClassName?: string;
   children: ReactNode;
 };
 

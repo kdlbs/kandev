@@ -2076,6 +2076,24 @@ type ActiveSessionRecoveryCandidate struct {
 	ExpectedExecutorUpdatedAt        time.Time
 }
 
+// PluginSessionFilter describes the bounded, cross-task session read used by
+// the plugin Host data API. Implementations should apply the workspace/task,
+// state, identity, and updated-since predicates before pagination so a plugin
+// reconciliation pass does not enumerate every task and session in memory.
+type PluginSessionFilter struct {
+	WorkspaceIDs []string
+	TaskIDs      []string
+	SessionIDs   []string
+	States       []TaskSessionState
+	UpdatedSince *time.Time
+	// ExcludeInternal applies the same config-task and automation-origin
+	// visibility rules as workspace task lists. Explicit task-id reads keep
+	// the legacy Host contract and leave this false.
+	ExcludeInternal bool
+	Limit           int
+	Offset          int
+}
+
 // ToAPI converts internal TaskSession to API type
 // TODO: Add v1.TaskSession type to pkg/api/v1/
 func (s *TaskSession) ToAPI() map[string]interface{} {

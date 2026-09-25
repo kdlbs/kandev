@@ -533,6 +533,13 @@ type SessionRepository interface {
 	UpdateTaskSessionLastReadMessageID(ctx context.Context, id, messageID string) error
 }
 
+// PluginSessionRepository is an optional optimized implementation of the
+// cross-task session read. The service keeps a fallback for repository
+// adapters that have not implemented this additive interface yet.
+type PluginSessionRepository interface {
+	ListTaskSessionsForPlugin(ctx context.Context, filter models.PluginSessionFilter) ([]*models.TaskSession, error)
+}
+
 // SessionWorktreeRepository exposes session-scoped worktree projections over
 // the task environment's repository rows. Sessions reference worktrees only
 // through task_sessions.task_environment_id.

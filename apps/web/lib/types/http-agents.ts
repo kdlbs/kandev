@@ -602,3 +602,49 @@ export type StatsResponse = {
   repository_stats: RepositoryStatsDTO[];
   git_stats: GitStatsDTO;
 };
+
+export type TokenUsageMetricValue = number | null;
+
+export type TokenUsageMetrics = {
+  input_tokens: TokenUsageMetricValue;
+  output_tokens: TokenUsageMetricValue;
+  cache_read_tokens: TokenUsageMetricValue;
+  cache_write_tokens: TokenUsageMetricValue;
+  reasoning_tokens: TokenUsageMetricValue;
+  total_tokens: TokenUsageMetricValue;
+  turns: TokenUsageMetricValue;
+  cost_subcents: TokenUsageMetricValue;
+  currency: string;
+  cost_basis: string;
+  cost_coverage: string;
+  effective_cost_per_million: TokenUsageMetricValue;
+};
+
+export type TokenUsageRow = TokenUsageMetrics & {
+  key: string;
+  period: string;
+  model: string;
+  provider: string;
+  task_id: string;
+  session_id: string;
+  source: string;
+  coverage: string;
+  estimated: boolean;
+  stale: boolean;
+  undated: boolean;
+};
+
+export type TokenUsageResponse = {
+  summary: TokenUsageMetrics;
+  rows: TokenUsageRow[];
+  totals: TokenUsageMetrics;
+  total_rows: number;
+  has_more: boolean;
+  has_history: boolean;
+  has_range_data: boolean;
+  has_native_history: boolean;
+  dated_coverage: boolean;
+  undated_coverage: boolean;
+  providers: string[];
+  last_updated?: string | null;
+};
