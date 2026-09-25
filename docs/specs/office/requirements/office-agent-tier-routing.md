@@ -52,21 +52,30 @@ wake-reason policy. Nothing here changes those contracts except where explicitly
 
 The migrated technical source is split into [part 1](../system-design/office-agent-tier-routing-01.md), [part 2](../system-design/office-agent-tier-routing-02.md), [part 3](../system-design/office-agent-tier-routing-03.md).
 
-## Decision: the agent record's `model` does not select a model
+## Decision: on a routed launch, the agent record's `model` does not select a model
 
-Routing is authoritative. The precedence order (wake_reason > per-agent
-override > role_tiers > workspace default) governs which tier — and
-therefore which model — a run launches on. An Office agent's own `model`
-field (`agent_profiles.model`) is not part of that precedence chain and
-never selects the launched model; a resolver test pins this at
-`apps/backend/internal/office/routing/agent_model_ignored_test.go`.
+This decision applies when the workspace has a routing config — a
+`office_workspace_routing` row that is enabled, or that carries a non-empty
+`provider_order`. On that path, routing is authoritative: the precedence
+order (wake_reason > per-agent override > role_tiers > workspace default)
+governs which tier — and therefore which model — a run launches on. An
+Office agent's own `model` field (`agent_profiles.model`) is not part of
+that precedence chain and never selects the launched model; a resolver test
+pins this at `apps/backend/internal/office/routing/agent_model_ignored_test.go`.
 
 The lever for an operator who wants a specific agent on a specific tier is
 the per-agent tier override (`tier_source = "override"`), or a `role_tiers`
 entry for agents sharing that role. Setting `model` on the agent record has
-no effect on resolution: the field predates workspace tier routing, is
-excluded from the agent response DTO, and a `PATCH` that attempts to set it
-is rejected with a `ValidationError`.
+no effect on a routed launch's resolution: the field predates workspace tier
+routing, is excluded from the agent response DTO, and a `PATCH` that
+attempts to set it is rejected with a `ValidationError`.
+
+When a workspace has no routing config, `Resolve` returns `Enabled: false`
+with no candidates, dispatch falls through to the legacy launch path, and
+that path launches the Office identity's own profile — whose `model` field
+is then the launched model (`apps/backend/internal/agent/runtime/lifecycle/profile_resolver.go`).
+This spec does not change that legacy behavior; it only decides what happens
+once a workspace opts into routing.
 
 ### ISSUE-9 (Office Beta, 2026-09-25) disposition
 
