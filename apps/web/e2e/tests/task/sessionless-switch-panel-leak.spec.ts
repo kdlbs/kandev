@@ -3,12 +3,7 @@ import { type Page, expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import {
-  GitHelper,
-  makeGitEnv,
-  openTaskSession,
-  createStandardProfile,
-} from "../../helpers/git-helper";
+import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { waitForLatestSessionDone } from "../../helpers/session";
 
@@ -64,7 +59,11 @@ async function setupTaskWithFilePanel(args: {
     "source task did not finish preparing its workspace",
   );
 
-  const session = await openTaskSession(args.testPage, "Panel Leak Source");
+  // The task API is authoritative here. Direct navigation avoids depending on
+  // a Kanban snapshot refresh while the newly prepared task is still settling.
+  await args.testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(args.testPage);
+  await session.waitForLoad();
   await args.testPage.reload();
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 45_000 });

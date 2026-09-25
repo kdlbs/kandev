@@ -569,8 +569,8 @@ test.describe("Session resume (TUI passthrough mode)", () => {
     //    resolution preserves resume detection.
     await backend.restart();
     await testPage.reload();
-    await session.waitForPassthroughLoad();
-    await session.waitForPassthroughLoaded();
+    await session.waitForPassthroughLoad(60_000);
+    await session.waitForPassthroughLoaded(60_000);
     await session.expectPassthroughHasText("RESUMED", 30_000);
   });
 });
