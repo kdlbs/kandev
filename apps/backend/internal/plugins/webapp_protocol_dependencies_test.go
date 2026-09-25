@@ -135,6 +135,47 @@ func TestListWebAppTasks_DerivesDependenciesAfterScopeNarrowing(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"blocked":true`)
 }
 
+func TestListWebAppTasks_TaskPlacementUsesWorkspaceDataScopeAndPagination(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	d.tasks.workspaces = []*taskmodels.Workspace{{ID: "ws-1"}, {ID: "ws-2"}}
+	d.tasks.tasksByWorkspace = map[string][]*taskmodels.Task{
+		"ws-1": {
+			{ID: "task-a", WorkspaceID: "ws-1", CreatedAt: time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC)},
+			{ID: "task-b", WorkspaceID: "ws-1", CreatedAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)},
+		},
+		"ws-2": {{ID: "foreign", WorkspaceID: "ws-2", CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}},
+	}
+	svc := &Service{taskData: d.tasks}
+	binding := webapp.CapabilityBinding{
+		ScopeKind: instances.ScopeTask, DataScopeKind: instances.ScopeWorkspace,
+		WorkspaceID: "ws-1", TaskID: "task-a", Permissions: []string{"api_read:tasks"},
+	}
+
+	first := httptest.NewRecorder()
+	svc.handleWebAppProtocol(first, httptest.NewRequest(http.MethodGet, "/?limit=1", nil), "", binding, "v1/data/tasks")
+	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+	var firstPage webAppPage[webAppTask]
+	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &firstPage))
+	require.Len(t, firstPage.Items, 1)
+	require.Equal(t, "task-a", firstPage.Items[0].ID)
+	require.True(t, firstPage.PageInfo.HasMore)
+	require.NotEmpty(t, firstPage.PageInfo.NextCursor)
+
+	second := httptest.NewRecorder()
+	secondRequest := httptest.NewRequest(http.MethodGet, "/?limit=1&cursor="+firstPage.PageInfo.NextCursor, nil)
+	svc.handleWebAppProtocol(second, secondRequest, "", binding, "v1/data/tasks")
+	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+	var secondPage webAppPage[webAppTask]
+	require.NoError(t, json.Unmarshal(second.Body.Bytes(), &secondPage))
+	require.Len(t, secondPage.Items, 1)
+	require.Equal(t, "task-b", secondPage.Items[0].ID)
+
+	foreign := httptest.NewRecorder()
+	foreignRequest := httptest.NewRequest(http.MethodGet, "/?workspace_id=ws-2", nil)
+	svc.handleWebAppProtocol(foreign, foreignRequest, "", binding, "v1/data/tasks")
+	require.Equal(t, http.StatusForbidden, foreign.Code)
+}
+
 func TestListWebAppTasks_FanOutRefusalBecomesResponseTooLarge(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
 	task := &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1"}

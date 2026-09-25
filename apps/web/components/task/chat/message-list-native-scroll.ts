@@ -1543,6 +1543,21 @@ type InitialScrollPositionEffectParams = Omit<InitialScrollPositionParams, "plac
   activationPendingRef: React.RefObject<boolean>;
 };
 
+function handleEmptyTranscriptPlacement(params: {
+  hasEmptyTranscript: boolean;
+  envSwitchPlacementToken: number | null;
+  historyRefreshPending: boolean;
+  didInitialScroll: React.RefObject<boolean>;
+  activationPendingRef: React.RefObject<boolean>;
+}): boolean {
+  if (!params.hasEmptyTranscript) return false;
+  if (params.envSwitchPlacementToken !== null && !params.historyRefreshPending) {
+    markInitialScrollConsumed(params.didInitialScroll, params.activationPendingRef);
+    completeEnvSwitchPlacement(params.envSwitchPlacementToken);
+  }
+  return true;
+}
+
 function runInitialScrollPositionEffect(
   params: InitialScrollPositionEffectParams,
 ): void | (() => void) {
@@ -1565,13 +1580,13 @@ function runInitialScrollPositionEffect(
     activationPendingRef,
   } = params;
   if (!isVisible || (envSwitchPlacementToken !== null && isRestoringLayout)) return;
-  const hasEmptyTranscript = itemCount === 0;
-  if (envSwitchPlacementToken !== null && hasEmptyTranscript) {
-    if (historyRefreshPending) return;
-    markInitialScrollConsumed(didInitialScroll, activationPendingRef);
-    completeEnvSwitchPlacement(envSwitchPlacementToken);
-    return;
-  }
+  const hasEmptyTranscript = handleEmptyTranscriptPlacement({
+    hasEmptyTranscript: itemCount === 0,
+    envSwitchPlacementToken,
+    historyRefreshPending,
+    didInitialScroll,
+    activationPendingRef,
+  });
   if (didInitialScroll.current || hasEmptyTranscript) return;
   const element = scrollRef.current;
   if (!element) return;
@@ -1605,7 +1620,11 @@ function runInitialScrollPositionEffect(
     if (phase === "provisional") provisionalTokenRef.current = envSwitchPlacementToken;
   };
 
-  if (activationPendingRef.current) return scheduleAfterPanelRestore(applyInitialScroll);
+  const isEnvSwitchSettling =
+    envSwitchPlacementToken !== null && provisionalTokenRef.current === envSwitchPlacementToken;
+  if (activationPendingRef.current && !isEnvSwitchSettling) {
+    return scheduleAfterPanelRestore(applyInitialScroll);
+  }
   applyInitialScroll();
 }
 

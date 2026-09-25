@@ -2,7 +2,13 @@
 
 import { memo } from "react";
 import Link from "@/components/routing/app-link";
-import { IconArrowLeft, IconChevronDown, IconGitBranch, IconCheck } from "@tabler/icons-react";
+import {
+  IconArrowLeft,
+  IconChevronDown,
+  IconChevronRight,
+  IconGitBranch,
+  IconCheck,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
@@ -10,13 +16,21 @@ import { LineStat } from "@/components/diff-stat";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import type { FileInfo } from "@/lib/state/slices";
-import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
+import {
+  TaskTopBarPluginActions,
+  useHasTaskTopBarPluginActions,
+} from "@/components/task/task-top-bar-plugin-actions";
 import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { linkToTaskOverview } from "@/lib/links";
 import { AppNavSheet } from "@/components/navigation/app-nav-sheet";
 import { useTranslation } from "react-i18next";
+import {
+  RemoteRepositoryProviderIcon,
+  useRemoteRepositoryProviderLabel,
+} from "@/components/task-create-dialog-remote-repo-provider-tabs";
+import type { TaskTopbarRepository } from "../task-page-content-helpers";
 
 type SessionMobileTopBarProps = {
   taskId?: string | null;
@@ -24,6 +38,7 @@ type SessionMobileTopBarProps = {
   taskTitle?: string;
   /** `owner/repo` (or the repository name) of the task's primary repository. */
   repositoryLabel?: string | null;
+  topbarRepository?: TaskTopbarRepository | null;
   sessionId?: string | null;
   baseBranch?: string;
   worktreeBranch?: string | null;
@@ -105,6 +120,64 @@ function MobileTaskTitle({
         )}
       </div>
     </button>
+  );
+}
+
+function MobileRepositoryLabel({ repository }: { repository: TaskTopbarRepository }) {
+  const { t } = useTranslation();
+  const providerLabel = useRemoteRepositoryProviderLabel(repository.provider);
+  const accessibleName = t("task:remoteRepositoryIdentity", {
+    provider: providerLabel,
+    repository: repository.fullName,
+  });
+  const icon = (
+    <span
+      data-testid="mobile-task-repository-provider-icon"
+      aria-hidden="true"
+      className="flex shrink-0 items-center"
+    >
+      <RemoteRepositoryProviderIcon provider={repository.provider} />
+    </span>
+  );
+  const name = (
+    <span data-testid="mobile-task-repository-name" aria-hidden="true" className="min-w-0 truncate">
+      {repository.displayName}
+    </span>
+  );
+  const className =
+    "flex h-11 min-h-11 min-w-11 max-w-[38%] shrink items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground";
+  const content = (
+    <span className="flex min-w-0 items-center gap-1">
+      {icon}
+      {name}
+    </span>
+  );
+
+  if (repository.browserUrl) {
+    return (
+      <a
+        href={repository.browserUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={accessibleName}
+        title={repository.fullName}
+        data-testid="mobile-task-repository-link"
+        className={`${className} cursor-pointer hover:bg-muted hover:text-foreground`}
+      >
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <span
+      title={repository.fullName}
+      data-testid="mobile-task-repository-label"
+      className={`${className} cursor-default`}
+    >
+      {content}
+      <span className="sr-only">{accessibleName}</span>
+    </span>
   );
 }
 
@@ -225,19 +298,23 @@ function MobileTopBarActions({
   onTaskUnarchived,
   onTaskPickerClick,
 }: MobileTopBarActionsProps) {
+  const hasPluginActions = useHasTaskTopBarPluginActions();
+  const pluginActions =
+    !isArchived && hasPluginActions ? (
+      <TaskTopBarPluginActions
+        sessionId={sessionId ?? null}
+        taskId={taskId ?? null}
+        taskTitle={taskTitle}
+        workspaceId={workspaceId ?? null}
+        presentation="mobile"
+      />
+    ) : undefined;
+
   return (
     <div className="flex shrink-0 items-center gap-1" data-testid="mobile-topbar-actions">
       <MRTopbarButton compact mobile />
       {isArchived && <TaskUnarchiveButton taskId={taskId} onUnarchived={onTaskUnarchived} mobile />}
       {!isArchived && <PortForwardButton sessionId={sessionId} />}
-      {!isArchived && (
-        <TaskTopBarPluginActions
-          sessionId={sessionId ?? null}
-          taskId={taskId ?? null}
-          taskTitle={taskTitle}
-          workspaceId={workspaceId ?? null}
-        />
-      )}
       {isRemoteExecutor && (
         <MobileRemoteExecutorIndicator
           taskId={taskId}
@@ -251,7 +328,7 @@ function MobileTopBarActions({
         />
       )}
       {showApproveButton && onApprove && <ApproveButton onApprove={onApprove} />}
-      <AppNavSheet onOpenTaskViews={onTaskPickerClick} />
+      <AppNavSheet onOpenTaskViews={onTaskPickerClick} pluginActions={pluginActions} />
     </div>
   );
 }
@@ -276,9 +353,18 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
             <IconArrowLeft className="h-4 w-4" />
           </Link>
         </Button>
+        {props.topbarRepository && (
+          <>
+            <MobileRepositoryLabel repository={props.topbarRepository} />
+            <IconChevronRight
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-muted-foreground"
+            />
+          </>
+        )}
         <MobileTaskTitle
           taskTitle={props.taskTitle}
-          repositoryLabel={props.repositoryLabel}
+          repositoryLabel={props.topbarRepository ? null : props.repositoryLabel}
           displayBranch={displayBranch}
           totalAdditions={totalAdditions}
           totalDeletions={totalDeletions}

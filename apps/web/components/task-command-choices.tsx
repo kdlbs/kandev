@@ -1,4 +1,5 @@
 import { createElement } from "react";
+import { IconLogicBuffer } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import type { CommandItem } from "@/lib/commands/types";
 import { useSetTaskColor, useTaskColor } from "@/hooks/use-task-color";
@@ -16,6 +17,7 @@ import {
 } from "./task/task-move-context-menu";
 import { useTaskPluginLinkActions } from "./task/task-session-sidebar-link-actions";
 import { useTaskPluginPrimaryMenuEntries } from "./task/task-switcher-plugin-menu-items";
+import type { KanbanCardMenuEntry } from "./kanban-card-menu-items";
 import {
   selectTaskLinkActions,
   taskLinkMenuOptions,
@@ -32,7 +34,45 @@ type ChoiceOptions = {
   linkHandlers: TaskLinkHandlers;
   openMoveOptions: (step: TaskMoveStep) => void;
   moveImmediately: (step: TaskMoveStep) => void;
+  onChangeWorkflow?: () => void;
 };
+
+/**
+ * One command per *selectable* plugin menu entry. A plugin submenu has no
+ * activation of its own (its `label` is only a trigger and it carries no
+ * `onSelect`), so its item children become the commands -- flattening them
+ * keeps a plugin's actions reachable from the command palette instead of
+ * dropping the whole contribution, and mirrors what the search surface shows
+ * for every other card action.
+ */
+export function pluginCommandChoices(
+  entry: KanbanCardMenuEntry,
+  group: string,
+  parentLabel?: string,
+): CommandItem[] {
+  if (entry.kind === "submenu") {
+    const label = typeof entry.label === "string" ? entry.label : parentLabel;
+    return entry.children.flatMap((child) => pluginCommandChoices(child, group, label));
+  }
+  if (entry.kind !== "item" || typeof entry.label !== "string") return [];
+  return [
+    {
+      // The entry key is unique across every plugin menu entry, including
+      // flattened children whose key encodes the child id, and it doubles as
+      // this row's React key and cmdk value.
+      id: entry.key,
+      label: entry.label,
+      group,
+      // A child's own label ("Blocked") is meaningless on its own in a palette
+      // listing every action, so the trigger it came from is the entry's
+      // context -- the same field the sidebar task commands use for the title.
+      context: parentLabel,
+      action: entry.onSelect,
+      disabled: entry.disabled,
+      icon: entry.icon,
+    },
+  ];
+}
 
 export function useTaskCommandChoices(options: ChoiceOptions) {
   const { task, linkHandlers } = options;
@@ -87,17 +127,7 @@ export function useTaskCommandChoices(options: ChoiceOptions) {
       icon: createElement(resolvePluginIcon(link.icon), { className: "size-3.5" }),
     })),
   );
-  const plugins = pluginEntries.flatMap((entry): CommandItem[] =>
-    entry.kind === "item" && typeof entry.label === "string"
-      ? [
-          {
-            ...item(entry.key, entry.label, entry.onSelect),
-            disabled: entry.disabled,
-            icon: entry.icon,
-          },
-        ]
-      : [],
-  );
+  const plugins = pluginEntries.flatMap((entry) => pluginCommandChoices(entry, group));
   return {
     colors,
     priorities,
@@ -147,6 +177,7 @@ export function useTaskMoveChoices({
   stepsByWorkflowId,
   openMoveOptions,
   moveImmediately,
+  onChangeWorkflow,
 }: Omit<ChoiceOptions, "linkHandlers">) {
   const { t } = useTranslation();
   const { currentSteps, targets } = taskMoveOptions(task.workflowId, workflows, stepsByWorkflowId);
@@ -170,15 +201,16 @@ export function useTaskMoveChoices({
   const steps = currentSteps
     .filter((step) => step.id !== task.workflowStepId)
     .map((step) => choice(step, task.workflowId!, group));
-  const workflowChoices: CommandItem[] = targets
-    .filter((workflow) => (stepsByWorkflowId[workflow.id]?.length ?? 0) > 0)
-    .map((workflow) => ({
-      id: `task-workflow-${workflow.id}`,
-      label: workflow.name,
-      group: t("task:sendToWorkflow"),
-      children: (stepsByWorkflowId[workflow.id] ?? []).map((step) =>
-        choice(step, workflow.id, workflow.name),
-      ),
-    }));
+  const workflowChoices: CommandItem[] = targets.length
+    ? [
+        {
+          id: "task-change-workflow",
+          label: t("task:changeWorkflow"),
+          group,
+          icon: <IconLogicBuffer className="size-3.5" />,
+          action: onChangeWorkflow,
+        },
+      ]
+    : [];
   return { steps, workflows: workflowChoices };
 }

@@ -104,6 +104,8 @@ test.describe("Mobile task autopilot", () => {
     );
     const childTask = await apiClient.getTask(child.id);
     expect(childTask.autopilot).toBe(true);
+    const childSessionId = child.session_id;
+    if (!childSessionId) throw new Error("mobile autopilot child did not return a session ID");
 
     await testPage.goto(`/t/${parent.id}`);
     const parentSession = new SessionPage(testPage);
@@ -133,12 +135,14 @@ test.describe("Mobile task autopilot", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "mobile autopilot task switcher");
 
     await waitForParentQuestion(apiClient, parent.id);
+    // The answer turn can finish before polling observes RUNNING. Its durable
+    // turn remains observable after the child returns to WAITING_FOR_INPUT.
     await expect
-      .poll(async () => (await apiClient.listTaskSessions(child.id)).sessions[0]?.state ?? "", {
+      .poll(async () => (await apiClient.listSessionTurns(childSessionId)).turns.length, {
         timeout: 60_000,
-        message: "the parent answer should resume the mobile child",
+        message: "the parent answer should create a mobile child turn",
       })
-      .not.toBe("WAITING_FOR_INPUT");
+      .toBeGreaterThanOrEqual(2);
 
     await testPage.goto(`/t/${child.id}`);
     const childSession = new SessionPage(testPage);

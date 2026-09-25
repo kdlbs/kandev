@@ -520,7 +520,7 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *m
 		ctx, task.ID, models.TaskResourceCleanupTriggerWorkspaceDelete,
 		newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, task.ID),
 		cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, cleanup.attachments,
-		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}, true, true, "",
+		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}, true, true, task.WorkspaceID,
 	)
 	return cleanup, err
 }
@@ -2041,6 +2041,9 @@ func remoteDockerConnectionChanged(current, next map[string]string) bool {
 }
 
 func (s *Service) hasExecutorRunningInventory(ctx context.Context, executorID string) (bool, error) {
+	if retained, err := s.hasKubernetesEnvironmentInventory(ctx, executorID); err != nil || retained {
+		return retained, err
+	}
 	running, err := s.executors.ListExecutorsRunning(ctx)
 	if err != nil {
 		return false, err

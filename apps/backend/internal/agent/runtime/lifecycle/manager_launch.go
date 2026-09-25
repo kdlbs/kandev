@@ -1057,6 +1057,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 
 	execReq := &ExecutorCreateRequest{
 		InstanceID:                     executionID,
+		ExecutorType:                   reqWithWorktree.ExecutorType,
 		TaskID:                         reqWithWorktree.TaskID,
 		TaskTitle:                      reqWithWorktree.TaskTitle,
 		SessionID:                      launchInventorySessionID(reqWithWorktree),
@@ -1229,6 +1230,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		DefaultBranch:              req.DefaultBranch,
 		CheckoutBranch:             req.CheckoutBranch,
 		PRNumber:                   req.PRNumber,
+		QualifiedPRBase:            req.QualifiedPRBase,
 		RemoteContribution:         req.RemoteContribution,
 		CheckoutOptions:            req.CheckoutOptions,
 		ContributionDestination:    req.ContributionDestination,
@@ -1267,6 +1269,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				DefaultBranch:              r.DefaultBranch,
 				CheckoutBranch:             r.CheckoutBranch,
 				PRNumber:                   r.PRNumber,
+				QualifiedPRBase:            r.QualifiedPRBase,
 				RemoteContribution:         r.RemoteContribution,
 				CheckoutOptions:            r.CheckoutOptions,
 				WorktreeID:                 r.WorktreeID,
@@ -1522,7 +1525,11 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		}
 		execution.IsPassthrough = req.IsPassthrough
 		if !req.IsPassthrough {
-			if err := m.materializeRuntimeProjectMCP(sharedCtx, execution, agentConfig); err != nil {
+			executorType := req.ExecutorType
+			if executorType == "" {
+				executorType = execution.ExecutorType
+			}
+			if err := m.materializeRuntimeProjectMCP(sharedCtx, execution, agentConfig, profileInfo, executorType); err != nil {
 				execution.AgentCommand = ""
 				execution.ContinueCommand = ""
 				execution.AgentArgs = nil
@@ -1716,7 +1723,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		return nil, err
 	}
 	if !reqWithWorktree.IsPassthrough {
-		if err := m.materializeRuntimeProjectMCP(ctx, execution, agentConfig); err != nil {
+		if err := m.materializeRuntimeProjectMCP(ctx, execution, agentConfig, profileInfo, reqWithWorktree.ExecutorType); err != nil {
 			m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "project MCP materialization failed")
 			return nil, err
 		}

@@ -211,6 +211,6 @@ test("collapsed sections do not leave flexible space before Utilities", async ({
           );
         }),
       )
-      .toBe(24);
+      .toBe(16);
   }
 });

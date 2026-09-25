@@ -20,6 +20,7 @@ func TestConfigurationCatalogIsComplete(t *testing.T) {
 		"tasks.preparationTimeout",
 		"credentials.file",
 		"limits.ghMaxConcurrent",
+		"limits.lspMaxConnections",
 		"messageQueue.maxPerSession",
 		"agentctl.notificationQueueCapacity",
 		"launcher.noBrowser",
@@ -27,6 +28,10 @@ func TestConfigurationCatalogIsComplete(t *testing.T) {
 		if _, ok := CatalogEntryForKey(key); !ok {
 			t.Errorf("catalog is missing %q", key)
 		}
+	}
+	entry, ok := CatalogEntryForKey("limits.lspMaxConnections")
+	if !ok || !strings.Contains(entry.Description, "including leases detached from a browser") {
+		t.Fatalf("LSP capacity description = %q, want detached leases included", entry.Description)
 	}
 }
 

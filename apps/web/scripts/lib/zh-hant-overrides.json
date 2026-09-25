@@ -31,7 +31,8 @@
       },
       "workflows": {
         "profileSessionLifecycleIntro": "這些設定適用於工作流程更改代理程式設定檔的情況。",
-        "profileSessionStartReuseDescription": "繼續使用此代理程式設定檔最近可用的工作階段。如果沒有可用工作階段，則開始新工作階段。"
+        "profileSessionStartReuseDescription": "繼續使用此代理程式設定檔最近可用的工作階段。如果沒有可用工作階段，則開始新工作階段。",
+        "openAgentSettings": "開啟代理程式設定"
       },
       "system": {
         "diskRefreshHelp": "遍歷 Kandev 資料目錄內的所有子目錄並累計檔案大小。結果會快取幾小時；點選可立即重新計算。大型工作區可能需要幾秒。"
@@ -75,7 +76,8 @@
       },
       "workflows": {
         "profileSessionLifecycleIntro": "這些設定適用於工作流程更改代理程式設定檔的情況。",
-        "profileSessionStartReuseDescription": "繼續使用此代理程式設定檔最近可用的工作階段。如果沒有可用工作階段，則開始新工作階段。"
+        "profileSessionStartReuseDescription": "繼續使用此代理程式設定檔最近可用的工作階段。如果沒有可用工作階段，則開始新工作階段。",
+        "openAgentSettings": "開啟代理程式設定"
       },
       "system": {
         "diskRefreshHelp": "遍歷 Kandev 數據目錄內的所有子目錄並累計檔案大小。結果會快取幾小時；點擊可立即重新計算。大型工作區可能需要幾秒。"

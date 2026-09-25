@@ -116,6 +116,10 @@ type environmentDestroyerAdapter struct {
 	containers *containerOpsDispatch
 }
 
+func (a *environmentDestroyerAdapter) DestroyKubernetesEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+	return a.lifecycle.DestroyKubernetesEnvironment(ctx, env)
+}
+
 func (a *environmentDestroyerAdapter) DestroyContainer(ctx context.Context, env *models.TaskEnvironment) error {
 	return a.containers.DestroyContainer(ctx, env)
 }

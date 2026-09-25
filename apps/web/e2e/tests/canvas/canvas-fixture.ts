@@ -20,6 +20,8 @@ export type CanvasRecord = {
   workspace_id: string;
   task_id?: string;
   scope_kind?: string;
+  data_scope_kind?: string;
+  grant_generation?: number;
   status?: string;
   active_release_id?: string;
   active_release_status?: string;
@@ -46,6 +48,31 @@ export type SeededCanvas = {
   canvas: CanvasRecord;
   session: SessionPage;
 };
+
+export async function seedCanvasWorkspacePreview(apiClient: ApiClient, seedData: SeedData) {
+  const previewTask = await apiClient.seedTask(
+    seedData.workspaceId,
+    "E2E Canvas Workspace Preview Task",
+    { workflow_id: seedData.workflowId, workflow_step_id: seedData.startStepId },
+  );
+  const foreignWorkspaceName = "E2E Canvas Foreign Workspace";
+  try {
+    const foreignWorkspace = await apiClient.createWorkspace(foreignWorkspaceName);
+    return {
+      workspaceTaskId: previewTask.task_id,
+      foreignWorkspaceId: foreignWorkspace.id,
+      cleanup: async () => {
+        await apiClient.deleteTask(previewTask.task_id).catch(() => undefined);
+        await apiClient
+          .deleteWorkspace(foreignWorkspace.id, foreignWorkspaceName)
+          .catch(() => undefined);
+      },
+    };
+  } catch (error) {
+    await apiClient.deleteTask(previewTask.task_id).catch(() => undefined);
+    throw error;
+  }
+}
 
 export async function expectCanvasFrameFillsHost(page: Page): Promise<void> {
   await expect
@@ -182,6 +209,7 @@ export async function waitForSessionWorkspace(
 export type CanvasSourceOptions = {
   noPermissions?: boolean;
   minimalPermissions?: boolean;
+  foreignWorkspaceId?: string;
 };
 
 function canvasCapabilities(options?: CanvasSourceOptions): string[] {
@@ -230,10 +258,12 @@ function canvasManifest(canvas: CanvasRecord, options?: CanvasSourceOptions): st
   ].join("\n");
 }
 
-function canvasFixtureScript(canvas: CanvasRecord): string {
+function canvasFixtureScript(canvas: CanvasRecord, options?: CanvasSourceOptions): string {
   const taskID = JSON.stringify(canvas.task_id ?? "");
+  const foreignWorkspaceID = JSON.stringify(options?.foreignWorkspaceId ?? "");
   return String.raw`(() => {
   const taskId = ${taskID};
+  const foreignWorkspaceId = ${foreignWorkspaceID};
   const text = (testId, value) => {
     const element = document.querySelector('[data-testid="' + testId + '"]');
     if (element) element.textContent = String(value);
@@ -260,6 +290,23 @@ function canvasFixtureScript(canvas: CanvasRecord): string {
   let streamReader;
   let streamCompletion = Promise.resolve();
 
+  const renderTasks = (tasks) => {
+    const list = document.querySelector('[data-testid="canvas-fixture-task-list"]');
+    if (!list) return;
+    list.replaceChildren();
+    tasks.forEach((candidate) => {
+      const item = document.createElement("article");
+      item.className = "task-item";
+      const title = document.createElement("h2");
+      title.textContent = candidate.title || "Workspace task";
+      const status = document.createElement("span");
+      status.className = "task-status";
+      status.textContent = candidate.status || "Open";
+      item.append(title, status);
+      list.append(item);
+    });
+  };
+
   const renderAppearance = () => {
     const root = document.documentElement;
     const styles = getComputedStyle(root);
@@ -275,12 +322,22 @@ function canvasFixtureScript(canvas: CanvasRecord): string {
   });
 
   const loadProjection = async () => {
-    const [context, taskPage, workflowPage] = await Promise.all([
+    const [context, tasks, workflowPage] = await Promise.all([
       api("./_kandev/v1/context"),
-      api("./_kandev/v1/data/tasks?limit=10"),
+      (async () => {
+        const items = [];
+        let cursor = "";
+        do {
+          const query = new URLSearchParams({ limit: "1" });
+          if (cursor) query.set("cursor", cursor);
+          const page = await api("./_kandev/v1/data/tasks?" + query.toString());
+          items.push(...(page.items || []));
+          cursor = page.page_info?.next_cursor || "";
+        } while (cursor);
+        return items;
+      })(),
       api("./_kandev/v1/data/workflows?limit=10"),
     ]);
-    const tasks = taskPage.items || [];
     task = tasks.find((candidate) => candidate.id === taskId) || tasks[0];
     const workflow = (workflowPage.items || []).find(
       (candidate) => candidate.id === task?.workflow_id,
@@ -293,8 +350,19 @@ function canvasFixtureScript(canvas: CanvasRecord): string {
     }
     text("canvas-fixture-context", context.task_id || "workspace");
     text("canvas-fixture-task-count", tasks.length);
+    text("canvas-fixture-task-ids", tasks.map((candidate) => candidate.id).join(","));
+    renderTasks(tasks);
     text("canvas-fixture-workflow-count", workflowPage.items?.length || 0);
     text("canvas-fixture-step-id", task?.workflow_step_id || "");
+    text("canvas-fixture-refresh-status", "refreshed");
+    if (foreignWorkspaceId) {
+      try {
+        await api("./_kandev/v1/data/tasks?workspace_id=" + encodeURIComponent(foreignWorkspaceId));
+        text("canvas-fixture-foreign-workspace-status", "unexpected-allowed");
+      } catch (error) {
+        text("canvas-fixture-foreign-workspace-status", "denied:" + error.status);
+      }
+    }
   };
 
   const parseEvent = (block) => {
@@ -425,6 +493,12 @@ function canvasFixtureScript(canvas: CanvasRecord): string {
   document.querySelector('[data-testid="canvas-fixture-resync"]')?.addEventListener("click", () => {
     void connectEvents("old-generation:1");
   });
+  document.querySelector('[data-testid="canvas-fixture-refresh"]')?.addEventListener("click", () => {
+    text("canvas-fixture-refresh-status", "refreshing");
+    void loadProjection().catch((error) => {
+      text("canvas-fixture-refresh-status", "error:" + error.status);
+    });
+  });
 
   text("canvas-fixture-script", "inline-ready");
   renderAppearance();
@@ -445,33 +519,39 @@ export function writeCanvasSource(
     [
       "<!doctype html>",
       '<html lang="en">',
-      '  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>E2E Plugin Canvas</title><link rel="stylesheet" href="./styles.css"><script src="./appearance.js"></script></head>',
+      '  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>E2E Plugin Canvas</title><script src="./appearance.js"></script>',
+      "    <style>",
+      "      :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #172033; background: #f7f8fc; font-synthesis: none; }",
+      "      * { box-sizing: border-box; } body { margin: 0; padding: 32px; } .canvas-shell { max-width: 920px; margin: 0 auto; }",
+      "      .canvas-header { margin-bottom: 24px; } .eyebrow { margin: 0 0 8px; color: #6257df; font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }",
+      "      h1 { margin: 0; font-size: clamp(24px, 4vw, 34px); line-height: 1.2; letter-spacing: -.03em; } .summary { margin: 8px 0 0; color: #687187; font-size: 14px; }",
+      "      .canvas-card { padding: 20px; border: 1px solid #e2e6ef; border-radius: 16px; background: white; box-shadow: 0 10px 32px #27345b0a; }",
+      "      .list-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; } .list-heading h2 { margin: 0; font-size: 15px; }",
+      "      .task-count { color: #687187; font-size: 12px; } .task-list { display: grid; gap: 10px; }",
+      "      .task-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 58px; padding: 12px 14px; border: 1px solid #e8ebf2; border-radius: 10px; background: #fff; }",
+      "      .task-item h2 { margin: 0; font-size: 14px; font-weight: 600; } .task-status { flex: none; padding: 4px 8px; border-radius: 999px; background: #f0efff; color: #5046c7; font-size: 11px; font-weight: 600; text-transform: capitalize; }",
+      '      .canvas-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; } button { min-height: 34px; padding: 7px 11px; border: 1px solid #dfe3ec; border-radius: 8px; background: white; color: #384158; font: inherit; font-size: 12px; cursor: pointer; -webkit-tap-highlight-color: transparent; } button:hover { background: #f6f7fb; } button[data-testid="canvas-fixture-refresh"] { border-color: #5548e8; background: #5548e8; color: white; }',
+      "      .diagnostics { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }",
+      '      @media (max-width: 600px) { body { padding: 20px 16px; } .canvas-card { padding: 16px; } .task-item { align-items: flex-start; flex-direction: column; gap: 8px; } .canvas-actions button:not([data-testid="canvas-fixture-refresh"]) { display: none; } }',
+      "    </style></head>",
       "  <body>",
       '    <main class="canvas-shell" data-testid="canvas-fixture-content">',
-      '      <header class="canvas-header"><p class="eyebrow" data-testid="canvas-fixture-eyebrow">E2E Plugin Canvas</p><h1>E2E Plugin Canvas</h1></header>',
+      '      <header class="canvas-header"><p class="eyebrow" data-testid="canvas-fixture-eyebrow">Workspace preview</p><h1>Your workspace tasks</h1><p class="summary">A live view of work across this workspace.</p></header>',
       '      <section class="canvas-card">',
-      '      <p data-testid="canvas-fixture-script">loading</p>',
-      '      <p data-testid="canvas-fixture-context">loading</p>',
-      '      <p data-testid="canvas-fixture-task-count">0</p>',
-      '      <p data-testid="canvas-fixture-workflow-count">0</p>',
-      '      <p data-testid="canvas-fixture-step-id">loading</p>',
-      '      <p data-testid="canvas-fixture-message-status">idle</p>',
-      '      <p data-testid="canvas-fixture-move-status">idle</p>',
-      '      <p data-testid="canvas-fixture-state-status">idle</p>',
-      '      <p data-testid="canvas-fixture-sse-status">loading</p>',
-      '      <p data-testid="canvas-fixture-sse-events">0</p>',
-      '      <p data-testid="canvas-fixture-sse-resync">idle</p>',
-      '      <p data-testid="canvas-fixture-appearance-mode">loading</p>',
-      '      <p data-testid="canvas-fixture-appearance-background">loading</p>',
-      '      <p data-testid="canvas-fixture-appearance-color-scheme">loading</p>',
-      '      <button type="button" data-testid="canvas-fixture-continue">Continue</button>',
-      '      <button type="button" data-testid="canvas-fixture-move">Move workflow step</button>',
-      '      <button type="button" data-testid="canvas-fixture-state">Recover state</button>',
-      '      <button type="button" data-testid="canvas-fixture-reconnect">Reconnect events</button>',
-      '      <button type="button" data-testid="canvas-fixture-resync">Force resync</button>',
+      '        <div class="list-heading"><h2>All workspace tasks</h2><span class="task-count"><span data-testid="canvas-fixture-task-count">0</span> tasks</span></div>',
+      '        <div class="task-list" data-testid="canvas-fixture-task-list" aria-label="Workspace tasks"></div>',
+      '        <div class="canvas-actions"><button type="button" data-testid="canvas-fixture-refresh">Refresh list</button></div>',
+      '        <div class="diagnostics" aria-hidden="true">',
+      '          <p data-testid="canvas-fixture-script">loading</p><p data-testid="canvas-fixture-context">loading</p><p data-testid="canvas-fixture-task-ids"></p>',
+      '          <p data-testid="canvas-fixture-refresh-status">idle</p><p data-testid="canvas-fixture-foreign-workspace-status">not-tested</p><p data-testid="canvas-fixture-workflow-count">0</p><p data-testid="canvas-fixture-step-id">loading</p>',
+      '          <p data-testid="canvas-fixture-message-status">idle</p><p data-testid="canvas-fixture-move-status">idle</p><p data-testid="canvas-fixture-state-status">idle</p><p data-testid="canvas-fixture-sse-status">loading</p>',
+      '          <p data-testid="canvas-fixture-sse-events">0</p><p data-testid="canvas-fixture-sse-resync">idle</p><p data-testid="canvas-fixture-appearance-mode">loading</p><p data-testid="canvas-fixture-appearance-background">loading</p><p data-testid="canvas-fixture-appearance-color-scheme">loading</p>',
+      '          <button type="button" data-testid="canvas-fixture-continue">Continue</button><button type="button" data-testid="canvas-fixture-move">Move workflow step</button><button type="button" data-testid="canvas-fixture-state">Recover state</button>',
+      '          <button type="button" data-testid="canvas-fixture-reconnect">Reconnect events</button><button type="button" data-testid="canvas-fixture-resync">Force resync</button>',
+      "        </div>",
       "      </section>",
       "    </main>",
-      `    <script>${canvasFixtureScript(canvas)}</script>`,
+      `    <script>${canvasFixtureScript(canvas, options)}</script>`,
       '    <script src="./script.js"></script>',
       "  </body>",
       "</html>",

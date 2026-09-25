@@ -46,6 +46,18 @@ describe("PluginSlot", () => {
     expect(screen.queryByTestId("slot-a")).toBeNull();
   });
 
+  it("excludes selected owners without affecting other instances of the slot", () => {
+    pluginRegistry.forPlugin("plugin-a").registerComponent(SLOT, () => <button>Usage</button>);
+    pluginRegistry.forPlugin("plugin-b").registerComponent(SLOT, () => <button>CPU</button>);
+    const { rerender } = render(<PluginSlot name={SLOT} excludePluginIds={["plugin-a"]} />);
+    expect(screen.queryByRole("button", { name: "Usage" })).toBeNull();
+    expect(screen.getByRole("button", { name: "CPU" })).toBeTruthy();
+
+    rerender(<PluginSlot name={SLOT} />);
+    expect(screen.getByRole("button", { name: "Usage" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "CPU" })).toBeTruthy();
+  });
+
   it("passes slotProps through to each registered component", () => {
     pluginRegistry
       .forPlugin("plugin-a")

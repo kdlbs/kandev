@@ -314,6 +314,7 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 			return acp.LoadSessionResponse{}, ctx.Err()
 		}
 	}
+	sessionMCPServers := registerACPMcpServers(req.McpServers)
 	a.mu.Lock()
 	if a.sessions == nil {
 		a.sessions = make(map[acp.SessionId]bool)
@@ -324,7 +325,11 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 	if a.commandsEmitted == nil {
 		a.commandsEmitted = make(map[acp.SessionId]bool)
 	}
+	if a.sessionMCPServers == nil {
+		a.sessionMCPServers = make(map[acp.SessionId]map[string]mcpServerDef)
+	}
 	a.sessions[req.SessionId] = true
+	a.sessionMCPServers[req.SessionId] = cloneMCPServerDefs(sessionMCPServers)
 	configOptions, ok := a.sessionConfig[req.SessionId]
 	if !ok {
 		a.sessionConfig[req.SessionId] = mockSessionConfigOptions()
