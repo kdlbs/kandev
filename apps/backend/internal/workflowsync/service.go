@@ -339,7 +339,7 @@ func (s *Service) recordFailure(ctx context.Context, workspaceID string, cfg *Co
 	now := s.now().UTC()
 	directive := buildFailureDirective(cfg, syncErr, now, s.jitter)
 	incSyncFailure(cfg.Provider, directive.circuitClass)
-	if err := s.store.RecordSyncFailure(ctx, workspaceID, syncErr.Error(), directive, now); err != nil {
+	if err := s.store.RecordSyncFailure(ctx, workspaceID, safeSyncErrorMessage(syncErr), directive, now); err != nil {
 		s.logger.Warn("failed to record sync failure",
 			zap.String("workspace_id", cfg.WorkspaceID), zap.Error(err))
 		return

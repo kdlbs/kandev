@@ -156,7 +156,7 @@ func (c *Controller) httpForceSync(ctx *gin.Context) {
 			response["error_code"] = github.RateLimitErrorCode
 			response["rate_limit"] = rateLimit
 		} else {
-			response["error"] = syncErr.Error()
+			response["error"] = safeSyncErrorMessage(syncErr)
 		}
 	}
 	if result != nil {

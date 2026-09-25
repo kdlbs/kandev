@@ -180,6 +180,42 @@ func TestHTTPForceSyncReturnsRateLimitDetailsWithFailedOperation(t *testing.T) {
 	assert.Equal(t, "retry_after_header", body.RateLimit.Source)
 }
 
+func TestHTTPForceSyncSanitizesProviderResponseBodyFromSyncAndConfigResponses(t *testing.T) {
+	const providerBodyMarker = "provider-response-body-must-not-leak"
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	require.NoError(t, err)
+	svc := NewService(
+		setupTestStore(t),
+		failingGitHubClients{err: &github.GitHubAPIError{
+			StatusCode:  http.StatusBadGateway,
+			Endpoint:    "/repos/acme/flows/contents",
+			Body:        providerBodyMarker,
+			FailureKind: github.FailureTransient,
+		}},
+		nil,
+		&fakeApplier{},
+		log,
+	)
+	configureWorkspace(t, svc, victimWorkspace)
+	router := newTestRouter(t, svc)
+
+	syncResponse := doJSON(t, router, http.MethodPost, "/api/v1/workflow-sync/sync?workspace_id="+victimWorkspace, nil)
+	require.Equal(t, http.StatusOK, syncResponse.Code)
+	assert.NotContains(t, syncResponse.Body.String(), providerBodyMarker)
+
+	configResponse := doJSON(t, router, http.MethodGet, "/api/v1/workflow-sync/config?workspace_id="+victimWorkspace, nil)
+	require.Equal(t, http.StatusOK, configResponse.Code)
+	assert.NotContains(t, configResponse.Body.String(), providerBodyMarker)
+
+	var config Config
+	require.NoError(t, json.Unmarshal(configResponse.Body.Bytes(), &config))
+	assert.False(t, config.LastOk)
+	assert.Equal(t, "GitHub request failed with HTTP status 502", config.LastError)
+	assert.Equal(t, string(github.FailureTransient), config.LastErrorClass)
+	assert.Equal(t, 1, config.ConsecutiveFailures)
+	assert.NotNil(t, config.NextRetryAt)
+}
+
 func TestHTTPForceSyncReturnsRateLimitDetailsWhenAdmissionWaitIsCanceled(t *testing.T) {
 	now := time.Date(2026, 8, 30, 11, 18, 0, 0, time.UTC)
 	retryAt := now.Add(2 * time.Minute)

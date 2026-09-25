@@ -2,6 +2,7 @@ package workflowsync
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -74,4 +75,19 @@ func classifyStatusCode(status int) authcircuit.FailureClass {
 	default:
 		return authcircuit.FailureClassTransient
 	}
+}
+
+// safeSyncErrorMessage removes provider response bodies before a sync failure
+// is persisted or returned. The remaining provider and status identify the
+// failure without retaining arbitrary upstream content.
+func safeSyncErrorMessage(err error) string {
+	var ghErr *github.GitHubAPIError
+	if errors.As(err, &ghErr) {
+		return fmt.Sprintf("GitHub request failed with HTTP status %d", ghErr.StatusCode)
+	}
+	var glErr *gitlab.APIError
+	if errors.As(err, &glErr) {
+		return fmt.Sprintf("GitLab request failed with HTTP status %d", glErr.StatusCode)
+	}
+	return "Workflow sync failed"
 }
