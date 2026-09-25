@@ -80,8 +80,8 @@ Add `mcpconfig/cursor_auth_bridge.go` with the requested public helpers:
 - `LinkCursorMCPAuth(workspacePath, cursorHome string, excludedWorkspaceRoots ...string) error`
 
 Keep slug derivation pure. The link helper resolves an absolute path and evaluates workspace symlinks before derivation.
-Normalize Windows separators. Replace each slash, dot, underscore, and colon, including a drive-volume separator, with a dash, then trim boundary dashes.
-Do not collapse internal dash runs. Reject an empty resulting slug.
+Match Cursor Agent CLI's project-directory normalization: replace each character outside ASCII `A-Z`, `a-z`, and `0-9` with a dash, collapse consecutive dashes, then trim boundary dashes. This covers Unix and Windows separators, punctuation, and non-ASCII characters with the same rule. Reject an empty resulting slug.
+Use the current slug for link destinations and disabled-link cleanup. Task-root exclusion recognizes both the current slug and the previous normalization so existing task project directories remain excluded after upgrade. Preserve those directories; do not rename or delete them.
 
 Scan direct project directories under `<cursorHome>/projects`.
 Exclude the current workspace and project slugs under the default task scratch root and configured task-worktree root, names containing `kandev-tasks`, symlinked project entries, and non-directory entries.
@@ -212,7 +212,7 @@ A temporary git repository/worktree test proves the expected link target without
 
 Desktop and phone Playwright tests prove default-on, save/reload false, re-enable, discard, and absence for other agents.
 Unit tests cover request omission, migration, duplication, and frontend draft reconciliation.
-The [plan](../../../plans/cursor-mcp-oauth-bridge/plan.md) owns exact commands and test names.
+The [original plan](../../../plans/cursor-mcp-oauth-bridge/plan.md) owns the original delivery commands and test names. The [slug normalization repair plan](../../../plans/cursor-mcp-slug-normalization/plan.md) owns the compatibility regression and verification commands.
 
 Cursor can replace a symlink during its own auth writes. A later enabled launch repairs it only if it remains a symlink.
 If Cursor creates a regular file, Kandev preserves that file.

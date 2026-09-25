@@ -986,6 +986,26 @@ func (m *MockClient) SetPRDetail(owner, repo string, number int, pr *PR, err err
 	m.reviewWatch.details[prKey{owner, repo, number}] = mockPRDetailResult{pr: pr, err: err}
 }
 
+func (m *MockClient) ensurePRHeadSHA(owner, repo string, number int, fallback string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := prKey{owner, repo, number}
+	pr, ok := m.prs[key]
+	if !ok || pr == nil {
+		return "", false
+	}
+	if pr.HeadSHA == "" {
+		updated := *pr
+		updated.HeadSHA = fallback
+		pr = &updated
+		m.prs[key] = pr
+		if pr.HeadBranch != "" {
+			m.prsByBranch[branchKey{owner, repo, pr.HeadBranch}] = pr
+		}
+	}
+	return pr.HeadSHA, true
+}
+
 // SetPRMergeQueue replaces the provider-side queue snapshot for a PR and can
 // advance its head. It is intentionally separate from AddPR so E2E tests can
 // drive removal and requeue transitions without replacing the whole fixture.
