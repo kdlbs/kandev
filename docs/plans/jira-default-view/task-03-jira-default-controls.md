@@ -168,3 +168,32 @@ The live Office run-list response now includes its existing causation ID so the 
 The PR #3936 retry artifact reported nine retry-only E2E failures. The fixes add causal waits for cancellation, file-tree, reload readiness, and persisted responses; select the seeded repository by ID; open the created task directly for the terminal check; and tolerate subpixel representation at the 44px touch-target boundary. A backend regression reproduces worktree cleanup failing when a checkout disappears between the path check and `git rev-parse`; cleanup now uses the branch commit only after confirming that disappearance.
 
 Focused no-retry repetitions pass for all changed desktop and mobile cases (10 desktop, 8 mobile). `go test ./internal/worktree ./internal/task/service ./internal/backendapp`, web typecheck, focused ESLint, E2E sleep ratchet, and `git diff --check` pass. The updated PR head's CI and retry artifact remain the final shared-runner verification.
+
+## Latest PR #3936 CI follow-up
+
+The exact-head blob audit reported ten retry-only scenarios and one file-tree test that failed all attempts. The follow-up removes the observed E2E races and fixture coupling: wait for file-tree and screenshot-capture readiness, open tasks by ID when cards update, isolate run-observation agent data, keep the workflow task command deterministic, restore PR-chip focus after a 2-to-1 unlink, retain a completed workflow preview during quick surface handoff, and confirm mobile prompt selection before checking its composer chip. No timeout was raised for the passthrough failure.
+
+```text
+pnpm run build:e2e
+PASS
+chromium markdown preview, pane isolation, run observation, preview feedback, and workflow lifecycle, repeat-each=3, retries=0
+15 passed
+chromium office error handling, repeat-each=10, retries=0, CI=true, GITHUB_ACTIONS=true, IPv4-first DNS
+10 passed
+mobile menu hierarchy and PR unlink, repeat-each=3, retries=0
+6 passed
+mobile passthrough composer prompt selection, repeat-each=10, retries=0
+10 passed
+chromium large file tree, repeat-each=3, retries=0
+3 passed
+mobile workflow move preview, repeat-each=5, retries=0
+5 passed
+PR chip and workflow preview focused unit tests
+59 passed
+web typecheck and ESLint on changed files
+PASS
+git diff --check
+PASS
+```
+
+The original office `TypeError: fetch failed` did not recur in ten runs with CI environment settings. Exact-head CI and its zero-retry blob audit remain pending for the pushed follow-up.

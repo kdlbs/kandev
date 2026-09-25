@@ -76,11 +76,11 @@ The visible star identifies the default; its accessible name says **Set ... as d
 
 ## Tests
 
-| Acceptance criteria | Focused evidence |
-| --- | --- |
-| `.1`, `.7` | Backend GET/PATCH and SQLite round-trip tests; `use-saved-views.test.ts` acknowledged writes, replacement, clear, and failure tests. |
+| Acceptance criteria    | Focused evidence                                                                                                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `.1`, `.7`             | Backend GET/PATCH and SQLite round-trip tests; `use-saved-views.test.ts` acknowledged writes, replacement, clear, and failure tests.                               |
 | `.2`, `.3`, `.4`, `.5` | New pure resolver and `jira-page-client` state tests, including exact custom JQL, no-default project key, deleted view, and late hydration after manual selection. |
-| `.6` | `list-toolbar.test.tsx` selection isolation, accessible names, and phone hit-target assertions. |
+| `.6`                   | `list-toolbar.test.tsx` selection isolation, accessible names, and phone hit-target assertions.                                                                    |
 
 ## E2E tests
 
@@ -119,3 +119,9 @@ On the latest `main`, the session-entry recovery, mobile PR re-request review, a
 The PR #3936 retry artifact reported nine retry-only E2E failures. Fixes now wait for cancellation and file-tree WebSocket responses, wait for the page and chat to finish loading after reload, wait for a persisted response before checking mobile rendering, select repositories by ID, navigate to the created terminal task directly, and allow subpixel rounding at the 44px touch-target boundary. Worktree cleanup now recovers the branch commit only when a checkout disappears during `git rev-parse`; a regression test reproduces the failed inspection race.
 
 Focused no-retry repetitions pass for the changed desktop and mobile cases: 10 desktop runs and 8 mobile runs. The worktree, task-service, and backend-app Go packages pass; web typecheck, ESLint, the E2E sleep ratchet, and `git diff --check` pass. The updated PR head's CI and retry artifact remain the final shared-runner verification.
+
+## PR #3936 follow-up after exact-head CI
+
+The blob audit for PR head `97c0d15d65222d87ec2d7dd82fa300d850754288` found ten retry-only scenarios and a file-tree test that failed on all three attempts. The follow-up arms file-tree response waits before navigation, avoids clicking a Kanban card while its live updates can detach it, gives the Office run test an isolated agent, waits for the preview iframe's screenshot mode before dragging, and uses a deterministic agent prompt for the lifecycle test. It also restores focus to the surviving PR chip after unlink, reuses a just-completed workflow preview across immediate surface changes, waits for the selected prompt state in the passthrough test, and applies the shared subpixel-safe touch-size assertion.
+
+No-retry local verification against the rebuilt E2E bundle passed: the five other desktop scenarios passed three times each; the office error scenario passed ten times with `CI=true`, `GITHUB_ACTIONS=true`, and IPv4-first DNS; the mobile menu and PR unlink scenarios passed three times each; passthrough prompt selection passed ten times; the large file tree passed three times; and the mobile workflow preview passed five times. The focused PR-chip and workflow-preview unit suites passed 59 tests. `pnpm run build:e2e`, web typecheck, focused ESLint, and `git diff --check` pass. The `fetch failed` in the original office error attempt was not reproducible in ten CI-environment runs. Exact-head PR checks and the explicit blob retry audit remain pending for the pushed follow-up.

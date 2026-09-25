@@ -29,9 +29,14 @@ test.describe("Large file tree virtualization", () => {
       title: "Large file tree virtualization",
     });
 
+    // The first page load can race the executor's initial checkout. Reload
+    // after the seeded task has finished preparation so the tree request reads
+    // the complete workspace, and arm before navigation starts it.
     const treeResponse = gateway.waitForResponse("workspace.tree.get");
-    await session.clickTab("Files");
+    await testPage.reload();
+    await session.waitForLoad();
     await treeResponse;
+    await session.clickTab("Files");
     const folder = session.fileTreeNode(LARGE_FILE_TREE_FOLDER);
     await expect(folder).toBeVisible();
     await expect(session.fileTreeNode(largeFileTreePath(0))).toHaveCount(0);
