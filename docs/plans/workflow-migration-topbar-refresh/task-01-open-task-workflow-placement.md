@@ -121,6 +121,9 @@ None.
 ## Results
 
 - Focused unit tests: 7 files, 108 tests passed.
+- PR fixup regression tests: 3 files, 53 tests passed, covering strict
+  projection freshness, task-detail refresh on reconnect, and retry after a
+  failed placeholder fetch.
 - `pnpm run typecheck` passed.
 - `pnpm run build:vite` passed. Vite reported existing chunk-size,
   deprecated option, and ineffective dynamic import warnings.
@@ -128,6 +131,9 @@ None.
 - Desktop Chromium E2E: 4 tests passed, including an external move event
   received by an open task page.
 - Phone mobile-chrome E2E: 1 test passed.
+- PR screenshot recapture passed: desktop Chromium 4 tests and phone mobile-
+  chrome 1 test. The phone test's first capture attempt hit a tap-stability
+  timeout and passed on retry.
 - `CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --no-build --project chromium e2e/tests/task/change-workflow.spec.ts`: 4 passed; captured the destination stepper.
 - `CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/task/mobile-change-workflow.spec.ts`: 1 passed; captured the destination step action.
 - Specification catalog and specification lint passed.

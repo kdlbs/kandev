@@ -48,6 +48,7 @@ function makeKanbanTask(overrides: Partial<KanbanTask> = {}): KanbanTask {
   } as KanbanTask;
 }
 
+// eslint-disable-next-line max-lines-per-function -- placement cases share fixtures and freshness assertions.
 describe("task workflow placement", () => {
   // @covers AC-TASKS-CHANGE-WORKFLOW-001.8
   it("applies a newer destination placement and retains task-only details", () => {
@@ -110,6 +111,65 @@ describe("task workflow placement", () => {
       workflow_step_id: SOURCE_STEP,
     });
   });
+
+  it("does not merge an older projection's freshness-sensitive details", () => {
+    const details = makeTaskDetails({
+      title: "Fresh title",
+      description: "Fresh description",
+      state: "IN_PROGRESS",
+      position: 9,
+      metadata: { source: "http" },
+      workflow_id: workflowId(DESTINATION_WORKFLOW),
+      workflow_step_id: DESTINATION_STEP,
+      updated_at: DESTINATION_UPDATED_AT,
+    });
+    const staleProjection = makeKanbanTask({
+      title: "Stale title",
+      description: "Stale description",
+      state: "TODO",
+      position: 1,
+      metadata: { source: "cache" },
+      workflowId: SOURCE_WORKFLOW,
+      workflowStepId: SOURCE_STEP,
+      updatedAt: SOURCE_UPDATED_AT,
+    });
+
+    const resolved = resolveEffectiveTask(details, null, staleProjection, TASK_ID);
+
+    expect(resolved).toMatchObject({
+      title: "Fresh title",
+      description: "Fresh description",
+      state: "IN_PROGRESS",
+      position: 9,
+      metadata: { source: "http" },
+      workflow_id: DESTINATION_WORKFLOW,
+      workflow_step_id: DESTINATION_STEP,
+    });
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["malformed", "not-a-timestamp"],
+    ["date-normalized malformed", "2026-02-30T00:00:00Z"],
+  ])("rejects a %s projection timestamp for placement", (_label, updatedAt) => {
+    const details = makeTaskDetails({
+      workflow_id: workflowId(DESTINATION_WORKFLOW),
+      workflow_step_id: DESTINATION_STEP,
+      updated_at: SOURCE_UPDATED_AT,
+    });
+    const untrustedProjection = makeKanbanTask({
+      workflowId: SOURCE_WORKFLOW,
+      workflowStepId: SOURCE_STEP,
+      updatedAt,
+    });
+
+    const resolved = resolveEffectiveTask(details, null, untrustedProjection, TASK_ID);
+
+    expect(resolved).toMatchObject({
+      workflow_id: DESTINATION_WORKFLOW,
+      workflow_step_id: DESTINATION_STEP,
+    });
+  });
 });
 
 describe("task workflow projection selection", () => {
@@ -128,6 +188,40 @@ describe("task workflow projection selection", () => {
     });
 
     expect(selected).toBe(destination);
+  });
+
+  it("keeps a nanosecond-newer active row over an older cached snapshot", () => {
+    const freshDestination = makeKanbanTask({
+      workflowId: DESTINATION_WORKFLOW,
+      workflowStepId: DESTINATION_STEP,
+      updatedAt: "2026-07-19T00:00:00.123456790Z",
+    });
+    const staleSource = makeKanbanTask({
+      updatedAt: "2026-07-19T00:00:00.123456789Z",
+    });
+
+    const selected = resolveLatestTaskProjection(TASK_ID, [freshDestination], {
+      [SOURCE_WORKFLOW]: { tasks: [staleSource] },
+    });
+
+    expect(selected).toBe(freshDestination);
+  });
+
+  it("ignores a date-normalized malformed cache timestamp", () => {
+    const validTask = makeKanbanTask({
+      workflowId: DESTINATION_WORKFLOW,
+      workflowStepId: DESTINATION_STEP,
+      updatedAt: "2026-02-28T00:00:00Z",
+    });
+    const malformedTask = makeKanbanTask({
+      updatedAt: "2026-02-30T00:00:00Z",
+    });
+
+    const selected = resolveLatestTaskProjection(TASK_ID, [validTask], {
+      [SOURCE_WORKFLOW]: { tasks: [malformedTask] },
+    });
+
+    expect(selected).toBe(validTask);
   });
 
   // @covers AC-TASKS-CHANGE-WORKFLOW-001.8

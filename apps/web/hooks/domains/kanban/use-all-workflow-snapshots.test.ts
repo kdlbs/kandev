@@ -11,6 +11,7 @@ const mockHydrate = vi.fn();
 
 type Workflow = { id: string; workspaceId: string; name: string };
 const NEW_WORKFLOW_ID = "workflow-new";
+const NEW_WORKFLOW_NAME = "Created later";
 type MockState = {
   connection: { status: string };
   workspaces: { activeId: string | null };
@@ -168,7 +169,7 @@ describe("useWorkflowSnapshotById", () => {
   it("loads steps for a workflow missing from the catalog without changing board selection", async () => {
     mockState.kanban = { workflowId: "workflow-active", steps: [], tasks: [] };
     mockFetchWorkflowSnapshot.mockResolvedValueOnce({
-      workflow: { id: NEW_WORKFLOW_ID, name: "Created later" },
+      workflow: { id: NEW_WORKFLOW_ID, name: NEW_WORKFLOW_NAME },
       steps: [{ id: "analysis", name: "Analysis", position: 0 }],
       tasks: [],
     });
@@ -185,7 +186,7 @@ describe("useWorkflowSnapshotById", () => {
         NEW_WORKFLOW_ID,
         expect.objectContaining({
           workflowId: NEW_WORKFLOW_ID,
-          workflowName: "Created later",
+          workflowName: NEW_WORKFLOW_NAME,
           steps: [expect.objectContaining({ id: "analysis", title: "Analysis" })],
         }),
       ),
@@ -194,6 +195,58 @@ describe("useWorkflowSnapshotById", () => {
     expect(mockState.kanban.workflowId).toBe("workflow-active");
     expect(mockHydrate).not.toHaveBeenCalled();
     expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a failed placeholder fetch after the task page remounts", async () => {
+    mockState.kanbanMulti.snapshots[NEW_WORKFLOW_ID] = {
+      workflowId: NEW_WORKFLOW_ID,
+      workflowName: NEW_WORKFLOW_NAME,
+      steps: [],
+      tasks: [],
+      isPlaceholder: true,
+    };
+    mockSetWorkflowSnapshot.mockImplementationOnce((id: string, snapshot: unknown) => {
+      mockState.kanbanMulti.snapshots[id] = snapshot;
+    });
+    mockFetchWorkflowSnapshot
+      .mockRejectedValueOnce(new Error("temporary fetch failure"))
+      .mockResolvedValueOnce({
+        workflow: { id: NEW_WORKFLOW_ID, name: NEW_WORKFLOW_NAME },
+        steps: [{ id: "analysis", name: "Analysis", position: 0 }],
+        tasks: [],
+      });
+
+    const firstMount = renderHook(() => useWorkflowSnapshotById("ws-A", NEW_WORKFLOW_ID));
+    try {
+      await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1));
+      await waitFor(() =>
+        expect(mockSetWorkflowSnapshot).toHaveBeenCalledWith(
+          NEW_WORKFLOW_ID,
+          expect.objectContaining({ isPlaceholder: false, fetchFailed: true }),
+        ),
+      );
+      firstMount.unmount();
+
+      const secondMount = renderHook(() => useWorkflowSnapshotById("ws-A", NEW_WORKFLOW_ID));
+      try {
+        await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(2));
+        await waitFor(() =>
+          expect(mockSetWorkflowSnapshot).toHaveBeenCalledWith(
+            NEW_WORKFLOW_ID,
+            expect.objectContaining({
+              workflowId: NEW_WORKFLOW_ID,
+              steps: [expect.objectContaining({ id: "analysis", title: "Analysis" })],
+            }),
+          ),
+        );
+      } finally {
+        secondMount.unmount();
+      }
+    } finally {
+      firstMount.unmount();
+      mockFetchWorkflowSnapshot.mockReset();
+      mockFetchWorkflowSnapshot.mockResolvedValue({ steps: [], tasks: [] });
+    }
   });
 });
 

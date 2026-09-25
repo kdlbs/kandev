@@ -183,10 +183,12 @@ export function TaskLoadErrorState() {
   );
 }
 
-function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
+export function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
   const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
   const [taskLoadError, setTaskLoadError] = useState<unknown | null>(null);
   const activeTaskIdRef = useRef(activeTaskId);
+  const connectionStatus = useAppStore((state) => state.connection.status);
+  const previousConnectionStatus = useRef(connectionStatus);
   const effectiveTaskId = activeTaskId ?? initialTask?.id ?? null;
   const kanbanTask = useAppStore((state) =>
     resolveLatestTaskProjection(effectiveTaskId, state.kanban.tasks, state.kanbanMulti.snapshots),
@@ -227,6 +229,13 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
     setTaskLoadError(null);
     void loadTaskDetails();
   }, [activeTaskId, taskDetails?.id, loadTaskDetails]);
+
+  useEffect(() => {
+    const reconnected =
+      previousConnectionStatus.current !== "connected" && connectionStatus === "connected";
+    previousConnectionStatus.current = connectionStatus;
+    if (reconnected) void loadTaskDetails();
+  }, [connectionStatus, loadTaskDetails]);
 
   useForegroundRefresh(loadTaskDetails, Boolean(activeTaskId), activeTaskId);
 

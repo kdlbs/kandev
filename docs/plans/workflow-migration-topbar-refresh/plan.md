@@ -20,12 +20,12 @@ package repairs its implementation without adding another product requirement.
 
 ## Root cause and reproduction
 
-The `task.updated` handler removes the task from the source `kanban.tasks` and
-inserts it into `kanbanMulti.snapshots[destination]`. `useTaskDetails` reads only
-`kanban.tasks`; `resolveEffectiveTask` then retains the old local
-`workflow_id`. `useWorkflowStepsMapped` reads `kanban.steps`, so the top bar
-continues to render the source workflow. A full reload obtains destination
-task details and loads its steps, which explains the reported recovery.
+The `task.updated` handler moves a task projection into
+`kanbanMulti.snapshots[destination]`. The task page must choose the freshest row
+across active and cached workflows, while a newer HTTP task detail remains
+authoritative over an older cached projection. A move can also be missed while
+the WebSocket is disconnected, so reconnect must refresh task details before
+the page can discover the destination workflow and its steps.
 
 The smallest regression is a task detail page open on Kanban/Review: migrate
 that task to Feature/Analysis through the existing Change workflow form, keep
@@ -54,11 +54,12 @@ backend result but does not assert the open page's stepper before reload.
 ## Technical approach
 
 In `task-page-content.tsx`, resolve the live task from the active workflow or
-its owning `kanbanMulti` snapshot by task ID. Extend
-`resolveEffectiveTask` in `task-page-content-helpers.ts` so a newer live
-placement updates workflow and step together, while older HTTP task details or
-snapshots cannot revert it. Keep title, repository, and other detailed fields
-from the task detail response where the board projection omits them.
+its owning `kanbanMulti` snapshot by task ID. Compare projection timestamps
+with the shared strict RFC3339Nano parser, and do not merge stale or invalid
+projections over newer HTTP task details. Keep the resolved task step
+authoritative for the top bar, and use a session step only as a fallback when
+it belongs to the current workflow. Refresh task details after a WebSocket
+reconnect so a move missed while offline is recovered.
 
 Have the task page request/consume step definitions for the resolved task
 workflow directly by ID, even if it is absent from `workflows.items`. Fetch only
@@ -107,12 +108,10 @@ placement without reloading. No new copy or control geometry is required.
 
 | Acceptance                     | Evidence                                                                                                                                                                                                                                                  |
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| AC-TASKS-CHANGE-WORKFLOW-001.8 | `task-page-content-workflow.test.ts`: newer destination placement wins; older and partial updates cannot restore source placement; task-only details remain; the freshest projection wins; fresh task details win over an older same-workflow step cache. |
+| AC-TASKS-CHANGE-WORKFLOW-001.8 | `task-page-content-workflow.test.ts`: newer destination placement wins; older and partial projections cannot restore source placement; stale fields cannot overwrite newer HTTP details; invalid timestamps, nanosecond ordering, and same-workflow current-step selection are covered. |
+| AC-TASKS-CHANGE-WORKFLOW-001.8 | `task-page-content.test.tsx`: task details refresh after WebSocket reconnection and retain the destination step over a stale cached row. |
 | AC-TASKS-CHANGE-WORKFLOW-001.8 | `use-workflow-steps-by-id.test.ts`: a placeholder destination snapshot updates to its ordered workflow steps when they load.                                                                                                                              |
-| AC-TASKS-CHANGE-WORKFLOW-001.8 | `use-all-workflow-snapshots.test.ts`: a task workflow absent from the catalog is fetched by ID, with only that snapshot loaded and board selection preserved.                                                                                             |
-
-The first helper assertion for destination workflow ID should fail against the
-current implementation before the fix.
+| AC-TASKS-CHANGE-WORKFLOW-001.8 | `use-all-workflow-snapshots.test.ts`: an uncatalogued task workflow is fetched by ID without changing board selection; a failed placeholder fetch retries after remount.                                                                                   |
 
 ## E2E tests
 
@@ -133,10 +132,16 @@ this session.
 ## Verification results
 
 - Focused unit tests: 7 files, 108 tests passed.
+- PR fixup regression tests: 3 files, 53 tests passed, covering strict
+  projection freshness, task-detail refresh on reconnect, and retry after a
+  failed placeholder fetch.
 - TypeScript typecheck passed.
 - Scoped ESLint passed with no warnings.
 - Production Vite build passed. Vite reported existing chunk-size, deprecated
   option, and ineffective dynamic import warnings.
+- PR screenshot recapture passed: desktop Chromium 4 tests and phone mobile-
+  chrome 1 test. The phone test's first capture attempt hit a tap-stability
+  timeout and passed on retry.
 - Desktop Chromium change-workflow E2E: 4 tests passed, including an external
   move event received by an open task page.
 - Phone mobile-chrome change-workflow E2E: 1 test passed.

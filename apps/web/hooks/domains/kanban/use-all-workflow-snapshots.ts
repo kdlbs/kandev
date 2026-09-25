@@ -24,7 +24,7 @@ type Workflow = { id: string; name: string };
 type WorkspaceContextRequest = { workspaceId: string; generation: number };
 
 function isBootHydratedSnapshot(snapshot: WorkflowSnapshotData | undefined): boolean {
-  return !!snapshot && snapshot.isPlaceholder !== true;
+  return !!snapshot && snapshot.isPlaceholder !== true && snapshot.fetchFailed !== true;
 }
 
 function hasNewerLivePlacement(existing: KanbanTask, fetchStart: KanbanTask | undefined): boolean {
@@ -303,11 +303,15 @@ async function fetchAndWriteSnapshot(
     }
     markFailed(wf.id, err);
     // A failed fetch must not leave a placeholder permanently "unknown": that
-    // would block the final-step ensure forever. Transition to an explicit
-    // known-but-empty state so the ensure proceeds ungated (safe default).
+    // would block the final-step ensure forever. Keep it known-but-empty for
+    // now, and mark it retryable for a later task-page mount.
     const current = store.getState().kanbanMulti.snapshots[wf.id];
     if (current?.isPlaceholder) {
-      store.getState().setWorkflowSnapshot(wf.id, { ...current, isPlaceholder: false });
+      store.getState().setWorkflowSnapshot(wf.id, {
+        ...current,
+        isPlaceholder: false,
+        fetchFailed: true,
+      });
     }
   }
 }
