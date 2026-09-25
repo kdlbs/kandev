@@ -640,6 +640,22 @@ export class ApiClient {
     return this.request("GET", "/api/v1/agents/available");
   }
 
+  async createCustomTUIAgent(options: {
+    display_name: string;
+    command: string;
+    model?: string;
+    description?: string;
+    mcp_strategy?: string;
+    protocol?: "acp";
+  }): Promise<Agent> {
+    const created = await this.request<{ name: string }>("POST", "/api/v1/agents/tui", options);
+    const { agents } = await this.listAgents();
+    const agent = agents.find((candidate) => candidate.name === created.name);
+    if (!agent)
+      throw new Error(`Custom TUI agent ${created.name} was not returned by the agent list`);
+    return agent;
+  }
+
   /** Removes a custom agent by slug, so a spec that creates one leaves the
    * worker's agent list as it found it. Missing is not an error. */
   async deleteCustomAgentByName(name: string): Promise<void> {

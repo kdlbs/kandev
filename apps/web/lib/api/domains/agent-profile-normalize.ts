@@ -242,6 +242,13 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     envVars: pickEnvVars(profile),
     cliPassthrough: pickBool(profile, "cliPassthrough", "cli_passthrough"),
     // Absent on legacy payloads → enabled by default.
+    cursorMcpAuthEnabled: pickBool(
+      profile,
+      "cursorMcpAuthEnabled",
+      "cursor_mcp_auth_enabled",
+      true,
+    ),
+    // Absent on legacy payloads → enabled by default.
     enabled: pickBool(profile, "enabled", "enabled", true),
     workspaceId: (() => {
       const value = pickOptionalString(profile, "workspaceId", "workspace_id");
@@ -302,6 +309,7 @@ export function toAgentProfilePayload(
   setPayloadField(payload, "provider_api_key_secret_id", profile.providerApiKeySecretId);
   setPayloadField(payload, "env_vars", profile.envVars);
   setPayloadField(payload, "cli_passthrough", profile.cliPassthrough);
+  setPayloadField(payload, "cursor_mcp_auth_enabled", profile.cursorMcpAuthEnabled);
   setPayloadField(payload, "enabled", profile.enabled);
   setPayloadField(payload, "user_modified", profile.userModified);
   setPayloadField(payload, "created_at", profile.createdAt);

@@ -1,9 +1,12 @@
+import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { updateAgentProfileAction } from "@/app/actions/agents";
 import type { Agent } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import {
   reconcileAgentProfileOptions,
   shouldSyncProfileSaveResponse,
+  useProfileSave,
 } from "./agent-profile-page-state";
 
 vi.mock("@/app/actions/agents", () => ({
@@ -141,5 +144,37 @@ describe("shouldSyncProfileSaveResponse", () => {
     const baseline = { ...current, name: "websocket update", updatedAt: "2026-01-01T01:00:00Z" };
 
     expect(shouldSyncProfileSaveResponse(response, baseline)).toBe(false);
+  });
+});
+
+describe("useProfileSave Cursor MCP auth preference", () => {
+  it("sends the changed preference when saving the profile editor", async () => {
+    const savedProfile = { ...agent("a1", "p1").profiles[0], cursorMcpAuthEnabled: true };
+    const draft = { ...savedProfile, cursorMcpAuthEnabled: false };
+    vi.mocked(updateAgentProfileAction).mockResolvedValue(draft);
+    const syncAgentsToStore = vi.fn();
+    const agents = [{ ...agent("a1", "p1"), profiles: [savedProfile] }];
+
+    const { result } = renderHook(() =>
+      useProfileSave({
+        agent: agents[0],
+        draft,
+        savedProfile,
+        setSaveStatus: vi.fn(),
+        markProfileSubmitted: vi.fn(),
+        acceptProfileSaveResponse: () => true,
+        settingsAgents: agents,
+        syncAgentsToStore,
+        toast: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current());
+
+    expect(updateAgentProfileAction).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({ cursor_mcp_auth_enabled: false }),
+      false,
+    );
   });
 });

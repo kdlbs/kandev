@@ -45,6 +45,9 @@ export function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<Ag
   if (patch.allow_indexing !== undefined) next.allowIndexing = patch.allow_indexing;
   if (patch.auto_approve !== undefined) next.autoApprove = patch.auto_approve;
   if (patch.cli_passthrough !== undefined) next.cliPassthrough = patch.cli_passthrough;
+  if (patch.cursor_mcp_auth_enabled !== undefined) {
+    next.cursorMcpAuthEnabled = patch.cursor_mcp_auth_enabled;
+  }
   if (patch.cli_flags !== undefined) next.cliFlags = patch.cli_flags;
   if (patch.command_prefix !== undefined) next.commandPrefix = patch.command_prefix;
   if (patch.provider_kind !== undefined) next.providerKind = patch.provider_kind;
@@ -242,6 +245,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       config_options: profile.configOptions ?? {},
       ...permissionsToProfilePatch(profile),
       cli_passthrough: profile.cliPassthrough ?? false,
+      cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
       cli_flags: profile.cliFlags ?? [],
       command_prefix: profile.commandPrefix ?? "",
       ...providerPayloadFields(profile),
@@ -323,6 +327,7 @@ async function savePersistedProfile(
       config_options: profile.configOptions ?? {},
       ...permissionsToProfilePatch(profile),
       cli_passthrough: profile.cliPassthrough ?? false,
+      cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
       cli_flags: profile.cliFlags ?? [],
       command_prefix: profile.commandPrefix ?? "",
       ...providerPayloadFields(profile),
@@ -360,6 +365,7 @@ async function saveExistingProfiles(
           config_options: profile.configOptions ?? {},
           ...permissionsToProfilePatch(profile),
           cli_passthrough: profile.cliPassthrough ?? false,
+          cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
           cli_flags: profile.cliFlags ?? [],
           command_prefix: profile.commandPrefix ?? "",
           ...providerPayloadFields(profile),
@@ -555,6 +561,7 @@ function isProfileIdentityDirty(draft: DraftProfile, saved: AgentProfile): boole
 function isProfileSettingsDirty(draft: DraftProfile, saved: AgentProfile): boolean {
   return (
     areConfigOptionsEqual(draft.configOptions, saved.configOptions) === false ||
+    (draft.cursorMcpAuthEnabled ?? true) !== (saved.cursorMcpAuthEnabled ?? true) ||
     arePermissionsDirty(draft, saved)
   );
 }

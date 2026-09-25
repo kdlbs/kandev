@@ -37,6 +37,9 @@ func TestDefaultProfileFieldsAreWritableAndBound(t *testing.T) {
 		if !field.Writable || field.Validator == "" || field.Authority == "" {
 			t.Errorf("profile field %q is not bound for writes: %#v", field.Key, field)
 		}
+		if field.Key == "agent_profile.cursor_mcp_auth_enabled" && field.DefaultBehavior != "true for new profiles" {
+			t.Errorf("Cursor MCP auth default behavior = %q, want true for new profiles", field.DefaultBehavior)
+		}
 	}
 }
 

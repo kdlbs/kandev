@@ -222,6 +222,7 @@ export function useProfileSave({
           config_options: draft.configOptions ?? {},
           ...permissionsToProfilePatch(draft),
           cli_passthrough: draft.cliPassthrough,
+          cursor_mcp_auth_enabled: draft.cursorMcpAuthEnabled ?? true,
           // Omit an unchanged enabled value so a profile editor save cannot
           // resurrect a concurrent list-toggle response from its stale draft.
           enabled:

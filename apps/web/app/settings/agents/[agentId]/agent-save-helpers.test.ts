@@ -95,6 +95,7 @@ describe("toAgentProfilePatch", () => {
       allow_indexing: true,
       auto_approve: true,
       cli_passthrough: true,
+      cursor_mcp_auth_enabled: false,
       cli_flags: [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: true, description: "" }],
     };
     expect(toAgentProfilePatch(patch)).toEqual({
@@ -104,6 +105,7 @@ describe("toAgentProfilePatch", () => {
       allowIndexing: true,
       autoApprove: true,
       cliPassthrough: true,
+      cursorMcpAuthEnabled: false,
       cliFlags: [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: true, description: "" }],
     });
   });
@@ -140,6 +142,12 @@ describe("toAgentProfilePatch", () => {
 describe("isProfileDirty", () => {
   it("returns false when draft equals saved", () => {
     expect(isProfileDirty(draftFrom(baseProfile), baseProfile)).toBe(false);
+  });
+
+  it("returns true when only the Cursor MCP auth preference changes", () => {
+    expect(
+      isProfileDirty(draftFrom(baseProfile, { cursorMcpAuthEnabled: false }), baseProfile),
+    ).toBe(true);
   });
 
   it("returns true when only mode changes", () => {
@@ -460,6 +468,63 @@ describe("command prefix save payloads", () => {
     expect(createAgentProfileAction).toHaveBeenCalledWith(
       savedAgent.id,
       expect.objectContaining({ command_prefix: COMMAND_PREFIX }),
+    );
+  });
+});
+
+describe("Cursor MCP auth preference save payloads", () => {
+  it("preserves false when updating an existing profile", async () => {
+    const savedProfile = { ...baseProfile, cursorMcpAuthEnabled: true };
+    const savedAgent = agentWithProfiles([savedProfile]);
+    const draftProfile = draftFrom(savedProfile, { cursorMcpAuthEnabled: false });
+    const draftAgent = agentWithProfiles([draftProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(updateAgentProfileAction).mockResolvedValue(draftProfile);
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(updateAgentProfileAction).toHaveBeenCalledWith(
+      baseProfile.id,
+      expect.objectContaining({ cursor_mcp_auth_enabled: false }),
+    );
+  });
+
+  it("defaults new agent profile payloads to enabled", async () => {
+    const draftProfile = draftFrom(baseProfile, { id: DRAFT_PROFILE_ID });
+    const draftAgent = agentWithProfiles([draftProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(createAgentAction).mockResolvedValue(
+      agentWithProfiles([{ ...draftProfile, id: PERSISTED_PROFILE_ID }]),
+    );
+
+    await saveNewAgent(draftAgent, callbacks);
+
+    expect(createAgentAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profiles: [expect.objectContaining({ cursor_mcp_auth_enabled: true })],
+      }),
+    );
+  });
+
+  it("preserves false when creating an additional profile", async () => {
+    const savedAgent = agentWithProfiles([baseProfile]);
+    const newProfile = draftFrom(baseProfile, {
+      id: NEW_PROFILE_ID,
+      name: NEW_PROFILE_NAME,
+      cursorMcpAuthEnabled: false,
+    });
+    const draftAgent = agentWithProfiles([baseProfile, newProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(createAgentProfileAction).mockResolvedValue({
+      ...newProfile,
+      id: PERSISTED_PROFILE_ID,
+    });
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(createAgentProfileAction).toHaveBeenCalledWith(
+      savedAgent.id,
+      expect.objectContaining({ cursor_mcp_auth_enabled: false }),
     );
   });
 });
