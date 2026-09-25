@@ -205,6 +205,25 @@ func (s *Service) persistExactProfileSessionBinding(
 	if exact == nil {
 		return nil
 	}
+	if binder, ok := s.repo.(interface {
+		BindExactProfileSessionIfAssignmentCurrent(
+			context.Context, string, string, models.TaskSessionState, string, int64, int64,
+		) (bool, error)
+	}); ok {
+		changed, err := binder.BindExactProfileSessionIfAssignmentCurrent(
+			ctx, session.ID, session.TaskID, session.State,
+			exact.AgentProfileID, exact.Generation, exact.Revision,
+		)
+		if err != nil {
+			return fmt.Errorf("persist exact profile session binding: %w", err)
+		}
+		if !changed {
+			return ErrExactProfileAssignmentInvalid
+		}
+		session.ExactProfileGeneration = exact.Generation
+		session.ExactProfileRevision = exact.Revision
+		return nil
+	}
 	current, err := s.resolveExactProfileAssignment(ctx, session.TaskID)
 	if err != nil {
 		return fmt.Errorf("validate current exact profile assignment: %w", err)

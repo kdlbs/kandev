@@ -31,6 +31,40 @@ type exactProfileAssignmentFenceRepo struct {
 	mu                  sync.Mutex
 }
 
+type exactProfileBindingFenceRepo struct {
+	sessionExecutorStore
+	exactProfileAssignmentStore
+	bindingWriteReached chan struct{}
+	assignmentReplaced  chan struct{}
+}
+
+func (r *exactProfileBindingFenceRepo) UpdateTaskSessionIfCurrentState(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+) (bool, error) {
+	if session.ExactProfileGeneration == 0 {
+		return r.sessionExecutorStore.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	}
+	close(r.bindingWriteReached)
+	<-r.assignmentReplaced
+	return r.sessionExecutorStore.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+}
+
+func (r *exactProfileBindingFenceRepo) BindExactProfileSessionIfAssignmentCurrent(
+	ctx context.Context,
+	sessionID, taskID string,
+	expected models.TaskSessionState,
+	agentProfileID string,
+	generation, revision int64,
+) (bool, error) {
+	close(r.bindingWriteReached)
+	<-r.assignmentReplaced
+	return r.sessionExecutorStore.(interface {
+		BindExactProfileSessionIfAssignmentCurrent(context.Context, string, string, models.TaskSessionState, string, int64, int64) (bool, error)
+	}).BindExactProfileSessionIfAssignmentCurrent(ctx, sessionID, taskID, expected, agentProfileID, generation, revision)
+}
+
 func (r *exactProfileAssignmentFenceRepo) GetExactProfileAssignment(
 	ctx context.Context,
 	taskID string,
@@ -240,6 +274,91 @@ func TestStartCreatedSession_RejectsSupersededExactAssignmentBeforeBinding(t *te
 	}
 
 	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.ExactProfileGeneration != 0 || session.ExactProfileRevision != 0 {
+		t.Fatalf("session exact binding = (%d, %d), want unbound", session.ExactProfileGeneration, session.ExactProfileRevision)
+	}
+}
+
+func TestStartCreatedSession_RejectsExactAssignmentReplacedAtSessionBinding(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	task, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.WorkspaceID = "ws1"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("set task workspace: %v", err)
+	}
+
+	revision := time.Unix(1_726_500_000, 0).UTC()
+	if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
+		TaskID: "task1", WorkspaceID: "ws1", AgentProfileID: "profile-exact", ProfileRevision: revision, Generation: 1,
+	}); err != nil {
+		t.Fatalf("assign generation one: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-exact"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set session profile: %v", err)
+	}
+
+	baseTaskRepo := newMockTaskRepo()
+	baseTaskRepo.tasks["task1"] = &v1.Task{
+		ID: "task1", WorkspaceID: "ws1", Title: "Test Task", Description: "desc", State: v1.TaskStateInProgress,
+	}
+	fenceRepo := &exactProfileBindingFenceRepo{
+		sessionExecutorStore:        repo,
+		exactProfileAssignmentStore: repo,
+		bindingWriteReached:         make(chan struct{}),
+		assignmentReplaced:          make(chan struct{}),
+	}
+	launched := make(chan struct{}, 1)
+	agentMgr := &mockAgentManager{
+		resolveProfileInfo: &executor.AgentProfileInfo{
+			ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: true, Revision: revision, Model: "gpt-exact",
+		},
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launched <- struct{}{}
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-stale"}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), baseTaskRepo, agentMgr)
+	svc.repo = fenceRepo
+	decision, err := svc.resolveExactProfileAssignment(ctx, "task1")
+	if err != nil || decision == nil {
+		t.Fatalf("resolve exact profile = (%#v, %v)", decision, err)
+	}
+
+	startErr := make(chan error, 1)
+	go func() {
+		_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile-exact", "start", false, false, false, nil, nil)
+		startErr <- err
+	}()
+	<-fenceRepo.bindingWriteReached
+	if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
+		TaskID: "task1", WorkspaceID: "ws1", AgentProfileID: "profile-exact", ProfileRevision: revision, Generation: 2,
+	}); err != nil {
+		t.Fatalf("assign generation two: %v", err)
+	}
+	close(fenceRepo.assignmentReplaced)
+	if err := <-startErr; !errors.Is(err, ErrExactProfileAssignmentInvalid) {
+		t.Fatalf("StartCreatedSession error = %v, want invalid exact assignment", err)
+	}
+	select {
+	case <-launched:
+		t.Fatal("launch started with superseded exact assignment")
+	default:
+	}
+
+	session, err = repo.GetTaskSession(ctx, "session1")
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}

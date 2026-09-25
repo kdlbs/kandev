@@ -212,6 +212,39 @@ func (r *Repository) ActivateExactProfileAssignment(ctx context.Context, taskID 
 	return rows == 1, err
 }
 
+// BindExactProfileSessionIfAssignmentCurrent records an exact-profile binding
+// only while the session and its task-owned assignment still match the
+// launcher's observed values. The assignment predicate is part of the write,
+// so a replacement cannot land between validation and session binding.
+func (r *Repository) BindExactProfileSessionIfAssignmentCurrent(
+	ctx context.Context,
+	sessionID, taskID string,
+	expectedState models.TaskSessionState,
+	agentProfileID string,
+	generation, revision int64,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		SET exact_profile_generation = ?, exact_profile_revision = ?, updated_at = ?
+		WHERE id = ? AND task_id = ? AND state = ?
+		  AND EXISTS (
+			SELECT 1
+			FROM task_exact_profile_assignments
+			WHERE task_id = ? AND agent_profile_id = ? AND generation = ?
+			  AND profile_revision = ? AND active = ?
+		  )
+	`), generation, revision, r.exactProfileAssignmentNow(), sessionID, taskID, string(expectedState),
+		taskID, agentProfileID, generation, time.Unix(0, revision).UTC(), dialect.BoolToInt(true))
+	if err != nil {
+		return false, fmt.Errorf("bind exact profile session: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
+}
+
 type exactProfileAssignmentScanner interface {
 	Scan(dest ...interface{}) error
 }
