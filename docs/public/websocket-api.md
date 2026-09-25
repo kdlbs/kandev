@@ -133,7 +133,12 @@ Malformed JSON produces a `BAD_REQUEST` error with empty `id` and `action`, beca
 | Hub-wide broadcast queue  | 256 messages                      | Global publishers block when this internal queue is saturated; delivery to each client can still drop at that client's queue.                                                                  |
 | Request dispatch          | One goroutine per inbound message | Handlers execute concurrently and responses can arrive out of request order. Correlate only by `id`.                                                                                           |
 
-There is no sequence number, durable replay, acknowledgement, or exactly-once guarantee. Notifications are invalidation hints: after a reconnect, gap, or dropped frame, refetch authoritative state through the appropriate list/get request or HTTP route.
+Ordinary notifications have no sequence number, durable replay,
+acknowledgement, or exactly-once guarantee. They are invalidation hints: after
+a reconnect, gap, or dropped frame, refetch authoritative state through the
+appropriate list/get request or HTTP route. The Host-owned prompt-history
+conversation stream is a separate ordered internal exception documented in
+the plugin contract below.
 
 ### Prompt attachments
 
@@ -164,9 +169,26 @@ Subscription actions are handled by the gateway before the normal dispatcher:
 | `run.subscribe` / `run.unsubscribe`                       | `{"run_id":"..."}`                   | Routes future `run.event.appended` messages for one Office run. No snapshot is replayed.                                                                                                              |
 | `system.metrics.subscribe` / `system.metrics.unsubscribe` | `{}`                                 | Starts/stops delivery of live `system.metrics.updated` snapshots and contributes to metrics collection interest.                                                                                      |
 
-All subscriptions are connection-local and are removed on disconnect. `session.subscribe` and `session.focus` can send an initial live snapshot, but other subscriptions do not replay missed notifications. For an Office run, fetch the REST snapshot before subscribing and reconcile again after a gap.
+All ordinary subscriptions are connection-local and are removed on
+disconnect. Ordinary `session.subscribe` and `session.focus` can send an
+initial live snapshot, but other ordinary subscriptions do not replay missed
+notifications. For an Office run, fetch the REST snapshot before subscribing
+and reconcile again after a gap.
 
 The first-party web client reconnects by default: at most 10 attempts, starting at 1 second, multiplying delay by 1.5, capped at 30 seconds. On open it flushes frames queued while disconnected, then resubscribes to tasks, sessions, focus state, runs, the default user, and metrics. Its ordinary request timeout defaults to 5 seconds; selected Git and PR requests use longer timeouts. A custom client must implement its own backoff, resubscription, refetch, and timeout policy.
+
+### Host-only prompt-history conversation stream
+
+The browser `host.conversation` facade uses an internal ordered session stream
+that is not a caller-visible WebSocket API. It has Host-minted per-consumer
+identities, monotonic sequence numbers, durable cursors, subscribe readiness,
+ACKs, reconnect replay, and terminal session-removal barriers. Its migrated
+event names are `message.added`, `message.updated`, `message.deleted`,
+`session.turn.started`, `session.turn.completed`, and `session.removed`.
+The authoritative request, ACK, result, event, and compatibility rules are in
+the Host-only conversation wire contract in
+`docs/plans/plugins/PLUGIN-API.md`; ordinary subscription behavior above does
+not override that internal contract.
 
 ## Core task and session requests
 
@@ -204,7 +226,7 @@ Creation and immediate launch are not one rollback boundary. If the task is crea
 
 Task states on the wire are `TODO`, `CREATED`, `SCHEDULING`, `IN_PROGRESS`, `REVIEW`, `BLOCKED`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`. Use `task.move` to change the workflow step and `task.state` to change runtime state; these are separate operations.
 
-`task.move` accepts an optional one-shot `entry_options` object. Its normalized fields are `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. Reset is additive, and instructions are appended after the destination step's normal prompt. When `skip_step_prompt` is set, the destination step's prompt and its task-description fallback are suppressed for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. The values do not mutate workflow defaults. A successful response includes, when supplied, the normalized `entry_options`, plus a `move_id` correlating options retained for a deferred move. The same options are accepted by `move_task_kandev`; its legacy top-level `prompt` is an alias for `entry_options.instructions`, and conflicting non-empty values are rejected. Moves requested by an active agent use the deferred MCP path and persist the complete options through turn completion, WIP promotion, and backend restart before the retained move is applied.
+`task.move` accepts an optional one-shot `entry_options` object. Its normalized fields are `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. Reset is additive, and instructions are appended after the destination step's normal prompt. When `skip_step_prompt` is set, the destination step's prompt and its task-description fallback are suppressed for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. The values do not mutate workflow defaults. A successful response includes, when supplied, the normalized `entry_options`, plus a `move_id` correlating options retained for a deferred move. The same options are accepted by `move_task_kandev`; its legacy top-level `prompt` is an alias for `entry_options.instructions`, and conflicting non-empty values are rejected. Actual workflow-step changes requested through `move_task_kandev` from a RUNNING or STARTING session use the deferred MCP path and persist their complete options through turn completion, WIP promotion, and backend restart. A valid same-step MCP request without entry options returns `disposition: "applied"` with the stored task, so the caller does not need to retry.
 
 ```json
 {
@@ -868,5 +890,9 @@ Routing is an efficiency mechanism, not the access-control boundary. With authen
 - **Responses arrive in the wrong order:** this is normal concurrent dispatch. Match by unique `id`, never arrival order.
 
 Dedicated `/terminal/*target` and `/lsp/:sessionId` WebSockets, plus `/vscode/:sessionId/*path` and `/port-proxy/:sessionId/:port/*path` proxies, are separate protocols. They do not use this JSON envelope and should not be sent `/ws` actions.
+
+The browser language-server socket at `/lsp/:sessionId?language=...` carries raw LSP JSON-RPC plus private Kandev control frames. With the restart-required `features.lspBrowserContinuity` flag enabled, a browser close or temporary network loss detaches the window while its task-host lease keeps running for up to one hour. Reopening the task within that hour can reattach to that lease without another `initialize`; each window and duplicated tab has its own lease. **Stop**, two minutes with no open editor, one hour detached, task-runtime shutdown, backend shutdown, or capacity eviction releases a lease. Reattachment cancels the detached deadline; an attached lease does not expire. `KANDEV_LSP_MAX_CONNECTIONS` counts attached and detached leases; at capacity, Kandev evicts the least-recently detached lease, or rejects a new request when all leases are attached. When continuity is disabled, closing the browser socket stops its process as before.
+
+The browser shows **Reconnecting** for an uncertain transport loss and retries attachment. A browser-reported `1005` or `1006`, graceful backend restart close `1001`, or backend transport close `4009` does not confirm that the language-server process exited. Close `4006` means the task-host process exited; the editor clears that generation's providers and diagnostics and offers **Retry**. Close `4010` means the task runtime stopped, so the editor ends the lease without reconnecting it. A backend restart releases leases, so the next connection starts a fresh process and repeats project analysis.
 
 Related guides: [Configuration](configuration.md), [Executors](executors.md), [Git Operations](git-operations.md), [Operations](operations.md), [Workflow Import / Export](workflow-import-export.md), and [Workflow Sync](workflow-sync.md).

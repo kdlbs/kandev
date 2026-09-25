@@ -10,6 +10,16 @@ import (
 // ProfileEnvVar is an environment variable entry on an agent profile.
 type ProfileEnvVar = taskmodels.ProfileEnvVar
 
+// Provider-kind values for AgentProfile.ProviderKind.
+const (
+	// ProviderKindNative keeps the agent CLI's own provider configuration.
+	// It is the zero value, so existing rows decode to it.
+	ProviderKindNative = ""
+	// ProviderKindOpenAICompatible routes the profile through a Kandev-injected
+	// OpenAI-compatible provider (base URL + bearer key).
+	ProviderKindOpenAICompatible = "openai_compatible"
+)
+
 type Agent struct {
 	ID            string         `json:"id"`
 	Name          string         `json:"name"`
@@ -36,6 +46,13 @@ type TUIConfigJSON struct {
 	// user's CLI definition, and because tui_config is JSON: adding the field
 	// needs no migration.
 	MCPStrategy string `json:"mcp_strategy,omitempty"`
+	// Protocol selects the runtime kandev drives the command with
+	// (registry.CustomAgentProtocol*). Empty — the value every row written
+	// before this field existed decodes to — means terminal passthrough.
+	Protocol string `json:"protocol,omitempty"`
+	// DisableBracketedPaste selects paced unframed delivery for terminal TUIs
+	// that do not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool `json:"disable_bracketed_paste,omitempty"`
 }
 
 type AgentProfile struct {
@@ -62,6 +79,10 @@ type AgentProfile struct {
 	// post-start failures re-dispatch to the next provider candidate. When
 	// enabled, FallbackModel is ignored and the UI hides its field.
 	AutoFallback bool `json:"auto_fallback" db:"auto_fallback"`
+
+	// RequireExactModel makes the configured model an explicit per-profile
+	// identity requirement. False preserves compatible pre-PR behavior.
+	RequireExactModel bool `json:"require_exact_model" db:"require_exact_model"`
 
 	// Mode is the optional ACP session mode applied via session/set_mode at
 	// session start. Empty when the agent does not advertise modes.
@@ -94,6 +115,24 @@ type AgentProfile struct {
 	// The raw string is shell-tokenised at launch time, mirroring CLIFlags.
 	// Empty means the agent command runs unwrapped.
 	CommandPrefix string `json:"command_prefix" db:"command_prefix"`
+
+	// ProviderKind selects how the profile routes model inference.
+	// "" / ProviderKindNative (default) keeps the agent CLI's own provider
+	// configuration untouched. ProviderKindOpenAICompatible makes Kandev
+	// inject an OpenAI-compatible provider (base URL + bearer key) into the
+	// agent it runs, for agents that advertise support. See
+	// docs/specs/agents/system-design/openai-compatible-providers.md.
+	ProviderKind string `json:"provider_kind,omitempty" db:"provider_kind"`
+	// ProviderBaseURL is the absolute http(s) endpoint root of the
+	// OpenAI-compatible provider, e.g. "http://localhost:20128/v1". Required
+	// when ProviderKind == ProviderKindOpenAICompatible; inert otherwise. When
+	// ProviderAPIKeySecretID is set the URL must be https or a loopback host so
+	// the bearer key is never sent in cleartext.
+	ProviderBaseURL string `json:"provider_base_url,omitempty" db:"provider_base_url"`
+	// ProviderAPIKeySecretID references a Kandev global secret holding the
+	// bearer key for the provider. The value itself is never stored on the
+	// profile or returned by any API.
+	ProviderAPIKeySecretID string `json:"provider_api_key_secret_id,omitempty" db:"provider_api_key_secret_id"`
 
 	// AllowIndexing is retained for backward compatibility with existing
 	// auggie profiles. The launch path no longer consults it — it is read

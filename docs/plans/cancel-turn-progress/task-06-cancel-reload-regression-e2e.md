@@ -5,14 +5,22 @@ status: completed
 wave: 4
 depends_on: ["05-backend-owned-cancel-control"]
 plan: "plan.md"
-spec: "../../specs/ui/requirements/cancel-turn-progress.md"
+requirements:
+  - REQ-UI-CANCEL-TURN-PROGRESS-001
+acceptance_criteria:
+  - AC-UI-CANCEL-TURN-PROGRESS-001.2
+  - AC-UI-CANCEL-TURN-PROGRESS-001.3
+  - AC-UI-CANCEL-TURN-PROGRESS-001.7
+  - AC-UI-CANCEL-TURN-PROGRESS-001.8
+system_design:
+  - ../../specs/ui/system-design/cancel-turn-progress.md
 ---
 
 # Task 06: Cancel reload regression
 
 ## Acceptance
 
-- The desktop regression sends cancellation to the backend during an existing slow mock turn,
+- The desktop regression sends cancellation to the backend during the E2E cancellation-hold mock turn,
   observes backend `cancellation_pending=true`, switches tasks, returns, reloads, and sees the same
   disabled animated control until cancellation settles.
 - A `mobile-chrome` regression taps cancel, waits for backend-owned pending state, reloads, and
@@ -52,7 +60,7 @@ Sequential. This task validates the complete backend-to-hydration-to-control pat
 
 - Spec: task navigation, reload, session-isolation, failure, and compact-mobile scenarios.
 - Plan: `E2E Tests` and `Mobile design contract`.
-- Existing patterns: the `/slow` mock-agent command, `SessionPage.clickTaskInSidebar`,
+- Existing patterns: the `/e2e:cancel-hold` mock-agent command, `SessionPage.clickTaskInSidebar`,
   `page.reload()`, `waitForActiveSessionForegroundActivity`, and mobile-only spec naming.
 
 ## Output contract
@@ -76,3 +84,12 @@ attempt used the desktop keyboard helper; it was corrected to submit through the
 final tests observe backend `cancellation_pending=true`, verify the disabled spinner after
 navigation/reload, and wait for the explicit `false` settle. The old held-frame helper was removed,
 and each run used only the isolated mock backend/workspace.
+
+The original `/slow 30s` fixture divided its delay across several emitter boundaries, so a real
+cancellation could settle before navigation and hydration completed. The `/e2e:cancel-hold` fixture
+has one cancellation boundary and emits no assistant output in every mock-agent run. The managed E2E
+profile supplies a three-second `PromptCancelJoinTimeout` baseline through `AgentctlStartupConfig`,
+the process adapter, and ACP; these two cancel-progress regressions scope a 12-second override, and
+zero preserves ACP's three-second default for normal startup. Fresh managed Chromium repeats
+passed five desktop task-switch executions and five mobile reload executions, with the pending
+control observed before eventual idle settlement.

@@ -13,6 +13,7 @@ import {
 } from "@/lib/local-storage";
 import { calculateHash } from "@/lib/utils/file-diff";
 import { getFilePreviewKind } from "@/lib/utils/file-types";
+import { normalizeWorkspaceFilePath } from "@/lib/workspace-file-path";
 import { useToast } from "@/components/toast-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSaveDeleteActions } from "./use-file-save-delete";
@@ -45,13 +46,14 @@ export function useOpenFileAtLine(
 ) {
   return useCallback(
     (path: string) => {
+      const openPath = normalizeWorkspaceFilePath(path, worktreePath);
       if (startLine && startLine > 0) {
-        setPendingCursorPosition(path, startLine, 1, undefined, sessionId);
-        onOpenFile?.(path);
-        scrollEditorIfMounted(path, worktreePath ?? null, startLine, 1, { sessionId });
+        setPendingCursorPosition(openPath, startLine, 1, undefined, sessionId);
+        onOpenFile?.(openPath);
+        scrollEditorIfMounted(openPath, worktreePath ?? null, startLine, 1, { sessionId });
         return;
       }
-      onOpenFile?.(path);
+      onOpenFile?.(openPath);
     },
     [onOpenFile, startLine, worktreePath, sessionId],
   );
@@ -211,6 +213,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
         originalHash: hash,
         isDirty: false,
         isBinary: response.is_binary,
+        resolvedPath: response.resolved_path,
         renderedPreview:
           getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
             ? savedTab.renderedPreview

@@ -277,6 +277,7 @@ type RunDetailResponse struct {
 	ID           string            `json:"id"`
 	IDShort      string            `json:"id_short"`
 	AgentID      string            `json:"agent_id"`
+	AgentName    string            `json:"agent_name,omitempty"`
 	Reason       string            `json:"reason"`
 	Status       string            `json:"status"`
 	CancelReason *string           `json:"cancel_reason,omitempty"`
@@ -329,6 +330,9 @@ type RunRuntimeDTO struct {
 
 type RunSkillDTO struct {
 	SkillID          string `json:"skill_id"`
+	DisplayName      string `json:"display_name,omitempty"`
+	Slug             string `json:"slug,omitempty"`
+	LabelSource      string `json:"label_source,omitempty"`
 	Version          string `json:"version"`
 	ContentHash      string `json:"content_hash"`
 	MaterializedPath string `json:"materialized_path"`

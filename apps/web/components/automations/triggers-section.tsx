@@ -7,6 +7,7 @@ import { Label } from "@kandev/ui/label";
 import type { AutomationTrigger, TriggerType, TriggerTypeInfo } from "@/lib/types/automation";
 import { ScheduleSelector } from "./schedule-selector";
 import { TriggerCard } from "./trigger-card";
+import { findTriggerInfo } from "./plugin-condition";
 import { TriggerPicker } from "./trigger-picker";
 
 type TriggersSectionProps = {
@@ -103,18 +104,23 @@ export function TriggersSection({
 
   return (
     <div className="space-y-4">
-      <ScheduleArea
-        scheduleTrigger={scheduleTrigger}
-        savedScheduleTrigger={savedScheduleTrigger}
-        onScheduleChange={handleScheduleChange}
-      />
+      {conditionTrigger?.type !== "plugin_event" && (
+        <ScheduleArea
+          scheduleTrigger={scheduleTrigger}
+          savedScheduleTrigger={savedScheduleTrigger}
+          onScheduleChange={handleScheduleChange}
+        />
+      )}
       <ConditionArea
         trigger={conditionTrigger}
         savedTrigger={savedConditionTrigger}
         automationId={automationId}
         workspaceId={workspaceId}
         triggerTypes={triggerTypes}
-        onAddTrigger={onAddTrigger}
+        onAddTrigger={(type, config) => {
+          if (type === "plugin_event" && scheduleTrigger) onDeleteTrigger(scheduleTrigger.id);
+          onAddTrigger(type, config);
+        }}
         onUpdateTrigger={onUpdateTrigger}
         onToggleTrigger={onToggleTrigger}
         onDeleteTrigger={onDeleteTrigger}
@@ -177,6 +183,7 @@ function ConditionArea({
       {trigger ? (
         <div className="space-y-2">
           <TriggerCard
+            pluginInfo={findTriggerInfo(trigger, triggerTypes)?.plugin}
             trigger={trigger}
             savedTrigger={savedTrigger?.id === trigger.id ? savedTrigger : undefined}
             automationId={automationId}

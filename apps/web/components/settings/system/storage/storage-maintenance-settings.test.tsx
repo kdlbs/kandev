@@ -455,7 +455,7 @@ describe("StorageMaintenanceSettings pending policy", () => {
 
     fireEvent.click(screen.getByTestId("storage-resource-temporary-artifacts-trigger"));
     fireEvent.click(screen.getByTestId("storage-temporary-artifacts-clean"));
-    expect(screen.getByText("Clean stale Kandev artifacts?")).toBeTruthy();
+    expect(screen.getByText("Clean inactive Kandev temporary files?")).toBeTruthy();
     fireEvent.click(screen.getByTestId("storage-temporary-artifacts-confirm"));
     await waitFor(() =>
       expect(currentController.runNow).toHaveBeenCalledWith(["temporary_artifacts"]),

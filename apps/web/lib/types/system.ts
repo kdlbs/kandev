@@ -207,6 +207,28 @@ export interface MessageQueueSettingsResponse {
   effective: MessageQueueEffectiveSettings;
 }
 
+export interface SessionCapacitySettingsValue {
+  enabled: boolean;
+  max_sessions: number;
+}
+
+/** Partial PATCH payload: omitted fields are left unchanged server-side. */
+export type SessionCapacitySettingsPatch = Partial<SessionCapacitySettingsValue>;
+
+export type SessionCapacitySettingsSource = "default" | "setting" | "environment";
+
+export interface SessionCapacityEffectiveSettings {
+  enabled: boolean;
+  max_sessions: number;
+  source: SessionCapacitySettingsSource;
+  locked: boolean;
+}
+
+export interface SessionCapacitySettingsResponse {
+  settings: SessionCapacitySettingsValue;
+  effective: SessionCapacityEffectiveSettings;
+}
+
 export type SleepInhibitionPlatform = "darwin" | "windows" | "linux" | "other";
 export type SleepInhibitionIssue =
   | "unsupported_platform"

@@ -145,13 +145,23 @@ func (cs *CronScheduler) shouldFire(t *AutomationTrigger, now time.Time) bool {
 }
 
 func (cs *CronScheduler) fire(ctx context.Context, t *AutomationTrigger, now time.Time) {
+	a, err := cs.svc.Store().GetAutomation(ctx, t.AutomationID)
+	if err != nil || a == nil {
+		return
+	}
+	for _, condition := range a.Triggers {
+		if condition.Type == TriggerTypePluginEvent {
+			return
+		}
+	}
+
 	data, _ := json.Marshal(map[string]string{
 		triggerDataSourceKey: string(TriggerTypeScheduled),
 		"timestamp":          now.Format(time.RFC3339),
 	})
 	dedupKey := fmt.Sprintf("scheduled:%s:%d", t.ID, now.Unix()/60) // Dedup by minute
 
-	if _, err := cs.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeScheduled, data, dedupKey); err != nil {
+	if _, err := cs.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeScheduled, data, DedupKey(dedupKey)); err != nil {
 		cs.logger.Error("failed to fire scheduled trigger",
 			zap.String("trigger_id", t.ID),
 			zap.String("automation_id", t.AutomationID),

@@ -18,8 +18,7 @@ import {
 } from "@/components/settings/settings-breadcrumbs";
 import { TaskBehaviorSettings } from "@/components/settings/task-behavior-settings";
 import { LegacyExecutorSettingsRoute } from "@/components/settings/legacy-executor-settings-route";
-import { StorageMaintenanceSettings } from "@/components/settings/system/storage/storage-maintenance-settings";
-import { SystemRouteShell } from "@/components/settings/system/system-route-shell";
+import { DataLogsSettings } from "@/components/settings/system/data-logs-settings";
 import { WorkspaceSettingsShell } from "@/components/settings/workspaces/workspace-settings-shell";
 import { SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS } from "@/lib/settings-discovery/catalog";
 import { workspaceId, workflowId } from "@/lib/types/ids";
@@ -150,6 +149,12 @@ describe("buildSettingsInitialStateForRoute", () => {
 
     expect(state.system).toBeUndefined();
   });
+
+  it("stamps the agent snapshot with the request generation", () => {
+    const state = buildState({ agentProfilesVersion: 4 });
+
+    expect(state.agentProfiles?.version).toBe(4);
+  });
 });
 
 describe("message queue settings route", () => {
@@ -204,6 +209,14 @@ describe("renderSettingsRoute", () => {
     const route = renderSettingsRoute("/settings/preferences/layouts");
     expect(isValidElement(route)).toBe(true);
     expect(((route as ReactElement).type as { name?: string }).name).toBe("LayoutSettings");
+  });
+
+  it("redirects the legacy sidebar page into the Layouts sidebar tab", () => {
+    const route = renderSettingsRoute("/settings/sidebar") as ReactElement<{ to: string }>;
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe("/settings/preferences/layouts?tab=sidebar");
   });
 
   it("redirects the legacy task actions page into Task behavior", () => {
@@ -270,18 +283,23 @@ describe("renderSettingsRoute", () => {
 });
 
 describe("system data and storage routes", () => {
-  it("renders Storage maintenance on its direct route", () => {
-    const route = renderSettingsRoute("/settings/system/storage") as ReactElement<{
-      titleKey: string;
-      descriptionKey: string;
-      children: ReactElement;
+  it("renders the Data & Logs page composition directly", () => {
+    const route = renderSettingsRoute("/settings/system/data-storage");
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route as ReactElement).type).toBe(DataLogsSettings);
+  });
+
+  it("redirects legacy backups into the Database tab and target", () => {
+    const route = renderSettingsRoute("/settings/system/backups") as ReactElement<{
+      to: string;
     }>;
 
     expect(isValidElement(route)).toBe(true);
-    expect(route.type).toBe(SystemRouteShell);
-    expect(route.props.titleKey).toBe("system:storageTitle");
-    expect(route.props.descriptionKey).toBe("system:storageDescription");
-    expect(route.props.children.type).toBe(StorageMaintenanceSettings);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe(
+      "/settings/system/data-storage?tab=database#setting-system-backups",
+    );
   });
 });
 

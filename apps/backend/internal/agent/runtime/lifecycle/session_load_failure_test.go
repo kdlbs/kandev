@@ -32,6 +32,15 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 			name:    "authentication failure",
 			message: "authentication required",
 		},
+		{
+			name: "missing rollout for a different session",
+			message: `load session failed: failed to load session: {"code":-32603,"message":"Internal error",` +
+				`"data":{"details":"no rollout found for thread id another-session"}}`,
+		},
+		{
+			name:    "unstructured missing rollout phrase",
+			message: "internal error: no rollout found for thread id saved-session",
+		},
 	}
 
 	for _, tt := range tests {
@@ -106,6 +115,16 @@ func TestInitializeSession_LoadCompatibilityFailureCreatesReplacement(t *testing
 		{name: "method not found", message: "method not found"},
 		{name: "capability mismatch", message: "agent does not support session loading (LoadSession capability is false)"},
 		{name: "unknown session", message: "Resource not found"},
+		{
+			name: "missing provider rollout",
+			message: `load session failed: failed to load session: {"code":-32603,"message":"Internal error",` +
+				`"data":{"details":"no rollout found for thread id saved-session"}}`,
+		},
+		{
+			name: "missing auggie session",
+			message: `load session failed: failed to load session: {"code":-32602,"message":"Invalid params",` +
+				`"data":{"details":"Session not found: saved-session"}}`,
+		},
 	}
 
 	for _, tt := range tests {

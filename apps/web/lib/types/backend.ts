@@ -44,6 +44,7 @@ import type {
 } from "@/lib/types/github";
 import type { TaskMR, TaskMRDeletedEvent, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
 import type { AgentProfileRecentUseApiRecord } from "@/lib/types/http-agent-profile-recent-use";
 import type { SystemMetricsSnapshot, StorageAnalysisUpdatedPayload } from "./system";
 import type { AgentRuntimeAvailability } from "./agent-runtime";
@@ -52,6 +53,7 @@ import type {
   ExecutorProfilePayload,
   PrepareProgressPayload,
   PrepareCompletedPayload,
+  LaunchWarningPayload,
   EnvironmentPayload,
 } from "./executor-payloads";
 
@@ -329,6 +331,7 @@ export type OfficeInboxItemNotificationPayload = {
 };
 
 export type FileChangeFacet = {
+  is_symlink?: boolean;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
   additions?: number;
   deletions?: number;
@@ -338,6 +341,7 @@ export type FileChangeFacet = {
 };
 
 export type FileInfo = {
+  is_symlink?: boolean;
   path: string;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
   staged: boolean;
@@ -356,6 +360,7 @@ export {
   type ExecutorProfilePayload,
   type PrepareProgressPayload,
   type PrepareCompletedPayload,
+  type LaunchWarningPayload,
   type EnvironmentPayload,
 } from "./executor-payloads";
 
@@ -365,6 +370,9 @@ export type AgentProfilePayload = {
   name: string;
   agent_display_name: string;
   model: string;
+  fallback_model?: string;
+  auto_fallback?: boolean;
+  require_exact_model?: boolean;
   auto_approve: boolean;
   dangerously_skip_permissions: boolean;
   allow_indexing: boolean;
@@ -380,6 +388,8 @@ export type AgentProfileDeletedPayload = {
 
 export type AgentProfileChangedPayload = {
   profile: AgentProfilePayload;
+  /** Sessionless-inference capability for profile events received before agent hydration. */
+  inference_capable?: boolean;
 };
 
 export type UserSettingsUpdatedPayload = Omit<
@@ -423,6 +433,8 @@ export type TaskStatusSummaryUpdatedPayload = {
 
 export type CanvasLifecyclePayload = {
   type?: string;
+  title?: string;
+  updated_at?: string;
   canvas_id: string;
   plugin_instance_id?: string;
   workspace_id?: string;
@@ -453,6 +465,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "task.plan.comments.changed": BackendMessage<
       "task.plan.comments.changed",
       TaskPlanCommentEventPayload
+    >;
+    "task.preview_feedback.changed": BackendMessage<
+      "task.preview_feedback.changed",
+      import("@/lib/types/http").TaskPreviewFeedbackSnapshot
     >;
     "task.plan.revision.created": BackendMessage<
       "task.plan.revision.created",
@@ -519,6 +535,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "workflow.step.deleted": BackendMessage<"workflow.step.deleted", WorkflowStepEventPayload>;
 
     "canvas.created": BackendMessage<"canvas.created", CanvasLifecyclePayload>;
+    "canvas.updated": BackendMessage<"canvas.updated", CanvasLifecyclePayload>;
     "canvas.release.activated": BackendMessage<"canvas.release.activated", CanvasLifecyclePayload>;
     "canvas.release.permission_required": BackendMessage<
       "canvas.release.permission_required",
@@ -545,6 +562,11 @@ export type BackendMessageMap = SessionBackendMessageMap &
       "executor.prepare.completed",
       PrepareCompletedPayload
     >;
+    "executor.reachability.changed": BackendMessage<
+      "executor.reachability.changed",
+      SSHReachabilityRecord
+    >;
+    "session.launch.warning": BackendMessage<"session.launch.warning", LaunchWarningPayload>;
     "environment.created": BackendMessage<"environment.created", EnvironmentPayload>;
     "environment.updated": BackendMessage<"environment.updated", EnvironmentPayload>;
     "environment.deleted": BackendMessage<"environment.deleted", EnvironmentPayload>;

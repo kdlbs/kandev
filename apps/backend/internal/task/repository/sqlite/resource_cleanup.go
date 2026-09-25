@@ -147,6 +147,32 @@ func (r *Repository) ListArchiveTaskResourceCleanupJobs(
 	return jobs, rows.Err()
 }
 
+// ListTaskResourceCleanupJobs returns every durable cleanup generation for one
+// task, including delete generations that outlive the task row itself.
+func (r *Repository) ListTaskResourceCleanupJobs(
+	ctx context.Context, taskID string,
+) ([]*models.TaskResourceCleanupJob, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskResourceCleanupColumns+`
+		FROM task_resource_cleanup_jobs
+		WHERE task_id = ?
+		ORDER BY created_at ASC
+	`), taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	jobs := make([]*models.TaskResourceCleanupJob, 0)
+	for rows.Next() {
+		job, scanErr := scanTaskResourceCleanupJob(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
 func (r *Repository) ListPreparedTaskResourceCleanupJobs(ctx context.Context) ([]*models.TaskResourceCleanupJob, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskResourceCleanupColumns+`

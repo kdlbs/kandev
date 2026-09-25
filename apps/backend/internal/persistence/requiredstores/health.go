@@ -2,6 +2,7 @@ package requiredstores
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/system/maintenance"
 )
 
 const (
@@ -30,6 +33,15 @@ type Health struct {
 	interval time.Duration
 	cancel   context.CancelFunc
 	done     chan struct{}
+}
+
+type probeFailureDiagnostic struct {
+	stage       string
+	elapsed     time.Duration
+	errorClass  string
+	storeID     string
+	writerStats sql.DBStats
+	readerStats sql.DBStats
 }
 
 // NewHealth creates a runtime health probe for a completed store tracker.
@@ -51,18 +63,29 @@ func (h *Health) SetInterval(interval time.Duration) {
 // more stores are unavailable, while recording an independent result for each
 // catalog entry.
 func (h *Health) Check(ctx context.Context) error {
+	_, err := h.check(ctx)
+	return err
+}
+
+func (h *Health) check(ctx context.Context) (*probeFailureDiagnostic, error) {
 	if h == nil || h.tracker == nil {
-		return errors.New("required-store health tracker is unavailable")
+		return nil, errors.New("required-store health tracker is unavailable")
 	}
 	if h.pool == nil || h.pool.Writer() == nil || h.pool.Reader() == nil {
-		return h.recordUnavailable(errors.New("database pool is unavailable"))
+		err := errors.New("database pool is unavailable")
+		diagnostic := h.failureDiagnostic("pool", 0, err, "")
+		return diagnostic, h.recordUnavailable(err)
 	}
-	probeErr := h.ping(ctx)
+	diagnostic, probeErr := h.pingObserved(ctx)
 	results := make([]error, len(h.tracker.catalog))
 	for index, descriptor := range h.tracker.catalog {
 		results[index] = probeErr
 		if probeErr == nil {
-			results[index] = h.probeTables(ctx, descriptor)
+			tableDiagnostic, tableErr := h.probeTablesObserved(ctx, descriptor)
+			results[index] = tableErr
+			if diagnostic == nil {
+				diagnostic = tableDiagnostic
+			}
 		}
 	}
 	var failures []error
@@ -77,20 +100,62 @@ func (h *Health) Check(ctx context.Context) error {
 	}
 	if len(failures) == 0 {
 		h.logTransition()
-		return nil
+		return nil, nil
 	}
 	h.logTransition()
-	return errors.Join(failures...)
+	return diagnostic, errors.Join(failures...)
 }
 
-func (h *Health) ping(ctx context.Context) error {
+// MarkUnavailable records a destructive database transition before the
+// maintenance owner releases its admission lease. This keeps stateful
+// requests fail-closed while the process waits for the required restart.
+func (h *Health) MarkUnavailable() {
+	if h == nil || h.tracker == nil {
+		return
+	}
+	_ = h.recordUnavailable(errors.New("database maintenance requires restart"))
+}
+
+// checkRuntime runs a periodic probe when the database can be admitted. SQLite
+// maintenance owns the same writer pool, so a busy maintenance lease defers
+// the probe instead of turning bounded writer contention into an unhealthy
+// state. Startup callers continue to use Check, which remains strict.
+func (h *Health) checkRuntime(ctx context.Context) (deferred bool, err error) {
+	deferred, _, err = h.checkRuntimeDetailed(ctx)
+	return deferred, err
+}
+
+func (h *Health) checkRuntimeDetailed(
+	ctx context.Context,
+) (deferred bool, diagnostic *probeFailureDiagnostic, err error) {
+	if h.isSQLite() {
+		release, ok := maintenance.ForPool(h.pool).TryAcquire()
+		if !ok {
+			if h.log != nil {
+				h.log.Debug("required persistence probe deferred during database maintenance")
+			}
+			return true, nil, nil
+		}
+		defer release()
+	}
+	diagnostic, err = h.check(ctx)
+	return false, diagnostic, err
+}
+
+func (h *Health) isSQLite() bool {
+	return h.pool != nil && h.pool.Writer() != nil && h.pool.Writer().DriverName() == dialect.SQLite3
+}
+
+func (h *Health) pingObserved(ctx context.Context) (*probeFailureDiagnostic, error) {
+	started := time.Now()
 	if err := h.pool.Writer().PingContext(ctx); err != nil {
-		return fmt.Errorf("writer ping failed: %w", err)
+		return h.failureDiagnostic("writer_ping", time.Since(started), err, ""), fmt.Errorf("writer ping failed: %w", err)
 	}
+	started = time.Now()
 	if err := h.pool.Reader().PingContext(ctx); err != nil {
-		return fmt.Errorf("reader ping failed: %w", err)
+		return h.failureDiagnostic("reader_ping", time.Since(started), err, ""), fmt.Errorf("reader ping failed: %w", err)
 	}
-	return nil
+	return nil, nil
 }
 
 func (h *Health) probeTables(ctx context.Context, descriptor Descriptor) error {
@@ -104,6 +169,84 @@ func (h *Health) probeTables(ctx context.Context, descriptor Descriptor) error {
 		}
 	}
 	return nil
+}
+
+func (h *Health) probeTablesObserved(
+	ctx context.Context,
+	descriptor Descriptor,
+) (*probeFailureDiagnostic, error) {
+	started := time.Now()
+	err := h.probeTables(ctx, descriptor)
+	if err == nil {
+		return nil, nil
+	}
+	return h.failureDiagnostic("table_probe", time.Since(started), err, descriptor.ID), err
+}
+
+func (h *Health) failureDiagnostic(stage string, elapsed time.Duration, err error, storeID string) *probeFailureDiagnostic {
+	diagnostic := &probeFailureDiagnostic{
+		stage:      stage,
+		elapsed:    elapsed,
+		errorClass: classifyProbeError(err),
+		storeID:    storeID,
+	}
+	if h.pool == nil {
+		return diagnostic
+	}
+	if writer := h.pool.Writer(); writer != nil {
+		diagnostic.writerStats = writer.Stats()
+	}
+	if reader := h.pool.Reader(); reader != nil {
+		diagnostic.readerStats = reader.Stats()
+	}
+	return diagnostic
+}
+
+func classifyProbeError(err error) string {
+	message := ""
+	if err != nil {
+		message = strings.ToLower(err.Error())
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case strings.Contains(message, "required table") && strings.Contains(message, "missing"):
+		return "required_table_missing"
+	default:
+		return "probe_error"
+	}
+}
+
+func (d *probeFailureDiagnostic) logFields() []zap.Field {
+	if d == nil {
+		return []zap.Field{zap.String("stage", "unknown"), zap.String("error_class", "probe_error")}
+	}
+	fields := []zap.Field{
+		zap.String("stage", d.stage),
+		zap.Float64("elapsed_ms", float64(d.elapsed)/float64(time.Millisecond)),
+		zap.String("error_class", d.errorClass),
+		zap.Int("writer_open_connections", d.writerStats.OpenConnections),
+		zap.Int("writer_in_use", d.writerStats.InUse),
+		zap.Int64("writer_wait_count", d.writerStats.WaitCount),
+		zap.Float64("writer_wait_duration_ms", float64(d.writerStats.WaitDuration)/float64(time.Millisecond)),
+		zap.Int("reader_open_connections", d.readerStats.OpenConnections),
+		zap.Int("reader_in_use", d.readerStats.InUse),
+		zap.Int64("reader_wait_count", d.readerStats.WaitCount),
+		zap.Float64("reader_wait_duration_ms", float64(d.readerStats.WaitDuration)/float64(time.Millisecond)),
+	}
+	if d.storeID != "" {
+		fields = append(fields, zap.String("store_id", d.storeID))
+	}
+	return fields
+}
+
+func (h *Health) logProbeFailure(diagnostic *probeFailureDiagnostic) {
+	if h == nil || h.log == nil {
+		return
+	}
+	h.log.Warn("required persistence probe failed", diagnostic.logFields()...)
 }
 
 func (h *Health) recordUnavailable(err error) error {
@@ -145,9 +288,13 @@ func (h *Health) run(ctx context.Context, interval time.Duration, done chan stru
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if ctx.Err() != nil {
+				return
+			}
 			checkCtx, cancel := context.WithTimeout(ctx, probeTimeout)
-			if err := h.Check(checkCtx); err != nil && h.log != nil {
-				h.log.Warn("required persistence probe failed", zap.Error(err))
+			_, diagnostic, err := h.checkRuntimeDetailed(checkCtx)
+			if err != nil {
+				h.logProbeFailure(diagnostic)
 			}
 			cancel()
 		}

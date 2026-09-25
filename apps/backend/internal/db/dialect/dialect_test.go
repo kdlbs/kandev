@@ -27,6 +27,15 @@ func TestTimestampType(t *testing.T) {
 	}
 }
 
+func TestByteOrderedText(t *testing.T) {
+	if got := ByteOrderedText(SQLite3, "t.id"); got != "t.id" {
+		t.Errorf("sqlite: expected bare expression, got %q", got)
+	}
+	if got := ByteOrderedText(PGX, "t.id"); got != `t.id COLLATE "C"` {
+		t.Errorf("pgx: expected explicit C collation, got %q", got)
+	}
+}
+
 func TestBoolToInt(t *testing.T) {
 	if BoolToInt(true) != 1 {
 		t.Error("expected 1 for true")

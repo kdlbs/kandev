@@ -114,7 +114,7 @@ describe("RunsPageClient feed", () => {
 
     fireEvent.click(screen.getByTestId("run-entry-run-x"));
 
-    expect(mocks.push).toHaveBeenCalledWith("/tasks/task-hidden");
+    expect(mocks.push).toHaveBeenCalledWith("/t/task-hidden");
   });
 
   it("does not navigate for a run that never produced a task", async () => {

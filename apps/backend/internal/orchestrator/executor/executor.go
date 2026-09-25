@@ -111,23 +111,6 @@ type sessionMetadataKeyStateSetter interface {
 	) (bool, error)
 }
 
-// sessionMetadataErrorCASWriter is the optional persistence seam for
-// execution-scoped bootstrap errors. Production repositories implement both
-// operations atomically; legacy test stores can fall back to the ordinary
-// metadata setter after the executor's current-execution fence.
-type sessionMetadataErrorCASWriter interface {
-	SetSessionMetadataKeyIfAbsent(
-		ctx context.Context,
-		sessionID, key string,
-		value interface{},
-	) (bool, error)
-	SetSessionMetadataKeyIfStamp(
-		ctx context.Context,
-		sessionID, key, expectedStamp string,
-		value interface{},
-	) (bool, error)
-}
-
 // bootstrapFailureCommitter is the atomic repository boundary for an
 // asynchronous process-start failure. The expected state and error stamp are
 // captured immediately before the commit; the repository must also require
@@ -476,6 +459,9 @@ type AgentProfileInfo struct {
 	AgentName                  string
 	Model                      string
 	Mode                       string
+	FallbackModel              string
+	AutoFallback               bool
+	RequireExactModel          bool
 	ConfigOptions              map[string]string
 	AutoApprove                bool
 	DangerouslySkipPermissions bool
@@ -559,12 +545,15 @@ type LaunchAgentRequest struct {
 	TaskRepositoryID        string // Exact task_repositories row for worktree recovery
 	RepositoryPath          string // Path to the main repository (for worktree creation)
 	BaseBranch              string // Base branch for the worktree (e.g., "main")
+	IntegrationRef          string // Verified terminal integration target for managed branch compaction
 	DefaultBranch           string // Repository's default_branch, used as a fallback when BaseBranch is missing
 	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
+	QualifiedPRBase         *models.PRBase
 	WorktreeBranchPrefix    string // Branch prefix for worktree branches
 	WorktreeBranchTemplate  string // Branch name template for worktree branches
 	WorktreeBranchTicket    string // External ticket value for branch templates
@@ -613,12 +602,15 @@ type RepoSpec struct {
 	RepositoryURL           string
 	RepoName                string
 	BaseBranch              string
+	IntegrationRef          string
 	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch          string
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
+	QualifiedPRBase         *models.PRBase
 	WorktreeID              string
 	// AllowBranchReplacement permits explicit branch replacement for this repo.
 	AllowBranchReplacement bool
@@ -671,14 +663,19 @@ type LaunchOptions struct {
 	OfficeAgentProfileID string
 	ExecutorID           string
 	TurnID               string
-	Prompt               string
-	PriorACPSession      string // ACP session ID to resume for the same concrete profile
-	WorkflowStepID       string
-	StartAgent           bool
-	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
-	McpProfile           *mcpprofile.Context
-	Attachments          []v1.MessageAttachment
-	Env                  map[string]string
+	// OnExecutionAdmitted runs after the launch path has identified and
+	// persisted the execution that will receive this turn, but before its
+	// process is started. Callers use this boundary to bind turn-scoped
+	// evidence to the execution that actually won admission.
+	OnExecutionAdmitted func(executionID string)
+	Prompt              string
+	PriorACPSession     string // ACP session ID to resume for the same concrete profile
+	WorkflowStepID      string
+	StartAgent          bool
+	McpMode             string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
+	McpProfile          *mcpprofile.Context
+	Attachments         []v1.MessageAttachment
+	Env                 map[string]string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string
@@ -724,6 +721,8 @@ type LaunchAgentResponse struct {
 	WorktreeID                string
 	WorktreePath              string
 	WorktreeBranch            string
+	WorktreeBranchOwner       string
+	WorktreeIntegrationRef    string
 	RequestedBaseBranch       string
 	BaseBranch                string
 	BaseBranchFallbackWarning string
@@ -745,6 +744,8 @@ type RepoWorktreeResult struct {
 	BranchSlug                string
 	WorktreeID                string
 	WorktreeBranch            string
+	WorktreeBranchOwner       string
+	WorktreeIntegrationRef    string
 	WorktreePath              string
 	MainRepoGitDir            string
 	RequestedBaseBranch       string
@@ -814,6 +815,7 @@ type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, 
 type SessionStateTransitionFunc func(
 	ctx context.Context,
 	taskID, sessionID string,
+	expectedState *models.TaskSessionState,
 	state models.TaskSessionState,
 	errorMessage string,
 	onChanged func(),
@@ -830,6 +832,16 @@ type BootstrapFailureTransitionFunc func(
 	expectedStamp string,
 	errorValue models.LastAgentError,
 ) (changed bool, finalState models.TaskSessionState, err error)
+
+// BootstrapFailureMessageRepairFunc retries the idempotent transcript write
+// after the state admission has already succeeded. The repair is deliberately
+// separate from the state commit so a transient message-store failure cannot
+// make an accepted bootstrap failure disappear from session history.
+type BootstrapFailureMessageRepairFunc func(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	errorValue models.LastAgentError,
+) error
 
 // SessionStartingFunc is called when the executor has prepared/resumed an
 // execution and needs to mark the session STARTING while preserving other
@@ -894,6 +906,14 @@ type AgentProcessStartFailedFunc func(ctx context.Context, taskID, sessionID, ag
 // repositoryID identifies the repository whose launch failed. Useful for
 // creating repository-scoped user-facing status messages tied to launch errors.
 type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID string, err error)
+
+// CeilingReservationReleaseFunc releases the orchestrator's session-ceiling
+// reservation for a session this package just moved out of the counted
+// population through a write that bypasses onSessionStateChange /
+// onSessionStateTransition (MarkCompletedBySession, the resume-failure
+// rollback). Releasing a session that held no reservation is a defined
+// no-op, so this can be called unconditionally on a successful write.
+type CeilingReservationReleaseFunc func(sessionID string)
 
 // LaunchFailureReviewEligibilityFunc reports whether a failed launch can offer
 // the mark-review-done recovery action. The resolver owns workflow and PR
@@ -983,6 +1003,9 @@ type Executor struct {
 	// typed error, FAILED state, and corresponding publication as one ownership
 	// decision.
 	onBootstrapFailureTransition BootstrapFailureTransitionFunc
+	// Retry hook for the chronological transcript entry when the state commit
+	// succeeds but the first idempotent message write fails.
+	onBootstrapFailureMessageRepair BootstrapFailureMessageRepairFunc
 
 	// Callback for STARTING writes that carry full session-row changes. Set by
 	// the orchestrator so launch/resume/model-switch transitions serialize with
@@ -1018,6 +1041,14 @@ type Executor struct {
 	// Callback for session launch failures (pre-start). Allows orchestrator
 	// to emit user-friendly guidance for known failure patterns.
 	onLaunchFailed LaunchFailedFunc
+
+	// Callback releasing the session-ceiling reservation for writes this
+	// package makes directly against the repository, bypassing
+	// onSessionStateChange / onSessionStateTransition (AC-51a).
+	onCeilingReservationRelease CeilingReservationReleaseFunc
+	// Optional observation-only bypass detector for the three entry points
+	// that start an agent process (AC-41/AC-41a).
+	ceilingBackingChecker CeilingBackingChecker
 	// Optional resolver for the mark-review-done recovery action.
 	launchFailureReviewEligibility LaunchFailureReviewEligibilityFunc
 	// Optional compatibility gate for legacy adapters.
@@ -1212,9 +1243,64 @@ type TaskRepositoryBaseBranchUpdater interface {
 	UpdateTaskRepositoryBaseBranch(ctx context.Context, taskID, taskRepositoryID, baseBranch string) error
 }
 
-// PRBaseResolver returns the current base branch for one provider pull request.
+// PRBaseResolver returns the current repository-qualified base for one PR.
 type PRBaseResolver interface {
-	ResolvePRBaseBranch(ctx context.Context, workspaceID, owner, repo string, number int) (string, error)
+	ResolvePRBase(ctx context.Context, workspaceID string, lookup PRBaseLookup) (models.PRBase, error)
+}
+
+// PRBaseResolutionError marks provider failures that make a legacy PR
+// association unsafe to resolve by branch alone.
+type PRBaseResolutionError struct {
+	cause                error
+	knownCrossRepository bool
+	invalidAssociation   bool
+}
+
+func (e *PRBaseResolutionError) Error() string {
+	if e == nil || e.cause == nil {
+		return "pull request base resolution failed"
+	}
+	return e.cause.Error()
+}
+
+func (e *PRBaseResolutionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+// KnownCrossRepository reports whether the resolver has identified a target
+// repository that differs from the checked out repository.
+func (e *PRBaseResolutionError) KnownCrossRepository() bool {
+	return e != nil && e.knownCrossRepository
+}
+
+// InvalidAssociation reports that provider data did not match the exact task
+// repository and checkout binding.
+func (e *PRBaseResolutionError) InvalidAssociation() bool {
+	return e != nil && e.invalidAssociation
+}
+
+// NewPRBaseResolutionError classifies a provider-side resolution failure for
+// the launch boundary. Invalid or known cross-repository associations cannot
+// continue with a bare task-repository branch.
+func NewPRBaseResolutionError(cause error, knownCrossRepository, invalidAssociation bool) *PRBaseResolutionError {
+	return &PRBaseResolutionError{
+		cause: cause, knownCrossRepository: knownCrossRepository, invalidAssociation: invalidAssociation,
+	}
+}
+
+// PRBaseLookup ties a provider lookup to one task-repository attachment.
+type PRBaseLookup struct {
+	TaskID             string
+	TaskRepositoryID   string
+	RepositoryID       string
+	Number             int
+	CheckoutBranch     string
+	AttachedOwner      string
+	AttachedRepository string
+	Target             *models.ComparisonTarget
 }
 
 // ExecutorConfig holds configuration for the Executor
@@ -1304,6 +1390,12 @@ func (e *Executor) SetOnBootstrapFailureTransition(fn BootstrapFailureTransition
 	e.onBootstrapFailureTransition = fn
 }
 
+// SetOnBootstrapFailureMessageRepair wires the bounded repair hook for a
+// bootstrap failure whose session admission already succeeded.
+func (e *Executor) SetOnBootstrapFailureMessageRepair(fn BootstrapFailureMessageRepairFunc) {
+	e.onBootstrapFailureMessageRepair = fn
+}
+
 // SetOnSessionStarting sets a callback for full session-row STARTING updates.
 func (e *Executor) SetOnSessionStarting(fn SessionStartingFunc) {
 	e.onSessionStarting = fn
@@ -1365,6 +1457,23 @@ func (e *Executor) SetOnAgentProcessStarted(fn AgentProcessStartedFunc) {
 // process startup fails and the normal failure handler has run.
 func (e *Executor) SetOnAgentProcessStartFailed(fn AgentProcessStartFailedFunc) {
 	e.onAgentProcessStartFailed = fn
+}
+
+// SetOnCeilingReservationRelease sets the callback used by writes this
+// package makes directly against the repository, bypassing
+// onSessionStateChange / onSessionStateTransition, to release the
+// session-ceiling reservation for a session that just left the counted
+// population (AC-51a).
+func (e *Executor) SetOnCeilingReservationRelease(fn CeilingReservationReleaseFunc) {
+	e.onCeilingReservationRelease = fn
+}
+
+// SetCeilingBackingChecker wires the AC-41 dependency-inverted bypass
+// detector. Leaving it unset (every existing construction site) is AC-41a's
+// contract: the three instrumented entry points behave exactly as they do
+// without this card at all.
+func (e *Executor) SetCeilingBackingChecker(checker CeilingBackingChecker) {
+	e.ceilingBackingChecker = checker
 }
 
 // SetOnPrimarySessionSet sets a callback for when the first session for a task

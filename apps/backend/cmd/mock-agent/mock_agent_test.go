@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -24,6 +25,74 @@ func (u *promptCancelUpdater) SessionUpdate(context.Context, acp.SessionNotifica
 
 func (u *promptCancelUpdater) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	return acp.RequestPermissionResponse{}, nil
+}
+
+func TestMockAgentCancelHoldDefersPromptCompletion(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const sessionID = acp.SessionId("cancel-hold-session")
+		t.Setenv("KANDEV_E2E_CANCEL_HOLD_DURATION", "30ms")
+		updater := newCapturingUpdater()
+		agent := &mockAgent{
+			model:             "mock-fast",
+			conn:              updater,
+			sessions:          map[acp.SessionId]bool{sessionID: true},
+			promptCancels:     make(map[acp.SessionId]context.CancelFunc),
+			promptCancelHolds: make(map[acp.SessionId]chan struct{}),
+			commandsEmitted:   make(map[acp.SessionId]bool),
+		}
+
+		result := make(chan struct {
+			response acp.PromptResponse
+			err      error
+		}, 1)
+		go func() {
+			response, err := agent.Prompt(context.Background(), acp.PromptRequest{
+				SessionId: sessionID,
+				Prompt:    []acp.ContentBlock{acp.TextBlock("/e2e:cancel-hold")},
+			})
+			result <- struct {
+				response acp.PromptResponse
+				err      error
+			}{response: response, err: err}
+		}()
+
+		synctest.Wait()
+		select {
+		case <-updater.anySeen:
+		default:
+			t.Fatal("hold prompt did not start")
+		}
+		if err := agent.Cancel(context.Background(), acp.CancelNotification{SessionId: sessionID}); err != nil {
+			t.Fatalf("cancel prompt: %v", err)
+		}
+		synctest.Wait()
+		select {
+		case <-result:
+			t.Fatal("cancel-hold prompt completed before its configured hold elapsed")
+		default:
+		}
+
+		time.Sleep(29 * time.Millisecond)
+		synctest.Wait()
+		select {
+		case <-result:
+			t.Fatal("cancel-hold prompt completed before its configured hold elapsed")
+		default:
+		}
+
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+		outcome := <-result
+		if outcome.err != nil {
+			t.Fatalf("prompt returned error: %v", outcome.err)
+		}
+		if outcome.response.StopReason != acp.StopReasonCancelled {
+			t.Fatalf("stop reason = %q, want cancelled", outcome.response.StopReason)
+		}
+		if texts := updater.textMessages(); len(texts) != 0 {
+			t.Fatalf("cancel-hold emitted assistant text: %v", texts)
+		}
+	})
 }
 
 func TestMockAgentCancelStopsPrompt(t *testing.T) {
@@ -86,6 +155,44 @@ func TestInitializePromptQueueingCanBeDisabled(t *testing.T) {
 		if _, advertised := response.AgentCapabilities.Meta["claudeCode"]; advertised {
 			t.Fatal("prompt queueing capability advertised while disabled")
 		}
+	}
+}
+
+func TestNewSessionKeepsMCPServersScopedToSession(t *testing.T) {
+	mcpServers = nil
+	t.Cleanup(func() { mcpServers = nil })
+
+	agent := &mockAgent{
+		sessions:        make(map[acp.SessionId]bool),
+		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
+		commandsEmitted: make(map[acp.SessionId]bool),
+	}
+	first, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
+		McpServers: []acp.McpServer{{Sse: &acp.McpServerSseInline{
+			Name: "kandev",
+			Url:  "http://127.0.0.1:10001/sse",
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("create first session: %v", err)
+	}
+	second, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
+		McpServers: []acp.McpServer{{Sse: &acp.McpServerSseInline{
+			Name: "kandev",
+			Url:  "http://127.0.0.1:10002/sse",
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+
+	firstServer := agent.sessionMCPServers[first.SessionId]["kandev"]
+	if firstServer.URL != "http://127.0.0.1:10001/sse" {
+		t.Fatalf("first session MCP URL = %q, want first endpoint", firstServer.URL)
+	}
+	secondServer := agent.sessionMCPServers[second.SessionId]["kandev"]
+	if secondServer.URL != "http://127.0.0.1:10002/sse" {
+		t.Fatalf("second session MCP URL = %q, want second endpoint", secondServer.URL)
 	}
 }
 
@@ -185,6 +292,20 @@ type capturingUpdater struct {
 
 func newCapturingUpdater() *capturingUpdater {
 	return &capturingUpdater{anySeen: make(chan struct{}), textSeen: make(chan struct{})}
+}
+
+func TestHandlePromptUtilityProfileUsesSelectedModel(t *testing.T) {
+	updater := newCapturingUpdater()
+	handlePrompt(&emitter{
+		ctx:  context.Background(),
+		conn: updater,
+		sid:  acp.SessionId("utility-profile-session"),
+	}, "/e2e:utility-profile", modelSmart)
+
+	texts := updater.textMessages()
+	if len(texts) != 1 || texts[0] != "utility profile model: "+modelSmart {
+		t.Fatalf("utility profile response = %v, want [%q]", texts, "utility profile model: "+modelSmart)
+	}
 }
 
 func (u *capturingUpdater) SessionUpdate(_ context.Context, n acp.SessionNotification) error {

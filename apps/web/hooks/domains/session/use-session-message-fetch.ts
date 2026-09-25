@@ -44,13 +44,22 @@ export function useInitialMessageLoadingState(
   ]);
 }
 
-export function getHydratedMessagesForGeneration(
-  hydrationRef: SessionHydrationRef | undefined,
-  sessionId: string,
-  readiness: Promise<void>,
-  hydrationKey: string | undefined,
-  store: SessionMessageStore,
-): Message[] | undefined {
+export function getHydratedMessagesForGeneration({
+  hydrationRef,
+  sessionId,
+  readiness,
+  hydrationKey,
+  store,
+  force = false,
+}: {
+  hydrationRef: SessionHydrationRef | undefined;
+  sessionId: string;
+  readiness: Promise<void>;
+  hydrationKey: string | undefined;
+  store: SessionMessageStore;
+  force?: boolean;
+}): Message[] | undefined {
+  if (force) return undefined;
   const generation = hydrationRef?.current;
   if (
     !hydrationKey ||
@@ -116,6 +125,7 @@ type DoFetchMessagesParams = {
     hydrationRef?: SessionHydrationRef,
     hydrationKey?: string,
     onRetry?: () => void,
+    options?: MessageFetchOptions,
   ) => Promise<Message[]>;
   onError?: (error: unknown) => void;
   isActive?: () => boolean;
@@ -123,6 +133,12 @@ type DoFetchMessagesParams = {
   canFinalizeLoading?: () => boolean;
   hydrationRef?: SessionHydrationRef;
   hydrationKey?: string;
+  options?: MessageFetchOptions;
+};
+
+export type MessageFetchOptions = {
+  force?: boolean;
+  authoritative?: boolean;
 };
 
 export async function doFetchMessages({
@@ -140,8 +156,9 @@ export async function doFetchMessages({
   canFinalizeLoading,
   hydrationRef,
   hydrationKey,
-}: DoFetchMessagesParams): Promise<void> {
-  if (isInactive(isActive)) return;
+  options,
+}: DoFetchMessagesParams): Promise<boolean> {
+  if (isInactive(isActive)) return false;
   beginSessionFetch(taskSessionId);
   setIsLoading(true);
   const isInitialHistoryFetch = lastFetchedSessionIdRef.current !== taskSessionId;
@@ -155,20 +172,28 @@ export async function doFetchMessages({
     setIsWaitingForInitialMessages(true);
   }
   try {
-    await fetchAndStoreMessages(taskSessionId, store, isActive, hydrationRef, hydrationKey, () =>
-      setHistoryStatus("retrying"),
+    await fetchAndStoreMessages(
+      taskSessionId,
+      store,
+      isActive,
+      hydrationRef,
+      hydrationKey,
+      () => setHistoryStatus("retrying"),
+      options,
     );
-    if (isInactive(isActive)) return;
+    if (isInactive(isActive)) return false;
     lastFetchedSessionIdRef.current = taskSessionId;
     setHistoryStatus("ready");
     setHistoryError(null);
     setIsWaitingForInitialMessages(false);
+    return true;
   } catch (error) {
-    if (isInactive(isActive)) return;
+    if (isInactive(isActive)) return false;
     if (onError) onError(error);
     else console.error("Failed to fetch messages:", error);
     setHistoryStatus("unavailable");
     setHistoryError(error);
+    return false;
   } finally {
     const active = !isInactive(isActive);
     if (endSessionFetch(taskSessionId)) {

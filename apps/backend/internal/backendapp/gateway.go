@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	orchestratorhandlers "github.com/kandev/kandev/internal/orchestrator/handlers"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -121,6 +122,8 @@ func provideGateway(
 	authSvc *auth.Service,
 	dataDir string,
 	registerCleanup func(func() error),
+	lspContinuityEnabled bool,
+	acquireSessionFence func(string) func(),
 	lspMaxConnections ...int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
 	gateway, err := gateways.Provide(log)
@@ -147,6 +150,13 @@ func provideGateway(
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
 		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspMaxConnections...)
+		if lspContinuityEnabled {
+			gateway.LSPHandler.EnableContinuity(acquireSessionFence, eventBus)
+			orchestratorSvc.SetLSPLeaseLifecycle(gateway.LSPHandler)
+			if registerCleanup != nil {
+				registerCleanup(gateway.LSPHandler.Close)
+			}
+		}
 		gateway.SetVscodeProxy(lifecycleMgr)
 		gateway.SetPortProxy(lifecycleMgr)
 		gateway.SetPortTunnel(lifecycleMgr)
@@ -335,13 +345,29 @@ func provideGateway(
 				return loadTaskGitObservations(ctx, taskRepo, taskID)
 			},
 			LoadPullRequests: loadPullRequests,
+			LoadLaunchQueue: func(ctx context.Context, taskID string) (*statussummary.LaunchQueueSummary, error) {
+				task, err := taskRepo.GetTask(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+				if task == nil {
+					return nil, fmt.Errorf("%w: %s", repoerrors.ErrTaskNotFound, taskID)
+				}
+				observation, observationErr := orchestratorSvc.CurrentSessionCeilingObservation(ctx)
+				return statussummary.LaunchQueueSummaryFromTaskWithCapacity(task, &statussummary.LaunchQueueCapacityObservation{
+					InUse:      observation.InUse,
+					Limit:      observation.Limit,
+					ObservedAt: observation.ObservedAt,
+					Known:      observationErr == nil && observation.Known,
+				}), nil
+			},
 			ResolveWorkspace: func(ctx context.Context, taskID string) (string, error) {
 				task, err := taskRepo.GetTask(ctx, taskID)
 				if err != nil {
 					return "", err
 				}
 				if task == nil {
-					return "", fmt.Errorf("task %q not found", taskID)
+					return "", fmt.Errorf("%w: %s", repoerrors.ErrTaskNotFound, taskID)
 				}
 				return task.WorkspaceID, nil
 			},
@@ -510,6 +536,7 @@ func loadTaskSessionObservations(
 		}
 		if lastError, ok := models.LoadLastAgentError(session.Metadata); ok && !lastError.IsDismissed() {
 			input.ActiveError = &statussummary.ActiveErrorSummary{
+				Scope:            models.ErrorScopeSession,
 				SessionID:        session.ID,
 				TaskRepositoryID: lastError.TaskRepositoryID,
 				ExecutionID:      lastError.ExecutionID,
@@ -551,10 +578,13 @@ func loadTaskLaunchErrorObservation(
 	return statussummary.TaskLaunchErrorObservation{
 		Observed: true,
 		Error: &statussummary.ActiveErrorSummary{
+			Scope:            models.ErrorScopeTask,
+			SessionID:        errorValue.SessionID,
 			TaskRepositoryID: errorValue.TaskRepositoryID,
 			Stamp:            errorValue.Stamp(),
 			OccurredAt:       errorValue.OccurredAt,
 			Preview:          errorValue.Message,
+			Details:          errorValue.Details,
 			Category:         errorValue.Code,
 			RecoveryActions:  errorValue.RecoveryActions,
 		},

@@ -40,6 +40,9 @@ const (
 	maxPluginActionEnvelopeBytes = manifest.MaxActionBodyBytes + 4096
 	maxPluginActionResponseBytes = 1 << 20 // 1 MiB
 	contentTypeHeader            = "Content-Type"
+	webhookOriginHostLifecycle   = "host_lifecycle"
+	webhookOriginHostRPC         = "host_rpc"
+	webhookOriginPluginResponse  = "plugin_response"
 )
 
 var pluginActionTimeout = 15 * time.Second
@@ -62,18 +65,37 @@ type webhookInvoker interface {
 // static-file serving (from the extracted package on disk), and the
 // external webhook relay (HTTP -> Host RPC over the live subprocess).
 type Controller struct {
-	svc            *Service
-	log            *logger.Logger
-	actionInvoker  actionInvoker
-	webhookInvoker webhookInvoker
+	svc                *Service
+	log                *logger.Logger
+	actionInvoker      actionInvoker
+	webhookInvoker     webhookInvoker
+	conversationTokens *conversationTokenManager
+	conversationReader ConversationReader
 }
 
 // RegisterRoutes wires the plugin HTTP surface. deliverer is accepted for
 // parity with the backendapp wiring (svc.SetDeliverer(deliverer) happens
 // alongside this call) — no handler in this file calls it directly, since
 // Service already notifies it on every install/status change.
-func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.Logger) {
-	ctrl := &Controller{svc: svc, log: log, actionInvoker: svc, webhookInvoker: svc}
+func RegisterRoutes(
+	router *gin.Engine,
+	svc *Service,
+	_ Deliverer,
+	log *logger.Logger,
+	conversationReaders ...ConversationReader,
+) {
+	var conversationReader ConversationReader
+	if len(conversationReaders) > 0 {
+		conversationReader = conversationReaders[0]
+	}
+	ctrl := &Controller{
+		svc:                svc,
+		log:                log,
+		actionInvoker:      svc,
+		webhookInvoker:     svc,
+		conversationTokens: svc.conversationTokens,
+		conversationReader: conversationReader,
+	}
 
 	api := router.Group("/api/plugins")
 	// Instance admin, not an org scope: plugins load into the shared host
@@ -106,6 +128,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 	// /settings is registered before /:id above: some gin/httprouter tree
 	// versions reject a static-ish sibling added after an existing wildcard.
 	registerUserStateRoutes(api, ctrl)
+	registerConversationRoutes(api, ctrl)
 	api.POST("/:id/webhooks/:key", ctrl.webhook)
 	api.GET("/:id/webhooks/:key", ctrl.webhook)
 }
@@ -434,6 +457,7 @@ func (c *Controller) webhook(ctx *gin.Context) {
 
 	leasedRecord, release, err := c.svc.beginPluginDispatch(id, dispatchGeneration(record))
 	if err != nil {
+		c.logWebhookFailure(id, http.StatusServiceUnavailable, webhookOriginHostLifecycle, err)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
 	}
@@ -441,10 +465,37 @@ func (c *Controller) webhook(ctx *gin.Context) {
 
 	resp, err := c.webhookInvoker.InvokeWebhook(ctx.Request.Context(), id, req)
 	if err != nil {
+		c.logWebhookFailure(id, http.StatusServiceUnavailable, webhookOriginHostRPC, err)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
 	}
 	c.writeWebhookResponse(ctx, leasedRecord, resp)
+}
+
+func (c *Controller) logWebhookFailure(pluginID string, status int, origin string, err error) {
+	if c == nil || c.log == nil {
+		return
+	}
+	fields := []zap.Field{
+		zap.String("plugin_id", pluginID),
+		zap.Int("status", status),
+		zap.String("origin", origin),
+	}
+	if err != nil {
+		fields = append(fields, zap.String("error_class", webhookHostErrorClass(err)))
+	}
+	c.log.Warn("plugin webhook failed", fields...)
+}
+
+func webhookHostErrorClass(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "host_error"
+	}
 }
 
 // webhookCallerAuthorized requires a caller identity unless the declaration
@@ -557,6 +608,7 @@ func webhookStatusForResponse(status int32) (int, bool) {
 func (c *Controller) writeWebhookResponse(ctx *gin.Context, record *store.Record, resp *pluginsdk.WebhookResponse) {
 	status, ok := webhookStatusForResponse(resp.Status)
 	if !ok {
+		c.logWebhookFailure(record.ID, http.StatusBadGateway, webhookOriginPluginResponse, nil)
 		ctx.JSON(http.StatusBadGateway, gin.H{
 			"error": fmt.Sprintf("plugin returned invalid webhook status %d", resp.Status),
 		})
@@ -576,6 +628,9 @@ func (c *Controller) writeWebhookResponse(ctx *gin.Context, record *store.Record
 			ctx.JSON(http.StatusForbidden, gin.H{"error": "auth login rejected"})
 			return
 		}
+	}
+	if status >= http.StatusInternalServerError {
+		c.logWebhookFailure(record.ID, status, webhookOriginPluginResponse, nil)
 	}
 	for k, v := range resp.Headers {
 		if http.CanonicalHeaderKey(k) == "Set-Cookie" {

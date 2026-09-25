@@ -32,6 +32,7 @@ const mockDockviewStore = vi.hoisted(() => ({
   api: null as null | {
     getPanel: (id: string) => { params?: Record<string, unknown> } | undefined;
     addPanel: typeof mockAddCanvasPanel;
+    groups: Array<{ id: string }>;
   },
   centerGroupId: "group-center",
   addBrowserPanel: vi.fn(),
@@ -56,6 +57,7 @@ const mockNormalizedReviews = vi.hoisted(() => ({
 const mockCanvasFeature = vi.hoisted(() => ({ enabled: true }));
 
 const mockAppState = vi.hoisted(() => ({
+  auth: { mode: "disabled", authenticated: false, user: null },
   workspaceId: "workspace-1",
   workspaces: { activeId: "workspace-1" },
   tasks: { activeSessionId: "session-1", activeTaskId: null },
@@ -195,6 +197,7 @@ function setOpenPanels(panels: Record<string, Record<string, unknown>>) {
   mockDockviewStore.api = {
     getPanel: (id) => (Object.hasOwn(panels, id) ? { params: panels[id] } : undefined),
     addPanel: mockAddCanvasPanel,
+    groups: [{ id: CENTER_GROUP_ID }, { id: SECONDARY_GROUP_ID }],
   };
 }
 
@@ -238,6 +241,7 @@ beforeEach(() => {
   mockDockviewStore.api = {
     getPanel: () => undefined,
     addPanel: mockAddCanvasPanel,
+    groups: [{ id: CENTER_GROUP_ID }, { id: SECONDARY_GROUP_ID }],
   };
   mockNormalizedReviews.reviews = [];
   mockListTaskCanvases.mockReset();
@@ -456,7 +460,7 @@ describe("AddPanelMenuItems — plugin task panels (AC1)", () => {
       .forPlugin("kandev-plugin-notes")
       .registerTaskPanel({ id: "notes", title: "Notes", Component: Notes });
 
-    renderMenu();
+    renderMenu({ taskId: "task-1" });
     const row = screen.getByTestId("add-panel-plugin-item-kandev-plugin-notes-notes");
     expect(row.textContent).toContain("Notes");
 

@@ -84,6 +84,27 @@ func TestDispatcherBackendClient_ErrorResponse(t *testing.T) {
 	assert.Contains(t, err.Error(), "boom")
 }
 
+func TestDispatcherBackendClientStructuredBackendErrorPreservesDetails(t *testing.T) {
+	log := newTestLogger(t)
+
+	response, err := ws.NewError("ignored", "test.action", "provider_update_failed", "provider update failed", map[string]interface{}{
+		"status": "partial",
+		"providers": []interface{}{
+			map[string]interface{}{"provider": "github", "status": "applied"},
+		},
+	})
+	require.NoError(t, err)
+	d := &fakeDispatcher{resp: response}
+	client := NewDispatcherBackendClient(d, log)
+
+	var backendErr *BackendError
+	require.ErrorAs(t, client.RequestPayload(context.Background(), "test.action", nil, nil), &backendErr)
+	require.Equal(t, "provider_update_failed", backendErr.Code)
+	require.Equal(t, "provider update failed", backendErr.Message)
+	require.Equal(t, "partial", backendErr.Details["status"])
+	require.NotNil(t, backendErr.Details["providers"])
+}
+
 func TestDispatcherBackendClient_DispatchError(t *testing.T) {
 	log := newTestLogger(t)
 

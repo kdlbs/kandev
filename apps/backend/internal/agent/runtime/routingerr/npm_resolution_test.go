@@ -71,6 +71,36 @@ func TestManagedRuntimeNpmResolutionSanitizesDetails(t *testing.T) {
 	}
 }
 
+func TestManagedRuntimeReleaseAgePolicyHasDistinctClassification(t *testing.T) {
+	const packageSpec = "@agentclientprotocol/claude-agent-acp@0.81.0"
+	input := "npm error code ETARGET\n" +
+		"npm error notarget No matching version found for " + packageSpec + " with a date before 9/22/2026, 12:28:47 PM."
+	classified := Classify(Input{
+		Phase:                     PhaseSessionInit,
+		Stderr:                    input,
+		ManagedRuntimePackageSpec: packageSpec,
+	})
+	if got, want := classified.Code, Code("managed_runtime_npm_policy"); got != want {
+		t.Fatalf("code = %q, want distinct release-age policy code %q", got, want)
+	}
+	if !strings.Contains(classified.RawExcerpt, "<release-date>") || strings.Contains(classified.RawExcerpt, "9/22/2026") || strings.Contains(classified.RawExcerpt, packageSpec) {
+		t.Fatalf("excerpt = %q, want bounded canonical details without raw date or package", classified.RawExcerpt)
+	}
+}
+
+func TestManagedRuntimeReleaseAgePolicyRequiresExactTrustedPackage(t *testing.T) {
+	input := "npm error code ETARGET\n" +
+		"npm error notarget No matching version found for dependency@0.81.0 with a date before 9/22/2026, 12:28:47 PM."
+	classified := Classify(Input{
+		Phase:                     PhaseSessionInit,
+		Stderr:                    input,
+		ManagedRuntimePackageSpec: "@agentclientprotocol/claude-agent-acp@0.81.0",
+	})
+	if classified.Code == CodeManagedRuntimeNpmPolicy {
+		t.Fatalf("unrelated package was classified as a managed runtime policy failure: %#v", classified)
+	}
+}
+
 func TestManagedRuntimeNpmResolutionMatchesExactPackage(t *testing.T) {
 	const packageSpec = "@kandev/agent@1.2.3"
 	tests := []struct {

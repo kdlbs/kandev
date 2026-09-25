@@ -51,6 +51,22 @@ describe("user settings revision ordering", () => {
 
     expect(result.revision).toBeNull();
   });
+
+  it("hydrates workspace sidebar layouts without dropping their revisions", () => {
+    const result = buildCoreFields({
+      sidebar_layouts_by_workspace: {
+        "workspace-a": {
+          version: 1,
+          revision: 3,
+          nodes: [],
+        },
+      },
+    } as never) as Record<string, unknown>;
+
+    expect(result.sidebarLayoutsByWorkspace).toEqual({
+      "workspace-a": { version: 1, revision: 3, nodes: [] },
+    });
+  });
 });
 
 describe("startup page user settings", () => {
@@ -757,6 +773,22 @@ describe("prevent auto-start on open preference", () => {
       buildCoreFields({ prevent_auto_start_agent_on_open: false }).preventAutoStartAgentOnOpen,
     ).toBe(false);
   });
+});
+
+it("maps hover settings and retains false/zero through omitted updates", () => {
+  expect(createDefaultUserSettings()).toMatchObject({
+    sidebarHoverEnabled: true,
+    sidebarHoverDelayMs: 500,
+  });
+  const current = mapUserSettingsData({ sidebar_hover_enabled: false, sidebar_hover_delay_ms: 0 });
+  expect(current).toMatchObject({ sidebarHoverEnabled: false, sidebarHoverDelayMs: 0 });
+  expect(buildCoreFields({}, current)).toMatchObject({
+    sidebarHoverEnabled: false,
+    sidebarHoverDelayMs: 0,
+  });
+  expect(
+    mapUserSettingsData({ sidebar_hover_enabled: true, sidebar_hover_delay_ms: 1200 }),
+  ).toMatchObject({ sidebarHoverEnabled: true, sidebarHoverDelayMs: 1200 });
 });
 
 // @covers AC-TASKS-CREATION-AUTO-FOCUS-001.1, AC-TASKS-CREATION-AUTO-FOCUS-001.4

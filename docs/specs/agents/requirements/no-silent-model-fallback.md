@@ -5,131 +5,107 @@ created: 2026-08-23
 owners:
   - kandev
 ---
-
 # No Silent Model Fallback Requirements
 
 ## Overview
 
-Kandev applies an agent profile model against the model catalog from the
-selected executor. A different effective model must be deterministic and
-visible to the user. The agent system owns this contract because it owns
-profiles, ACP session startup, and model-selection warnings.
+Profiles retain their model choices when executor capabilities differ from the
+host. Users can require exact selection for an individual profile. Upgrading
+Kandev must not turn existing fallback behavior into strict launch failures.
+
+The agent system owns this contract because it owns persisted profile policy.
+Task and Office execution consume that policy. This specification amends
+PR #3473 and is implemented by the profile policy and recovery designs.
 
 ## Terminology
 
-- **Requested model:** The model ID stored in the agent profile.
-- **Explicit fallback:** The optional fallback model ID stored in the profile.
-- **Bare model ID:** A model ID that contains no `[` or `]` character.
-- **Model variation:** An advertised model ID with the exact form
-  `<bare-model-id>[<non-empty-variant>]`. The variant contains no bracket
-  character. Its content is otherwise opaque.
-- **Unique variation:** The only distinct advertised variation for a requested
-  bare model ID.
+- **Strict profile:** a profile with Require exact model explicitly enabled.
+- **Compatible profile:** a profile with Require exact model disabled or absent.
+- **Requested model:** the effective model for the launch, including an
+  intentional session override where the existing session contract permits it.
+- **Fallback:** a different model selected or retained for the current launch.
 
 ## Requirements
 
-### REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001: Use executor-authoritative model selection
+### REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001: Explicit strictness and visible fallback
 
-**Intent:** Keep task launch operational without hiding a difference between
-the saved model and the effective executor model.
+**Intent:** Prevent unwanted substitutions when explicitly requested, while
+preserving working executor launches for existing profiles.
 
-**User story:** As a user, I want Kandev to use the selected executor's model
-catalog and report any fallback, so that I can understand which model runs.
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.1:** When Require exact model is
+  enabled, the executor shall advertise and apply the requested model before
+  the initial prompt. Otherwise the attempt shall fail before inference.
+  A fallback setting or advertised variation shall not bypass this rule.
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.2:** When a compatible profile uses
+  a different model, the session shall show one durable warning for that
+  selection decision. It shall include the requested and effective model when known.
+  Reload and event replay shall not duplicate the warning.
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.3:** Existing profiles and newly
+  created profiles shall have Require exact model off unless explicitly set.
+  An upgrade shall preserve the model, fallback model, automatic fallback,
+  and compatible launch outcomes. An absent setting shall not imply strictness.
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.4:** For compatible profiles, an
+  advertised requested model shall take priority. With automatic fallback off,
+  an advertised explicit fallback shall take priority over variation matching.
+  If no alternate selection is available, the session shall continue on the
+  executor current/default model with a warning. An empty catalog or unsupported
+  model-selection method shall also permit this continuation.
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.5:** Compatible profiles shall retain
+  existing apply-error behavior. An ordinary error applying an advertised model
+  shall fail unless automatic fallback is enabled. Automatic fallback shall
+  continue with a warning and ignore the configured explicit fallback.
+  Initialization failures, disconnections, and cancellation shall remain errors.
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.6:** Require exact model shall be a
+  per-profile setting in Fallback settings, available on desktop and mobile.
+  It shall default off. Enabling it shall disable the fallback controls without
+  erasing their values. Disabling it shall restore their previous behavior.
+  Save, reload, duplication, and supported profile export/import shall preserve
+  the setting. Omitted fields in partial updates shall preserve a saved choice.
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.7:** A collapsed Fallback settings
+  section shall summarize the effective policy and expose unsaved changes.
+  Strictness shall be keyboard and touch operable with visible explanatory copy.
+  Phone help shall use the existing drawer interaction, with reachable touch
+  targets, focus return, and no horizontal document overflow.
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.8:** Launch, reset, fresh workspace
+  rebind, and replacement-executor recovery shall apply the same profile policy.
+  Replacement selection shall use only replacement-session evidence. Cancellation
+  shall stop the attempt. A strict attempt without a ready replacement catalog
+  shall fail; an initialized compatible attempt may continue with a warning.
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.9:** Across different workflow steps,
+  an explicitly strict destination shall replace a session whose effective model
+  is different or unknown. Compatible destinations shall not force replacement
+  solely because the effective model differs. Same-step intentional overrides
+  shall keep their existing behavior. A validated empty reuse lookup shall create
+  a fresh session without an unvalidated second lookup.
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.10:** A missing host-probe model shall
+  remain an advisory and shall not disable profile selection. Runtime selection
+  shall not send an unadvertised model or rewrite the saved profile model.
+  Enabling strictness without a concrete model shall produce a validation error.
 
-#### Acceptance criteria
+### REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002: Compatible advertised variation selection
 
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.1:** When the executor advertises
-  the requested model, the system shall apply that exact model.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.2:** When the requested model is
-  absent and the executor advertises the configured explicit fallback, the
-  system shall apply the explicit fallback.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.3:** When no permitted advertised
-  model applies, the system shall make no speculative model-selection call and
-  shall continue with the provider current or default model.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.4:** When the effective model differs
-  from the requested model, the system shall persist one structured warning
-  that identifies the requested and effective models when known.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.5:** The system shall not rewrite the
-  saved profile model from an executor model-selection decision.
+**Intent:** Preserve the pre-PR compatible selection order without treating a
+variation as an exact identity. This amendment restores the scoped behavior
+removed by the strict-by-default PR.
 
-### REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002: Resolve one advertised model variation
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-002.1:** This rule applies when strictness
+  and automatic fallback are off. The bare requested ID must be absent, and no
+  advertised explicit fallback must be available. Under these conditions, exactly
+  one distinct advertised bracketed variation shall be selectable with a warning. Zero or multiple matches, malformed
+  variations, and already-bracketed requests shall not authorize a guessed ID;
+  the session shall use the executor default with a warning. Saved IDs shall
+  remain unchanged. Strict profiles shall never infer a variation.
 
-**Intent:** Preserve a user's bare model choice when a CLI replaces that model
-ID with one unambiguous bracketed variation.
+## Exclusions
 
-**User story:** As a user, I want `opus` to resolve to `opus[1m]` when that is
-the only advertised variation, so that a provider catalog change does not move
-my session to an unrelated default model.
+No global, workspace, executor, environment, or release-toggle setting. No
+provider switching caused by this new field. Office post-start routing remains
+workspace-owned. No retroactive interruption or model change of running turns.
+No guarantee that invalid credentials, missing executables, or network failures
+can launch successfully. No new global enforcement system for model costs.
 
-#### Acceptance criteria
+## System design and delivery
 
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-002.1:** When automatic fallback is
-  disabled, the exact requested model is absent, and an advertised explicit
-  fallback exists, the system shall apply the explicit fallback before it
-  considers an inferred variation. Automatic-fallback profiles shall retain
-  their legacy no-selection behavior for an absent requested model.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-002.2:** When no advertised explicit
-  fallback exists and the catalog contains exactly one distinct variation of a
-  requested bare model ID, the system shall apply that advertised variation.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-002.3:** When the catalog contains zero
-  or more than one distinct variation, the system shall not infer a model.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-002.4:** When the requested ID contains a
-  bracket, the system shall treat it as an exact ID and shall not infer another
-  variation.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-002.5:** Matching shall be case-sensitive
-  and shall not parse, rank, or assign meaning to variation text.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-002.6:** When Kandev applies a unique
-  variation, it shall keep the saved model unchanged and shall persist a
-  warning that identifies the inferred effective model.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-002.7:** The host profile probe shall
-  present unique-variation resolution as an advisory in the profile editor.
-  It shall not become the launch authority or add a model warning to a profile
-  selector. It shall not disable the profile.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-002.8:** The same resolution order shall
-  apply at initial launch, context reset, and workspace rebind.
-
-### REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-003: Show model warnings at the point of action
-
-**Intent:** Let users select a saved profile without treating a host discovery
-difference as evidence of an executor failure.
-
-#### Acceptance criteria
-
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-003.1:** A host model-catalog difference
-  shall not add an icon, message, tooltip, or help action to a profile selector.
-  This applies to its options and its selected label, including missing models,
-  one or several model variations, and empty or pending catalogs.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-003.2:** On desktop and mobile, an
-  otherwise eligible profile shall remain selectable by keyboard or pointer.
-  On touch devices, tapping its row shall select it without opening model help.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-003.3:** Existing authentication,
-  installation, and capability-probe failure indicators shall remain visible.
-  Their presence shall not depend on whether the saved model is advertised.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-003.4:** The profile editor shall retain
-  its missing-model treatment, unique-variation advisory, and fallback controls.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-003.5:** When the executor applies the
-  requested model successfully, a host catalog difference shall not cause a
-  model-selection warning in task chat. Actual fallback warnings shall retain
-  the persistence and visibility defined by requirement 001.
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-003.6:** Selecting a profile shall not
-  rewrite its saved model, reasoning configuration, or fallback settings.
-
-## Compatibility
-
-The September 2026 selector amendment removes host model advisories from
-profile selection. It preserves executor model selection and profile editing.
-Delivery is tracked in the [implementation package](../../../plans/profile-selector-model-warnings/plan.md).
-
-## Out of scope
-
-- Ranking multiple variations by context size, speed, price, or display order.
-- Parsing provider-specific variation syntax beyond the bracketed ID shape.
-- Inferring a base model from an already bracketed request.
-- Rewriting the profile model to the current executor's advertised variation.
-- Changing Office post-start provider routing or mid-turn model switching.
-- Changing host discovery refresh, cache invalidation, or ACP model normalization.
-
-## System design
-
-The technical source is split into [part 1](../system-design/no-silent-model-fallback-01.md)
-and [part 2](../system-design/no-silent-model-fallback-02.md).
+- [Policy and persistence](../system-design/no-silent-model-fallback-01.md)
+- [Recovery and profile surfaces](../system-design/no-silent-model-fallback-02.md)
+- [PR implementation package](../../../plans/exact-profile-model-identity/plan.md)

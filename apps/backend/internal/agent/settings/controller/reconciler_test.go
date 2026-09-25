@@ -293,6 +293,21 @@ func (f *fakeStore) UpdateAgentProfile(_ context.Context, p *models.AgentProfile
 	return nil
 }
 
+func (f *fakeStore) UpdateAgentProfileModelIfEmpty(
+	ctx context.Context,
+	profileID, model string,
+) (bool, error) {
+	profile, err := f.GetAgentProfile(ctx, profileID)
+	if err != nil || profile == nil || profile.Model != "" {
+		return false, err
+	}
+	profile.Model = model
+	if err := f.UpdateAgentProfile(ctx, profile); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (f *fakeStore) UpdateAgentProfileEnabled(ctx context.Context, id string, enabled bool) (time.Time, error) {
 	profile, err := f.GetAgentProfile(ctx, id)
 	if err != nil {

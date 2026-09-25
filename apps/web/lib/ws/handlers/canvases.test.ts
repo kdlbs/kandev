@@ -8,6 +8,7 @@ import { registerCanvasesHandlers } from "./canvases";
 
 const LIFECYCLE_ACTIONS = [
   "canvas.created",
+  "canvas.updated",
   "canvas.release.activated",
   "canvas.release.permission_required",
   "canvas.promoted",

@@ -67,6 +67,14 @@ const source = (...paths: string[]) => paths;
 const PROFILE_TASK = "task-01-profile-contract";
 const PROFILE_CRUD_SOURCE = "apps/backend/internal/agent/settings/controller/profile_crud.go";
 const PROFILE_DTO_SOURCE = "apps/backend/internal/agent/settings/dto/dto.go";
+const PROFILE_MODEL_FIELDS_SOURCE = source(
+  "apps/web/components/settings/profile-model-fields.tsx",
+  PROFILE_CRUD_SOURCE,
+);
+const PROFILE_MODEL_CONFIG_SOURCE = source(
+  "apps/web/components/settings/profile-model-config.ts",
+  PROFILE_CRUD_SOURCE,
+);
 const USER_TASK = "task-05-user-preferences";
 const USER_DTO_SOURCE = "apps/backend/internal/user/dto/dto.go";
 const WORKFLOW_TASK = "task-06-workflow-settings";
@@ -89,6 +97,9 @@ const supported = (
   status: "supported",
   owner,
 });
+
+const profileField = (id: string, fieldPath: string, sourcePaths: string[]) =>
+  supported(id, "agent_profile", fieldPath, sourcePaths, PROFILE_TASK);
 
 type SettingsExceptionInput = {
   id: string;
@@ -144,26 +155,13 @@ const UI_SETTINGS_COVERAGE_INVENTORY: SettingsCoverageEvidence[] = [
     ),
     PROFILE_TASK,
   ),
-  supported(
-    "agent-profile-model",
-    "agent_profile",
-    "model",
-    source("apps/web/components/settings/profile-model-fields.tsx", PROFILE_CRUD_SOURCE),
-    PROFILE_TASK,
-  ),
-  supported(
-    "agent-profile-fallback-model",
-    "agent_profile",
-    "fallback_model",
-    source("apps/web/components/settings/profile-model-config.ts", PROFILE_CRUD_SOURCE),
-    PROFILE_TASK,
-  ),
-  supported(
-    "agent-profile-auto-fallback",
-    "agent_profile",
-    "auto_fallback",
-    source("apps/web/components/settings/profile-model-config.ts", PROFILE_CRUD_SOURCE),
-    PROFILE_TASK,
+  profileField("agent-profile-model", "model", PROFILE_MODEL_FIELDS_SOURCE),
+  profileField("agent-profile-fallback-model", "fallback_model", PROFILE_MODEL_CONFIG_SOURCE),
+  profileField("agent-profile-auto-fallback", "auto_fallback", PROFILE_MODEL_CONFIG_SOURCE),
+  profileField(
+    "agent-profile-require-exact-model",
+    "require_exact_model",
+    PROFILE_MODEL_FIELDS_SOURCE,
   ),
   supported(
     "agent-profile-mode",

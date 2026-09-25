@@ -15,6 +15,8 @@ import (
 	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 const runtimeInternalErrorMessage = "internal runtime error"
@@ -27,6 +29,7 @@ type Handler struct {
 	runEvents   RunEventAppender
 	decisions   DecisionRecorder
 	logger      *commonlogger.Logger
+	taskLister  TaskFilteredLister
 }
 
 // RunEventAppender records runtime behavior against a run.
@@ -42,6 +45,7 @@ func NewHandler(
 	runEvents RunEventAppender,
 	decisions DecisionRecorder,
 	log *commonlogger.Logger,
+	taskLister TaskFilteredLister,
 ) *Handler {
 	if log == nil {
 		log = commonlogger.Default()
@@ -53,6 +57,7 @@ func NewHandler(
 		runEvents:   runEvents,
 		decisions:   decisions,
 		logger:      log,
+		taskLister:  taskLister,
 	}
 }
 
@@ -62,6 +67,7 @@ func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.POST("/runtime/task/decision", h.recordAgentDecision)
 	group.POST("/runtime/tasks/:id/status", h.updateTaskStatus)
 	group.POST("/runtime/tasks/:id/subtasks", h.createSubtask)
+	group.GET("/runtime/tasks", h.listTasks)
 	group.POST("/runtime/tasks", h.createTask)
 	group.POST("/runtime/agents", h.createAgent)
 	group.GET("/runtime/projects", h.listProjects)
@@ -73,6 +79,7 @@ func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.PUT("/runtime/memory/*path", h.putMemory)
 	group.GET("/runtime/skills", h.listSkills)
 	group.DELETE("/runtime/skills/:id", h.deleteSkill)
+	group.POST("/runtime/handoffs", h.handoffTask)
 }
 
 type recordAgentDecisionRequest struct {
@@ -177,7 +184,7 @@ func (h *Handler) postComment(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	taskID := firstNonEmpty(req.TaskID, runCtx.TaskID)
+	taskID := strings.TrimSpace(firstNonEmpty(req.TaskID, runCtx.TaskID))
 	if err := h.actions.PostComment(c.Request.Context(), runCtx, taskID, req.Body); err != nil {
 		h.respondRuntimeError(c, runCtx, "post_comment", "task", taskID, err)
 		return
@@ -393,6 +400,52 @@ func (h *Handler) deleteSkill(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+// handoffTask serves POST /runtime/handoffs (AC-2/AC-2a). Success always
+// returns HTTP 200, never 201, per the spec's failure-modes table.
+func (h *Handler) handoffTask(c *gin.Context) {
+	runCtx, _, ok := h.contextFromRequest(c)
+	if !ok {
+		return
+	}
+	var req HandoffRequest
+	if !bindClosedJSON(c, &req) {
+		return
+	}
+	result, err := h.actions.Handoff(c.Request.Context(), runCtx, req)
+	if err != nil {
+		h.respondHandoffError(c, runCtx, err)
+		return
+	}
+	h.appendActionRunEvent(c.Request.Context(), runCtx, "handoff_task", "task", result.TaskID)
+	c.JSON(http.StatusOK, result)
+}
+
+// respondHandoffError special-cases HandoffValidationError (400) and
+// HandoffSettlementError (500 with the delivery task id, F53) ahead of the
+// shared runtime error responder, which still handles the forbidden and
+// generic-internal cases the same way every other action does.
+func (h *Handler) respondHandoffError(c *gin.Context, runCtx RunContext, err error) {
+	var validation *HandoffValidationError
+	if errors.As(err, &validation) {
+		h.appendDeniedRunEvent(c.Request.Context(), runCtx, "handoff_task", "task", runCtx.TaskID, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var settlement *HandoffSettlementError
+	if errors.As(err, &settlement) {
+		h.logger.Error("office runtime handoff settlement failed",
+			zap.String("task_id", settlement.TaskID),
+			zap.String("run_id", runCtx.RunID),
+			zap.String("agent_id", runCtx.AgentID),
+			zap.Error(err),
+			zap.NamedError("cause", settlement.Unwrap()),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	h.respondRuntimeError(c, runCtx, "handoff_task", "task", runCtx.TaskID, err)
+}
+
 func memoryLayerAndKey(ns MemoryNamespace) (string, string) {
 	parts := strings.SplitN(ns.Key, "/", 2)
 	if ns.Kind == MemoryKindAgent {
@@ -422,9 +475,14 @@ func (h *Handler) contextFromRequest(c *gin.Context) (RunContext, *models.AgentI
 		return RunContext{}, nil, false
 	}
 	caps := FromAgent(agent)
+	liveHandoffCap := caps.CanHandoffTasks
 	if claims.Capabilities != "" {
 		_ = json.Unmarshal([]byte(claims.Capabilities), &caps)
 	}
+	// AC-9/F41: handoff_task is re-derived from the agent's live permissions on
+	// every call rather than trusting the signed snapshot, so a permission
+	// granted after the run token was minted is honoured immediately.
+	caps.CanHandoffTasks = liveHandoffCap
 	runCtx := RunContext{
 		WorkspaceID:  claims.WorkspaceID,
 		AgentID:      claims.AgentProfileID,
@@ -478,7 +536,9 @@ func (h *Handler) respondRuntimeError(
 	targetID string,
 	err error,
 ) {
-	if errors.Is(err, errTaskTitleRequired) || errors.Is(err, ErrProjectRequired) || errors.Is(err, ErrReasonTooLong) {
+	if errors.Is(err, errTaskTitleRequired) || errors.Is(err, ErrProjectRequired) ||
+		errors.Is(err, ErrInvalidWakeReason) || errors.Is(err, ErrReasonTooLong) ||
+		errors.Is(err, ErrInvalidListParams) || errors.Is(err, ErrCommentBodyRequired) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -489,7 +549,26 @@ func (h *Handler) respondRuntimeError(
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if errors.Is(err, shared.ErrForbidden) {
+	var refusal *runsservice.RefusalError
+	if errors.As(err, &refusal) {
+		// A refusal is an expected admission result. Do not expose its
+		// reason because it can contain repository diagnostics, while still
+		// giving the caller a stable gate it can handle.
+		h.appendDeniedRunEvent(
+			c.Request.Context(),
+			runCtx,
+			action,
+			targetType,
+			targetID,
+			errors.New("run enqueue refused"),
+		)
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "run enqueue refused",
+			"gate":  string(refusal.Gate),
+		})
+		return
+	}
+	if errors.Is(err, shared.ErrForbidden) || errors.Is(err, taskservice.ErrForbidden) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return

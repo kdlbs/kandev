@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconDownload } from "@tabler/icons-react";
@@ -10,31 +12,32 @@ import {
   ExternalVcsFileLink,
   useExternalVcsFileStatus,
 } from "@/components/editors/external-vcs-file-link";
+import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 
 type FileViewerHeaderProps = {
   path: string;
+  isSymlink?: boolean;
   worktreePath?: string;
   actions?: ReactNode;
 };
 
-export function FileViewerHeader({ path, worktreePath, actions }: FileViewerHeaderProps) {
+export function FileViewerHeader({
+  path,
+  isSymlink,
+  worktreePath,
+  actions,
+}: FileViewerHeaderProps) {
   const label = toRelativePath(path, worktreePath);
-  if (!actions) {
-    return (
-      <div className="flex items-center px-2 border-foreground/10 border-b">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
-          <span className="font-mono">{label}</span>
-        </div>
-      </div>
-    );
-  }
   return (
-    <div className="flex items-center px-2 border-foreground/10 border-b">
-      <div className="flex min-w-0 flex-1 items-center gap-2 py-2 text-xs text-muted-foreground">
-        <span className="truncate font-mono">{label}</span>
-      </div>
-      <div className="ml-auto flex shrink-0 items-center gap-1">{actions}</div>
-    </div>
+    <PanelHeaderBarSplit
+      left={
+        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <span className="truncate font-mono">{label}</span>
+          <SymlinkIndicator isSymlink={isSymlink} showLabel />
+        </div>
+      }
+      right={actions}
+    />
   );
 }
 
@@ -89,7 +92,7 @@ export function FileViewerDownloadButton({ onDownload }: FileViewerDownloadButto
           variant="ghost"
           onClick={onDownload}
           aria-label={t("editors:downloadFile")}
-          className="h-11 w-11 p-0 cursor-pointer sm:h-8 sm:w-8"
+          className="h-6 w-6 p-0 cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
         >
           <IconDownload className="h-4 w-4" />
         </Button>

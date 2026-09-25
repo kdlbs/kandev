@@ -31,7 +31,7 @@ import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
-import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { workspaceDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
@@ -168,50 +168,49 @@ function WorkspaceSettingsCard({
       name: p.label,
     }));
   return (
-    <SettingsCard isDirty={nameIsDirty || executorIsDirty || agentProfileIsDirty}>
-      <CardHeader>
-        <CardTitle>{t("workspaces:workspaceSettings")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          <SettingsTarget
-            targetId={workspaceDiscoveryTarget(workspaceId, "name")}
-            className="space-y-2"
-          >
-            <Label htmlFor="workspace-name">{t("workspaces:name")}</Label>
-            <Input
-              id="workspace-name"
-              value={workspaceNameDraft}
-              disabled={!canManage}
-              data-settings-dirty={nameIsDirty}
-              onChange={(e) => onNameChange(e.target.value)}
-            />
-          </SettingsTarget>
-          <SelectField
-            label={t("workspaces:defaultExecutor")}
-            placeholder={t("workspaces:selectDefaultExecutor")}
-            value={defaultExecutorId}
-            isDirty={executorIsDirty}
-            onChange={onExecutorChange}
-            options={executorsEmpty ? [] : executorOptions}
-            emptyLabel={t("workspaces:noExecutorsAvailable")}
-            emptyValue=""
-            discoveryTargetId={workspaceDiscoveryTarget(workspaceId, "default-executor")}
+    <SettingsGroup
+      title={t("workspaces:workspaceSettings")}
+      isDirty={nameIsDirty || executorIsDirty || agentProfileIsDirty}
+      contentClassName="space-y-4 divide-y-0"
+    >
+      <div className="space-y-4">
+        <SettingsTarget
+          targetId={workspaceDiscoveryTarget(workspaceId, "name")}
+          className="space-y-2"
+        >
+          <Label htmlFor="workspace-name">{t("workspaces:name")}</Label>
+          <Input
+            id="workspace-name"
+            value={workspaceNameDraft}
+            disabled={!canManage}
+            data-settings-dirty={nameIsDirty}
+            onChange={(e) => onNameChange(e.target.value)}
           />
-          <SelectField
-            label={t("workspaces:defaultAgentProfile")}
-            placeholder={t("workspaces:selectDefaultAgentProfile")}
-            value={defaultAgentProfileId}
-            isDirty={agentProfileIsDirty}
-            onChange={onAgentProfileChange}
-            options={profileOptions}
-            emptyLabel={t("workspaces:noAgentProfilesAvailable")}
-            emptyValue="empty-agent-profiles"
-            discoveryTargetId={workspaceDiscoveryTarget(workspaceId, "default-agent-profile")}
-          />
-        </div>
-      </CardContent>
-    </SettingsCard>
+        </SettingsTarget>
+        <SelectField
+          label={t("workspaces:defaultExecutor")}
+          placeholder={t("workspaces:selectDefaultExecutor")}
+          value={defaultExecutorId}
+          isDirty={executorIsDirty}
+          onChange={onExecutorChange}
+          options={executorsEmpty ? [] : executorOptions}
+          emptyLabel={t("workspaces:noExecutorsAvailable")}
+          emptyValue=""
+          discoveryTargetId={workspaceDiscoveryTarget(workspaceId, "default-executor")}
+        />
+        <SelectField
+          label={t("workspaces:defaultAgentProfile")}
+          placeholder={t("workspaces:selectDefaultAgentProfile")}
+          value={defaultAgentProfileId}
+          isDirty={agentProfileIsDirty}
+          onChange={onAgentProfileChange}
+          options={profileOptions}
+          emptyLabel={t("workspaces:noAgentProfilesAvailable")}
+          emptyValue="empty-agent-profiles"
+          discoveryTargetId={workspaceDiscoveryTarget(workspaceId, "default-agent-profile")}
+        />
+      </div>
+    </SettingsGroup>
   );
 }
 

@@ -458,6 +458,7 @@ function syncEnvFromAgentctlPayload(
     ...getAgentctlWorktreeFields(payload, isSibling),
     workspace_path: payload.workspace_path ?? payload.task_workspace_path ?? payload.worktree_path,
   });
+  store.getState().reconcileWorkflowSessionFocus?.(taskId);
 }
 
 /** Builds the partial-session patch applied for an agentctl_ready event.
@@ -852,12 +853,19 @@ function handleQueueStatusChangedMessage(
   state.setQueueEntries(payload.session_id, entries, meta);
 }
 
+function clearResumeAndLaunchWarnings(store: StoreApi<AppState>, sessionId: string) {
+  const state = store.getState();
+  state.setResumeSkipped(sessionId, false);
+  state.clearLaunchWarning?.(sessionId);
+}
+
 /** Registers the task-session WebSocket handlers (state, messages, workspace sources, queue). */
 // eslint-disable-next-line max-lines-per-function -- session events remain one ordered registry.
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "message.queue.status_changed": (message) =>
       handleQueueStatusChangedMessage(store, message.payload),
+    // eslint-disable-next-line complexity -- ordered session reconciliation keeps stale-event guards together
     "session.state_changed": (message) => {
       const payload = message.payload;
       if (!payload?.task_id) return;
@@ -900,6 +908,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         updatedAt: payload.updated_at,
       });
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
+      store.getState().reconcileWorkflowSessionFocus?.(taskId);
       syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
       extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
@@ -909,7 +918,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       // it: a failed manual resume emits STARTING before the launch fails,
       // and clearing there would drop the Start agent retry affordance.
       if (newState === "RUNNING") {
-        store.getState().setResumeSkipped(sessionId, false);
+        clearResumeAndLaunchWarnings(store, sessionId);
       }
 
       maybeAdoptSessionOnTransition(

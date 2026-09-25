@@ -111,6 +111,164 @@ func TestGetTaskSessionStatus_AutoResumesNormalWaitingSession(t *testing.T) {
 	}
 }
 
+func TestGetTaskSessionStatus_RecoversSweptSessionWithoutExecutorRow(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	if err := repo.SetSessionMetadataKey(ctx, "session1", models.SessionMetaKeyInterruptedRecoveryPending, "recovery-token"); err != nil {
+		t.Fatalf("set interrupted recovery marker: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus: %v", err)
+	}
+	if !resp.NeedsResume || !resp.IsResumable {
+		t.Fatalf("status = %+v, want resumable lazy recovery", resp)
+	}
+}
+
+func TestAutoResumeEligibilityPreservesDeferredLaunchOwnership(t *testing.T) {
+	queuedRecord := models.CeilingRecordKeys(models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			metaKeySessionID: "queued-session",
+		},
+		QueuedAt: time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC),
+	})
+	legacyRoute := models.WorkflowSessionRoute{
+		OperationID:       "route-1",
+		DestinationStepID: "step-2",
+		TargetKind:        "profile",
+		SourceSessionID:   "parked-session",
+		DestinationID:     "queued-session",
+		Phase:             "committed",
+	}
+
+	tests := []struct {
+		name          string
+		taskMetadata  map[string]interface{}
+		sessionID     string
+		sessionMeta   map[string]interface{}
+		primary       bool
+		wantAllowed   bool
+		wantBlockCode string
+	}{
+		{
+			name:        "ordinary session is eligible",
+			sessionID:   "ordinary-session",
+			wantAllowed: true,
+		},
+		{
+			name:      "durable parking does not block source session",
+			sessionID: "parked-session",
+			sessionMeta: map[string]interface{}{models.SessionMetaKeyWorkflowParking: models.WorkflowParking{
+				Stamp:           "parking-1",
+				ParkedAt:        time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC),
+				SourceSessionID: "parked-session",
+			}},
+			wantAllowed: true,
+		},
+		{
+			name:        "malformed parking does not block recovery",
+			sessionID:   "parked-session",
+			sessionMeta: map[string]interface{}{models.SessionMetaKeyWorkflowParking: map[string]interface{}{"stamp": "parking-1"}},
+			wantAllowed: true,
+		},
+		{
+			name:          "queued destination is not passively resumed",
+			taskMetadata:  map[string]interface{}{models.MetaKeyDeferredLaunch: queuedRecord},
+			sessionID:     "queued-session",
+			wantBlockCode: autoResumeBlockedLaunchQueued,
+		},
+		{
+			name: "sessionless workflow start protects its routed destination",
+			taskMetadata: map[string]interface{}{
+				models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+					Kind:    models.CeilingLaunchStart,
+					Payload: map[string]interface{}{metaKeyPrompt: "workflow prompt"},
+				}),
+				models.MetaKeyWorkflowSessionRoute: legacyRoute,
+			},
+			sessionID:     "queued-session",
+			wantBlockCode: autoResumeBlockedLaunchQueued,
+		},
+		{
+			name: "sessionless workflow start with no routed destination fails closed",
+			taskMetadata: map[string]interface{}{
+				models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+					Kind:    models.CeilingLaunchStart,
+					Payload: map[string]interface{}{metaKeyPrompt: "workflow prompt"},
+				}),
+			},
+			sessionID:     "ordinary-session",
+			wantBlockCode: autoResumeBlockedOwnershipUnavailable,
+		},
+		{
+			name:         "sibling remains eligible while another destination is queued",
+			taskMetadata: map[string]interface{}{models.MetaKeyDeferredLaunch: queuedRecord},
+			sessionID:    "sibling-session",
+			wantAllowed:  true,
+		},
+		{
+			name:          "malformed deferred launch blocks conservatively",
+			taskMetadata:  map[string]interface{}{models.MetaKeyDeferredLaunch: "not-a-record"},
+			sessionID:     "ordinary-session",
+			wantBlockCode: autoResumeBlockedOwnershipUnavailable,
+		},
+		{
+			name:         "exact legacy route does not block parked source",
+			taskMetadata: map[string]interface{}{models.MetaKeyWorkflowSessionRoute: legacyRoute},
+			sessionID:    "parked-session",
+			sessionMeta: map[string]interface{}{models.SessionMetaKeyWorkflowProfileSwitchStopIntent: models.WorkflowProfileSwitchStopIntent{
+				ExecutionID: "execution-1",
+				Stamp:       "legacy-1",
+			}},
+			wantAllowed: true,
+		},
+		{
+			name:         "legacy stop without exact route does not block recovery",
+			taskMetadata: map[string]interface{}{models.MetaKeyWorkflowSessionRoute: legacyRoute},
+			sessionID:    "other-session",
+			sessionMeta: map[string]interface{}{models.SessionMetaKeyWorkflowProfileSwitchStopIntent: models.WorkflowProfileSwitchStopIntent{
+				ExecutionID: "execution-1",
+				Stamp:       "legacy-1",
+			}},
+			wantAllowed: true,
+		},
+	}
+
+	service := &Service{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &models.Task{Metadata: tt.taskMetadata}
+			session := &models.TaskSession{
+				ID:        tt.sessionID,
+				Metadata:  tt.sessionMeta,
+				IsPrimary: tt.primary,
+			}
+			allowed, reason := service.autoResumeEligibility(context.Background(), task, session)
+			if allowed != tt.wantAllowed {
+				t.Fatalf("allowed = %t, want %t (reason %q)", allowed, tt.wantAllowed, reason)
+			}
+			if reason != tt.wantBlockCode {
+				t.Fatalf("reason = %q, want %q", reason, tt.wantBlockCode)
+			}
+		})
+	}
+}
+
 // TestGetTaskSessionStatus_AutoResumesFailedSessionWithResumeToken verifies the
 // failed-but-recoverable path: a FAILED session that still has a resumable
 // runtime + resume token reports NeedsResume=true so the frontend retries
@@ -340,6 +498,63 @@ func TestGetTaskSessionStatus_ArchiveCancelledSessionWithTokenAutoResumes(t *tes
 	}
 	if resp.ResumeReason != resumeReasonArchiveCancelledResumable {
 		t.Fatalf("expected ResumeReason=%q, got %q", resumeReasonArchiveCancelledResumable, resp.ResumeReason)
+	}
+}
+
+// TestGetTaskSessionStatus_OrphanCancelledSessionAutoResumes verifies that a
+// session cancelled by the orphan reconciliation sweep remains recoverable in
+// the same conversation. The cancellation reason is exact so an explicit user
+// stop cannot accidentally enter this path.
+func TestGetTaskSessionStatus_OrphanCancelledSessionAutoResumes(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	session.ErrorMessage = models.SessionOrphanedCancelReason
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:          "er1",
+		SessionID:   "session1",
+		TaskID:      "task1",
+		Status:      "ready",
+		Resumable:   true,
+		ResumeToken: "acp-session-123",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("failed to upsert executor running: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
+	}
+	if !resp.NeedsResume {
+		t.Fatal("expected NeedsResume=true for orphan-cancelled session")
+	}
+	if !resp.IsResumable {
+		t.Fatal("expected IsResumable=true for orphan-cancelled session")
+	}
+	if resp.NeedsWorkspaceRestore {
+		t.Fatal("expected NeedsWorkspaceRestore=false when auto-resuming")
+	}
+	if resp.ResumeReason != resumeReasonOrphanCancelledResumable {
+		t.Fatalf("expected ResumeReason=%q, got %q", resumeReasonOrphanCancelledResumable, resp.ResumeReason)
 	}
 }
 
@@ -640,6 +855,98 @@ func TestResumeTaskSession_WaitsForPromptReady(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("ResumeTaskSession did not return after prompt readiness")
+	}
+}
+
+func TestResumeTaskSession_RecoversSweptSessionWithoutExecutorRow(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	// Use the same guarded transition as the active/restart sweep. This
+	// intentionally has no executors_running row.
+	recovered, err := repo.RecoverTaskSessionByCandidate(ctx, models.ActiveSessionRecoveryCandidate{
+		TaskID: session.TaskID, SessionID: session.ID, ExpectedState: session.State,
+		ExpectedUpdatedAt: session.UpdatedAt, ExpectedLastEventAt: session.UpdatedAt,
+	}, time.Time{})
+	if err != nil || recovered == nil {
+		t.Fatalf("recover swept session = %+v, err=%v", recovered, err)
+	}
+
+	ready := make(chan struct{})
+	checked := make(chan struct{}, 1)
+	pollCtx, cancelPoll := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancelPoll)
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         false,
+		repoForExecutionLookup: repo,
+		isAgentReadyFn: func(_ context.Context, _ string) bool {
+			select {
+			case checked <- struct{}{}:
+			default:
+			}
+			select {
+			case <-ready:
+				return true
+			default:
+				return false
+			}
+		},
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			go func(sessionID string) {
+				for {
+					select {
+					case <-pollCtx.Done():
+						return
+					default:
+					}
+					sess, getErr := repo.GetTaskSession(context.Background(), sessionID)
+					if getErr == nil && sess != nil && sess.State == models.TaskSessionStateStarting {
+						sess.State = models.TaskSessionStateWaitingForInput
+						sess.UpdatedAt = time.Now().UTC()
+						_ = repo.UpdateTaskSession(context.Background(), sess)
+						return
+					}
+					time.Sleep(time.Millisecond)
+				}
+			}(req.SessionID)
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-swept-resume"}, nil
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	status, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil || !status.NeedsResume || !status.IsResumable {
+		t.Fatalf("status after sweep = %+v, err=%v, want focus recovery", status, err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, resumeErr := svc.ResumeTaskSession(ctx, "task1", "session1")
+		done <- resumeErr
+	}()
+	select {
+	case <-checked:
+	case <-time.After(3 * time.Second):
+		t.Fatal("ResumeTaskSession did not reach prompt readiness")
+	}
+	close(ready)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ResumeTaskSession after sweep: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ResumeTaskSession did not complete")
 	}
 }
 

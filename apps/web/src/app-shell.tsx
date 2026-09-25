@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
+import { MobileTaskNavigationProvider } from "@/components/navigation/mobile-task-navigation-provider";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { AppStatusSurfaceProvider } from "@/components/app-status-bar/app-status-surface-provider";
 import { CommandPanel } from "@/components/command-panel";
@@ -97,7 +98,9 @@ export function AppShell({ children }: AppShellProps) {
                       >
                         <AppSidebar />
                         <AppStatusSurfaceProvider>
-                          <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
+                          <MobileTaskNavigationProvider>
+                            <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
+                          </MobileTaskNavigationProvider>
                         </AppStatusSurfaceProvider>
                       </div>
                     </WorkspaceScopeProvider>

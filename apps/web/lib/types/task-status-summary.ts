@@ -8,6 +8,7 @@ export type AgentErrorCause = {
 };
 
 export type TaskStatusSummaryActiveError = {
+  scope?: "session" | "task";
   session_id?: string;
   task_repository_id?: string;
   stamp: string;
@@ -20,6 +21,20 @@ export type TaskStatusSummaryActiveError = {
   attempt_id?: string;
   causes?: AgentErrorCause[];
   recovery_actions?: TaskLaunchRecoveryAction[];
+};
+
+export type TaskStatusSummaryLaunchQueue = {
+  session_id?: string;
+  agent_profile_id?: string;
+  workflow_step_id?: string;
+  queued_at: string;
+  reason: "session_capacity" | "ownership_unavailable" | "replay_error";
+  retrying: boolean;
+  capacity?: {
+    in_use: number;
+    limit: number;
+    observed_at: string;
+  };
 };
 
 export type TaskStatusSummary = {
@@ -36,7 +51,11 @@ export type TaskStatusSummary = {
   pending_action?: TaskPendingAction;
   /** Number of prompts currently en-queued for the task (all sessions). */
   queued_prompt_count?: number;
+  /** Automatic session launch waiting for admission, independent of the selected session. */
+  launch_queue?: TaskStatusSummaryLaunchQueue | null;
   active_error?: TaskStatusSummaryActiveError | null;
+  /** Current task-owned failure, independent of the selected session. */
+  task_error?: TaskStatusSummaryActiveError | null;
   git?: {
     additions?: number;
     deletions?: number;

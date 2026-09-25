@@ -119,7 +119,7 @@ function buildCollapsibleItems(props: DesktopToolbarProps): ToolbarItemConfig[] 
     {
       id: "model",
       section: "right",
-      render: () => <ModelSelector sessionId={props.sessionId} />,
+      render: () => <ModelSelector sessionId={props.sessionId} showAgentIcon />,
     },
     {
       id: "enhance",

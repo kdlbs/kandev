@@ -3,118 +3,182 @@ status: current
 system: system-page
 requirements:
   - REQ-SYSTEM-PAGE-DATA-STORAGE-PAGES-001
+  - REQ-SYSTEM-PAGE-DATA-STORAGE-PAGES-002
+  - REQ-SYSTEM-PAGE-DATA-STORAGE-PAGES-003
+  - REQ-SYSTEM-PAGE-DATA-STORAGE-PAGES-004
 ---
 
 # System Data and Storage Pages System Design
 
 ## Purpose and boundaries
 
-The system-page system owns these routes and their operational content. This
-design changes frontend composition and navigation only. Existing backend APIs,
-permissions, jobs, and persistence remain unchanged.
-
-This design supersedes the route allocation for Database, Backups, Logs, and
-Storage in `system-page-01.md`.
+System-page owns the composition and maintenance presentation of these two routes.
+This revision describes the implemented [settings storage tabs package](../../../plans/settings-storage-tabs/plan.md).
+The existing two-page split and the new tab allocation are current.
+The [UI header-tab design](../../ui/system-design/settings-header-tabs.md) owns the reusable interaction.
+Office owns retention policy, deletion eligibility, preview markers, and count semantics.
+Those backend contracts remain unchanged.
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-SYSTEM-PAGE-DATA-STORAGE-PAGES-001` | [Route composition](#route-composition), [Navigation and discovery](#navigation-and-discovery), [Mobile design contract](#mobile-design-contract), [Compatibility](#compatibility) |
+| REQ-SYSTEM-PAGE-DATA-STORAGE-PAGES-001 | Route composition and compatibility |
+| REQ-SYSTEM-PAGE-DATA-STORAGE-PAGES-002 | Route composition and compatibility; State and permissions |
+| REQ-SYSTEM-PAGE-DATA-STORAGE-PAGES-003 | Retention controls; Temporary files and compaction |
+| REQ-SYSTEM-PAGE-DATA-STORAGE-PAGES-004 | Retention status |
 
-## Route composition
+## Route composition and compatibility
 
-`apps/web/src/settings-routes.tsx` will own two static route renderers.
+`src/settings-routes.tsx` retains both canonical paths.
+`SystemRouteShell` and `SystemPageShell` pass an optional tabs slot to the existing `SettingsPageHeader`.
+Each page owns one shared Tabs root around its header and content.
+Use dedicated route compositions when the shared root must contain the shell itself.
+Do not put a second page heading or tab strip inside the content.
 
-The `/settings/system/data-storage` renderer will use `SystemRouteShell` with
-the existing `Data & Logs` title. Its content component will render these
-sections in order:
+| Path | Query | Content order |
+| --- | --- | --- |
+| `/settings/system/data-storage` | `tab=database` (default) | DatabaseStatsCard, ToolPayloadRetentionCard, BackupsTable |
+| `/settings/system/data-storage` | `tab=logs` | LogViewer |
+| `/settings/system/storage` | `tab=host` (default) | StorageMaintenanceSettings |
+| `/settings/system/storage` | `tab=office-retention` | Retention status, retention policy |
 
-1. Database.
-2. Backups.
-3. Logs.
+`DataLogsSettings` is the Data & Logs tab composition.
+`StorageSettings` wraps existing host maintenance and Office retention.
+Settings menu labels and breadcrumb paths remain unchanged.
+Storage description includes host cleanup and Office history retention.
 
-The `/settings/system/storage` renderer will use `SystemRouteShell` with the
-existing Storage title and description. It will render
-`StorageMaintenanceSettings` directly. This removes the duplicate Storage
-section heading from the new page.
+In `lib/settings-discovery/catalog/system.ts`, move the retention entry to the Storage discovery parent.
+Keep stable target IDs and add tab queries to all affected entries.
+Backups and compaction resolve to Database, log results to Logs, and all existing host targets to Host.
+A recognized target fragment selects its owning tab before focus/highlight.
+A manually selected tab removes the old target fragment so it cannot override later navigation.
 
-The route split will not duplicate domain hooks or action handlers.
-`StorageMaintenanceSettings` will remain the single owner of storage data,
-draft state, and action state.
+Legacy routes resolve as follows:
 
-## Navigation and discovery
+- `/settings/system/database` -> Data & Logs, Database.
+- `/settings/system/backups` -> Data & Logs, Database, existing backups target.
+- `/settings/system/logs` -> Data & Logs, Logs.
+- Old Data & Logs retention fragments -> Storage, Office retention, same retention target.
 
-`apps/web/lib/settings-discovery/catalog/system.ts` will export a stable href
-for the Storage page. The System menu will add a direct Storage row after
-`Data & Logs`.
+Unrelated query parameters survive redirects. Legacy redirects use replacement navigation.
+An unqualified Data & Logs link still opens Database because it cannot identify a historical retention intent.
+Update `internal/office/retention/health.go` `fixURL` to
+`/settings/system/storage?tab=office-retention` and update its focused tests.
+Other backend behavior and health issue identities remain unchanged.
 
-The existing `system-data-storage` discovery page identity and href will remain
-stable. Database, Backups, and Logs will remain its children. A new
-`system-storage` page identity will own all existing storage targets.
+## State and permissions
 
-The breadcrumb label map will resolve the `storage` segment through the same
-translation key as the menu and page title. Catalog order will place Storage
-after `Data & Logs` and before Feature Toggles.
+The existing `SettingsSaveProvider` is keyed by pathname, not query.
+Use the UI design's same-path tab replacement and retained stateful panels.
+Keep contributors `system:storage-policy`, `system:retention`, and `system:tool-payload-retention` in their owning page.
+Do not duplicate them or reset their dirty baselines on tab activation.
+Visit panels lazily, then retain forms until route exit. The Logs panel mounts
+`LogViewer` on first activation and keeps it mounted while hidden so an in-progress
+diagnostic bundle can finish and download.
+Existing ongoing maintenance/preparation jobs keep their current lifecycle when a form is hidden.
 
-## Copy and localization
+The floating Save changes control saves all dirty contributors on the page, including inactive panels.
+Discard restores their authoritative baselines. Failed saves keep drafts and expose the existing error feedback.
+Return to the affected panel without losing state. Cross-page changes retain the existing navigation guard.
 
-The `Data & Logs` page description will no longer mention disk cleanup. The
-Storage route will reuse the existing localized Storage title and description.
+Retain existing API role gates and read-only member surfaces.
+Office retention remains admin-scoped even beside member-readable host information.
+A failed Office request must not hide the Host tab or its permitted content.
 
-All changed copy will remain complete in English, pseudo, Portuguese, Simplified
-Chinese, and both Traditional Chinese catalogs. Traditional Chinese updates
-will use the repository conversion command.
+## Retention controls
 
-## Save lifecycle
+Refactor `retention-settings-card.tsx` into focused policy, status, and help components under the same system directory.
+Keep `useRetentionSettings`, the settings wire types, and the save contributor contract.
+Use stable technical IDs for test selectors and wire mapping, independently of translated display labels.
 
-The Storage page will mount the existing `system:storage-policy` save
-contributor. The route-scoped settings coordinator will continue to show the
-shared save action and navigation guard for dirty storage policy settings.
+| Existing identity | Display label | Explanation |
+| --- | --- | --- |
+| `office_routine_runs` | Routine history | Routine activity, including skipped and coalesced executions |
+| `runs` | Agent run history | Office agent runs |
+| `run_events` | Run events | Timeline entries belonging to a run |
+| `office_run_route_attempts` | Provider attempts | Provider/model routing attempts for a run |
+| `office_run_skills` | Run skill records | Skill references associated with a run |
 
-The `Data & Logs` page will not mount the storage contributor. Database,
-backup, and log commands will continue to execute immediately.
+Use Minimum per routine for `routine_runs.floor_per_owner`.
+Use Minimum per agent profile for `runs.floor_per_owner`.
+Keep the enable switch, retention days, and minimums visible.
+Place interval, batch limit, and all three warning thresholds in Advanced settings, initially collapsed.
+Keep advanced fields in the draft while collapsed. Show validation errors outside the collapse and reveal the affected field.
+The run-events threshold counts events only. Dependent records have no independent retention window or floor.
+
+Remove the explicit `settingsControlClassName("h-11")` override from `NumberField`.
+Use the shared sizing helper without a desktop height override.
+Each numeric label has a focusable information button. Help covers meaning, limits, and zero-value behavior where supported.
+Reuse the `SleepInhibitionInfoTooltip` interaction in `sleep-inhibition-settings.tsx`: Tooltip on fine pointers, Drawer via `useTouchDrawer` on touch.
+The drawer has a label, close action, safe-area clearance, and focus return to its opener.
+Keep a short visible statement: cleanup removes old finished history and related run details, while active work remains protected.
+Helper icons contain secondary explanations; field labels and deletion consequences remain understandable without opening help.
+
+## Retention status
+
+Extract a pure status view-model helper and test it with the existing `RetentionStatus` shape.
+The summary uses saved `status.settings`, never the unsaved draft.
+The enabled badge means automatic deletion is configured; it does not imply a healthy last cleanup.
+Do not show an invented next-run time or a persisted history. Last sweep data resets after server restart.
+
+Render these sections in order:
+
+1. Automatic cleanup enabled/disabled and the last recorded cleanup result/time.
+2. Three stored-count summaries with translated labels, counts, and threshold states.
+3. Expandable Cleanup details with per-category deletion/preview counts, provider attempts, run skill records, skips, and attribution.
+
+Derive outcome from all reported table errors and both swept-table preview/backlog flags.
+Any error produces a visible error outcome, while retaining committed counts from successful categories.
+A preview in one category must not mask deletion in another. Show a mixed outcome when both occur.
+Show backlog separately from errors and preview. Preview counts never count as deleted records.
+A deletion total sums the five reported committed deletion counts and uses the unit records, never runs.
+
+Preserve `not_computed`, fresh, and stale states independently per count.
+A missing count shows unavailable, not zero. A stale count retains its last value and timestamp with a visible stale label.
+Compare counts against saved thresholds using the backend's strict greater-than rule. Zero disables that threshold.
+Stale values can say the last count exceeded a threshold but cannot claim current health.
+Use one Updated timestamp only when all displayed measured counts have the same timestamp; otherwise keep per-count timestamps.
+State that stored records include protected work and are not a deletion estimate.
+
+Warnings, unknown-status notices, backlog, and errors remain visible when details collapse.
+Details preserve unknown status values/counts, top routine ID/share, skip count/time, and per-category errors.
+Raw diagnostic values can remain in details; normal titles and labels use product language.
+No added network call, count scan, health metric, or history table is required.
+
+## Temporary files and compaction
+
+Rename the temporary-artifacts section to Temporary Kandev files through locale keys.
+In `storage-policy-card.tsx`, explain registered diagnostic bundles and utility working folders.
+Remove the repeated age sentence. Keep a concise visible stale-age/quarantine consequence next to the cleanup action.
+Help explains that shared temporary folders and unrelated package caches are excluded from this provider.
+Preserve the scheduled opt-in switch, manual action, disabled reasons, confirmations, and quarantine behavior.
+
+Remove `max-w-3xl` from `ToolPayloadRetentionCard` and retain `min-w-0`.
+The card fills the Database content row, while controls keep compact widths and wrap on phones.
+Keep existing analysis, backup preparation, automatic compaction, manual compaction, and space-reuse explanations.
 
 ## Mobile design contract
 
-The desktop outcome and the phone outcome are the same. Both surfaces provide
-direct destinations for system data and storage maintenance.
+The Settings index and full-height Settings surface remain the entry point and page scroll owner.
+Header tabs move below the description. They remain inline because they choose the primary page content.
+Phone retention status becomes a single-column list. Policy fields stack with labels, units, and 44px touch targets.
+The primary settings action remains the existing floating Save changes control with safe-area clearance.
+Help uses the shipped sleep-inhibition Drawer pattern; desktop uses hover/focus Tooltip.
+No second mobile state model, hidden duplicate form, nested vertical scroll area, or new sidebar is introduced.
 
-The existing Settings index and full-height Settings sheet are the nearest
-mobile examples. They provide the route list, touch targets, and direct
-navigation behavior. The change does not add another overlay.
+## Localization and documentation
 
-Each destination remains an inline settings page with the existing page scroll
-owner. The split reduces content depth and preserves safe-area behavior. It
-does not change touch controls inside either page.
+All changed labels use `t()` or `Trans` with complete English, Portuguese, and Chinese catalogs.
+Use `pnpm run i18n:zh-hant` for Traditional Chinese and verify the pseudo-locale.
+Use locale-aware number/date formatting. Preserve internal IDs and wire keys.
+Update `docs/public/operations.md` and applicable authentication navigation references when implementation ships.
+Public docs remain current during this design-only change.
 
-Desktop and phone share route definitions, discovery data, permissions, state,
-and action handlers. Playwright coverage will open both destinations from the
-correct settings navigation surface. Phone coverage will also check horizontal
-containment and storage save behavior.
+## Related decisions and contracts
 
-## Compatibility
-
-The canonical `Data & Logs` path remains `/settings/system/data-storage`.
-Existing `/settings/system/database`, `/settings/system/backups`, and
-`/settings/system/logs` paths will continue to redirect there.
-
-`/settings/system/storage` will stop redirecting and will become a rendered
-page. Saved last-page behavior will accept both canonical routes because both
-remain in the static route table.
-
-Loading and error states remain local to the component that owns each API.
-Changing one route does not change API availability or admin checks.
-
-## Verification
-
-Unit tests will cover route rendering, navigation labels, breadcrumb labels,
-discovery ownership, and localized copy. Playwright tests will cover desktop,
-phone, authenticated member, and container-backed storage paths.
-
-## Related decisions
-
-- [Separate System Data and Storage Pages](../../../decisions/2026-09-03-separate-system-data-storage-pages.md)
-- [Centralize Navigation and Namespace Plugin Destinations](../../../decisions/2026-08-04-navigation-manifest-boundaries.md)
-- [Install-wide storage maintenance](../../../decisions/0045-install-wide-storage-maintenance.md)
-- [Settings route save coordinator](../../../decisions/0046-settings-route-save-coordinator.md)
+- [Header tabs](../../../decisions/2026-09-15-settings-header-tabs.md)
+- [Separate data/storage pages](../../../decisions/2026-09-03-separate-system-data-storage-pages.md)
+- [Owned temporary files](../../../decisions/2026-08-08-owned-temp-artifact-cleanup.md)
+- [Office retention operations](../../office/system-design/run-history-retention-operations.md)
+- [Tool payload retention](tool-payload-retention.md)

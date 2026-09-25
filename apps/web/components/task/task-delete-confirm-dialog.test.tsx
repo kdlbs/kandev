@@ -14,7 +14,11 @@ vi.mock("@/lib/api", () => ({
 import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
 import { expectCompactWarning } from "./task-confirm-dialog.test-helpers";
 
-type SeedTask = { id: string; foregroundActivity?: "generating" | "background" | null };
+type SeedTask = {
+  id: string;
+  foregroundActivity?: "generating" | "background" | null;
+  workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
+};
 
 // The dialog reads live foreground_activity from the store via useTaskInFlight,
 // so every render needs a StateProvider. `tasks` seeds the active kanban tasks
@@ -33,6 +37,7 @@ function renderDialog(ui: ReactNode, tasks: SeedTask[] = []) {
             title: t.id,
             position: 0,
             foregroundActivity: t.foregroundActivity ?? undefined,
+            workspaceMode: t.workspaceMode,
           })),
         },
       }}
@@ -441,6 +446,72 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
     );
     expect(screen.getByText(/Any running agent sessions will be stopped/i)).toBeTruthy();
     expect(screen.queryByTestId(DISCARD_CHECKBOX_TESTID)).toBeNull();
+  });
+});
+
+describe("TaskDeleteConfirmDialog inherited-parent workspace copy", () => {
+  it("describes inherited-parent workspace preservation from explicit context", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="Child task"
+        taskId={TASK_ID}
+        executorType="worktree"
+        sharesParentWorkspace
+        onConfirm={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("task-cleanup-effects").querySelectorAll("li")).toHaveLength(1);
+    expect(
+      screen.getByText(
+        /This task shares its parent's workspace\. The parent task's worktree, branch, and files are not touched\./i,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/worktree and its branch will be deleted/i)).toBeNull();
+  });
+
+  it("resolves inherited-parent workspace preservation from the task store", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="Child task"
+        taskId={TASK_ID}
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+      [{ id: TASK_ID, workspaceMode: "inherit_parent" }],
+    );
+
+    expect(
+      screen.getByText(
+        /This task shares its parent's workspace\. The parent task's worktree, branch, and files are not touched\./i,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/worktree and its branch will be deleted/i)).toBeNull();
+  });
+
+  it("prefers the live task-store mode over stale caller context", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="Child task"
+        taskId={TASK_ID}
+        executorType="worktree"
+        sharesParentWorkspace
+        onConfirm={() => {}}
+      />,
+      [{ id: TASK_ID, workspaceMode: "new_workspace" }],
+    );
+
+    expect(screen.getByText(/worktree and its branch will be deleted/i)).toBeTruthy();
+    expect(screen.queryByText(/shares its parent's workspace/i)).toBeNull();
   });
 });
 

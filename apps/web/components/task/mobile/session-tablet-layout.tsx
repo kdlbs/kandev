@@ -2,7 +2,6 @@
 
 import { memo, useMemo } from "react";
 import { Group, Panel } from "react-resizable-panels";
-import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
 import { TaskCenterPanel } from "../task-center-panel";
 import { TaskRightPanel } from "../task-right-panel";
 import { TaskFilesPanel } from "../task-files-panel";
@@ -97,8 +96,6 @@ function TabletLeftPanel({
 }
 
 export const SessionTabletLayout = memo(function SessionTabletLayout({
-  workspaceId,
-  workflowId,
   sessionId = null,
   repository = null,
   defaultLayouts = {},
@@ -113,8 +110,6 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
     openFileRequest,
     handleOpenFile,
     handleFileOpenHandled,
-    isTaskSwitcherOpen,
-    setMobileSessionTaskSwitcherOpen,
   } = useSessionLayoutState({ sessionId });
 
   const layoutBySession = useLayoutStore((state) => state.columnsBySessionId);
@@ -174,22 +169,17 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
         </Panel>
 
         {/* Right Panel: Files + Terminal stacked */}
-        <Panel id="right" minSize="250px" className="min-h-0 min-w-0">
-          <TaskRightPanel
-            topPanel={topFilesPanel}
-            sessionId={sessionForPreview}
-            repositoryId={repository?.id ?? null}
-          />
-        </Panel>
+        {layoutState.right && (
+          <Panel id="right" minSize="250px" className="min-h-0 min-w-0">
+            <TaskRightPanel
+              topPanel={topFilesPanel}
+              sessionId={sessionForPreview}
+              repositoryId={repository?.id ?? null}
+            />
+          </Panel>
+        )}
       </Group>
 
-      {/* Task Switcher Sheet - same as mobile */}
-      <SessionTaskSwitcherSheet
-        open={isTaskSwitcherOpen}
-        onOpenChange={setMobileSessionTaskSwitcherOpen}
-        workspaceId={workspaceId}
-        workflowId={workflowId}
-      />
       <TaskReviewDialogMount taskId={activeTaskId} sessionId={effectiveSessionId} />
     </div>
   );

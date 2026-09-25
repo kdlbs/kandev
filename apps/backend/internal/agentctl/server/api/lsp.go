@@ -29,6 +29,7 @@ const (
 	lspCloseServerExited           = 4006
 	lspCloseAutoInstallUnsupported = 4007
 	lspCloseStartFailed            = 4008
+	lspCloseTransportFailed        = 4009
 
 	lspLanguageTypeScript    = "typescript"
 	lspLanguagePython        = "python"
@@ -395,10 +396,16 @@ func (s *Server) runLSPBridge(
 				if err != io.EOF {
 					s.logger.Debug("LSP stdout read error", zap.String("language", language), zap.Error(err))
 				}
+				closeCode := lspCloseTransportFailed
+				select {
+				case <-server.done:
+					closeCode = lspCloseServerExited
+				case <-time.After(100 * time.Millisecond):
+				}
 				_ = writeLSPMessage(
 					conn,
 					websocket.CloseMessage,
-					websocket.FormatCloseMessage(lspCloseServerExited, ""),
+					websocket.FormatCloseMessage(closeCode, ""),
 				)
 				return
 			}

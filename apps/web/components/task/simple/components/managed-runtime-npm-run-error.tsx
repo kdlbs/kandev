@@ -16,10 +16,11 @@ export function ManagedRuntimeNpmRunError({
 }: {
   error: RunError;
   agentName: string;
-  onRetry: () => void;
+  onRetry?: () => void;
 }) {
   const { t } = useTranslation();
   const [showDetails, setShowDetails] = useState(false);
+  const isPolicyFailure = error.failureCode === "managed_runtime_npm_policy";
   const technicalDetails = error.failureDetails;
 
   return (
@@ -34,13 +35,17 @@ export function ManagedRuntimeNpmRunError({
           <span className="text-sm font-medium">{agentName}</span>
           <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
             <IconAlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-            {t("chat:managedRuntimeNpmTitle")}
+            {t(
+              isPolicyFailure ? "chat:managedRuntimeNpmPolicyTitle" : "chat:managedRuntimeNpmTitle",
+            )}
           </span>
           <span className="text-xs text-muted-foreground">
             {formatRelativeTime(error.failedAt)}
           </span>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">{t("chat:managedRuntimeNpmBody")}</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t(isPolicyFailure ? "chat:managedRuntimeNpmPolicyBody" : "chat:managedRuntimeNpmBody")}
+        </p>
         {technicalDetails && (
           <Collapsible open={showDetails} onOpenChange={setShowDetails} className="mt-2">
             <CollapsibleTrigger className="flex min-h-11 cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground sm:min-h-8">
@@ -56,18 +61,20 @@ export function ManagedRuntimeNpmRunError({
             </CollapsibleContent>
           </Collapsible>
         )}
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-auto min-h-11 cursor-pointer gap-1.5 text-xs sm:min-h-8"
-            onClick={onRetry}
-            data-testid="run-error-managed-runtime-retry-button"
-          >
-            <IconRefresh className="h-3 w-3" />
-            {t("chat:managedRuntimeRetry")}
-          </Button>
-        </div>
+        {onRetry && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-auto min-h-11 cursor-pointer gap-1.5 text-xs sm:min-h-8"
+              onClick={onRetry}
+              data-testid="run-error-managed-runtime-retry-button"
+            >
+              <IconRefresh className="h-3 w-3" />
+              {t("chat:managedRuntimeRetry")}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

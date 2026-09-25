@@ -32,6 +32,8 @@ app is broken.
 - **AC-UI-EMPTY-TURN-NOTICE-001.6:** **`/cmd` not in the agent's advertised commands** → "`/cmd` isn't a command this agent recognizes, so it returned no output. Try resending your request as a normal message, without the leading slash."
 - **AC-UI-EMPTY-TURN-NOTICE-001.7:** **`/cmd` is advertised but the turn was empty** → "`/cmd` ran but produced no output. Try resending your request as a normal message, without the leading slash."
 - **AC-UI-EMPTY-TURN-NOTICE-001.8:** The `/command` token is matched case-insensitively against the agent's advertised commands (`availableCommands.bySessionId`), whose names carry no leading slash; the leading `/` is stripped and the first whitespace-delimited word is taken.
+- **AC-UI-EMPTY-TURN-NOTICE-001.9:** A turn that ends in a recoverable agent failure is not an empty turn. Its recovery/error entry is the turn's outcome, so the completed turn reports `had_output=true` and no empty-turn notice is shown for it. The recovery/error entry is the only explanation the user needs; a "finished without producing any output" notice stacked on top of it is misleading.
+- **AC-UI-EMPTY-TURN-NOTICE-001.10:** A recoverable agent failure does not create a second turn whose only content is the recovery status message. The failure's recovery/error entry attaches to the turn that failed, so at most one turn completes for the failure and no empty-turn notice appears for a separate recovery-message turn.
 
 ## Migrated source detail
 
@@ -64,6 +66,7 @@ When a user sends a message to the agent chat and the turn completes with **no c
 - **GIVEN** the same empty turn's `turn.completed` is processed more than once, **WHEN** the handler runs again, **THEN** only one notice exists for that turn.
 - **GIVEN** an orphan turn swept by resume cleanup, **WHEN** its `turn.completed` is published, **THEN** no notice appears.
 - **GIVEN** an empty turn on a quick-chat or config-chat surface, **WHEN** it completes, **THEN** no notice appears.
+- **GIVEN** a turn that ends in a recoverable agent failure (for example the model provider rejects the prompt), **WHEN** the turn completes, **THEN** the chat shows the recovery/error entry, no "finished without producing any output" notice appears, and exactly one turn completes for the failure.
 
 ## Out of scope
 
@@ -77,3 +80,4 @@ When a user sends a message to the agent chat and the turn completes with **no c
 - Backend: `had_output` is computed in `Service.CompleteTurn` via `turnHadAgentOutput` over the turn's persisted messages (`apps/backend/internal/task/service/service_turns.go`). Messages are fetched via `ListMessagesByTurnID` (indexed by `turn_id`), so the read is O(turn_messages) rather than O(session_messages). The result is added to the `turn.completed` payload in `publishTurnEvent`.
 - Frontend: `computeEmptyTurnNotice` in `apps/web/lib/ws/handlers/empty-turn-notice.ts` creates the notice. `filterVisibleMessages` in `apps/web/hooks/processed-message-filtering.ts` hides it after later output on the same turn. Both functions are wired to the existing session event and message state flow.
 - E2E: the mock agent's `empty-turn` scenario (`apps/backend/cmd/mock-agent/scenarios.go`) emits a multi-second empty `end_turn`; specs in `apps/web/e2e/tests/chat/empty-turn.spec.ts` (desktop) and `mobile-empty-turn.spec.ts` seed it as the auto-started turn so the live completion is observed.
+- Error-terminated turns: `handleRecoverableFailureLockedState` (`apps/backend/internal/orchestrator/event_handlers_agent.go`) attaches the recovery status message to the turn that failed rather than letting message creation auto-open a new turn (previously the failed turn was completed first, so `getActiveTurnID` returned `""` and `CreateSessionMessageIdempotent` lazily started a second turn). That turn reports `had_output=true` because its recovery/error entry is the turn's outcome, so neither the failed turn nor a synthetic recovery-message turn triggers the notice.

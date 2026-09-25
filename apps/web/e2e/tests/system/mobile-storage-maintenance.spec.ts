@@ -45,7 +45,7 @@ test.describe("Mobile storage maintenance", () => {
     expect(box).not.toBeNull();
     expect(box!.height).toBeGreaterThanOrEqual(44);
     await cleanButton.tap();
-    await expect(testPage.getByText("Clean stale Kandev artifacts?")).toBeVisible();
+    await expect(testPage.getByText("Clean inactive Kandev temporary files?")).toBeVisible();
     await prCapture.screenshot("temporary-artifacts-confirmation", {
       caption: "Mobile storage keeps stale artifact cleanup in a reachable confirmation",
     });
@@ -118,7 +118,7 @@ test.describe("Mobile storage maintenance", () => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
     await mobile.mobileMenuButton.click();
-    await testPage.getByRole("link", { name: "Settings" }).click();
+    await testPage.getByRole("link", { name: "Settings", exact: true }).click();
     const index = testPage.getByTestId("settings-index");
     await index.locator('a[href="/settings/system/storage"]').click();
 
@@ -128,7 +128,7 @@ test.describe("Mobile storage maintenance", () => {
     await testPage
       .getByRole("button", { name: "More information about Scheduled maintenance" })
       .click();
-    await expect(testPage.getByRole("tooltip")).toContainText(
+    await expect(testPage.getByRole("dialog")).toContainText(
       "Turning it off does not disable Analyze or Run now",
     );
     await testPage.keyboard.press("Escape");
@@ -176,14 +176,14 @@ test.describe("Mobile storage maintenance", () => {
     await testPage
       .getByRole("button", { name: "More information about Folders Kandev will check" })
       .tap();
-    await expect(testPage.getByRole("tooltip")).toContainText("recursively");
+    await expect(testPage.getByRole("dialog")).toContainText("recursively");
     await testPage.reload();
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
     await testPage
+      .getByTestId("storage-quarantine-card")
       .getByRole("button", { name: "More information about Quarantine" })
-      .first()
       .click();
-    await expect(testPage.getByRole("tooltip")).toContainText("recoverable holding area");
+    await expect(testPage.getByRole("dialog")).toContainText("recoverable holding area");
     await expect
       .poll(() =>
         testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -272,7 +272,7 @@ test.describe("Mobile storage maintenance", () => {
       );
     }
     await timingHelp.tap();
-    await expect(testPage.getByRole("tooltip")).toContainText("Scan duration");
+    await expect(testPage.getByRole("dialog")).toContainText("Scan duration");
     await prCapture.screenshot("progressive-analysis-timing", {
       caption: "Mobile storage opens progressive scan timing by touch",
     });

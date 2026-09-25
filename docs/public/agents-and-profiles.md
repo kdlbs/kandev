@@ -7,6 +7,8 @@ description: "Install agent CLIs and create profiles for models, modes, flags, s
 
 An **agent** is Kandev's integration with a coding-agent CLI. A **profile** is its reusable launch configuration. Create separate profiles when model, credentials, or permissions need different trust boundaries.
 
+The composer model picker shows the session's agent CLI logo beside the selected model and beside **Model** in the open popover. This identifies the CLI running the session, even when it supports models from several vendors.
+
 Agent authentication is separate from repository and integration credentials.
 
 ## Quick path
@@ -22,7 +24,7 @@ Open **Settings > Agents** (`/settings/agents`). Kandev scans the host on which 
 
 ![Settings > Agents showing detected agent CLIs, profiles, configured status, unavailable status, update indicators, and New profile controls.](../screenshots/settings-agents.png)
 
-The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, Hermes, Goose, and Antigravity. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
+The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, Hermes, Goose, Muse, and Antigravity. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
 
 Hermes launches with `hermes acp`. Install the required `hermes` executable from its **Settings > Agents** card, which runs the official Hermes installer. Hermes currently supports task and workspace sessions. Office-assigned skill injection is not yet supported.
 
@@ -30,12 +32,43 @@ Goose launches with `goose acp`. Its **Settings > Agents** card runs only the of
 
 Antigravity has no automated install: Google distributes `agy_acp_server.par` (`agy_acp_server.exe` on Windows) and its `localharness_external` or `localharness` sibling (`localharness_external.exe` or `localharness.exe` on Windows) as a signed archive through the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp) rather than npm, so extract both files into one directory and add it to PATH yourself. Kandev fails discovery closed when the harness sibling is missing or not executable, so a partial extraction reports as not installed rather than as a broken session.
 
+### Muse command surfaces
+
+Muse Code has no native ACP server, so Kandev runs it through the community
+[`@bex-co/muse-code-acp`](https://github.com/bex-co/muse-code-acp) adapter,
+which is not affiliated with Meta:
+
+- Structured ACP sessions and one-shot inference use the managed
+  `@bex-co/muse-code-acp` package at the selected effective version. This
+  needs Node.js 22 or later.
+- The adapter drives the native `muse` executable through `muse serve`; CLI
+  Passthrough starts `muse` directly.
+- On POSIX hosts, the Muse install action runs the official
+  `https://dev.meta.ai/install.sh` installer into the first writable directory
+  on the backend's `PATH`. Windows has no automated Muse install action because
+  the official installer is a POSIX shell script.
+
+Kandev detects Muse when `muse` is on the `PATH` of the backend process and
+responds to `--version`. Sign in with `muse login`, or set `META_API_KEY` for
+headless and remote executors. Muse keeps sessions under
+`~/.local/share/muse`, which Kandev uses for session resume.
+Kandev removes `XDG_CONFIG_HOME` and `XDG_DATA_HOME` overrides from Muse
+processes so credentials and sessions use these managed paths. Executors use an
+isolated home directory for both `~/.config/muse` and `~/.local/share/muse`; the
+real host home directory is not mounted.
+
+The adapter starts sessions on the `model` in Muse's
+`~/.config/muse/settings.json` and falls back to its own default otherwise,
+while the interactive `muse` CLI falls back to Meta's catalogue default. To
+pin one model for both, set it there, for example
+`{"schema_version": 1, "model": "muse-spark-1.3"}`.
+
 ### Pi command surfaces
 
 Pi uses separate executables for its two Kandev modes:
 
-- Structured ACP sessions and one-shot inference use
-  `npx --yes --prefer-offline pi-acp@<effective-version>`.
+- Structured ACP sessions and one-shot inference use the managed `pi-acp`
+  package at the selected effective version.
 - CLI Passthrough starts the globally installed `pi` executable.
 - The Pi install action runs `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
 
@@ -54,7 +87,7 @@ The status shown on this page is authoritative for the current host. A CLI that 
 ### Update a managed agent runtime
 
 The update icon is available on managed Claude, Codex, OpenCode, Copilot,
-Gemini, and Pi agent cards. It updates the runtime on the Kandev host.
+Gemini, Pi, and Muse agent cards. It updates the runtime on the Kandev host.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
@@ -89,6 +122,13 @@ the control has no dot but remains usable.
 3. Keep the latest version selected for a normal update, or select an older stable version to roll back.
 4. Select **Update runtime**, **Roll back runtime**, or **Repair runtime**.
 5. Wait for the exact version to prepare and pass its ACP capability probe.
+
+OpenCode has one additional host-runtime rule. When the `opencode` executable
+is on the Kandev host `PATH`, the update installs the selected `opencode-ai`
+package version globally and the follow-up capability probe runs that same
+executable. Containers, SSH executors, and hosts without that executable keep
+using the managed `npx` runtime. This keeps the update result aligned with the
+runtime that Kandev will use for host utility calls.
 
 Kandev enables the action only after the backend validates the selected version
 against the trusted package catalogue. It does not accept package names, npm
@@ -137,6 +177,14 @@ silently select another version. When the retry succeeds, no recovery card is
 shown. When it fails again, Kandev and Office show one **Retry runtime** action
 with collapsed technical details.
 
+Managed `npx` runtimes use a Kandev-owned npm project directory, so an `.npmrc`
+in the task repository does not change the managed runtime's package lookup.
+The task repository remains the command's working directory. User and global npm
+settings still apply, including `min-release-age` and `before` policies. If an
+age policy blocks the selected version, Kandev does not repair the npm cache or
+repeat the lookup online. Wait until the version meets the policy, or select an
+older trusted version, then choose **Retry runtime**.
+
 Do not use `npm cache clean --force` as the normal recovery step. It removes
 unrelated npm data and does not target the stale execution tree. If the
 specialized retry cannot resolve the runtime, check that the Kandev service
@@ -147,9 +195,13 @@ uses the expected npm installation and configured registry. Run `npm config get 
 
 ### Add a custom terminal agent
 
-Use **Settings > Agents > Add TUI Agent** for a CLI that Kandev does not register. Enter a display name, command, and optional model label. `{{model}}` in the command is replaced by the selected model value, then the entire command is split on whitespace with Go's `strings.Fields`.
+Use **Settings > Agents > Add custom agent** for a CLI that Kandev does not register. Enter a display name, a protocol, and a command. The entire command is split on whitespace with Go's `strings.Fields`.
 
-That parser is not a shell and is not quote-aware: quotes and backslashes do not preserve a path or model containing spaces as one argument. Custom TUI agents always use terminal passthrough. They do not gain ACP features such as structured permission prompts, model discovery, modes, or session configuration merely by being added. Test the exact resulting argument split before assigning it to work.
+That parser is not a shell and is not quote-aware: quotes and backslashes do not preserve a path or model containing spaces as one argument. Test the exact resulting argument split before assigning it to work.
+
+A **Terminal** agent runs as passthrough. It also takes an optional model label, and `{{model}}` in the command is replaced by that value. It gains no ACP features: no structured permission prompts, no model discovery, no modes, no session configuration.
+
+An **ACP** agent is driven over the Agent Client Protocol instead, so it does get structured chat, tool calls, permission prompts, and probed models and modes. Enter the command that starts the CLI's ACP server, usually behind a flag such as `--acp`. Its model comes from the capability probe rather than the command, and its MCP servers travel in `session/new`, so neither the model label nor the MCP strategy is offered.
 
 </details>
 
@@ -161,11 +213,14 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name                         | Label shown in workflow, session, and automation selectors.                                                                                                      |
 | Model                        | Requested through ACP when the agent supports model selection. Leaving it unset uses the agent's default where the form allows that.                             |
+| Require exact model          | Per-profile opt-in. When enabled, Kandev stops before inference unless the executor advertises and accepts the saved model. It disables fallback controls without erasing their saved values. |
+| Fallback settings            | Compatible profiles can use an advertised explicit fallback or automatic provider-default continuation. If the saved model is absent and exactly one bracketed variation is advertised, Kandev can use that variation with a warning. |
 | Mode                         | Requested with ACP `session/set_mode`. The choices come from the installed agent.                                                                                |
 | Configuration options        | Dynamic ACP values requested with `session/set_config_option`.                                                                                                   |
 | CLI flags                    | Enabled entries are tokenized and appended to the ACP launch command.                                                                                            |
 | Command prefix               | Optional ACP-only launcher argv prepended to the command, for example `greywall --`.                                                                             |
 | Environment                  | Literal values or references to Kandev secrets, resolved when the process starts.                                                                                |
+| Provider                     | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                 |
 | CLI passthrough              | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                               |
 | Enabled                      | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                         |
 | Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
@@ -181,36 +236,23 @@ interactive credential flow when a secret is required.
 
 Model, mode, command, and configuration choices are probed from the locally installed CLI and cached. The managed **Update agent** action refreshes them automatically; after other CLI changes, refresh the profile manually. Probe status can report **auth required**, **not installed**, **not configured**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
+### Use an OpenAI-compatible provider
+
+Open the **Provider** section in a profile that supports this feature. Select
+**OpenAI-compatible provider**, enter the absolute router base URL, and select
+an optional global API-key secret. Enter the model ID that the router accepts.
+The model field is free text because the router owns the model catalogue.
+
+Kandev sends the provider URL and optional bearer key through the ACP gateway
+authentication request when a new process starts. A running process keeps its
+existing provider settings until it restarts. CLI passthrough cannot use this
+provider because that path does not run the ACP authentication handshake.
+
 Configuration options are resolved for the model selected in the profile. An
 agent can therefore show a different option set for each model. If a model
 change makes a saved option value unsupported, Kandev removes that value after
 a successful resolution; a failed resolution keeps the draft unchanged so you
 can retry it.
-
-### Model IDs and executor catalogs
-
-The host model probe is an editing hint. The selected executor owns the model
-catalog at launch. Kandev resolves a saved model in this order:
-
-1. Use the exact requested model when the executor advertises it.
-2. Use the advertised explicit fallback when the requested model is absent.
-3. Use one unique bracketed variation when the requested model is absent and
-   the executor advertises exactly one matching ID.
-4. Use the agent's current or default model when no earlier choice applies.
-
-Profiles with automatic fallback enabled keep the legacy behavior when the
-saved model is absent: Kandev ignores the explicit fallback and does not infer
-a variation. It uses the agent's current or default model instead.
-
-For example, a saved `opus` model can launch as `opus[1m]` when that is the
-only advertised `opus[...]` ID. If the executor advertises both
-`opus[270k]` and `opus[1m, fast]`, Kandev does not choose either variation.
-Variation text is opaque and model IDs remain case-sensitive.
-
-Kandev shows a warning when the launch result differs from the saved model.
-The saved profile remains `opus`; Kandev does not rewrite it after applying a
-unique variation or using the agent default. Recheck the executor catalog when
-the warning repeats after credentials, copied configuration, or agent updates.
 
 ### Use a dynamic profile
 
@@ -255,6 +297,13 @@ exclusive health probe before it becomes eligible again. This shared error
 classification is used by task/Kanban and Office routing, while the per-
 candidate policies are configured on dynamic profiles.
 
+When a task launch waits for session capacity, Kandev keeps the selected
+destination and retries it automatically. Inspecting another session does not
+change the workflow's selected step or primary session. You can open another
+session and use its normal controls. Kandev resumes it when the session can run;
+the automatic session ceiling still applies unless you explicitly start,
+resume, or message the session.
+
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn
 with an ambiguous result does not switch providers automatically. If no
@@ -267,22 +316,33 @@ stale browser action does not replace a newer route decision.
 
 The model list shown while editing a profile comes from a host probe. It is an
 editing hint, not a launch gate. A profile remains selectable when its saved
-model is missing from that host list. Profile selectors do not show a model
-warning for this difference. Inspect the model list in profile settings for
-discovery details. Authentication, installation, and probe-failure indicators
-remain visible on profile selectors.
+model is missing from that host list. Profile selectors show an amber warning
+icon for this difference. On a desktop pointer, hover or focus the icon to
+read its tooltip. On a touch device, select the icon to open its warning
+drawer. Inspect the model list in profile settings for discovery details.
+Authentication, installation, and probe-failure indicators remain visible on
+profile selectors.
 
-At task launch, the selected executor's ACP catalog is authoritative. For
-profiles without automatic fallback, Kandev follows the four-step order above.
-For profiles with automatic fallback enabled, an absent saved model causes no
-model request, and Kandev ignores the explicit fallback and any variation.
-Kandev stores one warning in task chat with the requested model and the
-effective model when known. The warning also identifies the agent and executor
-and asks you to check credentials, copied configuration, and the agent version.
+At task launch, the selected executor's ACP catalog is authoritative. Kandev
+sends the requested model only when the executor advertises it. Profiles are
+compatible by default, so an unavailable saved model can use an advertised
+explicit fallback, one unique bracketed variation, or the executor's current
+or default model. Kandev records one warning with the requested and effective
+models when it continues with a different model. Automatic fallback allows
+provider-default continuation and ignores the saved explicit fallback.
 
-The saved profile model is not changed. Optional portable configuration can
-copy selected allowlisted files into a remote executor, but it cannot guarantee
-that the host and executor expose the same model catalog.
+Enable **Require exact model** when the profile must keep the saved model. The
+executor must advertise and accept that model before the first prompt. An empty
+or unsupported catalog, an unavailable model, or a failed apply stops the
+session before inference. Kandev never sends an unadvertised model and never
+rewrites the saved profile model.
+
+The host model list is only an editing hint. A missing host-probe model keeps a
+profile selectable and shows an advisory warning; the executor catalog decides
+the launch result. Upgrades and omitted API fields keep existing profiles
+compatible, with strictness off until a user enables it. Optional portable
+configuration can copy selected allowlisted files to a remote executor, but it
+cannot guarantee equal host and executor model catalogs.
 
 ### Monitor capability and subscription status
 
@@ -382,6 +442,8 @@ Literal values remain in profile configuration. A secret reference avoids copyin
 
 In a structured ACP session, the agent can present a permission request and its available responses. With **Auto-approve all permissions** disabled, a person chooses a response in the session. With it enabled, the runtime selects the first allow-once or allow-always response without waiting. If the agent supplies no allow response, Kandev selects its first response even when that response is not approval; with no responses, it cancels.
 
+Claude ACP also has a narrower built-in rule. When the agent uses the host-injected `kandev` MCP server, Kandev automatically selects an offered allow-once response, or allow-always when allow-once is not offered, even when **Auto-approve all permissions** is disabled. This covers every tool on that server, including task creation, task deletion, and plan changes. It is not a saved approval decision and is recreated for each task or Quick Chat session. Kandev still enforces MCP authentication, task and session authorization, user-question barriers, and workflow gates. Shell commands, file operations, third-party tools, and ambiguous requests keep the normal permission flow.
+
 An external MCP client can also list live pending requests for an authorized task and submit one
 exact option originally offered by the agent. The request-generation ID prevents an old approval
 from targeting a replacement prompt that reused a provider pending ID. Kandev records who selected
@@ -397,7 +459,7 @@ Workspace automation selectors do not offer passthrough agent profiles. Local ex
 
 ACP sessions can expose typed messages, tool updates, permission requests, models, modes, dynamic configuration, todos, usage, and resume metadata. Each capability depends on the agent's actual ACP implementation. ACP-only profile settings, including command prefixes and structured configuration, do not add those capabilities to a terminal-passthrough CLI.
 
-Passthrough preserves the CLI's native PTY interface. It is useful when the native terminal has features that ACP does not expose, but Kandev cannot manufacture structured capabilities that are absent. Custom TUI profiles are locked to passthrough. Profile-specific MCP injection also varies by CLI; verify the command preview and the MCP section before depending on it.
+Terminal custom profiles use passthrough and preserve the CLI's native PTY interface. This is useful when the native terminal has features that ACP does not expose, but Kandev cannot manufacture structured capabilities that are absent. Custom ACP profiles use structured ACP sessions. Profile-specific MCP injection also varies by CLI; verify the command preview and the MCP section before depending on it.
 
 > **MCP credential exposure:** MCP headers and environment values are stored in profile configuration. Codex may place them in process arguments, and Cursor or Pi may leave them in project files after teardown. Use short-lived, narrowly scoped credentials and review persisted files.
 

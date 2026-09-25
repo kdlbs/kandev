@@ -26,8 +26,11 @@ const storeMocks = vi.hoisted(() => ({
   commitSettingsMenuMode: vi.fn(),
   restoreSettingsMenuMode: vi.fn(),
   previewRichOutputAnimations: vi.fn(),
+  previewChatAnimations: vi.fn(),
   commitRichOutputAnimations: vi.fn(),
+  commitChatAnimations: vi.fn(),
   restoreRichOutputAnimations: vi.fn(),
+  restoreChatAnimations: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -247,8 +250,11 @@ beforeEach(() => {
   storeMocks.commitSettingsMenuMode.mockReset();
   storeMocks.restoreSettingsMenuMode.mockReset();
   storeMocks.previewRichOutputAnimations.mockReset();
+  storeMocks.previewChatAnimations.mockReset();
   storeMocks.commitRichOutputAnimations.mockReset();
+  storeMocks.commitChatAnimations.mockReset();
   storeMocks.restoreRichOutputAnimations.mockReset();
+  storeMocks.restoreChatAnimations.mockReset();
   storeMocks.state = {
     userSettings: {
       ...defaultSettingsState.userSettings,
@@ -256,13 +262,17 @@ beforeEach(() => {
     },
     settingsMenu: { savedMode: "flat" },
     richOutputMotion: { enabled: true, savedEnabled: true },
+    chatMotion: { enabled: true, savedEnabled: true },
     setUserSettings: storeMocks.setUserSettings,
     previewSettingsMenuMode: storeMocks.previewSettingsMenuMode,
     commitSettingsMenuMode: storeMocks.commitSettingsMenuMode,
     restoreSettingsMenuMode: storeMocks.restoreSettingsMenuMode,
     previewRichOutputAnimations: storeMocks.previewRichOutputAnimations,
+    previewChatAnimations: storeMocks.previewChatAnimations,
     commitRichOutputAnimations: storeMocks.commitRichOutputAnimations,
+    commitChatAnimations: storeMocks.commitChatAnimations,
     restoreRichOutputAnimations: storeMocks.restoreRichOutputAnimations,
+    restoreChatAnimations: storeMocks.restoreChatAnimations,
   };
 });
 
@@ -295,6 +305,36 @@ describe("AppearanceSettings rich-output motion preference", () => {
 
     await waitFor(() => expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE));
     expect(storeMocks.restoreRichOutputAnimations).toHaveBeenCalledOnce();
+  });
+});
+
+describe("AppearanceSettings chat motion preference", () => {
+  it("previews and saves chat motion locally without a user-settings request", async () => {
+    renderAppearance();
+
+    const toggle = screen.getByRole("switch", { name: "Chat animations" });
+    expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
+
+    fireEvent.click(toggle);
+    expect(storeMocks.previewChatAnimations).toHaveBeenCalledWith(false);
+    expect(toggle.getAttribute(DATA_SETTINGS_DIRTY_ATTRIBUTE)).toBe("true");
+
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+
+    await waitFor(() => expect(storeMocks.commitChatAnimations).toHaveBeenCalledWith(false));
+    expect(apiMocks.updateUserSettings).not.toHaveBeenCalled();
+    expect(storeMocks.setUserSettings).not.toHaveBeenCalled();
+  });
+
+  it("restores the saved chat motion preference through Reset", async () => {
+    renderAppearance();
+
+    const toggle = screen.getByRole("switch", { name: "Chat animations" });
+    fireEvent.click(toggle);
+    fireEvent.click(await screen.findByRole("button", { name: "Reset" }));
+
+    await waitFor(() => expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE));
+    expect(storeMocks.restoreChatAnimations).toHaveBeenCalledOnce();
   });
 });
 
@@ -396,4 +436,27 @@ describe("AppearanceSettings status bar preference", () => {
     "applies a newer save response after an older live update",
     verifyNewerSaveResponseWinsOverOlderLiveUpdate,
   );
+});
+
+it("validates hover drafts, preserves them after a failed save, and discards", async () => {
+  renderAppearance();
+  const delay = screen.getByRole("spinbutton", { name: "Hover delay (ms)" });
+  fireEvent.change(delay, { target: { value: "" } });
+  expect(
+    (screen.getByRole("button", { name: SAVE_CHANGES_LABEL }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  fireEvent.change(delay, { target: { value: "750" } });
+  apiMocks.updateUserSettings.mockRejectedValueOnce(new Error("Save failed"));
+  fireEvent.click(screen.getByRole("button", { name: SAVE_CHANGES_LABEL }));
+  await waitFor(() =>
+    expect(apiMocks.updateUserSettings).toHaveBeenCalledWith({ sidebar_hover_delay_ms: 750 }),
+  );
+  await waitFor(() =>
+    expect((screen.getByRole("button", { name: "Retry save" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    ),
+  );
+  expect((delay as HTMLInputElement).value).toBe("750");
+  fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+  expect((delay as HTMLInputElement).value).toBe("500");
 });

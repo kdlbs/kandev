@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -29,10 +30,8 @@ func newAgentErrorTestService(
 	t *testing.T, repo *sqliterepo.Repository, stepGetter *mockStepGetter, configure func(*Service),
 ) (*Service, *observer.ObservedLogs) {
 	t.Helper()
-	// handleRecoverableFailureLocked's last-but-one step (before this card's
-	// dispatch) fires a background cleanupAgentExecution that dereferences
-	// svc.executor — createTestServiceWithScheduler is the fixture that wires
-	// one, unlike the bare createTestService used elsewhere in this package.
+	// Recovery stops the failed execution before dispatching workflow actions.
+	// Use the fixture that wires svc.executor for that cleanup boundary.
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), agentMgr)
 	core, logs := observer.New(zapcore.DebugLevel)
@@ -45,6 +44,7 @@ func newAgentErrorTestService(
 		configure(svc)
 	}
 	svc.initWorkflowEngine()
+	t.Cleanup(svc.stopDynamicSuccessorWorkers)
 	return svc, logs
 }
 
@@ -408,6 +408,45 @@ func TestDispatchKanbanAgentErrorTrigger_OfficeAndLoadFailureGuards(t *testing.T
 	})
 }
 
+func TestHandleRecoverableFailurePersistsOfficeSessionHistory(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "office-history-task", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "step1",
+		ProjectID: "proj1", Title: "Office task", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now,
+	}))
+	requireNoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "office-history-session", TaskID: "office-history-task", State: models.TaskSessionStateRunning,
+		StartedAt: now, UpdatedAt: now,
+	}))
+
+	svc, _ := newAgentErrorTestService(t, repo, newMockStepGetter(), nil)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.handleRecoverableFailureLocked(ctx, watcher.AgentEventData{
+		TaskID:           "office-history-task",
+		SessionID:        "office-history-session",
+		AgentExecutionID: "office-history-execution",
+		ErrorMessage:     "The Office agent could not start.",
+		FailureCode:      models.LaunchErrorCategoryGenericLaunchFailure,
+		Phase:            models.LaunchErrorPhaseBootstrap,
+		AttemptID:        "office-history-attempt",
+		ErrorStamp:       "office-history-failure",
+	})
+
+	require.Len(t, messages.sessionMessages, 1, "Office failures must have one chronological session entry")
+	require.Equal(t, models.ErrorScopeSession, messages.sessionMessages[0].metadata["scope"])
+	require.Equal(t, "office-history-failure", messages.sessionMessages[0].metadata["error_stamp"])
+	require.Equal(t, true, messages.sessionMessages[0].metadata["recovery_actions"])
+
+	session, err := repo.GetTaskSession(ctx, "office-history-session")
+	requireNoError(t, err)
+	require.Equal(t, models.TaskSessionStateFailed, session.State)
+}
+
 type agentErrorTaskLoadErrorRepo struct {
 	sessionExecutorStore
 	err error
@@ -419,6 +458,8 @@ func (r *agentErrorTaskLoadErrorRepo) GetTask(_ context.Context, _ string) (*mod
 
 // --- AC-A5/A7/A8/F2/F3/F4/F5/F6/B5: the guard sequence. ---
 
+// TestDispatchKanbanAgentErrorTrigger_Guards verifies dispatch suppression for
+// user cancellation and dispatch eligibility for recoverable agent failures.
 func TestDispatchKanbanAgentErrorTrigger_Guards(t *testing.T) {
 	ctx := context.Background()
 
@@ -461,6 +502,7 @@ func TestDispatchKanbanAgentErrorTrigger_Guards(t *testing.T) {
 		if !svc.CancelTransientRetry(ctx, "t1", "s1") {
 			t.Fatal("CancelTransientRetry = false, want true (a loop was active)")
 		}
+		waitForFailureRecovery(t, svc)
 		if decisions.clearCalls != 0 {
 			t.Errorf("clearCalls = %d, want 0 (a user cancel must not dispatch on_agent_error)", decisions.clearCalls)
 		}
@@ -478,6 +520,7 @@ func TestDispatchKanbanAgentErrorTrigger_Guards(t *testing.T) {
 		svc, _ := newAgentErrorTestService(t, repo, stepGetter, func(s *Service) { s.engineDecisions = decisions })
 
 		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1"})
+		waitForFailureRecovery(t, svc)
 
 		if decisions.clearCalls != 1 {
 			t.Errorf("clearCalls = %d, want 1 (a non-user-initiated recoverable failure must dispatch)", decisions.clearCalls)

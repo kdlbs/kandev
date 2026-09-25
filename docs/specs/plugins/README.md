@@ -18,7 +18,9 @@ permissions, event delivery, and plugin-provided capabilities.
 
 This system owns plugin manifests, marketplace behavior, plugin state,
 installation and health, host data and tool APIs, contribution points, and
-plugin security boundaries.
+plugin security boundaries. Plugin-provided automation conditions and webhook
+adapter contracts belong here; automation admission and execution remain owned
+by the [Office system](../office/README.md).
 
 ## Exclusions
 
@@ -34,9 +36,11 @@ canonical requirement and system-design documents. Use the catalog command to fi
 ## Related systems
 
 - [UI](../ui/README.md): renders plugin contributions.
-- [Canvases](../canvases/README.md): binds isolated web applications to task
+- [Canvases](../canvases/README.md): binds plugin web applications to task
   and workspace canvas lifecycles.
+- [Tasks](../tasks/README.md): owns task and workflow state, including the
+  transition ledger projected through the Host data API.
 - [Canvas distribution](../canvases/system-design/marketplace-sharing.md): owns
   canvas export/import and the canvas-specific marketplace flow; reuses plugin
-  manifests, static validation, catalog sources, and runtime isolation.
+  manifests, static validation, catalog sources, and the runtime trust contract.
 - [Integrations](../integrations/README.md): supplies external connections.

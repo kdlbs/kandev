@@ -637,7 +637,7 @@ func userSettingsDomain() DomainDescriptor {
 		"show_scroll_to_start", "scroll to start", "boolean", "show_transcript_auto_scroll_control", "transcript scroll control", "boolean", "show_todo_list_panel", "todo list panel", "boolean",
 		"show_todo_list_panel_only_when_not_empty", "todo list empty state", "boolean", "show_release_notification", "release notification", "boolean", "release_notes_last_seen_version", "release notes version", "string",
 		"lsp_auto_start_languages", "LSP auto start", "array", "lsp_auto_install_languages", "LSP auto install", "array", "lsp_server_configs", "LSP server configs", "object",
-		"lsp_status_location", "LSP status location", "string", "saved_layouts", "saved layouts", "array", "sidebar_views", "sidebar views", "array",
+		"lsp_status_location", "LSP status location", "string", "saved_layouts", "saved layouts", "array", "sidebar_views", "sidebar views", "array", "sidebar_layout_state", "sidebar layout state", "object",
 		"sidebar_active_view_id", "active sidebar view", "string", "sidebar_draft", "sidebar draft", "object", "thread_views", "thread views", "array",
 		"thread_active_view_id", "active thread view", "string", "thread_view_draft", "thread draft", "object", "sidebar_task_prefs", "sidebar task preferences", "object",
 		"sidebar_task_color_automation", "sidebar color automation", "object", "sidebar_task_colors", "sidebar task colors", "object", "sidebar_task_color_patch", "sidebar task color patch", "object", "task_create_last_used", "last task create values", "object",
@@ -646,6 +646,7 @@ func userSettingsDomain() DomainDescriptor {
 		"default_utility_agent_id", "default utility agent", "string", "default_utility_model", "default utility model", "string", "default_utility_agent_profile_id", "default utility profile", "string",
 		"keyboard_shortcuts", "keyboard shortcuts", "object", "terminal_link_behavior", "terminal link behavior", "string", "terminal_font_family", "terminal font family", "string",
 		"terminal_font_size", "terminal font size", "integer", "changes_panel_layout", "changes panel layout", "string", "last_seen_display", "last seen display", "string",
+		"sidebar_hover_enabled", "sidebar hover enabled", "boolean", "sidebar_hover_delay_ms", "sidebar hover delay", "integer",
 		"system_metrics_display", "system metrics display", "object", "app_status_bar_enabled", "status bar", "boolean", "resolve_session_hostnames", "resolve hostnames", "boolean",
 		"app_status_bar_order", "status bar order", "object", "quick_chat_tab_order_by_workspace", "quick chat tab order", "object", "kanban_hidden_step_ids", "hidden kanban steps", "object",
 		"workflow_ids_with_auto_hide_empty_steps", "auto-hide workflows", "array", "kanban_sort", "kanban board sort", "string", "kanban_priority_filter_tokens", "kanban priority filter", "array",
@@ -653,6 +654,13 @@ func userSettingsDomain() DomainDescriptor {
 	fields := make([]FieldDescriptor, 0, len(values)/3)
 	for index := 0; index+2 < len(values); index += 3 {
 		field := preferenceField(values[index], values[index+1], values[index+2])
+		if values[index] == "sidebar_layout_state" {
+			// The update key is an atomic workspace-scoped operation. Reads
+			// project the complete persisted map so settings discovery can
+			// inspect it without exposing a whole-map replacement contract.
+			field.FieldPath = "sidebar_layouts_by_workspace"
+			field.Schema = map[string]any{"type": "object"}
+		}
 		switch values[index] {
 		case "keyboard_shortcuts":
 			field.Schema = keyboardShortcutsSchema()
@@ -741,6 +749,7 @@ func profileDomain() DomainDescriptor {
 			profileWritable("agent_profile.model", "model", "Model", "string", "Preferred model. Empty inherits the provider default.", false),
 			profileWritable("agent_profile.fallback_model", "fallback_model", "Fallback model", "string", "Optional fallback model.", false),
 			profileWritable("agent_profile.auto_fallback", "auto_fallback", "Automatic fallback", "boolean", "Enable automatic fallback behavior.", false),
+			profileWritable("agent_profile.require_exact_model", "require_exact_model", "Require exact model", "boolean", "Require the configured model to be advertised and applied.", false),
 			profileWritable("agent_profile.mode", "mode", "Mode", "string", "Agent operating mode.", false),
 			profileWritable("agent_profile.config_options", "config_options", "Configuration options", "object", "Typed provider options. Supplied maps replace the saved map.", true),
 			profileWritable("agent_profile.allow_indexing", "allow_indexing", "Allow indexing", "boolean", "Legacy compatibility permission.", false),

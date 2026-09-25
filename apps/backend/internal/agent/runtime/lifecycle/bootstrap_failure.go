@@ -7,6 +7,10 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// StopReasonAgentBootstrapFailed lets the lifecycle manager reclaim a fresh
+// failed launch while preserving an already-retained Kubernetes runtime.
+const StopReasonAgentBootstrapFailed = "agent bootstrap failed"
+
 // BootstrapFailure carries safe, operation-boundary evidence for a failure
 // before the agent becomes ready. Cause remains available to backend logging
 // and errors.Is/errors.As callers; user-facing projections must use Code and

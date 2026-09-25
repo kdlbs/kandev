@@ -3,7 +3,10 @@ import { createAppStore } from "@/lib/state/store";
 import { resolveTaskMenuTarget } from "./task-menu-target";
 
 const identity = { taskId: "A", workspaceId: "workspace" };
-function fixture(loss?: string) {
+function fixture(
+  loss?: string,
+  workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group",
+) {
   const store = createAppStore();
   store.setState((state) => ({
     workspaces: { ...state.workspaces, activeId: loss === "workspace" ? "elsewhere" : "workspace" },
@@ -32,6 +35,7 @@ function fixture(loss?: string) {
                     priority: "high",
                     isArchived: loss === "archived",
                     primaryExecutorType: "worktree",
+                    workspaceMode,
                   },
                 ],
         },
@@ -61,4 +65,9 @@ describe("task menu eligibility", () => {
       expect(resolveTaskMenuTarget(state, identity)).toBeNull();
     },
   );
+
+  it("carries the task workspace mode into the management target", () => {
+    const state = fixture(undefined, "inherit_parent").getState();
+    expect(resolveTaskMenuTarget(state, identity)?.workspaceMode).toBe("inherit_parent");
+  });
 });

@@ -41,6 +41,97 @@ def minimal_data():
     }
 
 
+class TestImpact(unittest.TestCase):
+    def data(self):
+        data = minimal_data()
+        data["impact"] = {
+            key: {"status": "none", "items": []}
+            for key in ("breaking", "ux", "plugins", "mcp", "database")
+        }
+        return data
+
+    def test_absent_is_not_reported_as_none(self):
+        self.assertNotIn('id="impact"', build.build(minimal_data()))
+        out = build.build(self.data())
+        self.assertIn("No changes found", out)
+        self.assertNotIn('id="impact-ux"', out)
+
+    def test_unknown_requires_reason_and_stays_distinct(self):
+        data = self.data()
+        data["impact"]["ux"] = {"status": "unknown", "items": []}
+        with self.assertRaises(build.BuildError):
+            build.build(data)
+        data["impact"]["ux"]["note"] = "UI files were unavailable."
+        self.assertIn("Not verified", build.build(data))
+
+    def test_new_contract_requires_why_and_impact(self):
+        with self.assertRaises(build.BuildError):
+            build.validate(minimal_data(), require_impact=True)
+        data = self.data()
+        data["why"] = {"problem": "p", "what": ["w"], "audience": "users", "outcome": "result"}
+        build.validate(data, require_impact=True, changed_paths={"a/b.go"})
+
+    def test_impact_source_paths_are_safe_and_in_inventory(self):
+        data = self.data()
+        data["impact"]["ux"] = {"status": "changed", "items": [{
+            "surface": "Settings", "before": "Old", "after": "New", "file": "a/b.go",
+        }]}
+        for value in ("/absolute.go", "../outside.go", "a/../b.go", "a\\b.go", "https://example.invalid/x"):
+            data["impact"]["ux"]["items"][0]["file"] = value
+            with self.subTest(value=value):
+                with self.assertRaises(build.BuildError):
+                    build.validate(data, changed_paths={"a/b.go"})
+        data["impact"]["ux"]["items"][0]["file"] = "a/other.go"
+        with self.assertRaises(build.BuildError):
+            build.validate(data, changed_paths={"a/b.go"})
+
+    def test_breaking_precedes_code_and_escapes_evidence(self):
+        data = self.data()
+        data["impact"]["breaking"] = {"status": "changed", "items": [{
+            "audience": "Existing users", "before": "Automatic fallback",
+            "after": "<script>alert(1)</script>", "action": "Select a matching model",
+            "file": "a/b.go",
+        }]}
+        out = build.build(data)
+        self.assertLess(out.index('id="impact-breaking"'), out.index('id="changes"'))
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", out)
+        self.assertIn("/files#diff-" + build.sha256_hex("a/b.go"), out)
+        self.assertIn("Breaking changes detected", out)
+
+    def test_mcp_counts_by_context_and_not_schema_edits(self):
+        data = self.data()
+        items = [{"name": name, "context": ctx, "change": change,
+                  "contract": "Input changes", "compatibility": "Compatible", "file": "tools.go"}
+                 for name, ctx, change in [("read", "task", "added"),
+                                           ("read", "office", "removed"),
+                                           ("write", "task", "changed")]]
+        data["impact"]["mcp"] = {"status": "changed", "items": items}
+        out = build.build(data)
+        self.assertIn("task: +1 added, 1 changed, -0 removed; net +1", out)
+        self.assertIn("office: +0 added, 0 changed, -1 removed; net -1", out)
+        items.append(dict(items[0]))
+        with self.assertRaises(build.BuildError):
+            build.build(data)
+
+    def test_rejects_incomplete_or_contradictory_categories(self):
+        for category in ("breaking", "ux", "plugins", "mcp", "database"):
+            for value in (None, [], {"status": "changed", "items": []},
+                          {"status": "none", "items": [{}]},
+                          {"status": "changed", "items": [{}]}):
+                with self.subTest(category=category, value=value):
+                    data = self.data()
+                    data["impact"][category] = value
+                    with self.assertRaises(build.BuildError):
+                        build.build(data)
+
+    def test_why_outcome_and_audience(self):
+        data = minimal_data()
+        data["why"].update({"audience": "Operators", "outcome": "Tasks start reliably"})
+        out = build.build(data)
+        self.assertIn("Operators", out)
+        self.assertIn("Tasks start reliably", out)
+
+
 class TestPatchToMarked(unittest.TestCase):
     def test_headers_dropped_context_kept_indices_recorded(self):
         patch = ("diff --git a/f b/f\nindex 1..2 100644\n--- a/f\n+++ b/f\n"

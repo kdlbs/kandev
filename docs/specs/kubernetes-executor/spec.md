@@ -7,6 +7,12 @@ owner: Kandev
 
 # Kubernetes Executor
 
+## Ownership transition
+
+This file records the Kubernetes foundation. The
+[task-pod contract](../executors/requirements/kubernetes-task-pod.md) and
+[design](../executors/system-design/kubernetes-task-pod.md) own the task-shared Pod lifecycle; the remaining foundation stays in force.
+
 ## Why
 
 Teams that already operate Kubernetes need Kandev sessions to run inside their
@@ -25,7 +31,7 @@ first-class Pod with an administrator-reviewed workload template.
 - Administrators can create Kubernetes profiles from one strict
   `core/v1 PodTemplate` YAML document. The profile chooses the main container,
   Linux architecture, and workspace storage policy.
-- One task session maps to one Pod. Kandev starts its existing `agentctl`
+- One task maps to one Pod shared by its independent sessions. Kandev starts its existing `agentctl`
   control process in the designated container and reaches it through a
   loopback-only Kubernetes port-forward.
 - The template can define images, sidecars, init containers, resource and
@@ -36,11 +42,11 @@ first-class Pod with an administrator-reviewed workload template.
   `kandev-workspace` mount at exactly `/workspace`; admission must preserve
   its recipient and shape. Runtime/auth mounts and init/ephemeral containers
   remain excluded. See [workspace grants](../executors/system-design/kubernetes-docker-workloads.md).
-- Profiles support a Kandev-managed per-session PVC, a Pod-scoped `emptyDir`,
+- Profiles support a Kandev-managed per-task PVC, a Pod-scoped `emptyDir`,
   or an existing namespaced PVC. Kandev never deletes an existing PVC.
 - Ordinary Stop and backend shutdown preserve the Pod and workspace for
-  resume. Archive, delete, and explicit force cleanup remove only resources
-  proven to belong to the recorded session.
+  resume. Session stop/delete removes only its agentctl instance. Task archive/delete
+  removes only resources proven to belong to the canonical task environment.
 - Members can discover and use administrator-configured Kubernetes profiles.
   They cannot create, edit, delete, or test Kubernetes executor/profile
   configuration.
@@ -93,23 +99,9 @@ first-class Pod with an administrator-reviewed workload template.
   current credential view. Rotating or repairing kubeconfig credentials must not
   leave list/card chrome pinned to a launch-time `Unauthorized` result after the
   current executor configuration can inspect the recorded Pod successfully.
-- Sidebar and Kanban executor indicators hydrate their exact task/session status
-  as soon as a valid indicator is rendered. The user does not need to hover the
-  icon before its healthy, failed, or unavailable tone becomes truthful. Exact
-  duplicate scopes share one in-flight read and one recent result; a later
-  hover or keyboard focus refreshes that scope without clearing the last known
-  facts while the refresh is pending.
-- A fine-pointer task-list or Kanban executor indicator uses the same compact,
-  structured disclosure language as the task Pull Request indicator: a
-  focusable icon trigger, a bounded summary surface, a clear identity header,
-  and aligned labelled status rows. It does not fall back to an unstructured
-  stack of sentences. Kubernetes rows include state, restart count, workspace
-  mode, creation time, last check, and a sanitized failure when present.
-- On a coarse pointer, the same compact executor indicator is tappable and
-  opens a bottom Drawer containing the same status facts. Its touch target is
-  at least 44 px without making dense task rows visually taller, and the Drawer
-  owns bounded scrolling plus safe-area padding. Hover is never the only way to
-  discover the status.
+- Compact sidebar and Kanban indicator hydration and responsive disclosure are
+  owned by [task executor status indicators](../executors/requirements/task-status-indicators.md)
+  and their [system design](../executors/system-design/task-status-indicators.md).
 - The raw PodTemplate YAML field grows and shrinks with its content from a compact
   minimum height. It has no independent vertical scrollbar; the settings page is
   the vertical scroll owner, while unwrapped YAML retains contained horizontal
@@ -207,7 +199,7 @@ or cluster-resource identity.
    agent subprocess.
 6. **Preserved:** ordinary stop or backend shutdown closes local forwarding but
    retains Pod/workspace for resume.
-7. **Cleaning:** terminal/forced cleanup validates exact identities, deletes
+7. **Cleaning:** task archive/delete cleanup validates exact identities, deletes
    the Pod, then deletes only a Kandev-created PVC.
 8. **Cleaned:** resources are absent and runtime inventory can be removed.
 
@@ -354,27 +346,8 @@ identity check or inventory lookup stops cleanup without deleting anything.
   kubeconfig credentials can inspect the exact recorded Pod and the indicator
   mounts or its disclosure opens again, **THEN** the status is re-read, the
   error clears, and the Pod icon uses the current healthy tone.
-- **GIVEN** Kanban renders a Kubernetes card with an executor, task, and primary
-  session identity, **WHEN** the card enters the document, **THEN** its exact Pod
-  status is requested before any hover and the Pod icon updates to the returned
-  semantic tone. Another mounted indicator for that exact scope joins the same
-  request instead of issuing a duplicate.
-- **GIVEN** an eager status read is already in flight, **WHEN** the user hovers
-  or keyboard-focuses the executor indicator, **THEN** the disclosure opens with
-  visible loading feedback, retains any last known facts, and joins the causal
-  read. A later open after settlement performs a fresh exact read.
-- **GIVEN** the rendered task has no primary session or lacks the executor
-  identity required by its status source, **WHEN** its indicator renders,
-  **THEN** no malformed request is sent and the icon plus disclosure report an
-  unavailable state rather than `ready`.
-- **GIVEN** a fine-pointer user opens a Kubernetes executor indicator in Kanban
-  or the task sidebar, **WHEN** the summary appears, **THEN** it uses a bounded
-  Pull Request-style identity header and aligned labelled rows for state,
-  restarts, workspace, created time, and last check, with the failure reason as
-  a distinct sanitized status row when present.
-- **GIVEN** the same indicator is rendered for a coarse pointer, **WHEN** the
-  user taps its 44 px target, **THEN** a safe-area-aware bottom Drawer presents
-  the same facts and can be dismissed without selecting or opening the task row.
+- Compact indicator acceptance criteria are maintained in
+  [REQ-EXECUTORS-TASK-STATUS-001](../executors/requirements/task-status-indicators.md).
 - **GIVEN** the recorded Kubernetes Pod is pending, failed, missing, or cannot
   be inspected, **WHEN** the task disclosure refreshes, **THEN** it shows the
   sanitized live state or unavailable/error state and never reports `ready`
@@ -389,7 +362,7 @@ identity check or inventory lookup stops cleanup without deleting anything.
   sessions, autoscaling, and pooled/multi-cluster scheduling.
 - Cross-namespace profiles inside one executor.
 - Windows Pods and automatic node-architecture discovery.
-- Sharing one Pod or one managed PVC among concurrent sessions.
+- Sharing one Pod or one managed PVC among different tasks.
 - Live mutation of running Pods after profile edits.
 - Raw kubeconfig storage in executor JSON or the current user-scoped secret
   store.

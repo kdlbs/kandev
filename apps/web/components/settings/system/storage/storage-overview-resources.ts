@@ -1,6 +1,5 @@
 import type {
   StorageFootprintMeasurement,
-  StorageDockerNetworkSummary,
   StorageOverviewResponse,
   StorageQuarantineSummary,
   StorageSourceProgress,
@@ -8,6 +7,7 @@ import type {
   StorageSummaryPartial,
   StorageTemporaryArtifactsSummary,
 } from "@/lib/types/system";
+import { dockerNetworksResource } from "./storage-docker-networks-resource";
 import { formatGigabytes } from "./storage-units";
 
 /**
@@ -28,9 +28,20 @@ export interface StorageResource {
   detailLines?: string[];
   warning?: string;
   source?: string;
+  sizeBytes?: number;
+  barPercent?: number;
+  partial?: boolean;
 }
 
 const STORAGE_UNAVAILABLE_VALUE_KEY = "system:storageUnavailableValue";
+// i18n-exempt: stable backend error marker from older storage snapshots.
+const LEGACY_DEADLINE_WARNING = "context deadline exceeded";
+const TEMPORARY_WARNING_LIMIT = 10;
+
+function measuredBytes(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value) || value < 0) return undefined;
+  return value;
+}
 
 function analysisSourceText(t: Translate, progress?: StorageSourceProgress): string {
   if (!progress || progress.state === "pending") {
@@ -74,27 +85,34 @@ function quarantineResource(t: Translate, summary: StorageQuarantineSummary): St
       warning: summary.warning,
     };
   }
+  const sizeBytes = measuredBytes(summary.size_bytes);
   return {
     id: "quarantine",
     label: t("system:storageQuarantinedResources"),
-    value: formatGigabytes(summary.size_bytes),
+    value: sizeBytes === undefined ? t(STORAGE_UNAVAILABLE_VALUE_KEY) : formatGigabytes(sizeBytes),
     detail: t("system:storageQuarantineMovedAside", { count: summary.count }),
+    sizeBytes,
   };
 }
 
 function dockerMeasurement(
   t: Translate,
   available: boolean,
-  value: string,
+  value: number | undefined,
   detail: string,
-): Pick<StorageResource, "value" | "detail"> {
+): Pick<StorageResource, "value" | "detail" | "sizeBytes"> {
   if (!available) {
     return {
       value: t(STORAGE_UNAVAILABLE_VALUE_KEY),
       detail: t("system:storageDockerUnmeasured"),
     };
   }
-  return { value, detail };
+  const sizeBytes = measuredBytes(value);
+  return {
+    value: sizeBytes === undefined ? t(STORAGE_UNAVAILABLE_VALUE_KEY) : formatGigabytes(sizeBytes),
+    detail,
+    sizeBytes,
+  };
 }
 
 function temporaryArtifactsResource(
@@ -111,6 +129,7 @@ function temporaryArtifactsResource(
       warning: warnings || undefined,
     };
   }
+  const sizeBytes = measuredBytes(summary.total_bytes);
   const stale = summary.stale_count ?? 0;
   const active = summary.active_count ?? 0;
   const protectedCount = summary.protected_count ?? 0;
@@ -123,10 +142,7 @@ function temporaryArtifactsResource(
   return {
     id: TEMPORARY_ARTIFACTS_RESOURCE_ID,
     label: t("system:storageTemporaryArtifacts"),
-    value:
-      summary.total_bytes === undefined
-        ? t(STORAGE_UNAVAILABLE_VALUE_KEY)
-        : formatGigabytes(summary.total_bytes),
+    value: sizeBytes === undefined ? t(STORAGE_UNAVAILABLE_VALUE_KEY) : formatGigabytes(sizeBytes),
     detail: [
       t("system:storageTemporaryArtifactsStaleCount", { count: stale }),
       staleBytes,
@@ -136,6 +152,7 @@ function temporaryArtifactsResource(
       .filter(Boolean)
       .join(" · "),
     warning: warnings || undefined,
+    sizeBytes,
   };
 }
 
@@ -147,16 +164,19 @@ function workspaceResource(
   if (!workspace) {
     return pendingStorageResource(t, "workspaces", t("system:storageTaskWorkspaces"), progress);
   }
+  const sizeBytes =
+    workspace.available === false ? undefined : measuredBytes(workspace.total_bytes);
   return {
     id: "workspaces",
     label: t("system:storageTaskWorkspaces"),
-    value: formatGigabytes(workspace.total_bytes ?? 0),
+    value: sizeBytes === undefined ? t(STORAGE_UNAVAILABLE_VALUE_KEY) : formatGigabytes(sizeBytes),
     detail: t("system:storageWorkspacesDetail", {
       reclaimable: formatGigabytes(workspace.candidate_bytes ?? 0),
       active: formatGigabytes(workspace.active_bytes ?? 0),
     }),
     warning: workspace.warning,
     source: "workspaces",
+    sizeBytes,
   };
 }
 
@@ -222,6 +242,7 @@ function databaseResource(
         source: options.source,
       };
     case "measured": {
+      const sizeBytes = measuredBytes(measurement.size_bytes);
       const detail = [
         t(options.detailKey),
         measurement.included_in_total === false
@@ -238,12 +259,11 @@ function databaseResource(
         id: options.id,
         label: options.label,
         value:
-          measurement.size_bytes === undefined
-            ? t(STORAGE_UNAVAILABLE_VALUE_KEY)
-            : formatGigabytes(measurement.size_bytes),
+          sizeBytes === undefined ? t(STORAGE_UNAVAILABLE_VALUE_KEY) : formatGigabytes(sizeBytes),
         detail,
         warning: measurement.warning,
         source: options.source,
+        sizeBytes,
       };
     }
   }
@@ -255,7 +275,7 @@ interface DockerResourceOptions {
   progress?: StorageSourceProgress;
   id: string;
   label: string;
-  value: string;
+  value: number | undefined;
   detail: string;
   warning?: string;
 }
@@ -283,32 +303,36 @@ function goCacheResources(
   progress: StorageSourceProgress | undefined,
   managedPath: string,
 ): StorageResource[] {
-  const resources: StorageResource[] = [
-    goCache
-      ? {
-          id: "go-cache",
-          label: t("system:storageGoBuildCache"),
-          value: formatGigabytes(goCache.size_bytes ?? 0),
-          // A filesystem path from the API is never routed through the catalog.
-          detail: goCache.path ?? managedPath,
-          warning: goCache.warning,
-          source: "go_cache",
-        }
-      : pendingStorageResource(
-          t,
-          "go-cache",
-          t("system:storageGoBuildCache"),
-          progress,
-          "go_cache",
-        ),
-  ];
+  const resources: StorageResource[] = [];
+  if (goCache) {
+    const sizeBytes = goCache.available === false ? undefined : measuredBytes(goCache.size_bytes);
+    resources.push({
+      id: "go-cache",
+      label: t("system:storageGoBuildCache"),
+      value:
+        sizeBytes === undefined ? t(STORAGE_UNAVAILABLE_VALUE_KEY) : formatGigabytes(sizeBytes),
+      // A filesystem path from the API is never routed through the catalog.
+      detail: goCache.path ?? managedPath,
+      warning: goCache.warning,
+      source: "go_cache",
+      sizeBytes,
+    });
+  } else {
+    resources.push(
+      pendingStorageResource(t, "go-cache", t("system:storageGoBuildCache"), progress, "go_cache"),
+    );
+  }
   if (goCache?.unmanaged_path) {
+    const sizeBytes =
+      goCache.available === false ? undefined : measuredBytes(goCache.unmanaged_size_bytes);
     resources.push({
       id: "unmanaged-go-cache",
       label: t("system:storageUserGoBuildCache"),
-      value: formatGigabytes(goCache.unmanaged_size_bytes ?? 0),
+      value:
+        sizeBytes === undefined ? t(STORAGE_UNAVAILABLE_VALUE_KEY) : formatGigabytes(sizeBytes),
       detail: goCache.unmanaged_path,
       source: "go_cache",
+      sizeBytes,
     });
   }
   return resources;
@@ -377,6 +401,13 @@ function temporaryRootLine(
   );
 }
 
+function temporarySummaryBytes(summary: StorageSystemTemporarySummary): number | undefined {
+  if (summary.status === "unavailable" || summary.status === "not_applicable") {
+    return undefined;
+  }
+  return measuredBytes(summary.size_bytes);
+}
+
 function temporarySummaryValue(t: Translate, summary: StorageSystemTemporarySummary): string {
   if (summary.status === "unavailable") {
     return t(STORAGE_UNAVAILABLE_VALUE_KEY);
@@ -384,10 +415,11 @@ function temporarySummaryValue(t: Translate, summary: StorageSystemTemporarySumm
   if (summary.status === "not_applicable") {
     return t("system:storageNotApplicableValue");
   }
-  if (summary.size_bytes === undefined) {
+  const sizeBytes = temporarySummaryBytes(summary);
+  if (sizeBytes === undefined) {
     return t(STORAGE_UNAVAILABLE_VALUE_KEY);
   }
-  return formatGigabytes(summary.size_bytes);
+  return formatGigabytes(sizeBytes);
 }
 
 function temporarySummaryDetail(
@@ -406,21 +438,55 @@ function temporarySummaryDetail(
   }
 }
 
+function normalizeTemporaryWarnings(warnings: string[]): {
+  values: string[];
+  includesDeadline: boolean;
+} {
+  const values: string[] = [];
+  let includesDeadline = false;
+  for (const warning of warnings) {
+    for (const line of warning.split(/\r?\n/)) {
+      const value = line.trim();
+      if (!value) continue;
+      if (value === LEGACY_DEADLINE_WARNING) {
+        includesDeadline = true;
+        continue;
+      }
+      if (values.includes(value) || values.length >= TEMPORARY_WARNING_LIMIT) continue;
+      values.push(value);
+    }
+  }
+  return { values, includesDeadline };
+}
+
 function systemTemporaryResource(
   t: Translate,
   summary: StorageSystemTemporarySummary,
 ): StorageResource {
-  const warnings = (summary.warnings ?? []).filter(Boolean).join(" · ");
+  const normalizedWarnings = normalizeTemporaryWarnings([
+    ...(summary.warnings ?? []),
+    ...summary.roots.flatMap((root) => root.warnings ?? []),
+  ]);
+  const includesDeadline =
+    summary.reason === "deadline" ||
+    summary.roots.some((root) => root.reason === "deadline") ||
+    normalizedWarnings.includesDeadline;
   const value = temporarySummaryValue(t, summary);
   const statusDetail = temporarySummaryDetail(t, summary.status);
+  const detailLines = summary.roots.map((root) => temporaryRootLine(t, root));
+  if (includesDeadline) {
+    detailLines.push(t("system:storageSystemTemporaryDeadlineDetail"));
+  }
   return {
     id: SYSTEM_TEMPORARY_RESOURCE_ID,
     label: t("system:storageSystemTemporaryFolders"),
     value,
     detail: [t("system:storageSystemTemporaryInformational"), statusDetail].join(" "),
-    detailLines: summary.roots.map((root) => temporaryRootLine(t, root)),
-    warning: warnings || undefined,
+    detailLines,
+    warning: normalizedWarnings.values.join(" · ") || undefined,
     source: "system_temporary",
+    sizeBytes: temporarySummaryBytes(summary),
+    partial: summary.status === "partial",
   };
 }
 
@@ -454,7 +520,7 @@ function dockerResources(
       progress,
       id: "managed-containers",
       label: t("system:storageKandevContainers"),
-      value: formatGigabytes(docker?.managed_container_bytes ?? 0),
+      value: docker?.managed_container_bytes,
       detail: t("system:storageManagedContainerCount", {
         count: docker?.managed_container_count ?? 0,
       }),
@@ -464,7 +530,7 @@ function dockerResources(
       progress,
       id: "docker-image-layers",
       label: t("system:storageDockerImageLayers"),
-      value: formatGigabytes(docker?.image_layer_bytes ?? 0),
+      value: docker?.image_layer_bytes,
       detail: dockerHost,
       warning: dockerWarning,
     }),
@@ -472,7 +538,7 @@ function dockerResources(
       progress,
       id: "docker-build-cache",
       label: t("system:storageDockerBuildCache"),
-      value: formatGigabytes(docker?.build_cache_bytes ?? 0),
+      value: docker?.build_cache_bytes,
       detail: dockerHost,
       warning: dockerWarning,
     }),
@@ -480,36 +546,38 @@ function dockerResources(
       progress,
       id: "docker-unused-images",
       label: t("system:storageUnusedDockerImages"),
-      value: formatGigabytes(docker?.unused_image_bytes ?? 0),
+      value: docker?.unused_image_bytes,
       detail: t("system:storageUnusedImagesDetail"),
       warning: dockerWarning,
     }),
   ];
 }
 
-function dockerNetworksResource(
-  t: Translate,
-  summary: StorageDockerNetworkSummary | null | undefined,
-): StorageResource {
-  if (!summary || summary.available === false) {
-    return {
-      id: "docker-networks",
-      label: t("system:storageDockerNetworks"),
-      value: t(STORAGE_UNAVAILABLE_VALUE_KEY),
-      detail: t("system:storageDockerNetworksUnmeasured"),
-      warning: summary?.warning,
-      source: "docker_networks",
-    };
-  }
-  const candidates = summary.candidates?.length ?? 0;
-  return {
-    id: "docker-networks",
-    label: t("system:storageDockerNetworks"),
-    value: String(candidates),
-    detail: t("system:storageDockerNetworksDetail", { count: candidates }),
-    warning: summary.warnings?.join(" · ") || undefined,
-    source: "docker_networks",
-  };
+function sortAndScaleResources(resources: StorageResource[]): StorageResource[] {
+  const ordered = resources
+    .map((resource, index) => ({ resource, index }))
+    .sort((left, right) => {
+      if (left.resource.sizeBytes === undefined && right.resource.sizeBytes === undefined) {
+        return left.index - right.index;
+      }
+      if (left.resource.sizeBytes === undefined) return 1;
+      if (right.resource.sizeBytes === undefined) return -1;
+      if (left.resource.sizeBytes !== right.resource.sizeBytes) {
+        return right.resource.sizeBytes - left.resource.sizeBytes;
+      }
+      return left.index - right.index;
+    });
+  const maximum = ordered.reduce<number | undefined>((largest, entry) => {
+    if (entry.resource.sizeBytes === undefined) return largest;
+    return largest === undefined
+      ? entry.resource.sizeBytes
+      : Math.max(largest, entry.resource.sizeBytes);
+  }, undefined);
+  return ordered.map(({ resource }) => {
+    if (resource.sizeBytes === undefined || maximum === undefined) return resource;
+    const barPercent = maximum === 0 ? 0 : Math.min(100, (resource.sizeBytes / maximum) * 100);
+    return { ...resource, barPercent };
+  });
 }
 
 export function storageResources(
@@ -518,7 +586,7 @@ export function storageResources(
 ): StorageResource[] {
   const summary = overview.summary ?? overview.analysis.partial_summary ?? {};
   const progress = overview.analysis.progress.sources;
-  return [
+  return sortAndScaleResources([
     workspaceResource(t, summary.workspaces, progress.workspaces),
     databaseResource(t, summary.database, progress.database, {
       id: DATABASE_RESOURCE_ID,
@@ -553,5 +621,5 @@ export function storageResources(
     ),
     ...dockerResources(t, summary.docker, progress.docker, overview.capabilities.docker_host),
     dockerNetworksResource(t, summary.docker_networks),
-  ];
+  ]);
 }

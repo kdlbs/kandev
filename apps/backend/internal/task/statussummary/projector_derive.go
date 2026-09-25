@@ -1,7 +1,11 @@
 package statussummary
 
 import (
+	"errors"
 	"strings"
+
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func deriveSummary(state *projectionState) TaskStatusSummary {
@@ -12,11 +16,57 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		ActiveSubagentCount: activeSubagentCount,
 		PendingAction:       derivePendingAction(state),
 		ActiveError:         deriveActiveError(state),
+		TaskError:           cloneActiveError(state.taskError),
 		Git:                 deriveGitSummary(state),
 		PullRequest:         derivePullRequestSummary(state),
 		QueuedPromptCount:   state.queuedCount,
 		LastActivityAt:      cloneTimePtr(state.lastActivityAt),
+		LaunchQueue:         cloneLaunchQueue(state.launchQueue),
 	}
+}
+
+func cloneLaunchQueue(queue *LaunchQueueSummary) *LaunchQueueSummary {
+	if queue == nil {
+		return nil
+	}
+	copy := *queue
+	if queue.Capacity != nil {
+		capacity := *queue.Capacity
+		copy.Capacity = &capacity
+	}
+	return &copy
+}
+
+func equalLaunchQueue(left, right *LaunchQueueSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if left.SessionID != right.SessionID ||
+		left.AgentProfileID != right.AgentProfileID ||
+		left.WorkflowStepID != right.WorkflowStepID ||
+		!left.QueuedAt.Equal(right.QueuedAt) ||
+		left.Reason != right.Reason ||
+		left.Retrying != right.Retrying {
+		return false
+	}
+	if left.Capacity == nil || right.Capacity == nil {
+		return left.Capacity == right.Capacity
+	}
+	// ObservedAt describes when the controller sampled capacity. It is a
+	// response freshness detail, not queue identity, and must not create a new
+	// persisted projection on every refresh.
+	return left.Capacity.InUse == right.Capacity.InUse &&
+		left.Capacity.Limit == right.Capacity.Limit
+}
+
+func cloneActiveError(value *ActiveErrorSummary) *ActiveErrorSummary {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	copy.RecoveryActions = append([]string(nil), value.RecoveryActions...)
+	copy.Causes = append([]models.AgentErrorCause(nil), value.Causes...)
+	return &copy
 }
 
 func deriveSessionFields(state *projectionState) (*PrimarySessionSummary, string, int) {
@@ -90,7 +140,7 @@ func derivePendingAction(state *projectionState) string {
 func deriveActiveError(state *projectionState) *ActiveErrorSummary {
 	var active *ActiveErrorSummary
 	if !state.errorsObserved && state.current != nil && state.current.ActiveError != nil &&
-		(!state.taskErrorObserved || state.current.ActiveError.SessionID != "") {
+		(!state.taskErrorObserved || activeErrorScope(state.current.ActiveError) == models.ErrorScopeSession) {
 		copy := *state.current.ActiveError
 		active = &copy
 	}
@@ -106,6 +156,18 @@ func deriveActiveError(state *projectionState) *ActiveErrorSummary {
 		active = &copy
 	}
 	return active
+}
+
+// activeErrorScope routes explicit ownership first. Older summaries omitted
+// scope, so their session-id inference remains the compatibility fallback.
+func activeErrorScope(value *ActiveErrorSummary) string {
+	if value != nil && (value.Scope == models.ErrorScopeSession || value.Scope == models.ErrorScopeTask) {
+		return value.Scope
+	}
+	if value != nil && value.SessionID != "" {
+		return models.ErrorScopeSession
+	}
+	return models.ErrorScopeTask
 }
 
 func newerActiveError(candidate, current *ActiveErrorSummary) bool {
@@ -165,14 +227,8 @@ func isGoneTaskPersistErr(err error) bool {
 		strings.Contains(msg, "violates foreign key")
 }
 
-// isMissingTaskResolveErr reports whether workspace resolution failed because
-// the task no longer exists. Transient repository errors must not match.
-func isMissingTaskResolveErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "not found") ||
-		strings.Contains(msg, "no rows") ||
-		strings.Contains(msg, "sql: no rows in result set")
+// isMissingTaskLookupErr reports whether a task lookup returned the repository's
+// authoritative missing-task sentinel. Transient repository errors must not match.
+func isMissingTaskLookupErr(err error) bool {
+	return errors.Is(err, repoerrors.ErrTaskNotFound)
 }

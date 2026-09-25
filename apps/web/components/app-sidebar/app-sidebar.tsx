@@ -8,6 +8,7 @@ import { useEnsureWorkspaceWorkflows } from "@/hooks/use-workflows";
 import { useOfficeModeState } from "@/hooks/use-in-office";
 import type { WorkspaceMode } from "@/components/workspace-scope-provider";
 import { useOfficeWorkspaceData } from "@/hooks/use-office-workspace-data";
+import { useSidebarHoverReveal } from "@/hooks/domains/sidebar/use-sidebar-hover-reveal";
 import { cn } from "@/lib/utils";
 import {
   APP_SIDEBAR_COLLAPSED_WIDTH,
@@ -27,6 +28,8 @@ import { IntegrationsSection } from "./sections/integrations-section";
 import { OfficeNavigationSection } from "./sections/office-navigation-section";
 import { ProjectsSection } from "./sections/projects-section";
 import { TasksSection } from "./sections/tasks-section";
+import { SidebarLayoutNavigation } from "./sidebar-layout-navigation";
+import { useHasSavedSidebarLayout } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
 
 const SECTION_ROUTE_MAP: Array<{ id: string; matches: (path: string) => boolean }> = [
   {
@@ -68,6 +71,7 @@ function AppSidebarUnresolvedNav({ collapsed }: { collapsed: boolean }) {
 }
 
 function AppSidebarModeNav({ collapsed, inOffice }: { collapsed: boolean; inOffice: boolean }) {
+  const hasSavedSidebarLayout = useHasSavedSidebarLayout();
   return (
     <>
       <div
@@ -77,18 +81,24 @@ function AppSidebarModeNav({ collapsed, inOffice }: { collapsed: boolean; inOffi
         )}
         data-testid="app-sidebar-scroll"
       >
-        <AppSidebarPrimaryNav collapsed={collapsed} />
-        {/* Directly under New Task: an automation is a thing you keep, the
-            same weight as a project, and the list IS the nav — picking one
-            opens its history rather than a settings form. */}
-        {!inOffice && <AutomationsSection collapsed={collapsed} />}
-        {!inOffice && <CanvasesSection collapsed={collapsed} />}
-        <PluginNavItems collapsed={collapsed} />
+        {hasSavedSidebarLayout ? (
+          <SidebarLayoutNavigation collapsed={collapsed} inOffice={inOffice} />
+        ) : (
+          <>
+            <AppSidebarPrimaryNav collapsed={collapsed} />
+            {/* Directly under New Task: an automation is a thing you keep, the
+                same weight as a project, and the list IS the nav — picking one
+                opens its history rather than a settings form. */}
+            {!inOffice && <AutomationsSection collapsed={collapsed} />}
+            {!inOffice && <CanvasesSection collapsed={collapsed} />}
+            <PluginNavItems collapsed={collapsed} />
+          </>
+        )}
         {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
         <ProjectsSection collapsed={collapsed} />
         <AgentsSection collapsed={collapsed} />
         {inOffice && <OfficeNavigationSection collapsed={collapsed} section="office" />}
-        {!inOffice && <IntegrationsSection collapsed={collapsed} />}
+        {!inOffice && !hasSavedSidebarLayout && <IntegrationsSection collapsed={collapsed} />}
       </div>
       {/* In regular kanban mode, Tasks is the flex-grow middle section so
           it absorbs remaining vertical space and scrolls internally.
@@ -117,6 +127,23 @@ function AppSidebarNavigation({ collapsed, mode, settingsMode }: AppSidebarNavig
     <nav className="relative flex-1 min-h-0 flex flex-col gap-2 px-2 py-2 overflow-hidden">
       {content()}
     </nav>
+  );
+}
+
+function AppSidebarFooterSlot({
+  collapsed,
+  onToggleSettingsMode,
+}: {
+  collapsed: boolean;
+  onToggleSettingsMode: () => void;
+}) {
+  const layoutManaged = useHasSavedSidebarLayout();
+  return (
+    <AppSidebarFooter
+      collapsed={collapsed}
+      onToggleSettingsMode={onToggleSettingsMode}
+      layoutManaged={layoutManaged}
+    />
   );
 }
 
@@ -180,6 +207,14 @@ export function AppSidebar() {
   const toggleCollapsed = useAppStore((s) => s.toggleAppSidebar);
   const setWidth = useAppStore((s) => s.setAppSidebarWidth);
   const pathname = usePathname();
+  const enabled = useAppStore((s) => s.userSettings.sidebarHoverEnabled);
+  const delayMs = useAppStore((s) => s.userSettings.sidebarHoverDelayMs);
+  const hover = useSidebarHoverReveal({ collapsed, pathname, enabled, delayMs });
+  const visuallyCollapsed = collapsed && !hover.revealed;
+  const handleToggleCollapse = () => {
+    hover.dismiss();
+    toggleCollapsed();
+  };
   const mode = useOfficeModeState();
   const [isResizing, setIsResizing] = useState(false);
 
@@ -224,7 +259,6 @@ export function AppSidebar() {
   const targetWidth = collapsed ? APP_SIDEBAR_COLLAPSED_WIDTH : expandedWidth;
   const { settingsMode, toggleSettingsMode: handleToggleSettingsMode } =
     useSettingsTakeover(pathname);
-
   useEffect(() => {
     if (!pathname) return;
     for (const entry of SECTION_ROUTE_MAP) {
@@ -244,6 +278,9 @@ export function AppSidebar() {
       style={{ width: targetWidth }}
     >
       <aside
+        ref={hover.ref}
+        {...hover.handlers}
+        data-hover-revealed={hover.revealed ? "true" : "false"}
         data-testid="app-sidebar"
         data-collapsed={collapsed ? "true" : "false"}
         className={cn(
@@ -256,15 +293,26 @@ export function AppSidebar() {
             ? "transition-none"
             : "transition-[width] duration-300 ease-out motion-reduce:transition-none",
         )}
-        style={{ width: targetWidth }}
+        style={{ width: visuallyCollapsed ? APP_SIDEBAR_COLLAPSED_WIDTH : expandedWidth }}
       >
-        <AppSidebarHeader collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
+        <AppSidebarHeader
+          collapsed={visuallyCollapsed}
+          hoverRevealed={hover.revealed}
+          onToggleCollapse={handleToggleCollapse}
+        />
         <div
           data-testid="app-sidebar-content"
           className="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
-          <AppSidebarNavigation collapsed={collapsed} mode={mode} settingsMode={settingsMode} />
-          <AppSidebarFooter collapsed={collapsed} onToggleSettingsMode={handleToggleSettingsMode} />
+          <AppSidebarNavigation
+            collapsed={visuallyCollapsed}
+            mode={mode}
+            settingsMode={settingsMode}
+          />
+          <AppSidebarFooterSlot
+            collapsed={visuallyCollapsed}
+            onToggleSettingsMode={handleToggleSettingsMode}
+          />
         </div>
         {!collapsed && <AppSidebarResizeHandle onMouseDown={handleResize} />}
       </aside>

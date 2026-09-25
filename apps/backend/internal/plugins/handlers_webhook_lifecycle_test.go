@@ -8,12 +8,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
@@ -25,13 +30,18 @@ type blockingWebhookInvoker struct {
 }
 
 type recordingWebhookInvoker struct {
-	calls int
+	calls    int
+	response *pluginsdk.WebhookResponse
+	err      error
 }
 
 func (i *recordingWebhookInvoker) InvokeWebhook(
 	_ context.Context, _ string, _ *pluginsdk.WebhookRequest,
 ) (*pluginsdk.WebhookResponse, error) {
 	i.calls++
+	if i.response != nil || i.err != nil {
+		return i.response, i.err
+	}
 	return &pluginsdk.WebhookResponse{Status: http.StatusOK}, nil
 }
 
@@ -109,6 +119,155 @@ runtime:
 		t.Fatalf("WritePackage: %v", err)
 	}
 	return &buf
+}
+
+func observedWebhookLogger(t *testing.T) (*logger.Logger, *observer.ObservedLogs) {
+	t.Helper()
+	core, logs := observer.New(zapcore.DebugLevel)
+	zapLogger := zap.New(core)
+	wrapped, err := logger.NewFromZap(zapLogger)
+	if err != nil {
+		t.Fatalf("NewFromZap: %v", err)
+	}
+	t.Cleanup(func() { _ = zapLogger.Sync() })
+	return wrapped, logs
+}
+
+func TestWebhookFailureOriginLogsSafeFields(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		origin     string
+		class      string
+		response   *pluginsdk.WebhookResponse
+		invokeErr  error
+		disable    bool
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name:       "host lifecycle",
+			origin:     "host_lifecycle",
+			class:      "host_error",
+			disable:    true,
+			wantStatus: http.StatusServiceUnavailable,
+			wantBody:   `"error":"plugins: plugin \"kandev-plugin-lifecycle-log\" lifecycle generation is no longer active"`,
+		},
+		{
+			name:       "host RPC",
+			origin:     "host_rpc",
+			class:      "host_error",
+			invokeErr:  fmt.Errorf("rpc failed with rpc-secret-sentinel"),
+			wantStatus: http.StatusServiceUnavailable,
+			wantBody:   `"error":"rpc failed with rpc-secret-sentinel"`,
+		},
+		{
+			name:       "plugin response",
+			origin:     "plugin_response",
+			response:   &pluginsdk.WebhookResponse{Status: http.StatusServiceUnavailable, Body: []byte("plugin-response-secret-sentinel")},
+			wantStatus: http.StatusServiceUnavailable,
+			wantBody:   "plugin-response-secret-sentinel",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			const id = "kandev-plugin-lifecycle-log"
+			svc, _, _ := newTestService(t)
+			if _, err := svc.Install(t.Context(), lifecycleWebhookPackage(t, id, "1.0.0", "public", false)); err != nil {
+				t.Fatalf("Install: %v", err)
+			}
+			if test.disable {
+				if err := svc.Disable(id); err != nil {
+					t.Fatalf("Disable: %v", err)
+				}
+			}
+
+			log, logs := observedWebhookLogger(t)
+			invoker := &recordingWebhookInvoker{response: test.response, err: test.invokeErr}
+			ctrl := &Controller{svc: svc, log: log, webhookInvoker: invoker}
+			gin.SetMode(gin.TestMode)
+			router := gin.New()
+			router.POST("/api/plugins/:id/webhooks/:key", ctrl.webhook)
+
+			requestBody := "request-body-secret-sentinel"
+			request := httptest.NewRequest(http.MethodPost,
+				"/api/plugins/"+id+"/webhooks/callback?token=query-secret-sentinel",
+				strings.NewReader(requestBody),
+			)
+			request.Header.Set("X-Request-Secret", "header-secret-sentinel")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			if recorder.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d, body=%s", recorder.Code, test.wantStatus, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), test.wantBody) {
+				t.Fatalf("body = %q, want it to contain %q", recorder.Body.String(), test.wantBody)
+			}
+			if test.disable && invoker.calls != 0 {
+				t.Fatalf("invoker calls = %d, want 0 after lifecycle lease failure", invoker.calls)
+			}
+			if !test.disable && invoker.calls != 1 {
+				t.Fatalf("invoker calls = %d, want 1", invoker.calls)
+			}
+
+			entries := logs.FilterMessage("plugin webhook failed").All()
+			if len(entries) != 1 {
+				t.Fatalf("webhook failure logs = %d, want 1", len(entries))
+			}
+			fields := entries[0].ContextMap()
+			if got := fields["plugin_id"]; got != id {
+				t.Fatalf("plugin_id = %v, want %q", got, id)
+			}
+			if got := fmt.Sprint(fields["status"]); got != fmt.Sprint(test.wantStatus) {
+				t.Fatalf("status field = %v, want %d", got, test.wantStatus)
+			}
+			if got := fields["origin"]; got != test.origin {
+				t.Fatalf("origin = %v, want %q", got, test.origin)
+			}
+			if test.class == "" {
+				if _, ok := fields["error_class"]; ok {
+					t.Fatalf("plugin response was labeled as a host error: %#v", fields["error_class"])
+				}
+			} else if got := fields["error_class"]; got != test.class {
+				t.Fatalf("error_class = %v, want %q", got, test.class)
+			}
+			logged := fmt.Sprint(fields)
+			for _, secret := range []string{
+				"request-body-secret-sentinel", "query-secret-sentinel", "header-secret-sentinel",
+				"rpc-secret-sentinel", "plugin-response-secret-sentinel",
+			} {
+				if strings.Contains(logged, secret) {
+					t.Fatalf("webhook diagnostic exposed %q: %s", secret, logged)
+				}
+			}
+			if _, ok := fields["error"]; ok {
+				t.Fatalf("webhook diagnostic contained a raw error field: %s", logged)
+			}
+		})
+	}
+}
+
+func TestWebhookFailureLogsWaitForAuthorizationAndDeclaration(t *testing.T) {
+	const id = "kandev-plugin-private-log"
+	svc, _, _ := newTestService(t)
+	if _, err := svc.Install(t.Context(), lifecycleWebhookPackage(t, id, "1.0.0", "authenticated", false)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	log, logs := observedWebhookLogger(t)
+	ctrl := &Controller{svc: svc, log: log, webhookInvoker: &recordingWebhookInvoker{}}
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/api/plugins/:id/webhooks/:key", ctrl.webhook)
+
+	unauthorized := doRequest(router, http.MethodPost, "/api/plugins/"+id+"/webhooks/callback", "{}", nil)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d, want 401", unauthorized.Code)
+	}
+	undeclared := doAuthedRequest(router, http.MethodPost, "/api/plugins/"+id+"/webhooks/unknown", "{}", nil)
+	if undeclared.Code != http.StatusNotFound {
+		t.Fatalf("undeclared status = %d, want 404", undeclared.Code)
+	}
+	if entries := logs.FilterMessage("plugin webhook failed").All(); len(entries) != 0 {
+		t.Fatalf("pre-dispatch requests emitted webhook failure diagnostics: %+v", entries)
+	}
 }
 
 func TestWebhookDispatchLeaseCoversRPCAndAuthLoginResponse(t *testing.T) {

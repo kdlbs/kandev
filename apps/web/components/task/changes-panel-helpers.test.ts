@@ -14,6 +14,10 @@ const PRIMARY_PR_ID = "primary-pr";
 const RENAMED_PATH = "src/renamed.ts";
 
 describe("mapToChangedFiles", () => {
+  it("preserves symlink identity", () => {
+    const file = { path: "link", status: "modified" as const, staged: false, is_symlink: true };
+    expect(mapToChangedFiles([file])[0]).toHaveProperty("isSymlink", true);
+  });
   it("preserves a projected mixed-change layer", () => {
     expect(
       mapToChangedFiles([

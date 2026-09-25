@@ -351,6 +351,10 @@ type pendingMoveScenario struct {
 //   - Mock LaunchAgent that fires the boot signal asynchronously so the
 //     resume path can complete in tests without a real agent process.
 func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
+	return buildPendingMoveScenarioWithQueue(t, false)
+}
+
+func buildPendingMoveScenarioWithQueue(t *testing.T, useSQLiteQueue bool) *pendingMoveScenario {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -390,6 +394,10 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 	log := testLogger()
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
+	messageQueueService := newAuthoritativeMemoryQueue(repo, log)
+	if useSQLiteQueue {
+		messageQueueService = newSQLiteQueueForTaskRepo(t, repo)
+	}
 
 	svc := &Service{
 		logger:             log,
@@ -397,7 +405,7 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 		workflowStepGetter: stepGetter,
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       newAuthoritativeMemoryQueue(repo, log),
+		messageQueue:       messageQueueService,
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -413,10 +421,15 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 	); err != nil {
 		t.Fatalf("queue hand-off prompt: %v", err)
 	}
+	reviewSession, err := repo.GetTaskSession(ctx, reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session for pending move: %v", err)
+	}
 	if err := svc.messageQueue.SetPendingMove(ctx, reviewSessionID, &messagequeue.PendingMove{
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
+		SessionIncarnationID: reviewSession.QueueIncarnationID,
+		TaskID:               "task-1",
+		WorkflowID:           "wf1",
+		WorkflowStepID:       stepInProgressID,
 	}); err != nil {
 		t.Fatalf("set pending move: %v", err)
 	}
@@ -860,6 +873,14 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("create session: %v", err)
 			}
+			if err := repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLastAgentError, models.LastAgentError{
+				Message:    "saved session failed before recovery",
+				OccurredAt: now,
+				Scope:      models.ErrorScopeSession,
+				StampValue: "saved-session-failure",
+			}); err != nil {
+				t.Fatalf("set saved session failure: %v", err)
+			}
 
 			taskRepo := newMockTaskRepo()
 			taskRepo.tasks["task-1"] = &v1.Task{
@@ -914,6 +935,10 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 			}
 			if _, err := time.Parse(time.RFC3339Nano, resolvedAt); err != nil {
 				t.Fatalf("recovery resolution timestamp %q is invalid: %v", resolvedAt, err)
+			}
+			lastError, ok := models.LoadLastAgentError(finalSess.Metadata)
+			if !ok || !lastError.IsDismissed() {
+				t.Fatalf("last agent error = %#v, want dismissed historical error", lastError)
 			}
 		})
 	}

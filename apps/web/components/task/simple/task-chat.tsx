@@ -13,6 +13,7 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
+import { useChatMotion } from "@/hooks/use-chat-motion";
 import { useAppStore } from "@/components/state-provider";
 import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
@@ -21,7 +22,6 @@ import { formatRelativeTime } from "@/lib/utils";
 import { MarkdownComment } from "./markdown-comment";
 import { AgentTurnPanel } from "./components/agent-turn-panel";
 import { RunErrorEntry } from "./components/run-error-entry";
-import { TaskChatLaunchError } from "./components/task-chat-launch-error";
 import { UserCommentRunBadge } from "./components/user-comment-run-badge";
 import { buildCommentTurnContext, type CommentTurnContext } from "./turn-context";
 import { groupSessionsForTimeline, groupSortKey, type SessionGroup } from "./session-groups";
@@ -35,7 +35,6 @@ import type {
 import {
   buildLaterAgentReplyMap,
   buildRunErrorsFromSessions,
-  filterVisibleRunErrors,
   mergeChatEntries,
   type ChatEntry,
 } from "./chat-entries";
@@ -506,6 +505,7 @@ function useChatAutoScroll(
  * the user when they scroll away.
  */
 function useCommentHashScroll(comments: TaskComment[]): void {
+  const motionEnabled = useChatMotion();
   const targetIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -519,9 +519,9 @@ function useCommentHashScroll(comments: TaskComment[]): void {
     if (!targetId) return;
     const el = document.getElementById(targetId);
     if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.scrollIntoView({ behavior: motionEnabled ? "smooth" : "auto", block: "center" });
     targetIdRef.current = null;
-  }, [comments]);
+  }, [comments, motionEnabled]);
 }
 
 function ChatEntries({
@@ -591,7 +591,6 @@ export function TaskChat({
   onCommentsChanged,
   taskTitle,
   taskDescription,
-  statusSummary,
   repositories,
 }: TaskChatProps) {
   const { t } = useTranslation();
@@ -616,10 +615,6 @@ export function TaskChat({
   );
   const turnCtx = useMemo(() => buildCommentTurnContext(comments, sessions), [comments, sessions]);
   const runErrors = useMemo(() => buildRunErrorsFromSessions(sessions), [sessions]);
-  const visibleRunErrors = useMemo(
-    () => filterVisibleRunErrors(runErrors, statusSummary?.active_error),
-    [runErrors, statusSummary?.active_error],
-  );
   const laterAgentReplyMap = useMemo(() => buildLaterAgentReplyMap(comments), [comments]);
   const entries = useMemo(
     () =>
@@ -629,10 +624,10 @@ export function TaskChat({
         groups: renderedGroups,
         decisions,
         turnCtx,
-        runErrors: visibleRunErrors,
+        runErrors,
         laterAgentReplyMap,
       }),
-    [comments, timeline, renderedGroups, decisions, turnCtx, visibleRunErrors, laterAgentReplyMap],
+    [comments, timeline, renderedGroups, decisions, turnCtx, runErrors, laterAgentReplyMap],
   );
 
   useChatAutoScroll(scrollParent ?? null, sessions, taskId);
@@ -653,12 +648,6 @@ export function TaskChat({
           {t("task:showOlderSessions", { count: olderGroups.length })}
         </button>
       )}
-      <TaskChatLaunchError
-        taskId={taskId}
-        workspaceId={workspaceId}
-        statusSummary={statusSummary}
-        repositories={repositories}
-      />
       {isEmpty ? (
         <p className="text-sm text-muted-foreground py-4">{t("task:noCommentsYet")}</p>
       ) : (

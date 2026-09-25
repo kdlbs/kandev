@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -395,6 +396,49 @@ func TestListMessagesPaginatedClampsLimit(t *testing.T) {
 	}
 	if len(clamped) != 3 {
 		t.Fatalf("clamped list = %d, want all 3", len(clamped))
+	}
+}
+
+func TestListMessagesPaginatedDefaultsLimitForAdditionalFilters(t *testing.T) {
+	svc, _, repo := newMessageTestService(t)
+	ctx := context.Background()
+	for index := 0; index <= DefaultMessagesPageSize; index++ {
+		seedMessage(t, repo, &models.Message{
+			ID:         fmt.Sprintf("filtered-%d", index),
+			AuthorType: models.MessageAuthorUser,
+			Content:    fmt.Sprintf("message-%d", index),
+		})
+	}
+
+	tests := []struct {
+		name    string
+		request ListMessagesRequest
+	}{
+		{
+			name: "author types",
+			request: ListMessagesRequest{
+				TaskSessionID: "sess-msg",
+				AuthorTypes:   []string{string(models.MessageAuthorUser)},
+			},
+		},
+		{
+			name: "task id",
+			request: ListMessagesRequest{
+				TaskSessionID: "sess-msg",
+				TaskID:        "task-msg",
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			page, hasMore, err := svc.ListMessagesPaginated(ctx, test.request)
+			if err != nil {
+				t.Fatalf("ListMessagesPaginated: %v", err)
+			}
+			if len(page) != DefaultMessagesPageSize || !hasMore {
+				t.Fatalf("page = %d, hasMore = %v; want %d and true", len(page), hasMore, DefaultMessagesPageSize)
+			}
+		})
 	}
 }
 

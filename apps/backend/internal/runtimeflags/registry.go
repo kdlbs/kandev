@@ -53,6 +53,22 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 var registrations = []runtimeFlagRegistration{
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.lspBrowserContinuity",
+			EnvVar:          "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY",
+			Kind:            KindFeature,
+			Label:           "LSP browser continuity",
+			Description:     "Keeps supported task-host language-server processes available across browser disconnects.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "Retains the task host and language-server process while an editor is detached; enable only with the bounded lease and idle-release behavior in place.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.LSPBrowserContinuity },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.LSPBrowserContinuity = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.office",
 			EnvVar:      "KANDEV_FEATURES_OFFICE",
 			Kind:        KindFeature,
@@ -73,7 +89,7 @@ var registrations = []runtimeFlagRegistration{
 			Key:         "features.needsYouInbox",
 			EnvVar:      "KANDEV_FEATURES_NEEDS_YOU_INBOX",
 			Kind:        KindFeature,
-			Label:       "Needs-you Inbox",
+			Label:       "Inbox",
 			Description: "Enables a workspace-scoped sidebar destination listing exactly the answerable clarification bundles for the active workspace, independent of Office mode.",
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskLow,

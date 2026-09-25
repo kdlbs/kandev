@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
@@ -14,6 +14,8 @@ import { ClarificationPanelSection } from "@/components/task/chat/clarification-
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
 import { useQuickChatInitialPrompt } from "./use-quick-chat-initial-prompt";
+import { QuickChatCancelCommands } from "./quick-chat-cancel-commands";
+import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 
 type QuickChatContentProps = {
   sessionId: string;
@@ -21,8 +23,6 @@ type QuickChatContentProps = {
   placeholderOverride?: string;
   initialPrompt?: string;
   onInitialPromptAttempted?: () => void;
-  recoveryContent?: ReactNode;
-  recoveryRevealKey?: string | null;
 };
 
 function useQuickChatState(sessionId: string) {
@@ -52,14 +52,13 @@ export const QuickChatContent = memo(function QuickChatContent({
   placeholderOverride,
   initialPrompt,
   onInitialPromptAttempted,
-  recoveryContent,
-  recoveryRevealKey,
 }: QuickChatContentProps) {
   const [clarificationKey, setClarificationKey] = useState(0);
   const shortcutScopeRef = useRef<HTMLDivElement>(null);
   const state = useQuickChatState(sessionId);
   const { chatInputRef, panelState, isSending, handleSubmit, handleCancelTurn } = state;
   const { taskId, pendingClarification, pendingClarificationGroup } = panelState;
+  const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
 
   useEffect(() => {
     const timer = setTimeout(() => chatInputRef.current?.focusInput(), 50);
@@ -99,6 +98,12 @@ export const QuickChatContent = memo(function QuickChatContent({
       onMouseDown={handleShortcutScopeMouseDown}
       className="flex flex-col flex-1 min-h-0 outline-none"
     >
+      <QuickChatCancelCommands
+        sessionId={sessionId}
+        isWorking={panelState.isWorking}
+        pendingClarification={pendingClarification}
+        onCancel={handleCancelTurn}
+      />
       <div className="flex-1 min-h-0 overflow-hidden bg-popover" data-testid="quick-chat-messages">
         <MessageList
           items={panelState.groupedItems}
@@ -112,15 +117,16 @@ export const QuickChatContent = memo(function QuickChatContent({
           sessionState={panelState.session?.state}
           worktreePath={getSessionWorkspacePath(panelState.session)}
           onOpenFile={undefined}
-          prependContent={recoveryContent}
-          recoveryRevealKey={recoveryRevealKey}
         />
       </div>
       <ClarificationPanelSection
         key={sessionId}
         pending={Boolean(pendingClarification)}
         messages={pendingClarificationGroup}
+        agentDisconnected={panelState.session?.pending_action === null}
         onResolved={handleClarificationResolved}
+        onLateAnswer={lateAnswer.send}
+        lateAnswerState={lateAnswer.state}
         shortcutScopeRef={shortcutScopeRef}
         maxHeightVh={35}
       />

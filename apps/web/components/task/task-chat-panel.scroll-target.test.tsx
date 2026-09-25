@@ -57,11 +57,93 @@ vi.mock("@/hooks/domains/session/load-message-window", () => ({
 }));
 
 import {
+  isMessageRowRendered,
   usePendingMessageScroll,
+  usePendingScrollToStart,
   useScrollTargetConsumption,
   type PendingMessageScrollTarget,
 } from "./task-chat-panel";
+import type { RenderItem } from "@/hooks/use-processed-messages";
 import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-window";
+
+describe("isMessageRowRendered", () => {
+  it("only treats direct message items as scrollable rows", () => {
+    const items = [
+      {
+        type: "turn_group",
+        id: "group-1",
+        turnId: "turn-1",
+        messages: [{ id: "grouped-prompt" }],
+      },
+      { type: "message", message: { id: "direct-prompt" } },
+    ] as unknown as RenderItem[];
+
+    expect(isMessageRowRendered(items, "grouped-prompt")).toBe(false);
+    expect(isMessageRowRendered(items, "direct-prompt")).toBe(true);
+  });
+});
+
+const FIRST_PROMPT_MESSAGE_ID = "first-prompt";
+
+describe("usePendingScrollToStart", () => {
+  it("retries after the first prompt row is not mounted yet", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const scrollToMessage = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+    const messageListRef = { current: { scrollToMessage } };
+    const onComplete = vi.fn();
+
+    renderHook(() =>
+      usePendingScrollToStart({
+        messageListRef,
+        firstMessageId: FIRST_PROMPT_MESSAGE_ID,
+        hasMore: false,
+        pending: true,
+        requestKey: 1,
+        onComplete,
+      }),
+    );
+
+    await flushFrames();
+    expect(scrollToMessage).toHaveBeenCalledTimes(1);
+    expect(onComplete).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(scrollToMessage).toHaveBeenCalledTimes(2);
+    expect(scrollToMessage).toHaveBeenLastCalledWith(FIRST_PROMPT_MESSAGE_ID, {
+      align: "start",
+    });
+    expect(onComplete).toHaveBeenCalledWith(true);
+  });
+
+  it("waits for pagination to finish before attempting the target", async () => {
+    const messageListRef = { current: scrollHandle(true) };
+    const onComplete = vi.fn();
+    const { rerender } = renderHook(
+      ({ hasMore }: { hasMore: boolean }) =>
+        usePendingScrollToStart({
+          messageListRef,
+          firstMessageId: FIRST_PROMPT_MESSAGE_ID,
+          hasMore,
+          pending: true,
+          requestKey: 1,
+          onComplete,
+        }),
+      { initialProps: { hasMore: true } },
+    );
+
+    await flushFrames();
+    expect(messageListRef.current?.scrollToMessage).not.toHaveBeenCalled();
+
+    rerender({ hasMore: false });
+    await flushFrames();
+    expect(messageListRef.current?.scrollToMessage).toHaveBeenCalledWith(FIRST_PROMPT_MESSAGE_ID, {
+      align: "start",
+    });
+    expect(onComplete).toHaveBeenCalledWith(true);
+  });
+});
 
 let pendingFrames: Array<(() => void) | undefined> = [];
 

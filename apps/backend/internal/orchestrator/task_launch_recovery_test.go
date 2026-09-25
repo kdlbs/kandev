@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -18,16 +20,37 @@ import (
 )
 
 type taskLaunchRecoveryServiceFake struct {
-	branches    []taskservice.Branch
-	branchErr   error
-	updated     []taskservice.UpdateRepositoryBaseBranchRequest
-	moved       []taskservice.MoveTaskOptions
-	moveErr     error
-	moveTaskIDs []string
+	branches      []taskservice.Branch
+	branchErr     error
+	updated       []taskservice.UpdateRepositoryBaseBranchRequest
+	systemUpdated []taskservice.UpdateRepositoryBaseBranchRequest
+	moved         []taskservice.MoveTaskOptions
+	moveErr       error
+	moveTaskIDs   []string
+	environment   *models.TaskEnvironment
+	resetErr      error
+	resetCalls    int
+}
+
+type failingTaskSessionErrorBus struct {
+	bus.EventBus
+	err error
+}
+
+func (b failingTaskSessionErrorBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	if subject == events.TaskSessionErrorChanged {
+		return b.err
+	}
+	return b.EventBus.Publish(ctx, subject, event)
 }
 
 func (f *taskLaunchRecoveryServiceFake) UpdateRepositoryBaseBranch(_ context.Context, req taskservice.UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error) {
 	f.updated = append(f.updated, req)
+	return &models.TaskRepository{ID: req.TaskRepositoryID, TaskID: req.TaskID, BaseBranch: req.BaseBranch}, nil
+}
+
+func (f *taskLaunchRecoveryServiceFake) UpdateRepositoryBaseBranchFromSystem(_ context.Context, req taskservice.UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error) {
+	f.systemUpdated = append(f.systemUpdated, req)
 	return &models.TaskRepository{ID: req.TaskRepositoryID, TaskID: req.TaskID, BaseBranch: req.BaseBranch}, nil
 }
 
@@ -42,6 +65,46 @@ func (f *taskLaunchRecoveryServiceFake) MoveTaskWithOptions(_ context.Context, t
 		return nil, f.moveErr
 	}
 	return &taskservice.MoveTaskResult{Task: &models.Task{ID: taskID, WorkflowID: workflowID, WorkflowStepID: workflowStepID, Position: position}}, nil
+}
+
+func (f *taskLaunchRecoveryServiceFake) GetTaskEnvironmentByTaskID(context.Context, string) (*models.TaskEnvironment, error) {
+	return f.environment, nil
+}
+
+func (f *taskLaunchRecoveryServiceFake) ResetTaskEnvironment(context.Context, string, taskservice.ResetOptions) error {
+	f.resetCalls++
+	return f.resetErr
+}
+
+func TestResetFailedTaskEnvironmentForRecoveryOnlyResetsFailedEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     models.TaskEnvironmentStatus
+		wantCalls  int
+		wantErr    bool
+		resetError error
+	}{
+		{name: "no environment", wantCalls: 0},
+		{name: "ready environment", status: models.TaskEnvironmentStatusReady, wantCalls: 0},
+		{name: "failed environment", status: models.TaskEnvironmentStatusFailed, wantCalls: 1},
+		{name: "reset failure", status: models.TaskEnvironmentStatusFailed, wantCalls: 1, wantErr: true, resetError: errors.New("reset failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &taskLaunchRecoveryServiceFake{resetErr: tc.resetError}
+			if tc.status != "" {
+				fake.environment = &models.TaskEnvironment{ID: "env-1", Status: tc.status}
+			}
+			svc := &Service{taskLaunchRecoveryTasks: fake}
+
+			err := svc.resetFailedTaskEnvironmentForRecovery(context.Background(), "task-1")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("resetFailedTaskEnvironmentForRecovery error = %v, want error = %t", err, tc.wantErr)
+			}
+			if fake.resetCalls != tc.wantCalls {
+				t.Fatalf("reset calls = %d, want %d", fake.resetCalls, tc.wantCalls)
+			}
+		})
+	}
 }
 
 type taskLaunchRecoveryWorktreeFake struct {
@@ -132,6 +195,166 @@ func recoveryFixtureService(t *testing.T, repo *sqliterepo.Repository, fake *tas
 	return svc
 }
 
+func TestHandleLaunchFailedProjectsTaskErrorAndRetiresSessionMarker(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-launch-failure", "session-launch-failure", "step1")
+	now := time.Now().UTC()
+	lastError := models.LastAgentError{
+		Message:          "The selected base branch is not available.",
+		OccurredAt:       now,
+		Scope:            models.ErrorScopeSession,
+		Code:             models.LaunchErrorCategoryBaseBranchMissing,
+		Details:          "base branch is missing",
+		RecoveryActions:  []string{models.RecoveryActionRetryDefault, models.RecoveryActionPickBaseBranch},
+		TaskRepositoryID: "task-repository-launch-failure",
+		StampValue:       "launch-failure-stamp",
+	}
+	if err := repo.SetSessionMetadataKey(context.Background(), "session-launch-failure", models.SessionMetaKeyLastAgentError, lastError); err != nil {
+		t.Fatalf("SetSessionMetadataKey: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.handleLaunchFailed(context.Background(), "task-launch-failure", "session-launch-failure", "repo-1", errors.New("workspace preparation failed"))
+
+	task, err := repo.GetTask(context.Background(), "task-launch-failure")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	taskError, ok := models.LoadTaskLaunchError(task.Metadata)
+	if !ok {
+		t.Fatal("task launch error was not persisted")
+	}
+	if taskError.Scope != models.ErrorScopeTask || taskError.SessionID != "session-launch-failure" {
+		t.Fatalf("task launch error ownership = %#v, want task scope with source session", taskError)
+	}
+	if taskError.Stamp() != lastError.Stamp() {
+		t.Fatalf("task launch error stamp = %q, want %q", taskError.Stamp(), lastError.Stamp())
+	}
+
+	session, err := repo.GetTaskSession(context.Background(), "session-launch-failure")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	retired, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok || !retired.IsDismissed() {
+		t.Fatalf("session launch error = %#v, want a dismissed correlation marker", retired)
+	}
+}
+
+func TestHandleLaunchFailedKeepsProfileSpecificFailureOnSession(t *testing.T) {
+	repo := setupTestRepo(t)
+	const (
+		taskID    = "task-session-owned-launch-failure"
+		sessionID = "session-session-owned-launch-failure"
+	)
+	seedSession(t, repo, taskID, sessionID, "step1")
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.AgentProfileID = "profile-specific"
+	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("UpdateTaskSession: %v", err)
+	}
+	lastError := models.LastAgentError{
+		Message:         "The agent could not start.",
+		OccurredAt:      time.Date(2026, 9, 14, 10, 30, 0, 0, time.UTC),
+		Scope:           models.ErrorScopeSession,
+		Code:            models.LaunchErrorCategoryGenericLaunchFailure,
+		Details:         "profile environment could not be resolved",
+		RecoveryActions: []string{models.RecoveryActionRetryLaunch},
+		StampValue:      "profile-specific-launch-failure",
+	}
+	if err := repo.SetSessionMetadataKey(
+		context.Background(), sessionID, models.SessionMetaKeyLastAgentError, lastError,
+	); err != nil {
+		t.Fatalf("SetSessionMetadataKey: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.handleLaunchFailed(
+		context.Background(), taskID, sessionID, "repo-1", errors.New("profile env resolution failed"),
+	)
+
+	task, err := repo.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if _, found := models.LoadTaskLaunchError(task.Metadata); found {
+		t.Fatal("profile-specific launch failure was incorrectly promoted to task scope")
+	}
+	updated, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession after launch failure: %v", err)
+	}
+	retained, found := models.LoadLastAgentError(updated.Metadata)
+	if !found || retained.IsDismissed() || retained.Stamp() != lastError.Stamp() {
+		t.Fatalf("session launch error = %#v, want active profile-specific marker", retained)
+	}
+	if updated.AgentProfileID != "profile-specific" {
+		t.Fatalf("session profile = %q, want profile-specific", updated.AgentProfileID)
+	}
+	if len(messages.sessionMessages) != 1 {
+		t.Fatalf("session recovery messages = %d, want 1", len(messages.sessionMessages))
+	}
+	if messages.sessionMessages[0].metadata["scope"] != models.ErrorScopeSession {
+		t.Fatalf("recovery message scope = %#v, want session", messages.sessionMessages[0].metadata["scope"])
+	}
+}
+
+func TestClearTaskLaunchRecoverySourceSucceedsWhenRetirementPublishFails(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-session-error-publish"
+		sessionID = "session-error-publish"
+	)
+	repo := setupTestRepo(t)
+	seedSession(t, repo, taskID, sessionID, "step1")
+	lastError := models.LastAgentError{
+		Message:    "The agent could not start.",
+		OccurredAt: time.Date(2026, 9, 14, 11, 0, 0, 0, time.UTC),
+		Scope:      models.ErrorScopeSession,
+		StampValue: "session-error-publish-stamp",
+	}
+	if err := repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLastAgentError, lastError); err != nil {
+		t.Fatalf("SetSessionMetadataKey: %v", err)
+	}
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	baseBus := bus.NewMemoryEventBus(testLogger())
+	t.Cleanup(func() { baseBus.Close() })
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.taskLaunchRecoveryRepo = repo
+	svc.eventBus = failingTaskSessionErrorBus{EventBus: baseBus, err: errors.New("event bus unavailable")}
+
+	err = svc.clearTaskLaunchRecoverySource(ctx, &taskLaunchRecoverySource{
+		task:         task,
+		session:      session,
+		sessionError: lastError,
+		sessionOwned: true,
+		errorStamp:   lastError.Stamp(),
+	})
+	if err != nil {
+		t.Fatalf("clearTaskLaunchRecoverySource: %v", err)
+	}
+	updated, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	retired, found := models.LoadLastAgentError(updated.Metadata)
+	if !found || !retired.IsDismissed() {
+		t.Fatalf("retired session error = %#v, want dismissed metadata", retired)
+	}
+}
+
 func TestRecoverTaskLaunchRejectsStaleStampBeforeMutation(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedTaskLaunchRecoveryFixture(t, repo, "task-stale", "task-repo-stale", models.RecoveryActionPickBaseBranch)
@@ -150,7 +373,7 @@ func TestRecoverTaskLaunchRejectsStaleStampBeforeMutation(t *testing.T) {
 	}
 }
 
-func TestRecoverTaskLaunchRejectsOlderSessionErrorWhenTaskErrorIsNewer(t *testing.T) {
+func TestRecoverTaskLaunchValidatesSessionErrorIndependentlyOfTaskError(t *testing.T) {
 	repo := setupTestRepo(t)
 	const taskID = "task-newer-task-error"
 	const taskRepositoryID = "task-repo-newer-task-error"
@@ -169,6 +392,7 @@ func TestRecoverTaskLaunchRejectsOlderSessionErrorWhenTaskErrorIsNewer(t *testin
 	if err := repo.SetSessionMetadataKey(context.Background(), "session-older-error", models.SessionMetaKeyLastAgentError, models.LastAgentError{
 		Message:          "older session launch error",
 		OccurredAt:       now.Add(-time.Hour),
+		Scope:            models.ErrorScopeSession,
 		Code:             models.LaunchErrorCategoryBaseBranchMissing,
 		RecoveryActions:  []string{models.RecoveryActionPickBaseBranch},
 		TaskRepositoryID: taskRepositoryID,
@@ -179,15 +403,26 @@ func TestRecoverTaskLaunchRejectsOlderSessionErrorWhenTaskErrorIsNewer(t *testin
 
 	fake := &taskLaunchRecoveryServiceFake{branches: []taskservice.Branch{{Name: "main", Type: "remote"}}}
 	svc := recoveryFixtureService(t, repo, fake)
-	_, err := svc.RecoverTaskLaunch(context.Background(), &TaskLaunchRecoveryRequest{
+	req := &TaskLaunchRecoveryRequest{
 		TaskID: taskID, SessionID: "session-older-error", TaskRepositoryID: taskRepositoryID,
 		Action: models.RecoveryActionPickBaseBranch, BaseBranch: "main", ErrorStamp: "older-session-stamp",
-	})
-	if !errors.Is(err, ErrTaskLaunchRecoveryStale) {
-		t.Fatalf("RecoverTaskLaunch error = %v, want stale error", err)
+	}
+	source, err := svc.loadTaskLaunchRecoverySource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("loadTaskLaunchRecoverySource: %v", err)
+	}
+	if err := svc.verifyCurrentTaskLaunchRecoverySource(context.Background(), source); err != nil {
+		t.Fatalf("verifyCurrentTaskLaunchRecoverySource: %v", err)
 	}
 	if len(fake.updated) != 0 {
-		t.Fatalf("older session recovery updated repositories: %#v", fake.updated)
+		t.Fatalf("validation updated repositories: %#v", fake.updated)
+	}
+	task, err := repo.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if taskError, ok := models.LoadTaskLaunchError(task.Metadata); !ok || taskError.Stamp() != "recovery-stamp" {
+		t.Fatalf("task error = %#v, want independent task error", taskError)
 	}
 }
 

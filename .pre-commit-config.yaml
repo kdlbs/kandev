@@ -49,11 +49,12 @@ repos:
         pass_filenames: true
 
       - id: go-lint
-        name: Go lint (PR changed code)
-        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; base=$(scripts/resolve-go-lint-base --comparison-base) || exit $?; cd apps/backend && golangci-lint run ./... --new-from-rev="$base" --timeout=5m'
+        name: Go lint (changed packages)
+        entry: bash scripts/lint-go-changed
         language: system
         files: ^apps/backend/.*\.go$
-        pass_filenames: false
+        pass_filenames: true
+        require_serial: true
 
   # Web app (TypeScript/React) hooks
   - repo: local

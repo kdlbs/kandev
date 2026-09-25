@@ -540,5 +540,8 @@
   "sidebarWeeks_other": "{{count}}周",
   "sidebarYears_one": "{{count}}年",
   "sidebarYears_other": "{{count}}年",
-  "sidebarYearsMax": "99+年"
+  "sidebarYearsMax": "99+年",
+  "integrationSettings": "集成设置",
+  "pageNavigation": "本页导航",
+  "viewOptions": "视图选项"
 }

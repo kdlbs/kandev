@@ -6,7 +6,8 @@ export type TriggerType =
   | "github_pr_merged"
   | "github_push"
   | "github_ci"
-  | "webhook";
+  | "webhook"
+  | "plugin_event";
 
 export type RunStatus =
   | "triggered"
@@ -99,6 +100,10 @@ export type AutomationRun = {
   thread_reason?: string;
   /** Snapshot of the rendered task title at admission time. */
   display_title?: string;
+  /** Why the webhook dedup key ended up empty (unresolved/not configured). Empty when a key was resolved. */
+  dedup_reason?: string;
+  /** Why the webhook repository selector produced no binding. Empty when a repository was bound. */
+  repository_reason?: string;
 };
 
 /**
@@ -154,8 +159,27 @@ export type GitHubCITriggerConfig = {
   check_names?: string[];
 };
 
+export type WebhookFilterOp = "eq" | "ne" | "in" | "not_in" | "exists" | "not_exists" | "contains";
+
+export type WebhookFilter = {
+  path: string;
+  op: WebhookFilterOp;
+  values?: string[];
+};
+
+export type WebhookRepositorySelector = {
+  selector_path: string;
+};
+
 export type WebhookTriggerConfig = {
+  /** Inert on the backend; kept only for wire compatibility with older clients. */
   filter_expression?: string;
+  /** Dot path into the payload whose resolved, trimmed, non-empty value dedups firings. */
+  dedup_key?: string;
+  /** Predicates evaluated in order before dedup; every one must pass to fire. */
+  filters?: WebhookFilter[];
+  /** Selects which already-configured repository a firing binds to. */
+  repository?: WebhookRepositorySelector;
 };
 
 // --- Trigger type metadata (from backend registry) ---
@@ -166,7 +190,25 @@ export type PlaceholderInfo = {
   example: string;
 };
 
+export type PluginConditionInfo = {
+  config_options?: Record<string, string[]>;
+  plugin_id: string;
+  provider_label: string;
+  available: boolean;
+  reason?: string;
+  condition: {
+    key: string;
+    label: string;
+    label_key?: string;
+    description: string;
+    description_key?: string;
+    config_version: number;
+    config_schema: Record<string, unknown>;
+  };
+};
+
 export type TriggerTypeInfo = {
+  plugin?: PluginConditionInfo;
   type: TriggerType;
   label: string;
   description: string;

@@ -8,13 +8,14 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
+	"github.com/kandev/kandev/internal/startup"
 )
 
 func TestHandlerReturnsStableRowsWithSanitizedErrors(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{
-		{ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}},
-		{ID: "second", OwnerPackage: "owner/second", RequiredTables: []string{"second"}},
+		{ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories},
+		{ID: "second", OwnerPackage: "owner/second", RequiredTables: []string{"second"}, Sweep: startup.StepStoresRepositories},
 	})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)

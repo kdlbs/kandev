@@ -101,7 +101,9 @@ func (r *Repository) UpdateRouteAttemptOutcome(
 // ParkRunForProviderCapacity flips a run into the "waiting for provider
 // capacity" parked state. retry_count is NOT incremented — parking is
 // not a retry, just a deferral. The next eligible-claim pass will
-// re-pick the run after earliest_retry_at.
+// re-pick the run after earliest_retry_at. priority_class is re-stamped
+// to recovery unless it is already human, so a parked run does not keep
+// racing plain event/periodic peers at its original claim priority.
 func (r *Repository) ParkRunForProviderCapacity(
 	ctx context.Context, runID, blockedStatus string,
 	earliestRetryAt time.Time,
@@ -117,9 +119,11 @@ func (r *Repository) ParkRunForProviderCapacity(
 		    earliest_retry_at = ?,
 		    scheduled_retry_at = ?,
 		    claimed_at = NULL,
-		    finished_at = NULL
+		    finished_at = NULL,
+		    priority_class = CASE WHEN priority_class = ? THEN priority_class ELSE ? END
 		WHERE id = ?
-	`), blockedStatus, retryAt, retryAt, runID)
+	`), blockedStatus, retryAt, retryAt,
+		models.PriorityClassHuman, models.PriorityClassRecovery, runID)
 	if err != nil {
 		return fmt.Errorf("run_routing: park: %w", err)
 	}
@@ -169,15 +173,18 @@ func (r *Repository) BumpRouteCycleBaseline(ctx context.Context, runID string) e
 // next dispatch pass picks a fresh candidate. Preserves the
 // LogicalProviderOrder / RequestedTier / CurrentRouteAttemptSeq cursor
 // so dispatchWithRouting can derive the exclude-set from prior attempts.
+// priority_class is re-stamped to recovery unless it is already human,
+// matching every other requeue path.
 func (r *Repository) RequeueRunForNextCandidate(
 	ctx context.Context, runID string,
 ) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE runs
 		SET status = 'queued', session_id = '',
-		    claimed_at = NULL, finished_at = NULL
+		    claimed_at = NULL, finished_at = NULL,
+		    priority_class = CASE WHEN priority_class = ? THEN priority_class ELSE ? END
 		WHERE id = ?
-	`), runID)
+	`), models.PriorityClassHuman, models.PriorityClassRecovery, runID)
 	if err != nil {
 		return fmt.Errorf("run_routing: requeue: %w", err)
 	}
@@ -270,6 +277,8 @@ func (r *Repository) ForceProviderRetryNow(
 // ClearAllParkedRoutingForWorkspace clears the routing-block columns on
 // every run in the workspace's parked set and sets status=queued so the
 // next scheduler tick can claim them via the legacy (non-routing) path.
+// priority_class is re-stamped to recovery unless it is already human,
+// matching every other requeue path.
 //
 // Called by the dashboard RoutingProvider when a workspace flips
 // office_workspace_routing.enabled from true → false: parked runs would
@@ -284,12 +293,13 @@ func (r *Repository) ClearAllParkedRoutingForWorkspace(
 		SET status = 'queued',
 		    routing_blocked_status = NULL,
 		    earliest_retry_at = NULL,
-		    scheduled_retry_at = NULL
+		    scheduled_retry_at = NULL,
+		    priority_class = CASE WHEN priority_class = ? THEN priority_class ELSE ? END
 		WHERE routing_blocked_status IS NOT NULL
 		  AND agent_profile_id IN (
 		    SELECT id FROM agent_profiles WHERE workspace_id = ?
 		  )
-	`), workspaceID)
+	`), models.PriorityClassHuman, models.PriorityClassRecovery, workspaceID)
 	if err != nil {
 		return fmt.Errorf("run_routing: clear parked workspace=%s: %w",
 			workspaceID, err)

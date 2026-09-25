@@ -35,6 +35,11 @@ function registerEnhanceAction(
   overrides: {
     run?: () => Promise<void> | void;
     visible?: (context: PluginTaskMenuContext) => boolean;
+    items?: (context: PluginTaskMenuContext) => readonly {
+      id: string;
+      label: string;
+      run: (context: PluginTaskMenuContext) => Promise<void> | void;
+    }[];
   } = {},
 ) {
   pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
@@ -43,12 +48,36 @@ function registerEnhanceAction(
     group: "edit",
     run: overrides.run ?? vi.fn(),
     ...(overrides.visible ? { visible: overrides.visible } : {}),
+    ...(overrides.items ? { items: overrides.items } : {}),
   });
 }
 
 afterEach(() => {
   cleanup();
   pluginRegistry.unregisterPlugin(PLUGIN_ID);
+});
+
+describe("buildEditMenuEntry — a registration the host cannot render", () => {
+  // Regression: the submenu-vs-flat decision was made from the number of visible
+  // registrations, so an action with no usable label wrapped the native Edit item
+  // in a submenu even though its own entry was dropped -- unlike the primary
+  // group, which omits such an action entirely.
+  it("keeps the flat Edit item when the only edit-group action is unusable", () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "broken",
+      label: "" as never,
+      group: "edit",
+      run: vi.fn(),
+    });
+
+    const entry = buildEditMenuEntry({ onEdit: vi.fn(), context: CONTEXT });
+
+    expect(entry.kind).toBe("item");
+    expect(entry.kind === "item" ? entry.key : "").toBe("edit");
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
 });
 
 describe("buildEditMenuEntry — AC10 (no plugin actions)", () => {
@@ -76,9 +105,30 @@ describe("buildEditMenuEntry — AC9 (plugin action registered)", () => {
     if (entry.kind === "submenu") {
       expect(entry.children.map((c) => c.key)).toEqual([
         "edit-task",
-        `plugin-edit-${PLUGIN_ID}-enhance`,
+        `plugin-edit-${PLUGIN_ID}:enhance`,
       ]);
     }
+  });
+
+  it("renders an edit action's children inside the Edit submenu", () => {
+    registerEnhanceAction({
+      items: () => [{ id: "quick", label: "Quick enhance", run: vi.fn() }],
+    });
+
+    const entry = buildEditMenuEntry({ onEdit: vi.fn(), context: CONTEXT });
+    expect(entry.kind).toBe("submenu");
+    if (entry.kind !== "submenu") return;
+
+    const pluginChild = entry.children.find(
+      (child) => child.key === `plugin-edit-${PLUGIN_ID}:enhance`,
+    );
+    expect(pluginChild?.kind).toBe("submenu");
+    if (pluginChild?.kind !== "submenu") return;
+    expect(pluginChild.children).toHaveLength(1);
+    const child = pluginChild.children[0];
+    expect(child?.kind).toBe("item");
+    if (child?.kind !== "item") return;
+    expect(child.label).toBe("Quick enhance");
   });
 });
 

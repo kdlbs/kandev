@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Button } from "@kandev/ui/button";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -429,9 +430,12 @@ function SecretsSettingsBody({
       {/* `secrets-settings-body` is the pseudo-coverage oracle's render anchor for
           this screen (e2e/tests/i18n/pseudo-coverage.spec.ts). Renaming it makes
           that spec time out rather than silently scan an unrendered route. */}
-      <div className="space-y-6" data-testid="secrets-settings-body">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-foreground">{secretScopeTitle(t, scope)}</div>
+      <SettingsGroup
+        title={secretScopeTitle(t, scope)}
+        description={secretScopeDescription(t, scope)}
+        data-testid="secrets-settings-body"
+        contentClassName="space-y-6 divide-y-0"
+        action={
           <Button
             onClick={actions.startCreate}
             disabled={isBusy || Boolean(editingId) || showCreate}
@@ -439,8 +443,8 @@ function SecretsSettingsBody({
           >
             {t("settings:addSecret")}
           </Button>
-        </div>
-
+        }
+      >
         {showCreate && (
           <SecretForm
             title={t("settings:newSecret")}
@@ -505,7 +509,7 @@ function SecretsSettingsBody({
             />
           ))}
         </div>
-      </div>
+      </SettingsGroup>
     </>
   );
 }

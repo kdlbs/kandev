@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { devices, type Page } from "@playwright/test";
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -344,7 +344,7 @@ export const test = backendFixture.extend<
   // Resets user settings to the E2E workspace/workflow before each test so that
   // SSR always resolves to the correct workspace regardless of what commitSettings
   // may have written during previous tests.
-  testPage: async ({ browser, backend, apiClient, seedData }, use) => {
+  testPage: async ({ browser, backend, apiClient, seedData }, use, testInfo) => {
     await backend.ensureReady();
     // A suite-level test may restart the worker backend after the worker-scoped
     // seed fixture ran. Health only proves that the listener is serving; it does
@@ -371,9 +371,12 @@ export const test = backendFixture.extend<
         confirm_task_archive: true,
         agent_generated_task_titles: false,
         mcp_task_agent_profile_default: "current_task",
-        sidebar_views: [DEFAULT_SIDEBAR_VIEW],
-        sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
-        sidebar_draft: null,
+        sidebar_view_state: {
+          workspace_id: seedData.workspaceId,
+          views: [DEFAULT_SIDEBAR_VIEW],
+          active_view_id: DEFAULT_SIDEBAR_VIEW.id,
+          draft: null,
+        },
         thread_views: [DEFAULT_THREAD_VIEW],
         thread_active_view_id: DEFAULT_THREAD_VIEW.id,
         thread_view_draft: null,
@@ -405,11 +408,16 @@ export const test = backendFixture.extend<
         show_scroll_to_last_prompt: true,
         show_scroll_to_start: false,
         show_transcript_auto_scroll_control: true,
+        // Reset the Kanban priority filter. Priority-filter tests persist their
+        // selection, and a stale selection can hide default-priority tasks in
+        // unrelated tests that run later in the same worker.
+        kanban_priority_filter_tokens: [],
         tasks_list_sort: "updated_desc",
         tasks_list_group: "state",
       });
     });
     const context = await browser.newContext({
+      ...(testInfo.project.name === "mobile-chrome" ? devices["Pixel 5"] : {}),
       baseURL: backend.frontendUrl,
     });
     const page = await context.newPage();
@@ -625,9 +633,12 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
       confirm_task_archive: true,
       agent_generated_task_titles: false,
       mcp_task_agent_profile_default: "current_task",
-      sidebar_views: [DEFAULT_SIDEBAR_VIEW],
-      sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
-      sidebar_draft: null,
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views: [DEFAULT_SIDEBAR_VIEW],
+        active_view_id: DEFAULT_SIDEBAR_VIEW.id,
+        draft: null,
+      },
       thread_views: [DEFAULT_THREAD_VIEW],
       thread_active_view_id: DEFAULT_THREAD_VIEW.id,
       thread_view_draft: null,
@@ -647,6 +658,10 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
       show_scroll_to_last_prompt: true,
       show_scroll_to_start: false,
       show_transcript_auto_scroll_control: true,
+      // Reset the Kanban priority filter. Priority-filter tests persist their
+      // selection, and a stale selection can hide default-priority tasks in
+      // unrelated tests that run later in the same worker.
+      kanban_priority_filter_tokens: [],
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",

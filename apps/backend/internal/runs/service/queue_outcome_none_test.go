@@ -20,3 +20,15 @@ func TestQueueOutcomeNone_MatchesEngineDeclaration(t *testing.T) {
 			runsservice.QueueOutcomeNone, engine.QueueOutcomeNone)
 	}
 }
+
+// TestQueueOutcomeRateLimited_MatchesEngineDeclaration is
+// TestQueueOutcomeNone_MatchesEngineDeclaration's twin for the value added
+// by REQ-OFFICE-ASSIGN-RATE-001: both packages declare QueueOutcome and
+// its members independently, so the engine adapter cannot report a refused
+// assignment wake unless the two stay in sync.
+func TestQueueOutcomeRateLimited_MatchesEngineDeclaration(t *testing.T) {
+	if string(runsservice.QueueOutcomeRateLimited) != string(engine.QueueOutcomeRateLimited) {
+		t.Fatalf("runsservice.QueueOutcomeRateLimited = %q, engine.QueueOutcomeRateLimited = %q; both MUST match",
+			runsservice.QueueOutcomeRateLimited, engine.QueueOutcomeRateLimited)
+	}
+}

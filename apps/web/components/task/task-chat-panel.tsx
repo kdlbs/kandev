@@ -44,6 +44,8 @@ import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { findUnreadDividerItemId, lastRenderedMessageId } from "@/lib/session-unread-divider";
 import { useSessionReadTracking } from "./chat/use-session-read-tracking";
 import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
+import type { RenderItem } from "@/hooks/use-processed-messages";
+
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import type { AppState } from "@/lib/state/store";
@@ -52,16 +54,14 @@ import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
 import { useTranslation } from "react-i18next";
 
 import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-window";
-import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
-import { isTypedTaskLaunchError } from "./simple/components/task-launch-error-entry";
+import { LaunchWarning } from "./launch-warning";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
-import {
-  isTaskLaunchErrorOwnedBySession,
-  isTaskLaunchErrorVisibleForSession,
-} from "@/components/task/chat/types";
 import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
-import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
+import { statusSummaryTaskError } from "@/lib/task-status-summary";
+import { LaunchQueueStatus } from "./launch-queue-status";
+import { WipQueueStatus } from "./wip-queue-status";
+import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -83,6 +83,10 @@ export type PendingMessageScrollTarget = {
   token: number;
   hostPanelId: string;
 };
+/** Reports whether a target has a dedicated DOM row in the transcript. */
+export function isMessageRowRendered(items: readonly RenderItem[], messageId: string): boolean {
+  return items.some((item) => item.type === "message" && item.message.id === messageId);
+}
 
 /** Scrolls a non-Dockview host target after the message row becomes rendered. */
 type PendingMessageScrollOptions = {
@@ -440,6 +444,60 @@ export function usePendingMessageScroll({
   return { isLoading };
 }
 
+const SCROLL_TO_START_RETRY_DELAY_MS = 50;
+const MAX_SCROLL_TO_START_ATTEMPTS = 120;
+
+type PendingScrollToStartOptions = {
+  messageListRef: RefObject<MessageListHandle | null>;
+  firstMessageId: string | null;
+  hasMore: boolean;
+  pending: boolean;
+  requestKey: number;
+  onComplete: (didScroll: boolean) => void;
+};
+
+/** Keeps a scroll-to-start request alive until the final page's row is mounted. */
+export function usePendingScrollToStart({
+  messageListRef,
+  firstMessageId,
+  hasMore,
+  pending,
+  requestKey,
+  onComplete,
+}: PendingScrollToStartOptions) {
+  useEffect(() => {
+    if (!pending || hasMore) return;
+    if (!firstMessageId) {
+      onComplete(false);
+      return;
+    }
+
+    let cancelled = false;
+    let frameId: number | null = null;
+    let timeoutId: number | null = null;
+    let attempts = 0;
+    const attempt = () => {
+      if (cancelled) return;
+      attempts += 1;
+      const didScroll = Boolean(
+        messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" }),
+      );
+      if (didScroll || attempts >= MAX_SCROLL_TO_START_ATTEMPTS) {
+        onComplete(didScroll);
+        return;
+      }
+      timeoutId = window.setTimeout(attempt, SCROLL_TO_START_RETRY_DELAY_MS);
+    };
+
+    frameId = requestAnimationFrame(attempt);
+    return () => {
+      cancelled = true;
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [firstMessageId, hasMore, messageListRef, onComplete, pending, requestKey]);
+}
+
 /** Computes the render-item key the unread "New" divider should appear
  * immediately before: tracks the latest rendered message id for session read
  * tracking, then maps the resulting divider anchor onto the grouped items. */
@@ -568,9 +626,13 @@ type TaskChatPanelProps = {
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
   /** Callback to open a file at a specific line (for comment clicks) */
-  onOpenFileAtLine?: (filePath: string) => void;
+  onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
   /** Hide the sessions dropdown (session tabs in dockview replace it) */
   hideSessionsDropdown?: boolean;
+  /** Mobile layout renders the task queue above its session picker. */
+  hideLaunchQueueStatus?: boolean;
+  /** Mobile layout renders the WIP queue above its session picker. */
+  hideWipQueueStatus?: boolean;
   /**
    * Embedded multi-panel hosts do not own the global workbench or shortcuts.
    * They keep the conversation and composer, but suppress those side effects.
@@ -996,13 +1058,16 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   pendingScrollToMessageId = null,
   pendingScrollTarget,
   onPendingScrollConsumed,
+  hideLaunchQueueStatus = false,
+  hideWipQueueStatus = false,
 }: TaskChatPanelProps) {
   const isArchived = useIsTaskArchived();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
   const launchErrorContext = useTaskLaunchErrorContext();
+  const summaryTaskId = statusTaskId ?? taskIdHint ?? launchErrorContext?.taskId ?? null;
   const launchStatusSummary = useTaskStatusSummary(
-    launchErrorContext?.taskId,
-    launchErrorContext?.statusSummary,
+    summaryTaskId,
+    launchErrorContext?.taskId === summaryTaskId ? launchErrorContext.statusSummary : undefined,
   );
   const { t } = useTranslation();
   useSettingsData(true);
@@ -1034,22 +1099,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarification,
     pendingClarificationGroup,
   } = panelState;
-  const activeLaunchError = launchStatusSummary?.active_error;
-  const selectedSessionRecoveryError = selectSessionRecoveryError(
-    activeLaunchError,
-    resolvedSessionId,
-    session?.metadata,
-  );
-  const visibleRecoveryError =
-    selectedSessionRecoveryError ??
-    (isTypedTaskLaunchError(activeLaunchError) &&
-    isTaskLaunchErrorVisibleForSession(activeLaunchError, resolvedSessionId)
-      ? activeLaunchError
-      : null);
-  const launchErrorOwned = Boolean(
-    isTypedTaskLaunchError(activeLaunchError) &&
-    isTaskLaunchErrorOwnedBySession(activeLaunchError, resolvedSessionId),
-  );
+  const taskLaunchError = statusSummaryTaskError(launchStatusSummary);
+  const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
+  const launchErrorOwned = Boolean(taskLaunchError);
   const showAgentStartHint = useComposerAgentStartHint(
     resolvedSessionId,
     session?.state,
@@ -1083,8 +1135,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     messageListRef,
     isInitialMessagesLoading,
     targetRendered: Boolean(
-      dockviewTargetMessageId &&
-      allMessages.some((message) => message.id === dockviewTargetMessageId),
+      dockviewTargetMessageId && isMessageRowRendered(groupedItems, dockviewTargetMessageId),
     ),
     renderedMessageCount: allMessages.length,
   });
@@ -1139,25 +1190,37 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   // which grows as pages prepend) has settled on the true first prompt by the
   // time the scroll fires.
   const [pendingScrollToStart, setPendingScrollToStart] = useState(false);
+  const [scrollToStartRequest, setScrollToStartRequest] = useState(0);
   useDrainOlderMessages(resolvedSessionId, pendingScrollToStart && hasMore);
-  useEffect(() => {
-    if (!pendingScrollToStart || hasMore) return;
+  const completeScrollToStart = useCallback((didScroll: boolean) => {
     setPendingScrollToStart(false);
-    if (firstMessageId) {
-      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
-    }
-  }, [pendingScrollToStart, hasMore, firstMessageId]);
+    if (didScroll) setIsFirstMessageHidden(false);
+  }, []);
+  usePendingScrollToStart({
+    messageListRef,
+    firstMessageId,
+    hasMore,
+    pending: pendingScrollToStart,
+    requestKey: scrollToStartRequest,
+    onComplete: completeScrollToStart,
+  });
   const scrollToStart = useCallback(() => {
-    if (hasMore) {
-      setPendingScrollToStart(true);
-      return;
-    }
-    if (firstMessageId) {
-      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
-    }
-  }, [hasMore, firstMessageId]);
+    setScrollToStartRequest((request) => request + 1);
+    setPendingScrollToStart(true);
+  }, []);
   // Search can target backend rows before the visible transcript boundary.
-  const search = useSessionSearch(resolvedSessionId, loadMoreRaw);
+  const navigateSearchHit = useCallback(
+    (id: string) => {
+      if (!messageListRef.current?.scrollToMessage(id, { align: "center" })) return null;
+      return (
+        panelRef.current?.querySelector<HTMLElement>(
+          `.chat-message-list [id="msg-${CSS.escape(id)}"]`,
+        ) ?? null
+      );
+    },
+    [messageListRef],
+  );
+  const search = useSessionSearch(resolvedSessionId, loadMoreRaw, navigateSearchHit);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({
     containerRef: panelRef,
@@ -1174,20 +1237,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     (e: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(e, panelRef),
     [],
   );
-  const launchErrorContent = launchErrorContext ? (
-    <TaskChatLaunchError
-      taskId={launchErrorContext.taskId}
-      workspaceId={launchErrorContext.workspaceId}
-      statusSummary={launchStatusSummary}
-      sessionId={resolvedSessionId}
-      sessionMetadata={session?.metadata}
-      repositories={launchErrorContext.repositories}
-    />
-  ) : null;
-  const recoveryRevealKey = visibleRecoveryError
-    ? `${resolvedSessionId ?? ""}:${visibleRecoveryError.stamp || visibleRecoveryError.occurred_at}`
-    : null;
-
   return (
     <PanelRoot
       ref={panelRef}
@@ -1198,56 +1247,69 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       onMouseDown={handlePanelMouseDown}
       className="outline-none"
     >
-      <PanelBody padding={false} scroll={false} className="relative overflow-hidden">
-        <TaskMarkdownFileLinkProvider
-          taskId={taskId}
-          sessionId={resolvedSessionId}
-          worktreePath={getSessionWorkspacePath(session)}
-          onOpenFile={onOpenFile}
-        >
-          <MessageList
-            ref={messageListRef}
-            items={groupedItems}
-            messages={allMessages}
-            footerActionMessages={footerActionMessages}
-            permissionsByToolCallId={permissionsByToolCallId}
-            childrenByParentToolCallId={childrenByParentToolCallId}
-            taskId={taskId ?? undefined}
-            sessionId={resolvedSessionId}
-            messagesLoading={messagesLoading}
-            historyRefreshPending={historyRefreshPending}
-            historyStatus={historyStatus}
-            historyError={historyError}
-            onRetryHistory={retryHistory}
-            isWorking={isWorking}
-            sessionState={session?.state}
-            worktreePath={getSessionWorkspacePath(session)}
-            onOpenFile={onOpenFile}
-            dividerBeforeItemKey={dividerBeforeItemKey}
-            lastPromptMessageId={lastPromptMessageId}
-            onLastPromptEdgeChange={setLastPromptEdge}
-            firstMessageId={firstMessageId}
-            onFirstMessageHiddenChange={setIsFirstMessageHidden}
-            anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
-            isVisible={transcriptIsVisible}
-            launchErrorOwned={launchErrorOwned}
-            launchErrorStamp={launchErrorOwned ? activeLaunchError?.stamp : undefined}
-            launchErrorOccurredAt={launchErrorOwned ? activeLaunchError?.occurred_at : undefined}
-            prependContent={launchErrorContent}
-            recoveryRevealKey={recoveryRevealKey}
-            stickyPromptBar={
-              showAnchoredBar && lastPromptMessage ? (
-                <AnchoredLastPromptBar
-                  promptText={lastPromptMessage.content}
-                  isVisible={anchoredBarVisible}
-                  onScrollUp={scrollToLastPrompt}
-                  showScrollToLastPrompt={showScrollToLastPrompt}
-                  onHeightChange={setAnchoredBarHeight}
-                />
-              ) : undefined
-            }
-          />
-        </TaskMarkdownFileLinkProvider>
+      {!hideLaunchQueueStatus && <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />}
+      {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
+      <PanelBody
+        padding={false}
+        scroll={false}
+        className="relative flex min-h-0 flex-col overflow-hidden"
+      >
+        <div className="flex min-h-0 flex-1 flex-col">
+          {resolvedSessionId ? (
+            <div className="shrink-0 px-2">
+              <LaunchWarning sessionId={resolvedSessionId} />
+            </div>
+          ) : null}
+          <div className="min-h-0 flex-1">
+            <TaskMarkdownFileLinkProvider
+              taskId={taskId}
+              sessionId={resolvedSessionId}
+              worktreePath={getSessionWorkspacePath(session)}
+              onOpenFile={onOpenFile}
+            >
+              <MessageList
+                ref={messageListRef}
+                items={groupedItems}
+                messages={allMessages}
+                footerActionMessages={footerActionMessages}
+                permissionsByToolCallId={permissionsByToolCallId}
+                childrenByParentToolCallId={childrenByParentToolCallId}
+                taskId={taskId ?? undefined}
+                sessionId={resolvedSessionId}
+                messagesLoading={messagesLoading}
+                historyRefreshPending={historyRefreshPending}
+                historyStatus={historyStatus}
+                historyError={historyError}
+                onRetryHistory={retryHistory}
+                isWorking={isWorking}
+                sessionState={session?.state}
+                worktreePath={getSessionWorkspacePath(session)}
+                onOpenFile={onOpenFile}
+                dividerBeforeItemKey={dividerBeforeItemKey}
+                lastPromptMessageId={lastPromptMessageId}
+                onLastPromptEdgeChange={setLastPromptEdge}
+                firstMessageId={firstMessageId}
+                onFirstMessageHiddenChange={setIsFirstMessageHidden}
+                anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
+                isVisible={transcriptIsVisible}
+                launchErrorOwned={launchErrorOwned}
+                launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
+                launchErrorOccurredAt={launchErrorOwned ? taskLaunchError?.occurred_at : undefined}
+                stickyPromptBar={
+                  showAnchoredBar && lastPromptMessage ? (
+                    <AnchoredLastPromptBar
+                      promptText={lastPromptMessage.content}
+                      isVisible={anchoredBarVisible}
+                      onScrollUp={scrollToLastPrompt}
+                      showScrollToLastPrompt={showScrollToLastPrompt}
+                      onHeightChange={setAnchoredBarHeight}
+                    />
+                  ) : undefined
+                }
+              />
+            </TaskMarkdownFileLinkProvider>
+          </div>
+        </div>
         {isJumpLoading && (
           <div
             data-testid="transcript-jump-loading"
@@ -1265,7 +1327,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           <ClarificationPanelSection
             pending={Boolean(pendingClarification)}
             messages={pendingClarificationGroup}
+            agentDisconnected={session?.pending_action === null}
             onResolved={handleClarificationResolved}
+            onLateAnswer={lateAnswer.send}
+            lateAnswerState={lateAnswer.state}
             shortcutScopeRef={panelRef}
             maxHeightVh={50}
           />

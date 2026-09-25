@@ -13,6 +13,7 @@ from pathlib import Path
 SKILL_DIR = Path(__file__).resolve().parents[1]
 TRUSTED_DIR = Path(".pr-walkthrough")
 DRAFT_PATH = TRUSTED_DIR / "draft.json"
+MANIFEST_PATH = TRUSTED_DIR / "head-context" / "manifest.json"
 OUTPUT_DIR = Path("docs/pr-walkthrough")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
@@ -72,6 +73,30 @@ def load_draft() -> object:
         raise ValueError(f"fixed draft is not valid JSON: {DRAFT_PATH}") from exc
 
 
+def validate_managed_draft(data: dict[str, object]) -> None:
+    """Apply the new walkthrough contract against the trusted file inventory."""
+    if not MANIFEST_PATH.is_file():
+        raise ValueError(f"prepared context manifest is missing: {MANIFEST_PATH}")
+    try:
+        manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"prepared context manifest is not valid JSON: {MANIFEST_PATH}") from exc
+    files = manifest.get("files") if isinstance(manifest, dict) else None
+    if not isinstance(files, list):
+        raise ValueError("prepared context manifest has no file inventory")
+    changed_paths = {
+        entry.get("path") for entry in files
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+    }
+    sys.path.insert(0, str(SKILL_DIR / "references"))
+    import build as trusted_build  # noqa: PLC0415
+
+    try:
+        trusted_build.validate(data, require_impact=True, changed_paths=changed_paths)
+    except trusted_build.BuildError as exc:
+        raise ValueError(str(exc)) from exc
+
+
 def render(data: dict[str, object]) -> tuple[Path, Path]:
     build_script = SKILL_DIR / "references" / "build.py"
     shell = SKILL_DIR / "references" / "shell.html"
@@ -110,6 +135,7 @@ def main() -> int:
             raise ValueError("renderer does not accept command arguments")
         data = load_draft()
         bound = bind_trusted_metadata(data)
+        validate_managed_draft(bound)
         json_path, html_path = render(bound)
     except (OSError, ValueError) as exc:
         print(f"walkthrough render failed: {exc}", file=sys.stderr)

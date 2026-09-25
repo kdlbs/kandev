@@ -5,6 +5,7 @@ import { WebSocketRequestError } from "@/lib/ws/client";
 import { RunErrorEntry } from "./run-error-entry";
 
 const { requestMock } = vi.hoisted(() => ({ requestMock: vi.fn() }));
+const RUN_ERROR_RESUME_TEST_ID = "run-error-resume-button";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) => selector({}),
@@ -33,6 +34,28 @@ function runError(failureCode: string): RunError {
 }
 
 describe("RunErrorEntry", () => {
+  it("renders managed npm policy failures on the runtime recovery surface", () => {
+    render(
+      <RunErrorEntry
+        taskId="task-1"
+        workspaceId="workspace-1"
+        error={{
+          ...runError("managed_runtime_npm_policy"),
+          failureDetails:
+            "npm error notarget No matching version found. Minimum release age policy applies.",
+        }}
+      />,
+    );
+
+    const recovery = screen.getByTestId("run-error-managed-runtime-npm-recovery");
+    expect(recovery.textContent).toContain("npm blocked this runtime version");
+    expect(recovery.textContent).toContain(
+      "Check npm's min-release-age or before setting. Wait until this version is eligible or select an older version, then retry.",
+    );
+    expect(screen.getByTestId("run-error-managed-runtime-retry-button")).toBeTruthy();
+    expect(screen.queryByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeNull();
+  });
+
   it.each(["provider_auth_required", "model_capacity"])(
     "keeps ordinary failure code %s on the resumable error surface",
     (failureCode) => {
@@ -40,7 +63,7 @@ describe("RunErrorEntry", () => {
         <RunErrorEntry taskId="task-1" workspaceId="workspace-1" error={runError(failureCode)} />,
       );
 
-      expect(screen.getByTestId("run-error-resume-button")).toBeTruthy();
+      expect(screen.getByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeTruthy();
       expect(screen.getByTestId("run-error-fresh-button")).toBeTruthy();
       expect(screen.queryByTestId("run-error-raw-payload")).toBeNull();
       expect(screen.getByTestId("remediation-link")).toBeTruthy();
@@ -71,5 +94,18 @@ describe("RunErrorEntry", () => {
     expect(await screen.findByText("The saved branch is no longer available.")).toBeTruthy();
     expect(screen.getByTestId("run-error-continue-new-branch-button")).toBeTruthy();
     expect(screen.getByTestId("run-error-restore-workspace-button")).toBeTruthy();
+  });
+
+  it("renders recovered session history without stale recovery controls", () => {
+    render(
+      <RunErrorEntry
+        taskId="task-1"
+        workspaceId="workspace-1"
+        error={{ ...runError("provider_auth_required"), isActive: false }}
+      />,
+    );
+
+    expect(screen.queryByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("run-error-fresh-button")).toBeNull();
   });
 });

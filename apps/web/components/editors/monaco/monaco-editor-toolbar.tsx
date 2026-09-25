@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import { Button } from "@kandev/ui/button";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -22,6 +24,7 @@ import {
   ExternalVcsFileLink,
   useExternalVcsFileStatus,
 } from "@/components/editors/external-vcs-file-link";
+import { EditorToolbarOverflowActions } from "@/components/editors/editor-toolbar-overflow";
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { LspStatusButton } from "@/components/editors/lsp-status-button";
 import type { FilePreviewKind } from "@/lib/utils/file-types";
@@ -48,7 +51,7 @@ function SaveButton({
       variant="default"
       onClick={onSave}
       disabled={!isDirty || isSaving}
-      className="cursor-pointer gap-2"
+      className="min-h-6 cursor-pointer gap-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
     >
       {isSaving ? (
         <>
@@ -69,11 +72,13 @@ function SaveButton({
 function ToolbarLeft({
   path,
   worktreePath,
+  isSymlink,
   isDirty,
   diffStats,
 }: {
   path: string;
   worktreePath?: string;
+  isSymlink?: boolean;
   isDirty: boolean;
   diffStats: { additions: number; deletions: number } | null;
 }) {
@@ -82,6 +87,7 @@ function ToolbarLeft({
       <ScrollOnOverflow className="min-w-0 font-mono">
         {toRelativePath(path, worktreePath)}
       </ScrollOnOverflow>
+      <SymlinkIndicator isSymlink={isSymlink} showLabel />
       {isDirty && diffStats && (
         <span className="shrink-0 text-xs text-yellow-500">
           {formatDiffStats(diffStats.additions, diffStats.deletions)}
@@ -119,7 +125,7 @@ function DiffIndicatorsButton({
   onToggle: () => void;
 }) {
   const { t } = useTranslation();
-  const buttonClass = `h-8 w-8 p-0 cursor-pointer ${isVisible ? "text-foreground" : "text-muted-foreground"}`;
+  const buttonClass = `h-6 w-6 p-0 cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11 ${isVisible ? "text-foreground" : "text-muted-foreground"}`;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -142,7 +148,7 @@ function WrapButton({
   onToggleWrap: () => void;
 }) {
   const { t } = useTranslation();
-  const wrapClass = `h-8 w-8 p-0 cursor-pointer ${wrapEnabled ? "text-foreground" : "text-muted-foreground"}`;
+  const wrapClass = `h-6 w-6 p-0 cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11 ${wrapEnabled ? "text-foreground" : "text-muted-foreground"}`;
   const wrapIcon = wrapEnabled ? (
     <IconTextWrap className="h-4 w-4" />
   ) : (
@@ -178,7 +184,7 @@ function ReloadFromAgentButton({
         <Button
           size="sm"
           variant="outline"
-          className="h-8 cursor-pointer gap-1 px-2 text-xs"
+          className="h-6 min-h-6 cursor-pointer gap-1 px-2 text-xs max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           onClick={onReloadFromAgent}
         >
           <IconRefresh className="h-3.5 w-3.5" />
@@ -201,7 +207,7 @@ function DeleteButton({ onDelete }: { onDelete?: () => void }) {
           size="sm"
           variant="ghost"
           onClick={onDelete}
-          className="h-8 w-8 p-0 cursor-pointer hover:text-destructive"
+          className="h-6 w-6 p-0 cursor-pointer hover:text-destructive max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
         >
           <IconTrash className="h-4 w-4" />
         </Button>
@@ -223,7 +229,7 @@ function DownloadButton({ onDownload }: { onDownload?: () => void }) {
           variant="ghost"
           onClick={onDownload}
           aria-label={t("editors:downloadFile")}
-          className="h-11 w-11 p-0 cursor-pointer sm:h-8 sm:w-8"
+          className="h-6 w-6 p-0 cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
         >
           <IconDownload className="h-4 w-4" />
         </Button>
@@ -260,7 +266,7 @@ function PreviewButton({
           disabled={isHtml && isPublishingHtmlPreview}
           aria-label={label}
           title={isHtml ? t("task:htmlPreviewTrustedCode") : undefined}
-          className="h-8 w-8 p-0 cursor-pointer"
+          className="h-6 w-6 p-0 cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
           data-testid={isHtml ? "html-preview-toggle" : "markdown-preview-toggle"}
         >
           {isHtml && isPublishingHtmlPreview ? (
@@ -284,6 +290,7 @@ interface MonacoEditorToolbarProps {
   path: string;
   repositoryName?: string;
   worktreePath?: string;
+  isSymlink?: boolean;
   isDirty: boolean;
   isSaving: boolean;
   diffStats: { additions: number; deletions: number } | null;
@@ -311,20 +318,47 @@ interface MonacoEditorToolbarProps {
   isPublishingHtmlPreview?: boolean;
 }
 
-export function MonacoEditorToolbar({
+type MonacoToolbarActionsProps = Pick<
+  MonacoEditorToolbarProps,
+  | "path"
+  | "repositoryName"
+  | "isDirty"
+  | "isSaving"
+  | "wrapEnabled"
+  | "showDiffIndicators"
+  | "enableComments"
+  | "sessionId"
+  | "lspStatus"
+  | "lspProgress"
+  | "lspLanguage"
+  | "showLspStatus"
+  | "onToggleLsp"
+  | "onToggleWrap"
+  | "onToggleDiffIndicators"
+  | "onSave"
+  | "onReloadFromAgent"
+  | "onDelete"
+  | "onDownload"
+  | "previewKind"
+  | "onTogglePreview"
+  | "onPreviewHtml"
+  | "isPublishingHtmlPreview"
+  | "commentCount"
+  | "hasRemoteUpdate"
+  | "hasVcsDiff"
+> & {
+  fileStatus?: { old_path?: string | null; status?: string | null };
+};
+
+function MonacoToolbarActions({
   path,
   repositoryName,
-  worktreePath,
   isDirty,
   isSaving,
-  diffStats,
   wrapEnabled,
   showDiffIndicators,
   enableComments,
   sessionId,
-  commentCount,
-  hasRemoteUpdate = false,
-  hasVcsDiff = false,
   lspStatus,
   lspProgress,
   lspLanguage,
@@ -340,66 +374,149 @@ export function MonacoEditorToolbar({
   onTogglePreview,
   onPreviewHtml,
   isPublishingHtmlPreview,
-}: MonacoEditorToolbarProps) {
+  commentCount,
+  hasRemoteUpdate,
+  hasVcsDiff,
+  fileStatus,
+}: MonacoToolbarActionsProps) {
+  return (
+    <div className="flex items-center gap-1">
+      <CommentCountBadge
+        enableComments={enableComments}
+        sessionId={sessionId}
+        commentCount={commentCount}
+      />
+      {showLspStatus ? (
+        <LspStatusButton
+          status={lspStatus}
+          progress={lspProgress}
+          lspLanguage={lspLanguage}
+          onToggle={onToggleLsp}
+        />
+      ) : null}
+      {(isDirty || hasVcsDiff) && (
+        <DiffIndicatorsButton isVisible={showDiffIndicators} onToggle={onToggleDiffIndicators} />
+      )}
+      {(onTogglePreview || onPreviewHtml) && (
+        <PreviewButton
+          previewKind={previewKind}
+          onTogglePreview={onTogglePreview}
+          onPreviewHtml={onPreviewHtml}
+          isPublishingHtmlPreview={isPublishingHtmlPreview}
+        />
+      )}
+      <WrapButton wrapEnabled={wrapEnabled} onToggleWrap={onToggleWrap} />
+      <ReloadFromAgentButton
+        hasRemoteUpdate={hasRemoteUpdate}
+        onReloadFromAgent={onReloadFromAgent}
+      />
+      <ExternalVcsFileLink
+        filePath={path}
+        previousPath={fileStatus?.old_path}
+        status={fileStatus?.status}
+        sessionId={sessionId}
+        repositoryName={repositoryName}
+        size="sm"
+      />
+      <FileActionsDropdown filePath={path} sessionId={sessionId} size="sm" />
+      <DownloadButton onDownload={onDownload} />
+      <DeleteButton onDelete={onDelete} />
+      <SaveButton isDirty={isDirty} isSaving={isSaving} onSave={onSave} />
+    </div>
+  );
+}
+
+function MonacoToolbarOverflowPrimaryActions({
+  showLspStatus,
+  lspStatus,
+  lspProgress,
+  lspLanguage,
+  onToggleLsp,
+  isDirty,
+  isSaving,
+  onSave,
+}: Pick<
+  MonacoEditorToolbarProps,
+  | "showLspStatus"
+  | "lspStatus"
+  | "lspProgress"
+  | "lspLanguage"
+  | "onToggleLsp"
+  | "isDirty"
+  | "isSaving"
+  | "onSave"
+>) {
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      {showLspStatus !== false ? (
+        <LspStatusButton
+          status={lspStatus}
+          progress={lspProgress}
+          lspLanguage={lspLanguage}
+          onToggle={onToggleLsp}
+        />
+      ) : null}
+      <SaveButton isDirty={isDirty} isSaving={isSaving} onSave={onSave} />
+    </div>
+  );
+}
+
+export function MonacoEditorToolbar(props: MonacoEditorToolbarProps) {
+  const { path, sessionId, repositoryName } = props;
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
+  const overflowActions = (
+    <EditorToolbarOverflowActions
+      filePath={path}
+      previousPath={fileStatus?.old_path}
+      status={fileStatus?.status}
+      sessionId={sessionId}
+      repositoryName={repositoryName}
+      isDirty={props.isDirty}
+      hasVcsDiff={props.hasVcsDiff}
+      showDiffIndicators={props.showDiffIndicators}
+      onToggleDiffIndicators={props.onToggleDiffIndicators}
+      wrapEnabled={props.wrapEnabled}
+      onToggleWrap={props.onToggleWrap}
+      lspLanguage={props.showLspStatus === false ? null : props.lspLanguage}
+      onToggleLsp={props.onToggleLsp}
+      hasRemoteUpdate={props.hasRemoteUpdate}
+      onReloadFromAgent={props.onReloadFromAgent}
+      previewKind={props.previewKind ?? "none"}
+      onTogglePreview={props.onTogglePreview}
+      onPreviewHtml={props.onPreviewHtml}
+      isPublishingHtmlPreview={props.isPublishingHtmlPreview}
+      commentCount={props.commentCount}
+      enableComments={props.enableComments}
+      onDownload={props.onDownload}
+      onDelete={props.onDelete}
+    />
+  );
   return (
     <PanelHeaderBarSplit
       left={
         <ToolbarLeft
           path={path}
-          worktreePath={worktreePath}
-          isDirty={isDirty}
-          diffStats={diffStats}
+          worktreePath={props.worktreePath}
+          isSymlink={props.isSymlink}
+          isDirty={props.isDirty}
+          diffStats={props.diffStats}
         />
       }
-      right={
-        <div className="flex items-center gap-1">
-          <CommentCountBadge
-            enableComments={enableComments}
-            sessionId={sessionId}
-            commentCount={commentCount}
-          />
-          {showLspStatus ? (
-            <LspStatusButton
-              status={lspStatus}
-              progress={lspProgress}
-              lspLanguage={lspLanguage}
-              onToggle={onToggleLsp}
-            />
-          ) : null}
-          {(isDirty || hasVcsDiff) && (
-            <DiffIndicatorsButton
-              isVisible={showDiffIndicators}
-              onToggle={onToggleDiffIndicators}
-            />
-          )}
-          {(onTogglePreview || onPreviewHtml) && (
-            <PreviewButton
-              previewKind={previewKind}
-              onTogglePreview={onTogglePreview}
-              onPreviewHtml={onPreviewHtml}
-              isPublishingHtmlPreview={isPublishingHtmlPreview}
-            />
-          )}
-          <WrapButton wrapEnabled={wrapEnabled} onToggleWrap={onToggleWrap} />
-          <ReloadFromAgentButton
-            hasRemoteUpdate={hasRemoteUpdate}
-            onReloadFromAgent={onReloadFromAgent}
-          />
-          <ExternalVcsFileLink
-            filePath={path}
-            previousPath={fileStatus?.old_path}
-            status={fileStatus?.status}
-            sessionId={sessionId}
-            repositoryName={repositoryName}
-            size="sm"
-          />
-          <FileActionsDropdown filePath={path} sessionId={sessionId} size="sm" />
-          <DownloadButton onDownload={onDownload} />
-          <DeleteButton onDelete={onDelete} />
-          <SaveButton isDirty={isDirty} isSaving={isSaving} onSave={onSave} />
-        </div>
+      right={<MonacoToolbarActions {...props} fileStatus={fileStatus} />}
+      rightWhenOverflow={
+        <MonacoToolbarOverflowPrimaryActions
+          showLspStatus={props.showLspStatus}
+          lspStatus={props.lspStatus}
+          lspProgress={props.lspProgress}
+          lspLanguage={props.lspLanguage}
+          onToggleLsp={props.onToggleLsp}
+          isDirty={props.isDirty}
+          isSaving={props.isSaving}
+          onSave={props.onSave}
+        />
       }
+      overflow={overflowActions}
+      overflowAt={520}
     />
   );
 }

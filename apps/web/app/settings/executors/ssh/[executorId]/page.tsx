@@ -13,6 +13,7 @@ import { fetchExecutor, listExecutors, updateExecutor } from "@/lib/api/domains/
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
 import { SSHSessionsCard } from "@/components/settings/ssh-sessions-card";
+import { SSHReachabilityCard } from "@/components/settings/ssh-reachability-card";
 import { listSSHSessions } from "@/lib/api/domains/ssh-api";
 import { getExecutorLabel } from "@/lib/executor-icons";
 import {
@@ -135,6 +136,7 @@ function SSHExecutorView({
         coordinatedSaveId={`ssh-executor:${executor.id}`}
         runningSessionCount={sessionCount}
       />
+      <SSHReachabilityCard executorId={executor.id} />
       <SSHSessionsCard executorId={executor.id} />
     </div>
   );

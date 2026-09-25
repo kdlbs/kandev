@@ -266,11 +266,10 @@ jobs:
       - name: Run golangci-lint
         # golangci-lint is preinstalled in the kandev-ci image; invoke it
         # directly instead of going through `golangci/golangci-lint-action`,
-        # which would re-download its own binary on every run. `--timeout=5m`
-        # matches the action's previous implicit default (the binary's own
-        # default is 1m, which can trip on cold caches).
+        # which would re-download its own binary on every run. Ten minutes
+        # leaves headroom for cold caches while still bounding analysis time.
         shell: bash
-        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=5m
+        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=10m
 
   test_shards:
     name: Backend Tests (${{ matrix.shard }}/2)
@@ -644,7 +643,7 @@ jobs:
             ./internal/workflowsync
             ./internal/worktree
           )
-          go test -v -race "${POSTGRES_PACKAGES[@]}"
+          go test -v -race -timeout 15m "${POSTGRES_PACKAGES[@]}"
 
   postgres-18:
     name: Backend Postgres 18
@@ -707,9 +706,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: windows-latest
-    # The race-sensitive Windows package suite can approach 20 minutes on a
-    # busy hosted runner; keep the cap finite while allowing runner variance.
-    timeout-minutes: 30
+    # Dependency hydration, build, vet, and the race-sensitive package suite
+    # can consume 30 minutes on a cold hosted runner. Keep the cap finite while
+    # leaving the final targeted regression checks time to run.
+    timeout-minutes: 40
     # Least-privilege: this job only reads source and runs tests, no PR/issue
     # writes or release operations. Flagged by CodeQL workflow audit + matching
     # CodeRabbit nitpick.

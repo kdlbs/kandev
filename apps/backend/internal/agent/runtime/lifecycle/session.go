@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -139,7 +140,7 @@ type InitializeResult struct {
 // It handles the initialize handshake and session creation/loading based on config.
 //
 // Session behavior:
-//   - If agentConfig.Runtime().SessionConfig.NativeSessionResume is true AND existingSessionID is provided: use session/load
+//   - If agentConfig.Runtime().SessionConfig.NativeSessionResume is true AND existingSessionID is provided: restore via the adapter
 //   - If NativeSessionResume is false (CLI handles resume): always use session/new
 //   - Otherwise: use session/new
 func (sm *SessionManager) InitializeSession(
@@ -230,7 +231,7 @@ func (sm *SessionManager) createOrLoadSession(
 		// the provider conversation. An internal error, timeout, cancellation,
 		// authentication failure, or unknown transport error is inconclusive:
 		// preserve the stored identity so a later retry can load it.
-		if !isSessionLoadFallbackErr(err) {
+		if !isSessionLoadFallbackErr(err, existingSessionID) {
 			sm.logger.Warn("session/load failed with an inconclusive error, preserving session identity",
 				zap.String("agent_type", agentConfig.ID()),
 				zap.String("existing_session_id", existingSessionID),
@@ -249,7 +250,8 @@ func (sm *SessionManager) createOrLoadSession(
 			zap.String("reason", err.Error()),
 			zap.Bool("method_not_found", isMethodNotFoundErr(err)),
 			zap.Bool("capability_mismatch", hasCanonicalSessionLoadMessage(err, "agent does not support session loading (LoadSession capability is false)")),
-			zap.Bool("session_unknown", isSessionUnknownErr(err)))
+			zap.Bool("session_unknown", isSessionUnknownErr(err)),
+			zap.Bool("provider_session_missing", isMissingProviderSessionErr(err, existingSessionID)))
 		return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
 	}
 	return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
@@ -293,7 +295,7 @@ func (sm *SessionManager) getResumeContextPrompt(agentConfig agents.Agent, taskS
 	return resumePrompt
 }
 
-// loadSession loads an existing session via ACP session/load
+// loadSession restores an existing session using the adapter's compatible ACP request.
 func (sm *SessionManager) loadSession(
 	ctx context.Context,
 	client *agentctl.Client,
@@ -301,7 +303,7 @@ func (sm *SessionManager) loadSession(
 	sessionID string,
 	mcpServers []agentctltypes.McpServer,
 ) (string, error) {
-	sm.logger.Info("sending ACP session/load request",
+	sm.logger.Info("restoring existing ACP session",
 		zap.String("agent_type", agentConfig.ID()),
 		zap.String("session_id", sessionID))
 
@@ -313,12 +315,12 @@ func (sm *SessionManager) loadSession(
 		// classification. The caller still classifies canceled loads as
 		// transport-dead and skips the session/new fallback.
 		if errors.Is(err, context.Canceled) {
-			sm.logger.Warn("ACP session/load aborted by context",
+			sm.logger.Warn("ACP session restoration aborted by context",
 				zap.String("agent_type", agentConfig.ID()),
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		} else {
-			sm.logger.Error("ACP session/load failed",
+			sm.logger.Error("ACP session restoration failed",
 				zap.String("agent_type", agentConfig.ID()),
 				zap.String("session_id", sessionID),
 				zap.Error(err))
@@ -326,7 +328,7 @@ func (sm *SessionManager) loadSession(
 		return "", fmt.Errorf("session/load failed: %w", err)
 	}
 
-	sm.logger.Info("ACP session loaded successfully",
+	sm.logger.Info("ACP session restored successfully",
 		zap.String("agent_type", agentConfig.ID()),
 		zap.String("session_id", sessionID))
 
@@ -363,7 +365,7 @@ func (sm *SessionManager) createNewSession(
 
 // InitializeAndPrompt performs full ACP session initialization and sends the initial prompt.
 // This offices:
-// 1. Session initialization (initialize + session/new or session/load)
+// 1. Session initialization (initialize + creation or restoration through the adapter)
 // 2. Publishing ACP session created event
 // 3. Connecting WebSocket streams
 // 4. Sending the initial task prompt (if provided)
@@ -524,12 +526,10 @@ func (sm *SessionManager) applyStartModelPolicyToEffectiveModel(
 	}
 	effective.decision = decision
 	if decision.Outcome == ModelSelectionOutcomeApplied ||
-		decision.Outcome == ModelSelectionOutcomeExplicitFallback ||
-		decision.Outcome == ModelSelectionOutcomeUniqueVariation {
+		decision.Outcome == ModelSelectionOutcomeExplicitFallback {
 		effective.appliedModel = decision.EffectiveModel
 	}
-	if decision.Outcome == ModelSelectionOutcomeExplicitFallback ||
-		decision.Outcome == ModelSelectionOutcomeUniqueVariation {
+	if decision.Outcome == ModelSelectionOutcomeExplicitFallback {
 		effective.model = decision.EffectiveModel
 	}
 	return effective
@@ -952,6 +952,19 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				zap.Int("effective_length", len(effectivePrompt)))
 		}
 		acpAttachments := convertAttachments(attachments)
+		onDispatched, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
+		var failureHandler func(InitialPromptFailure)
+		if onInitialPromptFailure != nil {
+			initialPromptFailure := sm.initialPromptFailure
+			failureHandler = func(failure InitialPromptFailure) {
+				onInitialPromptFailure()
+				if initialPromptFailure != nil {
+					initialPromptFailure(failure)
+				}
+			}
+		} else {
+			failureHandler = sm.initialPromptFailure
+		}
 		go func() {
 			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, 0)
 			defer cancel()
@@ -962,7 +975,7 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				false,
 				acpAttachments,
 				false,
-				sendPromptCallbacks{onFailure: sm.initialPromptFailure},
+				sendPromptCallbacks{onDispatched: onDispatched, onFailure: failureHandler},
 				false,
 			)
 			if err != nil {
@@ -1887,16 +1900,80 @@ func isSessionUnknownErr(err error) bool {
 // which replacing the provider conversation is known to be safe. Errors from
 // the agentctl WebSocket boundary are message-only, so retain the structured
 // ACP checks and match only their canonical projected messages here.
-func isSessionLoadFallbackErr(err error) bool {
+func isSessionLoadFallbackErr(err error, expectedSessionID string) bool {
 	if err == nil {
 		return false
 	}
-	if isMethodNotFoundErr(err) || isSessionUnknownErr(err) {
+	if isMethodNotFoundErr(err) || isSessionUnknownErr(err) ||
+		isMissingProviderSessionErr(err, expectedSessionID) {
 		return true
 	}
 	return hasCanonicalSessionLoadMessage(err, "Method not found") ||
 		hasCanonicalSessionLoadMessage(err, "agent does not support session loading (LoadSession capability is false)") ||
 		hasCanonicalSessionLoadMessage(err, "Resource not found")
+}
+
+const (
+	jsonRPCInternalError         = -32603
+	jsonRPCInvalidParams         = -32602
+	missingProviderRolloutPrefix = "no rollout found for thread id "
+	missingProviderSessionPrefix = "Session not found: "
+)
+
+type sessionLoadRequestError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    struct {
+		Details string `json:"details"`
+	} `json:"data"`
+}
+
+// isMissingProviderSessionErr recognizes Codex's explicit not-found response
+// after its process-local rollout state disappeared and Auggie's session not
+// found error. The session ID must match the one Kandev attempted to load;
+// unrelated internal errors remain fatal.
+func isMissingProviderSessionErr(err error, expectedSessionID string) bool {
+	if err == nil || strings.TrimSpace(expectedSessionID) == "" {
+		return false
+	}
+	var reqErr *acp.RequestError
+	if errors.As(err, &reqErr) {
+		encoded, marshalErr := json.Marshal(reqErr)
+		if marshalErr == nil && matchesMissingProviderSession(encoded, expectedSessionID) {
+			return true
+		}
+	}
+	message := err.Error()
+	for offset := strings.IndexByte(message, '{'); offset >= 0; {
+		candidate := message[offset:]
+		if matchesMissingProviderSession([]byte(candidate), expectedSessionID) {
+			return true
+		}
+		next := strings.IndexByte(candidate[1:], '{')
+		if next < 0 {
+			break
+		}
+		offset += next + 1
+	}
+	return false
+}
+
+func matchesMissingProviderSession(encoded []byte, expectedSessionID string) bool {
+	var projected sessionLoadRequestError
+	if err := json.Unmarshal(encoded, &projected); err != nil {
+		return false
+	}
+	if projected.Code == jsonRPCInternalError &&
+		projected.Message == "Internal error" &&
+		projected.Data.Details == missingProviderRolloutPrefix+expectedSessionID {
+		return true
+	}
+	if projected.Code == jsonRPCInvalidParams &&
+		projected.Message == "Invalid params" &&
+		projected.Data.Details == missingProviderSessionPrefix+expectedSessionID {
+		return true
+	}
+	return false
 }
 
 func hasCanonicalSessionLoadMessage(err error, canonical string) bool {

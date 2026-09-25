@@ -183,7 +183,9 @@ describe("Temporary artifact policy", () => {
       temporary_artifacts: { enabled: true },
     });
     expect(
-      screen.getAllByText("Registered inactive artifacts only. Minimum age: 24 hours.").length,
+      screen.getAllByText(
+        "Registered diagnostic bundles and utility working folders. Inactive for at least 24 hours.",
+      ).length,
     ).toBeGreaterThan(0);
   });
 
@@ -457,7 +459,7 @@ describe("StoragePolicyCard interactions", () => {
       "Go build cache",
       "Docker cleanup",
       "Quarantine safety",
-      "Temporary artifacts",
+      "Temporary Kandev files",
     ]) {
       expect(screen.getByText(heading)).toBeTruthy();
     }

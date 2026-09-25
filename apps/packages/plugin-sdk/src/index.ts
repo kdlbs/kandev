@@ -30,11 +30,35 @@ export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-f
 /**
  * Context for the `main-top-bar` slot. Phone listing contributions live in the
  * menu with 44px touch targets; interactions retain the slot's local state.
+ * On phones with task controls, the same plugin's chat-top-bar replaces this
+ * slot once it renders content. Null-rendering task controls retain this
+ * fallback. Listings and archived tasks retain the workspace toolbar.
  */
 export interface MainTopBarSlotProps {
   workspaceId: string | null;
   workspaceLabel?: string;
   currentPage: "kanban" | "tasks";
+  presentation: "desktop" | "mobile";
+}
+
+/**
+ * Context for the `chat-top-bar` slot. Phone task contributions live in the
+ * shared menu; tablet and desktop contributions remain inline in the top bar.
+ * When task controls are present, every registration in this slot renders
+ * instead of the same plugin's main-top-bar registrations in the phone menu.
+ */
+export interface ChatTopBarSlotProps {
+  /** Task the top bar belongs to, or null before one exists. */
+  taskId: string | null;
+  /** Display title of the task, when known. */
+  taskTitle?: string;
+  /** Workspace the task lives in, when known. */
+  workspaceId: string | null;
+  /** Session the top bar is currently bound to, or null before one exists. */
+  activeSessionId: string | null;
+  /** Every Kandev session id on the task, including `activeSessionId`. */
+  sessionIds: string[];
+  /** Host surface that mounted the contribution. */
   presentation: "desktop" | "mobile";
 }
 
@@ -85,6 +109,7 @@ export interface HostReact {
   createElement: ElementFactory;
   useState<Value>(initialValue: Value | (() => Value)): [Value, StateSetter<Value>];
   useEffect(effect: () => void | (() => void), dependencies?: readonly unknown[]): void;
+  useLayoutEffect(effect: () => void | (() => void), dependencies?: readonly unknown[]): void;
   useMemo<Value>(factory: () => Value, dependencies: readonly unknown[]): Value;
   useCallback<Callback extends (...args: never[]) => unknown>(
     callback: Callback,
@@ -291,19 +316,107 @@ export interface PluginRouteOptions {
   topbar?: boolean | PluginPageChrome;
 }
 
-export interface PluginTaskPanelProps {
-  panelId: string;
+export type PluginSessionKind = "managed" | "passthrough" | null;
+export type PluginConversationAuthor = "user" | "agent";
+export type PluginConversationSort = "asc" | "desc";
+
+export interface PluginConversationMessage {
+  id: string;
+  taskId: string | null;
+  sessionId: string;
+  turnId?: string;
+  authorType: PluginConversationAuthor;
+  type: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+  promptIndex?: number;
+  senderTaskId?: string;
+}
+
+export interface PluginConversationTurn {
+  id: string;
+  taskId: string | null;
+  sessionId: string;
+  startedAt: string;
+  completedAt?: string;
+  updatedAt: string;
+}
+
+export interface PluginSessionMessagesQuery {
+  sessionId: string | null;
+  taskId?: string | null;
+  authorTypes?: readonly PluginConversationAuthor[];
+  sort?: PluginConversationSort;
+  pageSize?: number;
+}
+
+export type PluginConversationErrorCode =
+  | "unauthenticated"
+  | "not_found"
+  | "invalid_query"
+  | "upstream_failure";
+
+export interface PluginConversationError {
+  code: PluginConversationErrorCode;
+  message: string;
+  retryable: boolean;
+}
+
+export interface PluginSessionMessagesState {
+  messages: readonly PluginConversationMessage[];
+  loading: boolean;
+  hydrated: boolean;
+  loadingMore: boolean;
+  error: PluginConversationError | null;
+  hasMore: boolean;
+  removed: boolean;
+  loadMore(): Promise<number>;
+  retry(): void;
+}
+
+export interface PluginSessionTurnsState {
+  turns: readonly PluginConversationTurn[];
+  loading: boolean;
+  hydrated: boolean;
+  error: PluginConversationError | null;
+  removed: boolean;
+  retry(): void;
+}
+
+export interface PluginConversationApi {
+  useSessionMessages(query: PluginSessionMessagesQuery): PluginSessionMessagesState;
+  useSessionTurns(sessionId: string | null, taskId?: string | null): PluginSessionTurnsState;
+  useMessageFavorite(sessionId: string | null, messageId: string): boolean;
+}
+
+export type PluginOpenMessageResult = { status: "accepted" | "unavailable" };
+
+export interface PluginTaskPanelConversationCapability {
+  openMessage(messageId: string): PluginOpenMessageResult;
+  history: PluginConversationApi;
+}
+
+export interface PluginTaskPanelContext {
   taskId: string;
   sessionId: string | null;
+  sessionKind: PluginSessionKind;
   presentation: "desktop" | "mobile";
+}
+
+export interface PluginTaskPanelProps extends PluginTaskPanelContext {
+  panelId: string;
+  conversation: PluginTaskPanelConversationCapability;
 }
 
 export interface TaskPanelRegistration {
   id: string;
   title: string;
+  titleKey?: string;
   icon?: PluginIcon;
   Component: Component<PluginTaskPanelProps>;
   mobileEnabled?: boolean;
+  visible?(context: PluginTaskPanelContext): boolean;
 }
 
 export interface PluginTaskMenuContext {
@@ -314,12 +427,44 @@ export interface PluginTaskMenuContext {
   presentation: "desktop" | "mobile";
 }
 
+/**
+ * One child of a task menu action that declares `items`. Unlike the parent
+ * action, an item is never registered on its own: it exists only inside its
+ * parent's submenu, so it has no `group`, no `visible`, and its own nesting is
+ * not supported (one level deep).
+ */
+export interface TaskMenuSubItemRegistration {
+  /** Unique within the parent action; contributes to the menu entry's React key. */
+  id: string;
+  label: string;
+  icon?: PluginIcon;
+  disabled?: boolean;
+  run(context: PluginTaskMenuContext): void | Promise<void>;
+}
+
 export interface TaskMenuActionRegistration {
   id: string;
   label: string;
   icon?: PluginIcon;
   group: "edit" | "primary";
   visible?(context: PluginTaskMenuContext): boolean;
+  /**
+   * Declaring this turns the action into a submenu: the host renders `label`
+   * as an unselectable submenu trigger and calls `items(context)` to get its
+   * children, in the returned order. It must be synchronous and cheap: the
+   * host cannot await a menu item, and it builds a card's or row's entries on
+   * every render — a card's dropdown and context variants are built from one
+   * evaluation, whether or not a menu is open — so an implementation that
+   * scans or sorts should memoize on the state it reads.
+   *
+   * `run` then serves as the fallback for a host that predates submenus (it
+   * ignores this field and renders the flat item) and for a build where
+   * `items` yields nothing usable: an empty list, or a throw (caught,
+   * logged, and treated as empty). Either way the action stays reachable
+   * instead of becoming a trigger with no children.
+   */
+  items?(context: PluginTaskMenuContext): readonly TaskMenuSubItemRegistration[];
+  /** A rejection is caught and logged; the menu closes either way. */
   run(context: PluginTaskMenuContext): void | Promise<void>;
 }
 
@@ -485,6 +630,7 @@ interface PluginUIShape {
   PopoverTitle: unknown;
   PopoverTrigger: unknown;
   Progress: unknown;
+  PromptMentionText: Component<{ text: string; interactive?: boolean }>;
   RichTextEditor: unknown;
   RichTextReadOnly: unknown;
   ScrollArea: unknown;
@@ -544,7 +690,9 @@ export type SettingsSaveContributor = {
 };
 
 export type PluginUIApi = {
-  readonly [Name in keyof PluginUIShape]: HostComponent;
+  readonly [Name in keyof PluginUIShape]: PluginUIShape[Name] extends Component<infer Props>
+    ? Component<Props>
+    : HostComponent;
 };
 
 export interface PluginToastApi {
@@ -580,6 +728,7 @@ export interface PluginHostApi {
   React: HostReact;
   jsx: ElementFactory;
   ui: PluginUIApi;
+  conversation: PluginConversationApi;
   i18n: PluginI18nApi;
   context: PluginContextApi;
   api: {

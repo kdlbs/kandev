@@ -77,6 +77,10 @@ const (
 	// EventTypeSessionInfo indicates ACP session metadata such as title changed.
 	EventTypeSessionInfo = "session_info"
 
+	// EventTypeResponseAttemptReset indicates that the provider abandoned its
+	// current response attempt and will continue the active prompt with a new one.
+	EventTypeResponseAttemptReset = "response_attempt_reset"
+
 	// EventTypeAuthRequired indicates the agent rejected session/new with an
 	// authentication-required error. The event carries the available auth
 	// methods (from ACP initialize); the client picks one and replays the
@@ -167,6 +171,10 @@ type AgentEvent struct {
 	// ProtocolMessageID identifies the source-protocol message this chunk belongs to.
 	// It is distinct from the Kandev message record ID used by downstream streaming.
 	ProtocolMessageID string `json:"protocol_message_id,omitempty"`
+
+	// RetractedMessageIDs identifies Kandev transcript records owned by an
+	// abandoned response attempt. It is populated only on response-attempt resets.
+	RetractedMessageIDs []string `json:"retracted_message_ids,omitempty"`
 
 	// --- Reasoning fields (for "reasoning" type) ---
 
@@ -482,6 +490,9 @@ type SessionModelState struct {
 	CurrentModelID string             `json:"current_model_id,omitempty"`
 	Models         []SessionModelInfo `json:"models,omitempty"`
 	ConfigOptions  []ConfigOption     `json:"config_options,omitempty"`
+	// ConfigOptionsSettled distinguishes a complete empty provider snapshot
+	// from the transient empty state sent before startup settles.
+	ConfigOptionsSettled bool `json:"config_options_settled,omitempty"`
 }
 
 // AuthMethodInfo represents an authentication method from ACP initialize.
