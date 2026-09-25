@@ -218,12 +218,20 @@ func (c *sshDockerConn) Close() error {
 	c.closed = true
 	c.mu.Unlock()
 
-	_ = c.closeStdin()
-	// Closing the session unblocks a Wait that is not going to return on its
-	// own, so a remote command that ignores stdin EOF costs a bounded delay
+	// Close the SSH session first. A Docker request can be blocked in
+	// stdin.Write while the remote channel window is full; waiting for
+	// stdinMu before closing the session would leave that write with no way to
+	// make progress. Session.Close interrupts the channel write and the later
+	// state update prevents any new writes from entering it.
+	sessionErr := c.session.Close()
+	c.stdinMu.Lock()
+	c.stdinClosed = true
+	c.stdinMu.Unlock()
+	// The closed session also unblocks a Wait that is not going to return on
+	// its own, so a remote command that ignores stdin EOF costs a bounded delay
 	// rather than stranding the caller's cleanup.
 	c.waitBounded(c.closeBudget())
-	return c.session.Close()
+	return sessionErr
 }
 
 // closeBudget is the wait this connection allows on close.

@@ -90,7 +90,7 @@ export function DockerSections({
           onChange={onAllowUserNamespacesChange}
         />
       )}
-      <DockerContainersCard profileId={profile.id} />
+      {!remoteExecutorId && <DockerContainersCard profileId={profile.id} />}
     </>
   );
 }

@@ -1999,7 +1999,6 @@ var remoteDockerConnectionKeys = []string{
 	sshMetaIdentitySource,
 	sshMetaIdentityFile,
 	sshMetaProxyJump,
-	sshMetaHostFingerprint,
 }
 
 // guardRetainedRemoteDockerConnection refuses to repoint a remote Docker
@@ -2009,7 +2008,9 @@ var remoteDockerConnectionKeys = []string{
 // and teardown reaches it through this row's current connection. Changing the
 // connection leaves that container on the original host with nothing pointing
 // at it. Fields that do not select a daemon, a rename for instance, stay
-// editable: the guard protects reachability, not the row.
+// editable: the guard protects reachability, not the row. The fingerprint is
+// intentionally excluded because an administrator must be able to re-trust
+// the same daemon after a legitimate host-key rotation.
 func (s *Service) guardRetainedRemoteDockerConnection(
 	ctx context.Context, executor *models.Executor, req *UpdateExecutorRequest,
 ) error {

@@ -79,6 +79,27 @@ func TestUpdateRemoteDockerExecutorRejectsConnectionChangeWhileContainersAreReta
 	}
 }
 
+// A retained container must not make a legitimate host-key rotation
+// unrecoverable. The daemon target stays the same, while an administrator
+// explicitly replaces the trusted fingerprint after re-testing the host.
+func TestUpdateRemoteDockerExecutorAllowsFingerprintChangeWhileContainersAreRetained(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	executor := createRetainedRemoteDockerExecutor(t, svc, repo)
+
+	rotated := validRemoteDockerExecutorConfig()
+	rotated[sshMetaHostFingerprint] = "SHA256:def"
+
+	updated, err := svc.UpdateExecutor(remoteDockerAdminContext(), executor.ID, &UpdateExecutorRequest{
+		Config: rotated,
+	})
+	if err != nil {
+		t.Fatalf("UpdateExecutor() error = %v, want nil for an explicit fingerprint rotation", err)
+	}
+	if got := updated.Config[sshMetaHostFingerprint]; got != "SHA256:def" {
+		t.Fatalf("updated fingerprint = %q, want SHA256:def", got)
+	}
+}
+
 // A rename touches no connection field, so it must stay allowed: the guard
 // exists to protect reachability, not to freeze the row.
 func TestUpdateRemoteDockerExecutorAllowsNonConnectionChangeWhileContainersAreRetained(t *testing.T) {
