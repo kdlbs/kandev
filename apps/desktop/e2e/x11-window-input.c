@@ -83,7 +83,7 @@ static int focus_window(Display *display, Window window) {
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    fprintf(stderr, "usage: x11-window-input find [pid] | click <pid> [x-ratio] [height-ratio] | quit <pid>\n");
+    fprintf(stderr, "usage: x11-window-input find [pid] | activate <pid> | quit <pid>\n");
     return 2;
   }
 
@@ -110,16 +110,14 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  if (strcmp(argv[1], "click") == 0) {
+  if (strcmp(argv[1], "activate") == 0) {
     XWindowAttributes attributes;
     if (!XGetWindowAttributes(display, window, &attributes)) {
       XCloseDisplay(display);
       return 1;
     }
-    double x_ratio = argc >= 4 ? strtod(argv[3], NULL) : 0.35;
-    double y_ratio = argc >= 5 ? strtod(argv[4], NULL) : 0.8;
-    int local_x = (int)(attributes.width * x_ratio);
-    int local_y = (int)(attributes.height * y_ratio);
+    int local_x = attributes.width / 40;
+    int local_y = attributes.height / 8;
     int root_x;
     int root_y;
     Window child;
@@ -128,6 +126,18 @@ int main(int argc, char **argv) {
     XTestFakeMotionEvent(display, DefaultScreen(display), root_x, root_y, CurrentTime);
     XTestFakeButtonEvent(display, 1, True, CurrentTime);
     XTestFakeButtonEvent(display, 1, False, CurrentTime);
+    XSync(display, False);
+    usleep(100000);
+    KeyCode tab = XKeysymToKeycode(display, XK_Tab);
+    KeyCode enter = XKeysymToKeycode(display, XK_Return);
+    XTestFakeKeyEvent(display, tab, True, CurrentTime);
+    XTestFakeKeyEvent(display, tab, False, CurrentTime);
+    XTestFakeKeyEvent(display, tab, True, CurrentTime);
+    XTestFakeKeyEvent(display, tab, False, CurrentTime);
+    XSync(display, False);
+    usleep(100000);
+    XTestFakeKeyEvent(display, enter, True, CurrentTime);
+    XTestFakeKeyEvent(display, enter, False, CurrentTime);
     XFlush(display);
     XCloseDisplay(display);
     return 0;

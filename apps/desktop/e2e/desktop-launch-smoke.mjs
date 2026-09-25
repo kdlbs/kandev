@@ -170,7 +170,7 @@ async function runConflictRecoverySmoke() {
     await waitForX11Window(inputHelper, launcher.pid, failIfLauncherExited);
     captureWindowScreenshot(inputHelper, launcher.pid, join(tmp, "conflict-startup.png"));
 
-    await clickLauncherForInstance(
+    await activateLauncherForInstance(
       inputHelper,
       launcher.pid,
       instancesDir,
@@ -178,7 +178,7 @@ async function runConflictRecoverySmoke() {
       failIfLauncherExited,
     );
     const first = (await waitForReadyInstances(instancesDir, 1, failIfLauncherExited))[0];
-    await clickLauncherForInstance(
+    await activateLauncherForInstance(
       inputHelper,
       launcher.pid,
       instancesDir,
@@ -304,10 +304,12 @@ async function waitForX11WindowGone(inputHelper, pid, timeoutMs) {
   );
 }
 
-async function clickLauncherForInstance(inputHelper, pid, instancesDir, count, tick) {
+async function activateLauncherForInstance(inputHelper, pid, instancesDir, count, tick) {
   tick?.();
-  execFileSync(inputHelper, ["click", String(pid), "0.35", "0.82"]);
-  process.stdout.write("Desktop recovery smoke: clicked the isolated-test action.\n");
+  // The fake runtime writes its conflict marker before the launcher drains stderr and updates the WebView.
+  await new Promise((resolveWait) => setTimeout(resolveWait, 750));
+  execFileSync(inputHelper, ["activate", String(pid)]);
+  process.stdout.write("Desktop recovery smoke: activated the isolated-test action.\n");
   await waitForCondition(
     async () => (await readInstances(instancesDir)).length >= count,
     90_000,
