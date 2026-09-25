@@ -209,6 +209,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/task-sessions/:id/turns", h.httpListSessionTurns)
 	api.POST("/tasks", h.httpCreateTask)
 	api.POST("/tasks/delete-preflight", h.httpTaskDeletePreflight)
+	api.POST("/tasks/:id/exact-retirement/preview", h.httpPreviewExactRetirement)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
 	api.PATCH("/tasks/:id/port-forwarding", h.httpUpdateTaskPortForwarding)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
