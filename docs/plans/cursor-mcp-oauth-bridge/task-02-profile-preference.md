@@ -129,4 +129,4 @@ Validation passed:
 
 `pnpm run i18n:zh-hant` is blocked by the existing simplified-string warning at `workflows:openAgentSettings`. The supported namespace-scoped generator wrote the `agents` Traditional Chinese catalogs from Simplified Chinese without reformatting other translated messages.
 
-Review follow-up makes profile saves omit an unchanged Cursor MCP auth preference, so stale drafts do not overwrite a newer value. The default-field test now also fails if the catalog field is absent. Regenerated the settings contract snapshots after CI detected that they did not yet include the new preference; `go run ./cmd/settings-catalog --check` passes.
+Review follow-up makes both profile editor and agent-level profile saves omit an unchanged Cursor MCP auth preference, so stale drafts do not overwrite a newer value. Regression tests cover both save paths. The default-field test now also fails if the catalog field is absent. Regenerated the settings contract snapshots after CI detected that they did not yet include the new preference; `go run ./cmd/settings-catalog --check` passes.

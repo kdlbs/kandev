@@ -118,7 +118,7 @@ Local review-fixup verification passed on 2026-09-25:
 - `GOOS=windows GOARCH=amd64 go test -c -o /tmp/cursor-mcpconfig-windows.test.exe ./internal/agent/mcpconfig`
 - `golangci-lint run ./... --new-from-rev=b88aea31ad49b2cda40e8ad84452356888e36a42 --timeout=5m`
 - `make -C apps/backend build`
-- Cursor profile save Vitest (8 tests), web typecheck, targeted ESLint, and Prettier check.
+- Cursor profile and agent-level save Vitest suites (49 tests combined), web typecheck, targeted ESLint, and Prettier check.
 - Settings contract CI test (3 tests), public-doc validation (62 tests, 47 pages), specification catalog validation/lint, and `git diff --check`.
 
 The generated settings snapshots now pass `node --test scripts/settings-contract-ci.test.mjs`. Refreshed PR checks will be recorded after pushing the fixup commit.

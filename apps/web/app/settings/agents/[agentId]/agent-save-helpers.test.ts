@@ -473,6 +473,22 @@ describe("command prefix save payloads", () => {
 });
 
 describe("Cursor MCP auth preference save payloads", () => {
+  it("omits an unchanged preference when saving another existing profile field", async () => {
+    const savedProfile = { ...baseProfile, cursorMcpAuthEnabled: true };
+    const savedAgent = agentWithProfiles([savedProfile]);
+    const draftProfile = draftFrom(savedProfile, { name: "Renamed profile" });
+    const draftAgent = agentWithProfiles([draftProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(updateAgentProfileAction).mockResolvedValue(draftProfile);
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(updateAgentProfileAction).toHaveBeenCalledWith(
+      baseProfile.id,
+      expect.objectContaining({ cursor_mcp_auth_enabled: undefined }),
+    );
+  });
+
   it("preserves false when updating an existing profile", async () => {
     const savedProfile = { ...baseProfile, cursorMcpAuthEnabled: true };
     const savedAgent = agentWithProfiles([savedProfile]);

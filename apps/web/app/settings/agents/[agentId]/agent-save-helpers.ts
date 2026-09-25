@@ -327,7 +327,10 @@ async function savePersistedProfile(
       config_options: profile.configOptions ?? {},
       ...permissionsToProfilePatch(profile),
       cli_passthrough: profile.cliPassthrough ?? false,
-      cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
+      cursor_mcp_auth_enabled:
+        (profile.cursorMcpAuthEnabled ?? true) === (savedProfile.cursorMcpAuthEnabled ?? true)
+          ? undefined
+          : (profile.cursorMcpAuthEnabled ?? true),
       cli_flags: profile.cliFlags ?? [],
       command_prefix: profile.commandPrefix ?? "",
       ...providerPayloadFields(profile),
