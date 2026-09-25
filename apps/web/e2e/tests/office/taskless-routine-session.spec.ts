@@ -55,12 +55,36 @@ async function listAgentRuns(
   officeApi: { rawRequest: (method: string, path: string) => Promise<Response> },
   agentId: string,
 ): Promise<AgentRun[]> {
-  const response = await officeApi.rawRequest("GET", `/agents/${agentId}/runs?limit=100`);
-  if (!response.ok) {
-    throw new Error(`Listing runs for agent ${agentId} failed with HTTP ${response.status}`);
+  const allRuns: AgentRun[] = [];
+  let cursor = "";
+  let cursorId = "";
+  for (;;) {
+    const query = new URLSearchParams({ limit: "100" });
+    if (cursor) {
+      query.set("cursor", cursor);
+      query.set("cursor_id", cursorId);
+    }
+    const response = await officeApi.rawRequest(
+      "GET",
+      `/agents/${agentId}/runs?${query.toString()}`,
+    );
+    if (!response.ok) {
+      throw new Error(`Listing runs for agent ${agentId} failed with HTTP ${response.status}`);
+    }
+    const result = (await response.json()) as {
+      runs?: AgentRun[];
+      next_cursor?: string;
+      next_id?: string;
+    };
+    const page = result.runs ?? [];
+    allRuns.push(...page);
+    if (!result.next_cursor || !result.next_id || page.length === 0) return allRuns;
+    if (result.next_cursor === cursor && result.next_id === cursorId) {
+      throw new Error(`Listing runs for agent ${agentId} returned a repeated page cursor`);
+    }
+    cursor = result.next_cursor;
+    cursorId = result.next_id;
   }
-  const result = (await response.json()) as { runs?: AgentRun[] };
-  return result.runs ?? [];
 }
 
 async function findAgentRunForRoutine(
