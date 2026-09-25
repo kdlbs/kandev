@@ -199,8 +199,12 @@ func TestBetaLegacyLightweightGate(t *testing.T) {
 				if err != nil {
 					t.Fatalf("second run: %v", err)
 				}
-				if run2.Status == models.RoutineRunStatusDone || run2.Status == models.RoutineRunStatusTaskCreated {
-					t.Fatalf("second run status = %q, want skipped/coalesced (live task must keep gating)", run2.Status)
+				want := models.RoutineRunStatusCoalesced
+				if policy == models.ConcurrencyPolicySkipIfActive {
+					want = models.RoutineRunStatusSkipped
+				}
+				if run2.Status != want {
+					t.Fatalf("second run status = %q, want %s (live task must keep gating)", run2.Status, want)
 				}
 
 				status, _ := queryRunStatus(t, db, run1.ID)
