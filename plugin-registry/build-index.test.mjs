@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test, { afterEach } from "node:test";
+import { promisify } from "node:util";
 import {
   buildEntry,
   buildIndex,
@@ -17,6 +20,7 @@ import {
 } from "./build-index.mjs";
 
 const realFetch = globalThis.fetch;
+const execFileAsync = promisify(execFile);
 afterEach(() => {
   globalThis.fetch = realFetch;
 });
@@ -654,6 +658,97 @@ test("buildIndex refuses an all-retained rebuild so a provider outage leaves Pag
   assert.equal(result.publishable, false);
   assert.deepEqual(result.retained, ["a"]);
   assert.match(result.fatalErrors.at(-1), /no fresh entries/);
+});
+
+test("pull-request builds reject retained invalid canvas entries", async () => {
+  const directory = await fs.mkdtemp(
+    path.join(os.tmpdir(), "registry-pr-canvas-"),
+  );
+  const server = http.createServer((request, response) => {
+    const requestPath = new URL(request.url ?? "/", "http://127.0.0.1")
+      .pathname;
+    if (requestPath === "/repos/acme/valid/releases/latest") {
+      response.end(
+        JSON.stringify({
+          tag_name: "v1.0.0",
+          assets: [
+            {
+              name: "valid-1.0.0.tar.gz",
+              browser_download_url: `${baseURL}/asset`,
+            },
+          ],
+        }),
+      );
+      return;
+    }
+    if (requestPath === "/repos/acme/valid") {
+      response.end(
+        JSON.stringify({ stargazers_count: 1, owner: { login: "acme" } }),
+      );
+      return;
+    }
+    if (requestPath === "/asset") {
+      response.end("package");
+      return;
+    }
+    response.writeHead(404);
+    response.end();
+  });
+  let baseURL = "";
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    baseURL = `http://127.0.0.1:${address.port}`;
+    const yamlPath = path.join(directory, "plugins.yaml");
+    const priorPath = path.join(directory, "prior.json");
+    const outputPath = path.join(directory, "index.json");
+    const verifierPath = path.join(directory, "verify.mjs");
+    await fs.writeFile(
+      yamlPath,
+      "plugins:\n  - id: board\n    repo: acme/board\n    kind: canvas\n  - id: valid\n    repo: acme/valid\n",
+    );
+    await fs.writeFile(
+      priorPath,
+      JSON.stringify({
+        schema_version: 1,
+        plugins: [priorRecord("board", "acme/board", "1.0.0")],
+      }),
+    );
+    await fs.writeFile(
+      verifierPath,
+      `#!${process.execPath}\nprocess.stdout.write('${JSON.stringify(verifiedPackage({ id: "valid", version: "1.0.0" }))}')\n`,
+      { mode: 0o755 },
+    );
+
+    await assert.rejects(
+      execFileAsync(
+        process.execPath,
+        [path.resolve("plugin-registry/build-index.mjs")],
+        {
+          env: {
+            ...process.env,
+            GITHUB_EVENT_NAME: "pull_request",
+            PLUGIN_REGISTRY_GITHUB_API: baseURL,
+            PLUGIN_REGISTRY_PLUGINS_YAML: yamlPath,
+            PLUGIN_REGISTRY_PRIOR_INDEX: priorPath,
+            PLUGIN_REGISTRY_OUTPUT: outputPath,
+            PLUGIN_PACKAGE_VERIFIER: verifierPath,
+          },
+        },
+      ),
+      /pull-request validation found invalid canvas entries/,
+    );
+    await assert.rejects(fs.access(outputPath));
+  } finally {
+    await new Promise((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 function priorRecord(id, repo, version) {
