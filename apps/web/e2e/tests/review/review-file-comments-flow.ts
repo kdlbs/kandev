@@ -7,10 +7,32 @@ export async function openFileComment(page: Page, dialog: Locator, mobile: boole
   );
   if (mobile) {
     await header.getByRole("button", { name: `More actions for ${DIFF_FILE}` }).tap();
-    await page
+    const menuItem = page
       .getByTestId("review-file-actions-menu")
-      .getByRole("menuitem", { name: "Comment on file" })
-      .tap({ force: true });
+      .getByRole("menuitem", { name: "Comment on file" });
+    await expect(menuItem).toBeVisible();
+    const viewport = page.viewportSize();
+    if (!viewport) throw new Error("the mobile review flow requires a fixed viewport");
+    await expect
+      .poll(
+        async () => {
+          const box = await menuItem.boundingBox();
+          return Boolean(
+            box &&
+            box.x >= 0 &&
+            box.y >= 0 &&
+            box.x + box.width <= viewport.width &&
+            box.y + box.height <= viewport.height &&
+            box.height >= 44,
+          );
+        },
+        {
+          timeout: 5_000,
+          message: "the mobile file action must fit the viewport and touch target",
+        },
+      )
+      .toBe(true);
+    await menuItem.tap();
   } else {
     await header.getByRole("button", { name: "Comment on file", exact: true }).click();
   }

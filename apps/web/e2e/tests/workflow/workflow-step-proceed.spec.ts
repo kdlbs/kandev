@@ -352,7 +352,7 @@ test.describe("Manual proceed to next workflow step", () => {
       const nextName = steps[i + 1].name;
 
       // Wait for agent to complete in current step
-      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+      await session.waitForChatIdle({ timeout: 30_000 });
 
       // Stepper shows current step
       await expect(session.stepperStep(currentName)).toHaveAttribute("aria-current", "step", {
@@ -374,7 +374,7 @@ test.describe("Manual proceed to next workflow step", () => {
     }
 
     // On Done step: proceed button should NOT be visible (final step)
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.proceedNextStepButton()).not.toBeVisible({ timeout: 5_000 });
   });
 });

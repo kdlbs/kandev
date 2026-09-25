@@ -65,6 +65,7 @@ test.describe("Agents browse page", () => {
   test("renders the heading and install cards statically, without a collapsible toggle", async ({
     testPage,
   }) => {
+    // Keep the fixture newer than the SSR snapshot so stale polling guards do not reject it.
     const availableAgents = AVAILABLE_AGENTS.agents.map((agent) => ({
       ...agent,
       updated_at: new Date(Date.now() + 60_000).toISOString(),

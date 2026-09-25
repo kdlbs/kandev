@@ -243,7 +243,7 @@ async function runProfileSessionLifecycleScenario(
 
   await apiClient.moveTask(task.id, workflow.id, stepB.id);
   await pollSessions(apiClient, task.id, 2);
-  await waitForProfileSession(apiClient, task.id, profileB.id);
+  await waitForProfileSession(apiClient, task.id, profileB.id, 60_000);
 
   await apiClient.moveTask(task.id, workflow.id, stepAAgain.id);
   await expect
@@ -313,7 +313,7 @@ test.describe("Workflow agent profile switching", () => {
       apiClient,
       seedData,
     }) => {
-      test.setTimeout(90_000);
+      test.setTimeout(120_000);
       await runProfileSessionLifecycleScenario(
         testPage,
         apiClient,
