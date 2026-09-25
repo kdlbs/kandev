@@ -58,12 +58,14 @@ integration regressions remain part of implementation.
 - Preserve context through composed launches and missing-execution recovery.
 - Compare persisted and dispatched expansions, including Office context injection.
 - Preserve existing handoff, entity-reference, mode, and queue behavior.
+- Gate shared saved-prompt mutations on `org.config.manage` while preserving
+  member reads and reference use.
 - Update the workflow saved-prompt public guidance with the implemented guarantee.
 
 ### Out of scope
 
 - Literal system-tag truncation or prompt-editor validation from the issue's secondary report.
-- New UI warnings, fail-closed resolution, permissions, or prompt matching rules.
+- New UI warnings, fail-closed resolution, or prompt matching rules.
 - Profile routing changes, queue schema changes, and queued-message edit/merge semantics.
 - Passthrough expansion, frontend changes, release flags, or database migrations.
 
@@ -110,7 +112,8 @@ All criterion suffixes below refer to `AC-TASKS-SAVED-PROMPT-DELIVERY-001`.
 | .6, .13 | `TestWorkflowEntrySavedPrompt_Recovery` and `TestStartSessionForWorkflowStep_ComposedHandoffSurvivesLazyResumeFallback`: missing execution and composed workflow-step recovery. |
 | .4, .5, .8 | `TestWorkflowEntrySavedPrompt_TrustGuards`: forged blocks, unknown references, lookup failure, absent expander, passthrough, and empty prompt. |
 | .12, .13 | `TestWorkflowEntrySavedPrompt_Composition`: nested references and workflow-level references. `TestWorkflowEntrySavedPrompt_DispatchModes` covers plan mode; the recovery test covers completion handoff ordering. |
-| .13 | `TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt`: queued Send Now preserves the accepted expansion in the deferred launch. |
+| .13 | `TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt`: queued Send Now preserves the accepted expansion in the deferred launch. `TestExecuteQueuedWorkflowPrompt_MissingExecutionKeepsDrainExpansion`: a workflow queue message is re-resolved before it is recorded; if the saved definition changes during failed dispatch, the fresh-runtime launch keeps the drain-time expansion. |
+| .14 | `TestPromptMutationsRequireOrgConfigManage` denies member POST, PATCH, and DELETE; `TestPromptReadsRemainAvailableToOrgMembers` preserves shared prompt reads. |
 
 Run the CREATED-session regression before production edits. It must fail because
 the saved definition disappears, not because the fixture fails to launch.
@@ -149,10 +152,18 @@ and its verification completed on 2026-09-25:
 - The public-doc validator tests passed (62 tests), and the validator accepted
   all 47 published pages.
 - `gofmt` and `git diff --check` passed.
+- PR fixup coverage passes for prompt mutation authorization, member reads,
+  non-composed recovery, queued workflow recovery after an in-flight saved-prompt
+  edit, and a nil workflow step. The queue resolves once at drain before the
+  message row is recorded, then fresh-runtime recovery carries that trusted
+  context.
+- Shared prompt mutations now require `org.config.manage`. Public documentation
+  states that prompts are instance-shared and records the current multi-org
+  admin boundary.
 
 The public workflow guidance now documents the preserved-context behavior. The
-issue remains assigned to `carlosflorencio`. Implementation, tests, docs, and
-plan files remain unstaged and uncommitted.
+issue remains assigned to `carlosflorencio`. The implementation and its PR
+fixup are tracked in [PR #3931](https://github.com/kdlbs/kandev/pull/3931).
 
 ## Risks
 

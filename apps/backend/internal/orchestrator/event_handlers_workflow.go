@@ -5760,6 +5760,10 @@ const metaKeyWorkflowDispatchInputPresent = "workflow_dispatch_input_present"
 // mode as metadata so recovery can apply the transform exactly once.
 const metaKeyWorkflowConfigMode = "workflow_config_mode"
 
+// metaKeyWorkflowAutoStart identifies a queue entry whose prompt was composed
+// by workflow entry and must be re-resolved once when the queue drains.
+const metaKeyWorkflowAutoStart = "workflow_auto_start"
+
 // MetaKeyTurnStartAlreadyProcessed marks a queued prompt whose on_turn_start
 // hook already ran synchronously before queuing (see
 // task/handlers.queuePromptIfRuntimeUnavailable, which queues after
@@ -5806,7 +5810,7 @@ func workflowMessageMetadata(planMode bool, origin workflowMessageOrigin, refere
 	if meta == nil {
 		meta = make(map[string]interface{})
 	}
-	meta["workflow_auto_start"] = true
+	meta[metaKeyWorkflowAutoStart] = true
 	return meta
 }
 
@@ -6044,7 +6048,7 @@ func (s *Service) injectAutoStartRuntimeContext(
 	titleOwner, includeCanvasGuidance bool,
 	pullRequestTargetContext string,
 ) (string, string) {
-	if (state.session.State != models.TaskSessionStateCreated &&
+	if state.step == nil || (state.session.State != models.TaskSessionStateCreated &&
 		!state.step.HasOnEnterAction(wfmodels.OnEnterResetAgentContext)) ||
 		state.session.IsPassthrough || (state.agentPrompt == "" && len(state.attachments) == 0) {
 		return recordedPrompt, dispatchPrompt

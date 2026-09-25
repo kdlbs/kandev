@@ -5809,6 +5809,9 @@ type promptTaskOptions struct {
 	// (e.g. appending a claimed step handoff) is not silently recomposed from
 	// the destination step's own template.
 	promptAlreadyComposed bool
+	// fallbackUsesEffectivePrompt upgrades an already-composed recovery prompt
+	// with the session's effective plan/config transforms before fresh launch.
+	fallbackUsesEffectivePrompt bool
 	// initialCreatePromptPassthrough keeps a creation-admission marker alive
 	// while a transient retry creates the next turn, then rebinds it to the
 	// execution admitted for that retry before provider dispatch.
@@ -5970,6 +5973,10 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	)
 	if err != nil {
 		return nil, err
+	}
+	if options.fallbackUsesEffectivePrompt {
+		options.fallbackLaunchPrompt = effectivePrompt
+		options.fallbackRetryPrompt = effectivePrompt
 	}
 	// A queued prompt may restart the provider as part of model switching
 	// before the normal claim helper runs. Keep the same session guard across

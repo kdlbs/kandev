@@ -3,10 +3,12 @@ package orchestrator
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -393,4 +395,184 @@ func TestWorkflowEntrySavedPrompt_Recovery(t *testing.T) {
 	require.NotContains(t, launchedPrompt, changedContent)
 	require.Contains(t, launchedPrompt, "Follow @principles.")
 	require.Equal(t, 1, strings.Count(launchedPrompt, sysprompt.Wrap(trustedContext)))
+}
+
+func TestWorkflowEntrySavedPrompt_UncomposedRecoveryCarriesTrustedContext(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-workflow-saved-prompt-uncomposed-recovery"
+		sessionID = "session-workflow-saved-prompt-uncomposed-recovery"
+		stepID    = "step-workflow-saved-prompt-uncomposed-recovery"
+	)
+	promptService := newPromptServiceForLaunchFallbackTest(t)
+	prompt, err := promptService.CreatePrompt(ctx, "principles", "Use the accepted recovery principles.")
+	require.NoError(t, err)
+	_, trustedContext := promptService.AppendReferenceExpansionsWithContext(ctx, "Follow @principles.", nil)
+	require.NotEmpty(t, trustedContext)
+
+	repo := setupTestRepo(t)
+	seedTaskAndSessionWithStep(t, repo, taskID, sessionID, stepID)
+	dbTask, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	dbTask.Description = "Follow @principles."
+	require.NoError(t, repo.UpdateTask(ctx, dbTask))
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentProfileID = "profile1"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Prompt: "Follow @principles."}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, WorkflowID: "wf1", Title: "Saved prompt recovery", State: v1.TaskStateInProgress}
+	var launchedPrompt string
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchedPrompt = req.TaskDescription
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-workflow-saved-prompt-uncomposed-recovery"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	svc.promptExpander = promptService
+	changedContent := "Use the changed recovery principles."
+	_, err = promptService.UpdatePrompt(ctx, prompt.ID, nil, &changedContent)
+	require.NoError(t, err)
+
+	// This exercises the non-composed fallback branch with the exact context
+	// accepted before the saved definition changed.
+	err = svc.fallbackFreshLaunchOnMissingExecution(
+		ctx, taskID, sessionID, "Follow @principles.", false, "", false,
+		trustedContext, false, nil, nil, nil,
+	)
+	require.NoError(t, err)
+	require.Contains(t, launchedPrompt, "Use the accepted recovery principles.")
+	require.NotContains(t, launchedPrompt, changedContent)
+	require.Equal(t, 1, strings.Count(launchedPrompt, sysprompt.Wrap(trustedContext)))
+}
+
+func TestExecuteQueuedWorkflowPrompt_MissingExecutionKeepsDrainExpansion(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-queued-saved-prompt"
+		sessionID = "session-queued-saved-prompt"
+		stepID    = "step-queued-saved-prompt"
+	)
+	promptService := newPromptServiceForLaunchFallbackTest(t)
+	prompt, err := promptService.CreatePrompt(ctx, "principles", "Definition prepared at queue drain.")
+	require.NoError(t, err)
+
+	repo := setupTestRepo(t)
+	seedTaskAndSessionWithStep(t, repo, taskID, sessionID, stepID)
+	dbTask, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	dbTask.Description = "Run @principles."
+	require.NoError(t, repo.UpdateTask(ctx, dbTask))
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentProfileID = "profile-queued-saved-prompt"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-queued-saved-prompt")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf1", Name: "Queued", Prompt: "Run @principles.",
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{
+		ID: taskID, WorkspaceID: "ws1", WorkflowID: "wf1", Title: "Queued saved prompt",
+		Description: "Run @principles.", State: v1.TaskStateInProgress,
+	}
+	var launchCalls atomic.Int32
+	launches := make(chan string, 4)
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		isAgentRunningFn:       func(_ context.Context, _ string) bool { return launchCalls.Load() > 0 },
+		isAgentReadyFn:         func(_ context.Context, _ string) bool { return launchCalls.Load() > 0 },
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			call := launchCalls.Add(1)
+			launches <- req.TaskDescription
+			if call == 1 {
+				current, getErr := repo.GetTaskSession(ctx, sessionID)
+				if getErr != nil {
+					return nil, getErr
+				}
+				if current.State == models.TaskSessionStateStarting {
+					current.State = models.TaskSessionStateWaitingForInput
+					if updateErr := repo.UpdateTaskSession(ctx, current); updateErr != nil {
+						return nil, updateErr
+					}
+				}
+			}
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-queued-replacement"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	svc.promptExpander = promptService
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	queuedPrompt, initialContext := promptService.AppendReferenceExpansionsWithContext(
+		ctx, "Run @principles.", nil,
+	)
+	require.NotEmpty(t, initialContext)
+	changedAfterRecord := "Definition changed after the queued message was recorded."
+	agentMgr.promptAgentFunc = func(_ context.Context, _ string, _ string, _ []v1.MessageAttachment, _ bool) (*executor.PromptResult, error) {
+		_, updateErr := promptService.UpdatePrompt(ctx, prompt.ID, nil, &changedAfterRecord)
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		return nil, executor.ErrExecutionNotFound
+	}
+	queued := &messagequeue.QueuedMessage{
+		ID: "queued-saved-prompt", SessionID: sessionID, TaskID: taskID,
+		Content: queuedPrompt, QueuedBy: messagequeue.QueuedByWorkflow,
+		Metadata: map[string]interface{}{
+			"workflow_auto_start": true,
+			metaKeyWorkflowStepID: stepID,
+			"workflow_step_name":  "Queued",
+		},
+	}
+
+	svc.markQueuedDispatchInFlight(sessionID, queued.ID)
+	svc.executeQueuedMessage(sessionID, queued)
+
+	require.Len(t, messages.userMessages, 1)
+	recordedPrompt := messages.userMessages[0].content
+	require.Contains(t, recordedPrompt, "Definition prepared at queue drain.")
+	require.NotContains(t, recordedPrompt, changedAfterRecord)
+	require.Equal(t, 1, strings.Count(recordedPrompt, sysprompt.Wrap(initialContext)))
+	require.Len(t, agentMgr.capturedPromptCalls, 1)
+	require.Contains(t, agentMgr.capturedPromptCalls[0].Prompt, "Definition prepared at queue drain.")
+	require.NotContains(t, agentMgr.capturedPromptCalls[0].Prompt, changedAfterRecord)
+	require.Equal(t, 1, strings.Count(agentMgr.capturedPromptCalls[0].Prompt, sysprompt.Wrap(initialContext)))
+
+	var replacementPrompt string
+	for len(launches) > 0 {
+		candidate := <-launches
+		if candidate != "" {
+			replacementPrompt = candidate
+		}
+	}
+	require.NotEmpty(t, replacementPrompt)
+	require.Contains(t, replacementPrompt, "Definition prepared at queue drain.")
+	require.NotContains(t, replacementPrompt, changedAfterRecord)
+	require.Equal(t, 1, strings.Count(replacementPrompt, sysprompt.Wrap(initialContext)))
+	require.Contains(t, recordedPrompt, "Run @principles.")
+	require.Contains(t, agentMgr.capturedPromptCalls[0].Prompt, "Run @principles.")
+}
+
+func TestInjectAutoStartRuntimeContext_NilStepPreservesPrompt(t *testing.T) {
+	svc := &Service{}
+	state := &autoStartStepPromptState{
+		session:     &models.TaskSession{State: models.TaskSessionStateWaitingForInput},
+		agentPrompt: "queued prompt",
+	}
+	recorded, dispatched := svc.injectAutoStartRuntimeContext(
+		state, "recorded prompt", "dispatched prompt", false, nil, false, false, "",
+	)
+	require.Equal(t, "recorded prompt", recorded)
+	require.Equal(t, "dispatched prompt", dispatched)
 }

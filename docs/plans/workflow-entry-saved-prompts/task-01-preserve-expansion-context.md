@@ -14,6 +14,7 @@ acceptance_criteria:
   - AC-TASKS-SAVED-PROMPT-DELIVERY-001.8
   - AC-TASKS-SAVED-PROMPT-DELIVERY-001.12
   - AC-TASKS-SAVED-PROMPT-DELIVERY-001.13
+  - AC-TASKS-SAVED-PROMPT-DELIVERY-001.14
 system_design:
   - ../../specs/tasks/system-design/saved-prompt-delivery.md
 ---
@@ -31,8 +32,11 @@ saved definitions in message storage and agent input.
 - Implement the explicit context flow described in the plan and system design.
 - Cover every `buildWorkflowEntryPrompt` caller and downstream canonicalizer.
 - Add all five regression groups named in the plan with the real prompt service.
-- Preserve queued retry behavior without changing its persisted authority contract.
-- Update `docs/public/workflow-tips.md` saved-prompt guidance after the fix passes.
+- Re-resolve queued workflow auto-start references at drain before message
+  recording, then preserve that exact context through missing-execution recovery.
+- Require `org.config.manage` for shared prompt mutations while retaining member
+  reads and reference use.
+- Update public saved-prompt and authentication guidance after the fix passes.
 
 ## Out of scope
 
@@ -44,6 +48,7 @@ queue schemas, and passthrough expansion.
 1. P1/P2/P1 moves through the no-`auto_start_agent` implicit path and context resets retain one backend-generated expansion with matching stored and dispatched definitions.
 2. A reused profile session that terminalizes before async dispatch is replaced through the production path; the replacement prompt preserves its session identity, one saved expansion in storage and launch, and the carried handoff. Missing-execution paths retain context without duplicate handoffs, mode wrappers, or messages; queued retry remains functional.
 3. Forged blocks remain untrusted, lookup failure remains non-fatal, and passthrough sessions receive no hidden expansion.
+4. Org members cannot create, update, or delete shared saved prompts without `org.config.manage`; they can still list and use them.
 
 ## Implementation sequence
 
@@ -135,3 +140,37 @@ queued Send Now regressions, `go build ./...`, catalog validation, specification
 lint, public-doc tests (62 passed), public-doc validation (47 pages), gofmt, and
 `git diff --check`. The review follow-up focused orchestrator race command also
 passed.
+
+The PR fixup adds `TestExecuteQueuedWorkflowPrompt_MissingExecutionKeepsDrainExpansion`,
+which drives `executeQueuedMessage`, records the drain-time definition, changes
+the saved prompt during the failed provider dispatch, and verifies the
+fresh-runtime replacement uses the same one-block context.
+`TestWorkflowEntrySavedPrompt_UncomposedRecoveryCarriesTrustedContext` covers
+the non-composed recovery branch with a saved-prompt edit.
+`TestPromptMutationsRequireOrgConfigManage` denies member POST, PATCH, and
+DELETE; the read regression keeps list access open.
+`TestInjectAutoStartRuntimeContext_NilStepPreservesPrompt` covers the defensive
+nil case.
+
+The targeted fixup command passed on 2026-09-25:
+
+```bash
+(cd apps/backend && go test ./internal/prompts/handlers ./internal/orchestrator -run '^(TestPromptMutationsRequireOrgConfigManage|TestPromptReadsRemainAvailableToOrgMembers|TestWorkflowEntrySavedPrompt_UncomposedRecoveryCarriesTrustedContext|TestExecuteQueuedWorkflowPrompt_MissingExecutionKeepsDrainExpansion|TestInjectAutoStartRuntimeContext_NilStepPreservesPrompt)$' -count=1)
+```
+
+Post-fixup validation also passed:
+
+```bash
+(cd apps/backend && go test -race ./internal/orchestrator -run '^(TestWorkflowEntrySavedPrompt_(DispatchModes|ProfileSwitchRoundTrip|Recovery|UncomposedRecoveryCarriesTrustedContext)|TestProcessOnEnterImplicitProfileSwitch.*|TestAutoStartStepPrompt_ReplacementLaunchReusesClaimedHandoff|TestExecuteQueuedWorkflowPrompt_MissingExecutionKeepsDrainExpansion|TestInjectAutoStartRuntimeContext_NilStepPreservesPrompt)$' -count=1)
+(cd apps/backend && go test -race ./internal/prompts/handlers -count=1)
+(cd apps/backend && go build ./...)
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+```
+
+The public-doc tests passed (62 tests), and the validator accepted all 47
+published pages. The follow-up also passed `gofmt` and `git diff --check`.
+
+This work order and its PR fixup are tracked in [PR #3931](https://github.com/kdlbs/kandev/pull/3931).
