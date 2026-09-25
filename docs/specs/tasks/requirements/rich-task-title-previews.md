@@ -5,6 +5,7 @@ created: 2026-08-18
 owners:
   - tbd
 ---
+
 # Rich task title previews Requirements
 
 ## Overview
@@ -20,6 +21,9 @@ This document is the migrated task-system source for the capability. The source 
 #### Acceptance criteria
 
 - **AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.2:** While Kanban multi-select is enabled, pointing at or focusing any card title shall not open its title preview, whether that card is selected or unselected.
+- **AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.3:** Enabling Kanban multi-select while a title preview is open shall close that preview; clicking a card title in multi-select shall select or deselect the card without opening the preview or navigating to the task.
+- **AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.4:** Disabling Kanban multi-select shall restore the normal fine-pointer title preview behavior. Coarse-pointer task navigation shall remain available without a hover preview.
 
 ## Migrated source detail
 
@@ -41,6 +45,7 @@ value and competes with those surfaces' navigation.
 - A keyboard user can focus the title trigger and open the same preview.
 - A keyboard user can open a subtask without opening the parent task.
 - A coarse-pointer device keeps the title's direct navigation action.
+- Kanban multi-select suppresses title previews so the selection controls and nearby cards remain reachable.
 - On a task page, the mobile task switcher gives access to the same task tree.
 - GitHub and GitLab status summaries use one provider-neutral presentation contract.
 
@@ -100,3 +105,4 @@ Provider-specific code supplies labels, icons, test identifiers, and status rows
 ## Implementation plan
 
 See [the implementation plan](../../../plans/rich-task-title-previews/plan.md).
+The Kanban multi-select correction is tracked in the [preview suppression fix plan](../../../plans/kanban-multi-select-title-preview/plan.md).

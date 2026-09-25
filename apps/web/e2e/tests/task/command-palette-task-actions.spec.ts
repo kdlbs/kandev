@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
+import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import {
   seedMoveOverrideFixture,
   waitForMoveRequest,
@@ -142,4 +143,30 @@ test("shows destination colors and moves immediately with the modified Enter sho
   await expect
     .poll(async () => (await apiClient.getTask(fixture.taskId)).workflow_step_id)
     .toBe(fixture.targetStepId);
+});
+
+test("opens the shared change workflow form from the command palette", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const fixture = await seedMoveOverrideFixture(
+    testPage,
+    apiClient,
+    seedData,
+    "Keyboard change workflow",
+  );
+  const destination = await apiClient.createWorkflow(seedData.workspaceId, "Keyboard destination");
+  const destinationStep = await apiClient.createWorkflowStep(destination.id, "Incoming", 0);
+  await testPage.reload();
+
+  await chooseCommand(testPage, "Change workflow...");
+  const form = new ChangeWorkflowPage(testPage);
+  await expect(form.desktopDialog).toBeVisible();
+  await form.chooseWorkflow(destination.id);
+  await form.chooseStep(destinationStep.id);
+  await form.form.getByTestId("change-workflow-cancel").click();
+
+  expect((await apiClient.getTask(fixture.taskId)).workflow_id).toBe(fixture.workflowId);
+  await expect(testPage).toHaveURL(new RegExp(`/t/${fixture.taskId}$`));
 });

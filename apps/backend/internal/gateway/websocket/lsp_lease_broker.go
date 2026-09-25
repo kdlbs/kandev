@@ -31,6 +31,9 @@ func (l *lspLease) gracefulRelease(generation uint64, reason, requestID string) 
 	if _, err := l.sendBrokerRequest(ctx, "shutdown", nil); err != nil {
 		l.manager.logger.Debug("LSP shutdown request did not complete before release", zap.String("language", l.language), zap.Error(err))
 	}
+	l.mu.Lock()
+	l.expectedUpstreamClose = true
+	l.mu.Unlock()
 	if err := l.writeBrowser(generation, map[string]any{
 		lspControlField: lspControlKind,
 		"action":        lspControlAck,

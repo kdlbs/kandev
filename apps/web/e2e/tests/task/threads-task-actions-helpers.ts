@@ -4,6 +4,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import { createStandardProfile } from "../../helpers/git-helper";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { assertNoDocumentHorizontalOverflow, requireBox } from "../../helpers/layout-assertions";
+import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 
 export async function withTaskActionSettings(api: ApiClient, run: () => Promise<void>) {
   const { settings } = await api.getUserSettings();
@@ -208,7 +209,7 @@ export async function allTaskActionOutcomes(
   await expect(root.getByRole(mobile ? "button" : "menuitem")).toHaveText([
     "Priority",
     "Move to",
-    "Send to workflow",
+    "Change workflow...",
     "Link",
     "Archive",
     "Delete",
@@ -216,10 +217,15 @@ export async function allTaskActionOutcomes(
   await page.keyboard.press("Escape");
 
   await ui.open(a.id);
-  await ui.nested("Send to workflow");
-  await expect(page.getByTestId(`task-context-workflow-${emptyWorkflow.id}`)).toBeDisabled();
-  await page.keyboard.press("Escape");
-  if (mobile) await page.keyboard.press("Escape");
+  await ui.pick("Change workflow...");
+  const emptyForm = new ChangeWorkflowPage(page, mobile);
+  await expect(emptyForm.form).toBeVisible();
+  await emptyForm.chooseWorkflow(emptyWorkflow.id);
+  await expect(page.getByTestId("change-workflow-no-steps")).toContainText(
+    "This workflow has no steps",
+  );
+  await expect(page.getByTestId("change-workflow-submit")).toBeDisabled();
+  await ui.press(page.getByTestId("change-workflow-cancel"));
 
   await ui.open(a.id);
   await ui.nested("Priority");
@@ -246,9 +252,12 @@ export async function allTaskActionOutcomes(
   await expect.poll(async () => (await api.getTask(a.id)).workflow_step_id).toBe(localStep.id);
 
   await ui.open(a.id);
-  await ui.nested("Send to workflow");
-  await ui.nested(destination.name);
-  await ui.pick("Incoming");
+  await ui.pick("Change workflow...");
+  const changeWorkflow = new ChangeWorkflowPage(page, mobile);
+  await expect(changeWorkflow.form).toBeVisible();
+  await changeWorkflow.chooseWorkflow(destination.id);
+  await changeWorkflow.chooseStep(destinationStep.id);
+  await changeWorkflow.submit();
   await expect
     .poll(async () => (await api.getTask(a.id)).workflow_step_id)
     .toBe(destinationStep.id);
