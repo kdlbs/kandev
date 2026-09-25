@@ -3172,6 +3172,9 @@ func (s *Service) processExitEnterForClaimedEffect(
 			return err
 		}
 	}
+	if s.silentRetainedTerminalEntry(ctx, taskID, targetStep) {
+		return nil
+	}
 	if fromStep == nil {
 		var err error
 		fromStep, err = s.loadWorkflowStepForLifecycle(ctx, fromStepID, "transition source")
@@ -4795,6 +4798,9 @@ func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, ses
 // entirely outside processOnEnter. See
 // docs/specs/office/system-design/step-entry-dispatch-convergence.md.
 func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string, transitionID int64, sourceStep *wfmodels.WorkflowStep) {
+	if s.silentRetainedTerminalEntry(ctx, taskID, step) {
+		return
+	}
 	// The step transition is already durable before on_enter runs. Its effects
 	// must finish even if the request or agent-event context that triggered the
 	// transition is cancelled.
@@ -5577,6 +5583,15 @@ func (s *Service) processStepExitAndEnterForDeferredMove(
 	if err != nil || current != identity || session.QueueIncarnationID != identity.SessionIncarnationID {
 		return
 	}
+	targetStep, err := s.loadWorkflowStepForLifecycle(ctx, toStepID, "deferred move target")
+	if err != nil {
+		return
+	}
+	// Apply the one-shot options before deciding whether this is a card-only entry.
+	entryStep := workflowmove.OverlayStep(targetStep, entryOptions)
+	if s.silentRetainedTerminalEntry(ctx, identity.TaskID, entryStep) {
+		return
+	}
 	fromStep, err := s.loadWorkflowStepForLifecycle(ctx, fromStepID, "deferred move source")
 	if err != nil {
 		return
@@ -5590,17 +5605,6 @@ func (s *Service) processStepExitAndEnterForDeferredMove(
 	fresh, err := s.repo.GetTaskSession(ctx, identity.SessionID)
 	if err != nil || fresh == nil || fresh.QueueIncarnationID != identity.SessionIncarnationID {
 		return
-	}
-	targetStep, err := s.loadWorkflowStepForLifecycle(ctx, toStepID, "deferred move target")
-	if err != nil {
-		return
-	}
-	// Overlay one-shot move options onto a transient copy of the target step so
-	// the ordinary on_enter path applies the reset and appended instructions;
-	// the durable step is never mutated.
-	entryStep := targetStep
-	if entryOptions != nil {
-		entryStep = workflowmove.OverlayStep(targetStep, entryOptions)
 	}
 	s.processOnEnter(ctx, identity.TaskID, fresh, entryStep, taskDescription, transitionID, fromStep)
 }
