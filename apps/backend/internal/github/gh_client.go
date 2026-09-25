@@ -24,6 +24,7 @@ import (
 // rate-limit dispatch (`resourceForGHArgs`) and the repo search helpers in
 // sync.
 const ghSearchReposPath = "search/repositories"
+const ghRateLimitPath = "rate_limit"
 
 const ghMergeableState = "MERGEABLE"
 
@@ -167,7 +168,7 @@ func resourceForGHArgs(args []string) Resource {
 }
 
 func isGitHubRateLimitProbe(args []string) bool {
-	return len(args) >= 2 && args[0] == "api" && args[1] == "rate_limit"
+	return len(args) >= 2 && args[0] == "api" && args[1] == ghRateLimitPath
 }
 
 // GHAvailable checks if the gh CLI is installed and accessible.
@@ -1518,7 +1519,7 @@ func (c *GHClient) FetchRateLimit(ctx context.Context) error {
 	if c.rateTracker == nil {
 		return nil
 	}
-	out, err := c.run(ctx, "api", "rate_limit")
+	out, err := c.run(ctx, "api", ghRateLimitPath)
 	if err != nil {
 		return fmt.Errorf("fetch rate limit: %w", err)
 	}

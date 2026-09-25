@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	reviewCleanupMetricClassAuth  = "auth"
-	reviewCleanupMetricClassOther = "other"
+	reviewCleanupMetricClassAuth      = "auth"
+	reviewCleanupMetricClassOther     = "other"
+	reviewCleanupMetricClassRateLimit = "rate_limit"
 )
 
 // expvar maps published at package init, exposed via stdlib's /debug/vars
@@ -130,7 +131,7 @@ func validReviewCleanupMetricScope(scope string) bool {
 
 func boundedReviewCleanupMetricClass(class string) string {
 	switch class {
-	case reviewCleanupMetricClassAuth, "config", "transient", "rate_limit":
+	case reviewCleanupMetricClassAuth, "config", "transient", reviewCleanupMetricClassRateLimit:
 		return class
 	default:
 		return reviewCleanupMetricClassOther

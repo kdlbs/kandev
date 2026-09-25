@@ -121,7 +121,7 @@ func TestReviewCleanupMetrics(t *testing.T) {
 			}
 		})
 	}
-	classLabels := []string{reviewCleanupMetricClassAuth, "config", "transient", "rate_limit", reviewCleanupMetricClassOther}
+	classLabels := []string{reviewCleanupMetricClassAuth, "config", "transient", reviewCleanupMetricClassRateLimit, reviewCleanupMetricClassOther}
 	var outcomeKeys = make(map[string]bool)
 	for _, scope := range []string{"workspace", "record"} {
 		for _, class := range classLabels {
