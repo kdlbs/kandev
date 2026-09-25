@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForSessionDone } from "../../helpers/session";
 import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import { KanbanPage } from "../../pages/kanban-page";
 import {
@@ -53,7 +54,9 @@ test.describe("Change workflow", () => {
     await kanban.goto();
     await kanban.openTaskActionsMenu(task.id);
 
-    await expect(testPage.getByRole("menuitem", { name: "Change workflow..." })).toBeVisible();
+    // The menu label follows the current product wording, while this stable
+    // test id identifies the single-task workflow action across both labels.
+    await expect(kanban.contextChangeWorkflow()).toBeVisible();
     await kanban.contextChangeWorkflow().click();
     const changeWorkflow = new ChangeWorkflowPage(testPage);
     await expect(changeWorkflow.desktopDialog).toBeVisible();
@@ -103,6 +106,20 @@ test.describe("Change workflow", () => {
     );
     await waitForWorkflowMoveLifecycle(apiClient, task.id);
     const { session: routedSession } = await apiClient.getTaskSession(destinationSessionId);
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      existingSessionId,
+      "source workflow session must settle before cleanup",
+      30_000,
+    );
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      destinationSessionId,
+      "destination workflow session must settle before cleanup",
+      30_000,
+    );
     expect(routedSession.agent_profile_id).toBe(fixture.profileB.id);
     expect(routedSession.agent_profile_snapshot?.model).toBe("mock-slow");
     const changed = await apiClient.getTask(task.id);

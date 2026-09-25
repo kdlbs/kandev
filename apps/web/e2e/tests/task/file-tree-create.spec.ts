@@ -48,11 +48,22 @@ async function setupTask(
       .poll(
         async () => {
           const environment = await apiClient.getTaskEnvironment(task.id);
+          const repositoryWorktree = environment?.repos?.find(
+            (repository) => repository.repository_id === seedData.repositoryId,
+          )?.worktree_path;
+          // A task environment may expose the task root in workspace_path and
+          // the repository checkout in repos[].worktree_path. Check both
+          // representations because the executor can publish either one first.
+          const candidatePaths = [
+            repositoryWorktree,
+            environment?.workspace_path,
+            environment?.worktree_path,
+          ].filter((candidate): candidate is string => Boolean(candidate));
           workspacePath =
-            environment?.workspace_path ?? environment?.repos?.[0]?.worktree_path ?? "";
-          return Boolean(
-            workspacePath && fs.existsSync(path.join(workspacePath, options.requiredPath!)),
-          );
+            candidatePaths.find((candidate) =>
+              fs.existsSync(path.join(candidate, options.requiredPath!)),
+            ) ?? "";
+          return workspacePath !== "";
         },
         {
           timeout: 60_000,

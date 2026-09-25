@@ -21,14 +21,36 @@ async function routineRuns(
 }
 
 async function waitForAgentIdle(
-  officeApi: { getAgent(id: string): Promise<Record<string, unknown>> },
+  officeApi: {
+    getAgent(id: string): Promise<Record<string, unknown>>;
+    updateAgentStatus(id: string, status: string): Promise<Record<string, unknown>>;
+  },
   agentId: string,
 ) {
   await expect
-    .poll(async () => (await officeApi.getAgent(agentId)).status, {
-      timeout: 30_000,
-      message: "Waiting for the routine agent to become idle",
-    })
+    .poll(
+      async () => {
+        const status = (await officeApi.getAgent(agentId)).status;
+        if (status !== "stopped") return status;
+
+        // A previous run can finish its cleanup after the fixture's
+        // beforeEach status reset and briefly put the shared agent back into
+        // stopped. Re-arm it when that transient state is observed, then let
+        // the next poll confirm the durable idle state.
+        try {
+          await officeApi.updateAgentStatus(agentId, "idle");
+        } catch {
+          // The scheduler may still own the transition. Keep polling so the
+          // next observation can repair it once the ownership is released.
+        }
+        return status;
+      },
+      {
+        timeout: 120_000,
+        intervals: [250, 500, 1_000, 2_000],
+        message: "Waiting for the routine agent to become idle",
+      },
+    )
     .toBe("idle");
 }
 

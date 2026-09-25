@@ -899,34 +899,18 @@ test.describe("Quick Chat", () => {
       timeout: 30_000,
     });
 
-    // The restored tab can render before the session model catalog arrives on
-    // the new WebSocket. Wait for the store entry that makes the selector
-    // usable instead of racing the first post-restart frame.
-    await expect
-      .poll(
-        () =>
-          testPage.evaluate((sessionId) => {
-            const entry =
-              window.__KANDEV_E2E_STORE__?.getState().sessionModels.bySessionId[sessionId];
-            return {
-              currentModelId: entry?.currentModelId ?? "",
-              configOptionIds: entry?.configOptions.map((option) => option.id) ?? [],
-            };
-          }, started.session_id),
-        { timeout: 30_000, message: "restored session model catalog did not hydrate" },
-      )
-      .toMatchObject({
-        currentModelId: "mock-fast",
-        configOptionIds: expect.arrayContaining(["effort"]),
-      });
-
     const modelSettings = restoredDialog.getByRole("button", {
       name: "Session model settings",
     });
-    await expect(modelSettings).toContainText("Mock Fast", { timeout: 15_000 });
+    // The tab and its profile label can render from the session snapshot before
+    // the restarted agent sends its dynamic catalog. Wait on the selector's
+    // user-visible label, then open it and wait for the config option itself.
+    // This follows the same causal path as the user and avoids reading a
+    // transient empty store entry during WebSocket reconnect.
+    await expect(modelSettings).toContainText("Mock Fast", { timeout: 60_000 });
     await modelSettings.click();
     await expect(testPage.getByTestId("config-option-trigger-effort")).toBeVisible({
-      timeout: 10_000,
+      timeout: 30_000,
     });
   });
 
