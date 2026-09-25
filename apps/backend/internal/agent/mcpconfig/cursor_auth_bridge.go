@@ -219,8 +219,19 @@ func cursorAuthExcludedProjectSlugs(workspaceRoots []string) ([]string, error) {
 			return nil, errors.New("cursor MCP auth exclusion root has an empty project slug")
 		}
 		slugs = append(slugs, slug)
+		legacySlug := deriveLegacyCursorProjectSlug(canonicalRoot)
+		if legacySlug != "" && legacySlug != slug {
+			slugs = append(slugs, legacySlug)
+		}
 	}
 	return slugs, nil
+}
+
+// deriveLegacyCursorProjectSlug keeps pre-normalization task projects out of credential aggregation.
+func deriveLegacyCursorProjectSlug(workspacePath string) string {
+	normalizedPath := strings.ReplaceAll(workspacePath, `\`, "/")
+	slug := strings.NewReplacer("/", "-", ".", "-", "_", "-", ":", "-").Replace(normalizedPath)
+	return strings.Trim(slug, "-")
 }
 
 func isCursorTaskProjectSlug(projectSlug string, taskRootSlugs []string) bool {

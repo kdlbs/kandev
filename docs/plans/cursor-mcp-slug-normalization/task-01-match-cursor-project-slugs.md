@@ -26,7 +26,7 @@ Make Kandev's Cursor project directory name match the supplied Cursor Agent CLI 
 
 - Replace the slug helper with ASCII-alphanumeric preservation, dash-run collapse, and boundary trimming.
 - Update slug table cases and the worktree link assertion, including Unix, Windows drive, Windows network, punctuation, empty, and non-ASCII paths.
-- Confirm task-root exclusion continues to use the same slug rule.
+- Keep task-root exclusion effective for current and pre-normalization project slugs.
 
 ## Out of scope
 
@@ -35,8 +35,9 @@ Make Kandev's Cursor project directory name match the supplied Cursor Agent CLI 
 ## Acceptance
 
 1. `TestDeriveCursorProjectSlug` fails against the old helper for the task dot-folder path and other dash-run cases, then passes with Cursor's expected single-dash names.
-2. `TestCursorMCPAuthWorktree` checks a literal expected project directory independently of `DeriveCursorProjectSlug` and finds the symlink there.
+2. `TestDeriveCursorProjectSlug` supplies literal expected slugs for fixed paths; `TestCursorMCPAuthWorktree` derives only its randomized temporary root prefix, keeps the expected task-path suffix literal, and finds the symlink there.
 3. Existing bridge and lifecycle tests pass; no regular auth file or source-exclusion safety behavior regresses.
+4. A regular auth file under a task project directory created with the previous slug rule is excluded from the shared snapshot.
 
 ## Verification
 
@@ -77,6 +78,6 @@ None.
 
 ## Results
 
-Implemented Cursor's ASCII-alphanumeric slug rule with collapsed separators and boundary trimming. Added fixed slug cases for the supplied `.kandev/tasks` path, Windows drive and network paths, punctuation runs, empty output, and non-ASCII characters. The worktree link and configured/missing task-root tests compute their expected Cursor slugs independently of `DeriveCursorProjectSlug`.
+Implemented Cursor's ASCII-alphanumeric slug rule with collapsed separators and boundary trimming. Added fixed slug cases for the supplied `.kandev/tasks` path, Windows drive and network paths, punctuation runs, empty output, and non-ASCII characters. The worktree assertion keeps the task-path suffix literal. PR fixup also adds legacy task-root slug exclusion and removes the duplicated current-slug normalizer from tests.
 
-The focused regression command failed against the prior helper as expected and passed after the fix. Both the full `mcpconfig` and lifecycle race suites passed. Backend lint passed with 0 issues, and `make -C apps/backend build` passed. The repository-wide backend test target had four isolated failures outside this work order: two real-process-tree probe assertions and two launcher config-discovery tests selecting `/root/.kandev/config.yaml` instead of their temporary configs. The focused slug, worktree, task-root exclusion, and lifecycle tests passed.
+The slug regression and the added legacy-root regression failed against their respective prior implementations and passed after the fixes. The full `mcpconfig` race suite passed after fixup; the lifecycle race suite had passed during the implementation run. Backend lint passed with 0 issues, `make -C apps/backend build` passed, and specification catalog validation, spec lint, and `git diff --check` passed. The earlier repository-wide backend test run had four isolated failures outside this work order: two real-process-tree probe assertions and two launcher config-discovery tests selecting `/root/.kandev/config.yaml` instead of their temporary configs.

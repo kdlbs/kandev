@@ -81,7 +81,7 @@ Add `mcpconfig/cursor_auth_bridge.go` with the requested public helpers:
 
 Keep slug derivation pure. The link helper resolves an absolute path and evaluates workspace symlinks before derivation.
 Match Cursor Agent CLI's project-directory normalization: replace each character outside ASCII `A-Z`, `a-z`, and `0-9` with a dash, collapse consecutive dashes, then trim boundary dashes. This covers Unix and Windows separators, punctuation, and non-ASCII characters with the same rule. Reject an empty resulting slug.
-Use the same derivation for link destinations, disabled-link cleanup, and task-root exclusion, so a task worktree cannot become a credential source under a different spelling.
+Use the current slug for link destinations and disabled-link cleanup. Task-root exclusion recognizes both the current slug and the previous normalization so existing task project directories remain excluded after upgrade. Preserve those directories; do not rename or delete them.
 
 Scan direct project directories under `<cursorHome>/projects`.
 Exclude the current workspace and project slugs under the default task scratch root and configured task-worktree root, names containing `kandev-tasks`, symlinked project entries, and non-directory entries.

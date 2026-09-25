@@ -73,7 +73,8 @@ func TestCursorMCPAuthWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantProjectDirectory := filepath.Join(cursorHome, "projects", cursorProjectSlugAsSpecifiedForTest(canonicalRoot)+"-kandev-tasks-hello-hj2srhm6-master")
+	// Keep the task path suffix literal; only the randomized test root is derived.
+	wantProjectDirectory := filepath.Join(cursorHome, "projects", DeriveCursorProjectSlug(canonicalRoot)+"-kandev-tasks-hello-hj2srhm6-master")
 	destination := filepath.Join(wantProjectDirectory, cursorMCPAuthFilename)
 	target, err := os.Readlink(destination)
 	if err != nil {
@@ -260,7 +261,7 @@ func TestAggregateCursorMCPAuthExcludesConfiguredTaskRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeCursorAuth(t, projects, cursorProjectSlugAsSpecifiedForTest(canonicalTaskWorkspace), `{"task-secret":{"token":"excluded"}}`, time.Now())
+	writeCursorAuth(t, projects, DeriveCursorProjectSlug(canonicalTaskWorkspace), `{"task-secret":{"token":"excluded"}}`, time.Now())
 	writeCursorAuth(t, projects, "ordinary-project", `{"ordinary":{"token":"included"}}`, time.Now())
 
 	if err := AggregateCursorMCPAuth(cursorHome, taskRoot); err != nil {
@@ -294,7 +295,7 @@ func TestAggregateCursorMCPAuthAllowsMissingExcludedRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	canonicalTaskWorkspace := filepath.Join(canonicalExistingParent, relativeTaskWorkspace)
-	writeCursorAuth(t, projects, cursorProjectSlugAsSpecifiedForTest(canonicalTaskWorkspace), `{"stale-task":{"token":"excluded"}}`, time.Now())
+	writeCursorAuth(t, projects, DeriveCursorProjectSlug(canonicalTaskWorkspace), `{"stale-task":{"token":"excluded"}}`, time.Now())
 
 	if err := AggregateCursorMCPAuth(cursorHome, missingTaskRoot); err != nil {
 		t.Fatalf("AggregateCursorMCPAuth with an absent task root: %v", err)
@@ -305,6 +306,36 @@ func TestAggregateCursorMCPAuthAllowsMissingExcludedRoot(t *testing.T) {
 	}
 	if _, exists := got["ordinary"]; !exists {
 		t.Fatalf("ordinary auth was not published: %#v", got)
+	}
+}
+
+func TestAggregateCursorMCPAuthExcludesLegacyConfiguredTaskRootSlug(t *testing.T) {
+	cursorHome := t.TempDir()
+	projects := filepath.Join(cursorHome, "projects")
+	if err := os.MkdirAll(projects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	taskStorage := t.TempDir()
+	taskRoot := filepath.Join(taskStorage, ".tasks_dir")
+	if err := os.MkdirAll(filepath.Join(taskRoot, "task-123", "repository"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Before slug normalization, the separator before the dot produced two dashes.
+	legacyTaskSlug := DeriveCursorProjectSlug(taskStorage) + "--tasks-dir-task-123-repository"
+	writeCursorAuth(t, projects, legacyTaskSlug, `{"legacy-task":{"token":"excluded"}}`, time.Now())
+	writeCursorAuth(t, projects, "ordinary-project", `{"ordinary":{"token":"included"}}`, time.Now())
+
+	if err := AggregateCursorMCPAuth(cursorHome, taskRoot); err != nil {
+		t.Fatalf("AggregateCursorMCPAuth: %v", err)
+	}
+	got := readCursorAuth(t, filepath.Join(cursorHome, cursorMCPAuthUnifiedFilename))
+	if _, exists := got["legacy-task"]; exists {
+		t.Fatalf("legacy task auth was aggregated: %#v", got)
+	}
+	if _, exists := got["ordinary"]; !exists {
+		t.Fatalf("ordinary project auth was excluded: %#v", got)
 	}
 }
 
@@ -530,27 +561,6 @@ func cursorAuthDestinationForTest(t *testing.T, cursorHome, workspacePath string
 		t.Fatal(err)
 	}
 	return filepath.Join(cursorHome, "projects", DeriveCursorProjectSlug(canonicalPath), cursorMCPAuthFilename)
-}
-
-func cursorProjectSlugAsSpecifiedForTest(path string) string {
-	var slug strings.Builder
-	previousWasSeparator := true
-	for _, char := range path {
-		if !isASCIIAlphaNumeric(char) {
-			previousWasSeparator = true
-			continue
-		}
-		if slug.Len() > 0 && previousWasSeparator {
-			slug.WriteByte('-')
-		}
-		slug.WriteRune(char)
-		previousWasSeparator = false
-	}
-	return slug.String()
-}
-
-func isASCIIAlphaNumeric(char rune) bool {
-	return char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9'
 }
 
 func TestDisableCursorMCPAuth(t *testing.T) {

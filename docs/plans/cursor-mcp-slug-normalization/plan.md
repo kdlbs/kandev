@@ -21,15 +21,15 @@ Kandev links shared MCP credentials into a project directory whose name can diff
 
 ## Scope
 
-In scope: use Cursor's ASCII-alphanumeric slug rule for both project link paths and task-root exclusion, and prove the worktree link lands at the expected directory.
+In scope: use Cursor's ASCII-alphanumeric slug rule for project links and current task-root exclusion, preserve exclusion for task directories created with the previous slug rule, and prove the worktree link lands at the expected directory.
 
 Out of scope: OAuth login, credential aggregation precedence, profile settings, remote executors, migration or deletion of old project directories, and Cursor versions with a different naming rule.
 
 ## Technical approach
 
-Update `DeriveCursorProjectSlug` in `apps/backend/internal/agent/mcpconfig/cursor_auth_bridge.go` to emit ASCII letters and digits unchanged, emit one dash for each run of other characters, and trim leading and trailing dashes. Keep it pure and retain the empty-slug guard at its callers. Both `cursorProjectAuthPath` and `cursorAuthExcludedProjectSlugs` already call this helper, so they will use the same new identity.
+Update `DeriveCursorProjectSlug` in `apps/backend/internal/agent/mcpconfig/cursor_auth_bridge.go` to emit ASCII letters and digits unchanged, emit one dash for each run of other characters, and trim leading and trailing dashes. Keep it pure and retain the empty-slug guard at its callers. Link destinations use the current helper. Task-root exclusion checks both the current root slug and the previous root slug, keeping pre-normalization task project directories out of credential aggregation.
 
-Update `TestDeriveCursorProjectSlug` in `cursor_auth_bridge_test.go` with the task dot-folder example, Unix and Windows paths, punctuation runs, boundary trimming, empty result, and a non-ASCII case. Add an independent expected directory assertion to `TestCursorMCPAuthWorktree` using a worktree under a `.kandev` directory; do not derive that assertion's expected slug with the helper under test.
+Update `TestDeriveCursorProjectSlug` in `cursor_auth_bridge_test.go` with literal expected slugs for the task dot-folder example, Unix and Windows paths, punctuation runs, boundary trimming, empty result, and a non-ASCII case. In `TestCursorMCPAuthWorktree`, derive only the randomized temporary root prefix and keep the expected `.kandev/tasks/...` suffix literal.
 
 ## Tests
 
@@ -37,7 +37,7 @@ Update `TestDeriveCursorProjectSlug` in `cursor_auth_bridge_test.go` with the ta
 | --- | --- |
 | AC-AGENTS-CURSOR-AUTH-001.1 | `TestCursorMCPAuthWorktree` verifies the linked auth file exists where Cursor's project slug points. |
 | AC-AGENTS-CURSOR-AUTH-001.4 | `TestDeriveCursorProjectSlug` verifies canonical path spelling, punctuation-run collapse, and Windows forms. |
-| AC-AGENTS-CURSOR-AUTH-003.1 | Existing task-root exclusion tests run with the corrected helper and remain green. |
+| AC-AGENTS-CURSOR-AUTH-003.1 | Current and legacy configured task-root slugs are excluded from credential aggregation. |
 
 First run the changed slug and worktree tests against the old helper and confirm the intended failure. Then apply the helper change and run the full work-order commands.
 
@@ -46,6 +46,8 @@ First run the changed slug and worktree tests against the old helper and confirm
 - [x] [Task 01: Match Cursor project slugs](task-01-match-cursor-project-slugs.md)
 
 ## Verification results
+
+The added legacy-root regression failed against the fixup baseline because the regular auth file was aggregated, then passed after exclusion was extended to the previous slug. The full `mcpconfig` race suite, backend lint, backend build, specification catalog validation, spec lint, and `git diff --check` passed. The earlier broad backend test run had four failures outside this work order: two real-process-tree probe assertions and two launcher config-discovery tests selecting `/root/.kandev/config.yaml` instead of temporary configs.
 
 The regression tests first failed against the old helper with extra dash runs and preserved non-ASCII characters, then passed after normalization changed.
 
