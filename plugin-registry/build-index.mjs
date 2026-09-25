@@ -800,6 +800,12 @@ async function main() {
   const result = await buildIndex(specs, { priorDocument });
 
   await writeBuildReport(result, specs.length);
+  if (
+    process.env.GITHUB_EVENT_NAME === "pull_request" &&
+    result.canvasErrors.length > 0
+  ) {
+    throw new Error("pull-request validation found invalid canvas entries");
+  }
   if (!result.publishable) {
     for (const error of result.fatalErrors) emitWorkflowError(error);
     throw new Error(result.fatalErrors.join("; "));
@@ -826,10 +832,6 @@ export async function readPriorDocument(priorPath) {
       `warning: prior index at ${priorPath} is unusable; continuing without retention data (${error.message})`,
     );
     return null;
-  }
-  if (process.env.GITHUB_EVENT_NAME === "pull_request" && canvasErrors.length > 0) {
-    console.error("error: pull-request validation found invalid canvas entries");
-    process.exitCode = 1;
   }
 }
 
