@@ -188,5 +188,19 @@ async function seedEligiblePR(apiClient: ApiClient, taskId: string) {
     checks_total: 3,
     checks_passing: 3,
   });
+  await apiClient.mockGitHubSeedPRFeedback({
+    owner: OWNER,
+    repo: REPO,
+    pr_number: PR_NUMBER,
+    checks: [
+      { name: "CI / lint", status: "completed", conclusion: "success" },
+      { name: "CI / tests", status: "completed", conclusion: "success" },
+      { name: "CI / build", status: "completed", conclusion: "success" },
+    ],
+    reviews: [
+      { id: 1, author: "octocat", state: "APPROVED" },
+      { id: 2, author: "hubot", state: "APPROVED" },
+    ],
+  });
   await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
 }
