@@ -8,6 +8,10 @@ import { Card, CardContent, CardTitle } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconAlertTriangle, IconDownload, IconFileZip } from "@tabler/icons-react";
 import { ApiError } from "@/lib/api/client";
+import { createDesktopV1Adapter } from "@/lib/desktop/adapter";
+import type { DesktopDownloadFeedback } from "@/lib/desktop/protocol";
+import { createTauriEventTransport } from "@/lib/desktop/tauri-event-transport";
+import { DIAGNOSTIC_BUNDLE_FILE_NAME } from "@/lib/desktop/download-feedback";
 import {
   buildDiagnosticBundleDownloadUrl,
   createDiagnosticBundle,
@@ -23,9 +27,14 @@ import type {
 } from "@/lib/types/system";
 import { BundleCustomizer } from "./bundle-customizer";
 
-type ViewState = "idle" | "collecting" | "preparing" | "partial" | "busy" | "error";
+type ViewState = "idle" | "collecting" | "preparing" | "saving" | "partial" | "busy" | "error";
+type ActiveDownload = { url: string; partial: boolean; warning: string; timeoutId?: number };
+type ActiveDownloadRef = { current: ActiveDownload | null };
+
+const DESKTOP_DOWNLOAD_FEEDBACK_TIMEOUT_MS = 10 * 60 * 1_000;
 
 const DEFAULT_SOURCES: DiagnosticBundleSource[] = ["backend", "frontend"];
+const desktopDownloadAdapter = createDesktopV1Adapter(createTauriEventTransport());
 
 // eslint-disable-next-line max-lines-per-function -- coordinates bundle polling and shared customizer state.
 export function LogViewer() {
@@ -41,6 +50,8 @@ export function LogViewer() {
   const [selectedSessionIDs, setSelectedSessionIDs] = useState<string[]>([]);
   const [customizerSubmitting, setCustomizerSubmitting] = useState(false);
   const mounted = useRef(true);
+  const activeDesktopDownload = useRef<ActiveDownload | null>(null);
+  const desktopDownloadListenerFailed = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -49,8 +60,50 @@ export function LogViewer() {
       .catch(() => undefined);
     return () => {
       mounted.current = false;
+      clearActiveDesktopDownload(activeDesktopDownload);
     };
   }, []);
+
+  useEffect(() => {
+    if (!desktopDownloadAdapter.isAvailable()) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    desktopDownloadListenerFailed.current = false;
+    void desktopDownloadAdapter
+      .listen("download", (feedback) => {
+        const active = activeDesktopDownload.current;
+        if (!mounted.current || !active || feedback.url !== active.url) return;
+        handleDesktopDownloadFeedback(feedback, active, {
+          setState,
+          setMessage,
+          t,
+          activeDesktopDownload,
+        });
+      })
+      .then(
+        (unlisten) => {
+          if (disposed) unlisten();
+          else stop = unlisten;
+        },
+        () => {
+          if (disposed) return;
+          desktopDownloadListenerFailed.current = true;
+          const active = activeDesktopDownload.current;
+          if (active) {
+            failActiveDesktopDownload(active, {
+              activeDesktopDownload,
+              setState,
+              setMessage,
+              t,
+            });
+          }
+        },
+      );
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, [t]);
 
   useEffect(() => {
     if (!customizerOpen || !selectedSources.includes("acp") || sessionsLoaded) return;
@@ -80,11 +133,16 @@ export function LogViewer() {
       if (job.status !== "ready" && job.status !== "partial") {
         throw new Error(job.warnings?.[0] ?? t("settings:diagnosticBundlePrepareError"));
       }
-      setState(job.status === "partial" ? "partial" : "idle");
-      setMessage(bundleMessage(job, t));
-      triggerDownload(buildDiagnosticBundleDownloadUrl(job.id));
+      startBundleDownload(job, buildDiagnosticBundleDownloadUrl(job.id), {
+        activeDesktopDownload,
+        setState,
+        setMessage,
+        t,
+        desktopDownloadListenerFailed,
+      });
     } catch (error) {
       if (!mounted.current) return;
+      clearActiveDesktopDownload(activeDesktopDownload);
       if (error instanceof ApiError && (error.status === 429 || error.status === 503)) {
         const retry = error.retryAfterSeconds ?? 5;
         setState("busy");
@@ -113,7 +171,7 @@ export function LogViewer() {
     });
   };
 
-  const pending = state === "collecting" || state === "preparing";
+  const pending = state === "collecting" || state === "preparing" || state === "saving";
   return (
     <div className="min-w-0 space-y-4">
       <DiagnosticDisclosure />
@@ -254,7 +312,109 @@ async function prepareDiagnosticBundle(
 function buttonLabel(state: ViewState, t: (key: string) => string): string {
   if (state === "collecting") return t("settings:diagnosticCollectingFrontendLogs");
   if (state === "preparing") return t("settings:diagnosticPreparingZip");
+  if (state === "saving") return t("settings:saving");
   return t("settings:diagnosticCustomize");
+}
+
+type DesktopDownloadActions = {
+  activeDesktopDownload: ActiveDownloadRef;
+  setState: (state: ViewState) => void;
+  setMessage: (message: string) => void;
+  t: (key: string) => string;
+};
+
+function clearActiveDesktopDownload(activeRef: ActiveDownloadRef): void {
+  const active = activeRef.current;
+  if (active?.timeoutId !== undefined) window.clearTimeout(active.timeoutId);
+  activeRef.current = null;
+}
+
+function failActiveDesktopDownload(active: ActiveDownload, actions: DesktopDownloadActions): void {
+  if (actions.activeDesktopDownload.current !== active) return;
+  clearActiveDesktopDownload(actions.activeDesktopDownload);
+  actions.setState("error");
+  actions.setMessage(
+    withPartialWarning(actions.t("settings:diagnosticSaveFailed"), active.warning),
+  );
+}
+
+function armDesktopDownloadFeedbackTimeout(
+  active: ActiveDownload,
+  actions: DesktopDownloadActions,
+): void {
+  if (active.timeoutId !== undefined) window.clearTimeout(active.timeoutId);
+  active.timeoutId = window.setTimeout(
+    () => failActiveDesktopDownload(active, actions),
+    DESKTOP_DOWNLOAD_FEEDBACK_TIMEOUT_MS,
+  );
+}
+
+function handleDesktopDownloadFeedback(
+  feedback: DesktopDownloadFeedback,
+  active: ActiveDownload,
+  actions: DesktopDownloadActions,
+): void {
+  if (feedback.status === "started") {
+    armDesktopDownloadFeedbackTimeout(active, actions);
+    actions.setMessage(actions.t("settings:diagnosticSavePending"));
+    return;
+  }
+  if (feedback.status === "cancelled") {
+    actions.setState(active.partial ? "partial" : "idle");
+    actions.setMessage("");
+  } else if (feedback.status === "saved") {
+    actions.setState(active.partial ? "partial" : "idle");
+    actions.setMessage(
+      withPartialWarning(actions.t("settings:diagnosticSaveComplete"), active.warning),
+    );
+  } else {
+    actions.setState("error");
+    actions.setMessage(
+      withPartialWarning(actions.t("settings:diagnosticSaveFailed"), active.warning),
+    );
+  }
+  actions.activeDesktopDownload.current = null;
+}
+
+function startBundleDownload(
+  job: DiagnosticBundleJob,
+  downloadUrl: string,
+  actions: {
+    activeDesktopDownload: ActiveDownloadRef;
+    setState: (state: ViewState) => void;
+    setMessage: (message: string) => void;
+    t: (key: string) => string;
+    desktopDownloadListenerFailed: { current: boolean };
+  },
+): void {
+  if (desktopDownloadAdapter.isAvailable()) {
+    const active: ActiveDownload = {
+      url: new URL(downloadUrl, window.location.href).href,
+      partial: job.status === "partial",
+      warning: bundleWarning(job, actions.t),
+    };
+    actions.activeDesktopDownload.current = active;
+    armDesktopDownloadFeedbackTimeout(active, actions);
+    actions.setState("saving");
+    actions.setMessage(actions.t("settings:diagnosticSavePending"));
+    if (actions.desktopDownloadListenerFailed.current) {
+      failActiveDesktopDownload(active, actions);
+    }
+  } else {
+    clearActiveDesktopDownload(actions.activeDesktopDownload);
+    actions.setState(job.status === "partial" ? "partial" : "idle");
+    actions.setMessage(bundleMessage(job, actions.t));
+  }
+  triggerDownload(downloadUrl);
+}
+
+function bundleWarning(job: DiagnosticBundleJob, t: (key: string) => string): string {
+  if (job.status !== "partial") return "";
+  return job.warnings?.length ? job.warnings.join(" ") : t("settings:diagnosticPartialZipWarning");
+}
+
+function withPartialWarning(message: string, warning: string): string {
+  return warning ? `${message} ${warning}` : message;
 }
 
 function bundleMessage(
@@ -270,7 +430,7 @@ function bundleMessage(
 function triggerDownload(url: string): void {
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = "kandev-diagnostic-logs.zip";
+  anchor.download = DIAGNOSTIC_BUNDLE_FILE_NAME;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

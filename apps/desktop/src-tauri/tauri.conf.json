@@ -13,6 +13,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Kandev",
         "width": 1280,
         "height": 900,
