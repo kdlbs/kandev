@@ -14,6 +14,7 @@ import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-
 import { selectMarkdownPreviewText } from "../../helpers/markdown-preview";
 import { waitForWorkspacePath } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import { waitForWorkspacePath } from "../../helpers/session";
 
 function createLongFileContent(lines = 500): string {
   return Array.from(

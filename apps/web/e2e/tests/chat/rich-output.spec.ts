@@ -116,6 +116,43 @@ test("renders complete chart geometry when device animation is disabled", async 
 }) => {
   await testPage.addInitScript(() => {
     window.localStorage.setItem("kandev.settings.richOutputAnimations", "false");
+    // This case checks static Recharts geometry. The lazy plot mount has its
+    // own coverage above; make visibility callbacks immediate here so the
+    // animation assertion cannot race with an inner transcript scroll.
+    class ImmediateIntersectionObserver {
+      private readonly callback: IntersectionObserverCallback;
+
+      constructor(callback: IntersectionObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(target: Element) {
+        this.callback(
+          [
+            {
+              isIntersecting: true,
+              intersectionRatio: 1,
+              target,
+              boundingClientRect: target.getBoundingClientRect(),
+              intersectionRect: target.getBoundingClientRect(),
+              rootBounds: null,
+              time: performance.now(),
+            } as IntersectionObserverEntry,
+          ],
+          this as unknown as IntersectionObserver,
+        );
+      }
+
+      unobserve() {}
+      disconnect() {}
+      takeRecords(): IntersectionObserverEntry[] {
+        return [];
+      }
+    }
+    Object.defineProperty(window, "IntersectionObserver", {
+      configurable: true,
+      value: ImmediateIntersectionObserver,
+    });
   });
   const session = await seedRichOutputTask({
     page: testPage,
@@ -127,6 +164,8 @@ test("renders complete chart geometry when device animation is disabled", async 
   const lineChart = richOutput.getByTestId("rich-output-chart-line");
   const barChart = richOutput.getByTestId("rich-output-chart-bar");
 
+  await expect(richOutput).toBeVisible({ timeout: 30_000 });
+  await expect(barChart).toBeVisible({ timeout: 30_000 });
   await lineChart.scrollIntoViewIfNeeded();
   const line = lineChart.locator(".recharts-line-curve");
   await expect(line).toBeVisible({ timeout: 30_000 });
