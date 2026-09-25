@@ -72,6 +72,8 @@ type TaskExecutionFields struct {
 	State                  string `db:"state"`
 	WorkspaceID            string `db:"workspace_id"`
 	IsFromOffice           bool   `db:"is_from_office"`
+	AssignmentGeneration   int64  `db:"assignment_generation"`
+	Archived               bool   `db:"archived"`
 }
 
 // GetTaskExecutionFields returns the execution-related fields for a task.
@@ -82,7 +84,9 @@ func (r *Repository) GetTaskExecutionFields(ctx context.Context, taskID string) 
 		       `+RunnerProjection("tasks")+` as assignee_agent_profile_id,
 		       COALESCE(tasks.state, '') as state,
 		       COALESCE(tasks.workspace_id, '') as workspace_id,
-		       `+taskrepo.IsFromOfficePredicate("tasks")+` AS is_from_office
+		       `+taskrepo.IsFromOfficePredicate("tasks")+` AS is_from_office,
+		       COALESCE(tasks.assignment_generation, 0) as assignment_generation,
+		       (tasks.archived_at IS NOT NULL) as archived
 		FROM tasks WHERE tasks.id = ?
 	`), taskID).StructScan(&fields)
 	if err == sql.ErrNoRows {

@@ -465,7 +465,23 @@ func (s *Service) checkPauseGateForAgent(ctx context.Context, agent *models.Agen
 	}
 	if active != nil {
 		pause.RecordBlocked(gateName)
-		return shared.ErrWorkspacePaused
+		return &pausedQueueError{pause: active}
 	}
 	return nil
 }
+
+// pausedQueueError wraps shared.ErrWorkspacePaused with the exact pause
+// record checkPauseGateForAgent already resolved, so a caller (the
+// task-assigned event subscriber's deferred-assignment recording) can
+// recover the blocking pause's id via errors.As without a second,
+// potentially racy PauseState read. Mirrors routines/service.go's
+// pausedDispatchError and scheduler.pausedQueueError (package-local by
+// design — the two packages don't share an error type). errors.Is against
+// shared.ErrWorkspacePaused still works for every existing caller via
+// Unwrap.
+type pausedQueueError struct {
+	pause *models.WorkspacePause
+}
+
+func (e *pausedQueueError) Error() string { return shared.ErrWorkspacePaused.Error() }
+func (e *pausedQueueError) Unwrap() error { return shared.ErrWorkspacePaused }

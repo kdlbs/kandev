@@ -61,6 +61,8 @@ func newRunCausationFromTaskTestService(t *testing.T) (*Service, *officesqlite.R
 			state TEXT DEFAULT 'TODO',
 			project_id TEXT DEFAULT '',
 			metadata TEXT DEFAULT '{}',
+			assignment_generation INTEGER NOT NULL DEFAULT 0,
+			archived_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,

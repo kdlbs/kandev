@@ -1309,7 +1309,20 @@ func (s *Service) queueTaskAssignedRun(
 	} else {
 		key = dedupkeys.AssignmentKey(taskID, agentProfileID, *assignmentGeneration)
 	}
-	return s.QueueRunFromTaskBoundary(ctx, agentProfileID, RunReasonTaskAssigned, payload, key, taskID)
+	err = s.QueueRunFromTaskBoundary(ctx, agentProfileID, RunReasonTaskAssigned, payload, key, taskID)
+	if err == nil {
+		return nil
+	}
+	// A confirmed operator pause is not a subscriber failure — record the
+	// occurrence so pause.Service.Resume or the recovery tick replays it
+	// once the workspace resumes (paused-assignment-replay), instead of
+	// the assignment silently going nowhere.
+	var pe *pausedQueueError
+	if errors.As(err, &pe) && pe.pause != nil {
+		s.RecordDeferredAssignment(ctx, taskID, pe.pause.ID)
+		return nil
+	}
+	return err
 }
 
 // handleTaskMoved keeps the legacy named-step activity fallback and queues

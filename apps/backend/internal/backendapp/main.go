@@ -2602,6 +2602,7 @@ func buildOfficeFeatureServices(
 	schedulerSvc.SetPauseGate(pauseSvc)
 	if services.Office != nil {
 		services.Office.SetPauseGate(pauseSvc)
+		pauseSvc.SetAssignmentReplayer(services.Office)
 	}
 
 	return &office.Services{
