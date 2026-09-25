@@ -44,6 +44,36 @@ queue](../../tasks/requirements/run-scheduling.md) and
 - **AC-OFFICE-SCHEDULER-001.11:** A cron routine trigger that can never fire (an impossible date, or an empty expression) is rejected at trigger-create time with a client error, not accepted as a silent no-op or a wrong daily fallback.
 - **AC-OFFICE-SCHEDULER-001.12:** A routine trigger's timezone defaults to UTC when not supplied; there is no workspace-level timezone.
 
+### REQ-OFFICE-SCHEDULER-002: Assignment wake respects step auto-start
+
+**Intent:** An Office task's current workflow step is authoritative for whether an agent should be
+running at all. A step with no `auto_start_agent` on_enter action (Backlog, `events:{}`) means the
+workflow has not yet decided to run this task — an assignee change, a task-created/task-updated
+event, or the unstarted-task recovery sweep must not launch an agent outside that decision. Every
+producer of a `task_assigned` run for an Office task's assignee (reactivity's assignee-change
+handler, the event-subscriber path, and unstarted-task recovery) applies the same eligibility
+predicate: the task's current workflow step must have an `auto_start_agent` on_enter action, or the
+task must have no workflow step at all (a task outside any workflow keeps its prior behaviour). This
+does not change how a legitimate auto-start step wakes its runner, and it does not touch Review/
+Approval's separate reviewer/approver wake path.
+
+#### Acceptance criteria
+
+- **AC-OFFICE-SCHEDULER-002.1:** Assigning, reassigning, creating, or updating an Office task whose
+  current workflow step has no `auto_start_agent` on_enter action queues zero `task_assigned` runs,
+  across all three producers (reactivity assignee-change, event-subscriber queueing, unstarted-task
+  recovery). The previous assignee's session interrupt (when reassigning) is unaffected — only the
+  new wake is gated.
+- **AC-OFFICE-SCHEDULER-002.2:** Assigning, reassigning, creating, or updating an Office task whose
+  current workflow step has an `auto_start_agent` on_enter action queues exactly one `task_assigned`
+  run per triggering event, unchanged from prior behaviour.
+- **AC-OFFICE-SCHEDULER-002.3:** A task with no workflow step bound (`workflow_step_id` empty) is
+  treated as eligible, preserving behaviour for tasks outside a workflow.
+- **AC-OFFICE-SCHEDULER-002.4:** A step lookup failure (repository error, missing step getter, or a
+  step ID that does not resolve) fails open — the wake is queued as before, and the skip decision is
+  never silently swallowed: an eligible-vs-ineligible outcome is logged at Info, and a failed lookup
+  is logged at Warn.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/scheduler-01.md), [part 2](../system-design/scheduler-02.md).

@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/shared"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
@@ -65,6 +66,13 @@ func (si *SchedulerIntegration) recoverUnstartedTasks(ctx context.Context, log *
 	}
 
 	for _, t := range tasks {
+		// The current step must accept an auto-started run before this
+		// recovery wake is queued. See shared.IsAssignmentWakeEligible for
+		// the fail-open rationale.
+		if !shared.IsAssignmentWakeEligible(ctx, log, si.svc.repo, si.svc.workflowStepGetter, t.ID, "scheduler_recovery.recover_unstarted_tasks") {
+			continue
+		}
+
 		log.Info("recovery sweep: re-queueing unstarted task",
 			zap.String("task_id", t.ID),
 			zap.String("agent_profile_id", t.AssigneeAgentProfileID))
