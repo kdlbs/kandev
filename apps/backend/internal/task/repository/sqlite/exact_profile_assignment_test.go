@@ -227,6 +227,9 @@ func TestFindExactProfileReusableSessionFiltersGenerationRevisionAndTerminalStat
 		generation int64
 		revision   int64
 	}{
+		{generation: 0, revision: 0},
+		{generation: 0, revision: revision},
+		{generation: 1, revision: 0},
 		{generation: 2, revision: revision + 1},
 		{generation: 3, revision: revision},
 		{generation: 1, revision: revision + 2},

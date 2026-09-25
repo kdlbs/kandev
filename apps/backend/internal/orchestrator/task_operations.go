@@ -3197,7 +3197,18 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	if session.TaskID != taskID {
 		return fmt.Errorf("session does not belong to task")
 	}
-	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
+	exactAssignment, err := s.resolveExactProfileAssignment(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if exactAssignment != nil {
+		if session.AgentProfileID != exactAssignment.AgentProfileID ||
+			session.ExactProfileGeneration != exactAssignment.Generation ||
+			session.ExactProfileRevision != exactAssignment.Revision {
+			return fmt.Errorf("%w: session %q is not bound to the active exact profile assignment", ErrExactProfileAssignmentInvalid, session.ID)
+		}
+	}
+	effectiveProfile := exactAssignmentGenerationProfile(exactAssignment, s.resolveStepAgentProfile(ctx, step))
 	if effectiveProfile != "" && effectiveProfile != session.AgentProfileID {
 		return fmt.Errorf(
 			"workflow step profile mismatch: step %q resolves to profile %q but session %q uses profile %q; route the session before prompting",
@@ -3288,6 +3299,13 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		zap.Bool("plan_mode", stepPlanMode))
 
 	return nil
+}
+
+func exactAssignmentGenerationProfile(exact *ExactProfileLaunchDecision, fallback string) string {
+	if exact != nil {
+		return exact.AgentProfileID
+	}
+	return fallback
 }
 
 // advanceTaskWorkflowStep updates the task's workflow step and clears session review status if the step changed.

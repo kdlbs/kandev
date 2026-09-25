@@ -332,6 +332,9 @@ func (r *Repository) GetExactProfileLaunchReceipt(ctx context.Context, taskID, s
 func (r *Repository) FindExactProfileReusableSession(
 	ctx context.Context, taskID string, generation, revision int64,
 ) (*models.TaskSession, error) {
+	if generation < 1 || revision < 1 {
+		return nil, nil
+	}
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+`
 		WHERE ts.task_id = ?

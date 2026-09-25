@@ -425,12 +425,12 @@ func (s *Service) launchWorkflowStep(ctx context.Context, req *LaunchSessionRequ
 	if err != nil {
 		return nil, err
 	}
-	return &LaunchSessionResponse{
+	return s.withExactProfileLaunchReceipt(ctx, &LaunchSessionResponse{
 		Success:   true,
 		TaskID:    req.TaskID,
 		SessionID: req.SessionID,
 		State:     string(v1.TaskSessionStateRunning),
-	}, nil
+	}), nil
 }
 
 // launchRestoreWorkspace restores workspace access for a terminal-state session (COMPLETED, FAILED, CANCELLED).
