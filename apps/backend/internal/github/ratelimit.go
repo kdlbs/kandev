@@ -274,6 +274,10 @@ func (r *RateTracker) ObservePrimary(resource Resource, retryAt time.Time, sourc
 		return
 	}
 	r.mu.Lock()
+	if !retryAt.After(r.primary[resource].RetryAt) {
+		r.mu.Unlock()
+		return
+	}
 	r.primary[resource] = primaryRetryState{RetryAt: retryAt, RetrySource: source}
 	r.signalChangedLocked()
 	r.mu.Unlock()
