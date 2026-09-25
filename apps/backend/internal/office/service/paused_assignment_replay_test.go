@@ -213,3 +213,94 @@ func TestPausedAssignmentReplay_DropsOnReassignment(t *testing.T) {
 		t.Fatalf("deferred assignment outcome = %q, want \"dropped\"", outcome)
 	}
 }
+
+// TestPausedAssignmentReplay_DropsOnArchive proves a deferred assignment
+// whose task was archived before replay ran is dropped, never queuing a
+// run for an archived task (AC-OFFICE-PAUSE-REPLAY-001.4).
+func TestPausedAssignmentReplay_DropsOnArchive(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	pauseSvc := pause.NewService(
+		svc.RepoForTest(),
+		noopTaskCanceller{},
+		&fakeWorkspaceChecker{known: map[string]bool{"ws-1": true}},
+		logger.Default(),
+	)
+	svc.SetPauseGate(pauseSvc)
+	pauseSvc.SetAssignmentReplayer(svc)
+
+	svc.ExecSQL(t, `INSERT INTO workspaces (id) VALUES ('ws-1')`)
+	createTestAgent(t, svc, "ws-1", "agent-1")
+	svc.ExecSQL(t,
+		`INSERT INTO tasks (id, workspace_id, project_id, assignment_generation) VALUES (?, ?, 'proj-1', 1)`,
+		"task-1", "ws-1")
+	setTestTaskAssignee(t, svc, "task-1", "agent-1")
+
+	if _, err := pauseSvc.Pause(ctx, "ws-1", "regression test", "user-1", "user"); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	gen := int64(1)
+	if err := svc.QueueTaskAssignedRunForTest(ctx, "task-1", "agent-1", &gen); err != nil {
+		t.Fatalf("QueueTaskAssignedRunForTest while paused: %v", err)
+	}
+
+	svc.ExecSQL(t, `UPDATE tasks SET archived_at = datetime('now') WHERE id = 'task-1'`)
+
+	if _, err := pauseSvc.Resume(ctx, "ws-1", "resolved", "user-1", "user"); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+
+	if got := countQueuedRuns(t, svc, "agent-1", service.RunReasonTaskAssigned); got != 0 {
+		t.Fatalf("queued runs for an archived task = %d, want 0", got)
+	}
+	if outcome := deferredAssignmentOutcome(t, svc, "task-1"); outcome != "dropped" {
+		t.Fatalf("deferred assignment outcome = %q, want \"dropped\"", outcome)
+	}
+}
+
+// TestPausedAssignmentReplay_DropsOnUnassign proves a deferred assignment
+// whose task was unassigned before replay ran is dropped rather than
+// replayed against a runner the task no longer has
+// (AC-OFFICE-PAUSE-REPLAY-001.4).
+func TestPausedAssignmentReplay_DropsOnUnassign(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	pauseSvc := pause.NewService(
+		svc.RepoForTest(),
+		noopTaskCanceller{},
+		&fakeWorkspaceChecker{known: map[string]bool{"ws-1": true}},
+		logger.Default(),
+	)
+	svc.SetPauseGate(pauseSvc)
+	pauseSvc.SetAssignmentReplayer(svc)
+
+	svc.ExecSQL(t, `INSERT INTO workspaces (id) VALUES ('ws-1')`)
+	createTestAgent(t, svc, "ws-1", "agent-1")
+	svc.ExecSQL(t,
+		`INSERT INTO tasks (id, workspace_id, project_id, assignment_generation) VALUES (?, ?, 'proj-1', 1)`,
+		"task-1", "ws-1")
+	setTestTaskAssignee(t, svc, "task-1", "agent-1")
+
+	if _, err := pauseSvc.Pause(ctx, "ws-1", "regression test", "user-1", "user"); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	gen := int64(1)
+	if err := svc.QueueTaskAssignedRunForTest(ctx, "task-1", "agent-1", &gen); err != nil {
+		t.Fatalf("QueueTaskAssignedRunForTest while paused: %v", err)
+	}
+
+	setTestTaskAssignee(t, svc, "task-1", "")
+
+	if _, err := pauseSvc.Resume(ctx, "ws-1", "resolved", "user-1", "user"); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+
+	if got := countQueuedRuns(t, svc, "agent-1", service.RunReasonTaskAssigned); got != 0 {
+		t.Fatalf("queued runs for an unassigned task = %d, want 0", got)
+	}
+	if outcome := deferredAssignmentOutcome(t, svc, "task-1"); outcome != "dropped" {
+		t.Fatalf("deferred assignment outcome = %q, want \"dropped\"", outcome)
+	}
+}
