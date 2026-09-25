@@ -50,7 +50,8 @@ const sqlitePrincipalGrantScopeViolationMessage = "UNIQUE constraint failed: tas
 const sqliteTaskGrantScopeViolationMessage = "UNIQUE constraint failed: task_coordinator_grants.coordinator_task_id, task_coordinator_grants.scope_kind, task_coordinator_grants.scope_id"
 
 // taskGrantScopeIndexName is the name of the task-bound partial unique
-// index on (coordinator_task_id, scope_kind, scope_id) WHERE principal_id IS NULL AND revoked_at IS NULL.
+// index on (coordinator_task_id, scope_kind, scope_id) for active rows whose
+// principal_id is empty.
 const taskGrantScopeIndexName = "uniq_active_task_coordinator_grants_scope"
 
 // isPrincipalGrantScopeUniqueViolation reports whether err is a violation of

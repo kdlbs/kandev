@@ -85,6 +85,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.ensureWorkspaceCoordinatorGrantSchema(); err != nil {
 		return err
 	}
+	if err := r.migrateCoordinatorGrantScopeIndexes(); err != nil {
+		return err
+	}
 	if err := r.migrateTaskPriorityToTextPostgres(); err != nil {
 		return err
 	}

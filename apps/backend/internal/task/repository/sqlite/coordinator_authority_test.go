@@ -548,6 +548,52 @@ func TestCoordinatorGrantTypedErrorsForAdapterSurface(t *testing.T) {
 	}
 }
 
+func TestCoordinatorGrantMigrationSeparatesPrincipalAndLegacyTaskScopeIndexes(t *testing.T) {
+	repo := newUsageEventsTestRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Coordinator authority"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, principal := range []*models.WorkspaceAgentPrincipal{
+		{ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1", LogicalKey: "coordinator-1", CreatedAt: now},
+		{ID: "principal-2", WorkspaceID: "ws-1", PluginInstallationID: "plugin-2", LogicalKey: "coordinator-2", CreatedAt: now},
+	} {
+		if err := repo.CreateWorkspaceAgentPrincipal(ctx, principal); err != nil {
+			t.Fatalf("CreateWorkspaceAgentPrincipal %s: %v", principal.ID, err)
+		}
+	}
+	if err := repo.CreateCoordinatorGrant(ctx, &models.CoordinatorGrant{
+		ID: "grant-1", CoordinatorTaskID: "coordinator", PrincipalID: "principal-1", WorkspaceID: "ws-1",
+		ScopeKind: "workspace", ScopeID: "ws-1", Capabilities: "orchestrate", GrantedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateCoordinatorGrant first principal: %v", err)
+	}
+	if _, err := repo.db.Exec(`
+		DROP INDEX uniq_active_task_coordinator_grants_scope;
+		CREATE UNIQUE INDEX uniq_active_task_coordinator_grants_scope
+			ON task_coordinator_grants(coordinator_task_id, scope_kind, scope_id)
+			WHERE revoked_at IS NULL;
+	`); err != nil {
+		t.Fatalf("restore legacy task-scope index: %v", err)
+	}
+	if err := repo.runMigrations(ctx); err != nil {
+		t.Fatalf("runMigrations: %v", err)
+	}
+	if err := repo.CreateCoordinatorGrant(ctx, &models.CoordinatorGrant{
+		ID: "grant-2", CoordinatorTaskID: "coordinator", PrincipalID: "principal-2", WorkspaceID: "ws-1",
+		ScopeKind: "workspace", ScopeID: "ws-1", Capabilities: "inspect", GrantedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateCoordinatorGrant second principal: %v", err)
+	}
+	if err := repo.CreateCoordinatorGrant(ctx, &models.CoordinatorGrant{
+		ID: "grant-3", CoordinatorTaskID: "coordinator", PrincipalID: "principal-1", WorkspaceID: "ws-1",
+		ScopeKind: "workspace", ScopeID: "ws-1", Capabilities: "inspect", GrantedAt: now,
+	}); !errors.Is(err, repoerrors.ErrCoordinatorGrantConflict) {
+		t.Fatalf("duplicate principal scope error = %v, want ErrCoordinatorGrantConflict", err)
+	}
+}
+
 // @covers AC-COORDINATOR-AUTHORITY-006
 func TestCoordinatorAuditProjectionCarriesReasonCodesOnly(t *testing.T) {
 	repo := newUsageEventsTestRepo(t)

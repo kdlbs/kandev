@@ -42,7 +42,7 @@ func (r *Repository) initCoordinatorAuthoritySchema() error {
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_task_coordinator_grants_scope
 			ON task_coordinator_grants(coordinator_task_id, scope_kind, scope_id)
-			WHERE revoked_at IS NULL;
+			WHERE revoked_at IS NULL AND principal_id = '';
 		CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_principal_coordinator_grants_scope
 			ON task_coordinator_grants(principal_id, scope_kind, scope_id)
 			WHERE revoked_at IS NULL AND principal_id != '';
@@ -74,6 +74,31 @@ func (r *Repository) initCoordinatorAuthoritySchema() error {
 	`)
 	if err != nil {
 		return fmt.Errorf("init coordinator authority schema: %w", err)
+	}
+	return nil
+}
+
+// migrateCoordinatorGrantScopeIndexes separates legacy task-bound grants from
+// durable principal grants while preserving one active grant per subject/scope.
+func (r *Repository) migrateCoordinatorGrantScopeIndexes() error {
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
+	if err != nil {
+		return fmt.Errorf("begin coordinator grant scope-index migration: %w", err)
+	}
+	if _, err := tx.ExecContext(r.migrationContext(), `DROP INDEX IF EXISTS uniq_active_task_coordinator_grants_scope`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("drop legacy coordinator task-scope index: %w", err)
+	}
+	if _, err := tx.ExecContext(r.migrationContext(), `
+		CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_task_coordinator_grants_scope
+			ON task_coordinator_grants(coordinator_task_id, scope_kind, scope_id)
+			WHERE revoked_at IS NULL AND principal_id = ''
+	`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("create coordinator task-scope index: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit coordinator grant scope-index migration: %w", err)
 	}
 	return nil
 }
