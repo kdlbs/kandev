@@ -119,6 +119,29 @@ func TestRateCoordinatorNonBlockingBackgroundAdmissionDefersForPrimaryWithoutRes
 	}
 }
 
+func TestRateCoordinatorPrimaryWithoutResetReopensAfterFallback(t *testing.T) {
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "elapsed-fallback-user",
+	}, nil)
+	tracker.Record(RateSnapshot{
+		Resource:          ResourceCore,
+		Remaining:         0,
+		RemainingObserved: true,
+		ParsedFromHeaders: true,
+		UpdatedAt:         time.Now().Add(-2 * secondaryFallbackDelay),
+	})
+
+	ctx := WithNonBlockingGitHubAdmission(
+		WithGitHubWorkClass(context.Background(), WorkClassBackground),
+	)
+	release, err := admission.acquire(ctx, ResourceCore)
+	if err != nil {
+		t.Fatalf("background request stayed deferred after fallback elapsed: %v", err)
+	}
+	release()
+}
+
 func TestRateCoordinatorInteractiveAdmissionCancellationPreservesRateDetails(t *testing.T) {
 	coordinator := NewRateCoordinator(nil, nil)
 	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{

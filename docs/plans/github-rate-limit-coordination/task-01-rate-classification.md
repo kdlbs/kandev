@@ -50,3 +50,8 @@ system_design:
 - Full `internal/github` package tests passed after the final Task 01 edit.
 - Tests use task-owned `GOCACHE` and `GOMODCACHE` under `/tmp` because the
   environment's shared module cache is read-only.
+- Follow-up: missing, malformed, zero, and negative reset headers now retain an
+  unknown reset and return a conservative retry. The real PAT HTTP path test
+  covers the classified error and the next background admission.
+- Follow-up verification passed: `go test ./internal/github ./internal/workflowsync -count=1`
+  and focused PAT regression tests under `go test -race ./internal/github`.

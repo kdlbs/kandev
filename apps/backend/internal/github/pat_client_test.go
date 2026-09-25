@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -690,6 +691,67 @@ func TestPATClient_RateLimit429_PreservesRealReset(t *testing.T) {
 	}
 	if !tracker.IsExhausted(ResourceCore) {
 		t.Errorf("expected core to be exhausted")
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-RATE-002.2
+// @covers AC-INTEGRATIONS-GITHUB-RATE-004.1
+func TestPATClient_PrimaryWithoutValidResetDefersNextBackgroundRequest(t *testing.T) {
+	for _, reset := range []string{"", "invalid", "0", "-1"} {
+		t.Run("reset="+reset, func(t *testing.T) {
+			var requests atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests.Add(1)
+				w.Header().Set("X-RateLimit-Limit", "5000")
+				w.Header().Set("X-RateLimit-Remaining", "0")
+				if reset != "" {
+					w.Header().Set("X-RateLimit-Reset", reset)
+				}
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+			}))
+			t.Cleanup(srv.Close)
+
+			client := newPATClientPointingAt(t, srv.URL)
+			coordinator := NewRateCoordinator(nil, nil)
+			tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+				Kind: AuthPrincipalHuman, Login: "invalid-reset-user",
+			}, nil)
+			client.WithRateTracker(tracker).withRateAdmission(admission)
+
+			var out struct{}
+			var apiErr *GitHubAPIError
+			if err := client.get(context.Background(), "/user", &out); !errors.As(err, &apiErr) {
+				t.Fatalf("first request error = %v, want GitHubAPIError", err)
+			}
+			if apiErr.FailureKind != FailurePrimaryRateLimit ||
+				apiErr.RetrySource != RetrySourceConservativeFallback ||
+				!apiErr.RetryAt.After(time.Now()) {
+				t.Fatalf("primary retry = (%s, %s, %s), want future conservative fallback",
+					apiErr.FailureKind, apiErr.RetrySource, apiErr.RetryAt)
+			}
+			snapshot, ok := tracker.Snapshot(ResourceCore)
+			if !ok || !snapshot.ResetAt.IsZero() || !tracker.IsExhausted(ResourceCore) {
+				t.Fatalf("invalid reset produced snapshot %+v (ok=%v)", snapshot, ok)
+			}
+
+			ctx := WithNonBlockingGitHubAdmission(
+				WithGitHubWorkClass(context.Background(), WorkClassBackground),
+			)
+			var deferred *AdmissionDeferredError
+			if err := client.get(ctx, "/user", &out); !errors.As(err, &deferred) {
+				t.Fatalf("next request error = %v, want AdmissionDeferredError", err)
+			}
+			if deferred.Reason != rateLimitBlockPrimary ||
+				deferred.RetrySource != RetrySourceConservativeFallback ||
+				!deferred.RetryAt.After(time.Now()) {
+				t.Fatalf("background retry = (%s, %s, %s)",
+					deferred.Reason, deferred.RetrySource, deferred.RetryAt)
+			}
+			if got := requests.Load(); got != 1 {
+				t.Fatalf("provider requests = %d, want 1", got)
+			}
+		})
 	}
 }
 

@@ -76,10 +76,12 @@ func classifyGitHubResponse(resp *http.Response, endpoint string, body []byte, n
 	result.Kind = classifyFailureKind(resp.StatusCode, string(body), resp.Header.Get("X-RateLimit-Remaining"), resp.Header.Get("Retry-After"))
 	switch result.Kind {
 	case FailurePrimaryRateLimit:
-		result.Kind = FailurePrimaryRateLimit
-		result.RetrySource = RetrySourcePrimaryReset
-		if result.Snapshot != nil {
+		if result.Snapshot != nil && !result.Snapshot.ResetAt.IsZero() {
+			result.RetrySource = RetrySourcePrimaryReset
 			result.RetryAt = result.Snapshot.ResetAt
+		} else {
+			result.RetrySource = RetrySourceConservativeFallback
+			result.RetryAt = now.Add(secondaryFallbackDelay).UTC()
 		}
 	case FailureSecondaryRateLimit:
 		result.RetryAt, result.RetrySource = retryAfter(resp.Header.Get("Retry-After"), now)

@@ -42,7 +42,8 @@ provider failure instead of treating every 403 as primary quota exhaustion.
 
 - **AC-INTEGRATIONS-GITHUB-RATE-001.1:** When a response reports zero primary
   remaining quota, the integration shall classify primary exhaustion and use
-  the provider reset time.
+  the provider reset time. If the reset is missing or invalid, it shall use a
+  one-minute conservative retry boundary from the observation time.
 - **AC-INTEGRATIONS-GITHUB-RATE-001.2:** When a 403 or 429 contains a rate or
   abuse signal while primary remaining is positive or unknown, the integration
   shall classify an observed secondary throttle and preserve the healthy
@@ -70,7 +71,8 @@ agents and operators.
   budget and throttle state.
 - **AC-INTEGRATIONS-GITHUB-RATE-002.2:** When background work reaches the
   configured primary reserve or an active provider retry window, Kandev shall
-  defer it before issuing a provider request.
+  defer it before issuing a provider request. A missing or invalid primary reset
+  shall defer the next request until the conservative retry boundary elapses.
 - **AC-INTEGRATIONS-GITHUB-RATE-002.3:** When interactive and background work
   are both eligible, interactive work shall have admission priority.
 

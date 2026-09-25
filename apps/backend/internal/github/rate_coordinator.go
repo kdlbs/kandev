@@ -144,8 +144,7 @@ func (a *RateAdmission) snapshot(resource Resource, now time.Time) rateAdmission
 }
 
 func primaryRateExhausted(rate RateSnapshot) bool {
-	return rate.Remaining <= 0 && (rate.RemainingObserved || !rate.ParsedFromHeaders) &&
-		(rate.ResetAt.IsZero() || rate.ResetAt.After(time.Now()))
+	return rate.Exhausted()
 }
 
 const defaultBackgroundPace = time.Second
@@ -324,7 +323,7 @@ func (a *RateAdmission) retryBoundary(
 			if snapshot.ResetAt.After(now) {
 				return snapshot.ResetAt, RetrySourcePrimaryReset
 			}
-			return now.Add(secondaryFallbackDelay).UTC(), RetrySourceConservativeFallback
+			return snapshot.primaryRetryAt(), RetrySourceConservativeFallback
 		}
 	}
 	if delay > 0 {
