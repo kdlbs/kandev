@@ -44,3 +44,7 @@ system_design:
 - Follow-up verification passed: the elapsed-fallback coordinator regression
   under `go test -race ./internal/github`, and diff-scoped `golangci-lint` found
   zero issues against base `3aa3233c7833c8f3c034083e10d76999af3a010d`.
+- Review follow-up: a zero-remaining `GET /rate_limit` bucket with a missing,
+  zero, or negative reset now keeps the reset unknown. The shared observer and
+  real PAT request path defer the next background request to the one-minute
+  fallback instead of treating the Unix epoch as a completed reset.

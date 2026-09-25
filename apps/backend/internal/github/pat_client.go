@@ -1021,7 +1021,7 @@ func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return c.apiError(resp, endpoint, body)
 	}
-	if endpoint != "/rate_limit" {
+	if endpoint != rateLimitEndpoint {
 		c.observeSuccess(endpoint)
 	}
 	return json.NewDecoder(resp.Body).Decode(result)
