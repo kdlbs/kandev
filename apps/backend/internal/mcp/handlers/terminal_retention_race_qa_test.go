@@ -17,10 +17,10 @@ type reparentBeforeRetentionWrite struct {
 	base *taskrepo.Repository
 }
 
-func (r *reparentBeforeRetentionWrite) UpdateTaskTerminalRetentionIfParent(
-	ctx context.Context, taskID, parentID, workspaceID string, held bool,
+func (r *reparentBeforeRetentionWrite) UpdateTaskWithTerminalRetentionIfParent(
+	ctx context.Context, task *models.Task, parentID, workspaceID string, held bool,
 ) (bool, error) {
-	current, err := r.base.GetTask(ctx, taskID)
+	current, err := r.base.GetTask(ctx, task.ID)
 	if err != nil {
 		return false, err
 	}
@@ -28,10 +28,10 @@ func (r *reparentBeforeRetentionWrite) UpdateTaskTerminalRetentionIfParent(
 	if err := r.base.UpdateTask(ctx, current); err != nil {
 		return false, err
 	}
-	return r.base.UpdateTaskTerminalRetentionIfParent(ctx, taskID, parentID, workspaceID, held)
+	return r.base.UpdateTaskWithTerminalRetentionIfParent(ctx, task, parentID, workspaceID, held)
 }
 
-func TestUpdateTaskTerminalRetentionRejectsFormerParentAfterConcurrentReparent(t *testing.T) {
+func TestUpdateTaskWithTerminalRetentionDoesNotApplyOrdinaryFieldsAfterConcurrentReparent(t *testing.T) {
 	svc, repo, _, _ := newTestTaskServiceWithWorkflowTasks(t, func(base *taskrepo.Repository) taskrepository.TaskRepository {
 		return &reparentBeforeRetentionWrite{TaskRepository: base, base: base}
 	})
@@ -50,7 +50,7 @@ func TestUpdateTaskTerminalRetentionRejectsFormerParentAfterConcurrentReparent(t
 	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
 	requestCtx := scope.WithPrincipal(ctx, scope.Principal{WorkspaceID: workspaces[0].ID, CallerTaskID: "old-parent", CallerSessionID: "session"})
 	resp, err := h.handleUpdateTask(requestCtx, makeWSMessage(t, ws.ActionMCPUpdateTask, map[string]interface{}{
-		"task_id": "child", "terminal_retention": true,
+		"task_id": "child", "title": "Changed", "state": "DONE", "terminal_retention": true,
 	}))
 	require.NoError(t, err)
 	child, err := repo.GetTask(ctx, "child")
@@ -61,6 +61,8 @@ func TestUpdateTaskTerminalRetentionRejectsFormerParentAfterConcurrentReparent(t
 	if models.IsTerminalRetentionHeld(child.Metadata) {
 		t.Error("former parent set retention hold")
 	}
+	require.Equal(t, "Child", child.Title)
+	require.NotEqual(t, "DONE", string(child.State))
 	if resp.Type != ws.MessageTypeError {
 		t.Errorf("response type = %q, want error", resp.Type)
 	}

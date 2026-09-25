@@ -166,7 +166,13 @@ type UpdateTaskRequest struct {
 	// AssigneeUserID sets the human assignee. A nil pointer leaves it alone; a
 	// pointer to "" unassigns. It is independent of the agent assignee and
 	// never clears it.
-	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
+	AssigneeUserID         *string `json:"assignee_user_id,omitempty"`
+	terminalRetentionScope *terminalRetentionScope
+}
+
+type terminalRetentionScope struct {
+	parentID, workspaceID string
+	held                  bool
 }
 
 // CreateWorkflowRequest contains the data for creating a new workflow

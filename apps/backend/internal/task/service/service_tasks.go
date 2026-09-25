@@ -2078,16 +2078,32 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		})
 	}
 	var updateErr error
-	if req.Position != nil {
+	switch {
+	case req.terminalRetentionScope != nil:
+		writer, ok := s.tasks.(interface {
+			UpdateTaskWithTerminalRetentionIfParent(context.Context, *models.Task, string, string, bool) (bool, error)
+		})
+		if !ok {
+			return nil, errors.New("task repository does not support combined terminal retention updates")
+		}
+		updated, err := writer.UpdateTaskWithTerminalRetentionIfParent(
+			updateCtx, task, req.terminalRetentionScope.parentID, req.terminalRetentionScope.workspaceID, req.terminalRetentionScope.held,
+		)
+		if err != nil {
+			updateErr = err
+		} else if !updated {
+			updateErr = repoerrors.ErrTaskParentMismatch
+		}
+	case req.Position != nil:
 		updateErr = s.tasks.UpdateTaskWithExplicitPosition(updateCtx, task)
-	} else {
+	default:
 		updateErr = s.tasks.UpdateTaskPreservingDeferredLaunch(updateCtx, task)
 	}
 	if updateErr != nil {
 		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(updateErr))
 		return nil, updateErr
 	}
-	if req.TerminalRetention != nil {
+	if req.terminalRetentionScope == nil && req.TerminalRetention != nil {
 		writer, ok := s.tasks.(interface {
 			UpdateTaskTerminalRetentionIfParent(context.Context, string, string, string, bool) (bool, error)
 		})
@@ -2149,6 +2165,21 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	s.logger.Info("task updated", zap.String("task_id", task.ID))
 
 	return task, nil
+}
+
+// UpdateTaskWithTerminalRetention applies ordinary task fields and a scoped
+// terminal-retention change atomically while the direct-parent relationship
+// remains valid.
+func (s *Service) UpdateTaskWithTerminalRetention(
+	ctx context.Context, id, parentID, workspaceID string, req *UpdateTaskRequest, held bool,
+) (*models.Task, bool, error) {
+	combinedReq := *req
+	combinedReq.terminalRetentionScope = &terminalRetentionScope{parentID: parentID, workspaceID: workspaceID, held: held}
+	task, err := s.UpdateTask(ctx, id, &combinedReq)
+	if errors.Is(err, repoerrors.ErrTaskParentMismatch) {
+		return nil, false, nil
+	}
+	return task, err == nil, err
 }
 
 // UpdateTaskTerminalRetention atomically changes the scoped retention flag

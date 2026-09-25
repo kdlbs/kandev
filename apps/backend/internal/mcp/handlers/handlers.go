@@ -1996,12 +1996,7 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 func (h *Handlers) updateTaskWithTerminalRetention(
 	ctx context.Context, taskID, parentID, workspaceID string, updateReq *service.UpdateTaskRequest, held bool,
 ) (*models.Task, bool, error) {
-	if updateReq.Title != nil || updateReq.Description != nil || updateReq.State != nil {
-		if _, err := h.taskSvc.UpdateTask(ctx, taskID, updateReq); err != nil {
-			return nil, false, err
-		}
-	}
-	return h.taskSvc.UpdateTaskTerminalRetention(ctx, taskID, parentID, workspaceID, held)
+	return h.taskSvc.UpdateTaskWithTerminalRetention(ctx, taskID, parentID, workspaceID, updateReq, held)
 }
 
 // handleSetTaskTitle resolves the one-shot provisional title created for a

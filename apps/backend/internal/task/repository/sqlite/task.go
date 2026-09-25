@@ -1033,6 +1033,61 @@ func (r *Repository) UpdateTaskPreservingDeferredLaunch(ctx context.Context, tas
 	return r.updateTaskCommit(ctx, task, "", true, true)
 }
 
+// UpdateTaskWithTerminalRetentionIfParent applies an ordinary task update and
+// its scoped terminal-retention change in one transaction. A former parent
+// therefore cannot leave the ordinary part of a rejected combined update.
+func (r *Repository) UpdateTaskWithTerminalRetentionIfParent(
+	ctx context.Context, task *models.Task, parentID, workspaceID string, held bool,
+) (bool, error) {
+	metadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		metadata = []byte("{}")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	currentParentID, currentWorkspaceID, found, err := r.readTaskParentScopeInTx(ctx, tx, task.ID)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+	}
+	if currentParentID != parentID || currentWorkspaceID != workspaceID {
+		return false, repoerrors.ErrTaskParentMismatch
+	}
+
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, "", true, true, nil)
+	if err != nil {
+		return false, err
+	}
+	if err := r.setTaskTerminalRetentionIfParentTx(ctx, tx, task.ID, parentID, workspaceID, held, task.UpdatedAt); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID, markerEntryID)
+	return true, nil
+}
+
+func (r *Repository) readTaskParentScopeInTx(ctx context.Context, tx *sql.Tx, taskID string) (parentID, workspaceID string, found bool, err error) {
+	query := `SELECT parent_id, workspace_id FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
+	}
+	err = tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&parentID, &workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	return parentID, workspaceID, true, nil
+}
+
 func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, expectedWorkflowID string, preservePosition, protectDeferredLaunch bool) error {
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
@@ -2376,6 +2431,37 @@ func (r *Repository) UpdateTaskTerminalRetentionIfParent(
 	}
 	rows, err := result.RowsAffected()
 	return rows > 0, err
+}
+
+func (r *Repository) setTaskTerminalRetentionIfParentTx(
+	ctx context.Context, tx *sql.Tx, taskID, parentID, workspaceID string, held bool, updatedAt time.Time,
+) error {
+	payload, err := json.Marshal(held)
+	if err != nil {
+		return err
+	}
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `UPDATE tasks SET metadata = jsonb_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ARRAY[?]::text[], ?::jsonb, true)::text, updated_at = ? WHERE id = ? AND parent_id = ? AND workspace_id = ?`
+	} else {
+		query = `UPDATE tasks SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ? WHERE id = ? AND parent_id = ? AND workspace_id = ?`
+	}
+	path := models.MetaKeyTerminalRetention
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		path = jsonPath(path)
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), path, string(payload), updatedAt, taskID, parentID, workspaceID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return repoerrors.ErrTaskParentMismatch
+	}
+	return nil
 }
 
 // SetTaskMetadataKeyIfNoActiveSession writes one metadata key only when the
