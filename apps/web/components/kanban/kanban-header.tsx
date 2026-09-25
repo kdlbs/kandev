@@ -50,6 +50,7 @@ type KanbanHeaderProps = {
   isSearchLoading?: boolean;
   tasksListOptions?: TasksListDisplayOptions;
   taskListingControls?: ReactNode;
+  mobileListingStatus?: ReactNode;
 };
 
 type ViewToggleItem = {
@@ -411,6 +412,7 @@ export function KanbanHeader({
   isSearchLoading = false,
   tasksListOptions,
   taskListingControls,
+  mobileListingStatus,
 }: KanbanHeaderProps) {
   const { t } = useTranslation();
   const { isMobile, isTablet } = useResponsiveBreakpoint();
@@ -437,6 +439,7 @@ export function KanbanHeader({
           currentPage={currentPage}
           title={title}
           workspaceLabel={workspaceLabel}
+          mobileListingStatus={mobileListingStatus}
           taskListingControls={taskListingControls}
           {...sharedSearch}
           tasksListOptions={tasksListOptions}

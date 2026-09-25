@@ -5,9 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -35,6 +33,24 @@ const (
 // GetAgentInstance method satisfies this directly.
 type AgentReader interface {
 	GetAgentInstance(ctx context.Context, id string) (*models.AgentInstance, error)
+}
+
+// RunQueuer is the seam Dispatcher uses to enqueue a fresh run through
+// the authoritative runs queue (runs/service.Service.QueueRun) instead of
+// inserting into the runs table directly
+// (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.2). A direct insert bypasses every
+// causation/priority/workspace resolution runs/service.QueueRun performs
+// — the run silently gets PriorityClass=PriorityClassHuman (the Go zero
+// value, the *highest* claim preference, exactly inverted from the
+// periodic class a routine/heartbeat wake should get),
+// WorkspaceID="" (excluded from every real workspace's ceiling/budget
+// accounting), and ActorKind="" (not "system"). Satisfied in production
+// by *office/service.Service, wired post-construction via SetRunQueuer
+// the same way SetRoutineLookup is (breaking the office/wakeup ←
+// office/service construction cycle: office/service's TaskCreator/other
+// dependencies are wired before the wakeup dispatcher exists).
+type RunQueuer interface {
+	QueueRunFromWakeup(ctx context.Context, agentProfileID, reason, routineID, contextSnapshot, causationID, idempotencyKey string) (runID string, err error)
 }
 
 // RoutineLookup is the slim interface the dispatcher uses to look up
@@ -67,6 +83,7 @@ type Dispatcher struct {
 	repo      *officesqlite.Repository
 	agents    AgentReader
 	routines  RoutineLookup
+	runQueuer RunQueuer
 	log       *logger.Logger
 	pauseGate shared.PauseGate
 }
@@ -96,6 +113,15 @@ func NewDispatcher(
 // already holds — so the cycle is broken by setting this post-build).
 func (d *Dispatcher) SetRoutineLookup(routines RoutineLookup) {
 	d.routines = routines
+}
+
+// SetRunQueuer wires the authoritative enqueue seam createFreshRun uses
+// to insert a run (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.2). Required in
+// production; callers wire this post-build the same way SetRoutineLookup
+// is. createFreshRun fails closed if this is never set — see RunQueuer's
+// doc comment for why there is no inline fallback insert here.
+func (d *Dispatcher) SetRunQueuer(runQueuer RunQueuer) {
+	d.runQueuer = runQueuer
 }
 
 // SetPauseGate wires the workspace-pause read used to block the
@@ -202,6 +228,23 @@ func (d *Dispatcher) coalesceIntoInflightRun(
 	return d.repo.MarkWakeupRequestCoalesced(ctx, req.ID, inflight.ID)
 }
 
+// routineIDFromPayload extracts routine_id from req's payload for a
+// source="routine" wakeup, so a fresh run created for it is attributed to
+// that routine (AC-OFFICE-RUN-CAUSATION-001.14, the routine launch
+// budget's REQ-OFFICE-LAUNCH-SAFETY-005 accounting key). Empty for every
+// other source, or when the payload is missing/malformed — the safe
+// default, matching resolveRoutinePolicy's own fallback.
+func routineIDFromPayload(req *officesqlite.WakeupRequest) string {
+	if req.Source != SourceRoutine {
+		return ""
+	}
+	var p RoutinePayload
+	if err := UnmarshalPayload(req.Payload, &p); err != nil {
+		return ""
+	}
+	return p.RoutineID
+}
+
 // effectiveReason returns the reason a run derived from req should carry:
 // req.Reason when set, else req.Source — mirroring createFreshRun's
 // fallback so a request is classified the same way whether it lands on
@@ -273,9 +316,10 @@ func normaliseRoutinePolicy(p string) string {
 	return PolicyCoalesceIfActive
 }
 
-// createFreshRun inserts a new runs row for the wakeup-request and marks
-// the request claimed against it. The run is taskless (payload.task_id
-// is omitted) and carries agent_profile_id + reason directly.
+// createFreshRun enqueues a new run for the wakeup-request through the
+// authoritative runs queue (RunQueuer) and marks the request claimed
+// against it. The run is taskless (payload.task_id is omitted) and
+// carries agent_profile_id + reason directly.
 //
 // Reason: prefer req.Reason; fall back to req.Source so the run is
 // always tagged with something useful (e.g. "heartbeat" / "comment").
@@ -285,8 +329,16 @@ func normaliseRoutinePolicy(p string) string {
 func (d *Dispatcher) createFreshRun(
 	ctx context.Context, req *officesqlite.WakeupRequest,
 ) error {
+	// checkPauseGate runs before the run-queuer nil check: it is
+	// createFreshRun's sole gate insertion point, and a caller wired
+	// with a pause gate but no run queuer (or vice versa) must still
+	// observe the gate's fail-closed/skip outcome rather than an
+	// unrelated configuration error masking it.
 	if err := d.checkPauseGate(ctx, req); err != nil {
 		return err
+	}
+	if d.runQueuer == nil {
+		return fmt.Errorf("create run for wakeup %s: no run queuer configured", req.ID)
 	}
 
 	reason := effectiveReason(req)
@@ -294,40 +346,49 @@ func (d *Dispatcher) createFreshRun(
 	if payload == "" {
 		payload = "{}"
 	}
-	run := &models.Run{
-		ID:              uuid.New().String(),
-		AgentProfileID:  req.AgentProfileID,
-		Reason:          reason,
-		Payload:         "{}",
-		Status:          "queued",
-		CoalescedCount:  1,
-		ContextSnapshot: payload,
-		RequestedAt:     time.Now().UTC(),
-		// AC-OFFICE-LOOP-LIVENESS-002.3: copied from the requesting
-		// wake, including on the lost-CAS fresh-run path — that run
-		// still carries the requesting wake's id, not a new one.
-		CausationID: req.CausationID,
-	}
-	if err := d.repo.CreateRun(ctx, run); err != nil {
+	// AC-OFFICE-LOOP-LIVENESS-002.3: req.CausationID is copied onto the
+	// created run's own CausationID column, including on the lost-CAS
+	// fresh-run path — that run still carries the requesting wake's id,
+	// not a new one.
+	//
+	// wakeupRunIdempotencyKey(req.ID) makes this enqueue idempotent per
+	// wakeup-request: enqueue and claim are two separate writes (no
+	// shared transaction spans office/wakeup and runs/service), so a
+	// second createFreshRun call for the same request — concurrent
+	// dispatch, or a retry after MarkWakeupRequestClaimed below fails —
+	// hits the runs table's idempotency-key uniqueness and is deduped
+	// rather than creating a second, orphaned run.
+	runID, err := d.runQueuer.QueueRunFromWakeup(ctx, req.AgentProfileID, reason, routineIDFromPayload(req), payload, req.CausationID, wakeupRunIdempotencyKey(req.ID))
+	if err != nil {
 		return fmt.Errorf("create run for wakeup %s: %w", req.ID, err)
 	}
-	if err := d.repo.MarkWakeupRequestClaimed(ctx, req.ID, run.ID); err != nil {
+	if err := d.repo.MarkWakeupRequestClaimed(ctx, req.ID, runID); err != nil {
 		// Best-effort cleanup: the run already exists; the caller will
 		// see a queued run without a corresponding wakeup-request claim,
-		// which is harmless but logged for visibility.
+		// which is harmless but logged for visibility. A retry of this
+		// same request now dedupes onto that same run instead of
+		// minting another one, so the orphan stays singular.
 		d.log.Warn("mark wakeup claimed failed (run already created)",
 			zap.String("wakeup_id", req.ID),
-			zap.String("run_id", run.ID),
+			zap.String("run_id", runID),
 			zap.Error(err))
 		return err
 	}
 	d.log.Info("wakeup dispatched",
 		zap.String("wakeup_id", req.ID),
-		zap.String("run_id", run.ID),
+		zap.String("run_id", runID),
 		zap.String("agent_id", req.AgentProfileID),
 		zap.String("source", req.Source),
 		zap.String("reason", reason))
 	return nil
+}
+
+// wakeupRunIdempotencyKey derives the enqueue-side idempotency key for
+// the run createFreshRun creates on behalf of requestID, matching the
+// "<prefix>:<id>" convention other one-run-per-source-event keys use
+// (e.g. office/approvals' "approval:"+approval.ID).
+func wakeupRunIdempotencyKey(requestID string) string {
+	return "wakeup:" + requestID
 }
 
 // wakeupPauseSkipReason is the skip reason MarkWakeupRequestSkipped

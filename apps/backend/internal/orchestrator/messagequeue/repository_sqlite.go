@@ -33,8 +33,9 @@ type sqliteRepository struct {
 	// OUTSIDE any transaction because a failed statement on PostgreSQL aborts
 	// the whole transaction — the guard must never issue its UPDATE against a
 	// missing table inside a tx.
-	tasksTablePresent        bool
-	taskSessionsTablePresent bool
+	tasksTablePresent          bool
+	taskSessionsTablePresent   bool
+	taskStepTransitionsPresent bool
 }
 
 // NewSQLiteRepository creates a SQLite-backed Repository. The supplied writer
@@ -72,6 +73,10 @@ func NewSQLiteRepository(writer, reader *sqlx.DB) (Repository, error) {
 		return nil, fmt.Errorf("messagequeue: resolve task_sessions table presence: %w", err)
 	}
 	r.taskSessionsTablePresent = present
+	r.taskStepTransitionsPresent, err = r.sharedTablePresent("task_step_transitions")
+	if err != nil {
+		return nil, fmt.Errorf("messagequeue: resolve task step transitions table presence: %w", err)
+	}
 	if present {
 		// Older isolated queue fixtures can provide a task_sessions table
 		// without the incarnation column. They still use the legacy queue API,
@@ -222,6 +227,62 @@ func (r *sqliteRepository) guardActiveTaskTx(ctx context.Context, tx *sqlx.Tx, t
 	}
 	if affected == 0 {
 		return ErrTaskInactive
+	}
+	return nil
+}
+
+// validateWorkflowEntryTx checks the launch-time entry after the task row has
+// been locked by guardActiveTaskTx. Workflow moves take the same task-row lock
+// before writing their transition ledger row, so this check and queue insert
+// form one admission boundary rather than a read-then-write race.
+func (r *sqliteRepository) validateWorkflowEntryTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	entry *WorkflowEntryIdentity,
+) error {
+	if entry == nil {
+		return nil
+	}
+	if !r.tasksTablePresent || !r.taskStepTransitionsPresent || entry.TransitionID <= 0 {
+		return ErrWorkflowEntryMismatch
+	}
+	query := `SELECT COALESCE(workflow_id, ''), COALESCE(workflow_step_id, '')
+		FROM tasks WHERE id = ? AND archived_at IS NULL`
+	if r.db.DriverName() == "pgx" {
+		query += ` FOR UPDATE`
+	}
+	var workflowID, workflowStepID string
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(query), taskID).Scan(&workflowID, &workflowStepID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrTaskInactive
+		}
+		return fmt.Errorf("read workflow entry for queue admission: %w", err)
+	}
+	if workflowID != entry.WorkflowID || workflowStepID != entry.WorkflowStepID {
+		return ErrWorkflowEntryMismatch
+	}
+	var transitionID int64
+	if err := tx.GetContext(ctx, &transitionID, r.db.Rebind(`
+		SELECT id FROM task_step_transitions
+		WHERE task_id = ?
+		ORDER BY id DESC
+		LIMIT 1
+	`), taskID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrWorkflowEntryMismatch
+		}
+		return fmt.Errorf("read workflow transition for queue admission: %w", err)
+	}
+	if transitionID != entry.TransitionID {
+		return ErrWorkflowEntryMismatch
+	}
+	generation, err := getLifecycleGenerationTx(ctx, tx, r.db, taskID)
+	if err != nil {
+		return err
+	}
+	if generation != entry.LifecycleGeneration {
+		return ErrLifecycleCancelled
 	}
 	return nil
 }
@@ -587,21 +648,21 @@ func decodeEntryOptions(encoded string) (*workflowmove.EntryOptions, error) {
 
 // Insert appends a new entry at the tail of the session's FIFO queue.
 func (r *sqliteRepository) Insert(ctx context.Context, msg *QueuedMessage, maxPerSession int) error {
-	return r.insert(ctx, nil, msg, nil, maxPerSession, nil)
+	return r.insert(ctx, nil, msg, nil, maxPerSession, nil, nil)
 }
 
 func (r *sqliteRepository) InsertForSession(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage, maxPerSession int) error {
 	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
 		return ErrSessionIdentityMismatch
 	}
-	return r.insert(ctx, &identity, msg, nil, maxPerSession, nil)
+	return r.insert(ctx, &identity, msg, nil, maxPerSession, nil, nil)
 }
 
 func (r *sqliteRepository) InsertForSessionWithClaim(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage, claim QueueAttachmentClaim, maxPerSession int) error {
 	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
 		return ErrSessionIdentityMismatch
 	}
-	return r.insert(ctx, &identity, msg, &claim, maxPerSession, nil)
+	return r.insert(ctx, &identity, msg, &claim, maxPerSession, nil, nil)
 }
 
 func (r *sqliteRepository) InsertForSessionWithPolicy(
@@ -615,7 +676,22 @@ func (r *sqliteRepository) InsertForSessionWithPolicy(
 	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
 		return ErrSessionIdentityMismatch
 	}
-	return r.insert(ctx, &identity, msg, claim, maxPerSession, &policy)
+	return r.insert(ctx, &identity, msg, claim, maxPerSession, &policy, nil)
+}
+
+func (r *sqliteRepository) InsertForSessionWithWorkflowEntry(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entry WorkflowEntryIdentity,
+	msg *QueuedMessage,
+	claim *QueueAttachmentClaim,
+	maxPerSession int,
+	policy *AutoMergePolicy,
+) error {
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	return r.insert(ctx, &identity, msg, claim, maxPerSession, policy, &entry)
 }
 
 func (r *sqliteRepository) insert(
@@ -625,6 +701,7 @@ func (r *sqliteRepository) insert(
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
 	policy *AutoMergePolicy,
+	workflowEntry *WorkflowEntryIdentity,
 ) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -632,6 +709,9 @@ func (r *sqliteRepository) insert(
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.guardActiveTaskTx(ctx, tx, msg.TaskID); err != nil {
+		return err
+	}
+	if err := r.validateWorkflowEntryTx(ctx, tx, msg.TaskID, workflowEntry); err != nil {
 		return err
 	}
 	if err := r.lockSessionTx(ctx, tx, msg.SessionID); err != nil {
@@ -795,7 +875,13 @@ func claimMessageAttachmentTx(
 			ctx, tx, claim, taskID, sessionID, attachmentID, attachment, now,
 		)
 	case models.AttachmentStateClaimed:
-		return 0, validateClaimedMessageAttachment(attachment, taskID, sessionID)
+		if err := validateClaimedMessageAttachment(attachment, taskID, sessionID); err != nil {
+			return 0, err
+		}
+		if attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
+			return 0, models.ErrAttachmentTooLarge
+		}
+		return attachment.SizeBytes, nil
 	default:
 		return 0, models.ErrAttachmentClaimConflict
 	}
@@ -2396,6 +2482,34 @@ func (r *sqliteRepository) CountBySession(ctx context.Context, sessionID string)
 	var n int
 	err := r.ro.GetContext(ctx, &n, r.ro.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), sessionID)
 	return n, err
+}
+
+func (r *sqliteRepository) CountQueueDepth(ctx context.Context) (int, error) {
+	rows, err := r.ro.QueryxContext(ctx, `SELECT metadata_json FROM queued_messages`)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	count := 0
+	for rows.Next() {
+		var metadataJSON string
+		if err := rows.Scan(&metadataJSON); err != nil {
+			return 0, err
+		}
+		metadata := make(map[string]interface{})
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+				return 0, fmt.Errorf("unmarshal queue depth metadata: %w", err)
+			}
+		}
+		if reserved, _ := metadata[MetadataLifecycleReserved].(bool); !reserved {
+			count++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 // CountPendingByTaskIDs counts pending entries per task, excluding durable
@@ -4681,21 +4795,21 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAbove(ctx context.Context, cand
 	if err := r.ensureEditLeaseSchema(ctx); err != nil {
 		return nil, false, err
 	}
-	return r.autoMergeCandidateIntoAbove(ctx, nil, candidate, nil, nil)
+	return r.autoMergeCandidateIntoAbove(ctx, nil, candidate, nil, nil, nil)
 }
 
 func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSession(ctx context.Context, identity QueueSessionIdentity, candidate *QueuedMessage) (*QueuedMessage, bool, error) {
 	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
 		return nil, false, ErrSessionIdentityMismatch
 	}
-	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, nil, nil)
+	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, nil, nil, nil)
 }
 
 func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithClaim(ctx context.Context, identity QueueSessionIdentity, candidate *QueuedMessage, claim QueueAttachmentClaim) (*QueuedMessage, bool, error) {
 	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
 		return nil, false, ErrSessionIdentityMismatch
 	}
-	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, &claim, nil)
+	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, &claim, nil, nil)
 }
 
 func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
@@ -4708,7 +4822,21 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
 	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
 		return nil, false, ErrSessionIdentityMismatch
 	}
-	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, claim, &policy)
+	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, claim, &policy, nil)
+}
+
+func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithWorkflowEntry(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entry WorkflowEntryIdentity,
+	candidate *QueuedMessage,
+	claim *QueueAttachmentClaim,
+	policy *AutoMergePolicy,
+) (*QueuedMessage, bool, error) {
+	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
+		return nil, false, ErrSessionIdentityMismatch
+	}
+	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, claim, policy, &entry)
 }
 
 //nolint:cyclop,funlen // the transaction's guards intentionally surround the one durable fold.
@@ -4718,6 +4846,7 @@ func (r *sqliteRepository) autoMergeCandidateIntoAbove(
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	policy *AutoMergePolicy,
+	workflowEntry *WorkflowEntryIdentity,
 ) (*QueuedMessage, bool, error) {
 	unlock := r.withSessionLock(candidate.SessionID)
 	defer unlock()
@@ -4733,6 +4862,9 @@ func (r *sqliteRepository) autoMergeCandidateIntoAbove(
 	// the fold, and the fold must not accept a message the purge will then
 	// silently delete. Task row first, then the session lock.
 	if err := r.guardActiveTaskTx(ctx, tx, candidate.TaskID); err != nil {
+		return nil, false, err
+	}
+	if err := r.validateWorkflowEntryTx(ctx, tx, candidate.TaskID, workflowEntry); err != nil {
 		return nil, false, err
 	}
 	if err := r.lockSessionTx(ctx, tx, candidate.SessionID); err != nil {
@@ -5401,8 +5533,9 @@ func lifecycleReservationFromMetadataJSON(metadataJSON string) (string, bool, er
 func (r *sqliteRepository) transferSessionOwned(
 	ctx context.Context,
 	oldSessionID, newSessionID, operationID string,
+	source, destination *QueueSessionIdentity,
 ) error {
-	return r.transferSessionOwnedTx(ctx, oldSessionID, newSessionID, operationID)
+	return r.transferSessionOwnedTx(ctx, oldSessionID, newSessionID, operationID, source, destination)
 }
 
 func (r *sqliteRepository) beginAuthorizedSessionTransferTx(
@@ -5515,30 +5648,32 @@ func (r *sqliteRepository) transferSessionQueueRowsTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	oldSessionID, newSessionID string,
-) error {
+) (int64, error) {
 	var destinationMax sql.NullInt64
 	if err := tx.GetContext(ctx, &destinationMax, r.db.Rebind(`
 		SELECT MAX(position) FROM queued_messages WHERE session_id = ?
 	`), newSessionID); err != nil {
-		return fmt.Errorf("transfer max: %w", err)
+		return 0, fmt.Errorf("transfer max: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE queued_messages
 		SET session_id = ?, position = position + ?
 		WHERE session_id = ?
 	`), newSessionID, destinationMax.Int64, oldSessionID); err != nil {
-		return fmt.Errorf("transfer queued: %w", err)
+		return 0, fmt.Errorf("transfer queued: %w", err)
 	}
 	var transferredMax sql.NullInt64
 	if err := tx.GetContext(ctx, &transferredMax, r.db.Rebind(`
 		SELECT MAX(position) FROM queued_messages WHERE session_id = ?
 	`), newSessionID); err != nil {
-		return fmt.Errorf("transfer destination max after move: %w", err)
+		return 0, fmt.Errorf("transfer destination max after move: %w", err)
 	}
 	if transferredMax.Valid {
-		return r.bumpQueuePositionTx(ctx, tx, newSessionID, transferredMax.Int64)
+		if err := r.bumpQueuePositionTx(ctx, tx, newSessionID, transferredMax.Int64); err != nil {
+			return 0, err
+		}
 	}
-	return nil
+	return destinationMax.Int64, nil
 }
 
 func (r *sqliteRepository) transferSessionStateTx(
@@ -5617,6 +5752,13 @@ func (r *sqliteRepository) transferSession(
 	if err := r.lockAndValidateTransferSessionsTx(ctx, tx, source, destination, first, second); err != nil {
 		return err
 	}
+	sourceGeneration := int64(0)
+	if source != nil {
+		sourceGeneration, err = r.getSendNowGenerationTx(ctx, tx, oldSessionID)
+		if err != nil {
+			return err
+		}
+	}
 	if oldSessionID == newSessionID {
 		return tx.Commit()
 	}
@@ -5642,7 +5784,8 @@ func (r *sqliteRepository) transferSession(
 	if err := r.deleteEditLeasesForTransferTx(ctx, tx, oldSessionID, newSessionID); err != nil {
 		return err
 	}
-	if err := r.transferSessionQueueRowsTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+	queuePositionOffset, err := r.transferSessionQueueRowsTx(ctx, tx, oldSessionID, newSessionID)
+	if err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM pending_moves WHERE session_id = ?`), newSessionID); err != nil {
@@ -5663,7 +5806,9 @@ func (r *sqliteRepository) transferSession(
 	if err := r.bumpSendNowGenerationTx(ctx, tx, newSessionID); err != nil {
 		return err
 	}
-	if err := r.transferPendingSendNowClaimTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+	if err := r.transferPendingSendNowClaimTx(
+		ctx, tx, oldSessionID, newSessionID, source, destination, sourceGeneration, queuePositionOffset,
+	); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5672,6 +5817,7 @@ func (r *sqliteRepository) transferSession(
 func (r *sqliteRepository) transferSessionOwnedTx(
 	ctx context.Context,
 	oldSessionID, newSessionID, operationID string,
+	source, destination *QueueSessionIdentity,
 ) error {
 	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
 		return err
@@ -5706,6 +5852,23 @@ func (r *sqliteRepository) transferSessionOwnedTx(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if source != nil {
+		if err := r.validateSessionIdentityTx(ctx, tx, *source); err != nil {
+			return err
+		}
+	}
+	if destination != nil {
+		if err := r.validateSessionIdentityTx(ctx, tx, *destination); err != nil {
+			return err
+		}
+	}
+	sourceGeneration := int64(0)
+	if source != nil {
+		sourceGeneration, err = r.getSendNowGenerationTx(ctx, tx, oldSessionID)
+		if err != nil {
+			return err
+		}
+	}
 	if oldSessionID == newSessionID {
 		return commitAuthorizedSessionTransferTx(
 			ctx, tx, r.db, oldSessionID, newSessionID, operationID,
@@ -5717,13 +5880,16 @@ func (r *sqliteRepository) transferSessionOwnedTx(
 	if err := r.deleteEditLeasesForTransferTx(ctx, tx, oldSessionID, newSessionID); err != nil {
 		return err
 	}
-	if err := r.transferSessionQueueRowsTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+	queuePositionOffset, err := r.transferSessionQueueRowsTx(ctx, tx, oldSessionID, newSessionID)
+	if err != nil {
 		return err
 	}
 	if err := r.transferSessionStateTx(ctx, tx, oldSessionID, newSessionID); err != nil {
 		return err
 	}
-	if err := r.transferPendingSendNowClaimTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+	if err := r.transferPendingSendNowClaimTx(
+		ctx, tx, oldSessionID, newSessionID, source, destination, sourceGeneration, queuePositionOffset,
+	); err != nil {
 		return err
 	}
 	return commitAuthorizedSessionTransferTx(

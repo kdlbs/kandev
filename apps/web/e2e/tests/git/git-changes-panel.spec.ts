@@ -465,6 +465,73 @@ test.describe("Git Changes Panel", () => {
    * Creates a task, modifies a file in the repository, and verifies the Changes panel
    * shows the modification in real-time via WebSocket updates.
    */
+  // @covers AC-UI-CHANGES-FILE-ROW-CONTAINMENT-002.4
+  test("keeps compact desktop actions across the phone breakpoint", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Improve mobile changes",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle();
+    const git = new GitHelper(path.join(backend.tmpDir, "repos", "e2e-repo"), {
+      ...process.env,
+      HOME: backend.tmpDir,
+    });
+    const filePath = "status-surface-metrics.test.ts";
+    git.createFile(filePath, "METRICS_MARKER\n");
+    git.createFile("mobile-resource-metrics-display.test.ts", "MOBILE_MARKER\n");
+    await session.clickTab("Changes");
+    await session.expandChangesSection("unstaged-files-section");
+    const row = testPage.getByTestId(`file-row-${filePath}`);
+    const stage = row.getByTitle("Stage file");
+    await expect(stage).toBeVisible();
+    expect((await stage.boundingBox())!.height).toBeLessThanOrEqual(24);
+    await expect(row.getByRole("button", { name: "Show more actions" })).toHaveCount(0);
+    if (prCapture.capturing) {
+      await row.hover();
+      await waitForFiniteAnimations(row.getByTestId("file-row-hover-actions"));
+      await expect(row.getByRole("button", { name: "Copy path" })).toBeVisible();
+    }
+    await prCapture.screenshot("desktop-changes", {
+      caption: "Desktop Changes rows expose Copy path alongside compact hover actions.",
+    });
+
+    await testPage.setViewportSize({ width: 767, height: 851 });
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .click();
+    await expect(row.getByRole("button", { name: "Show more actions" })).toBeVisible();
+    await expect(row.getByText(filePath, { exact: true })).toHaveCSS("white-space", "normal");
+    await expect(stage).toHaveCount(0);
+
+    await testPage.setViewportSize({ width: 768, height: 851 });
+    await session.clickTab("Changes");
+    await expect(stage).toBeVisible();
+    expect((await stage.boundingBox())!.height).toBeLessThanOrEqual(24);
+    await expect(row.getByRole("button", { name: "Show more actions" })).toHaveCount(0);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+  });
+
   test("shows modified files in unstaged section", async ({
     testPage,
     apiClient,
@@ -513,6 +580,56 @@ test.describe("Git Changes Panel", () => {
     await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
     // Scope the file search to the changes panel to avoid matching Files panel
     await expect(session.changes.getByText("test-file.txt")).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("copies a changed file path without opening its diff", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    await testPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    const title = "Copy changed file path";
+    await apiClient.createTaskWithAgent(seedData.workspaceId, title, seedData.agentProfileId, {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const session = await openTaskSession(testPage, title);
+    const filePath = "copy-path-e2e/copy-me.txt";
+    const git = new GitHelper(path.join(backend.tmpDir, "repos", "e2e-repo"), {
+      ...process.env,
+      HOME: backend.tmpDir,
+    });
+    fs.mkdirSync(path.join(backend.tmpDir, "repos", "e2e-repo", "copy-path-e2e"), {
+      recursive: true,
+    });
+    git.createFile(filePath, "COPY_PATH_MARKER\n");
+
+    await session.clickTab("Changes");
+    await session.expandChangesSection("unstaged-files-section");
+    const row = testPage.getByTestId(`file-row-${filePath.replace(/[/\\]/g, "-")}`);
+    await expect(row).toBeVisible();
+    const fileIdentity = row.getByTitle(filePath, { exact: true });
+    const copyPath = row.getByRole("button", { name: "Copy path" });
+    const rowButtonCount = await row.getByRole("button").count();
+    await fileIdentity.focus();
+    for (let index = 0; index < rowButtonCount; index += 1) {
+      await testPage.keyboard.press("Tab");
+      if (await copyPath.evaluate((element) => element === document.activeElement)) break;
+    }
+    await expect(copyPath).toBeFocused();
+    await expect
+      .poll(() =>
+        row
+          .getByTestId("file-row-hover-actions")
+          .evaluate((element) => getComputedStyle(element).opacity),
+      )
+      .toBe("1");
+    await testPage.keyboard.press("Enter");
+    await expect.poll(() => testPage.evaluate(() => navigator.clipboard.readText())).toBe(filePath);
+    await expect(testPage.locator("diffs-container")).toHaveCount(0);
   });
 
   // @covers AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.1
@@ -1896,7 +2013,7 @@ test.describe("Git Changes Panel", () => {
     expect(await diffViewerOpen(), "no cumulative diff panel before clicking Diff").toBe(false);
 
     // Click the "Diff" button in the header to open the cumulative diff view
-    await session.changes.getByRole("button", { name: "Diff", exact: true }).click();
+    await session.openChangesDiff();
 
     // Assert what the click actually opens. Without this the checks below are
     // vacuous: the two commit texts were already visible before the click and
@@ -2876,9 +2993,10 @@ test.describe("Git Changes Panel", () => {
     await expect(reviewDialog.getByTestId("vcs-primary-push")).toBeVisible({ timeout: 15_000 });
     await reviewDialog.getByRole("button", { name: "Open VCS options" }).click();
     const openMenu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
-    await expect(
-      openMenu.locator('[data-slot="dropdown-menu-sub-trigger"]').filter({ hasText: /^Push/ }),
-    ).not.toHaveAttribute("aria-disabled", "true");
+    const pushAction = openMenu
+      .locator('[data-slot="dropdown-menu-sub-trigger"]')
+      .filter({ hasText: /^Push/ });
+    await expect(pushAction).not.toHaveAttribute("aria-disabled", "true", { timeout: 15_000 });
     expect(git.getCurrentSha()).toBe(localHead);
     expect(git.exec("git status --porcelain").trim()).toBe("");
   });

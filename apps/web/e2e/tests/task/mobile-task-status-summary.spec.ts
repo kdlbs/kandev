@@ -58,7 +58,7 @@ test.describe("Mobile task status summary", () => {
     await testPage.goto(`/t/${navTask.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const sheet = testPage.getByRole("dialog");
     const targetRow = sheet.getByTestId("sidebar-task-item").filter({
       hasText: TARGET_TITLE,

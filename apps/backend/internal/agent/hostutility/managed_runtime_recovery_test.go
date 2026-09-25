@@ -19,6 +19,7 @@ import (
 // @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.6
 // @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.8
 func TestManagerProbeRecoversManagedRuntimeETarget(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	const version = "1.18.29"
 	agent := agents.NewOpenCodeACP()
 	var commands [][]string
@@ -98,6 +99,7 @@ func TestManagerProbeRecoversManagedRuntimeETarget(t *testing.T) {
 
 // @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.6
 func TestManagerProbeDoesNotRetryManagedRuntimeRecoveryTwice(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	agent := agents.NewOpenCodeACP()
 	var probes, repairs int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,8 +138,48 @@ func TestManagerProbeDoesNotRetryManagedRuntimeRecoveryTwice(t *testing.T) {
 	}
 }
 
+func TestManagedRuntimeReleaseAgePolicySkipsCacheRepair(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	agent := agents.NewOpenCodeACP()
+	var probes, repairs int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/inference/probe":
+			probes++
+			_ = json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
+				Success:     false,
+				Error:       "ACP initialize failed",
+				FailureCode: agentctlutil.ProbeFailureCode("managed_runtime_npm_policy"),
+			})
+		case "/api/v1/agent/managed-runtime/cache-repair":
+			repairs++
+			_ = json.NewEncoder(w).Encode(agentctlclient.RepairManagedRuntimeCacheResponse{Success: true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	host, port := serverHostPort(t, server)
+	manager := &Manager{log: newTestLogger(t)}
+	inst := &instance{
+		agentType: agent.ID(),
+		workDir:   t.TempDir(),
+		client:    agentctlclient.NewClient(host, port, manager.log),
+	}
+
+	caps := manager.probe(context.Background(), inst, agent, true)
+	if caps.Status != StatusFailed {
+		t.Fatalf("probe status = %q, want %q", caps.Status, StatusFailed)
+	}
+	if probes != 1 || repairs != 0 {
+		t.Fatalf("attempts = (%d probes, %d repairs), want (1, 0)", probes, repairs)
+	}
+}
+
 // @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.6
 func TestManagedRuntimeProbeRecoveryStopsOnCancellation(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	agent := agents.NewOpenCodeACP()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		t.Error("cancelled recovery must not reach agentctl")
@@ -176,6 +218,7 @@ func TestManagedRuntimeProbeRecoveryStopsOnCancellation(t *testing.T) {
 }
 
 func TestResolveModelConfigRecoversManagedRuntimeETarget(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	const version = "1.18.29"
 	agent := agents.NewOpenCodeACP()
 	log := newTestLogger(t)
@@ -254,6 +297,7 @@ func TestResolveModelConfigRecoversManagedRuntimeETarget(t *testing.T) {
 }
 
 func TestManagedRuntimeRepairWaitsForConcurrentProbe(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	agent := agents.NewOpenCodeACP()
 	blockerStarted := make(chan struct{})
 	releaseBlocker := make(chan struct{})

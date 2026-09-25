@@ -315,6 +315,7 @@ type Adapter struct {
 	// prompt response, so sendPrompt's normal complete emission never runs.
 	asyncTurnMu         sync.Mutex
 	asyncTurnFinalizers map[string]*asyncTurnFinalizer
+	cancelJoinTimeout   time.Duration
 	asyncTurnEpochs     map[string]uint64
 
 	// turnStartedAt records, per session, the time agentctl last dispatched
@@ -422,8 +423,7 @@ type asyncTurnFinalizer struct {
 	promptEpoch uint64
 }
 
-// promptCancelJoinTimeout bounds how long Cancel and sendPrompt wait for a stuck
-// session/prompt RPC to end after a user cancel. Exposed as a var for tests.
+// promptCancelJoinTimeout is the production default and preserves existing direct-test behavior.
 var promptCancelJoinTimeout = 3 * time.Second
 
 // NewAdapter creates a new ACP protocol adapter.
@@ -451,6 +451,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		attachMgr:                 shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 		promptGate:                make(chan struct{}, 1),
 		asyncTurnFinalizers:       make(map[string]*asyncTurnFinalizer),
+		cancelJoinTimeout:         cfg.PromptCancelJoinTimeout,
 		asyncTurnEpochs:           make(map[string]uint64),
 		turnStartedAt:             make(map[string]time.Time),
 		lifetimeCtx:               ctx,
@@ -531,7 +532,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
-		ClientCapabilities: clientCapabilitiesForAgent(a.agentID),
+		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-agentctl",
 			Version: "1.0.0",
@@ -584,6 +585,32 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		AuthMethods:             authMethods,
 	})
 
+	if err := a.applyProviderGatewayAuth(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	return nil
+}
+
+// applyProviderGatewayAuth authenticates the agent against a Kandev-configured
+// OpenAI-compatible gateway (base URL + bearer key) right after initialize. It
+// is a no-op unless the launch carries provider gateway auth. A failure aborts
+// the connection rather than letting the agent silently fall back to its
+// built-in vendor endpoint.
+func (a *Adapter) applyProviderGatewayAuth(ctx context.Context) error {
+	gw := a.cfg.ProviderGatewayAuth
+	if gw == nil {
+		return nil
+	}
+	if _, err := a.acpConn.Authenticate(ctx, acp.AuthenticateRequest{
+		MethodId: acp.AuthMethodId(gw.MethodID),
+		Meta:     gw.Meta,
+	}); err != nil {
+		return fmt.Errorf("OpenAI-compatible provider authentication failed: %w", err)
+	}
+	a.logger.Info("authenticated against OpenAI-compatible provider gateway",
+		zap.String("auth_method", gw.MethodID))
 	return nil
 }
 

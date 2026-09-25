@@ -18,6 +18,7 @@ from architecture_lint.rules import RULES  # noqa: E402
 RUNTIME_RULE = "ARCH-RUNTIME-IMPORT"
 TASK_OFFICE_RULE = "ARCH-TASK-OFFICE-IMPORT"
 ROOT_STATE_RULE = "ARCH-FRONTEND-ROOT-STATE-CAST"
+INBOX_HISTORY_ISOLATION_RULE = "ARCH-INBOX-HISTORY-ISOLATION"
 RUNTIME_IMPORT = "github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 OFFICE_IMPORT = "github.com/kandev/kandev/internal/office/models"
 RULE_FILES = {rule.id: rule.baseline_path.name for rule in RULES}
@@ -27,6 +28,8 @@ class ArchitectureFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.repo = Path(self.tempdir.name)
+        self.test_hooks = self.repo / ".empty-git-hooks"
+        self.test_hooks.mkdir()
         self.git("init", "-q")
         self.git("config", "user.email", "test@example.com")
         self.git("config", "user.name", "Architecture Test")
@@ -37,8 +40,9 @@ class ArchitectureFixture(unittest.TestCase):
         self.tempdir.cleanup()
 
     def git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        # Synthetic history must not depend on machine-wide Git hooks.
         return subprocess.run(
-            ["git", *args],
+            ["git", "-c", f"core.hooksPath={self.test_hooks}", *args],
             cwd=self.repo,
             text=True,
             capture_output=True,
@@ -59,6 +63,7 @@ class ArchitectureFixture(unittest.TestCase):
         runtime: list[dict[str, object]] | None = None,
         task_office: list[dict[str, object]] | None = None,
         root_state: list[dict[str, object]] | None = None,
+        inbox_history_isolation: list[dict[str, object]] | None = None,
     ) -> None:
         entries = {rule.id: [] for rule in RULES}
         entries.update(
@@ -66,6 +71,7 @@ class ArchitectureFixture(unittest.TestCase):
                 RUNTIME_RULE: runtime or [],
                 TASK_OFFICE_RULE: task_office or [],
                 ROOT_STATE_RULE: root_state or [],
+                INBOX_HISTORY_ISOLATION_RULE: inbox_history_isolation or [],
             }
         )
         for rule in RULES:

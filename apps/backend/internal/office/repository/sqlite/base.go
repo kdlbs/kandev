@@ -105,6 +105,7 @@ func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error)
 		log:        log,
 		migrate:    db.NewRequiredMigrateLogger(writer, log),
 	}
+	repo.SetLogger(log)
 	if err := repo.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize office schema: %w", err)
 	}
@@ -468,19 +469,68 @@ func (r *Repository) createRunTables() error {
 		causation_id TEXT NOT NULL DEFAULT '',
 		requested_at TIMESTAMP NOT NULL,
 		claimed_at TIMESTAMP,
-		finished_at TIMESTAMP
+		finished_at TIMESTAMP,
+		-- Causation chain identity, priority class, actor and workspace
+		-- (docs/specs/office/requirements/run-causation-chain.md,
+		-- launch-backpressure.md). Kept byte-identical to
+		-- migrateLaunchSafetyColumns's ADD COLUMN set so a fresh database
+		-- and a migrated one converge on the same shape. Named
+		-- chain_causation_id, not causation_id, to stay distinct from the
+		-- office-loop-liveness causation_id column above.
+		chain_causation_id TEXT NOT NULL DEFAULT '',
+		parent_run_id TEXT NOT NULL DEFAULT '',
+		causation_depth INTEGER NOT NULL DEFAULT 0,
+		priority_class INTEGER NOT NULL DEFAULT 2,
+		human_rooted INTEGER NOT NULL DEFAULT 0,
+		routine_id TEXT NOT NULL DEFAULT '',
+		actor_kind TEXT NOT NULL DEFAULT 'system',
+		actor_id TEXT NOT NULL DEFAULT '',
+		workspace_id TEXT NOT NULL DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_run_status_requested ON runs(status, requested_at);
+	CREATE INDEX IF NOT EXISTS idx_runs_assignment_rate_reason_requested ON runs(reason, requested_at);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_run_idempotency ON runs(idempotency_key) WHERE idempotency_key IS NOT NULL;
+	-- The causation_id/priority_class/actor_id indexes are declared in
+	-- migrateLaunchSafetyColumns, after the ADD COLUMN statements that
+	-- create those columns on an existing database, not here: this block
+	-- runs before runMigrations, so an index on a not-yet-added column
+	-- would fail the whole boot on any database that already has a runs
+	-- table.
 
 	CREATE TABLE IF NOT EXISTS office_run_skills (
 		run_id TEXT NOT NULL,
 		skill_id TEXT NOT NULL,
+		display_name TEXT NOT NULL DEFAULT '',
+		slug TEXT NOT NULL DEFAULT '',
+		label_source TEXT NOT NULL DEFAULT '',
 		version TEXT NOT NULL,
 		content_hash TEXT NOT NULL,
 		materialized_path TEXT NOT NULL,
 		PRIMARY KEY (run_id, skill_id)
 	);
+
+	CREATE TABLE IF NOT EXISTS office_run_sessions (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		agent_profile_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		attempt INTEGER NOT NULL,
+		state TEXT NOT NULL,
+		execution_id TEXT NOT NULL DEFAULT '',
+		execution_profile_id TEXT NOT NULL DEFAULT '',
+		adapter TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		acp_session_id TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		started_at TIMESTAMP,
+		finished_at TIMESTAMP,
+		cancel_requested_at TIMESTAMP,
+		error_message TEXT NOT NULL DEFAULT '',
+		version INTEGER NOT NULL DEFAULT 1,
+		UNIQUE (run_id, attempt)
+	);
+	CREATE INDEX IF NOT EXISTS idx_office_run_sessions_run ON office_run_sessions(run_id, attempt);
+	CREATE INDEX IF NOT EXISTS idx_office_run_sessions_live ON office_run_sessions(workspace_id, state);
 	`)
 	if err != nil {
 		return err

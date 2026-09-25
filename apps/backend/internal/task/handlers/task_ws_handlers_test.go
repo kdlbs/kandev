@@ -603,3 +603,15 @@ func TestWSCreateTaskDoesNotWaitForRecentUsePersistence(t *testing.T) {
 		t.Fatal("successful task.create waited for best-effort recent-use persistence")
 	}
 }
+
+func TestWSCreateTaskExecutorProfileWithoutAgent(t *testing.T) {
+	repo := &wsTaskRepo{}
+	h := newWSTaskHandlers(t, repo)
+	resp, err := h.wsCreateTask(context.Background(), wsWorkflowRequest(t, ws.ActionTaskCreate, map[string]any{
+		"workspace_id": "ws-b", "workflow_id": "wf-b", "title": "Deferred task", "executor_profile_id": "executor-profile",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type, "body: %s", resp.Payload)
+	require.Len(t, repo.created, 1)
+	assert.Equal(t, "executor-profile", repo.created[0].Metadata[models.MetaKeyExecutorProfileID])
+}

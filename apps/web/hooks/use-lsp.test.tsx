@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
     hasReportedProgress: false,
   };
   const enabledKeys = new Set<string>();
+  const leaseHints = new Set<string>();
   const changeListeners = new Set<(key: string) => void>();
   const connect = vi.fn(() => vi.fn());
   const state = { status: disabledStatus, progress: emptyProgress };
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => {
     lspAutoStartLanguages: [],
     lspServerConfigs: {},
   };
+  let continuityEnabled = false;
   const stop = vi.fn((sessionId: string, language: string) => {
     state.status = disabledStatus;
     for (const listener of changeListeners) listener(`${sessionId}:${language}`);
@@ -29,6 +31,7 @@ const mocks = vi.hoisted(() => {
     clearEnabledState: vi.fn((sessionId: string, language: string) => {
       const key = `kandev-lsp:${sessionId}:${language}`;
       enabledKeys.delete(key);
+      leaseHints.delete(`kandev-lsp-lease:${sessionId}:${language}`);
       for (const listener of changeListeners) listener(`${sessionId}:${language}`);
     }),
     connect,
@@ -40,6 +43,9 @@ const mocks = vi.hoisted(() => {
     isEnabledInStorage: vi.fn((sessionId: string, language: string) =>
       enabledKeys.has(`kandev-lsp:${sessionId}:${language}`),
     ),
+    hasLeaseHint: vi.fn((sessionId: string, language: string) =>
+      leaseHints.has(`kandev-lsp-lease:${sessionId}:${language}`),
+    ),
     onChange: vi.fn((listener: (key: string) => void) => {
       changeListeners.add(listener);
       return () => changeListeners.delete(listener);
@@ -50,9 +56,16 @@ const mocks = vi.hoisted(() => {
       for (const listener of changeListeners) listener(`${sessionId}:${language}`);
     }),
     state,
+    leaseHints,
     changeListeners,
     stop,
     userSettings,
+    get continuityEnabled() {
+      return continuityEnabled;
+    },
+    set continuityEnabled(value: boolean) {
+      continuityEnabled = value;
+    },
   };
 });
 
@@ -67,12 +80,17 @@ vi.mock("@/lib/lsp/lsp-client-manager", () => ({
     connect: mocks.connect,
     getProgress: mocks.getProgress,
     getStatus: mocks.getStatus,
+    hasLeaseHint: mocks.hasLeaseHint,
     isEnabledInStorage: mocks.isEnabledInStorage,
     onChange: mocks.onChange,
     saveEnabledState: mocks.saveEnabledState,
     stop: mocks.stop,
   },
   toLspLanguage: (language: string) => (language === "typescript" ? language : null),
+}));
+
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: () => mocks.continuityEnabled,
 }));
 
 import { useLsp, useLspStatus } from "./use-lsp";
@@ -90,6 +108,8 @@ beforeEach(() => {
   mocks.saveEnabledState.mockClear();
   mocks.stop.mockClear();
   mocks.enabledKeys.clear();
+  mocks.leaseHints.clear();
+  mocks.continuityEnabled = false;
   mocks.state.status = mocks.disabledStatus;
   mocks.state.progress = mocks.emptyProgress;
   mocks.userSettings.lspAutoStartLanguages = [];
@@ -208,6 +228,27 @@ describe("useLsp auto-start policy", () => {
 
     act(() => hook.result.current.toggle());
     await waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("useLsp browser continuity policy", () => {
+  it("reattaches a hinted lease when auto-start is disabled", async () => {
+    mocks.continuityEnabled = true;
+    mocks.leaseHints.add(`kandev-lsp-lease:${SESSION_ID}:${LANGUAGE}`);
+
+    const hook = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
+
+    await waitFor(() => expect(mocks.connect).toHaveBeenCalledOnce());
+    expect(mocks.connect).toHaveBeenCalledWith(SESSION_ID, LANGUAGE, {}, true);
+    hook.unmount();
+  });
+
+  it("does not use a stale lease hint when continuity is disabled", async () => {
+    mocks.leaseHints.add(`kandev-lsp-lease:${SESSION_ID}:${LANGUAGE}`);
+
+    const hook = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
+    expect(mocks.connect).not.toHaveBeenCalled();
+    hook.unmount();
   });
 });
 

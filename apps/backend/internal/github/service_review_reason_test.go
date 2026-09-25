@@ -35,6 +35,7 @@ func TestCleanupMergedReviewTasks_ThreadsApprovedReason(t *testing.T) {
 	if err := store.CreateReviewWatch(ctx, watch); err != nil {
 		t.Fatalf("CreateReviewWatch: %v", err)
 	}
+	seedTask(t, store, "task-approved", false)
 
 	rpt := &ReviewPRTask{
 		ReviewWatchID: watch.ID,

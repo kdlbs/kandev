@@ -27,7 +27,7 @@ import {
   useUnreadablePastedImageFeedback,
 } from "./use-attachment-file-feedback";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type {
   ChatSubmitPayload,
   ChatSubmitResult,
@@ -45,7 +45,7 @@ type UseChatInputStateProps = {
   workspaceId?: string | null;
   isSending: boolean;
   contextItems: ContextItem[];
-  pendingCommentsByFile?: Record<string, DiffComment[]>;
+  pendingCommentsByFile?: Record<string, ReviewComment[]>;
   /** Whether there are plan comments or PR feedback that allow empty-text submit */
   hasContextComments?: boolean;
   showRequestChangesTooltip: boolean;
@@ -63,10 +63,10 @@ function isPromiseLike(value: ChatSubmitResult): value is Promise<void | boolean
 }
 
 function collectComments(
-  pendingCommentsByFile: Record<string, DiffComment[]> | undefined,
-): DiffComment[] {
+  pendingCommentsByFile: Record<string, ReviewComment[]> | undefined,
+): ReviewComment[] {
   if (!pendingCommentsByFile) return [];
-  const allComments: DiffComment[] = [];
+  const allComments: ReviewComment[] = [];
   for (const filePath of Object.keys(pendingCommentsByFile))
     allComments.push(...pendingCommentsByFile[filePath]);
   return allComments;
@@ -153,7 +153,7 @@ type SubmitDraftArgs = {
   isSending: boolean;
   workspaceId?: string | null;
   valueRef: MutableRefObject<string>;
-  pendingCommentsRef: MutableRefObject<Record<string, DiffComment[]> | undefined>;
+  pendingCommentsRef: MutableRefObject<Record<string, ReviewComment[]> | undefined>;
   attachmentsRef: MutableRefObject<FileAttachment[]>;
   hasContextComments: boolean;
   inputRef: RefObject<TipTapInputHandle | null>;
@@ -161,7 +161,9 @@ type SubmitDraftArgs = {
   clearArgs: Omit<ClearSubmittedInputArgs, "submittedText" | "submittedAttachments">;
 };
 
-type DraftChatSubmitPayload = Required<Omit<ChatSubmitPayload, "planCommentRefs">>;
+type DraftChatSubmitPayload = Required<
+  Omit<ChatSubmitPayload, "planCommentRefs" | "previewFeedbackRefs" | "clientMessageId">
+>;
 
 function buildChatSubmitPayload(payload: DraftChatSubmitPayload): ChatSubmitPayload {
   return {

@@ -18,8 +18,8 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
         self.assertTrue(WORKFLOW.is_file(), "Documentation coverage workflow is missing")
         self.workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    # @covers AC-CI-PR-DOCS-001.1, AC-CI-PR-DOCS-002.2
-    def test_runs_for_all_pr_and_manual_retry_events(self) -> None:
+    # @covers AC-CI-PR-DOCS-001.1, AC-CI-PR-DOCS-002.2, AC-CI-PR-DOCS-004.4
+    def test_runs_for_relevant_pr_and_manual_retry_events(self) -> None:
         trigger = self.workflow.partition("on:\n")[2].partition("\nconcurrency:")[0]
         self.assertIn("pull_request_target:", trigger)
         for event in (
@@ -31,12 +31,31 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
             "unlabeled",
             "ready_for_review",
         ):
-            self.assertIn(event, trigger)
+            if event == "ready_for_review":
+                self.assertNotIn(event, trigger)
+            else:
+                self.assertIn(event, trigger)
         self.assertIn("merge_group:", trigger)
         self.assertIn("checks_requested", trigger)
         self.assertIn("workflow_dispatch:", trigger)
         self.assertIn("pr_number:", trigger)
         self.assertNotIn("paths:", trigger)
+
+    # @covers AC-CI-PR-DOCS-002.2, AC-CI-PR-DOCS-004.4
+    def test_unrelated_label_events_are_rejected_at_the_job_boundary(self) -> None:
+        coverage_job = self.workflow.partition("jobs:\n")[2]
+        self.assertIn("github.event_name != 'pull_request_target'", coverage_job)
+        self.assertIn("github.event.action != 'labeled'", coverage_job)
+        self.assertIn("github.event.action != 'unlabeled'", coverage_job)
+        self.assertIn("github.event.label.name == 'no-docs-allow'", coverage_job)
+        self.assertLess(coverage_job.index("github.event.label.name"), coverage_job.index("runs-on:"))
+
+    # @covers AC-CI-PR-DOCS-004.4
+    def test_description_edits_are_rejected_but_base_retargets_run(self) -> None:
+        coverage_job = self.workflow.partition("jobs:\n")[2]
+        self.assertIn("github.event.action != 'edited'", coverage_job)
+        self.assertIn("github.event.changes.base != null", coverage_job)
+        self.assertLess(coverage_job.index("github.event.changes.base"), coverage_job.index("runs-on:"))
 
     # @covers AC-CI-PR-DOCS-003.1, AC-CI-PR-DOCS-003.4
     def test_serializes_prs_without_cancelling_merge_group_runs(self) -> None:

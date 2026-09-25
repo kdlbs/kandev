@@ -540,5 +540,8 @@
   "sidebarWeeks_other": "{{count}}sem",
   "sidebarYears_one": "{{count}}a",
   "sidebarYears_other": "{{count}}a",
-  "sidebarYearsMax": "99+a"
+  "sidebarYearsMax": "99+a",
+  "integrationSettings": "Definições de integrações",
+  "pageNavigation": "Nesta página",
+  "viewOptions": "Opções de visualização"
 }

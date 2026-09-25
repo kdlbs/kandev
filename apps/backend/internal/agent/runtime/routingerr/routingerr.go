@@ -50,6 +50,7 @@ const (
 	CodePermissionDeniedByUser      Code = "permission_denied_by_user"
 	CodeNpxCacheCorrupted           Code = "npx_cache_corrupted"
 	CodeManagedRuntimeNpmResolution Code = "managed_runtime_npm_resolution"
+	CodeManagedRuntimeNpmPolicy     Code = "managed_runtime_npm_policy"
 	CodeResumeCorrupted             Code = "resume_corrupted"
 	CodeAgentTransportLost          Code = "agent_transport_lost"
 )
@@ -144,16 +145,23 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.ClassifierRule)
 }
 
+// ShouldShortRetry reports whether a classified failure is worth retrying
+// against the same provider before falling back or escalating.
+func (e *Error) ShouldShortRetry() bool {
+	return e != nil && e.Class == ClassTransient && e.AutoRetryable && e.FallbackAllowed
+}
+
 // Input is the raw signal bundle adapters pass to Classify.
 type Input struct {
-	Phase         Phase
-	ProviderID    string
-	ExitCode      *int
-	StructuredErr error
-	HTTPStatus    int
-	ResetHint     *time.Time
-	Stderr        string
-	Stdout        string
+	Phase                     Phase
+	ProviderID                string
+	ExitCode                  *int
+	StructuredErr             error
+	HTTPStatus                int
+	ResetHint                 *time.Time
+	Stderr                    string
+	Stdout                    string
+	ManagedRuntimePackageSpec string // trusted exact package from the managed runtime command
 }
 
 const exitCodeBinaryMissing = 127
@@ -166,11 +174,18 @@ const statusOverloaded = 529
 // Classify always returns a non-nil *Error, even for an unmatched or empty
 // input; callers may dereference the result without a nil check.
 func Classify(in Input) *Error {
-	excerpt := Sanitize(in.Stderr + "\n" + in.Stdout)
+	rawText := in.Stderr + "\n" + in.Stdout
+	excerpt := Sanitize(rawText)
 	if e := classifyInjection(in, excerpt); e != nil {
 		return e
 	}
 	if e := classifyStructured(in, excerpt); e != nil {
+		e.ResetHint = in.ResetHint
+		return applyInvariants(e)
+	}
+	if e := classifyManagedRuntimeNpmPolicy(in, rawText); e != nil {
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		return applyInvariants(e)
 	}
@@ -188,24 +203,24 @@ func Classify(in Input) *Error {
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	if e, ok := matchRuntimeEnvironmentRules(excerpt); ok {
+	if e, ok := matchRuntimeEnvironmentRulesForProvider(in.ProviderID, excerpt, rawText); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		if e.Code == CodeNpxCacheCorrupted {
 			// Preserve the legacy path for the path-aware remediation guard;
 			// the path is validated again before deletion.
-			e.RemediationPath = extractNpxCachePath(in.Stderr + "\n" + in.Stdout)
+			e.RemediationPath = extractNpxCachePath(rawText)
 		}
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	if e, ok := matchLegacyRuntimeEnvironmentRules(in.Stderr + "\n" + in.Stdout); ok {
+	if e, ok := matchLegacyRuntimeEnvironmentRulesForProvider(in.ProviderID, rawText, rawText); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		if e.Code == CodeNpxCacheCorrupted {
-			e.RemediationPath = extractNpxCachePath(in.Stderr + "\n" + in.Stdout)
+			e.RemediationPath = extractNpxCachePath(rawText)
 		}
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
@@ -332,7 +347,7 @@ func applyInvariants(e *Error) *Error {
 	case CodeNpxCacheCorrupted:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
-	case CodeManagedRuntimeNpmResolution:
+	case CodeManagedRuntimeNpmResolution, CodeManagedRuntimeNpmPolicy:
 		e.UserAction = true
 		e.AutoRetryable = false
 		e.FallbackAllowed = false

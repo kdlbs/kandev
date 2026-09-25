@@ -301,6 +301,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		ContributionDestinations:       req.ContributionDestinations,
 		ComparisonTargets:              req.ComparisonTargets,
 		AgentctlStartupConfig:          req.AgentctlStartupConfig,
+		ProviderGatewayAuth:            req.ProviderGatewayAuth,
 		Metadata:                       req.Metadata,
 	}, nil
 }
@@ -601,6 +602,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		McpMode:                    req.McpMode,
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
+		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
@@ -820,6 +822,18 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (strin
 	if script == "" {
 		return "", nil
 	}
+	options, err := primaryCheckoutOptions(req.Metadata)
+	if err != nil {
+		return "", err
+	}
+	script, err = checkoutOptionsPrepareScript(script, options)
+	if err != nil {
+		return "", err
+	}
+	deferSetup := options != nil && len(options.SparseDirectories) > 0
+	if deferSetup {
+		script = strings.Replace(script, "{{repository.setup_script}}", "", 1)
+	}
 	script = withBranchCheckout(req, script)
 	if binding, ok := req.RemoteContributions[""]; ok {
 		contributionScript, err := scriptengine.RemoteContributionSetupScript(&binding)
@@ -828,12 +842,17 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (strin
 		}
 		script += contributionScript
 	}
+	script += checkoutOptionsValidationScript(options)
 	if destination, ok := req.ContributionDestinations[""]; ok {
 		destinationScript, err := scriptengine.ContributionDestinationSetupScript(&destination)
 		if err != nil {
 			return "", err
 		}
 		script += destinationScript
+	}
+
+	if deferSetup {
+		script += "\n" + selectedCheckoutCredentialScrubScript(req.Metadata) + "\n{{repository.setup_script}}\n"
 	}
 
 	resolver := scriptengine.NewResolver().

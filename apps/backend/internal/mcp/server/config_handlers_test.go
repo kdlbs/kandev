@@ -97,6 +97,49 @@ func TestMoveTaskToolSchemasExposeEntryOptions(t *testing.T) {
 	}
 }
 
+func TestMoveTaskSameStepDescriptionsAndResponseForwarding(t *testing.T) {
+	for name, backend := range map[string]*testBackend{
+		"task":   {response: map[string]interface{}{"disposition": "applied", "task": map[string]interface{}{"id": "task-1", "workflow_step_id": "step-work", "position": 7}}},
+		"config": {response: map[string]interface{}{"disposition": "applied", "task": map[string]interface{}{"id": "task-1", "workflow_step_id": "step-work", "position": 7}}},
+	} {
+		var server *Server
+		if name == "task" {
+			server = newTaskModeServer(t, backend, "task-current")
+		} else {
+			server = newTestServer(t, backend)
+		}
+
+		tool := server.mcpServer.ListTools()["move_task_kandev"]
+		assert.Contains(t, tool.Tool.Description, "current workflow and step")
+		assert.Contains(t, tool.Tool.Description, "no retry is needed")
+		assert.Contains(t, tool.Tool.Description, "Only an actual step change")
+		position, ok := toolInputProperties(t, server, "move_task_kandev")["position"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Contains(t, position["description"], "server determines arrival order")
+		assert.Contains(t, position["description"], "preserves the stored position")
+
+		result := callTool(t, server, "move_task_kandev", map[string]interface{}{
+			"task_id": "task-1", "workflow_id": "wf-1", "workflow_step_id": "step-work", "position": 99,
+		})
+		require.False(t, result.IsError)
+		require.Len(t, result.Content, 1)
+		content, ok := result.Content[0].(mcplib.TextContent)
+		require.True(t, ok)
+		var response map[string]interface{}
+		require.NoError(t, json.Unmarshal([]byte(content.Text), &response))
+		assert.Equal(t, "applied", response["disposition"])
+		task, ok := response["task"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, float64(7), task["position"])
+		assert.Equal(t, ws.ActionMCPMoveTask, backend.lastAction)
+		payload, ok := backend.lastPayload.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "task-1", payload["task_id"])
+		assert.Equal(t, "wf-1", payload["workflow_id"])
+		assert.Equal(t, "step-work", payload["workflow_step_id"])
+	}
+}
+
 // --- Action constant tests ---
 
 func TestActionConstants_MatchWebSocketActions(t *testing.T) {

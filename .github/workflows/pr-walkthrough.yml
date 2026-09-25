@@ -8,11 +8,47 @@ on:
     types: [opened, ready_for_review, reopened, synchronize, labeled]
 
 env:
-  PR_WALKTHROUGH_MODEL: opencode-go/muse-spark-1.3-contributor
+  # Free model, accepted explicitly: it may use prompts and completions to
+  # train future Meta models, so PR patches and prepared head context are
+  # subject to that policy. To revoke, restore a non-training model such as
+  # opencode-go/muse-spark-1.3-contributor here and in the agent block below.
+  PR_WALKTHROUGH_MODEL: opencode/muse-spark-1.3-contributor-free
   PR_WALKTHROUGH_VARIANT: high
 
 concurrency:
-  group: pr-walkthrough-${{ github.event.pull_request.number }}
+  # GitHub resolves workflow concurrency before it evaluates the job `if`.
+  # Keep every event rejected by the generation gate out of the canceling
+  # group so it cannot terminate an eligible run for the same pull request.
+  group: >-
+    pr-walkthrough-${{ github.event.pull_request.number }}${{
+      (
+        vars.PR_WALKTHROUGH_ENABLED != 'true' ||
+        github.event_name != 'pull_request_target' ||
+        github.event.pull_request.draft != false ||
+        !(
+          (
+            github.event.pull_request.head.repo.full_name == github.repository &&
+            (github.event.action == 'opened' ||
+             github.event.action == 'reopened' ||
+             github.event.action == 'ready_for_review' ||
+             github.event.action == 'synchronize' ||
+             (github.event.action == 'labeled' && github.event.label.name == 'generate-pr-walkthrough'))
+          ) ||
+          (
+            github.event.pull_request.head.repo.full_name != github.repository &&
+            (
+              (github.event.action == 'labeled' && github.event.label.name == 'safe-to-review') ||
+              (github.event.action != 'labeled' &&
+               (
+                 contains(github.event.pull_request.labels.*.name, 'safe-to-review') ||
+                 (vars.CLAUDE_REVIEW_ALLOWLIST != '' &&
+                  contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login))
+               ))
+            )
+          )
+        )
+      ) && '-ineligible' || ''
+    }}
   cancel-in-progress: true
 
 jobs:
@@ -152,7 +188,7 @@ jobs:
           ---
           description: Generate and render a visual pull request walkthrough.
           mode: primary
-          model: "opencode-go/muse-spark-1.3-contributor"
+          model: "opencode/muse-spark-1.3-contributor-free"
           temperature: 0.1
           permission:
             "*": deny

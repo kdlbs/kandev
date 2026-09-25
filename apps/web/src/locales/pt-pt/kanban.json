@@ -101,6 +101,7 @@
   "step": "Passo",
   "subtaskOf": "Subtarefa de",
   "taskList": "Lista de tarefas",
+  "tasksInStep": "Tarefas em {{step}}",
   "tasksOverWipLimit": "Tarefas em {{label}}, acima do limite de WIP",
   "theseOptionsAffectThisTaskList": "Estas opções afetam apenas esta lista de tarefas.",
   "threads": "Tópicos",
@@ -128,5 +129,10 @@
   "boardSort": "Ordenação do quadro",
   "boardSortCreatedDesc": "Mais recentes primeiro",
   "boardSortPriorityDesc": "Prioridade",
-  "priorityFilter": "Filtro de prioridade"
+  "priorityFilter": "Filtro de prioridade",
+  "bulkSelected_one": "{{count}} selecionada",
+  "bulkSelected_other": "{{count}} selecionadas",
+  "bulkActions": "Ações",
+  "selectTasks": "Selecionar tarefas",
+  "cancelTaskSelection": "Cancelar seleção"
 }

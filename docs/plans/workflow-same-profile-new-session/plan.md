@@ -111,6 +111,10 @@ the shared backend policy rather than phone interaction.
 
 ## Related delivery records
 
+[Queued session ownership](../queued-session-ownership/plan.md) adds the
+parked-predecessor and deferred-destination intersection. This completed repair
+retains its original scope and results.
+
 [Workflow session targeting](../workflow-session-targeting/plan.md) delivered
 explicit initial and source-step recipients. Its completed results remain
 historical evidence, not proof of this profile-only case. This package owns

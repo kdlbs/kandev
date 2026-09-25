@@ -181,10 +181,9 @@ func TestUpdateRepositoryBaseBranch_PersistsAndPushes(t *testing.T) {
 	}
 }
 
-// TestUpdateRepositoryBaseBranch_NoChangeSkipsWork is a sanity check: when
-// the new value equals the stored value, the service short-circuits before
-// the DB write so callers don't trigger spurious task.updated events or
-// agentctl refreshes.
+// TestUpdateRepositoryBaseBranch_NoChangeSkipsWork ensures selecting the
+// already displayed branch records the user's choice without triggering
+// spurious task.updated events or agentctl refreshes.
 func TestUpdateRepositoryBaseBranch_NoChangeSkipsWork(t *testing.T) {
 	svc, bus, repo := createTestService(t)
 	ctx := context.Background()
@@ -219,6 +218,13 @@ func TestUpdateRepositoryBaseBranch_NoChangeSkipsWork(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("UpdateRepositoryBaseBranch: %v", err)
+	}
+	updated, err := repo.GetTaskRepository(ctx, rows[0].ID)
+	if err != nil {
+		t.Fatalf("GetTaskRepository: %v", err)
+	}
+	if !models.HasManualBaseBranchOverride(updated.Metadata) {
+		t.Fatal("same-branch manual selection did not persist its override marker")
 	}
 	if eventBusHasType(bus, events.TaskUpdated) {
 		t.Error("identical update should not emit task.updated")
@@ -255,7 +261,7 @@ func TestUpdateRepositoryBaseBranch_SameBranchClearsComparisonTarget(t *testing.
 		HeadRepository:   models.ComparisonTargetRepository{Host: "github.com", Path: "contributor/frontend", RemoteURL: "https://github.com/contributor/frontend.git"},
 		TargetRepository: models.ComparisonTargetRepository{Host: "github.com", Path: "upstream/frontend", RemoteURL: "https://github.com/upstream/frontend.git"},
 	}
-	if _, changed, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, rows[0].ID, &target, nil); err != nil || !changed {
+	if _, changed, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, rows[0].ID, &target, nil, false); err != nil || !changed {
 		t.Fatalf("seed comparison target: changed=%v err=%v", changed, err)
 	}
 	bus.ClearEvents()

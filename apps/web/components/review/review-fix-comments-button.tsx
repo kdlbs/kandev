@@ -4,7 +4,7 @@ import { useCallback } from "react";
 import { IconMessageForward } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
 import { ReviewCommentsOverview } from "./review-comments-overview";
 import { useTranslation } from "react-i18next";
@@ -22,7 +22,7 @@ function shouldOpenOverviewOnClick(): boolean {
 
 type FixCommentsButtonProps = {
   commentCount: number;
-  getPendingComments: () => DiffComment[];
+  getPendingComments: () => ReviewComment[];
   onFixComments: () => void;
 };
 

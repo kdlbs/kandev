@@ -4854,6 +4854,12 @@ type mockMessageCreator struct {
 	thinkingWrites            int
 	toolCallWrites            int
 	toolUpdateWrites          int
+	lastToolUpdateID          string
+	lastToolUpdateTitle       string
+	lastToolUpdateType        string
+	agentPlanUpserts          int
+	lastAgentPlanToolCallID   string
+	lastAgentPlanContent      string
 	userMessageErr            error
 	idempotentUserMessages    map[string]struct{}
 	permissionClaimFn         func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
@@ -4917,8 +4923,25 @@ func (m *mockMessageCreator) CreateToolCallMessage(context.Context, string, stri
 	return nil
 }
 
-func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, string, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+func (m *mockMessageCreator) UpdateToolCallMessage(
+	_ context.Context,
+	_, toolCallID, _, _, _, _, title, _, msgType string,
+	_ *streams.NormalizedPayload,
+) error {
 	m.toolUpdateWrites++
+	m.lastToolUpdateID = toolCallID
+	m.lastToolUpdateTitle = title
+	m.lastToolUpdateType = msgType
+	return nil
+}
+
+func (m *mockMessageCreator) UpsertAgentPlanMessage(
+	_ context.Context,
+	_, sourceToolCallID, _, content, _ string,
+) error {
+	m.agentPlanUpserts++
+	m.lastAgentPlanToolCallID = sourceToolCallID
+	m.lastAgentPlanContent = content
 	return nil
 }
 
@@ -4947,6 +4970,7 @@ func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, con
 func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, messageID, taskID, content, sessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.sessionMessageAttempts++
 	if m.sessionMessageErr != nil {
 		return m.sessionMessageErr
 	}
@@ -4966,6 +4990,9 @@ func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, m
 		metadata:      metadata,
 		requestsInput: requestsInput,
 	})
+	if m.sessionMessageDone != nil {
+		m.sessionMessageOnce.Do(func() { close(m.sessionMessageDone) })
+	}
 	return nil
 }
 

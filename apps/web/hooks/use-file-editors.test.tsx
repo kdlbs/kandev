@@ -271,6 +271,32 @@ describe("useOpenFileAtLine", () => {
     expect(consumePendingCursorPosition(APP_PATH)).toBeUndefined();
   });
 
+  // @covers AC-UI-FILE-TREE-PATH-SCOPE-001.1
+  it("uses one workspace-relative identity for an absolute tool path", () => {
+    const openFile = vi.fn();
+    const editor = createEditor(WORKTREE_APP_PATH);
+    getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });
+    const { result } = renderHook(() => useOpenFileAtLine(openFile, 88, WORKTREE_PATH));
+
+    act(() => result.current(WORKTREE_APP_PATH));
+
+    expect(openFile).toHaveBeenCalledWith(APP_PATH);
+    expect(editor.setPosition).toHaveBeenCalledWith({ lineNumber: 88, column: 1 });
+    expect(consumePendingCursorPosition(APP_PATH)).toBeUndefined();
+    expect(consumePendingCursorPosition(WORKTREE_APP_PATH)).toBeUndefined();
+  });
+
+  it("normalizes Windows workspace aliases case-insensitively", () => {
+    const openFile = vi.fn();
+    const { result } = renderHook(() =>
+      useOpenFileAtLine(openFile, undefined, String.raw`C:\Workspace`),
+    );
+
+    act(() => result.current(String.raw`c:\workspace\src\app.ts`));
+
+    expect(openFile).toHaveBeenCalledWith(APP_PATH);
+  });
+
   it("scrolls only the requested session-qualified model", () => {
     const firstModelUri = modelUriForDocument(DOCUMENT_URI, FIRST_SESSION_ID);
     const secondModelUri = modelUriForDocument(DOCUMENT_URI, SECOND_SESSION_ID);

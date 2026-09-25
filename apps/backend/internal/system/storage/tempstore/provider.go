@@ -473,22 +473,20 @@ func measurementFromResult(
 	deadline bool,
 ) RootMeasurement {
 	measurement.SkippedCount = result.SkippedCount
-	measurement.Warnings = appendBounded(nil, result.Warnings, 10)
+	measurement.Warnings = appendDistinctBounded(nil, result.Warnings, 10)
 	if result.Err != nil {
 		if deadline && errors.Is(result.Err, context.DeadlineExceeded) {
 			size := result.Bytes
 			measurement.Status = StatusPartial
 			measurement.SizeBytes = &size
 			measurement.Reason = reasonDeadline
-			measurement.Warnings = appendBounded(
-				measurement.Warnings, []string{result.Err.Error()}, 10,
-			)
+			measurement.Warnings = appendErrorWarnings(measurement.Warnings, result.Err, 10)
 			return measurement
 		}
 		measurement.Status = StatusUnavailable
 		measurement.SizeBytes = nil
 		measurement.Reason = reasonMeasurementUnavailable
-		measurement.Warnings = appendBounded(measurement.Warnings, []string{result.Err.Error()}, 10)
+		measurement.Warnings = appendErrorWarnings(measurement.Warnings, result.Err, 10)
 		return measurement
 	}
 	size := result.Bytes
@@ -518,7 +516,7 @@ func summarize(analysis Analysis) Analysis {
 		if root.SizeBytes != nil {
 			total += *root.SizeBytes
 		}
-		analysis.Warnings = appendBounded(analysis.Warnings, root.Warnings, 10)
+		analysis.Warnings = appendDistinctBounded(analysis.Warnings, root.Warnings, 10)
 	}
 	switch {
 	case measured+partial > 0:
@@ -549,16 +547,45 @@ func summarize(analysis Analysis) Analysis {
 	return analysis
 }
 
-func appendBounded(values, additions []string, limit int) []string {
+func appendErrorWarnings(values []string, err error, limit int) []string {
+	if err == nil || len(values) >= limit {
+		return values
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, child := range joined.Unwrap() {
+			values = appendErrorWarnings(values, child, limit)
+		}
+		return values
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return appendErrorWarnings(values, wrapped.Unwrap(), limit)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return values
+	}
+	return appendDistinctBounded(values, []string{err.Error()}, limit)
+}
+
+func appendDistinctBounded(values, additions []string, limit int) []string {
 	for _, addition := range additions {
 		if len(values) >= limit {
 			break
 		}
-		if addition != "" {
-			values = append(values, addition)
+		if addition == "" || containsWarning(values, addition) {
+			continue
 		}
+		values = append(values, addition)
 	}
 	return values
+}
+
+func containsWarning(values []string, candidate string) bool {
+	for _, value := range values {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func sameMount(left, right string, windows bool) bool {

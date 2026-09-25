@@ -113,6 +113,9 @@ func TestUpdateTaskAllocatesStepEntryWhenPendingAllocationPresent(t *testing.T) 
 	if holder.EntryID == 0 {
 		t.Fatalf("expected holder.EntryID to be populated, got 0")
 	}
+	if holder.TransitionID == 0 {
+		t.Fatalf("expected holder.TransitionID to be populated, got 0")
+	}
 	if holder.EntrySeq != 1 {
 		t.Fatalf("EntrySeq = %d, want 1", holder.EntrySeq)
 	}

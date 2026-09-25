@@ -55,6 +55,37 @@ when the agent did not emit its completion signal.
   the clarification barrier clears, the surfaces shall reevaluate visibility
   and show the action when the signal-gated idle conditions are satisfied.
 
+### REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003: Recovery after a step change
+
+**Status:** shipped.
+
+**Intent:** A caller can distinguish a stale completion attempt from a duplicate
+signal and recover without completing the wrong step.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003.1:** When the calling turn
+  belongs to a different step, completion remains rejected. The error identifies
+  the turn's step and the current step. No completion signal or event is created.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003.2:** The rejection explains
+  that retries in the same turn cannot recover. It directs the caller to end
+  that turn and have the user resume the session for the current step.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003.3:** After a fresh turn starts
+  on the current step, a new completion attempt is eligible under the normal
+  completion rules. A previous rejection does not permanently disable completion.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003.4:** Tool and signal-gated
+  prompt instructions distinguish stale rejection from `already_signaled`.
+  Completion remains the final action after all current-step requirements are
+  satisfied. Pending questions remain barriers. The instructions do not authorize
+  a task move as an automatic substitute for a rejected signal.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003.5:** User recovery guidance
+  explains fresh-turn recovery and the existing manual workflow move option.
+  It does not claim that waiting, reconnecting, or retrying the stale turn changes
+  its completion eligibility.
+
+This addition specifies recovery guidance. Automatic turn restart, deferred-move
+scheduling repairs, and changes to completion authorization are outside its scope.
+
 ## Migrated source detail
 
 ## Why

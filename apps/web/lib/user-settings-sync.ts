@@ -5,7 +5,7 @@ import type { UserSettingsUpdatePayload } from "@/lib/types/http-user-settings";
 const MAX_SYNC_ATTEMPTS = 3;
 const BASE_SYNC_RETRY_DELAY_MS = 100;
 
-async function requestUserSettingsUpdateWithRetry(
+export async function requestUserSettingsUpdateWithRetry(
   payload: UserSettingsUpdatePayload,
 ): Promise<Awaited<ReturnType<typeof updateUserSettings>>> {
   let lastError: unknown;
