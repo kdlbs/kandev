@@ -12,6 +12,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 import { selectMarkdownPreviewText } from "../../helpers/markdown-preview";
+import { waitForWorkspacePath } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 function createLongFileContent(lines = 500): string {
