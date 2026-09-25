@@ -49,16 +49,22 @@ func newTestStopCh(t *testing.T) chan struct{} {
 // mockAgentServer creates a test WebSocket server simulating agentctl.
 // It responds to agent stream requests and tracks which actions were called and in what order.
 type mockAgentServer struct {
-	server               *httptest.Server
-	mu                   sync.Mutex
-	actionLog            []string // ordered log of actions received
-	rejectStreamAttempts int
-	agentStatus          string
-	upgrader             websocket.Upgrader
-	handler              func(msg ws.Message) *ws.Message
-	wsConnected          chan struct{} // closed when WS stream connects
-	materialized         []materializedUpload
-	failMaterialize      bool
+	server                 *httptest.Server
+	mu                     sync.Mutex
+	actionLog              []string // ordered log of actions received
+	sessionDirectoryGrants []sessionDirectoryGrant
+	rejectStreamAttempts   int
+	agentStatus            string
+	upgrader               websocket.Upgrader
+	handler                func(msg ws.Message) *ws.Message
+	wsConnected            chan struct{} // closed when WS stream connects
+	materialized           []materializedUpload
+	failMaterialize        bool
+}
+
+type sessionDirectoryGrant struct {
+	action      string
+	directories []string
 }
 
 // materializedUpload records one /api/v1/attachments/materialize request so a
@@ -132,6 +138,16 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 
 			m.mu.Lock()
 			m.actionLog = append(m.actionLog, msg.Action)
+			if msg.Action == "agent.session.new" || msg.Action == "agent.session.load" {
+				var payload struct {
+					AdditionalDirectories []string `json:"additional_directories"`
+				}
+				if err := json.Unmarshal(msg.Payload, &payload); err == nil {
+					m.sessionDirectoryGrants = append(m.sessionDirectoryGrants, sessionDirectoryGrant{
+						action: msg.Action, directories: append([]string(nil), payload.AdditionalDirectories...),
+					})
+				}
+			}
 			m.mu.Unlock()
 
 			resp := m.buildResponse(msg)
@@ -282,6 +298,18 @@ func (m *mockAgentServer) getActionLog() []string {
 	result := make([]string, len(m.actionLog))
 	copy(result, m.actionLog)
 	return result
+}
+
+func (m *mockAgentServer) getSessionDirectoryGrants() []sessionDirectoryGrant {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	grants := make([]sessionDirectoryGrant, len(m.sessionDirectoryGrants))
+	for i, grant := range m.sessionDirectoryGrants {
+		grants[i] = sessionDirectoryGrant{
+			action: grant.action, directories: append([]string(nil), grant.directories...),
+		}
+	}
+	return grants
 }
 
 func (m *mockAgentServer) Close() {
@@ -1366,7 +1394,8 @@ func TestInitializeSession_CreatesNewSession(t *testing.T) {
 		},
 	}
 
-	result, err := sm.InitializeSession(ctx, client, agentConfig, "", "/workspace", nil)
+	projectRoots := []string{"/projects/project-1/context", "/repos/api", "/repos/web"}
+	result, err := sm.InitializeSession(ctx, client, agentConfig, "", "/repos/api", nil, projectRoots)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}
@@ -1376,6 +1405,10 @@ func TestInitializeSession_CreatesNewSession(t *testing.T) {
 	}
 	if result.SessionID != "test-session-123" {
 		t.Errorf("expected session ID 'test-session-123', got %q", result.SessionID)
+	}
+	grants := mock.getSessionDirectoryGrants()
+	if len(grants) != 1 || grants[0].action != "agent.session.new" || !reflect.DeepEqual(grants[0].directories, projectRoots) {
+		t.Fatalf("new-session writable roots = %#v, want session/new with %v", grants, projectRoots)
 	}
 }
 
@@ -1520,7 +1553,8 @@ func TestInitializeSession_LoadsExistingSession(t *testing.T) {
 		},
 	}
 
-	result, err := sm.InitializeSession(ctx, client, agentConfig, "existing-session", "/workspace", nil)
+	projectRoots := []string{"/projects/project-1/context", "/repos/api", "/repos/web"}
+	result, err := sm.InitializeSession(ctx, client, agentConfig, "existing-session", "/repos/api", nil, projectRoots)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}
@@ -1543,6 +1577,10 @@ func TestInitializeSession_LoadsExistingSession(t *testing.T) {
 	}
 	if !hasLoad {
 		t.Error("expected agent.session.load to be called")
+	}
+	grants := mock.getSessionDirectoryGrants()
+	if len(grants) != 1 || grants[0].action != "agent.session.load" || !reflect.DeepEqual(grants[0].directories, projectRoots) {
+		t.Fatalf("resumed-session writable roots = %#v, want session/load with %v", grants, projectRoots)
 	}
 	if hasNew {
 		t.Error("did not expect agent.session.new to be called when loading existing session")

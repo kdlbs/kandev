@@ -99,6 +99,8 @@ type executorStore interface {
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
 
+type AgentProjectContextPathResolver func(context.Context, string) (string, error)
+
 // sessionMetadataKeyStateSetter is an optional repository capability. Legacy
 // test stores can keep their existing metadata API, while the SQL repository
 // can guard recovery markers against a concurrent stop or archive.
@@ -583,6 +585,7 @@ type LaunchAgentRequest struct {
 	// compatibility with code paths that have not yet been updated.
 	Repositories     []RepoSpec
 	WorkspaceFolders []WorkspaceFolderSpec
+	ProjectWorkspace *ProjectWorkspaceAccess
 
 	// RouteOverride carries a provider-routing override resolved by the
 	// office scheduler. nil when routing is disabled or this is a kanban
@@ -591,6 +594,14 @@ type LaunchAgentRequest struct {
 }
 
 type WorkspaceFolderSpec struct{ Name, LocalPath string }
+
+// ProjectWorkspaceAccess grants the project context and isolated task
+// repository worktrees to the managed agent runtime.
+type ProjectWorkspaceAccess struct {
+	ContextPath             string
+	Tier                    string
+	RepositoryWorktreePaths []string
+}
 
 // RepoSpec describes one repository for a multi-repo task launch from the
 // orchestrator. Mirrors lifecycle.RepoLaunchSpec; kept as a separate type so
@@ -657,6 +668,10 @@ const McpModeOffice = mcpmode.Office
 // McpModeAutomation selects the fixed coordinator MCP surface for tasks
 // created by a user-configured automation.
 const McpModeAutomation = mcpmode.Automation
+
+const McpModeProjectCoordinator = mcpmode.ProjectCoordinator
+
+const McpModeProjectWorker = mcpmode.ProjectWorker
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
@@ -961,15 +976,16 @@ type GitLabCredentialResolver interface {
 
 // Executor manages agent execution for tasks
 type Executor struct {
-	agentManager      AgentManagerClient
-	attachmentReader  AttachmentReader
-	repo              executorStore
-	secretStore       secrets.SecretStore
-	shellPrefs        ShellPreferenceProvider
-	capabilities      ExecutorTypeCapabilities
-	gitlabCredentials GitLabCredentialResolver
-	logger            *logger.Logger
-	canvasesEnabled   bool
+	agentManager                    AgentManagerClient
+	attachmentReader                AttachmentReader
+	repo                            executorStore
+	secretStore                     secrets.SecretStore
+	shellPrefs                      ShellPreferenceProvider
+	capabilities                    ExecutorTypeCapabilities
+	gitlabCredentials               GitLabCredentialResolver
+	logger                          *logger.Logger
+	canvasesEnabled                 bool
+	agentProjectContextPathResolver AgentProjectContextPathResolver
 
 	gitCredentialIssuer            GitCredentialLeaseIssuer
 	gitCredentialBrokerURL         string
@@ -1339,6 +1355,24 @@ func (e *Executor) SetAttachmentReader(reader AttachmentReader) {
 // before any new agent session is launched.
 func (e *Executor) SetCanvasesEnabled(enabled bool) {
 	e.canvasesEnabled = enabled
+}
+
+func (e *Executor) SetAgentProjectContextPathResolver(resolver AgentProjectContextPathResolver) {
+	e.agentProjectContextPathResolver = resolver
+}
+
+func (e *Executor) resolveAgentProjectContextPath(ctx context.Context, projectID string) (string, error) {
+	if projectID == "" || e.agentProjectContextPathResolver == nil {
+		return "", fmt.Errorf("agent project context path resolver is unavailable")
+	}
+	path, err := e.agentProjectContextPathResolver(ctx, projectID)
+	if err != nil {
+		return "", fmt.Errorf("resolve agent project context: %w", err)
+	}
+	if path == "" {
+		return "", fmt.Errorf("agent project context path is unavailable")
+	}
+	return path, nil
 }
 
 // SetOnTaskStateChange sets a callback for task state changes.

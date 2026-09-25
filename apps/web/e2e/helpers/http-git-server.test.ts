@@ -104,4 +104,28 @@ describe("startHTTPGitFixture", () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("uses the configured provider origin for fixture repositories", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-http-git-"));
+    let fixture: Awaited<ReturnType<typeof startHTTPGitFixture>> | undefined;
+
+    try {
+      fixture = await startHTTPGitFixture(root, "github", {
+        bridgeGateway: "127.0.0.1",
+        providerOrigin: "https://github.com/",
+      });
+
+      expect(fixture.remoteURL).toBe("https://github.com/fixture/github.git");
+      expect(
+        execFileSync("git", ["remote", "get-url", "origin"], {
+          cwd: fixture.checkoutPath,
+          encoding: "utf8",
+        }),
+      ).toBe(fixture.remoteURL + "\n");
+      expect(fixture.gitConfigEnvVars[2]?.value).toBe("https://github.com/");
+    } finally {
+      await fixture?.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

@@ -299,3 +299,9 @@ func (r *Repository) Close() error {
 func (r *Repository) DB() *sql.DB {
 	return r.db.DB
 }
+
+// DBX returns the writer for repositories that share the task database and
+// need dialect-aware query rebinding.
+func (r *Repository) DBX() *sqlx.DB {
+	return r.db
+}

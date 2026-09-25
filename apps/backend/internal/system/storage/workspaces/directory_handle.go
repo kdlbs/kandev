@@ -26,7 +26,17 @@ type DirectoryHandle interface {
 	ReadLink(name string) (string, error)
 	ReadDir() ([]os.DirEntry, error)
 	ReadFile(name string) ([]byte, error)
+	ReadContextEntries() ([]DirectoryEntry, error)
+	ReadFileLimit(name string, maxBytes int64) ([]byte, error)
+	CreateFile(name string, data []byte, mode os.FileMode) error
 	WriteFile(name string, data []byte, mode os.FileMode) error
+	WriteFileAtomic(name string, data []byte, mode os.FileMode) error
+}
+
+type DirectoryEntry struct {
+	Name string
+	Mode os.FileMode
+	Size int64
 }
 
 // WriteOwnershipMarkerNoFollow writes an ownership marker through an already

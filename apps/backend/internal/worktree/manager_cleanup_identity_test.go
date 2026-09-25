@@ -71,6 +71,10 @@ func (h *postRemovalSwapDirectoryHandle) ReadFile(string) ([]byte, error) {
 	return nil, os.ErrNotExist
 }
 
+func (h *postRemovalSwapDirectoryHandle) ReadFileLimit(string, int64) ([]byte, error) {
+	return nil, os.ErrNotExist
+}
+
 func (h *postRemovalSwapDirectoryHandle) OpenFile(string) (io.ReadCloser, error) {
 	return nil, os.ErrNotExist
 }
@@ -87,11 +91,23 @@ func (h *postRemovalSwapDirectoryHandle) ReadLink(string) (string, error) {
 	return "", os.ErrNotExist
 }
 
+func (h *postRemovalSwapDirectoryHandle) CreateFile(string, []byte, os.FileMode) error {
+	return errors.New("fake directory handle does not support writes")
+}
+
 func (h *postRemovalSwapDirectoryHandle) ReadDir() ([]os.DirEntry, error) {
 	return nil, os.ErrNotExist
 }
 
+func (h *postRemovalSwapDirectoryHandle) ReadContextEntries() ([]storageworkspaces.DirectoryEntry, error) {
+	return nil, nil
+}
+
 func (h *postRemovalSwapDirectoryHandle) WriteFile(string, []byte, os.FileMode) error {
+	return errors.New("fake directory handle does not support writes")
+}
+
+func (h *postRemovalSwapDirectoryHandle) WriteFileAtomic(string, []byte, os.FileMode) error {
 	return errors.New("fake directory handle does not support writes")
 }
 

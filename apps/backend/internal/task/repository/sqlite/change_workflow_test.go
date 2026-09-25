@@ -13,6 +13,12 @@ func seedWorkflowChangeRows(t *testing.T, repo *Repository, taskID string) *mode
 	t.Helper()
 	ctx := context.Background()
 	seedWorkspace(t, repo, "workspace-workflow-change")
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO agent_projects (id, workspace_id, name)
+		VALUES (?, ?, ?)
+	`), "project-workflow-change", "workspace-workflow-change", "Workflow change project"); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
 	for _, workflow := range []*models.Workflow{
 		{ID: "workflow-change-source", WorkspaceID: "workspace-workflow-change", Name: "Source"},
 		{ID: "workflow-change-target", WorkspaceID: "workspace-workflow-change", Name: "Target"},
@@ -34,6 +40,8 @@ func seedWorkflowChangeRows(t *testing.T, repo *Repository, taskID string) *mode
 		WorkflowID: "workflow-change-source", WorkflowStepID: "workflow-change-source-step",
 		Title: "Original title", Description: "Original description", Priority: "medium",
 		Metadata: map[string]interface{}{"sentinel": "keep"}, WorkflowAgentOverrides: oldOverrides,
+		AgentProjectID: "project-workflow-change", AgentProjectTier: "coordinator",
+		AgentProjectProfileID: "profile-workflow-change",
 	}); err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -75,6 +83,10 @@ func TestWorkflowChangeAtomicAdmissionPersistsMembershipAndOverridesTogether(t *
 	}
 	if stored.WorkflowAgentOverrides == nil || stored.WorkflowAgentOverrides.WorkflowID != candidate.WorkflowID {
 		t.Fatalf("stored overrides = %+v", stored.WorkflowAgentOverrides)
+	}
+	if stored.AgentProjectID != source.AgentProjectID || stored.AgentProjectTier != source.AgentProjectTier ||
+		stored.AgentProjectProfileID != source.AgentProjectProfileID {
+		t.Fatalf("agent project identity changed during workflow move: %+v", stored)
 	}
 	if replacement, ok := stored.WorkflowAgentOverrides.ReplacementFor(candidate.WorkflowID, candidate.WorkflowStepID); !ok || replacement != "replacement-new" {
 		t.Fatalf("stored destination replacement = %q, %v", replacement, ok)

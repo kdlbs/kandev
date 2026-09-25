@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -22,43 +23,44 @@ const (
 
 // scenarioRegistry maps scenario names to their handler functions.
 var scenarioRegistry = map[string]func(e *emitter){
-	"simple-message":          scenarioSimpleMessage,
-	"read-and-edit":           scenarioReadAndEdit,
-	"permission-flow":         scenarioPermissionFlow,
-	toolKeyError:              scenarioError,
-	"subagent":                scenarioSubagent,
-	"all-tools":               scenarioAllTools,
-	"multi-turn":              scenarioMultiTurn,
-	"diff-expansion-setup":    scenarioDiffExpansionSetup,
-	"diff-update-setup":       scenarioDiffUpdateSetup,
-	"diff-update-modify":      scenarioDiffUpdateModify,
-	"diff-update-streaming":   scenarioDiffUpdateStreaming,
-	"multi-file-setup":        scenarioMultiFileSetup,
-	"multi-file-modify":       scenarioMultiFileModify,
-	"untracked-file-setup":    scenarioUntrackedFileSetup,
-	"untracked-file-modify":   scenarioUntrackedFileModify,
-	"clarification":           scenarioClarification,
-	"clarification-markdown":  scenarioClarificationMarkdown,
-	"clarification-multi":     scenarioClarificationMulti,
-	"clarification-timeout":   scenarioClarificationTimeout,
-	"multi-permission":        scenarioMultiPermission,
-	"kandev-mcp-permission":   scenarioKandevMCPPermission,
-	"review-cumulative-setup": scenarioReviewCumulativeSetup,
-	"walkthrough-setup":       scenarioWalkthroughSetup,
-	"walkthrough-basic":       scenarioWalkthroughBasic,
-	"walkthrough-reemit":      scenarioWalkthroughReemit,
-	"symlink-file-setup":      scenarioSymlinkFileSetup,
-	"markdown-table":          scenarioMarkdownTable,
-	"empty-turn":              scenarioEmptyTurn,
-	"push-current-branch":     scenarioPushCurrentBranch,
-	"steer-fold-setup":        scenarioSteerFoldSetup,
-	"steer-defer-setup":       scenarioSteerDeferSetup,
-	"saved-prompt-delivery":   scenarioSavedPromptDelivery,
-	"response-retry":          scenarioResponseRetry,
-	"goal-active":             scenarioGoalActive,
-	"goal-complete":           scenarioGoalComplete,
-	"goal-clear":              scenarioGoalClear,
-	"goal-long":               scenarioGoalLong,
+	"simple-message":              scenarioSimpleMessage,
+	"read-and-edit":               scenarioReadAndEdit,
+	"permission-flow":             scenarioPermissionFlow,
+	toolKeyError:                  scenarioError,
+	"subagent":                    scenarioSubagent,
+	"all-tools":                   scenarioAllTools,
+	"multi-turn":                  scenarioMultiTurn,
+	"diff-expansion-setup":        scenarioDiffExpansionSetup,
+	"diff-update-setup":           scenarioDiffUpdateSetup,
+	"diff-update-modify":          scenarioDiffUpdateModify,
+	"diff-update-streaming":       scenarioDiffUpdateStreaming,
+	"multi-file-setup":            scenarioMultiFileSetup,
+	"multi-file-modify":           scenarioMultiFileModify,
+	"untracked-file-setup":        scenarioUntrackedFileSetup,
+	"untracked-file-modify":       scenarioUntrackedFileModify,
+	"clarification":               scenarioClarification,
+	"clarification-markdown":      scenarioClarificationMarkdown,
+	"clarification-multi":         scenarioClarificationMulti,
+	"clarification-timeout":       scenarioClarificationTimeout,
+	"multi-permission":            scenarioMultiPermission,
+	"kandev-mcp-permission":       scenarioKandevMCPPermission,
+	"review-cumulative-setup":     scenarioReviewCumulativeSetup,
+	"walkthrough-setup":           scenarioWalkthroughSetup,
+	"walkthrough-basic":           scenarioWalkthroughBasic,
+	"walkthrough-reemit":          scenarioWalkthroughReemit,
+	"symlink-file-setup":          scenarioSymlinkFileSetup,
+	"markdown-table":              scenarioMarkdownTable,
+	"empty-turn":                  scenarioEmptyTurn,
+	"push-current-branch":         scenarioPushCurrentBranch,
+	"steer-fold-setup":            scenarioSteerFoldSetup,
+	"steer-defer-setup":           scenarioSteerDeferSetup,
+	"saved-prompt-delivery":       scenarioSavedPromptDelivery,
+	"agent-project-create-worker": scenarioAgentProjectCreateWorker,
+	"response-retry":              scenarioResponseRetry,
+	"goal-active":                 scenarioGoalActive,
+	"goal-complete":               scenarioGoalComplete,
+	"goal-clear":                  scenarioGoalClear,
+	"goal-long":                   scenarioGoalLong,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup
@@ -115,6 +117,32 @@ func scenarioEmptyTurn(e *emitter) {
 // directive inside a backend-generated expansion block.
 func scenarioSavedPromptDelivery(e *emitter) {
 	e.text(savedPromptDeliveryResponse)
+}
+
+func scenarioAgentProjectCreateWorker(e *emitter) {
+	const toolName = "create_agent_project_worker_kandev"
+	args := map[string]any{
+		"tier":   "economy",
+		"title":  "Worker created by the coordinator",
+		"prompt": `e2e:message("Project worker completed.")`,
+	}
+	toolID := nextToolID()
+	e.startTool(toolID, toolName, acp.ToolKindOther, args)
+	result, err := e.callMCPToolCtx(e.ctx, "kandev", toolName, args)
+	if err != nil {
+		e.completeTool(toolID, map[string]any{toolKeyError: err.Error()})
+		e.text("The project worker could not be created.")
+		return
+	}
+	e.completeTool(toolID, map[string]any{toolKeyResult: result})
+	var created struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal([]byte(result), &created) != nil || created.ID == "" {
+		e.text("The project worker could not be created: " + strings.TrimSpace(result))
+		return
+	}
+	e.text("The project worker was created.")
 }
 
 // emitPredefinedScenario dispatches to a named e2e scenario.

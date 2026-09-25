@@ -64,3 +64,39 @@ func TestScopePrincipalRejectsSessionFromAnotherTask(t *testing.T) {
 	_, err := resolver.ScopePrincipal(context.Background(), "automation-task", "session-1")
 	require.Error(t, err)
 }
+
+func TestScopePrincipalDerivesProjectMainTask(t *testing.T) {
+	tests := []struct {
+		name string
+		task *models.Task
+	}{
+		{
+			name: "coordinator",
+			task: &models.Task{
+				ID: "coordinator-task", WorkspaceID: "workspace-1",
+				AgentProjectID: "project-1", AgentProjectTier: models.AgentProjectTierCoordinator,
+			},
+		},
+		{
+			name: "worker",
+			task: &models.Task{
+				ID: "worker-task", WorkspaceID: "workspace-1", ParentID: "coordinator-task",
+				AgentProjectID: "project-1", AgentProjectTier: models.AgentProjectTierEconomy,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resolver := &Resolver{tasks: principalLookup{
+				task:      test.task,
+				workspace: &models.Workspace{ID: "workspace-1"},
+				session:   &models.TaskSession{ID: "session-1", TaskID: test.task.ID},
+			}}
+			ctx, err := resolver.ScopePrincipal(context.Background(), test.task.ID, "session-1")
+			require.NoError(t, err)
+			principal, ok := PrincipalFromContext(ctx)
+			require.True(t, ok)
+			require.Equal(t, "coordinator-task", principal.ProjectMainTaskID)
+		})
+	}
+}

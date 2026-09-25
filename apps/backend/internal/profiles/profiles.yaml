@@ -51,6 +51,12 @@ features:
     dev:  "true"
     e2e:  "true"
 
+  # Agent Projects use workflow-free tasks and shared host-local context.
+  KANDEV_FEATURES_AGENT_PROJECTS:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Opt-in authentication + per-user workspaces. This flag IS the on/off
   # switch: when on, every visitor must sign in (the first becomes admin via
   # a setup wizard) and workspaces are private per user. Off everywhere by

@@ -25,6 +25,9 @@ func TestMigrate_PriorityRebuildPreservesRequiredIndexes(t *testing.T) {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`CREATE TABLE agent_projects (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("seed agent projects table: %v", err)
+	}
 
 	// A legacy tasks table with INTEGER priority — this alone is enough to
 	// trigger the rebuild — and no external_id column, matching a real

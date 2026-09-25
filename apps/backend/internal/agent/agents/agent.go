@@ -63,6 +63,12 @@ type Agent interface {
 	InstallScript() string
 }
 
+// ProjectWorkspaceDirectoriesAgent marks ACP agents that accept additional
+// server-granted project workspace roots for new and restored sessions.
+type ProjectWorkspaceDirectoriesAgent interface {
+	SupportsProjectWorkspaceDirectories() bool
+}
+
 // VirtualAgent marks an agent family that is visible to settings and profile
 // configuration but cannot launch an inference process itself.
 type VirtualAgent interface {

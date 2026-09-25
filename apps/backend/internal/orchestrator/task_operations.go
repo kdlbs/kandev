@@ -37,6 +37,28 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+var (
+	ErrAgentProjectsDisabled         = errors.New("agent projects are disabled")
+	ErrAgentProjectLaunchUnavailable = errors.New("agent project launch policy is unavailable")
+)
+
+func (s *Service) resolveAgentProjectLaunch(
+	ctx context.Context,
+	task *models.Task,
+	profileID, executorID, executorProfileID string,
+) (string, string, string, error) {
+	if task == nil || task.AgentProjectID == "" {
+		return profileID, executorID, executorProfileID, nil
+	}
+	if !s.agentProjectsEnabled {
+		return "", "", "", ErrAgentProjectsDisabled
+	}
+	if s.agentProjectLaunchResolver == nil {
+		return "", "", "", ErrAgentProjectLaunchUnavailable
+	}
+	return s.agentProjectLaunchResolver(ctx, task, profileID, executorID, executorProfileID)
+}
+
 // PromptResult contains the result of a prompt operation
 type PromptResult struct {
 	StopReason   string // The reason the agent stopped (e.g., "end_turn")
@@ -300,6 +322,25 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		s.logger.Error("failed to fetch task for session preparation",
 			zap.String("task_id", taskID),
 			zap.Error(err))
+		return "", err
+	}
+	var projectLaunchTask *models.Task
+	if task.AgentProjectID != "" {
+		if s.repo == nil {
+			return "", ErrAgentProjectLaunchUnavailable
+		}
+		projectLaunchTask, err = s.repo.GetTask(ctx, taskID)
+		if err != nil || projectLaunchTask == nil {
+			if err == nil {
+				err = errors.New("agent project task is unavailable")
+			}
+			return "", fmt.Errorf("load agent project task identity: %w", err)
+		}
+	}
+	agentProfileID, executorID, executorProfileID, err = s.resolveAgentProjectLaunch(
+		ctx, projectLaunchTask, agentProfileID, executorID, executorProfileID,
+	)
+	if err != nil {
 		return "", err
 	}
 	// Resolve agent/executor profile from task metadata if not explicitly provided
@@ -678,6 +719,19 @@ func (s *Service) startCreatedSession(
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, options.ceilingEntryBinding); err != nil {
 		return nil, err
 	}
+	launchTask, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	profileID := agentProfileID
+	if profileID == "" {
+		profileID = session.AgentProfileID
+	}
+	profileID, _, _, err = s.resolveAgentProjectLaunch(ctx, launchTask, profileID, session.ExecutorID, session.ExecutorProfileID)
+	if err != nil {
+		return nil, err
+	}
+	agentProfileID = profileID
 
 	// Office-owned sessions must be started by the scheduler. Reject before
 	// resolving profiles or persisting any caller-derived session metadata.
@@ -1351,6 +1405,18 @@ func (s *Service) promoteSelectedExplicitWorkflowSession(
 
 //nolint:cyclop,funlen,gocognit,nestif // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
 func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, opts startTaskOptions) (*executor.TaskExecution, error) {
+	if s.repo != nil {
+		task, err := s.repo.GetTask(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		agentProfileID, executorID, executorProfileID, err = s.resolveAgentProjectLaunch(
+			ctx, task, agentProfileID, executorID, executorProfileID,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
 	ctx = executor.WithTaskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
 	if opts.ceilingEntryBinding != nil {
 		ctx = withCeilingEntryBinding(ctx, opts.ceilingEntryBinding)
@@ -3801,6 +3867,17 @@ func (s *Service) attemptColdResume(
 	isOfficeTask bool,
 	resumeAttempt *resumeAttempt,
 ) (retryable bool, err error) {
+	if s.repo != nil {
+		task, taskErr := s.repo.GetTask(ctx, session.TaskID)
+		if taskErr != nil {
+			return false, taskErr
+		}
+		if _, _, _, launchErr := s.resolveAgentProjectLaunch(
+			ctx, task, session.AgentProfileID, session.ExecutorID, session.ExecutorProfileID,
+		); launchErr != nil {
+			return false, launchErr
+		}
+	}
 	// If the session is in CREATED state with an existing workspace (executors_running
 	// row exists), the workspace was prepared but the agent was never started. Use
 	// LaunchPreparedSession which routes to startAgentOnExistingWorkspace to reuse

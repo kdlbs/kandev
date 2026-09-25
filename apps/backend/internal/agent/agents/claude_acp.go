@@ -77,9 +77,10 @@ func NewClaudeACP() *ClaudeACP {
 	}
 }
 
-func (a *ClaudeACP) ID() string          { return "claude-acp" }
-func (a *ClaudeACP) Name() string        { return "Claude ACP Agent" }
-func (a *ClaudeACP) DisplayName() string { return "Claude" }
+func (a *ClaudeACP) ID() string                                { return "claude-acp" }
+func (a *ClaudeACP) SupportsProjectWorkspaceDirectories() bool { return true }
+func (a *ClaudeACP) Name() string                              { return "Claude ACP Agent" }
+func (a *ClaudeACP) DisplayName() string                       { return "Claude" }
 func (a *ClaudeACP) Description() string {
 	return "Anthropic Claude coding agent using the ACP protocol via the agentclientprotocol bridge."
 }

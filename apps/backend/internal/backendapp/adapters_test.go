@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 
@@ -228,11 +229,17 @@ func TestBuildLifecycleLaunchRequestWiresMappedCollections(t *testing.T) {
 	}
 	override := &orchestratorexecutor.RouteOverride{}
 	filler.fillStruct(t, override)
+	projectWorkspace := &orchestratorexecutor.ProjectWorkspaceAccess{
+		ContextPath:             "/kandev/agent-projects/project/context",
+		Tier:                    "coordinator",
+		RepositoryWorktreePaths: []string{"/kandev/tasks/task/api", "/kandev/tasks/task/web"},
+	}
 
 	launchReq := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
 		WorkspaceFolders: folders,
 		RouteOverride:    override,
 		Repositories:     repos,
+		ProjectWorkspace: projectWorkspace,
 	}, "/workspace", "office-profile")
 
 	if len(launchReq.WorkspaceFolders) != len(folders) {
@@ -252,6 +259,14 @@ func TestBuildLifecycleLaunchRequestWiresMappedCollections(t *testing.T) {
 	}
 	for i := range repos {
 		assertSameNamedFieldsEqual(t, fmt.Sprintf("launch repo spec %d", i), repos[i], launchReq.Repositories[i])
+	}
+	if launchReq.ProjectWorkspace == nil || launchReq.ProjectWorkspace.ContextPath != projectWorkspace.ContextPath || launchReq.ProjectWorkspace.Tier != projectWorkspace.Tier ||
+		!slices.Equal(launchReq.ProjectWorkspace.RepositoryWorktreePaths, projectWorkspace.RepositoryWorktreePaths) {
+		t.Fatalf("ProjectWorkspace = %#v, want %#v", launchReq.ProjectWorkspace, projectWorkspace)
+	}
+	launchReq.ProjectWorkspace.RepositoryWorktreePaths[0] = "/changed"
+	if projectWorkspace.RepositoryWorktreePaths[0] == "/changed" {
+		t.Fatal("lifecycle launch request aliases the caller's project worktree paths")
 	}
 }
 

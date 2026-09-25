@@ -13,10 +13,27 @@ import {
 } from "./tasks.test-helpers";
 
 vi.mock("@/lib/recent-tasks", () => ({ removeRecentTask: vi.fn() }));
+const publishProjectTaskEvent = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/ws/handlers/agent-project-events", () => ({
+  publishAgentProjectTaskEvent: publishProjectTaskEvent,
+}));
 
 describe("task.deleted cleanup", () => {
   beforeEach(() => {
     vi.mocked(removeRecentTask).mockClear();
+    publishProjectTaskEvent.mockClear();
+  });
+
+  it("notifies the project sidebar when a worker is deleted", () => {
+    const payload = {
+      task_id: "worker-1",
+      workspace_id: "ws-1",
+      agent_project_id: "project-1",
+    };
+
+    registerTasksHandlers(makeStore())["task.deleted"]!(makeDeletedMessage(payload));
+
+    expect(publishProjectTaskEvent).toHaveBeenCalledWith(payload);
   });
 
   it("removes the deleted task from recent task history", () => {

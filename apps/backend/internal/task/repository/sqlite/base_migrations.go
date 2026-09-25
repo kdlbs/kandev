@@ -141,6 +141,22 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
 	}
+	// This follows the table rebuild so upgraded databases retain project identity.
+	if err := r.migrate.Apply("tasks.agent_project_id", `ALTER TABLE tasks ADD COLUMN agent_project_id TEXT REFERENCES agent_projects(id) ON DELETE RESTRICT`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("idx_tasks_agent_project_id", `CREATE INDEX IF NOT EXISTS idx_tasks_agent_project_id ON tasks(agent_project_id)`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("idx_tasks_agent_project_coordinator", `CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_agent_project_coordinator ON tasks(agent_project_id) WHERE agent_project_id IS NOT NULL AND parent_id = ''`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("tasks.agent_project_tier", `ALTER TABLE tasks ADD COLUMN agent_project_tier TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("tasks.agent_project_profile_id", `ALTER TABLE tasks ADD COLUMN agent_project_profile_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	// Store task-local fixed-step profile substitutions after the workflow-FK
 	// rebuild so legacy databases cannot lose the column during that recreate.
 	_ = r.migrate.Apply("tasks.workflow_agent_overrides", `ALTER TABLE tasks ADD COLUMN workflow_agent_overrides TEXT`)

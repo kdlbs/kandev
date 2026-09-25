@@ -226,6 +226,8 @@ type TaskDTO struct {
 	ActiveSubagentCount int                    `json:"active_subagent_count"`
 	IsRemoteExecutor    bool                   `json:"is_remote_executor,omitempty"`
 	ParentID            string                 `json:"parent_id,omitempty"`
+	AgentProjectID      string                 `json:"agent_project_id,omitempty"`
+	AgentProjectTier    string                 `json:"agent_project_tier,omitempty"`
 	Autopilot           bool                   `json:"autopilot"`
 	ArchivedAt          *time.Time             `json:"archived_at,omitempty"`
 	CreatedAt           time.Time              `json:"created_at"`
@@ -1005,6 +1007,8 @@ func FromTaskWithSessionInfo(
 		PrimarySessionPendingAction: primarySessionPendingAction,
 		IsRemoteExecutor:            primaryExecutorType != nil && models.IsRemoteExecutorType(models.ExecutorType(*primaryExecutorType)),
 		ParentID:                    task.ParentID,
+		AgentProjectID:              task.AgentProjectID,
+		AgentProjectTier:            task.AgentProjectTier,
 		Autopilot:                   task.Autopilot,
 		ArchivedAt:                  task.ArchivedAt,
 		CreatedAt:                   task.CreatedAt,

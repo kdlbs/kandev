@@ -408,6 +408,29 @@ const infraSchemaDDL = `
 		updated_at TIMESTAMP NOT NULL
 	);
 
+	CREATE TABLE IF NOT EXISTS agent_projects (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		repository_ids TEXT NOT NULL DEFAULT '[]',
+		primary_repository_id TEXT NOT NULL DEFAULT '',
+		coordinator_profile_id TEXT NOT NULL DEFAULT '',
+		economy_profile_id TEXT NOT NULL DEFAULT '',
+		frontier_profile_id TEXT NOT NULL DEFAULT '',
+		executor_profile_id TEXT NOT NULL DEFAULT '',
+		main_task_id TEXT NOT NULL DEFAULT '',
+		request_key TEXT NOT NULL DEFAULT '',
+		revision BIGINT NOT NULL DEFAULT 1,
+		archived_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_projects_request_key
+		ON agent_projects(workspace_id, request_key) WHERE request_key != '';
+	CREATE INDEX IF NOT EXISTS idx_agent_projects_workspace
+		ON agent_projects(workspace_id, archived_at, updated_at);
+
 	CREATE TABLE IF NOT EXISTS workspace_members (
 		workspace_id TEXT NOT NULL,
 		user_id TEXT NOT NULL,

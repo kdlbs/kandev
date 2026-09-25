@@ -496,6 +496,12 @@ const (
 	ActionMCPClarificationTimeout                  = "mcp.clarification_timeout"
 	ActionMCPSetTaskTitle                          = "mcp.set_task_title"
 	ActionMCPGetDiagnosticBundle                   = "mcp.get_diagnostic_bundle"
+	ActionMCPGetAgentProject                       = "mcp.get_agent_project"
+	ActionMCPListAgentProjectWorkers               = "mcp.list_agent_project_workers"
+	ActionMCPCreateAgentProjectWorker              = "mcp.create_agent_project_worker"
+	ActionMCPGetAgentProjectTask                   = "mcp.get_agent_project_task"
+	ActionMCPMessageAgentProjectWorker             = "mcp.message_agent_project_worker"
+	ActionMCPStopAgentProjectWorker                = "mcp.stop_agent_project_worker"
 
 	// Office task handoffs (cross-task context).
 	ActionMCPListRelatedTasks         = "mcp.list_related_tasks"

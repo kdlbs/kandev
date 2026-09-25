@@ -238,7 +238,7 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 	}
 	result, err := m.sessionManager.InitializeSession(
 		ctx, client, refresh.AgentConfig, execution.ACPSessionID,
-		execution.WorkspacePath, kubernetesRefreshMcpServers(refresh.McpServers),
+		execution.WorkspacePath, kubernetesRefreshMcpServers(refresh.McpServers), execution.ProjectWritableRoots,
 	)
 	if err != nil {
 		return "", fmt.Errorf("resume ACP session after Kubernetes restart: %w", err)

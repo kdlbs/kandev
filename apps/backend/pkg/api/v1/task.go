@@ -192,6 +192,8 @@ type Task struct {
 	WorkspaceOrphaned bool   `json:"workspace_orphaned,omitempty"`
 	IsEphemeral       bool   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
 	ParentID          string `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	AgentProjectID    string `json:"agent_project_id,omitempty"`
+	AgentProjectTier  string `json:"agent_project_tier,omitempty"`
 	Autopilot         bool   `json:"autopilot"`
 	Identifier        string `json:"identifier,omitempty"`
 }

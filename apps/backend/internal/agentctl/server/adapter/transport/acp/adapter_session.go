@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/coder/acp-go-sdk"
@@ -84,21 +85,29 @@ func (a *Adapter) waitForSessionCleanup() {
 
 // NewSession creates a new agent session.
 func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+	return a.NewSessionWithAdditionalDirectories(ctx, mcpServers, nil)
+}
+
+func (a *Adapter) NewSessionWithAdditionalDirectories(ctx context.Context, mcpServers []types.McpServer, directories []string) (string, error) {
 	if err := a.lockSessionTransition(ctx); err != nil {
 		return "", err
 	}
 	defer a.sessionTransitionMu.Unlock()
-	return a.newSession(ctx, mcpServers)
+	return a.newSession(ctx, mcpServers, directories)
 }
 
 //nolint:funlen // pre-existing session creation flow retained for transition ordering
-func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer, directories []string) (string, error) {
 	a.mu.Lock()
 	conn := a.acpConn
+	capabilities := a.capabilities
 	a.mu.Unlock()
 
 	if conn == nil {
 		return "", fmt.Errorf("adapter not initialized")
+	}
+	if err := validateAdditionalDirectories(capabilities, directories); err != nil {
+		return "", err
 	}
 	priorPromptTurn := a.currentPromptTurn()
 
@@ -129,8 +138,9 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
 	}
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
-		Cwd:        a.cfg.WorkDir,
-		McpServers: toACPMcpServers(filteredServers),
+		Cwd:                   a.cfg.WorkDir,
+		McpServers:            toACPMcpServers(filteredServers),
+		AdditionalDirectories: directories,
 	})
 	if err != nil {
 		for _, server := range filteredServers {
@@ -439,13 +449,17 @@ func mapToHTTPHeaders(headers map[string]string) []acp.HttpHeader {
 	return hdrs
 }
 
-// LoadSession restores an existing session, preferring advertised session/resume
-// without history replay and otherwise using session/load.
-// mcpServers are passed to the agent so it can reconnect to MCP servers on the new
-// agentctl instance (critical for agents that receive MCP configs via the protocol).
-//
-//nolint:funlen // pre-existing length preserved from adapter.go file split
+// LoadSession restores an existing session through the advertised session protocol.
 func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
+	return a.LoadSessionWithAdditionalDirectories(ctx, sessionID, mcpServers, nil)
+}
+
+// LoadSessionWithAdditionalDirectories restores an existing session and grants
+// the listed server-selected workspace directories to the agent.
+// mcpServers are passed to the agent so it can reconnect after resume.
+//
+//nolint:funlen // preserve the ordering-sensitive restore and replay lifecycle
+func (a *Adapter) LoadSessionWithAdditionalDirectories(ctx context.Context, sessionID string, mcpServers []types.McpServer, directories []string) error {
 	if err := a.lockSessionTransition(ctx); err != nil {
 		return err
 	}
@@ -464,6 +478,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		a.logger.Debug("session/load rejected: agent does not advertise LoadSession capability",
 			zap.String("session_id", sessionID))
 		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
+	}
+	if err := validateAdditionalDirectories(capabilities, directories); err != nil {
+		return err
 	}
 	priorPromptTurn := a.currentPromptTurn()
 
@@ -505,9 +522,10 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Unlock()
 
 	resp, err := a.restoreSessionState(ctx, conn, capabilities, acp.LoadSessionRequest{
-		SessionId:  acp.SessionId(sessionID),
-		Cwd:        a.cfg.WorkDir,
-		McpServers: toACPMcpServers(filteredServers),
+		SessionId:             acp.SessionId(sessionID),
+		Cwd:                   a.cfg.WorkDir,
+		McpServers:            toACPMcpServers(filteredServers),
+		AdditionalDirectories: directories,
 	})
 
 	if err != nil {
@@ -606,6 +624,10 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 // superseded one, so a successful reset closes the outgoing session to release its
 // resources. The old session is captured before NewSession overwrites a.sessionID.
 func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+	return a.ResetSessionWithAdditionalDirectories(ctx, mcpServers, nil)
+}
+
+func (a *Adapter) ResetSessionWithAdditionalDirectories(ctx context.Context, mcpServers []types.McpServer, directories []string) (string, error) {
 	if err := a.lockSessionTransition(ctx); err != nil {
 		return "", err
 	}
@@ -614,7 +636,7 @@ func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer
 	previous, conn := a.sessionID, a.acpConn
 	a.mu.RUnlock()
 
-	newID, err := a.newSession(ctx, mcpServers)
+	newID, err := a.newSession(ctx, mcpServers, directories)
 	if err != nil {
 		a.sessionTransitionMu.Unlock()
 		return "", err
@@ -632,6 +654,21 @@ func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer
 	}
 	a.sessionTransitionMu.Unlock()
 	return newID, nil
+}
+
+func validateAdditionalDirectories(capabilities acp.AgentCapabilities, directories []string) error {
+	if len(directories) == 0 {
+		return nil
+	}
+	if capabilities.SessionCapabilities.AdditionalDirectories == nil {
+		return fmt.Errorf("agent does not advertise additionalDirectories session support")
+	}
+	for _, directory := range directories {
+		if !filepath.IsAbs(directory) {
+			return fmt.Errorf("additional project workspace directory must be absolute: %q", directory)
+		}
+	}
+	return nil
 }
 
 func (a *Adapter) runSupersededSessionCleanup(

@@ -77,9 +77,10 @@ func NewCodexACP() *CodexACP {
 	}
 }
 
-func (a *CodexACP) ID() string          { return "codex-acp" }
-func (a *CodexACP) Name() string        { return "Codex ACP Agent" }
-func (a *CodexACP) DisplayName() string { return "Codex" }
+func (a *CodexACP) ID() string                                { return "codex-acp" }
+func (a *CodexACP) SupportsProjectWorkspaceDirectories() bool { return true }
+func (a *CodexACP) Name() string                              { return "Codex ACP Agent" }
+func (a *CodexACP) DisplayName() string                       { return "Codex" }
 func (a *CodexACP) Description() string {
 	return "OpenAI Codex coding agent using the Agent Client Protocol bridge."
 }

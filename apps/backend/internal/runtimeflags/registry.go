@@ -86,6 +86,22 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.agentProjects",
+			EnvVar:          "KANDEV_FEATURES_AGENT_PROJECTS",
+			Kind:            KindFeature,
+			Label:           "Agent Projects",
+			Description:     "Enables project coordinators, worker tasks, and shared project context.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Agent Projects create persistent workflow-free tasks and share writable filesystem context across project sessions.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.AgentProjects },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentProjects = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.needsYouInbox",
 			EnvVar:      "KANDEV_FEATURES_NEEDS_YOU_INBOX",
 			Kind:        KindFeature,

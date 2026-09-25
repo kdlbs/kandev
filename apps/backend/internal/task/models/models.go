@@ -12,6 +12,12 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+const (
+	AgentProjectTierCoordinator = "coordinator"
+	AgentProjectTierEconomy     = "economy"
+	AgentProjectTierFrontier    = "frontier"
+)
+
 // ErrExecutorRunningNotFound is returned when no executor running record exists for a session.
 var ErrExecutorRunningNotFound = errors.New("executor running not found")
 
@@ -1223,6 +1229,7 @@ const (
 	// TaskOriginAutomationTask is a normal, user-visible task created by an
 	// automation. Unlike automation_run, it remains in Kanban/sidebar flows.
 	TaskOriginAutomationTask = "automation_task"
+	TaskOriginAgentProject   = "agent_project"
 )
 
 // Task represents a task in the database
@@ -1291,11 +1298,14 @@ type Task struct {
 	// assignee above: a task can carry both, and setting one never clears the
 	// other. It is advisory and gates nothing; taking a task over is a
 	// reassignment plus a prompt, not a lock.
-	AssigneeUserID string `json:"assignee_user_id,omitempty"`
-	Origin         string `json:"origin,omitempty"`     // manual, agent_created, routine
-	ProjectID      string `json:"project_id,omitempty"` // FK to office project
-	Labels         string `json:"labels,omitempty"`     // JSON array string, default "[]"
-	Identifier     string `json:"identifier,omitempty"` // e.g. "KAN-42"
+	AssigneeUserID        string `json:"assignee_user_id,omitempty"`
+	Origin                string `json:"origin,omitempty"`     // manual, agent_created, routine
+	ProjectID             string `json:"project_id,omitempty"` // FK to office project
+	AgentProjectID        string `json:"agent_project_id,omitempty"`
+	AgentProjectTier      string `json:"agent_project_tier,omitempty"`
+	AgentProjectProfileID string `json:"agent_project_profile_id,omitempty"`
+	Labels                string `json:"labels,omitempty"`     // JSON array string, default "[]"
+	Identifier            string `json:"identifier,omitempty"` // e.g. "KAN-42"
 
 	// ExternalID is a caller-supplied identity used for create-idempotency
 	// (docs/specs/tasks/requirements/external-id-idempotency.md). Empty when the task
@@ -3153,6 +3163,8 @@ func (t *Task) ToAPI() *v1.Task {
 		IsEphemeral:       t.IsEphemeral,
 		ParentID:          t.ParentID,
 		Autopilot:         t.Autopilot,
+		AgentProjectID:    t.AgentProjectID,
+		AgentProjectTier:  t.AgentProjectTier,
 	}
 	if t.Identifier != "" {
 		result.Identifier = t.Identifier

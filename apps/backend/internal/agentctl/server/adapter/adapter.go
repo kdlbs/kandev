@@ -157,6 +157,14 @@ type SessionResettableAdapter interface {
 	ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error)
 }
 
+// ProjectWorkspaceAdapter is implemented by ACP adapters that accept the
+// server-granted project context and repository roots on session transitions.
+type ProjectWorkspaceAdapter interface {
+	NewSessionWithAdditionalDirectories(ctx context.Context, mcpServers []types.McpServer, directories []string) (string, error)
+	LoadSessionWithAdditionalDirectories(ctx context.Context, sessionID string, mcpServers []types.McpServer, directories []string) error
+	ResetSessionWithAdditionalDirectories(ctx context.Context, mcpServers []types.McpServer, directories []string) (string, error)
+}
+
 // TurnStartRecorder is an optional interface implemented by adapters that
 // record a wall-clock turn-start timestamp per session, covering both a
 // human prompt dispatch and a synthetic ScheduleWakeup self-resume (spec

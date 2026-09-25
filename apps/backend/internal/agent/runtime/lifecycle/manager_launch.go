@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
+	"github.com/kandev/kandev/internal/sysprompt"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -1030,6 +1031,10 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if len(contributionDestinations) > 0 {
 		metadata[MetadataKeyContributionDestinations] = contributionDestinations
 	}
+	projectRoots, err := projectWritableRoots(reqWithWorktree.ProjectWorkspace)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("resolve agent project write roots: %w", err)
+	}
 
 	launchAuthToken, err := m.resolveLaunchAuthToken(ctx, reqWithWorktree, metadata)
 	if err != nil {
@@ -1067,7 +1072,8 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
-		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
+		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree), reqWithWorktree.ProjectWorkspace),
+		ProjectWritableRoots:           projectRoots,
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,
 		AutoApprovePermissions:         profileInfo != nil && profileInfo.AutoApprove,
@@ -1558,6 +1564,59 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 
 // launchInternal is the body of Launch run inside the per-session singleflight
 // slot. Callers must not invoke this directly except via Launch.
+func (m *Manager) prepareProjectWorkspaceForLaunch(
+	original, prepared *LaunchRequest,
+	result *EnvPrepareResult,
+	recorder *prepareProgressRecorder,
+	workspacePath *string,
+) error {
+	fail := func(err error) error {
+		m.publishLaunchPrepareCompleted(original, result, recorder, *workspacePath, false, err)
+		return err
+	}
+	if !prepared.UseWorktree || result == nil || !result.Success {
+		return fail(fmt.Errorf("agent project requires a prepared local worktree"))
+	}
+	repositoryWorktreePaths, primaryWorktreePath := projectPreparedWorktrees(result, prepared.RepositoryID)
+	if primaryWorktreePath == "" || len(repositoryWorktreePaths) == 0 {
+		return fail(fmt.Errorf("agent project primary repository worktree is unavailable"))
+	}
+	prepared.ProjectWorkspace.RepositoryWorktreePaths = repositoryWorktreePaths
+	*workspacePath = primaryWorktreePath
+	prepared.WorkspacePath = *workspacePath
+	if _, err := reconcileProjectWorkspace(
+		*workspacePath, prepared.ProjectWorkspace.ContextPath,
+		prepared.TaskID, prepared.WorkspaceID, prepared.TaskDirName,
+	); err != nil {
+		return fail(err)
+	}
+	if err := applyAgentProjectInstructions(prepared, primaryWorktreePath); err != nil {
+		return fail(err)
+	}
+	return nil
+}
+
+func projectPreparedWorktrees(result *EnvPrepareResult, primaryRepositoryID string) ([]string, string) {
+	var paths []string
+	primaryPath := ""
+	if len(result.Worktrees) > 0 {
+		for _, repository := range result.Worktrees {
+			if repository.WorktreePath == "" {
+				continue
+			}
+			paths = append(paths, repository.WorktreePath)
+			if repository.RepositoryID == primaryRepositoryID {
+				primaryPath = repository.WorktreePath
+			}
+		}
+		return paths, primaryPath
+	}
+	if result.WorktreeID != "" && result.WorkspacePath != "" {
+		return []string{result.WorkspacePath}, result.WorkspacePath
+	}
+	return nil, ""
+}
+
 func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
 	m.logger.Debug("launching agent",
 		zap.String("task_id", req.TaskID),
@@ -1577,6 +1636,9 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 	if !agentConfig.Enabled() {
 		return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
+	}
+	if err := validateProjectWorkspaceAgent(req, profileInfo, agentConfig); err != nil {
+		return nil, err
 	}
 	if err := m.prepareManagedGoCacheEnvironment(ctx, req); err != nil {
 		return nil, err
@@ -1650,6 +1712,11 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		// state; otherwise standalone receives the repository path (or an empty
 		// path) that was present before preparation completed.
 		reqWithWorktree.WorkspacePath = workspacePath
+	}
+	if reqWithWorktree.ProjectWorkspace != nil {
+		if err := m.prepareProjectWorkspaceForLaunch(req, &reqWithWorktree, prepResult, progressRecorder, &workspacePath); err != nil {
+			return nil, err
+		}
 	}
 
 	// 6b. Deploy per-profile skills + custom prompt (ADR 0005 Wave A).
@@ -1740,6 +1807,44 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		zap.Stringer("runtime", execution.RuntimeName))
 
 	return execution, nil
+}
+
+func validateProjectWorkspaceAgent(req *LaunchRequest, profileInfo *AgentProfileInfo, agentConfig agents.Agent) error {
+	if req == nil || req.ProjectWorkspace == nil {
+		return nil
+	}
+	if req.IsPassthrough || (profileInfo != nil && profileInfo.CLIPassthrough) {
+		return fmt.Errorf("agent project profiles must use ACP session workspace access")
+	}
+	capability, supported := agentConfig.(agents.ProjectWorkspaceDirectoriesAgent)
+	if !supported || !capability.SupportsProjectWorkspaceDirectories() {
+		return fmt.Errorf("agent type %q cannot receive project workspace write access", agentConfig.ID())
+	}
+	return nil
+}
+
+func applyAgentProjectInstructions(req *LaunchRequest, primaryWorktreePath string) error {
+	if req == nil || req.ProjectWorkspace == nil {
+		return nil
+	}
+	tier := req.ProjectWorkspace.Tier
+	if tier != "coordinator" && tier != "economy" && tier != "frontier" {
+		return fmt.Errorf("agent project tier is unavailable for launch instructions")
+	}
+	req.TaskDescription = sysprompt.InjectAgentProjectInstructions(
+		req.TaskDescription,
+		sysprompt.AgentProjectInstructions(
+			tier,
+			req.ProjectWorkspace.ContextPath,
+			primaryWorktreePath,
+			req.ProjectWorkspace.RepositoryWorktreePaths,
+		),
+	)
+	if req.Metadata == nil {
+		req.Metadata = make(map[string]interface{})
+	}
+	req.Metadata["task_description"] = req.TaskDescription
+	return nil
 }
 
 func (m *Manager) admitExecutionOwner(ctx context.Context, req *LaunchRequest) error {

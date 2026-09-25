@@ -18,6 +18,8 @@ import (
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 )
 
+const projectArchiveCleanupRetryInterval = 100 * time.Millisecond
+
 type workspaceEnvironmentRepository interface {
 	taskEnvironmentOwnerTransferer
 	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
@@ -246,7 +248,16 @@ func cascadePostCommitError(out *CascadeOutcome, err error) error {
 //     archived, stamping the cascade ID on the released row.
 //  6. Evaluate cleanup once per affected group.
 func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cascade bool) (*CascadeOutcome, error) {
-	return s.archiveTaskTree(ctx, rootID, cascade, nil)
+	return s.archiveTaskTree(ctx, rootID, cascade, nil, false)
+}
+
+// ArchiveAgentProjectTree archives a project coordinator and its workers as a
+// single retryable lifecycle operation.
+func (s *HandoffService) ArchiveAgentProjectTree(ctx context.Context, projectID, rootID string) (*CascadeOutcome, error) {
+	if err := s.authorizeAgentProjectRoot(ctx, projectID, rootID); err != nil {
+		return nil, err
+	}
+	return s.archiveTaskTree(ctx, rootID, true, nil, true)
 }
 
 // ArchiveAutoTask archives a candidate only if the task row and its current
@@ -255,7 +266,18 @@ func (s *HandoffService) ArchiveAutoTask(ctx context.Context, candidate *models.
 	if candidate == nil {
 		return nil, errors.New("auto-archive candidate is required")
 	}
-	return s.archiveTaskTree(ctx, candidate.ID, false, candidate)
+	return s.archiveTaskTree(ctx, candidate.ID, false, candidate, false)
+}
+
+func (s *HandoffService) authorizeAgentProjectRoot(ctx context.Context, projectID, taskID string) error {
+	if projectID == "" || taskID == "" || s.agentProjectActionCheck == nil {
+		return ErrAgentProjectTaskForbidden
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil || task == nil || task.AgentProjectID != projectID || task.ParentID != "" {
+		return ErrAgentProjectTaskForbidden
+	}
+	return s.agentProjectActionCheck(ctx, projectID, taskID)
 }
 
 func (s *HandoffService) validateArchiveRoot(ctx context.Context, rootID string) error {
@@ -274,6 +296,7 @@ func (s *HandoffService) archiveTaskTree(
 	rootID string,
 	cascade bool,
 	autoArchiveCandidate *models.Task,
+	projectLifecycle bool,
 ) (*CascadeOutcome, error) {
 	archiveDeadline := archivecascade.ArchiveDeadline(ctx)
 	archiveCtx, cancelArchive := context.WithDeadline(ctx, archiveDeadline)
@@ -290,6 +313,13 @@ func (s *HandoffService) archiveTaskTree(
 	// Validate the root before CAS can turn an unknown ID into a no-op.
 	if err := s.validateArchiveRoot(archiveCtx, rootID); err != nil {
 		return nil, err
+	}
+	root, err := s.tasks.GetTask(archiveCtx, rootID)
+	if err != nil {
+		return nil, err
+	}
+	if root.AgentProjectID != "" && root.ParentID == "" && !projectLifecycle {
+		return nil, ErrAgentProjectCoordinatorActionRequired
 	}
 	cascadeLock := s.archiveCascadeLock.lockFor(rootID)
 	cascadeLock.Lock()
@@ -536,12 +566,21 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 	return s.DeleteTaskTreeWithOptions(ctx, rootID, cascade, DeleteTaskOptions{})
 }
 
+// DeleteAgentProjectTree deletes a coordinator and every worker after the
+// project service has checked capacity and worktree consent.
+func (s *HandoffService) DeleteAgentProjectTree(ctx context.Context, projectID, rootID string, options DeleteTaskOptions) (*CascadeOutcome, error) {
+	if err := s.authorizeAgentProjectRoot(ctx, projectID, rootID); err != nil {
+		return nil, err
+	}
+	return s.deleteTaskTreeWithReasonAndOptions(ctx, rootID, true, "", options, true)
+}
+
 // DeleteTaskTreeWithReason preserves the machine-readable reason on the
 // task.deleted event while using the same cascade lifecycle.
 func (s *HandoffService) DeleteTaskTreeWithReason(
 	ctx context.Context, rootID string, cascade bool, reason string,
 ) (*CascadeOutcome, error) {
-	return s.deleteTaskTreeWithReasonAndOptions(ctx, rootID, cascade, reason, DeleteTaskOptions{})
+	return s.deleteTaskTreeWithReasonAndOptions(ctx, rootID, cascade, reason, DeleteTaskOptions{}, false)
 }
 
 // DeleteTaskTreeWithOptions deletes a task tree after all owned worktrees have
@@ -550,11 +589,11 @@ func (s *HandoffService) DeleteTaskTreeWithReason(
 func (s *HandoffService) DeleteTaskTreeWithOptions(
 	ctx context.Context, rootID string, cascade bool, options DeleteTaskOptions,
 ) (*CascadeOutcome, error) {
-	return s.deleteTaskTreeWithReasonAndOptions(ctx, rootID, cascade, "", options)
+	return s.deleteTaskTreeWithReasonAndOptions(ctx, rootID, cascade, "", options, false)
 }
 
 func (s *HandoffService) deleteTaskTreeWithReasonAndOptions(
-	ctx context.Context, rootID string, cascade bool, reason string, options DeleteTaskOptions,
+	ctx context.Context, rootID string, cascade bool, reason string, options DeleteTaskOptions, projectLifecycle bool,
 ) (*CascadeOutcome, error) {
 	deleteDeadline := archivecascade.ArchiveDeadline(ctx)
 	deleteCtx, cancelDelete := context.WithDeadline(ctx, deleteDeadline)
@@ -567,6 +606,13 @@ func (s *HandoffService) deleteTaskTreeWithReasonAndOptions(
 	}
 	if s.tasks == nil {
 		return nil, errors.New("task repo not configured")
+	}
+	root, err := s.tasks.GetTask(deleteCtx, rootID)
+	if err != nil {
+		return nil, err
+	}
+	if root.AgentProjectID != "" && root.ParentID == "" && !projectLifecycle {
+		return nil, ErrAgentProjectCoordinatorActionRequired
 	}
 	defer s.lockArchiveCascade(rootID)()
 	cascadeID := uuid.New().String()
@@ -1345,6 +1391,19 @@ func (s *HandoffService) finalizeActiveSessions(
 // Manual archives and members of earlier cascades remain archived.
 // The cascade ID scope prevents resurrection of unrelated archive rows.
 func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (*CascadeOutcome, error) {
+	return s.unarchiveTaskTree(ctx, rootID, false)
+}
+
+// UnarchiveAgentProjectTree restores a project archive through its project
+// lifecycle boundary.
+func (s *HandoffService) UnarchiveAgentProjectTree(ctx context.Context, projectID, rootID string) (*CascadeOutcome, error) {
+	if err := s.authorizeAgentProjectRoot(ctx, projectID, rootID); err != nil {
+		return nil, err
+	}
+	return s.unarchiveTaskTree(ctx, rootID, true)
+}
+
+func (s *HandoffService) unarchiveTaskTree(ctx context.Context, rootID string, projectLifecycle bool) (*CascadeOutcome, error) {
 	deadline := archivecascade.ArchiveDeadline(ctx)
 	unarchiveCtx, cancelUnarchive := context.WithDeadline(ctx, deadline)
 	defer cancelUnarchive()
@@ -1364,10 +1423,13 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 	if root == nil {
 		return nil, fmt.Errorf("task %s not found", rootID)
 	}
+	if root.AgentProjectID != "" && root.ParentID == "" && !projectLifecycle {
+		return nil, ErrAgentProjectCoordinatorActionRequired
+	}
 	operationCtx, cancelOperation := archivecascade.ContinuationContextUntil(ctx, deadline)
 	defer cancelOperation()
 	if root.ArchivedByCascadeID == "" {
-		return s.unarchiveManualRoot(operationCtx, root)
+		return s.unarchiveManualRoot(operationCtx, root, projectLifecycle)
 	}
 	cascadeID := root.ArchivedByCascadeID
 	out := &CascadeOutcome{CascadeID: cascadeID}
@@ -1377,59 +1439,11 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 	if err != nil {
 		return nil, err
 	}
-	// Fence every cleanup before restoring any task. A later cancellation
-	// failure must not leave a partially restored tree that cannot be retried
-	// from its archived root.
-	cancelledCleanupOperations := make([]string, 0, len(all))
-	restoreCancelledCleanup := func() error {
-		restorer, ok := s.resourceCleaner.(taskResourceCleanupRestorer)
-		if !ok {
-			return nil
-		}
-		recoveryCtx, cancel := archivecascade.ContinuationContext(context.WithoutCancel(ctx))
-		defer cancel()
-		var errs []error
-		for _, operationID := range cancelledCleanupOperations {
-			if err := restorer.RestoreCancelledTaskResourceCleanup(recoveryCtx, operationID); err != nil {
-				errs = append(errs, fmt.Errorf("restore archive cleanup %s: %w", operationID, err))
-			}
-		}
-		return errors.Join(errs...)
+	restoreCancelledCleanup, err := s.cancelCascadeCleanup(operationCtx, ctx, all, cascadeID, projectLifecycle)
+	if err != nil {
+		return out, err
 	}
-	var restorationErrors []error
-	for _, id := range all {
-		operationID := string(models.TaskResourceCleanupTriggerCascadeArchive) + ":" + cascadeID + ":" + id
-		cancelledCleanupOperations = append(cancelledCleanupOperations, operationID)
-		if err := s.cancelArchiveResourceCleanup(operationCtx, id, operationID); err != nil {
-			return out, errors.Join(fmt.Errorf("cancel archive cleanup %s: %w", id, err), restoreCancelledCleanup())
-		}
-	}
-	// Unarchive deep→shallow so a partial failure leaves the root archived
-	// with its cascade ID, allowing a retry to discover remaining members.
-	var mutationErr error
-	for i := len(all) - 1; i >= 0; i-- {
-		id := all[i]
-		ok, err := s.tasks.UnarchiveTaskByCascade(operationCtx, id, cascadeID)
-		if err != nil {
-			mutationErr = fmt.Errorf("unarchive %s: %w", id, err)
-			break
-		}
-		if ok {
-			out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, id)
-			// Publish per restored task. The WS handler keys off
-			// archived_at=null to put the card back on the kanban.
-			if err := s.publishUpdatedTask(operationCtx, id); err != nil {
-				restorationErrors = append(restorationErrors,
-					fmt.Errorf("publish restored task %s: %w", id, err))
-			}
-			// This task may itself be a parent whose inherit_parent
-			// children were marked orphaned by this same archive; the
-			// marker's "parent_archived" claim is no longer true.
-			s.clearOrphanedInheritParentChildren(operationCtx, id)
-		} else {
-			out.SkippedTaskIDs = append(out.SkippedTaskIDs, id)
-		}
-	}
+	restorationErrors, mutationErr := s.unarchiveCascadeTasks(operationCtx, all, cascadeID, out)
 	if mutationErr != nil {
 		restorationErrors = append(restorationErrors, mutationErr, restoreCancelledCleanup())
 	}
@@ -1442,72 +1456,150 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 	// Restore group memberships scoped to the same cascade. Track the
 	// set of affected groups so we can also re-evaluate cleanup state
 	// (cleanup_status=cleaned → active + restored / restorable).
-	membershipRestoreFailed := false
-	groupIDs := map[string]bool{}
-	if s.wsGroups != nil {
-		for _, id := range out.ArchivedTaskIDs {
-			g, err := s.wsGroups.GetWorkspaceGroupForTask(groupRestoreCtx, id)
-			if err != nil {
-				membershipRestoreFailed = true
-				restorationErrors = append(restorationErrors,
-					fmt.Errorf("lookup workspace group for task %s: %w", id, err))
-				continue
-			}
-			restored := false
-			if g == nil {
-				mu := s.workspaceGroupLock.lockFor(id)
-				mu.Lock()
-				err := s.wsGroups.RestoreWorkspaceGroupMemberByCascade(groupRestoreCtx, id, cascadeID)
-				mu.Unlock()
-				if err != nil {
-					membershipRestoreFailed = true
-					restorationErrors = append(restorationErrors,
-						fmt.Errorf("restore membership for task %s: %w", id, err))
-					continue
-				}
-				restored = true
-				g, err = s.wsGroups.GetWorkspaceGroupForTask(groupRestoreCtx, id)
-				if err != nil {
-					membershipRestoreFailed = true
-					restorationErrors = append(restorationErrors,
-						fmt.Errorf("lookup restored workspace group for task %s: %w", id, err))
-					continue
-				}
-				if g == nil {
-					// A task without historical group membership is a
-					// valid no-op for the restore repository.
-					continue
-				}
-			}
-			if !restored {
-				mu := s.workspaceGroupLock.lockFor(g.ID)
-				mu.Lock()
-				err = s.wsGroups.RestoreWorkspaceGroupMemberByCascade(groupRestoreCtx, id, cascadeID)
-				mu.Unlock()
-				if err != nil {
-					membershipRestoreFailed = true
-					restorationErrors = append(restorationErrors,
-						fmt.Errorf("restore membership for task %s: %w", id, err))
-					continue
-				}
-			}
-			groupIDs[g.ID] = true
-		}
-	}
+	groupIDs, membershipRestoreFailed, groupErrors := s.restoreCascadeGroupMemberships(
+		groupRestoreCtx, out.ArchivedTaskIDs, cascadeID,
+	)
+	restorationErrors = append(restorationErrors, groupErrors...)
 	if membershipRestoreFailed {
 		restorationErrors = append(restorationErrors, s.preserveCascadeAfterMembershipFailure(
 			groupRestoreCtx, rootID, cascadeID, out.ArchivedTaskIDs, restoreCancelledCleanup,
 		))
 	}
 	if len(groupIDs) > 0 {
-		ids := make([]string, 0, len(groupIDs))
-		for id := range groupIDs {
-			ids = append(ids, id)
-		}
-		out.ReleasedGroupIDs = ids
-		restorationErrors = append(restorationErrors, s.restoreCleanedGroups(groupRestoreCtx, ids))
+		out.ReleasedGroupIDs = groupIDs
+		restorationErrors = append(restorationErrors, s.restoreCleanedGroups(groupRestoreCtx, groupIDs))
 	}
 	return out, cascadePostCommitError(out, errors.Join(restorationErrors...))
+}
+
+func (s *HandoffService) cancelCascadeCleanup(
+	operationCtx, requestCtx context.Context,
+	taskIDs []string,
+	cascadeID string,
+	projectLifecycle bool,
+) (func() error, error) {
+	operations := make([]string, 0, len(taskIDs))
+	restore := func() error {
+		restorer, ok := s.resourceCleaner.(taskResourceCleanupRestorer)
+		if !ok {
+			return nil
+		}
+		recoveryCtx, cancel := archivecascade.ContinuationContext(context.WithoutCancel(requestCtx))
+		defer cancel()
+		var errs []error
+		for _, operationID := range operations {
+			if err := restorer.RestoreCancelledTaskResourceCleanup(recoveryCtx, operationID); err != nil {
+				errs = append(errs, fmt.Errorf("restore archive cleanup %s: %w", operationID, err))
+			}
+		}
+		return errors.Join(errs...)
+	}
+	for _, id := range taskIDs {
+		operationID := string(models.TaskResourceCleanupTriggerCascadeArchive) + ":" + cascadeID + ":" + id
+		operations = append(operations, operationID)
+		var err error
+		if projectLifecycle {
+			err = s.cancelProjectArchiveResourceCleanup(operationCtx, id, operationID)
+		} else {
+			err = s.cancelArchiveResourceCleanup(operationCtx, id, operationID)
+		}
+		if err != nil {
+			return restore, errors.Join(fmt.Errorf("cancel archive cleanup %s: %w", id, err), restore())
+		}
+	}
+	return restore, nil
+}
+
+func (s *HandoffService) unarchiveCascadeTasks(
+	ctx context.Context,
+	taskIDs []string,
+	cascadeID string,
+	out *CascadeOutcome,
+) ([]error, error) {
+	var mutationErr error
+	var restorationErrors []error
+	for index := len(taskIDs) - 1; index >= 0; index-- {
+		id := taskIDs[index]
+		ok, err := s.tasks.UnarchiveTaskByCascade(ctx, id, cascadeID)
+		if err != nil {
+			mutationErr = fmt.Errorf("unarchive %s: %w", id, err)
+			break
+		}
+		if !ok {
+			out.SkippedTaskIDs = append(out.SkippedTaskIDs, id)
+			continue
+		}
+		out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, id)
+		if err := s.publishUpdatedTask(ctx, id); err != nil {
+			restorationErrors = append(restorationErrors, fmt.Errorf("publish restored task %s: %w", id, err))
+		}
+		s.clearOrphanedInheritParentChildren(ctx, id)
+	}
+	return restorationErrors, mutationErr
+}
+
+func (s *HandoffService) restoreCascadeGroupMemberships(
+	ctx context.Context,
+	taskIDs []string,
+	cascadeID string,
+) ([]string, bool, []error) {
+	if s.wsGroups == nil {
+		return nil, false, nil
+	}
+	groupSet := make(map[string]bool)
+	var errs []error
+	failed := false
+	for _, taskID := range taskIDs {
+		groupID, found, err := s.restoreCascadeGroupMembership(ctx, taskID, cascadeID)
+		if err != nil {
+			failed = true
+			errs = append(errs, err)
+			continue
+		}
+		if found {
+			groupSet[groupID] = true
+		}
+	}
+	groupIDs := make([]string, 0, len(groupSet))
+	for groupID := range groupSet {
+		groupIDs = append(groupIDs, groupID)
+	}
+	return groupIDs, failed, errs
+}
+
+func (s *HandoffService) restoreCascadeGroupMembership(ctx context.Context, taskID, cascadeID string) (string, bool, error) {
+	group, err := s.wsGroups.GetWorkspaceGroupForTask(ctx, taskID)
+	if err != nil {
+		return "", false, fmt.Errorf("lookup workspace group for task %s: %w", taskID, err)
+	}
+	restored := false
+	if group == nil {
+		mu := s.workspaceGroupLock.lockFor(taskID)
+		mu.Lock()
+		err = s.wsGroups.RestoreWorkspaceGroupMemberByCascade(ctx, taskID, cascadeID)
+		mu.Unlock()
+		if err != nil {
+			return "", false, fmt.Errorf("restore membership for task %s: %w", taskID, err)
+		}
+		restored = true
+		group, err = s.wsGroups.GetWorkspaceGroupForTask(ctx, taskID)
+		if err != nil {
+			return "", false, fmt.Errorf("lookup restored workspace group for task %s: %w", taskID, err)
+		}
+		if group == nil {
+			return "", false, nil
+		}
+	}
+	if !restored {
+		mu := s.workspaceGroupLock.lockFor(group.ID)
+		mu.Lock()
+		err = s.wsGroups.RestoreWorkspaceGroupMemberByCascade(ctx, taskID, cascadeID)
+		mu.Unlock()
+		if err != nil {
+			return "", false, fmt.Errorf("restore membership for task %s: %w", taskID, err)
+		}
+	}
+	return group.ID, true, nil
 }
 
 func (s *HandoffService) preserveCascadeAfterMembershipFailure(
@@ -1551,14 +1643,24 @@ func (s *HandoffService) preserveCascadeAfterMembershipFailure(
 // cascade infrastructure). Only the root is restored — its descendants
 // were archived independently, so resurrecting them here would reintroduce
 // the resurrection bug the cascade scoping fixed.
-func (s *HandoffService) unarchiveManualRoot(ctx context.Context, root *models.Task) (*CascadeOutcome, error) {
+func (s *HandoffService) unarchiveManualRoot(
+	ctx context.Context,
+	root *models.Task,
+	projectLifecycle bool,
+) (*CascadeOutcome, error) {
 	if root.ArchivedAt == nil {
 		return nil, errors.New("task is not archived")
 	}
 	out := &CascadeOutcome{}
 	var restorationErrors []error
-	if err := s.cancelArchiveResourceCleanup(ctx, root.ID, ""); err != nil {
-		return out, fmt.Errorf("cancel archive cleanup %s: %w", root.ID, err)
+	var cancelErr error
+	if projectLifecycle {
+		cancelErr = s.cancelProjectArchiveResourceCleanup(ctx, root.ID, "")
+	} else {
+		cancelErr = s.cancelArchiveResourceCleanup(ctx, root.ID, "")
+	}
+	if cancelErr != nil {
+		return out, fmt.Errorf("cancel archive cleanup %s: %w", root.ID, cancelErr)
 	}
 	ok, err := s.tasks.UnarchiveTask(ctx, root.ID)
 	if err != nil {
@@ -1603,6 +1705,30 @@ func (s *HandoffService) cancelArchiveResourceCleanup(ctx context.Context, taskI
 		return nil
 	}
 	return canceller.CancelArchiveTaskResourceCleanup(ctx, taskID)
+}
+
+func (s *HandoffService) cancelProjectArchiveResourceCleanup(
+	ctx context.Context,
+	taskID, operationID string,
+) error {
+	ticker := time.NewTicker(projectArchiveCleanupRetryInterval)
+	defer ticker.Stop()
+	var lastRace error
+	for {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(lastRace, err)
+		}
+		err := s.cancelArchiveResourceCleanup(ctx, taskID, operationID)
+		if err == nil || !errors.Is(err, ErrCleanupCancellationRace) {
+			return err
+		}
+		lastRace = err
+		select {
+		case <-ctx.Done():
+			return errors.Join(lastRace, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 // resolveDeleteSet returns the set of task IDs DeleteTaskTree should

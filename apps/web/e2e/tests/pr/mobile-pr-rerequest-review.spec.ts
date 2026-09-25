@@ -16,6 +16,35 @@ const MOBILE_PR_TITLE =
 const SWITCH_PR_NUMBER = 420;
 const SWITCH_SECOND_PR_NUMBER = 421;
 
+type ReviewSelectionStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      tasks: { activeSessionId: string | null };
+      setMobileSessionReview: (sessionId: string, reviewItemId: string | null) => void;
+    };
+  };
+};
+
+async function preferReviewForSession(
+  testPage: import("@playwright/test").Page,
+  repositoryId: string,
+  prNumber: number,
+): Promise<void> {
+  const reviewItemId = ["github", "https://github.com", repositoryId, String(prNumber)]
+    .map(encodeURIComponent)
+    .join(":");
+  await testPage.waitForFunction(() => {
+    const state = (window as ReviewSelectionStoreWindow).__KANDEV_E2E_STORE__?.getState();
+    return Boolean(state?.tasks.activeSessionId);
+  });
+  await testPage.evaluate((selectedReviewId) => {
+    const state = (window as ReviewSelectionStoreWindow).__KANDEV_E2E_STORE__?.getState();
+    const sessionId = state?.tasks.activeSessionId;
+    if (!state || !sessionId) throw new Error("Active session is unavailable");
+    state.setMobileSessionReview(sessionId, selectedReviewId);
+  }, reviewItemId);
+}
+
 test.describe("mobile PR re-request review", () => {
   test("uses bottom-nav Review to re-request a dismissed review without overflow", async ({
     testPage,
@@ -182,6 +211,7 @@ test.describe("mobile PR re-request review", () => {
     for (const prNumber of [SWITCH_PR_NUMBER, SWITCH_SECOND_PR_NUMBER]) {
       await apiClient.mockGitHubAssociateTaskPR({
         task_id: task.id,
+        repository_id: seedData.repositoryId,
         owner: OWNER,
         repo: REPO,
         pr_number: prNumber,
@@ -193,6 +223,15 @@ test.describe("mobile PR re-request review", () => {
         state: "open",
       });
     }
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.listTaskPRs(task.id))
+            .map((pr) => pr.pr_number)
+            .sort((left, right) => left - right),
+        { timeout: 15_000 },
+      )
+      .toEqual([SWITCH_PR_NUMBER, SWITCH_SECOND_PR_NUMBER]);
     await apiClient.mockGitHubSeedPRFeedback({
       owner: OWNER,
       repo: REPO,
@@ -235,7 +274,12 @@ test.describe("mobile PR re-request review", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    // Reload so both linked PRs are hydrated from the boot payload.
+    await testPage.reload();
+    await session.waitForLoad();
+    await preferReviewForSession(testPage, seedData.repositoryId, SWITCH_PR_NUMBER);
     await testPage.getByRole("button", { name: "Review", exact: true }).tap();
+    await expect(testPage.getByTestId("mobile-review-panel")).toBeVisible();
     const action = session.prReRequestReviewButton(REVIEWER);
     await expect(action).toBeVisible({ timeout: 15_000 });
 

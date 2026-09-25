@@ -260,27 +260,34 @@ type RelatedTasks struct {
 // than reaching into the repos directly so document writes still go
 // through DocumentService and emit the same revision/event side effects.
 type HandoffService struct {
-	tasks                  repository.TaskRepository
-	docs                   *DocumentService
-	docsRepo               repository.DocumentRepository
-	blockers               BlockerRepository
-	wsGroups               WorkspaceGroupRepo
-	sessions               SessionWorktreeReader
-	cleaner                WorkspaceCleaner
-	runCanceller           RunCanceller
-	gitArchiveCapture      GitArchiveCapture
-	eventPublisher         TaskEventPublisher
-	vacancyReconciler      VacatedStepReconciler
-	resourceCleaner        TaskResourceCleaner
-	taskAccessCheck        func(ctx context.Context, taskID string) error
-	comments               CommentReader
-	sessionCeilingReleaser SessionCeilingReleaser
-	logger                 *logger.Logger
-	parentLock             parentMutex
-	archiveCascadeLock     parentMutex
-	partialArchiveMu       sync.Mutex
-	partialArchiveIDs      map[string]string
-	workspaceGroupLock     parentMutex
+	tasks                   repository.TaskRepository
+	docs                    *DocumentService
+	docsRepo                repository.DocumentRepository
+	blockers                BlockerRepository
+	wsGroups                WorkspaceGroupRepo
+	sessions                SessionWorktreeReader
+	cleaner                 WorkspaceCleaner
+	runCanceller            RunCanceller
+	gitArchiveCapture       GitArchiveCapture
+	eventPublisher          TaskEventPublisher
+	vacancyReconciler       VacatedStepReconciler
+	resourceCleaner         TaskResourceCleaner
+	taskAccessCheck         func(ctx context.Context, taskID string) error
+	agentProjectActionCheck func(ctx context.Context, projectID, taskID string) error
+	comments                CommentReader
+	sessionCeilingReleaser  SessionCeilingReleaser
+	logger                  *logger.Logger
+	parentLock              parentMutex
+	archiveCascadeLock      parentMutex
+	partialArchiveMu        sync.Mutex
+	partialArchiveIDs       map[string]string
+	workspaceGroupLock      parentMutex
+}
+
+// SetAgentProjectActionAuthorizer wires project membership checks for the
+// explicit project-level task lifecycle APIs.
+func (s *HandoffService) SetAgentProjectActionAuthorizer(check func(context.Context, string, string) error) {
+	s.agentProjectActionCheck = check
 }
 
 // TaskEventPublisher abstracts the side-effect of broadcasting task

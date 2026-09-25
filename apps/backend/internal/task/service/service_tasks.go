@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -74,6 +75,14 @@ var ErrInvalidTaskWorkflow = errors.New("invalid task workflow")
 // DeleteWorkflow) can treat a concurrent archive as a no-op instead of
 // aborting the whole operation.
 var ErrTaskAlreadyArchived = errors.New("task is already archived")
+
+var ErrAgentProjectsDisabled = errors.New("agent projects are disabled")
+
+var ErrAgentProjectTaskForbidden = errors.New("agent project task creation is only available through the project service")
+
+var ErrAgentProjectCoordinatorActionRequired = errors.New("project coordinators can only be archived or deleted through the project")
+
+var ErrAgentProjectWorkflowOperation = errors.New("workflow operations are unavailable for agent project tasks")
 
 // ErrAutoTitlePromptRequired is returned when auto-title creation has neither
 // a prompt nor a usable provisional title.
@@ -221,6 +230,46 @@ func foundOutcomeFor(task *models.Task) CreateTaskOutcome {
 // call returns, so settlement is their responsibility (see the spec's
 // "Settlement call site" section).
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (CreateTaskResult, error) {
+	if req == nil {
+		return CreateTaskResult{}, errors.New("task create request is required")
+	}
+	if req.AgentProjectID != "" || req.AgentProjectTier != "" || req.AgentProjectProfileID != "" || req.Origin == models.TaskOriginAgentProject {
+		return CreateTaskResult{}, ErrAgentProjectTaskForbidden
+	}
+	if req.ParentID != "" {
+		parent, err := s.tasks.GetTask(ctx, req.ParentID)
+		if err != nil {
+			return CreateTaskResult{}, fmt.Errorf("invalid parent_id: %w", err)
+		}
+		if parent.AgentProjectID != "" {
+			return CreateTaskResult{}, ErrAgentProjectTaskForbidden
+		}
+	}
+	return s.createTask(ctx, req)
+}
+
+// CreateAgentProjectTask is the only task-service entry point that admits a
+// workflow-free Agent Project coordinator or worker. The project service must
+// validate its stored policy before this method is called.
+func (s *Service) CreateAgentProjectTask(ctx context.Context, req *CreateTaskRequest) (CreateTaskResult, error) {
+	if !s.agentProjectsEnabled {
+		return CreateTaskResult{}, ErrAgentProjectsDisabled
+	}
+	if req == nil || req.AgentProjectID == "" || req.AgentProjectTier == "" || req.AgentProjectProfileID == "" || req.WorkflowID != "" || req.WorkflowStepID != "" || req.ProjectID != "" {
+		return CreateTaskResult{}, ErrAgentProjectTaskForbidden
+	}
+	if s.agentProjectTaskAuthorizer == nil {
+		return CreateTaskResult{}, ErrAgentProjectTaskForbidden
+	}
+	if err := s.agentProjectTaskAuthorizer(ctx, req); err != nil {
+		return CreateTaskResult{}, err
+	}
+	req.agentProjectTask = true
+	req.Origin = models.TaskOriginAgentProject
+	return s.createTask(ctx, req)
+}
+
+func (s *Service) createTask(ctx context.Context, req *CreateTaskRequest) (CreateTaskResult, error) {
 	if err := s.AuthorizeWorkspaceScope(ctx, req.WorkspaceID, authz.ScopeTaskWrite); err != nil {
 		return CreateTaskResult{}, err
 	}
@@ -797,11 +846,21 @@ func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 		}
 	}
 	isOffice := isOfficeRequest(req)
+	isAgentProject := req.agentProjectTask && req.AgentProjectID != "" && req.Origin == models.TaskOriginAgentProject
+	if (req.AgentProjectID != "" || req.AgentProjectTier != "" || req.AgentProjectProfileID != "") && !isAgentProject {
+		return ErrAgentProjectTaskForbidden
+	}
+	if isAgentProject && (req.WorkflowID != "" || req.WorkflowStepID != "" || req.ProjectID != "") {
+		return ErrAgentProjectTaskForbidden
+	}
+	if isAgentProject && (req.AgentProjectProfileID == "" || req.AgentProjectProfileID != req.AssigneeAgentProfileID || !slices.Contains([]string{"coordinator", "economy", "frontier"}, req.AgentProjectTier)) {
+		return ErrAgentProjectTaskForbidden
+	}
 	// Automation runs never land on a board, so they need no workflow — the
 	// trigger is the start signal, not a column. They are still ordinary,
 	// persistent tasks; only their origin keeps them out of board reads.
 	isAutomationRun := req.Origin == models.TaskOriginAutomationRun
-	if !req.IsEphemeral && !isOffice && !isAutomationRun && req.WorkflowID == "" {
+	if !req.IsEphemeral && !isOffice && !isAutomationRun && !isAgentProject && req.WorkflowID == "" {
 		return fmt.Errorf("workflow_id is required for non-ephemeral tasks")
 	}
 	if req.IsEphemeral && req.WorkflowID != "" {
@@ -989,6 +1048,9 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Origin:                 origin,
 		ProjectID:              req.ProjectID,
+		AgentProjectID:         req.AgentProjectID,
+		AgentProjectTier:       req.AgentProjectTier,
+		AgentProjectProfileID:  req.AgentProjectProfileID,
 		Labels:                 labels,
 	}
 }
@@ -1992,6 +2054,9 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if err != nil {
 		return nil, err
 	}
+	if task.AgentProjectID != "" && (req.WorkflowStepID != nil || req.ParentID != nil && *req.ParentID != task.ParentID) {
+		return nil, ErrAgentProjectWorkflowOperation
+	}
 	if req.Repositories != nil {
 		if err := s.preserveRepositoryCheckoutOptions(ctx, task, req.Repositories); err != nil {
 			return nil, err
@@ -2374,6 +2439,35 @@ func (s *Service) RestoreTaskMessageRollback(
 // The task remains in the DB but is excluded from active board views.
 // Active agent sessions are stopped and worktrees cleaned up in background.
 func (s *Service) ArchiveTask(ctx context.Context, id string) error {
+	return s.archiveTask(ctx, id, false)
+}
+
+// ArchiveAgentProjectTask is reserved for the project lifecycle service.
+func (s *Service) ArchiveAgentProjectTask(ctx context.Context, projectID, id string) error {
+	if !s.agentProjectsEnabled {
+		return ErrAgentProjectsDisabled
+	}
+	if s.agentProjectActionAuthorizer == nil {
+		return ErrAgentProjectTaskForbidden
+	}
+	if err := s.agentProjectActionAuthorizer(ctx, projectID, id); err != nil {
+		return err
+	}
+	return s.archiveTask(ctx, id, true)
+}
+
+type taskArchivePreparation struct {
+	task           *models.Task
+	activeSessions []*models.TaskSession
+	stopTargets    []taskStopTarget
+	sessions       []*models.TaskSession
+	worktrees      []*worktree.Worktree
+	taskEnv        *models.TaskEnvironment
+	envCleanup     taskEnvironmentCleanup
+	cleanupJob     *models.TaskResourceCleanupJob
+}
+
+func (s *Service) archiveTask(ctx context.Context, id string, projectLifecycle bool) error {
 	archiveDeadline := archivecascade.ArchiveDeadline(ctx)
 	archiveCtx, cancelArchive := context.WithDeadline(ctx, archiveDeadline)
 	defer cancelArchive()
@@ -2381,143 +2475,130 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	if err := s.authorizeTaskScope(archiveCtx, id, authz.ScopeTaskWrite); err != nil {
 		return err
 	}
-	// 1. Get task and verify it exists
-	task, err := s.tasks.GetTask(archiveCtx, id)
+	prepared, err := s.prepareTaskArchive(archiveCtx, id, projectLifecycle)
 	if err != nil {
 		return err
 	}
-
-	if task.ArchivedAt != nil {
-		return fmt.Errorf("%w: %s", ErrTaskAlreadyArchived, id)
-	}
-
-	// 2. Gather data needed for cleanup BEFORE archive
-	var stopTargets []taskStopTarget
-	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(archiveCtx, id)
-	if err != nil {
-		return fmt.Errorf("list active task sessions for archive: %w", err)
-	}
-	if s.executionStopper != nil {
-		stopTargets, err = s.buildStopTargets(archiveCtx, id, activeSessions)
-		if err != nil {
-			return fmt.Errorf("list runtime cleanup inventory: %w", err)
-		}
-	}
-
-	// 2b. Capture git archive snapshot for active sessions BEFORE stopping agents
-	// Use a bounded timeout to prevent blocking the archive operation if agentctl is stuck.
-	if s.gitArchiveCapture != nil && len(activeSessions) > 0 {
-		for _, sess := range activeSessions {
-			if sess == nil || sess.ID == "" {
-				continue
-			}
-			snapCtx, cancel := context.WithTimeout(archiveCtx, 10*time.Second)
-			err := s.gitArchiveCapture.CaptureArchiveSnapshot(snapCtx, sess.ID)
-			cancel()
-			if err != nil {
-				s.logger.Warn("failed to capture git archive snapshot",
-					zap.String("task_id", id),
-					zap.String("session_id", sess.ID),
-					zap.Error(err))
-			}
-		}
-	}
-
-	sessions, err := s.sessions.ListTaskSessions(archiveCtx, id)
-	if err != nil {
-		return fmt.Errorf("list task sessions for archive: %w", err)
-	}
-
-	worktrees, err := s.gatherWorktreesForDelete(archiveCtx, id)
-	if err != nil {
-		return fmt.Errorf("list worktrees for archive: %w", err)
-	}
-	taskEnv, err := s.gatherTaskEnvironmentForCleanup(archiveCtx, id)
-	if err != nil {
-		return fmt.Errorf("lookup task environment for archive: %w", err)
-	}
-	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false, preserveBranches: true}
-	cleanupJob, err := s.persistTaskResourceCleanup(
-		archiveCtx, id, models.TaskResourceCleanupTriggerArchive, "",
-		sessions, worktrees, stopTargets, nil, envCleanup, true, true, task.WorkspaceID,
-	)
-	if err != nil {
-		return err
-	}
-
-	// 3. Set archived_at in DB
 	if err := s.tasks.ArchiveTask(archiveCtx, id); err != nil {
-		s.resolveTaskResourceCleanupAfterMutationError(archiveCtx, cleanupJob)
+		s.resolveTaskResourceCleanupAfterMutationError(archiveCtx, prepared.cleanupJob)
 		return err
 	}
+	s.registerTaskRuntimeStopOwners(prepared.stopTargets, true)
 
-	// Register the exact inventory before CANCELLED becomes visible. A launch
-	// persistence loser can then distinguish these owned executions from one
-	// that raced in after the snapshot and must clean itself up.
-	s.registerTaskRuntimeStopOwners(stopTargets, true)
-
-	// archived_at has committed above: the rest of this function only
-	// reports on that already-durable state (cancelling sessions, re-reading
-	// the task, publishing task.updated) or kicks off cleanup that already
-	// runs detached from ctx. A client disconnecting right after the write
-	// above must not stop any of that from finishing and reaching
-	// event-driven clients that don't share the archiving caller's
-	// connection.
 	finalizeCtx, cancelFinalize := archivecascade.ContinuationContextUntil(ctx, archiveDeadline)
 	defer cancelFinalize()
-
-	// 3b. Finalize active sessions in the DB and publish their cancellation
-	// events. See finalizeCancelledSessions for the detailed rationale.
-	s.finalizeCancelledSessions(finalizeCtx, id, activeSessions, archiveDeadline, models.SessionArchiveCancelReason)
-	var postCommitErr error
-
-	// 4. Re-read task for updated archived_at field. The archive row is
-	// already durable, so a projection read failure must not skip cleanup.
-	archivedTask := task
-	task, err = s.tasks.GetTask(finalizeCtx, id)
-	if err != nil {
-		task = archivedTask
-		postCommitErr = &CascadePostCommitError{
-			Err: fmt.Errorf("reload archived task %s: %w", id, err),
-		}
-		s.logger.Warn("failed to reload committed archived task",
-			zap.String("task_id", id), zap.Error(err))
-	} else {
-		// 5. Publish task.updated event so frontend removes from board
-		s.publishTaskEvent(finalizeCtx, events.TaskUpdated, task, nil)
-	}
-
-	// 5b. Archive cleanup tears down this task's runtime resources (worktree,
-	// container/sandbox) but preserves its task_environments row
-	// (deleteRow: false above) — the row is deleted only by a DELETE cascade
-	// or an explicit ResetTaskEnvironment, never by archive. An inherit_parent
-	// child that has not yet launched and still depends on this task's
-	// environment is therefore left pointing at a row that either dangles
-	// later (if something does delete it) or, more immediately, survives but
-	// now names a workspace whose worktree is gone. Mark those children now,
-	// while we still know which task was archived, instead of letting them
-	// silently strand.
-	s.markOrphanedInheritParentChildren(finalizeCtx, task)
-	s.pullNextTaskOnVacate(finalizeCtx, task.WorkflowStepID, task.ID)
+	s.finalizeCancelledSessions(finalizeCtx, id, prepared.activeSessions, archiveDeadline, models.SessionArchiveCancelReason)
+	archivedTask, postCommitErr := s.reloadCommittedArchivedTask(finalizeCtx, id, prepared.task)
+	s.markOrphanedInheritParentChildren(finalizeCtx, archivedTask)
+	s.pullNextTaskOnVacate(finalizeCtx, archivedTask.WorkflowStepID, archivedTask.ID)
 	s.logger.Info("task archived",
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
+	s.completeTaskArchiveCleanup(finalizeCtx, id, prepared)
+	return postCommitErr
+}
 
-	// 6. Background: Stop agents and cleanup worktrees
-	if cleanupJob != nil {
-		if err := s.StartPreparedTaskResourceCleanup(context.WithoutCancel(finalizeCtx), cleanupJob.OperationID); err != nil {
-			s.logger.Warn("start committed archive resource cleanup",
-				zap.String("job_id", cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
+func (s *Service) prepareTaskArchive(
+	ctx context.Context,
+	id string,
+	projectLifecycle bool,
+) (*taskArchivePreparation, error) {
+	task, err := s.tasks.GetTask(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if task.AgentProjectID != "" && task.ParentID == "" && !projectLifecycle {
+		return nil, ErrAgentProjectCoordinatorActionRequired
+	}
+	if task.ArchivedAt != nil {
+		return nil, fmt.Errorf("%w: %s", ErrTaskAlreadyArchived, id)
+	}
+	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("list active task sessions for archive: %w", err)
+	}
+	var stopTargets []taskStopTarget
+	if s.executionStopper != nil {
+		stopTargets, err = s.buildStopTargets(ctx, id, activeSessions)
+		if err != nil {
+			return nil, fmt.Errorf("list runtime cleanup inventory: %w", err)
 		}
-	} else if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || taskEnv != nil {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, false,
-			"task archived", "failed to stop session on task archive", "task archive cleanup completed")
 	}
+	s.captureTaskArchiveSnapshots(ctx, id, activeSessions)
+	sessions, err := s.sessions.ListTaskSessions(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("list task sessions for archive: %w", err)
+	}
+	worktrees, err := s.gatherWorktreesForDelete(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("list worktrees for archive: %w", err)
+	}
+	taskEnv, err := s.gatherTaskEnvironmentForCleanup(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("lookup task environment for archive: %w", err)
+	}
+	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false, preserveBranches: true}
+	cleanupJob, err := s.persistTaskResourceCleanup(
+		ctx, id, models.TaskResourceCleanupTriggerArchive, "",
+		sessions, worktrees, stopTargets, nil, envCleanup, true, true, task.WorkspaceID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &taskArchivePreparation{
+		task: task, activeSessions: activeSessions, stopTargets: stopTargets,
+		sessions: sessions, worktrees: worktrees, taskEnv: taskEnv,
+		envCleanup: envCleanup, cleanupJob: cleanupJob,
+	}, nil
+}
 
-	if postCommitErr != nil {
-		return postCommitErr
+func (s *Service) reloadCommittedArchivedTask(
+	ctx context.Context,
+	id string,
+	fallback *models.Task,
+) (*models.Task, error) {
+	task, err := s.tasks.GetTask(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to reload committed archived task",
+			zap.String("task_id", id), zap.Error(err))
+		return fallback, &CascadePostCommitError{Err: fmt.Errorf("reload archived task %s: %w", id, err)}
 	}
-	return nil
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	return task, nil
+}
+
+func (s *Service) completeTaskArchiveCleanup(ctx context.Context, id string, prepared *taskArchivePreparation) {
+	if prepared.cleanupJob != nil {
+		if err := s.StartPreparedTaskResourceCleanup(context.WithoutCancel(ctx), prepared.cleanupJob.OperationID); err != nil {
+			s.logger.Warn("start committed archive resource cleanup",
+				zap.String("job_id", prepared.cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
+		}
+		return
+	}
+	if len(prepared.stopTargets) > 0 || s.worktreeCleanup != nil || len(prepared.sessions) > 0 || prepared.taskEnv != nil {
+		s.runAsyncTaskCleanup(id, prepared.sessions, prepared.worktrees, prepared.stopTargets,
+			prepared.envCleanup, false, "task archived", "failed to stop session on task archive", "task archive cleanup completed")
+	}
+}
+
+func (s *Service) captureTaskArchiveSnapshots(ctx context.Context, taskID string, sessions []*models.TaskSession) {
+	if s.gitArchiveCapture == nil || len(sessions) == 0 {
+		return
+	}
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		snapshotCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := s.gitArchiveCapture.CaptureArchiveSnapshot(snapshotCtx, session.ID)
+		cancel()
+		if err != nil {
+			s.logger.Warn("failed to capture git archive snapshot",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+		}
+	}
 }
 
 // markOrphanedInheritParentChildren stamps an orphan marker on archived's
@@ -2915,28 +2996,43 @@ func (s *Service) registerTaskRuntimeStopOwners(stopTargets []taskStopTarget, fo
 // For fast UI response, the DB delete and event publish happen synchronously,
 // while agent stopping and worktree cleanup happen asynchronously.
 func (s *Service) DeleteTask(ctx context.Context, id string) error {
-	return s.deleteTaskWithReasonAndOptions(ctx, id, "", DeleteTaskOptions{})
+	return s.deleteTaskWithReasonAndOptions(ctx, id, "", DeleteTaskOptions{}, false)
+}
+
+// DeleteAgentProjectTask is reserved for the project lifecycle service.
+func (s *Service) DeleteAgentProjectTask(ctx context.Context, projectID, id string, options DeleteTaskOptions) error {
+	if !s.agentProjectsEnabled {
+		return ErrAgentProjectsDisabled
+	}
+	if s.agentProjectActionAuthorizer == nil {
+		return ErrAgentProjectTaskForbidden
+	}
+	if err := s.agentProjectActionAuthorizer(ctx, projectID, id); err != nil {
+		return err
+	}
+	return s.deleteTaskWithReasonAndOptions(ctx, id, "", options, true)
 }
 
 // DeleteTaskWithOptions deletes a task with explicit consent for destructive
 // worktree cleanup.
 func (s *Service) DeleteTaskWithOptions(ctx context.Context, id string, options DeleteTaskOptions) error {
-	return s.deleteTaskWithReasonAndOptions(ctx, id, "", options)
+	return s.deleteTaskWithReasonAndOptions(ctx, id, "", options, false)
 }
 
 // DeleteTaskWithReason behaves like DeleteTask but attaches a machine-readable
 // reason (e.g. "pr_approved_by_user") to the task.deleted event so the frontend
 // can explain why a focused task vanished.
 func (s *Service) DeleteTaskWithReason(ctx context.Context, id, reason string) error {
-	return s.deleteTaskWithReasonAndOptions(ctx, id, reason, DeleteTaskOptions{})
+	return s.deleteTaskWithReasonAndOptions(ctx, id, reason, DeleteTaskOptions{}, false)
 }
 
 func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) error {
-	return s.deleteTaskWithReasonAndOptions(ctx, id, reason, DeleteTaskOptions{})
+	return s.deleteTaskWithReasonAndOptions(ctx, id, reason, DeleteTaskOptions{}, false)
 }
 
 func (s *Service) deleteTaskWithReasonAndOptions(
 	ctx context.Context, id, reason string, options DeleteTaskOptions,
+	projectLifecycle bool,
 ) error {
 	deadline := archivecascade.ArchiveDeadline(ctx)
 	operationCtx, cancelOperation := context.WithDeadline(ctx, deadline)
@@ -2944,7 +3040,14 @@ func (s *Service) deleteTaskWithReasonAndOptions(
 	if err := s.authorizeTaskScope(operationCtx, id, authz.ScopeTaskWrite); err != nil {
 		return err
 	}
-	_, err := s.deleteTaskWithReasonAndDBDelete(operationCtx, id, reason, models.TaskResourceCleanupTriggerDelete, options, func(ctx context.Context, id string) (bool, error) {
+	task, err := s.tasks.GetTask(operationCtx, id)
+	if err != nil {
+		return err
+	}
+	if task.AgentProjectID != "" && task.ParentID == "" && !projectLifecycle {
+		return ErrAgentProjectCoordinatorActionRequired
+	}
+	_, err = s.deleteTaskWithReasonAndDBDelete(operationCtx, id, reason, models.TaskResourceCleanupTriggerDelete, options, func(ctx context.Context, id string) (bool, error) {
 		if err := s.tasks.DeleteTask(ctx, id); err != nil {
 			return false, err
 		}

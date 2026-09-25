@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -21,12 +22,57 @@ type guardedMCPDispatcher struct {
 
 func (d *guardedMCPDispatcher) RegisterFunc(action string, handler ws.HandlerFunc) {
 	d.Dispatcher.RegisterFunc(action, func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		if response, err := d.handlers.authorizeProjectAction(ctx, msg); response != nil {
+			return response, err
+		}
 		guarded, replacement, err := d.handlers.authorizeAutomationRequest(ctx, msg)
 		if guarded != nil {
 			return guarded, err
 		}
 		return handler(ctx, replacement)
 	})
+}
+
+var projectCoordinatorActions = map[string]struct{}{
+	ws.ActionMCPGetAgentProject:           {},
+	ws.ActionMCPListAgentProjectWorkers:   {},
+	ws.ActionMCPCreateAgentProjectWorker:  {},
+	ws.ActionMCPMessageAgentProjectWorker: {},
+	ws.ActionMCPStopAgentProjectWorker:    {},
+	ws.ActionMCPAskUserQuestion:           {},
+}
+
+var projectWorkerActions = map[string]struct{}{
+	ws.ActionMCPGetAgentProjectTask: {},
+	ws.ActionMCPAskParentQuestion:   {},
+}
+
+// authorizeProjectAction mirrors the project MCP catalogs at dispatch time.
+// Project tasks never fall through to generic task actions, even if an agent
+// sends a raw WebSocket action that was not advertised as a tool.
+func (h *Handlers) authorizeProjectAction(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok {
+		return nil, nil
+	}
+
+	allowed := false
+	switch {
+	case principal.IsProjectCoordinator():
+		_, allowed = projectCoordinatorActions[msg.Action]
+	case principal.IsProjectWorker():
+		_, allowed = projectWorkerActions[msg.Action]
+	case principal.AgentProjectID != "" || principal.Surface == mcpprofile.SurfaceProjectCoordinator || principal.Surface == mcpprofile.SurfaceProjectWorker:
+		allowed = false
+	default:
+		return nil, nil
+	}
+	if allowed {
+		return nil, nil
+	}
+	response, err := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction,
+		"tool is not available on this project MCP surface", nil)
+	return response, err
 }
 
 // automationSurfaceActions is the execution-time mirror of the fixed

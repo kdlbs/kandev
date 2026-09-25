@@ -25,9 +25,10 @@ func (a *Adapter) restoreSessionState(
 	resumeCtx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.resume")
 	span.SetAttributes(attribute.String("session_id", string(req.SessionId)))
 	resp, err := conn.ResumeSession(resumeCtx, acp.ResumeSessionRequest{
-		SessionId:  req.SessionId,
-		Cwd:        req.Cwd,
-		McpServers: req.McpServers,
+		SessionId:             req.SessionId,
+		Cwd:                   req.Cwd,
+		McpServers:            req.McpServers,
+		AdditionalDirectories: req.AdditionalDirectories,
 	})
 	if err != nil {
 		span.RecordError(err)

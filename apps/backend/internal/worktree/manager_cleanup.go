@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/system/storage"
@@ -869,7 +870,25 @@ func (m *Manager) tryRemoveEmptyTaskDir(worktreePath string) {
 		return
 	}
 	entries, readErr := os.ReadDir(parent)
+	if readErr == nil && len(entries) == 2 &&
+		containsDirectoryEntry(entries, storageworkspaces.OwnershipMarkerFilename) &&
+		containsDirectoryEntry(entries, "context") {
+		marker, found, markerErr := storageworkspaces.ReadOwnershipMarker(parent)
+		linkPath := filepath.Join(parent, "context")
+		if markerErr == nil && found && marker.TaskID != "" && marker.TaskDirName == filepath.Base(parent) &&
+			isAgentProjectContextDirectoryLink(linkPath) {
+			if err := RemoveOwnedDirectoryLink(parent, "context"); err != nil {
+				m.logger.Debug("project context link not removed", zap.String("path", linkPath), zap.Error(err))
+				return
+			}
+			entries, readErr = os.ReadDir(parent)
+		}
+	}
 	if readErr == nil && len(entries) == 1 && entries[0].Name() == storageworkspaces.OwnershipMarkerFilename && entries[0].Type().IsRegular() {
+		marker, found, markerErr := storageworkspaces.ReadOwnershipMarker(parent)
+		if markerErr != nil || !found || marker.TaskID == "" || marker.TaskDirName != filepath.Base(parent) {
+			return
+		}
 		if err := os.Remove(filepath.Join(parent, storageworkspaces.OwnershipMarkerFilename)); err != nil && !os.IsNotExist(err) {
 			m.logger.Debug("task ownership marker not removed", zap.String("path", parent), zap.Error(err))
 			return
@@ -880,6 +899,41 @@ func (m *Manager) tryRemoveEmptyTaskDir(worktreePath string) {
 			zap.String("path", parent),
 			zap.Error(err))
 	}
+}
+
+func containsDirectoryEntry(entries []os.DirEntry, name string) bool {
+	for _, entry := range entries {
+		if entry.Name() == name {
+			return true
+		}
+	}
+	return false
+}
+
+func isAgentProjectContextDirectoryLink(linkPath string) bool {
+	info, err := os.Lstat(linkPath)
+	if err != nil || !isPlatformDirectoryLink(info, linkPath) {
+		return false
+	}
+	target, err := platformDirectoryLinkTarget(linkPath)
+	if err != nil {
+		return false
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(linkPath), target)
+	}
+	target = filepath.Clean(target)
+	projectID := filepath.Base(filepath.Dir(target))
+	parsedID, err := uuid.Parse(projectID)
+	if err != nil || parsedID.String() != projectID || filepath.Base(target) != "context" ||
+		filepath.Base(filepath.Dir(filepath.Dir(target))) != "agent-projects" {
+		return false
+	}
+	if err := requireNoSymlinkAncestors(target); err != nil {
+		return false
+	}
+	targetInfo, err := os.Lstat(target)
+	return err == nil && targetInfo.IsDir() && !isPlatformDirectoryLink(targetInfo, target)
 }
 
 // forceRemoveDir removes a directory, retrying transient filesystem failures.

@@ -235,6 +235,34 @@ func TestTaskPublication_PreservesSameSecondActivityOrdering(t *testing.T) {
 	}
 }
 
+func TestTaskLifecycleEventPublishesAgentProjectIdentity(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	now := time.Now().UTC()
+	svc.publishTaskEventNow(context.Background(), events.TaskCreated, &models.Task{
+		ID:               "worker-task",
+		WorkspaceID:      "workspace-1",
+		AgentProjectID:   "project-1",
+		AgentProjectTier: models.AgentProjectTierEconomy,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}, nil, nil, nil, nil)
+
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 1 {
+		t.Fatalf("published events = %d, want 1", len(published))
+	}
+	data, ok := published[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data type = %T, want map[string]interface{}", published[0].Data)
+	}
+	if got := data["agent_project_id"]; got != "project-1" {
+		t.Fatalf("agent_project_id = %#v, want project-1", got)
+	}
+	if got := data["agent_project_tier"]; got != models.AgentProjectTierEconomy {
+		t.Fatalf("agent_project_tier = %#v, want %q", got, models.AgentProjectTierEconomy)
+	}
+}
+
 func TestTaskPublication_KnownPrimaryWithoutAgentIdentityEmitsExplicitNulls(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	data := make(map[string]interface{})

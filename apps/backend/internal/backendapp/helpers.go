@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -76,6 +77,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/internal/profiles"
+	agentprojects "github.com/kandev/kandev/internal/projects"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
 	"github.com/kandev/kandev/internal/quickterminal"
@@ -1295,6 +1297,35 @@ func resolveRepositoryIDForSessionSubpath(ctx context.Context, taskRepo *sqliter
 
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.
 func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, handoffSvc *taskservice.HandoffService) {
+	projectService := agentprojects.NewService(
+		agentprojects.NewStore(p.taskRepo.DBX()), p.taskSvc, p.agentSettingsRepo, p.features.AgentProjects,
+	)
+	projectService.SetProjectWorkspaceProfileSupportChecker(func(ctx context.Context, agentID string) bool {
+		return projectWorkspaceAgentSupported(ctx, agentID, p.agentSettingsRepo, p.agentRegistry)
+	})
+	if p.services != nil {
+		projectService.SetWorkerChangeRequestReader(newTaskChangeRequestReader(
+			p.taskSvc, p.services.GitHub, p.services.GitLab,
+		))
+	}
+	if p.orchestratorSvc != nil {
+		projectService.SetWorkerStarter(agentProjectWorkerLauncher{service: p.orchestratorSvc})
+	}
+	if p.services != nil {
+		p.services.AgentProjects = projectService
+	}
+	projectService.SetContextStore(agentprojects.NewContextStore(filepath.Join(p.homeDir, "agent-projects")))
+	projectService.SetTaskLifecycleCoordinator(handoffSvc)
+	p.taskSvc.SetAgentProjectContextPathResolver(projectService.ContextPath)
+	p.taskSvc.SetAgentProjectPrimaryRepositoryIDResolver(projectService.PrimaryRepositoryID)
+	if p.orchestratorSvc != nil {
+		p.orchestratorSvc.SetAgentProjectsEnabled(p.features.AgentProjects)
+		p.orchestratorSvc.SetAgentProjectLaunchResolver(projectService.ResolveTaskLaunch)
+		p.orchestratorSvc.SetAgentProjectContextPathResolver(func(_ context.Context, projectID string) (string, error) {
+			return projectService.ContextPath(projectID)
+		})
+	}
+	agentprojects.RegisterRoutes(p.router, projectService)
 	if attachmentSvc := p.taskSvc.AttachmentService(); attachmentSvc != nil {
 		taskhandlers.RegisterAttachmentRoutes(p.router, attachmentSvc, p.log)
 	} else {
@@ -2021,6 +2052,9 @@ func registerMCPAndDebugRoutes(
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
 	mcpHandlers.SetPluginService(p.services.Plugins)
+	if p.services.AgentProjects != nil {
+		mcpHandlers.SetAgentProjectService(p.services.AgentProjects)
+	}
 	if p.features.Canvases && p.services != nil && p.services.Canvas != nil && p.services.Plugins != nil {
 		mcpHandlers.SetCanvasAuthoringService(newCanvasAuthoringService(
 			p.services.Canvas, p.services.Plugins, p.taskSvc,

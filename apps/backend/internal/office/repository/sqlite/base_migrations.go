@@ -862,6 +862,9 @@ func (r *Repository) runTaskPriorityRecreate() error {
 		{"assignee_user_id", `ALTER TABLE tasks ADD COLUMN assignee_user_id TEXT NOT NULL DEFAULT ''`},
 		{"assignment_generation", `ALTER TABLE tasks ADD COLUMN assignment_generation INTEGER NOT NULL DEFAULT 0`},
 		{"workflow_agent_overrides", `ALTER TABLE tasks ADD COLUMN workflow_agent_overrides TEXT`},
+		{"agent_project_id", `ALTER TABLE tasks ADD COLUMN agent_project_id TEXT`},
+		{"agent_project_tier", `ALTER TABLE tasks ADD COLUMN agent_project_tier TEXT NOT NULL DEFAULT ''`},
+		{"agent_project_profile_id", `ALTER TABLE tasks ADD COLUMN agent_project_profile_id TEXT NOT NULL DEFAULT ''`},
 	}
 	for _, column := range legacyColumns {
 		if _, err := conn.ExecContext(ctx, column.stmt); err != nil && !db.IsDuplicateColumnError(err) {
@@ -918,6 +921,9 @@ func taskPriorityMigrationStatements() []string {
 			updated_at TIMESTAMP NOT NULL,
 			origin TEXT DEFAULT 'manual',
 			project_id TEXT DEFAULT '',
+			agent_project_id TEXT REFERENCES agent_projects(id) ON DELETE RESTRICT,
+			agent_project_tier TEXT NOT NULL DEFAULT '',
+			agent_project_profile_id TEXT NOT NULL DEFAULT '',
 			labels TEXT DEFAULT '[]',
 			identifier TEXT,
 			checkout_agent_id TEXT,
@@ -943,7 +949,7 @@ func taskPriorityMigrationStatements() []string {
 			id, workspace_id, workflow_id, workflow_step_id, workflow_agent_overrides, title, description,
 			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled,
 			archived_at, archived_by_cascade_id, created_at, updated_at,
-			origin, project_id,
+			origin, project_id, agent_project_id, agent_project_tier, agent_project_profile_id,
 			labels, identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
 			external_id, external_id_settled_at, assignee_user_id, assignment_generation
@@ -957,7 +963,7 @@ func taskPriorityMigrationStatements() []string {
 			COALESCE(archived_by_cascade_id,''),
 			created_at, updated_at,
 			COALESCE(origin,'manual'),
-			COALESCE(project_id,''),
+			COALESCE(project_id,''), agent_project_id, COALESCE(agent_project_tier,''), COALESCE(agent_project_profile_id,''),
 			COALESCE(labels,'[]'), identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
 			external_id, external_id_settled_at,
@@ -971,6 +977,8 @@ func taskPriorityMigrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_archived ON tasks(workspace_id, archived_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_agent_project_id ON tasks(agent_project_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_agent_project_coordinator ON tasks(agent_project_id) WHERE agent_project_id IS NOT NULL AND parent_id = ''`,
 		// idx_tasks_assignee was removed in ADR 0005 Wave F when the
 		// per-task assignee moved to workflow_step_participants.
 		//

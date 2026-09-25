@@ -518,6 +518,28 @@ func TestInjectKandevContext_SystemContentStrippable(t *testing.T) {
 	assert.Equal(t, "Do something", stripped)
 }
 
+func TestInjectAgentProjectInstructionsReplacesPriorWorkspaceAndKeepsPathsAsData(t *testing.T) {
+	old := AgentProjectInstructions("coordinator", "/old/context", "/old/repo", []string{"/old/repo"})
+	prompt := InjectAgentProjectInstructions("Do the work", old)
+	current := AgentProjectInstructions("coordinator", "/new/context", "/new/repo", []string{"/new/repo", "/sibling/repo"})
+	got := InjectAgentProjectInstructions(prompt, current)
+
+	assert.Contains(t, got, `"/new/context"`)
+	assert.Contains(t, got, `"/new/repo"`)
+	assert.Contains(t, got, `"/sibling/repo"`)
+	assert.NotContains(t, got, "/old/context")
+	assert.Equal(t, 1, strings.Count(got, "KANDEV AGENT PROJECT CONTEXT"))
+	assert.Contains(t, got, "create_agent_project_worker_kandev")
+	assert.NotContains(t, StripSystemContent(got), "KANDEV AGENT PROJECT CONTEXT")
+}
+
+func TestAgentProjectWorkerInstructionsDoNotGrantCoordinatorRole(t *testing.T) {
+	content := AgentProjectInstructions("economy", "/project/context", "/project/repo", []string{"/project/repo"})
+	assert.Contains(t, content, "You are the Worker")
+	assert.Contains(t, content, "get_agent_project_task_kandev")
+	assert.NotContains(t, content, "create_agent_project_worker_kandev")
+}
+
 // --- StripSystemContent tests ---
 
 func TestStripSystemContent_NoTags(t *testing.T) {

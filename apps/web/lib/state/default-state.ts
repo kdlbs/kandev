@@ -21,6 +21,7 @@ import {
   defaultFailedInboxState,
   defaultPreviewFeedbackState,
   defaultInboxHistoryState,
+  defaultAgentProjectsState,
 } from "./slices";
 import { mergeHydratedQuickChatSessions } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
@@ -30,6 +31,7 @@ import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
 import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
 import { normalizeThreadViews } from "./slices/ui/thread-view-builtins";
 import { normalizeAgentProfiles } from "@/lib/api/domains/agent-profile-normalize";
+import { mergeAgentProjectsState } from "./slices/agent-projects/hydration";
 
 function mergeHydratedSettingsAgents(
   incoming: HydrationState["settingsAgents"],
@@ -136,6 +138,7 @@ export const defaultState = {
   jiraIssueWatches: defaultJiraState.jiraIssueWatches,
   linearIssueWatches: defaultLinearState.linearIssueWatches,
   office: defaultOfficeState.office,
+  agentProjects: defaultAgentProjectsState.agentProjects,
   features: defaultFeaturesState.features,
   auth: defaultAuthState.auth,
   sessionHostnames: defaultAuthState.sessionHostnames,
@@ -549,6 +552,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
       ...initialState.linearIssueWatches,
     },
     office: { ...defaultState.office, ...initialState.office },
+    agentProjects: mergeAgentProjectsState(initialState.agentProjects, defaultState.agentProjects),
     needsYouInbox: { ...defaultState.needsYouInbox, ...initialState.needsYouInbox },
     failedInbox: {
       ...defaultState.failedInbox,

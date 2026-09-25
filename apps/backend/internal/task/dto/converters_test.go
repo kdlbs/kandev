@@ -62,6 +62,28 @@ func TestFromTaskSerializesWorkspaceFolders(t *testing.T) {
 	}
 }
 
+func TestFromTaskSerializesAgentProjectIdentity(t *testing.T) {
+	got := FromTask(&models.Task{
+		ID:               "task-agent-project",
+		AgentProjectID:   "project-1",
+		AgentProjectTier: "coordinator",
+	})
+	if got.AgentProjectID != "project-1" || got.AgentProjectTier != "coordinator" {
+		t.Fatalf("agent project identity = (%q, %q), want (project-1, coordinator)", got.AgentProjectID, got.AgentProjectTier)
+	}
+	payload, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal task DTO: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatalf("decode task DTO: %v", err)
+	}
+	if string(fields["agent_project_id"]) != `"project-1"` || string(fields["agent_project_tier"]) != `"coordinator"` {
+		t.Fatalf("agent project fields = %s, want project-1/coordinator", payload)
+	}
+}
+
 func TestFromTaskProjectsWorkflowAgentOverridesOnlyForStoredWorkflow(t *testing.T) {
 	overrides, err := models.NewWorkflowAgentOverrides("wf-1", []models.WorkflowAgentOverrideBinding{
 		{StepID: "implement", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b"},

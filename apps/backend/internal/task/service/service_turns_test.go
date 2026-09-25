@@ -1967,6 +1967,92 @@ func TestGetWorkspaceInfoForSession_MultiRepoReturnsTaskRoot(t *testing.T) {
 	}
 }
 
+func TestGetWorkspaceInfoForAgentProjectUsesPrimaryRepoAndContextRoots(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	if _, err := repo.DB().ExecContext(ctx, `INSERT INTO agent_projects (id, workspace_id, name) VALUES (?, ?, ?)`, "project-1", "ws-1", "Project"); err != nil {
+		t.Fatalf("insert agent project: %v", err)
+	}
+	task, err := repo.GetTask(ctx, "task-123")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	task.AgentProjectID = "project-1"
+	task.AgentProjectTier = "coordinator"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+	now := time.Now().UTC()
+	for position, item := range []struct{ id, name, source, checkout string }{
+		{"repo-api", "api", "/source/api", "/tasks/project/api"},
+		{"repo-web", "web", "/source/web", "/tasks/project/web"},
+	} {
+		if err := repo.CreateRepository(ctx, &models.Repository{
+			ID: item.id, WorkspaceID: "ws-1", Name: item.name, LocalPath: item.source, DefaultBranch: "main",
+		}); err != nil {
+			t.Fatalf("CreateRepository(%s): %v", item.id, err)
+		}
+		if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+			ID: "task-repo-" + item.id, TaskID: "task-123", RepositoryID: item.id,
+			BaseBranch: "main", Position: position,
+		}); err != nil {
+			t.Fatalf("CreateTaskRepository(%s): %v", item.id, err)
+		}
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-project", TaskID: "task-123", TaskEnvironmentID: "env-project",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-project", TaskID: "task-123", ExecutorType: "worktree", WorkspacePath: "/tasks/project/web",
+		TaskDirName: "project-task_abc", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "env-repo-web", TaskEnvironmentID: "env-project", RepositoryID: "repo-web", WorktreeID: "worktree-web", WorktreePath: "/tasks/project/web", Position: 0, CreatedAt: now},
+			{ID: "env-repo-api", TaskEnvironmentID: "env-project", RepositoryID: "repo-api", WorktreeID: "worktree-api", WorktreePath: "/tasks/project/api", Position: 1, CreatedAt: now},
+		},
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	svc.SetAgentProjectContextPathResolver(func(projectID string) (string, error) {
+		if projectID != "project-1" {
+			t.Fatalf("context resolver project ID = %q", projectID)
+		}
+		return "/kandev/agent-projects/project-1/context", nil
+	})
+	svc.SetAgentProjectPrimaryRepositoryIDResolver(func(_ context.Context, workspaceID, projectID string) (string, error) {
+		if workspaceID != "ws-1" || projectID != "project-1" {
+			t.Fatalf("primary repository resolver identity = (%q, %q)", workspaceID, projectID)
+		}
+		return "repo-api", nil
+	})
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-project")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession: %v", err)
+	}
+	if info.WorkspacePath != "/tasks/project/api" {
+		t.Fatalf("project WorkspacePath = %q, want primary repo worktree", info.WorkspacePath)
+	}
+	if info.ProjectWorkspace == nil || info.ProjectWorkspace.ContextPath != "/kandev/agent-projects/project-1/context" {
+		t.Fatalf("ProjectWorkspace = %#v, want canonical context root", info.ProjectWorkspace)
+	}
+	if info.ProjectWorkspace.PrimaryRepositoryID != "repo-api" {
+		t.Fatalf("primary repository ID = %q, want repo-api", info.ProjectWorkspace.PrimaryRepositoryID)
+	}
+	wantRoots := []string{"/tasks/project/web", "/tasks/project/api"}
+	if !slices.Equal(info.ProjectWorkspace.RepositoryWorktreePaths, wantRoots) {
+		t.Fatalf("repository worktree roots = %v, want %v", info.ProjectWorkspace.RepositoryWorktreePaths, wantRoots)
+	}
+	for _, folder := range info.WorkspaceFolders {
+		if folder.Name == "context" {
+			t.Fatal("project context must not be reconciled as a repository folder")
+		}
+	}
+}
+
 // AbandonOpenTurns: turns left open by a previous crash must close with
 // completed_at = started_at so analytics' active_duration_ms doesn't get
 // poisoned with the dead window and the UI's running timer doesn't count

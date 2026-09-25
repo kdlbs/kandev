@@ -26,6 +26,7 @@ The task carries the outcome through the workflow. The repository and session pr
 
 **Create and start tasks**
 
+- [Create an Agent Project](#create-an-agent-project)
 - [Prepare a workspace](#prepare-a-workspace)
 - [Create a task](#create-a-task)
 - [Start a task](#start-a-task)
@@ -154,6 +155,26 @@ with the built-in Kanban steps, so it can accept tasks immediately.
 The initial database bootstrap can include a **Default Workspace** and a **Development** workflow.
 Later user-created workspaces receive **Kanban** instead; they do not inherit other workflows or
 settings from the default workspace.
+
+## Create an Agent Project
+
+An Agent Project keeps one coordinator conversation, its worker tasks, and shared context together. Project tasks do not use a workflow.
+
+An administrator must enable **Agent Projects** in **Settings → System → Feature Toggles**. Add a remote repository to the workspace, set a local worktree executor as its default, and select three compatible agent profiles.
+
+1. Open **Projects** in the sidebar and select **New project**.
+2. Enter a name, select one or more remote repositories, and choose the primary repository.
+3. Choose the coordinator, economy worker, and frontier worker profiles.
+4. Select **Create project**. Kandev opens the coordinator task without starting an agent turn.
+5. Send a prompt to start the coordinator. Ask it to create an economy or frontier worker when you need separate work.
+
+Expand the project row to open its worker tasks. Each worker has its own repository checkout and status. Worker completion does not start a new coordinator turn.
+
+The coordinator's **Files** panel starts at **Context**. Select **Workspace** to browse repository files. A worker's Files panel starts at its workspace and also gives access to project context. Context files are shared by project tasks and do not appear in **Changes**.
+
+The project menu lets you archive or delete a project. Archive keeps shared context and lets you restore the project. Delete removes its coordinator and worker tasks. You can keep or remove shared context files. If a task worktree has local changes, select **Permanently discard tracked and untracked changes** to continue.
+
+Project context lives on the Kandev host under `<home>/agent-projects/`. Database backups do not include these files. Copy this directory separately when you back up Kandev.
 
 ## Create a task
 

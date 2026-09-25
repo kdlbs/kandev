@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,15 +17,16 @@ import (
 )
 
 type sessionRequestCaptureAgent struct {
-	newRequest   acpsdk.NewSessionRequest
-	loadRequest  acpsdk.LoadSessionRequest
-	newStarted   chan struct{}
-	releaseNew   chan struct{}
-	newCalls     chan struct{}
-	closeStarted chan struct{}
-	releaseClose chan struct{}
-	closeCalls   chan struct{}
-	loadStarted  chan struct{}
+	newRequest    acpsdk.NewSessionRequest
+	loadRequest   acpsdk.LoadSessionRequest
+	resumeRequest acpsdk.ResumeSessionRequest
+	newStarted    chan struct{}
+	releaseNew    chan struct{}
+	newCalls      chan struct{}
+	closeStarted  chan struct{}
+	releaseClose  chan struct{}
+	closeCalls    chan struct{}
+	loadStarted   chan struct{}
 
 	mu                      sync.Mutex
 	closeStartedOnce        sync.Once
@@ -113,7 +116,8 @@ func (*sessionRequestCaptureAgent) Prompt(context.Context, acpsdk.PromptRequest)
 	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 }
 
-func (*sessionRequestCaptureAgent) ResumeSession(context.Context, acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
+func (a *sessionRequestCaptureAgent) ResumeSession(_ context.Context, request acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
+	a.resumeRequest = request
 	return acpsdk.ResumeSessionResponse{}, nil
 }
 
@@ -161,6 +165,48 @@ func TestMCPSessionNewAndLoadUseHTTPWithSSEFallback(t *testing.T) {
 			}
 			assertCapturedKandevTransport(t, capture.loadRequest.McpServers, tt.wantType)
 		})
+	}
+}
+
+func TestProjectWorkspaceDirectoriesReachACPSessionTransitions(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.AdditionalDirectories = &acpsdk.SessionAdditionalDirectoriesCapabilities{}
+	directories := []string{"/projects/123/context", "/repos/api", "/repos/web"}
+
+	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, directories); err != nil {
+		t.Fatalf("NewSessionWithAdditionalDirectories: %v", err)
+	}
+	if !reflect.DeepEqual(capture.newRequest.AdditionalDirectories, directories) {
+		t.Fatalf("session/new additionalDirectories = %v, want %v", capture.newRequest.AdditionalDirectories, directories)
+	}
+
+	if err := adapter.LoadSessionWithAdditionalDirectories(context.Background(), "session-1", nil, directories); err != nil {
+		t.Fatalf("LoadSessionWithAdditionalDirectories: %v", err)
+	}
+	if !reflect.DeepEqual(capture.loadRequest.AdditionalDirectories, directories) {
+		t.Fatalf("session/load additionalDirectories = %v, want %v", capture.loadRequest.AdditionalDirectories, directories)
+	}
+
+	adapter.capabilities.SessionCapabilities.Resume = &acpsdk.SessionResumeCapabilities{}
+	if err := adapter.LoadSessionWithAdditionalDirectories(context.Background(), "session-2", nil, directories); err != nil {
+		t.Fatalf("LoadSessionWithAdditionalDirectories using session/resume: %v", err)
+	}
+	if !reflect.DeepEqual(capture.resumeRequest.AdditionalDirectories, directories) {
+		t.Fatalf("session/resume additionalDirectories = %v, want %v", capture.resumeRequest.AdditionalDirectories, directories)
+	}
+}
+
+func TestProjectWorkspaceDirectoriesRequireAdvertisedCapability(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	directories := []string{"/projects/123/context"}
+	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, directories); err == nil || !strings.Contains(err.Error(), "does not advertise additionalDirectories") {
+		t.Fatalf("NewSessionWithAdditionalDirectories error = %v, want missing capability error", err)
+	}
+	capture.mu.Lock()
+	calls := capture.sessionCounter
+	capture.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("session/new reached agent without advertised capability (%d sessions)", calls)
 	}
 }
 

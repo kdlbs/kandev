@@ -818,6 +818,11 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	if taskID == "" {
 		taskID = session.TaskID
 	}
+	task, taskErr := s.tasks.GetTask(ctx, taskID)
+	if taskErr != nil {
+		return nil, fmt.Errorf("load task for workspace recovery: %w", taskErr)
+	}
+	isAgentProject := task != nil && task.AgentProjectID != ""
 
 	// Get workspace path from the session's worktree(s).
 	// Multi-repo: every per-repo worktree sits as a sibling under the task root
@@ -827,7 +832,11 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	// tracker fan-out that scanRepositorySubdirs relies on.
 	var workspacePath string
 	if len(session.Worktrees) > 1 {
-		workspacePath = filepath.Dir(session.Worktrees[0].WorktreePath)
+		if isAgentProject {
+			workspacePath = session.Worktrees[0].WorktreePath
+		} else {
+			workspacePath = filepath.Dir(session.Worktrees[0].WorktreePath)
+		}
 	} else if len(session.Worktrees) == 1 {
 		workspacePath = session.Worktrees[0].WorktreePath
 	}
@@ -901,6 +910,14 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		RuntimeConfigOptions:    runtimeConfig.ConfigOptions,
 		RuntimeConfigOptionsSet: runtimeConfigOptionsSet,
 	}
+	if task != nil {
+		info.AgentProjectID = task.AgentProjectID
+	}
+	projectWorkspace, err := s.resolveAgentProjectWorkspace(ctx, task)
+	if err != nil {
+		return nil, err
+	}
+	info.ProjectWorkspace = projectWorkspace
 	// Durable folder attachments are replayed by lifecycle for both fresh
 	// launch and workspace-only session recovery.
 	if s.workspaceFolders != nil {
@@ -968,6 +985,11 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	if err := s.populateWorkspaceRepositorySpecs(ctx, taskID, workspaceInventory, info); err != nil {
 		return nil, err
 	}
+	if info.ProjectWorkspace != nil {
+		if err := populateProjectWorkspacePaths(info, workspaceInventory); err != nil {
+			return nil, err
+		}
+	}
 
 	// Populate executor info for correct runtime selection and remote reconnection
 	running, err := s.executors.GetExecutorRunningBySessionID(ctx, sessionID)
@@ -1005,6 +1027,94 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	}
 
 	return info, nil
+}
+
+func (s *Service) resolveAgentProjectWorkspace(
+	ctx context.Context,
+	task *models.Task,
+) (*lifecycle.ProjectWorkspaceAccess, error) {
+	if task == nil || task.AgentProjectID == "" {
+		return nil, nil
+	}
+	if s.agentProjectContextPathResolver == nil {
+		return nil, errors.New("project context path resolver is unavailable")
+	}
+	contextPath, err := s.agentProjectContextPathResolver(task.AgentProjectID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project context path: %w", err)
+	}
+	primaryRepositoryID, err := s.resolveAgentProjectPrimaryRepositoryID(ctx, task)
+	if err != nil {
+		return nil, err
+	}
+	return &lifecycle.ProjectWorkspaceAccess{
+		ContextPath: contextPath, PrimaryRepositoryID: primaryRepositoryID,
+	}, nil
+}
+
+func (s *Service) resolveAgentProjectPrimaryRepositoryID(ctx context.Context, task *models.Task) (string, error) {
+	if s.agentProjectPrimaryRepositoryIDResolver == nil {
+		return "", nil
+	}
+	primaryRepositoryID, err := s.agentProjectPrimaryRepositoryIDResolver(ctx, task.WorkspaceID, task.AgentProjectID)
+	if err != nil {
+		return "", fmt.Errorf("resolve project primary repository: %w", err)
+	}
+	return primaryRepositoryID, nil
+}
+
+func populateProjectWorkspacePaths(info *lifecycle.WorkspaceInfo, inventory []*models.TaskEnvironmentRepo) error {
+	info.WorkspacePath = ""
+	populatePathsFromProjectRepositories(info)
+	if len(info.ProjectWorkspace.RepositoryWorktreePaths) == 0 {
+		populatePathsFromInventory(info, inventory)
+	}
+	if info.ProjectWorkspace.PrimaryRepositoryID != "" && info.WorkspacePath == "" {
+		return fmt.Errorf("primary project repository %q has no workspace worktree", info.ProjectWorkspace.PrimaryRepositoryID)
+	}
+	return nil
+}
+
+func populatePathsFromProjectRepositories(info *lifecycle.WorkspaceInfo) {
+	for _, repository := range info.WorkspaceRepositories {
+		if repository.WorktreePath != "" {
+			info.ProjectWorkspace.RepositoryWorktreePaths = append(
+				info.ProjectWorkspace.RepositoryWorktreePaths,
+				repository.WorktreePath,
+			)
+		}
+		info.WorkspacePath = chooseProjectWorkspacePath(
+			info.WorkspacePath, repository.WorktreePath, repository.RepositoryID, info.ProjectWorkspace.PrimaryRepositoryID,
+		)
+	}
+}
+
+func populatePathsFromInventory(info *lifecycle.WorkspaceInfo, inventory []*models.TaskEnvironmentRepo) {
+	for _, worktree := range inventory {
+		if worktree == nil || worktree.WorktreePath == "" {
+			continue
+		}
+		info.ProjectWorkspace.RepositoryWorktreePaths = append(
+			info.ProjectWorkspace.RepositoryWorktreePaths,
+			worktree.WorktreePath,
+		)
+		info.WorkspacePath = chooseProjectWorkspacePath(
+			info.WorkspacePath, worktree.WorktreePath, worktree.RepositoryID, info.ProjectWorkspace.PrimaryRepositoryID,
+		)
+	}
+}
+
+func chooseProjectWorkspacePath(current, candidate, repositoryID, primaryRepositoryID string) string {
+	if candidate == "" {
+		return current
+	}
+	if repositoryID == primaryRepositoryID && primaryRepositoryID != "" {
+		return candidate
+	}
+	if current == "" && primaryRepositoryID == "" {
+		return candidate
+	}
+	return current
 }
 
 func (s *Service) applyWorkspaceExecutorRecord(
@@ -1092,6 +1202,7 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 		}
 		if worktree := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchPlans[index].IdentitySlug}]; worktree != nil {
 			spec.WorktreeID = worktree.WorktreeID
+			spec.WorktreePath = worktree.WorktreePath
 			spec.BranchSlug = worktree.BranchSlug
 			spec.BranchIdentitySlug = worktree.BranchSlug
 		}

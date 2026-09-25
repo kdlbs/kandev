@@ -497,9 +497,21 @@ func buildLifecycleLaunchRequest(
 		BranchIdentitySlug:            req.BranchIdentitySlug,
 	}
 	launchReq.WorkspaceFolders = lifecycleWorkspaceFolders(req.WorkspaceFolders)
+	launchReq.ProjectWorkspace = lifecycleProjectWorkspace(req.ProjectWorkspace)
 	launchReq.RouteOverride = lifecycleRouteOverride(req.RouteOverride)
 	launchReq.Repositories = lifecycleRepoLaunchSpecs(req.Repositories)
 	return launchReq
+}
+
+func lifecycleProjectWorkspace(projectWorkspace *executor.ProjectWorkspaceAccess) *lifecycle.ProjectWorkspaceAccess {
+	if projectWorkspace == nil {
+		return nil
+	}
+	return &lifecycle.ProjectWorkspaceAccess{
+		ContextPath:             projectWorkspace.ContextPath,
+		Tier:                    projectWorkspace.Tier,
+		RepositoryWorktreePaths: append([]string(nil), projectWorkspace.RepositoryWorktreePaths...),
+	}
 }
 
 func lifecycleWorkspaceFolders(folders []executor.WorkspaceFolderSpec) []lifecycle.WorkspaceFolderSpec {

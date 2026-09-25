@@ -150,7 +150,12 @@ func (sm *SessionManager) InitializeSession(
 	existingSessionID string,
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
+	additionalDirectories ...[]string,
 ) (*InitializeResult, error) {
+	var directories []string
+	if len(additionalDirectories) > 0 {
+		directories = additionalDirectories[0]
+	}
 	rt := agentConfig.Runtime()
 	sm.logger.Info("initializing ACP session",
 		zap.String("agent_type", agentConfig.ID()),
@@ -185,7 +190,7 @@ func (sm *SessionManager) InitializeSession(
 		zap.String("agent_version", result.AgentVersion))
 
 	// Step 2: Create or resume ACP session based on configuration
-	sessionID, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers)
+	sessionID, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers, directories)
 	if err != nil {
 		return nil, err
 	}
@@ -202,6 +207,7 @@ func (sm *SessionManager) createOrLoadSession(
 	existingSessionID string,
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
+	additionalDirectories []string,
 ) (string, error) {
 	rt := agentConfig.Runtime()
 	sm.logger.Debug("createOrLoadSession decision",
@@ -210,7 +216,7 @@ func (sm *SessionManager) createOrLoadSession(
 		zap.String("existing_session_id", existingSessionID),
 		zap.Bool("will_attempt_load", rt.SessionConfig.NativeSessionResume && existingSessionID != ""))
 	if rt.SessionConfig.NativeSessionResume && existingSessionID != "" {
-		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID, mcpServers)
+		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID, mcpServers, additionalDirectories)
 		if err == nil {
 			return sessionID, nil
 		}
@@ -252,9 +258,9 @@ func (sm *SessionManager) createOrLoadSession(
 			zap.Bool("capability_mismatch", hasCanonicalSessionLoadMessage(err, "agent does not support session loading (LoadSession capability is false)")),
 			zap.Bool("session_unknown", isSessionUnknownErr(err)),
 			zap.Bool("provider_session_missing", isMissingProviderSessionErr(err, existingSessionID)))
-		return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+		return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers, additionalDirectories)
 	}
-	return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+	return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers, additionalDirectories)
 }
 
 // shouldInjectResumeContext determines if we should inject resume context for this session.
@@ -302,12 +308,13 @@ func (sm *SessionManager) loadSession(
 	agentConfig agents.Agent,
 	sessionID string,
 	mcpServers []agentctltypes.McpServer,
+	additionalDirectories []string,
 ) (string, error) {
 	sm.logger.Info("restoring existing ACP session",
 		zap.String("agent_type", agentConfig.ID()),
 		zap.String("session_id", sessionID))
 
-	if err := client.LoadSession(ctx, sessionID, mcpServers); err != nil {
+	if err := client.LoadSessionWithAdditionalDirectories(ctx, sessionID, mcpServers, additionalDirectories); err != nil {
 		// context.Canceled is caller teardown (WS disconnect, session already
 		// gone) rather than an agent or transport fault, so it does not warrant
 		// an ERROR + stacktrace. DeadlineExceeded is a real startup/handshake
@@ -342,12 +349,13 @@ func (sm *SessionManager) createNewSession(
 	agentConfig agents.Agent,
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
+	additionalDirectories []string,
 ) (string, error) {
 	sm.logger.Info("sending ACP session/new request",
 		zap.String("agent_type", agentConfig.ID()),
 		zap.String("workspace_path", workspacePath))
 
-	sessionID, err := client.NewSession(ctx, workspacePath, mcpServers)
+	sessionID, err := client.NewSessionWithAdditionalDirectories(ctx, workspacePath, mcpServers, additionalDirectories)
 	if err != nil {
 		sm.logger.Error("ACP session/new failed",
 			zap.String("agent_type", agentConfig.ID()),
@@ -576,7 +584,7 @@ func (sm *SessionManager) initializeACPConnection(
 	if client == nil {
 		return ctx, nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
-	result, err := sm.InitializeSession(ctx, client, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers)
+	result, err := sm.InitializeSession(ctx, client, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers, execution.ProjectWritableRoots)
 	releaseClient()
 	if err != nil {
 		// loadSession already logged the root cause. context.Canceled is

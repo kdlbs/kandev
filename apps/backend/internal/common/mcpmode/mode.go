@@ -4,12 +4,14 @@
 package mcpmode
 
 const (
-	Task             = "task"
-	TaskTitlePending = "task-title-pending"
-	Config           = "config"
-	External         = "external"
-	Office           = "office"
-	Automation       = "automation"
+	Task               = "task"
+	TaskTitlePending   = "task-title-pending"
+	Config             = "config"
+	External           = "external"
+	Office             = "office"
+	Automation         = "automation"
+	ProjectCoordinator = "project-coordinator"
+	ProjectWorker      = "project-worker"
 )
 
 var instanceModes = [...]string{
@@ -18,6 +20,8 @@ var instanceModes = [...]string{
 	Config,
 	Office,
 	Automation,
+	ProjectCoordinator,
+	ProjectWorker,
 }
 
 // InstanceModes returns the modes accepted by the agentctl instance API.

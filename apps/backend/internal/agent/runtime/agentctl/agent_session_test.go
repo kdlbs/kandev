@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -96,6 +97,52 @@ func TestResetSession_UsesResetActionAndReturnsNewSessionID(t *testing.T) {
 	}
 	if len(payload.McpServers) != 1 || payload.McpServers[0].Name != "kandev" {
 		t.Errorf("mcp_servers = %+v, want the kandev server forwarded", payload.McpServers)
+	}
+}
+
+func TestProjectWorkspaceDirectoriesAreForwardedForNewAndLoadedSessions(t *testing.T) {
+	directories := []string{"/projects/123/context", "/repos/api"}
+	tests := []struct {
+		name   string
+		action string
+		call   func(*Client) error
+	}{
+		{
+			name:   "new",
+			action: "agent.session.new",
+			call: func(client *Client) error {
+				_, err := client.NewSessionWithAdditionalDirectories(context.Background(), "/repo", nil, directories)
+				return err
+			},
+		},
+		{
+			name:   "load",
+			action: "agent.session.load",
+			call: func(client *Client) error {
+				return client.LoadSessionWithAdditionalDirectories(context.Background(), "session-1", nil, directories)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, captured := captureStreamRequest(t, okResponse(map[string]any{"success": true, "session_id": "session-1"}))
+			if err := tt.call(client); err != nil {
+				t.Fatalf("session request: %v", err)
+			}
+			sent := captured()
+			if sent.Action != tt.action {
+				t.Fatalf("action = %q, want %q", sent.Action, tt.action)
+			}
+			var payload struct {
+				AdditionalDirectories []string `json:"additional_directories"`
+			}
+			if err := json.Unmarshal(sent.Payload, &payload); err != nil {
+				t.Fatalf("decode request payload: %v", err)
+			}
+			if !reflect.DeepEqual(payload.AdditionalDirectories, directories) {
+				t.Fatalf("additional_directories = %v, want %v", payload.AdditionalDirectories, directories)
+			}
+		})
 	}
 }
 

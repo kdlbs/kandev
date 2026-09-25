@@ -336,6 +336,7 @@ type Handlers struct {
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc AgentPermissionService
+	agentProjectSvc    AgentProjectMCPService
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -465,6 +466,11 @@ func (h *Handlers) SetPluginService(svc *plugins.Service) {
 	h.pluginSvc = svc
 }
 
+// SetAgentProjectService wires the session-bound coordinator MCP boundary.
+func (h *Handlers) SetAgentProjectService(svc AgentProjectMCPService) {
+	h.agentProjectSvc = svc
+}
+
 // SetCanvasAuthoringService wires the feature-gated, task-scoped canvas
 // authoring boundary. Leave it unset when canvas support is disabled so raw WS
 // canvas actions are not registered either.
@@ -488,6 +494,7 @@ func (h *Handlers) registerTaskModeHandlers(d *guardedMCPDispatcher) {
 	h.registerTaskMutationHandlers(d)
 	h.registerTaskPlanHandlers(d)
 	h.registerTaskQuestionHandlers(d)
+	h.registerAgentProjectHandlers(d)
 	h.registerReviewHandlers(d)
 	h.registerCanvasHandlers(d)
 }

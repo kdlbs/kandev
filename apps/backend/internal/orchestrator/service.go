@@ -747,7 +747,9 @@ type Service struct {
 	// subagentContexts optionally persists a relational record of subagent
 	// (Task tool) invocations recognized on the tool-call frame paths. Nil is
 	// safe: both call sites guard on it. See SetSubagentContextRecorder.
-	subagentContexts SubagentContextRecorder
+	subagentContexts           SubagentContextRecorder
+	agentProjectsEnabled       bool
+	agentProjectLaunchResolver func(context.Context, *models.Task, string, string, string) (string, string, string, error)
 
 	// agentProfileRecentUseRecorder optionally persists the task_create profile
 	// selected by a deferred launch after its agent starts successfully.
@@ -1962,6 +1964,23 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 func (s *Service) SetCanvasesEnabled(enabled bool) {
 	if s.executor != nil {
 		s.executor.SetCanvasesEnabled(enabled)
+	}
+}
+
+// SetAgentProjectsEnabled gates every task launch carrying project identity.
+func (s *Service) SetAgentProjectsEnabled(enabled bool) {
+	s.agentProjectsEnabled = enabled
+}
+
+// SetAgentProjectLaunchResolver supplies the stored project profile and
+// executor after validating the task's project membership and caller choices.
+func (s *Service) SetAgentProjectLaunchResolver(resolver func(context.Context, *models.Task, string, string, string) (string, string, string, error)) {
+	s.agentProjectLaunchResolver = resolver
+}
+
+func (s *Service) SetAgentProjectContextPathResolver(resolver executor.AgentProjectContextPathResolver) {
+	if s.executor != nil {
+		s.executor.SetAgentProjectContextPathResolver(resolver)
 	}
 }
 

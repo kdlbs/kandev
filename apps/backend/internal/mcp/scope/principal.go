@@ -13,15 +13,26 @@ import (
 // Automation handlers use the principal as their workspace and self-target
 // boundary in addition to the normal owner identity attached to the context.
 type Principal struct {
-	AutomationID    string
-	WorkspaceID     string
-	CallerTaskID    string
-	CallerSessionID string
-	Surface         mcpprofile.Surface
+	AutomationID      string
+	WorkspaceID       string
+	CallerTaskID      string
+	CallerSessionID   string
+	Surface           mcpprofile.Surface
+	AgentProjectID    string
+	AgentProjectTier  string
+	ProjectMainTaskID string
 }
 
 func (p Principal) IsAutomation() bool {
 	return p.AutomationID != "" && p.Surface == mcpprofile.SurfaceAutomation
+}
+
+func (p Principal) IsProjectCoordinator() bool {
+	return p.AgentProjectID != "" && p.AgentProjectTier == models.AgentProjectTierCoordinator && p.Surface == mcpprofile.SurfaceProjectCoordinator
+}
+
+func (p Principal) IsProjectWorker() bool {
+	return p.AgentProjectID != "" && (p.AgentProjectTier == models.AgentProjectTierEconomy || p.AgentProjectTier == models.AgentProjectTierFrontier) && p.Surface == mcpprofile.SurfaceProjectWorker
 }
 
 type principalContextKey struct{}
@@ -62,12 +73,22 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 	if err != nil {
 		return nil, fmt.Errorf("resolve MCP principal task %s: %w", taskID, err)
 	}
+	mainTaskID := ""
+	if task.AgentProjectID != "" {
+		mainTaskID = task.ID
+		if task.AgentProjectTier != models.AgentProjectTierCoordinator {
+			mainTaskID = task.ParentID
+		}
+	}
 	return WithPrincipal(ctx, Principal{
-		AutomationID:    automationID,
-		WorkspaceID:     workspaceID,
-		CallerTaskID:    taskID,
-		CallerSessionID: sessionID,
-		Surface:         surface,
+		AutomationID:      automationID,
+		WorkspaceID:       workspaceID,
+		CallerTaskID:      taskID,
+		CallerSessionID:   sessionID,
+		Surface:           surface,
+		AgentProjectID:    task.AgentProjectID,
+		AgentProjectTier:  task.AgentProjectTier,
+		ProjectMainTaskID: mainTaskID,
 	}), nil
 }
 
@@ -114,6 +135,22 @@ func (r *Resolver) resolvePrincipalWorkspace(ctx context.Context, task *models.T
 }
 
 func principalSurface(task *models.Task) (string, mcpprofile.Surface, error) {
+	if task.AgentProjectID != "" {
+		switch task.AgentProjectTier {
+		case models.AgentProjectTierCoordinator:
+			if task.ParentID != "" {
+				return "", mcpprofile.SurfaceKanbanTask, fmt.Errorf("project coordinator has a parent task")
+			}
+			return "", mcpprofile.SurfaceProjectCoordinator, nil
+		case models.AgentProjectTierEconomy, models.AgentProjectTierFrontier:
+			if task.ParentID == "" {
+				return "", mcpprofile.SurfaceKanbanTask, fmt.Errorf("project worker has no coordinator parent")
+			}
+			return "", mcpprofile.SurfaceProjectWorker, nil
+		default:
+			return "", mcpprofile.SurfaceKanbanTask, fmt.Errorf("project task tier is invalid")
+		}
+	}
 	if task.Origin != models.TaskOriginAutomationRun {
 		if task.IsFromOffice {
 			return "", mcpprofile.SurfaceOfficeTask, nil

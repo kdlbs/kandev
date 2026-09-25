@@ -496,6 +496,10 @@ type FeaturesConfig struct {
 	// HTTP/WS route registration, and frontend nav/route visibility.
 	Office bool `mapstructure:"office" json:"office"`
 
+	// AgentProjects gates the workflow-free project coordinator and worker
+	// lifecycle, project APIs, and its navigation surfaces.
+	AgentProjects bool `mapstructure:"agent_projects" json:"agentProjects"`
+
 	// Auth is the on/off switch for opt-in authentication and per-user
 	// workspaces. When on, every visitor must sign in (the first becomes the
 	// admin via a setup wizard) and workspaces are private per user; the

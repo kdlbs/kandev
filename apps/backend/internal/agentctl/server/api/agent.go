@@ -55,8 +55,9 @@ type InitializeResponse struct {
 
 // NewSessionRequest is a request to create a new ACP session
 type NewSessionRequest struct {
-	Cwd        string            `json:"cwd"` // Working directory for the session
-	McpServers []types.McpServer `json:"mcp_servers,omitempty"`
+	Cwd                   string            `json:"cwd"` // Working directory for the session
+	McpServers            []types.McpServer `json:"mcp_servers,omitempty"`
+	AdditionalDirectories []string          `json:"additional_directories,omitempty"`
 }
 
 // NewSessionResponse is the response to a new session call
@@ -69,8 +70,9 @@ type NewSessionResponse struct {
 
 // LoadSessionRequest is a request to load an existing ACP session
 type LoadSessionRequest struct {
-	SessionID  string            `json:"session_id"`
-	McpServers []types.McpServer `json:"mcp_servers,omitempty"`
+	SessionID             string            `json:"session_id"`
+	McpServers            []types.McpServer `json:"mcp_servers,omitempty"`
+	AdditionalDirectories []string          `json:"additional_directories,omitempty"`
 }
 
 // LoadSessionResponse is the response to a load session call
@@ -432,13 +434,13 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 
-	adapter := s.procMgr.GetAdapter()
-	if adapter == nil {
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
 	}
 
-	if err := adapter.Initialize(ctx); err != nil {
+	if err := agentAdapter.Initialize(ctx); err != nil {
 		s.logger.Error("initialize failed", zap.Error(err))
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		return resp
@@ -446,7 +448,7 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 
 	// Get agent info after successful initialization
 	var agentInfoResp *AgentInfoResponse
-	if info := adapter.GetAgentInfo(); info != nil {
+	if info := agentAdapter.GetAgentInfo(); info != nil {
 		agentInfoResp = &AgentInfoResponse{
 			Name:    info.Name,
 			Version: info.Version,
@@ -575,8 +577,8 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 	ctx, cancel := context.WithTimeout(ctx, constants.SessionNewTimeout)
 	defer cancel()
 
-	adapter := s.procMgr.GetAdapter()
-	if adapter == nil {
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
 	}
@@ -596,7 +598,18 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
-	sessionID, err := adapter.NewSession(ctx, mcpServers)
+	var sessionID string
+	var err error
+	if len(req.AdditionalDirectories) > 0 {
+		workspaceAdapter, ok := agentAdapter.(adapter.ProjectWorkspaceAdapter)
+		if !ok {
+			err = fmt.Errorf("agent does not support project workspace directories")
+		} else {
+			sessionID, err = workspaceAdapter.NewSessionWithAdditionalDirectories(ctx, mcpServers, req.AdditionalDirectories)
+		}
+	} else {
+		sessionID, err = agentAdapter.NewSession(ctx, mcpServers)
+	}
 	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
 	if err != nil {
 		s.logger.Error("new session failed", zap.Error(err))
@@ -607,7 +620,7 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
 		Success:    true,
 		SessionID:  sessionID,
-		ModelState: sessionModelState(adapter),
+		ModelState: sessionModelState(agentAdapter),
 	})
 	return resp
 }
@@ -626,8 +639,8 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 	ctx, cancel := context.WithTimeout(ctx, constants.SessionLoadTimeout)
 	defer cancel()
 
-	adapter := s.procMgr.GetAdapter()
-	if adapter == nil {
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
 	}
@@ -647,10 +660,21 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
-	if err := adapter.LoadSession(ctx, req.SessionID, mcpServers); err != nil {
-		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
-		s.logger.Error("load session failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+	var loadErr error
+	if len(req.AdditionalDirectories) > 0 {
+		workspaceAdapter, ok := agentAdapter.(adapter.ProjectWorkspaceAdapter)
+		if !ok {
+			loadErr = fmt.Errorf("agent does not support project workspace directories")
+		} else {
+			loadErr = workspaceAdapter.LoadSessionWithAdditionalDirectories(ctx, req.SessionID, mcpServers, req.AdditionalDirectories)
+		}
+	} else {
+		loadErr = agentAdapter.LoadSession(ctx, req.SessionID, mcpServers)
+	}
+	if loadErr != nil {
+		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, loadErr)
+		s.logger.Error("load session failed", zap.Error(loadErr))
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, loadErr.Error(), nil)
 		return resp
 	}
 	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)
@@ -658,7 +682,7 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, LoadSessionResponse{
 		Success:    true,
 		SessionID:  req.SessionID,
-		ModelState: sessionModelState(adapter),
+		ModelState: sessionModelState(agentAdapter),
 	})
 	return resp
 }
@@ -945,7 +969,18 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
-	sessionID, err := sr.ResetSession(ctx, mcpServers)
+	var sessionID string
+	var err error
+	if len(req.AdditionalDirectories) > 0 {
+		workspaceAdapter, ok := agentAdapter.(adapter.ProjectWorkspaceAdapter)
+		if !ok {
+			err = fmt.Errorf("agent does not support project workspace directories")
+		} else {
+			sessionID, err = workspaceAdapter.ResetSessionWithAdditionalDirectories(ctx, mcpServers, req.AdditionalDirectories)
+		}
+	} else {
+		sessionID, err = sr.ResetSession(ctx, mcpServers)
+	}
 	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
 	if err != nil {
 		s.logger.Error("session reset failed", zap.Error(err))

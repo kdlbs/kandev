@@ -61,6 +61,25 @@ The optional `workspace_mode` field advertises exactly two values: `inherit_pare
 
 Omit `workspace_mode` to use defaulting instead of sending an empty string. MCP schema validation rejects empty, whitespace-only, and padded values before backend dispatch, even though the backend policy resolver still trims strings. `shared` and `shared_group` are not supported by this MCP endpoint.
 
+## Agent Project task MCP
+
+When **Agent Projects** is enabled in **Settings > System > Feature Toggles**, a
+coordinator session gets project-scoped MCP tools. A coordinator can read its
+project with `get_agent_project_kandev` and list direct workers with
+`list_agent_project_workers_kandev`.
+
+Use `create_agent_project_worker_kandev` to create and start an economy or
+frontier worker. The project supplies the worker profile and executor. Omit
+`repositories` to use all repositories selected for the project. If you pass a
+repository list, each repository must belong to the project and each selected
+base branch must exist on the remote.
+
+Use `message_agent_project_worker_kandev` or
+`stop_agent_project_worker_kandev` with a direct worker ID returned by the
+project tools. A worker session gets `get_agent_project_task_kandev` to read its
+own task, result, and repository branch status. These tools cannot select an
+arbitrary workspace, parent task, profile, or executor.
+
 ## Quick path
 
 - Use a **workflow event** for predictable transitions on existing tasks.

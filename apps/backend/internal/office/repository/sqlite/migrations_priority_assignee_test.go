@@ -17,7 +17,7 @@ import (
 // is dropped along with the data in it. For the human assignee that would mean
 // every existing assignment silently disappearing on an install that still
 // needs this historical rebuild.
-func TestMigrate_PriorityRebuildPreservesAssignee(t *testing.T) {
+func TestMigrate_PriorityRebuildPreservesTaskIdentity(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db") + "?_journal_mode=WAL"
 	db, err := sqlx.Open("sqlite3", dbPath)
 	if err != nil {
@@ -25,8 +25,14 @@ func TestMigrate_PriorityRebuildPreservesAssignee(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	if _, err := db.Exec(`CREATE TABLE agent_projects (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("seed agent projects table: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO agent_projects (id) VALUES ('project-1')`); err != nil {
+		t.Fatalf("seed agent project: %v", err)
+	}
 	// Legacy INTEGER-priority table (enough to trigger the rebuild) that
-	// already carries an assignment, as an install upgrading mid-feature would.
+	// already carries identities, as an install upgrading mid-feature would.
 	if _, err := db.Exec(`
 		CREATE TABLE tasks (
 			id TEXT PRIMARY KEY,
@@ -46,6 +52,7 @@ func TestMigrate_PriorityRebuildPreservesAssignee(t *testing.T) {
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			origin TEXT DEFAULT 'manual',
 			project_id TEXT DEFAULT '',
+		agent_project_id TEXT REFERENCES agent_projects(id) ON DELETE RESTRICT,
 			labels TEXT DEFAULT '[]',
 			identifier TEXT,
 			assignee_user_id TEXT NOT NULL DEFAULT ''
@@ -54,8 +61,8 @@ func TestMigrate_PriorityRebuildPreservesAssignee(t *testing.T) {
 		t.Fatalf("seed legacy schema: %v", err)
 	}
 	if _, err := db.Exec(`
-		INSERT INTO tasks (id, workspace_id, title, assignee_user_id)
-		VALUES ('task-1', 'ws-1', 'assigned task', 'user-42')
+		INSERT INTO tasks (id, workspace_id, title, assignee_user_id, agent_project_id)
+		VALUES ('task-1', 'ws-1', 'assigned task', 'user-42', 'project-1')
 	`); err != nil {
 		t.Fatalf("seed assigned task: %v", err)
 	}
@@ -70,5 +77,12 @@ func TestMigrate_PriorityRebuildPreservesAssignee(t *testing.T) {
 	}
 	if assignee != "user-42" {
 		t.Fatalf("assignee lost by priority rebuild: got %q, want %q", assignee, "user-42")
+	}
+	var projectID string
+	if err := db.Get(&projectID, `SELECT agent_project_id FROM tasks WHERE id = 'task-1'`); err != nil {
+		t.Fatalf("tasks.agent_project_id missing after priority rebuild: %v", err)
+	}
+	if projectID != "project-1" {
+		t.Fatalf("agent project identity lost by priority rebuild: got %q, want %q", projectID, "project-1")
 	}
 }

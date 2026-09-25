@@ -458,87 +458,89 @@ type Repos struct {
 
 // Service provides task business logic
 type Service struct {
-	workspaces                      repository.WorkspaceRepository
-	userDirectory                   UserDirectory
-	unitPlacer                      UnitPlacer
-	unitReach                       UnitReachResolver
-	userOrgs                        func(ctx context.Context, userID string) (string, error)
-	tasks                           repository.TaskRepository
-	taskRepos                       repository.TaskRepoRepository
-	workspaceFolders                repository.TaskWorkspaceFolderRepository
-	workflows                       repository.WorkflowRepository
-	messages                        repository.MessageRepository
-	attachments                     repository.AttachmentRepository
-	turns                           repository.TurnRepository
-	sessions                        repository.SessionRepository
-	gitSnapshots                    repository.GitSnapshotRepository
-	repoEntities                    repository.RepositoryEntityRepository
-	desktopRootStore                repository.DesktopDiscoveryRootRepository
-	repositorySets                  repository.RepositorySetRepository
-	branchPolicies                  repository.RepositoryBranchPolicyRepository
-	repositoryCleanup               repository.RepositoryCleanupRepository
-	executors                       repository.ExecutorRepository
-	environments                    repository.EnvironmentRepository
-	taskEnvironments                repository.TaskEnvironmentRepository
-	reviews                         repository.ReviewRepository
-	resourceCleanups                repository.TaskResourceCleanupRepository
-	statusSummaries                 repository.TaskStatusSummaryRepository
-	taskActivity                    repository.TaskActivityRepository
-	subagentContexts                repository.SubagentContextRepository
-	usage                           repository.UsageRepository
-	agentProfiles                   AgentProfileReader
-	agentProfileExecutorValidator   AgentProfileExecutorValidator
-	workspacePolicyAttacher         WorkspacePolicyAttacher
-	autoArchiveCoordinator          AutoArchiveCoordinator
-	workflowTaskArchiveCoordinator  WorkflowTaskArchiveCoordinator
-	taskLifecycleCoordinator        TaskLifecycleCoordinator
-	attachmentSvc                   *AttachmentService
-	statusSummaryPRs                TaskStatusSummaryPRReader
-	statusSummaryLaunchQueue        TaskStatusSummaryLaunchQueueReader
-	statusSummaryProjector          TaskStatusSummaryEventProjector
-	queuedPromptCounter             QueuedPromptCounter
-	eventBus                        bus.EventBus
-	logger                          *logger.Logger
-	discoveryConfig                 RepositoryDiscoveryConfig
-	discoveryCacheMu                sync.Mutex
-	discoveryCache                  map[string]discoveryCacheEntry
-	discoveryRootCache              map[string]discoveryRootCacheEntry
-	discoveryFlights                map[string]*discoveryFlight
-	discoveryNow                    func() time.Time
-	discoveryScanRoot               func(context.Context, string, int) (repositoryDiscoveryScanResult, error)
-	filesystemWarnings              *fsdiagnostics.WarningLimiter
-	worktreeCleanup                 WorktreeCleanup
-	canvasCleanup                   CanvasCleanup
-	executionStopper                TaskExecutionStopper
-	clarificationCanceller          TerminalClarificationCanceller
-	parkedProjectionCanceller       ParkedProjectionCanceller
-	sessionCeilingReleaser          SessionCeilingReleaser
-	rowLivenessProber               TaskRowLivenessProber
-	executionLivenessChecker        TaskExecutionLivenessChecker
-	contextWindowResetter           func(context.Context, string) error
-	cleanupActivity                 TaskResourceCleanupActivityGate
-	branchMaterializer              BranchMaterializer
-	workspaceSourceMaterializer     WorkspaceSourceMaterializer
-	workspaceSourceLocksMu          sync.Mutex
-	workspaceSourceLocks            map[string]*sync.Mutex
-	providerProber                  ProviderDefaultBranchProber
-	gitArchiveCapture               GitArchiveCapture
-	workflowStepCreator             WorkflowStepCreator
-	executorSaveObserver            ExecutorSaveObserver
-	workspaceBootstrapper           WorkspaceBootstrapper
-	workflowStepGetter              WorkflowStepGetter
-	workflowMovePreflight           WorkflowMovePreflight
-	startStepResolver               StartStepResolver
-	stepHistoryRecorder             StepHistoryRecorder
-	contributionDestinationPreparer ContributionDestinationPreparer
-	prTaskResolver                  PRTaskResolver
-	quickChatDir                    string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
-	branchFetcher                   *branchFetcher
-	envDestroyer                    EnvironmentDestroyer
-	wsGroupMembership               WorkspaceGroupMembershipReader
-	executorCapabilityProber        ExecutorCapabilityProber
-	checkoutCredentialPolicy        func(context.Context, string) (bool, error)
-	sshTaskDirReclaimer             SSHTaskDirReclaimer
+	workspaces                              repository.WorkspaceRepository
+	userDirectory                           UserDirectory
+	unitPlacer                              UnitPlacer
+	unitReach                               UnitReachResolver
+	userOrgs                                func(ctx context.Context, userID string) (string, error)
+	tasks                                   repository.TaskRepository
+	taskRepos                               repository.TaskRepoRepository
+	workspaceFolders                        repository.TaskWorkspaceFolderRepository
+	workflows                               repository.WorkflowRepository
+	messages                                repository.MessageRepository
+	attachments                             repository.AttachmentRepository
+	turns                                   repository.TurnRepository
+	sessions                                repository.SessionRepository
+	gitSnapshots                            repository.GitSnapshotRepository
+	repoEntities                            repository.RepositoryEntityRepository
+	desktopRootStore                        repository.DesktopDiscoveryRootRepository
+	repositorySets                          repository.RepositorySetRepository
+	branchPolicies                          repository.RepositoryBranchPolicyRepository
+	repositoryCleanup                       repository.RepositoryCleanupRepository
+	executors                               repository.ExecutorRepository
+	environments                            repository.EnvironmentRepository
+	taskEnvironments                        repository.TaskEnvironmentRepository
+	reviews                                 repository.ReviewRepository
+	resourceCleanups                        repository.TaskResourceCleanupRepository
+	statusSummaries                         repository.TaskStatusSummaryRepository
+	taskActivity                            repository.TaskActivityRepository
+	subagentContexts                        repository.SubagentContextRepository
+	usage                                   repository.UsageRepository
+	agentProfiles                           AgentProfileReader
+	agentProfileExecutorValidator           AgentProfileExecutorValidator
+	workspacePolicyAttacher                 WorkspacePolicyAttacher
+	autoArchiveCoordinator                  AutoArchiveCoordinator
+	workflowTaskArchiveCoordinator          WorkflowTaskArchiveCoordinator
+	taskLifecycleCoordinator                TaskLifecycleCoordinator
+	attachmentSvc                           *AttachmentService
+	statusSummaryPRs                        TaskStatusSummaryPRReader
+	statusSummaryLaunchQueue                TaskStatusSummaryLaunchQueueReader
+	statusSummaryProjector                  TaskStatusSummaryEventProjector
+	queuedPromptCounter                     QueuedPromptCounter
+	eventBus                                bus.EventBus
+	logger                                  *logger.Logger
+	discoveryConfig                         RepositoryDiscoveryConfig
+	discoveryCacheMu                        sync.Mutex
+	discoveryCache                          map[string]discoveryCacheEntry
+	discoveryRootCache                      map[string]discoveryRootCacheEntry
+	discoveryFlights                        map[string]*discoveryFlight
+	discoveryNow                            func() time.Time
+	discoveryScanRoot                       func(context.Context, string, int) (repositoryDiscoveryScanResult, error)
+	filesystemWarnings                      *fsdiagnostics.WarningLimiter
+	worktreeCleanup                         WorktreeCleanup
+	canvasCleanup                           CanvasCleanup
+	executionStopper                        TaskExecutionStopper
+	clarificationCanceller                  TerminalClarificationCanceller
+	parkedProjectionCanceller               ParkedProjectionCanceller
+	sessionCeilingReleaser                  SessionCeilingReleaser
+	rowLivenessProber                       TaskRowLivenessProber
+	executionLivenessChecker                TaskExecutionLivenessChecker
+	contextWindowResetter                   func(context.Context, string) error
+	cleanupActivity                         TaskResourceCleanupActivityGate
+	branchMaterializer                      BranchMaterializer
+	workspaceSourceMaterializer             WorkspaceSourceMaterializer
+	workspaceSourceLocksMu                  sync.Mutex
+	workspaceSourceLocks                    map[string]*sync.Mutex
+	agentProjectContextPathResolver         func(string) (string, error)
+	agentProjectPrimaryRepositoryIDResolver func(context.Context, string, string) (string, error)
+	providerProber                          ProviderDefaultBranchProber
+	gitArchiveCapture                       GitArchiveCapture
+	workflowStepCreator                     WorkflowStepCreator
+	executorSaveObserver                    ExecutorSaveObserver
+	workspaceBootstrapper                   WorkspaceBootstrapper
+	workflowStepGetter                      WorkflowStepGetter
+	workflowMovePreflight                   WorkflowMovePreflight
+	startStepResolver                       StartStepResolver
+	stepHistoryRecorder                     StepHistoryRecorder
+	contributionDestinationPreparer         ContributionDestinationPreparer
+	prTaskResolver                          PRTaskResolver
+	quickChatDir                            string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
+	branchFetcher                           *branchFetcher
+	envDestroyer                            EnvironmentDestroyer
+	wsGroupMembership                       WorkspaceGroupMembershipReader
+	executorCapabilityProber                ExecutorCapabilityProber
+	checkoutCredentialPolicy                func(context.Context, string) (bool, error)
+	sshTaskDirReclaimer                     SSHTaskDirReclaimer
 	// orphanReapHostSnapshotter and orphanReapVerifier back the reap phase's
 	// host process detection. Nil selects the real platform implementation
 	// (resource_cleanup_orphan_reap_host_*.go); tests override them
@@ -569,6 +571,9 @@ type Service struct {
 	runtimeOverridesMu          sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
+	agentProjectsEnabled             bool
+	agentProjectTaskAuthorizer       func(context.Context, *CreateTaskRequest) error
+	agentProjectActionAuthorizer     func(context.Context, string, string) error
 
 	workspaceDefaultsInitializer WorkspaceDefaultsInitializer
 	// foregroundActivity resolves the live fine-grained busy substate of a RUNNING
@@ -640,6 +645,34 @@ type Service struct {
 // required before a newly created child can be returned or launched.
 type WorkspacePolicyAttacher interface {
 	AttachWorkspacePolicy(ctx context.Context, taskID, parentID string, policy WorkspacePolicy) error
+}
+
+// SetAgentProjectsEnabled gates project task creation from the typed runtime
+// flag configured during backend startup.
+func (s *Service) SetAgentProjectsEnabled(enabled bool) {
+	s.agentProjectsEnabled = enabled
+}
+
+// SetAgentProjectTaskAuthorizer installs the project-domain check used by the
+// workflow-free task creation path.
+func (s *Service) SetAgentProjectTaskAuthorizer(authorizer func(context.Context, *CreateTaskRequest) error) {
+	s.agentProjectTaskAuthorizer = authorizer
+}
+
+// SetAgentProjectActionAuthorizer installs the membership check used by
+// project-level archive and delete operations.
+func (s *Service) SetAgentProjectActionAuthorizer(authorizer func(context.Context, string, string) error) {
+	s.agentProjectActionAuthorizer = authorizer
+}
+
+func (s *Service) SetAgentProjectContextPathResolver(resolver func(string) (string, error)) {
+	s.agentProjectContextPathResolver = resolver
+}
+
+func (s *Service) SetAgentProjectPrimaryRepositoryIDResolver(
+	resolver func(context.Context, string, string) (string, error),
+) {
+	s.agentProjectPrimaryRepositoryIDResolver = resolver
 }
 
 // AutoArchiveCoordinator owns the full lifecycle transition for automatic

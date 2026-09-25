@@ -29,9 +29,40 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func TestApplyAgentProjectInstructionsAddsCurrentWorkspaceAndRefreshesMetadata(t *testing.T) {
+	req := &LaunchRequest{
+		TaskDescription: sysprompt.InjectAgentProjectInstructions(
+			"Implement the change",
+			sysprompt.AgentProjectInstructions("coordinator", "/old/context", "/old/repo", []string{"/old/repo"}),
+		),
+		Metadata: map[string]interface{}{"task_description": "stale"},
+		ProjectWorkspace: &ProjectWorkspaceAccess{
+			ContextPath:             "/kandev/agent-projects/project/context",
+			Tier:                    "coordinator",
+			RepositoryWorktreePaths: []string{"/tasks/project/api", "/tasks/project/web"},
+		},
+	}
+
+	err := applyAgentProjectInstructions(req, "/tasks/project/api")
+
+	require.NoError(t, err)
+	require.Contains(t, req.TaskDescription, `"/kandev/agent-projects/project/context"`)
+	require.Contains(t, req.TaskDescription, `"/tasks/project/api"`)
+	require.Contains(t, req.TaskDescription, `"/tasks/project/web"`)
+	require.Contains(t, req.TaskDescription, "create_agent_project_worker_kandev")
+	require.NotContains(t, req.TaskDescription, "/old/context")
+	require.Equal(t, req.TaskDescription, req.Metadata["task_description"])
+}
+
+func TestApplyAgentProjectInstructionsRequiresAProjectTier(t *testing.T) {
+	req := &LaunchRequest{ProjectWorkspace: &ProjectWorkspaceAccess{ContextPath: "/context"}}
+	require.ErrorContains(t, applyAgentProjectInstructions(req, "/repo"), "agent project tier is unavailable")
+}
 
 // resumeTestAgent is a minimal agent with a BuildCommand that respects the
 // Resume helper (--resume <session_id>) so we can verify buildAgentCommand
@@ -251,6 +282,19 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "copilot --acp", cmds.initial)
 	})
+}
+
+func TestProjectWorkspaceLaunchRequiresSupportedACPAgent(t *testing.T) {
+	req := &LaunchRequest{ProjectWorkspace: &ProjectWorkspaceAccess{ContextPath: "/context"}}
+	if err := validateProjectWorkspaceAgent(req, nil, &cliFlagTestAgent{}); err == nil {
+		t.Fatal("project launch accepted an agent without additional-directory support")
+	}
+	if err := validateProjectWorkspaceAgent(req, nil, agents.NewClaudeACP()); err != nil {
+		t.Fatalf("project launch rejected supported Claude ACP: %v", err)
+	}
+	if err := validateProjectWorkspaceAgent(req, &AgentProfileInfo{CLIPassthrough: true}, agents.NewClaudeACP()); err == nil {
+		t.Fatal("project launch accepted a passthrough profile without ACP root grants")
+	}
 }
 
 func TestBuildAgentCommand_CommandPrefix(t *testing.T) {

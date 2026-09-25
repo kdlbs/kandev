@@ -31,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/orgunit"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
+	agentprojects "github.com/kandev/kandev/internal/projects"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
 	quickterminalrepository "github.com/kandev/kandev/internal/quickterminal/repository"
@@ -83,6 +84,7 @@ type Services struct {
 	DynamicProfileResolver   *agentruntime.ProfileExecutionResolver
 	DynamicBindingResolver   *dynamicruntime.CredentialBindingResolver
 	Task                     *taskservice.Service
+	AgentProjects            *agentprojects.Service
 	// Org owns organizations. Always non-nil; Enabled() reports whether the
 	// multi-tenancy feature is on.
 	Org           *org.Service

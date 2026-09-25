@@ -91,6 +91,15 @@ var taskScanColumns = []taskScanColumn{
 	{name: "assignee_user_id"},
 	{name: "origin"},
 	{name: "project_id"},
+	{name: "agent_project_id", selectExpr: func(alias string) string {
+		return `COALESCE(` + alias + `.agent_project_id, '') AS agent_project_id`
+	}},
+	{name: "agent_project_tier", selectExpr: func(alias string) string {
+		return `COALESCE(` + alias + `.agent_project_tier, '') AS agent_project_tier`
+	}},
+	{name: "agent_project_profile_id", selectExpr: func(alias string) string {
+		return `COALESCE(` + alias + `.agent_project_profile_id, '') AS agent_project_profile_id`
+	}},
 	{name: "labels"},
 	{name: "identifier"},
 	{name: "external_id"},
@@ -419,9 +428,9 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		workflowAgentOverridesValue = workflowAgentOverrides
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
+		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, agent_project_id, agent_project_tier, agent_project_profile_id, labels, identifier, external_id, assignee_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, nullableAgentProjectID(task.AgentProjectID), task.AgentProjectTier, task.AgentProjectProfileID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
 	if err != nil {
 		if isExternalIDUniqueViolation(err) {
 			return "", fmt.Errorf("%w: %w", ErrExternalIDConflict, err)
@@ -1189,7 +1198,7 @@ func (r *Repository) buildTaskUpdateQuery(
 		}
 	}
 	updateQuery := fmt.Sprintf(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, agent_project_id = ?, agent_project_tier = ?, agent_project_profile_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
 		WHERE id = ?
 	`, metadataExpr)
 	if models.IsAgentTitlePending(task.Metadata) {
@@ -1201,11 +1210,18 @@ func (r *Repository) buildTaskUpdateQuery(
 				description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?,
 				queued_for_step_id = ?, queued_at = ?,
 				metadata = %s,
-				parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
+				parent_id = ?, updated_at = ?, origin = ?, project_id = ?, agent_project_id = ?, agent_project_tier = ?, agent_project_profile_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
 			WHERE id = ?
 		`, pending, metadataMerge)
 	}
 	return updateQuery, metadata, workflowAgentOverrides, nil
+}
+
+func nullableAgentProjectID(projectID string) interface{} {
+	if projectID == "" {
+		return nil
+	}
+	return projectID
 }
 
 func encodeWorkflowAgentOverridesValue(overrides *models.WorkflowAgentOverrides) (interface{}, error) {
@@ -1263,7 +1279,32 @@ func (r *Repository) updateTaskTx(
 	if err != nil {
 		return "", 0, err
 	}
-	args := []interface{}{task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID}
+	args := []interface{}{
+		task.WorkspaceID,
+		task.WorkflowID,
+		task.WorkflowStepID,
+		workflowAgentOverrides,
+		task.Title,
+		task.Description,
+		task.State,
+		task.Priority,
+		task.Position,
+		dialect.BoolToInt(task.WIPAdmitted),
+		task.QueuedForStepID,
+		task.QueuedAt,
+		string(metadata),
+		task.ParentID,
+		task.UpdatedAt,
+		task.Origin,
+		task.ProjectID,
+		nullableAgentProjectID(task.AgentProjectID),
+		task.AgentProjectTier,
+		task.AgentProjectProfileID,
+		task.Labels,
+		task.Identifier,
+		task.AssigneeUserID,
+		task.ID,
+	}
 	if workflowChangeSource != nil {
 		updateQuery += ` AND workflow_id = ? AND workflow_step_id = ? AND updated_at = ?`
 		args = append(args, workflowChangeSource.WorkflowID, workflowChangeSource.StepID, workflowChangeSource.UpdatedAt)
@@ -2950,9 +2991,9 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	task.UpdatedAt = time.Now().UTC()
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, agent_project_id = ?, agent_project_tier = ?, agent_project_profile_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
-	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
+	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, nullableAgentProjectID(task.AgentProjectID), task.AgentProjectTier, task.AgentProjectProfileID, task.Labels, task.Identifier, task.ID)
 	if err != nil {
 		return err
 	}
@@ -3075,13 +3116,13 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	task.UpdatedAt = time.Now().UTC()
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, agent_project_id = ?, agent_project_tier = ?, agent_project_profile_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
 		`+queuePredicate+`
 		  AND archived_at IS NULL
 		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 	`), append([]interface{}{
-		task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID,
+		task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, nullableAgentProjectID(task.AgentProjectID), task.AgentProjectTier, task.AgentProjectProfileID, task.Labels, task.Identifier, task.ID,
 	}, predicateArgs...)...)
 	if err != nil {
 		return false, err
@@ -3688,7 +3729,7 @@ func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, wo
 	sort = usermodels.NormalizeTasksListSort(sort)
 
 	// Build filter conditions
-	filter := ""
+	filter := " AND COALESCE(agent_project_id, '') = ''"
 	if onlyEphemeral {
 		// Only ephemeral tasks
 		filter += " AND is_ephemeral = 1"
@@ -4015,7 +4056,7 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 		&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 		&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 		&task.CreatedAt, &task.UpdatedAt,
-		&task.AssigneeAgentProfileID, &task.AssigneeUserID, &task.Origin, &task.ProjectID,
+		&task.AssigneeAgentProfileID, &task.AssigneeUserID, &task.Origin, &task.ProjectID, &task.AgentProjectID, &task.AgentProjectTier, &task.AgentProjectProfileID,
 		&task.Labels, &identifier, &externalID, &externalIDSettledAt, &task.IsFromOffice,
 	)
 	if err != nil {
@@ -4064,7 +4105,7 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 			&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 			&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 			&task.CreatedAt, &task.UpdatedAt,
-			&task.AssigneeAgentProfileID, &task.AssigneeUserID, &task.Origin, &task.ProjectID,
+			&task.AssigneeAgentProfileID, &task.AssigneeUserID, &task.Origin, &task.ProjectID, &task.AgentProjectID, &task.AgentProjectTier, &task.AgentProjectProfileID,
 			&task.Labels, &identifier, &externalID, &externalIDSettledAt, &task.IsFromOffice,
 		)
 		if err != nil {

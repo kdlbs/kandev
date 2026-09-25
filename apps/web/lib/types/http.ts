@@ -20,6 +20,12 @@ import type { OnEnterActionType, StepEvents } from "./workflow-actions";
 import type { EntityReference } from "./entity-reference";
 import type { TaskStatusSummary } from "./task-status-summary";
 import type { AgentGoalReconciliation } from "@/lib/agent-goal";
+export type {
+  AgentProject,
+  AgentProjectContextEntry,
+  AgentProjectContextFile,
+  AgentProjectTaskSummary,
+} from "./http-agent-projects";
 
 export type { TaskStatusSummary } from "./task-status-summary";
 
@@ -503,6 +509,9 @@ export type Task = ActiveSubagentCountFields & {
   // Office extensions (mirror TaskDTO Go fields). Empty/undefined for kanban-origin tasks.
   origin?: TaskOrigin;
   project_id?: string;
+  /** Workspace-level Agent Project identity. Independent of Office project_id. */
+  agent_project_id?: string;
+  agent_project_tier?: "coordinator" | "economy" | "frontier";
   // Backend-computed "owned by office" flag: true when project_id is set
   // OR workflow_id matches the workspace's office_workflow_id. See
   // isFromOfficeProjection in the Go task repo for the canonical rule.

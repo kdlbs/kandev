@@ -116,6 +116,13 @@ func isOwnedDirectoryLinkPath(root, name string) bool {
 	return root != "" && filepath.IsAbs(root) && name != "" && filepath.Base(name) == name && name != "." && name != ".."
 }
 
+// IsDirectoryLink reports whether path is a symbolic link or platform
+// directory junction without following it.
+func IsDirectoryLink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && isPlatformDirectoryLink(info, path)
+}
+
 func canonicalDirectoryLinkTarget(target string) (string, error) {
 	canonicalTarget, err := filepath.EvalSymlinks(target)
 	if err != nil {

@@ -96,11 +96,12 @@ type NewSessionResponse struct {
 
 // createSessionRequest sends a session creation request and parses the response.
 // Used by both NewSession and ResetSession which share the same payload/response format.
-func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, mcpServers []types.McpServer) (string, error) {
+func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, mcpServers []types.McpServer, additionalDirectories []string) (string, error) {
 	payload := struct {
-		Cwd        string            `json:"cwd"`
-		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
-	}{Cwd: cwd, McpServers: mcpServers}
+		Cwd                   string            `json:"cwd"`
+		McpServers            []types.McpServer `json:"mcp_servers,omitempty"`
+		AdditionalDirectories []string          `json:"additional_directories,omitempty"`
+	}{Cwd: cwd, McpServers: mcpServers, AdditionalDirectories: additionalDirectories}
 
 	c.setLastSessionModelState(nil)
 	resp, err := c.sendStreamRequest(ctx, action, payload)
@@ -129,23 +130,36 @@ func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, m
 
 // NewSession creates a new ACP session via the agent WebSocket stream.
 func (c *Client) NewSession(ctx context.Context, cwd string, mcpServers []types.McpServer) (string, error) {
-	return c.createSessionRequest(ctx, "agent.session.new", cwd, mcpServers)
+	return c.NewSessionWithAdditionalDirectories(ctx, cwd, mcpServers, nil)
+}
+
+func (c *Client) NewSessionWithAdditionalDirectories(ctx context.Context, cwd string, mcpServers []types.McpServer, directories []string) (string, error) {
+	return c.createSessionRequest(ctx, "agent.session.new", cwd, mcpServers, directories)
 }
 
 // ResetSession creates a new session on the same connection, resetting context without
 // restarting the subprocess. Returns the new session ID or an error if not supported.
 func (c *Client) ResetSession(ctx context.Context, cwd string, mcpServers []types.McpServer) (string, error) {
-	return c.createSessionRequest(ctx, "agent.session.reset", cwd, mcpServers)
+	return c.ResetSessionWithAdditionalDirectories(ctx, cwd, mcpServers, nil)
+}
+
+func (c *Client) ResetSessionWithAdditionalDirectories(ctx context.Context, cwd string, mcpServers []types.McpServer, directories []string) (string, error) {
+	return c.createSessionRequest(ctx, "agent.session.reset", cwd, mcpServers, directories)
 }
 
 // LoadSession resumes an existing ACP session via the agent WebSocket stream.
 // mcpServers are forwarded to the agentctl handler so agents that receive MCP configs
 // via the protocol (e.g. Auggie) can reconnect to MCP servers on the new instance.
 func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
+	return c.LoadSessionWithAdditionalDirectories(ctx, sessionID, mcpServers, nil)
+}
+
+func (c *Client) LoadSessionWithAdditionalDirectories(ctx context.Context, sessionID string, mcpServers []types.McpServer, directories []string) error {
 	payload := struct {
-		SessionID  string            `json:"session_id"`
-		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
-	}{SessionID: sessionID, McpServers: mcpServers}
+		SessionID             string            `json:"session_id"`
+		McpServers            []types.McpServer `json:"mcp_servers,omitempty"`
+		AdditionalDirectories []string          `json:"additional_directories,omitempty"`
+	}{SessionID: sessionID, McpServers: mcpServers, AdditionalDirectories: directories}
 
 	c.setLastSessionModelState(nil)
 	resp, err := c.sendStreamRequest(ctx, "agent.session.load", payload)

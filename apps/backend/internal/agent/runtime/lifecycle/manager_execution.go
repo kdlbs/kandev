@@ -427,9 +427,18 @@ func validateWorkspaceInfoForExecution(ctx context.Context, info *WorkspaceInfo)
 	}
 	for index, repository := range info.WorkspaceRepositories {
 		candidate := info.WorkspacePath
-		if index > 0 {
+		switch {
+		case info.AgentProjectID != "":
+			candidate = repository.WorktreePath
+			if candidate == "" && index == 0 {
+				candidate = info.WorkspacePath
+			}
+			if candidate == "" {
+				candidate = filepath.Join(filepath.Dir(info.WorkspacePath), repository.RepoName)
+			}
+		case index > 0:
 			candidate = filepath.Join(info.WorkspacePath, repository.RepoName)
-		} else if len(info.WorkspaceRepositories) > 1 {
+		case len(info.WorkspaceRepositories) > 1:
 			// Multi-repository worktree layouts use a task root. Local layouts
 			// may use the primary repository itself as the root, so prefer the
 			// root when it validates and otherwise try its named child.
@@ -942,16 +951,26 @@ type executionEnvironmentPreparation struct {
 
 func (m *Manager) reconcileExecutionWorkspace(ctx context.Context, taskID string, info *WorkspaceInfo) error {
 	owner := ownedDirectoryLinkOwner(taskID, info.TaskDirName)
-	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {
-		return err
-	}
-	if info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == "local_pc" {
-		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger, owner); err != nil {
+	if info.ExecutorType == string(models.ExecutorTypeWorktree) || info.AgentProjectID != "" {
+		if err := m.reconcileWorkspaceWorktrees(ctx, taskID, info); err != nil {
 			return err
 		}
 	}
-	if info.ExecutorType == string(models.ExecutorTypeWorktree) {
-		if err := m.reconcileWorkspaceWorktrees(ctx, taskID, info); err != nil {
+	if info.AgentProjectID != "" {
+		if info.ProjectWorkspace == nil || info.ProjectWorkspace.ContextPath == "" {
+			return fmt.Errorf("agent project context access is unavailable")
+		}
+		if _, err := reconcileProjectWorkspace(
+			info.WorkspacePath, info.ProjectWorkspace.ContextPath, taskID, info.WorkspaceID, info.TaskDirName,
+		); err != nil {
+			return err
+		}
+	}
+	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {
+		return err
+	}
+	if info.AgentProjectID == "" && (info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == "local_pc") {
+		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger, owner); err != nil {
 			return err
 		}
 	}
@@ -966,6 +985,10 @@ func (m *Manager) prepareExecutionCreateRequest(
 ) (*executionCreatePreparation, error) {
 	if info.AgentID == "" {
 		return nil, fmt.Errorf("agent ID is required in WorkspaceInfo")
+	}
+	projectRoots, err := projectWritableRoots(info.ProjectWorkspace)
+	if err != nil {
+		return nil, fmt.Errorf("resolve agent project write roots: %w", err)
 	}
 	agentConfig, ok := m.registry.Get(info.AgentID)
 	if !ok {
@@ -1043,7 +1066,8 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AgentProfileID:                 executionProfileID,
 			OfficeAgentProfileID:           officeAgentProfileID,
 			WorkspacePath:                  info.WorkspacePath,
-			WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
+			WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories, info.ProjectWorkspace),
+			ProjectWritableRoots:           projectRoots,
 			Protocol:                       string(agentConfig.Runtime().Protocol),
 			Env:                            envPreparation.env,
 			AutoApprovePermissions:         autoApprove,
@@ -1190,17 +1214,28 @@ func (m *Manager) publishCreatedExecution(
 }
 
 func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string, info *WorkspaceInfo) error {
-	if len(info.WorkspaceRepositories) == 0 || m.worktreeMgr == nil {
+	if len(info.WorkspaceRepositories) == 0 {
+		return nil
+	}
+	if m.worktreeMgr == nil {
+		if info.AgentProjectID != "" {
+			return fmt.Errorf("project worktree manager is unavailable")
+		}
 		return nil
 	}
 	if info.SessionID == "" || info.TaskDirName == "" {
 		return fmt.Errorf("worktree workspace is missing durable session or task directory")
 	}
-	for _, repository := range info.WorkspaceRepositories {
+	if info.ProjectWorkspace != nil {
+		info.ProjectWorkspace.RepositoryWorktreePaths = nil
+		info.WorkspacePath = ""
+	}
+	for index := range info.WorkspaceRepositories {
+		repository := &info.WorkspaceRepositories[index]
 		if repository.RepositoryPath == "" {
 			return fmt.Errorf("workspace repository %q source path is missing", repository.RepoName)
 		}
-		if _, err := m.worktreeMgr.Create(ctx, worktree.CreateRequest{
+		created, err := m.worktreeMgr.Create(ctx, worktree.CreateRequest{
 			TaskID: taskID, SessionID: info.SessionID, RepositoryID: repository.RepositoryID,
 			TaskEnvironmentID: info.TaskEnvironmentID, ReuseRequired: info.TaskEnvironmentID != "",
 			RepositoryPath: repository.RepositoryPath, BaseBranch: repository.BaseBranch,
@@ -1212,11 +1247,30 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 			RemoteSyncHandled: repository.RemoteSyncHandled,
 			BranchSlug:        repository.BranchSlug, BranchIdentitySlug: repository.BranchIdentitySlug,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("recreate workspace worktree %q: %w", repository.RepoName, err)
 		}
+		repository.WorktreePath = created.Path
+		if info.ProjectWorkspace != nil {
+			recordRecoveredProjectWorkspaceRepository(info, repository.RepositoryID, created.Path, index)
+		}
+	}
+	if info.ProjectWorkspace != nil && info.ProjectWorkspace.PrimaryRepositoryID != "" && info.WorkspacePath == "" {
+		return fmt.Errorf("primary project repository %q has no recovered worktree", info.ProjectWorkspace.PrimaryRepositoryID)
 	}
 	return nil
+}
+
+func recordRecoveredProjectWorkspaceRepository(info *WorkspaceInfo, repositoryID, path string, index int) {
+	if info == nil || info.ProjectWorkspace == nil || path == "" {
+		return
+	}
+	info.ProjectWorkspace.RepositoryWorktreePaths = append(info.ProjectWorkspace.RepositoryWorktreePaths, path)
+	if info.ProjectWorkspace.PrimaryRepositoryID == repositoryID ||
+		info.ProjectWorkspace.PrimaryRepositoryID == "" && index == 0 {
+		info.WorkspacePath = path
+	}
 }
 
 // admitWorkspaceRecovery gates lifecycle workspace reconciliation with the
