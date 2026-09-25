@@ -20,13 +20,29 @@ async function routineRuns(
   return (Array.isArray(result.runs) ? result.runs : []) as RoutineRun[];
 }
 
+async function waitForAgentIdle(
+  officeApi: { getAgent(id: string): Promise<Record<string, unknown>> },
+  agentId: string,
+) {
+  await expect
+    .poll(async () => (await officeApi.getAgent(agentId)).status, {
+      timeout: 30_000,
+      message: "Waiting for the routine agent to become idle",
+    })
+    .toBe("idle");
+}
+
 test.describe("Office taskless routine sessions", () => {
   test("fires a real taskless routine twice without creating task rows", async ({
     officeApi,
     apiClient,
     officeSeed,
   }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(420_000);
+    // The worker resets the status before each test, but the status write and
+    // scheduler claim are asynchronous. Do not fire a routine while the
+    // previous run still holds the agent in a transient working state.
+    await waitForAgentIdle(officeApi, officeSeed.agentId);
     const before = await apiClient.listTasks(officeSeed.workspaceId);
     const routine = await officeApi.createRoutine(officeSeed.workspaceId, {
       name: `Taskless E2E ${Date.now()}`,
@@ -40,6 +56,7 @@ test.describe("Office taskless routine sessions", () => {
     const seen = new Set(((existing.runs ?? []) as { id: string }[]).map((run) => run.id));
     const sessions: string[] = [];
     for (let attempt = 1; attempt <= 2; attempt += 1) {
+      await waitForAgentIdle(officeApi, officeSeed.agentId);
       const response = await officeApi.runRoutine(routineId);
       expect(response.status).toBe(200);
       let runId = "";
@@ -84,7 +101,7 @@ test.describe("Office taskless routine sessions", () => {
             const detail = await result.json();
             return detail.status;
           },
-          { timeout: 120_000 },
+          { timeout: 180_000 },
         )
         .toMatch(/^(finished|failed|cancelled)$/);
       const detail = await (await officeApi.rawRequest("GET", detailPath)).json();

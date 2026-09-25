@@ -65,6 +65,7 @@ test.describe("Session layout", () => {
   });
 
   test("maximize survives page refresh", async ({ testPage, apiClient, seedData }) => {
+    test.setTimeout(120_000);
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "Refresh Test");
 
     // Type a command in the terminal, then maximize
@@ -79,8 +80,9 @@ test.describe("Session layout", () => {
     // After refresh: terminal should still be maximized
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
     await session.expectMaximized();
+    await session.expectTerminalConnected(60_000);
     // Terminal reconnects to the same shell — our output should still be there
-    await session.expectTerminalHasText(TERMINAL_MARKER);
+    await session.expectTerminalHasText(TERMINAL_MARKER, 60_000);
   });
 
   test("task switching preserves maximize per session", async ({

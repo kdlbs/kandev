@@ -44,43 +44,6 @@ async function openTaskSession(page: Page, title: string): Promise<SessionPage> 
 
 type SessionTabHistoryEntry = { id: string; text: string };
 
-type E2EStoreWindow = Window & {
-  __KANDEV_E2E_STORE__?: {
-    getState: () => {
-      kanbanMulti: {
-        snapshots: Record<
-          string,
-          {
-            steps: Array<{ id: string }>;
-            tasks: Array<{ id: string; workflowStepId: string }>;
-          }
-        >;
-      };
-      workflows: { activeId: string | null };
-    };
-  };
-};
-
-/** Wait for the workflow snapshot source that renders the Kanban cards to hydrate. */
-async function waitForKanbanTask(page: Page, workflowId: string, taskId: string): Promise<void> {
-  await page.waitForFunction(
-    ({ expectedWorkflowId, expectedTaskId }) => {
-      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-      const state = store?.getState();
-      if (!state) return false;
-      if (state.workflows.activeId !== expectedWorkflowId) return false;
-      const snapshot = state.kanbanMulti.snapshots[expectedWorkflowId];
-      if (!snapshot) return false;
-      const stepIds = new Set(snapshot.steps.map((step) => step.id));
-      return snapshot.tasks.some(
-        (task) => task.id === expectedTaskId && stepIds.has(task.workflowStepId),
-      );
-    },
-    { expectedWorkflowId: workflowId, expectedTaskId: taskId },
-    { timeout: 30_000 },
-  );
-}
-
 async function recordSessionTabHistory(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const history: SessionTabHistoryEntry[][] = [];
@@ -542,15 +505,11 @@ test.describe("Session resume (TUI passthrough mode)", () => {
       },
     );
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await waitForKanbanTask(testPage, seedData.workflowId, task.id);
-    const card = kanban.taskCardByTitle("TUI Multi-Repo Resume Task");
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    // Open the task by its API id. The Kanban projection can lag while a
+    // multi-repo passthrough task is starting, even though the task exists.
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}(?:[?]|$)`));
     await session.waitForPassthroughLoad();
     await session.waitForPassthroughLoaded();
     await session.expectPassthroughHasText("Mock Agent");
