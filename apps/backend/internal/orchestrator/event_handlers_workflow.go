@@ -4063,6 +4063,9 @@ func (s *Service) sessionHasUnauthorizedExactModelDrift(
 	}
 	profile, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
 	if err != nil {
+		if errors.Is(err, agentruntime.ErrVirtualProfile) {
+			return false, nil
+		}
 		return false, fmt.Errorf("resolve exact workflow profile %q: %w", profileID, err)
 	}
 	if profile == nil {
@@ -7699,6 +7702,53 @@ func (s *Service) applyEngineTransitionWithMode(
 		})
 }
 
+func (s *Service) recoverCompletedTurnAfterWorkflowPreflightFailure(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	result engine.HandleResult,
+) {
+	if session == nil || !result.Transitioned || s.turnService == nil ||
+		!workflowProfileSwitchGuardIsHeld(ctx, session.ID) {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("could not verify workflow source after completion preflight failure",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return
+	}
+	if task == nil || task.WorkflowStepID != result.FromStepID {
+		return
+	}
+	currentSession, err := s.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		s.logger.Warn("could not reload session after completion preflight failure",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return
+	}
+	if currentSession == nil || currentSession.TaskID != taskID ||
+		currentSession.State != models.TaskSessionStateRunning {
+		return
+	}
+	activeTurnID, err := s.peekActiveTurnID(ctx, currentSession.ID)
+	if err != nil {
+		s.logger.Warn("could not check active turn after completion preflight failure; skipping recovery",
+			zap.String("task_id", taskID),
+			zap.String("session_id", currentSession.ID),
+			zap.Error(err))
+		return
+	}
+	if activeTurnID != "" {
+		return
+	}
+	s.setSessionWaitingForInput(ctx, taskID, currentSession.ID, currentSession)
+}
+
 // applyEngineTransitionWithCommitMode applies the shared lifecycle around a
 // transition commit. The default path commits through ApplyTransition. The
 // quorum decision path supplies a CAS commit so lifecycle hooks cannot be
@@ -7733,6 +7783,9 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 				zap.String("task_id", taskID),
 				zap.String("step_id", result.ToStepID),
 				zap.Error(err))
+			if trigger == engine.TriggerOnTurnComplete {
+				s.recoverCompletedTurnAfterWorkflowPreflightFailure(ctx, taskID, session, result)
+			}
 			return false
 		}
 	}
