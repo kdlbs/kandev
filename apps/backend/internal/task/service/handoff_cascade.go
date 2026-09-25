@@ -338,7 +338,6 @@ func (s *HandoffService) archiveTaskTree(
 	// Capture active session repositories before cancellation and archive
 	// mutation. Snapshot failures are best effort, matching the legacy path.
 	s.captureArchiveSnapshots(postArchiveCtx, all)
-	s.cancelArchiveRunsForCandidate(postArchiveCtx, all, autoArchiveCandidate)
 	// Archive deepest first so parent_id pointers stay valid through the walk;
 	// not strictly required by the schema, but keeps the audit log readable.
 	vacatedStepIDs := make(map[string]struct{})
@@ -350,6 +349,11 @@ func (s *HandoffService) archiveTaskTree(
 		cleanupOps, out, vacatedStepIDs,
 	)
 	if mutationErr != nil {
+		if len(out.ArchivedTaskIDs) == 0 {
+			mutationErr = s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(
+				transferCompensationCtx, ownershipTransfers, mutationErr,
+			)
+		}
 		return out, mutationErr
 	}
 	cleanupErrors, finishErr := s.finishArchiveTaskTree(
@@ -420,9 +424,7 @@ func (s *HandoffService) applyArchiveTaskMutations(
 		if ok {
 			out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, all[i])
 			recordVacatedStep(vacatedStepIDs, vacatedStepID)
-			if autoArchiveCandidate != nil {
-				s.cancelActiveRuns(ctx, []string{all[i]}, models.SessionArchiveTreeCancelReason)
-			}
+			s.cancelActiveRuns(ctx, []string{all[i]}, models.SessionArchiveTreeCancelReason)
 			cleanupErrors = appendTaskCleanupError(
 				cleanupErrors,
 				s.finalizeActiveSessions(ctx, archiveDeadline, all[i], models.SessionArchiveTreeCancelReason),
@@ -1297,17 +1299,6 @@ func (s *HandoffService) cancelActiveRuns(ctx context.Context, taskIDs []string,
 			}
 		}
 	}
-}
-
-func (s *HandoffService) cancelArchiveRunsForCandidate(
-	ctx context.Context,
-	taskIDs []string,
-	candidate *models.Task,
-) {
-	if candidate != nil {
-		return
-	}
-	s.cancelActiveRuns(ctx, taskIDs, models.SessionArchiveTreeCancelReason)
 }
 
 func (s *HandoffService) finalizeActiveSessions(

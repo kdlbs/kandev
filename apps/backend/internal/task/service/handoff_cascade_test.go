@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +20,33 @@ type fakeCascadeRepo struct {
 	*phase4TaskRepo
 	autoArchiveCASLoss bool
 	unarchiveErr       error
+}
+
+type retentionRaceCascadeRepo struct {
+	*fakeCascadeRepo
+}
+
+func (r *retentionRaceCascadeRepo) ArchiveTaskIfActiveWithVacatedStep(
+	_ context.Context,
+	taskID, _ string,
+) (string, bool, error) {
+	r.base.mu.Lock()
+	defer r.base.mu.Unlock()
+	task := r.base.tasks[taskID]
+	task.Metadata = map[string]interface{}{models.MetaKeyTerminalRetention: true}
+	return "", false, fmt.Errorf("%w: %s", ErrTaskArchiveHeld, taskID)
+}
+
+func (r *retentionRaceCascadeRepo) GetTaskEnvironment(
+	ctx context.Context,
+	environmentID string,
+) (*models.TaskEnvironment, error) {
+	env, err := r.fakeCascadeRepo.GetTaskEnvironment(ctx, environmentID)
+	if env == nil || err != nil {
+		return env, err
+	}
+	copy := *env
+	return &copy, nil
 }
 
 func newCascadeRepo(base *fakeTaskRepo) *fakeCascadeRepo {
@@ -683,6 +711,53 @@ func TestArchiveTaskTree_TransfersSharedEnvironmentFromDepartingOwner(t *testing
 	}
 	if status := groups.cleanupStatuses["g1"]; status != "" {
 		t.Fatalf("group cleanup status = %q, want unchanged while child remains active", status)
+	}
+}
+
+func TestArchiveTaskTree_RetentionRaceRestoresOwnershipAndKeepsRunAlive(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	tasks.taskEnvironments = map[string]*models.TaskEnvironment{
+		"env-shared": {ID: "env-shared", TaskID: "root"},
+	}
+	groups := newCascadeWSGroupRepo()
+	groups.groups["g1"] = &orchmodels.WorkspaceGroup{
+		ID: "g1", WorkspaceID: "ws-1", OwnerTaskID: "root",
+		MaterializedEnvironmentID: "env-shared",
+		OwnedByKandev:             true,
+		CleanupPolicy:             orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel,
+		CleanupStatus:             orchmodels.WorkspaceCleanupStatusActive,
+	}
+	groups.members["g1"] = map[string]string{
+		"root":  orchmodels.WorkspaceMemberRoleOwner,
+		"child": orchmodels.WorkspaceMemberRoleMember,
+	}
+	base := newCascadeRepo(tasks)
+	canceller := &recordingRunCanceller{}
+	svc := NewHandoffService(&retentionRaceCascadeRepo{fakeCascadeRepo: base}, nil, nil, nil, groups, nil)
+	svc.SetRunCanceller(canceller)
+
+	_, err := svc.ArchiveTaskTree(context.Background(), "root", false)
+	if !errors.Is(err, ErrTaskArchiveHeld) {
+		t.Fatalf("ArchiveTaskTree error = %v, want terminal retention hold", err)
+	}
+	if len(canceller.calls) != 0 {
+		t.Errorf("cancelled runs = %v, want none after held archive", canceller.calls)
+	}
+	env, err := tasks.GetTaskEnvironment(context.Background(), "env-shared")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if env.TaskID != "root" {
+		t.Errorf("shared environment owner = %q, want original owner root", env.TaskID)
+	}
+	root, err := tasks.GetTask(context.Background(), "root")
+	if err != nil {
+		t.Fatalf("GetTask root: %v", err)
+	}
+	if root.ArchivedAt != nil || !models.IsTerminalRetentionHeld(root.Metadata) {
+		t.Fatalf("held root = %+v, want retained and unarchived", root)
 	}
 }
 
