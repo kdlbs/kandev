@@ -134,9 +134,9 @@ test.describe("Terminal hangs on Connecting", () => {
    */
   test("shell terminal reconnects after hard reload", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(60_000);
-    await createTaskAndWaitForDone(apiClient, seedData, "Reload Terminal Task");
+    const task = await createTaskAndWaitForDone(apiClient, seedData, "Reload Terminal Task");
 
-    const session = await navigateToTaskViaKanban(testPage, "Reload Terminal Task");
+    const session = await navigateToTaskViaKanban(testPage, task.id);
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
@@ -162,10 +162,10 @@ test.describe("Terminal hangs on Connecting", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    await createTaskAndWaitForDone(apiClient, seedData, "Sidebar Switch Alpha");
+    const alpha = await createTaskAndWaitForDone(apiClient, seedData, "Sidebar Switch Alpha");
     await createTaskAndWaitForDone(apiClient, seedData, "Sidebar Switch Beta");
 
-    const session = await navigateToTaskViaKanban(testPage, "Sidebar Switch Alpha");
+    const session = await navigateToTaskViaKanban(testPage, alpha.id);
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
@@ -203,7 +203,7 @@ test.describe("Terminal hangs on Connecting", () => {
   }) => {
     test.setTimeout(150_000);
 
-    await createTaskAndWaitForDone(apiClient, seedData, "Default Exec A");
+    const taskA = await createTaskAndWaitForDone(apiClient, seedData, "Default Exec A");
     await createTaskAndWaitForDone(
       apiClient,
       seedData,
@@ -212,7 +212,7 @@ test.describe("Terminal hangs on Connecting", () => {
     );
     await createTaskAndWaitForDone(apiClient, seedData, "Default Exec C");
 
-    const session = await navigateToTaskViaKanban(testPage, "Default Exec A");
+    const session = await navigateToTaskViaKanban(testPage, taskA.id);
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
