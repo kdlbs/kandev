@@ -71,6 +71,43 @@ func TestSilentRetainedTerminalMoveDoesNotCreateSessionOrReopenTask(t *testing.T
 	require.True(t, models.IsTerminalRetentionHeld(stored.Metadata))
 }
 
+// TestFinalizeStepEnter_SilentRetainedTerminalEntryLeavesSessionUntouched
+// covers the finalize-only entry path used after queue promotion. A retained
+// terminal card with no entry work must not clear a source session's review
+// state before processOnEnter recognizes that the entry is suppressed.
+func TestFinalizeStepEnter_SilentRetainedTerminalEntryLeavesSessionUntouched(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
+	source := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", Position: 0, AgentProfileID: "profile-a"}
+	done := &wfmodels.WorkflowStep{
+		ID: "step-b", WorkflowID: "wf1", Name: "Done", Position: 1,
+		AgentProfileID: "profile-b", ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyNew,
+		CompleteTaskOnEnter: true,
+	}
+	fixture.stepGetter.steps[source.ID] = source
+	fixture.stepGetter.steps[done.ID] = done
+
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	task.WorkflowStepID = done.ID
+	task.State = v1.TaskStateCompleted
+	task.Metadata[models.MetaKeyTerminalRetention] = true
+	require.NoError(t, fixture.repo.UpdateTask(ctx, task))
+
+	session, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
+	require.NoError(t, err)
+	session.ReviewStatus = "approved"
+	require.NoError(t, fixture.repo.UpdateTaskSession(ctx, session))
+
+	require.NoError(t, fixture.svc.finalizeStepEnter(
+		ctx, task.ID, session.ID, done, task.Description, true, source,
+	))
+
+	stored, err := fixture.repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ReviewStatus("approved"), stored.ReviewStatus)
+}
+
 func TestDeferredSilentRetainedTerminalMovePreservesRunningSession(t *testing.T) {
 	sc := buildPendingMoveScenarioWithQueue(t, true)
 	done := sc.stepGetter.steps[stepReviewedID]

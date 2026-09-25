@@ -3344,6 +3344,9 @@ func (s *Service) prepareStepEnter(
 // processes on_enter actions for the target step. Shared by executeStepTransition
 // and processStepExitAndEnter.
 func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool, sourceStep *wfmodels.WorkflowStep, entryIDs ...int64) error {
+	if s.silentRetainedTerminalEntry(ctx, taskID, targetStep) {
+		return nil
+	}
 	session, err := s.prepareStepEnter(ctx, taskID, sessionID, clearReview)
 	if err != nil {
 		return err
