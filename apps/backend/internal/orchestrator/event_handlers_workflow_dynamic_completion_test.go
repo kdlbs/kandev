@@ -2,16 +2,21 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentsettingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
@@ -64,6 +69,36 @@ func useStoreBackedProfileResolver(fixture *profileSwitchFixture, resolver *life
 		mockAgentManager: fixture.agentMgr,
 		profiles:         resolver,
 	}
+}
+
+// @covers AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.14
+func TestWorkflowCompletionRecoveryLogsActiveTurnLookupFailure(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	core, logs := observer.New(zapcore.WarnLevel)
+	logger, err := commonlogger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	fixture.svc.logger = logger
+	fixture.svc.turnService = &failingActiveTurnLookup{
+		TurnService: &repoTurnService{repo: fixture.repo},
+		err:         errors.New("turn store unavailable"),
+	}
+
+	fixture.svc.recoverCompletedTurnAfterWorkflowPreflightFailure(
+		withWorkflowProfileSwitchGuardHeld(ctx, fixture.current.ID, ""),
+		"t1",
+		fixture.current,
+		engine.HandleResult{Transitioned: true, FromStepID: "step-a", ToStepID: "step-b"},
+	)
+
+	session, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateRunning, session.State)
+	warnings := logs.FilterMessage("could not check active turn after completion preflight failure; skipping recovery").All()
+	require.Len(t, warnings, 1)
+	require.Equal(t, "t1", warnings[0].ContextMap()["task_id"])
+	require.Equal(t, fixture.current.ID, warnings[0].ContextMap()["session_id"])
+	require.Equal(t, "turn store unavailable", warnings[0].ContextMap()["error"])
 }
 
 // @covers AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.1

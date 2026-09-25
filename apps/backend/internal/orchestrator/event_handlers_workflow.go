@@ -7736,7 +7736,14 @@ func (s *Service) recoverCompletedTurnAfterWorkflowPreflightFailure(
 		return
 	}
 	activeTurnID, err := s.peekActiveTurnID(ctx, currentSession.ID)
-	if err != nil || activeTurnID != "" {
+	if err != nil {
+		s.logger.Warn("could not check active turn after completion preflight failure; skipping recovery",
+			zap.String("task_id", taskID),
+			zap.String("session_id", currentSession.ID),
+			zap.Error(err))
+		return
+	}
+	if activeTurnID != "" {
 		return
 	}
 	s.setSessionWaitingForInput(ctx, taskID, currentSession.ID, currentSession)

@@ -7,6 +7,7 @@ requirements:
 system_design:
   - ../../specs/tasks/system-design/workflow-profile-readiness.md
   - ../../specs/tasks/system-design/workflow-profile-session-lifecycle.md
+  - ../../specs/agents/system-design/dynamic-agent-routing-01.md
 legacy_specs: []
 ---
 
@@ -126,6 +127,8 @@ Implementation and design checks on 2026-09-25 passed:
 - `pnpm exec eslint --max-warnings 0` on the new E2E test.
 - Managed E2E build completed for the backend and Vite web assets.
 - Frontend dependency installation was unnecessary because `apps/node_modules` was present.
+
+PR fixup verification on 2026-09-25 also passed: targeted orchestrator race tests, changed-code `golangci-lint` (0 issues), and the managed Chromium workflow scenarios with retries disabled (6 passed). The local PR documentation coverage evaluator reported `covered` after the work order linked the Dynamic routing design. Documentation validation and specification lint passed.
 
 The new browser regression cleans up its Dynamic profile while the feature flag is enabled.
 

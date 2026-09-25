@@ -114,6 +114,8 @@ test.describe("Dynamic workflow completion", () => {
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
+      await testPage.reload();
+      await session.waitForLoad();
       await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step");
       await session.sendMessage('e2e:message("dynamic-completion-second-turn")');
       await waitForAgentMarker(apiClient, sessionId, "dynamic-completion-second-turn");

@@ -19,6 +19,7 @@ acceptance_criteria:
 system_design:
   - ../../specs/tasks/system-design/workflow-profile-readiness.md
   - ../../specs/tasks/system-design/workflow-profile-session-lifecycle.md
+  - ../../specs/agents/system-design/dynamic-agent-routing-01.md
 ---
 
 # Task 01: Restore Dynamic workflow completion
@@ -118,3 +119,16 @@ Avoid recursive acquisition of the session guard in the READY path.
 Completed on 2026-09-25. The regression suite reproduced the virtual-profile preflight failure and the stranded `RUNNING` session before the production change. After the fix, targeted orchestrator tests, the race-enabled control suite, lifecycle resolver tests, backend lint, and all six selected Chromium tests passed. The managed E2E run built the backend and Vite assets. Both selected specs were discovered and executed. Spec validation, spec lint, formatting, and diff checks passed. Frontend dependencies were already installed, so the frozen install step was skipped.
 
 Review follow-up completed on 2026-09-25. The profile-lookup recovery check is now separate from a credential-preflight integration regression that delivers `handleAgentReady` followed by complete-stream, verifies the completed turn and unchanged primary source session, then sends a follow-up through queue admission and confirms exactly one prompt and new turn with no stranded queue entry. The destination-only credential rejection uses a parked target with a profile lacking the source session's valid credential. The browser scenario now polls the exact persisted session identity, primary flag, and `WAITING_FOR_INPUT` state after the second response marker. The runtime facade re-exports `ErrVirtualProfile` so the orchestrator respects the lifecycle import boundary. Focused orchestrator tests and race-enabled recovery coverage passed, architecture lint passed, backend lint passed, and the managed Chromium run passed all six selected tests after rebuilding the backend and web assets. The E2E file's ESLint and Prettier checks passed.
+
+PR fixup completed on 2026-09-25. Active-turn lookup errors now emit a warning with task/session identifiers while recovery remains fail-closed; a regression covers the warning and retained `RUNNING` state. The browser scenario reloads the task before its follow-up, proving persisted readiness. The plan and work order now link the Dynamic routing system design so the delivery package covers every referenced requirement. Validation passed:
+
+- `(cd apps/backend && go test ./internal/orchestrator -run '^TestWorkflowCompletionRecoveryLogsActiveTurnLookupFailure$' -count=1)`
+- `(cd apps/backend && go test -race ./internal/orchestrator -run 'TestWorkflow(Dynamic|ProfileLookupFailure|CredentialPreflightFailure|Completion|PreflightFailure)|TestWorkflowCompletionRecoveryLogsActiveTurnLookupFailure|TestPrepareWorkflowStepSession|TestPreflightWorkflowStepCredentials|TestExactModelWorkflowStartPolicy|TestHandleAgentReady|TestHandleCompleteStreamEvent' -count=1)`
+- `(cd apps/backend && golangci-lint run ./... --new-from-rev=3aa3233c7833c8f3c034083e10d76999af3a010d --timeout=5m)` (0 issues)
+- `(cd apps/web && pnpm e2e:run --project chromium tests/workflow/dynamic-workflow-completion.spec.ts tests/workflow/workflow-session-targeting.spec.ts -- --retries=0)` (6 passed)
+- `(cd apps/web && pnpm exec eslint --max-warnings 0 e2e/tests/workflow/dynamic-workflow-completion.spec.ts)`
+- `(cd apps/web && pnpm exec prettier --check e2e/tests/workflow/dynamic-workflow-completion.spec.ts)`
+- `python3 scripts/list-docs.py validate`
+- `python3 scripts/lint-spec-files.py --all`
+- Local `pr-docs.cjs` coverage evaluation reported `covered`.
+- `git diff --check`
