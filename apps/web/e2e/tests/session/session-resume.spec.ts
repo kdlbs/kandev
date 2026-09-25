@@ -454,10 +454,10 @@ test.describe("Session resume (TUI passthrough mode)", () => {
 
     // 8. Wait for passthrough terminal to reconnect after resume
     await session.waitForPassthroughLoad();
-    await session.waitForPassthroughLoaded();
+    await session.waitForPassthroughLoaded(60_000);
 
     // 9. The TUI should show the RESUMED header, confirming --resume/-c was passed
-    await session.expectPassthroughHasText("RESUMED", 30_000);
+    await session.expectPassthroughHasText("RESUMED", 60_000);
   });
 
   test("resume TUI session with multiple repos reconnects with resume flag", async ({

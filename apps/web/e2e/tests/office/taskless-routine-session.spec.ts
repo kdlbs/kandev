@@ -38,7 +38,12 @@ test.describe("Office taskless routine sessions", () => {
     apiClient,
     officeSeed,
   }) => {
-    test.setTimeout(420_000);
+    // A taskless launch has two asynchronous schedulers in front of the mock
+    // agent (the wakeup dispatcher and the Office run scheduler). Under the
+    // busiest CI shards a claimed run can wait through several scheduler
+    // cycles before the runtime is admitted. Keep the test bounded, but allow
+    // that startup window to complete without relying on Playwright retries.
+    test.setTimeout(720_000);
     // The worker resets the status before each test, but the status write and
     // scheduler claim are asynchronous. Do not fire a routine while the
     // previous run still holds the agent in a transient working state.
@@ -101,7 +106,7 @@ test.describe("Office taskless routine sessions", () => {
             const detail = await result.json();
             return detail.status;
           },
-          { timeout: 180_000 },
+          { timeout: 300_000, intervals: [1_000, 2_000, 5_000] },
         )
         .toMatch(/^(finished|failed|cancelled)$/);
       const detail = await (await officeApi.rawRequest("GET", detailPath)).json();

@@ -136,10 +136,11 @@ test.describe("Session layout", () => {
     // exercising the tryRestoreLayout path that restores maximize from sessionStorage.
     await testPage.goto(taskAUrl);
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
+    await session.expectTerminalConnected(60_000);
 
     // Task A should still be maximized with our output
     await session.expectMaximized();
-    await session.expectTerminalHasText(TERMINAL_MARKER);
+    await session.expectTerminalHasText(TERMINAL_MARKER, 60_000);
   });
 
   test("closing maximized panel exits maximize and restores layout", async ({

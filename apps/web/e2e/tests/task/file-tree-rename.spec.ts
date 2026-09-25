@@ -155,7 +155,7 @@ test.describe("File tree inline rename", () => {
     );
     // Click another file to blur the input. The other node also belongs to
     // the tree, so we don't lose tree-container focus state.
-    await session.fileTreeNode("other.ts").click();
+    await (await session.fileTree.waitForFileTreeNode("other.ts")).click();
 
     await session.fileTree.waitForFileTreeNode("blur-final.ts");
     await expect(session.fileTreeNode("blur-original.ts")).toHaveCount(0);
