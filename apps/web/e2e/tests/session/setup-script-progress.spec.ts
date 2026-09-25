@@ -37,15 +37,29 @@ test.describe("Setup script progress UX", () => {
   }) => {
     test.setTimeout(240_000);
 
-    // Hold the setup script until the browser subscribes so its preparing
-    // state and streamed output stay observable. The setup script is the
-    // durable gate here; repository preparation can use a clone path that does
-    // not run fetch, so a git-only gate would leave this test waiting forever.
+    // Hold repository preparation until the browser subscribes so its
+    // preparing state and streamed output stay observable. This test opts the
+    // shared fixture repository into the sync path, which guarantees that the
+    // cross-platform git shim can provide the gate before setup starts.
     const gateID = Date.now();
+    const gitGateFile = path.join(backend.tmpDir, "git-delay-ms");
+    const gitStartedFile = path.join(backend.tmpDir, `git-started-${gateID}`);
+    const gitReleaseFile = path.join(backend.tmpDir, `git-release-${gateID}`);
     const startedFile = path.join(backend.tmpDir, `setup-started-${gateID}`);
     const releaseFile = path.join(backend.tmpDir, `setup-release-${gateID}`);
     let profile: { id: string } | null = null;
+    const repositoryResponse = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/repositories/${seedData.repositoryId}`,
+    );
+    expect(repositoryResponse.ok).toBeTruthy();
+    const repository = (await repositoryResponse.json()) as { pull_before_worktree?: boolean };
     try {
+      fs.writeFileSync(
+        gitGateFile,
+        JSON.stringify({ startedFile: gitStartedFile, releaseFile: gitReleaseFile }),
+      );
+      await apiClient.updateRepository(seedData.repositoryId, { pull_before_worktree: true });
       const setupScript = [
         "echo '[setup] installing deps'",
         `touch '${startedFile}'`,
@@ -76,6 +90,14 @@ test.describe("Setup script progress UX", () => {
       await session.waitForLoad();
 
       await expect
+        .poll(() => fs.existsSync(gitStartedFile), {
+          message: "repository preparation should reach its deterministic git gate",
+          timeout: 90_000,
+        })
+        .toBe(true);
+      fs.writeFileSync(gitReleaseFile, "release");
+
+      await expect
         .poll(() => fs.existsSync(startedFile), {
           message: "setup script should reach its deterministic test gate",
           timeout: 120_000,
@@ -99,12 +121,21 @@ test.describe("Setup script progress UX", () => {
       await expect(panel).toHaveAttribute("data-expanded", "false");
     } finally {
       // Always release a setup process that is still waiting before teardown.
+      if (!fs.existsSync(gitReleaseFile)) fs.writeFileSync(gitReleaseFile, "release");
       if (!fs.existsSync(releaseFile)) fs.writeFileSync(releaseFile, "release");
       if (profile) {
         await apiClient.deleteExecutorProfile(profile.id).catch(() => {
           // Profile may already be deleted if the test tore down mid-run.
         });
       }
+      await apiClient
+        .updateRepository(seedData.repositoryId, {
+          pull_before_worktree: repository.pull_before_worktree === true,
+        })
+        .catch(() => {});
+      if (fs.existsSync(gitGateFile)) fs.unlinkSync(gitGateFile);
+      if (fs.existsSync(gitStartedFile)) fs.unlinkSync(gitStartedFile);
+      if (fs.existsSync(gitReleaseFile)) fs.unlinkSync(gitReleaseFile);
       if (fs.existsSync(startedFile)) fs.unlinkSync(startedFile);
       if (fs.existsSync(releaseFile)) fs.unlinkSync(releaseFile);
     }

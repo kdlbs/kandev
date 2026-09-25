@@ -133,5 +133,15 @@ test("renders complete chart geometry when device animation is disabled", async 
   await expect(line).not.toHaveAttribute("stroke-dasharray", /\d/);
 
   await barChart.scrollIntoViewIfNeeded();
-  await expect(barChart.locator(".recharts-bar-rectangle")).toHaveCount(6);
+  // Recharts mounts the plot after its intersection observer runs. Under CI
+  // load the chart shell can be visible before the bar rectangles exist.
+  await expect(async () => {
+    await barChart.scrollIntoViewIfNeeded();
+    await barChart.evaluate((element) =>
+      element.scrollIntoView({ block: "center", inline: "nearest" }),
+    );
+    await waitForFiniteAnimations(barChart);
+    await expect(barChart.locator("svg")).toBeVisible({ timeout: 1_000 });
+    await expect(barChart.locator(".recharts-bar-rectangle")).toHaveCount(6, { timeout: 1_000 });
+  }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
 });

@@ -132,11 +132,26 @@ test("removes only stopped Kandev-labeled containers and gates daemon-wide clean
     await expect(testPage.getByTestId("storage-resource-managed-containers")).toContainText(
       "2 managed containers",
     );
-    await testPage.getByTestId("storage-run-now").click();
-    await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
-      "data-job-state",
-      "succeeded",
-    );
+    const runNow = testPage.getByTestId("storage-run-now");
+    await runNow.click();
+    // A concurrent worker can still hold the process-wide maintenance lock.
+    // Wait for either the job to finish or the explicit force action to appear
+    // instead of assuming the five-second default assertion covers both paths.
+    const runAnyway = testPage.getByTestId("storage-run-anyway");
+    await expect
+      .poll(
+        async () => {
+          if ((await runNow.getAttribute("data-job-state")) === "succeeded") return "succeeded";
+          if (await runAnyway.isVisible().catch(() => false)) return "busy";
+          return "pending";
+        },
+        { timeout: 60_000, message: "storage cleanup accepted or marked busy" },
+      )
+      .not.toBe("pending");
+    if ((await runNow.getAttribute("data-job-state")) !== "succeeded") {
+      await runAnyway.click();
+      await expect(runNow).toHaveAttribute("data-job-state", "succeeded", { timeout: 60_000 });
+    }
     await expect.poll(() => dockerInspectExists(managed)).toBe(false);
     expect(dockerInspectExists(active)).toBe(true);
     expect(dockerInspectExists(unrelated)).toBe(true);
