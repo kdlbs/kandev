@@ -18,11 +18,12 @@ func TestDeriveCursorProjectSlug(t *testing.T) {
 		path string
 		want string
 	}{
-		{name: "path separators and punctuation", path: "/work/my.repo_name", want: "work-my-repo-name"},
-		{name: "windows drive path", path: `C:\Users\Alice\my_repo.v2`, want: "C--Users-Alice-my-repo-v2"},
+		{name: "Cursor task dot-folder path", path: "/Users/cfl12/.kandev/tasks/hello_hj2srhm6/master", want: "Users-cfl12-kandev-tasks-hello-hj2srhm6-master"},
+		{name: "windows drive path", path: `C:\Users\Alice\my_repo.v2`, want: "C-Users-Alice-my-repo-v2"},
 		{name: "windows network path", path: `\\server\share\project`, want: "server-share-project"},
-		{name: "keep internal dash runs", path: "/work//a__b", want: "work--a--b"},
+		{name: "punctuation runs collapse", path: "---/work...__///a!!b---", want: "work-a-b"},
 		{name: "trim boundary dashes", path: "./work/", want: "work"},
+		{name: "non-ASCII characters", path: "/work/café/项目/naïve", want: "work-caf-na-ve"},
 		{name: "empty result", path: "/...___", want: ""},
 	}
 	for _, tt := range tests {
@@ -38,7 +39,7 @@ func TestCursorMCPAuthWorktree(t *testing.T) {
 	requireSymlinkSupport(t)
 	root := t.TempDir()
 	repository := filepath.Join(root, "repository")
-	worktree := filepath.Join(root, "worktrees", "feature")
+	worktree := filepath.Join(root, ".kandev", "tasks", "hello_hj2srhm6", "master")
 	if err := os.MkdirAll(repository, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,12 @@ func TestCursorMCPAuthWorktree(t *testing.T) {
 		t.Fatalf("LinkCursorMCPAuth(worktree): %v", err)
 	}
 
-	destination := cursorAuthDestinationForTest(t, cursorHome, worktree)
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantProjectDirectory := filepath.Join(cursorHome, "projects", cursorProjectSlugAsSpecifiedForTest(canonicalRoot)+"-kandev-tasks-hello-hj2srhm6-master")
+	destination := filepath.Join(wantProjectDirectory, cursorMCPAuthFilename)
 	target, err := os.Readlink(destination)
 	if err != nil {
 		t.Fatalf("Readlink(%s): %v", destination, err)
@@ -254,7 +260,7 @@ func TestAggregateCursorMCPAuthExcludesConfiguredTaskRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeCursorAuth(t, projects, DeriveCursorProjectSlug(canonicalTaskWorkspace), `{"task-secret":{"token":"excluded"}}`, time.Now())
+	writeCursorAuth(t, projects, cursorProjectSlugAsSpecifiedForTest(canonicalTaskWorkspace), `{"task-secret":{"token":"excluded"}}`, time.Now())
 	writeCursorAuth(t, projects, "ordinary-project", `{"ordinary":{"token":"included"}}`, time.Now())
 
 	if err := AggregateCursorMCPAuth(cursorHome, taskRoot); err != nil {
@@ -288,7 +294,7 @@ func TestAggregateCursorMCPAuthAllowsMissingExcludedRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	canonicalTaskWorkspace := filepath.Join(canonicalExistingParent, relativeTaskWorkspace)
-	writeCursorAuth(t, projects, DeriveCursorProjectSlug(canonicalTaskWorkspace), `{"stale-task":{"token":"excluded"}}`, time.Now())
+	writeCursorAuth(t, projects, cursorProjectSlugAsSpecifiedForTest(canonicalTaskWorkspace), `{"stale-task":{"token":"excluded"}}`, time.Now())
 
 	if err := AggregateCursorMCPAuth(cursorHome, missingTaskRoot); err != nil {
 		t.Fatalf("AggregateCursorMCPAuth with an absent task root: %v", err)
@@ -524,6 +530,27 @@ func cursorAuthDestinationForTest(t *testing.T, cursorHome, workspacePath string
 		t.Fatal(err)
 	}
 	return filepath.Join(cursorHome, "projects", DeriveCursorProjectSlug(canonicalPath), cursorMCPAuthFilename)
+}
+
+func cursorProjectSlugAsSpecifiedForTest(path string) string {
+	var slug strings.Builder
+	previousWasSeparator := true
+	for _, char := range path {
+		if !isASCIIAlphaNumeric(char) {
+			previousWasSeparator = true
+			continue
+		}
+		if slug.Len() > 0 && previousWasSeparator {
+			slug.WriteByte('-')
+		}
+		slug.WriteRune(char)
+		previousWasSeparator = false
+	}
+	return slug.String()
+}
+
+func isASCIIAlphaNumeric(char rune) bool {
+	return char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9'
 }
 
 func TestDisableCursorMCPAuth(t *testing.T) {
