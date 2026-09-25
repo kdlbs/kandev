@@ -349,11 +349,19 @@ func (s *HandoffService) archiveTaskTree(
 		cleanupOps, out, vacatedStepIDs,
 	)
 	if mutationErr != nil {
-		if len(out.ArchivedTaskIDs) == 0 {
-			mutationErr = s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(
-				transferCompensationCtx, ownershipTransfers, mutationErr,
-			)
+		archived := make(map[string]struct{}, len(out.ArchivedTaskIDs))
+		for _, taskID := range out.ArchivedTaskIDs {
+			archived[taskID] = struct{}{}
 		}
+		var abortedTransfers []workspaceEnvironmentOwnershipTransfer
+		for _, transfer := range ownershipTransfers {
+			if _, ok := archived[transfer.oldOwnerTaskID]; !ok {
+				abortedTransfers = append(abortedTransfers, transfer)
+			}
+		}
+		mutationErr = s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(
+			transferCompensationCtx, abortedTransfers, mutationErr,
+		)
 		return out, mutationErr
 	}
 	cleanupErrors, finishErr := s.finishArchiveTaskTree(

@@ -27,9 +27,12 @@ type retentionRaceCascadeRepo struct {
 }
 
 func (r *retentionRaceCascadeRepo) ArchiveTaskIfActiveWithVacatedStep(
-	_ context.Context,
-	taskID, _ string,
+	ctx context.Context,
+	taskID, cascadeID string,
 ) (string, bool, error) {
+	if taskID != "root" {
+		return r.fakeCascadeRepo.ArchiveTaskIfActiveWithVacatedStep(ctx, taskID, cascadeID)
+	}
 	r.base.mu.Lock()
 	defer r.base.mu.Unlock()
 	task := r.base.tasks[taskID]
@@ -758,6 +761,57 @@ func TestArchiveTaskTree_RetentionRaceRestoresOwnershipAndKeepsRunAlive(t *testi
 	}
 	if root.ArchivedAt != nil || !models.IsTerminalRetentionHeld(root.Metadata) {
 		t.Fatalf("held root = %+v, want retained and unarchived", root)
+	}
+}
+
+func TestArchiveTaskTree_RetentionRaceAfterChildArchiveRestoresRootOwnership(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	tasks.addTask("peer", "", "ws-1")
+	tasks.taskEnvironments = map[string]*models.TaskEnvironment{
+		"env-shared": {ID: "env-shared", TaskID: "root"},
+	}
+	groups := newCascadeWSGroupRepo()
+	groups.groups["g1"] = &orchmodels.WorkspaceGroup{
+		ID: "g1", WorkspaceID: "ws-1", OwnerTaskID: "root",
+		MaterializedEnvironmentID: "env-shared",
+		OwnedByKandev:             true,
+		CleanupPolicy:             orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel,
+		CleanupStatus:             orchmodels.WorkspaceCleanupStatusActive,
+	}
+	groups.members["g1"] = map[string]string{
+		"root":  orchmodels.WorkspaceMemberRoleOwner,
+		"child": orchmodels.WorkspaceMemberRoleMember,
+		"peer":  orchmodels.WorkspaceMemberRoleMember,
+	}
+	canceller := &recordingRunCanceller{}
+	svc := NewHandoffService(&retentionRaceCascadeRepo{fakeCascadeRepo: newCascadeRepo(tasks)}, nil, nil, nil, groups, nil)
+	svc.SetRunCanceller(canceller)
+
+	out, err := svc.ArchiveTaskTree(context.Background(), "root", true)
+	if !errors.Is(err, ErrTaskArchiveHeld) {
+		t.Fatalf("ArchiveTaskTree error = %v, want terminal retention hold", err)
+	}
+	if len(out.ArchivedTaskIDs) != 1 || out.ArchivedTaskIDs[0] != "child" {
+		t.Fatalf("archived tasks = %v, want only child", out.ArchivedTaskIDs)
+	}
+	root, _ := tasks.GetTask(context.Background(), "root")
+	child, _ := tasks.GetTask(context.Background(), "child")
+	if root.ArchivedAt != nil || !models.IsTerminalRetentionHeld(root.Metadata) || child.ArchivedAt == nil {
+		t.Fatalf("root = %+v, child = %+v; want held root and archived child", root, child)
+	}
+	for _, taskID := range canceller.calls {
+		if taskID == "root" {
+			t.Fatal("held root run was cancelled")
+		}
+	}
+	env, err := tasks.GetTaskEnvironment(context.Background(), "env-shared")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if env.TaskID != "root" {
+		t.Fatalf("shared environment owner = %q, want held root", env.TaskID)
 	}
 }
 
