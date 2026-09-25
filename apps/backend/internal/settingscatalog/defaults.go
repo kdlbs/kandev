@@ -641,7 +641,7 @@ func userSettingsDomain() DomainDescriptor {
 		"sidebar_active_view_id", "active sidebar view", "string", "sidebar_draft", "sidebar draft", "object", "thread_views", "thread views", "array",
 		"thread_active_view_id", "active thread view", "string", "thread_view_draft", "thread draft", "object", "sidebar_task_prefs", "sidebar task preferences", "object",
 		"sidebar_task_color_automation", "sidebar color automation", "object", "sidebar_task_colors", "sidebar task colors", "object", "sidebar_task_color_patch", "sidebar task color patch", "object", "task_create_last_used", "last task create values", "object",
-		"jira_saved_views", "Jira saved views", "object", "jira_task_presets", "Jira task presets", "object", "github_saved_presets", "GitHub saved presets", "object",
+		"jira_saved_views", "Jira saved views", "object", "jira_default_view_id", "Jira default view", "string", "jira_task_presets", "Jira task presets", "object", "github_saved_presets", "GitHub saved presets", "object",
 		"github_default_query_presets", "GitHub query presets", "object", "gitlab_saved_presets", "GitLab saved presets", "object", "azure_devops_browse_preferences", "Azure DevOps browse preferences", "object",
 		"default_utility_agent_id", "default utility agent", "string", "default_utility_model", "default utility model", "string", "default_utility_agent_profile_id", "default utility profile", "string",
 		"keyboard_shortcuts", "keyboard shortcuts", "object", "terminal_link_behavior", "terminal link behavior", "string", "terminal_font_family", "terminal font family", "string",

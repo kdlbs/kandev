@@ -5068,6 +5068,21 @@
           "settings_href": "/settings/preferences"
         },
         {
+          "key": "user_settings.jira_default_view_id",
+          "field_path": "jira_default_view_id",
+          "label": "Jira default view",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "string",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
           "key": "user_settings.jira_task_presets",
           "field_path": "jira_task_presets",
           "label": "Jira task presets",
@@ -6291,6 +6306,7 @@
       "github_saved_presets",
       "gitlab_saved_presets",
       "initial_setup_complete",
+      "jira_default_view_id",
       "jira_saved_views",
       "jira_task_presets",
       "kanban_hidden_step_ids",

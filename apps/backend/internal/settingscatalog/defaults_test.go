@@ -40,6 +40,27 @@ func TestDefaultProfileFieldsAreWritableAndBound(t *testing.T) {
 	}
 }
 
+func TestJiraDefaultViewPreferenceIsCallerOwnedString(t *testing.T) {
+	registry, err := DefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	domain, ok := registry.Domain("user_settings")
+	if !ok {
+		t.Fatal("user_settings descriptor missing")
+	}
+	for _, field := range domain.Fields {
+		if field.Key != "user_settings.jira_default_view_id" {
+			continue
+		}
+		if field.JSONType != "string" || field.FieldPath != "jira_default_view_id" || field.Authority != "user.self" || field.Owner != "user-settings" {
+			t.Fatalf("Jira default view descriptor = %+v, want caller-owned string preference", field)
+		}
+		return
+	}
+	t.Fatal("Jira default view preference is missing from user settings catalog")
+}
+
 func TestWritableDomainsExposeConcreteOperationAuthorities(t *testing.T) {
 	registry, err := DefaultRegistry()
 	if err != nil {

@@ -16,6 +16,17 @@ export function reconcileStatuses(selected: string[], available: JiraStatus[]): 
   return next.length === selected.length ? selected : next;
 }
 
+// Saved custom JQL owns the complete query, so its structured status snapshot
+// must not be reconciled against the available status options.
+export function reconcileStatusesForQuery(
+  statusesLoaded: boolean,
+  customJql: string | null,
+  selected: string[],
+  available: JiraStatus[],
+): string[] {
+  return statusesLoaded && customJql === null ? reconcileStatuses(selected, available) : selected;
+}
+
 // unionByName merges status lists from several projects, de-duping by name.
 // Two projects may expose a status with the same name but different ids; the
 // filter targets status names in JQL, so name is the identity that matters.
@@ -53,7 +64,7 @@ export function useProjectStatuses(
   workspaceId?: string | null,
 ): ProjectStatuses {
   const [options, setOptions] = useState<JiraStatus[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const cacheRef = useRef<Map<string, JiraStatus[]>>(new Map());
 
   const workspaceKey = workspaceId?.trim() ?? "";
@@ -62,13 +73,10 @@ export function useProjectStatuses(
 
   useEffect(() => {
     let cancelled = false;
-    // Re-fetching for a new key set: options for the previous set are stale and
-    // the current set has not resolved yet, so mark unloaded until it does.
-    setLoaded(false);
     async function load() {
       if (projectKeys.length === 0) {
         setOptions([]);
-        setLoaded(true);
+        setLoadedKey(cacheKey);
         return;
       }
       const cache = cacheRef.current;
@@ -90,7 +98,7 @@ export function useProjectStatuses(
       );
       if (cancelled) return;
       setOptions(unionByName(projectKeys.map((key) => cache.get(statusCacheKey(key)) ?? [])));
-      setLoaded(true);
+      setLoadedKey(cacheKey);
     }
     void load();
     return () => {
@@ -100,5 +108,5 @@ export function useProjectStatuses(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cacheKey]);
 
-  return { options, loaded };
+  return { options, loaded: loadedKey === cacheKey };
 }
