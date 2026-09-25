@@ -142,6 +142,45 @@ func TestServiceGetWorkspaceRateLimitSnapshotKeepsPrimaryReserveBackgroundOnly(t
 	}
 }
 
+func TestServiceGetWorkspaceRateLimitSnapshotReopensExpiredPrimaryReserve(t *testing.T) {
+	store := newTestStore(t)
+	seedConnectionWorkspaces(t, store, "workspace-1")
+	if err := store.UpsertWorkspaceConnection(context.Background(), &WorkspaceConnection{
+		WorkspaceID: "workspace-1", Source: ConnectionSourcePAT,
+		GitHubHost: defaultGitHubHost, Login: "yattdev", Status: ConnectionStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(nil, AuthMethodPAT, nil, store, nil, testLogger(t))
+	t.Cleanup(svc.Stop)
+	principal := AuthPrincipal{
+		Kind: AuthPrincipalHuman, Source: ConnectionSourcePAT,
+		Login: "yattdev", WorkspaceID: "workspace-1",
+	}
+	tracker, admission := svc.rateCoordinator.coordinate(defaultGitHubHost, principal, nil)
+	now := time.Now().UTC()
+	tracker.Record(RateSnapshot{
+		Resource: ResourceCore, Limit: 5000, Remaining: 500,
+		ResetAt: now.Add(-time.Minute), UpdatedAt: now,
+	})
+
+	snapshot, err := svc.GetWorkspaceRateLimitSnapshot(context.Background(), "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.BackgroundAllowed || snapshot.BlockingReason != "" {
+		t.Fatalf("expired primary reserve snapshot = %+v", snapshot)
+	}
+
+	release, err := admission.acquire(WithNonBlockingGitHubAdmission(
+		WithGitHubWorkClass(context.Background(), WorkClassBackground),
+	), ResourceCore)
+	if err != nil {
+		t.Fatalf("background admission after expired reserve: %v", err)
+	}
+	release()
+}
+
 func TestServiceGetWorkspaceRateLimitSnapshotColdStateDoesNotRequireProvider(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "workspace-1")
