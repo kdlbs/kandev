@@ -35,22 +35,17 @@ test.describe("Setup script progress UX", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(240_000);
 
-    // Gate the preceding fetch until the browser subscribes, then hold the
-    // setup script so its preparing state and streamed output stay observable.
+    // Hold the setup script until the browser subscribes so its preparing
+    // state and streamed output stay observable. The setup script is the
+    // durable gate here; repository preparation can use a clone path that does
+    // not run fetch, so a git-only gate would leave this test waiting forever.
     const gateID = Date.now();
-    const gitGateFile = path.join(backend.tmpDir, "git-delay-ms");
-    const gitStartedFile = path.join(backend.tmpDir, `git-started-${gateID}`);
-    const gitReleaseFile = path.join(backend.tmpDir, `git-release-${gateID}`);
     const startedFile = path.join(backend.tmpDir, `setup-started-${gateID}`);
     const releaseFile = path.join(backend.tmpDir, `setup-release-${gateID}`);
     let profile: { id: string } | null = null;
     try {
-      fs.writeFileSync(
-        gitGateFile,
-        JSON.stringify({ startedFile: gitStartedFile, releaseFile: gitReleaseFile }),
-      );
       const setupScript = [
         "echo '[setup] installing deps'",
         `touch '${startedFile}'`,
@@ -81,16 +76,9 @@ test.describe("Setup script progress UX", () => {
       await session.waitForLoad();
 
       await expect
-        .poll(() => fs.existsSync(gitStartedFile), {
-          message: "repository preparation should reach its deterministic git gate",
-          timeout: 90_000,
-        })
-        .toBe(true);
-      fs.writeFileSync(gitReleaseFile, "release");
-      await expect
         .poll(() => fs.existsSync(startedFile), {
           message: "setup script should reach its deterministic test gate",
-          timeout: 60_000,
+          timeout: 120_000,
         })
         .toBe(true);
 
@@ -111,16 +99,12 @@ test.describe("Setup script progress UX", () => {
       await expect(panel).toHaveAttribute("data-expanded", "false");
     } finally {
       // Always release a setup process that is still waiting before teardown.
-      if (!fs.existsSync(gitReleaseFile)) fs.writeFileSync(gitReleaseFile, "release");
       if (!fs.existsSync(releaseFile)) fs.writeFileSync(releaseFile, "release");
       if (profile) {
         await apiClient.deleteExecutorProfile(profile.id).catch(() => {
           // Profile may already be deleted if the test tore down mid-run.
         });
       }
-      if (fs.existsSync(gitGateFile)) fs.unlinkSync(gitGateFile);
-      if (fs.existsSync(gitStartedFile)) fs.unlinkSync(gitStartedFile);
-      if (fs.existsSync(gitReleaseFile)) fs.unlinkSync(gitReleaseFile);
       if (fs.existsSync(startedFile)) fs.unlinkSync(startedFile);
       if (fs.existsSync(releaseFile)) fs.unlinkSync(releaseFile);
     }

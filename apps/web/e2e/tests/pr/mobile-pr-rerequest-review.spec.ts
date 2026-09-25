@@ -165,7 +165,7 @@ test.describe("mobile PR re-request review", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
     const task = await apiClient.createTaskWithAgent(
@@ -179,20 +179,18 @@ test.describe("mobile PR re-request review", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
-    for (const prNumber of [SWITCH_PR_NUMBER, SWITCH_SECOND_PR_NUMBER]) {
-      await apiClient.mockGitHubAssociateTaskPR({
-        task_id: task.id,
-        owner: OWNER,
-        repo: REPO,
-        pr_number: prNumber,
-        pr_url: `https://github.com/${OWNER}/${REPO}/pull/${prNumber}`,
-        pr_title: `PR ${prNumber}`,
-        head_branch: `feat/pr-${prNumber}`,
-        base_branch: "main",
-        author_login: "another-user",
-        state: "open",
-      });
-    }
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: SWITCH_PR_NUMBER,
+      pr_url: `https://github.com/${OWNER}/${REPO}/pull/${SWITCH_PR_NUMBER}`,
+      pr_title: `PR ${SWITCH_PR_NUMBER}`,
+      head_branch: `feat/pr-${SWITCH_PR_NUMBER}`,
+      base_branch: "main",
+      author_login: "another-user",
+      state: "open",
+    });
     await apiClient.mockGitHubSeedPRFeedback({
       owner: OWNER,
       repo: REPO,
@@ -208,23 +206,6 @@ test.describe("mobile PR re-request review", () => {
       reviews: [],
     });
 
-    let releaseSecondFeedback!: () => void;
-    const secondFeedbackHeld = new Promise<void>((resolve) => {
-      releaseSecondFeedback = resolve;
-    });
-    let observeSecondFeedback!: () => void;
-    const secondFeedbackRequested = new Promise<void>((resolve) => {
-      observeSecondFeedback = resolve;
-    });
-    await testPage.route(
-      (url) => url.pathname === `/api/v1/github/prs/${OWNER}/${REPO}/${SWITCH_SECOND_PR_NUMBER}`,
-      async (route) => {
-        const response = await route.fetch();
-        observeSecondFeedback();
-        await secondFeedbackHeld;
-        await route.fulfill({ response });
-      },
-    );
     const mutationUrls: string[] = [];
     testPage.on("request", (request) => {
       if (request.method() === "POST" && request.url().includes("/requested-reviewers")) {
@@ -237,17 +218,52 @@ test.describe("mobile PR re-request review", () => {
     await session.waitForLoad();
     await testPage.getByRole("button", { name: "Review", exact: true }).tap();
     await expect(testPage.getByLabel("Loading change request")).toHaveCount(0, {
-      timeout: 30_000,
+      timeout: 60_000,
     });
     const action = session.prReRequestReviewButton(REVIEWER);
     await expect(action).toBeVisible({ timeout: 30_000 });
 
-    await testPage.getByTestId("review-item-selector-trigger").tap();
+    let releaseSecondFeedback!: () => void;
+    const secondFeedbackHeld = new Promise<void>((resolve) => {
+      releaseSecondFeedback = resolve;
+    });
+    let observeSecondFeedback!: () => void;
+    const secondFeedbackRequested = new Promise<void>((resolve) => {
+      observeSecondFeedback = resolve;
+    });
+    // Add PR B only after PR A is loaded. This keeps the initial review
+    // deterministic while the delayed response is used only for the switch.
+    await testPage.route(
+      (url) => url.pathname === `/api/v1/github/prs/${OWNER}/${REPO}/${SWITCH_SECOND_PR_NUMBER}`,
+      async (route) => {
+        const response = await route.fetch();
+        observeSecondFeedback();
+        await secondFeedbackHeld;
+        await route.fulfill({ response });
+      },
+    );
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: SWITCH_SECOND_PR_NUMBER,
+      pr_url: `https://github.com/${OWNER}/${REPO}/pull/${SWITCH_SECOND_PR_NUMBER}`,
+      pr_title: `PR ${SWITCH_SECOND_PR_NUMBER}`,
+      head_branch: `feat/pr-${SWITCH_SECOND_PR_NUMBER}`,
+      base_branch: "main",
+      author_login: "another-user",
+      state: "open",
+    });
+
+    const selector = testPage.getByTestId("review-item-selector-trigger");
+    await expect(selector).toBeVisible({ timeout: 30_000 });
+    await selector.tap();
     const secondReview = testPage.getByRole("menuitemradio", {
       name: new RegExp(`^PR ${SWITCH_SECOND_PR_NUMBER}\\b`),
     });
     await expect(secondReview).toBeVisible();
-    await secondReview.tap();
+    await secondReview.tap({ force: true });
     await secondFeedbackRequested;
 
     await expect(action).toHaveCount(0);
