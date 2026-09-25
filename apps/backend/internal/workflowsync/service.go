@@ -188,7 +188,12 @@ func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string)
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return nil, err
 	}
-	return s.store.GetConfigForWorkspace(ctx, workspaceID)
+	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
+	if err != nil || cfg == nil {
+		return cfg, err
+	}
+	cfg.LastError = safeStoredSyncErrorMessage(cfg.LastError)
+	return cfg, nil
 }
 
 // SetConfigForWorkspace validates and stores the workspace's config.
