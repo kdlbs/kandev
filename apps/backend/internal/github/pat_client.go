@@ -97,6 +97,9 @@ func (c *PATClient) apiError(resp *http.Response, endpoint string, body []byte) 
 	if c.rateTracker != nil && failure.Kind == FailureSecondaryRateLimit {
 		c.rateTracker.ObserveSecondary(failure.Resource, failure.RetryAt, failure.RetrySource, string(body))
 	}
+	if c.rateTracker != nil && failure.Kind == FailurePrimaryRateLimit {
+		c.rateTracker.ObservePrimary(failure.Resource, failure.RetryAt, failure.RetrySource)
+	}
 	return &GitHubAPIError{
 		StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(body),
 		FailureKind: failure.Kind, Resource: failure.Resource, RetryAt: failure.RetryAt,
