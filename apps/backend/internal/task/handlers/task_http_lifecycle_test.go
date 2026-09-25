@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 )
 
@@ -21,6 +22,7 @@ import (
 // the HTTP list/count routes need, recording the arguments they receive.
 type httpTaskRepo struct {
 	wsTaskRepo
+	taskrepository.TaskResourceCleanupRepository
 
 	listedWorkspaceID string
 	listedPage        int
@@ -35,6 +37,57 @@ type httpTaskRepo struct {
 	stepCountErr      error
 	countedWorkflowID string
 	countedStepID     string
+	cleanupJobs       []*models.TaskResourceCleanupJob
+	cleanupJobsByOp   map[string]*models.TaskResourceCleanupJob
+}
+
+func (r *httpTaskRepo) CreateTaskResourceCleanupJob(
+	_ context.Context, job *models.TaskResourceCleanupJob,
+) error {
+	if r.cleanupJobsByOp == nil {
+		r.cleanupJobsByOp = make(map[string]*models.TaskResourceCleanupJob)
+	}
+	r.cleanupJobsByOp[job.OperationID] = job
+	return nil
+}
+
+func (r *httpTaskRepo) GetTaskResourceCleanupJobByOperationID(
+	_ context.Context, operationID string,
+) (*models.TaskResourceCleanupJob, error) {
+	return r.cleanupJobsByOp[operationID], nil
+}
+
+func (r *httpTaskRepo) UpdateTaskResourceCleanupSnapshot(
+	_ context.Context, operationID, snapshot string,
+) error {
+	if job := r.cleanupJobsByOp[operationID]; job != nil {
+		job.ResourceSnapshot = snapshot
+	}
+	return nil
+}
+
+func (r *httpTaskRepo) StartPreparedTaskResourceCleanupJob(
+	_ context.Context, id string,
+) (bool, error) {
+	for _, job := range r.cleanupJobsByOp {
+		if job.ID == id && job.State == models.TaskResourceCleanupStatePrepared {
+			job.State = models.TaskResourceCleanupStatePending
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *httpTaskRepo) ListTaskResourceCleanupJobs(
+	_ context.Context, taskID string,
+) ([]*models.TaskResourceCleanupJob, error) {
+	jobs := make([]*models.TaskResourceCleanupJob, 0, len(r.cleanupJobs))
+	for _, job := range r.cleanupJobs {
+		if job != nil && job.TaskID == taskID {
+			jobs = append(jobs, job)
+		}
+	}
+	return jobs, nil
 }
 
 func (r *httpTaskRepo) ListTasksByWorkspace(
@@ -70,7 +123,7 @@ func newHTTPTaskHandlers(t *testing.T, repo *httpTaskRepo) *TaskHandlers {
 		Workflows: repo, Messages: repo, Turns: repo,
 		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
-		Reviews: repo,
+		Reviews: repo, ResourceCleanups: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
 	return &TaskHandlers{service: svc, logger: log}
 }
@@ -139,6 +192,54 @@ func TestHTTPGetTaskDeniesForeignTask(t *testing.T) {
 	h.httpGetTask(ownerCtx)
 	require.Equal(t, http.StatusOK, ownerRec.Code)
 	require.Contains(t, ownerRec.Body.String(), "Victim", "the owner must still get their task")
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.5
+func TestHTTPGetArchiveSourceManifestDeniesForeignWorkspace(t *testing.T) {
+	repo := &httpTaskRepo{cleanupJobs: []*models.TaskResourceCleanupJob{{
+		ID: "cleanup-b", TaskID: "task-b",
+		ResourceSnapshot: `{"workspace_id":"ws-b","worktrees":[{"id":"wt-b","task_id":"task-b","repository_id":"repo-b"}],"archive_source_manifest":[{"task_id":"task-b","cleanup_job_id":"cleanup-b","worktree_id":"wt-b","repository_id":"repo-b"}]}`,
+	}}}
+	h := newHTTPTaskHandlers(t, repo)
+
+	foreignCtx, foreignRec := taskRequestAs(t, "user-a", http.MethodGet,
+		"/api/v1/tasks/task-b/archive-source-manifest", "task-b")
+	h.httpGetArchiveSourceManifest(foreignCtx)
+	require.Equal(t, http.StatusNotFound, foreignRec.Code)
+	require.JSONEq(t, `{"error":"archive source manifest not found"}`, foreignRec.Body.String())
+
+	ownerCtx, ownerRec := taskRequestAs(t, "user-b", http.MethodGet,
+		"/api/v1/tasks/task-b/archive-source-manifest", "task-b")
+	h.httpGetArchiveSourceManifest(ownerCtx)
+	require.Equal(t, http.StatusOK, ownerRec.Code)
+	require.Contains(t, ownerRec.Body.String(), `"worktree_id":"wt-b"`)
+
+	missingCtx, missingRec := taskRequestAs(t, "user-b", http.MethodGet,
+		"/api/v1/tasks/task-b/archive-source-manifest", "task-b")
+	newHTTPTaskHandlers(t, &httpTaskRepo{}).httpGetArchiveSourceManifest(missingCtx)
+	require.Equal(t, http.StatusNotFound, missingRec.Code)
+	require.JSONEq(t, `{"error":"archive source manifest not found"}`, missingRec.Body.String())
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.5
+func TestHTTPGetArchiveSourceManifestReturnsAllCleanupGenerations(t *testing.T) {
+	repo := &httpTaskRepo{cleanupJobs: []*models.TaskResourceCleanupJob{
+		{
+			ID: "cleanup-first", TaskID: "task-b",
+			ResourceSnapshot: `{"workspace_id":"ws-b","worktrees":[{"id":"wt-first","task_id":"task-b","repository_id":"repo-b"}],"archive_source_manifest":[{"task_id":"task-b","cleanup_job_id":"cleanup-first","worktree_id":"wt-first","repository_id":"repo-b"}]}`,
+		},
+		{
+			ID: "cleanup-second", TaskID: "task-b",
+			ResourceSnapshot: `{"workspace_id":"ws-b","worktrees":[{"id":"wt-second","task_id":"task-b","repository_id":"repo-b"}],"archive_source_manifest":[{"task_id":"task-b","cleanup_job_id":"cleanup-second","worktree_id":"wt-second","repository_id":"repo-b"}]}`,
+		},
+	}}
+	h := newHTTPTaskHandlers(t, repo)
+	ownerCtx, ownerRec := taskRequestAs(t, "user-b", http.MethodGet,
+		"/api/v1/tasks/task-b/archive-source-manifest", "task-b")
+	h.httpGetArchiveSourceManifest(ownerCtx)
+	require.Equal(t, http.StatusOK, ownerRec.Code)
+	require.Contains(t, ownerRec.Body.String(), `"cleanup_job_id":"cleanup-first"`)
+	require.Contains(t, ownerRec.Body.String(), `"cleanup_job_id":"cleanup-second"`)
 }
 
 func TestHTTPGetTaskReturnsNotFoundForUnknownTask(t *testing.T) {

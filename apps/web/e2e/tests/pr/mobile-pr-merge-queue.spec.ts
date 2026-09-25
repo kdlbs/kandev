@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 import { assertNoDocumentHorizontalOverflow, requireBox } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 
@@ -50,6 +51,7 @@ test("adds a GitHub PR to the merge queue from mobile Review", async ({
     checks_passing: 3,
   });
   await apiClient.mockGitHubSetMergeOutcome("northstar-labs", "relay-console", 843, "queued");
+  await seedEligiblePRFeedback(apiClient);
 
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
@@ -79,6 +81,7 @@ test("adds a GitHub PR to the merge queue from mobile Review", async ({
     checks_total: 3,
     checks_passing: 3,
   });
+  await seedEligiblePRFeedback(apiClient);
   const merge = panel.getByRole("button", { name: "Merge PR" });
   await expect(merge).toBeVisible({ timeout: 15_000 });
   expect((await requireBox(merge, "mobile merge queue action")).height).toBeGreaterThanOrEqual(44);
@@ -86,6 +89,23 @@ test("adds a GitHub PR to the merge queue from mobile Review", async ({
   await merge.tap();
   await expect(testPage.getByText("PR added to merge queue", { exact: true })).toBeVisible();
 });
+
+async function seedEligiblePRFeedback(apiClient: ApiClient) {
+  await apiClient.mockGitHubSeedPRFeedback({
+    owner: "northstar-labs",
+    repo: "relay-console",
+    pr_number: 843,
+    checks: [
+      { name: "Required check 1", status: "completed", conclusion: "success" },
+      { name: "Required check 2", status: "completed", conclusion: "success" },
+      { name: "Required check 3", status: "completed", conclusion: "success" },
+    ],
+    reviews: [
+      { id: 1, author: "reviewer-one", state: "APPROVED", created_at: "2026-09-24T10:00:00Z" },
+      { id: 2, author: "reviewer-two", state: "APPROVED", created_at: "2026-09-24T11:00:00Z" },
+    ],
+  });
+}
 
 test("surfaces queued PR metadata in the mobile drawer and Review", async ({
   testPage,

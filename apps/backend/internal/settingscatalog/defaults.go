@@ -755,6 +755,7 @@ func profileDomain() DomainDescriptor {
 			profileWritable("agent_profile.allow_indexing", "allow_indexing", "Allow indexing", "boolean", "Legacy compatibility permission.", false),
 			profileWritable("agent_profile.auto_approve", "auto_approve", "Auto approve", "boolean", "Automatically approve supported agent permissions.", false),
 			profileWritable("agent_profile.cli_passthrough", "cli_passthrough", "CLI passthrough", "boolean", "Enable CLI passthrough mode.", false),
+			profileWritableWithDefault("agent_profile.cursor_mcp_auth_enabled", "cursor_mcp_auth_enabled", "Share Cursor MCP credentials", "boolean", "Reuse local Cursor MCP credentials when a Cursor profile launches.", "true for new profiles"),
 			profileWritable("agent_profile.enabled", "enabled", "Enabled", "boolean", "Allow this profile for new work.", false),
 			profileWritable("agent_profile.cli_flags", "cli_flags", "CLI flags", "array", "Complete replacement list of validated CLI flags.", true),
 			profileWritableSensitive("agent_profile.env_vars", "env_vars", "Environment variables", "array", "Complete replacement list. Secret values remain references.", true),
@@ -807,6 +808,12 @@ func profileWritable(key, path, label, jsonType, description string, replacement
 			"x-kandev-dynamic":     "provider_config_options",
 		}
 	}
+	return field
+}
+
+func profileWritableWithDefault(key, path, label, jsonType, description, defaultBehavior string) FieldDescriptor {
+	field := profileWritable(key, path, label, jsonType, description, false)
+	field.DefaultBehavior = defaultBehavior
 	return field
 }
 

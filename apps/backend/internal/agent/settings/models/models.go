@@ -103,6 +103,9 @@ type AgentProfile struct {
 	// CLIPassthrough enables TUI-passthrough execution style. Orthogonal to ACP.
 	CLIPassthrough bool `json:"cli_passthrough" db:"cli_passthrough"`
 
+	// CursorMCPAuthEnabled shares local Cursor MCP auth files for Cursor launches.
+	CursorMCPAuthEnabled bool `json:"cursor_mcp_auth_enabled" db:"cursor_mcp_auth_enabled"`
+
 	// Enabled gates the profile from new-work selection: when false, the
 	// profile is hidden from task/session creation pickers but keeps serving
 	// existing sessions and remains editable in settings. Independent of

@@ -15,6 +15,7 @@ import { useTaskCanvasLifecycleActivation } from "./dockview-canvas-activation";
 import { statusSummaryTaskError } from "@/lib/task-status-summary";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
+import type { TaskTopbarRepository } from "./task-page-content-helpers";
 
 // Re-export for backwards compatibility
 export type { SelectedDiff } from "@/hooks/use-session-layout-state";
@@ -37,6 +38,7 @@ type TaskLayoutProps = {
   taskTitle?: string;
   /** `owner/repo` (or the repository name) of the task's primary repository. */
   repositoryLabel?: string | null;
+  topbarRepository?: TaskTopbarRepository | null;
   baseBranch?: string;
   worktreeBranch?: string | null;
   isRemoteExecutor?: boolean;
@@ -81,6 +83,7 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
   defaultLayouts = {},
   taskTitle,
   repositoryLabel,
+  topbarRepository,
   baseBranch,
   worktreeBranch,
   isRemoteExecutor,
@@ -123,6 +126,7 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
         worktreeBranch={worktreeBranch}
         taskTitle={taskTitle}
         repositoryLabel={repositoryLabel}
+        topbarRepository={topbarRepository}
         isRemoteExecutor={isRemoteExecutor}
         remoteExecutorType={remoteExecutorType}
         remoteExecutorName={remoteExecutorName}

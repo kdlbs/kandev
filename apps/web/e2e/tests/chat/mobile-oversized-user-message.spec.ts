@@ -92,6 +92,7 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
 }) => {
   test.setTimeout(240_000);
   const { source, tail, firstLine } = oversizedMessage("MOBILE-OVERSIZED");
+  const slowPrompt = "/slow 30s";
   const firstTitle = `Mobile oversized message ${Date.now()}`;
   const task = await createTask(apiClient, seedData, firstTitle);
   if (!task.session_id) throw new Error("oversized mobile task has no session_id");
@@ -157,10 +158,10 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
     1,
   );
 
-  await session.sendMessageViaButton("/slow 30s");
-  await expect(
-    chat.getByTestId("user-message-bubble").filter({ hasText: "/slow 30s" }),
-  ).toBeVisible({ timeout: 15_000 });
+  await session.sendMessageViaButton(slowPrompt);
+  await expect(chat.getByTestId("user-message-bubble").filter({ hasText: slowPrompt })).toBeVisible(
+    { timeout: 15_000 },
+  );
   await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
   await waitForActiveSessionForegroundActivity(testPage, "generating");
   await waitForComposerQueueMode(testPage, 30_000);
@@ -215,7 +216,7 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
       async () => {
         const { messages } = await apiClient.listSessionMessages(task.session_id!);
         return messages.some(
-          (message) => message.author_type === "user" && message.content === "/slow 30s",
+          (message) => message.author_type === "user" && message.content === slowPrompt,
         );
       },
       { timeout: 30_000, message: "the mobile follow-up prompt should be stored" },
