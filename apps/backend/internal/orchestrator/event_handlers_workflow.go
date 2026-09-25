@@ -4677,7 +4677,14 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	if move.MoveID == "" {
 		move.MoveID = legacyPendingMoveID(sessionID, move)
 	}
-	if !s.pendingMoveExactProfileGenerationCurrent(ctx, taskID, move.ExactProfileGeneration) {
+	currentExactGeneration, exactGenerationKnown := s.pendingMoveExactProfileGenerationState(ctx, taskID, move.ExactProfileGeneration)
+	if !exactGenerationKnown {
+		s.logger.Warn("cannot verify exact-profile generation for pending move; preserving for retry",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID),
+			zap.String("move_id", move.MoveID), zap.Int64("exact_profile_generation", move.ExactProfileGeneration))
+		return
+	}
+	if !currentExactGeneration {
 		s.logger.Warn("discarding stale exact-profile pending move",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID),
 			zap.String("move_id", move.MoveID), zap.Int64("exact_profile_generation", move.ExactProfileGeneration))
@@ -4862,14 +4869,9 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	)
 }
 
-func (s *Service) pendingMoveExactProfileGenerationCurrent(ctx context.Context, taskID string, generation int64) bool {
-	current, _ := s.pendingMoveExactProfileGenerationState(ctx, taskID, generation)
-	return current
-}
-
 // pendingMoveExactProfileGenerationState distinguishes a confirmed mismatch
-// from a store read failure. Replay fails closed on either condition; the
-// background reaper preserves rows it could not inspect so recovery can retry.
+// from a store read failure. Callers preserve rows they could not inspect so
+// recovery can retry.
 func (s *Service) pendingMoveExactProfileGenerationState(
 	ctx context.Context, taskID string, generation int64,
 ) (current, known bool) {

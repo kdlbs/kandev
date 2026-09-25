@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -171,6 +172,54 @@ func TestPendingMove_StaleExactProfileGenerationIsDiscarded(t *testing.T) {
 	if task.WorkflowStepID != stepInReviewID {
 		t.Fatalf("stale exact generation moved task to %q, want %q", task.WorkflowStepID, stepInReviewID)
 	}
+}
+
+func TestPendingMove_PreservesMoveAndPromptWhenExactAssignmentReadFails(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	const moveID = "move-assignment-read-error"
+	move := &messagequeue.PendingMove{
+		MoveID:                 moveID,
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         stepInProgressID,
+		ExactProfileGeneration: 1,
+	}
+	if err := sc.svc.messageQueue.SetPendingMove(sc.ctx, sc.reviewSessionID, move); err != nil {
+		t.Fatalf("set pending move: %v", err)
+	}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session: %v", err)
+	}
+	sc.svc.repo = &pendingMoveAssignmentErrorRepo{
+		Repository: sc.repo,
+		err:        errors.New("temporary assignment store failure"),
+	}
+
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+
+	storedMove, exists, err := sc.svc.messageQueue.GetPendingMoveWithError(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load pending move after transient assignment read failure: %v", err)
+	}
+	if !exists || storedMove == nil || storedMove.MoveID != moveID {
+		t.Fatalf("pending move = %#v, exists = %t, want move %q preserved", storedMove, exists, moveID)
+	}
+	status := sc.svc.messageQueue.GetStatus(sc.ctx, sc.reviewSessionID)
+	if status.Count != 1 || len(status.Entries) != 1 || status.Entries[0].QueuedBy != messagequeue.QueuedByMoveTask {
+		t.Fatalf("queued handoff prompt = %#v, want one preserved move prompt", status.Entries)
+	}
+}
+
+type pendingMoveAssignmentErrorRepo struct {
+	*sqliterepo.Repository
+	err error
+}
+
+func (r *pendingMoveAssignmentErrorRepo) GetExactProfileAssignment(
+	context.Context, string,
+) (*models.ExactProfileAssignment, error) {
+	return nil, r.err
 }
 
 func TestPendingMove_ZeroGenerationIsDiscardedAfterExactAssignment(t *testing.T) {
