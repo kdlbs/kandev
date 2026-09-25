@@ -194,6 +194,7 @@ const (
 	MetadataKeyRemoteContributions      = "remote_contributions"
 	MetadataKeyContributionDestinations = "contribution_destinations"
 	MetadataKeyComparisonTargets        = "comparison_targets"
+	MetadataKeyExecutorType             = "executor_type"
 	MetadataKeyIsRemote                 = "is_remote"
 	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
 	MetadataKeyAgentConfigBundles       = "agent_config_bundles"
@@ -375,7 +376,8 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyKubernetesInventoryState:         true,
 
 	// Executor type marker
-	MetadataKeyIsRemote: true,
+	MetadataKeyExecutorType: true,
+	MetadataKeyIsRemote:     true,
 
 	// Executor profile / auth config
 	MetadataKeyCleanupScript:            true,
@@ -591,7 +593,10 @@ type RemoteInstanceRefresher interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID        string
+	InstanceID string
+	// ExecutorType is retained in execution metadata so recovered sessions can
+	// safely re-check host-local filesystem eligibility.
+	ExecutorType      string
 	TaskID            string
 	TaskTitle         string
 	SessionID         string
@@ -735,6 +740,12 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	for k, v := range ri.Metadata {
 		metadata[k] = v
 	}
+	executorType := req.ExecutorType
+	if executorType != "" {
+		metadata[MetadataKeyExecutorType] = executorType
+	} else {
+		delete(metadata, MetadataKeyExecutorType)
+	}
 
 	workspacePath := ri.WorkspacePath
 	if workspacePath == "" {
@@ -753,6 +764,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 
 	execution := &AgentExecution{
 		ID:                   ri.InstanceID,
+		ExecutorType:         executorType,
 		RunID:                req.Env["KANDEV_RUN_ID"],
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
