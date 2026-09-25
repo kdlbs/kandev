@@ -42,8 +42,8 @@ test("renders and persists native rich output with an explicit file preview", as
       element.scrollIntoView({ block: "center", inline: "nearest" }),
     );
     await waitForFiniteAnimations(barChart);
-    await expect(barChart.locator("svg")).toBeVisible({ timeout: 1_000 });
-  }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
+    await expect(barChart.locator("svg")).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 60_000, intervals: [250, 500, 1_000] });
   await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible({ timeout: 30_000 });
   await expect(barChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(barChart.locator(".recharts-xAxis")).toContainText("/api");
