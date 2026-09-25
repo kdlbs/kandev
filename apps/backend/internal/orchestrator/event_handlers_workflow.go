@@ -3329,13 +3329,11 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 		return err
 	}
 
-	// transitionID 0: this path (manual move / legacy on_turn_start/complete) does
-	// not attach a step-entry ResultHolder before ApplyTransition, so no
-	// entry was allocated for this step-entry. processOnEnter's engine-owned
-	// action cases treat transitionID==0 as "not this Build round's dispatch
-	// path" and skip with a log rather than executing — see
-	// docs/specs/workflow-on-enter-action-dispatch/spec.md and the task
-	// plan's scope note for why E2-E5 dispatch is deferred.
+	// Manual task.moved handling carries its committed StepTransitionID through
+	// this call for exact route and entry-ownership checks. It does not attach a
+	// StepEntry ResultHolder to ApplyTransition; engine-owned on_enter actions
+	// remain governed by the separate step-entry dispatch contract. Legacy
+	// on_turn_start/complete paths may still pass transitionID 0.
 	var transitionID int64
 	if len(entryIDs) > 0 {
 		transitionID = entryIDs[0]
