@@ -358,6 +358,40 @@ func TestConcurrentSuccessResponseClearsSecondaryButPreservesPrimaryRetryAfter(t
 	}
 }
 
+func TestPrimaryRetryBoundaryDoesNotMoveEarlierWithOutOfOrderResponses(t *testing.T) {
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "out-of-order-primary-user",
+	}, nil)
+	later := time.Now().Add(2 * time.Minute).UTC()
+	earlier := later.Add(-time.Minute)
+	tracker.Record(RateSnapshot{
+		Resource:          ResourceCore,
+		Remaining:         0,
+		RemainingObserved: true,
+		ParsedFromHeaders: true,
+		UpdatedAt:         time.Now().UTC(),
+	})
+	tracker.ObservePrimary(ResourceCore, later, RetrySourceRetryAfter)
+	tracker.ObservePrimary(ResourceCore, earlier, RetrySourceConservativeFallback)
+
+	ctx := WithNonBlockingGitHubAdmission(
+		WithGitHubWorkClass(context.Background(), WorkClassBackground),
+	)
+	release, err := admission.acquire(ctx, ResourceCore)
+	if release != nil {
+		t.Fatal("background request entered an active primary retry window")
+	}
+	var deferred *AdmissionDeferredError
+	if !errors.As(err, &deferred) {
+		t.Fatalf("acquire error = %v, want AdmissionDeferredError", err)
+	}
+	if !deferred.RetryAt.Equal(later) || deferred.RetrySource != RetrySourceRetryAfter {
+		t.Fatalf("deferred retry = (%s, %s), want (%s, %s)",
+			deferred.RetryAt, deferred.RetrySource, later, RetrySourceRetryAfter)
+	}
+}
+
 func TestRateCoordinatorPrincipalKeysShareOnlyTheSameUpstreamIdentity(t *testing.T) {
 	coordinator := NewRateCoordinator(nil, nil)
 	first, _ := coordinator.coordinate("github.com", AuthPrincipal{
