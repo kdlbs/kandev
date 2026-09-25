@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 func TestPrepareCursorMCPAuthEligibility(t *testing.T) {
@@ -417,5 +418,67 @@ func TestMaterializeRuntimeProjectMCPPreparesCursorAuthWithoutServers(t *testing
 	}
 	if target != filepath.Join(home, ".cursor", "kandev-mcp-auth-unified.json") {
 		t.Fatalf("link target = %q", target)
+	}
+}
+
+func TestSameCursorMCPAuthHomeRecognizesSymlinkAlias(t *testing.T) {
+	actualHome := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "home-alias")
+	if err := os.Symlink(actualHome, alias); err != nil {
+		t.Skipf("symlink creation is unavailable: %v", err)
+	}
+	if !sameCursorMCPAuthHome(actualHome, alias) {
+		t.Fatalf("sameCursorMCPAuthHome(%q, %q) = false, want true", actualHome, alias)
+	}
+}
+
+func TestPrepareCursorMCPAuthExcludesConfiguredTaskWorktrees(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cursorProjects := filepath.Join(home, ".cursor", "projects")
+	taskRoot := filepath.Join(t.TempDir(), "custom-task-storage")
+	worktreeManager, err := worktree.NewManager(worktree.Config{TasksBasePath: taskRoot}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	taskWorkspace := filepath.Join(taskRoot, "task-123", "repository")
+	if err := os.MkdirAll(taskWorkspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	taskAuthPath := cursorMCPAuthDestinationForTest(t, cursorProjects, taskWorkspace)
+	if err := os.MkdirAll(filepath.Dir(taskAuthPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(taskAuthPath, []byte(`{"task-secret":{"token":"excluded"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(cursorProjects, "ordinary-project"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cursorProjects, "ordinary-project", "mcp-auth.json"), []byte(`{"ordinary":{"token":"included"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := newTestManager(t)
+	mgr.worktreeMgr = worktreeManager
+	if err := mgr.prepareCursorMCPAuth(
+		&AgentExecution{WorkspacePath: t.TempDir(), ExecutorType: string(models.ExecutorTypeLocal)},
+		&AgentProfileInfo{CursorMCPAuthEnabled: true},
+		string(models.ExecutorTypeLocal),
+		mcpconfig.CursorStrategy{},
+	); err != nil {
+		t.Fatalf("prepareCursorMCPAuth: %v", err)
+	}
+
+	master, err := os.ReadFile(filepath.Join(home, ".cursor", "kandev-mcp-auth-unified.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(master), "task-secret") {
+		t.Fatalf("configured task auth leaked into shared file: %s", master)
+	}
+	if !strings.Contains(string(master), "ordinary") {
+		t.Fatalf("ordinary project auth was excluded: %s", master)
 	}
 }

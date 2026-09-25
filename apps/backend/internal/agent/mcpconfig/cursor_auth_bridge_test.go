@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +19,8 @@ func TestDeriveCursorProjectSlug(t *testing.T) {
 		want string
 	}{
 		{name: "path separators and punctuation", path: "/work/my.repo_name", want: "work-my-repo-name"},
+		{name: "windows drive path", path: `C:\Users\Alice\my_repo.v2`, want: "C--Users-Alice-my-repo-v2"},
+		{name: "windows network path", path: `\\server\share\project`, want: "server-share-project"},
 		{name: "keep internal dash runs", path: "/work//a__b", want: "work--a--b"},
 		{name: "trim boundary dashes", path: "./work/", want: "work"},
 		{name: "empty result", path: "/...___", want: ""},
@@ -34,9 +35,7 @@ func TestDeriveCursorProjectSlug(t *testing.T) {
 }
 
 func TestCursorMCPAuthWorktree(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation is not reliably available on Windows CI")
-	}
+	requireSymlinkSupport(t)
 	root := t.TempDir()
 	repository := filepath.Join(root, "repository")
 	worktree := filepath.Join(root, "worktrees", "feature")
@@ -103,7 +102,20 @@ func runGit(t *testing.T, repository string, args ...string) {
 	}
 }
 
+func requireSymlinkSupport(t *testing.T) {
+	t.Helper()
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.WriteFile(target, []byte("target"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, "link")); err != nil {
+		t.Skipf("symlink creation is unavailable: %v", err)
+	}
+}
+
 func TestAggregateCursorMCPAuth(t *testing.T) {
+	requireSymlinkSupport(t)
 	cursorHome := t.TempDir()
 	projects := filepath.Join(cursorHome, "projects")
 	if err := os.MkdirAll(projects, 0o755); err != nil {
@@ -159,6 +171,7 @@ func TestAggregateCursorMCPAuth(t *testing.T) {
 }
 
 func TestAggregateCursorMCPAuth_NoSourcesAndProtectedMaster(t *testing.T) {
+	requireSymlinkSupport(t)
 	t.Run("no valid source leaves stale master unchanged", func(t *testing.T) {
 		cursorHome := t.TempDir()
 		projects := filepath.Join(cursorHome, "projects")
@@ -221,7 +234,100 @@ func TestAggregateCursorMCPAuth_NoSourcesAndProtectedMaster(t *testing.T) {
 	}
 }
 
+func TestAggregateCursorMCPAuthExcludesConfiguredTaskRoot(t *testing.T) {
+	cursorHome := t.TempDir()
+	projects := filepath.Join(cursorHome, "projects")
+	if err := os.MkdirAll(projects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	taskRoot := filepath.Join(t.TempDir(), "custom-task-storage")
+	taskWorkspace := filepath.Join(taskRoot, "task-123", "repository")
+	if err := os.MkdirAll(taskWorkspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	absoluteTaskWorkspace, err := filepath.Abs(taskWorkspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalTaskWorkspace, err := filepath.EvalSymlinks(absoluteTaskWorkspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCursorAuth(t, projects, DeriveCursorProjectSlug(canonicalTaskWorkspace), `{"task-secret":{"token":"excluded"}}`, time.Now())
+	writeCursorAuth(t, projects, "ordinary-project", `{"ordinary":{"token":"included"}}`, time.Now())
+
+	if err := AggregateCursorMCPAuth(cursorHome, taskRoot); err != nil {
+		t.Fatalf("AggregateCursorMCPAuth: %v", err)
+	}
+	got := readCursorAuth(t, filepath.Join(cursorHome, cursorMCPAuthUnifiedFilename))
+	if _, exists := got["task-secret"]; exists {
+		t.Fatalf("configured task auth was aggregated: %#v", got)
+	}
+	if _, exists := got["ordinary"]; !exists {
+		t.Fatalf("ordinary project auth was excluded: %#v", got)
+	}
+}
+
+func TestAggregateCursorMCPAuthAllowsMissingExcludedRoot(t *testing.T) {
+	cursorHome := t.TempDir()
+	projects := filepath.Join(cursorHome, "projects")
+	writeCursorAuth(t, projects, "ordinary-project", `{"ordinary":{"token":"included"}}`, time.Now())
+	missingTaskRoot := filepath.Join(t.TempDir(), "not-created-yet")
+	taskWorkspace := filepath.Join(missingTaskRoot, "task-123", "repository")
+	absoluteExistingParent, err := filepath.Abs(filepath.Dir(missingTaskRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalExistingParent, err := filepath.EvalSymlinks(absoluteExistingParent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relativeTaskWorkspace, err := filepath.Rel(filepath.Dir(missingTaskRoot), taskWorkspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalTaskWorkspace := filepath.Join(canonicalExistingParent, relativeTaskWorkspace)
+	writeCursorAuth(t, projects, DeriveCursorProjectSlug(canonicalTaskWorkspace), `{"stale-task":{"token":"excluded"}}`, time.Now())
+
+	if err := AggregateCursorMCPAuth(cursorHome, missingTaskRoot); err != nil {
+		t.Fatalf("AggregateCursorMCPAuth with an absent task root: %v", err)
+	}
+	got := readCursorAuth(t, filepath.Join(cursorHome, cursorMCPAuthUnifiedFilename))
+	if _, exists := got["stale-task"]; exists {
+		t.Fatalf("stale task auth under the absent root was aggregated: %#v", got)
+	}
+	if _, exists := got["ordinary"]; !exists {
+		t.Fatalf("ordinary auth was not published: %#v", got)
+	}
+}
+
+func TestLinkCursorMCPAuthSharesCredentialByNameWithoutOriginBinding(t *testing.T) {
+	requireSymlinkSupport(t)
+	cursorHome := t.TempDir()
+	projects := filepath.Join(cursorHome, "projects")
+	writeCursorAuth(t, projects, "trusted-source", `{"calendar":{"access_token":"synthetic-token"}}`, time.Now())
+
+	workspace := t.TempDir()
+	projectConfig := filepath.Join(workspace, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(projectConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(projectConfig, []byte(`{"mcpServers":{"calendar":{"url":"https://untrusted.invalid"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LinkCursorMCPAuth(workspace, cursorHome); err != nil {
+		t.Fatalf("LinkCursorMCPAuth: %v", err)
+	}
+	got := readCursorAuth(t, cursorAuthDestinationForTest(t, cursorHome, workspace))
+	if got["calendar"]["access_token"] != "synthetic-token" {
+		t.Fatalf("same-name auth was not copied across project origins: %#v", got)
+	}
+}
+
 func TestLinkCursorMCPAuth(t *testing.T) {
+	requireSymlinkSupport(t)
 	t.Run("workspace under symlinked parent uses canonical project slug", func(t *testing.T) {
 		cursorHome := t.TempDir()
 		projects := filepath.Join(cursorHome, "projects")
@@ -373,6 +479,38 @@ func TestLinkCursorMCPAuth(t *testing.T) {
 			t.Fatalf("destination should remain absent, stat error = %v", err)
 		}
 	})
+
+	t.Run("existing bridge link remains when refresh has no valid source", func(t *testing.T) {
+		cursorHome := t.TempDir()
+		projects := filepath.Join(cursorHome, "projects")
+		if err := os.MkdirAll(projects, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		master := filepath.Join(cursorHome, cursorMCPAuthUnifiedFilename)
+		if err := os.WriteFile(master, []byte(`{"stale":{"token":"synthetic"}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		writeCursorAuth(t, projects, "invalid", `not-json`, time.Now())
+		workspace := t.TempDir()
+		destination := cursorAuthDestinationForTest(t, cursorHome, workspace)
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(master, destination); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := LinkCursorMCPAuth(workspace, cursorHome); err != nil {
+			t.Fatalf("LinkCursorMCPAuth: %v", err)
+		}
+		got, err := os.Readlink(destination)
+		if err != nil {
+			t.Fatalf("existing bridge link was removed: %v", err)
+		}
+		if got != master {
+			t.Fatalf("existing link target = %q, want %q", got, master)
+		}
+	})
 }
 
 func cursorAuthDestinationForTest(t *testing.T, cursorHome, workspacePath string) string {
@@ -389,6 +527,7 @@ func cursorAuthDestinationForTest(t *testing.T, cursorHome, workspacePath string
 }
 
 func TestDisableCursorMCPAuth(t *testing.T) {
+	requireSymlinkSupport(t)
 	for _, targetKind := range []string{"bridge absolute", "bridge relative", "unrelated"} {
 		t.Run(targetKind, func(t *testing.T) {
 			cursorHome := t.TempDir()
@@ -457,6 +596,7 @@ func TestDisableCursorMCPAuth(t *testing.T) {
 }
 
 func TestCursorMCPAuthConcurrentPreparation(t *testing.T) {
+	requireSymlinkSupport(t)
 	cursorHome := t.TempDir()
 	projects := filepath.Join(cursorHome, "projects")
 	if err := os.MkdirAll(projects, 0o755); err != nil {

@@ -30,6 +30,7 @@ Persist the default-enabled preference and expose one localized checkbox through
 - `settings/store/sqlite.go` and migration/duplicate/round-trip tests.
 - `settings/dto/profile_contract.go`, `dto.go`, controller CRUD and conversion files, and their tests.
 - `apps/backend/internal/settingscatalog/defaults.go` and catalog contract tests.
+- Generated settings discovery contracts in `apps/web/lib/settings-discovery/`.
 - `apps/backend/internal/agent/runtime/lifecycle/types.go` and `profile_resolver.go` for the resolved preference.
 - Web `lib/types/agent-profile.ts`, `lib/types/backend.ts`, `lib/api/domains/agent-profile-normalize.ts`, and profile mutation types.
 - Web `components/settings/profile-form-fields.tsx`, `agent-profile-page.tsx`, `agent-profile-page-state.ts`, `agent-profile-dirty.ts`, and `agent-profile-reconciliation.ts`.
@@ -127,3 +128,5 @@ Validation passed:
 - Mobile Chrome settings E2E: 1 passed, including touch-size and overflow checks.
 
 `pnpm run i18n:zh-hant` is blocked by the existing simplified-string warning at `workflows:openAgentSettings`. The supported namespace-scoped generator wrote the `agents` Traditional Chinese catalogs from Simplified Chinese without reformatting other translated messages.
+
+Review follow-up makes profile saves omit an unchanged Cursor MCP auth preference, so stale drafts do not overwrite a newer value. The default-field test now also fails if the catalog field is absent. Regenerated the settings contract snapshots after CI detected that they did not yet include the new preference; `go run ./cmd/settings-catalog --check` passes.

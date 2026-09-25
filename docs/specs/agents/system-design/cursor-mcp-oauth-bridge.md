@@ -76,15 +76,17 @@ Tests inject a temporary home and never scan the developer's home.
 Add `mcpconfig/cursor_auth_bridge.go` with the requested public helpers:
 
 - `DeriveCursorProjectSlug(workspacePath string) string`
-- `AggregateCursorMCPAuth(cursorHome string) error`
-- `LinkCursorMCPAuth(workspacePath, cursorHome string) error`
+- `AggregateCursorMCPAuth(cursorHome string, excludedWorkspaceRoots ...string) error`
+- `LinkCursorMCPAuth(workspacePath, cursorHome string, excludedWorkspaceRoots ...string) error`
 
 Keep slug derivation pure. The link helper resolves an absolute path and evaluates workspace symlinks before derivation.
-Replace each slash, dot, and underscore with a dash, then trim boundary dashes.
+Normalize Windows separators. Replace each slash, dot, underscore, and colon, including a drive-volume separator, with a dash, then trim boundary dashes.
 Do not collapse internal dash runs. Reject an empty resulting slug.
 
 Scan direct project directories under `<cursorHome>/projects`.
-Exclude names containing `kandev-tasks`, symlinked project entries, and non-directory entries.
+Exclude the current workspace and project slugs under the default task scratch root and configured task-worktree root, names containing `kandev-tasks`, symlinked project entries, and non-directory entries.
+Task-root exclusion compares each canonical root's project slug with entry slug prefixes, so custom `tasks_base_path` values do not depend on their name containing `kandev-tasks`.
+When a configured root is absent, resolve its existing parent and append the missing path suffix. This still excludes stale Cursor project entries after task worktree directories are removed. A different root-resolution error prevents aggregation rather than risking task credentials in the snapshot.
 Use `Lstat` for each auth file and accept only regular, non-symlink files.
 Also reject a symlinked projects root to avoid scanning an unexpected tree.
 
@@ -94,6 +96,8 @@ Skip invalid files as a whole. Preserve unknown fields inside server objects.
 Order sources by descending modification time and ascending path.
 Select the first object for each exact server key.
 Do not deep-merge tokens or combine accounts.
+
+Credential identity is the exact server name. The bridge does not read project MCP configuration or compare server URLs or OAuth issuers. A local project that declares an existing server name can therefore use its copied credential at another endpoint. This is an accepted trust boundary of default-enabled sharing: users must trust local project configurations launched with sharing enabled and revoke credentials through the provider if an unintended endpoint may have received them. The synthetic aggregation test covers this name-only sharing behavior.
 
 Rebuild `<cursorHome>/kandev-mcp-auth-unified.json` from sources on each eligible enabled launch.
 The prior master is never a source.

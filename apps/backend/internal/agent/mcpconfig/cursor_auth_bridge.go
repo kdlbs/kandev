@@ -33,17 +33,18 @@ type cursorMCPAuthSnapshot struct {
 
 // DeriveCursorProjectSlug derives Cursor's project directory name from a path.
 func DeriveCursorProjectSlug(workspacePath string) string {
-	slug := strings.NewReplacer("/", "-", ".", "-", "_", "-").Replace(workspacePath)
+	normalizedPath := strings.ReplaceAll(workspacePath, `\`, "/")
+	slug := strings.NewReplacer("/", "-", ".", "-", "_", "-", ":", "-").Replace(normalizedPath)
 	return strings.Trim(slug, "-")
 }
 
 // AggregateCursorMCPAuth publishes the latest valid project auth snapshot.
 // It leaves the existing master unchanged when no eligible source is valid.
-func AggregateCursorMCPAuth(cursorHome string) error {
+func AggregateCursorMCPAuth(cursorHome string, excludedWorkspaceRoots ...string) error {
 	cursorMCPAuthMutex.Lock()
 	defer cursorMCPAuthMutex.Unlock()
 
-	snapshot, err := aggregateCursorMCPAuth(cursorHome)
+	snapshot, err := aggregateCursorMCPAuth(cursorHome, excludedWorkspaceRoots...)
 	if err != nil || !snapshot.hasSources {
 		return err
 	}
@@ -52,25 +53,26 @@ func AggregateCursorMCPAuth(cursorHome string) error {
 
 // LinkCursorMCPAuth refreshes the shared snapshot and links a canonical
 // workspace's Cursor project auth file to it when at least one source is valid.
-func LinkCursorMCPAuth(workspacePath, cursorHome string) error {
+func LinkCursorMCPAuth(workspacePath, cursorHome string, excludedWorkspaceRoots ...string) error {
 	cursorMCPAuthMutex.Lock()
 	defer cursorMCPAuthMutex.Unlock()
-	return linkCursorMCPAuth(workspacePath, cursorHome)
+	return linkCursorMCPAuth(workspacePath, cursorHome, excludedWorkspaceRoots...)
 }
 
 // PrepareCursorMCPAuth applies the enabled or disabled bridge behavior for a
 // local Cursor launch.
-func PrepareCursorMCPAuth(workspacePath, cursorHome string, enabled bool) error {
+func PrepareCursorMCPAuth(workspacePath, cursorHome string, enabled bool, excludedWorkspaceRoots ...string) error {
 	cursorMCPAuthMutex.Lock()
 	defer cursorMCPAuthMutex.Unlock()
 	if !enabled {
 		return disableCursorMCPAuth(workspacePath, cursorHome)
 	}
-	return linkCursorMCPAuth(workspacePath, cursorHome)
+	return linkCursorMCPAuth(workspacePath, cursorHome, excludedWorkspaceRoots...)
 }
 
-func linkCursorMCPAuth(workspacePath, cursorHome string) error {
-	snapshot, err := aggregateCursorMCPAuth(cursorHome)
+func linkCursorMCPAuth(workspacePath, cursorHome string, excludedWorkspaceRoots ...string) error {
+	workspaceRoots := append([]string{workspacePath}, excludedWorkspaceRoots...)
+	snapshot, err := aggregateCursorMCPAuth(cursorHome, workspaceRoots...)
 	if err != nil {
 		return err
 	}
@@ -123,7 +125,7 @@ func disableCursorMCPAuth(workspacePath, cursorHome string) error {
 	return os.Remove(destination)
 }
 
-func aggregateCursorMCPAuth(cursorHome string) (cursorMCPAuthSnapshot, error) {
+func aggregateCursorMCPAuth(cursorHome string, excludedWorkspaceRoots ...string) (cursorMCPAuthSnapshot, error) {
 	projectsPath := filepath.Join(cursorHome, "projects")
 	projectsInfo, err := os.Lstat(projectsPath)
 	if errors.Is(err, os.ErrNotExist) {
@@ -139,7 +141,11 @@ func aggregateCursorMCPAuth(cursorHome string) (cursorMCPAuthSnapshot, error) {
 	if err != nil {
 		return cursorMCPAuthSnapshot{}, err
 	}
-	sources := collectCursorMCPAuthSources(projectsPath, entries)
+	excludedSlugs, err := cursorAuthExcludedProjectSlugs(excludedWorkspaceRoots)
+	if err != nil {
+		return cursorMCPAuthSnapshot{}, err
+	}
+	sources := collectCursorMCPAuthSources(projectsPath, entries, excludedSlugs)
 	if len(sources) == 0 {
 		return cursorMCPAuthSnapshot{}, nil
 	}
@@ -164,10 +170,10 @@ func aggregateCursorMCPAuth(cursorHome string) (cursorMCPAuthSnapshot, error) {
 	return cursorMCPAuthSnapshot{data: append(data, '\n'), hasSources: true}, nil
 }
 
-func collectCursorMCPAuthSources(projectsPath string, entries []os.DirEntry) []cursorMCPAuthSource {
+func collectCursorMCPAuthSources(projectsPath string, entries []os.DirEntry, excludedSlugs []string) []cursorMCPAuthSource {
 	sources := make([]cursorMCPAuthSource, 0, len(entries))
 	for _, entry := range entries {
-		if strings.Contains(entry.Name(), cursorTaskProjectMarker) {
+		if strings.Contains(entry.Name(), cursorTaskProjectMarker) || isCursorTaskProjectSlug(entry.Name(), excludedSlugs) {
 			continue
 		}
 		projectPath := filepath.Join(projectsPath, entry.Name())
@@ -181,6 +187,34 @@ func collectCursorMCPAuthSources(projectsPath string, entries []os.DirEntry) []c
 		}
 	}
 	return sources
+}
+
+func cursorAuthExcludedProjectSlugs(workspaceRoots []string) ([]string, error) {
+	slugs := make([]string, 0, len(workspaceRoots))
+	for _, root := range workspaceRoots {
+		if root == "" {
+			continue
+		}
+		canonicalRoot, err := canonicalPathIncludingMissingSuffix(root)
+		if err != nil {
+			return nil, errors.New("could not resolve Cursor MCP auth exclusion root")
+		}
+		slug := DeriveCursorProjectSlug(canonicalRoot)
+		if slug == "" {
+			return nil, errors.New("cursor MCP auth exclusion root has an empty project slug")
+		}
+		slugs = append(slugs, slug)
+	}
+	return slugs, nil
+}
+
+func isCursorTaskProjectSlug(projectSlug string, taskRootSlugs []string) bool {
+	for _, rootSlug := range taskRootSlugs {
+		if projectSlug == rootSlug || strings.HasPrefix(projectSlug, rootSlug+"-") {
+			return true
+		}
+	}
+	return false
 }
 
 func readCursorMCPAuthSource(path string) (cursorMCPAuthSource, bool) {
@@ -327,6 +361,31 @@ func canonicalWorkspacePath(workspacePath string) (string, error) {
 		return "", err
 	}
 	return filepath.EvalSymlinks(absolutePath)
+}
+
+// canonicalPathIncludingMissingSuffix resolves symlinked ancestors when a task root has been removed.
+func canonicalPathIncludingMissingSuffix(path string) (string, error) {
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	for existingPath := absolutePath; ; existingPath = filepath.Dir(existingPath) {
+		resolvedPath, resolveErr := filepath.EvalSymlinks(existingPath)
+		if resolveErr == nil {
+			suffix, relErr := filepath.Rel(existingPath, absolutePath)
+			if relErr != nil {
+				return "", relErr
+			}
+			return filepath.Join(resolvedPath, suffix), nil
+		}
+		if !errors.Is(resolveErr, os.ErrNotExist) {
+			return "", resolveErr
+		}
+		parent := filepath.Dir(existingPath)
+		if parent == existingPath {
+			return "", resolveErr
+		}
+	}
 }
 
 func cursorMasterPath(cursorHome string) (string, error) {

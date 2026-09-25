@@ -36,16 +36,17 @@ Create safe, independently tested filesystem helpers with synthetic credentials.
 - New `apps/backend/internal/agent/mcpconfig/cursor_auth_bridge.go`.
 - New `apps/backend/internal/agent/mcpconfig/cursor_auth_bridge_test.go`.
 - A focused private helper file if Go size limits require it.
-- Requested public helper signatures, private aggregation result, and bridge-link cleanup.
+- Requested helper signatures, private aggregation result, and bridge-link cleanup. Aggregation accepts excluded workspace roots so task credentials remain excluded with custom `tasks_base_path` values.
 - Serialization, source selection, canonical workspace resolution, atomic writes, and destination preservation.
 
 Exclude lifecycle hooks, profile persistence, UI, OAuth calls, and real home-directory reads.
 
 ## Implementation acceptance
 
-1. All filesystem cases in the design pass, including duplicate timestamps and symlinked source directories.
+1. All filesystem cases in the design pass, including duplicate timestamps, symlinked source directories, and task worktrees beneath a custom configured root.
 2. No-source and malformed-source cases cannot create a new link to a stale master. Regular destinations remain unchanged.
 3. Parallel bridge calls produce complete snapshots and links. Disabled cleanup removes only a matching bridge link.
+4. Slug derivation covers Windows separators and drive prefixes. Tests that create symlinks skip only when symlink creation is unavailable.
 
 ## TDD and verification
 
@@ -77,3 +78,5 @@ Verification passed from `apps/backend`:
 
 - `go test ./internal/agent/mcpconfig/...`
 - `go test -race ./internal/agent/mcpconfig/...`
+
+Review follow-up adds deterministic Windows drive and UNC slug cases, custom task-root exclusion (including stale Cursor entries after the root is removed), same-name credential sharing coverage for the documented cross-origin trust boundary, and a Windows CI slug test. Symlink-dependent tests probe host support and skip when unavailable.

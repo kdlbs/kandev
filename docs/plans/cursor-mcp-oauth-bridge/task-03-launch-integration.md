@@ -105,3 +105,20 @@ Completed on 2026-09-25.
 - `make -C apps/backend test` ran but failed in checks outside this change. `internal/agentctl/server/process/probe` failed `TestProbeRealTree_AllDescendantsPreTurn_Settled` and `TestProbeRealTree_NewDescendantAfterTurnStart_Live` both in the full run and in isolation. `internal/common/config` and `internal/launcher` failed during the broad run because the host environment injected `KANDEV_INTERNAL_CONFIG_FILE=/root/.kandev/config.yaml`; both packages pass when run in isolation with `KANDEV_INTERNAL_CONFIG_FILE` and `KANDEV_INTERNAL_CONFIG_HOME_FILE` unset.
 - Review follow-up: `resolvePassthroughAgent` now obtains agent and profile together and propagates resolver failures; eligible local Cursor preparation rejects unresolved profile data. A resume regression verifies opt-out cleanup happens before a later resolver error can prevent process start. Expected test paths resolve the workspace independently, with deterministic symlink-parent coverage. Public documentation now limits unrelated-symlink preservation to disabled cleanup.
 - Re-ran `go test -v ./internal/agent/mcpconfig/... ./internal/agent/runtime/lifecycle/...`, the matching `-race` command, `make -C apps/backend build`, public-doc tests/validation, `gofmt`, and `git diff --check`; all passed. The broad backend suite was not rerun during review follow-up.
+
+PR review follow-up on 2026-09-25 also normalizes Windows Cursor project slugs and tests them in the Windows workflow; excludes the configured task-worktree root; recognizes HOME aliases by filesystem identity; and omits unchanged Cursor auth values from profile-save patches. It regenerates both settings discovery snapshots that the initial PR's frontend CI found stale, strengthens the settings-default assertion, and guards symlink-dependent tests on platforms without symlink support. The public guide and authoritative requirements/design now disclose that credentials are shared by exact server name without URL or issuer comparison. A synthetic test records that accepted trust boundary. Existing links remain when a refresh has no valid source, as required by the approved system-design compatibility limit.
+
+The initial PR-head frontend check failed because its generated settings snapshot was stale. The generated files are now current. Backend results from the original implementation remain as documented above; the broad backend suite was not rerun for this review follow-up.
+
+
+Local review-fixup verification passed on 2026-09-25:
+
+- `go test ./internal/agent/mcpconfig/... ./internal/agent/runtime/lifecycle/... ./internal/settingscatalog/...`
+- `go test -race ./internal/agent/mcpconfig/... ./internal/agent/runtime/lifecycle/... ./internal/settingscatalog/...`
+- `GOOS=windows GOARCH=amd64 go test -c -o /tmp/cursor-mcpconfig-windows.test.exe ./internal/agent/mcpconfig`
+- `golangci-lint run ./... --new-from-rev=b88aea31ad49b2cda40e8ad84452356888e36a42 --timeout=5m`
+- `make -C apps/backend build`
+- Cursor profile save Vitest (8 tests), web typecheck, targeted ESLint, and Prettier check.
+- Settings contract CI test (3 tests), public-doc validation (62 tests, 47 pages), specification catalog validation/lint, and `git diff --check`.
+
+The generated settings snapshots now pass `node --test scripts/settings-contract-ci.test.mjs`. Refreshed PR checks will be recorded after pushing the fixup commit.

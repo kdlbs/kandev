@@ -62,6 +62,10 @@ The checkbox controls bridge preparation, not OAuth revocation or credential iso
 A running process can retain credentials already loaded into memory.
 Profile choices share a filesystem destination when they use the same canonical workspace.
 
+### Credential trust boundary
+
+The bridge uses the exact MCP server name as the credential identity. It does not compare server URLs or OAuth issuers between projects. A trusted local project configuration with a matching name can therefore use a copied credential at a different endpoint. This is an accepted consequence of the default-enabled cross-project sharing behavior. Users are responsible for trusting project configurations launched with sharing enabled and for revoking provider credentials if an unintended endpoint may have received them.
+
 The user chose newest-file conflict precedence and removal of the bridge link on the next disabled launch.
 File modification time does not prove credential freshness or token validity.
 

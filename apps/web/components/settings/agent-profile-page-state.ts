@@ -69,6 +69,14 @@ export function shouldSyncProfileSaveResponse(
   return isProfileRevisionNewer(response, currentSaved);
 }
 
+function changedCursorMcpAuthPreference(
+  draft: AgentProfile,
+  savedProfile: AgentProfile,
+): boolean | undefined {
+  const draftValue = draft.cursorMcpAuthEnabled ?? true;
+  return draftValue === (savedProfile.cursorMcpAuthEnabled ?? true) ? undefined : draftValue;
+}
+
 export function useProfileEditorState(
   profile: AgentProfile,
   permissionSettings: Record<string, PermissionSetting>,
@@ -222,7 +230,7 @@ export function useProfileSave({
           config_options: draft.configOptions ?? {},
           ...permissionsToProfilePatch(draft),
           cli_passthrough: draft.cliPassthrough,
-          cursor_mcp_auth_enabled: draft.cursorMcpAuthEnabled ?? true,
+          cursor_mcp_auth_enabled: changedCursorMcpAuthPreference(draft, savedProfile),
           // Omit an unchanged enabled value so a profile editor save cannot
           // resurrect a concurrent list-toggle response from its stale draft.
           enabled:

@@ -120,4 +120,5 @@ Review follow-up passed the full focused MCP bridge and lifecycle suites, their 
 - A non-default process HOME or remote executor cannot safely use the backend's host credentials.
 - Filesystem rename behavior and symlink permission differ across operating systems.
 - The supplied Cursor filesystem contract requires real-version compatibility evidence before claiming live OAuth success.
+- Credential entries are matched by exact server name without checking project MCP URLs or OAuth issuers. Users must trust project configurations launched with sharing enabled and revoke credentials through the provider if an unintended endpoint may have received them.
 - No automatic backend restart or global runtime release flag is part of this request.
