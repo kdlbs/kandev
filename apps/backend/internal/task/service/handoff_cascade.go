@@ -266,6 +266,9 @@ func (s *HandoffService) validateArchiveRoot(ctx context.Context, rootID string)
 	if root == nil {
 		return taskrepo.ErrTaskNotFound
 	}
+	if models.IsTerminalRetentionHeld(root.Metadata) {
+		return fmt.Errorf("%w: %s", ErrTaskArchiveHeld, rootID)
+	}
 	return nil
 }
 
@@ -297,6 +300,11 @@ func (s *HandoffService) archiveTaskTree(
 	cascadeID, all, err := s.resolveArchiveCascade(archiveCtx, rootID, cascade)
 	if err != nil {
 		return nil, err
+	}
+	for _, taskID := range all {
+		if err := s.validateArchiveRoot(archiveCtx, taskID); err != nil {
+			return nil, err
+		}
 	}
 	out := &CascadeOutcome{CascadeID: cascadeID}
 	// Archive cleanup must not tear down a shared workspace while an active

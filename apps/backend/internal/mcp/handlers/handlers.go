@@ -1921,6 +1921,7 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Title                *string `json:"title"`
 		Description          *string `json:"description"`
 		State                *string `json:"state"`
+		TerminalRetention    *bool   `json:"terminal_retention"`
 		DeferredLaunchPrompt *string `json:"deferred_launch_prompt"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
@@ -1928,6 +1929,16 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.TerminalRetention != nil {
+		principal, ok := mcpscope.PrincipalFromContext(ctx)
+		if !ok || principal.IsAutomation() || principal.CallerTaskID == "" || principal.CallerTaskID == req.TaskID {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "parent task authority is required for terminal retention", nil)
+		}
+		target, err := h.taskSvc.GetTask(ctx, req.TaskID)
+		if err != nil || target == nil || target.ParentID != principal.CallerTaskID || target.WorkspaceID != principal.WorkspaceID {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "parent task authority is required for terminal retention", nil)
+		}
 	}
 
 	// Applied before the ordinary field update so a rejected prompt edit does
@@ -1949,9 +1960,10 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	task, err := h.taskSvc.UpdateTask(ctx, req.TaskID, &service.UpdateTaskRequest{
-		Title:       req.Title,
-		Description: req.Description,
-		State:       state,
+		Title:             req.Title,
+		Description:       req.Description,
+		State:             state,
+		TerminalRetention: req.TerminalRetention,
 	})
 	if err != nil {
 		h.logger.Error("failed to update task", zap.Error(err))

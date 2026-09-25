@@ -3243,6 +3243,14 @@ func (s *Service) processStepExitAndEnterWithSteps(
 			return err
 		}
 	}
+	// A retained terminal move with a suppressed prompt is a card-only
+	// transition. The task service has already completed the task on entry;
+	// preparing the destination step's agent profile here would create an idle
+	// session and its state projection could move the card back to REVIEW.
+	// Keep the existing session and its runtime untouched.
+	if s.silentRetainedTerminalEntry(ctx, taskID, targetStep) {
+		return nil
+	}
 
 	effectClaim, claimed, effectErr := s.claimRouteEffectForStepEnter(
 		ctx, taskID, targetStep.ID, transitionID,
@@ -3287,6 +3295,15 @@ func (s *Service) processStepExitAndEnterWithSteps(
 	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, 0, fromStep)
 	claimFinished = true
 	return effectClaim.finish(true)
+}
+
+func (s *Service) silentRetainedTerminalEntry(ctx context.Context, taskID string, step *wfmodels.WorkflowStep) bool {
+	if step == nil || step.Prompt != "" || len(step.Events.OnEnter) != 0 || !s.workflowStepIsTerminal(ctx, step.ID) {
+		return false
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	return err == nil && task != nil && task.WorkflowStepID == step.ID &&
+		models.IsTerminalRetentionHeld(task.Metadata) && task.State == v1.TaskStateCompleted
 }
 
 // finalizeStepEnter optionally clears review status, reloads the session, and

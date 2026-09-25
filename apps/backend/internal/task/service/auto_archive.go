@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/archivecascade"
@@ -47,6 +48,9 @@ func (s *Service) runAutoArchive(ctx context.Context) {
 		return
 	}
 	for _, task := range tasks {
+		if models.IsTerminalRetentionHeld(task.Metadata) {
+			continue
+		}
 		out, err := s.autoArchiveCoordinator.ArchiveAutoTask(runCtx, task)
 		switch {
 		case err != nil:

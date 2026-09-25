@@ -75,6 +75,10 @@ var ErrInvalidTaskWorkflow = errors.New("invalid task workflow")
 // aborting the whole operation.
 var ErrTaskAlreadyArchived = errors.New("task is already archived")
 
+// ErrTaskArchiveHeld prevents cleanup of a task with an explicit terminal
+// retention hold until a scoped caller clears that hold.
+var ErrTaskArchiveHeld = errors.New("task has a terminal retention hold")
+
 // ErrAutoTitlePromptRequired is returned when auto-title creation has neither
 // a prompt nor a usable provisional title.
 var ErrAutoTitlePromptRequired = errors.New("description or title is required when auto_title is enabled")
@@ -2039,6 +2043,12 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if req.Metadata != nil {
 		task.Metadata = protectedTaskMetadataUpdate(task.Metadata, req.Metadata)
 	}
+	if req.TerminalRetention != nil {
+		if task.Metadata == nil {
+			task.Metadata = make(map[string]interface{})
+		}
+		task.Metadata[models.MetaKeyTerminalRetention] = *req.TerminalRetention
+	}
 	if req.Title != nil {
 		task.Title = *req.Title
 		if task.Metadata != nil {
@@ -2389,6 +2399,9 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	if task.ArchivedAt != nil {
 		return fmt.Errorf("%w: %s", ErrTaskAlreadyArchived, id)
+	}
+	if models.IsTerminalRetentionHeld(task.Metadata) {
+		return fmt.Errorf("%w: %s", ErrTaskArchiveHeld, id)
 	}
 
 	// 2. Gather data needed for cleanup BEFORE archive
