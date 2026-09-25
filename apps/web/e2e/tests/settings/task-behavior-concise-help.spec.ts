@@ -11,8 +11,15 @@ test("concise descriptions retain hover and keyboard technical help", async ({ t
   const info = testPage.getByRole("button", { name: "About Profile for Tasks Created by Agents" });
   await info.hover();
   await expect(testPage.getByRole("tooltip")).toContainText("Workflow-selected profiles win first");
-  await testPage.mouse.move(0, 0);
+  await testPage.keyboard.press("Escape");
+  await expect(testPage.getByRole("tooltip")).toBeHidden();
+
+  // Start the keyboard check after the pointer tooltip is fully closed. Radix
+  // keeps the hover and focus state in the same provider, so switching while
+  // the first portal is closing can otherwise lose the focus-open event under
+  // a loaded browser.
   await info.focus();
+  await expect(info).toBeFocused();
   await expect(testPage.getByRole("tooltip")).toContainText("agent_profile_id");
   await testPage.keyboard.press("Escape");
   await testPage.getByRole("tab", { name: "Runtime", exact: true }).click();

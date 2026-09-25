@@ -9,6 +9,14 @@ import {
   movePreviewRequestPredicate,
 } from "./workflow-move-preview-stability-helpers";
 
+type PreviewStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      taskSessionsByTask: { loadedByTaskId: Record<string, boolean> };
+    };
+  };
+};
+
 test.describe("mobile: workflow move preview", () => {
   test("shows the same prediction and details inside the touch drawer", async ({
     tabletTestPage,
@@ -52,6 +60,19 @@ test.describe("mobile: workflow move preview", () => {
       await expect(previewPanel).toBeVisible({ timeout: 10_000 });
       const trigger = previewPanel.getByTestId("workflow-stepper-minimal");
       await expect(trigger).toBeVisible({ timeout: 15_000 });
+
+      // The preview revision includes the task-session projection. Wait for
+      // that projection before opening the drawer, so its initial load cannot
+      // invalidate the first request and look like a refresh caused by the
+      // harmless bookkeeping updates below.
+      await tabletTestPage.waitForFunction(
+        ({ taskId }) => {
+          const store = (window as PreviewStoreWindow).__KANDEV_E2E_STORE__;
+          return store?.getState().taskSessionsByTask.loadedByTaskId[taskId] === true;
+        },
+        { taskId: task.id },
+        { timeout: 15_000 },
+      );
 
       const isMovePreviewRequest = movePreviewRequestPredicate(task.id, targetStep.id);
       let requestCount = 0;

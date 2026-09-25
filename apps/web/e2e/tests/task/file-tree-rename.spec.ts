@@ -3,12 +3,8 @@ import path from "node:path";
 import fs from "node:fs";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import {
-  GitHelper,
-  makeGitEnv,
-  openTaskSession,
-  createStandardProfile,
-} from "../../helpers/git-helper";
+import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
+import { SessionPage } from "../../pages/session-page";
 import { dwell } from "../../helpers/causal-waits";
 
 // Inline rename lives in file-context-menu.tsx (useFileRename + TreeNodeName).
@@ -28,13 +24,17 @@ async function setupTask(
   taskTitle: string,
 ) {
   const profile = await createStandardProfile(apiClient, profileName);
-  await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
+  const task = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
     description: "/e2e:simple-message",
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
     repository_ids: [seedData.repositoryId],
   });
-  const session = await openTaskSession(testPage, taskTitle);
+  // Use the task id returned by the API. Waiting for a title in the Kanban
+  // projection can race the first file-tree snapshot on a loaded worker.
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
   await session.clickTab("Files");
   return session;
 }
