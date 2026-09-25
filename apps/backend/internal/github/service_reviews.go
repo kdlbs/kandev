@@ -495,6 +495,9 @@ func (s *Service) enrichPRDetails(ctx context.Context, client Client, prs []*PR)
 				zap.Error(err))
 			continue
 		}
+		if full == nil {
+			continue
+		}
 		pr.HeadBranch = full.HeadBranch
 		pr.HeadSHA = full.HeadSHA
 		pr.BaseBranch = full.BaseBranch

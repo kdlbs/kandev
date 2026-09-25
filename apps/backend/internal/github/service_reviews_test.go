@@ -133,6 +133,12 @@ func TestCheckReviewWatchEnrichesSearchResultsBeforePublishingEvent(t *testing.T
 				headBranch: "feature/search", baseBranch: "main", additions: 1, deletions: 2,
 			},
 		},
+		{
+			name: "nil detail response keeps identity unavailable",
+			wantDetails: reviewPRDetails{
+				headBranch: "feature/search", baseBranch: "main", additions: 1, deletions: 2,
+			},
+		},
 	}
 
 	for _, tt := range tests {
