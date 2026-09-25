@@ -30,8 +30,8 @@ func TestSilentRetainedTerminalMoveDoesNotCreateSessionOrReopenTask(t *testing.T
 	require.NoError(t, err)
 	task.WorkflowStepID = done.ID
 	task.State = v1.TaskStateCompleted
-	task.Metadata[models.MetaKeyTerminalRetention] = true
 	require.NoError(t, fixture.repo.UpdateTask(ctx, task))
+	setTerminalRetentionForOrchestratorTest(t, ctx, fixture.repo, task)
 	session, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
 	require.NoError(t, err)
 	session.State = models.TaskSessionStateWaitingForInput
@@ -91,8 +91,8 @@ func TestFinalizeStepEnter_SilentRetainedTerminalEntryLeavesSessionUntouched(t *
 	require.NoError(t, err)
 	task.WorkflowStepID = done.ID
 	task.State = v1.TaskStateCompleted
-	task.Metadata[models.MetaKeyTerminalRetention] = true
 	require.NoError(t, fixture.repo.UpdateTask(ctx, task))
+	setTerminalRetentionForOrchestratorTest(t, ctx, fixture.repo, task)
 
 	session, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
 	require.NoError(t, err)
@@ -120,8 +120,7 @@ func TestDeferredSilentRetainedTerminalMovePreservesRunningSession(t *testing.T)
 
 	task, err := sc.repo.GetTask(sc.ctx, "task-1")
 	require.NoError(t, err)
-	task.Metadata = map[string]interface{}{models.MetaKeyTerminalRetention: true}
-	require.NoError(t, sc.repo.UpdateTask(sc.ctx, task))
+	setTerminalRetentionForOrchestratorTest(t, sc.ctx, sc.repo, task)
 	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
 	require.NoError(t, err)
 	require.Equal(t, models.TaskSessionStateRunning, session.State)
@@ -155,4 +154,18 @@ func TestDeferredSilentRetainedTerminalMovePreservesRunningSession(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, v1.TaskStateCompleted, stored.State)
 	require.True(t, models.IsTerminalRetentionHeld(stored.Metadata))
+}
+
+func setTerminalRetentionForOrchestratorTest(
+	t *testing.T,
+	ctx context.Context,
+	repo interface {
+		UpdateTaskTerminalRetentionIfParent(context.Context, string, string, string, bool) (bool, error)
+	},
+	task *models.Task,
+) {
+	t.Helper()
+	changed, err := repo.UpdateTaskTerminalRetentionIfParent(ctx, task.ID, task.ParentID, task.WorkspaceID, true)
+	require.NoError(t, err)
+	require.True(t, changed)
 }

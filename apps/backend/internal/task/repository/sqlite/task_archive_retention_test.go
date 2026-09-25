@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
@@ -76,11 +75,13 @@ func setTerminalRetentionForArchiveTest(t *testing.T, repo *Repository, taskID s
 	if err != nil {
 		t.Fatal(err)
 	}
-	if task.Metadata == nil {
-		task.Metadata = make(map[string]interface{})
-	}
-	task.Metadata[models.MetaKeyTerminalRetention] = true
-	if err := repo.UpdateTask(context.Background(), task); err != nil {
+	updated, err := repo.UpdateTaskTerminalRetentionIfParent(
+		context.Background(), task.ID, task.ParentID, task.WorkspaceID, true,
+	)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !updated {
+		t.Fatal("terminal retention update did not match task scope")
 	}
 }

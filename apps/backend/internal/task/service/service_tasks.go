@@ -2087,6 +2087,23 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(updateErr))
 		return nil, updateErr
 	}
+	if req.TerminalRetention != nil {
+		writer, ok := s.tasks.(interface {
+			UpdateTaskTerminalRetentionIfParent(context.Context, string, string, string, bool) (bool, error)
+		})
+		if !ok {
+			return nil, errors.New("task repository does not support terminal retention updates")
+		}
+		updated, err := writer.UpdateTaskTerminalRetentionIfParent(
+			ctx, id, task.ParentID, task.WorkspaceID, *req.TerminalRetention,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if !updated {
+			return nil, taskrepo.ErrTaskNotFound
+		}
+	}
 	// UpdateTask may have applied a conditional title/metadata patch because
 	// this snapshot was stale. Publish and return the row that actually won so
 	// callers never receive the provisional title or pending marker again.

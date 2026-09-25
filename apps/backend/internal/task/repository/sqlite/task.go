@@ -1025,10 +1025,10 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 // reads the task once at the start of a request and can commit after the
 // session ceiling's own compare-and-set writers (SetTaskDeferredLaunchIfUnchanged)
 // have moved that key on. It performs the same write as UpdateTask, except
-// deferred_launch in the write payload is replaced by the row's own current
-// value at write time, so a stale in-memory snapshot can never resurrect or
-// clobber whatever those writers did to it in the meantime. Every other key
-// keeps ordinary replace semantics, including deletion by omission.
+// deferred_launch and terminal_retention in the write payload are replaced by
+// the row's own current values at write time, so a stale in-memory snapshot
+// cannot overwrite their dedicated writers. Every other key keeps ordinary
+// replace semantics, including deletion by omission.
 func (r *Repository) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
 	return r.updateTaskCommit(ctx, task, "", true, true)
 }
@@ -1187,16 +1187,10 @@ func (r *Repository) applyPreservedPositionInTx(ctx context.Context, tx *sql.Tx,
 	return nil
 }
 
-// buildTaskUpdateQuery builds updateTaskTx's UPDATE statement and the
-// metadata payload it binds. protectDeferredLaunch strips deferred_launch
-// from the payload regardless of which query shape below owns the write: a
-// key absent from the patch document leaves the row's own current value in
-// place for both merge mechanisms (json_patch/jsonb `||` in the
-// title-pending branch below, and the explicit splice
-// protectedTaskMetadataMergeExpression performs for the plain-replace
-// branch), so a stale in-memory snapshot can never resurrect or clobber
-// whatever the session ceiling's own CAS writers did to that key in the
-// meantime.
+// buildTaskUpdateQuery always protects terminal_retention because its scoped
+// writer owns that field. protectDeferredLaunch additionally preserves the
+// session ceiling's concurrent CAS writes. Other metadata keeps replace
+// semantics, including deletion by omission.
 func (r *Repository) buildTaskUpdateQuery(
 	task *models.Task, metadata []byte, protectDeferredLaunch bool,
 ) (query string, finalMetadata []byte, workflowAgentOverrides interface{}, err error) {
@@ -1209,16 +1203,14 @@ func (r *Repository) buildTaskUpdateQuery(
 	} else {
 		workflowAgentOverrides = encodedWorkflowAgentOverrides
 	}
+	stripped, marshalErr := stripProtectedTaskMetadata(metadata, protectDeferredLaunch)
+	if marshalErr != nil {
+		return "", nil, nil, marshalErr
+	}
+	metadata = stripped
 	metadataExpr := "?"
-	if protectDeferredLaunch {
-		stripped, marshalErr := stripProtectedTaskMetadata(metadata)
-		if marshalErr != nil {
-			return "", nil, nil, marshalErr
-		}
-		metadata = stripped
-		if !models.IsAgentTitlePending(task.Metadata) {
-			metadataExpr = protectedTaskMetadataMergeExpression(r.db.DriverName())
-		}
+	if !models.IsAgentTitlePending(task.Metadata) {
+		metadataExpr = protectedTaskMetadataMergeExpression(r.db.DriverName(), protectDeferredLaunch)
 	}
 	updateQuery := fmt.Sprintf(`
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
@@ -2645,38 +2637,10 @@ func pendingTaskMetadataMergeExpression(driver string) string {
 	return "json_patch(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, json_remove(?, '$.agent_title_pending', '$.agent_title_owner_session_id'))"
 }
 
-// stripProtectedTaskMetadata returns metadata (already-marshaled JSON) with
-// deferred_launch removed, for updateTaskTx's protectDeferredLaunch mode
-// (UpdateTaskPreservingDeferredLaunch), applied to the write payload
-// regardless of which of the two query shapes below owns the write. The key
-// is owned by its own compare-and-set writers (the session ceiling's
-// admission machinery) and can change between the moment a request-scoped
-// caller read this snapshot and the moment this write commits. A key absent
-// from the payload leaves the row's own current value in place under both
-// merge mechanisms: protectedTaskMetadataMergeExpression's explicit splice
-// for the plain-replace shape, and pendingTaskMetadataMergeExpression's
-// json_patch/jsonb `||` merge for the agent-title-pending shape. Either way
-// a stale snapshot can never resurrect or clobber whatever the ceiling's own
-// writers did to the key in between.
-//
-// It must operate on the metadata bytes updateTaskTx passes in — already
-// merged by preserveLiveHandoffProvenance with the row's live handoffs/
-// handoff_source — rather than re-deriving from task.Metadata: re-deriving
-// would rebuild the payload from the caller's pre-transaction snapshot and
-// silently discard that merge, reverting a concurrently committed handoff
-// provenance write. Decoding into map[string]json.RawMessage rather than
-// map[string]interface{} avoids a float64 round-trip that would corrupt an
-// unrelated large or high-precision numeric field elsewhere in the document
-// (AC-27), matching preserveLiveHandoffProvenance's own approach.
-//
-// step_handoff_carry is deliberately NOT included here even though
-// service_task_metadata.go's protectedTaskMetadataUpdate treats it the same
-// way deferred_launch is treated at the HTTP PATCH boundary: unlike
-// deferred_launch, step_handoff_carry has a legitimate direct write path
-// through the ordinary in-memory task.Metadata + UpdateTask sequence
-// (event_handlers_workflow.go's step-transition handling), not only a CAS
-// primitive, so protecting it here would silently drop that write.
-func stripProtectedTaskMetadata(metadata []byte) ([]byte, error) {
+// stripProtectedTaskMetadata removes terminal_retention from every full-row
+// update payload and deferred_launch when its dedicated CAS writers need
+// protection. The remaining metadata keeps replace semantics.
+func stripProtectedTaskMetadata(metadata []byte, protectDeferredLaunch bool) ([]byte, error) {
 	// Always yields a non-nil map, even for absent/null input: json.Marshal
 	// of a nil map produces the JSON scalar `null`, and Postgres's jsonb `||`
 	// merge expression below concatenates a scalar with an object into a
@@ -2688,36 +2652,41 @@ func stripProtectedTaskMetadata(metadata []byte) ([]byte, error) {
 			return nil, err
 		}
 	}
-	delete(decoded, models.MetaKeyDeferredLaunch)
+	delete(decoded, models.MetaKeyTerminalRetention)
+	if protectDeferredLaunch {
+		delete(decoded, models.MetaKeyDeferredLaunch)
+	}
 	return json.Marshal(decoded)
 }
 
-// protectedTaskMetadataMergeExpression is updateTaskTx's metadata write when
-// protectDeferredLaunch is set (UpdateTaskPreservingDeferredLaunch). The
-// payload (?, already stripped of deferred_launch by
-// stripProtectedTaskMetadata) is the write's target — every other key
-// behaves exactly like the historical plain replace, including deletion by
-// omission — and only deferred_launch is patched back in from the row's own
-// pre-write value, so a stale in-memory snapshot can never resurrect or
-// clobber whatever the row's own CAS writers (the session ceiling's
-// admission machinery) did to it in the meantime. A protected key absent
-// from the current row must end up absent from the result too, not present
-// with a JSON null — SQLite's json_patch treats a null overlay value as
-// "remove if present, otherwise no-op" (RFC 7396), which is exactly that;
-// Postgres has no such rule for its jsonb `||` operator, so
-// jsonb_strip_nulls first removes the key jsonb_build_object had to
-// represent as JSON null because the row does not have it.
-func protectedTaskMetadataMergeExpression(driver string) string {
+// protectedTaskMetadataMergeExpression restores terminal_retention from the
+// live row on every full-row update and deferred_launch when it is protected.
+// SQLite needs explicit JSON booleans because json_extract returns booleans as
+// integers. Postgres omits missing keys through jsonb_strip_nulls.
+func protectedTaskMetadataMergeExpression(driver string, protectDeferredLaunch bool) string {
+	keys := []string{models.MetaKeyTerminalRetention}
+	if protectDeferredLaunch {
+		keys = append(keys, models.MetaKeyDeferredLaunch)
+	}
+	var postgresFields, sqliteFields []string
+	for _, key := range keys {
+		postgresFields = append(postgresFields, fmt.Sprintf("'%s', (%s)->'%s'", key, postgresMetadataObject, key))
+		if key == models.MetaKeyTerminalRetention {
+			sqliteFields = append(sqliteFields, fmt.Sprintf(
+				"'%s', json(CASE json_type(%s, '$.%s') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE 'null' END)",
+				key, sqliteMetadataObject, key,
+			))
+			continue
+		}
+		sqliteFields = append(sqliteFields, fmt.Sprintf("'%s', json_extract(%s, '$.%s')", key, sqliteMetadataObject, key))
+	}
 	if dialect.IsPostgres(driver) {
 		return fmt.Sprintf(
-			"(?::jsonb || jsonb_strip_nulls(jsonb_build_object('%s', (%s)->'%s')))::text",
-			models.MetaKeyDeferredLaunch, postgresMetadataObject, models.MetaKeyDeferredLaunch,
+			"(?::jsonb || jsonb_strip_nulls(jsonb_build_object(%s)))::text",
+			strings.Join(postgresFields, ", "),
 		)
 	}
-	return fmt.Sprintf(
-		"json_patch(?, json_object('%s', json_extract(%s, '$.%s')))",
-		models.MetaKeyDeferredLaunch, sqliteMetadataObject, models.MetaKeyDeferredLaunch,
-	)
+	return fmt.Sprintf("json_patch(?, json_object(%s))", strings.Join(sqliteFields, ", "))
 }
 
 // DetachTask clears only the hierarchy fields involved in detachment. Keeping

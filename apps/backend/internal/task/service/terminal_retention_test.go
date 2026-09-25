@@ -205,12 +205,18 @@ func (r holdBeforeArchiveRepository) ArchiveTask(ctx context.Context, taskID str
 	if err != nil {
 		return err
 	}
-	if task.Metadata == nil {
-		task.Metadata = make(map[string]interface{})
+	writer, ok := base.(interface {
+		UpdateTaskTerminalRetentionIfParent(context.Context, string, string, string, bool) (bool, error)
+	})
+	if !ok {
+		return errors.New("task repository does not support terminal retention updates")
 	}
-	task.Metadata[models.MetaKeyTerminalRetention] = true
-	if err := base.UpdateTask(ctx, task); err != nil {
+	updated, err := writer.UpdateTaskTerminalRetentionIfParent(ctx, task.ID, task.ParentID, task.WorkspaceID, true)
+	if err != nil {
 		return err
+	}
+	if !updated {
+		return taskrepo.ErrTaskNotFound
 	}
 	return base.ArchiveTask(ctx, taskID)
 }
