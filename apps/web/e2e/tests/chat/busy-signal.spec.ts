@@ -89,6 +89,9 @@ test.describe("Coarse RUNNING busy signal", () => {
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({
       timeout: 20_000,
     });
+
+    // Do not leave a live background turn for the next test to inherit.
+    await session.waitForChatIdle({ timeout: 60_000 });
   });
 
   test("foreground generation continues to queue input", async ({

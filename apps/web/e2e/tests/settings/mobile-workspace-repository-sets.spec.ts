@@ -105,13 +105,25 @@ test.describe("Mobile workspace repository sets", () => {
       "Add repositories in task order. Base branches are optional.",
     );
     const addRepository = testPage.getByTestId("repository-set-add-repository");
+    await waitForFiniteAnimations(surface);
+    await expect
+      .poll(
+        async () => {
+          const [hintBox, addBox] = await Promise.all([
+            membersHint.boundingBox(),
+            addRepository.boundingBox(),
+          ]);
+          return Boolean(hintBox && addBox && addBox.y > hintBox.y + hintBox.height);
+        },
+        { timeout: 10_000, message: "repository selector should follow its task-order hint" },
+      )
+      .toBe(true);
     const [membersHintBox, addRepositoryBox] = await Promise.all([
       membersHint.boundingBox(),
       addRepository.boundingBox(),
     ]);
     expect(membersHintBox).not.toBeNull();
     expect(addRepositoryBox).not.toBeNull();
-    expect(addRepositoryBox!.y).toBeGreaterThan(membersHintBox!.y + membersHintBox!.height);
     expect(addRepositoryBox!.width).toBeCloseTo(membersHintBox!.width, 0);
     await testPage.getByTestId(`repository-set-remove-${seedData.repositoryId}`).tap();
     await addRepository.tap();

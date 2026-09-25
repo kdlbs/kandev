@@ -51,40 +51,16 @@ async function waitForAgentIdle(
     .toBe("idle");
 }
 
-async function listAgentRuns(
+async function listRecentAgentRuns(
   officeApi: { rawRequest: (method: string, path: string) => Promise<Response> },
   agentId: string,
 ): Promise<AgentRun[]> {
-  const allRuns: AgentRun[] = [];
-  let cursor = "";
-  let cursorId = "";
-  for (;;) {
-    const query = new URLSearchParams({ limit: "100" });
-    if (cursor) {
-      query.set("cursor", cursor);
-      query.set("cursor_id", cursorId);
-    }
-    const response = await officeApi.rawRequest(
-      "GET",
-      `/agents/${agentId}/runs?${query.toString()}`,
-    );
-    if (!response.ok) {
-      throw new Error(`Listing runs for agent ${agentId} failed with HTTP ${response.status}`);
-    }
-    const result = (await response.json()) as {
-      runs?: AgentRun[];
-      next_cursor?: string;
-      next_id?: string;
-    };
-    const page = result.runs ?? [];
-    allRuns.push(...page);
-    if (!result.next_cursor || !result.next_id || page.length === 0) return allRuns;
-    if (result.next_cursor === cursor && result.next_id === cursorId) {
-      throw new Error(`Listing runs for agent ${agentId} returned a repeated page cursor`);
-    }
-    cursor = result.next_cursor;
-    cursorId = result.next_id;
+  const response = await officeApi.rawRequest("GET", `/agents/${agentId}/runs?limit=100`);
+  if (!response.ok) {
+    throw new Error(`Listing recent runs for agent ${agentId} failed with HTTP ${response.status}`);
   }
+  const result = (await response.json()) as { runs?: AgentRun[] };
+  return result.runs ?? [];
 }
 
 async function findAgentRunForRoutine(
@@ -93,7 +69,7 @@ async function findAgentRunForRoutine(
   routineId: string,
   seenRunIds: Set<string>,
 ): Promise<string> {
-  const runs = await listAgentRuns(officeApi, agentId);
+  const runs = await listRecentAgentRuns(officeApi, agentId);
   return runs.find((run) => !seenRunIds.has(run.id) && run.routine_id === routineId)?.id ?? "";
 }
 
@@ -122,8 +98,7 @@ test.describe("Office taskless routine sessions", () => {
     });
     const routineId = routine.id as string;
 
-    const existing = await listAgentRuns(officeApi, officeSeed.agentId);
-    const seen = new Set(existing.map((run) => run.id));
+    const seen = new Set<string>();
     const sessions: string[] = [];
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       await waitForAgentIdle(officeApi, officeSeed.agentId);

@@ -86,15 +86,16 @@ test.describe("Mobile task listing display preferences", () => {
     await expandDisplaySettingsGroup(testPage, "list-rows", "mobile");
     const settingsSaved = ws.waitForResponse("user.settings.update", { timeout: 15_000 });
     await tasksMenu.getByText("Show task details", { exact: true }).click();
-    await settingsSaved;
-    await expect
-      .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_show_details, {
-        message: "task detail preference was not persisted",
-        timeout: 15_000,
-      })
-      .toBe(true);
+    const savedSettings = await settingsSaved;
+    expect(savedSettings.payload).toMatchObject({
+      settings: { tasks_list_show_details: true },
+    });
     await testPage.keyboard.press("Escape");
     await expect(tasksMenu).toHaveCount(0);
+
+    await testPage.reload();
+    await expect(testPage.getByTestId("tasks-list")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/tasks/);
 
     const row = testPage.getByTestId("tasks-list-row").filter({ hasText: TASK_TITLE });
     await expect(row).toContainText(SEEDED_REPOSITORY_LABEL);
