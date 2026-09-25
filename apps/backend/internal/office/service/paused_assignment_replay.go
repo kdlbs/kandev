@@ -47,11 +47,18 @@ func (s *Service) RecordDeferredAssignment(ctx context.Context, taskID, pauseID 
 	if fields.AssigneeAgentProfileID == "" {
 		return
 	}
-	if err := s.repo.RecordDeferredAssignment(
+	recorded, err := s.repo.RecordDeferredAssignment(
 		ctx, taskID, fields.WorkspaceID, fields.AssigneeAgentProfileID, fields.AssignmentGeneration, pauseID,
-	); err != nil {
+	)
+	if err != nil {
 		s.logger.Warn("record deferred assignment failed",
 			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if !recorded {
+		// The generation guard suppressed a stale write (a still-pending
+		// row already carries a newer generation): nothing changed, so
+		// logging a "deferred" activity entry here would be misleading.
 		return
 	}
 	s.LogActivity(ctx, fields.WorkspaceID, "system", "",

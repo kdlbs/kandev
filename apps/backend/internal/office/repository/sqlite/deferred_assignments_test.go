@@ -17,13 +17,13 @@ func TestResolveDeferredAssignment_CASKeysOnFullIdentityNotJustTaskID(t *testing
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	if err := repo.RecordDeferredAssignment(ctx, "task-1", "ws-1", "agent-1", 1, "pause-1"); err != nil {
+	if _, err := repo.RecordDeferredAssignment(ctx, "task-1", "ws-1", "agent-1", 1, "pause-1"); err != nil {
 		t.Fatalf("record gen1: %v", err)
 	}
 
 	// A reassignment during the same pause overwrites the row to gen2
 	// before the gen1 reader below gets to resolve it.
-	if err := repo.RecordDeferredAssignment(ctx, "task-1", "ws-1", "agent-2", 2, "pause-1"); err != nil {
+	if _, err := repo.RecordDeferredAssignment(ctx, "task-1", "ws-1", "agent-2", 2, "pause-1"); err != nil {
 		t.Fatalf("record gen2 (overwrite): %v", err)
 	}
 
@@ -64,12 +64,18 @@ func TestRecordDeferredAssignment_DoesNotRegressToOlderGeneration(t *testing.T) 
 	ctx := context.Background()
 
 	// B's assignment (gen2) commits first...
-	if err := repo.RecordDeferredAssignment(ctx, "task-1", "ws-1", "agent-2", 2, "pause-1"); err != nil {
+	if _, err := repo.RecordDeferredAssignment(ctx, "task-1", "ws-1", "agent-2", 2, "pause-1"); err != nil {
 		t.Fatalf("record gen2: %v", err)
 	}
-	// ...then A's stale write (gen1, captured before B committed) lands.
-	if err := repo.RecordDeferredAssignment(ctx, "task-1", "ws-1", "agent-1", 1, "pause-1"); err != nil {
+	// ...then A's stale write (gen1, captured before B committed) lands —
+	// the generation guard must suppress it and report recorded=false, so
+	// the caller knows not to log a "deferred" activity entry for it.
+	recorded, err := repo.RecordDeferredAssignment(ctx, "task-1", "ws-1", "agent-1", 1, "pause-1")
+	if err != nil {
 		t.Fatalf("record gen1 (stale, must not regress): %v", err)
+	}
+	if recorded {
+		t.Fatal("stale gen1 write must report recorded=false: the guard suppressed it")
 	}
 
 	pending, err := repo.ListPendingDeferredAssignmentsForWorkspace(ctx, "ws-1")
@@ -95,7 +101,7 @@ func TestRecordDeferredAssignment_OverwritesAResolvedRowRegardlessOfGeneration(t
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	if err := repo.RecordDeferredAssignment(ctx, "task-1", "ws-1", "agent-1", 5, "pause-1"); err != nil {
+	if _, err := repo.RecordDeferredAssignment(ctx, "task-1", "ws-1", "agent-1", 5, "pause-1"); err != nil {
 		t.Fatalf("record gen5: %v", err)
 	}
 	won, err := repo.ResolveDeferredAssignment(ctx, "task-1", 5, "agent-1", "pause-1", "replayed")
@@ -109,7 +115,7 @@ func TestRecordDeferredAssignment_OverwritesAResolvedRowRegardlessOfGeneration(t
 	// A fresh pause + deferral for the same task, generation lower than
 	// the already-resolved row, must still overwrite: the row is resolved,
 	// so the generation guard does not apply.
-	if err := repo.RecordDeferredAssignment(ctx, "task-1", "ws-1", "agent-3", 2, "pause-2"); err != nil {
+	if _, err := repo.RecordDeferredAssignment(ctx, "task-1", "ws-1", "agent-3", 2, "pause-2"); err != nil {
 		t.Fatalf("record gen2 over a resolved row: %v", err)
 	}
 

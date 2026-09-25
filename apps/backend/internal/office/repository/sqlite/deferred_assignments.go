@@ -38,11 +38,14 @@ func (r *Repository) createDeferredAssignmentsTable() error {
 // interleave (A reads gen1, B commits and records gen2, A's write lands
 // last), and an unconditional overwrite would let A's stale write regress
 // a still-pending gen2 row back to gen1 — silently losing B's assignment
-// (R1-F3). A losing write is a silent no-op, matching this method's
-// existing best-effort contract (the caller logs, never propagates).
+// (R1-F3). The returned bool reports whether this call actually wrote a
+// row: false (with a nil error) means the generation guard suppressed a
+// stale write, letting the caller skip logging an activity entry for an
+// assignment that was never recorded — the write itself remains a
+// best-effort no-op rather than a propagated error.
 func (r *Repository) RecordDeferredAssignment(
 	ctx context.Context, taskID, workspaceID, agentProfileID string, assignmentGeneration int64, pauseID string,
-) error {
+) (bool, error) {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO office_deferred_assignments (
@@ -50,18 +53,22 @@ func (r *Repository) RecordDeferredAssignment(
 		) VALUES (?, ?, ?, ?, ?, ?)
 	`), taskID, workspaceID, agentProfileID, assignmentGeneration, pauseID, now)
 	if err == nil {
-		return nil
+		return true, nil
 	}
 	if !isUniqueConstraintErr(err) {
-		return err
+		return false, err
 	}
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE office_deferred_assignments
 		SET workspace_id = ?, agent_profile_id = ?, assignment_generation = ?, pause_id = ?, created_at = ?,
 		    resolved_at = NULL, outcome = ''
 		WHERE task_id = ? AND (resolved_at IS NOT NULL OR assignment_generation <= ?)
 	`), workspaceID, agentProfileID, assignmentGeneration, pauseID, now, taskID, assignmentGeneration)
-	return err
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	return rows > 0, err
 }
 
 // ListPendingDeferredAssignmentsForWorkspace returns every pending

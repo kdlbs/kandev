@@ -33,7 +33,7 @@ func TestPostgresRecordDeferredAssignment_UpsertsOnConflict(t *testing.T) {
 		t.Fatalf("init office repo: %v", err)
 	}
 
-	if err := repo.RecordDeferredAssignment(ctx, "pg-task-1", "pg-ws-1", "agent-1", 1, "pg-pause-1"); err != nil {
+	if _, err := repo.RecordDeferredAssignment(ctx, "pg-task-1", "pg-ws-1", "agent-1", 1, "pg-pause-1"); err != nil {
 		t.Fatalf("first record: %v", err)
 	}
 
@@ -50,7 +50,7 @@ func TestPostgresRecordDeferredAssignment_UpsertsOnConflict(t *testing.T) {
 	// Same task_id again: must hit the UPDATE fallback on the PK conflict,
 	// not error, and must reset resolved_at/outcome back to pending with
 	// the new agent/generation/pause.
-	if err := repo.RecordDeferredAssignment(ctx, "pg-task-1", "pg-ws-1", "agent-2", 2, "pg-pause-2"); err != nil {
+	if _, err := repo.RecordDeferredAssignment(ctx, "pg-task-1", "pg-ws-1", "agent-2", 2, "pg-pause-2"); err != nil {
 		t.Fatalf("second record (conflict fallback): %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestPostgresListReplayablePendingDeferredAssignments_ExcludesActivePause(t 
 		t.Fatalf("create pause: %v", err)
 	}
 
-	if err := repo.RecordDeferredAssignment(ctx, "pg-task-2", "pg-ws-2", "agent-1", 1, pause.ID); err != nil {
+	if _, err := repo.RecordDeferredAssignment(ctx, "pg-task-2", "pg-ws-2", "agent-1", 1, pause.ID); err != nil {
 		t.Fatalf("record deferred assignment: %v", err)
 	}
 
@@ -158,7 +158,7 @@ func TestPostgresResolveDeferredAssignment_CASOnlyResolvesPendingOnce(t *testing
 		t.Fatalf("init office repo: %v", err)
 	}
 
-	if err := repo.RecordDeferredAssignment(ctx, "pg-task-3", "pg-ws-3", "agent-1", 1, "pg-pause-3"); err != nil {
+	if _, err := repo.RecordDeferredAssignment(ctx, "pg-task-3", "pg-ws-3", "agent-1", 1, "pg-pause-3"); err != nil {
 		t.Fatalf("record deferred assignment: %v", err)
 	}
 
@@ -184,5 +184,46 @@ func TestPostgresResolveDeferredAssignment_CASOnlyResolvesPendingOnce(t *testing
 	}
 	if outcome != "replayed" {
 		t.Fatalf("outcome = %q, want %q (the losing CAS must not overwrite it)", outcome, "replayed")
+	}
+}
+
+// TestPostgresRecordDeferredAssignment_DoesNotRegressToOlderGeneration_Pending
+// is the PostgreSQL twin of TestRecordDeferredAssignment_DoesNotRegressToOlderGeneration
+// (R1-F3): it proves the generation guard blocks a stale gen1 write from
+// overwriting a still-*pending* gen2 row on Postgres too, and that the
+// suppressed write reports recorded=false so the caller skips logging a
+// misleading "deferred" activity entry for it.
+// Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresRecordDeferredAssignment_DoesNotRegressToOlderGeneration_Pending(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	ctx := context.Background()
+
+	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init task repo: %v", err)
+	}
+	repo, err := sqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init office repo: %v", err)
+	}
+
+	if _, err := repo.RecordDeferredAssignment(ctx, "pg-task-r1f3", "pg-ws-r1f3", "agent-2", 2, "pause-1"); err != nil {
+		t.Fatalf("record gen2: %v", err)
+	}
+	// Stale gen1 write; must be a no-op because the still-pending gen2 row
+	// has a higher generation.
+	recorded, err := repo.RecordDeferredAssignment(ctx, "pg-task-r1f3", "pg-ws-r1f3", "agent-1", 1, "pause-1")
+	if err != nil {
+		t.Fatalf("record gen1 (stale): %v", err)
+	}
+	if recorded {
+		t.Fatal("stale gen1 write must report recorded=false: the guard suppressed it")
+	}
+
+	pending, err := repo.ListPendingDeferredAssignmentsForWorkspace(ctx, "pg-ws-r1f3")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(pending) != 1 || pending[0].AssignmentGeneration != 2 || pending[0].AgentProfileID != "agent-2" {
+		t.Fatalf("stale gen1 write regressed gen2 row on Postgres: %+v", pending)
 	}
 }
