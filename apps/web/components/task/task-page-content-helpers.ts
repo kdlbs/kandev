@@ -141,29 +141,90 @@ export function resolveEffectiveTask(
   return null;
 }
 
+export function resolveLatestTaskProjection(
+  taskId: string | null,
+  activeTasks: KanbanState["tasks"],
+  snapshots: Record<string, { tasks: KanbanState["tasks"] }>,
+): KanbanState["tasks"][number] | null {
+  if (!taskId) return null;
+  const candidates = [activeTasks, ...Object.values(snapshots).map((snapshot) => snapshot.tasks)];
+  let latestTask: KanbanState["tasks"][number] | null = null;
+  let latestTimestamp = Number.NEGATIVE_INFINITY;
+
+  for (const tasks of candidates) {
+    for (const task of tasks) {
+      if (task.id !== taskId) continue;
+      const updatedAt = parseTaskTimestamp(task.updatedAt) ?? 0;
+      if (!latestTask || updatedAt >= latestTimestamp) {
+        latestTask = task;
+        latestTimestamp = updatedAt;
+      }
+    }
+  }
+
+  return latestTask;
+}
+
+export function resolveWorkflowCurrentStepId(
+  sessionStepId: string | null,
+  taskStepId: string | null,
+  workflowStepIds: readonly string[],
+): string | null {
+  if (taskStepId) return taskStepId;
+  if (sessionStepId && workflowStepIds.includes(sessionStepId)) return sessionStepId;
+  return null;
+}
+
+function parseTaskTimestamp(value: string | null | undefined): number | null {
+  const parsed = Date.parse(value ?? "");
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasNewerKanbanState(
+  baseTask: Task,
+  kanbanTimestamp: number | null,
+  baseTimestamp: number | null,
+): boolean {
+  return Boolean(
+    baseTask.archived_at &&
+    kanbanTimestamp !== null &&
+    baseTimestamp !== null &&
+    kanbanTimestamp > baseTimestamp,
+  );
+}
+
+function hasCurrentKanbanPlacement(
+  kanbanTask: KanbanState["tasks"][number],
+  kanbanTimestamp: number | null,
+  baseTimestamp: number | null,
+): boolean {
+  const hasCompletePlacement = Boolean(kanbanTask.workflowId && kanbanTask.workflowStepId);
+  const placementIsNotOlder =
+    kanbanTimestamp === null || baseTimestamp === null || kanbanTimestamp >= baseTimestamp;
+  return hasCompletePlacement && placementIsNotOlder;
+}
+
 export function mergeBaseWithKanban(
   baseTask: Task,
   kanbanTask: KanbanState["tasks"][number] | null,
 ): Task {
   if (!kanbanTask) return baseTask;
-  const kanbanUpdatedAt = Date.parse(kanbanTask.updatedAt ?? "");
-  const baseUpdatedAt = Date.parse(baseTask.updated_at ?? "");
-  const hasNewerKanbanState =
-    Boolean(baseTask.archived_at) &&
-    Number.isFinite(kanbanUpdatedAt) &&
-    Number.isFinite(baseUpdatedAt) &&
-    kanbanUpdatedAt > baseUpdatedAt;
+  const kanbanTimestamp = parseTaskTimestamp(kanbanTask.updatedAt);
+  const baseTimestamp = parseTaskTimestamp(baseTask.updated_at);
+  const applyPlacement = hasCurrentKanbanPlacement(kanbanTask, kanbanTimestamp, baseTimestamp);
   return {
     ...baseTask,
     title: kanbanTask.title ?? baseTask.title,
     description: kanbanTask.description ?? baseTask.description,
-    workflow_step_id:
-      (kanbanTask.workflowStepId as string | undefined) ?? baseTask.workflow_step_id,
+    workflow_id: applyPlacement ? toWorkflowId(kanbanTask.workflowId) : baseTask.workflow_id,
+    workflow_step_id: applyPlacement ? kanbanTask.workflowStepId : baseTask.workflow_step_id,
     position: kanbanTask.position ?? baseTask.position,
     state: (kanbanTask.state as Task["state"] | undefined) ?? baseTask.state,
     repositories: baseTask.repositories,
     metadata: kanbanTask.metadata !== undefined ? kanbanTask.metadata : baseTask.metadata,
-    archived_at: hasNewerKanbanState ? null : baseTask.archived_at,
+    archived_at: hasNewerKanbanState(baseTask, kanbanTimestamp, baseTimestamp)
+      ? null
+      : baseTask.archived_at,
   };
 }
 
@@ -176,7 +237,7 @@ export function buildTaskFromKanban(kanbanTask: KanbanState["tasks"][number]): T
     position: kanbanTask.position,
     state: kanbanTask.state ?? "CREATED",
     workspace_id: toWorkspaceId(""),
-    workflow_id: toWorkflowId(""),
+    workflow_id: toWorkflowId(kanbanTask.workflowId ?? ""),
     priority: kanbanTask.priority ?? "medium",
     repositories: [],
     created_at: "",

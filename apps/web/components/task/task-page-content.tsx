@@ -7,7 +7,6 @@ import Link from "@/components/routing/app-link";
 import { useTranslation } from "react-i18next";
 import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
-import type { KanbanState } from "@/lib/state/slices";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSessionAgent } from "@/hooks/domains/session/use-session-agent";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
@@ -18,7 +17,8 @@ import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-se
 import { useExternalVcsFileLinkHydration } from "@/hooks/domains/workspace/use-external-vcs-file-link";
 import { fetchTask } from "@/lib/api";
 import { linkToTaskOverview } from "@/lib/links";
-import { useTasks } from "@/hooks/use-tasks";
+import { useWorkflowSnapshotById } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { useWorkflowStepsById } from "@/hooks/domains/kanban/use-workflow-steps-by-id";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useTaskCanvasesStateForTask } from "@/hooks/domains/task/use-task-canvases";
@@ -29,6 +29,7 @@ import {
   buildArchivedValue,
   hasResolvedTaskDetails,
   resolveEffectiveTask,
+  resolveLatestTaskProjection,
   resolveTaskContentState,
   syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
@@ -48,23 +49,16 @@ type TaskPageContentProps = {
   officeTaskHref?: string | null;
 };
 
-export function useWorkflowStepsMapped() {
-  const kanbanSteps = useAppStore((state) => state.kanban.steps);
-  return useMemo(
-    () =>
-      kanbanSteps.map((s) => ({
-        id: s.id,
-        name: s.title,
-        color: s.color,
-        position: s.position,
-        events: s.events,
-        allow_manual_move: s.allow_manual_move,
-        prompt: s.prompt,
-        is_start_step: s.is_start_step,
-        agent_profile_id: s.agent_profile_id,
-      })),
-    [kanbanSteps],
-  );
+export function useWorkflowStepsMapped(workflowId: string | null | undefined) {
+  return useWorkflowStepsById(workflowId);
+}
+
+function useTaskWorkflowSnapshot(task: Task | null) {
+  useWorkflowSnapshotById(task?.workspace_id ?? null, task?.workflow_id ?? null);
+}
+
+function getTaskArchivedState(task: Task | null): boolean | null {
+  return task ? task.archived_at != null : null;
 }
 
 export function useSessionPanelState(effectiveSessionId: string | null | undefined) {
@@ -83,8 +77,10 @@ export function useSessionPanelState(effectiveSessionId: string | null | undefin
   const sessionWorkflowStepId = useAppStore((state) => {
     const taskId = state.tasks.activeTaskId;
     if (!taskId) return null;
-    const task = state.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return (task?.workflowStepId as string) ?? null;
+    return (
+      resolveLatestTaskProjection(taskId, state.kanban.tasks, state.kanbanMulti.snapshots)
+        ?.workflowStepId ?? null
+    );
   });
   const previewOpen = useAppStore((state) =>
     effectiveSessionId ? (state.previewPanel.openBySessionId[effectiveSessionId] ?? false) : false,
@@ -191,14 +187,10 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
   const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
   const [taskLoadError, setTaskLoadError] = useState<unknown | null>(null);
   const activeTaskIdRef = useRef(activeTaskId);
-  const kanbanTask = useAppStore((state) =>
-    activeTaskId
-      ? (state.kanban.tasks.find(
-          (item: KanbanState["tasks"][number]) => item.id === activeTaskId,
-        ) ?? null)
-      : null,
-  );
   const effectiveTaskId = activeTaskId ?? initialTask?.id ?? null;
+  const kanbanTask = useAppStore((state) =>
+    resolveLatestTaskProjection(effectiveTaskId, state.kanban.tasks, state.kanbanMulti.snapshots),
+  );
   const task = useMemo(
     () => resolveEffectiveTask(taskDetails, initialTask, kanbanTask, effectiveTaskId),
     [taskDetails, initialTask, kanbanTask, effectiveTaskId],
@@ -208,8 +200,6 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
     taskDetailsId: taskDetails?.id ?? null,
     initialTaskId: initialTask?.id ?? null,
   });
-  useTasks(task?.workflow_id ?? null);
-
   useEffect(() => {
     activeTaskIdRef.current = activeTaskId;
   }, [activeTaskId]);
@@ -360,16 +350,17 @@ function TaskPageContentLive({
     onTaskUnarchived,
     refreshTask,
   } = useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
+  useTaskWorkflowSnapshot(task);
   const taskCanvasesState = useTaskCanvasesStateForTask(task, canvasesEnabled);
   useExternalVcsFileLinkHydration(task, repositories);
 
-  const workflowSteps = useWorkflowStepsMapped();
+  const workflowSteps = useWorkflowStepsMapped(task?.workflow_id);
   const sessionPanel = useSessionPanelState(effectiveSessionId);
   const agentctlStatus = useSessionAgentctl(effectiveSessionId);
   const resumption = useSessionResumption(
     task?.id ?? null,
     effectiveSessionId,
-    task ? task.archived_at != null : null,
+    getTaskArchivedState(task),
     { onTaskArchiveConflict: refreshTask },
   );
   const merged = useMergedAgentState(agent, resumption, sessionPanel, effectiveSessionId, task);

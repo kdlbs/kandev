@@ -273,7 +273,7 @@ async function fetchAndWriteSnapshot(
 
     const workflowSnapshot = {
       workflowId: wf.id,
-      workflowName: wf.name,
+      workflowName: snapshot.workflow?.name ?? wf.name,
       steps,
       tasks,
     };
@@ -319,6 +319,74 @@ function safeErrorMessage(error: unknown): string {
 function mapSnapshotTask(task: Task, stepIds: Set<string>): KanbanTask | null {
   if (!task.workflow_step_id || !stepIds.has(task.workflow_step_id)) return null;
   return toKanbanTask(task);
+}
+
+export function useWorkflowSnapshotById(
+  workspaceId: string | null,
+  workflowId: string | null | undefined,
+) {
+  const store = useAppStoreApi();
+  const connectionStatus = useAppStore((state) => state.connection.status);
+  const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration);
+  const workspaceContextRetryVersion = useAppStore(
+    (state) => state.workspaceContextRead?.retryVersion ?? 0,
+  );
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const fetchGenRef = useRef(0);
+  const lastRefreshNonceRef = useRef(refreshNonce);
+  const lastConnectionStatusRef = useRef(connectionStatus);
+  const lastContextGenerationRef = useRef(workspaceContextGeneration);
+  const lastRecoveryRetryVersionRef = useRef(workspaceContextRetryVersion);
+  const refresh = useCallback(() => setRefreshNonce((current) => current + 1), []);
+
+  useForegroundRefresh(refresh, Boolean(workspaceId && workflowId), `${workspaceId}:${workflowId}`);
+
+  useEffect(() => {
+    if (!workspaceId || !workflowId) return;
+
+    const forceRefresh =
+      refreshNonce !== lastRefreshNonceRef.current ||
+      connectionStatus !== lastConnectionStatusRef.current ||
+      workspaceContextGeneration !== lastContextGenerationRef.current ||
+      workspaceContextRetryVersion !== lastRecoveryRetryVersionRef.current;
+    lastRefreshNonceRef.current = refreshNonce;
+    lastConnectionStatusRef.current = connectionStatus;
+    lastContextGenerationRef.current = workspaceContextGeneration;
+    lastRecoveryRetryVersionRef.current = workspaceContextRetryVersion;
+
+    const state = store.getState();
+    const currentSnapshot = state.kanbanMulti.snapshots[workflowId];
+    const activeWorkflowHasSteps =
+      state.kanban.workflowId === workflowId && state.kanban.steps.length > 0;
+    if (!forceRefresh && (isBootHydratedSnapshot(currentSnapshot) || activeWorkflowHasSteps)) {
+      return;
+    }
+
+    const myGen = fetchGenRef.current + 1;
+    fetchGenRef.current = myGen;
+    const request = { workspaceId, generation: state.workspaceContextGeneration };
+    void fetchAndWriteSnapshot(
+      { id: workflowId, name: currentSnapshot?.workflowName ?? workflowId },
+      store,
+      fetchGenRef,
+      myGen,
+      request,
+      () => {},
+      () => {},
+    );
+
+    return () => {
+      if (fetchGenRef.current === myGen) fetchGenRef.current += 1;
+    };
+  }, [
+    connectionStatus,
+    refreshNonce,
+    store,
+    workspaceContextGeneration,
+    workspaceContextRetryVersion,
+    workflowId,
+    workspaceId,
+  ]);
 }
 
 // eslint-disable-next-line max-lines-per-function -- one hook owns snapshot refresh and generation cleanup

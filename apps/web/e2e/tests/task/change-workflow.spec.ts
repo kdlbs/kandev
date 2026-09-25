@@ -9,7 +9,38 @@ import {
 } from "./task-workflow-agent-overrides-helpers";
 
 test.describe("Change workflow", () => {
-  test("maps a task profile for a later destination step and preserves its context", async ({
+  test("updates an open task page after a move from another client", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const destination = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "External move target",
+    );
+    const analysis = await apiClient.createWorkflowStep(destination.id, "Analysis", 0);
+    await apiClient.createWorkflowStep(destination.id, "Implement", 1);
+    const task = await apiClient.createTask(seedData.workspaceId, "External workflow move task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    await expect(testPage.getByTestId("task-topbar")).toBeVisible();
+    const taskUrl = testPage.url();
+
+    await apiClient.moveTask(task.id, destination.id, analysis.id);
+
+    await expect(testPage).toHaveURL(taskUrl);
+    const stepper = testPage.getByTestId("workflow-stepper");
+    await expect(stepper.getByTestId("workflow-step-Analysis")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    await expect(stepper.getByTestId("workflow-step-Implement")).toBeVisible();
+  });
+
+  test("updates the open task stepper after changing workflow and preserves its context", async ({
     testPage,
     apiClient,
     seedData,
@@ -39,6 +70,13 @@ test.describe("Change workflow", () => {
       fixture.profileA.id,
     );
     const before = await apiClient.getTask(task.id);
+    await testPage.goto(`/t/${task.id}`);
+    await expect(testPage.getByTestId("task-topbar")).toBeVisible();
+    const taskUrl = testPage.url();
+    await testPage.getByTestId("task-topbar-actions-menu").click();
+    await expect(testPage.getByRole("menuitem", { name: "Change workflow..." })).toBeVisible();
+    await testPage.getByRole("menuitem", { name: "Change workflow..." }).click();
+
     const previewChanges: Array<Record<string, unknown>> = [];
     testPage.on("request", (request) => {
       if (request.url().includes(`/api/v1/tasks/${task.id}/move-preview`)) {
@@ -49,12 +87,6 @@ test.describe("Change workflow", () => {
           previewChanges.push(body.workflow_change as unknown as Record<string, unknown>);
       }
     });
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.openTaskActionsMenu(task.id);
-
-    await expect(testPage.getByRole("menuitem", { name: "Change workflow..." })).toBeVisible();
-    await kanban.contextChangeWorkflow().click();
     const changeWorkflow = new ChangeWorkflowPage(testPage);
     await expect(changeWorkflow.desktopDialog).toBeVisible();
     await changeWorkflow.chooseWorkflow(fixture.workflow.id);
@@ -95,6 +127,26 @@ test.describe("Change workflow", () => {
     await expect(changeWorkflow.desktopDialog).toBeHidden();
 
     await waitForWorkflowStep(apiClient, task.id, fixture.prStep.id);
+    await expect(testPage).toHaveURL(taskUrl);
+    const stepper = testPage.getByTestId("workflow-stepper");
+    await expect(stepper.getByTestId("workflow-step-Analysis")).toBeVisible();
+    await expect(stepper.getByTestId("workflow-step-Implement")).toBeVisible();
+    await expect(stepper.getByTestId("workflow-step-Review")).toBeVisible();
+    await expect(stepper.getByTestId("workflow-step-PR")).toHaveAttribute("aria-current", "step");
+    if (prCapture.capturing) {
+      await testPage.evaluate(async () => {
+        await Promise.all(
+          document
+            .getAnimations()
+            .filter((animation) => animation.playState === "running")
+            .map((animation) => animation.finished.catch(() => undefined)),
+        );
+      });
+      await prCapture.screenshot("desktop-task-destination-stepper", {
+        caption:
+          "Open task page showing the destination workflow and current step after migration.",
+      });
+    }
     const destinationSessionId = await waitForNewWorkflowProfileSession(
       apiClient,
       task.id,
