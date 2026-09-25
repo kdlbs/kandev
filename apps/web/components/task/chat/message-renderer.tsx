@@ -37,6 +37,7 @@ import {
 } from "@/components/task/chat/messages/kandev-tool-message";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { isDismissedGitPushErrorMessage } from "@/lib/utils/git-push-error-message";
 
 type AdapterContext = {
   isTaskDescription: boolean;
@@ -517,6 +518,8 @@ export const MessageRenderer = memo(function MessageRenderer({
   isTurnActive = false,
   isContainingTurnActive = false,
 }: MessageRendererProps) {
+  if (isDismissedGitPushErrorMessage(comment)) return null;
+
   const ctx = {
     isTaskDescription,
     taskId,

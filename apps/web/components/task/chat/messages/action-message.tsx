@@ -19,6 +19,7 @@ import {
   type LastAgentError,
 } from "@/lib/session-last-agent-error";
 import { legacyRecoveryMessageMatchesError } from "@/lib/session-recovery-presentation";
+import { GitPushErrorDismissAction } from "./git-push-error-dismiss-button";
 
 function isSessionActive(state?: TaskSessionState) {
   return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
@@ -145,6 +146,7 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
       sessionState={sessionState}
       taskId={comment.task_id}
       sessionId={comment.session_id}
+      comment={comment}
       recoveryActionsVisible={recoveryActionsVisible}
       onRecoveryRequested={() => setRecoveryRequested(true)}
     />
@@ -158,6 +160,7 @@ function SettledActionMessage({
   sessionState,
   taskId,
   sessionId,
+  comment,
   recoveryActionsVisible,
   onRecoveryRequested,
 }: {
@@ -167,6 +170,7 @@ function SettledActionMessage({
   sessionState?: TaskSessionState;
   taskId?: string;
   sessionId?: string;
+  comment: Message;
   recoveryActionsVisible: boolean;
   onRecoveryRequested: () => void;
 }) {
@@ -185,6 +189,7 @@ function SettledActionMessage({
       sessionError={sessionError}
       taskId={taskId}
       sessionId={sessionId}
+      comment={comment}
       recoveryActionsVisible={recoveryActionsVisible}
       onRecoveryRequested={onRecoveryRequested}
     />
@@ -197,6 +202,7 @@ function SettledFailureMessage({
   sessionError,
   taskId,
   sessionId,
+  comment,
   recoveryActionsVisible,
   onRecoveryRequested,
 }: {
@@ -205,6 +211,7 @@ function SettledFailureMessage({
   sessionError?: string;
   taskId?: string;
   sessionId?: string;
+  comment: Message;
   recoveryActionsVisible: boolean;
   onRecoveryRequested: () => void;
 }) {
@@ -237,6 +244,13 @@ function SettledFailureMessage({
             actions: renderedMetadata?.actions,
             taskId,
             sessionId,
+            extraContent: (
+              <GitPushErrorDismissAction
+                messageId={comment.id}
+                type={comment.type}
+                metadata={comment.metadata}
+              />
+            ),
             isRecoveryMessage: metadata?.recovery_actions === true,
             onRecoveryRequested,
           })}
@@ -255,16 +269,18 @@ function renderSettledActionButtons({
   actions,
   taskId,
   sessionId,
+  extraContent,
   isRecoveryMessage,
   onRecoveryRequested,
 }: {
   actions?: MessageAction[];
   taskId?: string;
   sessionId?: string;
+  extraContent?: ReactElement;
   isRecoveryMessage: boolean;
   onRecoveryRequested: () => void;
 }): ReactElement | null {
-  if (!actions || actions.length === 0) return null;
+  if (!actions || actions.length === 0) return extraContent ?? null;
   const hasSessionRecoveryAction = actions.some((action) => sessionRecoveryAction(action));
   if (hasSessionRecoveryAction && taskId && sessionId) {
     return (
@@ -281,6 +297,7 @@ function renderSettledActionButtons({
       actions={actions}
       taskId={taskId}
       onRecoveryRequested={isRecoveryMessage ? onRecoveryRequested : undefined}
+      extraContent={extraContent}
     />
   );
 }

@@ -388,6 +388,54 @@ describe("filterVisibleMessages recovery history", () => {
   });
 });
 
+describe("filterVisibleMessages dismissed Git push errors", () => {
+  it("hides only a persisted push failure row, preserving legacy errors and later failures", () => {
+    const dismissed = baseMessage({
+      id: "dismissed-push",
+      type: "error",
+      metadata: {
+        git_operation_error: true,
+        operation: "push",
+        git_operation_error_dismissed_at: "2026-09-25T10:00:00Z",
+      },
+    });
+    const legacyPush = baseMessage({
+      id: "legacy-push",
+      type: "error",
+      metadata: { git_operation_error: true, operation: "push" },
+    });
+    const laterPush = baseMessage({
+      id: "later-push",
+      type: "error",
+      metadata: { git_operation_error: true, operation: "push" },
+    });
+    const unrelated = baseMessage({
+      id: "unrelated-error",
+      type: "error",
+      metadata: {
+        git_operation_error: true,
+        operation: "pull",
+        git_operation_error_dismissed_at: "2026-09-25T10:00:00Z",
+      },
+    });
+    const malformedMarker = baseMessage({
+      id: "malformed-marker",
+      type: "error",
+      metadata: {
+        git_operation_error: "true",
+        operation: "push",
+        git_operation_error_dismissed_at: "2026-09-25T10:00:00Z",
+      },
+    });
+
+    expect(
+      filterPlanMessages([dismissed, legacyPush, laterPush, unrelated, malformedMarker]).map(
+        (message) => message.id,
+      ),
+    ).toEqual(["legacy-push", "later-push", "unrelated-error", "malformed-marker"]);
+  });
+});
+
 describe("hasFailedAgentBootAfter", () => {
   it("returns true when a boot after the failure reports status failed", () => {
     expect(hasFailedAgentBootAfter([bootMessage(AFTER, { status: "failed" })], ERROR_AT)).toBe(

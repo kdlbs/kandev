@@ -30,6 +30,7 @@ const (
 )
 
 var ErrMessageIDConflict = errors.New("client message id is already used")
+var ErrNotGitPushErrorMessage = errors.New("message is not a Git push error")
 
 var agentPlanMessageIDNamespace = uuid.MustParse("138966de-88bc-49c0-b65f-cbfbac17f729")
 
@@ -991,6 +992,40 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, e
 		}
 	}
 	return message, nil
+}
+
+// DismissGitPushErrorMessage records a shared acknowledgment on one eligible
+// Git push failure. The message's stored session determines read access.
+func (s *Service) DismissGitPushErrorMessage(ctx context.Context, messageID string) (string, error) {
+	message, err := s.messages.GetMessage(ctx, messageID)
+	if err != nil {
+		return "", err
+	}
+	if message == nil {
+		return "", repoerrors.ErrTaskNotFound
+	}
+	if message.TaskSessionID == "" {
+		return "", repoerrors.ErrTaskNotFound
+	}
+	if err := s.AuthorizeSessionAccess(ctx, message.TaskSessionID); err != nil {
+		return "", err
+	}
+	if message.Type != models.MessageTypeError || message.Metadata["git_operation_error"] != true || message.Metadata["operation"] != "push" {
+		return "", ErrNotGitPushErrorMessage
+	}
+	if dismissedAt, ok := message.Metadata["git_operation_error_dismissed_at"].(string); ok && dismissedAt != "" {
+		return dismissedAt, nil
+	}
+
+	dismissedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	if message.Metadata == nil {
+		message.Metadata = make(map[string]any)
+	}
+	message.Metadata["git_operation_error_dismissed_at"] = dismissedAt
+	if err := s.UpdateMessage(ctx, message); err != nil {
+		return "", err
+	}
+	return dismissedAt, nil
 }
 
 // RehydrateMessagePayload resolves an externalized large tool-output

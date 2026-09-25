@@ -198,10 +198,11 @@ const (
 	ActionSystemMetricsUnsubscribe = "system.metrics.unsubscribe"
 
 	// Message actions
-	ActionMessageAdd    = "message.add"
-	ActionMessageGet    = "message.get"
-	ActionMessageList   = "message.list"
-	ActionMessageSearch = "message.search"
+	ActionMessageAdd                 = "message.add"
+	ActionMessageDismissGitPushError = "message.dismiss_git_push_error"
+	ActionMessageGet                 = "message.get"
+	ActionMessageList                = "message.list"
+	ActionMessageSearch              = "message.search"
 
 	// Notification actions (server -> client)
 	ActionACPProgress                    = "acp.progress"

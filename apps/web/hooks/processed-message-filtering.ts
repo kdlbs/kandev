@@ -9,6 +9,7 @@ import {
   isPendingClarificationMessage,
   type PendingClarificationScope,
 } from "@/lib/utils/pending-clarification";
+import { isDismissedGitPushErrorMessage } from "@/lib/utils/git-push-error-message";
 
 const VISIBLE_MESSAGE_TYPES: Set<string> = new Set([
   "message",
@@ -391,6 +392,7 @@ export function filterVisibleMessages(
 ): Message[] {
   const activeClarification = findActiveClarification(messages, scope);
   const filtered = messages.filter((message) => {
+    if (isDismissedGitPushErrorMessage(message)) return false;
     if (subagentChildIds.has(message.id) || isSetupScriptMessage(message)) return false;
     if (message.type === "clarification_request") {
       return isClarificationVisible(message, activeClarification);

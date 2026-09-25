@@ -14,6 +14,12 @@ import {
   type TaskSessionState,
 } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
+import { t } from "@/lib/i18n";
+import { MessageRenderer } from "../message-renderer";
+
+const toastErrorMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/toast/sonner", () => ({ toast: { error: toastErrorMock } }));
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),
@@ -36,6 +42,7 @@ afterEach(() => {
 
 const CANCEL_TEST_ID = "recovery-cancel-retry-button";
 const TECHNICAL_DETAILS = "Technical details";
+const GIT_PUSH_FIX_TEST_ID = "git-push-error-fix";
 const RECOVERY_MESSAGE = "Agent encountered an error";
 const RESUME_LABEL = "Resume session";
 const RESUME_TEST_ID = "recovery-resume-button";
@@ -173,6 +180,91 @@ function renderAction(
     ),
   });
 }
+
+function legacyGitPushError(): Message {
+  return retryMessage({
+    id: "legacy-push-error",
+    type: "error",
+    content: "Git push failed: remote rejected the branch",
+    metadata: {
+      git_operation_error: true,
+      operation: "push",
+      error_output: "remote rejected the branch",
+      actions: [
+        {
+          type: "ws_request",
+          label: "Fix",
+          test_id: GIT_PUSH_FIX_TEST_ID,
+          params: { method: "agent.prompt", payload: { session_id: TEST_SESSION_ID } },
+        },
+      ],
+    },
+  } as Partial<Message>);
+}
+
+describe("ActionMessage Git push failure dismissal", () => {
+  it("renders Dismiss for legacy push failures and retries a failed save", async () => {
+    requestMock.mockRejectedValueOnce(new Error("write failed")).mockResolvedValueOnce({});
+    const message = legacyGitPushError();
+    const view = renderAction(message, "WAITING_FOR_INPUT");
+    const dismiss = screen.getByTestId("git-push-error-dismiss-button");
+
+    expect(screen.getByTestId(GIT_PUSH_FIX_TEST_ID).hasAttribute("disabled")).toBe(false);
+    expect(dismiss.hasAttribute("disabled")).toBe(false);
+    await act(async () => fireEvent.click(dismiss));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith(t("common:requestFailed")));
+    expect(screen.getByTestId(GIT_PUSH_FIX_TEST_ID).hasAttribute("disabled")).toBe(false);
+    expect(dismiss.hasAttribute("disabled")).toBe(false);
+
+    await act(async () => fireEvent.click(dismiss));
+    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
+    expect(requestMock).toHaveBeenNthCalledWith(1, "message.dismiss_git_push_error", {
+      message_id: "legacy-push-error",
+    });
+    expect(requestMock).toHaveBeenNthCalledWith(2, "message.dismiss_git_push_error", {
+      message_id: "legacy-push-error",
+    });
+
+    view.rerender(
+      <MessageRenderer
+        comment={{
+          ...message,
+          metadata: {
+            ...message.metadata,
+            git_operation_error_dismissed_at: "2026-09-25T10:00:00Z",
+          },
+        }}
+        isTaskDescription={false}
+      />,
+    );
+    expect(view.container.firstChild).toBeNull();
+  });
+
+  it.each([
+    ["other Git operation", { operation: "pull" }],
+    ["missing Git error marker", { git_operation_error: false }],
+  ])("does not add Dismiss to %s", (_name, metadata) => {
+    const message = legacyGitPushError();
+    renderAction(
+      {
+        ...message,
+        metadata: { ...message.metadata, ...metadata },
+      },
+      "WAITING_FOR_INPUT",
+    );
+
+    expect(screen.queryByTestId("git-push-error-dismiss-button")).toBeNull();
+    expect(screen.getByTestId(GIT_PUSH_FIX_TEST_ID)).toBeTruthy();
+  });
+
+  it("does not add Dismiss to an error-shaped action with another message type", () => {
+    const message = legacyGitPushError();
+    renderAction({ ...message, type: "status" }, "WAITING_FOR_INPUT");
+
+    expect(screen.queryByTestId("git-push-error-dismiss-button")).toBeNull();
+    expect(screen.getByTestId(GIT_PUSH_FIX_TEST_ID)).toBeTruthy();
+  });
+});
 
 /** Like renderAction, but captures the store so the test can drive live session
  *  state transitions (STARTING/RUNNING → WAITING_FOR_INPUT) the way a real
