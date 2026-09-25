@@ -392,6 +392,28 @@ func TestPrimaryRetryBoundaryDoesNotMoveEarlierWithOutOfOrderResponses(t *testin
 	}
 }
 
+func TestRateAdmissionRetryBoundaryKeepsActiveProviderSourceAfterFallback(t *testing.T) {
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "retry-source-after-fallback-user",
+	}, nil)
+	original := time.Now().UTC()
+	retryAt := original.Add(120 * time.Second)
+	tracker.Record(RateSnapshot{
+		Resource: ResourceCore, Limit: 5000, Remaining: 5000,
+		UpdatedAt: original.Add(61 * time.Second),
+	})
+	tracker.ObservePrimary(ResourceCore, retryAt, RetrySourceRetryAfter)
+
+	gotAt, gotSource := admission.retryBoundary(
+		ResourceCore, rateLimitBlockPrimary, original.Add(61*time.Second), time.Minute,
+	)
+	if !gotAt.Equal(retryAt) || gotSource != RetrySourceRetryAfter {
+		t.Fatalf("primary retry = (%s, %s), want (%s, %s)",
+			gotAt, gotSource, retryAt, RetrySourceRetryAfter)
+	}
+}
+
 func TestRateCoordinatorPrincipalKeysShareOnlyTheSameUpstreamIdentity(t *testing.T) {
 	coordinator := NewRateCoordinator(nil, nil)
 	first, _ := coordinator.coordinate("github.com", AuthPrincipal{
