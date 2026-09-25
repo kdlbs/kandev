@@ -67,8 +67,7 @@ test.describe("File tree inline rename", () => {
 
     const session = await setupTask(testPage, apiClient, seedData, "ft-rename", "FT Rename Enter");
 
-    const node = session.fileTreeNode("rename-me.ts");
-    await expect(node).toBeVisible({ timeout: 15_000 });
+    const node = await session.fileTree.waitForFileTreeNode("rename-me.ts");
 
     const input = await startRenameViaContextMenu(testPage, node);
     // Select-all then type the new name (the hook also calls .select() but

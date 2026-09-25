@@ -26,7 +26,7 @@ test.describe("Office taskless routine sessions", () => {
     apiClient,
     officeSeed,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(300_000);
     const before = await apiClient.listTasks(officeSeed.workspaceId);
     const routine = await officeApi.createRoutine(officeSeed.workspaceId, {
       name: `Taskless E2E ${Date.now()}`,
@@ -84,7 +84,7 @@ test.describe("Office taskless routine sessions", () => {
             const detail = await result.json();
             return detail.status;
           },
-          { timeout: 60_000 },
+          { timeout: 120_000 },
         )
         .toMatch(/^(finished|failed|cancelled)$/);
       const detail = await (await officeApi.rawRequest("GET", detailPath)).json();

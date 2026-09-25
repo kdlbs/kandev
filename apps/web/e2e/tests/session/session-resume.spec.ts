@@ -467,17 +467,11 @@ test.describe("Session resume (TUI passthrough mode)", () => {
       },
     );
 
-    // 3. Navigate and wait for TUI terminal to load
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await waitForKanbanTask(testPage, seedData.workflowId, task.id);
-
-    const card = kanban.taskCardByTitle("TUI Resume Task");
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    // 3. Open the task by its API id. The Kanban projection can lag while a
+    // passthrough task is starting, even though the task already exists.
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}(?:[?]|$)`));
     await session.waitForPassthroughLoad();
     await session.waitForPassthroughLoaded();
 

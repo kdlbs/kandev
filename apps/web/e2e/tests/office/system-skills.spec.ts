@@ -49,11 +49,41 @@ test.describe("Office system skills", () => {
     officeApi,
     officeSeed,
   }) => {
-    const agent = (await officeApi.getAgent(officeSeed.agentId)) as {
+    // Onboarding returns before the asynchronous role-default backfill can
+    // finish. Prime the lazy system-skill sync, then read the agent until both
+    // persisted skill lists are populated.
+    await officeApi.listSkills(officeSeed.workspaceId);
+    const expectedDefaultSlugs = [
+      "kandev-protocol",
+      "memory",
+      "kandev-team-admin",
+      "kandev-task-ops",
+    ];
+    let agent: {
       desired_skills?: string;
       skill_ids?: string;
       role?: string;
-    };
+    } = {};
+    await expect
+      .poll(
+        async () => {
+          agent = (await officeApi.getAgent(officeSeed.agentId)) as typeof agent;
+          try {
+            const desiredSlugs = JSON.parse(agent.desired_skills ?? "[]");
+            const desiredIds = JSON.parse(agent.skill_ids ?? "[]");
+            return (
+              Array.isArray(desiredIds) &&
+              desiredIds.length > 0 &&
+              Array.isArray(desiredSlugs) &&
+              expectedDefaultSlugs.every((slug) => desiredSlugs.includes(slug))
+            );
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 30_000, message: "CEO role-default skills were not backfilled" },
+      )
+      .toBe(true);
     expect(agent.role).toBe("ceo");
 
     // After onboarding both `desired_skills` (legacy: slug array,
@@ -65,7 +95,7 @@ test.describe("Office system skills", () => {
     expect(desiredSlugs.length, "desired_skills").toBeGreaterThan(0);
     expect(desiredIds.length, "skill_ids").toBeGreaterThan(0);
 
-    for (const slug of ["kandev-protocol", "memory", "kandev-team-admin", "kandev-task-ops"]) {
+    for (const slug of expectedDefaultSlugs) {
       expect(desiredSlugs, `${slug} must be auto-attached to the CEO`).toContain(slug);
     }
   });

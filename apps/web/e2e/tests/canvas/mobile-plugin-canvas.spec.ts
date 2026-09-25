@@ -286,6 +286,12 @@ test.describe("Plugin-backed canvases on mobile", () => {
       expect(taskId).toBeTruthy();
 
       await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}(?:[?]|$)`));
+      // Re-open the task after the long guided-form flow. A backend recovery
+      // can leave the SPA shell mounted with no active task even though the
+      // task and session are durable, and publishing through that stale shell
+      // drops the MCP message.
+      await backend.ensureReady();
+      await testPage.goto(`/t/${taskId}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
       await session.waitForChatIdle({ timeout: 45_000 });
