@@ -133,6 +133,47 @@ describe("triggerBlobDownload", () => {
     expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:mock");
   });
 
+  it.each(["cancelled", "failed"] as const)(
+    "revokes a native Blob URL after %s feedback",
+    (status) => {
+      Object.defineProperty(window, "__TAURI_INTERNALS__", {
+        configurable: true,
+        value: { invoke: vi.fn(), transformCallback: vi.fn() },
+      });
+      spyAnchorClick();
+
+      triggerBlobDownload(new Blob([SAMPLE_BLOB_CONTENT]), SAMPLE_DOWNLOAD_NAME);
+      completeNativeBlobDownload({ status, url: "blob:mock", fileName: SAMPLE_DOWNLOAD_NAME });
+
+      expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:mock");
+    },
+  );
+
+  it("extends Blob lifetime while the native Save dialog is selecting a destination", () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: { invoke: vi.fn(), transformCallback: vi.fn() },
+    });
+    spyAnchorClick();
+
+    triggerBlobDownload(new Blob([SAMPLE_BLOB_CONTENT]), SAMPLE_DOWNLOAD_NAME);
+    vi.advanceTimersByTime(20 * 60 * 1_000);
+    completeNativeBlobDownload({
+      status: "selecting",
+      url: "blob:mock",
+      fileName: SAMPLE_DOWNLOAD_NAME,
+    });
+    vi.advanceTimersByTime(20 * 60 * 1_000);
+
+    expect(revokeObjectURLMock).not.toHaveBeenCalled();
+    completeNativeBlobDownload({
+      status: "cancelled",
+      url: "blob:mock",
+      fileName: SAMPLE_DOWNLOAD_NAME,
+    });
+    expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:mock");
+  });
+
   it("bounds cleanup if native completion feedback never arrives", () => {
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,

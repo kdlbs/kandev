@@ -18,6 +18,7 @@ import {
 } from "@/lib/desktop/external-links";
 import { requestNewTaskCreation } from "@/lib/desktop/new-task-request";
 import { createTauriEventTransport } from "@/lib/desktop/tauri-event-transport";
+import { listenForDesktopDownloadReady } from "@/lib/desktop/download-ready";
 import { desktopDownloadToastStatus } from "@/lib/desktop/download-feedback";
 import { completeNativeBlobDownload } from "@/lib/utils/native-blob-download";
 import { desktopUpdater } from "@/lib/desktop/updater-client";
@@ -108,6 +109,23 @@ export function DesktopCommandHost({
       stop?.();
     };
   }, [adapter, t]);
+
+  useEffect(() => {
+    if (!adapter.isAvailable()) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listenForDesktopDownloadReady(adapter).then(
+      (unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      },
+      () => undefined,
+    );
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, [adapter]);
 
   useEffect(() => subscribeDesktopExternalLinks(document, externalLinks), [externalLinks]);
 

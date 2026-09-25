@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
@@ -12,6 +12,7 @@ import { createDesktopV1Adapter } from "@/lib/desktop/adapter";
 import type { DesktopDownloadFeedback } from "@/lib/desktop/protocol";
 import { createTauriEventTransport } from "@/lib/desktop/tauri-event-transport";
 import { DIAGNOSTIC_BUNDLE_FILE_NAME } from "@/lib/desktop/download-feedback";
+import { triggerUrlDownload } from "@/lib/utils/file-download";
 import {
   buildDiagnosticBundleDownloadUrl,
   createDiagnosticBundle,
@@ -32,6 +33,7 @@ type ActiveDownload = { url: string; partial: boolean; warning: string; timeoutI
 type ActiveDownloadRef = { current: ActiveDownload | null };
 
 const DESKTOP_DOWNLOAD_FEEDBACK_TIMEOUT_MS = 10 * 60 * 1_000;
+const DESKTOP_DOWNLOAD_SELECTION_TIMEOUT_MS = 30 * 60 * 1_000;
 
 const DEFAULT_SOURCES: DiagnosticBundleSource[] = ["backend", "frontend"];
 const desktopDownloadAdapter = createDesktopV1Adapter(createTauriEventTransport());
@@ -51,7 +53,47 @@ export function LogViewer() {
   const [customizerSubmitting, setCustomizerSubmitting] = useState(false);
   const mounted = useRef(true);
   const activeDesktopDownload = useRef<ActiveDownload | null>(null);
-  const desktopDownloadListenerFailed = useRef(false);
+  const desktopDownloadListenerReady = useRef(false);
+  const desktopDownloadListenerPromise = useRef<Promise<boolean> | null>(null);
+  const desktopDownloadListenerStop = useRef<(() => void) | null>(null);
+  const desktopDownloadListenerGeneration = useRef(0);
+
+  const ensureDesktopDownloadListener = useCallback((): Promise<boolean> => {
+    if (!desktopDownloadAdapter.isAvailable()) return Promise.resolve(false);
+    if (desktopDownloadListenerReady.current) return Promise.resolve(true);
+    if (desktopDownloadListenerPromise.current) return desktopDownloadListenerPromise.current;
+    const generation = desktopDownloadListenerGeneration.current;
+    const promise = desktopDownloadAdapter
+      .listen("download", (feedback) => {
+        const active = activeDesktopDownload.current;
+        if (!mounted.current || !active || feedback.url !== active.url) return;
+        handleDesktopDownloadFeedback(feedback, active, {
+          setState,
+          setMessage,
+          t,
+          activeDesktopDownload,
+        });
+      })
+      .then(
+        (unlisten) => {
+          if (!mounted.current || generation !== desktopDownloadListenerGeneration.current) {
+            unlisten();
+            return false;
+          }
+          desktopDownloadListenerReady.current = true;
+          desktopDownloadListenerStop.current = unlisten;
+          return true;
+        },
+        () => false,
+      )
+      .finally(() => {
+        if (desktopDownloadListenerPromise.current === promise) {
+          desktopDownloadListenerPromise.current = null;
+        }
+      });
+    desktopDownloadListenerPromise.current = promise;
+    return promise;
+  }, [t]);
 
   useEffect(() => {
     mounted.current = true;
@@ -66,44 +108,16 @@ export function LogViewer() {
 
   useEffect(() => {
     if (!desktopDownloadAdapter.isAvailable()) return;
-    let disposed = false;
-    let stop: (() => void) | undefined;
-    desktopDownloadListenerFailed.current = false;
-    void desktopDownloadAdapter
-      .listen("download", (feedback) => {
-        const active = activeDesktopDownload.current;
-        if (!mounted.current || !active || feedback.url !== active.url) return;
-        handleDesktopDownloadFeedback(feedback, active, {
-          setState,
-          setMessage,
-          t,
-          activeDesktopDownload,
-        });
-      })
-      .then(
-        (unlisten) => {
-          if (disposed) unlisten();
-          else stop = unlisten;
-        },
-        () => {
-          if (disposed) return;
-          desktopDownloadListenerFailed.current = true;
-          const active = activeDesktopDownload.current;
-          if (active) {
-            failActiveDesktopDownload(active, {
-              activeDesktopDownload,
-              setState,
-              setMessage,
-              t,
-            });
-          }
-        },
-      );
+    desktopDownloadListenerGeneration.current += 1;
+    void ensureDesktopDownloadListener();
     return () => {
-      disposed = true;
-      stop?.();
+      desktopDownloadListenerGeneration.current += 1;
+      desktopDownloadListenerReady.current = false;
+      desktopDownloadListenerPromise.current = null;
+      desktopDownloadListenerStop.current?.();
+      desktopDownloadListenerStop.current = null;
     };
-  }, [t]);
+  }, [ensureDesktopDownloadListener]);
 
   useEffect(() => {
     if (!customizerOpen || !selectedSources.includes("acp") || sessionsLoaded) return;
@@ -133,12 +147,13 @@ export function LogViewer() {
       if (job.status !== "ready" && job.status !== "partial") {
         throw new Error(job.warnings?.[0] ?? t("settings:diagnosticBundlePrepareError"));
       }
-      startBundleDownload(job, buildDiagnosticBundleDownloadUrl(job.id), {
+      await startBundleDownload(job, buildDiagnosticBundleDownloadUrl(job.id), {
         activeDesktopDownload,
         setState,
         setMessage,
         t,
-        desktopDownloadListenerFailed,
+        ensureDesktopDownloadListener,
+        isMounted: () => mounted.current,
       });
     } catch (error) {
       if (!mounted.current) return;
@@ -341,12 +356,10 @@ function failActiveDesktopDownload(active: ActiveDownload, actions: DesktopDownl
 function armDesktopDownloadFeedbackTimeout(
   active: ActiveDownload,
   actions: DesktopDownloadActions,
+  timeout = DESKTOP_DOWNLOAD_FEEDBACK_TIMEOUT_MS,
 ): void {
   if (active.timeoutId !== undefined) window.clearTimeout(active.timeoutId);
-  active.timeoutId = window.setTimeout(
-    () => failActiveDesktopDownload(active, actions),
-    DESKTOP_DOWNLOAD_FEEDBACK_TIMEOUT_MS,
-  );
+  active.timeoutId = window.setTimeout(() => failActiveDesktopDownload(active, actions), timeout);
 }
 
 function handleDesktopDownloadFeedback(
@@ -354,6 +367,11 @@ function handleDesktopDownloadFeedback(
   active: ActiveDownload,
   actions: DesktopDownloadActions,
 ): void {
+  if (feedback.status === "selecting") {
+    armDesktopDownloadFeedbackTimeout(active, actions, DESKTOP_DOWNLOAD_SELECTION_TIMEOUT_MS);
+    actions.setMessage(actions.t("settings:diagnosticSavePending"));
+    return;
+  }
   if (feedback.status === "started") {
     armDesktopDownloadFeedbackTimeout(active, actions);
     actions.setMessage(actions.t("settings:diagnosticSavePending"));
@@ -373,10 +391,10 @@ function handleDesktopDownloadFeedback(
       withPartialWarning(actions.t("settings:diagnosticSaveFailed"), active.warning),
     );
   }
-  actions.activeDesktopDownload.current = null;
+  clearActiveDesktopDownload(actions.activeDesktopDownload);
 }
 
-function startBundleDownload(
+async function startBundleDownload(
   job: DiagnosticBundleJob,
   downloadUrl: string,
   actions: {
@@ -384,10 +402,18 @@ function startBundleDownload(
     setState: (state: ViewState) => void;
     setMessage: (message: string) => void;
     t: (key: string) => string;
-    desktopDownloadListenerFailed: { current: boolean };
+    ensureDesktopDownloadListener: () => Promise<boolean>;
+    isMounted: () => boolean;
   },
-): void {
+): Promise<void> {
   if (desktopDownloadAdapter.isAvailable()) {
+    if (!(await actions.ensureDesktopDownloadListener())) {
+      clearActiveDesktopDownload(actions.activeDesktopDownload);
+      actions.setState("error");
+      actions.setMessage(actions.t("settings:diagnosticSaveFailed"));
+      return;
+    }
+    if (!actions.isMounted()) return;
     const active: ActiveDownload = {
       url: new URL(downloadUrl, window.location.href).href,
       partial: job.status === "partial",
@@ -397,15 +423,12 @@ function startBundleDownload(
     armDesktopDownloadFeedbackTimeout(active, actions);
     actions.setState("saving");
     actions.setMessage(actions.t("settings:diagnosticSavePending"));
-    if (actions.desktopDownloadListenerFailed.current) {
-      failActiveDesktopDownload(active, actions);
-    }
   } else {
     clearActiveDesktopDownload(actions.activeDesktopDownload);
     actions.setState(job.status === "partial" ? "partial" : "idle");
     actions.setMessage(bundleMessage(job, actions.t));
   }
-  triggerDownload(downloadUrl);
+  triggerUrlDownload(downloadUrl, DIAGNOSTIC_BUNDLE_FILE_NAME);
 }
 
 function bundleWarning(job: DiagnosticBundleJob, t: (key: string) => string): string {
@@ -425,15 +448,6 @@ function bundleMessage(
   return job.warnings?.length
     ? t("settings:diagnosticPartialZipDownloading", { warnings: job.warnings.join(" ") })
     : t("settings:diagnosticPartialZipUnavailable");
-}
-
-function triggerDownload(url: string): void {
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = DIAGNOSTIC_BUNDLE_FILE_NAME;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
 }
 
 function delay(milliseconds: number): Promise<void> {

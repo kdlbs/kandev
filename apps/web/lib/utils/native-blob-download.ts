@@ -13,7 +13,7 @@ export function retainNativeBlobDownload(url: string): boolean {
 }
 
 export function completeNativeBlobDownload(feedback: DesktopDownloadFeedback): void {
-  if (feedback.status === "started") {
+  if (feedback.status === "selecting" || feedback.status === "started") {
     if (pendingNativeBlobDownloads.has(feedback.url)) armNativeBlobDownloadCleanup(feedback.url);
     return;
   }

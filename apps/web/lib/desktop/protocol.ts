@@ -10,12 +10,18 @@ export const DESKTOP_NATIVE_EVENTS = {
   "new-task": desktopEvent("new-task"),
   "check-for-updates": desktopEvent("check-for-updates"),
   download: desktopEvent("download"),
+  "download-ready": desktopEvent("download-ready"),
 } as const;
 
 export type DesktopEventName = keyof typeof DESKTOP_NATIVE_EVENTS;
 
 export type DesktopDownloadFeedback = {
-  status: "started" | "saved" | "cancelled" | "failed";
+  status: "selecting" | "started" | "saved" | "cancelled" | "failed";
+  url: string;
+  fileName: string;
+};
+
+export type DesktopDownloadReady = {
   url: string;
   fileName: string;
 };
@@ -26,6 +32,7 @@ export type DesktopEventPayloads = {
   "new-task": undefined;
   "check-for-updates": undefined;
   download: DesktopDownloadFeedback;
+  "download-ready": DesktopDownloadReady;
 };
 
 export const DESKTOP_NATIVE_COMMANDS = {

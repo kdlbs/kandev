@@ -37,8 +37,9 @@ the original response bytes and report completion or failure.
 
 ## Acceptance
 
-1. An owned HTTP or Blob download opens a parented Save panel with the
-   suggested filename and writes exact bytes only after selection.
+1. An owned HTTP or Blob download opens a parented Save panel asynchronously
+   with the suggested filename, then retries the same URL and writes exact
+   bytes only after selection.
 2. Cancel, untrusted origin, dialog error, and failed transfer do not claim
    success and leave the user able to retry.
 3. Existing desktop startup, capabilities, and folder selection still work.
@@ -81,8 +82,8 @@ None.
 
 ## Risks
 
-The download callback and native dialog must cooperate on each supported
-WebView. macOS may omit the finished path even after success.
+The asynchronous download callback and native dialog must cooperate on each
+supported WebView. macOS may omit the finished path even after success.
 
 ## Parallelism
 
@@ -96,14 +97,18 @@ WebView. macOS may omit the finished path even after success.
 
 ## Results
 
-- `cargo test --features desktop-runtime downloads::tests`: 7 download tests passed.
-- `cargo test --features desktop-runtime`: all 73 Rust tests passed.
-- `cargo check --features desktop-runtime --bin kandev-desktop`: passed.
+- `cargo test --features desktop-runtime downloads::tests`: all 13 download tests passed.
+- `cargo test --features desktop-runtime`: all 79 Rust tests passed.
+- `cargo fmt --check`: passed.
+- `cargo audit`: passed after updating `rustls` to 0.23.45; eight existing allowed warnings remain.
 - `node --test e2e/desktop-launch-smoke.test.mjs`: all 9 tests passed.
 - `pnpm --filter @kandev/desktop e2e`: Linux desktop build and startup smoke passed.
 - The startup smoke verifies backend readiness and WebView navigation. It does
   not automate the native Save dialog or verify downloaded bytes.
 - A packaged macOS Save/Cancel and HTTP/Blob byte check is still required. This
   Linux host cannot verify WKWebView dialog behavior or saved-file hashes.
+- The Save dialog is asynchronous on the WebView main thread. After selection,
+  the app retries the same URL with the selected destination; Rust tests cover
+  selection, retry, expiry, cancellation, and completion correlation.
 - Status remains blocked until packaged native Save/Cancel and byte-preservation
   evidence is recorded. AC-DESKTOP-NATIVE-DOWNLOADS-001.2 is unverified.

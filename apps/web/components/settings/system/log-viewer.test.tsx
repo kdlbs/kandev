@@ -1,7 +1,8 @@
 import { StrictMode } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TauriEventInternals } from "@/lib/desktop/tauri-event-transport";
+import type { DesktopDownloadFeedback } from "@/lib/desktop/protocol";
 import { LogViewer } from "./log-viewer";
 
 const createMock = vi.fn();
@@ -12,6 +13,7 @@ const DOWNLOAD_URL = "/download/bundle-1";
 const LISTEN_COMMAND_SUFFIX = "|listen";
 const DIAGNOSTIC_SAVE_PENDING = "Choose where to save the diagnostic ZIP.";
 const DIAGNOSTIC_SAVE_FAILED = "The diagnostic ZIP could not be saved. Try again.";
+const DIAGNOSTIC_BUNDLE_FILE_NAME = "kandev-diagnostic-logs.zip";
 const CUSTOMIZE_BUNDLE_TEST_ID = "customize-diagnostic-bundle";
 const CREATE_BUNDLE_TEST_ID = "create-custom-diagnostic-bundle";
 const BUNDLE_STATUS_TEST_ID = "diagnostic-bundle-status";
@@ -46,6 +48,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   if (originalTauriInternals) {
     Object.defineProperty(window, "__TAURI_INTERNALS__", originalTauriInternals);
   } else {
@@ -54,12 +57,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function installDesktopEvents({ failListener = false } = {}) {
+function installDesktopEvents({ failListener = false, failListenerAttempts = 0 } = {}) {
   let onNativeEvent: ((event: { payload: unknown }) => void) | undefined;
+  let failedListenerAttempts = 0;
+  let listenerAttempts = 0;
   const internals: TauriEventInternals = {
     invoke: vi.fn(async (command: string) => {
-      if (failListener && command.endsWith(LISTEN_COMMAND_SUFFIX))
-        throw new Error("listener failed");
+      if (command.endsWith(LISTEN_COMMAND_SUFFIX)) {
+        listenerAttempts += 1;
+        if (failListener || failedListenerAttempts < failListenerAttempts) {
+          failedListenerAttempts += 1;
+          throw new Error("listener failed");
+        }
+      }
       return command.endsWith(LISTEN_COMMAND_SUFFIX) ? 41 : undefined;
     }),
     transformCallback: vi.fn((callback) => {
@@ -71,10 +81,14 @@ function installDesktopEvents({ failListener = false } = {}) {
   return {
     internals,
     emit: (payload: unknown) => onNativeEvent?.({ payload }),
+    listenerAttempts: () => listenerAttempts,
   };
 }
 
-async function mountDesktopLogViewer(options?: { failListener?: boolean }) {
+async function mountDesktopLogViewer(options?: {
+  failListener?: boolean;
+  failListenerAttempts?: number;
+}) {
   createMock.mockResolvedValue({ id: "bundle-1", status: "ready", warnings: [] });
   const desktop = installDesktopEvents(options);
   render(<LogViewer />);
@@ -112,7 +126,7 @@ describe("LogViewer download feedback", () => {
     desktop.emit({
       status: "saved",
       url: new URL(DOWNLOAD_URL, window.location.href).href,
-      fileName: "kandev-diagnostic-logs.zip",
+      fileName: DIAGNOSTIC_BUNDLE_FILE_NAME,
     });
 
     expect(await screen.findByText("The diagnostic ZIP was saved.")).toBeTruthy();
@@ -124,7 +138,7 @@ describe("LogViewer download feedback", () => {
     desktop.emit({
       status: "cancelled",
       url: new URL(DOWNLOAD_URL, window.location.href).href,
-      fileName: "kandev-diagnostic-logs.zip",
+      fileName: DIAGNOSTIC_BUNDLE_FILE_NAME,
     });
 
     await waitFor(() => expect(screen.queryByTestId(BUNDLE_STATUS_TEST_ID)).toBeNull());
@@ -137,7 +151,7 @@ describe("LogViewer download feedback", () => {
     desktop.emit({
       status: "failed",
       url: new URL(DOWNLOAD_URL, window.location.href).href,
-      fileName: "kandev-diagnostic-logs.zip",
+      fileName: DIAGNOSTIC_BUNDLE_FILE_NAME,
     });
 
     const status = await screen.findByTestId(BUNDLE_STATUS_TEST_ID);
@@ -164,14 +178,60 @@ describe("LogViewer download feedback", () => {
     expect(screen.getByTestId(CUSTOMIZE_BUNDLE_TEST_ID).hasAttribute("disabled")).toBe(false);
   });
 
-  it("reports a retryable error if the native result listener fails", async () => {
-    await mountDesktopLogViewer({ failListener: true });
+  it("does not start the transfer when feedback listener setup keeps failing", async () => {
+    const desktop = await mountDesktopLogViewer({ failListener: true });
 
     clickDesktopDownload();
 
     const status = await screen.findByTestId(BUNDLE_STATUS_TEST_ID);
     expect(status.textContent).toContain(DIAGNOSTIC_SAVE_FAILED);
     expect(screen.getByTestId(CUSTOMIZE_BUNDLE_TEST_ID).hasAttribute("disabled")).toBe(false);
+    expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
+    expect(desktop.listenerAttempts()).toBe(2);
+  });
+
+  it("retries listener setup before starting a download after a transient listener failure", async () => {
+    const desktop = await mountDesktopLogViewer({ failListenerAttempts: 1 });
+
+    clickDesktopDownload();
+
+    await waitFor(() => expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce());
+    expect(desktop.listenerAttempts()).toBe(2);
+
+    desktop.emit({
+      status: "saved",
+      url: new URL(DOWNLOAD_URL, window.location.href).href,
+      fileName: DIAGNOSTIC_BUNDLE_FILE_NAME,
+    });
+    expect(await screen.findByText("The diagnostic ZIP was saved.")).toBeTruthy();
+  });
+
+  it("does not time out while the native Save dialog is open", async () => {
+    const desktop = await prepareDesktopDownload();
+    vi.useFakeTimers();
+
+    desktop.emit({
+      status: "selecting",
+      url: new URL(DOWNLOAD_URL, window.location.href).href,
+      fileName: DIAGNOSTIC_BUNDLE_FILE_NAME,
+    } as DesktopDownloadFeedback);
+    act(() => vi.advanceTimersByTime(15 * 60 * 1_000));
+
+    expect(screen.getByText(DIAGNOSTIC_SAVE_PENDING)).toBeTruthy();
+    expect(screen.getByTestId(CUSTOMIZE_BUNDLE_TEST_ID).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("clears its result watchdog after a terminal native event", async () => {
+    const desktop = await prepareDesktopDownload();
+    const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+
+    desktop.emit({
+      status: "saved",
+      url: new URL(DOWNLOAD_URL, window.location.href).href,
+      fileName: DIAGNOSTIC_BUNDLE_FILE_NAME,
+    });
+
+    expect(clearTimeoutSpy).toHaveBeenCalled();
   });
 });
 

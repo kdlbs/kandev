@@ -1,13 +1,24 @@
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 use url::Url;
 
 #[derive(Clone, Default)]
 pub struct DownloadTracker {
-    pending: Arc<Mutex<HashMap<String, PathBuf>>>,
+    pending: Arc<Mutex<HashMap<String, PendingDownload>>>,
+    next_attempt: Arc<AtomicU64>,
+}
+
+#[derive(Clone)]
+enum PendingDownload {
+    Selecting { attempt: u64 },
+    Selected { attempt: u64, destination: PathBuf },
+    Transferring { destination: PathBuf },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,7 +28,11 @@ pub struct DownloadCompletion {
 }
 
 impl DownloadTracker {
+    #[cfg(test)]
     pub fn begin(&self, url: &Url, destination: PathBuf) -> bool {
+        if destination.as_os_str().is_empty() {
+            return false;
+        }
         let mut pending = self
             .pending
             .lock()
@@ -25,26 +40,113 @@ impl DownloadTracker {
         if pending.contains_key(url.as_str()) {
             return false;
         }
-        pending.insert(url.as_str().to_string(), destination);
+        pending.insert(
+            url.as_str().to_string(),
+            PendingDownload::Transferring { destination },
+        );
         true
     }
 
-    pub fn contains(&self, url: &Url) -> bool {
-        self.pending
+    pub fn begin_selection(&self, url: &Url) -> Option<u64> {
+        let mut pending = self
+            .pending
             .lock()
-            .expect("download tracker mutex poisoned")
-            .contains_key(url.as_str())
+            .expect("download tracker mutex poisoned");
+        if pending.contains_key(url.as_str()) {
+            return None;
+        }
+        let attempt = self.next_attempt.fetch_add(1, Ordering::Relaxed);
+        pending.insert(
+            url.as_str().to_string(),
+            PendingDownload::Selecting { attempt },
+        );
+        Some(attempt)
+    }
+
+    pub fn select_destination(&self, url: &Url, attempt: u64, destination: PathBuf) -> bool {
+        if destination.as_os_str().is_empty() {
+            return false;
+        }
+        let mut pending = self
+            .pending
+            .lock()
+            .expect("download tracker mutex poisoned");
+        let Some(download) = pending.get_mut(url.as_str()) else {
+            return false;
+        };
+        if !matches!(download, PendingDownload::Selecting { attempt: current } if *current == attempt)
+        {
+            return false;
+        }
+        *download = PendingDownload::Selected {
+            attempt,
+            destination,
+        };
+        true
+    }
+
+    pub fn cancel_selection(&self, url: &Url, attempt: u64) -> bool {
+        let mut pending = self
+            .pending
+            .lock()
+            .expect("download tracker mutex poisoned");
+        let is_attempt = matches!(
+            pending.get(url.as_str()),
+            Some(PendingDownload::Selecting { attempt: current }) if *current == attempt
+        );
+        if is_attempt {
+            pending.remove(url.as_str());
+        }
+        is_attempt
+    }
+
+    pub fn expire_selection(&self, url: &Url, attempt: u64) -> bool {
+        let mut pending = self
+            .pending
+            .lock()
+            .expect("download tracker mutex poisoned");
+        let is_attempt = matches!(
+            pending.get(url.as_str()),
+            Some(PendingDownload::Selecting { attempt: current })
+                | Some(PendingDownload::Selected { attempt: current, .. })
+                if *current == attempt
+        );
+        if is_attempt {
+            pending.remove(url.as_str());
+        }
+        is_attempt
+    }
+
+    pub fn start_selected_transfer(&self, url: &Url) -> Option<PathBuf> {
+        let mut pending = self
+            .pending
+            .lock()
+            .expect("download tracker mutex poisoned");
+        let download = pending.get_mut(url.as_str())?;
+        let PendingDownload::Selected { destination, .. } = download else {
+            return None;
+        };
+        let destination = destination.clone();
+        *download = PendingDownload::Transferring {
+            destination: destination.clone(),
+        };
+        Some(destination)
     }
 
     pub fn finish(&self, url: &Url, success: bool) -> Option<DownloadCompletion> {
-        self.pending
+        let mut pending = self
+            .pending
             .lock()
-            .expect("download tracker mutex poisoned")
-            .remove(url.as_str())
-            .map(|destination| DownloadCompletion {
-                destination,
-                success,
-            })
+            .expect("download tracker mutex poisoned");
+        let destination = match pending.get(url.as_str())? {
+            PendingDownload::Transferring { destination } => destination.clone(),
+            _ => return None,
+        };
+        pending.remove(url.as_str());
+        Some(DownloadCompletion {
+            destination,
+            success,
+        })
     }
 
     #[cfg(test)]
@@ -95,16 +197,20 @@ mod runtime {
     use super::{is_owned_download, safe_suggested_filename, DownloadTracker};
     use crate::backend::BackendState;
     use serde::Serialize;
+    use std::time::Duration;
     use tauri::{webview::DownloadEvent, AppHandle, Emitter, Manager, WebviewWindow};
     use tauri_plugin_dialog::DialogExt;
     use url::Url;
 
     const MAIN_WINDOW_LABEL: &str = "main";
     const DOWNLOAD_FEEDBACK_EVENT: &str = "kandev-desktop-v1-download";
+    const DOWNLOAD_READY_EVENT: &str = "kandev-desktop-v1-download-ready";
+    const SELECTION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
     #[derive(Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     enum DownloadStatus {
+        Selecting,
         Started,
         Saved,
         Cancelled,
@@ -119,11 +225,28 @@ mod runtime {
         file_name: String,
     }
 
+    #[derive(Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct DownloadReady {
+        url: String,
+        file_name: String,
+    }
+
     fn emit_feedback(window: &WebviewWindow, url: &Url, file_name: &str, status: DownloadStatus) {
         let _ = window.emit(
             DOWNLOAD_FEEDBACK_EVENT,
             DownloadFeedback {
                 status,
+                url: url.as_str().to_string(),
+                file_name: file_name.to_string(),
+            },
+        );
+    }
+
+    fn emit_download_ready(window: &WebviewWindow, url: &Url, file_name: &str) {
+        let _ = window.emit(
+            DOWNLOAD_READY_EVENT,
+            DownloadReady {
                 url: url.as_str().to_string(),
                 file_name: file_name.to_string(),
             },
@@ -160,36 +283,85 @@ mod runtime {
                     emit_feedback(&window, &url, &file_name, DownloadStatus::Failed);
                     return false;
                 }
-                if tracker.contains(&url) {
-                    emit_feedback(&window, &url, &file_name, DownloadStatus::Failed);
-                    return false;
+                if let Some(selected_path) = tracker.start_selected_transfer(&url) {
+                    *destination = selected_path;
+                    emit_feedback(&window, &url, &file_name, DownloadStatus::Started);
+                    return true;
                 }
 
-                let Some(selected) = app
-                    .dialog()
+                let Some(attempt) = tracker.begin_selection(&url) else {
+                    emit_feedback(&window, &url, &file_name, DownloadStatus::Failed);
+                    return false;
+                };
+                emit_feedback(&window, &url, &file_name, DownloadStatus::Selecting);
+                let callback_window = window.clone();
+                let callback_tracker = tracker.clone();
+                let callback_url = url.clone();
+                let callback_file_name = file_name.clone();
+                let timeout_tracker = tracker.clone();
+                let timeout_url = url.clone();
+                let timeout_window = window.clone();
+                let timeout_file_name = file_name.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(SELECTION_TIMEOUT);
+                    if timeout_tracker.expire_selection(&timeout_url, attempt) {
+                        emit_feedback(
+                            &timeout_window,
+                            &timeout_url,
+                            &timeout_file_name,
+                            DownloadStatus::Failed,
+                        );
+                    }
+                });
+                app.dialog()
                     .file()
                     .set_file_name(&file_name)
                     .set_parent(&window)
-                    .blocking_save_file()
-                else {
-                    emit_feedback(&window, &url, &file_name, DownloadStatus::Cancelled);
-                    return false;
-                };
-                let selected_path = match selected.into_path() {
-                    Ok(path) => path,
-                    Err(_) => {
-                        emit_feedback(&window, &url, &file_name, DownloadStatus::Failed);
-                        return false;
-                    }
-                };
-                if !tracker.begin(&url, selected_path.clone()) {
-                    emit_feedback(&window, &url, &file_name, DownloadStatus::Failed);
-                    return false;
-                }
-
-                *destination = selected_path;
-                emit_feedback(&window, &url, &file_name, DownloadStatus::Started);
-                true
+                    .save_file(move |selected| {
+                        let Some(selected) = selected else {
+                            callback_tracker.cancel_selection(&callback_url, attempt);
+                            emit_feedback(
+                                &callback_window,
+                                &callback_url,
+                                &callback_file_name,
+                                DownloadStatus::Cancelled,
+                            );
+                            return;
+                        };
+                        let selected_path = match selected.into_path() {
+                            Ok(path) => path,
+                            Err(_) => {
+                                callback_tracker.cancel_selection(&callback_url, attempt);
+                                emit_feedback(
+                                    &callback_window,
+                                    &callback_url,
+                                    &callback_file_name,
+                                    DownloadStatus::Failed,
+                                );
+                                return;
+                            }
+                        };
+                        if callback_tracker.select_destination(
+                            &callback_url,
+                            attempt,
+                            selected_path,
+                        ) {
+                            emit_download_ready(
+                                &callback_window,
+                                &callback_url,
+                                &callback_file_name,
+                            );
+                        } else {
+                            callback_tracker.cancel_selection(&callback_url, attempt);
+                            emit_feedback(
+                                &callback_window,
+                                &callback_url,
+                                &callback_file_name,
+                                DownloadStatus::Failed,
+                            );
+                        }
+                    });
+                false
             }
             DownloadEvent::Finished { url, success, .. } => {
                 if let Some(completion) = tracker.finish(&url, success) {
@@ -305,6 +477,79 @@ mod tests {
             })
         );
         assert!(tracker.begin(&url, selected));
+    }
+
+    #[test]
+    fn rejects_a_transfer_without_a_selected_destination() {
+        let tracker = DownloadTracker::default();
+        let url = Url::parse("http://127.0.0.1:38430/export.zip").unwrap();
+
+        assert!(!tracker.begin(&url, PathBuf::new()));
+        assert_eq!(tracker.pending_count(), 0);
+    }
+
+    #[test]
+    fn rejects_an_empty_save_dialog_destination() {
+        let tracker = DownloadTracker::default();
+        let url = Url::parse("http://127.0.0.1:38430/export.zip").unwrap();
+        let attempt = tracker.begin_selection(&url).unwrap();
+
+        assert!(!tracker.select_destination(&url, attempt, PathBuf::new()));
+        assert!(tracker.cancel_selection(&url, attempt));
+        assert_eq!(tracker.pending_count(), 0);
+    }
+
+    #[test]
+    fn native_download_hook_uses_the_nonblocking_save_dialog_api() {
+        let source = include_str!("downloads.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap();
+
+        assert!(source.contains(".save_file("));
+        assert!(!source.contains(".blocking_save_file("));
+    }
+
+    #[test]
+    fn selected_destination_is_used_for_the_retried_request_once() {
+        let tracker = DownloadTracker::default();
+        let url = Url::parse("http://127.0.0.1:38430/export.zip").unwrap();
+        let destination = PathBuf::from("/tmp/export.zip");
+        let attempt = tracker.begin_selection(&url).unwrap();
+
+        assert!(tracker.select_destination(&url, attempt, destination.clone()));
+        assert_eq!(
+            tracker.start_selected_transfer(&url),
+            Some(destination.clone())
+        );
+        assert_eq!(tracker.start_selected_transfer(&url), None);
+        assert_eq!(tracker.finish(&url, true).unwrap().destination, destination);
+    }
+
+    #[test]
+    fn cancelled_and_expired_selections_release_the_url_for_retry() {
+        let tracker = DownloadTracker::default();
+        let url = Url::parse("http://127.0.0.1:38430/export.zip").unwrap();
+        let cancelled = tracker.begin_selection(&url).unwrap();
+        assert!(tracker.cancel_selection(&url, cancelled));
+
+        let expired = tracker.begin_selection(&url).unwrap();
+        assert!(tracker.select_destination(&url, expired, PathBuf::from("/tmp/export.zip")));
+        assert!(tracker.expire_selection(&url, expired));
+        assert_eq!(tracker.pending_count(), 0);
+        assert!(tracker.begin_selection(&url).is_some());
+    }
+
+    #[test]
+    fn an_old_selection_timeout_cannot_remove_a_newer_retry() {
+        let tracker = DownloadTracker::default();
+        let url = Url::parse("http://127.0.0.1:38430/export.zip").unwrap();
+        let expired = tracker.begin_selection(&url).unwrap();
+        assert!(tracker.cancel_selection(&url, expired));
+
+        let retry = tracker.begin_selection(&url).unwrap();
+        assert!(!tracker.expire_selection(&url, expired));
+        assert!(tracker.select_destination(&url, retry, PathBuf::from("/tmp/retry.zip")));
     }
 
     #[test]

@@ -27,7 +27,10 @@ downloads remain usable.
 ## In scope
 
 - Correct direct Blob export callers with immediate URL revocation.
-- Connect desktop save results to the log-bundle status and retry state.
+- Register Logs feedback before starting the HTTP request, pause the transfer
+  while the native Save panel is open, and report bounded retryable failures.
+- Keep diagnostic toast suppression scoped to the Logs operation while its
+  page is active.
 - Add focused browser and phone download coverage for the affected paths.
 
 ## Out of scope
@@ -107,15 +110,19 @@ an anchor was clicked. Avoid leaking object URLs after failed attempts.
 
 ## Results
 
-- `pnpm exec vitest run components/settings/system/log-viewer.test.tsx lib/utils/file-download.test.ts lib/desktop/download-feedback.test.ts`: 17 tests passed. Coverage includes delayed native Blob initiation, terminal-event cleanup, bounded cleanup, missing Logs results, listener failure, and an unrelated export using the diagnostic filename.
-- Targeted ESLint and `pnpm run typecheck` passed.
+- `pnpm exec vitest run components/settings/system/log-viewer.test.tsx lib/utils/file-download.test.ts lib/desktop/download-feedback.test.ts lib/desktop/download-ready.test.ts`: all 25 tests passed. Coverage includes delayed native Blob initiation, Save-panel lifetime, terminal cleanup, bounded cleanup, no-result recovery, listener failure and retry, ready-URL replay, route-aware feedback, and an unrelated export using the diagnostic filename.
+- `pnpm exec vitest run lib/desktop/external-links-usage.test.ts`: all 5 ownership assertions passed after changing the Logs download helper.
+- Targeted ESLint, `pnpm run typecheck`, and the production Vite build passed.
 - `pnpm run i18n:check` and `pnpm run i18n:ratchet` passed.
-- `pnpm e2e:run tests/system/logs-page.spec.ts`: all 3 browser tests passed.
-- `pnpm e2e:run --project mobile-chrome tests/system/mobile-logs-bundle.spec.ts`: all 3 mobile tests passed.
+- `pnpm e2e:run tests/system/logs-page.spec.ts`: all 3 browser tests passed after a fresh production build.
+- `pnpm e2e:run --project mobile-chrome tests/system/mobile-logs-bundle.spec.ts`: all 3 mobile tests passed after a fresh production build.
 - `node --test scripts/validate-public-docs.test.mjs`: all 62 tests passed; the public-doc validator accepted all 47 pages.
 - `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all` passed.
 - The Linux desktop package built and its startup smoke passed. It does not
   automate the native Save dialog or verify downloaded bytes.
+- The diagnostic listener is established before the HTTP anchor is clicked.
+  Save-panel selection and transfer completion have separate bounded timeouts;
+  a missing listener or terminal event leaves the export retryable.
 - Packaged macOS Save/Cancel and byte-preservation evidence remains required
   before AC-001.2 is verified. This Linux host cannot run that WKWebView check.
 - Status remains blocked on the same native transfer gate as Task 01. The

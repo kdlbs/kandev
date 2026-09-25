@@ -65,3 +65,12 @@ export function triggerFileDownload({
 export function triggerBlobDownload(blob: Blob, fileName: string): void {
   downloadBlobViaAnchor(blob, fileName);
 }
+
+export function triggerUrlDownload(url: string, fileName: string): void {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}

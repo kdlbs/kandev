@@ -27,9 +27,10 @@ browser and phone continue using their normal download behavior.
 
 `apps/desktop/src-tauri/src/main.rs` constructs the configured main WebView
 with a download callback before navigation. The callback checks the owned
-origin, opens the native Save panel, and reports cancellation or transfer
-completion. The SPA shows diagnostic-bundle results and global results for
-other in-app downloads.
+origin and uses the non-blocking native Save dialog. After selection, the SPA
+retries the same URL through the WebView with the selected destination. The
+shell reports selection, cancellation, and transfer completion. The SPA shows
+diagnostic-bundle results and global results for other in-app downloads.
 
 The Linux desktop smoke checks startup and readiness only. It does not automate
 the native Save panel or compare downloaded bytes. AC-DESKTOP-NATIVE-DOWNLOADS-001.2
@@ -46,12 +47,15 @@ visibility, capabilities, and existing startup handoff.
 For `DownloadEvent::Requested`, check that the current WebView is the owned,
 health-verified Kandev origin. Accept only a download from that same origin or
 an object URL created by that origin. Use the engine's suggested destination
-only for a safe suggested filename, then show the existing native dialog
-plugin's Save panel, parented to the main window. On selection, set the
-callback's absolute destination to the selected path and allow the WebView to
-transfer its original response bytes. On cancellation, reject the request.
-Do not accept a caller-supplied path or a new general filesystem command from
-the SPA. The backend keeps enforcing authentication and authorization for HTTP
+only for a safe suggested filename. Reserve the URL and open the existing
+native dialog plugin's Save panel asynchronously, parented to the main window;
+reject this first request while the user chooses a destination. On selection,
+record the absolute destination and notify the SPA to retry the same URL. For
+that retry, set the callback's destination and allow the WebView to transfer
+the original response bytes. On cancellation, release the reservation and
+reject the request. Expire abandoned selections after a bounded interval. Do
+not accept a caller-supplied path or a new general filesystem command from the
+SPA. The backend keeps enforcing authentication and authorization for HTTP
 downloads.
 
 For `DownloadEvent::Finished`, treat `success` as authoritative. On macOS the
@@ -80,9 +84,13 @@ updater's signed package transfer or links opened in the system browser.
 
 ## Failure and recovery
 
-If the Save panel cannot open or a transfer fails, cancel or report the attempt
-without success copy and leave the action retryable. Never silently write to a
-fallback directory when the user cancelled. Test the browser path separately
+Register the diagnostic result listener before triggering its download. If
+listener setup fails, do not start the request; show a retryable error. A
+missing terminal result has a bounded transfer timeout. While the Save panel is
+open, use a longer bounded selection timeout so a user taking time to choose a
+location does not receive a premature failure. If the user cancels or a
+transfer fails, release the reservation and object URL without success copy.
+Never silently write to a fallback directory. Test the browser path separately
 to catch regressions in HTTP and Blob downloads.
 
 ## Validation

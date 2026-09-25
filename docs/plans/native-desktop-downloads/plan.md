@@ -43,10 +43,12 @@ verify that the reported click saves bytes to the selected destination.
 
 Register `on_download` while constructing the configured main WebView in
 `apps/desktop/src-tauri/src/main.rs`. Add a small desktop download module for
-URL/origin decisions, safe suggested names, Save dialog result, completion
-correlation, and failure signaling. Use the installed `tauri-plugin-dialog`;
-keep bytes in the WebView's transfer path. Preserve the existing startup and
-folder-picker boundaries.
+URL/origin decisions, safe suggested names, asynchronous Save dialog
+selection, retry correlation, completion correlation, and failure signaling.
+The initial WebView request opens the dialog and is rejected; a native event
+asks the SPA to retry the same URL with the selected destination. Use the
+installed `tauri-plugin-dialog`; keep bytes in the WebView's transfer path.
+Preserve the existing startup and folder-picker boundaries.
 
 Review all direct object-URL callers found in the source audit. Give their
 URLs through the native WebView terminal event, with bounded cleanup for an
@@ -113,13 +115,15 @@ remain covered.
 
 ## Verification results
 
-The Rust tests, Linux build and startup smoke passed. The web type-check,
-focused tests and lint, localization gates, public-doc checks, browser
-log-bundle E2E, and mobile log-bundle E2E also passed. The desktop launch smoke
-validates startup and readiness; it does not exercise a native Save dialog or
-file transfer. AC-DESKTOP-NATIVE-DOWNLOADS-001.2 remains unverified. A packaged
-macOS Save/Cancel and HTTP/Blob byte-hash run is required before this plan can
-be completed, and this Linux host cannot run that WKWebView check.
+The full Rust suite passed (79 tests), the Rust lockfile audit passed with its
+existing allowed warnings, and the Linux desktop package built and passed its
+startup smoke. The focused web suite passed (25 tests), along with type-check,
+targeted lint, production build, localization checks, browser Logs E2E (3/3),
+and mobile Logs E2E (3/3). The desktop smoke validates startup and readiness;
+it does not exercise a native Save dialog or file transfer. Criterion
+`AC-DESKTOP-NATIVE-DOWNLOADS-001.2` remains unverified. A packaged macOS
+Save/Cancel and HTTP/Blob byte-hash run is required before this plan can be
+completed, and this Linux host cannot run that WKWebView check.
 
 ## Risks
 
@@ -127,6 +131,7 @@ be completed, and this Linux host cannot run that WKWebView check.
   raises a download event; the macOS packaged-app check is required.
 - Tauri's macOS finished event can omit the path, so completion must use the
   chosen destination and `success` flag.
-- A synchronous Save panel in the download callback must be proven on macOS.
+- The asynchronous Save panel and retried transfer must be exercised in a
+  packaged macOS build.
 - Bounded cleanup can expire an abandoned native Blob download; terminal
   feedback normally releases its object URL sooner.
