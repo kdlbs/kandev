@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -27,6 +28,32 @@ func TestHandleAssignExactTaskProfileForwardsGuardedRequest(t *testing.T) {
 		t.Fatalf("handle assignment: %v", err)
 	}
 	if assigner.taskID != "task-1" || assigner.profileID != "profile-1" || assigner.generation != 2 {
+		t.Fatalf("assignment = (%q, %q, %d)", assigner.taskID, assigner.profileID, assigner.generation)
+	}
+}
+
+func TestHandleAssignExactTaskProfileForwardsTrustedExternalRequest(t *testing.T) {
+	assigner := &recordingExactTaskProfileAssigner{}
+	h := NewHandlers(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, testLogger(t))
+	h.SetExactTaskProfileAssigner(assigner)
+	payload, err := json.Marshal(map[string]interface{}{
+		"task_id": "task-external", "agent_profile_id": "profile-1", "generation": 2,
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	response, err := h.handleAssignExactTaskProfile(
+		mcporigin.WithTrustedExternalTransport(context.Background()),
+		&ws.Message{ID: "request-external", Action: ws.ActionMCPAssignExactTaskProfile, Payload: payload},
+	)
+	if err != nil {
+		t.Fatalf("handle assignment: %v", err)
+	}
+	if response == nil || response.Type == ws.MessageTypeError {
+		t.Fatalf("response = %#v, want assignment response", response)
+	}
+	if assigner.taskID != "task-external" || assigner.profileID != "profile-1" || assigner.generation != 2 {
 		t.Fatalf("assignment = (%q, %q, %d)", assigner.taskID, assigner.profileID, assigner.generation)
 	}
 }
