@@ -54,6 +54,11 @@ type SecondaryRateLimitState struct {
 	Reason      string      `json:"reason,omitempty"`
 }
 
+type primaryRetryState struct {
+	RetryAt     time.Time
+	RetrySource RetrySource
+}
+
 // Exhausted returns true when the bucket has no quota left and its reset is
 // still unknown or in the future.
 func (s RateSnapshot) Exhausted() bool {
@@ -108,6 +113,7 @@ type RateTracker struct {
 	exhausted   map[Resource]bool
 	lastEmitted map[Resource]time.Time
 	secondary   map[Resource]SecondaryRateLimitState
+	primary     map[Resource]primaryRetryState
 	changed     chan struct{}
 	refreshMu   sync.Mutex
 	refreshDone chan struct{}
@@ -122,6 +128,7 @@ func NewRateTracker(eventBus bus.EventBus, log *logger.Logger) *RateTracker {
 		exhausted:   make(map[Resource]bool),
 		lastEmitted: make(map[Resource]time.Time),
 		secondary:   make(map[Resource]SecondaryRateLimitState),
+		primary:     make(map[Resource]primaryRetryState),
 		changed:     make(chan struct{}),
 		bus:         eventBus,
 		log:         log,
@@ -247,6 +254,9 @@ func (r *RateTracker) WaitDuration(resource Resource) time.Duration {
 	if r.exhausted[resource] {
 		retryAt = r.snapshots[resource].primaryRetryAt()
 	}
+	if primary := r.primary[resource]; primary.RetryAt.After(retryAt) {
+		retryAt = primary.RetryAt
+	}
 	if secondary := r.secondary[resource]; secondary.RetryAt.After(retryAt) {
 		retryAt = secondary.RetryAt
 	}
@@ -255,6 +265,24 @@ func (r *RateTracker) WaitDuration(resource Resource) time.Duration {
 		return 0
 	}
 	return d
+}
+
+// ObservePrimary retains a provider retry boundary that is later than an
+// incomplete primary reset header.
+func (r *RateTracker) ObservePrimary(resource Resource, retryAt time.Time, source RetrySource) {
+	if resource == "" || retryAt.IsZero() {
+		return
+	}
+	r.mu.Lock()
+	r.primary[resource] = primaryRetryState{RetryAt: retryAt, RetrySource: source}
+	r.signalChangedLocked()
+	r.mu.Unlock()
+}
+
+func (r *RateTracker) PrimaryRetry(resource Resource) primaryRetryState {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.primary[resource]
 }
 
 // BackgroundWaitDuration adds the interactive quota reserve to provider
@@ -309,11 +337,13 @@ func (r *RateTracker) ObserveSuccess(resource Resource) {
 	now := time.Now().UTC()
 	r.mu.Lock()
 	previous, observed := r.secondary[resource]
-	if !observed {
+	_, primaryObserved := r.primary[resource]
+	if !observed && !primaryObserved {
 		r.mu.Unlock()
 		return
 	}
 	delete(r.secondary, resource)
+	delete(r.primary, resource)
 	r.signalChangedLocked()
 	r.mu.Unlock()
 	early := previous.RetryAt.After(now)

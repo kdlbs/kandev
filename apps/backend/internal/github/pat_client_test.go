@@ -755,6 +755,56 @@ func TestPATClient_PrimaryWithoutValidResetDefersNextBackgroundRequest(t *testin
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-RATE-001.4
+// @covers AC-INTEGRATIONS-GITHUB-RATE-002.2
+func TestPATClient_PrimaryWithoutResetHonorsRetryAfterForBackgroundAdmission(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("X-RateLimit-Limit", "5000")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("Retry-After", "120")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := newPATClientPointingAt(t, srv.URL)
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "retry-after-primary-user",
+	}, nil)
+	client.WithRateTracker(tracker).withRateAdmission(admission)
+
+	startedAt := time.Now().UTC()
+	var out struct{}
+	var apiErr *GitHubAPIError
+	if err := client.get(context.Background(), "/user", &out); !errors.As(err, &apiErr) {
+		t.Fatalf("first request error = %v, want GitHubAPIError", err)
+	}
+	if apiErr.FailureKind != FailurePrimaryRateLimit || apiErr.RetrySource != RetrySourceRetryAfter ||
+		apiErr.RetryAt.Before(startedAt.Add(119*time.Second)) {
+		t.Fatalf("primary retry = (%s, %s, %s), want retry-after at least 119 seconds away",
+			apiErr.FailureKind, apiErr.RetrySource, apiErr.RetryAt)
+	}
+
+	ctx := WithNonBlockingGitHubAdmission(
+		WithGitHubWorkClass(context.Background(), WorkClassBackground),
+	)
+	var deferred *AdmissionDeferredError
+	if err := client.get(ctx, "/user", &out); !errors.As(err, &deferred) {
+		t.Fatalf("next request error = %v, want AdmissionDeferredError", err)
+	}
+	if deferred.Reason != rateLimitBlockPrimary || deferred.RetrySource != RetrySourceRetryAfter ||
+		deferred.RetryAt.Before(startedAt.Add(119*time.Second)) {
+		t.Fatalf("background retry = (%s, %s, %s), want retry-after at least 119 seconds away",
+			deferred.Reason, deferred.RetrySource, deferred.RetryAt)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("provider requests = %d, want 1", got)
+	}
+}
+
 // When a 429 has no rate-limit headers, a conservative secondary window still
 // applies without corrupting the primary bucket.
 func TestPATClient_RateLimit429_NoHeaders_UsesSecondaryFallback(t *testing.T) {

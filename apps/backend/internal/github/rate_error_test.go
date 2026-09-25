@@ -105,6 +105,24 @@ func TestClassifyGitHubResponseRetryAfterHTTPDate(t *testing.T) {
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-RATE-001.4
+func TestClassifyGitHubResponsePrimaryWithoutResetHonorsRetryAfter(t *testing.T) {
+	now := time.Date(2026, 9, 25, 5, 18, 9, 0, time.UTC)
+	resp := &http.Response{StatusCode: http.StatusForbidden, Header: http.Header{
+		"X-Ratelimit-Remaining": {"0"},
+		"Retry-After":           {"120"},
+	}}
+
+	got := classifyGitHubResponse(resp, "/user", []byte(`{"message":"API rate limit exceeded"}`), now)
+	if got.Kind != FailurePrimaryRateLimit {
+		t.Fatalf("kind = %s, want %s", got.Kind, FailurePrimaryRateLimit)
+	}
+	if got.RetrySource != RetrySourceRetryAfter || !got.RetryAt.Equal(now.Add(120*time.Second)) {
+		t.Fatalf("retry boundary = (%s, %s), want (%s, %s)",
+			got.RetryAt, got.RetrySource, now.Add(120*time.Second), RetrySourceRetryAfter)
+	}
+}
+
 func TestFailureKindOfClassifiesNetworkTransportAsTransient(t *testing.T) {
 	err := &url.Error{Op: "Get", URL: "https://api.github.com/user", Err: syscall.ECONNREFUSED}
 	if got := FailureKindOf(err); got != FailureTransient {

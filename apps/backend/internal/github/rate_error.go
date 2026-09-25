@@ -83,6 +83,10 @@ func classifyGitHubResponse(resp *http.Response, endpoint string, body []byte, n
 			result.RetrySource = RetrySourceConservativeFallback
 			result.RetryAt = now.Add(secondaryFallbackDelay).UTC()
 		}
+		if retryAt, source := retryAfter(resp.Header.Get("Retry-After"), now); source == RetrySourceRetryAfter && retryAt.After(result.RetryAt) {
+			result.RetryAt = retryAt
+			result.RetrySource = source
+		}
 	case FailureSecondaryRateLimit:
 		result.RetryAt, result.RetrySource = retryAfter(resp.Header.Get("Retry-After"), now)
 	}
