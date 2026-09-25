@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
 	userstore "github.com/kandev/kandev/internal/user/store"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -38,16 +39,25 @@ type inboxTaskLookup interface {
 	BatchGetSessionsForTasks(ctx context.Context, taskIDs []string) (map[string][]*taskmodels.TaskSession, error)
 }
 
-// inboxTaskService is the combined dependency the Needs-you Inbox handlers
-// need from the task service.
+// inboxWorkflowStepReader resolves a task's current workflow step for the
+// History tab's step-starts-no-agent label. The clarification package has no
+// other workflow dependency; this is that one, narrow read.
+type inboxWorkflowStepReader interface {
+	GetWorkflowStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
+}
+
+// inboxTaskService is the combined dependency the Needs-you Inbox and
+// Inbox History handlers need from the task service.
 type inboxTaskService interface {
 	inboxWorkspaceAuthorizer
 	inboxTaskLookup
+	inboxWorkflowStepReader
 }
 
-// inboxBundleStore is the bounded read/write surface the Needs-you Inbox
-// endpoints need: the existing bundle-query machinery plus the new per-user
-// dismiss/snooze sidecar (needs-you-inbox design, "Persistence").
+// inboxBundleStore is the bounded read/write surface the Needs-you Inbox and
+// Inbox History endpoints need: the existing bundle-query machinery, the
+// per-user dismiss/snooze sidecar (needs-you-inbox design, "Persistence"),
+// and the additive, isolated history read.
 type inboxBundleStore interface {
 	ListUnresolvedClarificationBundles(ctx context.Context, opts taskmodels.ListClarificationBundlesOptions) (*taskmodels.ClarificationBundlePage, error)
 	FindMessagesByPendingIDs(ctx context.Context, pendingIDs []string) (map[string][]*taskmodels.Message, error)
@@ -55,6 +65,8 @@ type inboxBundleStore interface {
 	DeleteClarificationInboxSidecar(ctx context.Context, userID, pendingID string) error
 	CountHiddenClarificationBundles(ctx context.Context, opts taskmodels.ListClarificationBundlesOptions) (taskmodels.ClarificationInboxHiddenSummary, error)
 	GetClarificationInboxSidecarStates(ctx context.Context, userID string, pendingIDs []string) (map[string]taskmodels.ClarificationInboxHiddenBundle, error)
+	ListInboxHistoryBundles(ctx context.Context, opts taskmodels.ListClarificationHistoryOptions) (*taskmodels.ClarificationHistoryPage, error)
+	CountInboxHistoryBundles(ctx context.Context, opts taskmodels.ListClarificationHistoryOptions) (int, error)
 }
 
 const (

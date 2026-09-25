@@ -9,7 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/gitlab"
 )
 
 func TestRetryPolicyDelayUsesEqualJitterAndCapsPreJitterDelay(t *testing.T) {
@@ -87,6 +89,21 @@ func TestBuildFailureDirectiveSuspendsOnlyPermanentGitHubFailures(t *testing.T) 
 	assert.False(t, gitLab.suspended)
 	assert.Equal(t, string(github.FailureTransient), gitLab.class)
 	assert.NotNil(t, gitLab.nextAttemptAt)
+}
+
+func TestBuildFailureDirectiveKeepsGitLabAuthCircuitRetry(t *testing.T) {
+	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
+	directive := buildFailureDirective(&Config{
+		Provider: ProviderGitLab, IntervalSeconds: 60,
+	}, &gitlab.APIError{StatusCode: 401, Endpoint: "/projects/x"}, now,
+		func(time.Duration) time.Duration { return 0 })
+
+	assert.False(t, directive.suspended)
+	assert.Equal(t, authcircuit.FailureClassAuth, directive.circuitClass)
+	assert.Equal(t, string(authcircuit.FailureClassAuth), directive.class)
+	require.NotNil(t, directive.nextAttemptAt)
+	assert.False(t, directive.nextAttemptAt.Before(now.Add(authcircuit.PermanentBackoff.Base)))
+	assert.False(t, directive.nextAttemptAt.After(now.Add(3*time.Minute)))
 }
 
 func TestFailureKindTreatsMissingAndInvalidGitHubConnectionsAsPermanent(t *testing.T) {

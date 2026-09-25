@@ -5,6 +5,7 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/github"
 )
 
@@ -17,6 +18,7 @@ type failureDirective struct {
 	suspended        bool
 	suspensionReason string
 	retrySource      github.RetrySource
+	circuitClass     authcircuit.FailureClass
 }
 
 func defaultJitter(max time.Duration) time.Duration {
@@ -34,13 +36,24 @@ func buildFailureDirective(
 ) failureDirective {
 	kind := failureKind(cfg.Provider, syncErr)
 	directive := failureDirective{
-		class:       string(kind),
-		consecutive: cfg.ConsecutiveFailures + 1,
+		class:        string(kind),
+		consecutive:  cfg.ConsecutiveFailures + 1,
+		circuitClass: classifySyncErr(syncErr),
 	}
-	if kind == github.FailureInvalidCredentials || kind == github.FailureMissingResource {
+	if cfg.Provider == ProviderGitHub &&
+		(kind == github.FailureInvalidCredentials || kind == github.FailureMissingResource) {
 		directive.suspended = true
 		directive.suspensionReason = syncErr.Error()
 		return directive
+	}
+	if cfg.Provider == ProviderGitLab {
+		directive.class = string(directive.circuitClass)
+		if directive.circuitClass != authcircuit.FailureClassTransient {
+			state := cfg.circuitState()
+			state.RecordFailure(now, directive.circuitClass, nil)
+			directive.nextAttemptAt = state.NextRetryAt
+			return directive
+		}
 	}
 
 	policyDelay := retryPolicyDelay(cfg.IntervalSeconds, directive.consecutive, jitter)

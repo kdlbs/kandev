@@ -58,7 +58,7 @@ describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => 
 
     const keys = entryKeys(entries);
     const sendToIndex = keys.indexOf("send-to-workflow");
-    const primaryIndex = keys.indexOf(`plugin-primary-${PLUGIN_ID}-${ACTION_ID}`);
+    const primaryIndex = keys.indexOf(`plugin-primary-${PLUGIN_ID}:${ACTION_ID}`);
     const linkIndex = keys.indexOf("link");
 
     expect(sendToIndex).toBeGreaterThanOrEqual(0);
@@ -107,7 +107,7 @@ describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => 
       "move-to",
       "send-to-workflow",
       "plugins-separator",
-      `plugin-primary-${PLUGIN_ID}-${ACTION_ID}`,
+      `plugin-primary-${PLUGIN_ID}:${ACTION_ID}`,
       "remove-separator",
       "archive",
       "delete",
@@ -119,7 +119,7 @@ describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => 
 
     const entries = buildKanbanCardMenuEntries({ workflows: [], stepsByWorkflowId: {} });
 
-    expect(entryKeys(entries)).not.toContain(`plugin-primary-${PLUGIN_ID}-${ACTION_ID}`);
+    expect(entryKeys(entries)).not.toContain(`plugin-primary-${PLUGIN_ID}:${ACTION_ID}`);
   });
 
   it("leaves the 'edit' group submenu unaffected by 'primary' group registrations", () => {

@@ -88,12 +88,16 @@ function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
   };
 }
 
-function renderRow(showTaskDetails: boolean, initialState: HydrationState = {}) {
+function renderRow(
+  showTaskDetails: boolean,
+  initialState: HydrationState = {},
+  taskOverrides: Partial<Task> = {},
+) {
   return render(
     <StateProvider initialState={initialState}>
       <TooltipProvider>
         <TaskListRowPrimaryContent
-          task={makeTask()}
+          task={makeTask(taskOverrides)}
           level={0}
           repositories={[]}
           parentTasks={[]}
@@ -136,6 +140,31 @@ describe("TaskListRowPrimaryContent, contributions shown (AC8, AC9, AC23)", () =
     expect(wrapper?.classList.contains("items-center")).toBe(true);
     expect(wrapper?.classList.contains("gap-1")).toBe(true);
     expect(screen.queryByTestId(MR_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("passes task-level automation flags to the PR badge", () => {
+    renderRow(
+      true,
+      {
+        taskPRs: { byTaskId: { "task-1": [makePR()] } },
+        workspaces: { items: [], activeId: "ws1" },
+      },
+      {
+        status_summary: {
+          revision: 1,
+          updated_at: "2026-09-23T00:00:00Z",
+          pull_request: {
+            number: 1,
+            state: "open",
+            auto_fix_enabled: true,
+            auto_merge_enabled: true,
+          },
+        },
+      },
+    );
+
+    expect(screen.getByTestId("pr-task-automation-auto-fix")).not.toBeNull();
+    expect(screen.getByTestId("pr-task-automation-auto-merge")).not.toBeNull();
   });
 });
 

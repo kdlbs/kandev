@@ -67,7 +67,7 @@ func TestCanvasCoreBundle_ContainsOneReadContract(t *testing.T) {
 	files, ok := core["files"].([]map[string]string)
 	require.True(t, ok)
 	require.Len(t, files, len(canvasskill.CoreInventory()))
-	require.Equal(t, "2", canvasskill.Version)
+	require.Equal(t, "3", canvasskill.Version)
 }
 
 func TestCanvasCreateResponseCarriesCurrentAuthoringVersion(t *testing.T) {
@@ -79,7 +79,7 @@ func TestCanvasCreateResponseCarriesCurrentAuthoringVersion(t *testing.T) {
 	skill, ok := response["skill"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, canvasskill.Version, skill["version"])
-	require.Equal(t, "2", skill["version"])
+	require.Equal(t, "3", skill["version"])
 	policy, ok := response["initial_permission_policy"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, canvas.CreationAuthorityPolicyVersion, policy["version"])

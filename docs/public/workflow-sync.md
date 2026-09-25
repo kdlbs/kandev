@@ -78,7 +78,7 @@ The status also records `last_synced_at`, `last_ok`, `last_error`, and `last_war
 
 Auto-sync does not retry a failing provider on every outer poll tick. Transient failures use equal-jitter exponential backoff: the base is the larger of the configured interval and one minute, each consecutive failure doubles it, and the pre-jitter delay stops growing at one hour. A provider `Retry-After` time or exhausted primary-bucket reset can move `next_attempt_at` later, never earlier.
 
-Kandev suspends automatic polling after a definite credential/access failure or a missing repository, branch, path, or ref. The configuration retains one actionable failure and suspension reason; later skipped ticks make no provider request and do not repeat the warning. GitLab sync receives the same generic transient backoff, but GitHub-specific response classification is not applied to GitLab errors.
+Kandev suspends GitHub automatic polling after a definite credential/access failure or a missing repository, branch, path, or ref. The configuration retains one actionable failure and suspension reason; later skipped ticks make no provider request and do not repeat the warning. A GitHub credential change resumes polling on the next tick. GitLab sync uses bounded circuit retries and its own error classification.
 
 Saving the configuration clears its retry and suspension schedule. **Sync now** also bypasses the automatic schedule for one interactive recovery attempt. A successful attempt clears the failure state; another definite failure suspends polling again with the current reason.
 

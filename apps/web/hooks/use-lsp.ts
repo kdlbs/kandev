@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { lspClientManager, toLspLanguage, type LspStatus } from "@/lib/lsp/lsp-client-manager";
 import { EMPTY_LSP_PROGRESS, type LspProgressSnapshot } from "@/lib/lsp/lsp-progress";
 
@@ -45,7 +46,8 @@ function toggleLsp(sessionId: string, lspLanguage: string): void {
     current.state === "ready" ||
     current.state === "connecting" ||
     current.state === "installing" ||
-    current.state === "starting"
+    current.state === "starting" ||
+    current.state === "reconnecting"
   ) {
     requestLspStop(sessionId, lspLanguage);
   }
@@ -82,6 +84,7 @@ export function useLsp(
 } {
   const lspAutoStartLanguages = useAppStore((s) => s.userSettings.lspAutoStartLanguages);
   const lspServerConfigs = useAppStore((s) => s.userSettings.lspServerConfigs);
+  const continuityEnabled = useFeature("lspBrowserContinuity");
   const lspLanguage = toLspLanguage(monacoLanguage);
   const shouldAutoStart = lspLanguage ? lspAutoStartLanguages.includes(lspLanguage) : false;
   const key = lspKey(sessionId, lspLanguage);
@@ -91,6 +94,13 @@ export function useLsp(
     () =>
       sessionId && lspLanguage
         ? lspClientManager.isEnabledInStorage(sessionId, lspLanguage)
+        : false,
+  );
+  const hasLeaseHint = useSyncExternalStore(
+    (callback) => subscribeToLspKey(key, callback),
+    () =>
+      continuityEnabled && sessionId && lspLanguage
+        ? lspClientManager.hasLeaseHint(sessionId, lspLanguage)
         : false,
   );
   const startRequestGeneration = useSyncExternalStore(
@@ -104,12 +114,21 @@ export function useLsp(
   // the override; later settings/configuration renders must not reacquire it.
   useEffect(() => {
     const autoStartEnabled = shouldAutoStart && !hasManualStopOverride;
-    if ((!autoStartEnabled && !isManuallyEnabled) || !sessionId || !lspLanguage) return;
-    const disconnect = lspClientManager.connect(sessionId, lspLanguage, lspServerConfigs);
+    if ((!autoStartEnabled && !isManuallyEnabled && !hasLeaseHint) || !sessionId || !lspLanguage) {
+      return;
+    }
+    const disconnect = lspClientManager.connect(
+      sessionId,
+      lspLanguage,
+      lspServerConfigs,
+      continuityEnabled,
+    );
     return disconnect;
   }, [
     hasManualStopOverride,
     isManuallyEnabled,
+    hasLeaseHint,
+    continuityEnabled,
     shouldAutoStart,
     sessionId,
     lspLanguage,

@@ -80,6 +80,39 @@ func TestBuildReviewTaskRequest_TruncatesTitle(t *testing.T) {
 	}
 }
 
+func TestBuildReviewTaskRequest_ForkPRRequiresManualStart(t *testing.T) {
+	tests := []struct {
+		name          string
+		headOwner     string
+		headRepo      string
+		wantAutostart bool
+	}{
+		{name: "same repository", headOwner: "acme", headRepo: "widget", wantAutostart: true},
+		{name: "fork repository", headOwner: "contributor", headRepo: "widget"},
+		{name: "missing head repository identity"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evt := newReviewEvent()
+			evt.PR.HeadRepoOwner = tt.headOwner
+			evt.PR.HeadRepoName = tt.headRepo
+
+			req := buildReviewTaskRequest(evt, nil, "acme/widget")
+			if req.Metadata[taskmodels.MetaKeyAutoStartGuard] != true {
+				t.Fatalf("auto-start guard = %v, want true", req.Metadata[taskmodels.MetaKeyAutoStartGuard])
+			}
+			_, gotAutostart := req.Metadata[taskmodels.MetaKeyAutoStartClaimed]
+			if gotAutostart != tt.wantAutostart {
+				t.Errorf("automatic launch token present = %v, want %v", gotAutostart, tt.wantAutostart)
+			}
+			_, requiresManualStart := req.Metadata[taskmodels.MetaKeyForkPRRequiresManualStart]
+			if requiresManualStart != !tt.wantAutostart {
+				t.Errorf("manual-start marker present = %v, want %v", requiresManualStart, !tt.wantAutostart)
+			}
+		})
+	}
+}
+
 // TestBuildIssueTaskTitle_TruncatesTitle mirrors the review-title regression for
 // the GitHub issue watcher's "Issue #<n>: <title>" builder.
 func TestBuildIssueTaskTitle_TruncatesTitle(t *testing.T) {
@@ -175,6 +208,7 @@ func newReviewEvent() *github.NewReviewPREvent {
 		PR: &github.PR{
 			Number: 42, Title: "Some PR", HTMLURL: "https://gh/acme/widget/pull/42",
 			RepoOwner: "acme", RepoName: "widget",
+			HeadRepoOwner: "acme", HeadRepoName: "widget",
 		},
 	}
 }
@@ -431,6 +465,110 @@ func TestAutoStart_BothPathsFireExactlyOnce(t *testing.T) {
 	}
 	if len(sessions) != 1 {
 		t.Errorf("expected exactly 1 session in DB, got %d", len(sessions))
+	}
+}
+
+func TestAutoStart_ForkReviewWaitsForManualStart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "task-fork-review-42"
+	const stepID = "step-fork-review"
+
+	sg := newMockStepGetter()
+	sg.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf1", Name: "Review", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
+		},
+	}
+	evt := newReviewEvent()
+	evt.WorkflowStepID = stepID
+	evt.PR.HeadRepoOwner = "contributor"
+	request := buildReviewTaskRequest(evt, nil, "acme/widget")
+	if _, hasToken := request.Metadata[taskmodels.MetaKeyAutoStartClaimed]; hasToken {
+		t.Fatal("fork review task must not carry an unattended auto-start token")
+	}
+	if request.Metadata[taskmodels.MetaKeyForkPRRequiresManualStart] != true {
+		t.Fatal("fork review task must persist the manual-start requirement")
+	}
+
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &taskmodels.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	metadata := make(map[string]interface{}, len(request.Metadata)+1)
+	for key, value := range request.Metadata {
+		metadata[key] = value
+	}
+	metadata[taskmodels.MetaKeyAgentProfileID] = testAgentProfileID
+	task := &taskmodels.Task{
+		ID: taskID, WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: stepID,
+		Title: request.Title, Description: request.Description, State: v1.TaskStateInProgress,
+		Metadata: metadata, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{
+		ID: taskID, State: v1.TaskStateInProgress,
+		Metadata: map[string]interface{}{
+			taskmodels.MetaKeyAutoStartGuard: true,
+			taskmodels.MetaKeyAgentProfileID: testAgentProfileID,
+		},
+	}
+	var launchCount atomic.Int32
+	launched := make(chan struct{}, 2)
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCount.Add(1)
+			launched <- struct{}{}
+			return &executor.LaunchAgentResponse{}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, sg, taskRepo, agentMgr)
+
+	dbTask, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	svc.autoStartReviewTask(ctx, evt, dbTask)
+	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.queue_promoted", 0, false)
+	svc.autoStartTaskForLoadedStep(ctx, dbTask, sg.steps[stepID], "task.moved", false, 0, false)
+	select {
+	case <-launched:
+		t.Fatal("fork review task launched automatically")
+	case <-time.After(250 * time.Millisecond):
+	}
+	if got := launchCount.Load(); got != 0 {
+		t.Fatalf("automatic launch count = %d, want 0", got)
+	}
+	sessions, err := repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		t.Fatalf("ListTaskSessions before manual start: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("sessions before manual start = %d, want 0", len(sessions))
+	}
+	if _, err := svc.StartTask(ctx, taskID, testAgentProfileID, "", "", "", "Review", stepID, false, true, nil); err != errForkPRManualStartRequired {
+		t.Fatalf("automatic StartTask error = %v, want %v", err, errForkPRManualStartRequired)
+	}
+
+	if _, err := svc.StartTask(ctx, taskID, testAgentProfileID, "", "", "", "Review", stepID, false, false, nil); err != nil {
+		t.Fatalf("manual StartTask: %v", err)
+	}
+	select {
+	case <-launched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("manual start did not launch the fork review task")
+	}
+	if got := launchCount.Load(); got != 1 {
+		t.Fatalf("launch count after manual start = %d, want 1", got)
 	}
 }
 

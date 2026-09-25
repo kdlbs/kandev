@@ -14,6 +14,7 @@ async function seedSimpleTask(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
+  requiredPaths: string[] = [],
 ): Promise<{ session: SessionPage; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -26,6 +27,36 @@ async function seedSimpleTask(
       repository_ids: [seedData.repositoryId],
     },
   );
+
+  // Environment readiness and repository materialization are separate
+  // transitions. Wait for the exact fixture paths before the first Files
+  // request, otherwise a valid early tree snapshot can be retained while the
+  // checkout is still being populated.
+  if (requiredPaths.length > 0) {
+    let workspacePath = "";
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+        timeout: 30_000,
+        message: `Waiting for ${title} task environment to be ready`,
+      })
+      .toBe("ready");
+    await expect
+      .poll(
+        async () => {
+          const environment = await apiClient.getTaskEnvironment(task.id);
+          workspacePath =
+            environment?.workspace_path ?? environment?.repos?.[0]?.worktree_path ?? "";
+          return requiredPaths.every((requiredPath) =>
+            Boolean(workspacePath && fs.existsSync(path.join(workspacePath, requiredPath))),
+          );
+        },
+        {
+          timeout: 60_000,
+          message: `Waiting for ${requiredPaths.join(", ")} in the ${title} worktree`,
+        },
+      )
+      .toBe(true);
+  }
 
   await testPage.goto(`/t/${task.id}`);
 
@@ -92,6 +123,7 @@ test.describe("Symlink file handling", () => {
       apiClient,
       seedData,
       "Symlink Dir Tree Test",
+      ["real-dir/child.txt", "link-dir/child.txt"],
     );
 
     // Open Files tab
@@ -99,18 +131,15 @@ test.describe("Symlink file handling", () => {
     await expect(session.files).toBeVisible({ timeout: 5_000 });
 
     // The symlink-to-directory should appear in the tree
-    const linkDirRow = session.files.getByText("link-dir");
-    await expect(linkDirRow).toBeVisible({ timeout: 10_000 });
-
-    await expect(session.fileTreeNode("link-dir").getByTestId("symlink-indicator")).toBeVisible();
+    const linkDirNode = await session.fileTree.waitForFileTreeNode("link-dir");
+    await expect(linkDirNode.getByTestId("symlink-indicator")).toBeVisible();
 
     // Click to expand — if the fix is missing, this is classified as a file
     // and would try to open it in the editor instead of expanding.
-    await linkDirRow.click();
+    await linkDirNode.click();
 
     // Assert the child file inside the symlinked directory is now visible
-    const childFile = session.files.getByText("child.txt");
-    await expect(childFile).toBeVisible({ timeout: 10_000 });
+    await session.fileTree.waitForFileTreeNode("link-dir/child.txt");
   });
 
   for (const provider of ["monaco", "codemirror"] as const) {

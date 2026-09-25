@@ -87,6 +87,14 @@ type InferenceAgent interface {
 	InferenceConfig() *InferenceConfig
 }
 
+// HostUtilityInferenceAgent is an optional capability for agents whose host
+// utility command differs from the command used by a task executor. The
+// default InferenceConfig remains executor-safe; host utility callers can use
+// this capability when they run on the backend host.
+type HostUtilityInferenceAgent interface {
+	HostUtilityInferenceConfig() *InferenceConfig
+}
+
 // ManagedNPMRuntimeAgent is an optional capability for built-in agents whose
 // ACP runtime is resolved through npm. Package names and ACP arguments are
 // defined by the agent implementation rather than caller-provided input.
@@ -391,17 +399,19 @@ type PassthroughConfig struct {
 	// and when routing chat-compose messages to the PTY. "\r" for most TUIs.
 	// Empty inherits DefaultPassthroughSubmitSequence at PTY write sites.
 	SubmitSequence string
-	// DisableBracketedPaste sends prompt bytes verbatim (plus SubmitSequence).
-	// Claude Code enables bracketed-paste *mode* (?2004h) in its Ink TUI; injecting
-	// ESC[200~…ESC[201~ delimiters breaks input (nothing appears in the prompt).
+	// DisableBracketedPaste sends the prompt body without ESC[200~…ESC[201~
+	// delimiters. The planner then paces the body in writes that each fit within
+	// one terminal read, because a TUI can drop whole reads of a larger unframed
+	// burst. Set it only for a TUI that does not accept bracketed-paste input;
+	// framed bodies arrive whole at any length.
 	DisableBracketedPaste bool
-	// SubmitDelay is the wait inserted before each non-first chunk when writing the
-	// prompt+submit sequence to PTY stdin. Ink-based TUIs (Claude Code) detect a
+	// SubmitDelay is the wait inserted before the separate submit chunk when
+	// writing a prompt to PTY stdin. Ink-based TUIs (Claude Code) detect a
 	// "paste burst" when many stdin bytes arrive in one read and absorb the
 	// trailing \r into the pasted content instead of dispatching it as Enter.
-	// Splitting the prompt body from the submit byte with a small delay forces the
-	// submit to arrive as a discrete keystroke. 0 disables (other TUIs handle one
-	// atomic write fine).
+	// Writing the submit byte on its own after a small delay makes it arrive as
+	// a discrete keystroke. 0 appends the submit sequence to the final body
+	// write (other TUIs handle prompt and submit in one read).
 	SubmitDelay time.Duration
 }
 
@@ -445,6 +455,11 @@ type InferenceConfig struct {
 	Command Command
 	// ModelFlag is the flag template for specifying the model (e.g., ["--model", "{model}"]).
 	ModelFlag Param
+	// OperatorDefined marks a Command that the install operator registered in
+	// Settings rather than one compiled into this binary. The host utility's
+	// probe allow-list is built from literals, which a command that does not
+	// exist until it is typed can never join.
+	OperatorDefined bool
 }
 
 // InferenceModel describes a model available for inference.

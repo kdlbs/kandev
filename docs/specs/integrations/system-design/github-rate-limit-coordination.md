@@ -59,14 +59,19 @@ uses the Core resource and does not wait on GraphQL or Search state.
 
 ## Workflow Sync recovery
 
-`workflow_sync_configs` persists consecutive failure count, next attempt,
-failure class, and automatic-poll suspension. Transient failures use
+`workflow_sync_configs` uses the shared auth circuit's `failure_class`,
+`consecutive_failures`, and `next_retry_at` columns as its retry schedule.
+The API's `next_attempt_at` mirrors `next_retry_at`; GitHub-specific
+`last_error_class`, `poll_suspended`, and `poll_suspension_reason` add the
+diagnostic and suspension state. Transient failures use
 equal-jitter exponential delay based on the larger of the configured interval
 and one minute, doubling to a one-hour cap. A later provider retry/reset is the
 lower bound.
 
-Invalid credentials/access and missing targets suspend automatic polling and
-write one actionable error. A configuration save clears scheduling state.
+Definite GitHub credential/access failures and missing targets suspend
+automatic polling and write one actionable error. A credential fingerprint
+change or configuration save clears the suspension and retry state. GitLab
+continues to use bounded circuit retries for its auth/config failures.
 Explicit Sync now bypasses automatic scheduling state, updates the single error
 on failure, and clears the state on success. GitLab receives generic transient
 backoff but does not use GitHub-specific response classification.

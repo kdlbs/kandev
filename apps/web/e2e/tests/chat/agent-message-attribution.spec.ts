@@ -183,6 +183,7 @@ test.describe("Cross-task agent message attribution", () => {
     await expect(panel.getByTestId("sender-task-badge")).toHaveCount(10);
     await expect(panel.getByTestId("queue-entry-edit")).toHaveCount(0);
     await expect(panel.getByTestId("queue-entry-remove")).toHaveCount(10);
+    const queueIdentity = await apiClient.getQueueSessionIdentity(target.id, target.sessionId);
 
     const firstAgentEntry = panel.getByTestId("queue-entry").filter({
       has: testPage.getByTestId("queue-entry-text").filter({ hasText: /^agent queued 1$/ }),
@@ -192,8 +193,14 @@ test.describe("Cross-task agent message attribution", () => {
     await expect(panel).toContainText("9 of 10");
 
     await panel.getByTestId("queue-clear-all").click();
-    await expect(panel).not.toBeVisible({ timeout: 10_000 });
-    await expect(chat.getByTestId("queue-chip")).not.toBeVisible();
+    await expect(panel).not.toBeVisible({ timeout: 30_000 });
+    await expect(chat.getByTestId("queue-chip")).not.toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count), {
+        timeout: 30_000,
+        message: "Waiting for clear-all to commit before admitting a new message",
+      })
+      .toBe(0);
 
     await createSenderTaskingTarget(
       apiClient,

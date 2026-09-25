@@ -12,6 +12,7 @@ const automaticSyncWorkerLimit = 4
 
 type automaticJob struct {
 	workspaceID string
+	force       bool
 }
 
 type queuedAutomaticJob struct {

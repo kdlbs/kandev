@@ -498,6 +498,128 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   background-clip: padding-box;
 }
 
+.kanban-scroll-region {
+  scrollbar-gutter: stable;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 120ms ease;
+}
+
+.kanban-scroll-region[data-kanban-scroll-axis="horizontal"] {
+  scrollbar-gutter: auto;
+}
+
+.kanban-scroll-region::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.kanban-scroll-region::-webkit-scrollbar-thumb {
+  background: transparent;
+  background-clip: padding-box;
+}
+
+.kanban-scroll-region:is(:hover, :focus-within),
+.kanban-scroll-region[data-kanban-scroll-active="true"] {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.kanban-scroll-region:is(:hover, :focus-within)::-webkit-scrollbar-thumb,
+.kanban-scroll-region[data-kanban-scroll-active="true"]::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.kanban-overflow-fade {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease;
+}
+
+.kanban-overflow-fade-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.kanban-overflow-fade-top,
+.kanban-overflow-fade-bottom {
+  right: 10px;
+  left: 0;
+  height: 48px;
+  display: flex;
+  justify-content: center;
+  padding-block: 4px;
+}
+
+.kanban-overflow-chevron {
+  color: var(--foreground);
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+.kanban-overflow-fade-top {
+  top: 0;
+  align-items: flex-start;
+  background: linear-gradient(to bottom, var(--background) 25%, transparent);
+}
+
+.kanban-overflow-fade-bottom {
+  bottom: 0;
+  align-items: flex-end;
+  background: linear-gradient(to top, var(--background) 25%, transparent);
+}
+
+.kanban-overflow-fade-left,
+.kanban-overflow-fade-right {
+  top: 0;
+  bottom: 10px;
+  width: 16px;
+}
+
+.kanban-overflow-fade-left {
+  left: 0;
+  background: linear-gradient(to right, var(--background), transparent);
+}
+
+.kanban-overflow-fade-right {
+  right: 0;
+  background: linear-gradient(to left, var(--background), transparent);
+}
+
+@media (any-pointer: coarse) {
+  .kanban-scroll-region {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+
+  .kanban-scroll-region::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    background-clip: padding-box;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kanban-scroll-region,
+  .kanban-overflow-fade {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .kanban-scroll-region {
+    scrollbar-color: auto;
+    transition: none;
+  }
+
+  .kanban-scroll-region::-webkit-scrollbar-thumb {
+    background: ButtonText;
+  }
+
+  .kanban-overflow-fade {
+    display: none;
+  }
+}
+
 .task-sidebar-scroll[data-can-scroll-down="true"] {
   mask-image: linear-gradient(to bottom, black 0, black calc(100% - 3.5rem), transparent 100%);
   -webkit-mask-image: linear-gradient(
@@ -996,6 +1118,20 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 
 .markdown-body p + p {
   margin-top: 0.5em;
+}
+
+.katex-display {
+  max-width: 100%;
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.125rem 0.25rem;
+  text-align: left;
+}
+
+.katex-display > .katex {
+  display: inline-block;
+  min-width: max-content;
 }
 
 .tiptap-plan-wrapper .ProseMirror::after {
@@ -2096,5 +2232,13 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   .sidebar-section-content[data-state="open"],
   .sidebar-section-content[data-state="closed"] {
     animation: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-chat-text-motion],
+  [data-chat-motion-item] {
+    opacity: 1 !important;
+    transform: none !important;
   }
 }

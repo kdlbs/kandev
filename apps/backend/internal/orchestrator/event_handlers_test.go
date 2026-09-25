@@ -301,6 +301,8 @@ type mockAgentManager struct {
 	promptAcceptedOnError           bool
 	promptAgentFunc                 func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error)
 	launchAgentFunc                 func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
+	initialPromptDispatchCallback   func()
+	initialPromptFailureCallback    func()
 	startAgentProcessCalls          []string
 	startAgentProcessErr            error
 	startAgentProcessFunc           func(context.Context, string) error
@@ -407,15 +409,16 @@ type mockAgentManager struct {
 	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
 	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
 	// returned to simulate "no running agent".
-	setSessionModeCalls       []sessionModeCall
-	setSessionModeErr         error
-	mcpModeCalls              []sessionModeCall
-	setSessionModelCalls      []sessionModelCall
-	setSessionModelSupported  bool
-	setSessionModelErr        error
-	setSessionConfigCalls     []sessionConfigCall
-	setSessionConfigSupported bool
-	setSessionConfigErr       error
+	setSessionModeCalls               []sessionModeCall
+	setSessionModeErr                 error
+	mcpModeCalls                      []sessionModeCall
+	setSessionModelCalls              []sessionModelCall
+	setSessionModelSupported          bool
+	setSessionModelErr                error
+	setSessionConfigCalls             []sessionConfigCall
+	setSessionConfigSupported         bool
+	setSessionConfigErr               error
+	getPromptGenerationForSessionFunc func(context.Context, string) (uint64, error)
 }
 
 type sessionModelCall struct {
@@ -469,6 +472,15 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, sessionID stri
 	}
 	return err
 }
+
+func (m *mockAgentManager) RegisterInitialPromptDispatchCallbacks(_ string, onDispatched, onFailure func()) error {
+	m.mu.Lock()
+	m.initialPromptDispatchCallback = onDispatched
+	m.initialPromptFailureCallback = onFailure
+	m.mu.Unlock()
+	return nil
+}
+
 func (m *mockAgentManager) IsAgentCommandConfigured(_ string) bool { return true }
 func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
 	m.mu.Lock()
@@ -647,7 +659,10 @@ func (m *mockAgentManager) OwnsPromptActivity(
 		activityEpoch == m.currentPromptActivityEpoch.Load()
 }
 
-func (m *mockAgentManager) GetPromptGenerationForSession(_ context.Context, _ string) (uint64, error) {
+func (m *mockAgentManager) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
+	if m.getPromptGenerationForSessionFunc != nil {
+		return m.getPromptGenerationForSessionFunc(ctx, sessionID)
+	}
 	return m.currentPromptGeneration.Load(), nil
 }
 
@@ -2501,6 +2516,25 @@ func TestDeliverPassthroughPrompt(t *testing.T) {
 		}
 	})
 
+	t.Run("refuses the prompt when config resolution fails", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		configErr := errors.New("agent definition is unavailable")
+		agentMgr := &mockAgentManager{
+			isPassthrough:        true,
+			passthroughConfigErr: configErr,
+		}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		err := svc.writePassthroughPrompt(context.Background(), "s1", strings.Repeat("long prompt ", 100))
+		if !errors.Is(err, configErr) {
+			t.Fatalf("writePassthroughPrompt error = %v, want config error", err)
+		}
+		if got := len(agentMgr.passthroughStdinCalls); got != 0 {
+			t.Fatalf("stdin calls after config failure = %d, want 0", got)
+		}
+	})
+
 	t.Run("cancellation interrupts submit delay", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
@@ -2955,6 +2989,14 @@ func TestClassifyManagedRuntimeNpmStartFailureUsesStructuredError(t *testing.T) 
 		"npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3",
 	)) != nil {
 		t.Fatal("unstructured npm text must not select the managed runtime recovery card")
+	}
+
+	policy := classifyManagedRuntimeNpmStartFailure(fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.Code("managed_runtime_npm_policy"),
+		Details: "npm error code ETARGET\nnpm error notarget No matching version found with a date before <release-date>",
+	}))
+	if policy == nil || policy.Code != routingerr.Code("managed_runtime_npm_policy") {
+		t.Fatalf("policy startup failure = %#v, want managed runtime policy classification", policy)
 	}
 }
 

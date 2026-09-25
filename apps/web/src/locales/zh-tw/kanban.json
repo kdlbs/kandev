@@ -101,6 +101,7 @@
   "step": "步驟",
   "subtaskOf": "子任務，父任務為",
   "taskList": "任務清單",
+  "tasksInStep": "{{step}}中的任務",
   "tasksOverWipLimit": "{{label}} 個任務，超出 WIP 限制",
   "theseOptionsAffectThisTaskList": "這些選項僅影響此任務清單。",
   "threads": "對話流",
@@ -128,5 +129,10 @@
   "boardSort": "看板排序",
   "boardSortCreatedDesc": "最新優先",
   "boardSortPriorityDesc": "優先順序",
-  "priorityFilter": "優先順序篩選"
+  "priorityFilter": "優先順序篩選",
+  "bulkSelected_other": "已選擇 {{count}} 個",
+  "bulkActions": "操作",
+  "selectTasks": "選擇任務",
+  "cancelTaskSelection": "取消選擇",
+  "bulkSelected_one": "已選擇 {{count}} 個"
 }

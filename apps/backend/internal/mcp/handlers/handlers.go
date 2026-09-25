@@ -189,6 +189,9 @@ type SessionLauncher interface {
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error)
 	QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error
 	GetMessageQueue() *messagequeue.Service
+	// CheckQueueAdmissionReadiness rechecks automatic dispatch for the exact
+	// session incarnation admitted by a queue operation.
+	CheckQueueAdmissionReadiness(context.Context, messagequeue.QueueSessionIdentity)
 	// QueueAndInterruptForPeerMessage atomically queues prompt for sessionID
 	// then interrupts the session's in-flight turn to dispatch it right
 	// away, bypassing FIFO order. Used only by queueThenInterruptTaskMessage
@@ -262,6 +265,7 @@ type UserSettingsProvider interface {
 
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
+	automationCreator      AutomationCreator
 	taskSvc                *service.Service
 	workflowCtrl           *workflowctrl.Controller
 	clarificationSvc       ClarificationService
@@ -544,6 +548,10 @@ func (h *Handlers) registerTaskPlanHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPCreateTaskPlan, h.handleCreateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPGetTaskPlan, h.handleGetTaskPlan)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
+	d.RegisterFunc(ws.ActionMCPEditTaskPlan, h.handleEditTaskPlan)
+	d.RegisterFunc(ws.ActionMCPListTaskPlanRevisions, h.handleListTaskPlanRevisions)
+	d.RegisterFunc(ws.ActionMCPGetTaskPlanRevision, h.handleGetTaskPlanRevision)
+	d.RegisterFunc(ws.ActionMCPRestoreTaskPlanRevision, h.handleRestoreTaskPlanRevision)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
 	d.RegisterFunc(ws.ActionMCPShowWalkthrough, h.handleShowWalkthrough)
 	d.RegisterFunc(ws.ActionMCPGetWalkthrough, h.handleGetWalkthrough)
@@ -568,6 +576,7 @@ func (h *Handlers) registerTaskQuestionHandlers(d *guardedMCPDispatcher) {
 }
 
 func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
+	d.RegisterFunc(ws.ActionMCPCreateAutomation, h.handleCreateAutomation)
 	if h.settingsRegistry != nil {
 		h.registerSettingsHandlers(d)
 	}
@@ -794,6 +803,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	startAgent := req.StartAgent == nil || *req.StartAgent
 	explicitWorkspaceID := req.WorkspaceID != ""
 	explicitWorkflowID := req.WorkflowID != ""
+	explicitWorkflowStep := req.WorkflowStepID != ""
 
 	// Only require description for subtasks if we're starting an agent
 	if req.ParentID != "" && req.Description == "" && startAgent {
@@ -869,15 +879,21 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
 
+	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+
 	identity, _ := authn.IdentityFromContext(ctx)
 	contributions, err := h.resolveMCPRemoteContributions(ctx, req.WorkspaceID, identity.UserID, repos)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
-
-	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	if workspacePolicy.Mode == mcpWorkspaceModeInheritParent &&
+		(len(req.Repositories) > 0 || req.BaseBranch != "") {
+		if err := h.taskSvc.ValidateInheritedWorkspaceRepositorySelection(ctx, req.ParentID, repos); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 	}
 
 	// Resolve the destination step before launch metadata. The profile lookup
@@ -905,6 +921,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 	}
+	launchConfig.InitialCreatePrompt = startAgent && explicitWorkflowStep && req.WorkflowStepID != "" && strings.TrimSpace(req.Description) != ""
 	metadata = workspacePolicy.MergeMetadataBlock(metadata)
 	var deferredLaunch map[string]interface{}
 	if startAgent {
@@ -1365,6 +1382,7 @@ type mcpAutoStartConfig struct {
 	ExecutorID           string
 	ExecutorProfileID    string
 	InitialRuntimeConfig *models.SessionRuntimeConfig
+	InitialCreatePrompt  bool
 }
 
 var errMCPAgentProfileRequired = errors.New("agent_profile_id is required because the selected task profile policy, workflow, and workspace defaults did not resolve a profile")
@@ -1729,7 +1747,7 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 
-		resp, err := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+		launchReq := &orchestrator.LaunchSessionRequest{
 			TaskID:            task.ID,
 			Intent:            orchestrator.IntentStart,
 			AgentProfileID:    config.AgentProfileID,
@@ -1737,10 +1755,50 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 			ExecutorProfileID: config.ExecutorProfileID,
 			WorkflowStepID:    task.WorkflowStepID,
 			Prompt:            task.Description,
-		})
+		}
+		if config.InitialCreatePrompt {
+			prepResp, prepErr := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+				TaskID:               task.ID,
+				Intent:               orchestrator.IntentPrepare,
+				AgentProfileID:       config.AgentProfileID,
+				ExecutorID:           config.ExecutorID,
+				ExecutorProfileID:    config.ExecutorProfileID,
+				WorkflowStepID:       task.WorkflowStepID,
+				InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(task.Description), nil),
+				DeferredStart:        true,
+			})
+			if prepErr != nil {
+				h.logger.Error("failed to prepare initial MCP creation prompt",
+					zap.String("task_id", task.ID), zap.Error(prepErr))
+				return
+			}
+			if prepResp == nil || prepResp.SessionID == "" {
+				h.logger.Error("initial MCP creation prompt preparation returned no session",
+					zap.String("task_id", task.ID))
+				return
+			}
+			launchReq = &orchestrator.LaunchSessionRequest{
+				TaskID:              task.ID,
+				Intent:              orchestrator.IntentStartCreated,
+				SessionID:           prepResp.SessionID,
+				AgentProfileID:      config.AgentProfileID,
+				ExecutorID:          config.ExecutorID,
+				ExecutorProfileID:   config.ExecutorProfileID,
+				WorkflowStepID:      task.WorkflowStepID,
+				Prompt:              task.Description,
+				InitialCreatePrompt: true,
+			}
+		}
+
+		resp, err := h.sessionLauncher.LaunchSession(ctx, launchReq)
 		if err != nil {
 			h.logger.Error("failed to auto-start task",
 				zap.String("task_id", task.ID), zap.Error(err))
+			return
+		}
+		if resp == nil {
+			h.logger.Error("auto-start returned no response",
+				zap.String("task_id", task.ID))
 			return
 		}
 		h.logger.Info("auto-started agent for MCP-created task",
@@ -2356,7 +2414,13 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to resolve calling turn", nil)
 	}
 	if launchStepID != task.WorkflowStepID {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow step changed before signal was recorded", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fmt.Sprintf(
+			"workflow step changed before signal was recorded. This turn started in step %s. "+
+				"The current step is %s. No signal was recorded. Retrying in this turn cannot recover. "+
+				"End this turn and ask the user to resume this session for the current step. "+
+				"After satisfying that step, signal completion from the new turn. "+
+				"Do not move the task solely to bypass this error.",
+			launchStepID, task.WorkflowStepID), nil)
 	}
 
 	boundedHandoff, handoffTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Handoff))
@@ -3415,6 +3479,7 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 		}
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue message: %w", err)
 	}
+	h.sessionLauncher.CheckQueueAdmissionReadiness(ctx, identity)
 	h.publishQueueStatusEvent(ctx, identity, queue)
 	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}, nil
 }
@@ -4323,10 +4388,12 @@ func (h *Handlers) sessionUpdatedAtForStateEvent(ctx context.Context, sessionID 
 // handleCreateTaskPlan creates a new task plan.
 func (h *Handlers) handleCreateTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID    string `json:"task_id"`
-		Title     string `json:"title"`
-		Content   string `json:"content"`
-		CreatedBy string `json:"created_by"`
+		TaskID          string `json:"task_id"`
+		Title           string `json:"title"`
+		Content         string `json:"content"`
+		CreatedBy       string `json:"created_by"`
+		ExpectedVersion string `json:"expected_version"`
+		AllowTruncation bool   `json:"allow_truncation"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -4346,6 +4413,9 @@ func (h *Handlers) handleCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		Content:            req.Content,
 		CreatedBy:          createdBy,
 		EvaluateTruncation: true,
+		AgentWrite:         true,
+		ExpectedVersion:    req.ExpectedVersion,
+		AllowTruncation:    req.AllowTruncation,
 	})
 	if err != nil {
 		return planws.CreateError(msg, err)
@@ -4355,7 +4425,7 @@ func (h *Handlers) handleCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 	if result.TruncationDetected {
 		warning = planTruncationWarning(result.ReplacedRunes, result.NewRunes, result.PriorRevisionNumber)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(result.Plan), warning, result.PriorRevisionNumber))
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(result.Plan), result.Plan.WriteVersion, warning, result.PriorRevisionNumber))
 }
 
 // handleGetTaskPlan retrieves a task plan.
@@ -4365,7 +4435,7 @@ func (h *Handlers) handleGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 
-	plan, err := h.planService.GetPlan(ctx, req.TaskID)
+	plan, err := h.planService.GetPlanSnapshot(ctx, req.TaskID)
 	if err != nil {
 		return planws.GetError(msg, err)
 	}
@@ -4374,7 +4444,7 @@ func (h *Handlers) handleGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{})
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+	return ws.NewResponse(msg.ID, msg.Action, planReadPayload(plan))
 }
 
 // handleUpdateTaskPlan updates an existing task plan.
@@ -4389,11 +4459,13 @@ func (h *Handlers) handleGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.
 // it cannot reach.
 func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID    string `json:"task_id"`
-		Title     string `json:"title"`
-		Content   string `json:"content"`
-		CreatedBy string `json:"created_by"`
-		Mode      string `json:"mode"`
+		TaskID          string `json:"task_id"`
+		Title           string `json:"title"`
+		Content         string `json:"content"`
+		CreatedBy       string `json:"created_by"`
+		Mode            string `json:"mode"`
+		ExpectedVersion string `json:"expected_version"`
+		AllowTruncation bool   `json:"allow_truncation"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -4415,6 +4487,9 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		CreatedBy:          createdBy,
 		EvaluateTruncation: mode == service.PlanWriteModeReplace,
 		Mode:               mode,
+		AgentWrite:         true,
+		ExpectedVersion:    req.ExpectedVersion,
+		AllowTruncation:    req.AllowTruncation,
 	})
 	if err != nil {
 		return planws.UpdateError(msg, err)
@@ -4424,7 +4499,7 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 	if result.TruncationDetected {
 		warning = planTruncationWarning(result.ReplacedRunes, result.NewRunes, result.PriorRevisionNumber)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(result.Plan), warning, result.PriorRevisionNumber))
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(result.Plan), result.Plan.WriteVersion, warning, result.PriorRevisionNumber))
 }
 
 // handleDeleteTaskPlan deletes a task plan.

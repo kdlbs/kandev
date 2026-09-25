@@ -144,6 +144,9 @@ type Service struct {
 	comparisonTargetObserver    ComparisonTargetObserver
 	taskIssueStore              TaskIssueStore
 	workspaceGroupOwnerResolver WorkspaceGroupOwnerResolver
+	taskActivityProvider        TaskActivityProvider
+	clockMu                     sync.RWMutex
+	clock                       func() time.Time
 	// cascadeTaskDeleter is the cascade-delete entry point used by the
 	// watch reset flow. It is distinct from taskDeleter (which only deletes
 	// a single task by ID) because reset must walk the task tree and clean
@@ -156,6 +159,8 @@ type Service struct {
 	searchCache           *ttlCache
 	prStatusCache         *ttlCache
 	prFeedbackCache       *ttlCache
+	workflowRunsCache     *ttlCache
+	workflowJobsCache     *ttlCache
 	mergeMethodsCache     *ttlCache
 	accessibleReposCache  *ttlCache
 	repoErrorCache        *ttlCache
@@ -188,6 +193,21 @@ type Service struct {
 	// here because keys are unbounded and short-lived and the hot path is a
 	// LoadOrStore guard, not iteration.
 	inflightWorkspaceRefreshes sync.Map
+
+	// passiveFallback* limits the legacy per-watch fallback used by passive
+	// workspace refreshes. The admission window is shared across workspaces so
+	// a batch outage cannot turn a single background tick into an unbounded CLI
+	// fan-out. Admissions are retained as timestamps to enforce a rolling
+	// minute instead of allowing a wall-clock boundary burst.
+	passiveFallbackMu            sync.Mutex
+	passiveFallbackAdmissions    []passiveFallbackAdmission
+	passiveFallbackTargetCursors map[string]int
+
+	// passiveWorkspaceRefreshAt suppresses repeated workspace reads that find
+	// no due watch. Stale-task refreshes bypass this admission and remain
+	// independent of the passive cooldown.
+	passiveWorkspaceRefreshMu sync.Mutex
+	passiveWorkspaceRefreshAt map[string]time.Time
 
 	// stopCtx / stopCancel / bgWG own the lifecycle of background goroutines
 	// the service spawns lazily (currently refreshStaleWorkspaceWatches).
@@ -223,30 +243,35 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 	rateTracker := NewRateTracker(eventBus, log)
 	rateCoordinator := NewRateCoordinator(eventBus, log)
 	service := &Service{
-		client:                  client,
-		authMethod:              authMethod,
-		secrets:                 secrets,
-		store:                   store,
-		eventBus:                eventBus,
-		logger:                  log,
-		searchCache:             newTTLCache(),
-		prStatusCache:           newTTLCache(),
-		prFeedbackCache:         newPRFeedbackCache(),
-		mergeMethodsCache:       newMergeMethodsCache(),
-		accessibleReposCache:    newAccessibleReposCache(),
-		repoErrorCache:          newRepoErrorCache(),
-		forkParentCache:         newForkParentCache(),
-		protectionCache:         newBranchProtectionCache(),
-		rateTracker:             rateTracker,
-		rateCoordinator:         rateCoordinator,
-		prDiscoveryHealth:       newPRDiscoveryHealth(eventBus, log),
-		prDiscoveryAttempts:     make(map[string]*prDiscoveryAttemptResult),
-		tokenClientFactory:      func(token string) Client { return NewPATClient(token) },
-		ghAccountLister:         ListGHAccounts,
-		cleanupFailureCounts:    make(map[string]int),
-		appRegistrationRuntimes: make(map[string]*githubAppRuntime),
-		stopCtx:                 stopCtx,
-		stopCancel:              stopCancel,
+		client:                       client,
+		authMethod:                   authMethod,
+		secrets:                      secrets,
+		store:                        store,
+		eventBus:                     eventBus,
+		logger:                       log,
+		searchCache:                  newTTLCache(),
+		prStatusCache:                newTTLCache(),
+		prFeedbackCache:              newPRFeedbackCache(),
+		workflowRunsCache:            newWorkflowAttentionCache(),
+		workflowJobsCache:            newWorkflowAttentionCache(),
+		mergeMethodsCache:            newMergeMethodsCache(),
+		accessibleReposCache:         newAccessibleReposCache(),
+		repoErrorCache:               newRepoErrorCache(),
+		forkParentCache:              newForkParentCache(),
+		protectionCache:              newBranchProtectionCache(),
+		rateTracker:                  rateTracker,
+		rateCoordinator:              rateCoordinator,
+		prDiscoveryHealth:            newPRDiscoveryHealth(eventBus, log),
+		prDiscoveryAttempts:          make(map[string]*prDiscoveryAttemptResult),
+		tokenClientFactory:           func(token string) Client { return NewPATClient(token) },
+		ghAccountLister:              ListGHAccounts,
+		cleanupFailureCounts:         make(map[string]int),
+		passiveFallbackTargetCursors: make(map[string]int),
+		passiveWorkspaceRefreshAt:    make(map[string]time.Time),
+		appRegistrationRuntimes:      make(map[string]*githubAppRuntime),
+		stopCtx:                      stopCtx,
+		stopCancel:                   stopCancel,
+		clock:                        time.Now,
 	}
 	if store != nil {
 		service.resolver = NewCredentialResolver(store, secrets)
@@ -414,6 +439,24 @@ func (s *Service) SetCascadeTaskDeleter(d watchreset.TaskDeleter) {
 
 // SetTaskSessionChecker sets the session checker for cleanup operations.
 func (s *Service) SetTaskSessionChecker(c TaskSessionChecker) { s.taskSessionChecker = c }
+
+// SetTaskActivityProvider wires the persisted task activity projection used
+// by passive adaptive searching-watch refreshes.
+func (s *Service) SetTaskActivityProvider(provider TaskActivityProvider) {
+	s.taskActivityProvider = provider
+}
+
+// SetClock installs the service clock used by passive refresh admission.
+// Production uses time.Now; tests can use a fixed clock.
+func (s *Service) SetClock(clock func() time.Time) {
+	s.clockMu.Lock()
+	defer s.clockMu.Unlock()
+	if clock == nil {
+		s.clock = time.Now
+		return
+	}
+	s.clock = clock
+}
 
 // SetSecretManager sets the secret manager for token configuration operations.
 func (s *Service) SetSecretManager(m SecretManager) { s.secretManager = m }

@@ -11,6 +11,7 @@ import (
 
 	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/system/info"
 )
 
@@ -113,11 +114,55 @@ func TestReadyHandlerBodyShapesByReadiness(t *testing.T) {
 	}
 }
 
+// TestReadyHandlerIncludesStartupSnapshot covers the AC-PLATFORM-STARTUP-
+// PROGRESS-005 requirement that /ready carry the startup snapshot in both
+// its starting 503 and its ready 200 bodies, never 404, whenever a
+// *startup.Reporter is wired into routeParams.
+func TestReadyHandlerIncludesStartupSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	reporter := startup.New(testLogger(t))
+	reporter.Set(startup.RecoveringSessions)
+
+	setReadyForTest(t, false)
+	router := gin.New()
+	router.GET("/ready", readyHandler(routeParams{version: "1.2.3", progress: reporter}))
+
+	startingRec := httptest.NewRecorder()
+	router.ServeHTTP(startingRec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	var startingBody map[string]interface{}
+	if err := json.Unmarshal(startingRec.Body.Bytes(), &startingBody); err != nil {
+		t.Fatalf("decode starting body: %v", err)
+	}
+	startingSnap, ok := startingBody["startup"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("starting body missing \"startup\" snapshot: %#v", startingBody)
+	}
+	if startingSnap["phase"] != string(startup.RecoveringSessions) {
+		t.Fatalf("starting startup.phase = %v, want %v", startingSnap["phase"], startup.RecoveringSessions)
+	}
+
+	setReadyForTest(t, true)
+	readyRec := httptest.NewRecorder()
+	router.ServeHTTP(readyRec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	var readyBody map[string]interface{}
+	if err := json.Unmarshal(readyRec.Body.Bytes(), &readyBody); err != nil {
+		t.Fatalf("decode ready body: %v", err)
+	}
+	readySnap, ok := readyBody["startup"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("ready body missing \"startup\" snapshot: %#v", readyBody)
+	}
+	if readySnap["phase"] != string(startup.RecoveringSessions) {
+		t.Fatalf("ready startup.phase = %v, want %v", readySnap["phase"], startup.RecoveringSessions)
+	}
+}
+
 func TestReadyHandlerReportsPersistenceFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setReadyForTest(t, true)
 	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
 		ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks"},
+		Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)

@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -257,13 +258,25 @@ func TestExportAutomationsZip_OneEntryPerAutomation(t *testing.T) {
 func TestExportAutomationsDocument_TriggerBadConfig_EmitsRenderedWarning(t *testing.T) {
 	svc, wsLookup := exportServiceTestFixture(t)
 	wsLookup.exists["ws-1"] = true
-	createExportTestAutomation(t, svc, &CreateAutomationRequest{
+	a := createExportTestAutomation(t, svc, &CreateAutomationRequest{
 		WorkspaceID: "ws-1",
 		Name:        "Hook",
 		Triggers: []CreateTriggerSpec{
-			{Type: TriggerTypeWebhook, Config: []byte("not-json"), Enabled: true},
+			{Type: TriggerTypeWebhook, Config: []byte("{}"), Enabled: true},
 		},
 	})
+
+	// validateWebhookConfig rejects malformed JSON at every save-time entry
+	// point (CreateAutomation, AddTrigger, UpdateTrigger), so a stored
+	// non-JSON config can now only arise from post-creation corruption.
+	// Write straight to the store to simulate that and exercise export's
+	// defensive handling of it.
+	badConfig := json.RawMessage("not-json")
+	if err := svc.store.UpdateTrigger(context.Background(), a.Triggers[0].ID, &UpdateTriggerRequest{
+		Config: &badConfig,
+	}); err != nil {
+		t.Fatalf("UpdateTrigger: %v", err)
+	}
 
 	body, err := svc.ExportAutomationsDocument(context.Background(), "ws-1")
 	if err != nil {

@@ -10,6 +10,7 @@ const discovery = vi.hoisted(() => ({
     { id: "", path: "/configured", display_path: "/configured", state: "connected" },
   ],
   homeConfirmationRequired: true,
+  failedRoots: [] as string[],
 }));
 const actions = vi.hoisted(() => ({
   refreshDiscovery: vi.fn(),
@@ -49,6 +50,8 @@ import { RepositoryDiscoveryControls } from "./repository-discovery-controls";
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  discovery.desktopRuntime = true;
+  discovery.failedRoots = [];
 });
 
 describe("RepositoryDiscoveryControls", () => {
@@ -63,6 +66,15 @@ describe("RepositoryDiscoveryControls", () => {
 
   it("does not lease or render a surface when disabled", () => {
     render(<RepositoryDiscoveryControls workspaceId="workspace-1" enabled={false} />);
+
+    expect(screen.queryByTestId("root-controls")).toBeNull();
+  });
+
+  it("does not render failed-root diagnostics for a non-desktop picker", () => {
+    discovery.desktopRuntime = false;
+    discovery.failedRoots = ["/missing-repositories"];
+
+    render(<RepositoryDiscoveryControls workspaceId="workspace-1" presentation="picker" />);
 
     expect(screen.queryByTestId("root-controls")).toBeNull();
   });

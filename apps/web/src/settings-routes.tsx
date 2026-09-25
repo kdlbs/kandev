@@ -50,7 +50,7 @@ import { UnitsPage } from "@/components/settings/units/units-page";
 import { HealthIssuesCard } from "@/components/settings/system/health-issues-card";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { SystemRouteShell } from "@/components/settings/system/system-route-shell";
-import { StorageMaintenanceSettings } from "@/components/settings/system/storage/storage-maintenance-settings";
+import { StorageSettings } from "@/components/settings/system/storage-settings";
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
@@ -64,6 +64,7 @@ import {
   KEYBOARD_SHORTCUTS_SETTINGS_HREF,
   LAYOUTS_SETTINGS_HREF,
   NOTIFICATIONS_SETTINGS_HREF,
+  SIDEBAR_LAYOUT_TAB_HREF,
   TASK_BEHAVIOR_SETTINGS_HREF,
   TERMINAL_EDITORS_SETTINGS_HREF,
 } from "@/lib/settings-discovery/catalog/preferences";
@@ -137,6 +138,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/preferences/notifications": () => <NotificationsSettings />,
   "/settings/preferences/task-behavior": () => <TaskBehaviorSettings />,
   "/settings/preferences/terminal-editors": () => <TerminalEditorsSettings />,
+  "/settings/sidebar": () => <SettingsRedirect to={SIDEBAR_LAYOUT_TAB_HREF} />,
   // Legacy /settings/general paths, one redirect per page that lived there.
   "/settings/general": () => <SettingsRedirect to={APPEARANCE_SETTINGS_HREF} />,
   "/settings/general/appearance": () => <SettingsRedirect to={APPEARANCE_SETTINGS_HREF} />,
@@ -201,16 +203,17 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <AboutSettings licenses={licenseEntries} />
     </SystemRouteShell>
   ),
-  "/settings/system/data-storage": () => (
-    <SystemRouteShell
-      titleKey="system:navDataStorage"
-      descriptionKey="system:dataStoragePageDescription"
-    >
-      <DataLogsSettings />
-    </SystemRouteShell>
+  "/settings/system/data-storage": () => <DataLogsSettings />,
+  "/settings/system/backups": () => (
+    <SettingsRedirect
+      to={`${SYSTEM_DATA_STORAGE_SETTINGS_HREF}?tab=database#setting-system-backups`}
+    />
   ),
-  "/settings/system/backups": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
-  "/settings/system/database": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/system/database": () => (
+    <SettingsRedirect
+      to={`${SYSTEM_DATA_STORAGE_SETTINGS_HREF}?tab=database#setting-system-database`}
+    />
+  ),
   "/settings/units": () => (
     <SystemRouteShell titleKey="settings:unitsTitle" descriptionKey="settings:unitsDescription">
       <UnitsPage />
@@ -230,7 +233,9 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
     </SystemRouteShell>
   ),
   "/settings/system/licenses": () => <SettingsRedirect to={SYSTEM_ABOUT_SETTINGS_HREF} />,
-  "/settings/system/logs": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/system/logs": () => (
+    <SettingsRedirect to={`${SYSTEM_DATA_STORAGE_SETTINGS_HREF}?tab=logs#setting-system-logs`} />
+  ),
   "/settings/system/message-queue": () => <SettingsRedirect to={TASK_BEHAVIOR_SETTINGS_HREF} />,
   "/settings/system/status": () => (
     <SystemRouteShell titleKey="common:status" descriptionKey="system:statusPageDescription">
@@ -242,11 +247,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <UIStateCard />
     </SystemRouteShell>
   ),
-  "/settings/system/storage": () => (
-    <SystemRouteShell titleKey="system:storageTitle" descriptionKey="system:storageDescription">
-      <StorageMaintenanceSettings />
-    </SystemRouteShell>
-  ),
+  "/settings/system/storage": () => <StorageSettings />,
   "/settings/system/updates": renderUpdatesRoute,
   "/settings/changelog": () => <SettingsRedirect to="/settings/system/updates" />,
 };

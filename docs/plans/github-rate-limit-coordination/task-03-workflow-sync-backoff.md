@@ -35,13 +35,17 @@ system_design:
 
 ## Results
 
-- Added idempotent recovery columns and round-trip coverage for fresh,
-  upgraded, and replayed Workflow Sync schemas.
+- Reconciled the recovery columns with the landed shared auth circuit:
+  `next_retry_at` is the persisted schedule, and API `next_attempt_at`
+  mirrors it. Fresh, upgraded, and replayed schemas have round-trip coverage.
 - Automatic failures persist equal-jitter exponential backoff, honor provider
   retry lower bounds, and skip provider resolution before `next_attempt_at`.
 - Invalid GitHub credentials/access and missing targets suspend polling after
-  one attempt; skipped ticks stay silent. GitLab failures retain generic
-  transient recovery.
+  one attempt; skipped ticks stay silent. GitLab transient failures use the
+  interval-based schedule, while GitLab auth/config failures retain the shared
+  circuit's bounded retry policy.
 - Config saves and explicit Sync now re-arm recovery state, while successful
   explicit sync clears failures and suspension.
-- Package and race suites passed with task-local Go caches.
+- After the 2026-09-25 current-base merge, `go test ./internal/workflowsync
+  -count=1 -timeout=2m` and `go test -race ./internal/workflowsync -count=1
+  -timeout=3m` passed.

@@ -320,6 +320,33 @@ func TestMockControllerAddIssues(t *testing.T) {
 	}
 }
 
+func TestMockControllerAddPRsDefaultsSameRepositoryHeadIdentity(t *testing.T) {
+	router, mock := setupMockControllerTestForAddIssues()
+	response := serveMockJSON(t, router, http.MethodPost, "/api/v1/github/mock/prs", `{"prs":[
+		{"number":42,"title":"same repository","state":"open","head_branch":"feature","base_branch":"main","repo_owner":"owner","repo_name":"repo"},
+		{"number":43,"title":"fork source","state":"open","head_branch":"feature","base_branch":"main","repo_owner":"owner","repo_name":"repo","head_repo_owner":"contributor","head_repo_name":"repo-fork"}
+	]}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("add PRs: %d %s", response.Code, response.Body.String())
+	}
+
+	sameRepositoryPR, err := mock.GetPR(context.Background(), "owner", "repo", 42)
+	if err != nil {
+		t.Fatalf("get same-repository PR: %v", err)
+	}
+	if sameRepositoryPR.HeadRepoOwner != "owner" || sameRepositoryPR.HeadRepoName != "repo" {
+		t.Fatalf("same-repository head = %s/%s, want owner/repo", sameRepositoryPR.HeadRepoOwner, sameRepositoryPR.HeadRepoName)
+	}
+
+	forkPR, err := mock.GetPR(context.Background(), "owner", "repo", 43)
+	if err != nil {
+		t.Fatalf("get fork PR: %v", err)
+	}
+	if forkPR.HeadRepoOwner != "contributor" || forkPR.HeadRepoName != "repo-fork" {
+		t.Fatalf("fork head = %s/%s, want contributor/repo-fork", forkPR.HeadRepoOwner, forkPR.HeadRepoName)
+	}
+}
+
 func TestMockControllerAddIssuesInvalidPayload(t *testing.T) {
 	router, _ := setupMockControllerTestForAddIssues()
 

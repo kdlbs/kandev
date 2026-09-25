@@ -66,7 +66,7 @@ test.describe("System storage maintenance", () => {
     const cleanButton = testPage.getByTestId("storage-temporary-artifacts-clean");
     await expect(cleanButton).toBeEnabled();
     await cleanButton.click();
-    await expect(testPage.getByText("Clean stale Kandev artifacts?")).toBeVisible();
+    await expect(testPage.getByText("Clean inactive Kandev temporary files?")).toBeVisible();
     await prCapture.screenshot("temporary-artifacts-confirmation", {
       caption: "Desktop storage confirms stale registered artifacts before quarantine",
     });

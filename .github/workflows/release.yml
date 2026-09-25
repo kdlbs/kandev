@@ -745,11 +745,60 @@ jobs:
           VITE_KANDEV_API_PORT: ""
           VITE_KANDEV_DEBUG: ""
         run: pnpm -C apps --filter @kandev/web build
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Upload web bundle (attempt 1)
+        id: upload_web_bundle_1
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: web-bundle
           path: apps/web/dist
+          if-no-files-found: error
           include-hidden-files: true
+
+      - name: Wait before web bundle upload retry (attempt 2)
+        if: steps.upload_web_bundle_1.outcome == 'failure'
+        run: |
+          echo "::warning::web-bundle upload attempt 1/3 failed; retrying in 30 seconds."
+          sleep 30
+
+      - name: Upload web bundle (attempt 2)
+        id: upload_web_bundle_2
+        if: steps.upload_web_bundle_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: web-bundle
+          path: apps/web/dist
+          if-no-files-found: error
+          include-hidden-files: true
+          overwrite: true
+
+      - name: Wait before web bundle upload retry (attempt 3)
+        if: steps.upload_web_bundle_2.outcome == 'failure'
+        run: |
+          echo "::warning::web-bundle upload attempt 2/3 failed; retrying in 60 seconds."
+          sleep 60
+
+      - name: Upload web bundle (attempt 3)
+        id: upload_web_bundle_3
+        if: steps.upload_web_bundle_2.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: web-bundle
+          path: apps/web/dist
+          if-no-files-found: error
+          include-hidden-files: true
+          overwrite: true
+
+      - name: Fail after web bundle upload retries
+        if: >-
+          steps.upload_web_bundle_1.outcome == 'failure' &&
+          steps.upload_web_bundle_2.outcome == 'failure' &&
+          steps.upload_web_bundle_3.outcome == 'failure'
+        run: |
+          echo "::error::web-bundle upload failed after 3 attempts." >&2
+          exit 1
 
   build-bundles:
     name: Build platform bundle (${{ matrix.platform }})
@@ -874,17 +923,70 @@ jobs:
             shasum -a 256 "kandev-${{ matrix.platform }}.zip" > "kandev-${{ matrix.platform }}.zip.sha256"
           fi
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Upload runtime bundle (attempt 1)
+        id: upload_runtime_bundle_1
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bundle-${{ matrix.platform }}
           # The zip entries match nothing on the four non-Windows platforms.
-          # if-no-files-found is left at its default so a missing tarball is
-          # still an error.
           path: |
             dist/kandev-${{ matrix.platform }}.tar.gz
             dist/kandev-${{ matrix.platform }}.tar.gz.sha256
             dist/kandev-${{ matrix.platform }}.zip
             dist/kandev-${{ matrix.platform }}.zip.sha256
+          if-no-files-found: error
+
+      - name: Wait before runtime bundle upload retry (attempt 2)
+        if: steps.upload_runtime_bundle_1.outcome == 'failure'
+        run: |
+          echo "::warning::${{ matrix.platform }} runtime bundle upload attempt 1/3 failed; retrying in 30 seconds."
+          sleep 30
+
+      - name: Upload runtime bundle (attempt 2)
+        id: upload_runtime_bundle_2
+        if: steps.upload_runtime_bundle_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bundle-${{ matrix.platform }}
+          path: |
+            dist/kandev-${{ matrix.platform }}.tar.gz
+            dist/kandev-${{ matrix.platform }}.tar.gz.sha256
+            dist/kandev-${{ matrix.platform }}.zip
+            dist/kandev-${{ matrix.platform }}.zip.sha256
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Wait before runtime bundle upload retry (attempt 3)
+        if: steps.upload_runtime_bundle_2.outcome == 'failure'
+        run: |
+          echo "::warning::${{ matrix.platform }} runtime bundle upload attempt 2/3 failed; retrying in 60 seconds."
+          sleep 60
+
+      - name: Upload runtime bundle (attempt 3)
+        id: upload_runtime_bundle_3
+        if: steps.upload_runtime_bundle_2.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bundle-${{ matrix.platform }}
+          path: |
+            dist/kandev-${{ matrix.platform }}.tar.gz
+            dist/kandev-${{ matrix.platform }}.tar.gz.sha256
+            dist/kandev-${{ matrix.platform }}.zip
+            dist/kandev-${{ matrix.platform }}.zip.sha256
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Fail after runtime bundle upload retries
+        if: >-
+          steps.upload_runtime_bundle_1.outcome == 'failure' &&
+          steps.upload_runtime_bundle_2.outcome == 'failure' &&
+          steps.upload_runtime_bundle_3.outcome == 'failure'
+        run: |
+          echo "::error::${{ matrix.platform }} runtime bundle upload failed after 3 attempts." >&2
+          exit 1
 
   build-desktop:
     name: Build desktop app (${{ matrix.platform }})
@@ -898,6 +1000,7 @@ jobs:
         needs.build-bundles.result == 'success'
       }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - platform: macos-arm64
@@ -1428,10 +1531,57 @@ jobs:
           fi
           ls -lh "$out_dir"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Upload desktop artifacts (attempt 1)
+        id: upload_desktop_artifacts_1
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-${{ matrix.platform }}
           path: dist/desktop-artifacts/*
+          if-no-files-found: error
+
+      - name: Wait before desktop artifact upload retry (attempt 2)
+        if: steps.upload_desktop_artifacts_1.outcome == 'failure'
+        run: |
+          echo "::warning::${{ matrix.platform }} desktop artifact upload attempt 1/3 failed; retrying in 30 seconds."
+          sleep 30
+
+      - name: Upload desktop artifacts (attempt 2)
+        id: upload_desktop_artifacts_2
+        if: steps.upload_desktop_artifacts_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: dist/desktop-artifacts/*
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Wait before desktop artifact upload retry (attempt 3)
+        if: steps.upload_desktop_artifacts_2.outcome == 'failure'
+        run: |
+          echo "::warning::${{ matrix.platform }} desktop artifact upload attempt 2/3 failed; retrying in 60 seconds."
+          sleep 60
+
+      - name: Upload desktop artifacts (attempt 3)
+        id: upload_desktop_artifacts_3
+        if: steps.upload_desktop_artifacts_2.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: dist/desktop-artifacts/*
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Fail after desktop artifact upload retries
+        if: >-
+          steps.upload_desktop_artifacts_1.outcome == 'failure' &&
+          steps.upload_desktop_artifacts_2.outcome == 'failure' &&
+          steps.upload_desktop_artifacts_3.outcome == 'failure'
+        run: |
+          echo "::error::${{ matrix.platform }} desktop artifact upload failed after 3 attempts." >&2
+          exit 1
 
   # ---------------------------------------------------------------------------
   # Docker base image — split per arch onto native runners, then stitched into

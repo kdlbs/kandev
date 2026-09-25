@@ -359,6 +359,181 @@ func TestPromptSendNowClaimSkipsOnTurnStartWhenAlreadyProcessed(t *testing.T) {
 	}
 }
 
+func TestPromptSendNowClaimStartsCreatedSessionManually(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSessionWithStep(t, repo, "task-created", "session-created", "step-created")
+	seedExecutorRunning(t, repo, "session-created", "task-created", "exec-created")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-created"] = &wfmodels.WorkflowStep{
+		ID: "step-created", WorkflowID: "wf1", Name: "Created step", Position: 0,
+	}
+	stepGetter.workflowAgentProfileID = "profile-created"
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-created", v1.TaskStateInProgress)
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "task-created", "session-created")
+	if err != nil {
+		t.Fatalf("resolve session identity: %v", err)
+	}
+	claim := &messagequeue.SendNowClaim{
+		Identity: identity,
+		Dispatch: messagequeue.QueuedMessage{
+			ID:        "queued-created",
+			TaskID:    "task-created",
+			SessionID: "session-created",
+			Content:   "manual capacity override",
+		},
+	}
+
+	deliveryAttempted, err := svc.promptSendNowClaim(ctx, claim)
+	if err != nil {
+		t.Fatalf("prompt Send Now claim: %v", err)
+	}
+	if !deliveryAttempted {
+		t.Fatal("created-session Send Now did not report delivery")
+	}
+	if len(messages.userMessages) != 1 {
+		t.Fatalf("created-session Send Now recorded %d user messages, want 1", len(messages.userMessages))
+	}
+
+	session, err := repo.GetTaskSession(ctx, "session-created")
+	if err != nil {
+		t.Fatalf("reload created session: %v", err)
+	}
+	if session.State == models.TaskSessionStateCreated {
+		t.Fatal("created-session Send Now left the session in CREATED")
+	}
+	agentMgr.mu.Lock()
+	descriptionCalls := len(agentMgr.setExecutionDescriptionCalls)
+	agentMgr.mu.Unlock()
+	if descriptionCalls != 1 {
+		t.Fatalf("created-session Send Now made %d launch description calls, want 1", descriptionCalls)
+	}
+}
+
+func TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSessionWithStep(t, repo, "queued-created", "queued-session", "queued-step")
+	seedExecutorRunning(t, repo, "queued-session", "queued-created", "prepared-exec")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["queued-step"] = &wfmodels.WorkflowStep{
+		ID: "queued-step", WorkflowID: "wf1", Name: "Queued workflow step", Position: 0,
+	}
+	stepGetter.workflowAgentProfileID = "profile-queued"
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "queued-created", v1.TaskStateScheduling)
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	svc.messageCreator = &mockMessageCreator{}
+	t.Cleanup(svc.stopSendNowWorkers)
+
+	queuedAt := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	deferral := models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			metaKeySessionID:      "queued-session",
+			metaKeyAgentProfileID: "profile-queued",
+			metaKeyPrompt:         "workflow prompt",
+			"skip_message_record": true,
+		},
+		Origin:          string(launchOriginAutomatic),
+		ReasonCode:      ceilingReasonRefused,
+		QueuedAt:        queuedAt,
+		Ceiling:         5,
+		Population:      6,
+		PopulationKnown: true,
+	}
+	if err := repo.SetTaskMetadataKey(ctx, "queued-created", models.MetaKeyDeferredLaunch, models.CeilingRecordKeys(deferral)); err != nil {
+		t.Fatalf("persist ceiling deferral: %v", err)
+	}
+	queued, err := svc.messageQueue.QueueMessage(
+		ctx, "queued-session", "queued-created", "pending Continue", "", messagequeue.QueuedByUser, false, nil,
+	)
+	if err != nil {
+		t.Fatalf("queue Continue: %v", err)
+	}
+
+	sent, err := svc.SendQueuedNow(ctx, "queued-session", QueueSendNowScopeEntry, queued.ID)
+	if err != nil {
+		t.Fatalf("SendQueuedNow: %v", err)
+	}
+	if sent != 1 {
+		t.Fatalf("SendQueuedNow sent %d entries, want 1", sent)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	launched := false
+	for time.Now().Before(deadline) {
+		agentMgr.mu.Lock()
+		descriptionCalls := len(agentMgr.setExecutionDescriptionCalls)
+		descriptions := make([]string, 0, descriptionCalls)
+		for _, call := range agentMgr.setExecutionDescriptionCalls {
+			descriptions = append(descriptions, call.Prompt)
+		}
+		agentMgr.mu.Unlock()
+		if descriptionCalls == 1 {
+			if !strings.Contains(descriptions[0], "workflow prompt") || !strings.Contains(descriptions[0], "pending Continue") {
+				t.Fatalf("created-session launch prompt = %q, want workflow prompt and Continue", descriptions[0])
+			}
+			launched = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !launched {
+		session, sessionErr := repo.GetTaskSession(ctx, "queued-session")
+		status := svc.messageQueue.GetStatus(ctx, "queued-session")
+		agentMgr.mu.Lock()
+		capturedPrompts := append([]string(nil), agentMgr.capturedPrompts...)
+		descriptionCalls := append([]promptCall(nil), agentMgr.setExecutionDescriptionCalls...)
+		agentMgr.mu.Unlock()
+		t.Fatalf("SendQueuedNow did not accept the created-session launch before the timeout: record=%#v session=%#v session_err=%v queue=%#v prompts=%#v descriptions=%#v", deferredLaunchOf(t, svc, "queued-created"), session, sessionErr, status, capturedPrompts, descriptionCalls)
+	}
+
+	// The created-session launch is owned by the Send Now worker. The agent
+	// manager callback above happens before that worker returns and settles the
+	// exact ceiling record, so wait for the durable settlement boundary before
+	// asserting the replay is gone.
+	settleDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(settleDeadline) {
+		record := deferredLaunchOf(t, svc, "queued-created")
+		if record == nil || !models.HasCeilingDeferredIntent(&models.Task{Metadata: map[string]interface{}{
+			models.MetaKeyDeferredLaunch: record,
+		}}) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	record := deferredLaunchOf(t, svc, "queued-created")
+	if record != nil && models.HasCeilingDeferredIntent(&models.Task{Metadata: map[string]interface{}{
+		models.MetaKeyDeferredLaunch: record,
+	}}) {
+		t.Fatalf("SendQueuedNow left the original ceiling launch replayable: %#v", record)
+	}
+	agentMgr.mu.Lock()
+	beforeSweeps := len(agentMgr.setExecutionDescriptionCalls)
+	agentMgr.mu.Unlock()
+
+	// Completion and every later sweep must observe an empty ceiling half. In
+	// particular, a replay must not send the old workflow prompt a second time.
+	svc.drainDeferredCeilingLaunches(ctx)
+	svc.drainDeferredCeilingLaunches(ctx)
+	agentMgr.mu.Lock()
+	afterSweeps := len(agentMgr.setExecutionDescriptionCalls)
+	agentMgr.mu.Unlock()
+	if afterSweeps != beforeSweeps {
+		t.Fatalf("subsequent ceiling sweeps dispatched %d duplicate launches", afterSweeps-beforeSweeps)
+	}
+}
+
 func TestPromptSendNowClaimRejectsPlanCommentWhenTranscriptPersistenceFails(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

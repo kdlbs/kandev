@@ -162,19 +162,17 @@ func TestGHSearchParsingPreservesImmutableIdentity(t *testing.T) {
 	}
 }
 
-func TestGHClient_GetPRParsesSupportedCLIRepositoryShape(t *testing.T) {
-	binDir := t.TempDir()
-	logPath := filepath.Join(t.TempDir(), "gh-args.log")
-	ghPath := filepath.Join(binDir, "gh")
-	script := `#!/bin/sh
-printf '%s\n' "$*" >> "$GH_ARGS_LOG"
-printf '%s\n' '{"number":7,"title":"Remote contribution","url":"https://github.com/acme/widget/pull/7","state":"OPEN","body":"","headRefName":"feature/remote","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","baseRefName":"main","author":{"login":"alice"},"isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","additions":1,"deletions":0,"createdAt":"2025-01-01T00:00:00Z","updatedAt":"2025-01-02T00:00:00Z","mergedAt":"","closedAt":"","reviewRequests":[],"maintainerCanModify":true,"headRepository":{"id":"R_kgDOFork123","name":"widget-fork","nameWithOwner":"contributor/widget-fork","url":"https://github.com/contributor/widget-fork","cloneUrl":"https://github.com/contributor/widget-fork.git"},"headRepositoryOwner":{"login":"contributor"}}'
-`
-	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake gh: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("GH_ARGS_LOG", logPath)
+func TestPRBaseGHCLIQueriesAndRetainsBaseOID(t *testing.T) {
+	calls := newFakeGH(t,
+		ghResponse{
+			Prefix: "pr view 7",
+			Stdout: `{"number":7,"title":"Remote contribution","url":"https://github.com/acme/widget/pull/7","state":"OPEN","body":"","headRefName":"feature/remote","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","baseRefName":"main","author":{"login":"alice"},"isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","additions":1,"deletions":0,"createdAt":"2025-01-01T00:00:00Z","updatedAt":"2025-01-02T00:00:00Z","mergedAt":"","closedAt":"","reviewRequests":[],"maintainerCanModify":true,"headRepository":{"id":"R_kgDOFork123","name":"widget-fork","nameWithOwner":"contributor/widget-fork","url":"https://github.com/contributor/widget-fork","cloneUrl":"https://github.com/contributor/widget-fork.git"},"headRepositoryOwner":{"login":"contributor"}}`,
+		},
+		ghResponse{
+			Prefix: "api repos/acme/widget/pulls/7",
+			Stdout: `{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","ref":"release/next","repo":{"id":17,"name":"widget","owner":{"login":"upstream"}}}`,
+		},
+	)
 
 	pr, err := NewGHClient().GetPR(context.Background(), "acme", "widget", 7)
 	if err != nil {
@@ -183,18 +181,28 @@ printf '%s\n' '{"number":7,"title":"Remote contribution","url":"https://github.c
 	if pr.HeadRepoNodeID != "R_kgDOFork123" || pr.HeadRepoOwner != "contributor" || pr.HeadRepoName != "widget-fork" {
 		t.Fatalf("source repository = (%q, %q, %q), want CLI node ID and owner shape", pr.HeadRepoNodeID, pr.HeadRepoOwner, pr.HeadRepoName)
 	}
-	if pr.BaseRepoOwner != "acme" || pr.BaseRepoName != "widget" || pr.BaseDefaultBranch != "" {
-		t.Fatalf("target repository = (%q, %q, %q), want acme/widget with no guessed default branch", pr.BaseRepoOwner, pr.BaseRepoName, pr.BaseDefaultBranch)
+	if pr.BaseRepoID != 17 || pr.BaseRepoOwner != "upstream" || pr.BaseRepoName != "widget" ||
+		pr.BaseBranch != "release/next" || pr.BaseDefaultBranch != "" {
+		t.Fatalf("target repository = (%d, %q, %q), base=%q default=%q, want REST target identity and ref", pr.BaseRepoID, pr.BaseRepoOwner, pr.BaseRepoName, pr.BaseBranch, pr.BaseDefaultBranch)
 	}
-	args, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read gh args: %v", err)
+	got := calls(t)
+	assertGHArgv(t, got, 0, []string{
+		"pr", "view", "7", "--repo", "acme/widget", "--json",
+		"number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,changedFiles,mergedBy,autoMergeRequest,createdAt,updatedAt,mergedAt,closedAt,reviewRequests,maintainerCanModify,headRepository,headRepositoryOwner",
+	})
+	assertGHArgv(t, got, 1, []string{
+		"api", "repos/acme/widget/pulls/7", "--jq",
+		"{sha: .base.sha, ref: .base.ref, repo: {id: .base.repo.id, name: .base.repo.name, owner: .base.repo.owner}}",
+	})
+	for _, invocation := range got {
+		for index, arg := range invocation {
+			if arg == "--json" && index+1 < len(invocation) && strings.Contains(invocation[index+1], "baseRefOid") {
+				t.Fatalf("unsupported baseRefOid requested from gh pr --json: %#v", invocation)
+			}
+		}
 	}
-	if !strings.Contains(string(args), "headRepositoryOwner") {
-		t.Fatalf("GetPR() did not request headRepositoryOwner: %s", args)
-	}
-	if strings.Contains(string(args), "baseRepository") {
-		t.Fatalf("GetPR() requested unsupported baseRepository field: %s", args)
+	if pr.BaseSHA != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("BaseSHA = %q, want REST base.sha", pr.BaseSHA)
 	}
 }
 

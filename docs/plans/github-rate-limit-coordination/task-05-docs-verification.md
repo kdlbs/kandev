@@ -63,24 +63,17 @@ Passing repository gates:
 - `python3 .github/scripts/lint-harness-files.py AGENTS.md`
 - `git diff --check`
 
-`make -C apps/backend test` fails only in four environment-sensitive or
-externally-owned packages, none touched by this change. Targeted package
-reruns reproduce all four:
+The 2026-09-25 merge against `main` at `b88aea31ad49b2cda40e8ad84452356888e36a42`
+reconciled Workflow Sync with the landed auth circuit, preserved the task-bound
+rate snapshot tool, and refreshed the public recovery guidance. The current
+focused GitHub, Workflow Sync, MCP, and backend-app package suites pass;
+Workflow Sync race tests, backend lint, spec lint/catalog validation, and both
+public-doc validators pass. The PR delta passes `git diff upstream/main --check`.
 
-- `internal/agent/runtime/agentctl/launcher`: process-group child PID failures
-  are observed and reproducible under the guarded runtime.
-- `internal/agentctl/server/process`: parent PID and stale process-group
-  failures, with `GetParentPID` returning `-1`, are observed and reproducible
-  under the guarded runtime.
-- `internal/common/config`: proven environmental by an
-  `env -u KANDEV_HEALTH_TIMEOUT_MS` control, which passes with the injected
-  `KANDEV_HEALTH_TIMEOUT_MS=180000` removed.
-- `internal/task/service`: reproduced by three independent tasks on unrelated
-  branches. Temp-directory location, sandbox denial of `os.OpenRoot`, and
-  parent-chain traversal from `/` were tested and eliminated as causes. The
-  externally-owned defect remains under investigation as Kandev Support
-  request `c67824e3-6eca-4c57-96b3-7a205885dd83`.
-
-The task does not bypass the guard or edit these unrelated packages. The
-coordinator accepted the preserved broad-suite exception as externally owned;
-all branch-owned acceptance and verification paths pass.
+`make -C apps/backend test` reports three unchanged-package failures in this
+environment: `internal/common/config` sees the injected
+`KANDEV_HEALTH_TIMEOUT_MS=360000` (the focused test passes with that variable
+unset), while `internal/task/handlers` and `internal/task/service` reject local
+repository parent access. Representative task failures reproduce from an exact
+archive of the same `main` base. The broad gate remains failing on these base
+failures.

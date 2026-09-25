@@ -3,11 +3,37 @@ package workflowsync
 import (
 	"expvar"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/authcircuit"
 )
 
-var workflowSyncTransitionsTotal = expvar.NewMap("workflow_sync_recovery_transitions_total")
+// expvar maps published at package init, exposed via stdlib's /debug/vars
+// handler in dev mode. Process-local and dev-mode-visible only; labels are
+// bounded to provider name ("github"/"gitlab") and failure class
+// ("transient"/"auth"/"config"), never workspace IDs, repository/project
+// identifiers, branches, or error text. Mirrors the label idiom in
+// internal/github/metrics_vars.go.
+var (
+	syncFailuresTotal            = expvar.NewMap("workflowsync_failures_total")
+	circuitSkipsTotal            = expvar.NewMap("workflowsync_circuit_skips_total")
+	circuitResetTotal            = expvar.NewMap("workflowsync_circuit_resets_total")
+	workflowSyncTransitionsTotal = expvar.NewMap("workflow_sync_recovery_transitions_total")
+)
 
-func workflowSyncMetricLabel(pairs ...string) string {
+func workflowSyncMetricLabel(pairs ...string) string { return metricLabel(pairs...) }
+
+func incWorkflowSyncTransition(transition, provider, failureClass, retrySource string) {
+	workflowSyncTransitionsTotal.Add(metricLabel(
+		"transition", transition,
+		"provider", provider,
+		"failure_class", failureClass,
+		"retry_source", retrySource,
+	), 1)
+}
+
+// metricLabel builds a "k1=v1;k2=v2;..." label string for an expvar map
+// key, matching the idiom in internal/github/metrics_vars.go.
+func metricLabel(pairs ...string) string {
 	if len(pairs)%2 != 0 {
 		return ""
 	}
@@ -18,11 +44,20 @@ func workflowSyncMetricLabel(pairs ...string) string {
 	return strings.Join(parts, ";")
 }
 
-func incWorkflowSyncTransition(transition, provider, failureClass, retrySource string) {
-	workflowSyncTransitionsTotal.Add(workflowSyncMetricLabel(
-		"transition", transition,
-		"provider", provider,
-		"failure_class", failureClass,
-		"retry_source", retrySource,
-	), 1)
+// incSyncFailure records a classified sync failure, labeled only by
+// provider and failure class.
+func incSyncFailure(provider string, class authcircuit.FailureClass) {
+	syncFailuresTotal.Add(metricLabel("provider", provider, "class", string(class)), 1)
+}
+
+// incCircuitSkip records that a due sync was skipped because its circuit
+// was still open, labeled only by provider.
+func incCircuitSkip(provider string) {
+	circuitSkipsTotal.Add(metricLabel("provider", provider), 1)
+}
+
+// incCircuitReset records a circuit reset, labeled by provider and the
+// trigger ("credential" or "config").
+func incCircuitReset(provider, trigger string) {
+	circuitResetTotal.Add(metricLabel("provider", provider, "trigger", trigger), 1)
 }

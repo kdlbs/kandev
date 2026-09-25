@@ -52,7 +52,7 @@ func (c *Controller) ListEditors(ctx context.Context) (dto.EditorsResponse, erro
 			return result[i].Name < result[j].Name
 		})
 	}
-	return dto.EditorsResponse{Editors: result}, nil
+	return dto.EditorsResponse{Editors: result, FolderOpeningAvailable: service.FolderOpeningAvailable()}, nil
 }
 
 func (c *Controller) OpenSessionEditor(ctx context.Context, sessionID string, req dto.OpenEditorRequest) (dto.OpenEditorResponse, error) {
