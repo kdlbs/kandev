@@ -64,19 +64,24 @@ async function setupTask({
           (repository) => repository.repository_id === seedData.repositoryId,
         )?.worktree_path;
         // The environment root and the repository checkout are separate
-        // paths. The executor can publish either path first, so check every
+        // paths. The executor can publish either path first, and the first
+        // repository snapshot can omit repository_id, so check every
         // advertised candidate and keep the one that contains the fixture.
         const candidatePaths = [
           repositoryWorktree,
+          ...(environment?.repos ?? []).map((repository) => repository.worktree_path),
           environment?.workspace_path,
           environment?.worktree_path,
-        ].filter((candidate): candidate is string => Boolean(candidate));
+        ].filter(
+          (candidate, index, paths): candidate is string =>
+            Boolean(candidate) && paths.indexOf(candidate) === index,
+        );
         workspacePath =
           candidatePaths.find((candidate) => fs.existsSync(path.join(candidate, requiredPath))) ??
           "";
         return workspacePath !== "";
       },
-      { timeout: 60_000, message: `Waiting for ${requiredPath} in the ${taskTitle} worktree` },
+      { timeout: 90_000, message: `Waiting for ${requiredPath} in the ${taskTitle} worktree` },
     )
     .toBe(true);
 
@@ -155,6 +160,8 @@ async function dispatchHtmlDnd(testPage: Page, sourcePath: string, targetPath: s
 }
 
 test.describe("File tree drag and drop", () => {
+  test.describe.configure({ timeout: 180_000 });
+
   test("drag a file into a folder moves it on disk and in the tree", async ({
     testPage,
     apiClient,

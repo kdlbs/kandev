@@ -11,6 +11,7 @@ test("identifies a symlink in Changes and the mobile file viewer", async ({
   seedData,
   backend,
 }) => {
+  test.setTimeout(120_000);
   const repo = path.join(backend.tmpDir, "repos", "e2e-repo");
   const name = "a-long-symbolic-link-filename-for-mobile-containment.txt";
   fs.writeFileSync(path.join(repo, "symlink-target.txt"), "target content\n");

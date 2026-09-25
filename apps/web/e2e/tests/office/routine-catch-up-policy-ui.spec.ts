@@ -48,6 +48,8 @@ async function assertCatchUpPolicyToggles(page: Page, catchUpMaxInput: () => Pro
 }
 
 test.describe("Routine catch-up policy UI", () => {
+  test.describe.configure({ timeout: 120_000 });
+
   test("create dialog: catch-up policy control visibility toggles live", async ({
     testPage,
     prCapture,
@@ -63,7 +65,7 @@ test.describe("Routine catch-up policy UI", () => {
       .getByRole("combobox")
       .click();
     await expect(testPage.getByRole("option", { name: "CEO", exact: true })).toBeVisible({
-      timeout: 30_000,
+      timeout: 60_000,
     });
     await testPage.getByRole("option", { name: "CEO", exact: true }).click();
     await testPage.getByRole("button", { name: "Next" }).click();

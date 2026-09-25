@@ -887,6 +887,10 @@ test.describe("Quick Chat", () => {
       `[data-tab-reference="conversation:${started.session_id}"]`,
     );
     await expect(restoredTab).toBeVisible({ timeout: 15_000 });
+    // The restored tab can be visible without being the selected tab while
+    // the shell restores its tab snapshot. Select it before checking the
+    // session-owned model controls.
+    await restoredTab.click();
 
     await waitForSessionState(apiClient, {
       taskId: started.task_id,
@@ -907,6 +911,7 @@ test.describe("Quick Chat", () => {
     // user-visible label, then open it and wait for the config option itself.
     // This follows the same causal path as the user and avoids reading a
     // transient empty store entry during WebSocket reconnect.
+    await expect(modelSettings).toBeVisible({ timeout: 30_000 });
     await expect(modelSettings).toContainText("Mock Fast", { timeout: 60_000 });
     await modelSettings.click();
     await expect(testPage.getByTestId("config-option-trigger-effort")).toBeVisible({

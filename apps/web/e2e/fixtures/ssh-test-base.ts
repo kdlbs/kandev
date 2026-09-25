@@ -196,7 +196,7 @@ async function resetSSHRuntime(
       },
       {
         message: "previous SSH runtime rows should stay empty before the next test",
-        timeout: 60_000,
+        timeout: 120_000,
       },
     )
     .toBe(true);

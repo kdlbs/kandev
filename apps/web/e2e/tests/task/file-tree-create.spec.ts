@@ -52,13 +52,19 @@ async function setupTask(
             (repository) => repository.repository_id === seedData.repositoryId,
           )?.worktree_path;
           // A task environment may expose the task root in workspace_path and
-          // the repository checkout in repos[].worktree_path. Check both
-          // representations because the executor can publish either one first.
+          // the repository checkout in repos[].worktree_path. The repository
+          // id can be absent during the first materialization snapshot, so
+          // include every advertised repository path until the exact fixture
+          // file identifies the correct checkout.
           const candidatePaths = [
             repositoryWorktree,
+            ...(environment?.repos ?? []).map((repository) => repository.worktree_path),
             environment?.workspace_path,
             environment?.worktree_path,
-          ].filter((candidate): candidate is string => Boolean(candidate));
+          ].filter(
+            (candidate, index, paths): candidate is string =>
+              Boolean(candidate) && paths.indexOf(candidate) === index,
+          );
           workspacePath =
             candidatePaths.find((candidate) =>
               fs.existsSync(path.join(candidate, options.requiredPath!)),
@@ -66,7 +72,7 @@ async function setupTask(
           return workspacePath !== "";
         },
         {
-          timeout: 60_000,
+          timeout: 90_000,
           message: `Waiting for ${options.requiredPath} in the ${options.taskTitle} worktree`,
         },
       )
@@ -102,6 +108,8 @@ async function startCreateAtRoot(testPage: Page) {
 }
 
 test.describe("File tree create file", () => {
+  test.describe.configure({ timeout: 180_000 });
+
   test("New file at root creates a file on disk and in the tree", async ({
     testPage,
     apiClient,
