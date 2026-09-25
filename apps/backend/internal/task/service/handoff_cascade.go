@@ -357,12 +357,22 @@ func (s *HandoffService) archiveTaskTree(
 		for _, transfer := range ownershipTransfers {
 			if _, ok := archived[transfer.oldOwnerTaskID]; !ok {
 				abortedTransfers = append(abortedTransfers, transfer)
+			} else {
+				mutationErr = errors.Join(mutationErr,
+					s.transferWorkspaceEnvironmentOwnershipToSurvivor(
+						transferCompensationCtx, transfer, archived,
+					))
 			}
 		}
 		mutationErr = s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(
 			transferCompensationCtx, abortedTransfers, mutationErr,
 		)
-		return out, mutationErr
+		groupIDs, membershipErrors, membershipErr := s.releaseAndEvaluateMemberships(
+			postArchiveCtx, out.ArchivedTaskIDs,
+			orchmodels.WorkspaceReleaseReasonArchived, cascadeID,
+		)
+		out.ReleasedGroupIDs = groupIDs
+		return out, errors.Join(mutationErr, errors.Join(membershipErrors...), membershipErr)
 	}
 	cleanupErrors, finishErr := s.finishArchiveTaskTree(
 		postArchiveCtx, transferCompensationCtx, archiveDeadline,
@@ -1101,6 +1111,61 @@ func (s *HandoffService) rollbackWorkspaceEnvironmentOwnershipAfterFailure(
 	}
 	return errors.Join(cause, fmt.Errorf("rollback shared workspace environment ownership: %w", rollbackErr))
 }
+
+func (s *HandoffService) transferWorkspaceEnvironmentOwnershipToSurvivor(
+	ctx context.Context,
+	transfer workspaceEnvironmentOwnershipTransfer,
+	archived map[string]struct{},
+) error {
+	environments, ok := s.tasks.(workspaceEnvironmentRepository)
+	if !ok {
+		return errors.New("task environment repository unavailable")
+	}
+	group, err := s.wsGroups.GetWorkspaceGroup(ctx, transfer.groupID)
+	if err != nil {
+		return fmt.Errorf("load workspace group %s for partial archive ownership transfer: %w", transfer.groupID, err)
+	}
+	if group == nil {
+		return nil
+	}
+	members, err := s.wsGroups.ListActiveWorkspaceGroupMembers(ctx, transfer.groupID)
+	if err != nil {
+		return fmt.Errorf("list active workspace group members for %s: %w", transfer.groupID, err)
+	}
+	taskID, err := availableWorkspaceEnvironmentOwner(
+		ctx, environments, transfer.environmentID,
+		survivingWorkspaceMemberIDs(group.OwnerTaskID, members, archived),
+	)
+	if err != nil {
+		return fmt.Errorf("select surviving owner for environment %s: %w", transfer.environmentID, err)
+	}
+	if taskID == "" || taskID == transfer.newOwnerTaskID {
+		return nil
+	}
+	mu := s.workspaceGroupLock.lockFor(transfer.groupID)
+	mu.Lock()
+	defer mu.Unlock()
+	env, err := environments.GetTaskEnvironment(ctx, transfer.environmentID)
+	if err != nil {
+		return fmt.Errorf("load environment %s for partial archive ownership transfer: %w", transfer.environmentID, err)
+	}
+	if env == nil {
+		return fmt.Errorf("environment %s not found for partial archive ownership transfer", transfer.environmentID)
+	}
+	if env.TaskID == taskID {
+		return nil
+	}
+	if env.TaskID != transfer.newOwnerTaskID || env.OwnershipGeneration != transfer.resultingGeneration {
+		return fmt.Errorf("environment %s ownership changed during partial archive", transfer.environmentID)
+	}
+	if err := environments.TransferTaskEnvironmentOwnership(
+		ctx, transfer.environmentID, env.TaskID, env.OwnershipGeneration, taskID,
+	); err != nil {
+		return fmt.Errorf("transfer environment %s to surviving task %s: %w", transfer.environmentID, taskID, err)
+	}
+	return nil
+}
+
 func (s *HandoffService) rollbackAutoArchiveCASLoss(
 	ctx context.Context,
 	transfers []workspaceEnvironmentOwnershipTransfer,
