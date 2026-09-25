@@ -664,6 +664,7 @@ test("pull-request builds reject retained invalid canvas entries", async () => {
   const directory = await fs.mkdtemp(
     path.join(os.tmpdir(), "registry-pr-canvas-"),
   );
+  let manifestRequests = 0;
   const server = http.createServer((request, response) => {
     const requestPath = new URL(request.url ?? "/", "http://127.0.0.1")
       .pathname;
@@ -685,6 +686,11 @@ test("pull-request builds reject retained invalid canvas entries", async () => {
       response.end(
         JSON.stringify({ stargazers_count: 1, owner: { login: "acme" } }),
       );
+      return;
+    }
+    if (requestPath === "/acme/valid/v1.0.0/manifest.yaml") {
+      manifestRequests += 1;
+      response.end("display_name: Valid\n");
       return;
     }
     if (requestPath === "/asset") {
@@ -733,6 +739,7 @@ test("pull-request builds reject retained invalid canvas entries", async () => {
             ...process.env,
             GITHUB_EVENT_NAME: "pull_request",
             PLUGIN_REGISTRY_GITHUB_API: baseURL,
+            PLUGIN_REGISTRY_RAW_BASE: baseURL,
             PLUGIN_REGISTRY_PLUGINS_YAML: yamlPath,
             PLUGIN_REGISTRY_PRIOR_INDEX: priorPath,
             PLUGIN_REGISTRY_OUTPUT: outputPath,
@@ -742,6 +749,7 @@ test("pull-request builds reject retained invalid canvas entries", async () => {
       ),
       /pull-request validation found invalid canvas entries/,
     );
+    assert.equal(manifestRequests, 1);
     await assert.rejects(fs.access(outputPath));
   } finally {
     await new Promise((resolve, reject) =>
