@@ -63,6 +63,51 @@ func TestTokenClientFetchRateLimitPreservesSecondaryThrottle(t *testing.T) {
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-RATE-002.2
+func TestTokenClientFetchRateLimitUnknownResetDefersBackgroundRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reset string
+	}{
+		{name: "missing"},
+		{name: "zero", reset: `,"reset":0`},
+		{name: "negative", reset: `,"reset":-1`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, requests := newRecordingPATServer(t, map[string]string{
+				"/rate_limit": `{"resources":{"core":{"limit":5000,"remaining":0` + tc.reset + `}}}`,
+			})
+			coordinator := NewRateCoordinator(nil, nil)
+			tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+				Kind: AuthPrincipalHuman, Login: "unknown-reset-" + tc.name,
+			}, nil)
+			client.WithRateTracker(tracker)
+			if err := client.FetchRateLimit(context.Background()); err != nil {
+				t.Fatalf("FetchRateLimit: %v", err)
+			}
+			client.withRateAdmission(admission)
+
+			ctx := WithNonBlockingGitHubAdmission(
+				WithGitHubWorkClass(context.Background(), WorkClassBackground),
+			)
+			var out struct{}
+			err := client.get(ctx, "/repos/o/r", &out)
+			var deferred *AdmissionDeferredError
+			if !errors.As(err, &deferred) {
+				t.Fatalf("background request error = %v, want admission deferral", err)
+			}
+			if deferred.Reason != rateLimitBlockPrimary ||
+				deferred.RetrySource != RetrySourceConservativeFallback ||
+				!deferred.RetryAt.After(time.Now()) {
+				t.Fatalf("deferral = %+v, want primary exhaustion with conservative retry", deferred)
+			}
+			if len(*requests) != 1 || (*requests)[0].Path != "/rate_limit" {
+				t.Fatalf("provider requests = %+v, want only GET /rate_limit", *requests)
+			}
+		})
+	}
+}
+
 func TestPATClientExecuteGraphQLClassifiesRateLimitedPayload(t *testing.T) {
 	client, _ := newRecordingPATServer(t, map[string]string{
 		"/graphql": `{"data":null,"errors":[{"type":"RATE_LIMITED","message":"API rate limit already exceeded for user ID 79718216"}]}`,
