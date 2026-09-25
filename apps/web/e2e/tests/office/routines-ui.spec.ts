@@ -362,14 +362,13 @@ test.describe("Routines UI", () => {
 
     await testPage.goto("/office/routines");
     await testPage.getByRole("tab", { name: "Runs" }).click();
+    // officeSeed's workspace is reset per test, so exactly one run exists.
+    const runsList = testPage.locator(".rounded-lg.divide-y > div");
+    await expect(runsList).toHaveCount(1, { timeout: 10_000 });
     // AC-OFFICE-ROUTINE-WIRE-004.1/.3: `created_at` now reaches the model,
     // so run-row.tsx's `formatTime` renders the real timestamp instead of
     // the "--" placeholder it showed for every run before this capability.
-    await expect(
-      testPage.getByText(new Date(fired.run.created_at).toLocaleString(), { exact: true }),
-    ).toBeVisible({
-      timeout: 10_000,
-    });
+    await expect(runsList).toContainText(new Date(fired.run.created_at).toLocaleString());
   });
 
   // Review round 3 (Codex-1): before Build round 4's fix,

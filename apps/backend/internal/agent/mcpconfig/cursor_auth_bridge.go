@@ -33,9 +33,24 @@ type cursorMCPAuthSnapshot struct {
 
 // DeriveCursorProjectSlug derives Cursor's project directory name from a path.
 func DeriveCursorProjectSlug(workspacePath string) string {
-	normalizedPath := strings.ReplaceAll(workspacePath, `\`, "/")
-	slug := strings.NewReplacer("/", "-", ".", "-", "_", "-", ":", "-").Replace(normalizedPath)
-	return strings.Trim(slug, "-")
+	var slug strings.Builder
+	previousWasSeparator := true
+	for _, char := range workspacePath {
+		if !isCursorSlugASCIIAlphaNumeric(char) {
+			previousWasSeparator = true
+			continue
+		}
+		if slug.Len() > 0 && previousWasSeparator {
+			slug.WriteByte('-')
+		}
+		slug.WriteRune(char)
+		previousWasSeparator = false
+	}
+	return slug.String()
+}
+
+func isCursorSlugASCIIAlphaNumeric(char rune) bool {
+	return char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9'
 }
 
 // AggregateCursorMCPAuth publishes the latest valid project auth snapshot.
@@ -204,8 +219,19 @@ func cursorAuthExcludedProjectSlugs(workspaceRoots []string) ([]string, error) {
 			return nil, errors.New("cursor MCP auth exclusion root has an empty project slug")
 		}
 		slugs = append(slugs, slug)
+		legacySlug := deriveLegacyCursorProjectSlug(canonicalRoot)
+		if legacySlug != "" && legacySlug != slug {
+			slugs = append(slugs, legacySlug)
+		}
 	}
 	return slugs, nil
+}
+
+// deriveLegacyCursorProjectSlug keeps pre-normalization task projects out of credential aggregation.
+func deriveLegacyCursorProjectSlug(workspacePath string) string {
+	normalizedPath := strings.ReplaceAll(workspacePath, `\`, "/")
+	slug := strings.NewReplacer("/", "-", ".", "-", "_", "-", ":", "-").Replace(normalizedPath)
+	return strings.Trim(slug, "-")
 }
 
 func isCursorTaskProjectSlug(projectSlug string, taskRootSlugs []string) bool {

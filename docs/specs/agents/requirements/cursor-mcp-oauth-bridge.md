@@ -79,3 +79,4 @@ File modification time does not prove credential freshness or token validity.
 ## Implementation plans
 
 - [Cursor auth bridge plan](../../../plans/cursor-mcp-oauth-bridge/plan.md)
+- [Cursor slug normalization repair](../../../plans/cursor-mcp-slug-normalization/plan.md)
