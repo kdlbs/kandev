@@ -20,6 +20,10 @@ type PageShellProps = {
   leftActions?: ReactNode;
   actions?: ReactNode;
   overflowActions?: ReactNode;
+  /** Raw menu items shown only when the topbar action budget is exceeded. */
+  overflowMenuItems?: ReactNode;
+  /** Primary action retained beside the overflow menu at narrow widths. */
+  overflowPrimaryAction?: ReactNode;
   className?: string;
   showStatusTrigger?: boolean;
   /** `data-testid` on the topbar header (e2e anchors like `office-topbar`). */
@@ -44,7 +48,7 @@ type PageShellProps = {
 
 /**
  * The one page chrome for top-level routes: `PageTopbar` with the app nav
- * trigger injected ahead of any page `leading`, the home affordance resolved by
+ * trigger following the page actions, the home affordance resolved by
  * `useHomeAffordance` (instead of each shell hand-rolling an escape hatch), and
  * a scroll container below.
  *
@@ -71,12 +75,13 @@ export function PageShell({
         testId={topbarTestId}
         homeAffordance={home.mode}
         homeHref={home.href}
-        leading={
+        leading={leading}
+        actions={
           <>
+            {forwarded.actions}
             {showNavTrigger && (
               <AppNavSheet pageNav={pageNav} omitDestinations={navOmitDestinations} />
             )}
-            {leading}
           </>
         }
       />

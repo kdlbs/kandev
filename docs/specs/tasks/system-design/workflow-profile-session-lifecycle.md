@@ -4,6 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-001
   - REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-002
+  - REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-003
 ---
 
 # Workflow Step Profile Session Lifecycle System Design
@@ -32,6 +33,7 @@ session's model settings without switching profiles.
 | --- | --- |
 | `REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-001` | [Data and contracts](#data-and-contracts), [Control flow](#control-flow), [Failure and recovery](#failure-and-recovery), [Combined step agent selector](#combined-step-agent-selector) |
 | `REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-002` | [Explicit recipient contract](#explicit-recipient-contract), [Recipient bindings](#recipient-bindings), [Explicit routing flow](#explicit-routing-flow), [Combined step agent selector](#combined-step-agent-selector) |
+| `REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-003` | [Manual move recipient focus](#manual-move-recipient-focus) |
 
 ## Components and responsibilities
 
@@ -487,8 +489,79 @@ logs include session ID, execution ID, and intent stamp.
 
 ## Implementation plans
 
+- [Queued session ownership](../../../plans/queued-session-ownership/plan.md)
+  records the original parking and admission implementation through the paired
+  [inspection and queue design](queued-session-ownership.md). Stop-intent
+  tombstones remain callback evidence, not current activation policy.
+  The [session-open decision](../../../decisions/2026-09-18-session-open-resumes-conversation.md)
+  supersedes parking-based recovery suppression. Opening an earlier conversation
+  follows normal recovery without changing its workflow recipient role.
 - [Explicit session targeting](../../../plans/workflow-session-targeting/plan.md)
 - [Same-profile fresh-session repair](../../../plans/workflow-same-profile-new-session/plan.md)
+
+## Manual move recipient focus
+
+Requirement `REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-003` maps to this section.
+This extension was implemented on 2026-09-19. Tasks owns it because workflow
+entry routing determines the recipient. UI owns its existing panel primitives.
+
+### Entry correlation
+
+`useWorkflowStepMove` currently discards the move response. Background handlers
+preserve nonterminal pins, and Dockview can preserve another panel on insertion.
+Neither mechanism expresses the user's manual move intent.
+
+Add optional `workflow_entry_identity` to the HTTP move response and its web
+types. Capture the committed transition identifier in `MoveTaskWithOptions`
+before its task refresh. Format it with the existing workflow entry identity
+convention. Do not derive it from the refreshed task or treat `move_id` as the
+route operation ID. A no-op move omits the identity.
+
+Use `workflow_session_route.entry_identity`, `destination_step_id`,
+`destination_session_id`, and `phase` from the accepted task projection.
+Require the response identity, requested step, committed phase, and task-owned
+session to match. Carry committed route metadata through the existing
+`task.updated` publication after promotion if that publication omits it.
+Preserve existing stale-projection guards. Do not predict the recipient from
+preview data, session creation order, primary promotion alone, or profile name.
+
+### Local intent and presentation
+
+Add one ephemeral focus intent per active task presentation, owned by shared
+store actions. Record request sequence, presentation token, task, workflow,
+destination step, and manual navigation revision when the move starts.
+Bind its entry identity only after the matching response succeeds. Reconcile
+against already-received state and subsequent updates, in either order.
+
+Cancel on error, unmount, presentation change, task departure, later explicit
+session selection, or replacement by a newer request. Selection away and back
+still cancels. Reuse the manual navigation revision that `setActiveSession`
+already advances; do not infer user action from automatic Dockview callbacks.
+
+After the destination row is available, clear the earlier pin and update active
+session plus remembered selection atomically. Retain a one-shot presentation
+request until the target panel exists. Dockview consumes it after session-panel
+creation and bypasses preserved-panel restoration for this request only.
+Phone consumes the same request to select chat and close the step picker.
+Acknowledgement clears it. Never reuse the short tab-pointer intent TTL for an
+asynchronous workflow entry. Session selection cannot call launch or send APIs.
+
+### Mobile, recovery, and compatibility
+
+Reuse `session-mobile-layout.tsx` and `MobileSessionsPicker`: direct chat is the
+primary content, and the inset picker remains a temporary session choice.
+Keep the existing transcript scroll owner, dynamic viewport, safe-area spacing,
+and touch geometry. Do not autofocus the composer or open the phone keyboard.
+
+No database migration, routing change, or new runtime flag is required. Intent
+is browser-local and disappears on reload. Old servers without entry identity
+retain existing selection behavior. Reconnect reconciliation uses accepted task
+and session projections and cannot revive cancelled intent. Missing, malformed,
+foreign, or ambiguous targets preserve selection. Existing errors remain visible.
+
+See the [implementation plan](../../../plans/workflow-session-focus/plan.md)
+for the desktop/phone preview and race coverage. Existing routing diagnostics
+remain sufficient; no new metric or prompt logging is required.
 
 ## Related decisions
 

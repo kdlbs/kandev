@@ -36,6 +36,9 @@ type TUIAgentConfig struct {
 	// an MCP client at all. Resolved from the user's stored strategy key; see
 	// mcpconfig.StrategyByKey for why it is chosen rather than inferred.
 	MCPStrategy mcpconfig.PassthroughMCPStrategy
+	// DisableBracketedPaste selects the paced unframed delivery path for a
+	// terminal that does not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool
 }
 
 // TUIAgent implements Agent + PassthroughAgent for CLI passthrough TUI tools.
@@ -74,24 +77,23 @@ func NewTUIAgent(cfg TUIAgentConfig) *TUIAgent {
 	a := &TUIAgent{
 		StandardPassthrough: StandardPassthrough{
 			Cfg: PassthroughConfig{
-				Supported:       true,
-				Label:           "CLI Passthrough",
-				Description:     cfg.Desc,
-				PassthroughCmd:  NewCommand(cmdArgs...),
-				ModelFlag:       cfg.ModelFlag,
-				IdleTimeout:     cfg.IdleTimeout,
-				BufferMaxBytes:  cfg.BufferMax,
-				WaitForTerminal: cfg.WaitForTerm,
-				MCPStrategy:     cfg.MCPStrategy,
+				Supported:             true,
+				Label:                 "CLI Passthrough",
+				Description:           cfg.Desc,
+				PassthroughCmd:        NewCommand(cmdArgs...),
+				ModelFlag:             cfg.ModelFlag,
+				IdleTimeout:           cfg.IdleTimeout,
+				BufferMaxBytes:        cfg.BufferMax,
+				WaitForTerminal:       cfg.WaitForTerm,
+				MCPStrategy:           cfg.MCPStrategy,
+				DisableBracketedPaste: cfg.DisableBracketedPaste,
 				// Ink-based TUIs (Claude Code and similar) coalesce multi-byte
 				// stdin reads into a paste burst, absorbing a trailing "\r" into
-				// the pasted content instead of dispatching Enter, and enable
-				// bracketed-paste mode so ESC[200~…ESC[201~ delimiters break
-				// input. Send prompt bytes verbatim and split the submit byte
-				// into a discrete keystroke so programmatic PTY prompts submit.
-				// Matches the built-in Claude passthrough agent.
-				DisableBracketedPaste: true,
-				SubmitDelay:           150 * time.Millisecond,
+				// the pasted content instead of dispatching Enter. The submit
+				// byte is therefore a separate delayed keystroke, and the body
+				// travels as a bracketed paste so it arrives whole at any
+				// length. Matches the built-in Claude passthrough agent.
+				SubmitDelay: 150 * time.Millisecond,
 			},
 		},
 		cfg: cfg,

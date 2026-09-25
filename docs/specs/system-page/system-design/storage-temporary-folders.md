@@ -143,6 +143,10 @@ Permanent deletion retains its existing reporting and retention deadline.
 
 ## Presentation
 
+The current [storage analysis presentation design](storage-analysis-presentation.md) extends row ordering
+and timeout feedback. Its measured size order supersedes the adjacency described below.
+The existing reader, ownership, totals, and cleanup contracts remain authoritative.
+
 Add a System temporary folders disclosure beside Kandev temporary artifacts in the analysis section.
 Show full folder size and the visible note: `Informational. Can overlap counted categories.`
 Expanded content shows resolved roots, partial status, and measurement limitations.
@@ -161,7 +165,8 @@ Keep one page scroll owner. Paths wrap within the resource detail.
 Keep required help visible inline. No tooltip or overlay is needed to understand cleanup scope.
 Phone controls have at least 44-pixel hit targets. Fine-pointer buttons retain 28-pixel density.
 No fixed toolbar or new navigation route is required.
-All new copy uses `system` translations in all five supported language catalogs.
+All new copy uses `system` translations in the `en`, `pt-pt`, `zh-cn`, `zh-hk`,
+`zh-tw`, and `ja` language catalogs.
 
 ## Verification and delivery
 

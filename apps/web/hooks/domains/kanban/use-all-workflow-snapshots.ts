@@ -60,6 +60,20 @@ function hasNewerLiveAutoStartFailed(
   return existing.autoStartFailed !== fetchStart.autoStartFailed;
 }
 
+function hasNewerLiveInterrupted(
+  existing: KanbanTask,
+  fetchStart: KanbanTask | undefined,
+): boolean {
+  if (!fetchStart) return true;
+  if (
+    existing.interruptedGeneration !== undefined ||
+    fetchStart.interruptedGeneration !== undefined
+  ) {
+    return existing.interruptedGeneration !== fetchStart.interruptedGeneration;
+  }
+  return existing.interrupted !== fetchStart.interrupted;
+}
+
 function hasNewerLiveWorkspaceOrphaned(
   existing: KanbanTask,
   fetchStart: KanbanTask | undefined,
@@ -85,6 +99,12 @@ function preserveLiveMarkerFields(
 ): void {
   // A task.updated event can set or clear either marker while the snapshot
   // is in flight. Preserve the newer live value instead of rolling it back.
+  if (merged.interrupted === undefined || hasNewerLiveInterrupted(existing, fetchStart)) {
+    merged.interrupted = existing.interrupted;
+  }
+  if (existing.interruptedGeneration !== undefined) {
+    merged.interruptedGeneration = existing.interruptedGeneration;
+  }
   if (merged.autoStartFailed === undefined || hasNewerLiveAutoStartFailed(existing, fetchStart)) {
     merged.autoStartFailed = existing.autoStartFailed;
   }
@@ -235,6 +255,7 @@ async function fetchAndWriteSnapshot(
       is_start_step: step.is_start_step,
       show_in_command_panel: step.show_in_command_panel,
       agent_profile_id: step.agent_profile_id,
+      session_target: step.session_target ?? null,
       wip_limit: step.wip_limit,
       pull_from_step_id: step.pull_from_step_id ?? null,
       stage_type: step.stage_type,

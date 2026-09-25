@@ -172,6 +172,48 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn(archive, package)
         self.assertLess(package.index(validation), package.index(archive))
 
+    def assert_required_artifact_upload_retries(
+        self, job_name: str, step_prefix: str
+    ) -> None:
+        block = job_block(job_name)
+        for attempt in (1, 2, 3):
+            step_id = f"{step_prefix}_{attempt}"
+            self.assertEqual(block.count(f"id: {step_id}"), 1)
+            if attempt > 1:
+                self.assertIn(
+                    f"if: steps.{step_prefix}_{attempt - 1}.outcome == 'failure'",
+                    block,
+                )
+
+        self.assertEqual(block.count("if-no-files-found: error"), 3)
+        self.assertEqual(block.count("overwrite: true"), 2)
+        self.assertIn("sleep 30", block)
+        self.assertIn("sleep 60", block)
+        self.assertIn("attempt 1/3 failed; retrying in 30 seconds.", block)
+        self.assertIn("attempt 2/3 failed; retrying in 60 seconds.", block)
+        normalized = " ".join(block.split())
+        self.assertIn(
+            f"if: >- steps.{step_prefix}_1.outcome == 'failure' && "
+            f"steps.{step_prefix}_2.outcome == 'failure' && "
+            f"steps.{step_prefix}_3.outcome == 'failure'",
+            normalized,
+        )
+
+    def test_required_artifact_uploads_retry_and_desktop_matrix_isolated(self) -> None:
+        self.assert_required_artifact_upload_retries("build-web", "upload_web_bundle")
+        self.assert_required_artifact_upload_retries(
+            "build-bundles", "upload_runtime_bundle"
+        )
+        self.assert_required_artifact_upload_retries(
+            "build-desktop", "upload_desktop_artifacts"
+        )
+
+        desktop = job_block("build-desktop")
+        self.assertIn("fail-fast: false", desktop)
+        self.assertIn(
+            "needs.build-desktop.result == 'success'", job_block("publish-release")
+        )
+
     def test_stable_jobs_continue_past_skipped_nightly_branch_only_after_successful_needs(
         self,
     ) -> None:

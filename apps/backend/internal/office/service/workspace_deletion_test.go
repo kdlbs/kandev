@@ -74,6 +74,75 @@ func TestDeleteWorkspaceStopsTasksDeletesDataAndConfig(t *testing.T) {
 	}
 }
 
+func TestDeleteWorkspaceStopsRunOwnedExecutionsBeforeDeletingData(t *testing.T) {
+	ctx := context.Background()
+	taskSvc := &fakeWorkspaceTaskService{
+		workspace: &taskmodels.Workspace{ID: "ws-delete", Name: "default"},
+	}
+	stopper := &fakeRunExecutionStopper{}
+	svc := newTestService(t, service.ServiceOptions{
+		TaskWorkspace:       taskSvc,
+		RunExecutionStopper: stopper,
+	})
+	createTestAgent(t, svc, "ws-delete", "agent-run-delete")
+	now := time.Now().UTC()
+	svc.ExecSQL(t, `INSERT INTO runs (
+		id, agent_profile_id, reason, payload, status, requested_at
+	) VALUES (?, ?, 'routine', '{}', 'claimed', ?)`, "run-delete", "agent-run-delete", now)
+	svc.ExecSQL(t, `INSERT INTO office_run_sessions (
+		id, workspace_id, agent_profile_id, run_id, attempt, state,
+		execution_id, created_at
+	) VALUES (?, ?, ?, ?, 1, 'running', ?, ?)`,
+		"session-delete", "ws-delete", "agent-run-delete", "run-delete", "execution-delete", now)
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+	if len(stopper.executionIDs) != 1 || stopper.executionIDs[0] != "execution-delete" {
+		t.Fatalf("stopped executions = %#v, want execution-delete", stopper.executionIDs)
+	}
+	if taskSvc.deletedWorkspace != "ws-delete" {
+		t.Fatalf("deleted workspace = %q, want ws-delete", taskSvc.deletedWorkspace)
+	}
+}
+
+func TestDeleteWorkspaceAbortsWhenRunExecutionStopFails(t *testing.T) {
+	ctx := context.Background()
+	taskSvc := &fakeWorkspaceTaskService{
+		workspace: &taskmodels.Workspace{ID: "ws-delete", Name: "default"},
+	}
+	stopper := &fakeRunExecutionStopper{err: errors.New("stop failed")}
+	svc := newTestService(t, service.ServiceOptions{
+		TaskWorkspace:       taskSvc,
+		RunExecutionStopper: stopper,
+	})
+	createTestAgent(t, svc, "ws-delete", "agent-run-delete")
+	now := time.Now().UTC()
+	svc.ExecSQL(t, `INSERT INTO runs (
+		id, agent_profile_id, reason, payload, status, requested_at
+	) VALUES (?, ?, 'routine', '{}', 'claimed', ?)`, "run-delete", "agent-run-delete", now)
+	svc.ExecSQL(t, `INSERT INTO office_run_sessions (
+		id, workspace_id, agent_profile_id, run_id, attempt, state,
+		execution_id, created_at
+	) VALUES (?, ?, ?, ?, 1, 'running', ?, ?)`,
+		"session-delete", "ws-delete", "agent-run-delete", "run-delete", "execution-delete", now)
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err == nil {
+		t.Fatal("DeleteWorkspace returned nil after runtime stop failure")
+	}
+	if taskSvc.deletedWorkspace != "" {
+		t.Fatalf("workspace deleted after runtime stop failure: %q", taskSvc.deletedWorkspace)
+	}
+	var sessions int
+	if err := svc.RepoForTest().ReaderDB().Get(&sessions,
+		`SELECT COUNT(*) FROM office_run_sessions WHERE id = ?`, "session-delete"); err != nil {
+		t.Fatalf("count run sessions: %v", err)
+	}
+	if sessions != 1 {
+		t.Fatalf("run session count = %d, want 1 after aborted deletion", sessions)
+	}
+}
+
 func TestDeleteWorkspaceUsesTaskLifecycleDeleter(t *testing.T) {
 	ctx := context.Background()
 	taskSvc := &fakeWorkspaceTaskService{
@@ -382,6 +451,16 @@ func (f *deadlineWorkspaceGroupCleaner) CleanupWorkspaceGroups(ctx context.Conte
 
 type fakeTaskCanceller struct {
 	taskIDs []string
+}
+
+type fakeRunExecutionStopper struct {
+	executionIDs []string
+	err          error
+}
+
+func (f *fakeRunExecutionStopper) Stop(_ context.Context, executionID, _ string) error {
+	f.executionIDs = append(f.executionIDs, executionID)
+	return f.err
 }
 
 func (f *fakeTaskCanceller) CancelTaskExecution(_ context.Context, taskID string, _ string, _ bool) error {

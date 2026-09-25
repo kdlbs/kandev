@@ -2,6 +2,7 @@
 status: draft
 system: integrations
 requirements:
+  - REQ-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-002
   - REQ-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001
 ---
 
@@ -144,3 +145,42 @@ Desktop and mobile Playwright tests verify the existing entry points and the pro
 - [Requirements](../requirements/github-workflow-attention.md)
 - [Shared task summary design](../../ui/system-design/pr-task-status-summary.md)
 - [Implementation plan](../../../plans/github-workflow-attention/plan.md)
+
+## Expiring Actions observations
+
+`REQ-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-002` maps to this section.
+Share raw workflow-run observations across batched enrichment and service
+feedback/status reads. Keep per-PR classification outside the shared cache.
+Key entries by credential scope and generation, normalized repository identity,
+and head SHA. Reuse the bounded `ttlCache` and its singleflight/invalidation
+patterns; add per-entry expiry support if needed. Keep at most 512 run entries
+and 512 job entries. Errors are not cached.
+
+| Observation | TTL |
+| --- | --- |
+| Empty list or any pending/running/unknown status | 30 seconds |
+| Any approval/action-required or ambiguous attention result | 30 seconds |
+| Nonempty, all completed, no attention requirement | 5 minutes |
+
+A SHA does not freeze the workflow run collection. Reruns and new runs can
+arrive for the same SHA. Never use an infinite TTL. Cache job observations by
+credential scope, repository, run ID, and attempt, with the same expiry classes.
+A run-attempt change must not reuse jobs from an earlier attempt.
+
+Keep existing batched enrichment limits: concurrency 4 and total budget
+5 seconds. Preserve the outer status/search cache TTL of 30 seconds and the
+feedback TTL of 8 seconds. Long Actions entries only affect workflow attention,
+not checks, review status, or auto-merge decisions.
+
+Explicit refresh invalidates the relevant Actions and outer response entries,
+then coalesces concurrent refreshes. Generation checks prevent an older
+in-flight request from repopulating invalidated data. Passive page polling
+uses the cache. Route future approval/rerun mutations through this invalidation
+seam; adding those mutations is outside this package.
+
+External reruns on a completed SHA can take up to 5 minutes plus the next
+1-minute poll tick to appear. Attention and running results use the short TTL.
+Provider errors retain unknown/stale-positive semantics and existing retry
+admission. Terminal PRs continue to skip Actions reads altogether.
+
+See [the implementation plan](../../../plans/watch-task-cleanup/plan.md).

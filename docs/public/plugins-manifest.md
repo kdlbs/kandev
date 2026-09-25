@@ -414,9 +414,10 @@ matched, so a plugin subscribed to `shell.output.*` reads the session id off
 `event_type` as its last segment. For an unsuffixed subject that string is
 just the subject itself (`task.created`).
 The table above documents backend `capabilities.events` bus vocabulary. The
-browser conversation facade uses a separate Host-only ordered vocabulary for
-live history, including `session.turn.started` and `session.turn.completed`;
-those names do not change the backend subjects listed here.
+browser conversation facade uses a separate Host-only revision-bound v2
+vocabulary for live history, including `session.turn.started` and
+`session.turn.completed`; those names do not change the backend subjects listed
+here.
 
 | Domain                     | Events                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

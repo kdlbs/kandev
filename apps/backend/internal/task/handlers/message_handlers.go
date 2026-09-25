@@ -25,7 +25,9 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/previewfeedback"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
+	"github.com/kandev/kandev/internal/task/repository/previewfeedbacktx"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
@@ -304,8 +306,22 @@ func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
 		c.JSON(http.StatusGone, gin.H{"code": "tool_payload_removed", "message_id": message.ID, "removed_at": marker["removed_at"], "summary": message.Content})
 		return
 	}
+	if message.PayloadDigest != "" {
+		// Large output was externalized at write time (see
+		// externalizeMessagePayload) and message.Metadata currently holds
+		// only the small has_output/stdout_bytes/... summary
+		// ProjectMessageMetadata produces - not the full body. This route is
+		// the explicit, authorized single-message load that resolves it
+		// back before extraction.
+		if err := h.service.RehydrateMessagePayload(c.Request.Context(), message); err != nil {
+			h.logger.Error("failed to rehydrate message payload",
+				zap.String("message_id", message.ID), zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load shell output"})
+			return
+		}
+	}
 	output, ok := models.ExtractShellExecOutput(message.Metadata)
-	if !ok || message.TaskSessionID != c.Param("id") {
+	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
 		return
 	}
@@ -331,7 +347,6 @@ type listMessagesParams struct {
 	sort       string
 	authorType string
 	limit      int
-	paginated  bool
 }
 
 const (
@@ -386,6 +401,13 @@ func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesPa
 		}
 		limit = parsed
 	}
+	if !limitProvided && before == "" && after == "" && sort == "" {
+		// No pagination parameters at all: default to a bounded first page
+		// instead of an unbounded full-session read. See
+		// service.DefaultMessagesPageSize and wsListMessages's matching
+		// default for the WebSocket path.
+		limit = service.DefaultMessagesPageSize
+	}
 	return listMessagesParams{
 		before:     before,
 		after:      after,
@@ -393,7 +415,6 @@ func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesPa
 		sort:       sort,
 		authorType: authorType,
 		limit:      limit,
-		paginated:  limitProvided || before != "" || after != "" || aroundProvided || sort != "" || authorTypeProvided,
 	}, true
 }
 
@@ -402,15 +423,7 @@ func (h *MessageHandlers) fetchMessages(
 	sessionID string,
 	params listMessagesParams,
 ) (dto.ListMessagesResponse, error) {
-	if params.paginated {
-		return h.fetchMessagesPaginated(ctx, sessionID, params)
-	}
-	messages, err := h.service.ListMessages(ctx, sessionID)
-	if err != nil {
-		return dto.ListMessagesResponse{}, err
-	}
-	result := messagesToAPI(messages)
-	return dto.ListMessagesResponse{Messages: result, Total: len(result)}, nil
+	return h.fetchMessagesPaginated(ctx, sessionID, params)
 }
 
 // fetchMessagesPaginated loads a filtered or around-window message page.
@@ -481,20 +494,21 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 // WS handlers
 
 type wsAddMessageRequest struct {
-	TaskID                string                      `json:"task_id"`
-	TaskSessionID         string                      `json:"session_id"`
-	MessageID             string                      `json:"message_id,omitempty"`
-	ClientMessageID       string                      `json:"client_message_id,omitempty"`
-	Content               string                      `json:"content"`
-	AuthorID              string                      `json:"author_id,omitempty"`
-	Model                 string                      `json:"model,omitempty"`
-	PlanMode              bool                        `json:"plan_mode,omitempty"`
-	HasReviewComments     bool                        `json:"has_review_comments,omitempty"`
-	Attachments           []v1.MessageAttachment      `json:"attachments,omitempty"`
-	ContextFiles          []v1.ContextFileMeta        `json:"context_files,omitempty"`
-	EntityReferences      []v1.EntityReference        `json:"entity_references,omitempty"`
-	PlanCommentRefs       []models.TaskPlanCommentRef `json:"plan_comment_refs,omitempty"`
-	RequirePrimarySession bool                        `json:"require_primary_session,omitempty"`
+	TaskID                string                          `json:"task_id"`
+	TaskSessionID         string                          `json:"session_id"`
+	MessageID             string                          `json:"message_id,omitempty"`
+	ClientMessageID       string                          `json:"client_message_id,omitempty"`
+	Content               string                          `json:"content"`
+	AuthorID              string                          `json:"author_id,omitempty"`
+	Model                 string                          `json:"model,omitempty"`
+	PlanMode              bool                            `json:"plan_mode,omitempty"`
+	HasReviewComments     bool                            `json:"has_review_comments,omitempty"`
+	Attachments           []v1.MessageAttachment          `json:"attachments,omitempty"`
+	ContextFiles          []v1.ContextFileMeta            `json:"context_files,omitempty"`
+	EntityReferences      []v1.EntityReference            `json:"entity_references,omitempty"`
+	PlanCommentRefs       []models.TaskPlanCommentRef     `json:"plan_comment_refs,omitempty"`
+	PreviewFeedbackRefs   []models.TaskPreviewFeedbackRef `json:"preview_feedback_refs,omitempty"`
+	RequirePrimarySession bool                            `json:"require_primary_session,omitempty"`
 	// These fields are server-owned and are carried only from message admission
 	// to the created-session dispatch. They are intentionally not JSON fields.
 	canvasGuidanceResolved   bool
@@ -504,18 +518,19 @@ type wsAddMessageRequest struct {
 }
 
 type addMessageReplayIdentity struct {
-	TaskID                string                      `json:"task_id"`
-	TaskSessionID         string                      `json:"session_id"`
-	Content               string                      `json:"content"`
-	AuthorID              string                      `json:"author_id"`
-	Model                 string                      `json:"model"`
-	PlanMode              bool                        `json:"plan_mode"`
-	HasReviewComments     bool                        `json:"has_review_comments"`
-	Attachments           []v1.MessageAttachment      `json:"attachments"`
-	ContextFiles          []v1.ContextFileMeta        `json:"context_files"`
-	EntityReferences      []v1.EntityReference        `json:"entity_references"`
-	PlanCommentRefs       []models.TaskPlanCommentRef `json:"plan_comment_refs"`
-	RequirePrimarySession bool                        `json:"require_primary_session"`
+	TaskID                string                          `json:"task_id"`
+	TaskSessionID         string                          `json:"session_id"`
+	Content               string                          `json:"content"`
+	AuthorID              string                          `json:"author_id"`
+	Model                 string                          `json:"model"`
+	PlanMode              bool                            `json:"plan_mode"`
+	HasReviewComments     bool                            `json:"has_review_comments"`
+	Attachments           []v1.MessageAttachment          `json:"attachments"`
+	ContextFiles          []v1.ContextFileMeta            `json:"context_files"`
+	EntityReferences      []v1.EntityReference            `json:"entity_references"`
+	PlanCommentRefs       []models.TaskPlanCommentRef     `json:"plan_comment_refs"`
+	PreviewFeedbackRefs   []models.TaskPreviewFeedbackRef `json:"preview_feedback_refs"`
+	RequirePrimarySession bool                            `json:"require_primary_session"`
 }
 
 func addMessageRequestFingerprint(req wsAddMessageRequest) (string, error) {
@@ -524,7 +539,8 @@ func addMessageRequestFingerprint(req wsAddMessageRequest) (string, error) {
 		AuthorID: req.AuthorID, Model: req.Model, PlanMode: req.PlanMode,
 		HasReviewComments: req.HasReviewComments, Attachments: req.Attachments,
 		ContextFiles: req.ContextFiles, EntityReferences: req.EntityReferences,
-		PlanCommentRefs: req.PlanCommentRefs, RequirePrimarySession: req.RequirePrimarySession,
+		PlanCommentRefs: req.PlanCommentRefs, PreviewFeedbackRefs: req.PreviewFeedbackRefs,
+		RequirePrimarySession: req.RequirePrimarySession,
 	})
 }
 
@@ -558,7 +574,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return response, nil
 	}
 	admissionCtx := ctx
-	if len(req.PlanCommentRefs) > 0 {
+	if len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0 {
 		var releaseAdmission func()
 		admissionCtx, releaseAdmission, err = h.service.AcquirePlanCommentAndMessageAdmission(
 			ctx, req.TaskID, req.ClientMessageID,
@@ -576,7 +592,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			return response, nil
 		}
 	}
-	if len(req.PlanCommentRefs) == 0 && req.ClientMessageID != "" {
+	if len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 && req.ClientMessageID != "" {
 		var releaseMessageAdmission func()
 		admissionCtx, releaseMessageAdmission, err = h.service.AcquireMessageAdmission(
 			admissionCtx, req.ClientMessageID,
@@ -629,9 +645,10 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		req.EntityReferences = references
 	}
-	if len(req.PlanCommentRefs) > 0 {
-		if err := h.service.ValidatePlanCommentMessage(
-			admissionCtx, req.TaskID, req.TaskSessionID, req.Content, req.PlanCommentRefs,
+	if len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0 {
+		if err := h.service.ValidateTaskFeedbackMessage(
+			admissionCtx, req.TaskID, req.TaskSessionID, req.Content,
+			req.PlanCommentRefs, req.PreviewFeedbackRefs,
 			req.RequirePrimarySession, sessionResp.Session.State,
 		); err != nil {
 			if response := planCommentMessageError(msg, err); response != nil {
@@ -641,8 +658,23 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to validate plan comments", nil)
 		}
 	}
+	if len(req.PreviewFeedbackRefs) > 0 {
+		previewAttachments, err := h.service.PreviewFeedbackAttachments(
+			admissionCtx, req.TaskID, req.PreviewFeedbackRefs,
+		)
+		if err != nil {
+			if response := planCommentMessageError(msg, err); response != nil {
+				return response, nil
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid preview feedback attachments", nil)
+		}
+		req.Attachments = append(req.Attachments, previewAttachments...)
+		if err := validateAttachments(req.Attachments); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+	}
 	var planCommentAttachmentClaim *messagequeue.QueueAttachmentClaim
-	if len(req.PlanCommentRefs) > 0 && len(req.Attachments) > 0 {
+	if (len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0) && len(req.Attachments) > 0 {
 		claim, err := h.service.PrepareMessageAttachmentClaim(ctx, req.TaskID, req.Attachments)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
@@ -651,7 +683,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 
 	// Transition task from REVIEW → IN_PROGRESS if needed
-	task, err := h.ensureTaskInProgress(ctx, req.TaskID)
+	task, err := h.ensureTaskInProgress(ctx, req.TaskID, req.TaskSessionID)
 	if err != nil {
 		h.logger.Error("failed to get task", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
@@ -744,7 +776,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	storedContent = orchestrator.AppendEntityReferenceContext(storedContent, req.EntityReferences)
 	configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
 	titleOwner := false
-	hasMessageContent := req.Content != "" || len(req.Attachments) > 0 || len(req.PlanCommentRefs) > 0
+	hasMessageContent := req.Content != "" || len(req.Attachments) > 0 ||
+		len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0
 	task, titleOwner, wsErr = h.resolveMessageTaskAndTitleOwner(
 		ctx, msg, task, req.TaskID, req.TaskSessionID, configMode, startCreatedSession, hasMessageContent,
 	)
@@ -806,6 +839,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		AuthorID:              req.AuthorID,
 		Metadata:              messageMetadata,
 		PlanCommentRefs:       req.PlanCommentRefs,
+		PreviewFeedbackRefs:   req.PreviewFeedbackRefs,
 		RequirePrimarySession: req.RequirePrimarySession,
 		ExpectedSessionState:  sessionResp.Session.State,
 		AttachmentClaim:       planCommentAttachmentClaim,
@@ -815,9 +849,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// Every comment-bearing message uses the queue row as a durable dispatch
 	// receipt. Promptable sessions drain it immediately; workflow waits and
 	// process restarts retain the same caller-owned delivery identity.
-	atomicQueuedPlanComments := len(req.PlanCommentRefs) > 0
+	atomicQueuedTaskFeedback := len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0
 	var queuedCoordinator AtomicQueuedPromptCoordinator
-	if atomicQueuedPlanComments {
+	if atomicQueuedTaskFeedback {
 		var ok bool
 		queuedCoordinator, ok = h.orchestrator.(AtomicQueuedPromptCoordinator)
 		if !ok {
@@ -825,7 +859,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 	}
 	createMessage := func() (*models.Message, error) {
-		if atomicQueuedPlanComments {
+		if atomicQueuedTaskFeedback {
 			queueMetadata := make(map[string]interface{}, len(createRequest.Metadata)+1)
 			for key, value := range createRequest.Metadata {
 				queueMetadata[key] = value
@@ -902,7 +936,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		promptReferencesPrepared = initialTaskBrief.PromptReferencesPrepared
 		req.promptReferencesPrepared = promptReferencesPrepared
 	}
-	if initialTaskBriefQueued && h.orchestrator != nil && !atomicQueuedPlanComments {
+	if initialTaskBriefQueued && h.orchestrator != nil && !atomicQueuedTaskFeedback {
 		queueMetadata := meta.ToMap()
 		if queueMetadata == nil {
 			queueMetadata = make(map[string]interface{})
@@ -926,7 +960,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue prompt", nil)
 		}
-	} else if turnStartResult.Queued && !atomicQueuedPlanComments {
+	} else if turnStartResult.Queued && !atomicQueuedTaskFeedback {
 		if err := h.orchestrator.QueueUserPrompt(
 			ctx,
 			req.TaskID,
@@ -956,7 +990,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// an orchestrator is available. This runs async so the WS request can
 	// respond immediately. Plan mode changes the execution prompt and agent
 	// behavior; it does not make message.add a record-only operation.
-	if h.orchestrator != nil && !turnStartResult.Queued && !atomicQueuedPlanComments && !initialTaskBriefQueued {
+	if h.orchestrator != nil && !turnStartResult.Queued && !atomicQueuedTaskFeedback && !initialTaskBriefQueued {
 		h.dispatchPromptAsync(
 			ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer, trustedPromptContext,
 		)
@@ -1000,7 +1034,7 @@ func (h *MessageHandlers) addMessageReplayResponse(
 		// A replay may be the first process that survives long enough to kick
 		// the atomically persisted delivery receipt. Notification is idempotent:
 		// an acknowledged receipt makes this a no-op.
-		if len(req.PlanCommentRefs) > 0 {
+		if len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0 {
 			if coordinator, ok := h.orchestrator.(AtomicQueuedPromptCoordinator); ok {
 				coordinator.NotifyQueuedUserPrompt(ctx, existing.TaskID, existing.TaskSessionID)
 			}
@@ -1039,8 +1073,9 @@ func addMessageReplayConflicts(
 	}
 	storedFingerprint, _ := existing.Metadata[plancomments.MetadataClientMessageFingerprint].(string)
 	return (storedFingerprint != "" && storedFingerprint != requestFingerprint) ||
-		(storedFingerprint == "" && len(req.PlanCommentRefs) > 0) ||
-		!plancomments.MetadataRefsMatch(existing.Metadata, req.PlanCommentRefs)
+		(storedFingerprint == "" && (len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0)) ||
+		!plancomments.MetadataRefsMatch(existing.Metadata, req.PlanCommentRefs) ||
+		!previewfeedback.MetadataRefsMatch(existing.Metadata, req.PreviewFeedbackRefs)
 }
 
 // lockMessageID serializes acceptance for one caller-owned message ID. The
@@ -1148,7 +1183,7 @@ func validateAddMessageRequest(req wsAddMessageRequest) string {
 		return "task_id is required"
 	}
 	// Content can be empty if there are attachments (image-only messages)
-	if req.Content == "" && len(req.Attachments) == 0 && len(req.PlanCommentRefs) == 0 {
+	if req.Content == "" && len(req.Attachments) == 0 && len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 {
 		return "content or attachments are required"
 	}
 	seenPlanComments := make(map[string]struct{}, len(req.PlanCommentRefs))
@@ -1161,11 +1196,21 @@ func validateAddMessageRequest(req wsAddMessageRequest) string {
 		}
 		seenPlanComments[ref.ID] = struct{}{}
 	}
+	seenPreviewFeedback := make(map[string]struct{}, len(req.PreviewFeedbackRefs))
+	for _, ref := range req.PreviewFeedbackRefs {
+		if ref.ID == "" || ref.Version <= 0 {
+			return "preview_feedback_refs are invalid"
+		}
+		if _, duplicate := seenPreviewFeedback[ref.ID]; duplicate {
+			return "preview_feedback_refs contain duplicates"
+		}
+		seenPreviewFeedback[ref.ID] = struct{}{}
+	}
 	if len(req.ClientMessageID) > 128 {
 		return "client_message_id is too long"
 	}
-	if len(req.PlanCommentRefs) > 0 && req.ClientMessageID == "" {
-		return "client_message_id is required with plan comments"
+	if (len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0) && req.ClientMessageID == "" {
+		return "client_message_id is required with task feedback"
 	}
 	if len(req.PlanCommentRefs) > 0 && plancomments.ContainsReservedPlaceholder(req.Content) {
 		return "content contains a reserved plan comment marker"
@@ -1192,8 +1237,18 @@ func queuedMessageAttachments(attachments []v1.MessageAttachment) []messagequeue
 }
 
 func planCommentMessageError(msg *ws.Message, err error) *ws.Message {
-	if errors.Is(err, plancomments.ErrRenderedTooLarge) {
+	if errors.Is(err, plancomments.ErrRenderedTooLarge) || errors.Is(err, previewfeedback.ErrPromptTooLarge) {
 		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Rendered message content is too long", nil)
+		return response
+	}
+	var previewChanged *previewfeedbacktx.FeedbackChangedError
+	if errors.As(err, &previewChanged) {
+		details := map[string]interface{}{}
+		if previewChanged.Snapshot != nil {
+			details["snapshot"] = dto.TaskPreviewFeedbackSnapshotFromModel(previewChanged.Snapshot)
+		}
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodePreviewFeedbackChanged,
+			"Task preview feedback changed", details)
 		return response
 	}
 	var commentsChanged *plancommenttx.CommentsChangedError
@@ -1281,15 +1336,24 @@ func (h *MessageHandlers) logBlockedRunningSession(sessionID string, state model
 		zap.String("session_state", string(state)))
 }
 
-// ensureTaskInProgress fetches the task and transitions it from REVIEW → IN_PROGRESS if needed.
+// ensureTaskInProgress fetches the task and transitions it from REVIEW to
+// IN_PROGRESS if needed. A task whose automatic destination is still waiting
+// for session capacity remains in Scheduling until real work starts.
 // The fetched task is returned so message context injection can reuse the same
 // snapshot instead of issuing another repository lookup.
-func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID string) (*models.Task, error) {
+//
+//nolint:cyclop,gocognit,nestif // REVIEW reconciliation keeps queue and task CAS checks together.
+func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID, sessionID string) (*models.Task, error) {
 	task, err := h.service.GetTask(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
 	if task.State != v1.TaskStateReview {
+		return task, nil
+	}
+	if task, keptQueued, err := h.reconcileQueuedMessageTask(ctx, task, taskID, sessionID); err != nil {
+		return nil, err
+	} else if keptQueued {
 		return task, nil
 	}
 	if _, err := h.service.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
@@ -1301,6 +1365,94 @@ func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID strin
 			zap.String("task_id", taskID))
 	}
 	return task, nil
+}
+
+//nolint:cyclop,gocognit,nestif // Queue reconciliation keeps the read/compare/CAS fence in one transaction-shaped helper.
+func (h *MessageHandlers) reconcileQueuedMessageTask(
+	ctx context.Context,
+	task *models.Task,
+	taskID, sessionID string,
+) (*models.Task, bool, error) {
+	// A REVIEW task can still own an automatic launch that is waiting for
+	// capacity. Read that queue for every message path, including callers that
+	// do not provide a session id. A repository failure is uncertainty, not an
+	// absence, so state must remain unchanged and the error must be returned.
+	deferral, queued, err := h.service.ReadCeilingDeferredLaunch(ctx, taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !queued {
+		return task, false, nil
+	}
+	queuedSessionID := models.CeilingDeferralSessionID(task, deferral)
+	if queuedSessionID == "" {
+		return task, true, nil
+	}
+	// A caller targeting another session is an explicit message to that
+	// session. It must not claim or preserve a different queued destination.
+	if sessionID != "" && sessionID != queuedSessionID {
+		return task, false, nil
+	}
+	if !models.CeilingDeferralTargetsSession(task, deferral, queuedSessionID) {
+		return task, true, nil
+	}
+	queuedSession, err := h.service.GetTaskSession(ctx, queuedSessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	if queuedSession == nil || queuedSession.TaskID != taskID {
+		return task, true, nil
+	}
+	if queuedSession.State != models.TaskSessionStateCreated {
+		return task, false, nil
+	}
+
+	// Re-read the queue and route immediately before the state CAS. A successor
+	// entry must not inherit the old destination's repair.
+	latestDeferral, latestQueued, err := h.service.ReadCeilingDeferredLaunch(ctx, taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !latestQueued {
+		return task, false, nil
+	}
+	sameEntry, err := models.CeilingDeferralsEquivalentForAdmission(deferral, latestDeferral)
+	if err != nil {
+		return task, true, nil
+	}
+	latestTask, err := h.service.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	latestSessionID := models.CeilingDeferralSessionID(latestTask, latestDeferral)
+	if !sameEntry || latestSessionID != queuedSessionID ||
+		!models.CeilingDeferralTargetsSession(latestTask, latestDeferral, queuedSessionID) {
+		return task, true, nil
+	}
+	task = latestTask
+	latestSession, err := h.service.GetTaskSession(ctx, queuedSessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	if latestSession == nil || latestSession.TaskID != taskID {
+		return task, true, nil
+	}
+	if latestSession.State != models.TaskSessionStateCreated {
+		return task, false, nil
+	}
+
+	h.logger.Info("keeping task in Scheduling while message targets a capacity-deferred session",
+		zap.String("task_id", taskID), zap.String("session_id", queuedSessionID))
+	updated, err := h.service.UpdateTaskStateIfCurrentIn(
+		ctx, taskID, v1.TaskStateScheduling, []v1.TaskState{v1.TaskStateReview},
+	)
+	if err != nil {
+		return nil, false, err
+	}
+	if updated {
+		task.State = v1.TaskStateScheduling
+	}
+	return task, true, nil
 }
 
 // dispatchPromptAsync forwards the message to the agent as a prompt in a
@@ -1817,6 +1969,11 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 	}
 	if req.Sort != "" && req.Sort != messageSortAsc && req.Sort != messageSortDesc {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "sort must be asc or desc", nil)
+	}
+	if req.Limit <= 0 && req.Before == "" && req.After == "" && req.Sort == "" {
+		// No pagination parameters at all: default to a bounded first page,
+		// matching httpListMessages's parseListMessageParams default.
+		req.Limit = service.DefaultMessagesPageSize
 	}
 
 	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, service.ListMessagesRequest{

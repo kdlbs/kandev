@@ -105,6 +105,29 @@ async function waitForFirstSessionId(apiClient: ApiClient, taskId: string): Prom
   return sessionId;
 }
 
+/** Creates a fresh profile after the per-test cleanup has run. The suite
+ * restart registers the provider, while testPage cleanup removes every
+ * non-seed profile, so a profile captured during beforeAll may be gone before
+ * the task is created. */
+async function createClaudeAcpProfile(apiClient: ApiClient): Promise<string> {
+  let agentId = "";
+  await expect
+    .poll(
+      async () => {
+        const { agents } = await apiClient.listAgents();
+        agentId = agents.find((agent) => agent.name === "claude-acp")?.id ?? "";
+        return agentId;
+      },
+      { message: "claude-acp agent should be registered", timeout: 30_000 },
+    )
+    .not.toBe("");
+
+  const profile = await apiClient.createAgentProfile(agentId, `Parked E2E ${Date.now()}`, {
+    model: "mock-fast",
+  });
+  return profile.id;
+}
+
 /** Creates a task whose foreground turn registers a shell-kind detached
  * launch after `settleDelay`, scripts its probe to hold "live" indefinitely
  * before that settle can happen, then waits for the settle itself. */
@@ -140,22 +163,11 @@ async function createParkedTask(
 }
 
 test.describe("Parked on background work", () => {
-  let claudeAcpProfileId: string;
-
-  test.beforeAll(async ({ backend, apiClient }) => {
+  test.beforeAll(async ({ backend }) => {
     await backend.restart({
       KANDEV_PARKED_PROBE_INTERVAL: PARKED_PROBE_INTERVAL,
       KANDEV_MOCK_PROVIDERS: "claude-acp",
     });
-    const { agents } = await apiClient.listAgents();
-    const claudeAgent = agents.find((agent) => agent.name === "claude-acp");
-    const profileId = claudeAgent?.profiles[0]?.id;
-    if (!profileId) {
-      throw new Error(
-        "E2E seed has no claude-acp mock profile after KANDEV_MOCK_PROVIDERS restart",
-      );
-    }
-    claudeAcpProfileId = profileId;
   });
 
   test.afterAll(async ({ backend }) => {
@@ -168,6 +180,7 @@ test.describe("Parked on background work", () => {
     testPage,
   }) => {
     test.setTimeout(120_000);
+    const claudeAcpProfileId = await createClaudeAcpProfile(apiClient);
 
     // Mount the sidebar on a different task first so the client is live
     // before the parked task's own WS traffic starts (see
@@ -219,6 +232,7 @@ test.describe("Parked on background work", () => {
     testPage,
   }) => {
     test.setTimeout(120_000);
+    const claudeAcpProfileId = await createClaudeAcpProfile(apiClient);
 
     // Keep the sidebar mounted before the parked task settles. This lets the
     // test observe the task.updated projection instead of depending on a

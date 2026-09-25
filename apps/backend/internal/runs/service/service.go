@@ -12,19 +12,41 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
+
+// errIdempotencyKeyConflict signals that insertRun's CreateRun failed
+// because idx_run_idempotency rejected a duplicate idempotency_key —
+// distinct from the earlier CheckIdempotencyKey miss, which only looks
+// within IdempotencyWindowHours. Two independent producers deriving the
+// same operation id for the same event can both pass that fast-path check
+// before either commits (or the colliding row can simply be older than the
+// window); the unique index is what actually stops the second insert.
+// QueueRun treats this as a durable dedupe hit: QueueOutcomeDeduped, not an
+// error, so the losing producer's caller does not abort or log a spurious
+// failure for what is really a no-op.
+var errIdempotencyKeyConflict = errors.New("idempotency key conflict")
+
+// errWakeWaveConflict signals that insertRun's CreateRunTx failed because
+// idx_run_wake_wave rejected a duplicate wave identity — the tx-scoped
+// sibling of errIdempotencyKeyConflict, for the completion-wave dedup
+// index instead of the idempotency index. Treated the same way: a durable
+// dedupe hit, not an error.
+var errWakeWaveConflict = errors.New("wake wave conflict")
 
 // RunQueueAdapter is the interface the workflow engine uses to enqueue
 // runs from queue_run actions. Phase 2 final's parallel agent
@@ -35,21 +57,16 @@ type RunQueueAdapter interface {
 	QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutcome, error)
 }
 
-// QueueOutcome reports what QueueRun actually did with a request. A
-// duplicated declaration lives in internal/workflow/engine (see that
-// package's RunQueueAdapter doc); both MUST match.
-type QueueOutcome string
+// QueueOutcome is the shared queue contract used by office producers and the
+// runs service. The workflow engine keeps its adapter-local declaration to
+// avoid importing the office package; its values remain wire-compatible.
+type QueueOutcome = shared.QueueOutcome
 
 const (
-	// QueueOutcomeQueued means a new runs row was inserted.
-	QueueOutcomeQueued QueueOutcome = "queued"
-	// QueueOutcomeDeduped means an existing row with the same IdempotencyKey
-	// already exists in the durable idempotency index, so nothing was inserted.
-	QueueOutcomeDeduped QueueOutcome = "deduped"
-	// QueueOutcomeCoalesced means the request was merged into an existing
-	// queued row for the same agent, reason, and task bucket within the
-	// coalescing window, so nothing new was inserted.
-	QueueOutcomeCoalesced QueueOutcome = "coalesced"
+	QueueOutcomeQueued      = shared.QueueOutcomeQueued
+	QueueOutcomeDeduped     = shared.QueueOutcomeDeduped
+	QueueOutcomeCoalesced   = shared.QueueOutcomeCoalesced
+	QueueOutcomeRateLimited = shared.QueueOutcomeRateLimited
 )
 
 // QueueRunRequest carries everything the queue needs to insert a row.
@@ -76,6 +93,61 @@ type QueueRunRequest struct {
 	Reason         string
 	IdempotencyKey string
 	Payload        map[string]any
+
+	// ActorKind and ActorID declare who caused this enqueue
+	// (AC-OFFICE-RUN-CAUSATION-001.15). ActorKind is treated as required:
+	// an empty, invalid, or unrecognized value — or ActorKindAgent with an
+	// empty ActorID — resolves to ActorKindSystem and increments
+	// office_launch_actor_missing_total, per AC-OFFICE-RUN-CAUSATION-001.16.
+	// It never resolves to ActorKindUser, so a rule keyed on a human actor
+	// fails toward the restrictive answer.
+	ActorKind models.ActorKind
+	ActorID   string
+
+	// CausingRunID is the run this enqueue happened inside, empty for a
+	// root cause. When set but unreadable, the enqueue is refused
+	// (AC-OFFICE-RUN-CAUSATION-001.21) rather than rooted.
+	CausingRunID string
+	// RoutineID is the routine this enqueue is chargeable to, empty for
+	// none (AC-OFFICE-RUN-CAUSATION-001.14). Must only be set by a
+	// trusted internal caller (a routine fire, or the task-boundary
+	// carrier) — never accepted verbatim from agent-supplied input.
+	RoutineID string
+	// CarrierHumanRooted carries the human-rooted flag across a task
+	// boundary without requiring a read of the creating run
+	// (AC-OFFICE-RUN-CAUSATION-001.13). Nil when the caller has no carrier
+	// to report (a direct CausingRunID enqueue derives human-rooted from
+	// that run instead).
+	CarrierHumanRooted *bool
+	// CarrierCreatingRunID and CarrierCausationDepth carry the
+	// task-boundary carrier's lineage across a task boundary without
+	// requiring a read of the creating run (AC-OFFICE-RUN-CAUSATION-001.18).
+	// Both are empty/zero when the caller has no carrier lineage to
+	// report. Per AC-OFFICE-RUN-CAUSATION-001.24, an empty
+	// CarrierCreatingRunID means the resulting run is a root regardless of
+	// what CarrierCausationID and CarrierCausationDepth say.
+	CarrierCreatingRunID  string
+	CarrierCausationID    string
+	CarrierCausationDepth int
+
+	// ContextSnapshot is stored on the run's context_snapshot column
+	// verbatim, distinct from Payload (the routing envelope: task id,
+	// workflow step id, agent profile id). Used by taskless
+	// wakeup-originated runs to carry the wakeup's own JSON context
+	// (including routine_id, which models.ContinuationScopeForRun reads
+	// back out) without mixing it into the envelope. Empty for every
+	// other caller, which leaves the column at its default.
+	ContextSnapshot string
+
+	// SkipCoalesce bypasses this call's own coalescing window
+	// (shouldCoalesceRun/CoalesceRunTx) for a caller that already ran its
+	// own, independent in-flight-merge decision before calling QueueRun
+	// (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.5): running both mechanisms on
+	// the same request risks the two disagreeing about which existing row
+	// (if any) this request should merge into. Idempotency, causation
+	// resolution, and the insert still run normally.
+	SkipCoalesce bool
+
 	// WakeWaveKey and WakeWaveString are the completion-wave identity
 	// (parent-wake-wave-identity). When WakeWaveKey is non-empty, QueueRun
 	// never coalesces this request into an existing row, is never merged
@@ -84,6 +156,15 @@ type QueueRunRequest struct {
 	// QueueOutcomeDeduped instead of an error.
 	WakeWaveKey    string
 	WakeWaveString string
+
+	// CausationID is stored verbatim on the created run's own CausationID
+	// column (AC-OFFICE-LOOP-LIVENESS-002.3, unrelated to this package's
+	// causation-chain resolution below and to the resulting row's
+	// ChainCausationID) — copied from the wakeup request that produced
+	// this enqueue, so a run created through this seam still carries the
+	// loop-liveness correlation a direct-insert caller used to set by
+	// hand. Empty for a caller with no wakeup request to correlate.
+	CausationID string
 }
 
 // CoalesceWindowSeconds is the default coalescing window. When two
@@ -134,6 +215,66 @@ type Service struct {
 	log      *logger.Logger
 	resolver AgentResolver
 	signalCh chan struct{}
+
+	// maxCausationDepth, selfTriggerAllowance, and
+	// selfTriggerTotalAllowance back REQ-OFFICE-LAUNCH-SAFETY-003/004.
+	// Zero means "use the documented default", so a Service built via
+	// New without SetLaunchSafetyLimits still enforces the spec defaults
+	// rather than being unbounded.
+	maxCausationDepth         int
+	selfTriggerAllowance      int
+	selfTriggerTotalAllowance int
+}
+
+// DefaultMaxCausationDepth is the documented default for
+// AC-OFFICE-LAUNCH-SAFETY-003.1.
+const DefaultMaxCausationDepth = 8
+
+// DefaultSelfTriggerAllowance is the documented default for
+// AC-OFFICE-LAUNCH-SAFETY-004.3.
+const DefaultSelfTriggerAllowance = 3
+
+// DefaultSelfTriggerTotalAllowance is the documented default for the
+// reason-independent allowance of AC-OFFICE-LAUNCH-SAFETY-004.8.
+const DefaultSelfTriggerTotalAllowance = 8
+
+// SelfTriggerWindow is the rolling window AC-OFFICE-LAUNCH-SAFETY-004.3
+// and AC-OFFICE-LAUNCH-SAFETY-004.8 count against. Unlike the
+// allowances, the window itself is not configurable.
+const SelfTriggerWindow = 60 * time.Minute
+
+// SetLaunchSafetyLimits configures the causation-depth ceiling, the
+// per-reason self-trigger allowance, and the reason-independent
+// self-trigger allowance. A value less than 1 is replaced by the
+// documented default, per AC-OFFICE-LAUNCH-SAFETY-003.1 / 004.3 / 004.8:
+// a configured 0 must not mean "unlimited" or "no self-triggering ever
+// allowed by accident of an unset override". A total below the
+// per-reason value is a valid, honored configuration
+// (AC-OFFICE-LAUNCH-SAFETY-004.8); clamping happens independently for
+// each of the three values.
+func (s *Service) SetLaunchSafetyLimits(maxCausationDepth, selfTriggerAllowance, selfTriggerTotalAllowance int) {
+	s.maxCausationDepth = clampToDefault(maxCausationDepth, DefaultMaxCausationDepth)
+	s.selfTriggerAllowance = clampToDefault(selfTriggerAllowance, DefaultSelfTriggerAllowance)
+	s.selfTriggerTotalAllowance = clampToDefault(selfTriggerTotalAllowance, DefaultSelfTriggerTotalAllowance)
+}
+
+func clampToDefault(value, def int) int {
+	if value < 1 {
+		return def
+	}
+	return value
+}
+
+func (s *Service) effectiveMaxCausationDepth() int {
+	return clampToDefault(s.maxCausationDepth, DefaultMaxCausationDepth)
+}
+
+func (s *Service) effectiveSelfTriggerAllowance() int {
+	return clampToDefault(s.selfTriggerAllowance, DefaultSelfTriggerAllowance)
+}
+
+func (s *Service) effectiveSelfTriggerTotalAllowance() int {
+	return clampToDefault(s.selfTriggerTotalAllowance, DefaultSelfTriggerTotalAllowance)
 }
 
 // New constructs a Service. The signal channel is created here so
@@ -163,79 +304,46 @@ func (s *Service) SubscribeSignal() <-chan struct{} { return s.signalCh }
 // QueueRun implements RunQueueAdapter. The flow is:
 //  1. Resolve agent_profile_id (from the request field, payload fallback,
 //     or a wired resolver).
-//  2. Recent idempotency check on req.IdempotencyKey if set.
-//  3. Coalescing (5s window for same agent, reason, and task bucket).
-//  4. Insert into runs table.
-//  5. Publish OfficeRunQueued.
-//  6. Signal the scheduler (B3.5 — event-driven claim).
+//  2. Idempotency check, coalescing, causation resolution (depth and
+//     self-trigger gates), and insert, all inside one transaction
+//     serialized per agent profile — see enqueueLocked.
+//  3. Publish OfficeRunQueued.
+//  4. Signal the scheduler (B3.5 — event-driven claim).
 //
 // The returned QueueOutcome lets the caller distinguish a fresh insert from
 // a deduplicated or coalesced request instead of treating any nil error as
 // "a run was queued".
 func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutcome, error) {
+	outcome, _, err := s.QueueRunAndReturn(ctx, req)
+	return outcome, err
+}
+
+// QueueRunAndReturn is QueueRun, additionally returning the inserted row
+// on a QueueOutcomeQueued outcome (nil for QueueOutcomeDeduped/Coalesced,
+// which insert nothing). Exposed for callers that need the new run's id
+// — e.g. the wakeup dispatcher, which must mark its own wakeup-request
+// row claimed against it.
+func (s *Service) QueueRunAndReturn(ctx context.Context, req QueueRunRequest) (QueueOutcome, *models.Run, error) {
 	agentInstanceID, err := s.resolveAgentInstance(ctx, req)
 	if err != nil {
-		return QueueOutcomeNone, err
+		return QueueOutcomeNone, nil, err
 	}
 	if agentInstanceID == "" {
-		return QueueOutcomeNone, fmt.Errorf("queue run: agent_profile_id is required")
-	}
-
-	if req.IdempotencyKey != "" {
-		dup, err := s.repo.CheckIdempotencyKey(ctx, req.IdempotencyKey, IdempotencyWindowHours)
-		if err != nil {
-			return QueueOutcomeNone, fmt.Errorf("idempotency check: %w", err)
-		}
-		if dup {
-			return ReportWindowedDedup(QueueSourceRuns, req.Reason, req.IdempotencyKey), nil
-		}
+		return QueueOutcomeNone, nil, fmt.Errorf("queue run: agent_profile_id is required")
 	}
 
 	payloadMap := runPayload(req, agentInstanceID)
 	payload, err := encodePayload(payloadMap)
 	if err != nil {
-		return QueueOutcomeNone, fmt.Errorf("encode payload: %w", err)
+		return QueueOutcomeNone, nil, fmt.Errorf("encode payload: %w", err)
 	}
 
-	if shouldCoalesceRun(req) {
-		coalesced, err := s.repo.CoalesceRun(ctx, agentInstanceID, req.Reason, CoalesceWindowSeconds, payload)
-		if err != nil {
-			return QueueOutcomeNone, fmt.Errorf("coalesce check: %w", err)
-		}
-		if coalesced {
-			s.log.Debug("run coalesced",
-				zap.String("agent", agentInstanceID),
-				zap.String("reason", req.Reason))
-			// Coalesced rows are merged into an existing queued row, so
-			// no new signal is needed — the scheduler already saw the
-			// original insert.
-			return QueueOutcomeCoalesced, nil
-		}
-	}
-
-	row, insertErr := s.insertRun(ctx, agentInstanceID, req, payload)
-	// idx_run_wake_wave has no windowed pre-check the way IdempotencyKey
-	// does — it must stay unbounded — so this is the only place a
-	// wave-carrying conflict is caught. Checked before ReportInsertResult
-	// (which only classifies idx_run_idempotency) so the two indexes'
-	// independent meanings ("same dispatch" vs "same wave") stay
-	// distinguishable to the caller and to office_run_dedup_total's labels.
-	if runssqlite.IsWakeWaveUniqueViolation(insertErr) {
-		s.log.Debug("run skipped (wake wave index race)",
-			zap.String("wake_wave_key", req.WakeWaveKey))
-		ParentWakeDedupedTotal.Add(1)
-		return QueueOutcomeDeduped, nil
-	}
-	// idx_run_idempotency has no time bound, so a conflict here can come
-	// from a row older than IdempotencyWindowHours, not just the windowed
-	// race CheckIdempotencyKey guards against above. ReportInsertResult
-	// classifies that as a no-op dedupe rather than a hard error.
-	outcome, err := ReportInsertResult(QueueSourceRuns, req.Reason, req.IdempotencyKey, agentInstanceID, insertErr)
+	outcome, row, err := s.enqueueLocked(ctx, agentInstanceID, req, payload)
 	if err != nil {
-		return QueueOutcomeNone, err
+		return QueueOutcomeNone, nil, err
 	}
-	if outcome == QueueOutcomeDeduped {
-		return outcome, nil
+	if outcome != QueueOutcomeQueued {
+		return outcome, nil, nil
 	}
 
 	s.log.Info("run queued",
@@ -245,35 +353,159 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutco
 
 	s.publishRunQueued(ctx, row, req.IdempotencyKey)
 	s.signal()
-	return QueueOutcomeQueued, nil
+	return QueueOutcomeQueued, row, nil
 }
 
-// insertRun creates the runs row and returns it. Pulled out of
-// QueueRun to keep the latter under the funlen budget. The returned error is
-// the raw CreateRun error (wrapped for context, never reclassified) — the
-// caller runs it through ReportInsertResult, which does its own unique-index
-// classification against the original error chain.
-func (s *Service) insertRun(
+// enqueueLocked performs the idempotency check, the coalescing check,
+// causation resolution, and the insert inside one transaction serialized
+// per agent profile (AC-OFFICE-LAUNCH-SAFETY-003.8): the depth check,
+// the self-trigger window count, the idempotency check, and the insert
+// must be serialized against every other concurrent enqueue for the
+// same agent profile, on every supported database engine, so that two
+// concurrent enqueues can never both observe the same self-trigger
+// count or the same idempotency-key absence before either commits.
+// idx_run_wake_wave has no windowed pre-check the way IdempotencyKey does
+// — it must stay unbounded — so a wave-carrying conflict is only ever
+// caught by the insert itself, inside this same transaction.
+func (s *Service) enqueueLocked(
 	ctx context.Context, agentInstanceID string, req QueueRunRequest, payload string,
+) (QueueOutcome, *models.Run, error) {
+	tx, err := s.repo.BeginEnqueueTx(ctx, agentInstanceID)
+	if err != nil {
+		return "", nil, fmt.Errorf("begin enqueue transaction: %w", err)
+	}
+	rec := &gateOutcomeRecorder{}
+	// Registered before the rollback defer below, so it runs after: Go
+	// defers execute in LIFO order, and flushGateOutcomes must not write
+	// until this transaction has actually committed or rolled back —
+	// see gateOutcomeRecorder's doc comment.
+	defer s.flushGateOutcomes(ctx, rec)
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if req.IdempotencyKey != "" {
+		dup, err := s.repo.CheckIdempotencyKeyTx(ctx, tx, req.IdempotencyKey, IdempotencyWindowHours)
+		if err != nil {
+			return "", nil, fmt.Errorf("idempotency check: %w", err)
+		}
+		if dup {
+			return ReportWindowedDedup(QueueSourceRuns, req.Reason, req.IdempotencyKey), nil, nil
+		}
+	}
+
+	if shouldCoalesceRun(req) {
+		coalesced, err := s.repo.CoalesceRunTx(ctx, tx, agentInstanceID, req.Reason, CoalesceWindowSeconds, payload)
+		if err != nil {
+			return "", nil, fmt.Errorf("coalesce check: %w", err)
+		}
+		if coalesced {
+			if err := tx.Commit(); err != nil {
+				return "", nil, fmt.Errorf("commit coalesce: %w", err)
+			}
+			committed = true
+			s.log.Debug("run coalesced",
+				zap.String("agent", agentInstanceID),
+				zap.String("reason", req.Reason))
+			// Coalesced rows are merged into an existing queued row, so
+			// no new signal is needed — the scheduler already saw the
+			// original insert.
+			return QueueOutcomeCoalesced, nil, nil
+		}
+	}
+
+	row, err := s.insertRun(ctx, tx, rec, agentInstanceID, req, payload)
+	if err != nil {
+		// idx_run_idempotency has no time bound, so a conflict here can
+		// come from a row older than IdempotencyWindowHours, not just the
+		// windowed race the idempotency check above guards against.
+		// Either way the existing row is definitionally the same
+		// operation this key identifies, so treat it as a no-op dedupe
+		// rather than a hard error (see errIdempotencyKeyConflict's doc
+		// comment).
+		if errors.Is(err, errIdempotencyKeyConflict) {
+			s.log.Debug("run skipped (idempotency index race)",
+				zap.String("key", req.IdempotencyKey))
+			return QueueOutcomeDeduped, nil, nil
+		}
+		// idx_run_wake_wave has no windowed pre-check the way
+		// IdempotencyKey does, so a conflict here is the only place a
+		// wave-carrying request's dedupe is caught.
+		if errors.Is(err, errWakeWaveConflict) {
+			s.log.Debug("run skipped (wake wave index race)",
+				zap.String("wake_wave_key", req.WakeWaveKey))
+			ParentWakeDedupedTotal.Add(1)
+			return QueueOutcomeDeduped, nil, nil
+		}
+		return "", nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", nil, fmt.Errorf("commit enqueue: %w", err)
+	}
+	committed = true
+	return QueueOutcomeQueued, row, nil
+}
+
+// insertRun resolves causation (actor, workspace, depth, self-trigger,
+// priority class) and creates the runs row, returning it. A refusal from
+// resolveCausation is returned unchanged: no row is inserted and no
+// idempotency key is consumed, per AC-OFFICE-LAUNCH-SAFETY-003.4.
+func (s *Service) insertRun(
+	ctx context.Context, tx *sqlx.Tx, rec *gateOutcomeRecorder, agentInstanceID string, req QueueRunRequest, payload string,
 ) (*models.Run, error) {
+	causation, err := s.resolveCausation(ctx, tx, rec, agentInstanceID, req)
+	if err != nil {
+		return nil, err
+	}
+
 	var idemKeyPtr *string
 	if req.IdempotencyKey != "" {
 		k := req.IdempotencyKey
 		idemKeyPtr = &k
 	}
 	row := &models.Run{
-		ID:             uuid.New().String(),
-		AgentProfileID: agentInstanceID,
-		Reason:         req.Reason,
-		Payload:        payload,
-		Status:         "queued",
-		CoalescedCount: 1,
-		IdempotencyKey: idemKeyPtr,
-		RequestedAt:    time.Now().UTC(),
-		WakeWaveKey:    req.WakeWaveKey,
-		WakeWaveString: req.WakeWaveString,
+		ID:              uuid.New().String(),
+		AgentProfileID:  agentInstanceID,
+		Reason:          req.Reason,
+		Payload:         payload,
+		Status:          "queued",
+		CoalescedCount:  1,
+		IdempotencyKey:  idemKeyPtr,
+		RequestedAt:     time.Now().UTC(),
+		ContextSnapshot: req.ContextSnapshot,
+		ParentRunID:     causation.ParentRunID,
+		CausationDepth:  causation.CausationDepth,
+		PriorityClass:   causation.PriorityClass,
+		HumanRooted:     causation.HumanRooted,
+		RoutineID:       causation.RoutineID,
+		ActorKind:       causation.ActorKind,
+		ActorID:         causation.ActorID,
+		WorkspaceID:     causation.WorkspaceID,
+		WakeWaveKey:     req.WakeWaveKey,
+		WakeWaveString:  req.WakeWaveString,
+		CausationID:     req.CausationID,
 	}
-	if err := s.repo.CreateRun(ctx, row); err != nil {
+	if causation.CausationID != "" {
+		row.ChainCausationID = causation.CausationID
+	} else {
+		// AC-OFFICE-RUN-CAUSATION-001.2: a root's causation id is its own
+		// run id. Known only now that the row's ID has been minted.
+		row.ChainCausationID = row.ID
+	}
+	if err := s.repo.CreateRunTx(ctx, tx, row); err != nil {
+		if runssqlite.IsIdempotencyKeyUniqueViolation(err) {
+			return nil, errIdempotencyKeyConflict
+		}
+		// idx_run_wake_wave has no windowed pre-check the way
+		// IdempotencyKey does — it must stay unbounded — so this insert is
+		// the only place a wave-carrying conflict is caught.
+		if runssqlite.IsWakeWaveUniqueViolation(err) {
+			return nil, errWakeWaveConflict
+		}
 		return nil, fmt.Errorf("enqueue run: %w", err)
 	}
 	return row, nil
@@ -326,7 +558,7 @@ func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
 // longer describe the wake it delivers. idx_run_wake_wave, not this
 // window, is what reconciles wave-carrying requests.
 func shouldCoalesceRun(req QueueRunRequest) bool {
-	return req.WakeWaveKey == "" && !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
+	return !req.SkipCoalesce && req.WakeWaveKey == "" && !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
 }
 
 // publishRunQueued emits the OfficeRunQueued bus event so the WS

@@ -87,9 +87,11 @@ service Host {
   // repositories, or document fields. The requested target must belong to
   // workspace_id; foreign and unknown targets fail as NotFound.
   rpc GetTaskRelations(GetTaskRelationsRequest) returns (GetTaskRelationsResponse);
+  rpc ListTaskStepTransitions(ListTaskStepTransitionsRequest) returns (ListTaskStepTransitionsResponse);
   rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
   rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
+  rpc ListWorkflowTransitionGroups(ListWorkflowTransitionGroupsRequest) returns (ListWorkflowTransitionGroupsResponse);
   rpc ListAgentProfiles(ListAgentProfilesRequest) returns (ListAgentProfilesResponse);
   rpc ListExecutorProfiles(ListExecutorProfilesRequest) returns (ListExecutorProfilesResponse);
   rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
@@ -431,6 +433,23 @@ message Task {
   string project_id = 28;
   // Caller-supplied create-idempotency key, empty when the task holds none.
   string external_id = 29;
+  // Dependency projection derived from task_blockers, matching what the
+  // kanban board already shows. A read that cannot resolve the dependency
+  // graph reports blocked=true, blocked_reason="unknown", and empty edge
+  // lists rather than a false "unblocked".
+  bool blocked = 30;
+  string blocked_reason = 31; // "pending" | "failed" | "unknown" | ""
+  // Predecessors this task waits on, and dependents waiting on this task.
+  // Each list is capped per task; the matching *_truncated flag reports
+  // whether entries beyond the cap were omitted.
+  repeated TaskDependencyRef depends_on = 32;
+  repeated TaskDependencyRef blocks = 33;
+  bool depends_on_truncated = 34;
+  bool blocks_truncated = 35;
+  // Whether this task is configured to auto-start once every predecessor in
+  // depends_on resolves. Always false when blocked_reason is "unknown",
+  // regardless of the underlying stored configuration.
+  bool start_when_unblocked = 36;
 }
 message TaskRepository {
   string id = 1;
@@ -466,6 +485,20 @@ message TaskPullRequest {
   string author_login = 18;
   optional string closed_at = 19; // RFC3339
 }
+// TaskDependencyRef is one edge end in a task's dependency projection: a
+// predecessor entry in depends_on, or a dependent entry in blocks.
+message TaskDependencyRef {
+  string id = 1;
+  // Redacted to "" on a canvas surface when the referenced task falls
+  // outside the caller's scope; id and status still identify and describe
+  // the edge without exposing the other task's content.
+  string title = 2;
+  string state = 3; // TaskState enum value as a string, stable; "" when redacted
+  // DependencyStatusForTask's verdict: "resolved" | "failed" | "pending".
+  // Always "" on a blocks entry, since status describes a predecessor's
+  // progress toward unblocking this task, not this task's own state.
+  string status = 4;
+}
 
 message TaskFilter {
   repeated string workspace_ids = 1; // empty → all the plugin may see
@@ -490,6 +523,23 @@ message GetTaskRequest {
 }
 message GetTaskResponse {
   Task task = 1;
+}
+message TaskStepTransition {
+  string id = 1; // decimal ledger identity; stable across timestamp ties
+  optional string from_workflow_id = 2;
+  optional string from_workflow_step_id = 3;
+  optional string to_workflow_id = 4;
+  optional string to_workflow_step_id = 5;
+  string trigger = 6;
+  string occurred_at = 7; // RFC3339
+}
+message ListTaskStepTransitionsRequest {
+  string task_id = 1;
+  Page page = 2;
+}
+message ListTaskStepTransitionsResponse {
+  repeated TaskStepTransition items = 1;
+  PageInfo page_info = 2;
 }
 
 message RelationTask {
@@ -549,6 +599,20 @@ message ListWorkflowsRequest {
 }
 message ListWorkflowsResponse {
   repeated Workflow workflows = 1;
+  PageInfo page_info = 2;
+}
+message WorkflowTransitionGroup {
+  string kind = 1; // within | entry | exit
+  optional string from_step_id = 2;
+  optional string to_step_id = 3;
+  int64 count = 4;
+}
+message ListWorkflowTransitionGroupsRequest {
+  string workflow_id = 1;
+  Page page = 2;
+}
+message ListWorkflowTransitionGroupsResponse {
+  repeated WorkflowTransitionGroup items = 1;
   PageInfo page_info = 2;
 }
 

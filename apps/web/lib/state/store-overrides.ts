@@ -13,6 +13,7 @@ export function buildStateOverrides(m: DefaultState) {
     workspaceContextGeneration: m.workspaceContextGeneration,
     workspaceContextRead: m.workspaceContextRead,
     tasks: m.tasks,
+    workflowSessionFocus: m.workflowSessionFocus,
     taskRemoval: m.taskRemoval,
     workspaces: m.workspaces,
     repositories: m.repositories,
@@ -52,6 +53,7 @@ export function buildStateOverrides(m: DefaultState) {
     sessionMode: m.sessionMode,
     userShells: m.userShells,
     prepareProgress: m.prepareProgress,
+    launchWarning: m.launchWarning,
     sessionTodos: m.sessionTodos,
     agentCapabilities: m.agentCapabilities,
     sessionModels: m.sessionModels,
@@ -102,6 +104,7 @@ export function buildStateOverrides(m: DefaultState) {
     sessionFailureNotification: m.sessionFailureNotification,
     bottomTerminal: m.bottomTerminal,
     sidebarViews: m.sidebarViews,
+    sidebarViewsByWorkspace: m.sidebarViewsByWorkspace,
     threadViews: m.threadViews,
     sidebarTaskPrefs: m.sidebarTaskPrefs,
   };

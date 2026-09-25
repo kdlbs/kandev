@@ -10,6 +10,12 @@ owners:
 
 # Task plan append-mode agent text System Design
 
+## Implemented recovery extension
+
+The implemented [safe agent edits design](plan-safe-edits.md) replaces post-write stop
+guidance with preventive rejection and revision recovery tools. The implemented
+contract transition applies to agent writes. Existing append guidance remains.
+
 ## Purpose and boundaries
 
 This design owns `REQ-TASKS-PLAN-APPEND-006`: every agent-facing string that describes a
@@ -88,14 +94,10 @@ it back toward the replace path that caused the loss. `AC-TASKS-PLAN-APPEND-006.
 `006.8` require that sentence replaced by one naming `append` as the way to add a
 section without resubmitting the document.
 
-Everything else in that warning must survive, for reasons recorded in its doc comment
-rather than obvious: it deliberately does not tell the caller to "recover" the content
-through an MCP tool, because no plan tool reads a past revision and
-`get_task_plan_kandev` would hand back the truncated document; it names where the prior
-content lives; and it tells the caller not to rewrite from memory. Naming `append`
-strengthens that advice rather than competing with it — the caller is told what to do
-instead of what just failed. Keep the rune counts, the percentage, the two branches on
-whether the prior revision number is known, and the response field.
+The legacy warning remains only for compatibility with non-guarded callers. Current
+agent writes reject suspicious reductions before storage and expose task-scoped
+revision list/read tools. Keep the rune counts, percentage, append guidance, and
+the instruction not to rewrite from memory.
 
 This is Go string content, not localized UI copy, so the i18n rules do not reach it.
 `AC-TASKS-PLAN-APPEND-005.1` excludes this wording from the replace-mode freeze
@@ -103,11 +105,11 @@ precisely so the two criteria do not contradict each other.
 
 ### Acknowledgement
 
-The acknowledgement needs **no change**, verified rather than assumed. `planWriteAck`
+The acknowledgement also reports the committed edit version. `planWriteAck`
 in `internal/mcp/server/handlers.go` already prefers the stored `content` length over
 what the call sent, renders it as bytes, and already appends a line stating that plan
-content is omitted and should be read back with `get_task_plan_kandev`. That is exactly
-`AC-TASKS-PLAN-APPEND-006.6`, satisfied by existing behavior on both modes.
+content is omitted and should be read back with `get_task_plan_kandev`. Append keeps
+the stored-size behavior from `AC-TASKS-PLAN-APPEND-006.6`.
 
 Build must not add plan content to that acknowledgement. Doing so would return the
 accumulated document on every append and give back the response-leg saving this

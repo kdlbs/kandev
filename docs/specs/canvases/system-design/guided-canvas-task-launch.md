@@ -152,7 +152,8 @@ The definition in `config/prompts/create-canvas.md` contains this guidance:
 > Call `publish_canvas_kandev` and address any validation errors.
 > Report the canvas identity and whether its release is active, awaits permission review, or was unsuccessful.
 > If publication is unsuccessful, report the failure and do not claim that the canvas is published.
-> If workspace access requires promotion, explain the user action that is still required.
+> A new owner-authorized task canvas can use its declared supported permissions across the current workspace before promotion.
+> Promotion adds workspace navigation. Do not claim that promotion is required to preview workspace task data.
 > A local build alone does not publish a canvas inside Kandev.
 > If the tools remain unavailable, report the limitation instead of claiming that workspace files are a Kandev canvas.
 

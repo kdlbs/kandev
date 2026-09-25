@@ -16,6 +16,10 @@ function backendFeatureKeys(source: string): string[] {
 }
 
 describe("feature flag repository contract", () => {
+  it("keeps browser-owned LSP continuity disabled by default", () => {
+    expect(defaultFeatureFlags.lspBrowserContinuity).toBe(false);
+  });
+
   it("keeps dynamic agent routing disabled by default", () => {
     expect(defaultFeatureFlags.dynamicAgentRouting).toBe(false);
   });

@@ -1,3 +1,4 @@
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
 import { useCallback } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { mergeGroupOrder } from "@/lib/sidebar/apply-view";
@@ -28,7 +29,7 @@ export function useSidebarTaskPrefs() {
       const state = store.getState();
       const current = state.sidebarTaskPrefs.orderedTaskIds;
       setSidebarTaskOrder(mergeGroupOrder(current, groupTaskIds));
-      const sliceState = state.sidebarViews;
+      const sliceState = selectSidebarViews(state);
       const baseSort =
         sliceState.draft?.sort ??
         sliceState.views.find((v) => v.id === sliceState.activeViewId)?.sort;

@@ -20,7 +20,7 @@ import {
   type WorkflowMoveOptionsSubmit,
 } from "./workflow-move-options";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
-import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
+import type { WorkflowMoveEntryOptions, WorkflowMoveResponse } from "@/lib/api/domains/kanban-api";
 import type { WorkflowStepProgress } from "@/hooks/domains/kanban/use-workflow-step-progress";
 import { StepProgressDetails } from "./workflow-step-progress-details";
 
@@ -45,11 +45,13 @@ export function useTaskMoveOptions({
   workflowId,
   steps,
   closeMenu,
+  onMoveCommitted,
 }: {
   taskId: string;
   workflowId?: string | null;
   steps?: TaskMoveStep[];
   closeMenu?: () => void;
+  onMoveCommitted?: (response: WorkflowMoveResponse) => void;
 }) {
   const [moveOptionsStep, setMoveOptionsStep] = useState<TaskMoveStep | null>(null);
   const { move, isMoving } = useWorkflowMove();
@@ -69,10 +71,11 @@ export function useTaskMoveOptions({
   const runMove = async (
     targetStepId: string,
     entryOptions: WorkflowMoveEntryOptions | undefined,
+    targetWorkflowId = workflowId,
   ) => {
-    if (!workflowId) return false;
+    if (!targetWorkflowId) return false;
     const result = await move(taskId, {
-      workflow_id: workflowId,
+      workflow_id: targetWorkflowId,
       workflow_step_id: targetStepId,
       position: 0,
       entry_options: entryOptions,
@@ -86,13 +89,18 @@ export function useTaskMoveOptions({
       });
       return false;
     }
+    onMoveCommitted?.(result.response);
     closeMenu?.();
     return true;
   };
 
   const submitMoveOptions = async (entryOptions: WorkflowMoveEntryOptions | undefined) => {
     if (!moveOptionsStep) return false;
-    const ok = await runMove(moveOptionsStep.id, entryOptions);
+    const ok = await runMove(
+      moveOptionsStep.id,
+      entryOptions,
+      moveOptionsStep.workflow_id ?? workflowId,
+    );
     if (ok) setMoveOptionsStep(null);
     return ok;
   };
@@ -111,6 +119,8 @@ export function useTaskMoveOptions({
     openMoveOptionsStep,
     submitMoveOptions,
     submitMoveOptionsForStep,
+    moveImmediately: (step: TaskMoveStep) =>
+      runMove(step.id, undefined, step.workflow_id ?? workflowId),
     closeMoveOptions: () => {
       setMoveOptionsStep(null);
     },
@@ -122,7 +132,9 @@ export function TaskMoveOptionsSurface({
   isMoving,
   onClose,
   onSubmit,
+  autoFocusInstructions,
 }: {
+  autoFocusInstructions?: boolean;
   step: TaskMoveStep | null;
   isMoving: boolean;
   onClose: () => void;
@@ -138,6 +150,7 @@ export function TaskMoveOptionsSurface({
     targetStepName: step.title,
     isMoving,
     onSubmit,
+    autoFocusInstructions,
   };
   const Options = usesTouchDrawer ? WorkflowMoveOptions : WorkflowMoveDialog;
   return <Options {...optionsProps} />;

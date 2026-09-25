@@ -545,12 +545,15 @@ type LaunchAgentRequest struct {
 	TaskRepositoryID        string // Exact task_repositories row for worktree recovery
 	RepositoryPath          string // Path to the main repository (for worktree creation)
 	BaseBranch              string // Base branch for the worktree (e.g., "main")
+	IntegrationRef          string // Verified terminal integration target for managed branch compaction
 	DefaultBranch           string // Repository's default_branch, used as a fallback when BaseBranch is missing
 	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
+	QualifiedPRBase         *models.PRBase
 	WorktreeBranchPrefix    string // Branch prefix for worktree branches
 	WorktreeBranchTemplate  string // Branch name template for worktree branches
 	WorktreeBranchTicket    string // External ticket value for branch templates
@@ -599,12 +602,15 @@ type RepoSpec struct {
 	RepositoryURL           string
 	RepoName                string
 	BaseBranch              string
+	IntegrationRef          string
 	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch          string
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
+	QualifiedPRBase         *models.PRBase
 	WorktreeID              string
 	// AllowBranchReplacement permits explicit branch replacement for this repo.
 	AllowBranchReplacement bool
@@ -657,14 +663,19 @@ type LaunchOptions struct {
 	OfficeAgentProfileID string
 	ExecutorID           string
 	TurnID               string
-	Prompt               string
-	PriorACPSession      string // ACP session ID to resume for the same concrete profile
-	WorkflowStepID       string
-	StartAgent           bool
-	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
-	McpProfile           *mcpprofile.Context
-	Attachments          []v1.MessageAttachment
-	Env                  map[string]string
+	// OnExecutionAdmitted runs after the launch path has identified and
+	// persisted the execution that will receive this turn, but before its
+	// process is started. Callers use this boundary to bind turn-scoped
+	// evidence to the execution that actually won admission.
+	OnExecutionAdmitted func(executionID string)
+	Prompt              string
+	PriorACPSession     string // ACP session ID to resume for the same concrete profile
+	WorkflowStepID      string
+	StartAgent          bool
+	McpMode             string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
+	McpProfile          *mcpprofile.Context
+	Attachments         []v1.MessageAttachment
+	Env                 map[string]string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string
@@ -710,6 +721,8 @@ type LaunchAgentResponse struct {
 	WorktreeID                string
 	WorktreePath              string
 	WorktreeBranch            string
+	WorktreeBranchOwner       string
+	WorktreeIntegrationRef    string
 	RequestedBaseBranch       string
 	BaseBranch                string
 	BaseBranchFallbackWarning string
@@ -731,6 +744,8 @@ type RepoWorktreeResult struct {
 	BranchSlug                string
 	WorktreeID                string
 	WorktreeBranch            string
+	WorktreeBranchOwner       string
+	WorktreeIntegrationRef    string
 	WorktreePath              string
 	MainRepoGitDir            string
 	RequestedBaseBranch       string
@@ -800,6 +815,7 @@ type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, 
 type SessionStateTransitionFunc func(
 	ctx context.Context,
 	taskID, sessionID string,
+	expectedState *models.TaskSessionState,
 	state models.TaskSessionState,
 	errorMessage string,
 	onChanged func(),
@@ -1235,9 +1251,64 @@ type TaskRepositoryBaseBranchUpdater interface {
 	UpdateTaskRepositoryBaseBranch(ctx context.Context, taskID, taskRepositoryID, baseBranch string) error
 }
 
-// PRBaseResolver returns the current base branch for one provider pull request.
+// PRBaseResolver returns the current repository-qualified base for one PR.
 type PRBaseResolver interface {
-	ResolvePRBaseBranch(ctx context.Context, workspaceID, owner, repo string, number int) (string, error)
+	ResolvePRBase(ctx context.Context, workspaceID string, lookup PRBaseLookup) (models.PRBase, error)
+}
+
+// PRBaseResolutionError marks provider failures that make a legacy PR
+// association unsafe to resolve by branch alone.
+type PRBaseResolutionError struct {
+	cause                error
+	knownCrossRepository bool
+	invalidAssociation   bool
+}
+
+func (e *PRBaseResolutionError) Error() string {
+	if e == nil || e.cause == nil {
+		return "pull request base resolution failed"
+	}
+	return e.cause.Error()
+}
+
+func (e *PRBaseResolutionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+// KnownCrossRepository reports whether the resolver has identified a target
+// repository that differs from the checked out repository.
+func (e *PRBaseResolutionError) KnownCrossRepository() bool {
+	return e != nil && e.knownCrossRepository
+}
+
+// InvalidAssociation reports that provider data did not match the exact task
+// repository and checkout binding.
+func (e *PRBaseResolutionError) InvalidAssociation() bool {
+	return e != nil && e.invalidAssociation
+}
+
+// NewPRBaseResolutionError classifies a provider-side resolution failure for
+// the launch boundary. Invalid or known cross-repository associations cannot
+// continue with a bare task-repository branch.
+func NewPRBaseResolutionError(cause error, knownCrossRepository, invalidAssociation bool) *PRBaseResolutionError {
+	return &PRBaseResolutionError{
+		cause: cause, knownCrossRepository: knownCrossRepository, invalidAssociation: invalidAssociation,
+	}
+}
+
+// PRBaseLookup ties a provider lookup to one task-repository attachment.
+type PRBaseLookup struct {
+	TaskID             string
+	TaskRepositoryID   string
+	RepositoryID       string
+	Number             int
+	CheckoutBranch     string
+	AttachedOwner      string
+	AttachedRepository string
+	Target             *models.ComparisonTarget
 }
 
 // ExecutorConfig holds configuration for the Executor

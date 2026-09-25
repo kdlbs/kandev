@@ -4,6 +4,10 @@
 **Date:** 2026-09-10
 **Area:** backend, protocol, security
 
+The task-data initial grant ceiling below is amended by
+[task canvas workspace data](2026-09-23-task-canvas-workspace-data.md).
+It remains the historical rule for version-1 authority.
+
 ## Context
 
 A user asks their task agent to create a canvas, then must approve its first

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 )
 
 // CeilingDeferralsEquivalent reports whether two deferrals describe the same
@@ -33,6 +34,30 @@ func CeilingDeferralsEquivalent(a, b CeilingDeferral) (bool, error) {
 		return false, fmt.Errorf("failed to canonicalize the incoming launch payload: %w", err)
 	}
 	return bytes.Equal(left, right), nil
+}
+
+// CeilingDeferralsEquivalentForAdmission compares two observations of one
+// deferred launch at an admission boundary. A legacy record may gain its
+// workflow-entry binding between reads, so an absent binding and a present
+// binding are equivalent only after the optional field is removed from both
+// payloads. When both observations carry a binding, the binding remains part
+// of the identity and must compare exactly.
+func CeilingDeferralsEquivalentForAdmission(a, b CeilingDeferral) (bool, error) {
+	left := a
+	right := b
+	_, leftBound := a.Payload[CeilingLaunchEntryBindingKey]
+	_, rightBound := b.Payload[CeilingLaunchEntryBindingKey]
+	if leftBound != rightBound {
+		left.Payload = comparablePayloadWithoutOptionalBinding(a.Payload)
+		right.Payload = comparablePayloadWithoutOptionalBinding(b.Payload)
+	}
+	return CeilingDeferralsEquivalent(left, right)
+}
+
+func comparablePayloadWithoutOptionalBinding(payload map[string]interface{}) map[string]interface{} {
+	copyOfPayload := maps.Clone(payload)
+	delete(copyOfPayload, CeilingLaunchEntryBindingKey)
+	return copyOfPayload
 }
 
 // canonicalComparablePayload renders a payload to its comparison form: marshalled

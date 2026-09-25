@@ -70,7 +70,7 @@ test.describe("Mobile file confirmations", () => {
     restoreRepository = fixture.restoreRepository;
 
     expect(await testPage.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(true);
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
 
     const file = session.fileTreeNode(filePath);
     await expect(file).toBeVisible({ timeout: 15_000 });

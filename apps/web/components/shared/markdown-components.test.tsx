@@ -51,13 +51,23 @@ import {
   MarkdownTaskContext,
   markdownComponents,
   normalizeMarkdown,
+  rehypePlugins,
   remarkPlugins,
   type MarkdownFileLinkContextValue,
 } from "./markdown-components";
+import { MemoizedMarkdown } from "./memoized-markdown";
 
 function renderMarkdown(source: string): string {
   return renderToStaticMarkup(
     <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+      {source}
+    </ReactMarkdown>,
+  );
+}
+
+function renderMathMarkdown(source: string): string {
+  return renderToStaticMarkup(
+    <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>
       {source}
     </ReactMarkdown>,
   );
@@ -91,6 +101,86 @@ function resetMarkdownComponentTestState() {
     },
   };
 }
+
+const KATEX_CLASS = 'class="katex"';
+const KATEX_DISPLAY_CLASS = 'class="katex-display"';
+
+describe("markdown math", () => {
+  afterEach(resetMarkdownComponentTestState);
+
+  // @covers AC-UI-MARKDOWN-MATH-001.1
+  it("renders inline math through the shared remark plugin list", () => {
+    const html = renderMathMarkdown("Energy: $E = mc^2$");
+
+    expect(html).toContain(KATEX_CLASS);
+  });
+
+  // @covers AC-UI-MARKDOWN-MATH-001.2
+  it("renders a single-line double-dollar expression as display math", () => {
+    const html = renderMathMarkdown("$$\\frac{a}{b}$$");
+
+    expect(html).toContain(KATEX_DISPLAY_CLASS);
+    expect(html).toContain('class="frac-line"');
+  });
+
+  // @covers AC-UI-MARKDOWN-MATH-002.1, AC-UI-MARKDOWN-MATH-002.2
+  it("keeps currency text literal when a dollar pair contains edge whitespace", () => {
+    const html = renderMathMarkdown("Cost: $100 and $200");
+
+    expect(html).toContain("Cost: $100 and $200");
+    expect(html).not.toContain(KATEX_CLASS);
+  });
+
+  // @covers AC-UI-MARKDOWN-MATH-001.2
+  it("renders multiline display math", () => {
+    const html = renderMathMarkdown("$$\n\\frac{a}{b}\n$$");
+
+    expect(html).toContain(KATEX_DISPLAY_CLASS);
+    expect(html).toContain('class="frac-line"');
+  });
+
+  // @covers AC-UI-MARKDOWN-MATH-002.1, AC-UI-MARKDOWN-MATH-002.2
+  it("keeps escaped and edge-whitespace dollar pairs literal", () => {
+    const html = renderMathMarkdown(String.raw`\$100 and \$200
+
+$ 100$ and $100 $`);
+
+    expect(html).toContain("$100 and $200");
+    expect(html).toContain("$ 100$ and $100 $");
+    expect(html).not.toContain(KATEX_CLASS);
+  });
+
+  it("keeps source delimiters literal when both math edges contain whitespace", () => {
+    const html = renderMathMarkdown("Literal: $ E = mc^2 $");
+
+    expect(html).toContain("$ E = mc^2 $");
+    expect(html).not.toContain(KATEX_CLASS);
+  });
+
+  // @covers AC-UI-MARKDOWN-MATH-002.2
+  it("leaves dollar signs in inline and fenced code literal", () => {
+    const html = renderMathMarkdown("`$E = mc^2$`\n\n```text\n$E = mc^2$\n```");
+
+    expect(html).toContain("$E = mc^2$");
+    expect(html).not.toContain(KATEX_CLASS);
+  });
+
+  // @covers AC-UI-MARKDOWN-MATH-001.6
+  it("keeps surrounding prose when TeX is invalid", () => {
+    const html = renderMathMarkdown(String.raw`Before $\notARealCommand$ after`);
+
+    expect(html).toContain("Before");
+    expect(html).toContain("after");
+    expect(html).toContain("notARealCommand");
+  });
+
+  // @covers AC-UI-MARKDOWN-MATH-001.3
+  it("renders math in the memoized chat Markdown renderer", () => {
+    const { container } = render(<MemoizedMarkdown content="Energy: $E = mc^2$" />);
+
+    expect(container.querySelector(".katex")).not.toBeNull();
+  });
+});
 
 describe("markdownComponents", () => {
   afterEach(resetMarkdownComponentTestState);

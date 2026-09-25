@@ -18,8 +18,8 @@ a user-controlled, persisted contract: the user drags a card to a new place in
 its column, every view reconciles to it, and the top card is the one the step
 takes next.
 
-Prior art, the wire contract, and the mechanism behind these criteria are in the
-paired [system design](../system-design/kanban-task-reordering.md).
+[Design](../system-design/kanban-task-reordering.md). Phone interactions follow
+[mobile scrolling](mobile-kanban-scroll.md); drag criteria apply to wider views.
 
 ## Terminology
 

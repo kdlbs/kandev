@@ -23,6 +23,7 @@ import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { useRouter } from "@/lib/routing/client-router";
+import { classifyAgentProfileFallback } from "@/lib/agent-profile-fallback";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 import { RecordDot } from "@/components/settings/record-dot";
@@ -81,9 +82,20 @@ function ProfileRowActions({
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const pendingDelete = useRef(false);
+  const [open, setOpen] = useState(false);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger
+        asChild
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
         <Button
           ref={deleteAnchorRef}
           variant="ghost"
@@ -254,6 +266,16 @@ function ProfileRowCard({
   confirmationProps,
 }: ProfileRowCardProps) {
   const { isMobile } = useResponsiveBreakpoint();
+  const { t } = useTranslation();
+  const fallbackState = classifyAgentProfileFallback(profile);
+  let fallbackLabel = t("agents:fallbackNone");
+  if (fallbackState.kind === "exact") {
+    fallbackLabel = t("agents:fallbackExact");
+  } else if (fallbackState.kind === "next") {
+    fallbackLabel = t("agents:fallbackNext");
+  } else if (fallbackState.kind === "model") {
+    fallbackLabel = t("agents:fallbackModel", { model: fallbackState.model });
+  }
   return (
     <Card
       // Same surface treatment as the workspace section tiles.
@@ -274,12 +296,16 @@ function ProfileRowCard({
             <span className="truncate text-sm font-medium">{profile.name}</span>
             {profile.enabled === false && <DisabledBadge />}
           </div>
-          {(profile.model || profile.mode) && (
-            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-3.5">
-              {profile.model && <Badge variant="outline">{profile.model}</Badge>}
-              {profile.mode && <Badge variant="secondary">{profile.mode}</Badge>}
-            </div>
-          )}
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-3.5">
+            {profile.model && <Badge variant="outline">{profile.model}</Badge>}
+            <Badge
+              className="h-auto min-h-5 max-w-full min-w-0 overflow-visible whitespace-pre-wrap break-all text-left"
+              variant="secondary"
+            >
+              {fallbackLabel}
+            </Badge>
+            {profile.mode && <Badge variant="secondary">{profile.mode}</Badge>}
+          </div>
         </div>
         <div className="relative z-10 flex shrink-0 items-center gap-1">
           {canManage &&

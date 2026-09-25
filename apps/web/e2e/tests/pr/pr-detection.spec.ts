@@ -309,8 +309,8 @@ test.describe("PR auto-detection", () => {
 
     // --- Verify PR topbar button updates to merged state ---
     // The backend poller (every 30s) syncs the merged state and broadcasts
-    // via WS. The PRTopbarButton re-renders with the purple merged icon.
-    await expect(session.prTopbarButton().locator(".text-purple-500").first()).toBeVisible({
+    // via WS. Assert the semantic state rather than an icon styling class.
+    await expect(session.prTopbarButton()).toHaveAttribute("data-pr-state", "merged", {
       timeout: 90_000,
     });
   });

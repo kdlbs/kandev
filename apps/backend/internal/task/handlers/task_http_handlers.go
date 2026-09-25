@@ -467,6 +467,21 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 	c.JSON(http.StatusOK, dtos[0])
 }
 
+// httpGetArchiveSourceManifest exposes only durable archive-time evidence.
+// Service authorization binds each decoded cleanup snapshot to its workspace.
+func (h *TaskHandlers) httpGetArchiveSourceManifest(c *gin.Context) {
+	manifest, err := h.service.GetArchiveSourceManifest(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		if errors.Is(err, service.ErrTaskSourceManifestNotFound) {
+			handleNotFound(c, h.logger, taskrepo.ErrTaskNotFound, "archive source manifest not found")
+			return
+		}
+		handleNotFound(c, h.logger, err, "archive source manifest not found")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"worktrees": manifest})
+}
+
 func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 	ctx := c.Request.Context()
 	sessions, err := h.service.ListTaskSessions(ctx, c.Param("id"))
@@ -721,22 +736,23 @@ func (h *TaskHandlers) httpBulkMoveSelectedTasks(c *gin.Context, body httpBulkMo
 }
 
 type httpTaskRepositoryInput struct {
-	RepositoryID   string `json:"repository_id"`
-	BaseBranch     string `json:"base_branch"`
-	CheckoutBranch string `json:"checkout_branch"`
-	BranchPolicyID string `json:"branch_policy_id,omitempty"`
-	PRNumber       int    `json:"pr_number,omitempty"`
-	LocalPath      string `json:"local_path"`
-	Name           string `json:"name"`
-	DefaultBranch  string `json:"default_branch"`
-	GitHubURL      string `json:"github_url"`
-	RemoteURL      string `json:"remote_url"`
-	Provider       string `json:"provider"`
-	ProviderHost   string `json:"provider_host"`
-	ProviderScope  string `json:"provider_scope"`
-	ProviderRepoID string `json:"provider_repo_id"`
-	ProviderOwner  string `json:"provider_owner"`
-	ProviderName   string `json:"provider_name"`
+	CheckoutOptions *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
+	RepositoryID    string                            `json:"repository_id"`
+	BaseBranch      string                            `json:"base_branch"`
+	CheckoutBranch  string                            `json:"checkout_branch"`
+	BranchPolicyID  string                            `json:"branch_policy_id,omitempty"`
+	PRNumber        int                               `json:"pr_number,omitempty"`
+	LocalPath       string                            `json:"local_path"`
+	Name            string                            `json:"name"`
+	DefaultBranch   string                            `json:"default_branch"`
+	GitHubURL       string                            `json:"github_url"`
+	RemoteURL       string                            `json:"remote_url"`
+	Provider        string                            `json:"provider"`
+	ProviderHost    string                            `json:"provider_host"`
+	ProviderScope   string                            `json:"provider_scope"`
+	ProviderRepoID  string                            `json:"provider_repo_id"`
+	ProviderOwner   string                            `json:"provider_owner"`
+	ProviderName    string                            `json:"provider_name"`
 
 	// Fresh-branch flow (local executor only): when FreshBranch is true the
 	// handler discards uncommitted changes in the local clone and creates
@@ -754,28 +770,29 @@ type httpTaskRepositoryInput struct {
 }
 
 type httpCreateTaskRequest struct {
-	WorkspaceID       string                    `json:"workspace_id"`
-	WorkflowID        string                    `json:"workflow_id"`
-	WorkflowStepID    string                    `json:"workflow_step_id"`
-	Title             string                    `json:"title"`
-	Description       string                    `json:"description,omitempty"`
-	AutoTitle         bool                      `json:"auto_title,omitempty"`
-	Autopilot         bool                      `json:"autopilot,omitempty"`
-	Priority          string                    `json:"priority,omitempty"`
-	State             *v1.TaskState             `json:"state,omitempty"`
-	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position          int                       `json:"position,omitempty"`
-	Metadata          map[string]interface{}    `json:"metadata,omitempty"`
-	StartAgent        bool                      `json:"start_agent,omitempty"`
-	PrepareSession    bool                      `json:"prepare_session,omitempty"`
-	AgentProfileID    string                    `json:"agent_profile_id,omitempty"`
-	ExecutorID        string                    `json:"executor_id,omitempty"`
-	ExecutorProfileID string                    `json:"executor_profile_id,omitempty"`
-	PlanMode          bool                      `json:"plan_mode,omitempty"`
-	Attachments       []v1.MessageAttachment    `json:"attachments,omitempty"`
-	ParentID          string                    `json:"parent_id,omitempty"`
-	WorkspacePath     string                    `json:"workspace_path,omitempty"`
-	BlockedBy         []string                  `json:"blocked_by,omitempty"`
+	WorkspaceID            string                    `json:"workspace_id"`
+	WorkflowID             string                    `json:"workflow_id"`
+	WorkflowStepID         string                    `json:"workflow_step_id"`
+	WorkflowAgentOverrides map[string]string         `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                    `json:"title"`
+	Description            string                    `json:"description,omitempty"`
+	AutoTitle              bool                      `json:"auto_title,omitempty"`
+	Autopilot              bool                      `json:"autopilot,omitempty"`
+	Priority               string                    `json:"priority,omitempty"`
+	State                  *v1.TaskState             `json:"state,omitempty"`
+	Repositories           []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	Position               int                       `json:"position,omitempty"`
+	Metadata               map[string]interface{}    `json:"metadata,omitempty"`
+	StartAgent             bool                      `json:"start_agent,omitempty"`
+	PrepareSession         bool                      `json:"prepare_session,omitempty"`
+	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
+	ExecutorID             string                    `json:"executor_id,omitempty"`
+	ExecutorProfileID      string                    `json:"executor_profile_id,omitempty"`
+	PlanMode               bool                      `json:"plan_mode,omitempty"`
+	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
+	ParentID               string                    `json:"parent_id,omitempty"`
+	WorkspacePath          string                    `json:"workspace_path,omitempty"`
+	BlockedBy              []string                  `json:"blocked_by,omitempty"`
 	// StartWhenUnblocked records the agent start as an intent consumed by
 	// dependency resolution. nil derives it from StartAgent when BlockedBy is set.
 	StartWhenUnblocked *bool  `json:"start_when_unblocked,omitempty"`
@@ -930,9 +947,12 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 			body.Metadata = make(map[string]interface{})
 		}
 		body.Metadata[models.MetaKeyAgentProfileID] = body.AgentProfileID
-		if body.ExecutorProfileID != "" {
-			body.Metadata[models.MetaKeyExecutorProfileID] = body.ExecutorProfileID
+	}
+	if body.ExecutorProfileID != "" {
+		if body.Metadata == nil {
+			body.Metadata = make(map[string]interface{})
 		}
+		body.Metadata[models.MetaKeyExecutorProfileID] = body.ExecutorProfileID
 	}
 
 	title := strings.TrimSpace(body.Title)
@@ -965,6 +985,9 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		WorkspaceID:                 body.WorkspaceID,
 		WorkflowID:                  body.WorkflowID,
 		WorkflowStepID:              body.WorkflowStepID,
+		WorkflowAgentOverrides:      body.WorkflowAgentOverrides,
+		ExecutorID:                  body.ExecutorID,
+		ExecutorProfileID:           body.ExecutorProfileID,
 		Title:                       title,
 		Description:                 description,
 		AutoTitle:                   body.AutoTitle,
@@ -1372,22 +1395,23 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			return nil, false
 		}
 		repos = append(repos, dto.TaskRepositoryInput{
-			RepositoryID:   r.RepositoryID,
-			BaseBranch:     r.BaseBranch,
-			CheckoutBranch: r.CheckoutBranch,
-			BranchPolicyID: r.BranchPolicyID,
-			PRNumber:       r.PRNumber,
-			LocalPath:      r.LocalPath,
-			Name:           r.Name,
-			DefaultBranch:  r.DefaultBranch,
-			GitHubURL:      r.GitHubURL,
-			RemoteURL:      r.RemoteURL,
-			Provider:       r.Provider,
-			ProviderHost:   r.ProviderHost,
-			ProviderScope:  r.ProviderScope,
-			ProviderRepoID: r.ProviderRepoID,
-			ProviderOwner:  r.ProviderOwner,
-			ProviderName:   r.ProviderName,
+			CheckoutOptions: r.CheckoutOptions,
+			RepositoryID:    r.RepositoryID,
+			BaseBranch:      r.BaseBranch,
+			CheckoutBranch:  r.CheckoutBranch,
+			BranchPolicyID:  r.BranchPolicyID,
+			PRNumber:        r.PRNumber,
+			LocalPath:       r.LocalPath,
+			Name:            r.Name,
+			DefaultBranch:   r.DefaultBranch,
+			GitHubURL:       r.GitHubURL,
+			RemoteURL:       r.RemoteURL,
+			Provider:        r.Provider,
+			ProviderHost:    r.ProviderHost,
+			ProviderScope:   r.ProviderScope,
+			ProviderRepoID:  r.ProviderRepoID,
+			ProviderOwner:   r.ProviderOwner,
+			ProviderName:    r.ProviderName,
 		})
 	}
 	return repos, true
@@ -1415,7 +1439,12 @@ func (h *TaskHandlers) associatePRFromRepoInputs(taskID, sessionID string, repos
 // succeeded. A nil *startAgentDispatch means there is nothing to dispatch —
 // prepare-only, start_agent not requested, or prepare itself failed.
 type startAgentDispatch struct {
-	sessionID string
+	sessionID           string
+	initialCreatePrompt bool
+}
+
+func eligibleInitialCreatePrompt(body httpCreateTaskRequest) bool {
+	return body.StartAgent && body.WorkflowStepID != "" && strings.TrimSpace(body.Description) != ""
 }
 
 // prepareTaskSession runs the create sequence's synchronous session-setup
@@ -1520,7 +1549,14 @@ func (h *TaskHandlers) prepareStartAgentSession(
 	} else {
 		response.State = updatedTask.State
 	}
-	return &startAgentDispatch{sessionID: sessionID}
+	return &startAgentDispatch{
+		sessionID: sessionID,
+		// body.WorkflowStepID is the caller's original explicit selection.
+		// resolvedStepID may have been inferred or normalized before this
+		// helper runs, so it cannot establish the provenance required for the
+		// initial creation-prompt path.
+		initialCreatePrompt: eligibleInitialCreatePrompt(body),
+	}
 }
 
 // dispatchTaskSession launches the agent asynchronously (create-sequence
@@ -1542,14 +1578,15 @@ func (h *TaskHandlers) dispatchTaskSession(
 		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 		launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
-			TaskID:            taskID,
-			Intent:            orchestrator.IntentStartCreated,
-			SessionID:         sessionID,
-			AgentProfileID:    body.AgentProfileID,
-			Prompt:            description,
-			SkipMessageRecord: false,
-			PlanMode:          body.PlanMode,
-			Attachments:       body.Attachments,
+			TaskID:              taskID,
+			Intent:              orchestrator.IntentStartCreated,
+			SessionID:           sessionID,
+			AgentProfileID:      body.AgentProfileID,
+			Prompt:              description,
+			SkipMessageRecord:   false,
+			PlanMode:            body.PlanMode,
+			Attachments:         body.Attachments,
+			InitialCreatePrompt: dispatch.initialCreatePrompt,
 		})
 		if err != nil {
 			h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", taskID), zap.String("session_id", sessionID))
@@ -1635,22 +1672,23 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	if body.Repositories != nil {
 		for _, r := range body.Repositories {
 			repos = append(repos, dto.TaskRepositoryInput{
-				RepositoryID:   r.RepositoryID,
-				BaseBranch:     r.BaseBranch,
-				CheckoutBranch: r.CheckoutBranch,
-				BranchPolicyID: r.BranchPolicyID,
-				PRNumber:       r.PRNumber,
-				LocalPath:      r.LocalPath,
-				Name:           r.Name,
-				DefaultBranch:  r.DefaultBranch,
-				GitHubURL:      r.GitHubURL,
-				RemoteURL:      r.RemoteURL,
-				Provider:       r.Provider,
-				ProviderHost:   r.ProviderHost,
-				ProviderScope:  r.ProviderScope,
-				ProviderRepoID: r.ProviderRepoID,
-				ProviderOwner:  r.ProviderOwner,
-				ProviderName:   r.ProviderName,
+				CheckoutOptions: r.CheckoutOptions,
+				RepositoryID:    r.RepositoryID,
+				BaseBranch:      r.BaseBranch,
+				CheckoutBranch:  r.CheckoutBranch,
+				BranchPolicyID:  r.BranchPolicyID,
+				PRNumber:        r.PRNumber,
+				LocalPath:       r.LocalPath,
+				Name:            r.Name,
+				DefaultBranch:   r.DefaultBranch,
+				GitHubURL:       r.GitHubURL,
+				RemoteURL:       r.RemoteURL,
+				Provider:        r.Provider,
+				ProviderHost:    r.ProviderHost,
+				ProviderScope:   r.ProviderScope,
+				ProviderRepoID:  r.ProviderRepoID,
+				ProviderOwner:   r.ProviderOwner,
+				ProviderName:    r.ProviderName,
 			})
 		}
 	}
@@ -1832,9 +1870,10 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 	}
 
 	response := dto.MoveTaskResponse{
-		Task:         dto.FromTask(result.Task),
-		MoveID:       result.MoveID,
-		EntryOptions: result.EntryOptions,
+		Task:                  dto.FromTask(result.Task),
+		WorkflowEntryIdentity: result.WorkflowEntryIdentity,
+		MoveID:                result.MoveID,
+		EntryOptions:          result.EntryOptions,
 	}
 	if result.WorkflowStep != nil {
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)

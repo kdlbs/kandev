@@ -504,9 +504,11 @@ const (
 	Host_ListTasks_FullMethodName                     = "/kandev.plugin.v1.Host/ListTasks"
 	Host_GetTask_FullMethodName                       = "/kandev.plugin.v1.Host/GetTask"
 	Host_GetTaskRelations_FullMethodName              = "/kandev.plugin.v1.Host/GetTaskRelations"
+	Host_ListTaskStepTransitions_FullMethodName       = "/kandev.plugin.v1.Host/ListTaskStepTransitions"
 	Host_ListWorkspaces_FullMethodName                = "/kandev.plugin.v1.Host/ListWorkspaces"
 	Host_ListWorkflows_FullMethodName                 = "/kandev.plugin.v1.Host/ListWorkflows"
 	Host_ListWorkflowSteps_FullMethodName             = "/kandev.plugin.v1.Host/ListWorkflowSteps"
+	Host_ListWorkflowTransitionGroups_FullMethodName  = "/kandev.plugin.v1.Host/ListWorkflowTransitionGroups"
 	Host_ListAgentProfiles_FullMethodName             = "/kandev.plugin.v1.Host/ListAgentProfiles"
 	Host_ListExecutorProfiles_FullMethodName          = "/kandev.plugin.v1.Host/ListExecutorProfiles"
 	Host_ListRepositories_FullMethodName              = "/kandev.plugin.v1.Host/ListRepositories"
@@ -587,9 +589,11 @@ type HostClient interface {
 	// repositories, or document fields. The requested target must belong to
 	// workspace_id; foreign and unknown targets fail as NotFound.
 	GetTaskRelations(ctx context.Context, in *GetTaskRelationsRequest, opts ...grpc.CallOption) (*GetTaskRelationsResponse, error)
+	ListTaskStepTransitions(ctx context.Context, in *ListTaskStepTransitionsRequest, opts ...grpc.CallOption) (*ListTaskStepTransitionsResponse, error)
 	ListWorkspaces(ctx context.Context, in *ListWorkspacesRequest, opts ...grpc.CallOption) (*ListWorkspacesResponse, error)
 	ListWorkflows(ctx context.Context, in *ListWorkflowsRequest, opts ...grpc.CallOption) (*ListWorkflowsResponse, error)
 	ListWorkflowSteps(ctx context.Context, in *ListWorkflowStepsRequest, opts ...grpc.CallOption) (*ListWorkflowStepsResponse, error)
+	ListWorkflowTransitionGroups(ctx context.Context, in *ListWorkflowTransitionGroupsRequest, opts ...grpc.CallOption) (*ListWorkflowTransitionGroupsResponse, error)
 	ListAgentProfiles(ctx context.Context, in *ListAgentProfilesRequest, opts ...grpc.CallOption) (*ListAgentProfilesResponse, error)
 	ListExecutorProfiles(ctx context.Context, in *ListExecutorProfilesRequest, opts ...grpc.CallOption) (*ListExecutorProfilesResponse, error)
 	ListRepositories(ctx context.Context, in *ListRepositoriesRequest, opts ...grpc.CallOption) (*ListRepositoriesResponse, error)
@@ -804,6 +808,16 @@ func (c *hostClient) GetTaskRelations(ctx context.Context, in *GetTaskRelationsR
 	return out, nil
 }
 
+func (c *hostClient) ListTaskStepTransitions(ctx context.Context, in *ListTaskStepTransitionsRequest, opts ...grpc.CallOption) (*ListTaskStepTransitionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTaskStepTransitionsResponse)
+	err := c.cc.Invoke(ctx, Host_ListTaskStepTransitions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) ListWorkspaces(ctx context.Context, in *ListWorkspacesRequest, opts ...grpc.CallOption) (*ListWorkspacesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListWorkspacesResponse)
@@ -828,6 +842,16 @@ func (c *hostClient) ListWorkflowSteps(ctx context.Context, in *ListWorkflowStep
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListWorkflowStepsResponse)
 	err := c.cc.Invoke(ctx, Host_ListWorkflowSteps_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListWorkflowTransitionGroups(ctx context.Context, in *ListWorkflowTransitionGroupsRequest, opts ...grpc.CallOption) (*ListWorkflowTransitionGroupsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListWorkflowTransitionGroupsResponse)
+	err := c.cc.Invoke(ctx, Host_ListWorkflowTransitionGroups_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1110,9 +1134,11 @@ type HostServer interface {
 	// repositories, or document fields. The requested target must belong to
 	// workspace_id; foreign and unknown targets fail as NotFound.
 	GetTaskRelations(context.Context, *GetTaskRelationsRequest) (*GetTaskRelationsResponse, error)
+	ListTaskStepTransitions(context.Context, *ListTaskStepTransitionsRequest) (*ListTaskStepTransitionsResponse, error)
 	ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error)
 	ListWorkflows(context.Context, *ListWorkflowsRequest) (*ListWorkflowsResponse, error)
 	ListWorkflowSteps(context.Context, *ListWorkflowStepsRequest) (*ListWorkflowStepsResponse, error)
+	ListWorkflowTransitionGroups(context.Context, *ListWorkflowTransitionGroupsRequest) (*ListWorkflowTransitionGroupsResponse, error)
 	ListAgentProfiles(context.Context, *ListAgentProfilesRequest) (*ListAgentProfilesResponse, error)
 	ListExecutorProfiles(context.Context, *ListExecutorProfilesRequest) (*ListExecutorProfilesResponse, error)
 	ListRepositories(context.Context, *ListRepositoriesRequest) (*ListRepositoriesResponse, error)
@@ -1236,6 +1262,9 @@ func (UnimplementedHostServer) GetTask(context.Context, *GetTaskRequest) (*GetTa
 func (UnimplementedHostServer) GetTaskRelations(context.Context, *GetTaskRelationsRequest) (*GetTaskRelationsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTaskRelations not implemented")
 }
+func (UnimplementedHostServer) ListTaskStepTransitions(context.Context, *ListTaskStepTransitionsRequest) (*ListTaskStepTransitionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTaskStepTransitions not implemented")
+}
 func (UnimplementedHostServer) ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorkspaces not implemented")
 }
@@ -1244,6 +1273,9 @@ func (UnimplementedHostServer) ListWorkflows(context.Context, *ListWorkflowsRequ
 }
 func (UnimplementedHostServer) ListWorkflowSteps(context.Context, *ListWorkflowStepsRequest) (*ListWorkflowStepsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorkflowSteps not implemented")
+}
+func (UnimplementedHostServer) ListWorkflowTransitionGroups(context.Context, *ListWorkflowTransitionGroupsRequest) (*ListWorkflowTransitionGroupsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListWorkflowTransitionGroups not implemented")
 }
 func (UnimplementedHostServer) ListAgentProfiles(context.Context, *ListAgentProfilesRequest) (*ListAgentProfilesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListAgentProfiles not implemented")
@@ -1566,6 +1598,24 @@ func _Host_GetTaskRelations_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_ListTaskStepTransitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTaskStepTransitionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListTaskStepTransitions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListTaskStepTransitions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListTaskStepTransitions(ctx, req.(*ListTaskStepTransitionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_ListWorkspaces_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListWorkspacesRequest)
 	if err := dec(in); err != nil {
@@ -1616,6 +1666,24 @@ func _Host_ListWorkflowSteps_Handler(srv interface{}, ctx context.Context, dec f
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).ListWorkflowSteps(ctx, req.(*ListWorkflowStepsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListWorkflowTransitionGroups_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWorkflowTransitionGroupsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListWorkflowTransitionGroups(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListWorkflowTransitionGroups_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListWorkflowTransitionGroups(ctx, req.(*ListWorkflowTransitionGroupsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2076,6 +2144,10 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Host_GetTaskRelations_Handler,
 		},
 		{
+			MethodName: "ListTaskStepTransitions",
+			Handler:    _Host_ListTaskStepTransitions_Handler,
+		},
+		{
 			MethodName: "ListWorkspaces",
 			Handler:    _Host_ListWorkspaces_Handler,
 		},
@@ -2086,6 +2158,10 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListWorkflowSteps",
 			Handler:    _Host_ListWorkflowSteps_Handler,
+		},
+		{
+			MethodName: "ListWorkflowTransitionGroups",
+			Handler:    _Host_ListWorkflowTransitionGroups_Handler,
 		},
 		{
 			MethodName: "ListAgentProfiles",

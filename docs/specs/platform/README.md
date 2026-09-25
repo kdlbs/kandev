@@ -15,6 +15,9 @@ The platform system owns cross-cutting runtime services, configuration,
 observability, notifications, localization, lifecycle safety, and shared
 operational guarantees.
 
+Repository validation performance, including local commit checks and shared CI
+execution, belongs here. The CI system retains hosted workflow trust policy.
+
 Shared read-capacity protection and aggregate reporting availability belong here.
 Domain systems retain ownership of source records and workspace context identity.
 
@@ -38,9 +41,11 @@ retains ownership of its values, validation, authority, and persistence.
 
 ### Requirements
 
+- [Task Status Summary Projection Contention](requirements/task-summary-contention.md)
 - [CI performance](requirements/ci-performance.md)
 
 - [Startup lifecycle](requirements/startup-lifecycle.md)
+- [Startup progress visibility](requirements/startup-progress-visibility.md)
 
 - [Agent-accessible Kandev settings](requirements/agent-settings-parity.md)
 
@@ -57,6 +62,7 @@ retains ownership of its values, validation, authority, and persistence.
 - [Environment-specific browser tab title prefixes](requirements/dev-preview-title-prefixes.md)
 - [Browser console retention](requirements/browser-console-retention.md)
 - [Diagnostic logging](requirements/diagnostic-logging.md)
+- [Runtime failure attribution](requirements/runtime-failure-attribution.md)
 - [Duration-aware E2E sharding and CI reliability](requirements/e2e-duration-aware-sharding.md)
 - [External CI runner capacity](requirements/external-e2e-runner-capacity.md)
 - [Expected runtime log severity](requirements/expected-runtime-log-severity.md)
@@ -80,6 +86,7 @@ retains ownership of its values, validation, authority, and persistence.
 - [Setup and Launch Timeout](requirements/setup-launch-timeout.md)
 - [Quiet benign teardown log noise on shutdown](requirements/shutdown-log-noise.md)
 - [Do not surface backend-shutdown turn aborts as agent failures](requirements/shutdown-turn-failure-suppression.md)
+- [Background subsystem context-cancellation log severity](requirements/shutdown-background-canceled-logs.md)
 - [Startup Configuration Parity](requirements/startup-configuration-parity.md)
 - [Prevent Host Sleep During Active Tasks](requirements/task-sleep-inhibition.md)
 - [Traditional Chinese locales (Taiwan and Hong Kong)](requirements/traditional-chinese-locales.md)
@@ -87,9 +94,11 @@ retains ownership of its values, validation, authority, and persistence.
 
 ### System design
 
+- [Task Status Summary Projection Contention](system-design/task-summary-contention.md)
 - [CI performance](system-design/ci-performance.md)
 
 - [Startup lifecycle](system-design/startup-lifecycle.md)
+- [Startup progress visibility](system-design/startup-progress-visibility.md)
 
 - [Agent-accessible Kandev settings](system-design/agent-settings-parity.md)
 - [Core settings domain adoption](system-design/agent-settings-domains.md)
@@ -106,6 +115,7 @@ retains ownership of its values, validation, authority, and persistence.
 - [Viewport-bounded Session Delivery](system-design/viewport-bounded-session-delivery.md)
 - [Diagnostic logging System Design Part 1](system-design/diagnostic-logging-01.md)
 - [Diagnostic logging System Design Part 2](system-design/diagnostic-logging-02.md)
+- [Runtime failure attribution](system-design/runtime-failure-attribution.md)
 - [Expected runtime log severity](system-design/expected-runtime-log-severity.md)
 - [Duration-aware E2E sharding and CI reliability](system-design/e2e-duration-aware-sharding.md)
 - [External CI runner capacity](system-design/external-e2e-runner-capacity.md)
@@ -116,9 +126,11 @@ retains ownership of its values, validation, authority, and persistence.
 - [Session MCP Attachment Observability](system-design/mcp-session-observability.md)
 - [Required Persisted Store Parity](system-design/postgres-domain-store-parity.md)
 - [Provider Error Recovery](system-design/provider-error-recovery.md)
+- [Provider Response-Attempt Recovery](system-design/provider-response-attempt-recovery.md)
 - [Workspace Git Status](system-design/workspace-git-status.md)
 - [Go dev launcher and startup version](system-design/go-dev-launcher.md)
 - [Startup database selection continuity](system-design/startup-database-selection-continuity.md)
+- [Background subsystem context-cancellation log severity](system-design/shutdown-background-canceled-logs.md)
 
 ## Migration record
 

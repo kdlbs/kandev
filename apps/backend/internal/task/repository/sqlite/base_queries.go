@@ -1,7 +1,14 @@
 // Package sqlite provides SQLite-based repository implementations.
 package sqlite
 
-import "strings"
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"strings"
+
+	"github.com/jmoiron/sqlx"
+)
 
 // sqlLimitClause is the SQL fragment appended to dynamic queries when a row
 // limit is requested. Shared across plan.go, document.go, and message.go.
@@ -35,6 +42,39 @@ func buildInPlaceholders(ids []string) (string, []interface{}) {
 		args[i] = id
 	}
 	return placeholders, args
+}
+
+// listLimitedCandidates runs query against ro (appending sqlLimitClause and
+// limit as a trailing bound parameter when limit > 0), scanning each row
+// with scanRow. It centralizes the query/scan-loop shape shared by the
+// read-only maintenance-candidate listers (duplicate git snapshots,
+// orphaned message payloads, ...) so each lister only supplies its SQL and
+// per-row scan logic.
+func listLimitedCandidates[T any](ctx context.Context, ro *sqlx.DB, query string, limit int, errLabel string, scanRow func(*sql.Rows) (T, error)) ([]T, error) {
+	args := []interface{}{}
+	if limit > 0 {
+		query += sqlLimitClause
+		args = append(args, limit)
+	}
+
+	rows, err := ro.QueryContext(ctx, ro.Rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list %s: %w", errLabel, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []T
+	for rows.Next() {
+		item, err := scanRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan %s: %w", errLabel, err)
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate %s: %w", errLabel, err)
+	}
+	return out, nil
 }
 
 // chunkIDs splits ids into sub-slices of at most size entries. Useful when

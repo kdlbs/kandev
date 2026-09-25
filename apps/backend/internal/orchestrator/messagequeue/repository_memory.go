@@ -252,6 +252,20 @@ func (r *memoryRepository) CountPendingByTaskIDs(_ context.Context, taskIDs []st
 	return counts, nil
 }
 
+func (r *memoryRepository) CountQueueDepth(_ context.Context) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	for _, entries := range r.entries {
+		for _, entry := range entries {
+			if !entry.IsReservedInFlight() {
+				count++
+			}
+		}
+	}
+	return count, nil
+}
+
 // Insert appends a new entry at the tail of the session's FIFO queue.
 func (r *memoryRepository) Insert(_ context.Context, msg *QueuedMessage, maxPerSession int) error {
 	r.mu.Lock()
@@ -303,6 +317,22 @@ func (r *memoryRepository) InsertForSessionWithPolicy(
 		return err
 	}
 	return r.insertLocked(msg, maxPerSession)
+}
+
+func (r *memoryRepository) InsertForSessionWithWorkflowEntry(
+	context.Context,
+	QueueSessionIdentity,
+	WorkflowEntryIdentity,
+	*QueuedMessage,
+	*QueueAttachmentClaim,
+	int,
+	*AutoMergePolicy,
+) error {
+	// The in-memory queue has no shared task repository or workflow-transition
+	// transaction, so accepting a captured entry would falsely claim to fence
+	// workflow moves. Callers must use the legacy path explicitly or provide a
+	// transactional queue repository.
+	return ErrQueueAdmissionUnavailable
 }
 
 // Restore reinserts a previously dequeued entry at its original FIFO position.
@@ -1963,6 +1993,20 @@ func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
 		return nil, false, err
 	}
 	return r.autoMergeCandidateIntoAboveLocked(candidate)
+}
+
+func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithWorkflowEntry(
+	context.Context,
+	QueueSessionIdentity,
+	WorkflowEntryIdentity,
+	*QueuedMessage,
+	*QueueAttachmentClaim,
+	*AutoMergePolicy,
+) (*QueuedMessage, bool, error) {
+	// Candidate folding is an admission mutation too. It needs the same
+	// shared task/queue transaction as insertion before it can honor an entry
+	// fence.
+	return nil, false, ErrQueueAdmissionUnavailable
 }
 
 func (r *memoryRepository) autoMergeCandidateIntoAboveLocked(candidate *QueuedMessage) (*QueuedMessage, bool, error) {

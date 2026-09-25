@@ -724,14 +724,28 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session
 			zap.Error(err))
 	}
 	for _, chunk := range agents.PlanPassthroughStdinChunks(promptWithAttachments, pt) {
-		if chunk.DelayBefore > 0 {
-			time.Sleep(chunk.DelayBefore)
+		if err := waitPassthroughChunkDelay(ctx, chunk.DelayBefore); err != nil {
+			return nil, err
 		}
 		if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, chunk.Data); err != nil {
 			return nil, fmt.Errorf("failed to write to passthrough stdin: %w", err)
 		}
 	}
 	return &PromptResult{StopReason: stopReasonPassthrough}, nil
+}
+
+func waitPassthroughChunkDelay(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, session *models.TaskSession, prompt string, attachments []v1.MessageAttachment) (string, error) {
@@ -889,6 +903,28 @@ func workspaceFromTaskEnvironment(env *models.TaskEnvironment) string {
 // the agent doesn't support in-place switching, it falls back to stopping and
 // restarting the agent with the new model.
 func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel, prompt string) (*PromptResult, error) {
+	return e.switchModel(ctx, taskID, sessionID, newModel, prompt, nil, nil)
+}
+
+// SwitchModelWithDispatchCallbacks is the model-switch variant used by a
+// resume-owned prompt. The fallback startup sends its initial prompt from a
+// lifecycle goroutine, so the caller must receive the actual acceptance or
+// pre-acceptance failure instead of treating StartAgentProcess as acceptance.
+func (e *Executor) SwitchModelWithDispatchCallbacks(
+	ctx context.Context,
+	taskID, sessionID, newModel, prompt string,
+	onDispatched func(executionID string),
+	onFailure func(),
+) (*PromptResult, error) {
+	return e.switchModel(ctx, taskID, sessionID, newModel, prompt, onDispatched, onFailure)
+}
+
+func (e *Executor) switchModel(
+	ctx context.Context,
+	taskID, sessionID, newModel, prompt string,
+	onDispatched func(executionID string),
+	onFailure func(),
+) (*PromptResult, error) {
 	e.logger.Info("switching model for session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -954,7 +990,7 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		zap.Bool("use_worktree", req.UseWorktree),
 		zap.String("repository_path", req.RepositoryPath))
 
-	if err := e.launchModelSwitchAgent(launchCtx, task.ID, sessionID, newModel, session, req, existingRunning); err != nil {
+	if err := e.launchModelSwitchAgent(launchCtx, task.ID, sessionID, newModel, session, req, existingRunning, onDispatched, onFailure); err != nil {
 		return nil, err
 	}
 
@@ -1123,7 +1159,15 @@ func (e *Executor) stopPreparedModelSwitchAgent(
 }
 
 // launchModelSwitchAgent launches the new agent, persists state, and starts the process.
-func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID, newModel string, session *models.TaskSession, req *LaunchAgentRequest, existingRunning *models.ExecutorRunning) error {
+func (e *Executor) launchModelSwitchAgent(
+	ctx context.Context,
+	taskID, sessionID, newModel string,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	existingRunning *models.ExecutorRunning,
+	onDispatched func(executionID string),
+	onFailure func(),
+) error {
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
 	if err != nil {
 		e.logger.Error("failed to launch agent with new model",
@@ -1131,6 +1175,28 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return fmt.Errorf("failed to launch agent with new model: %w", err)
+	}
+	if onDispatched != nil || onFailure != nil {
+		registrar, ok := e.agentManager.(interface {
+			RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
+		})
+		if !ok {
+			registrationErr := errors.New("agent manager cannot register initial prompt dispatch callbacks")
+			e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, registrationErr)
+			return registrationErr
+		}
+		if err := registrar.RegisterInitialPromptDispatchCallbacks(
+			resp.AgentExecutionID,
+			func() {
+				if onDispatched != nil {
+					onDispatched(resp.AgentExecutionID)
+				}
+			},
+			onFailure,
+		); err != nil {
+			e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, err)
+			return fmt.Errorf("failed to register initial prompt dispatch callbacks: %w", err)
+		}
 	}
 
 	if err := e.persistModelSwitchState(ctx, taskID, sessionID, session, newModel); err != nil {
@@ -1217,6 +1283,7 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 	for _, repoInfo := range allRepos {
 		if repoInfo.RepositoryID == session.RepositoryID {
 			req.ComparisonTarget = repoInfo.ComparisonTarget
+			req.QualifiedPRBase = repoInfo.QualifiedPRBase
 			break
 		}
 	}

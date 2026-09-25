@@ -5,6 +5,22 @@ import { StateProvider } from "@/components/state-provider";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { pluginRegistry } from "@/lib/plugins/registry";
 
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ isMobile: true }),
+}));
+vi.mock("@/hooks/use-select-workspace", () => ({ useSelectWorkspace: () => vi.fn() }));
+vi.mock("@/hooks/use-system-health-indicator", () => ({
+  useSystemHealthIndicator: () => ({
+    hasIssues: false,
+    issues: [],
+    dialogOpen: false,
+    openDialog: vi.fn(),
+  }),
+}));
+vi.mock("@/hooks/use-nav-availability", () => ({ useNavAvailability: () => ({}) }));
+vi.mock("@/components/theme/app-theme", () => ({
+  useTheme: () => ({ resolvedTheme: "light", setTheme: vi.fn() }),
+}));
 vi.mock("@/components/page-topbar", () => ({
   PageTopbar: ({
     title,
@@ -28,8 +44,21 @@ vi.mock("@/components/page-topbar", () => ({
 }));
 
 vi.mock("./mobile-menu-sheet", () => ({
-  MobileMenuSheet: ({ open, pageActions }: { open: boolean; pageActions?: ReactNode }) =>
-    open ? <div role="dialog">{pageActions}</div> : null,
+  MobileMenuSheet: ({
+    open,
+    pageActions,
+    listingControls,
+  }: {
+    open: boolean;
+    pageActions?: ReactNode;
+    listingControls?: ReactNode;
+  }) =>
+    open ? (
+      <div role="dialog">
+        {pageActions}
+        {listingControls}
+      </div>
+    ) : null,
 }));
 
 const launchers = vi.hoisted(() => ({
@@ -57,7 +86,7 @@ vi.mock("@/components/quick-chat/use-quick-chat-activity", () => ({
   useQuickChatActivity: () => chat,
 }));
 
-const MENU = "mobile-topbar-menu";
+const MENU = "app-nav-trigger";
 const CHAT = "mobile-quick-chat-button";
 const TERMINAL = "mobile-quick-terminal-button";
 const CONTEXT = "mobile-topbar-page-context";
@@ -79,7 +108,22 @@ afterEach(() => {
 
 function renderHeader(props: Partial<ComponentProps<typeof KanbanHeaderMobile>> = {}) {
   return render(
-    <StateProvider>
+    <StateProvider
+      initialState={{
+        workspaces: {
+          activeId: props.workspaceId === undefined && "workspaceId" in props ? null : WORKSPACE,
+          items: [
+            {
+              id: WORKSPACE,
+              name: "Harbor",
+              owner_id: "user",
+              created_at: "2026-09-15T00:00:00Z",
+              updated_at: "2026-09-15T00:00:00Z",
+            },
+          ],
+        },
+      }}
+    >
       <KanbanHeaderMobile
         title="Localized page title"
         workspaceId={WORKSPACE}
@@ -135,6 +179,15 @@ describe("stateful phone menu plugins", () => {
 });
 
 describe("shared phone listing header", () => {
+  // @covers AC-UI-MOBILE-MENU-001.4
+  it("exposes view options independently of app navigation", () => {
+    renderHeader();
+    expect(screen.queryByRole("button", { name: "View options" })).toBeNull();
+    const options = screen.getByTestId(CONTEXT);
+    expect(options === screen.getByTestId("app-nav-trigger")).toBe(false);
+    fireEvent.click(options);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
   // @covers AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.5 AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.7
   it.each([
     ["kanban", "Kanban"],
@@ -151,11 +204,16 @@ describe("shared phone listing header", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
-  it("keeps the Threads-supplied view control in the title slot", () => {
-    renderHeader({ currentPage: "threads", taskListingControls: <button>Review view</button> });
+  it("opens Threads options from the mode title and includes its saved views", () => {
+    renderHeader({
+      currentPage: "threads",
+      taskListingControls: <button>Review view</button>,
+      mobileListingStatus: <span data-testid="deck-position">2/3</span>,
+    });
+    expect(screen.getByTestId("deck-position").closest("header")).not.toBeNull();
+    fireEvent.click(screen.getByTestId(CONTEXT));
     const view = screen.getByRole("button", { name: "Review view" });
-    expect(view.closest("header")).not.toBeNull();
-    expect(screen.queryByTestId(CONTEXT)).toBeNull();
+    expect(view.closest("header")).toBeNull();
     expect(screen.queryByTestId("mobile-topbar-action-strip")).toBeNull();
   });
 
@@ -168,7 +226,7 @@ describe("shared phone listing header", () => {
     expect(screen.queryByTestId(testId)).toBeNull();
     openMenu();
     fireEvent.click(screen.getByTestId(testId));
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("dialog").getAttribute("data-state")).toBe("closed");
     expect(launchers[launcher]).not.toHaveBeenCalled();
     frame();
     expect(launchers[launcher]).toHaveBeenCalledTimes(1);
@@ -185,13 +243,13 @@ describe("shared phone listing header", () => {
   it("reveals search from the menu and clears its query on collapse", () => {
     const onSearchChange = vi.fn();
     renderHeader({ currentPage: "tasks", searchQuery: "Alpha", onSearchChange });
-    openMenu();
+    fireEvent.click(screen.getByTestId("mobile-topbar-page-context"));
     expect(screen.getByTestId(SEARCH).getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(screen.getByTestId(SEARCH));
     expect(screen.queryByRole("dialog")).toBeNull();
     frame();
     expect(onSearchChange).not.toHaveBeenCalled();
-    openMenu();
+    fireEvent.click(screen.getByTestId("mobile-topbar-page-context"));
     expect(screen.getByTestId(SEARCH).getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(screen.getByTestId(SEARCH));
     frame();
