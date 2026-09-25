@@ -796,6 +796,33 @@ func (s *Service) startCreatedSession(
 		seam2Res.rekeyToSession(ctx, activeSession.ID)
 		sessionID = activeSession.ID
 		effectiveProfileID = activeSession.AgentProfileID
+		if exactAssignment != nil {
+			effectiveProfileID = exactAssignment.AgentProfileID
+		}
+		if session.AgentProfileID != effectiveProfileID {
+			observedState := session.State
+			session.AgentProfileID = effectiveProfileID
+			session.AgentProfileSnapshot = map[string]interface{}{"id": effectiveProfileID}
+			if profileInfo, resolveErr := s.agentManager.ResolveAgentProfile(ctx, effectiveProfileID); resolveErr != nil {
+				s.logger.Warn("failed to resolve agent profile snapshot for redirected session",
+					zap.String("session_id", sessionID),
+					zap.String("profile_id", effectiveProfileID),
+					zap.Error(resolveErr))
+			} else if profileInfo != nil {
+				session.AgentProfileSnapshot = map[string]interface{}{
+					"id":             profileInfo.ProfileID,
+					"name":           profileInfo.ProfileName,
+					"agent_id":       profileInfo.AgentID,
+					"agent_name":     profileInfo.AgentName,
+					"model":          profileInfo.Model,
+					"mode":           profileInfo.Mode,
+					"config_options": maps.Clone(profileInfo.ConfigOptions),
+				}
+			}
+			if err := s.persistFullTaskSessionIfCurrent(ctx, session, observedState); err != nil {
+				return nil, fmt.Errorf("persist redirected session profile: %w", err)
+			}
+		}
 		if err := s.persistExactProfileSessionBinding(ctx, session, exactAssignment); err != nil {
 			return nil, err
 		}

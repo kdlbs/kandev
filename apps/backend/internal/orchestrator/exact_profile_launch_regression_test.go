@@ -68,7 +68,7 @@ func TestStartCreatedSession_PersistsExactBindingOnWorkflowRedirect(t *testing.T
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:             "session-redirected",
 		TaskID:         "task1",
-		AgentProfileID: "profile-exact",
+		AgentProfileID: "profile-other",
 		State:          models.TaskSessionStateCreated,
 		StartedAt:      time.Now().UTC().Add(time.Second),
 		UpdatedAt:      time.Now().UTC().Add(time.Second),
@@ -92,6 +92,7 @@ func TestStartCreatedSession_PersistsExactBindingOnWorkflowRedirect(t *testing.T
 	}
 
 	var launchedSessionID string
+	var launchedProfileID string
 	agentMgr := &mockAgentManager{
 		resolveProfileInfo: &executor.AgentProfileInfo{
 			ProfileID:   "profile-exact",
@@ -102,6 +103,7 @@ func TestStartCreatedSession_PersistsExactBindingOnWorkflowRedirect(t *testing.T
 		},
 		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 			launchedSessionID = req.SessionID
+			launchedProfileID = req.AgentProfileID
 			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-redirected"}, nil
 		},
 	}
@@ -119,6 +121,9 @@ func TestStartCreatedSession_PersistsExactBindingOnWorkflowRedirect(t *testing.T
 	if launchedSessionID != "session-redirected" {
 		t.Fatalf("launched session = %q, want redirected session", launchedSessionID)
 	}
+	if launchedProfileID != "profile-exact" {
+		t.Fatalf("launched profile = %q, want assigned exact profile", launchedProfileID)
+	}
 
 	redirected, err := repo.GetTaskSession(ctx, "session-redirected")
 	if err != nil {
@@ -132,6 +137,9 @@ func TestStartCreatedSession_PersistsExactBindingOnWorkflowRedirect(t *testing.T
 			generation,
 			revision.UnixNano(),
 		)
+	}
+	if redirected.AgentProfileID != "profile-exact" {
+		t.Fatalf("redirected profile = %q, want assigned exact profile", redirected.AgentProfileID)
 	}
 }
 

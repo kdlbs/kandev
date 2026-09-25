@@ -36,6 +36,8 @@ signals, and task-scoped scheduling contracts.
 
 ### Requirements
 
+- [Exact Profile Assignment at Launch](requirements/exact-profile-launch-assignment.md)
+
 - [Initial task brief](requirements/initial-task-brief.md)
 
 - [Task completion, conversation follow-ups, and workspace access](requirements/task-completion.md)
@@ -144,6 +146,8 @@ signals, and task-scoped scheduling contracts.
 - [Human Assignee and Actor Attribution](requirements/human-assignee.md)
 
 ### System design
+
+- [Exact Profile Assignment at Launch](system-design/exact-profile-launch-assignment.md)
 
 - [Initial task brief](system-design/initial-task-brief.md)
 
