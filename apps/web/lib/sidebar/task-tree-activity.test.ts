@@ -15,6 +15,7 @@ const ACTIVITY = {
   fractional120Equivalent: "2026-04-01T11:00:00.120+01:00",
   fractional123: "2026-04-01T10:00:00.123Z",
   fractional125: "2026-04-01T10:00:00.125Z",
+  normalizedInvalid: "2026-02-30T10:00:00Z",
   createdParent: "2026-03-01",
   createdChild: "2026-03-02",
 } as const;
@@ -213,6 +214,50 @@ describe("fractional activity timestamp precision", () => {
     expect(
       applyView(missingTasks, lastActivityView("asc")).groups[0].tasks.map((item) => item.id),
     ).toEqual(["first-missing", "second-missing", "dated"]);
+  });
+
+  it("uses the existing lexical fallback for malformed or normalized wire timestamps", () => {
+    const tasks = [
+      task({ id: "normalized-invalid", lastActivityAt: ACTIVITY.normalizedInvalid }),
+      task({ id: "valid", lastActivityAt: "2026-03-01T12:00:00Z" }),
+    ];
+
+    expect(
+      applyView(tasks, lastActivityView("desc")).groups[0].tasks.map((item) => item.id),
+    ).toEqual(["valid", "normalized-invalid"]);
+    expect(
+      applyView(tasks, lastActivityView("asc")).groups[0].tasks.map((item) => item.id),
+    ).toEqual(["normalized-invalid", "valid"]);
+
+    const zeroTasks = [
+      task({ id: "zero", lastActivityAt: "0" }),
+      task({ id: "older", lastActivityAt: "1999-12-31T23:59:59Z" }),
+    ];
+    expect(
+      applyView(zeroTasks, lastActivityView("desc")).groups[0].tasks.map((item) => item.id),
+    ).toEqual(["older", "zero"]);
+    expect(
+      applyView(zeroTasks, lastActivityView("asc")).groups[0].tasks.map((item) => item.id),
+    ).toEqual(["zero", "older"]);
+  });
+
+  it("does not let a normalized-invalid child move its parent tree", () => {
+    const tasks = [
+      task({ id: "parent", lastActivityAt: "2026-03-01T12:00:00Z" }),
+      task({
+        id: "child",
+        parentTaskId: "parent",
+        lastActivityAt: ACTIVITY.normalizedInvalid,
+      }),
+      task({ id: "peer", lastActivityAt: "2026-03-02T09:00:00Z" }),
+    ];
+
+    expect(
+      applyView(tasks, lastActivityView("desc")).groups[0].tasks.map((item) => item.id),
+    ).toEqual(["peer", "parent"]);
+    expect(
+      applyView(tasks, lastActivityView("asc")).groups[0].tasks.map((item) => item.id),
+    ).toEqual(["parent", "peer"]);
   });
 });
 

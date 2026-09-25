@@ -1,4 +1,5 @@
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 
 type IncludedTaskGraph = {
   tasksById: Map<string, TaskSwitcherItem>;
@@ -12,39 +13,12 @@ type ComponentGraph = {
   parents: Set<number>[];
 };
 
-type ParsedActivityTimestamp = {
-  wholeSecond: number;
-  fractionalSecond: string;
-};
-
-const RFC3339_TIMESTAMP = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/i;
-
 export function taskActivitySortValue(task: TaskSwitcherItem): string {
   return task.lastActivityAt ?? task.updatedAt ?? task.createdAt ?? "";
 }
 
-function parseActivityTimestamp(value: string): ParsedActivityTimestamp | undefined {
-  const rfc3339Match = RFC3339_TIMESTAMP.exec(value);
-  if (rfc3339Match) {
-    const milliseconds = Date.parse(rfc3339Match[1] + rfc3339Match[3]);
-    if (Number.isNaN(milliseconds)) return undefined;
-    return {
-      wholeSecond: milliseconds / 1000,
-      fractionalSecond: rfc3339Match[2] ?? "",
-    };
-  }
-
-  const milliseconds = Date.parse(value);
-  if (Number.isNaN(milliseconds)) return undefined;
-  return { wholeSecond: milliseconds / 1000, fractionalSecond: "" };
-}
-
-function compareFractionalSeconds(a: string, b: string): number {
-  const precision = Math.max(a.length, b.length);
-  const normalizedA = a.padEnd(precision, "0");
-  const normalizedB = b.padEnd(precision, "0");
-  if (normalizedA === normalizedB) return 0;
-  return normalizedA < normalizedB ? -1 : 1;
+function parseActivityTimestamp(value: string): bigint | null {
+  return parseStrictRfc3339Timestamp(value);
 }
 
 /** Compare valid timestamps by instant, preserving lexical fallback for missing or invalid values. */
@@ -52,11 +26,9 @@ export function compareActivityTimestamps(a: string, b: string): number {
   if (a === b) return 0;
   const parsedA = parseActivityTimestamp(a);
   const parsedB = parseActivityTimestamp(b);
-  if (parsedA && parsedB) {
-    if (parsedA.wholeSecond !== parsedB.wholeSecond) {
-      return parsedA.wholeSecond < parsedB.wholeSecond ? -1 : 1;
-    }
-    return compareFractionalSeconds(parsedA.fractionalSecond, parsedB.fractionalSecond);
+  if (parsedA !== null && parsedB !== null) {
+    if (parsedA === parsedB) return 0;
+    return parsedA < parsedB ? -1 : 1;
   }
   return a.localeCompare(b);
 }

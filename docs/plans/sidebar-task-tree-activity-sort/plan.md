@@ -71,7 +71,7 @@ Only tree order is required to change. The existing desktop sidebar and phone dr
 
 ## Verification results
 
-Task 01 is complete. The focused unit suite passed (3 files, 81 tests), frontend typecheck and changed-file ESLint passed, including RFC3339 precision coverage, and focused desktop (`chromium`) and phone (`mobile-chrome`) Playwright tests passed. Specification validation and lint passed.
+Task 01 is complete. The focused unit suite passed (3 files, 83 tests), frontend typecheck and changed-file ESLint passed, including mixed fractional precision and malformed RFC3339 coverage, and focused desktop (`chromium`) and phone (`mobile-chrome`) Playwright tests passed. Specification validation and lint passed.
 
 ## Risks
 

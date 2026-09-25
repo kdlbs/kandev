@@ -110,11 +110,11 @@ None. Read [the requirement](../../specs/ui/requirements/sidebar-last-activity-s
 
 Implemented a cycle-safe iterative resolver that aggregates the newest activity across each included subtree. Filters run before aggregation, collapse does not affect it, and each row keeps its own activity timestamp. The phone row projection now carries `lastActivityAt` with task update and creation fallbacks while preserving summary freshness in `updatedAt`.
 
-Activity keys compare chronological RFC3339 instants with full fractional precision and timezone offsets. Equal instants retain stable order, and missing timestamps keep their existing fallback order.
+Activity keys compare chronological RFC3339 instants with full fractional precision and timezone offsets through the shared strict parser. Malformed or semantically invalid timestamps retain the existing lexical fallback instead of being normalized by `Date.parse`. Equal instants retain stable order, and missing timestamps keep their existing fallback order.
 
 Validation passed:
 
-- Focused Vitest suite: 3 files, 81 tests.
+- Focused Vitest suite after review: 3 files, 83 tests, including malformed calendar dates and shorthand timestamp fallback.
 - Frontend typecheck.
 - ESLint on all changed TypeScript files with `--max-warnings 0`.
 - Desktop Playwright regression in `chromium`.

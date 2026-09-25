@@ -36,7 +36,7 @@ Resolve the map in one bounded traversal with memoized subtree values and an ite
 
 ## Shared sort path
 
-Compare activity values by chronological instant, including timezone offsets and all fractional-second digits. RFC3339Nano values can have different fractional precision, so string order does not always match time order. Semantically equal instants retain stable input order, and missing values keep their existing fallback behavior.
+Compare valid activity values by chronological instant, including timezone offsets and all fractional-second digits. Use the shared strict RFC3339 parser because JavaScript's `Date.parse` can normalize malformed wire values into a different instant. Malformed values retain the existing lexical fallback. RFC3339Nano values can have different fractional precision, so string order does not always match time order. Semantically equal instants retain stable input order, and missing values keep their existing fallback behavior.
 
 The existing stable `applySort` index tiebreak handles equal aggregate values. Its direction sign gives descending and ascending order from the same maximum value. `applyGroup` then keeps roots and children attached and uses the sorted input; group headings keep their existing ordering rules. `applySubtaskOrder` and pinned-task floating still run afterward with their current precedence. Only the `lastActivityAt` comparator branch consumes the tree activity map; `updatedAt`, state, title, created, and custom order keep their existing semantics.
 
