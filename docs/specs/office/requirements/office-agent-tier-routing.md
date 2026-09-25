@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: office
 created: 2026-08-20
 owners:
@@ -51,3 +51,33 @@ wake-reason policy. Nothing here changes those contracts except where explicitly
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/office-agent-tier-routing-01.md), [part 2](../system-design/office-agent-tier-routing-02.md), [part 3](../system-design/office-agent-tier-routing-03.md).
+
+## Decision: the agent record's `model` does not select a model
+
+Routing is authoritative. The precedence order (wake_reason > per-agent
+override > role_tiers > workspace default) governs which tier — and
+therefore which model — a run launches on. An Office agent's own `model`
+field (`agent_profiles.model`) is not part of that precedence chain and
+never selects the launched model; a resolver test pins this at
+`apps/backend/internal/office/routing/agent_model_ignored_test.go`.
+
+The lever for an operator who wants a specific agent on a specific tier is
+the per-agent tier override (`tier_source = "override"`), or a `role_tiers`
+entry for agents sharing that role. Setting `model` on the agent record has
+no effect on resolution: the field predates workspace tier routing, is
+excluded from the agent response DTO, and a `PATCH` that attempts to set it
+is rejected with a `ValidationError`.
+
+### ISSUE-9 (Office Beta, 2026-09-25) disposition
+
+A Beta test reported the Critic agent (workspace `95542bf3`) configured
+`model = "opus[1m]"` running on Sonnet across every observed run
+(`d8a6f6d4`, `8e0996b9`, reason `review_started`). Investigation found: the
+operator never set a per-agent tier override, so resolution fell through to
+the workspace `default_tier = "balanced"` exactly as designed; the agent
+list and detail API carry no `model` key; and the UI (agent header and
+Configuration tab) render the effective model, tier, and tier source, with
+no surface showing "Opus" for this agent in the running build. The Beta
+report's `opus[1m]` observation came from reading the agent record's
+`model` column directly, not from the product. Closed as working-as-designed
+with no change to resolution or precedence.
