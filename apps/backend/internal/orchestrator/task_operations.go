@@ -3941,6 +3941,9 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 		zap.Error(cause))
 	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
 	defer cancelCleanup()
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForExecution(executionID)
+	}
 	if err := s.executor.StopExecution(cleanupCtx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
 		return err
 	}
@@ -4617,6 +4620,9 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 		zap.Bool("force", force))
 
 	// Stop all agents for this task
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForTask(taskID)
+	}
 	if err := s.executor.StopByTaskID(ctx, taskID, reason, force); err != nil {
 		if !errors.Is(err, executor.ErrOrphanRecoveryIncomplete) {
 			return err
@@ -4628,7 +4634,6 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 			zap.String("task_id", taskID),
 			zap.Error(err))
 	}
-
 	// Move task to REVIEW state for user review
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
 		s.logger.Error("failed to update task state to REVIEW after stop",
@@ -4720,6 +4725,9 @@ func (s *Service) stopTaskSessionForCoordinator(ctx context.Context, taskID, ses
 	if err != nil {
 		return false, err
 	}
+	if result.Changed && s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForSession(sessionID)
+	}
 	// Detached teardown must not observe this operation as an in-flight
 	// cancellation. ScheduleTeardown starts a goroutine, so relying on the
 	// deferred release above makes the ordering scheduler-dependent.
@@ -4799,6 +4807,9 @@ func (s *Service) CancelTaskExecution(ctx context.Context, taskID string, reason
 		zap.String("task_id", taskID),
 		zap.String("reason", reason),
 		zap.Bool("force", force))
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForTask(taskID)
+	}
 	err := s.executor.StopByTaskID(ctx, taskID, reason, force)
 	if err != nil && errors.Is(err, executor.ErrOrphanRecoveryIncomplete) {
 		// Every session that could be reached did stop; only a registry-only
@@ -4846,6 +4857,9 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 		zap.String("session_id", sessionID),
 		zap.String("reason", reason),
 		zap.Bool("force", force))
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForSession(sessionID)
+	}
 	return s.executor.Stop(ctx, sessionID, reason, force)
 }
 
@@ -4854,6 +4868,9 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 // rows have been removed, and it waits for the executor process to exit before
 // returning to the destructive worktree cleanup path.
 func (s *Service) StopSessionSynchronously(ctx context.Context, sessionID string, reason string, force bool) error {
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForSession(sessionID)
+	}
 	return s.executor.StopSessionSynchronously(ctx, sessionID, reason, force)
 }
 
@@ -5179,6 +5196,9 @@ func (s *Service) quiesceSessionExecutionBeforeDeletion(
 	ctx context.Context,
 	taskID, sessionID string,
 ) error {
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForSession(sessionID)
+	}
 	if s.agentManager == nil {
 		return nil
 	}
@@ -5310,6 +5330,9 @@ func (s *Service) StopExecution(ctx context.Context, executionID string, reason 
 		zap.String("execution_id", executionID),
 		zap.String("reason", reason),
 		zap.Bool("force", force))
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForExecution(executionID)
+	}
 	return s.executor.StopExecution(ctx, executionID, reason, force)
 }
 
@@ -9945,6 +9968,9 @@ func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
 		zap.String("task_id", taskID))
 
 	// Stop all agents for this task (which will trigger AgentCompleted events and update session states)
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForTask(taskID)
+	}
 	if err := s.executor.StopByTaskID(ctx, taskID, "task completed by user", false); err != nil {
 		// If agents are already stopped, just update the task state directly
 		s.logger.Warn("failed to stop agents, updating task state directly",

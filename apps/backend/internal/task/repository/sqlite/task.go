@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
@@ -1044,7 +1045,7 @@ func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, ex
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, preservePosition, protectDeferredLaunch)
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, preservePosition, protectDeferredLaunch, nil)
 	if err != nil {
 		return err
 	}
@@ -1091,7 +1092,7 @@ func (r *Repository) UpdateTaskIfWorkflowStepMatches(ctx context.Context, task *
 	if expectedStepID != "" && stepID != expectedStepID {
 		return fmt.Errorf("%w: expected %q, task is now in %q", ErrWorkflowStepChanged, expectedStepID, stepID)
 	}
-	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, true, true)
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, true, true, nil)
 	if err != nil {
 		return err
 	}
@@ -1132,6 +1133,40 @@ func (r *Repository) readTaskPositionInTx(ctx context.Context, tx *sql.Tx, taskI
 		return 0, false, err
 	}
 	return position, true, nil
+}
+
+func (r *Repository) readTaskUpdatedAtInTx(ctx context.Context, tx *sql.Tx, taskID string) (time.Time, error) {
+	query := `SELECT updated_at FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
+	}
+	var updatedAt time.Time
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&updatedAt); err != nil {
+		return time.Time{}, err
+	}
+	return updatedAt, nil
+}
+
+func (r *Repository) validateWorkflowChangeSourceInTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	taskID, workflowID, stepID string,
+	source *models.WorkflowChangeSource,
+) error {
+	if source == nil || workflowID != source.WorkflowID || stepID != source.StepID {
+		return repoerrors.ErrWorkflowChangeConflict
+	}
+	updatedAt, err := r.readTaskUpdatedAtInTx(ctx, tx, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	}
+	if err != nil {
+		return err
+	}
+	if !updatedAt.Equal(source.UpdatedAt) {
+		return repoerrors.ErrWorkflowChangeConflict
+	}
+	return nil
 }
 
 // applyPreservedPositionInTx overwrites task.Position with the value read
@@ -1227,31 +1262,20 @@ func encodeWorkflowAgentOverridesValue(overrides *models.WorkflowAgentOverrides)
 // set only by UpdateTaskPreservingDeferredLaunch, re-merges the row's own
 // current deferred_launch value into the write so a stale in-memory snapshot
 // can never resurrect or clobber a concurrent session-ceiling CAS write.
-func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte, expectedWorkflowID string, preservePosition, protectDeferredLaunch bool) (entryID string, markerEntryID int64, err error) {
-	fromWorkflowID, fromStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
+func (r *Repository) updateTaskTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	task *models.Task,
+	metadata []byte,
+	expectedWorkflowID string,
+	preservePosition, protectDeferredLaunch bool,
+	workflowChangeSource *models.WorkflowChangeSource,
+) (entryID string, markerEntryID int64, err error) {
+	fromWorkflowID, fromStepID, err := r.readAndValidateTaskUpdateSourceInTx(
+		ctx, tx, task, expectedWorkflowID, preservePosition, workflowChangeSource,
+	)
 	if err != nil {
 		return "", 0, err
-	}
-	if !found {
-		// A concurrently deleted task must surface as ErrTaskNotFound, not
-		// fall through to the CAS comparison below: with fromWorkflowID=""
-		// (never equal to a non-empty expectedWorkflowID) that branch would
-		// misreport the deletion as a workflow-resolution conflict. NotFound
-		// is reserved for the addressed resource and wins the precedence
-		// ladder over every other case (design's error-mapping table).
-		return "", 0, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
-	}
-	if err := r.applyPreservedPositionInTx(ctx, tx, task, preservePosition); err != nil {
-		return "", 0, err
-	}
-	if expectedWorkflowID != "" && fromWorkflowID != expectedWorkflowID {
-		// Checked here, immediately before the UPDATE below and using the
-		// same in-transaction, lock-protected read the ledger's "from" value
-		// already comes from — this is the narrowest possible point to close
-		// the race a caller-side pre-read (GetTask, well before this write)
-		// cannot rule out on its own. See ErrWorkflowResolutionConflict (errors.go).
-		return "", 0, fmt.Errorf("%w: expected %q, task is now in %q",
-			ErrWorkflowResolutionConflict, expectedWorkflowID, fromWorkflowID)
 	}
 	metadata, err = r.preserveLiveHandoffProvenance(ctx, tx, task.ID, metadata)
 	if err != nil {
@@ -1271,12 +1295,20 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	if err != nil {
 		return "", 0, err
 	}
-	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID)
+	args := []interface{}{task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID}
+	if workflowChangeSource != nil {
+		updateQuery += ` AND workflow_id = ? AND workflow_step_id = ? AND updated_at = ?`
+		args = append(args, workflowChangeSource.WorkflowID, workflowChangeSource.StepID, workflowChangeSource.UpdatedAt)
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), args...)
 	if err != nil {
 		return "", 0, err
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		if workflowChangeSource != nil {
+			return "", 0, repoerrors.ErrWorkflowChangeConflict
+		}
 		return "", 0, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
 	if err := r.settleTerminalPendingMovesTx(ctx, tx, task); err != nil {
@@ -1343,6 +1375,36 @@ func (r *Repository) settleTerminalPendingMovesTx(ctx context.Context, tx *sql.T
 	return nil
 }
 
+func (r *Repository) readAndValidateTaskUpdateSourceInTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	task *models.Task,
+	expectedWorkflowID string,
+	preservePosition bool,
+	workflowChangeSource *models.WorkflowChangeSource,
+) (string, string, error) {
+	fromWorkflowID, fromStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
+		return "", "", err
+	}
+	if !found {
+		return "", "", fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+	}
+	if err := r.applyPreservedPositionInTx(ctx, tx, task, preservePosition); err != nil {
+		return "", "", err
+	}
+	if expectedWorkflowID != "" && fromWorkflowID != expectedWorkflowID {
+		return "", "", fmt.Errorf("%w: expected %q, task is now in %q",
+			ErrWorkflowResolutionConflict, expectedWorkflowID, fromWorkflowID)
+	}
+	if workflowChangeSource != nil {
+		if err := r.validateWorkflowChangeSourceInTx(ctx, tx, task.ID, fromWorkflowID, fromStepID, workflowChangeSource); err != nil {
+			return "", "", err
+		}
+	}
+	return fromWorkflowID, fromStepID, nil
+}
+
 // UpdateTaskWithWorkflowStepAdmission atomically moves a task into a workflow
 // step. A limited full target stores the task in that destination as queued;
 // it never rejects the move for WIP capacity. sourceStepID is the step the
@@ -1355,7 +1417,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 	targetStepID string,
 	limit int,
 ) (bool, error) {
-	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil)
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil)
 	return admitted, err
 }
 
@@ -1380,13 +1442,34 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	expectedWorkflowID string,
 ) (bool, error) {
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil,
+	)
+	return admitted, err
+}
+
+// UpdateTaskWithWorkflowChangeAdmissionAndState writes a change-workflow
+// transition only while the persisted source identity and version still match.
+func (r *Repository) UpdateTaskWithWorkflowChangeAdmissionAndState(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	source *models.WorkflowChangeSource,
+) (bool, error) {
+	if source == nil {
+		return false, fmt.Errorf("workflow change source guard is required")
+	}
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source,
 	)
 	return admitted, err
 }
 
 func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(ctx context.Context, task *models.Task, expectedStepID, targetStepID string, limit int, admittedState *v1.TaskState, queueExitPending bool, expectedWorkflowID string) (bool, bool, error) {
-	return r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, admittedState, queueExitPending, expectedStepID, expectedWorkflowID, nil)
+	return r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, admittedState, queueExitPending, expectedStepID, expectedWorkflowID, nil, nil)
 }
 
 // UpdateTaskWithWorkflowStepAdmissionIfAtStep is the AC-46/48 compare-and-swap
@@ -1407,7 +1490,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 ) (applied bool, err error) {
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
-	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil)
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil)
 	return applied, err
 }
 
@@ -1421,7 +1504,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
 	return r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record,
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil,
 	)
 }
 
@@ -1465,7 +1548,7 @@ func (r *Repository) MarkDeferredMoveAppliedForSession(
 	if err != nil {
 		return false, err
 	}
-	if _, _, err := r.updateTaskTx(ctx, tx, task, metadata, "", true, false); err != nil {
+	if _, _, err := r.updateTaskTx(ctx, tx, task, metadata, "", true, false, nil); err != nil {
 		return false, err
 	}
 	if err := r.deleteDeferredMoveGuardTx(ctx, tx, record); err != nil {
@@ -1701,6 +1784,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	expectedStepID string,
 	expectedWorkflowID string,
 	deferredMove *messagequeue.PendingMoveRecord,
+	workflowChangeSource *models.WorkflowChangeSource,
 ) (admitted bool, applied bool, err error) {
 	currentSourceStepID := sourceStepID
 	for attempt := 0; attempt < admissionSourceRetryLimit; attempt++ {
@@ -1716,12 +1800,16 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 			expectedStepID,
 			expectedWorkflowID,
 			deferredMove,
+			workflowChangeSource,
 		)
 		unlock()
 
 		var changed *admissionSourceChangedError
 		if !errors.As(err, &changed) {
 			return admitted, applied, err
+		}
+		if workflowChangeSource != nil {
+			return false, false, repoerrors.ErrWorkflowChangeConflict
 		}
 		if expectedStepID != "" {
 			// CAS callers preserve their existing applied=false contract when
@@ -1746,6 +1834,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	expectedStepID string,
 	expectedWorkflowID string,
 	deferredMove *messagequeue.PendingMoveRecord,
+	workflowChangeSource *models.WorkflowChangeSource,
 ) (admitted bool, applied bool, err error) {
 	now := time.Now().UTC()
 	task.UpdatedAt = now
@@ -1792,7 +1881,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	// source so it acquires the complete sorted lock set before assigning an
 	// arrival position. This closes the single-move TOCTOU window without
 	// acquiring a newly discovered source beneath an already-held lock.
-	_, actualSourceStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	actualWorkflowID, actualSourceStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
 	if err != nil {
 		return false, false, err
 	}
@@ -1800,7 +1889,15 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		return false, false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
 	if actualSourceStepID != sourceStepID {
+		if workflowChangeSource != nil {
+			return false, false, repoerrors.ErrWorkflowChangeConflict
+		}
 		return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
+	}
+	if workflowChangeSource != nil {
+		if err := r.validateWorkflowChangeSourceInTx(ctx, tx, task.ID, actualWorkflowID, actualSourceStepID, workflowChangeSource); err != nil {
+			return false, false, err
+		}
 	}
 
 	// AC-46/48 compare-and-swap precondition, only for CAS callers (see
@@ -1874,7 +1971,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	if err != nil {
 		metadata = []byte("{}")
 	}
-	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, false, false)
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, false, false, workflowChangeSource)
 	if err != nil {
 		return false, false, err
 	}

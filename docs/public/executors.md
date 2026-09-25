@@ -21,7 +21,7 @@ An executor determines where Kandev creates a task environment and runs `agentct
 | Worktree      | Supported; normal default                                                       | Dedicated Git worktree on the Kandev host                               | Parallel coding on a trusted machine                                     |
 | Local         | Supported                                                                       | The selected checkout, or an explicit folder for a repository-free task | One controlled task must work in that exact folder                       |
 | Local Docker  | Supported when the global Docker runtime is enabled and its daemon is reachable | `/workspace` in a new Docker container                                  | You need a repeatable container boundary                                 |
-| Kubernetes    | Dependency-bound on cluster access, namespaced RBAC, admission, storage, and streaming support | `/workspace` in one Pod per task session | You need sessions scheduled inside an administrator-managed cluster boundary |
+| Kubernetes    | Dependency-bound on cluster access, namespaced RBAC, admission, storage, and streaming support | `/workspace` in one Pod per task | You need sessions scheduled inside an administrator-managed cluster boundary |
 | Sprites.dev   | Supported, provider-dependent                                                   | `/workspace` in a provider sandbox                                      | You need remote compute and accept provider lifecycle/billing            |
 | SSH           | Supported for repository sources on a trusted host                              | A task folder on a trusted SSH host                                     | You need a remote host with SSH, SFTP, forwarding, and clone credentials |
 | Remote Docker | **Not implemented**                                                             | None                                                                    | Do not select or create this type                                        |
@@ -317,7 +317,7 @@ docker ps -a --filter label=kandev.managed=true
 
 > **Cluster authority:** A Kubernetes profile is an administrator-authored Pod template. It can request powerful workload settings, and every injected task credential is available to the main container. Use admission policy, a dedicated namespace, a narrowly scoped API identity, and a separate workload service account.
 
-Kubernetes maps one task session to one namespaced Pod and reaches the injected `agentctl` through a process-local `127.0.0.1` port-forward. The backend can authenticate from an absolute kubeconfig path on the Kandev host or from its own in-cluster service account. It never falls back to a local executor when cluster configuration, admission, exec, or port-forward fails.
+Kubernetes maps one task to one namespaced Pod, with an independent agentctl instance for each session, and reaches the injected `agentctl` through a process-local `127.0.0.1` port-forward. The backend can authenticate from an absolute kubeconfig path on the Kandev host or from its own in-cluster service account. It never falls back to a local executor when cluster configuration, admission, exec, or port-forward fails.
 
 The current experimental matrix validates API and `agentctl` connectivity on Kubernetes 1.34.8 and 1.36.1 and runs the full lifecycle suite on 1.36.1. Other server versions have not yet been validated.
 
@@ -331,7 +331,7 @@ Each executor fixes one namespace and connection configuration. Each profile sup
 
 | Workspace mode | Persistence and ownership |
 |---|---|
-| Managed PVC | Kandev creates one claim for the session, preserves it across ordinary stop, backend restart, and Pod replacement, then deletes it only during terminal or forced cleanup after exact identity checks. |
+| Managed PVC | Kandev creates one claim for the task, preserves it across ordinary stop, backend restart, and Pod replacement, then deletes it only during task archive/delete cleanup after exact identity checks. |
 | `emptyDir` | Fast Pod-scoped storage. It survives a main-container restart but is lost with the Pod, so a missing Pod cannot be recovered. No PVC permission is required. |
 | Existing claim | Kandev verifies and mounts the named claim in the executor namespace. It never creates or deletes that claim. Concurrent-access safety depends on the claim and application. |
 
@@ -345,9 +345,9 @@ an immutable registry digest. The current Kind evidence covers Linux `amd64`
 only. These files are profile inputs, not standalone Pod manifests; Kandev
 continues to own bootstrap, credentials, runtime mounts, and the workspace.
 
-Ordinary Stop, agent restart, main-container restart, and backend restart preserve the Pod and workspace. Resume verifies the recorded name, UID, and complete ownership-label identity, creates a new local port-forward, and reconnects. Every managed create also carries a fresh 256-bit request nonce so an ambiguous API response cannot make Kandev adopt or delete a copied-label object. Archive/delete terminal cleanup or an explicit force cleanup deletes only the exact recorded Pod and, for managed storage, the exact Kandev-created PVC. A same-name object with another UID, ownership identity, or create nonce is left untouched and cleanup fails closed.
+Stop, including force-stop, removes only the selected agentctl instance. Other sessions and the task workspace remain available. Agent, main-container, and backend restarts preserve the Pod and workspace. Resume verifies the recorded name, UID, and complete ownership-label identity, creates a new local port-forward, and reconnects. Every managed create also carries a fresh 256-bit request nonce so an ambiguous API response cannot make Kandev adopt or delete a copied-label object. Task archive/delete cleanup deletes only the exact recorded Pod and, for managed storage, the exact Kandev-created PVC. A same-name object with another UID, ownership identity, or create nonce is left untouched and cleanup fails closed.
 
-Saved executor connection settings are different from the recorded workload snapshot. Current kubeconfig/in-cluster credentials, context, and timeout are used to reach an existing session; changing them can restore or break reconnect and cleanup. Existing sessions continue to target their recorded namespace even if the saved namespace changes, and the saved namespace affects new sessions only. Current Pod template, image, platform, main container, and storage settings also affect new sessions only. If Kandev must replace a missing Pod, it uses the recorded namespace and workload snapshot rather than the edited profile.
+Saved executor connection settings are different from the recorded workload snapshot. Current kubeconfig/in-cluster credentials, context, and timeout are used to reach an existing session; changing them can restore or break reconnect and cleanup. Existing sessions continue to target their recorded namespace even if the saved namespace changes, and the saved namespace affects new task Pods only. Current Pod template, image, platform, main container, and storage settings also affect new task Pods only; additional sessions reuse the task's recorded workload. If Kandev must replace a missing Pod, it uses the recorded namespace and workload snapshot rather than the edited profile.
 
 An executor cannot be deleted or changed into or out of Kubernetes while runtime inventory still references it. Clear the sessions through normal terminal cleanup first; deleting a profile does not mutate or destroy a retained workload.
 
@@ -358,7 +358,7 @@ memory values are requests from the verified Pod spec, not actual usage or
 cost. Stop preserves a resumable Kandev-managed workspace; Archive or Delete
 can remove it. Kandev does not delete an operator-owned existing claim.
 
-See [Kubernetes](k8s.md#configure-the-kubernetes-executor) for kubeconfig and in-cluster setup, the opt-in namespaced RBAC manifest, exact ownership labels, diagnostics, template rules, and recovery guidance.
+All sessions in a task share one credential trust boundary. Same-UID agents can read sibling credentials even when their profiles differ. Operators must trust every attached agent and revoke or rotate exposed credentials after compromise. See [Kubernetes](k8s.md#configure-the-kubernetes-executor) for the trust boundary, kubeconfig and in-cluster setup, the opt-in namespaced RBAC manifest, exact ownership labels, diagnostics, template rules, and recovery guidance.
 
 ## Sprites.dev
 

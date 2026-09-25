@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -49,6 +50,145 @@ func completedStepFields(t *testing.T, logs *observer.ObservedLogs, wantStep sta
 		t.Fatalf("no \"Startup step completed\" entry for step %q", wantStep)
 	}
 	return fields
+}
+
+func newObservedRecoveryManagerLogger(t *testing.T) (*logger.Logger, *observer.ObservedLogs) {
+	t.Helper()
+	core, logs := observer.New(zap.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return log, logs
+}
+
+func recoveryOutcomeFields(t *testing.T, logs *observer.ObservedLogs) map[string]interface{} {
+	t.Helper()
+	entries := logs.FilterMessage("startup session recovery summary").All()
+	if len(entries) != 1 {
+		t.Fatalf("recovery summary entries = %d, want one", len(entries))
+	}
+	return entries[0].ContextMap()
+}
+
+func assertRecoveryCount(t *testing.T, fields map[string]interface{}, name string, want int) {
+	t.Helper()
+	if got := fmt.Sprint(fields[name]); got != fmt.Sprint(want) {
+		t.Fatalf("%s = %v, want %d", name, fields[name], want)
+	}
+}
+
+func newRecoverySummaryManager(t *testing.T, log *logger.Logger, backend *MockExecutor) *Manager {
+	t.Helper()
+	registry := NewExecutorRegistry(log)
+	registry.Register(backend)
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	t.Cleanup(func() { _ = mgr.Stop() })
+	return mgr
+}
+
+// @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.4
+func TestManagerStartLogsRecoveryOutcomeSummaryForZeroCandidates(t *testing.T) {
+	log, logs := newObservedRecoveryManagerLogger(t)
+	mgr := newRecoverySummaryManager(t, log, &MockExecutor{name: executor.NameStandalone})
+	mgr.SetExecutorRunningWriter(&listingWriter{rows: []*models.ExecutorRunning{}})
+
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	fields := recoveryOutcomeFields(t, logs)
+	if fields["candidate_count_known"] != true {
+		t.Fatalf("candidate_count_known = %v, want true for a successful empty inventory", fields["candidate_count_known"])
+	}
+	for name, want := range map[string]int{
+		"candidate_count": 0, "retracked_count": 0, "not_retracked_count": 0,
+		"not_retracked_deadline": 0, "not_retracked_task_identity": 0,
+		"not_retracked_task_environment": 0, "not_retracked_agent_identity": 0,
+		"not_retracked_turn_status": 0, "not_retracked_duplicate_execution": 0,
+		"not_retracked_unknown": 0,
+	} {
+		assertRecoveryCount(t, fields, name, want)
+	}
+}
+
+// @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.4
+func TestManagerStartMarksCandidateCountUnknownWhenInventoryReadFails(t *testing.T) {
+	log, logs := newObservedRecoveryManagerLogger(t)
+	mgr := newRecoverySummaryManager(t, log, &MockExecutor{name: executor.NameStandalone})
+	mgr.SetExecutorRunningWriter(&listingWriter{err: errors.New("inventory read failed")})
+
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	fields := recoveryOutcomeFields(t, logs)
+	if fields["candidate_count_known"] != false {
+		t.Fatalf("candidate_count_known = %v, want false after inventory read failure", fields["candidate_count_known"])
+	}
+	assertRecoveryCount(t, fields, "candidate_count", 0)
+	assertRecoveryCount(t, fields, "not_retracked_count", 0)
+	assertRecoveryCount(t, fields, "not_retracked_unknown", 0)
+}
+
+// @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.4
+func TestManagerStartCountsBackendOmissionsAsUnknownRecoveryOutcomes(t *testing.T) {
+	log, logs := newObservedRecoveryManagerLogger(t)
+	mgr := newRecoverySummaryManager(t, log, &MockExecutor{name: executor.NameStandalone})
+	mgr.SetExecutorRunningWriter(&listingWriter{rows: []*models.ExecutorRunning{{SessionID: "session-1"}}})
+	reporter, stepLogs := newObservedSessionsRecoveryReporter(t)
+	reporter.Set(startup.RecoveringSessions)
+
+	if err := mgr.Start(startup.WithReporter(context.Background(), reporter)); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	fields := recoveryOutcomeFields(t, logs)
+	if fields["candidate_count_known"] != true {
+		t.Fatalf("candidate_count_known = %v, want true", fields["candidate_count_known"])
+	}
+	assertRecoveryCount(t, fields, "candidate_count", 1)
+	assertRecoveryCount(t, fields, "retracked_count", 0)
+	assertRecoveryCount(t, fields, "not_retracked_count", 1)
+	assertRecoveryCount(t, fields, "not_retracked_unknown", 1)
+	stepFields := completedStepFields(t, stepLogs, startup.StepSessionsRecovery)
+	assertRecoveryCount(t, stepFields, "done", 0)
+	assertRecoveryCount(t, stepFields, "total", 1)
+}
+
+// @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.4
+func TestManagerStartSeparatesRetrackedAndKnownRefusalOutcomes(t *testing.T) {
+	log, logs := newObservedRecoveryManagerLogger(t)
+	backend := &MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{
+			newRecoveryTurnOutcomeExecutorInstance(),
+			{InstanceID: "instance-missing-task", SessionID: "session-2", RuntimeName: executor.NameStandalone},
+		},
+	}
+	mgr := newRecoverySummaryManager(t, log, backend)
+	registerRecoveryTestAgentProfile(t, mgr)
+	mgr.SetExecutorRunningWriter(&listingWriter{rows: []*models.ExecutorRunning{
+		{TaskID: "task-1", SessionID: "session-1"},
+		{TaskID: "task-2", SessionID: "session-2"},
+	}})
+	reporter, stepLogs := newObservedSessionsRecoveryReporter(t)
+	reporter.Set(startup.RecoveringSessions)
+
+	if err := mgr.Start(startup.WithReporter(context.Background(), reporter)); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	fields := recoveryOutcomeFields(t, logs)
+	assertRecoveryCount(t, fields, "candidate_count", 2)
+	assertRecoveryCount(t, fields, "retracked_count", 1)
+	assertRecoveryCount(t, fields, "not_retracked_count", 1)
+	assertRecoveryCount(t, fields, "not_retracked_task_identity", 1)
+	assertRecoveryCount(t, fields, "not_retracked_unknown", 0)
+	if _, ok := mgr.GetExecutionBySessionID("session-1"); !ok {
+		t.Fatal("the valid recovered session was not re-tracked")
+	}
+	stepFields := completedStepFields(t, stepLogs, startup.StepSessionsRecovery)
+	assertRecoveryCount(t, stepFields, "done", 2)
+	assertRecoveryCount(t, stepFields, "total", 2)
 }
 
 // TestManagerStartRecoverySessionsStepReportsCountedProgress covers the

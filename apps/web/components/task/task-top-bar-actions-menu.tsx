@@ -9,7 +9,7 @@ import { useArchiveAndSwitchTask, useDeleteAndSwitchTask } from "@/hooks/use-tas
 
 /**
  * The detail surface has no board of its own to lean on, so a workflow move
- * (Move to / Send to workflow) landing the subject in a workflow this client
+ * (Move to / Change workflow) landing the subject in a workflow this client
  * has never tracked would otherwise leave it absent from every board
  * collection even though it still exists. Subscribing to the task directly
  * guarantees its `task.updated` reaches this client regardless of workflow

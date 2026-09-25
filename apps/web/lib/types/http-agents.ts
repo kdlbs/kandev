@@ -47,6 +47,8 @@ export type TUIConfig = {
    * calls, models, and modes.
    */
   protocol?: CustomAgentProtocol;
+  /** Use paced unframed writes for TUIs that reject bracketed-paste markers. */
+  disable_bracketed_paste?: boolean;
 };
 
 /** One selectable MCP injection mechanism, served by the backend. */

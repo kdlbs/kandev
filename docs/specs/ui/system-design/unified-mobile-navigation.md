@@ -9,6 +9,7 @@ requirements:
   - REQ-UI-MOBILE-MENU-005
   - REQ-UI-MOBILE-MENU-006
   - REQ-UI-MOBILE-MENU-007
+  - REQ-UI-MOBILE-MENU-008
 ---
 
 # Unified mobile navigation design
@@ -304,10 +305,21 @@ The September 23 composition refinement groups `main-top-bar`,
 `sidebar-workspace-actions`, and page-scoped `chat-top-bar` contributions inside
 `MobilePluginNavSection`. `AppNavSheet` supplies phone workspace context through
 `AppNavSections`; the section checks registrations before rendering workspace
-controls. When both workspace and task actions exist, localized context labels
-separate them. Keep each registration and its original props; identical-looking
-status controls can have different scopes and must not be deduplicated by the
-host. Empty sections disappear. `MobileWorkspaceActionsSection` retains canvases
+controls. Phone navigation uses one wrapping action group without workspace/task
+subheadings. When task actions are supplied, `PluginSlotPresence` observes
+owner-marked `chat-top-bar` registration wrappers and reports owners with mounted
+content. Exclude only those owners from `main-top-bar` in this menu. A layout
+effect measures initial content; a scoped MutationObserver follows asynchronous
+null/content changes and disconnects on unmount. Layout-neutral wrappers retain
+child width constraints. Null-rendering task controls retain workspace fallback;
+report only changed owner sets to avoid feedback from normal status updates.
+Keep every registration in the selected slot with its original props and error
+boundary. This chooses a contextual toolbar by plugin identity, never by rendered
+text or component identity (plugins may create separate component factories for
+the two slots). Sidebar workspace actions remain independent. Without task
+actions, including archived tasks, show all workspace toolbar controls. Recompute
+from live registry state; desktop/tablet slots and navigation destinations remain
+unchanged. Empty sections disappear. `MobileWorkspaceActionsSection` retains canvases
 and opts out of rendering plugin actions only for phone app navigation.
 
 `NavigationMetrics` retains the status-bar preference gate and reuses
@@ -352,3 +364,5 @@ Validate ordered geometry and both quick launch outcomes from Home and task
 workbench, disclosure keyboard/touch behavior, empty/configured integrations,
 workspace switches, long translated labels, and unchanged 768px/wider composition.
 Reuse the populated isolated preview and reapply its mock seed after any restart.
+
+The [mobile plugin deduplication plan](../../../plans/mobile-plugin-deduplication/plan.md) records the September 24 toolbar selection correction.

@@ -465,11 +465,12 @@ func (h *TaskHandlers) wsArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 }
 
 type wsMoveTaskRequest struct {
-	ID             string                     `json:"id"`
-	WorkflowID     string                     `json:"workflow_id"`
-	WorkflowStepID string                     `json:"workflow_step_id"`
-	Position       int                        `json:"position"`
-	EntryOptions   *workflowmove.EntryOptions `json:"entry_options,omitempty"`
+	ID             string                        `json:"id"`
+	WorkflowID     string                        `json:"workflow_id"`
+	WorkflowStepID string                        `json:"workflow_step_id"`
+	Position       int                           `json:"position"`
+	EntryOptions   *workflowmove.EntryOptions    `json:"entry_options,omitempty"`
+	WorkflowChange *models.WorkflowChangeRequest `json:"workflow_change,omitempty"`
 }
 
 func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -497,6 +498,7 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 			AllowActivePrimarySession: true,
 			StepHistoryActor:          wfmodels.StepTransitionActorHuman,
 			EntryOptions:              req.EntryOptions,
+			WorkflowChange:            req.WorkflowChange,
 		},
 	)
 	if err != nil {

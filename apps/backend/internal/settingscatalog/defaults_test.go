@@ -33,10 +33,20 @@ func TestDefaultProfileFieldsAreWritableAndBound(t *testing.T) {
 	if len(domain.Fields) < 14 {
 		t.Fatalf("profile field count = %d, want complete profile contract", len(domain.Fields))
 	}
+	cursorMCPAuthFound := false
 	for _, field := range domain.Fields {
 		if !field.Writable || field.Validator == "" || field.Authority == "" {
 			t.Errorf("profile field %q is not bound for writes: %#v", field.Key, field)
 		}
+		if field.Key == "agent_profile.cursor_mcp_auth_enabled" {
+			cursorMCPAuthFound = true
+			if field.DefaultBehavior != "true for new profiles" {
+				t.Errorf("Cursor MCP auth default behavior = %q, want true for new profiles", field.DefaultBehavior)
+			}
+		}
+	}
+	if !cursorMCPAuthFound {
+		t.Error("Cursor MCP auth preference field is missing")
 	}
 }
 

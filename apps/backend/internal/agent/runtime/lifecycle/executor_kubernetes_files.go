@@ -68,7 +68,7 @@ func (r *KubernetesExecutor) materializeKubernetesCredentials(
 	if req.AgentConfig == nil {
 		return nil
 	}
-	home := kubernetesAuthHomePath
+	home := kubernetesSessionHome(req)
 	catalog := remoteauth.BuildCatalogForHost([]agents.Agent{req.AgentConfig}, runtime.GOOS, mustUserHome())
 	selectedMethods, err := kubernetesSelectedCredentialMethods(req.Metadata, catalog)
 	if err != nil {
@@ -87,7 +87,7 @@ func (r *KubernetesExecutor) materializeKubernetesCredentials(
 				continue
 			}
 			command := "set -eu; export HOME=" + shellQuote(home) +
-				"; set -a; . " + shellQuote(kubernetesAuthEnvPath) + "; set +a; " + method.SetupScript
+				"; set -a; . " + shellQuote(kubernetesSessionAuthPath(req)) + "; set +a; " + method.SetupScript
 			if execErr := runtimeClient.streams.Exec(ctx, kubeexecutor.ExecRequest{
 				Namespace: pod.Namespace, Pod: pod.Name, Container: container,
 				Command: []string{"sh", "-c", command},

@@ -94,7 +94,6 @@
   "selectRepository": "リポジトリを選択",
   "selectTask": "タスク {{title}} を選択",
   "selectWorkflow": "ワークフローを選択",
-  "sendToWorkflow": "ワークフローに送信",
   "selectedFilterCount_one": "{{label}}: {{count}}件選択",
   "selectedFilterCount_other": "{{label}}: {{count}}件選択",
   "sentryIssue": "Sentryの問題",
@@ -129,5 +128,10 @@
   "boardSort": "ボードの並び順",
   "boardSortCreatedDesc": "新しい順",
   "boardSortPriorityDesc": "優先度順",
-  "priorityFilter": "優先度フィルタ"
+  "priorityFilter": "優先度フィルタ",
+  "bulkSelected_one": "{{count}}件選択中",
+  "bulkSelected_other": "{{count}}件選択中",
+  "bulkActions": "操作",
+  "selectTasks": "タスクを選択",
+  "cancelTaskSelection": "選択をキャンセル"
 }

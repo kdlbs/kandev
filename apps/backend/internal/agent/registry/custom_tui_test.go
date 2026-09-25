@@ -109,6 +109,33 @@ func TestRegisterCustomTUIAgent_CommandArgs(t *testing.T) {
 	}
 }
 
+func TestRegisterCustomTUIAgent_DisableBracketedPaste(t *testing.T) {
+	log := newTestLogger()
+	reg := NewRegistry(log)
+
+	err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{
+		Slug:                  "raw-tui",
+		DisplayName:           "Raw TUI",
+		Command:               "raw-tui",
+		DisableBracketedPaste: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ag, ok := reg.Get("raw-tui")
+	if !ok {
+		t.Fatal("expected agent to be registered")
+	}
+	pt, ok := ag.(agents.PassthroughAgent)
+	if !ok {
+		t.Fatal("custom terminal agent does not implement PassthroughAgent")
+	}
+	if !pt.PassthroughConfig().DisableBracketedPaste {
+		t.Error("DisableBracketedPaste = false, want true")
+	}
+}
+
 func TestRegisterCustomTUIAgent_EmptyCommand(t *testing.T) {
 	log := newTestLogger()
 	reg := NewRegistry(log)

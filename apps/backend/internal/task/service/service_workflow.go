@@ -473,6 +473,9 @@ type MoveTaskOptions struct {
 	// target workflow step. They are persisted privately on a transient task
 	// marker and are never included in task.moved event payloads.
 	EntryOptions *workflowmove.EntryOptions
+	// WorkflowChange opts this single-task move into source/version checks and
+	// atomically replaces the task's destination workflow agent overrides.
+	WorkflowChange *models.WorkflowChangeRequest
 }
 
 // ErrWorkflowResolutionConflict indicates a caller's pre-resolved "current
@@ -524,6 +527,19 @@ type workflowMoveAdmissionWithStateCASRepository interface {
 
 type workflowMoveStepConflictRepository interface {
 	UpdateTaskIfWorkflowStepMatches(context.Context, *models.Task, string, string) error
+}
+
+type workflowChangeAdmissionRepository interface {
+	UpdateTaskWithWorkflowChangeAdmissionAndState(
+		context.Context,
+		*models.Task,
+		string,
+		string,
+		int,
+		*v1.TaskState,
+		bool,
+		*models.WorkflowChangeSource,
+	) (bool, error)
 }
 
 // workflowMoveConflictRepository is the same-step counterpart of
@@ -597,10 +613,22 @@ func (s *Service) MoveTaskWithOptions(
 		return nil, fmt.Errorf("%w: resolved %q, task is now in %q",
 			ErrWorkflowResolutionConflict, *opts.ExpectedWorkflowID, task.WorkflowID)
 	}
+	if opts.WorkflowChange != nil {
+		if err := validateWorkflowChangeSource(task, workflowID, workflowStepID, opts.WorkflowChange); err != nil {
+			return nil, err
+		}
+	}
 
 	targetStep, err := s.validateTaskMove(ctx, task, workflowID, workflowStepID, opts)
 	if err != nil {
 		return nil, err
+	}
+	var candidateOverrides *models.WorkflowAgentOverrides
+	if opts.WorkflowChange != nil {
+		candidateOverrides, err = s.prepareWorkflowChange(ctx, task, workflowID, workflowStepID, opts.WorkflowChange)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	oldWorkflowID := task.WorkflowID
@@ -643,8 +671,22 @@ func (s *Service) MoveTaskWithOptions(
 
 	if stepChanged && targetStep != nil && s.workflowMovePreflight != nil {
 		currentSession := s.resolvePrimaryOrActiveSession(ctx, id)
-		if err := s.workflowMovePreflight.PreflightWorkflowStepMove(ctx, id, currentSession, targetStep); err != nil {
-			return nil, fmt.Errorf("failed to preflight workflow move: %w", err)
+		var preflightErr error
+		if opts.WorkflowChange != nil {
+			preflight, ok := s.workflowMovePreflight.(WorkflowChangeMovePreflight)
+			if !ok {
+				return nil, fmt.Errorf("workflow change preflight does not accept candidate task state")
+			}
+			candidate := *task
+			candidate.WorkflowID = workflowID
+			candidate.WorkflowStepID = workflowStepID
+			candidate.WorkflowAgentOverrides = candidateOverrides
+			preflightErr = preflight.PreflightWorkflowStepChange(ctx, &candidate, currentSession, targetStep)
+		} else {
+			preflightErr = s.workflowMovePreflight.PreflightWorkflowStepMove(ctx, id, currentSession, targetStep)
+		}
+		if preflightErr != nil {
+			return nil, fmt.Errorf("failed to preflight workflow move: %w", preflightErr)
 		}
 	}
 	stateAfterAdmission := *task
@@ -656,6 +698,9 @@ func (s *Service) MoveTaskWithOptions(
 
 	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
+	if opts.WorkflowChange != nil {
+		task.WorkflowAgentOverrides = candidateOverrides
+	}
 	// A move naming the task's current step is not an arrival
 	// (REQ-TASKS-KANBAN-TASK-REORDERING-001.28): it keeps the position it
 	// already holds rather than the caller-supplied literal, which the
@@ -1409,6 +1454,16 @@ func (s *Service) updateMovedTaskCrossStep(
 	admittedState *v1.TaskState,
 	opts MoveTaskOptions,
 ) (bool, error) {
+	if opts.WorkflowChange != nil {
+		changeRepo, ok := s.tasks.(workflowChangeAdmissionRepository)
+		if !ok {
+			return false, fmt.Errorf("workflow change admission repository unavailable for step %s", targetStep.ID)
+		}
+		return changeRepo.UpdateTaskWithWorkflowChangeAdmissionAndState(
+			ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit,
+			admittedState, true, workflowChangeGuard(opts.WorkflowChange),
+		)
+	}
 	admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository)
 	if !ok {
 		return false, fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)

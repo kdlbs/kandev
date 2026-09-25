@@ -103,6 +103,10 @@ var ErrWorkflowResolutionConflict = errors.New("task workflow changed since reso
 // typed error to settle the route as a durable stale-source outcome.
 var ErrWorkflowStepChanged = errors.New("workflow step changed before route commit")
 
+// ErrWorkflowChangeConflict reports that an explicit change-workflow request
+// no longer matches the task source or task version it was opened against.
+var ErrWorkflowChangeConflict = errors.New("task changed since workflow change was opened")
+
 // ErrRunnerMutabilityConflict wraps one of the ten ordered mutability reason
 // codes rejecting a runner switch. Reason is always a member of the same
 // closed vocabulary the projection uses, never "eligible" and never empty.

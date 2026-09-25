@@ -129,9 +129,16 @@ test.describe("Mobile plugin menu actions", () => {
       }
       await expect(testPage.getByTestId("app-status-metrics")).toHaveCount(0);
     }
+
+    for (const width of [768, 1440]) {
+      await testPage.setViewportSize({ width, height: 900 });
+      await testPage.goto("/tasks");
+      await expect(testPage.locator("#hello-main-top-bar")).toBeVisible();
+      await expect(testPage.getByTestId("mobile-plugin-nav-section")).toHaveCount(0);
+    }
   });
 
-  // @covers AC-UI-MOBILE-TASK-CHROME-001.7
+  // @covers AC-UI-MOBILE-TASK-CHROME-001.7, AC-UI-MOBILE-MENU-008.1
   test("moves session contributions from a long task header into the Plugins section", async ({
     testPage,
     apiClient,
@@ -178,9 +185,9 @@ test.describe("Mobile plugin menu actions", () => {
     await pluginSection.scrollIntoViewIfNeeded();
     await waitForFiniteAnimations(menu);
     await expect(menu.getByText("Plugins", { exact: true })).toHaveCount(1);
-    await expect(pluginSection.getByRole("heading", { name: "Workspace" })).toBeVisible();
-    await expect(pluginSection.getByRole("heading", { name: "Task", exact: true })).toBeVisible();
-    await expect(pluginSection.locator("#hello-main-top-bar")).toHaveCount(1);
+    await expect(pluginSection.getByRole("heading", { name: "Workspace" })).toHaveCount(0);
+    await expect(pluginSection.getByRole("heading", { name: "Task", exact: true })).toHaveCount(0);
+    await expect(pluginSection.locator("#hello-main-top-bar")).toHaveCount(0);
     const workspaceAction = pluginSection.getByTestId("e2e-sidebar-workspace-actions");
     await expect(workspaceAction).toHaveCount(1);
     await workspaceAction.tap();
@@ -214,11 +221,7 @@ test.describe("Mobile plugin menu actions", () => {
       await testPage.setViewportSize({ width, height: 851 });
       await pluginSection.evaluate((element) => element.scrollIntoView({ block: "start" }));
       const sectionBox = await requireBox(pluginSection, "Plugins section");
-      for (const control of [
-        action,
-        workspaceAction,
-        pluginSection.locator("#hello-main-top-bar"),
-      ]) {
+      for (const control of [action, workspaceAction]) {
         const box = await requireBox(control, "plugin control");
         expect(box.height).toBeGreaterThanOrEqual(44);
         expect(box.width).toBeGreaterThanOrEqual(44);
@@ -231,7 +234,7 @@ test.describe("Mobile plugin menu actions", () => {
           await testPage.emulateMedia({ colorScheme });
           await waitForFiniteAnimations(menu);
           await prCapture.screenshot(`mobile-task-plugin-menu-${colorScheme}`, {
-            caption: `Workspace and task plugins grouped together, followed by resources (${colorScheme})`,
+            caption: `One contextual toolbar per plugin, followed by resources (${colorScheme})`,
           });
         }
       }
@@ -248,6 +251,17 @@ test.describe("Mobile plugin menu actions", () => {
     await testPage.getByTestId("app-nav-trigger").tap();
     await expect(menu.getByTestId("mobile-plugin-nav-section")).toBeVisible();
     await expect(menu.getByTestId("app-status-metrics")).toHaveCount(0);
+
+    // @covers AC-UI-MOBILE-MENU-008.2
+    await testPage.keyboard.press("Escape");
+    await apiClient.archiveTask(task.id);
+    await testPage.reload();
+    await menuTrigger.tap();
+    await expect(pluginSection.locator("#hello-main-top-bar")).toBeVisible();
+    await expect(status).toHaveCount(0);
+    await expect(action).toHaveCount(0);
+    await expect(workspaceAction).toBeVisible();
+
     if (prCapture.capturing) {
       await testPage.setViewportSize({ width: 393, height: 851 });
       await testPage.goto("/?home=overview");

@@ -67,7 +67,11 @@ immediate marker contract.
    publishing it.
 3. While the guard is still held, the orchestrator writes all planned prompt
    chunks to the PTY. This preserves the existing exclusion against a
-   concurrent cancel, manual drain, or prompt dispatch.
+   concurrent cancel, manual drain, or prompt dispatch. After a successful
+   write, the orchestrator acknowledges the reservation. The reservation is
+   retained in durable storage until acknowledged, so an unacknowledged entry
+   is re-reserved and written again at every later turn end, and it blocks the
+   entries queued behind it.
 4. The ready handler releases the session guard.
 5. The ready handler invokes the deferred publication callback synchronously.
    `MemoryEventBus` calls `handleAgentRunning`, which can now acquire the free

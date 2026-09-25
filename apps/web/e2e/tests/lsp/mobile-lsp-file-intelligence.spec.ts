@@ -5,6 +5,7 @@ import {
 } from "../../helpers/layout-assertions";
 import {
   createKotlinTask,
+  expectFakeLspEvent,
   installFakeKotlinLsp,
   LONG_LSP_PROGRESS_MESSAGE,
   openLspStatus,
@@ -13,6 +14,17 @@ import {
   releaseFakeLspInitialization,
 } from "./lsp-e2e-helpers";
 import { dwell } from "../../helpers/causal-waits";
+import { SessionPage } from "../../pages/session-page";
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
+}
 
 test.describe("Mobile LSP boundaries", () => {
   test.describe.configure({ timeout: 90_000 });
@@ -23,6 +35,9 @@ test.describe("Mobile LSP boundaries", () => {
     seedData,
     backend,
   }) => {
+    const releaseFeature = await backend.useEnv({
+      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
+    });
     const initial = await apiClient.getUserSettings();
     const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
       ? (initial.settings.lsp_auto_start_languages as string[])
@@ -70,6 +85,7 @@ test.describe("Mobile LSP boundaries", () => {
         lsp_auto_start_languages: initialAutoStart,
         lsp_status_location: initialLocation,
       });
+      await releaseFeature();
     }
   });
 
@@ -155,6 +171,98 @@ test.describe("Mobile LSP boundaries", () => {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_status_location: initialLocation,
       });
+    }
+  });
+
+  test("reattaches the retained language server in the tablet drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(180_000);
+    const releaseFeature = await backend.useEnv({
+      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
+    });
+    const initial = await apiClient.getUserSettings();
+    const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
+      ? (initial.settings.lsp_auto_start_languages as string[])
+      : [];
+    const initialLocation =
+      initial.settings.lsp_status_location === "status_bar" ? "status_bar" : "toolbar";
+    try {
+      await testPage.setViewportSize({ width: 820, height: 900 });
+      installFakeKotlinLsp(backend, {
+        keepProgress: true,
+        progress: {
+          title: "Importing Kotlin project",
+          message: "Tablet project model is warming up",
+          percentage: 42,
+        },
+      });
+      await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        lsp_auto_start_languages: [...new Set([...initialAutoStart, "kotlin"])],
+        lsp_status_location: "toolbar",
+      });
+      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Tablet Kotlin LSP Continuity",
+      });
+      await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible();
+      const fileNode = testPage.locator(
+        `[data-testid="file-tree-node"][data-path="${task.filePaths[0]}"]`,
+      );
+      await expect(fileNode).toBeVisible({ timeout: 15_000 });
+      await fileNode.tap();
+      await expect(testPage.locator(".monaco-editor:visible")).toBeVisible({ timeout: 15_000 });
+      const initialStatus = testPage.getByTestId("lsp-status-button");
+      await expect(initialStatus).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      const started = await expectFakeLspEvent(
+        backend,
+        (event) => event.event === "started",
+        "tablet task-host process",
+      );
+      const initializeCount = readFakeLspEvents(backend).filter(
+        (event) => event.event === "message" && event.method === "initialize",
+      ).length;
+      expect(initializeCount).toBe(1);
+
+      await testPage.reload();
+      await testPage.setViewportSize({ width: 820, height: 900 });
+      const reopenedSession = new SessionPage(testPage);
+      await reopenedSession.waitForLoad(45_000);
+      testPage.setDefaultTimeout(15_000);
+      await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible();
+      const reopenedFileNode = testPage.locator(
+        `[data-testid="file-tree-node"][data-path="${task.filePaths[0]}"]`,
+      );
+      await expect(reopenedFileNode).toBeVisible({ timeout: 15_000 });
+      await reopenedFileNode.tap();
+      await expect(testPage.locator(".monaco-editor:visible")).toBeVisible({ timeout: 15_000 });
+      const reopenedStatus = testPage.getByTestId("lsp-status-button");
+      await expect(reopenedStatus).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      await expect(testPage.getByTestId("app-status-lsp")).toHaveCount(0);
+      const drawer = await openLspStatus(testPage);
+      await expect(drawer).toHaveAttribute("data-testid", "lsp-status-drawer");
+      await expect(drawer.getByTestId("lsp-project-progress")).toContainText(
+        "Tablet project model is warming up",
+      );
+      expect(readFakeLspEvents(backend).filter((event) => event.event === "started")).toHaveLength(
+        1,
+      );
+      expect(
+        readFakeLspEvents(backend).filter(
+          (event) => event.event === "message" && event.method === "initialize",
+        ),
+      ).toHaveLength(initializeCount);
+      expect(isProcessAlive(started.pid)).toBe(true);
+      await performLspAction(testPage, "stop");
+      await expect.poll(() => isProcessAlive(started.pid)).toBe(false);
+    } finally {
+      await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        lsp_auto_start_languages: initialAutoStart,
+        lsp_status_location: initialLocation,
+      });
+      await releaseFeature();
     }
   });
 

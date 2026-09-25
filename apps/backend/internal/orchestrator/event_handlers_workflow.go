@@ -4539,34 +4539,68 @@ func (s *Service) preflightWorkflowStepCredentials(
 	currentSession *models.TaskSession,
 	targetStep *wfmodels.WorkflowStep,
 ) error {
+	return s.preflightWorkflowStepCredentialsWithCandidate(ctx, taskID, nil, currentSession, targetStep)
+}
+
+func (s *Service) preflightWorkflowStepCredentialsWithCandidate(
+	ctx context.Context,
+	taskID string,
+	candidate *models.Task,
+	currentSession *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+) error {
 	if currentSession == nil || targetStep == nil {
 		return nil
 	}
 	ctx = withWorkflowMetaCache(ctx)
 	if targetStep.SessionTarget != nil {
-		resolution, err := s.resolveWorkflowSessionTarget(ctx, taskID, targetStep)
-		if err != nil {
-			return err
-		}
-		targetSession := currentSession
-		if s.resolveStepProfileSessionStartPolicy(targetStep) == models.WorkflowProfileSessionStartPolicyReuse && resolution.session != nil {
-			targetSession = resolution.session
-		}
-		task, err := s.repo.GetTask(ctx, taskID)
-		if err != nil {
-			return fmt.Errorf("get task for explicit credential preflight: %w", err)
-		}
-		if task == nil {
-			return fmt.Errorf("task %s not found for explicit credential preflight", taskID)
-		}
-		return s.executor.PreflightManagedGitCredentials(
-			ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
-		)
+		return s.preflightExplicitWorkflowStepCredentials(ctx, taskID, candidate, currentSession, targetStep)
 	}
-	effectiveProfile, err := s.resolveStepAgentProfileForTaskID(ctx, taskID, targetStep)
+	effectiveProfile, err := s.resolveWorkflowMovePreflightProfile(ctx, taskID, candidate, targetStep)
 	if err != nil {
 		return err
 	}
+	return s.preflightFixedWorkflowStepCredentials(ctx, taskID, candidate, currentSession, targetStep, effectiveProfile)
+}
+
+func (s *Service) preflightExplicitWorkflowStepCredentials(
+	ctx context.Context,
+	taskID string,
+	candidate *models.Task,
+	currentSession *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+) error {
+	var resolution workflowSessionTargetResolution
+	var err error
+	if candidate != nil {
+		resolution, err = s.resolveWorkflowSessionTargetWithTask(ctx, taskID, targetStep, candidate)
+	} else {
+		resolution, err = s.resolveWorkflowSessionTarget(ctx, taskID, targetStep)
+	}
+	if err != nil {
+		return err
+	}
+	targetSession := currentSession
+	if s.resolveStepProfileSessionStartPolicy(targetStep) == models.WorkflowProfileSessionStartPolicyReuse && resolution.session != nil {
+		targetSession = resolution.session
+	}
+	task, err := s.preflightTaskProjection(ctx, taskID, candidate)
+	if err != nil {
+		return fmt.Errorf("get task for explicit credential preflight: %w", err)
+	}
+	return s.executor.PreflightManagedGitCredentials(
+		ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
+	)
+}
+
+func (s *Service) preflightFixedWorkflowStepCredentials(
+	ctx context.Context,
+	taskID string,
+	candidate *models.Task,
+	currentSession *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+	effectiveProfile string,
+) error {
 	startPolicy := s.resolveStepProfileSessionStartPolicy(targetStep)
 	if shouldKeepCurrentWorkflowStepSession(effectiveProfile, currentSession.AgentProfileID, startPolicy) {
 		if effectiveProfile == "" || startPolicy != models.WorkflowProfileSessionStartPolicyReuse {
@@ -4590,16 +4624,39 @@ func (s *Service) preflightWorkflowStepCredentials(
 			targetSession = existing
 		}
 	}
-	task, err := s.repo.GetTask(ctx, taskID)
+	task, err := s.preflightTaskProjection(ctx, taskID, candidate)
 	if err != nil {
 		return fmt.Errorf("get task for credential preflight: %w", err)
-	}
-	if task == nil {
-		return fmt.Errorf("task %s not found for credential preflight", taskID)
 	}
 	return s.executor.PreflightManagedGitCredentials(
 		ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
 	)
+}
+
+func (s *Service) preflightTaskProjection(ctx context.Context, taskID string, candidate *models.Task) (*models.Task, error) {
+	if candidate != nil {
+		return candidate, nil
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task %s not found for credential preflight", taskID)
+	}
+	return task, nil
+}
+
+func (s *Service) resolveWorkflowMovePreflightProfile(
+	ctx context.Context,
+	taskID string,
+	candidate *models.Task,
+	targetStep *wfmodels.WorkflowStep,
+) (string, error) {
+	if candidate != nil {
+		return s.resolveStepAgentProfileForTask(ctx, candidate, targetStep), nil
+	}
+	return s.resolveStepAgentProfileForTaskID(ctx, taskID, targetStep)
 }
 
 // PreflightWorkflowStepMove exposes the destination lifecycle preflight to
@@ -4611,6 +4668,20 @@ func (s *Service) PreflightWorkflowStepMove(
 	targetStep *wfmodels.WorkflowStep,
 ) error {
 	return s.preflightWorkflowStepCredentials(ctx, taskID, currentSession, targetStep)
+}
+
+// PreflightWorkflowStepChange validates credentials against a candidate task
+// carrying the form's normalized destination profile choices.
+func (s *Service) PreflightWorkflowStepChange(
+	ctx context.Context,
+	candidate *models.Task,
+	currentSession *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+) error {
+	if candidate == nil {
+		return fmt.Errorf("workflow change candidate is required")
+	}
+	return s.preflightWorkflowStepCredentialsWithCandidate(ctx, candidate.ID, candidate, currentSession, targetStep)
 }
 
 // maybySwitchSessionForProfile preserves the legacy processOnEnter failure
@@ -5995,8 +6066,8 @@ type passthroughRunningPreparer interface {
 // deliverPassthroughPrompt writes a prompt to PTY stdin and marks the session as running.
 // Uses the per-agent PlanPassthroughStdinChunks so Claude's inter-chunk SubmitDelay is
 // honored here too (queued / workflow-auto-start path); other agents stay on the single
-// atomic write. Falls back to the simple "\r" append if config resolution fails so a
-// transient lookup error never silently swallows the prompt.
+// atomic write. Config resolution is required: an unknown agent contract must not fall
+// back to one unframed write, because a long prompt can be silently truncated.
 //
 // Callers that already hold the per-session cancellation guard must use
 // PreparePassthroughRunning + writePassthroughPrompt instead (see handleAgentReady); this
@@ -6021,15 +6092,10 @@ func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, conte
 func (s *Service) writePassthroughPrompt(ctx context.Context, sessionID, content string) error {
 	pt, cfgErr := s.agentManager.ResolvePassthroughConfig(ctx, sessionID)
 	if cfgErr != nil {
-		s.logger.Warn("failed to resolve passthrough config, falling back to \\r submit",
+		s.logger.Warn("failed to resolve passthrough config; refusing unsafe prompt write",
 			zap.String("session_id", sessionID),
 			zap.Error(cfgErr))
-	}
-	if cfgErr != nil {
-		if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, content+"\r"); err != nil {
-			return fmt.Errorf("write to passthrough stdin: %w", err)
-		}
-		return nil
+		return fmt.Errorf("resolve passthrough config: %w", cfgErr)
 	}
 	for _, chunk := range agents.PlanPassthroughStdinChunks(content, pt) {
 		if chunk.DelayBefore > 0 {
