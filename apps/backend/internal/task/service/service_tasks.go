@@ -2134,6 +2134,35 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	return task, nil
 }
 
+// UpdateTaskTerminalRetention atomically changes the scoped retention flag
+// only while the authorized parent relationship still holds.
+func (s *Service) UpdateTaskTerminalRetention(
+	ctx context.Context, id, parentID, workspaceID string, held bool,
+) (*models.Task, bool, error) {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+		return nil, false, err
+	}
+	writer, ok := s.tasks.(interface {
+		UpdateTaskTerminalRetentionIfParent(context.Context, string, string, string, bool) (bool, error)
+	})
+	if !ok {
+		return nil, false, errors.New("task repository does not support scoped terminal retention updates")
+	}
+	updated, err := writer.UpdateTaskTerminalRetentionIfParent(ctx, id, parentID, workspaceID, held)
+	if err != nil {
+		return nil, false, err
+	}
+	if !updated {
+		return nil, false, nil
+	}
+	task, err := s.tasks.GetTask(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	return task, true, nil
+}
+
 func (s *Service) reloadTaskAfterMutation(ctx context.Context, id string, fallback *models.Task, operation string) *models.Task {
 	current, err := s.tasks.GetTask(ctx, id)
 	if err != nil {

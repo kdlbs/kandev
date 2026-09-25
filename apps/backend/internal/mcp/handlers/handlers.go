@@ -1930,6 +1930,7 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	var retentionParentID, retentionWorkspaceID string
 	if req.TerminalRetention != nil {
 		principal, ok := mcpscope.PrincipalFromContext(ctx)
 		if !ok || principal.IsAutomation() || principal.CallerTaskID == "" || principal.CallerTaskID == req.TaskID {
@@ -1943,6 +1944,8 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		if target == nil || target.ParentID != principal.CallerTaskID || target.WorkspaceID != principal.WorkspaceID {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "parent task authority is required for terminal retention", nil)
 		}
+		retentionParentID = principal.CallerTaskID
+		retentionWorkspaceID = principal.WorkspaceID
 	}
 
 	// Applied before the ordinary field update so a rejected prompt edit does
@@ -1963,12 +1966,22 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		state = &normalized
 	}
 
-	task, err := h.taskSvc.UpdateTask(ctx, req.TaskID, &service.UpdateTaskRequest{
-		Title:             req.Title,
-		Description:       req.Description,
-		State:             state,
-		TerminalRetention: req.TerminalRetention,
-	})
+	updateReq := &service.UpdateTaskRequest{
+		Title:       req.Title,
+		Description: req.Description,
+		State:       state,
+	}
+	var task *models.Task
+	var err error
+	if req.TerminalRetention == nil {
+		task, err = h.taskSvc.UpdateTask(ctx, req.TaskID, updateReq)
+	} else {
+		var changed bool
+		task, changed, err = h.updateTaskWithTerminalRetention(ctx, req.TaskID, retentionParentID, retentionWorkspaceID, updateReq, *req.TerminalRetention)
+		if err == nil && !changed {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "parent task authority is required for terminal retention", nil)
+		}
+	}
 	if err != nil {
 		h.logger.Error("failed to update task", zap.Error(err))
 		if errors.Is(err, service.ErrTaskTitleTooLong) {
@@ -1978,6 +1991,17 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+}
+
+func (h *Handlers) updateTaskWithTerminalRetention(
+	ctx context.Context, taskID, parentID, workspaceID string, updateReq *service.UpdateTaskRequest, held bool,
+) (*models.Task, bool, error) {
+	if updateReq.Title != nil || updateReq.Description != nil || updateReq.State != nil {
+		if _, err := h.taskSvc.UpdateTask(ctx, taskID, updateReq); err != nil {
+			return nil, false, err
+		}
+	}
+	return h.taskSvc.UpdateTaskTerminalRetention(ctx, taskID, parentID, workspaceID, held)
 }
 
 // handleSetTaskTitle resolves the one-shot provisional title created for a

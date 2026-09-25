@@ -2359,6 +2359,33 @@ func (r *Repository) SetTaskMetadataKey(ctx context.Context, taskID, key string,
 	return err
 }
 
+// UpdateTaskTerminalRetentionIfParent changes only the terminal-retention
+// metadata while the target remains a direct child in the caller's workspace.
+func (r *Repository) UpdateTaskTerminalRetentionIfParent(
+	ctx context.Context, taskID, parentID, workspaceID string, held bool,
+) (bool, error) {
+	payload, err := json.Marshal(held)
+	if err != nil {
+		return false, err
+	}
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `UPDATE tasks SET metadata = jsonb_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ARRAY[?]::text[], ?::jsonb, true)::text, updated_at = ? WHERE id = ? AND parent_id = ? AND workspace_id = ?`
+	} else {
+		query = `UPDATE tasks SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ? WHERE id = ? AND parent_id = ? AND workspace_id = ?`
+	}
+	path := models.MetaKeyTerminalRetention
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		path = jsonPath(path)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), path, string(payload), time.Now().UTC(), taskID, parentID, workspaceID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
 // SetTaskMetadataKeyIfNoActiveSession writes one metadata key only when the
 // task has no session in STARTING or RUNNING. This prevents a delayed failure
 // callback from re-adding a marker after a newer launch has already started.
