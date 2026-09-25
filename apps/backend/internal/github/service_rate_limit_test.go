@@ -2,9 +2,55 @@ package github
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestServiceGetWorkspaceRateLimitSnapshotSerializesSafeSecondaryReason(t *testing.T) {
+	const providerSecret = "provider-body-must-not-be-exposed"
+	store := newTestStore(t)
+	seedConnectionWorkspaces(t, store, "workspace-1")
+	if err := store.UpsertWorkspaceConnection(context.Background(), &WorkspaceConnection{
+		WorkspaceID: "workspace-1", Source: ConnectionSourcePAT,
+		GitHubHost: defaultGitHubHost, Login: "yattdev", Status: ConnectionStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(nil, AuthMethodPAT, nil, store, nil, testLogger(t))
+	t.Cleanup(svc.Stop)
+	tracker, _ := svc.rateCoordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Source: ConnectionSourcePAT,
+		Login: "yattdev", WorkspaceID: "workspace-1",
+	}, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"secondary rate limit: ` + providerSecret + `"}`))
+	}))
+	t.Cleanup(server.Close)
+	client := newPATClientPointingAt(t, server.URL).WithRateTracker(tracker)
+	if err := client.get(context.Background(), "/repos/o/r/pulls/1", &struct{}{}); err == nil {
+		t.Fatal("expected secondary rate-limit refusal")
+	}
+
+	snapshot, err := svc.GetWorkspaceRateLimitSnapshot(context.Background(), "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serialized, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Secondary.Reason != "secondary_rate_limit" {
+		t.Fatalf("secondary reason = %q", snapshot.Secondary.Reason)
+	}
+	if strings.Contains(string(serialized), providerSecret) {
+		t.Fatalf("serialized snapshot exposes provider response: %s", serialized)
+	}
+}
 
 func TestServiceGetWorkspaceRateLimitSnapshotReportsPrimarySecondaryDisagreement(t *testing.T) {
 	store := newTestStore(t)

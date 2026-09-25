@@ -32,6 +32,11 @@ const (
 // counters update at human speed rather than once per request.
 const rateUpdateDebounce = 5 * time.Second
 
+// secondaryRateLimitReason is safe to expose in task-bound snapshots. Provider
+// response bodies may contain arbitrary untrusted text, so the tracker records
+// only this bounded diagnostic alongside the resource and retry metadata.
+const secondaryRateLimitReason = "secondary_rate_limit"
+
 // RateSnapshot captures the rate-limit state for one bucket at a point in time.
 type RateSnapshot struct {
 	Resource          Resource  `json:"resource"`
@@ -305,7 +310,7 @@ func (r *RateTracker) BackgroundWaitDuration(resource Resource) time.Duration {
 
 // ObserveSecondary records a provider refusal independently from primary
 // resource snapshots.
-func (r *RateTracker) ObserveSecondary(resource Resource, retryAt time.Time, source RetrySource, reason string) {
+func (r *RateTracker) ObserveSecondary(resource Resource, retryAt time.Time, source RetrySource, _ string) {
 	if resource == "" || retryAt.IsZero() {
 		return
 	}
@@ -314,7 +319,7 @@ func (r *RateTracker) ObserveSecondary(resource Resource, retryAt time.Time, sou
 	previous := r.secondary[resource]
 	r.secondary[resource] = SecondaryRateLimitState{
 		Resource: resource, Active: retryAt.After(now), RetryAt: retryAt,
-		ObservedAt: now, RetrySource: source, Reason: reason,
+		ObservedAt: now, RetrySource: source, Reason: secondaryRateLimitReason,
 	}
 	r.signalChangedLocked()
 	r.mu.Unlock()
