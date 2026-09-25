@@ -216,6 +216,41 @@ func TestHTTPForceSyncSanitizesProviderResponseBodyFromSyncAndConfigResponses(t 
 	assert.NotNil(t, config.NextRetryAt)
 }
 
+func TestHTTPHandlersSanitizeLegacyStoredProviderErrorFromConfigAndSync(t *testing.T) {
+	const providerBodyMarker = "legacy-provider-private-qa-marker"
+	retryAt := time.Date(2026, 9, 25, 18, 0, 0, 0, time.UTC)
+	deferred := &github.AdmissionDeferredError{Reason: "background admission deferred"}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	require.NoError(t, err)
+	store := setupTestStore(t)
+	svc := NewService(store, failingGitHubClients{err: deferred}, nil, &fakeApplier{}, log)
+	configureWorkspace(t, svc, victimWorkspace)
+	_, err = store.db.Exec(`
+		UPDATE workflow_sync_configs
+		SET last_ok = 0, last_error = ?, failure_class = ?, consecutive_failures = 3,
+			next_retry_at = ?, last_error_class = ?
+		WHERE workspace_id = ?
+	`, "github API error: "+providerBodyMarker, "transient", retryAt, "transient", victimWorkspace)
+	require.NoError(t, err)
+	router := newTestRouter(t, svc)
+
+	configResponse := doJSON(t, router, http.MethodGet, "/api/v1/workflow-sync/config?workspace_id="+victimWorkspace, nil)
+	require.Equal(t, http.StatusOK, configResponse.Code)
+	assert.NotContains(t, configResponse.Body.String(), providerBodyMarker)
+	var configBody Config
+	require.NoError(t, json.Unmarshal(configResponse.Body.Bytes(), &configBody))
+	assert.Equal(t, "Workflow sync failed", configBody.LastError)
+	assert.Equal(t, "transient", string(configBody.FailureClass))
+	assert.Equal(t, "transient", configBody.LastErrorClass)
+	assert.Equal(t, 3, configBody.ConsecutiveFailures)
+	require.NotNil(t, configBody.NextRetryAt)
+	assert.Equal(t, retryAt, *configBody.NextRetryAt)
+
+	syncResponse := doJSON(t, router, http.MethodPost, "/api/v1/workflow-sync/sync?workspace_id="+victimWorkspace, nil)
+	require.Equal(t, http.StatusOK, syncResponse.Code)
+	assert.NotContains(t, syncResponse.Body.String(), providerBodyMarker)
+}
+
 func TestHTTPForceSyncReturnsRateLimitDetailsWhenAdmissionWaitIsCanceled(t *testing.T) {
 	now := time.Date(2026, 8, 30, 11, 18, 0, 0, time.UTC)
 	retryAt := now.Add(2 * time.Minute)

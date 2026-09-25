@@ -4,12 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 )
+
+const genericSyncFailureMessage = "Workflow sync failed"
 
 // classifySyncErr maps a sync failure to an authcircuit.FailureClass so the
 // caller can decide whether to back off on the short transient schedule or
@@ -89,5 +92,29 @@ func safeSyncErrorMessage(err error) string {
 	if errors.As(err, &glErr) {
 		return fmt.Sprintf("GitLab request failed with HTTP status %d", glErr.StatusCode)
 	}
-	return "Workflow sync failed"
+	return genericSyncFailureMessage
+}
+
+// safeStoredSyncErrorMessage sanitizes historical error values read from the
+// database. Rows written before provider errors were sanitized can contain
+// arbitrary upstream response bodies, so only retain the exact safe summaries
+// written by the current code.
+func safeStoredSyncErrorMessage(message string) string {
+	if message == "" || message == genericSyncFailureMessage {
+		return message
+	}
+	for _, prefix := range []string{
+		"GitHub request failed with HTTP status ",
+		"GitLab request failed with HTTP status ",
+	} {
+		statusText, ok := strings.CutPrefix(message, prefix)
+		if !ok {
+			continue
+		}
+		status, err := strconv.Atoi(statusText)
+		if err == nil && status >= 100 && status <= 599 && strconv.Itoa(status) == statusText {
+			return message
+		}
+	}
+	return genericSyncFailureMessage
 }
