@@ -212,6 +212,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				// execution-profile column, carried onto ri by
 				// buildRecoveredInstances -- never the adopted instance.
 				AgentProfileID:       ri.AgentProfileID,
+				ExecutorType:         getMetadataString(ri.Metadata, MetadataKeyExecutorType),
 				ContainerID:          ri.ContainerID,
 				ContainerIP:          ri.ContainerIP,
 				WorkspacePath:        ri.WorkspacePath,

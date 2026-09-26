@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
 
@@ -147,6 +148,16 @@ func TestToAgentExecutionCapturesDefensiveRuntimeEnvironment(t *testing.T) {
 
 	got["PATH"] = "/mutated"
 	require.Equal(t, "/tmp/kandev-shim:/usr/bin", execution.RuntimeEnvironment()["PATH"])
+}
+
+func TestToAgentExecutionCarriesExecutorTypeForLocalityChecks(t *testing.T) {
+	execution := (&ExecutorInstance{InstanceID: "execution"}).ToAgentExecution(&ExecutorCreateRequest{
+		ExecutorType: string(models.ExecutorTypeWorktree),
+	})
+
+	require.Equal(t, string(models.ExecutorTypeWorktree), execution.ExecutorType)
+	require.Equal(t, string(models.ExecutorTypeWorktree), execution.metadataString(MetadataKeyExecutorType))
+	require.True(t, ShouldPersistMetadataKey(MetadataKeyExecutorType))
 }
 
 func TestToAgentExecutionCapturesRunID(t *testing.T) {

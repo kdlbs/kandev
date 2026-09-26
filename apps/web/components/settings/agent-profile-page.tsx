@@ -98,6 +98,7 @@ function toProfileFormData(
     auto_approve: permissionValues.auto_approve,
     allow_indexing: permissionValues.allow_indexing,
     cli_passthrough: profile.cliPassthrough,
+    cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
     cli_flags: profile.cliFlags ?? [],
     command_prefix: profile.commandPrefix ?? "",
     provider_kind: profile.providerKind ?? "",
@@ -287,6 +288,9 @@ function ProfileSettingsCard({
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           agentName={agent.name}
+          cursorMcpAuthSupported={
+            agent.name === "cursor-acp" || agent.tui_config?.mcp_strategy === "cursor"
+          }
           onModelConfigResolutionPendingChange={onModelConfigResolutionPendingChange}
           lockPassthrough={Boolean(agent.tui_config)}
           hideCustomCLIFlags

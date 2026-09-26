@@ -99,6 +99,7 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		ProviderBaseURL:            profile.ProviderBaseURL,
 		ProviderAPIKeySecretID:     profile.ProviderAPIKeySecretID,
 		CLIPassthrough:             profile.CLIPassthrough,
+		CursorMCPAuthEnabled:       profile.CursorMCPAuthEnabled,
 		NativeSessionResume:        nativeSessionResume,
 		SupportsMCP:                agent.SupportsMCP,
 	}, nil

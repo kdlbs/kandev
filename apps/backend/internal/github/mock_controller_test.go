@@ -83,6 +83,38 @@ func TestMockControllerSeedPRFeedbackClearsPRCaches(t *testing.T) {
 	}
 }
 
+func TestMockControllerSeedPRFeedbackUsesHeadSHAForExistingPR(t *testing.T) {
+	router, svc, _ := setupWorkspaceAuthMockController(t)
+	mock, ok := svc.client.(*MockClient)
+	if !ok {
+		t.Fatalf("service client has type %T, want *MockClient", svc.client)
+	}
+	mock.AddPR(&PR{Number: 7, RepoOwner: "owner", RepoName: "repo"})
+
+	response := serveMockJSON(t, router, http.MethodPost,
+		"/api/v1/github/mock/pr-feedback",
+		`{"owner":"owner","repo":"repo","pr_number":7,"checks":[{"name":"CI","status":"completed","conclusion":"success"}]}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("seed PR feedback: %d %s", response.Code, response.Body.String())
+	}
+
+	pr, err := mock.GetPR(context.Background(), "owner", "repo", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.HeadSHA == "" {
+		t.Fatal("seeded feedback left the existing PR without a head SHA")
+	}
+
+	feedback, err := mock.GetPRFeedback(context.Background(), "owner", "repo", 7)
+	if err != nil {
+		t.Fatalf("GetPRFeedback: %v", err)
+	}
+	if len(feedback.Checks) != 1 || feedback.Checks[0].Name != "CI" {
+		t.Fatalf("feedback checks = %#v, want the seeded CI check", feedback.Checks)
+	}
+}
+
 func TestMockControllerWorkflowMutationsClearCachesAndNormalizeEvidence(t *testing.T) {
 	router, svc, _ := setupWorkspaceAuthMockController(t)
 	mock, ok := svc.client.(*MockClient)

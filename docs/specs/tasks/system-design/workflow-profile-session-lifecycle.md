@@ -132,6 +132,8 @@ of the transition.
 
 ## Failure and recovery
 
+[Profile readiness](workflow-profile-readiness.md) defines Dynamic-profile validation and completed-turn recovery after preflight rejection.
+
 Destination preparation and credential validation fail before source mutation.
 The current session remains primary and recoverable.
 

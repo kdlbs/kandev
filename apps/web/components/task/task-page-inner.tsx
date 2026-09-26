@@ -35,6 +35,7 @@ import {
   buildDebugEntries,
   buildArchivedValue,
   resolveTaskProps,
+  resolveWorkflowCurrentStepId,
   useTaskActionsMenuBoardRow,
   selectWorkspaceRepositories,
 } from "@/components/task/task-page-content-helpers";
@@ -122,12 +123,12 @@ function resolveRemoteExecutorResults(status?: RemoteExecutorStatus | null) {
   };
 }
 
-// Prefer the session-level step (delivered direct via session.state_changed) over the task-level step (routed through the hub broadcast and slightly stale).
 function resolveCurrentStepId(
   sessionStepId: string | null,
   taskStepId: string | null,
+  workflowStepIds: readonly string[],
 ): string | null {
-  return sessionStepId || taskStepId || null;
+  return resolveWorkflowCurrentStepId(sessionStepId, taskStepId, workflowStepIds);
 }
 
 function buildTaskTopBarProps(params: {
@@ -150,10 +151,15 @@ function buildTaskTopBarProps(params: {
     activeSessionId: params.effectiveSessionId,
     taskTitle: taskProps.taskTitle,
     repositoryLabel: taskProps.repositoryLabel,
+    topbarRepository: taskProps.topbarRepository,
     showDebugOverlay,
     onToggleDebugOverlay,
     workflowSteps,
-    currentStepId: resolveCurrentStepId(params.sessionWorkflowStepId, taskProps.workflowStepId),
+    currentStepId: resolveCurrentStepId(
+      params.sessionWorkflowStepId,
+      taskProps.workflowStepId,
+      workflowSteps.map((step) => step.id),
+    ),
     workflowId: taskProps.workflowId,
     taskState: params.task?.state ?? null,
     workspaceId: taskProps.workspaceId,
@@ -204,6 +210,7 @@ function buildTaskLayoutProps(params: {
     taskCanvasesStatus: params.taskCanvasesStatus,
     taskTitle: taskProps.taskTitle,
     repositoryLabel: taskProps.repositoryLabel,
+    topbarRepository: taskProps.topbarRepository,
     baseBranch: taskProps.baseBranch,
     worktreeBranch: params.merged.worktreeBranch,
     isRemoteExecutor: params.remote.isRemoteExecutor,

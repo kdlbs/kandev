@@ -1782,10 +1782,11 @@ func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
 }
 
 type httpMoveTaskRequest struct {
-	WorkflowID     string                     `json:"workflow_id"`
-	WorkflowStepID string                     `json:"workflow_step_id"`
-	Position       int                        `json:"position"`
-	EntryOptions   *workflowmove.EntryOptions `json:"entry_options,omitempty"`
+	WorkflowID     string                        `json:"workflow_id"`
+	WorkflowStepID string                        `json:"workflow_step_id"`
+	Position       int                           `json:"position"`
+	EntryOptions   *workflowmove.EntryOptions    `json:"entry_options,omitempty"`
+	WorkflowChange *models.WorkflowChangeRequest `json:"workflow_change,omitempty"`
 }
 
 // httpReorderStepTasksRequest is the frozen reorder request contract
@@ -1865,6 +1866,7 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 			AllowActivePrimarySession: true,
 			StepHistoryActor:          wfmodels.StepTransitionActorHuman,
 			EntryOptions:              body.EntryOptions,
+			WorkflowChange:            body.WorkflowChange,
 		},
 	)
 	if err != nil {

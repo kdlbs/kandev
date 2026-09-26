@@ -219,6 +219,8 @@ export type WorkflowSnapshotData = {
   steps: KanbanState["steps"];
   tasks: KanbanState["tasks"];
   isPlaceholder?: boolean;
+  /** A known-empty failed fetch is retryable after a task-page remount. */
+  fetchFailed?: boolean;
 };
 
 export type KanbanMultiState = {
