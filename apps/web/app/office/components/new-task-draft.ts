@@ -11,10 +11,6 @@ export type IssueDraft = {
   projectId: string;
   status: string;
   priority: TaskPriority;
-  showReviewer: boolean;
-  showApprover: boolean;
-  reviewerIds: string[];
-  approverIds: string[];
 };
 
 const EMPTY_DRAFT: IssueDraft = {
@@ -24,10 +20,6 @@ const EMPTY_DRAFT: IssueDraft = {
   projectId: "",
   status: "todo",
   priority: "medium",
-  showReviewer: false,
-  showApprover: false,
-  reviewerIds: [],
-  approverIds: [],
 };
 
 function draftKey(workspaceId: string | null, parentTaskId?: string) {

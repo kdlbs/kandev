@@ -86,8 +86,8 @@ that gate.
   the New Task dialog never offers a global profile as a choice, so this
   path holds to the stricter, Office-only rule instead of the override rule.
 
-- New unexported `CreateTaskRequest.RequireAssigneeAgentProfileValidation
-  bool` field (`json:"-"`, never accepted from a request body).
+- New service-request field `CreateTaskRequest.RequireAssigneeAgentProfileValidation
+  bool` (`json:"-"`, never accepted from a request body).
   `AssigneeAgentProfileID` is shared by trusted internal callers (agent-created
   subtasks, the onboarding adapter, routine-created tasks) that already trust
   their own value; gating the new check behind a flag only the HTTP handler
@@ -107,6 +107,10 @@ that gate.
   existing `validateWorkflowAgentOverrides` call, before
   `prepareContributionDestination` and before any task row is built —
   but only when `req.RequireAssigneeAgentProfileValidation` is set.
+- The same HTTP-only path rejects an Office assignee when the task is not
+  Office-owned. A project-linked task or a task on the workspace's canonical
+  Office workflow is eligible. An ordinary Kanban task cannot queue an Office
+  assignment run and therefore cannot accept this field.
 
 No repository or transaction change: `insertTaskTx`
 (`internal/task/repository/sqlite/task.go`) already calls
@@ -166,9 +170,10 @@ change was needed there.
   real-SQLite-backed test can authentically prove the runner seat exists.
   Covers: valid Office assignee seats the runner; nonexistent profile
   rejected with no task row written; profile scoped to another workspace
-  rejected; disabled profile rejected; global (no-workspace) profile
-  rejected; duplicate `external_id` short-circuits without re-validating a
-  second (invalid) assignee; no assignee is unaffected.
+  rejected; disabled profile accepted; global (no-workspace) profile rejected;
+  an Office assignee on a Kanban workflow is rejected; duplicate `external_id`
+  short-circuits without re-validating a second (invalid) assignee; no assignee
+  is unaffected.
 - **Frontend regression:**
   `apps/web/app/office/components/new-task-dialog-create-payload.test.tsx`.
   Renders `NewTaskDialog` with a pre-filled draft (via `defaultProjectId` /
@@ -179,6 +184,23 @@ change was needed there.
   Verified against the pre-fix code (temporarily reproducing the
   metadata-nesting bug in place) to confirm it fails for the right reason
   before confirming it passes against the fix.
+- **Mobile browser regression:**
+  `apps/web/e2e/tests/office/mobile-new-task-dialog.spec.ts` verifies that
+  mobile users can create an assigned task and that unsupported reviewer and
+  approver controls are not shown.
+
+## PR fixup verification (2026-09-26)
+
+- `TMPDIR=/root/.cache/kandev-pr3978-scratch.IEyzod go test ./internal/task/handlers -run '^(TestCreateTaskRejectsOfficeAssigneeForKanbanWorkflow|TestBetaOfficeCreateContract)$' -count=1`
+  passed.
+- `pnpm test -- app/office/components/new-task-dialog.test.tsx app/office/components/new-task-dialog-create-payload.test.tsx`
+  passed: 2 files and 5 tests.
+- `pnpm e2e:run --project mobile-chrome tests/office/mobile-new-task-dialog.spec.ts`
+  passed: 1 mobile test. The managed runner built the backend and web assets.
+- `python3 scripts/lint-spec-files.py --all` passed.
+- `python3 scripts/list-docs.py validate` passed.
+
+The full backend suite and full E2E suite were not run for this fixup.
 
 ## Not touching
 
@@ -189,7 +211,8 @@ change was needed there.
 - The seat-casting engine (`engine_adapters/seat_caster.go`,
   `office/service/review_stage.go`).
 - Explicit reviewer/approver selection — tracked separately by follow-up
-  task `1d4259a9-486f-40f4-b5ae-ba9acc8660d7`.
+  task `1d4259a9-486f-40f4-b5ae-ba9acc8660d7`. The dialog hides those controls
+  until that task implements and submits their contract.
 
 ## Implementation Waves
 

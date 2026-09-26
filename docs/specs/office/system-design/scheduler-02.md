@@ -361,11 +361,16 @@ A create-task request may carry `assignee_agent_profile_id` (`httpCreateTaskRequ
 `CreateTaskRequest.AssigneeAgentProfileID` is also populated by several trusted internal callers
 (agent-created subtasks, the onboarding adapter, routine-created tasks) that already trust their own
 value and must not be re-gated by this check, so the HTTP handler alone also sets a second,
-unexported field, `RequireAssigneeAgentProfileValidation`, on the same request. `Service.prepareTaskForCreation`
+service-request field, `RequireAssigneeAgentProfileValidation`, on the same request. This field is not
+part of the HTTP JSON contract. `Service.prepareTaskForCreation`
 (`internal/task/service/service_tasks.go`) calls the exported `Service.ValidateAssigneeAgentProfile`
 (`internal/task/service/workflow_agent_overrides.go`) immediately after the existing
 `validateWorkflowAgentOverrides` check, and only when that flag is set — before any task row is
-built or written. The validator reads the profile through the already-injected `AgentProfileReader`
+built or written. Before it reads the profile, the service also verifies that the task is Office-owned:
+it must have a project or use the workspace's canonical Office workflow. An Office assignee on an
+ordinary Kanban workflow is rejected before insertion, because the Office assignment listener does
+not enqueue `task_assigned` runs for Kanban tasks. The validator reads the profile through the
+already-injected `AgentProfileReader`
 (`s.agentProfiles`, the same seam `internal/office` uses to serve `ListAgentInstances`) and rejects
 with `ErrInvalidAssigneeAgentProfile` (a sentinel whose message contains `"invalid"`, so
 `isValidationError` in `internal/task/handlers/errors.go` maps it to a 4xx with no additional

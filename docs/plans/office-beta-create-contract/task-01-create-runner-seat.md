@@ -12,6 +12,7 @@ acceptance_criteria:
   - AC-OFFICE-SCHEDULER-003.2
   - AC-OFFICE-SCHEDULER-003.3
   - AC-OFFICE-SCHEDULER-003.4
+  - AC-OFFICE-SCHEDULER-003.5
 system_design:
   - ../../specs/office/system-design/scheduler-02.md
 ---
@@ -36,27 +37,28 @@ system_design:
   runner seat.
 - A request that omits `assignee_agent_profile_id` is unaffected: the task
   is created with no runner seat, exactly as before this change.
+- A request that names an Office assignee for a non-Office task is rejected
+  before insertion. Project-linked tasks and tasks on the workspace's
+  canonical Office workflow remain eligible.
 - The New Task dialog sends `assignee_agent_profile_id` as a top-level
   create-payload field, not nested inside `metadata`.
 - The dead reviewer/approver "Stages" UI (`execution_policy`,
   `new-task-stages.tsx`) is removed, since it had no backend reader and is
   superseded by derived seat-casting on gated-step entry.
+- The dialog does not show reviewer or approver controls until their create
+  request contract is implemented.
 
 ## Verification
 
-- RED/GREEN backend: `TestBetaOfficeCreateContract`
-  (`apps/backend/internal/task/handlers/assignee_agent_profile_contract_test.go`)
-  fails against pre-fix `task_http_handlers.go` (no assignee field decoded)
-  and passes after the fix. Uses a real temp-file SQLite database because
+- `TMPDIR=/root/.cache/kandev-pr3978-scratch.IEyzod go test ./internal/task/handlers -run '^(TestCreateTaskRejectsOfficeAssigneeForKanbanWorkflow|TestBetaOfficeCreateContract)$' -count=1`
+  passed. The regression uses a real temp-file SQLite database because
   `assignee_agent_profile_id` is a computed projection over
   `workflow_step_participants`, not a stored column.
-- RED/GREEN frontend:
-  `apps/web/app/office/components/new-task-dialog-create-payload.test.tsx`
-  fails when the dialog nests the assignee under `metadata` (reproduced by
-  temporarily reintroducing that shape) and passes against the fix.
-- `cd apps/backend && go build ./...`
-- `cd apps/backend && go test ./internal/task/handlers/... -run TestBetaOfficeCreateContract -v`
-- `cd apps/backend && go test ./internal/task/... ./internal/backendapp/... ./internal/mcp/...`
-- `cd apps/web && pnpm test -- app/office/components/new-task-dialog-create-payload.test.tsx app/office/components/new-task-dialog.test.tsx`
-- `python3 scripts/lint-spec-files.py --all`
-- `python3 scripts/list-docs.py validate`
+- `pnpm test -- app/office/components/new-task-dialog.test.tsx app/office/components/new-task-dialog-create-payload.test.tsx`
+  passed: 2 files and 5 tests.
+- `pnpm e2e:run --project mobile-chrome tests/office/mobile-new-task-dialog.spec.ts`
+  passed: 1 mobile test. The managed runner built the backend and web assets.
+- `python3 scripts/lint-spec-files.py --all` passed.
+- `python3 scripts/list-docs.py validate` passed.
+
+The full backend suite and full E2E suite were not run for this fixup.

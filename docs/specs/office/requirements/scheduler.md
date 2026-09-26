@@ -89,8 +89,10 @@ task being created; this mirrors the eligibility filter `ListAgentInstances` alr
 listing assignable profiles for a workspace, which does not gate on the profile's `enabled` flag
 either — a profile the assignee picker already offers must remain assignable, so create-time
 validation is not stricter than the picker it validates against. A non-workspace-scoped ("global")
-profile is Office-eligible for the listing but is not this requirement's create-time contract,
-because the surfaces that supply this field never offer a global profile as a choice.
+profile is not eligible for the Office listing or this create-time contract. A separate legacy
+workflow-override rule allows global profiles in that context; it does not apply to task assignees.
+The assignee field also applies only to Office-owned tasks, identified by a project or the
+workspace's canonical Office workflow. A regular Kanban workflow cannot accept an Office assignee.
 
 #### Acceptance criteria
 
@@ -111,6 +113,10 @@ because the surfaces that supply this field never offer a global profile as a ch
   writing a second runner seat or a second wake.
 - **AC-OFFICE-SCHEDULER-003.4:** A create-task request that omits `assignee_agent_profile_id` is
   unaffected: the task is created with no runner seat, exactly as before this requirement.
+- **AC-OFFICE-SCHEDULER-003.5:** A create-task request that names an Office assignee for a task
+  that is not Office-owned is rejected with a client error before any task row is written. The
+  Office-owned check accepts a project-linked task or a task on the workspace's canonical Office
+  workflow. No runner seat or assignment wake is produced for a rejected Kanban task.
 
 ## System design
 

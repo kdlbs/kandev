@@ -162,6 +162,20 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 		req.Origin == models.TaskOriginOnboarding
 }
 
+func (s *Service) validateAssigneeTaskIsOffice(ctx context.Context, req *CreateTaskRequest) error {
+	if req.AssigneeAgentProfileID == "" || isOfficeRequest(req) {
+		return nil
+	}
+	_, officeWorkflowID, err := s.tasks.GetWorkspaceTaskPrefix(ctx, req.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("get office workflow for assignee task: %w", err)
+	}
+	if officeWorkflowID != "" && req.WorkflowID == officeWorkflowID {
+		return nil
+	}
+	return fmt.Errorf("%w: Office agent assignees require an Office task", ErrInvalidAssigneeAgentProfile)
+}
+
 // CreateTaskOutcome distinguishes why Service.CreateTask returned the task it
 // did, per the create-idempotency contract
 // (docs/specs/tasks/requirements/external-id-idempotency.md). Only meaningful when
@@ -331,6 +345,11 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	}
 	if err := s.validateWorkflowAgentOverrides(ctx, req); err != nil {
 		return nil, err
+	}
+	if req.RequireAssigneeAgentProfileValidation {
+		if err := s.validateAssigneeTaskIsOffice(ctx, req); err != nil {
+			return nil, err
+		}
 	}
 	// Gated by RequireAssigneeAgentProfileValidation (set only by the
 	// untrusted HTTP create-task handler): running here, after the duplicate

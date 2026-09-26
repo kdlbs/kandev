@@ -105,6 +105,8 @@ func newAssigneeContractFixtureWithStoreErrors(
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: workspaceID, Name: "Workflow"}))
+	_, err = repo.DB().Exec(`UPDATE workspaces SET office_workflow_id = ? WHERE id = ?`, workflowID, workspaceID)
+	require.NoError(t, err)
 	now := time.Now().UTC()
 	_, err = repo.DB().Exec(`INSERT INTO workflow_steps
 		(id, workflow_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -165,10 +167,16 @@ func (f assigneeContractFixture) pauseWorkspace(t *testing.T) {
 }
 
 func (f assigneeContractFixture) createTaskBody(title, assigneeAgentProfileID, externalID string) string {
+	return f.createTaskBodyForWorkflow(title, assigneeAgentProfileID, externalID, f.workflowID, f.stepID)
+}
+
+func (f assigneeContractFixture) createTaskBodyForWorkflow(
+	title, assigneeAgentProfileID, externalID, workflowID, stepID string,
+) string {
 	body := map[string]any{
 		"workspace_id":     f.workspaceID,
-		"workflow_id":      f.workflowID,
-		"workflow_step_id": f.stepID,
+		"workflow_id":      workflowID,
+		"workflow_step_id": stepID,
 		"title":            title,
 	}
 	if assigneeAgentProfileID != "" {
@@ -182,6 +190,36 @@ func (f assigneeContractFixture) createTaskBody(title, assigneeAgentProfileID, e
 		panic(err)
 	}
 	return string(data)
+}
+
+func TestCreateTaskRejectsOfficeAssigneeForKanbanWorkflow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	f := newAssigneeContractFixture(t, map[string]*settingsmodels.AgentProfile{
+		"agent-office-1": {ID: "agent-office-1", WorkspaceID: "ws-assignee-contract"},
+	})
+	kanbanWorkflowID := "wf-kanban-assignee-contract"
+	kanbanStepID := "step-kanban-assignee-contract"
+	require.NoError(t, f.repo.CreateWorkflow(context.Background(), &models.Workflow{
+		ID: kanbanWorkflowID, WorkspaceID: f.workspaceID, Name: "Kanban workflow",
+	}))
+	now := time.Now().UTC()
+	_, err := f.repo.DB().Exec(`INSERT INTO workflow_steps
+		(id, workflow_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		kanbanStepID, kanbanWorkflowID, kanbanStepID, 0, now, now)
+	require.NoError(t, err)
+	f.handlers.service.SetWorkflowStepGetter(assigneeContractStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		f.stepID:     {ID: f.stepID, WorkflowID: f.workflowID, Name: f.stepID, Position: 0},
+		kanbanStepID: {ID: kanbanStepID, WorkflowID: kanbanWorkflowID, Name: kanbanStepID, Position: 0},
+	}})
+
+	rec := doCreateTask(f.handlers, f.createTaskBodyForWorkflow(
+		"Kanban task", "agent-office-1", "", kanbanWorkflowID, kanbanStepID,
+	))
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
+
+	tasks, err := f.repo.ListTasks(context.Background(), kanbanWorkflowID)
+	require.NoError(t, err)
+	assert.Empty(t, tasks, "a rejected Office assignment must not leave a Kanban task")
 }
 
 // createTaskBodyNoStep omits workflow_step_id so CreateTask must resolve the
