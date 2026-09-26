@@ -2043,6 +2043,9 @@ type TaskSession struct {
 	TokensIn       int64 `json:"tokens_in"`
 	TokensCachedIn int64 `json:"tokens_cached_in"`
 	TokensOut      int64 `json:"tokens_out"`
+
+	ExactProfileGeneration int64 `json:"exact_profile_generation,omitempty"`
+	ExactProfileRevision   int64 `json:"exact_profile_revision,omitempty"`
 }
 
 // ActiveSessionCancellationCandidate is the compare-and-set snapshot used by
@@ -2650,25 +2653,27 @@ type TaskEnvironmentRepo struct {
 // TaskEnvironmentRecoveryClaimRequest identifies the environment authority
 // required while an automatic host-worktree recovery is in progress.
 type TaskEnvironmentRecoveryClaimRequest struct {
-	TaskEnvironmentID   string
-	OwnerTaskID         string
-	OwnershipGeneration int64
-	SessionID           string
-	OperationID         string
-	ExecutorType        string
+	TaskEnvironmentID    string
+	OwnerTaskID          string
+	OwnershipGeneration  int64
+	SessionID            string
+	SessionIncarnationID string
+	OperationID          string
+	ExecutorType         string
 }
 
 // TaskEnvironmentRecoveryClaim is the durable authority held from recovery
 // preflight through the external workspace-start boundary.
 type TaskEnvironmentRecoveryClaim struct {
-	TaskEnvironmentID   string    `json:"task_environment_id"`
-	OwnerTaskID         string    `json:"owner_task_id"`
-	OwnershipGeneration int64     `json:"ownership_generation"`
-	SessionID           string    `json:"session_id"`
-	OperationID         string    `json:"operation_id"`
-	ExecutorType        string    `json:"executor_type"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	TaskEnvironmentID    string    `json:"task_environment_id"`
+	OwnerTaskID          string    `json:"owner_task_id"`
+	OwnershipGeneration  int64     `json:"ownership_generation"`
+	SessionID            string    `json:"session_id"`
+	SessionIncarnationID string    `json:"-"`
+	OperationID          string    `json:"operation_id"`
+	ExecutorType         string    `json:"executor_type"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 // ToAPI converts internal TaskEnvironment to API map.

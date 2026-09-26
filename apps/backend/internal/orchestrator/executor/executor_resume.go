@@ -1015,6 +1015,9 @@ func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]i
 // Branch replacement is intentionally opt-in; ordinary resume preserves the
 // original worktree branch and reports when it is unrecoverable.
 type ResumeOptions struct {
+	ExactProfile           bool
+	ExactProfileModel      string
+	ExactProfileRevision   int64
 	AllowBranchReplacement bool
 	// AllowCompletedSessionResume is granted only by an explicit user recovery
 	// or a pinned follow-up dispatch. It does not change the global terminal
@@ -1132,13 +1135,22 @@ func (e *Executor) resumeSession(
 	}
 
 	resumeStatePersisted := false
-	var beforeCredentialLease func() error
+	var recoveryAdmission *worktree.RecoveryAdmission
+	var beforeCredentialLease func(*LaunchAgentRequest, *models.TaskEnvironment) error
 	if startAgent {
-		beforeCredentialLease = func() error {
+		beforeCredentialLease = func(req *LaunchAgentRequest, existingEnv *models.TaskEnvironment) error {
+			admission, admissionErr := e.admitSelectedWorktreeRecovery(
+				ctx, task.ID, session, existingEnv, req.ExecutorType,
+			)
+			if admissionErr != nil {
+				return admissionErr
+			}
+			recoveryAdmission = admission
 			// The rollback path must remain armed if persistence fails after the
 			// session has entered STARTING.
 			resumeStatePersisted = true
-			if persistErr := e.persistResumeStateWithOptions(ctx, task.ID, session, true, options); persistErr != nil {
+			admissionCtx := worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+			if persistErr := e.persistResumeStateWithOptions(admissionCtx, task.ID, session, true, options); persistErr != nil {
 				return persistErr
 			}
 			return nil
@@ -1148,6 +1160,7 @@ func (e *Executor) resumeSession(
 		ctx, task, session, startAgent, beforeCredentialLease, options,
 	)
 	if err != nil {
+		_ = releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission)
 		if resumeStatePersisted {
 			e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err, nil)
 		}
@@ -1159,27 +1172,30 @@ func (e *Executor) resumeSession(
 		// lease issuer has observed STARTING. Persist that metadata with the
 		// same expected-state guard before launching, so a concurrent terminal
 		// transition cannot be overwritten by a stale resume.
-		if err := e.persistSessionFullRowIfCurrentState(ctx, session, models.TaskSessionStateStarting); err != nil {
+		admissionCtx := worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+		if err := e.persistSessionFullRowIfCurrentState(admissionCtx, session, models.TaskSessionStateStarting); err != nil {
+			_ = releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission)
 			if resumeStatePersisted {
 				e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err, nil)
 			}
 			return nil, err
 		}
 		credentialSnapshotPersisted = resumeCredentialSnapshotChanged(session, previousCredentialSnapshot)
+	} else {
+		recoveryAdmission, err = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, existingEnv, req.ExecutorType)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	var recoveryAdmission *worktree.RecoveryAdmission
-	recoveryAdmission, err = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, existingEnv, req.ExecutorType)
-	if err != nil {
-		if resumeStatePersisted {
-			e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err, nil)
-		}
-		return nil, err
-	}
 	launchCtx := ctx
 	if recoveryAdmission != nil {
 		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
 	}
+	// Selected recovery may replace canonical worktree rows. Reapply the
+	// environment projection after admission so lifecycle receives the
+	// replacement identities rather than the request assembled before repair.
+	e.reuseExistingEnvironment(launchCtx, req, existingEnv)
 	cleanupCtx := resumeOwnedCleanupContext(launchCtx)
 	defer func() { _ = releaseSelectedWorktreeRecovery(cleanupCtx, &recoveryAdmission) }()
 
@@ -1573,7 +1589,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	task *v1.Task,
 	session *models.TaskSession,
 	startAgent bool,
-	beforeCredentialLease func() error,
+	beforeCredentialLease func(*LaunchAgentRequest, *models.TaskEnvironment) error,
 ) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
 	return e.buildResumeRequestAtCredentialBoundaryWithOptions(
 		ctx, task, session, startAgent, beforeCredentialLease, ResumeOptions{},
@@ -1585,7 +1601,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 	task *v1.Task,
 	session *models.TaskSession,
 	startAgent bool,
-	beforeCredentialLease func() error,
+	beforeCredentialLease func(*LaunchAgentRequest, *models.TaskEnvironment) error,
 	options ResumeOptions,
 ) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
 	req, metadata := newResumeLaunchRequest(task, session, startAgent, options)
@@ -1634,7 +1650,12 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 		ctx, req.AgentProfileID, execConfig.ProfileEnvVars,
 	)
 	if err := e.configureResumeGitHubCredentialsWithProfileEnvAndBridge(
-		ctx, req, session, allRepos, beforeCredentialLease, profileEnvVars, profileResolved,
+		ctx, req, session, allRepos, func() error {
+			if beforeCredentialLease == nil {
+				return nil
+			}
+			return beforeCredentialLease(req, existingEnv)
+		}, profileEnvVars, profileResolved,
 	); err != nil {
 		return nil, "", execConfig, existingEnv, existingRunning, err
 	}
@@ -1670,6 +1691,9 @@ func newResumeLaunchRequest(
 		IsPassthrough:          session.IsPassthrough,
 		TaskEnvironmentID:      session.TaskEnvironmentID,
 		AllowBranchReplacement: options.AllowBranchReplacement,
+		ExactProfile:           options.ExactProfile,
+		ExactProfileModel:      options.ExactProfileModel,
+		ExactProfileRevision:   options.ExactProfileRevision,
 	}
 
 	metadata := map[string]interface{}{}

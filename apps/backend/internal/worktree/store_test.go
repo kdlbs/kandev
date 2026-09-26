@@ -230,14 +230,21 @@ func TestSQLiteStore_CompareAndSwapWorktreeWithRecoveryClaim(t *testing.T) {
 	if err := store.CreateWorktree(ctx, expected); err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
+	const recoveryIncarnationID = "incarnation-guarded-cas"
+	if _, err := store.db.ExecContext(ctx, `
+		UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?
+	`, recoveryIncarnationID, "session-guarded-cas"); err != nil {
+		t.Fatalf("set recovery session incarnation: %v", err)
+	}
 
 	claim, err := store.AcquireTaskEnvironmentRecoveryClaim(ctx, models.TaskEnvironmentRecoveryClaimRequest{
-		TaskEnvironmentID:   expected.TaskEnvironmentID,
-		OwnerTaskID:         "task-guarded-cas",
-		OwnershipGeneration: 1,
-		SessionID:           "session-guarded-cas-recovery",
-		OperationID:         "operation-guarded-cas",
-		ExecutorType:        string(models.ExecutorTypeWorktree),
+		TaskEnvironmentID:    expected.TaskEnvironmentID,
+		OwnerTaskID:          "task-guarded-cas",
+		OwnershipGeneration:  1,
+		SessionID:            "session-guarded-cas",
+		SessionIncarnationID: recoveryIncarnationID,
+		OperationID:          "operation-guarded-cas",
+		ExecutorType:         string(models.ExecutorTypeWorktree),
 	})
 	if err != nil {
 		t.Fatalf("acquire recovery claim: %v", err)

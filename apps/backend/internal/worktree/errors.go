@@ -17,14 +17,18 @@ type WorktreeRecoveryError struct {
 	ActualBacklink   string
 	State            string
 	Reason           string
+	Cause            error
 }
 
 func (e *WorktreeRecoveryError) Error() string {
 	return fmt.Sprintf("%s: task %q checkout %q: %s", ErrWorktreeCorrupted, e.TaskID, e.Checkout, e.Reason)
 }
 
-func (e *WorktreeRecoveryError) Unwrap() error {
-	return ErrWorktreeCorrupted
+func (e *WorktreeRecoveryError) Unwrap() []error {
+	if e.Cause == nil {
+		return []error{ErrWorktreeCorrupted}
+	}
+	return []error{ErrWorktreeCorrupted, e.Cause}
 }
 
 var (

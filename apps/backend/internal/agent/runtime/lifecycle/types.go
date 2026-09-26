@@ -55,6 +55,15 @@ type AgentExecution struct {
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.
 	AgentProfileID string
+	// ExactProfile prevents model fallback for a task-owned exact assignment.
+	ExactProfile         bool
+	ExactProfileModel    string
+	ExactProfileRevision int64
+	// exactProfileAttempt is the immutable tuple admitted by the orchestrator
+	// before this execution starts. It is copied at attachment so delayed stream
+	// events never consult mutable task/session assignment state.
+	exactProfileAttempt   *models.ExactProfileLaunchAttemptBinding
+	exactProfileAttemptMu sync.RWMutex
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
 	OfficeAgentProfileID string
@@ -416,6 +425,37 @@ func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func(), func()) {
 	e.initialPromptFailureCallback = nil
 	e.initialPromptDispatchCallbackMu.Unlock()
 	return onDispatched, onFailure
+}
+
+func cloneExactProfileLaunchAttempt(binding *models.ExactProfileLaunchAttemptBinding, executionID string) (*models.ExactProfileLaunchAttemptBinding, error) {
+	if binding == nil || binding.TaskID == "" || binding.SessionID == "" || binding.ExecutionID != executionID ||
+		binding.AttemptID == "" || binding.SessionIncarnationID == "" || binding.AgentProfileID == "" || binding.Model == "" ||
+		binding.ProfileRevision.IsZero() || binding.Generation < 1 {
+		return nil, models.ErrExactProfileAssignmentInvalidInput
+	}
+	copy := *binding
+	copy.ExpectedPrior = nil
+	return &copy, nil
+}
+
+// installExactProfileLaunchAttempt records the already-bound immutable tuple.
+// Admission holds remoteInstanceLifecycleMu, so no other admission or removal
+// can interleave between the durable bind and this installation.
+func (e *AgentExecution) installExactProfileLaunchAttempt(binding *models.ExactProfileLaunchAttemptBinding) {
+	e.exactProfileAttemptMu.Lock()
+	e.exactProfileAttempt = binding
+	e.exactProfileAttemptMu.Unlock()
+}
+
+func (e *AgentExecution) exactProfileLaunchAttemptSnapshot() *models.ExactProfileLaunchAttemptBinding {
+	e.exactProfileAttemptMu.RLock()
+	defer e.exactProfileAttemptMu.RUnlock()
+	if e.exactProfileAttempt == nil {
+		return nil
+	}
+	copy := *e.exactProfileAttempt
+	copy.ExpectedPrior = nil
+	return &copy
 }
 
 type activeTopLevelTool struct {
@@ -1194,10 +1234,16 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
-	TaskID            string
-	WorkspaceID       string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
-	SessionID         string
-	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	TaskID       string
+	WorkspaceID  string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
+	SessionID    string
+	ExactProfile bool
+	// ExactProfileModel and ExactProfileRevision were resolved and validated
+	// before entering lifecycle. Exact launches must not re-read a mutable
+	// profile model during startup.
+	ExactProfileModel    string
+	ExactProfileRevision int64
+	TaskEnvironmentID    string // Env this session belongs to (shared across sessions in same task)
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
 	// AllowBranchReplacement is an explicit user-selected recovery permission.
@@ -1384,6 +1430,9 @@ type CredentialsManager interface {
 type AgentProfileInfo struct {
 	ProfileID     string
 	ProfileName   string
+	WorkspaceID   string
+	Enabled       bool
+	Revision      time.Time
 	AgentID       string
 	AgentName     string // e.g., "auggie", "claude", "codex"
 	Model         string // applied through ACP model selection at session start
@@ -1452,9 +1501,10 @@ type McpConfigProvider interface {
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation
 type WorkspaceInfo struct {
-	TaskID            string
-	SessionID         string // Task session ID (from task_sessions table)
-	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	TaskID               string
+	SessionID            string // Task session ID (from task_sessions table)
+	SessionIncarnationID string // Immutable session incarnation used for recovery admission
+	TaskEnvironmentID    string // Env this session belongs to (shared across sessions in same task)
 	// EnvironmentOwnerTaskID and OwnershipGeneration are the durable identity
 	// used to guard host worktree recovery across inherited environments.
 	EnvironmentOwnerTaskID string

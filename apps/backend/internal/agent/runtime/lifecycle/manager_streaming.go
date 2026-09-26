@@ -355,21 +355,22 @@ func (m *Manager) publishStreamingContentNow(
 	}
 
 	payload := &AgentStreamEventPayload{
-		Type:           "agent/event",
-		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:        execution.ID,
-		ExecutionID:    execution.ID,
-		AttemptID:      attemptID,
-		OwnerKind:      executionOwnerKind(execution),
-		WorkspaceID:    execution.WorkspaceID,
-		RunID:          execution.RunID,
-		RunSessionID:   execution.RunSessionID,
-		RunAttempt:     execution.RunAttempt,
-		AgentProfileID: execution.officeProfileID(),
-		AgentType:      execution.AgentID,
-		TaskID:         execution.TaskID,
-		SessionID:      execution.SessionID,
-		Data:           &event,
+		Type:                "agent/event",
+		Timestamp:           time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:             execution.ID,
+		ExecutionID:         execution.ID,
+		AttemptID:           attemptID,
+		OwnerKind:           executionOwnerKind(execution),
+		WorkspaceID:         execution.WorkspaceID,
+		RunID:               execution.RunID,
+		RunSessionID:        execution.RunSessionID,
+		RunAttempt:          execution.RunAttempt,
+		AgentProfileID:      execution.officeProfileID(),
+		AgentType:           execution.AgentID,
+		TaskID:              execution.TaskID,
+		SessionID:           execution.SessionID,
+		ExactProfileAttempt: execution.exactProfileLaunchAttemptSnapshot(),
+		Data:                &event,
 	}
 	m.eventPublisher.PublishAgentStreamEventPayload(payload)
 }

@@ -303,6 +303,7 @@ type mockAgentManager struct {
 	launchAgentFunc                 func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
 	initialPromptDispatchCallback   func()
 	initialPromptFailureCallback    func()
+	exactProfileAttemptBindings     []*models.ExactProfileLaunchAttemptBinding
 	startAgentProcessCalls          []string
 	startAgentProcessErr            error
 	startAgentProcessFunc           func(context.Context, string) error
@@ -478,6 +479,22 @@ func (m *mockAgentManager) RegisterInitialPromptDispatchCallbacks(_ string, onDi
 	m.initialPromptDispatchCallback = onDispatched
 	m.initialPromptFailureCallback = onFailure
 	m.mu.Unlock()
+	return nil
+}
+
+func (m *mockAgentManager) AdmitExactProfileLaunchAttempt(_ string, binding *models.ExactProfileLaunchAttemptBinding, bind func(*models.ExactProfileLaunchAttemptBinding) (bool, error)) error {
+	changed, err := bind(binding)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return models.ErrExactProfileAssignmentGeneration
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	copy := *binding
+	copy.ExpectedPrior = nil
+	m.exactProfileAttemptBindings = append(m.exactProfileAttemptBindings, &copy)
 	return nil
 }
 

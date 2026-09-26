@@ -46,6 +46,18 @@ func TestBuildLifecycleLaunchRequestForwardsRemoteContributions(t *testing.T) {
 	}
 }
 
+func TestBuildLifecycleLaunchRequestForwardsExactProfileSnapshot(t *testing.T) {
+	launchReq := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		ExactProfile:         true,
+		ExactProfileModel:    "gpt-5.6-codex",
+		ExactProfileRevision: 1726500000000000000,
+	}, "/workspace", "office-profile")
+
+	if !launchReq.ExactProfile || launchReq.ExactProfileModel != "gpt-5.6-codex" || launchReq.ExactProfileRevision != 1726500000000000000 {
+		t.Fatalf("exact profile snapshot = %+v, want exact model and revision", launchReq)
+	}
+}
+
 // distinctFiller populates struct fields with non-zero values that are unique
 // per field, so a mapper that drops a field (or crosswires two of the same
 // type) produces an observable difference rather than two matching zero

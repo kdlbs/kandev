@@ -342,52 +342,12 @@ func (r *Repository) DeleteMessageWithConversationReceipt(ctx context.Context, m
 }
 
 func (r *Repository) CreateTurnWithConversationReceipt(ctx context.Context, turn *models.Turn) (*models.ConversationMutationReceipt, error) {
-	stampTurnDefaults(turn)
-	tx, base, err := r.beginConversationMutation(ctx, turn.TaskSessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := r.insertTurnRow(ctx, tx, turn); err != nil {
-		return nil, err
-	}
-	receipt := &models.ConversationMutationReceipt{}
-	if err := r.populateConversationTurnReceipt(ctx, tx, receipt, base, turn, models.ConversationMutationUpsert); err != nil {
-		return nil, err
-	}
-	if err := r.finishConversationMutation(tx); err != nil {
-		return nil, err
-	}
-	return receipt, nil
+	_, receipt, err := r.createTurnTx(ctx, turn, createTurnTxOptions{receipt: true})
+	return receipt, err
 }
 
 func (r *Repository) CreateTurnWithStepStampConversationReceipt(ctx context.Context, turn *models.Turn) (bool, *models.ConversationMutationReceipt, error) {
-	stampTurnDefaults(turn)
-	tx, base, err := r.beginConversationMutation(ctx, turn.TaskSessionID)
-	if err != nil {
-		return false, nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	_, stepID, found, stepErr := r.readTaskStepInTx(ctx, tx, turn.TaskID)
-	stamped := false
-	if stepErr == nil && found && stepID != "" {
-		if turn.Metadata == nil {
-			turn.Metadata = map[string]interface{}{}
-		}
-		turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
-		stamped = true
-	}
-	if err := r.insertTurnRow(ctx, tx, turn); err != nil {
-		return false, nil, err
-	}
-	receipt := &models.ConversationMutationReceipt{}
-	if err := r.populateConversationTurnReceipt(ctx, tx, receipt, base, turn, models.ConversationMutationUpsert); err != nil {
-		return false, nil, err
-	}
-	if err := r.finishConversationMutation(tx); err != nil {
-		return false, nil, err
-	}
-	return stamped, receipt, nil
+	return r.createTurnTx(ctx, turn, createTurnTxOptions{stampStep: true, receipt: true})
 }
 
 func (r *Repository) UpdateTurnWithConversationReceipt(ctx context.Context, turn *models.Turn) (*models.ConversationMutationReceipt, error) {

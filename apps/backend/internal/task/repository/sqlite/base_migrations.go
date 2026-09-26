@@ -137,6 +137,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	}
 	r.migrate.Apply("tasks.parent_id", `ALTER TABLE tasks ADD COLUMN parent_id TEXT DEFAULT ''`)
 	r.migrate.Apply("tasks.autopilot_enabled", `ALTER TABLE tasks ADD COLUMN autopilot_enabled INTEGER NOT NULL DEFAULT 0`)
+	if err := r.ensureTaskExactProfileSchema(); err != nil {
+		return err
+	}
 	// Remove FK constraint on workflow_id to allow ephemeral tasks without workflows
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
@@ -195,6 +198,16 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// recreates task_sessions from an explicit column list and would drop a
 	// column added earlier.
 	r.migrate.Apply("task_sessions.name", `ALTER TABLE task_sessions ADD COLUMN name TEXT DEFAULT ''`)
+	// task_sessions exact-profile attribution columns bind a session to the
+	// task-owned exact assignment that created it. They stay zero for sessions
+	// created before, or outside, an exact assignment; an exact launch never
+	// reuses a session whose generation/revision does not match the active
+	// assignment. Like name above, both must be added after the
+	// migrateSessionsRemoveAgentExecutionID rebuild so a legacy upgrade does
+	// not drop them, and the rebuild's explicit column lists keep them so the
+	// ADD is already-present on fresh databases.
+	_ = r.migrate.Apply("task_sessions.exact_profile_generation", `ALTER TABLE task_sessions ADD COLUMN exact_profile_generation BIGINT NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("task_sessions.exact_profile_revision", `ALTER TABLE task_sessions ADD COLUMN exact_profile_revision BIGINT NOT NULL DEFAULT 0`)
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
 	r.migrate.Apply("repository_secret_bindings.table", `
 		CREATE TABLE IF NOT EXISTS repository_secret_bindings (
@@ -456,6 +469,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// current step definition, which may have changed since that entry was
 	// allocated.
 	_ = r.migrate.Apply("workflow_step_entries.marker_positions", `ALTER TABLE workflow_step_entries ADD COLUMN marker_positions TEXT NOT NULL DEFAULT ''`)
+	if err := r.migrateTaskEnvironmentRecoveryClaimSessionIncarnation(); err != nil {
+		return err
+	}
 
 	// One row per SSH executor holding observed reachability — deliberately
 	// not columns on executors, which holds user-authored config and a
@@ -486,6 +502,25 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		return fmt.Errorf("create Kubernetes environment inventory: %w", err)
 	}
 
+	return nil
+}
+
+// migrateTaskEnvironmentRecoveryClaimSessionIncarnation upgrades claims that
+// predate session-incarnation binding. Fresh databases create the column inline
+// after runMigrations; only an existing recovery-claim table needs this ALTER.
+func (r *Repository) migrateTaskEnvironmentRecoveryClaimSessionIncarnation() error {
+	exists, err := r.tableExists("task_environment_recovery_claims")
+	if err != nil {
+		return fmt.Errorf("inspect task environment recovery claims: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	if err := r.migrate.Apply("task_environment_recovery_claims.session_incarnation_id", `
+		ALTER TABLE task_environment_recovery_claims
+			ADD COLUMN session_incarnation_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add task environment recovery claim session incarnation: %w", err)
+	}
 	return nil
 }
 
@@ -789,6 +824,70 @@ func (r *Repository) ensureImproveKandevWorkflowTemplateUniqueness() error {
 // ensureTaskWorkspaceFoldersSchema upgrades databases created before durable
 // folder attachments existed. CREATE TABLE/INDEX IF NOT EXISTS is replay-safe
 // on SQLite and Postgres.
+// ensureTaskExactProfileSchema upgrades databases created before the
+// task-owned exact-profile assignment and launch-receipt tables existed.
+// Both statements are replay-safe on SQLite and Postgres.
+func (r *Repository) ensureTaskExactProfileSchema() error {
+	if _, err := r.db.Exec(`
+		CREATE TABLE IF NOT EXISTS task_exact_profile_assignments (
+			task_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			agent_profile_id TEXT NOT NULL,
+			profile_revision TIMESTAMP NOT NULL,
+			generation BIGINT NOT NULL,
+			source_workflow_id TEXT NOT NULL DEFAULT '',
+			source_workflow_step_id TEXT NOT NULL DEFAULT '',
+			source_task_state TEXT NOT NULL DEFAULT '',
+			active INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_task_exact_profile_assignments_active
+			ON task_exact_profile_assignments(task_id, active);
+		CREATE TABLE IF NOT EXISTS task_exact_profile_launch_receipts (
+			task_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			agent_profile_id TEXT NOT NULL,
+			generation BIGINT NOT NULL,
+			profile_revision_nanos BIGINT NOT NULL,
+			model TEXT NOT NULL DEFAULT '',
+			outcome TEXT NOT NULL,
+			failure_reason TEXT NOT NULL DEFAULT '',
+			inference_started INTEGER NOT NULL DEFAULT 0,
+			substitution_done INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL,
+			PRIMARY KEY (task_id, session_id),
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_task_exact_profile_receipts_generation
+			ON task_exact_profile_launch_receipts(task_id, generation);
+		CREATE TABLE IF NOT EXISTS task_exact_profile_launch_attempt_bindings (
+			task_id TEXT NOT NULL, session_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+			attempt_id TEXT NOT NULL, session_incarnation_id TEXT NOT NULL,
+			agent_profile_id TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', profile_revision_nanos BIGINT NOT NULL,
+			generation BIGINT NOT NULL, created_at TIMESTAMP NOT NULL,
+			PRIMARY KEY (task_id, session_id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		);
+		CREATE TABLE IF NOT EXISTS task_exact_profile_launch_attempt_receipts (
+			task_id TEXT NOT NULL, session_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+			attempt_id TEXT NOT NULL, session_incarnation_id TEXT NOT NULL,
+			agent_profile_id TEXT NOT NULL, profile_revision_nanos BIGINT NOT NULL,
+			generation BIGINT NOT NULL, model TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL,
+			failure_reason TEXT NOT NULL DEFAULT '', inference_started INTEGER NOT NULL DEFAULT 0,
+			substitution_done INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL,
+			PRIMARY KEY (task_id, session_id, execution_id, attempt_id, session_incarnation_id, agent_profile_id, profile_revision_nanos, generation),
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		);
+	`); err != nil {
+		return fmt.Errorf("create exact task profile schema: %w", err)
+	}
+	if err := r.migrate.Apply("task_exact_profile_launch_attempt_bindings.model", `ALTER TABLE task_exact_profile_launch_attempt_bindings ADD COLUMN model TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add exact profile launch attempt model: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) ensureTaskWorkspaceFoldersSchema() error {
 	if _, err := r.db.ExecContext(r.migrationContext(), `
 		CREATE TABLE IF NOT EXISTS task_workspace_folders (

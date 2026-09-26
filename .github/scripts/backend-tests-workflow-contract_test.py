@@ -51,6 +51,17 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn('"postgres-18:${POSTGRES_18_RESULT}"', self.workflow)
         self.assertIn("TestPreviousStableUpgrade", self.workflow)
 
+    def test_postgres_18_runs_exact_profile_attempts_without_skips(self) -> None:
+        exact = step_block(self.workflow, "Run PostgreSQL 18 exact profile attempt gates")
+        for test_name in (
+            "TestPostgresExactProfileAttemptRereadsAssignmentAfterReplacement",
+            "TestPostgresLegacyExactReceiptLookupSerializesWithSuccessorBind",
+            "TestPostgresCurrentExactReceiptLookupSerializesWithSuccessorAssignment",
+            "TestPostgresExactProfileAttemptRejectsLegacyModelAfterReopen",
+        ):
+            self.assertIn(test_name, exact)
+        self.assertIn("--- SKIP:", exact)
+
     def test_windows_job_has_headroom_for_hosted_runner_variance(self) -> None:
         _, marker, windows_job = self.workflow.partition("  test-windows:\n")
         self.assertTrue(marker)

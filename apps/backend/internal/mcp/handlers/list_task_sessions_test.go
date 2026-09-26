@@ -7,12 +7,50 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type receiptExactProfileAssigner struct {
+	receipt *models.ExactProfileLaunchReceipt
+}
+
+func (a *receiptExactProfileAssigner) AssignExactTaskProfile(
+	context.Context, orchestrator.ExactTaskProfileAssignmentRequest,
+) (*orchestrator.ExactProfileLaunchDecision, error) {
+	return nil, nil
+}
+
+func (a *receiptExactProfileAssigner) ExactProfileLaunchReceipt(
+	context.Context, string, string,
+) (*models.ExactProfileLaunchReceipt, error) {
+	return a.receipt, nil
+}
+
+func TestProjectExactProfileReceiptExposesOnlyBoundedModelEvidence(t *testing.T) {
+	revision := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	h := &Handlers{exactTaskProfileAssigner: &receiptExactProfileAssigner{receipt: &models.ExactProfileLaunchReceipt{
+		TaskID: "task", SessionID: "session", AgentProfileID: "profile-sol", Generation: 4,
+		ProfileRevision: revision, Model: "gpt-5.6-sol", Outcome: models.ExactProfileLaunchOutcomeApplied,
+		InferenceStarted: true, SubstitutionDone: false, FailureReason: "must remain private",
+	}}}
+
+	projected, err := h.projectExactProfileReceipt(context.Background(), "task", "session", true)
+	require.NoError(t, err)
+	require.Equal(t, &taskSessionExactProfile{
+		AgentProfileID: "profile-sol", Generation: 4, ProfileRevision: revision.UnixNano(),
+		Model: "gpt-5.6-sol", Outcome: models.ExactProfileLaunchOutcomeApplied,
+		InferenceStarted: true, SubstitutionPerformed: false, ModelVerified: true,
+	}, projected)
+
+	hidden, err := h.projectExactProfileReceipt(context.Background(), "task", "session", false)
+	require.NoError(t, err)
+	require.Nil(t, hidden)
+}
 
 // seedTaskWithSessions creates a task carrying one primary session and the
 // given number of extra spawned sessions, each started later than the last so

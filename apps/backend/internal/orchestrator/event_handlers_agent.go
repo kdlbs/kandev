@@ -3654,6 +3654,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			}
 			return true
 		}
+		s.recordExactProfileStartFailure(ctx, taskID, sessionID, agentExecutionID, err)
 		s.preserveWorkflowStartPromptAfterFailure(ctx, taskID, sessionID, agentExecutionID)
 	}
 	if isManagedRuntimeNpmFailureCode(failureData.FailureCode) {

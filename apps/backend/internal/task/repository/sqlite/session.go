@@ -30,59 +30,17 @@ type taskSessionExecutor interface {
 
 // CreateTurn creates a new turn
 func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
-	stampTurnDefaults(turn)
-	return r.insertTurnWithSessionLock(ctx, turn)
+	_, _, err := r.createTurnTx(ctx, turn, createTurnTxOptions{})
+	return err
 }
 
 // CreateTurnWithStepStamp is documented on the TurnRepository interface. It
-// reads the task's current step inside a transaction that takes the same
-// readTaskStepInTx lock a step move takes, so the read and the turn insert
-// are serialized against concurrent movers of the same task row rather than
-// racing a plain unlocked GetTask against a later, separate insert. A
-// failure to open a transaction or read the step degrades to a plain,
-// unstamped insert — see the spec's failure-modes table: turn creation must
-// never fail because telemetry could not be resolved.
+// reads the current workflow step and inserts the turn under the same task,
+// environment, and session authority. A missing step or payload task remains
+// an unstamped turn; authority and step-read errors abort the transaction.
 func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (bool, error) {
-	stampTurnDefaults(turn)
-
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return false, r.insertTurnWithSessionLock(ctx, turn)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.TaskSessionID); err != nil {
-		return false, err
-	}
-	_, stepID, found, stepErr := r.readTaskStepInTx(ctx, tx, turn.TaskID)
-	if stepErr != nil {
-		_ = tx.Rollback()
-		committed = true
-		return false, r.insertTurnWithSessionLock(ctx, turn)
-	}
-
-	stamped := false
-	if found && stepID != "" {
-		if turn.Metadata == nil {
-			turn.Metadata = map[string]interface{}{}
-		}
-		turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
-		stamped = true
-	}
-
-	if err := r.insertTurnRow(ctx, tx, turn); err != nil {
-		return false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	committed = true
-	return stamped, nil
+	stamped, _, err := r.createTurnTx(ctx, turn, createTurnTxOptions{stampStep: true})
+	return stamped, err
 }
 
 // stampTurnDefaults fills in the ID/timestamp defaults CreateTurn and
@@ -489,7 +447,8 @@ const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
 	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id,
-	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out`
+	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out,
+	ts.exact_profile_generation, ts.exact_profile_revision`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -1090,12 +1049,13 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 			repository_id, base_branch, base_commit_sha, workspace_path,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
-			is_primary, review_status, is_passthrough, task_environment_id, name
+			is_primary, review_status, is_passthrough, task_environment_id, name,
+			exact_profile_generation, exact_profile_revision
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?
+			?, ?, ?
 		)
 	`), session.ID, session.TaskID, session.QueueIncarnationID, agentProfileID,
 		session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
@@ -1104,7 +1064,8 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
-		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
+		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name,
+		session.ExactProfileGeneration, session.ExactProfileRevision)
 
 	return err
 }
@@ -1350,6 +1311,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
 		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut,
+		&session.ExactProfileGeneration, &session.ExactProfileRevision,
 	)
 
 	if err == sql.ErrNoRows {
@@ -1480,6 +1442,12 @@ func (r *Repository) claimPromptableTaskSessionIfActive(
 		return models.PromptableTaskSessionClaim{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if _, err := r.admitSessionWriteTx(ctx, tx, id); err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionInactive}, nil
+		}
+		return models.PromptableTaskSessionClaim{}, err
+	}
 
 	var state models.TaskSessionState
 	var active bool
@@ -1815,6 +1783,9 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	expected *models.TaskSessionState,
 ) (bool, error) {
 	if tx, ok := exec.(*sqlx.Tx); ok {
+		if _, err := r.admitSessionWriteTx(ctx, tx, session.ID); err != nil {
+			return false, err
+		}
 		if err := r.ensureTaskSessionEnvironmentAvailableTx(ctx, tx, session.ID, session.TaskEnvironmentID); err != nil {
 			return false, err
 		}
@@ -1856,7 +1827,8 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 			repository_id = ?, base_branch = ?, base_commit_sha = ?, workspace_path = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
-			is_primary = ?, review_status = ?, is_passthrough = ?, task_environment_id = ?
+			is_primary = ?, review_status = ?, is_passthrough = ?, task_environment_id = ?,
+			exact_profile_generation = ?, exact_profile_revision = ?
 		WHERE id = ?`
 	args := []interface{}{agentProfileID, session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
 		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
@@ -1865,6 +1837,7 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 		string(session.State), session.ErrorMessage, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID,
+		session.ExactProfileGeneration, session.ExactProfileRevision,
 		session.ID}
 	if expected != nil {
 		query += " AND state = ?"
@@ -1958,10 +1931,18 @@ func (r *Repository) UpdateTaskSessionAgentProfileSnapshot(
 
 // UpdateTaskSessionState updates just the state and error message of an agent session
 func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, status models.TaskSessionState, errorMessage string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := r.admitSessionWriteTx(ctx, tx, id); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	completedAt := completedAtForTaskSessionState(status, now)
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET state = ?, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?
 	`), string(status), errorMessage, completedAt, now, id)
 	if err != nil {
@@ -1972,7 +1953,7 @@ func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, stat
 	if rows == 0 {
 		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, id)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // UpdateTaskSessionStateIfCurrent transitions a session only when its state
@@ -1984,9 +1965,20 @@ func (r *Repository) UpdateTaskSessionStateIfCurrent(
 	expected, status models.TaskSessionState,
 	errorMessage string,
 ) (bool, time.Time, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := r.admitSessionWriteTx(ctx, tx, id); err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return false, time.Now().UTC(), nil
+		}
+		return false, time.Time{}, err
+	}
 	now := time.Now().UTC()
 	completedAt := completedAtForTaskSessionState(status, now)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
 		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
 		WHERE id = ? AND state = ?
@@ -1998,6 +1990,9 @@ func (r *Repository) UpdateTaskSessionStateIfCurrent(
 	if err != nil {
 		return false, time.Time{}, err
 	}
+	if err := tx.Commit(); err != nil {
+		return false, time.Time{}, err
+	}
 	return rows > 0, now, nil
 }
 
@@ -2007,9 +2002,20 @@ func (r *Repository) UpdateTaskSessionStateIfCurrentIdentity(
 	expected, status models.TaskSessionState,
 	errorMessage string,
 ) (bool, time.Time, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := r.admitSessionWriteTx(ctx, tx, id); err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return false, time.Now().UTC(), nil
+		}
+		return false, time.Time{}, err
+	}
 	now := time.Now().UTC()
 	completedAt := completedAtForTaskSessionState(status, now)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
 		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
 		WHERE id = ? AND task_id = ? AND queue_incarnation_id = ? AND state = ?
@@ -2020,6 +2026,9 @@ func (r *Repository) UpdateTaskSessionStateIfCurrentIdentity(
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
+		return false, time.Time{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return false, time.Time{}, err
 	}
 	return rows > 0, now, nil
@@ -3755,6 +3764,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
 		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut,
+		&session.ExactProfileGeneration, &session.ExactProfileRevision,
 	)
 	if err != nil {
 		return nil, err

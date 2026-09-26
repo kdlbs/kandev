@@ -599,6 +599,9 @@ func (m *Manager) buildAgentCommandWithContext(
 		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
 		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
 	}
+	if req.ExactProfile && req.ExactProfileModel != "" {
+		model = req.ExactProfileModel
+	}
 	cliFlagTokens, commandPrefixTokens, err := m.resolveProfileLaunchTokens(profileInfo)
 	if err != nil {
 		return agentCommands{}, err
@@ -1064,6 +1067,9 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
 		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
+		ExactProfile:                   reqWithWorktree.ExactProfile,
+		ExactProfileModel:              reqWithWorktree.ExactProfileModel,
+		ExactProfileRevision:           reqWithWorktree.ExactProfileRevision,
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
@@ -2184,7 +2190,7 @@ func (m *Manager) finishRegisteredLaunchRollback(execution *AgentExecution, task
 		// A failed resume only owns the newly opened local client and forward. The
 		// recorded Pod/PVC inventory remains the authority for a later retry or
 		// terminal cleanup, so never discard its durable row here.
-		m.executionStore.Remove(execution.ID)
+		m.RemoveExecution(execution.ID)
 		return
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -2203,7 +2209,7 @@ func (m *Manager) finishRegisteredLaunchRollback(execution *AgentExecution, task
 			}
 		}
 	}
-	m.executionStore.Remove(execution.ID)
+	m.RemoveExecution(execution.ID)
 }
 
 func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend, execInstance *ExecutorInstance, execution *AgentExecution, reason string) {

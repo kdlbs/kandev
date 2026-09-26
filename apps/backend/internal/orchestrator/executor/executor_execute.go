@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -98,6 +99,11 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	}
 	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
+	}
+	if surface == mcpprofile.SurfaceKanbanTask && mcpscope.IsCanonicalCoordinatorTask(ctx, task, e.repo) {
+		capabilities = append(capabilities,
+			mcpprofile.CapabilityExactTaskProfileAssignment,
+		)
 	}
 	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
 }
@@ -1217,6 +1223,7 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	session := &models.TaskSession{
 		ID:                            sessionID,
 		TaskID:                        task.ID,
+		QueueIncarnationID:            uuid.New().String(),
 		AgentProfileID:                agentProfileID,
 		RepositoryID:                  repositoryID,
 		BaseBranch:                    baseBranch,
@@ -1260,30 +1267,10 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		return "", err
 	}
 
-	var recoveryAdmission *worktree.RecoveryAdmission
-	if e.selectedWorktreeRecoveryAdmission != nil {
-		selectedEnv, envErr := e.resolveEnvironmentForAdmission(ctx, task.ID, taskEnvironmentID)
-		if envErr != nil {
-			return "", envErr
-		}
-		recoveryAdmission, envErr = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, execConfig.ExecutorType)
-		if envErr != nil {
-			return "", envErr
-		}
-	}
-
-	createCtx := ctx
-	if recoveryAdmission != nil {
-		createCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
-	}
-	createErr := e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
-	if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
-		if createErr == nil {
-			createErr = fmt.Errorf("release worktree recovery admission: %w", releaseErr)
-		} else {
-			createErr = errors.Join(createErr, fmt.Errorf("release worktree recovery admission: %w", releaseErr))
-		}
-	}
+	// New sessions do not become durable until createPreparedSession returns.
+	// Recovery admission validates the requesting durable session, so the
+	// post-persistence LaunchPreparedSession boundary owns the first admission.
+	createErr := e.createPreparedSession(ctx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
 	if createErr != nil {
 		e.logger.Error("failed to persist agent session",
 			zap.String("task_id", task.ID),
@@ -1669,6 +1656,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		session.ExecutorID = execCfg.ExecutorID
 	}
 	req.OfficeAgentProfileID = opts.OfficeAgentProfileID
+	req.ExactProfile = opts.ExactProfile
+	req.ExactProfileModel = opts.ExactProfileModel
+	req.ExactProfileRevision = opts.ExactProfileRevision
 	req.TurnID = opts.TurnID
 	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {
 		req.OfficeAgentProfileID = session.AgentProfileID
@@ -1809,7 +1799,10 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
 	if startAgent && opts.OnExecutionAdmitted != nil {
-		opts.OnExecutionAdmitted(resp.AgentExecutionID)
+		if err := opts.OnExecutionAdmitted(resp.AgentExecutionID); err != nil {
+			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
+			return nil, fmt.Errorf("%w: %v", ErrExactAttemptAdmission, err)
+		}
 	}
 
 	// Capture the current HEAD commit as the base commit for this session asynchronously.
@@ -2484,7 +2477,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	startAgent bool,
 	mcpMode string,
 	request *LaunchAgentRequest,
-	onExecutionAdmitted func(string),
+	onExecutionAdmitted func(string) error,
 	turnIDs ...string,
 ) (*TaskExecution, error) {
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
@@ -2560,7 +2553,10 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 		SessionID:        session.ID,
 	}
 	if onExecutionAdmitted != nil {
-		onExecutionAdmitted(executionID)
+		if err := onExecutionAdmitted(executionID); err != nil {
+			e.stopFailedStartExecution(ctx, executionID, "execution admission")
+			return nil, fmt.Errorf("%w: %v", ErrExactAttemptAdmission, err)
+		}
 	}
 
 	// Start the agent process asynchronously

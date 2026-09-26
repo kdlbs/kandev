@@ -993,6 +993,7 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 						zap.String("execution_id", execution.ID),
 						zap.Error(err))
 				}
+				return
 			}
 		}()
 	case sm.shouldInjectResumeContext(agentConfig, execution.SessionID):

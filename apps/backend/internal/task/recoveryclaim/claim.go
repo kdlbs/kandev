@@ -12,6 +12,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	kandevdb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -27,6 +28,8 @@ var (
 	// identity and cannot release or use the claim.
 	ErrClaimMismatch = errors.New("task environment recovery claim mismatch")
 )
+
+const forUpdateClause = ` FOR UPDATE`
 
 type claimContextKey struct{}
 
@@ -69,8 +72,8 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 	if db == nil {
 		return nil, errors.New("task environment recovery claim: database is required")
 	}
-	if req.TaskEnvironmentID == "" || req.OwnerTaskID == "" || req.SessionID == "" || req.OperationID == "" || req.ExecutorType == "" {
-		return nil, errors.New("task environment recovery claim: environment, owner, session, operation, and executor are required")
+	if req.TaskEnvironmentID == "" || req.OwnerTaskID == "" || req.SessionID == "" || req.SessionIncarnationID == "" || req.OperationID == "" || req.ExecutorType == "" {
+		return nil, errors.New("task environment recovery claim: environment, owner, session, session incarnation, operation, and executor are required")
 	}
 
 	tx, err := db.BeginTxx(ctx, nil)
@@ -96,22 +99,37 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 	if executorType != req.ExecutorType {
 		return nil, fmt.Errorf("%w: environment %s uses executor %q, request selected %q", ErrClaimMismatch, req.TaskEnvironmentID, executorType, req.ExecutorType)
 	}
-
 	claim, err := loadClaim(ctx, db, tx, req.TaskEnvironmentID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	if claim != nil {
+		if err := validateRequesterIdentity(ctx, db, tx, req); err != nil {
+			return nil, err
+		}
+		snapshot, err := loadAdmissionSnapshot(ctx, db, tx, req.TaskEnvironmentID, req.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		if ClassifyAdmission(snapshot) == models.TaskEnvironmentAdmissionLiveBlocker {
+			return nil, fmt.Errorf("%w: environment %s has a live session or runtime", ErrBusy, req.TaskEnvironmentID)
+		}
 		if claim.OwnerTaskID == req.OwnerTaskID && claim.OwnershipGeneration == req.OwnershipGeneration &&
-			claim.SessionID == req.SessionID && claim.OperationID == req.OperationID && claim.ExecutorType == req.ExecutorType {
+			claim.SessionID == req.SessionID && claim.SessionIncarnationID == req.SessionIncarnationID &&
+			claim.OperationID == req.OperationID && claim.ExecutorType == req.ExecutorType {
 			return claim, tx.Commit()
 		}
 		return nil, fmt.Errorf("%w: environment %s is claimed by operation %s", ErrBusy, req.TaskEnvironmentID, claim.OperationID)
 	}
-
-	if busy, err := environmentHasConsumers(ctx, db, tx, req.TaskEnvironmentID, req.SessionID); err != nil {
+	if err := validateRequesterIdentity(ctx, db, tx, req); err != nil {
 		return nil, err
-	} else if busy {
+	}
+
+	snapshot, err := loadAdmissionSnapshot(ctx, db, tx, req.TaskEnvironmentID, req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if ClassifyAdmission(snapshot) == models.TaskEnvironmentAdmissionLiveBlocker {
 		return nil, fmt.Errorf("%w: environment %s has a live session or runtime", ErrBusy, req.TaskEnvironmentID)
 	}
 
@@ -119,16 +137,17 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 	claim = &models.TaskEnvironmentRecoveryClaim{
 		TaskEnvironmentID: req.TaskEnvironmentID, OwnerTaskID: req.OwnerTaskID,
 		OwnershipGeneration: req.OwnershipGeneration, SessionID: req.SessionID,
-		OperationID: req.OperationID, ExecutorType: req.ExecutorType,
+		SessionIncarnationID: req.SessionIncarnationID,
+		OperationID:          req.OperationID, ExecutorType: req.ExecutorType,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, err := tx.ExecContext(ctx, db.Rebind(`
 		INSERT INTO task_environment_recovery_claims (
-			task_environment_id, owner_task_id, ownership_generation, session_id,
+			task_environment_id, owner_task_id, ownership_generation, session_id, session_incarnation_id,
 			operation_id, executor_type, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), claim.TaskEnvironmentID, claim.OwnerTaskID, claim.OwnershipGeneration,
-		claim.SessionID, claim.OperationID, claim.ExecutorType, claim.CreatedAt, claim.UpdatedAt); err != nil {
+		claim.SessionID, claim.SessionIncarnationID, claim.OperationID, claim.ExecutorType, claim.CreatedAt, claim.UpdatedAt); err != nil {
 		if isUniqueViolation(err) {
 			return nil, fmt.Errorf("%w: environment %s was claimed concurrently", ErrBusy, req.TaskEnvironmentID)
 		}
@@ -138,6 +157,124 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 		return nil, err
 	}
 	return claim, nil
+}
+
+func validateRequesterIdentity(
+	ctx context.Context,
+	db *sqlx.DB,
+	tx *sqlx.Tx,
+	req models.TaskEnvironmentRecoveryClaimRequest,
+) error {
+	query := `
+		SELECT task_id, task_environment_id, queue_incarnation_id
+		FROM task_sessions
+		WHERE id = ?`
+	if dialect.IsPostgres(db.DriverName()) {
+		query += forUpdateClause
+	}
+	var taskID, incarnationID string
+	var environmentID sql.NullString
+	if err := tx.QueryRowContext(ctx, db.Rebind(query), req.SessionID).Scan(
+		&taskID, &environmentID, &incarnationID,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: requesting session is not current", ErrClaimMismatch)
+		}
+		return err
+	}
+	if !environmentID.Valid || environmentID.String != req.TaskEnvironmentID || incarnationID == "" || incarnationID != req.SessionIncarnationID {
+		return fmt.Errorf("%w: requesting session authority changed", ErrClaimMismatch)
+	}
+	authorized, err := requesterTaskCanUseEnvironment(ctx, db, tx, req, taskID)
+	if err != nil {
+		return err
+	}
+	if !authorized {
+		return fmt.Errorf("%w: requesting session authority changed", ErrClaimMismatch)
+	}
+	return nil
+}
+
+func requesterTaskCanUseEnvironment(
+	ctx context.Context,
+	db *sqlx.DB,
+	tx *sqlx.Tx,
+	req models.TaskEnvironmentRecoveryClaimRequest,
+	requesterTaskID string,
+) (bool, error) {
+	ownerWorkspaceID, err := taskWorkspaceID(ctx, db, tx, req.OwnerTaskID)
+	if err != nil {
+		return false, err
+	}
+	for taskID := requesterTaskID; taskID != ""; {
+		workspaceID, parentID, mode, taskErr := taskInheritance(ctx, db, tx, taskID)
+		if errors.Is(taskErr, sql.ErrNoRows) {
+			return false, nil
+		}
+		if taskErr != nil || workspaceID != ownerWorkspaceID {
+			return false, taskErr
+		}
+		if taskID == req.OwnerTaskID {
+			return true, nil
+		}
+		if mode != "inherit_parent" {
+			break
+		}
+		taskID = parentID
+	}
+	return requesterTaskSharesEnvironment(ctx, db, tx, req, requesterTaskID, ownerWorkspaceID)
+}
+
+func taskWorkspaceID(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID string) (string, error) {
+	var workspaceID string
+	query := `SELECT workspace_id FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(db.DriverName()) {
+		query += forUpdateClause
+	}
+	err := tx.QueryRowContext(ctx, db.Rebind(query), taskID).Scan(&workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("%w: environment owner is not current", ErrClaimMismatch)
+	}
+	return workspaceID, err
+}
+
+func taskInheritance(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID string) (string, string, string, error) {
+	var workspaceID, parentID, mode string
+	query := fmt.Sprintf(`
+		SELECT workspace_id, COALESCE(parent_id, ''), COALESCE(%s, '')
+		FROM tasks WHERE id = ?`, dialect.JSONExtractPath(db.DriverName(), "metadata", "workspace", "mode"))
+	if dialect.IsPostgres(db.DriverName()) {
+		query += forUpdateClause
+	}
+	err := tx.QueryRowContext(ctx, db.Rebind(query), taskID).Scan(&workspaceID, &parentID, &mode)
+	return workspaceID, parentID, mode, err
+}
+
+func requesterTaskSharesEnvironment(
+	ctx context.Context,
+	db *sqlx.DB,
+	tx *sqlx.Tx,
+	req models.TaskEnvironmentRecoveryClaimRequest,
+	requesterTaskID, ownerWorkspaceID string,
+) (bool, error) {
+	var matched int
+	err := tx.QueryRowContext(ctx, db.Rebind(`
+		SELECT 1
+		FROM task_workspace_groups groups
+		JOIN task_workspace_group_members member
+		  ON member.workspace_group_id = groups.id
+		JOIN tasks requester ON requester.id = member.task_id
+		WHERE groups.owner_task_id = ?
+		  AND groups.materialized_environment_id = ?
+		  AND member.task_id = ?
+		  AND member.released_at IS NULL
+		  AND requester.workspace_id = ?
+		LIMIT 1
+	`), req.OwnerTaskID, req.TaskEnvironmentID, requesterTaskID, ownerWorkspaceID).Scan(&matched)
+	if errors.Is(err, sql.ErrNoRows) || kandevdb.IsMissingTableError(err) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // Release removes exactly the operation and generation supplied by claim.
@@ -165,9 +302,9 @@ func Release(ctx context.Context, db *sqlx.DB, claim *models.TaskEnvironmentReco
 	result, err := tx.ExecContext(ctx, db.Rebind(`
 		DELETE FROM task_environment_recovery_claims
 		WHERE task_environment_id = ? AND owner_task_id = ? AND ownership_generation = ?
-		  AND session_id = ? AND operation_id = ? AND executor_type = ?
+		  AND session_id = ? AND session_incarnation_id = ? AND operation_id = ? AND executor_type = ?
 	`), claim.TaskEnvironmentID, claim.OwnerTaskID, claim.OwnershipGeneration,
-		claim.SessionID, claim.OperationID, claim.ExecutorType)
+		claim.SessionID, claim.SessionIncarnationID, claim.OperationID, claim.ExecutorType)
 	if err != nil {
 		return err
 	}
@@ -280,7 +417,19 @@ func ValidateTx(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, claim *models.Tas
 	if !sameClaim(current, claim) {
 		return ErrClaimMismatch
 	}
+	if err := validateClaimRequesterIdentity(ctx, db, tx, claim); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateClaimRequesterIdentity(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, claim *models.TaskEnvironmentRecoveryClaim) error {
+	return validateRequesterIdentity(ctx, db, tx, models.TaskEnvironmentRecoveryClaimRequest{
+		TaskEnvironmentID:    claim.TaskEnvironmentID,
+		OwnerTaskID:          claim.OwnerTaskID,
+		SessionID:            claim.SessionID,
+		SessionIncarnationID: claim.SessionIncarnationID,
+	})
 }
 
 func loadEnvironmentOwner(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID string) (string, error) {
@@ -296,7 +445,7 @@ func lockTask(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID string) erro
 	//nolint:nestif // SQLite and PostgreSQL require different row-locking paths.
 	query := `SELECT id FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += forUpdateClause
 	} else {
 		// SQLite starts deferred transactions by default. Take its single-writer
 		// reservation before reading the owner and environment rows so an
@@ -349,7 +498,7 @@ func ensureCleanupAbsent(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID s
 func loadEnvironmentIdentity(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID string) (string, int64, string, error) {
 	query := `SELECT task_id, ownership_generation, executor_type FROM task_environments WHERE id = ?`
 	if dialect.IsPostgres(db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += forUpdateClause
 	}
 	var ownerTaskID, executorType string
 	var generation int64
@@ -362,38 +511,66 @@ func loadEnvironmentIdentity(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, envi
 	return ownerTaskID, generation, executorType, nil
 }
 
-func environmentHasConsumers(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID, requestingSessionID string) (bool, error) {
-	var sessionExists, runtimeExists bool
+func loadAdmissionSnapshot(
+	ctx context.Context,
+	db *sqlx.DB,
+	tx *sqlx.Tx,
+	environmentID string,
+	requestingSessionID string,
+) (models.TaskEnvironmentAdmissionSnapshot, error) {
+	snapshot := models.TaskEnvironmentAdmissionSnapshot{}
 	if err := tx.QueryRowContext(ctx, db.Rebind(`
-		SELECT EXISTS (
-			SELECT 1 FROM task_sessions
-			WHERE task_environment_id = ? AND id <> ?
-			  AND state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
-		)
-	`), environmentID, requestingSessionID).Scan(&sessionExists); err != nil {
-		return false, err
+		SELECT COALESCE(materialization_session_id, '')
+		FROM task_environments
+		WHERE id = ?
+	`), environmentID).Scan(&snapshot.MaterializationSessionID); err != nil {
+		return snapshot, err
 	}
-	if err := tx.QueryRowContext(ctx, db.Rebind(`
-		SELECT EXISTS (
-			SELECT 1 FROM executors_running er
-			JOIN task_sessions ts ON ts.id = er.session_id
-			WHERE ts.task_environment_id = ?
-		)
-	`), environmentID).Scan(&runtimeExists); err != nil {
-		return false, err
+
+	rows, err := tx.QueryContext(ctx, db.Rebind(`
+		SELECT ts.id, ts.state,
+			EXISTS (
+				SELECT 1 FROM task_session_turns turn
+				WHERE turn.task_session_id = ts.id AND turn.completed_at IS NULL
+			),
+			CASE WHEN er.session_id IS NULL THEN FALSE ELSE TRUE END,
+			COALESCE(er.status, '')
+		FROM task_sessions ts
+		LEFT JOIN executors_running er ON er.session_id = ts.id
+		WHERE ts.task_environment_id = ?
+		ORDER BY ts.id
+	`), environmentID)
+	if err != nil {
+		return snapshot, err
 	}
-	return sessionExists || runtimeExists, nil
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		consumer := models.TaskEnvironmentAdmissionConsumer{}
+		if err := rows.Scan(
+			&consumer.SessionID,
+			&consumer.SessionState,
+			&consumer.HasActiveTurn,
+			&consumer.HasExecutor,
+			&consumer.ExecutorStatus,
+		); err != nil {
+			return snapshot, err
+		}
+		consumer.IsRequester = consumer.SessionID == requestingSessionID
+		snapshot.Consumers = append(snapshot.Consumers, consumer)
+	}
+	return snapshot, rows.Err()
 }
 
 func loadClaim(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID string) (*models.TaskEnvironmentRecoveryClaim, error) {
 	claim := &models.TaskEnvironmentRecoveryClaim{}
 	err := tx.QueryRowContext(ctx, db.Rebind(`
-		SELECT task_environment_id, owner_task_id, ownership_generation, session_id,
+		SELECT task_environment_id, owner_task_id, ownership_generation, session_id, session_incarnation_id,
 			operation_id, executor_type, created_at, updated_at
 		FROM task_environment_recovery_claims WHERE task_environment_id = ?
-	`), environmentID).Scan(
+	`+claimForUpdateClause(db.DriverName())), environmentID).Scan(
 		&claim.TaskEnvironmentID, &claim.OwnerTaskID, &claim.OwnershipGeneration,
-		&claim.SessionID, &claim.OperationID, &claim.ExecutorType,
+		&claim.SessionID, &claim.SessionIncarnationID, &claim.OperationID, &claim.ExecutorType,
 		&claim.CreatedAt, &claim.UpdatedAt,
 	)
 	if err != nil {
@@ -405,7 +582,15 @@ func loadClaim(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID stri
 func sameClaim(left, right *models.TaskEnvironmentRecoveryClaim) bool {
 	return left != nil && right != nil && left.TaskEnvironmentID == right.TaskEnvironmentID &&
 		left.OwnerTaskID == right.OwnerTaskID && left.OwnershipGeneration == right.OwnershipGeneration &&
-		left.SessionID == right.SessionID && left.OperationID == right.OperationID && left.ExecutorType == right.ExecutorType
+		left.SessionID == right.SessionID && left.SessionIncarnationID == right.SessionIncarnationID &&
+		left.OperationID == right.OperationID && left.ExecutorType == right.ExecutorType
+}
+
+func claimForUpdateClause(driverName string) string {
+	if dialect.IsPostgres(driverName) {
+		return forUpdateClause
+	}
+	return ""
 }
 
 func isUniqueViolation(err error) bool {

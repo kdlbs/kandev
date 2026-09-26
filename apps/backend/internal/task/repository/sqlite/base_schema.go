@@ -95,6 +95,7 @@ func (r *Repository) ensureTaskEnvironmentRecoveryClaimsSchema() error {
 			owner_task_id TEXT NOT NULL,
 			ownership_generation BIGINT NOT NULL,
 			session_id TEXT NOT NULL,
+			session_incarnation_id TEXT NOT NULL DEFAULT '',
 			operation_id TEXT NOT NULL,
 			executor_type TEXT NOT NULL,
 			created_at TIMESTAMP NOT NULL,
@@ -532,6 +533,62 @@ func (r *Repository) initTaskSchema() error {
 		archived_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS task_exact_profile_assignments (
+		task_id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		agent_profile_id TEXT NOT NULL,
+		profile_revision TIMESTAMP NOT NULL,
+		generation BIGINT NOT NULL,
+		source_workflow_id TEXT NOT NULL DEFAULT '',
+		source_workflow_step_id TEXT NOT NULL DEFAULT '',
+		source_task_state TEXT NOT NULL DEFAULT '',
+		active INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_exact_profile_assignments_active
+		ON task_exact_profile_assignments(task_id, active);
+
+	CREATE TABLE IF NOT EXISTS task_exact_profile_launch_receipts (
+		task_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		agent_profile_id TEXT NOT NULL,
+		generation BIGINT NOT NULL,
+		profile_revision_nanos BIGINT NOT NULL,
+		model TEXT NOT NULL DEFAULT '',
+		outcome TEXT NOT NULL,
+		failure_reason TEXT NOT NULL DEFAULT '',
+		inference_started INTEGER NOT NULL DEFAULT 0,
+		substitution_done INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (task_id, session_id),
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_exact_profile_receipts_generation
+		ON task_exact_profile_launch_receipts(task_id, generation);
+
+	CREATE TABLE IF NOT EXISTS task_exact_profile_launch_attempt_bindings (
+		task_id TEXT NOT NULL, session_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+		attempt_id TEXT NOT NULL, session_incarnation_id TEXT NOT NULL,
+		agent_profile_id TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', profile_revision_nanos BIGINT NOT NULL,
+		generation BIGINT NOT NULL, created_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (task_id, session_id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS task_exact_profile_launch_attempt_receipts (
+		task_id TEXT NOT NULL, session_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+		attempt_id TEXT NOT NULL, session_incarnation_id TEXT NOT NULL,
+		agent_profile_id TEXT NOT NULL, profile_revision_nanos BIGINT NOT NULL,
+		generation BIGINT NOT NULL, model TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL,
+		failure_reason TEXT NOT NULL DEFAULT '', inference_started INTEGER NOT NULL DEFAULT 0,
+		substitution_done INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (task_id, session_id, execution_id, attempt_id, session_incarnation_id, agent_profile_id, profile_revision_nanos, generation),
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 
 	CREATE TABLE IF NOT EXISTS repositories (

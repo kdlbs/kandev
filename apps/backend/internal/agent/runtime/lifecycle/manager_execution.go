@@ -1234,7 +1234,7 @@ func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInf
 	if ownerTaskID == "" {
 		ownerTaskID = info.TaskID
 	}
-	if ownerTaskID == "" || info.SessionID == "" || info.OwnershipGeneration <= 0 {
+	if ownerTaskID == "" || info.SessionID == "" || info.SessionIncarnationID == "" || info.OwnershipGeneration <= 0 {
 		return nil, fmt.Errorf("worktree recovery admission: workspace environment identity is incomplete")
 	}
 	slots := make([]worktree.RecoverySlot, 0, len(info.WorkspaceRepositories))
@@ -1253,13 +1253,14 @@ func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInf
 		return nil, nil
 	}
 	request := worktree.RecoveryAdmissionRequest{
-		TaskID:              info.TaskID,
-		SessionID:           info.SessionID,
-		TaskEnvironmentID:   info.TaskEnvironmentID,
-		OwnerTaskID:         ownerTaskID,
-		OwnershipGeneration: info.OwnershipGeneration,
-		ExecutorType:        info.ExecutorType,
-		Slots:               slots,
+		TaskID:               info.TaskID,
+		SessionID:            info.SessionID,
+		SessionIncarnationID: info.SessionIncarnationID,
+		TaskEnvironmentID:    info.TaskEnvironmentID,
+		OwnerTaskID:          ownerTaskID,
+		OwnershipGeneration:  info.OwnershipGeneration,
+		ExecutorType:         info.ExecutorType,
+		Slots:                slots,
 	}
 	admission, err := m.worktreeMgr.AdmitRecovery(ctx, request)
 	if err != nil {

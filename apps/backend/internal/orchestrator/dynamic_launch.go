@@ -425,6 +425,9 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 			return nil, err
 		}
 	}
+	if options.ExactProfile {
+		return s.launchConcretePreparedSession(ctx, task, sessionID, options)
+	}
 	if s.profileExecutionResolver == nil {
 		return s.launchConcretePreparedSession(ctx, task, sessionID, options)
 	}

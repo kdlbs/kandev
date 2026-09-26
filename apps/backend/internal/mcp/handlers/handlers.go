@@ -150,6 +150,20 @@ type TaskRepository interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
 }
 
+// ExactTaskProfileAssigner records a validated, generation-guarded concrete
+// profile selection for a task.
+type ExactTaskProfileAssigner interface {
+	AssignExactTaskProfile(ctx context.Context, request orchestrator.ExactTaskProfileAssignmentRequest) (*orchestrator.ExactProfileLaunchDecision, error)
+}
+
+type exactTaskProfileGenerationReader interface {
+	ExactTaskProfileGeneration(context.Context, string) (int64, error)
+}
+
+type exactProfileLaunchReceiptReader interface {
+	ExactProfileLaunchReceipt(context.Context, string, string) (*models.ExactProfileLaunchReceipt, error)
+}
+
 // RemoteContributionService resolves provider URLs before task creation and
 // associates an already-existing PR/MR after the target task-repository row
 // exists. Implementations must return only server-authored identity data.
@@ -335,7 +349,12 @@ type Handlers struct {
 
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
-	agentPermissionSvc AgentPermissionService
+	agentPermissionSvc       AgentPermissionService
+	exactTaskProfileAssigner ExactTaskProfileAssigner
+}
+
+func (h *Handlers) SetExactTaskProfileAssigner(assigner ExactTaskProfileAssigner) {
+	h.exactTaskProfileAssigner = assigner
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -519,6 +538,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
+	d.RegisterFunc(ws.ActionMCPAssignExactTaskProfile, h.handleAssignExactTaskProfile)
 	d.RegisterFunc(ws.ActionMCPSetTaskTitle, h.handleSetTaskTitle)
 	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)

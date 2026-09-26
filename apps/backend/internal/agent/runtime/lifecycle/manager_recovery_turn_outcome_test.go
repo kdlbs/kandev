@@ -4,13 +4,24 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 )
+
+type exactRecoveryWriter struct {
+	captureExecutorRunningWriter
+	binding *models.ExactProfileLaunchAttemptBinding
+}
+
+func (w *exactRecoveryWriter) GetCurrentExactProfileLaunchAttempt(context.Context, string, string) (*models.ExactProfileLaunchAttemptBinding, error) {
+	return w.binding, nil
+}
 
 // fakeTurnOutcomeBackend embeds *MockExecutor so it satisfies ExecutorBackend
 // via the existing mock, and additionally implements the unexported
@@ -347,6 +358,72 @@ func TestManagerStartPublishesRunningWhenNoTurnOutcomeRetained(t *testing.T) {
 	}
 	if len(backend.ackedCalls) != 0 {
 		t.Fatalf("ackedCalls = %v, want none: nothing was retained, so nothing to acknowledge", backend.ackedCalls)
+	}
+}
+
+func TestManagerStartRehydratesCurrentExactAttemptBeforeRecoveryPublication(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	backend := &fakeTurnOutcomeBackend{MockExecutor: &MockExecutor{name: executor.NameStandalone, recoverInstances: []*ExecutorInstance{newRecoveryTurnOutcomeExecutorInstance()}}}
+	registry.Register(backend)
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	t.Cleanup(func() { _ = mgr.Stop() })
+	registerRecoveryTestAgentProfile(t, mgr)
+	binding := &models.ExactProfileLaunchAttemptBinding{TaskID: "task-1", SessionID: "session-1", ExecutionID: "exec-recovered", AttemptID: "attempt-1", SessionIncarnationID: "incarnation-1", AgentProfileID: recoveryTestAgentProfileID, Model: "model-exact", ProfileRevision: time.Unix(1_726_500_000, 0).UTC(), Generation: 1}
+	mgr.SetExecutorRunningWriter(&exactRecoveryWriter{binding: binding})
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	execution, ok := mgr.GetExecution("exec-recovered")
+	if !ok {
+		t.Fatal("recovered execution missing")
+	}
+	got := execution.exactProfileLaunchAttemptSnapshot()
+	if got == nil || got.AttemptID != binding.AttemptID || got.SessionIncarnationID != binding.SessionIncarnationID || got.Model != binding.Model {
+		t.Fatalf("recovered exact attempt = %#v", got)
+	}
+	binding.AttemptID = "mutated"
+	binding.Model = "model-mutated"
+	if got := execution.exactProfileLaunchAttemptSnapshot(); got.AttemptID != "attempt-1" || got.Model != "model-exact" {
+		t.Fatalf("recovered binding aliased caller state: %#v", got)
+	}
+}
+
+func TestManagerStartLeavesRecoveryEvidenceEmptyForInvalidExactAttempt(t *testing.T) {
+	valid := &models.ExactProfileLaunchAttemptBinding{TaskID: "task-1", SessionID: "session-1", ExecutionID: "exec-recovered", AttemptID: "attempt-1", SessionIncarnationID: "incarnation-1", AgentProfileID: recoveryTestAgentProfileID, Model: "model-exact", ProfileRevision: time.Unix(1_726_500_000, 0).UTC(), Generation: 1}
+	for _, tc := range []struct {
+		name    string
+		binding *models.ExactProfileLaunchAttemptBinding
+	}{
+		{name: "missing"},
+		{name: "execution mismatch", binding: func() *models.ExactProfileLaunchAttemptBinding { b := *valid; b.ExecutionID = "other"; return &b }()},
+		{name: "malformed", binding: func() *models.ExactProfileLaunchAttemptBinding { b := *valid; b.AttemptID = ""; return &b }()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := newTestRegistryLogger()
+			registry := NewExecutorRegistry(log)
+			registry.Register(&fakeTurnOutcomeBackend{MockExecutor: &MockExecutor{name: executor.NameStandalone, recoverInstances: []*ExecutorInstance{newRecoveryTurnOutcomeExecutorInstance()}}})
+			eventBus := &MockEventBus{}
+			mgr := NewManager(newTestRegistry(), eventBus, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+			cleanupManagerStopCh(t, mgr)
+			t.Cleanup(func() { _ = mgr.Stop() })
+			registerRecoveryTestAgentProfile(t, mgr)
+			mgr.SetExecutorRunningWriter(&exactRecoveryWriter{binding: tc.binding})
+			if err := mgr.Start(context.Background()); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			execution, ok := mgr.GetExecution("exec-recovered")
+			if !ok {
+				t.Fatal("ordinary recovered execution missing")
+			}
+			if got := execution.exactProfileLaunchAttemptSnapshot(); got != nil {
+				t.Fatalf("recovered exact=%#v, want no exact evidence", got)
+			}
+			if !hasEventType(eventBus.PublishedEvents, events.AgentRunning) {
+				t.Fatal("ordinary recovered running event was not preserved")
+			}
+		})
 	}
 }
 

@@ -279,21 +279,22 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 	// session_id is the task session ID (execution.SessionID)
 	// acp_session_id in eventData is the internal agent protocol session
 	payload := AgentStreamEventPayload{
-		Type:           "agent/event",
-		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:        execution.ID,
-		ExecutionID:    execution.ID,
-		AttemptID:      attemptID,
-		OwnerKind:      executionOwnerKind(execution),
-		WorkspaceID:    execution.WorkspaceID,
-		RunID:          execution.RunID,
-		RunSessionID:   execution.RunSessionID,
-		RunAttempt:     execution.RunAttempt,
-		AgentProfileID: execution.officeProfileID(),
-		AgentType:      execution.AgentID,
-		TaskID:         execution.TaskID,
-		SessionID:      execution.SessionID,
-		Data:           eventData,
+		Type:                "agent/event",
+		Timestamp:           time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:             execution.ID,
+		ExecutionID:         execution.ID,
+		AttemptID:           attemptID,
+		OwnerKind:           executionOwnerKind(execution),
+		WorkspaceID:         execution.WorkspaceID,
+		RunID:               execution.RunID,
+		RunSessionID:        execution.RunSessionID,
+		RunAttempt:          execution.RunAttempt,
+		AgentProfileID:      execution.officeProfileID(),
+		AgentType:           execution.AgentID,
+		TaskID:              execution.TaskID,
+		SessionID:           execution.SessionID,
+		ExactProfileAttempt: execution.exactProfileLaunchAttemptSnapshot(),
+		Data:                eventData,
 	}
 
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)

@@ -333,7 +333,10 @@ func (m *Manager) Start(ctx context.Context) error {
 				execution.SessionTraceContext(), execution.TaskID, execution.SessionID, execution.ID,
 			)
 
+			exactAttempt := m.recoveredExactProfileLaunchAttempt(recoveryCtx, execution)
+			execution.remoteInstanceLifecycleMu.Lock()
 			if err := m.executionStore.Add(execution); err != nil {
+				execution.remoteInstanceLifecycleMu.Unlock()
 				// Should not happen at startup — duplicate sessions in the recovery
 				// list signal a DB consistency issue, not a normal race. Log loudly
 				// and skip; the first one to land wins.
@@ -350,6 +353,10 @@ func (m *Manager) Start(ctx context.Context) error {
 				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
 			}
+			if exactAttempt != nil {
+				execution.installExactProfileLaunchAttempt(exactAttempt)
+			}
+			execution.remoteInstanceLifecycleMu.Unlock()
 			m.setRuntimeInterest(execution.SessionID, true)
 			recoveryOutcome.retrackedCount++
 			// AC-EXECUTORS-SURVIVAL-003.1: this execution is durably in the
@@ -832,7 +839,7 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	execution.agentctlLifecycleMu.Unlock()
 
 	// Remove from execution store
-	m.RemoveExecution(execution.ID)
+	m.removeExecutionLocked(execution.ID, execution)
 
 	// Delete the persistence row in lockstep with store removal so we never
 	// leave a phantom executors_running row pointing at a non-existent
@@ -862,12 +869,26 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 // Typical usage: Called by cleanup loops or after successful StopAgent completion.
 // For stale/dead executions, use CleanupStaleExecutionBySessionID instead.
 func (m *Manager) RemoveExecution(executionID string) {
-	m.releaseActivity(executionActivityKey(executionID))
-	if execution, ok := m.executionStore.Get(executionID); ok {
-		m.closeStreamCoalescer(execution)
-		m.cleanupPassthroughMCPConfig(execution)
-		m.setRuntimeInterest(execution.SessionID, false)
+	execution, ok := m.executionStore.Get(executionID)
+	if !ok {
+		m.releaseActivity(executionActivityKey(executionID))
+		return
 	}
+	execution.remoteInstanceLifecycleMu.Lock()
+	defer execution.remoteInstanceLifecycleMu.Unlock()
+	m.removeExecutionLocked(executionID, execution)
+}
+
+// removeExecutionLocked removes the current execution while its lifecycle
+// guard is held. Stop and launch rollback paths already own that guard.
+func (m *Manager) removeExecutionLocked(executionID string, execution *AgentExecution) {
+	if current, ok := m.executionStore.Get(executionID); !ok || current != execution {
+		return
+	}
+	m.releaseActivity(executionActivityKey(executionID))
+	m.closeStreamCoalescer(execution)
+	m.cleanupPassthroughMCPConfig(execution)
+	m.setRuntimeInterest(execution.SessionID, false)
 	m.executionStore.Remove(executionID)
 	m.logger.Debug("removed execution from tracking",
 		zap.String("execution_id", executionID))
