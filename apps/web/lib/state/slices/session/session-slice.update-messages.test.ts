@@ -124,6 +124,35 @@ describe("updateMessages", () => {
   });
 });
 
+it("keeps an acknowledged Git push dismissal when a delayed update replays its original timestamp", () => {
+  const store = makeStore();
+  const dismissedAt = "2026-09-25T10:00:00Z";
+  const dismissed = makeMessage("push-error", "Git push failed", SESSION, {
+    type: "error",
+    updated_at: dismissedAt,
+    metadata: {
+      git_operation_error: true,
+      operation: "push",
+      git_operation_error_dismissed_at: dismissedAt,
+    },
+  });
+  store.getState().setMessages(SESSION, [dismissed]);
+
+  store.getState().updateMessages([
+    makeMessage("push-error", "Git push failed", SESSION, {
+      type: "error",
+      updated_at: dismissed.updated_at,
+      metadata: { git_operation_error: true, operation: "push" },
+    }),
+  ]);
+
+  expect(store.getState().messages.bySession[SESSION][0].metadata).toEqual({
+    git_operation_error: true,
+    operation: "push",
+    git_operation_error_dismissed_at: dismissedAt,
+  });
+});
+
 it("keeps a committed removal marker through stale message events and HTTP snapshots", () => {
   const store = makeStore();
   const original = makeMessage("tool", "Command", SESSION, {

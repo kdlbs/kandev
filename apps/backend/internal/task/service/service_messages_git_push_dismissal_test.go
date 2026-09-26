@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ type gitPushErrorMessageDismisser interface {
 
 type dismissalTrackingMessageRepository struct {
 	repository.MessageRepository
+	mu       sync.Mutex
 	writes   int
 	writeErr error
 	message  *models.Message
@@ -31,11 +33,73 @@ func (r *dismissalTrackingMessageRepository) GetMessage(ctx context.Context, id 
 }
 
 func (r *dismissalTrackingMessageRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
+	r.mu.Lock()
 	r.writes++
-	if r.writeErr != nil {
-		return r.writeErr
+	writeErr := r.writeErr
+	r.mu.Unlock()
+	if writeErr != nil {
+		return writeErr
 	}
 	return r.MessageRepository.UpdateMessage(ctx, message)
+}
+
+func (r *dismissalTrackingMessageRepository) SetMessageMetadataStringIfEmptyWithConversationReceipt(
+	ctx context.Context,
+	messageID, expectedSessionID, key, value string,
+) (*models.Message, *models.ConversationMutationReceipt, bool, error) {
+	r.mu.Lock()
+	writeErr := r.writeErr
+	if writeErr != nil {
+		r.writes++
+		r.mu.Unlock()
+		return nil, nil, false, writeErr
+	}
+	r.mu.Unlock()
+	writer, ok := r.MessageRepository.(messageMetadataFirstWriter)
+	if !ok {
+		return nil, nil, false, errors.New("atomic message metadata updates are unavailable")
+	}
+	message, receipt, changed, err := writer.SetMessageMetadataStringIfEmptyWithConversationReceipt(
+		ctx, messageID, expectedSessionID, key, value,
+	)
+	if changed {
+		r.mu.Lock()
+		r.writes++
+		r.mu.Unlock()
+	}
+	return message, receipt, changed, err
+}
+
+func (r *dismissalTrackingMessageRepository) writeCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.writes
+}
+
+type concurrentDismissalMessageRepository struct {
+	*dismissalTrackingMessageRepository
+	mu           sync.Mutex
+	initialReads int
+	bothRead     chan struct{}
+	release      chan struct{}
+}
+
+func (r *concurrentDismissalMessageRepository) GetMessage(ctx context.Context, id string) (*models.Message, error) {
+	message, err := r.dismissalTrackingMessageRepository.GetMessage(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if dismissedAt, ok := message.Metadata["git_operation_error_dismissed_at"].(string); ok && dismissedAt != "" {
+		return message, nil
+	}
+	r.mu.Lock()
+	r.initialReads++
+	if r.initialReads == 2 {
+		close(r.bothRead)
+	}
+	r.mu.Unlock()
+	<-r.release
+	return message, nil
 }
 
 func TestDismissGitPushErrorMessage(t *testing.T) {
@@ -252,5 +316,58 @@ func TestDismissGitPushErrorMessageRejectsNilMetadataBeforeWrite(t *testing.T) {
 	}
 	if tracking.writes != 0 || len(eventBus.GetPublishedEvents()) != 0 {
 		t.Fatalf("nil metadata writes/events = %d/%d, want 0/0", tracking.writes, len(eventBus.GetPublishedEvents()))
+	}
+}
+
+func TestDismissGitPushErrorMessageSerializesConcurrentFirstWrite(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-concurrent-dismissal")
+	message := &models.Message{
+		ID: "concurrent-push-failure", TaskID: "task-123", TaskSessionID: sessionID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Type: models.MessageTypeError,
+		Metadata: map[string]any{"git_operation_error": true, "operation": "push"},
+	}
+	if err := repo.CreateMessage(ctx, message); err != nil {
+		t.Fatal(err)
+	}
+	tracking := &dismissalTrackingMessageRepository{MessageRepository: repo}
+	concurrent := &concurrentDismissalMessageRepository{
+		dismissalTrackingMessageRepository: tracking,
+		bothRead:                           make(chan struct{}),
+		release:                            make(chan struct{}),
+	}
+	svc.messages = concurrent
+	eventBus.ClearEvents()
+
+	type result struct {
+		dismissedAt string
+		err         error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			dismissedAt, err := svc.DismissGitPushErrorMessage(ctx, message.ID)
+			results <- result{dismissedAt: dismissedAt, err: err}
+		}()
+	}
+	select {
+	case <-concurrent.bothRead:
+		close(concurrent.release)
+	case <-time.After(time.Second):
+		t.Fatal("concurrent dismissals did not both read the undismissed row")
+	}
+	first := <-results
+	second := <-results
+	if first.err != nil || second.err != nil {
+		t.Fatalf("concurrent dismissal errors = %v, %v", first.err, second.err)
+	}
+	if first.dismissedAt == "" || first.dismissedAt != second.dismissedAt {
+		t.Fatalf("concurrent dismissal timestamps = %q, %q; want one shared timestamp", first.dismissedAt, second.dismissedAt)
+	}
+	if tracking.writeCount() != 1 || countEvents(eventBus.GetPublishedEvents(), events.MessageUpdated) != 1 {
+		t.Fatalf("concurrent dismissal writes/events = %d/%d, want 1/1", tracking.writeCount(), countEvents(eventBus.GetPublishedEvents(), events.MessageUpdated))
 	}
 }

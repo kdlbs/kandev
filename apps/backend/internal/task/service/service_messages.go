@@ -34,6 +34,16 @@ var ErrNotGitPushErrorMessage = errors.New("message is not a Git push error")
 
 var agentPlanMessageIDNamespace = uuid.MustParse("138966de-88bc-49c0-b65f-cbfbac17f729")
 
+type messageMetadataFirstWriter interface {
+	SetMessageMetadataStringIfEmptyWithConversationReceipt(
+		context.Context,
+		string,
+		string,
+		string,
+		string,
+	) (*models.Message, *models.ConversationMutationReceipt, bool, error)
+}
+
 type planCommentMessageWriter interface {
 	CreateMessageWithPlanComments(
 		context.Context,
@@ -1017,10 +1027,27 @@ func (s *Service) DismissGitPushErrorMessage(ctx context.Context, messageID stri
 		return dismissedAt, nil
 	}
 
-	dismissedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	message.Metadata["git_operation_error_dismissed_at"] = dismissedAt
-	if err := s.UpdateMessage(ctx, message); err != nil {
+	writer, ok := s.messages.(messageMetadataFirstWriter)
+	if !ok {
+		return "", errors.New("atomic message metadata updates are unavailable")
+	}
+	candidate := time.Now().UTC().Format(time.RFC3339Nano)
+	stored, receipt, changed, err := writer.SetMessageMetadataStringIfEmptyWithConversationReceipt(
+		ctx,
+		message.ID,
+		message.TaskSessionID,
+		"git_operation_error_dismissed_at",
+		candidate,
+	)
+	if err != nil {
 		return "", err
+	}
+	dismissedAt, ok := stored.Metadata["git_operation_error_dismissed_at"].(string)
+	if !ok || dismissedAt == "" {
+		return "", errors.New("dismissed message is missing its acknowledgment timestamp")
+	}
+	if changed {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, stored, receipt)
 	}
 	return dismissedAt, nil
 }

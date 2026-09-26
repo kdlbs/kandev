@@ -244,13 +244,7 @@ function SettledFailureMessage({
             actions: renderedMetadata?.actions,
             taskId,
             sessionId,
-            extraContent: (
-              <GitPushErrorDismissAction
-                messageId={comment.id}
-                type={comment.type}
-                metadata={comment.metadata}
-              />
-            ),
+            extraContent: <GitPushErrorDismissAction message={comment} />,
             isRecoveryMessage: metadata?.recovery_actions === true,
             onRecoveryRequested,
           })}
@@ -284,12 +278,15 @@ function renderSettledActionButtons({
   const hasSessionRecoveryAction = actions.some((action) => sessionRecoveryAction(action));
   if (hasSessionRecoveryAction && taskId && sessionId) {
     return (
-      <SessionRecoveryActionButtons
-        actions={actions}
-        taskId={taskId}
-        sessionId={sessionId}
-        onRecoveryRequested={onRecoveryRequested}
-      />
+      <>
+        <SessionRecoveryActionButtons
+          actions={actions}
+          taskId={taskId}
+          sessionId={sessionId}
+          onRecoveryRequested={onRecoveryRequested}
+        />
+        {extraContent}
+      </>
     );
   }
   return (

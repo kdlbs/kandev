@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- recovery action variants share one rendering harness. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { StoreApi } from "zustand";
 import { ActionMessage } from "./action-message";
 
@@ -50,6 +50,9 @@ const STALL_CANCEL_TEST_ID = "stall-cancel-turn-button";
 const TEST_SESSION_ID = "sess-1";
 const TEST_TASK_ID = "task-1";
 const SESSION_RECOVER_METHOD = "session.recover";
+const LEGACY_PUSH_ERROR_ID = "legacy-push-error";
+const GIT_PUSH_DISMISS_TEST_ID = "git-push-error-dismiss-button";
+const OTHER_SESSION_FAILURE_CONTENT = "Another session Git push failed";
 
 /** Builds a system status Message describing a transient provider retry, with an optional Cancel action. */
 function retryMessage(overrides: Partial<Message> = {}): Message {
@@ -183,7 +186,7 @@ function renderAction(
 
 function legacyGitPushError(): Message {
   return retryMessage({
-    id: "legacy-push-error",
+    id: LEGACY_PUSH_ERROR_ID,
     type: "error",
     content: "Git push failed: remote rejected the branch",
     metadata: {
@@ -202,12 +205,65 @@ function legacyGitPushError(): Message {
   } as Partial<Message>);
 }
 
+function StoredMessageRenderer({
+  messageId,
+  onStore,
+}: {
+  messageId: string;
+  onStore: (store: StoreApi<AppState>) => void;
+}) {
+  const store = useAppStoreApi();
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const message = useAppStore((state) =>
+    state.messages.bySession[activeSessionId ?? TEST_SESSION_ID]?.find(
+      (entry) => entry.id === messageId,
+    ),
+  );
+  onStore(store);
+  return message ? <MessageRenderer comment={message} isTaskDescription={false} /> : null;
+}
+
+function renderStoredMessage(message: Message, otherSessionMessage?: Message) {
+  let store!: StoreApi<AppState>;
+  const initialState: Partial<AppState> = {
+    taskSessions: {
+      items: {
+        [TEST_SESSION_ID]: { state: "WAITING_FOR_INPUT" } as TaskSession,
+      },
+    },
+    messages: {
+      bySession: {
+        [message.session_id]: [message],
+        ...(otherSessionMessage ? { [otherSessionMessage.session_id]: [otherSessionMessage] } : {}),
+      },
+      metaBySession: {},
+    },
+    turns: {
+      bySession: {},
+      activeBySession: {},
+      loadedBySession: {},
+      reconcileEpochBySession: {},
+      settledBoundaryBySession: {},
+    },
+  };
+  const view = render(
+    <StateProvider initialState={initialState}>
+      <StoredMessageRenderer messageId={message.id} onStore={(nextStore) => (store = nextStore)} />
+    </StateProvider>,
+  );
+  act(() => store.getState().setActiveSession(TEST_TASK_ID, message.session_id));
+  return { ...view, store };
+}
+
 describe("ActionMessage Git push failure dismissal", () => {
-  it("renders Dismiss for legacy push failures and retries a failed save", async () => {
-    requestMock.mockRejectedValueOnce(new Error("write failed")).mockResolvedValueOnce({});
+  it("retries a failed save and hides from the persisted response when the update event is missed", async () => {
+    requestMock.mockRejectedValueOnce(new Error("write failed")).mockResolvedValueOnce({
+      message_id: LEGACY_PUSH_ERROR_ID,
+      dismissed_at: "2026-09-25T10:00:00Z",
+    });
     const message = legacyGitPushError();
-    const view = renderAction(message, "WAITING_FOR_INPUT");
-    const dismiss = screen.getByTestId("git-push-error-dismiss-button");
+    const { container } = renderStoredMessage(message);
+    const dismiss = screen.getByTestId(GIT_PUSH_DISMISS_TEST_ID);
 
     expect(screen.getByTestId(GIT_PUSH_FIX_TEST_ID).hasAttribute("disabled")).toBe(false);
     expect(dismiss.hasAttribute("disabled")).toBe(false);
@@ -219,25 +275,87 @@ describe("ActionMessage Git push failure dismissal", () => {
     await act(async () => fireEvent.click(dismiss));
     await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
     expect(requestMock).toHaveBeenNthCalledWith(1, "message.dismiss_git_push_error", {
-      message_id: "legacy-push-error",
+      message_id: LEGACY_PUSH_ERROR_ID,
     });
     expect(requestMock).toHaveBeenNthCalledWith(2, "message.dismiss_git_push_error", {
-      message_id: "legacy-push-error",
+      message_id: LEGACY_PUSH_ERROR_ID,
+    });
+    await waitFor(() => expect(container.firstChild).toBeNull());
+  });
+
+  it("applies an in-flight dismissal to its original session after switching sessions", async () => {
+    const message = legacyGitPushError();
+    const otherSessionId = "sess-2";
+    const otherSessionMessage = {
+      ...message,
+      session_id: toSessionId(otherSessionId),
+      content: OTHER_SESSION_FAILURE_CONTENT,
+    };
+    let resolveDismissal!: (response: { message_id: string; dismissed_at: string }) => void;
+    requestMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveDismissal = resolve;
+        }),
+    );
+    const { container, store } = renderStoredMessage(message, otherSessionMessage);
+
+    await act(async () => fireEvent.click(screen.getByTestId(GIT_PUSH_DISMISS_TEST_ID)));
+    act(() => store.getState().setActiveSession(TEST_TASK_ID, otherSessionId));
+    expect(screen.getByText(OTHER_SESSION_FAILURE_CONTENT)).toBeTruthy();
+
+    await act(async () => {
+      resolveDismissal({
+        message_id: message.id,
+        dismissed_at: "2026-09-25T10:00:00Z",
+      });
+      await Promise.resolve();
     });
 
-    view.rerender(
-      <MessageRenderer
-        comment={{
-          ...message,
-          metadata: {
-            ...message.metadata,
-            git_operation_error_dismissed_at: "2026-09-25T10:00:00Z",
-          },
-        }}
-        isTaskDescription={false}
-      />,
+    expect(
+      store.getState().messages.bySession[TEST_SESSION_ID]?.find((entry) => entry.id === message.id)
+        ?.metadata?.git_operation_error_dismissed_at,
+    ).toBe("2026-09-25T10:00:00Z");
+    expect(
+      store.getState().messages.bySession[otherSessionId]?.find((entry) => entry.id === message.id)
+        ?.metadata?.git_operation_error_dismissed_at,
+    ).toBeUndefined();
+    expect(container.firstChild).not.toBeNull();
+    expect(screen.getByText(OTHER_SESSION_FAILURE_CONTENT)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage recovery and dismissal actions", () => {
+  it("keeps Dismiss alongside a session recovery action", () => {
+    const message = legacyGitPushError();
+    renderAction(
+      {
+        ...message,
+        metadata: {
+          ...message.metadata,
+          recovery_actions: true,
+          actions: [
+            {
+              type: "ws_request",
+              label: RESUME_LABEL,
+              test_id: RESUME_TEST_ID,
+              params: {
+                method: SESSION_RECOVER_METHOD,
+                payload: {
+                  task_id: TEST_TASK_ID,
+                  session_id: TEST_SESSION_ID,
+                  action: "resume",
+                },
+              },
+            },
+          ],
+        },
+      },
+      "WAITING_FOR_INPUT",
     );
-    expect(view.container.firstChild).toBeNull();
+
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(GIT_PUSH_DISMISS_TEST_ID)).toBeTruthy();
   });
 
   it.each([
@@ -253,7 +371,7 @@ describe("ActionMessage Git push failure dismissal", () => {
       "WAITING_FOR_INPUT",
     );
 
-    expect(screen.queryByTestId("git-push-error-dismiss-button")).toBeNull();
+    expect(screen.queryByTestId(GIT_PUSH_DISMISS_TEST_ID)).toBeNull();
     expect(screen.getByTestId(GIT_PUSH_FIX_TEST_ID)).toBeTruthy();
   });
 
@@ -261,7 +379,7 @@ describe("ActionMessage Git push failure dismissal", () => {
     const message = legacyGitPushError();
     renderAction({ ...message, type: "status" }, "WAITING_FOR_INPUT");
 
-    expect(screen.queryByTestId("git-push-error-dismiss-button")).toBeNull();
+    expect(screen.queryByTestId(GIT_PUSH_DISMISS_TEST_ID)).toBeNull();
     expect(screen.getByTestId(GIT_PUSH_FIX_TEST_ID)).toBeTruthy();
   });
 });

@@ -33,6 +33,26 @@ func (r *dismissalWSMessageRepository) UpdateMessage(_ context.Context, message 
 	return nil
 }
 
+func (r *dismissalWSMessageRepository) SetMessageMetadataStringIfEmptyWithConversationReceipt(
+	_ context.Context,
+	messageID, expectedSessionID, key, value string,
+) (*models.Message, *models.ConversationMutationReceipt, bool, error) {
+	if r.updateErr != nil {
+		return nil, nil, false, r.updateErr
+	}
+	if r.message == nil || r.message.ID != messageID || r.message.TaskSessionID != expectedSessionID {
+		return nil, nil, false, errors.New("message not found")
+	}
+	if existing, ok := r.message.Metadata[key].(string); ok && existing != "" {
+		return r.message, nil, false, nil
+	}
+	if r.message.Metadata == nil {
+		r.message.Metadata = map[string]any{}
+	}
+	r.message.Metadata[key] = value
+	return r.message, nil, true, nil
+}
+
 func dispatchGitPushDismissal(t *testing.T, repo *dismissalWSMessageRepository, ctx context.Context, payload any) *ws.Message {
 	t.Helper()
 	log := newTestLogger(t)
