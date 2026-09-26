@@ -127,6 +127,9 @@ export interface IntegrationSettingsRegistration {
  * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage,
  * presentation }`). On phones, `presentation` is "mobile": contributions
  * live in the listing topbar menu with 44px touch targets and 16px SVG icons.
+ * When task controls are present, each plugin's chat-top-bar registrations
+ * replace its main-top-bar registrations in that menu. Listings and archived
+ * tasks retain workspace controls; sidebar workspace actions stay independent.
  * Slots retain ownership of their controls and disclosure state; arbitrary
  * interactions do not dismiss the host menu. Desktop sizing stays unchanged.
  * "app-status-bar-left" / "app-status-bar-right" (receives
@@ -360,8 +363,16 @@ export type PluginTaskMenuContext = PluginSDK.PluginTaskMenuContext;
  * "edit" nests the item inside the card's `Edit` submenu; group "primary"
  * renders it as a flat, top-level menu item after the movement group and
  * before the `Archive`/`Delete` removal group.
+ *
+ * An action that declares `items` becomes a submenu: `label` is its
+ * (unselectable) trigger, the returned children are its entries, and `run`
+ * remains the fallback for a host that predates the field and for a build
+ * whose `items` yields nothing usable.
  */
 export type TaskMenuActionRegistration = PluginSDK.TaskMenuActionRegistration;
+
+/** One child of a `TaskMenuActionRegistration` that declares `items`. */
+export type TaskMenuSubItemRegistration = PluginSDK.TaskMenuSubItemRegistration;
 
 /** Read-only context passed to `TaskFilterRegistration.matches`. */
 export type PluginTaskFilterContext = Parameters<PluginSDK.TaskFilterRegistration["matches"]>[0];

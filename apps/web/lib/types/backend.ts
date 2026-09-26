@@ -377,6 +377,7 @@ export type AgentProfilePayload = {
   dangerously_skip_permissions: boolean;
   allow_indexing: boolean;
   cli_passthrough?: boolean;
+  cursor_mcp_auth_enabled?: boolean;
   plan: string;
   created_at?: string;
   updated_at?: string;
@@ -433,6 +434,8 @@ export type TaskStatusSummaryUpdatedPayload = {
 
 export type CanvasLifecyclePayload = {
   type?: string;
+  title?: string;
+  updated_at?: string;
   canvas_id: string;
   plugin_instance_id?: string;
   workspace_id?: string;
@@ -533,6 +536,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "workflow.step.deleted": BackendMessage<"workflow.step.deleted", WorkflowStepEventPayload>;
 
     "canvas.created": BackendMessage<"canvas.created", CanvasLifecyclePayload>;
+    "canvas.updated": BackendMessage<"canvas.updated", CanvasLifecyclePayload>;
     "canvas.release.activated": BackendMessage<"canvas.release.activated", CanvasLifecyclePayload>;
     "canvas.release.permission_required": BackendMessage<
       "canvas.release.permission_required",

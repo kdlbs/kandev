@@ -279,6 +279,12 @@ type TaskActivityRepository interface {
 	LoadTaskLastActivity(ctx context.Context, taskIDs []string) (map[string]time.Time, error)
 }
 
+// PRWatchTaskActivityRepository loads the bounded activity projection for a
+// bulk set of task IDs.
+type PRWatchTaskActivityRepository interface {
+	LoadPRWatchTaskActivity(ctx context.Context, taskIDs []string) (map[string]models.PRWatchTaskActivity, error)
+}
+
 // TaskRepoRepository handles the task↔repository junction table (models.TaskRepository rows).
 // Named TaskRepoRepository to reduce reader confusion with the TaskRepository sub-interface above.
 type TaskRepoRepository interface {
@@ -290,10 +296,11 @@ type TaskRepoRepository interface {
 	// UpdateTaskRepositoryComparisonTarget atomically replaces or removes the
 	// provider-owned comparison target on one exact attachment. When target is
 	// nil, expected limits removal to the same provider change when supplied.
-	UpdateTaskRepositoryComparisonTarget(ctx context.Context, id string, target *models.ComparisonTarget, expected *models.ComparisonTarget) (*models.TaskRepository, bool, error)
-	// UpdateTaskRepositoryBaseBranchAndClearComparisonTarget changes the manual
-	// base branch and clears any provider-owned comparison target in one write.
-	UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx context.Context, id, baseBranch string) (*models.TaskRepository, bool, error)
+	UpdateTaskRepositoryComparisonTarget(ctx context.Context, id string, target *models.ComparisonTarget, expected *models.ComparisonTarget, clearManualOverride bool) (*models.TaskRepository, bool, error)
+	// UpdateTaskRepositoryBaseBranchAndClearComparisonTarget updates the base
+	// branch and clears provider-owned target metadata in one write. A manual
+	// selection also records that launch-time PR refresh must preserve it.
+	UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx context.Context, id, baseBranch string, manualSelection bool) (*models.TaskRepository, bool, error)
 	DeleteTaskRepository(ctx context.Context, id string) error
 	DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)

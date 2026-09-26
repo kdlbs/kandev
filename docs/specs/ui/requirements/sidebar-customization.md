@@ -58,6 +58,7 @@ A shortcut is a reference to an existing destination or supported host action.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-005.2:** All editing and navigation operations shall work without dragging, hovering, or long pressing. Touch targets shall measure at least 44 pixels.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-005.3:** Phone surfaces shall fit the viewport, contain long-content scrolling, and clear safe areas. Desktop and phone shall share layout data without persisting responsive overflow choices.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-005.4:** Controls shall have accessible names, keyboard operation, visible focus, and predictable focus return. New interface copy shall support every shipped locale.
+- **AC-UI-SIDEBAR-CUSTOMIZATION-005.5:** Saving or resetting a layout shall preserve the phone menu hierarchy: visible Home and quick actions, required task/local navigation, then customizable workspace tools and shortcut groups. Workspace tools retain their saved relative order and visibility. Built-in Automations, Canvases, and Integrations shall use labelled disclosures with visible expansion cues and labelled destinations; integration and automation setup remain reachable when empty. The Tasks heading retains the create-task action in regular workspaces, without a duplicate built-in New Task row. Office keeps its existing creation entry. Phone composition shall not rewrite the saved desktop order.
 
 ## Scope boundaries
 
@@ -67,9 +68,12 @@ buttons, new Slack behavior, Run automation actions, arbitrary URLs/scripts,
 shared team layouts, and task-list filtering changes are excluded.
 Office-only sections keep their existing composition in this version. Common
 Home, New Task, plugin links, and shortcut groups remain customizable in Office.
-Required inbox entries and the Tasks region remain fixed. Shortcut groups belong
-above that region. The editor identifies these fixed entries.
+Required inbox entries and the Tasks region remain fixed. Desktop shortcut groups
+belong above that region; phone groups follow task navigation. The editor identifies
+these fixed entries. Phone composition follows the
+[unified mobile navigation contract](unified-mobile-navigation.md).
 
 ## Implementation plans
 
 - [Sidebar customization](../../../plans/sidebar-customization/plan.md)
+- [Mobile saved navigation](../../../plans/mobile-saved-navigation/plan.md)

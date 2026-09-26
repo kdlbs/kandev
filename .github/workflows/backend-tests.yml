@@ -798,6 +798,9 @@ jobs:
           -run '^(TestExplicitLocalRepositoryWindowsPathSemantics|TestListDirectory.*|TestDriveRootsFromMask|TestSplitAbsForRoot)$'
           ./internal/task/service
 
+      - name: Test Cursor project slug path normalization
+        run: go test -race -v ./internal/agent/mcpconfig -run '^TestDeriveCursorProjectSlug$'
+
       # Pure GOOS-branch logic (no syscalls), but it must actually observe
       # Windows to prove the unavailable branch, not just compile under it.
       - name: Test Windows agent-survival flag availability

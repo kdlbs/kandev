@@ -1,15 +1,26 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import { useEffect } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { createElement, type ReactNode, useEffect } from "react";
+import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
-import { TaskLoadErrorState } from "./task-page-content";
+import * as api from "@/lib/api";
+import { taskId, workflowId, workspaceId, type Task } from "@/lib/types/http";
+import { TaskLoadErrorState, useTaskDetails } from "./task-page-content";
 import { TaskRemovalBoundary } from "./task-removal-boundary";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const TASK_A = "task-a";
 const TASK_B = "task-b";
 const REMOVAL_STATUS_TEST_ID = "task-removal-status";
+
+function createStateWrapper(initialState: unknown) {
+  return function StateTestWrapper({ children }: { children: ReactNode }) {
+    return createElement(StateProvider, { initialState: initialState as never, children });
+  };
+}
 
 function renderErrorState(activeId: string | null) {
   render(
@@ -34,6 +45,68 @@ describe("TaskLoadErrorState", () => {
     expect(screen.getByTestId("task-unavailable-overview-link").getAttribute("href")).toBe(
       "/?home=overview",
     );
+  });
+});
+
+describe("useTaskDetails reconnect refresh", () => {
+  it("reloads task placement after the websocket reconnects", async () => {
+    const initialTask = {
+      id: taskId(TASK_A),
+      title: "Workflow migration task",
+      description: "Task details",
+      workflow_id: workflowId("workflow-source"),
+      workflow_step_id: "step-source",
+      position: 0,
+      state: "TODO",
+      workspace_id: workspaceId("workspace-1"),
+      priority: "medium",
+      repositories: [],
+      created_at: "2026-07-18T00:00:00Z",
+      updated_at: "2026-07-18T00:00:00Z",
+    } as Task;
+    const movedTask = {
+      ...initialTask,
+      workflow_id: workflowId("workflow-destination"),
+      workflow_step_id: "step-analysis",
+      updated_at: "2026-07-19T00:00:00Z",
+    };
+    const fetchTask = vi.spyOn(api, "fetchTask").mockResolvedValue(movedTask);
+    const wrapper = createStateWrapper({
+      tasks: { activeTaskId: TASK_A },
+      connection: { status: "disconnected" },
+      kanban: {
+        tasks: [
+          {
+            id: TASK_A,
+            title: initialTask.title,
+            description: initialTask.description,
+            workflowId: "workflow-source",
+            workflowStepId: "step-source",
+            position: initialTask.position,
+            state: initialTask.state,
+            updatedAt: initialTask.updated_at,
+          },
+        ],
+      } as never,
+    });
+    const { result } = renderHook(
+      () => ({
+        details: useTaskDetails(TASK_A, initialTask),
+        store: useAppStoreApi(),
+      }),
+      { wrapper },
+    );
+
+    expect(fetchTask).not.toHaveBeenCalled();
+    act(() => result.current.store.getState().setConnectionStatus("connected"));
+
+    await waitFor(() => expect(fetchTask).toHaveBeenCalledWith(TASK_A, { cache: "no-store" }));
+    await waitFor(() => {
+      expect(result.current.details.task).toMatchObject({
+        workflow_id: "workflow-destination",
+        workflow_step_id: "step-analysis",
+      });
+    });
   });
 });
 

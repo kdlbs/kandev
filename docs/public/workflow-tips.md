@@ -145,6 +145,19 @@ Workflow-level settings include the name and default agent profile. Each step ca
 | WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A manual move into a full target succeeds and queues in that target. |
 | Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
 
+### Recover from a context reset failure
+
+When **Reset agent context** starts a fresh ACP session, Kandev restores the
+selected model, permission mode, and provider options before the next automatic
+prompt. If the provider rejects a setting, reset fails, or the request times
+out, Kandev leaves the session waiting for input and does not send that prompt.
+The conversation shows a previous-agent-error notice with the reset cause.
+
+To recover, delete the affected conversation from its session actions, then
+create a new session. The task workspace and files remain available. See
+[Sessions and Review](sessions-and-review.md) for the session actions and mobile
+session picker.
+
 The Kanban column shows the admitted count and limit, followed by a **Queued**
 section when overflow exists. The task sidebar shows a queue icon for each
 queued task; hover or focus gives its position in the destination queue.
@@ -228,6 +241,7 @@ A step's Prompt field accepts `@name` references to [saved prompts](developer-to
 
 - The reference is resolved when the step prompt runs, not when it is saved. Editing the saved prompt's content later automatically changes what every step referencing it sends next time: there is nothing to update on the step itself.
 - The `@name` mention stays visible in the prompt/chat. Kandev attaches the referenced prompt's content as hidden context for the agent; it is not shown as part of the visible conversation.
+- Workflow entries keep that hidden context when they start a new profile session, reset the agent context, or recover with a fresh runtime. The saved message and agent prompt retain the same definition once for that entry.
 - `{{task_prompt}}` is only interpolated in the step prompt field itself. If a referenced saved prompt's content contains `{{task_prompt}}`, it is **not** expanded; it is sent to the agent as literal text.
 
 The same `@name` syntax and resolution apply to a GitHub Review Watch's prompt field. See [Integrations](integrations.md#configure-and-use-the-workspace).

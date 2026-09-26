@@ -48,6 +48,9 @@ type AgentExecution struct {
 	SessionID         string
 	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
 	WorkspaceID       string
+	// ExecutorType preserves launch locality for features that must only access
+	// the backend user's host filesystem. Empty means locality is unknown.
+	ExecutorType string
 	// AgentProfileID is the concrete profile used by the running CLI. The
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.
@@ -1154,6 +1157,7 @@ type RepoLaunchSpec struct {
 	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch     string
 	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase    *models.PRBase
 	RemoteContribution *models.RemoteContribution
 	CheckoutOptions    *models.RepositoryCheckoutOptions
 	WorktreeID         string // Existing worktree ID to reuse (skip creation if set)
@@ -1202,6 +1206,8 @@ type WorkspaceRepositorySpec struct {
 	BaseBranch             string
 	DefaultBranch          string
 	CheckoutBranch         string
+	PRNumber               int
+	QualifiedPRBase        *models.PRBase
 	ComparisonTarget       *models.ComparisonTarget
 	WorktreeID             string
 	WorktreeBranchPrefix   string
@@ -1319,6 +1325,7 @@ type LaunchRequest struct {
 	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase        *models.PRBase
 	RemoteContribution     *models.RemoteContribution
 	CheckoutOptions        *models.RepositoryCheckoutOptions
 	ComparisonTarget       *models.ComparisonTarget
@@ -1375,6 +1382,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		DefaultBranch:              r.DefaultBranch,
 		CheckoutBranch:             r.CheckoutBranch,
 		PRNumber:                   r.PRNumber,
+		QualifiedPRBase:            r.QualifiedPRBase,
 		RemoteContribution:         r.RemoteContribution,
 		CheckoutOptions:            r.CheckoutOptions,
 		ComparisonTarget:           r.ComparisonTarget,
@@ -1438,11 +1446,12 @@ type AgentProfileInfo struct {
 	AutoFallback bool
 	// RequireExactModel makes the configured model an explicit identity
 	// requirement. False preserves compatible pre-PR behavior.
-	RequireExactModel   bool
-	AllowIndexing       bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
-	CLIPassthrough      bool
-	NativeSessionResume bool // Agent supports ACP session/load for resume
-	SupportsMCP         bool
+	RequireExactModel    bool
+	AllowIndexing        bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
+	CLIPassthrough       bool
+	CursorMCPAuthEnabled bool
+	NativeSessionResume  bool // Agent supports ACP session/load for resume
+	SupportsMCP          bool
 	// CLIFlags is the resolved user-configurable list of CLI flags for this
 	// profile. Passed verbatim to cliflags.Resolve at launch time.
 	CLIFlags []settingsmodels.CLIFlag

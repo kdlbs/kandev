@@ -5533,8 +5533,9 @@ func lifecycleReservationFromMetadataJSON(metadataJSON string) (string, bool, er
 func (r *sqliteRepository) transferSessionOwned(
 	ctx context.Context,
 	oldSessionID, newSessionID, operationID string,
+	source, destination *QueueSessionIdentity,
 ) error {
-	return r.transferSessionOwnedTx(ctx, oldSessionID, newSessionID, operationID)
+	return r.transferSessionOwnedTx(ctx, oldSessionID, newSessionID, operationID, source, destination)
 }
 
 func (r *sqliteRepository) beginAuthorizedSessionTransferTx(
@@ -5647,30 +5648,32 @@ func (r *sqliteRepository) transferSessionQueueRowsTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	oldSessionID, newSessionID string,
-) error {
+) (int64, error) {
 	var destinationMax sql.NullInt64
 	if err := tx.GetContext(ctx, &destinationMax, r.db.Rebind(`
 		SELECT MAX(position) FROM queued_messages WHERE session_id = ?
 	`), newSessionID); err != nil {
-		return fmt.Errorf("transfer max: %w", err)
+		return 0, fmt.Errorf("transfer max: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE queued_messages
 		SET session_id = ?, position = position + ?
 		WHERE session_id = ?
 	`), newSessionID, destinationMax.Int64, oldSessionID); err != nil {
-		return fmt.Errorf("transfer queued: %w", err)
+		return 0, fmt.Errorf("transfer queued: %w", err)
 	}
 	var transferredMax sql.NullInt64
 	if err := tx.GetContext(ctx, &transferredMax, r.db.Rebind(`
 		SELECT MAX(position) FROM queued_messages WHERE session_id = ?
 	`), newSessionID); err != nil {
-		return fmt.Errorf("transfer destination max after move: %w", err)
+		return 0, fmt.Errorf("transfer destination max after move: %w", err)
 	}
 	if transferredMax.Valid {
-		return r.bumpQueuePositionTx(ctx, tx, newSessionID, transferredMax.Int64)
+		if err := r.bumpQueuePositionTx(ctx, tx, newSessionID, transferredMax.Int64); err != nil {
+			return 0, err
+		}
 	}
-	return nil
+	return destinationMax.Int64, nil
 }
 
 func (r *sqliteRepository) transferSessionStateTx(
@@ -5749,6 +5752,13 @@ func (r *sqliteRepository) transferSession(
 	if err := r.lockAndValidateTransferSessionsTx(ctx, tx, source, destination, first, second); err != nil {
 		return err
 	}
+	sourceGeneration := int64(0)
+	if source != nil {
+		sourceGeneration, err = r.getSendNowGenerationTx(ctx, tx, oldSessionID)
+		if err != nil {
+			return err
+		}
+	}
 	if oldSessionID == newSessionID {
 		return tx.Commit()
 	}
@@ -5774,7 +5784,8 @@ func (r *sqliteRepository) transferSession(
 	if err := r.deleteEditLeasesForTransferTx(ctx, tx, oldSessionID, newSessionID); err != nil {
 		return err
 	}
-	if err := r.transferSessionQueueRowsTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+	queuePositionOffset, err := r.transferSessionQueueRowsTx(ctx, tx, oldSessionID, newSessionID)
+	if err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM pending_moves WHERE session_id = ?`), newSessionID); err != nil {
@@ -5795,7 +5806,9 @@ func (r *sqliteRepository) transferSession(
 	if err := r.bumpSendNowGenerationTx(ctx, tx, newSessionID); err != nil {
 		return err
 	}
-	if err := r.transferPendingSendNowClaimTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+	if err := r.transferPendingSendNowClaimTx(
+		ctx, tx, oldSessionID, newSessionID, source, destination, sourceGeneration, queuePositionOffset,
+	); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5804,6 +5817,7 @@ func (r *sqliteRepository) transferSession(
 func (r *sqliteRepository) transferSessionOwnedTx(
 	ctx context.Context,
 	oldSessionID, newSessionID, operationID string,
+	source, destination *QueueSessionIdentity,
 ) error {
 	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
 		return err
@@ -5838,6 +5852,23 @@ func (r *sqliteRepository) transferSessionOwnedTx(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if source != nil {
+		if err := r.validateSessionIdentityTx(ctx, tx, *source); err != nil {
+			return err
+		}
+	}
+	if destination != nil {
+		if err := r.validateSessionIdentityTx(ctx, tx, *destination); err != nil {
+			return err
+		}
+	}
+	sourceGeneration := int64(0)
+	if source != nil {
+		sourceGeneration, err = r.getSendNowGenerationTx(ctx, tx, oldSessionID)
+		if err != nil {
+			return err
+		}
+	}
 	if oldSessionID == newSessionID {
 		return commitAuthorizedSessionTransferTx(
 			ctx, tx, r.db, oldSessionID, newSessionID, operationID,
@@ -5849,13 +5880,16 @@ func (r *sqliteRepository) transferSessionOwnedTx(
 	if err := r.deleteEditLeasesForTransferTx(ctx, tx, oldSessionID, newSessionID); err != nil {
 		return err
 	}
-	if err := r.transferSessionQueueRowsTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+	queuePositionOffset, err := r.transferSessionQueueRowsTx(ctx, tx, oldSessionID, newSessionID)
+	if err != nil {
 		return err
 	}
 	if err := r.transferSessionStateTx(ctx, tx, oldSessionID, newSessionID); err != nil {
 		return err
 	}
-	if err := r.transferPendingSendNowClaimTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+	if err := r.transferPendingSendNowClaimTx(
+		ctx, tx, oldSessionID, newSessionID, source, destination, sourceGeneration, queuePositionOffset,
+	); err != nil {
 		return err
 	}
 	return commitAuthorizedSessionTransferTx(

@@ -89,7 +89,6 @@
   "selectRepository": "Selecionar repositório",
   "selectTask": "Selecionar a tarefa {{title}}",
   "selectWorkflow": "Selecionar fluxo de trabalho",
-  "sendToWorkflow": "Enviar para o fluxo de trabalho",
   "selectedFilterCount_one": "{{label}}: {{count}} selecionado",
   "selectedFilterCount_other": "{{label}}: {{count}} selecionados",
   "sentryIssue": "Issue do Sentry",
@@ -129,5 +128,10 @@
   "boardSort": "Ordenação do quadro",
   "boardSortCreatedDesc": "Mais recentes primeiro",
   "boardSortPriorityDesc": "Prioridade",
-  "priorityFilter": "Filtro de prioridade"
+  "priorityFilter": "Filtro de prioridade",
+  "bulkSelected_one": "{{count}} selecionada",
+  "bulkSelected_other": "{{count}} selecionadas",
+  "bulkActions": "Ações",
+  "selectTasks": "Selecionar tarefas",
+  "cancelTaskSelection": "Cancelar seleção"
 }

@@ -1018,6 +1018,35 @@
           );
         },
       });
+      registry.registerTaskMenuAction({
+        id: "task-shortcuts",
+        label: "Task shortcuts",
+        group: "primary",
+        items: function () {
+          return [
+            {
+              id: "record-presentation",
+              label: "Record menu presentation",
+              run: function (childContext) {
+                return host.storage.set(
+                  "task",
+                  childContext.taskId,
+                  "primary-submenu-presentation",
+                  childContext.presentation,
+                );
+              },
+            },
+          ];
+        },
+        run: function (context) {
+          return host.storage.set(
+            "task",
+            context.taskId,
+            "primary-submenu-presentation",
+            context.presentation,
+          );
+        },
+      });
 
       registry.registerKeybinding("open-demo", function () {
         function DemoModalContent() {

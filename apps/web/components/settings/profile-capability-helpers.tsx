@@ -1,4 +1,5 @@
 import { Trans, useTranslation } from "react-i18next";
+import { useEffect } from "react";
 import { IconTerminal2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -9,8 +10,40 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@kandev/ui/dialog";
-import type { CommandEntry, ModeEntry } from "@/lib/types/http";
+import { useProfileModelCapabilities } from "@/hooks/domains/settings/use-profile-model-capabilities";
+import { modelConfigOptions } from "@/components/settings/profile-model-config";
+import type { CommandEntry, ModeEntry, ModelConfig } from "@/lib/types/http";
 import type { ProfileFormData } from "./profile-model-fields";
+
+type ProfileFormCapabilitySelection = {
+  model: string;
+  mode: string;
+  provider_kind?: string;
+  config_options?: Record<string, string>;
+};
+
+export function useProfileFormCapabilities(
+  agentName: string,
+  profile: ProfileFormCapabilitySelection,
+  modelConfig: ModelConfig,
+  onChange: (patch: { config_options: Record<string, string> }) => void,
+  onPendingChange?: (pending: boolean) => void,
+) {
+  const result = useProfileModelCapabilities(agentName, profile, modelConfig, onChange, {
+    skipCapabilityProbe: profile.provider_kind === "openai_compatible",
+  });
+
+  useEffect(() => {
+    onPendingChange?.(result.isConfigResolutionPending);
+  }, [onPendingChange, result.isConfigResolutionPending]);
+
+  return {
+    ...result,
+    configOptions: modelConfigOptions(
+      result.configOptions ? { ...modelConfig, config_options: result.configOptions } : modelConfig,
+    ),
+  };
+}
 
 // An example slash command the user types verbatim — an identifier, not copy.
 const EXAMPLE_COMMAND = "/init";

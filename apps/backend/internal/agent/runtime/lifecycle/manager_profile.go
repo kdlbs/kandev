@@ -28,26 +28,34 @@ func (m *Manager) ResolveAgentProfile(ctx context.Context, profileID string) (*A
 // getAgentConfigForExecution retrieves the agent configuration for an execution.
 // The execution must have AgentCommand set (which includes the agent type).
 func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (agents.Agent, error) {
+	agentConfig, _, err := m.getAgentConfigAndProfileForExecution(context.Background(), execution)
+	return agentConfig, err
+}
+
+func (m *Manager) getAgentConfigAndProfileForExecution(ctx context.Context, execution *AgentExecution) (agents.Agent, *AgentProfileInfo, error) {
 	if execution.AgentProfileID == "" {
-		return nil, fmt.Errorf("execution %s has no agent profile ID", execution.ID)
+		return nil, nil, fmt.Errorf("execution %s has no agent profile ID", execution.ID)
 	}
 
 	if m.profileResolver == nil {
-		return nil, fmt.Errorf("profile resolver not configured")
+		return nil, nil, fmt.Errorf("profile resolver not configured")
 	}
 
-	profileInfo, err := m.profileResolver.ResolveProfile(context.Background(), execution.AgentProfileID)
+	profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve profile: %w", err)
+		return nil, nil, fmt.Errorf("failed to resolve profile: %w", err)
+	}
+	if profileInfo == nil {
+		return nil, nil, errors.New("failed to resolve profile: empty profile")
 	}
 
 	agentTypeName := profileInfo.AgentName
 	agentConfig, ok := m.registry.Get(agentTypeName)
 	if !ok {
-		return nil, fmt.Errorf("agent type not found: %s", agentTypeName)
+		return nil, nil, fmt.Errorf("agent type not found: %s", agentTypeName)
 	}
 
-	return agentConfig, nil
+	return agentConfig, profileInfo, nil
 }
 
 // resolveMcpServers centralizes MCP resolution for a session:

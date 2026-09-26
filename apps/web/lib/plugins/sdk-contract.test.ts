@@ -20,6 +20,8 @@ import type {
   RepositoryProviderRegistration as PublicRepositoryProviderRegistration,
   ReviewSummary as PublicReviewSummary,
   ReviewTaskAssociation as PublicReviewTaskAssociation,
+  TaskMenuActionRegistration as PublicTaskMenuActionRegistration,
+  TaskMenuSubItemRegistration as PublicTaskMenuSubItemRegistration,
   TaskPanelRegistration as PublicTaskPanelRegistration,
 } from "@kandev/plugin-sdk";
 import type {
@@ -41,6 +43,8 @@ import type {
   RepositoryProviderRegistration,
   ReviewItemSummary,
   ReviewTaskAssociation,
+  TaskMenuActionRegistration,
+  TaskMenuSubItemRegistration,
   TaskPanelRegistration,
 } from "./types";
 
@@ -53,6 +57,24 @@ type SameType<Left, Right> = Left extends Right ? (Right extends Left ? true : f
 type HasUseLayoutEffect = "useLayoutEffect" extends keyof PublicHostReact ? true : false;
 type HasPromptMentionText = "PromptMentionText" extends keyof PublicPluginUIApi ? true : false;
 type HasConversationApi = "conversation" extends keyof PublicPluginHostApi ? true : false;
+type HasTaskMenuItems = "items" extends keyof PublicTaskMenuActionRegistration ? true : false;
+
+// A registration that predates submenus must keep compiling unchanged, and the
+// submenu shape must be expressible: that pair is the whole compatibility story
+// of the optional `items` field.
+const flatOnlyTaskMenuAction: PublicTaskMenuActionRegistration = {
+  id: "legacy",
+  label: "Legacy",
+  group: "primary",
+  run: () => {},
+};
+const submenuTaskMenuAction: PublicTaskMenuActionRegistration = {
+  id: "submenu",
+  label: "Submenu",
+  group: "primary",
+  items: () => [{ id: "child", label: "Child", run: () => {} }],
+  run: () => {},
+};
 
 const legacyTaskPanelRegistration: PublicTaskPanelRegistration = {
   id: "legacy",
@@ -162,5 +184,30 @@ describe("public plugin SDK", () => {
     expect(legacyTaskPanelRegistration.title).toBe("Legacy");
     expect(publicHostContract).toBeTypeOf("function");
     expect(publicRegistryContract).toBeTypeOf("function");
+  });
+});
+
+// The registrations this feature adds to the public SDK. A plugin author
+// imports these names verbatim, and the host's runtime-facing types must stay
+// identical to them, including the optional `items` field.
+describe("task menu submenu SDK contract", () => {
+  it("is canonical in both directions", () => {
+    const taskMenuActionRegistrationIsCanonical: SameType<
+      TaskMenuActionRegistration,
+      PublicTaskMenuActionRegistration
+    > = true;
+    const taskMenuSubItemRegistrationIsCanonical: SameType<
+      TaskMenuSubItemRegistration,
+      PublicTaskMenuSubItemRegistration
+    > = true;
+    const publicTaskMenuActionHasItems: HasTaskMenuItems = true;
+    expect(taskMenuActionRegistrationIsCanonical).toBe(true);
+    expect(taskMenuSubItemRegistrationIsCanonical).toBe(true);
+    expect(publicTaskMenuActionHasItems).toBe(true);
+    // A registration that predates submenus still compiles unchanged, and the
+    // submenu shape is expressible: that pair is the compatibility story of the
+    // optional `items` field.
+    expect(flatOnlyTaskMenuAction.run).toBeTypeOf("function");
+    expect(submenuTaskMenuAction.items).toBeTypeOf("function");
   });
 });

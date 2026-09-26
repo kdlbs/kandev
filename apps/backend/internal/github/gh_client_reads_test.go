@@ -187,6 +187,42 @@ func TestGHClient_GetPR_NotFoundBecomesTypedError(t *testing.T) {
 	}
 }
 
+func TestGHClient_GetPRBaseOIDReadFailureKeepsPRDetailsUsable(t *testing.T) {
+	calls := newFakeGH(t,
+		ghResponse{
+			Prefix: "pr view 8",
+			Stdout: `{"number":8,"title":"base SHA unavailable","url":"https://github.com/acme/widget/pull/8","state":"OPEN","headRefName":"feature","headRefOid":"abc","baseRefName":"main","headRepository":{"name":"widget","nameWithOwner":"acme/widget"},"headRepositoryOwner":{"login":"acme"}}`,
+		},
+		ghResponse{
+			Prefix: "api repos/acme/widget/pulls/8",
+			Stderr: "HTTP 403: Forbidden",
+			Exit:   1,
+		},
+	)
+
+	pr, err := NewGHClient().GetPR(context.Background(), "acme", "widget", 8)
+	if err != nil {
+		t.Fatalf("GetPR() error = %v, want PR details to remain available", err)
+	}
+	if pr.Number != 8 || pr.BaseBranch != "main" || pr.BaseSHA != "" {
+		t.Fatalf("PR = %#v, want base branch without optional OID", pr)
+	}
+	if pr.BaseRepoOwner != "" || pr.BaseRepoName != "" || pr.BaseRepoID != 0 {
+		t.Fatalf("PR base repository = (%q, %q, %d), want no inferred identity after REST failure", pr.BaseRepoOwner, pr.BaseRepoName, pr.BaseRepoID)
+	}
+	got := calls(t)
+	if len(got) != 2 {
+		t.Fatalf("gh calls = %v, want PR view and a best-effort REST OID read", got)
+	}
+	if strings.Contains(strings.Join(got[0], " "), "baseRefOid") {
+		t.Fatalf("gh pr view requested unsupported baseRefOid: %v", got[0])
+	}
+	assertGHArgv(t, got, 1, []string{
+		"api", "repos/acme/widget/pulls/8", "--jq",
+		"{sha: .base.sha, ref: .base.ref, repo: {id: .base.repo.id, name: .base.repo.name, owner: .base.repo.owner}}",
+	})
+}
+
 // TestGHClient_GetPR_RequestsOutcomeFields covers AC-09: the --json field
 // list gains changedFiles, mergedBy, autoMergeRequest, and never requests
 // closedBy (absent from the gh CLI's PR field set). The decoded PR carries
@@ -420,6 +456,9 @@ func TestGHClient_ListAuthoredPRs(t *testing.T) {
 	}
 	if !containsPair(argv, "--state", "open") || !containsPair(argv, "--repo", "acme/widget") {
 		t.Errorf("argv = %q, want --state open and --repo acme/widget", argv)
+	}
+	if strings.Contains(strings.Join(argv, " "), "baseRefOid") {
+		t.Errorf("argv = %q, requests baseRefOid unsupported by gh pr list", argv)
 	}
 	if len(prs) != 2 || prs[0].Number != 1 || prs[1].Number != 2 {
 		t.Fatalf("prs = %#v", prs)

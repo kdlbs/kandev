@@ -121,11 +121,12 @@ does not need a Go backend or an injected Kandev JavaScript API.
    the app needs.
 5. Package the manifest and static files as a gzip-compressed tar archive.
 
-For a new owner-created task canvas, the first valid release can receive the
-declared supported task-scoped permissions through its initial permission
-policy. Imported packages and later permission increases need human approval.
-Keep `network_origins` as exact HTTPS origins. Do not use wildcards, paths,
-credentials, query strings, or fragments.
+For a new owner-authorized task canvas, the first valid release can receive
+only its declared supported permissions through the initial permission policy.
+Kandev data access is limited to the current workspace while the canvas stays
+placed in its creating task. Imported packages and later permission increases
+need human approval. Keep `network_origins` as exact HTTPS origins. Do not use
+wildcards, paths, credentials, query strings, or fragments.
 
 For example, a page can read task data with the browser Fetch API:
 
@@ -137,9 +138,22 @@ if (!response.ok) {
 const tasks = await response.json();
 ```
 
-Use `./_kandev/v1/events` for the event stream. Keep all protocol paths
-relative so the same package works in task and workspace scope. Do not copy a
-capability URL from the host into the app.
+Use `./_kandev/v1/events` for the event stream. Read both `scope_kind` and
+`data_scope_kind` from `./_kandev/v1/context`: the first describes placement,
+and the second describes the Kandev data boundary. Keep all protocol paths
+relative so the same package works in task and workspace placement. For task
+lists, follow `page_info.next_cursor` to load every page. Do not set
+`workspace_id` to another workspace or copy a capability URL from the host.
+
+For recorded workflow movement, the browser can GET
+`./_kandev/v1/data/tasks/{task_id}/step-transitions` with
+`api_read:tasks`. A workspace canvas can GET
+`./_kandev/v1/data/workflows/{workflow_id}/transition-groups` with both
+`api_read:tasks` and `api_read:workflows`. The latter is denied to a task
+canvas until the user promotes it. Both return bounded `{items,page_info}`
+pages; use the opaque `next_cursor` to continue. The equivalent optional
+backend Host extension is `pluginsdk.TransitionHistory(host)`. It exposes
+`ListTask` and `ListWorkflowGroups` with the same fields and grants.
 
 Kandev injects a reserved startup bootstrap into the packaged entry document.
 It runs before authored scripts, reports an initial document error when one is
@@ -446,7 +460,7 @@ closing future reads.
 | registerTaskAction              | Child action inside the task menu's native Link section                                                                                                                                                                                                                                                | Active ui.bundle                                                       | Action is revoked on unload; host supplies current task/workspace and desktop/mobile presentation                                                                                                               | registry.registerTaskAction({ id: "link-pr", placement: "link", ... })                                              |
 | registerReviewProvider          | Normalized task reviews, workspace associations, unlink, and shared Review panel                                                                                                                                                                                                                       | ui.bundle and matching `repository_providers[]` id                     | Snapshots/subscriptions are owner-scoped and revoked on unload; host owns status chrome, indicators, unlink UI, and responsive Review placement                                                                 | registry.registerReviewProvider({ id: "acme", ...reviews })                                                         |
 | registerTaskPanel               | { id, title, titleKey?, icon?, Component, mobileEnabled?, visible?(context) }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, sessionKind, presentation, conversation: { openMessage(messageId), history } }; `titleKey` is a plugin translation key with literal `title` fallback | Active ui.bundle | Panel renders behind its own error boundary with reactive localized titles; a throwing `visible` hides the item; handles are generation-bound and independently scoped, inert after unmount, identity change, disable, reload, or uninstall; `host.conversation` outside a panel returns stable empty state; desktop preserves layout identity on navigation and mobile uses the full-height Chat surface | registry.registerTaskPanel({ id: "notes", title: "Notes", titleKey: "panels.notes", Component: NotesPanel }) |
-| registerTaskMenuAction          | { id, label, icon?, group: "edit" \| "primary", visible?(context), run(context) }; "edit" is card-only inside Edit, while "primary" is a flat item on cards and desktop/mobile task-row menus                                                                                                          | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged                                                                                                                           | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "primary", run: doEnhance })              |
+| registerTaskMenuAction          | { id, label, icon?, group: "edit" \| "primary", visible?(context), items?(context), run(context) }; "edit" is card-only inside Edit, while "primary" is a top-level item on cards and desktop/mobile task-row menus; a synchronous `items(context)` returning TaskMenuSubItemRegistration[] ({ id, label, icon?, disabled?, run(context) }) renders the action as a submenu of those children instead | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged; an items() that throws or yields nothing usable falls back to the flat item, and unusable children are dropped                                                                                                                           | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "primary", run: doEnhance })              |
 | registerTaskFilter              | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository                                                                                                                         | Active ui.bundle                                                       | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching                  | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |
 | registerTaskListFacet           | { id, label, getValues({ taskId, workspaceId }), subscribe? }; adds page-local Sort and Group choices on `/tasks`                                                                                                                                                                                      | Active ui.bundle                                                       | Values apply only to the loaded page, callbacks are isolated, and registrations are revoked on disable/unload                                                                                                   | registry.registerTaskListFacet({ id: "tags", label: "Tag", getValues: taskTags })                                   |
 | host.React / host.jsx           | Shared React instance and React.createElement alias                                                                                                                                                                                                                                                    | Active ui.bundle                                                       | No cleanup; never bundle a second React/Radix runtime                                                                                                                                                           | const h = host.jsx                                                                                                  |
@@ -631,7 +645,7 @@ to strings, but an unmounted name renders nowhere.
 | new-session-input-actions | New-session composer toolbar                                                               | PluginComposerSlotProps                                          |
 | chat-submit-decoration    | Layer over the composer's send button                                                      | ChatSubmitDecorationSlotProps                                    |
 | chat-top-bar              | Session top bar or phone Plugins menu                                                      | ChatTopBarSlotProps                                              |
-| main-top-bar              | Home/Kanban/Tasks top bar or phone Plugins menu                                             | MainTopBarSlotProps                                              |
+| main-top-bar              | Home/Kanban/Tasks top bar or phone Plugins menu; a task toolbar from the same plugin takes precedence | MainTopBarSlotProps                                              |
 | app-status-bar-left       | Left side of desktop status bar or mobile status drawer                                    | AppStatusBarSlotProps                                            |
 | app-status-bar-right      | Right side of desktop status bar or mobile status drawer                                   | AppStatusBarSlotProps                                            |
 | plugin-settings           | Top of this plugin's Settings > Plugins page                                               | { pluginId, status }; owner-scoped to the plugin being viewed    |
@@ -1873,7 +1887,7 @@ plugins at once. Available slots:
 | `new-session-input-actions` | New-session composer toolbar                                                                           | `PluginComposerSlotProps`                                         |
 | `chat-submit-decoration`    | Layer over the chat composer's send button, for adornments that belong on the send affordance itself   | `ChatSubmitDecorationSlotProps`                                   |
 | `chat-top-bar`              | Session top bar on desktop; shared Plugins menu section on phones                                      | `ChatTopBarSlotProps`                                             |
-| `main-top-bar`              | Default app top bar on desktop; shared Plugins menu section on phones                               | `MainTopBarSlotProps`                                             |
+| `main-top-bar`              | Default app top bar on desktop; phone Plugins menu unless the same plugin supplies task controls | `MainTopBarSlotProps`                                             |
 | `app-status-bar-left`       | Default-left item in the global status surface                                                         | `AppStatusBarSlotProps`                                           |
 | `app-status-bar-right`      | Default-right item in the global status surface                                                        | `AppStatusBarSlotProps`                                           |
 | `plugin-settings`           | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }`                                            |
@@ -2084,7 +2098,15 @@ type MainTopBarSlotProps = {
 Because the bar is not scoped to a task, no task/session ids are provided. On
 desktop, keep contributions to small badges or icon buttons in the compact
 horizontal strip. On a phone, `presentation` is `"mobile"`; the contribution
-renders in the shared listing menu's **Plugins** section. The host wraps
+renders in the shared app menu's **Plugins** section alongside sidebar workspace
+actions. On a task with task controls, a plugin's `chat-top-bar` registrations
+replace that same plugin's `main-top-bar` registrations once task content renders.
+If task controls return `null`, the workspace toolbar remains available until
+task content appears; it returns if task content disappears. Keep task-relevant
+actions in `chat-top-bar`; every registration in that selected slot renders.
+Workspace-only plugins and sidebar workspace actions remain available. Listings
+and archived tasks use the workspace toolbar. The menu uses one wrapping group
+without Workspace/Task subheadings. The host wraps
 contributions within the menu width and gives `host.ui.Button` controls a
 minimum 44px active target. Use `host.ui.Button` for documented icon actions;
 the host normalizes their SVG icons to 16px. Desktop contributions keep their
@@ -2513,7 +2535,7 @@ Host reader because event queues are bounded and delivery is best-effort.
 
 `registerTaskMenuAction` adds an item to native task menus. Group `"edit"` is
 card-only and nests inside the kanban card's `Edit` submenu. Group `"primary"`
-renders as a flat top-level item on cards and desktop/mobile task-row menus.
+renders as a top-level item on cards and desktop/mobile task-row menus.
 `task-card-indicators` (see the named slots table) is the matching read-only
 surface, rendered beside the PR status icon on every card. `task-card-tags`
 is a sibling read-only surface with the same `slotProps` shape, mounted in its
@@ -2547,6 +2569,40 @@ logged, not left to crash the card; the menu closes either way. Group
 `"primary"` actions render and behave the same way as their own top-level row,
 including in desktop and phone task-row menus. Do not patch first-party task
 components directly.
+
+An action of either group that declares `items(context)` renders as a submenu
+instead: `label` becomes an unselectable trigger and the returned
+`TaskMenuSubItemRegistration` children are its entries, in order, each called
+with the same `context` as the action. Nesting stops at that one level. A
+`primary` action's children also reach the command palette and the sidebar's
+task commands, one command each; `edit` stays card-only, as it always was. `items()` is synchronous and is called while the host builds that
+card's or row's menu entries on every render, whether or not a menu is open; a
+card's dropdown and context variants are built from one evaluation, so read
+cached state and memoize anything expensive. `run` stays required: it is the
+flat item a host that predates `items` renders, and the fallback whenever
+`items` yields nothing usable (a non-array, an empty list, a promise, or a
+throw, which is caught and logged). A child needs a non-blank, unique `id`, a
+non-blank `label` and a callable `run`, with optional fields of the shapes the
+entry builder understands: a boolean `disabled` (or `null`, meaning enabled) and
+an `icon` that is a curated name, a component, a ready-made element or `null`. A child the host cannot read
+or render is dropped, and one whose `id` repeats is reported and skipped.
+
+```js
+registry.registerTaskMenuAction({
+  id: "add-tag",
+  label: "Add tag...",
+  group: "primary",
+  // Optional. Turns this action into a submenu of these children.
+  items: (context) =>
+    recentTags(context).map((tag) => ({
+      id: tag.id,
+      label: tag.name,
+      run: (ctx) => applyTag(ctx.taskId, tag.id),
+    })),
+  // Flat behavior, and the fallback when `items` has nothing usable.
+  run: (context) => openTagPicker(context.taskId),
+});
+```
 
 `registerTaskFilter` adds a client-side, multi-select filter section to the
 kanban board's display dropdown, next to the built-in Workflow and Repository

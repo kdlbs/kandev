@@ -1147,8 +1147,14 @@ func (r *Repository) initStepTransitionsSchema() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_task
 		ON task_step_transitions(task_id, occurred_at, id);
+	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_task_id
+		ON task_step_transitions(task_id, id);
 	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_occurred
 		ON task_step_transitions(occurred_at);
+	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_from_workflow
+		ON task_step_transitions(from_workflow_id, task_id);
+	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_to_workflow
+		ON task_step_transitions(to_workflow_id, task_id);
 	`)
 	if err != nil {
 		return fmt.Errorf("init step transitions schema: %w", err)

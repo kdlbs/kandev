@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-09-10
-last_updated: 2026-09-10
+last_updated: 2026-09-23
 ---
 
 # Owner-authorized canvas creation
@@ -39,10 +39,11 @@ imported code and later changes cannot claim that creation authority.
 - **AC-CANVASES-LOCAL-CREATION-001.1:** The first valid release of an
   owner-authorized task canvas shall activate without a separate permission
   approval. Its grants shall contain only its declared, supported permissions.
-- **AC-CANVASES-LOCAL-CREATION-001.2:** Initial grants shall remain within the
-  task scope and current owner access. They can cover supported data reads,
-  writes, events, instance state, and exact HTTPS external origins. They shall
-  not enable remote scripts, managed backend execution, or workspace access.
+- **AC-CANVASES-LOCAL-CREATION-001.2:** Initial grants shall contain only the
+  declared supported data reads, writes, events, instance state, and exact HTTPS
+  external origins. For a new owner-authorized canvas, those grants shall cover
+  the current workspace while the canvas remains in its task. They shall not
+  enable another workspace, remote scripts, or managed backend execution.
 - **AC-CANVASES-LOCAL-CREATION-001.3:** Agent fields, package metadata, display
   titles, and ownership of an imported package shall not establish local
   creation authority. Missing or mismatched trusted identity shall deny it.
@@ -71,3 +72,4 @@ a marketplace, import UI, collaborator role, or ongoing blanket approval.
 ## Implementation plans
 
 - [Canvas runtime and permission fixes](../../../plans/canvas-runtime-permission-fixes/plan.md)
+- [Task canvas workspace data preview](../../../plans/task-canvas-workspace-preview/plan.md)

@@ -72,6 +72,21 @@ and provider status. Task and UI systems consume its results.
   immediate fallback using the same invalid query or an automatic retry more
   often than once per minute for that discovery target.
 
+### REQ-INTEGRATIONS-GITHUB-PR-POLLING-001: Adaptive background discovery
+
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.1:** Searching watches shall use a 1-minute interval while their task runs or has less than 2 hours of inactivity. They shall use 15 minutes from 2 hours to less than 24 hours, then 30 minutes.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.2:** Task execution, task conversation activity, or an observed branch commit or push shall restore fast discovery. A new watch shall receive an initial attempt on the next poll tick.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.3:** Idle discovery shall not stop permanently. A PR opened externally on an unchanged branch shall remain discoverable. Known PRs shall retain their 1-minute background cadence.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.4:** Explicit PR refresh shall bypass the idle schedule but obey existing rate-limit and authentication admission. Passive frontend refreshes shall obey the idle schedule for searching targets. An explicit refresh shall not reuse the result of an active passive provider attempt.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.5:** Poll attempts and provider status writes shall not count as task activity. Shared targets shall use the fastest eligible member's schedule. Archived and deleted members shall not accelerate it.
+
+### REQ-INTEGRATIONS-GITHUB-PR-POLLING-002: Bounded batch fallback
+
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.1:** Rate-limit, authentication, and invalid-query batch failures shall not trigger per-watch fallback for the affected workspace. Successful workspace batches shall not be repeated because another workspace failed.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.2:** Transient failures shall permit at most 5 fallback target checks per workspace and 10 across one poll cycle. Deferred targets shall retain their state and receive a fair opportunity on later cycles.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.3:** A rate-limit or authentication error during fallback shall stop remaining checks for that workspace. Cancellation shall stop the cycle. Existing retry deadlines remain authoritative.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.4:** Clients without GraphQL support shall retain REST support under the same bounded schedule. Deferral shall not imply a successful provider observation or discard pending status events.
+
 ## Exclusions
 
 No new credentials, automatic PR creation, inferred PR links from chat, changed
@@ -86,3 +101,7 @@ runtime status, not a permanent incident archive.
 - [System design](../system-design/github-pr-discovery-health.md)
 - [Implementation package](../../../plans/github-pr-discovery-health/plan.md)
 - [Watch reconciliation repair](../../../plans/github-pr-watch-reconciliation/plan.md)
+
+## Polling efficiency package
+
+- [Implementation plan](../../../plans/watch-task-cleanup/plan.md)

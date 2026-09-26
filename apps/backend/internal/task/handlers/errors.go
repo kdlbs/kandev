@@ -26,6 +26,7 @@ const (
 	moveConflictCodeWorkflowStep       = "task_move_workflow_step"
 	moveConflictCodeWIPLimit           = "task_move_wip_limit"
 	moveConflictCodePending            = "task_move_pending"
+	moveConflictCodeWorkflowChange     = "workflow_change_conflict"
 )
 
 // errorDetailKeyErrorCode is the JSON key every machine-readable error detail
@@ -148,6 +149,15 @@ func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {
 		}
 		c.JSON(http.StatusConflict, body)
 	case isValidationError(err):
+		var changeErr *service.WorkflowChangeValidationError
+		if errors.As(err, &changeErr) {
+			body := gin.H{"code": changeErr.Code}
+			if changeErr.SourceProfileID != "" {
+				body["source_profile_id"] = changeErr.SourceProfileID
+			}
+			c.JSON(http.StatusBadRequest, body)
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
 		log.Error("task move failed", zap.Error(err))
@@ -197,6 +207,8 @@ func isMoveConflict(err error) bool {
 // error code and the safe error message (which never carries option values).
 func moveEntryOptionsWSError(err error) (string, string, bool) {
 	switch {
+	case errors.Is(err, service.ErrWorkflowChangeConflict):
+		return ws.ErrorCodeConflict, moveConflictCodeWorkflowChange, true
 	case errors.Is(err, workflowmove.ErrMoveConflict):
 		return ws.ErrorCodeConflict, err.Error(), true
 	case errors.Is(err, workflowmove.ErrConflictingInstructions),
@@ -205,6 +217,10 @@ func moveEntryOptionsWSError(err error) (string, string, bool) {
 		errors.Is(err, workflowmove.ErrEntryTargetUnavailable):
 		return ws.ErrorCodeValidation, err.Error(), true
 	default:
+		var changeErr *service.WorkflowChangeValidationError
+		if errors.As(err, &changeErr) {
+			return ws.ErrorCodeValidation, changeErr.Code, true
+		}
 		return "", "", false
 	}
 }
@@ -215,6 +231,9 @@ func moveConflictCode(err error) string {
 	}
 	if errors.Is(err, workflowmove.ErrMoveConflict) {
 		return moveConflictCodePending
+	}
+	if errors.Is(err, service.ErrWorkflowChangeConflict) {
+		return moveConflictCodeWorkflowChange
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
@@ -238,6 +257,9 @@ func isValidationError(err error) bool {
 		return false
 	}
 	if errors.Is(err, service.ErrInvalidParent) || errors.Is(err, service.ErrAutoTitleUnsupportedForOffice) {
+		return true
+	}
+	if errors.Is(err, service.ErrInvalidWorkflowChange) {
 		return true
 	}
 	if errors.Is(err, service.ErrTaskTitleTooLong) {

@@ -178,6 +178,10 @@ const (
 	// because the winner will (or already did) handle it.
 	// Absent on ordinary (non-watcher) auto-start tasks, which launch normally.
 	MetaKeyAutoStartClaimed = "auto_start_claimed"
+	// MetaKeyForkPRRequiresManualStart blocks unattended launches of fork PR
+	// review tasks. Their worktree setup scripts can read executor-profile secrets;
+	// a user can still explicitly start the task after reviewing it.
+	MetaKeyForkPRRequiresManualStart = "fork_pr_requires_manual_start"
 	// MetaKeyInterruptedAt is set by reconciliation when a task's session lost
 	// an active turn. Its presence makes the task DTO report `interrupted: true`
 	// so task-list surfaces show the warning indicator. The orchestrator removes

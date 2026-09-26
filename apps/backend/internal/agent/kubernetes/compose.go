@@ -12,6 +12,9 @@ import (
 // Runtime inventory metadata keys are shared by lifecycle persistence and
 // higher-level fail-closed inventory checks.
 const (
+	MetadataKeyTaskOwned             = "kubernetes_task_owned"
+	MetadataKeyOwnershipVersion      = "kubernetes_resource_ownership_version"
+	TaskOwnershipVersion             = "task-v1"
 	MetadataKeyResourceExecutorID    = "kubernetes_resource_executor_id"
 	MetadataKeyResourceProfileID     = "kubernetes_resource_profile_id"
 	MetadataKeyResourceInstanceID    = "kubernetes_resource_instance_id"
@@ -21,6 +24,7 @@ const (
 )
 
 type ResourceIdentity struct {
+	TaskOwned     bool
 	ExecutorID    string
 	ProfileID     string
 	InstanceID    string
@@ -97,6 +101,10 @@ func OwnershipLabels(identity ResourceIdentity) (map[string]string, error) {
 		"app.kubernetes.io/component":  "agent-session",
 		"app.kubernetes.io/managed-by": "kandev",
 		"app.kubernetes.io/instance":   identity.InstanceID,
+	}
+	if identity.TaskOwned {
+		labels["kandev.ai/ownership-version"] = TaskOwnershipVersion
+		labels["app.kubernetes.io/component"] = "task-environment"
 	}
 	for _, item := range values {
 		if item.value == "" || len(validation.IsValidLabelValue(item.value)) > 0 {

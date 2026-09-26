@@ -45,7 +45,7 @@ async function setupTask({
     .poll(
       async () => {
         const environment = await apiClient.getTaskEnvironment(task.id);
-        workspacePath = environment?.workspace_path ?? environment?.repos?.[0]?.worktree_path ?? "";
+        workspacePath = environment?.repos?.[0]?.worktree_path || environment?.workspace_path || "";
         return Boolean(workspacePath && fs.existsSync(path.join(workspacePath, requiredPath)));
       },
       { timeout: 60_000, message: `Waiting for ${taskTitle} worktree materialization` },

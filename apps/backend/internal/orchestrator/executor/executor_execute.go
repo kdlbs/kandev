@@ -856,6 +856,15 @@ func (e *Executor) persistSessionFullRowIfCurrentState(
 	if isStopTerminalSessionState(current.State) {
 		return &SessionStateSupersededError{SessionID: session.ID, State: current.State}
 	}
+	if expected == models.TaskSessionStateStarting && current.State == models.TaskSessionStateRunning {
+		return fmt.Errorf(
+			"%w: session %s state changed from %s to %s before runtime persistence",
+			errSessionAdvancedToRunning,
+			session.ID,
+			expected,
+			current.State,
+		)
+	}
 	return fmt.Errorf(
 		"session %s state changed from %s to %s before runtime persistence",
 		session.ID,
@@ -1744,10 +1753,6 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, err
 	}
 
-	if startAgent {
-		e.observeSessionCoresidency(launchCtx, sessionCoresidencySiteLaunch, task.ID, sessionID)
-	}
-
 	// Fast path: workspace already launched (executors_running row exists).
 	// The selected-environment recovery gate above must run first, including
 	// when this path only starts an agent process on an existing workspace.
@@ -2294,6 +2299,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			CheckoutOptions:            info.CheckoutOptions,
 			ContributionDestination:    info.ContributionDestination,
 			ComparisonTarget:           info.ComparisonTarget,
+			QualifiedPRBase:            info.QualifiedPRBase,
 			WorktreeBranchPrefix:       info.WorktreeBranchPrefix,
 			WorktreeBranchTemplate:     info.WorktreeBranchTemplate,
 			PullBeforeWorktree:         info.PullBeforeWorktree,
@@ -2369,6 +2375,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.CheckoutOptions = repoInfo.CheckoutOptions
 		req.ContributionDestination = repoInfo.ContributionDestination
 		req.ComparisonTarget = repoInfo.ComparisonTarget
+		req.QualifiedPRBase = repoInfo.QualifiedPRBase
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree

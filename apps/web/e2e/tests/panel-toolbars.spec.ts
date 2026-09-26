@@ -376,7 +376,8 @@ test.describe("shared panel toolbars", () => {
 
     await session.clickTab("Files");
     await expect(session.files).toBeVisible();
-    await session.fileTreeNode("walkthrough_base.txt").click();
+    const baseFile = await session.fileTree.waitForFileTreeNode("walkthrough_base.txt");
+    await baseFile.click();
 
     const editor = testPage.locator(".monaco-editor:visible").first();
     await expect(editor).toBeVisible({ timeout: 20_000 });

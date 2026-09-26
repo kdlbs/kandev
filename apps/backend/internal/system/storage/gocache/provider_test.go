@@ -7,16 +7,21 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/system/storage"
 )
 
+func int64Pointer(value int64) *int64 {
+	return &value
+}
+
 func TestAnalysisJSONUsesStorageAPISnakeCase(t *testing.T) {
 	encoded, err := json.Marshal(Analysis{
 		Path: "/cache", SizeBytes: 42, Owned: true, Enabled: false,
-		UnmanagedPath: "/user-cache", UnmanagedSizeBytes: 24,
+		UnmanagedPath: "/user-cache", UnmanagedSizeBytes: int64Pointer(24),
 	})
 	if err != nil {
 		t.Fatalf("Marshal Analysis: %v", err)
@@ -24,6 +29,36 @@ func TestAnalysisJSONUsesStorageAPISnakeCase(t *testing.T) {
 	want := `{"path":"/cache","size_bytes":42,"owned":true,"enabled":false,"unmanaged_path":"/user-cache","unmanaged_size_bytes":24}`
 	if string(encoded) != want {
 		t.Fatalf("Analysis JSON = %s, want %s", encoded, want)
+	}
+}
+
+func TestAnalyzeSerializesMeasuredZeroForUnmanagedCache(t *testing.T) {
+	home := t.TempDir()
+	userCache := filepath.Join(t.TempDir(), "go-build")
+	if err := os.MkdirAll(userCache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOCACHE", userCache)
+	provider := New(Config{
+		HomeDir:  home,
+		TrashDir: filepath.Join(home, "trash"),
+		Settings: staticSettings{settings: storage.DefaultSettings()},
+	})
+
+	analysis, err := provider.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if analysis.UnmanagedPath != userCache || analysis.UnmanagedSizeBytes == nil || *analysis.UnmanagedSizeBytes != 0 {
+		t.Fatalf("analysis = %#v, want an explicit measured zero", analysis)
+	}
+
+	encoded, err := json.Marshal(analysis)
+	if err != nil {
+		t.Fatalf("Marshal Analysis: %v", err)
+	}
+	if got := string(encoded); !strings.Contains(got, `"unmanaged_size_bytes":0`) {
+		t.Fatalf("serialized analysis = %s, want unmanaged_size_bytes zero", encoded)
 	}
 }
 
@@ -168,7 +203,7 @@ func TestAnalyzeReportsUnmanagedDefaultGoCacheReadOnly(t *testing.T) {
 		t.Fatalf("Analyze: %v", err)
 	}
 	if analysis.UnmanagedPath != userCache ||
-		analysis.UnmanagedSizeBytes != int64(len("user cache bytes")) {
+		analysis.UnmanagedSizeBytes == nil || *analysis.UnmanagedSizeBytes != int64(len("user cache bytes")) {
 		t.Fatalf("analysis = %#v, want unmanaged cache %s", analysis, userCache)
 	}
 	if _, err := os.Stat(artifact); err != nil {

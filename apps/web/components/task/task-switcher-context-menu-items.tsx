@@ -413,8 +413,13 @@ function BulkSelectionMenuItems(props: BulkSelectionMenuProps) {
       groups={[
         {
           key: "mark",
-          visible: Boolean(props.onBulkPin),
-          content: <BulkPinMenuItem {...props} />,
+          visible: props.actingIds.length > 0,
+          content: (
+            <>
+              <BulkPinMenuItem {...props} />
+              <TaskColorMenu taskIds={props.actingIds} />
+            </>
+          ),
         },
         {
           key: "move",

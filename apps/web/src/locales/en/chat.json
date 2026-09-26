@@ -139,6 +139,8 @@
   "technicalDetails": "Technical details",
   "managedRuntimeNpmTitle": "npm could not prepare the runtime",
   "managedRuntimeNpmBody": "Kandev refreshed package data and retried the same runtime once.",
+  "managedRuntimeNpmPolicyTitle": "npm blocked this runtime version",
+  "managedRuntimeNpmPolicyBody": "Check npm's min-release-age or before setting. Wait until this version is eligible or select an older version, then retry.",
   "managedRuntimeRetry": "Retry runtime",
   "theAssociatedWorktree": "The associated worktree",
   "theTaskAndItsData": "The task and its data",

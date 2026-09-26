@@ -14,7 +14,11 @@ vi.mock("@/components/theme/app-theme", () => ({
   useTheme: () => theme,
 }));
 
-function acknowledge(frame: HTMLElement, result: "ready" | "failed" = "ready") {
+function acknowledge(
+  frame: HTMLElement,
+  result: "ready" | "failed" = "ready",
+  code: "document_error" | "context_unavailable" = "document_error",
+) {
   const probe = (frame as HTMLIFrameElement).contentWindow;
   const message = (
     probe as unknown as { postMessage: ReturnType<typeof vi.fn> }
@@ -27,7 +31,7 @@ function acknowledge(frame: HTMLElement, result: "ready" | "failed" = "ready") {
         version: WEB_APP_STARTUP_VERSION,
         nonce: message.nonce,
         result,
-        ...(result === "failed" ? { code: "document_error" } : {}),
+        ...(result === "failed" ? { code } : {}),
       },
       source: probe as unknown as Window,
     }),
@@ -107,7 +111,7 @@ describe("WebAppFrame updates and failure handling", () => {
     expect(screen.getByTitle("Canvas")).toBe(frame);
   });
 
-  it("ignores wrong-frame results and becomes unavailable at the deadline", async () => {
+  it("ignores wrong-frame results and reports a timeout reason at the deadline", async () => {
     vi.useFakeTimers();
     const onError = vi.fn();
     render(<WebAppFrame runtimeUrl="/runtime/one/" title="Canvas" onError={onError} />);
@@ -137,12 +141,31 @@ describe("WebAppFrame updates and failure handling", () => {
     expect(screen.getByTestId("web-app-frame").getAttribute("data-frame-state")).toBe("loading");
     act(() => vi.advanceTimersByTime(15_000));
     expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith("timeout");
     expect(screen.getByTestId("web-app-frame").getAttribute("data-frame-state")).toBe(
       "unavailable",
     );
     expect(screen.queryByTitle("Canvas")).toBeNull();
     vi.useRealTimers();
   });
+
+  it.each([["document_error"], ["context_unavailable"]] as const)(
+    "passes the guest-reported %s code to onError",
+    async (code) => {
+      const onError = vi.fn();
+      render(<WebAppFrame runtimeUrl="/runtime/one/" title="Canvas" onError={onError} />);
+      const frame = screen.getByTitle("Canvas");
+      const postMessage = vi.fn();
+      Object.defineProperty(frame, "contentWindow", {
+        configurable: true,
+        value: { postMessage },
+      });
+      fireEvent.load(frame);
+      acknowledge(frame, "failed", code);
+      await waitFor(() => expect(onError).toHaveBeenCalledOnce());
+      expect(onError).toHaveBeenCalledWith(code);
+    },
+  );
 
   it("uses the phone safe-area inset and renders no iframe without a capability", () => {
     responsive.isMobile = true;

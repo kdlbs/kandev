@@ -1230,6 +1230,9 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 }
 
 func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecutionID string) bool {
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForExecution(agentExecutionID)
+	}
 	err := s.executor.StopExecution(ctx, agentExecutionID, "dynamic route fallback", true)
 	if err == nil {
 		return true

@@ -103,9 +103,11 @@ const (
 	// Plugin-backed canvas lifecycle notifications. These are owner-scoped
 	// workspace/task events and contain no application content or capabilities.
 	ActionCanvasCreated                   = "canvas.created"
+	ActionCanvasUpdated                   = "canvas.updated"
 	ActionCanvasReleaseActivated          = "canvas.release.activated"
 	ActionCanvasReleasePermissionRequired = "canvas.release.permission_required"
 	ActionCanvasPromoted                  = "canvas.promoted"
+	ActionCanvasWorkspaceDataEnabled      = "canvas.workspace_data_enabled"
 	ActionCanvasArchived                  = "canvas.archived"
 	ActionCanvasRestored                  = "canvas.restored"
 	ActionCanvasRemoved                   = "canvas.removed"

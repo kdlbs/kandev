@@ -118,7 +118,10 @@ icons show running, idle, or paused activity. Tasks and required inbox entries r
 their fixed navigation area, and hiding a shortcut does not disable the underlying feature.
 
 On a phone, open the menu and choose **Sidebar** to edit the same layout. Use the move controls to
-reorder entries or move a shortcut to another section. **Restore defaults** resets the draft for the
+reorder entries or move a shortcut to another section. Home and quick actions stay above Tasks;
+customized workspace tools and shortcut sections follow the task list. Expand **Integrations** to
+see named provider links and integration settings, including when no provider is configured.
+**Restore defaults** resets the draft for the
 active workspace; the shared **Save changes** action persists it. If another client saves first, the
 editor keeps your draft and reports the conflict so you can reconcile it.
 
@@ -174,7 +177,7 @@ Remote repository and issue/PR URLs are not added from this settings page. Use t
 4. Complete the provider's authentication flow. Some agents expose a dedicated login terminal; others use their own CLI outside Kandev.
 5. Open the agent and its profile. Verify the selected model and mode, permission switches, CLI flags, environment variables, MCP configuration, and CLI-passthrough setting. Save changes.
 
-Detected capabilities come from the installed CLI and can change after an agent upgrade or login. A model or mode shown in documentation is not guaranteed for every account. If no built-in adapter fits, **Add TUI Agent** creates a passthrough integration; passthrough has a different resume, usage, and MCP contract from an ACP-capable agent.
+Detected capabilities come from the installed CLI and can change after an agent upgrade or login. A model or mode shown in documentation is not guaranteed for every account. If no built-in adapter fits, **Add custom agent** registers the CLI as a Terminal or an ACP agent; Terminal passthrough has a different resume, usage, and MCP contract from an ACP-capable agent.
 
 For the first task on an existing repository, keep the seeded **Worktree** executor profile. It creates a separate Git checkout so concurrent Kandev tasks do not edit the same working tree. A worktree is Git isolation, not operating-system isolation. Choose **Local** only when direct edits in the selected checkout are intentional. A repository initialized from **New Task** has one empty initial commit and no project files. Creation selects a direct Local profile for a single-row task when one is available and preserves the selected executor for multiple rows. Without a direct Local profile, single-row creation remains disabled. See [Agents and profiles](agents-and-profiles.md) and [Executors](executors.md) before using Docker, SSH, Sprites, custom scripts, or shared infrastructure.
 

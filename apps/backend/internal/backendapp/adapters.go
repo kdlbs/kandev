@@ -485,6 +485,7 @@ func buildLifecycleLaunchRequest(
 		CheckoutOptions:               req.CheckoutOptions,
 		ContributionDestination:       req.ContributionDestination,
 		ComparisonTarget:              req.ComparisonTarget,
+		QualifiedPRBase:               req.QualifiedPRBase,
 		WorktreeBranchPrefix:          req.WorktreeBranchPrefix,
 		WorktreeBranchTemplate:        req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:          req.WorktreeBranchTicket,
@@ -551,6 +552,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 			CheckoutOptions:            r.CheckoutOptions,
 			ContributionDestination:    r.ContributionDestination,
 			ComparisonTarget:           r.ComparisonTarget,
+			QualifiedPRBase:            r.QualifiedPRBase,
 			WorktreeID:                 r.WorktreeID,
 			AllowBranchReplacement:     r.AllowBranchReplacement,
 			WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
@@ -1245,7 +1247,7 @@ func (a githubTaskIssueStoreAdapter) UpdateTaskRepositoryBaseBranch(
 	if err != nil {
 		return err
 	}
-	_, err = a.svc.UpdateRepositoryBaseBranch(ctx, taskservice.UpdateRepositoryBaseBranchRequest{
+	_, err = a.svc.UpdateRepositoryBaseBranchFromSystem(ctx, taskservice.UpdateRepositoryBaseBranchRequest{
 		TaskID: taskID, TaskRepositoryID: taskRepo.ID, BaseBranch: baseBranch,
 	})
 	return err

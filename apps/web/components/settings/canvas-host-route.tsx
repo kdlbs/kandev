@@ -20,6 +20,7 @@ import {
   canvasPresentationUserId,
   recordCanvasPresentation,
 } from "@/lib/canvas-presentation-storage";
+import type { WebAppStartupFailureReason } from "@/components/plugins/web-app-startup";
 import { useCanvasHostCanvases } from "./canvas-host-picker";
 import { type CanvasHostState } from "./canvas-host-components";
 import { CanvasHostRouteView } from "./canvas-host-route-view";
@@ -323,11 +324,19 @@ function useCanvasHost(canvasId: string) {
     setState((current) => (current === "loading_runtime" ? "ready" : current));
   }, []);
 
-  const markRuntimeUnavailable = useCallback(() => {
-    clearRuntimeRenewal();
-    setRuntimeUrl(null);
-    setState("unavailable");
-  }, [clearRuntimeRenewal]);
+  const [runtimeFailureReason, setRuntimeFailureReason] =
+    useState<WebAppStartupFailureReason | null>(null);
+
+  const markRuntimeUnavailable = useCallback(
+    (reason: WebAppStartupFailureReason) => {
+      clearRuntimeRenewal();
+      setRuntimeUrl(null);
+      setError(null);
+      setRuntimeFailureReason(reason);
+      setState("runtime_failed");
+    },
+    [clearRuntimeRenewal],
+  );
 
   useEffect(() => {
     renewRuntimeRef.current = renewRuntime;
@@ -354,8 +363,10 @@ function useCanvasHost(canvasId: string) {
     runtimeUrl,
     state,
     error,
+    runtimeFailureReason,
     lifecycleRevision,
     load,
+    refresh,
     renewRuntime,
     markRuntimeReady,
     markRuntimeUnavailable,
@@ -388,6 +399,21 @@ async function editCanvasFromHost(options: CanvasHostEditOptions): Promise<void>
   }
 }
 
+function useRecordCanvasPresentation(canvas: Canvas | null, userId: string | null) {
+  useEffect(() => {
+    if (!canvas || canvas.scope_kind !== "task" || !canvas.task_id || !userId) return;
+    recordCanvasPresentation(
+      {
+        userId,
+        workspaceId: canvas.workspace_id,
+        taskId: canvas.task_id,
+        canvasId: canvas.id,
+      },
+      "manual",
+    );
+  }, [canvas, userId]);
+}
+
 export function CanvasHostRoute({
   canvasId,
   embedded = false,
@@ -404,7 +430,9 @@ export function CanvasHostRoute({
     runtimeUrl,
     state,
     error,
+    runtimeFailureReason,
     load,
+    refresh,
     markRuntimeReady,
     markRuntimeUnavailable,
     setHostError,
@@ -412,22 +440,13 @@ export function CanvasHostRoute({
   const hostCanvases = useCanvasHostCanvases(canvas);
   const [menuOpen, setMenuOpen] = useState(false);
   const [promotionOpen, setPromotionOpen] = useState(false);
+  const [workspaceDataOpen, setWorkspaceDataOpen] = useState(false);
   const [releasesOpen, setReleasesOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
   const [editing, setEditing] = useState(false);
 
-  useEffect(() => {
-    if (!canvas || canvas.scope_kind !== "task" || !canvas.task_id || !presentationUserId) return;
-    recordCanvasPresentation(
-      {
-        userId: presentationUserId,
-        workspaceId: canvas.workspace_id,
-        taskId: canvas.task_id,
-        canvasId: canvas.id,
-      },
-      "manual",
-    );
-  }, [canvas, presentationUserId]);
+  useRecordCanvasPresentation(canvas, presentationUserId);
 
   const edit = () =>
     editCanvasFromHost({
@@ -456,25 +475,38 @@ export function CanvasHostRoute({
       runtimeUrl={runtimeUrl}
       state={state}
       error={error}
+      runtimeFailureReason={runtimeFailureReason}
       menuOpen={menuOpen}
       promotionOpen={promotionOpen}
+      workspaceDataOpen={workspaceDataOpen}
       releasesOpen={releasesOpen}
       shareOpen={shareOpen}
+      renameOpen={renameOpen}
       editing={editing}
       setMenuOpen={setMenuOpen}
       setPromotionOpen={setPromotionOpen}
+      setWorkspaceDataOpen={setWorkspaceDataOpen}
       setReleasesOpen={setReleasesOpen}
       setShareOpen={setShareOpen}
+      setRenameOpen={setRenameOpen}
       onEdit={() => void edit()}
       onPromote={() => setPromotionOpen(true)}
+      onEnableWorkspaceData={() => {
+        setMenuOpen(false);
+        setWorkspaceDataOpen(true);
+      }}
       onReleases={() => setReleasesOpen(true)}
       onShare={() => setShareOpen(true)}
+      onRename={() => {
+        setMenuOpen(false);
+        setRenameOpen(true);
+      }}
       onSelectCanvas={selectCanvas}
       onRuntimeReady={markRuntimeReady}
       onRuntimeError={markRuntimeUnavailable}
       onRetry={load}
       onPromotionCompleted={() => router.push(canvas ? canvasHref(canvas.id) : "/")}
-      onChanged={load}
+      onChanged={refresh}
     />
   );
 }

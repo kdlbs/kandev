@@ -137,6 +137,16 @@ export class LspClientEditorState {
     if (targetModel) this.applyDiagnostics(connection.ownerId, targetModel, canonicalParams);
   }
 
+  clearConnectionDiagnostics(connection: ManagedLspConnection): void {
+    connection.diagnosticsByUri.clear();
+    const monaco = getMonacoInstance();
+    if (!monaco) return;
+    const markerOwner = this.markerOwner(connection.ownerId);
+    for (const model of monaco.editor.getModels()) {
+      monaco.editor.setModelMarkers(model, markerOwner, []);
+    }
+  }
+
   applyCachedDiagnostics(connection: ManagedLspConnection, model: monacoEditor.ITextModel): void {
     for (const params of connection.diagnosticsByUri.values()) {
       if (connectionModelMatchesUri(model, params.uri, connection)) {

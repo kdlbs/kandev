@@ -139,6 +139,8 @@
   "technicalDetails": "技術的な詳細",
   "managedRuntimeNpmTitle": "npm がランタイムを準備できませんでした",
   "managedRuntimeNpmBody": "Kandev はパッケージデータを更新し、同じランタイムをもう一度試しました。",
+  "managedRuntimeNpmPolicyTitle": "npm がこのランタイムバージョンをブロックしました",
+  "managedRuntimeNpmPolicyBody": "npm の min-release-age または before 設定を確認してください。このバージョンが利用可能になるまで待つか、古いバージョンを選んで再試行してください。",
   "managedRuntimeRetry": "ランタイムを再試行",
   "theAssociatedWorktree": "関連付けられたワークツリー",
   "theTaskAndItsData": "タスクとそのデータ",
