@@ -55,6 +55,12 @@ when the agent did not emit its completion signal.
   hide the next-step action even when the session is waiting for input. After
   the clarification barrier clears, the surfaces shall reevaluate visibility
   and show the action when the signal-gated idle conditions are satisfied.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-002.6:** When a task qualifies
+  for the adjacent-next-step action, its standard and passthrough composers
+  shall name and move to the next step in that task's own workflow, regardless
+  of which workflow is selected on the board. If the task's workflow or current
+  step is not yet available, the composers shall omit the action until that
+  task's data is available; they shall never offer a step from another workflow.
 
 ### REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003: Recovery after a step change
 

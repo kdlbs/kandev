@@ -1,8 +1,49 @@
 import { test, expect } from "../../fixtures/test-base";
 import { routeMainWebSocketWithPromptDrop } from "../../helpers/ws-drop";
+import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import {
+  BOARD_CONTEXT_TASK_TITLE,
+  FEATURE_TASK_TITLE,
+  seedCrossWorkflowProceedScenario,
+} from "./workflow-cross-workflow-proceed-helpers";
 
 test.describe("Manual proceed to next workflow step", () => {
+  test("uses the task workflow when another board is selected", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const scenario = await seedCrossWorkflowProceedScenario(apiClient, seedData);
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await expect(kanban.taskCardByTitle(BOARD_CONTEXT_TASK_TITLE)).toBeVisible();
+    await expect(kanban.taskCardByTitle(FEATURE_TASK_TITLE)).not.toBeVisible();
+    await kanban.taskCardByTitle(BOARD_CONTEXT_TASK_TITLE).click();
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const featureTaskRow = session.sidebarTaskItem(FEATURE_TASK_TITLE);
+    await expect(featureTaskRow).toBeVisible({ timeout: 15_000 });
+    await featureTaskRow.click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${scenario.featureTask.id}(?:\\?|$)`));
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    await expect(session.stepperStep("Analysis")).toHaveAttribute("aria-current", "step");
+    const proceedButton = session.proceedNextStepButton();
+    await expect(proceedButton).toContainText("Implement");
+    await proceedButton.click();
+
+    await expect
+      .poll(async () => (await apiClient.getTask(scenario.featureTask.id)).workflow_step_id, {
+        timeout: 15_000,
+      })
+      .toBe(scenario.implementStep.id);
+    await expect(session.stepperStep("Implement")).toHaveAttribute("aria-current", "step");
+  });
+
   test("shows next step action for an idle signal-gated transition", async ({
     testPage,
     apiClient,

@@ -34,8 +34,12 @@ the future ADR 0015 `manual_fallback` signal path.
 - HTTP hydration, multi-workflow snapshot refresh, mobile workspace switching,
   workflow-step WebSocket mapping, and live Kanban update mapping preserve the
   signal-gated flag.
-- `useNextWorkflowStep` exposes the existing adjacent-next-step action only for
-  a signal-gated `move_to_next` action. Ungated move actions remain suppressed,
+- `useNextWorkflowStep` resolves the task's workflow and current step from the
+  freshest task projection, then reads that workflow's ordered steps from the
+  active Kanban state or its multi-workflow snapshot. The selected board
+  workflow is never used as a substitute for the task's workflow. It exposes
+  the existing adjacent-next-step action for a signal-gated `move_to_next`
+  action. Ungated move actions remain suppressed,
   as do signal-gated `move_to_previous` and `move_to_step` actions, because the
   existing `moveTask` operation submits the adjacent next step rather than a
   configured arbitrary destination.
@@ -66,7 +70,11 @@ eligibility predicates.
 1. Initial hydration, snapshot refresh, workspace switching, or a live
    workflow-step event writes the step events and signal-gated flag into the
    Kanban store.
-2. `useNextWorkflowStep` locates the current and adjacent next step.
+2. `useNextWorkflowStep` locates the task in the active and cached task
+   projections. It uses that task's workflow identity to select the active
+   step list or the corresponding cached workflow snapshot. It locates the
+   current and adjacent next step only within that list. The move target uses
+   the same task workflow identity and adjacent step ID.
 3. It inspects current-step `on_turn_complete` actions for `move_to_next`,
    `move_to_previous`, or `move_to_step`.
 4. An ungated move suppresses the composer action because the turn completion
@@ -84,6 +92,9 @@ eligibility predicates.
 ## Failure and recovery
 
 - Missing task, workflow, current step, or next step data produces no action.
+- A task in a workflow other than the selected board workflow waits for its
+  own snapshot to hydrate; it never borrows the selected board's steps. When
+  the snapshot arrives, both composer surfaces recompute the existing action.
 - An omitted signal-gated field preserves the legacy ungated behavior.
 - A busy agent keeps the action hidden. Returning to idle recomputes the surface
   without a reload.
