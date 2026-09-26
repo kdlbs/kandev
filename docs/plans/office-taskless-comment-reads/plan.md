@@ -1,6 +1,6 @@
 ---
 created: 2026-09-27
-status: planned
+status: done
 requirements:
   - REQ-OFFICE-AGENT-COMMENT-READS-001
   - REQ-OFFICE-AGENT-COMMENT-READS-009

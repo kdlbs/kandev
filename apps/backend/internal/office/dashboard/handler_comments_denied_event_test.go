@@ -99,7 +99,7 @@ func TestListComments_DeniedAgentReadAppendsRunEvent(t *testing.T) {
 
 // TestListComments_NoDeniedEventWithoutRunOrOnSuccess covers
 // AC-OFFICE-AGENT-COMMENT-READS-009.6: no event is appended for a refused
-// caller with no run identifier, an accepted read, or a dependency error.
+// caller with no run identifier, an accepted read, or a target lookup error.
 func TestListComments_NoDeniedEventWithoutRunOrOnSuccess(t *testing.T) {
 	f := newCommentSecurityFixture(t)
 	appender := &recordingRunEventAppender{}
@@ -129,6 +129,22 @@ func TestListComments_NoDeniedEventWithoutRunOrOnSuccess(t *testing.T) {
 	f.router.ServeHTTP(rec2, getCommentsReq("task-1", okToken, ""))
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("accepted status = %d, want 200; body=%s", rec2.Code, rec2.Body.String())
+	}
+
+	// A taskless run uses the workspace-scoped lookup path. Remove the task
+	// table to make that lookup fail with a backend error, which must remain a
+	// 500 and must not be reported as an authorization denial.
+	tasklessToken, err := f.agentsSvc.MintRuntimeJWT(agent.ID, "", agent.WorkspaceID, "run-4", "sess-4", "")
+	if err != nil {
+		t.Fatalf("mint taskless jwt: %v", err)
+	}
+	if _, err := f.repo.ExecRaw(context.Background(), `DROP TABLE tasks`); err != nil {
+		t.Fatalf("drop tasks table: %v", err)
+	}
+	rec3 := httptest.NewRecorder()
+	f.router.ServeHTTP(rec3, getCommentsReq("task-1", tasklessToken, ""))
+	if rec3.Code != http.StatusInternalServerError {
+		t.Fatalf("lookup error status = %d, want 500; body=%s", rec3.Code, rec3.Body.String())
 	}
 
 	appender.mu.Lock()

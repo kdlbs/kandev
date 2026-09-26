@@ -385,11 +385,10 @@ indistinguishable from an existing unrelated one on every surface using the
 guard.
 
 The caller identity comes from validated JWT claims, so a caller cannot claim
-to be a task it is not. A token with no task claim reads nothing unless it is a
-taskless run token, which reads only inside its own workspace claim. That reach
-equals what the same run can already enumerate through the runtime board read
-and annotate through the runtime comment action, so no new data becomes
-reachable to it. A task-bound token gains nothing.
+to be a task it is not. A taskless run token can now read comment bodies for any
+task in its workspace. Runtime board access and permission to annotate comments
+do not grant permission to read their bodies. A task-bound token gains no new
+access.
 
 Recorded so it is not mistaken for a new hole: the dashboard task **document**
 routes apply no relation check either. That gap predates this work, is the same
