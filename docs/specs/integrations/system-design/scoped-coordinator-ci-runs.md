@@ -1,5 +1,5 @@
 ---
-status: current
+status: superseded
 system: integrations
 requirements:
   - REQ-INTEGRATIONS-SCOPED-CI-RUNS-001
@@ -9,6 +9,9 @@ owners:
 ---
 
 # Scoped coordinator CI run system design
+
+This design is superseded by
+[provider access for managed plugin sessions](provider-session-access.md).
 
 ## Ownership and mapping
 

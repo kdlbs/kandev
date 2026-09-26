@@ -1,6 +1,6 @@
 # Server-Owned Scoped CI Runs
 
-- Status: accepted
+- Status: superseded by 2026-09-26-plugin-direct-provider-access
 - Date: 2026-08-30
 - Area: backend, protocol, security, GitHub, workflow
 

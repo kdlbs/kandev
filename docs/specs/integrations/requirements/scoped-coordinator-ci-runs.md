@@ -1,5 +1,5 @@
 ---
-status: active
+status: deprecated
 system: integrations
 created: 2026-08-30
 owners:
@@ -7,6 +7,11 @@ owners:
 ---
 
 # Scoped coordinator CI run requirements
+
+This action-specific server proxy is being replaced by
+[provider access for managed plugin sessions](provider-session-access.md).
+Its old acceptance criteria remain here only to identify the unshipped
+implementation being removed from PR #3165.
 
 ## Overview
 
