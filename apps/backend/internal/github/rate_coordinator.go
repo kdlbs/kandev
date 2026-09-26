@@ -230,14 +230,14 @@ func (a *RateAdmission) acquire(ctx context.Context, resource Resource) (func(),
 	}
 	if githubWorkClass(ctx) == WorkClassBackground {
 		if nonBlockingGitHubAdmission(ctx) {
-			return a.tryAcquireBackground(ctx, resource)
+			return a.tryAcquireBackground(resource)
 		}
 		return a.acquireBackground(ctx, resource)
 	}
 	return a.acquireInteractive(ctx, resource)
 }
 
-func (a *RateAdmission) tryAcquireBackground(ctx context.Context, resource Resource) (func(), error) {
+func (a *RateAdmission) tryAcquireBackground(resource Resource) (func(), error) {
 	now := time.Now()
 	trackerChanged := a.principal.tracker.Changed()
 	decision := a.snapshot(resource, now)
@@ -258,12 +258,6 @@ func (a *RateAdmission) tryAcquireBackground(ctx context.Context, resource Resou
 	nextBackgroundAt := state.nextBackgroundAt
 	a.principal.mu.Unlock()
 	reason := backgroundDeferralReason(decision, waitingInteractive, backgroundBusy, nextBackgroundAt, now)
-	if reason == rateLimitBlockBackgroundPacing {
-		if err := waitForLocalPacing(ctx, time.Until(nextBackgroundAt), trackerChanged, changed); err != nil {
-			return nil, err
-		}
-		return a.tryAcquireBackground(ctx, resource)
-	}
 	retryAt, retrySource := a.retryBoundary(resource, reason, now, wait)
 	incGitHubBackgroundDeferral(resource, reason)
 	return nil, &AdmissionDeferredError{
@@ -301,18 +295,6 @@ func backgroundDeferralReason(
 	default:
 		return rateLimitBlockProviderRetry
 	}
-}
-
-func waitForLocalPacing(
-	ctx context.Context,
-	wait time.Duration,
-	trackerChanged <-chan struct{},
-	stateChanged <-chan struct{},
-) error {
-	if wait <= 0 {
-		return nil
-	}
-	return waitForAdmissionChange(ctx, wait, trackerChanged, stateChanged)
 }
 
 func (a *RateAdmission) retryBoundary(
