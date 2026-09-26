@@ -84,6 +84,15 @@ var ErrAutoTitlePromptRequired = errors.New("description or title is required wh
 // that does not expose the one-shot title tool.
 var ErrAutoTitleUnsupportedForOffice = errors.New("auto_title is not supported for Office tasks")
 
+// ErrAssigneeSeatRequiresResolvedStep rejects a create-time request that named
+// an assignee agent profile but resolved to no workflow step (e.g. the
+// workflow has no steps yet, or step resolution failed). upsertRunnerInTx
+// only writes the runner seat when both an assignee and a step ID are
+// present, so continuing past this without rejecting would repeat the
+// ISSUE-7 pattern in a second guise: the assignee is validated, task
+// creation reports success, and no runner participant is ever written.
+var ErrAssigneeSeatRequiresResolvedStep = errors.New("invalid workflow: cannot seat assignee because no workflow step could be resolved")
+
 type pendingTaskTitleSetter interface {
 	SetTaskTitleIfPending(ctx context.Context, taskID, sessionID, title string) (bool, error)
 }
@@ -151,6 +160,20 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 		req.Origin == models.TaskOriginAgentCreated ||
 		req.Origin == models.TaskOriginRoutine ||
 		req.Origin == models.TaskOriginOnboarding
+}
+
+func (s *Service) validateAssigneeTaskIsOffice(ctx context.Context, req *CreateTaskRequest) error {
+	if req.AssigneeAgentProfileID == "" || isOfficeRequest(req) {
+		return nil
+	}
+	_, officeWorkflowID, err := s.tasks.GetWorkspaceTaskPrefix(ctx, req.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("get office workflow for assignee task: %w", err)
+	}
+	if officeWorkflowID != "" && req.WorkflowID == officeWorkflowID {
+		return nil
+	}
+	return fmt.Errorf("%w: Office agent assignees require an Office task", ErrInvalidAssigneeAgentProfile)
 }
 
 // CreateTaskOutcome distinguishes why Service.CreateTask returned the task it
@@ -323,11 +346,31 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.validateWorkflowAgentOverrides(ctx, req); err != nil {
 		return nil, err
 	}
+	if req.RequireAssigneeAgentProfileValidation {
+		if err := s.validateAssigneeTaskIsOffice(ctx, req); err != nil {
+			return nil, err
+		}
+	}
+	// Gated by RequireAssigneeAgentProfileValidation (set only by the
+	// untrusted HTTP create-task handler): running here, after the duplicate
+	// external_id short-circuit in CreateTask already returned, means a
+	// duplicate retry never re-validates its own assignee.
+	if req.RequireAssigneeAgentProfileValidation {
+		if err := s.ValidateAssigneeAgentProfile(ctx, req.WorkspaceID, req.AssigneeAgentProfileID); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.prepareContributionDestination(ctx, req); err != nil {
 		return nil, err
 	}
 
 	workflowStepID := s.resolveWorkflowStep(ctx, req)
+	// Only the untrusted HTTP create path (RequireAssigneeAgentProfileValidation)
+	// promises a runner seat for its assignee; internal callers that set
+	// AssigneeAgentProfileID without it already know their step resolves.
+	if req.RequireAssigneeAgentProfileValidation && req.AssigneeAgentProfileID != "" && workflowStepID == "" {
+		return nil, ErrAssigneeSeatRequiresResolvedStep
+	}
 	task := s.buildTask(ctx, req, workflowStepID)
 	task.ExternalID = externalID
 

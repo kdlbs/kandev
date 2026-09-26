@@ -786,13 +786,17 @@ type httpCreateTaskRequest struct {
 	StartAgent             bool                      `json:"start_agent,omitempty"`
 	PrepareSession         bool                      `json:"prepare_session,omitempty"`
 	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
-	ExecutorID             string                    `json:"executor_id,omitempty"`
-	ExecutorProfileID      string                    `json:"executor_profile_id,omitempty"`
-	PlanMode               bool                      `json:"plan_mode,omitempty"`
-	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
-	ParentID               string                    `json:"parent_id,omitempty"`
-	WorkspacePath          string                    `json:"workspace_path,omitempty"`
-	BlockedBy              []string                  `json:"blocked_by,omitempty"`
+	// AssigneeAgentProfileID names an Office agent instance to seat as the
+	// task's runner at create time. Optional, and always workspace-scoped;
+	// see service.ValidateAssigneeAgentProfile for eligibility rules.
+	AssigneeAgentProfileID string                 `json:"assignee_agent_profile_id,omitempty"`
+	ExecutorID             string                 `json:"executor_id,omitempty"`
+	ExecutorProfileID      string                 `json:"executor_profile_id,omitempty"`
+	PlanMode               bool                   `json:"plan_mode,omitempty"`
+	Attachments            []v1.MessageAttachment `json:"attachments,omitempty"`
+	ParentID               string                 `json:"parent_id,omitempty"`
+	WorkspacePath          string                 `json:"workspace_path,omitempty"`
+	BlockedBy              []string               `json:"blocked_by,omitempty"`
 	// StartWhenUnblocked records the agent start as an intent consumed by
 	// dependency resolution. nil derives it from StartAgent when BlockedBy is set.
 	StartWhenUnblocked *bool  `json:"start_when_unblocked,omitempty"`
@@ -932,7 +936,6 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_profile_id is required to start agent"})
 		return
 	}
-
 	repos, ok := convertCreateTaskRepositories(c, body.Repositories)
 	if !ok {
 		return
@@ -957,6 +960,11 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 
 	title := strings.TrimSpace(body.Title)
 	description := strings.TrimSpace(body.Description)
+	// Trimmed once here so the value ValidateAssigneeAgentProfile looks up
+	// and the value the runner seat is written under are identical — a
+	// padded ID that passed validation must not be stored un-trimmed, where
+	// an exact-ID lookup on the seat would never resolve it.
+	assigneeAgentProfileID := strings.TrimSpace(body.AssigneeAgentProfileID)
 
 	// Office task-handoffs phase 5: resolve workspace policy from the
 	// request + parent task, merge into Metadata, and remember it so the
@@ -982,33 +990,42 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	}
 
 	result, err := h.service.CreateTask(c.Request.Context(), &service.CreateTaskRequest{
-		WorkspaceID:                 body.WorkspaceID,
-		WorkflowID:                  body.WorkflowID,
-		WorkflowStepID:              body.WorkflowStepID,
-		WorkflowAgentOverrides:      body.WorkflowAgentOverrides,
-		ExecutorID:                  body.ExecutorID,
-		ExecutorProfileID:           body.ExecutorProfileID,
-		Title:                       title,
-		Description:                 description,
-		AutoTitle:                   body.AutoTitle,
-		Autopilot:                   body.Autopilot,
-		Priority:                    body.Priority,
-		State:                       body.State,
-		Repositories:                convertToServiceRepos(repos),
-		Position:                    body.Position,
-		Metadata:                    metadata,
-		DeferredLaunch:              deferredLaunch,
-		RecordAgentProfileRecentUse: true,
-		PlanMode:                    body.PlanMode,
-		StartAgent:                  body.StartAgent,
-		ParentID:                    body.ParentID,
-		WorkspacePath:               body.WorkspacePath,
-		BlockedBy:                   body.BlockedBy,
-		StartWhenUnblocked:          body.StartWhenUnblocked,
-		ProjectID:                   body.ProjectID,
-		Labels:                      labels,
-		ExternalID:                  body.ExternalID,
-		WorkspacePolicy:             &wsPolicy,
+		WorkspaceID:            body.WorkspaceID,
+		WorkflowID:             body.WorkflowID,
+		WorkflowStepID:         body.WorkflowStepID,
+		WorkflowAgentOverrides: body.WorkflowAgentOverrides,
+		AssigneeAgentProfileID: assigneeAgentProfileID,
+		// This is untrusted browser input, unlike the internal callers
+		// (agent-created subtasks, onboarding, routines) that also populate
+		// AssigneeAgentProfileID — only this HTTP path opts into create-time
+		// validation of the named profile. Gating it inside
+		// prepareTaskForCreation (rather than checking it here, before
+		// CreateTask runs) means a duplicate external_id still short-circuits
+		// to the existing task without re-validating this request's assignee.
+		RequireAssigneeAgentProfileValidation: true,
+		ExecutorID:                            body.ExecutorID,
+		ExecutorProfileID:                     body.ExecutorProfileID,
+		Title:                                 title,
+		Description:                           description,
+		AutoTitle:                             body.AutoTitle,
+		Autopilot:                             body.Autopilot,
+		Priority:                              body.Priority,
+		State:                                 body.State,
+		Repositories:                          convertToServiceRepos(repos),
+		Position:                              body.Position,
+		Metadata:                              metadata,
+		DeferredLaunch:                        deferredLaunch,
+		RecordAgentProfileRecentUse:           true,
+		PlanMode:                              body.PlanMode,
+		StartAgent:                            body.StartAgent,
+		ParentID:                              body.ParentID,
+		WorkspacePath:                         body.WorkspacePath,
+		BlockedBy:                             body.BlockedBy,
+		StartWhenUnblocked:                    body.StartWhenUnblocked,
+		ProjectID:                             body.ProjectID,
+		Labels:                                labels,
+		ExternalID:                            body.ExternalID,
+		WorkspacePolicy:                       &wsPolicy,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
