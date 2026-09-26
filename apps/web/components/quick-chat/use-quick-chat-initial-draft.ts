@@ -30,6 +30,10 @@ export function useQuickChatInitialDraft({
     if (appliedRef.current === draft) return;
     const input = chatInputRef.current;
     if (!input) return;
+    // The composer ref can exist before its underlying editor does (e.g.
+    // TipTap's `immediatelyRender: false`); insertText/clear silently no-op
+    // until then, so wait for it rather than marking the draft applied.
+    if (!input.getTextareaElement()) return;
     input.clear();
     input.insertText(draft, 0, 0);
     input.focusInput();

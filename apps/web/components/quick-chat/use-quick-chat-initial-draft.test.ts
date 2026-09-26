@@ -8,7 +8,7 @@ const DRAFT = "why is KAN-418 here?";
 function createHandle(getValue = vi.fn().mockReturnValue("")) {
   return {
     focusInput: vi.fn(),
-    getTextareaElement: vi.fn(),
+    getTextareaElement: vi.fn().mockReturnValue(document.createElement("div")),
     getValue,
     getSelectionStart: vi.fn().mockReturnValue(0),
     insertText: vi.fn(),
@@ -86,6 +86,23 @@ describe("useQuickChatInitialDraft", () => {
 
     expect(handle.clear).not.toHaveBeenCalled();
     expect(handle.insertText).not.toHaveBeenCalled();
+  });
+
+  it("holds a draft while the composer ref exists but its editor is not ready yet, then applies it once ready", () => {
+    const getTextareaElement = vi.fn().mockReturnValue(null);
+    const handle = { ...createHandle(), getTextareaElement };
+    const chatInputRef = { current: handle };
+
+    const { rerender } = renderHook(() => useQuickChatInitialDraft({ draft: DRAFT, chatInputRef }));
+
+    expect(handle.clear).not.toHaveBeenCalled();
+    expect(handle.insertText).not.toHaveBeenCalled();
+
+    getTextareaElement.mockReturnValue(document.createElement("div"));
+    rerender();
+
+    expect(handle.insertText).toHaveBeenCalledWith(DRAFT, 0, 0);
+    expect(handle.focusInput).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the draft pending while initialPrompt is non-empty, then applies it once the prompt clears", () => {
