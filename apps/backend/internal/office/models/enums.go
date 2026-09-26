@@ -26,21 +26,6 @@ const (
 // String implements fmt.Stringer.
 func (s ApprovalStatus) String() string { return string(s) }
 
-// RunStatus is the scheduler queue state for a Run row.
-// See internal/office/scheduler/run.go for the state machine.
-type RunStatus string
-
-// Run queue status values.
-const (
-	RunStatusQueued   RunStatus = "queued"
-	RunStatusClaimed  RunStatus = "claimed"
-	RunStatusFinished RunStatus = "finished"
-	RunStatusFailed   RunStatus = "failed"
-)
-
-// String implements fmt.Stringer.
-func (s RunStatus) String() string { return string(s) }
-
 // RoutineRunStatus is the lifecycle state of a RoutineRun row.
 // See internal/office/routines/service.go for the state machine.
 type RoutineRunStatus string
@@ -287,19 +272,6 @@ const (
 // String implements fmt.Stringer.
 func (s ProviderHealthState) String() string { return string(s) }
 
-// RoutingBlockedStatus is the "park reason" written onto Run when no
-// provider can be selected.
-type RoutingBlockedStatus string
-
-// Routing blocked-status values.
-const (
-	RoutingBlockedWaitingForCapacity RoutingBlockedStatus = "waiting_for_provider_capacity"
-	RoutingBlockedActionRequired     RoutingBlockedStatus = "blocked_provider_action_required"
-)
-
-// String implements fmt.Stringer.
-func (s RoutingBlockedStatus) String() string { return string(s) }
-
 // RouteAttemptOutcome is the result of one route attempt persisted to
 // office_route_attempts. See internal/office/scheduler/dispatch_routing.go
 // for the lifecycle.
@@ -383,39 +355,6 @@ const (
 
 // String implements fmt.Stringer.
 func (s SkillApprovalState) String() string { return string(s) }
-
-// RunEventLevel is the severity classification of a RunEvent row.
-// Free-form by convention: info | warn | error.
-type RunEventLevel string
-
-// Run event level values.
-const (
-	RunEventLevelInfo  RunEventLevel = "info"
-	RunEventLevelWarn  RunEventLevel = "warn"
-	RunEventLevelError RunEventLevel = "error"
-)
-
-// String implements fmt.Stringer.
-func (l RunEventLevel) String() string { return string(l) }
-
-// RunEventType is the kind of a RunEvent. Open set (init, step,
-// adapter.invoke, complete, error, runtime.denied, runtime.action, …).
-// Typed for documentation, not for exhaustiveness.
-type RunEventType string
-
-// Well-known run event types. Adapters may emit additional values.
-const (
-	RunEventTypeInit          RunEventType = "init"
-	RunEventTypeAdapterInvoke RunEventType = "adapter.invoke"
-	RunEventTypeStep          RunEventType = "step"
-	RunEventTypeComplete      RunEventType = "complete"
-	RunEventTypeError         RunEventType = "error"
-	RunEventTypeRuntimeDenied RunEventType = "runtime.denied"
-	RunEventTypeRuntimeAction RunEventType = "runtime.action"
-)
-
-// String implements fmt.Stringer.
-func (t RunEventType) String() string { return string(t) }
 
 // ChannelPlatform is the external service a Channel row relays to.
 // Open set — new adapters add new platforms.
