@@ -1,6 +1,6 @@
 ---
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-27
 status: done
 requirements:
   - REQ-PLATFORM-BACKEND-RESTART-PAGE-RECOVERY-001
@@ -14,7 +14,7 @@ legacy_specs: []
 
 ## Outcome
 
-Move the System > About `SystemInfo` snapshot and request state to one identity-scoped TanStack Query cache. Preserve the existing About presentation, authenticated endpoint, page boot ID, backend restart guard, and every other System state owner. This refactor adds no product behavior or boot-payload fields.
+Move the System > About `SystemInfo` snapshot and request state to one identity-scoped TanStack Query cache. Preserve the existing About presentation, authenticated endpoint, page boot ID, backend restart guard, and every other System state owner. Keep one QueryClient stable for the authenticated app branch and remove obsolete identity entries without remounting shell state. This refactor adds no product behavior or boot-payload fields.
 
 ## Contracts
 
@@ -29,7 +29,7 @@ Move the System > About `SystemInfo` snapshot and request state to one identity-
 
 ## Verification results
 
-- Focused SystemInfo, System slice, restart guard, restart flow, self-update, and System API tests pass (68 tests across 6 files).
-- Web typecheck and full lint pass. `pnpm install --frozen-lockfile` passes from `apps/`.
-- Architecture lint, spec validation, harness validation, the i18n ratchet, and `git diff --check` pass.
-- No mobile E2E was needed: this data-ownership refactor leaves About layout, copy, controls, and responsive behavior unchanged.
+- The focused SystemInfo, app error-boundary, state-provider, System slice, restart guard, restart flow, self-update, and System API suite passes: 80 tests across 8 files.
+- Web typecheck and lint pass. `pnpm install --frozen-lockfile` passes from `apps/`.
+- Architecture lint, documentation validation, specification lint, the i18n ratchet, and `git diff --check` pass.
+- The managed mobile Docker permissions E2E passes both member and admin cases, including the edited-form identity-change regression.

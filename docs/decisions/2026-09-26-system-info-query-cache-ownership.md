@@ -26,13 +26,15 @@ ID and require a page reload after a process change.
 - The SystemInfo query key includes the canonical full backend API base URL,
   page `bootId`, auth mode, authenticated state, and user ID. It is not
   workspace-scoped.
-- The authenticated application shell owns one stable QueryClient per such
-  identity. The client is created once per identity in React state. A provider
-  key change mounts a separate client, and the authenticated shell unmounts the
+- The authenticated application shell owns one QueryClient for the mounted app
+  branch. The client remains stable across backend and auth identity changes;
+  the provider is not keyed by identity because doing so remounts unrelated
+  shell state. The query key scopes data to the full identity, and the provider
+  cancels and removes SystemInfo queries for identities that are no longer
+  current through QueryClient APIs. The authenticated shell unmounts the
   provider on logout. Query functions pass TanStack Query's observer signal to
-  the existing transport. When the last observer leaves during an in-flight
-  request, TanStack cancels that query and aborts its signal. No provider-owned
-  AbortController or effect-based cache disposal is used.
+  the existing transport, so leaving an in-flight query cancels its request.
+  No provider-owned AbortController or StrictMode replay guard is used.
 - The boot payload is unchanged. It supplies only the stable page `bootId` used
   to construct the query identity. The About view lazily fetches SystemInfo
   from the existing authenticated endpoint when it mounts.
@@ -61,9 +63,11 @@ error, deduplication, and refresh state. Its first HTTP request occurs only
 when the About view mounts. Concurrent observers share a request. During a
 development StrictMode observer replay, TanStack may cancel a pending request
 and start a replacement when the observer returns; the hook does not impose an
-exactly-once request guarantee across that lifecycle. The restart guard
-continues to make its separate uncached request because that request proves
-process identity on reconnect.
+exactly-once request guarantee across that lifecycle. Backend or auth identity
+changes retain unrelated shell state while removing prior SystemInfo snapshots
+and cancelling their pending requests. Logout unmounts the provider, and the
+restart guard continues to make its separate uncached request because that
+request proves process identity on reconnect.
 
 TanStack Query is introduced as a bounded pilot. Its use here does not establish
 a default owner for every server-backed Zustand slice.
@@ -80,6 +84,9 @@ a default owner for every server-backed Zustand slice.
   this bounded UI cache pilot.
 - Use a global SystemInfo key with no backend or auth identity. This can reuse a
   response across a backend or authenticated-user change.
+- Key the QueryClientProvider subtree by backend/auth identity. This isolates
+  cache instances but remounts unrelated shell routes and discards form state;
+  identity-keyed queries with targeted cache cleanup preserve that state.
 - Refetch the Query cache on every reconnect. The existing generation guard
   already performs the required uncached check, and a new backend generation
   requires a document reload.

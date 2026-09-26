@@ -23,7 +23,9 @@ Give the About view one authoritative server snapshot and request lifecycle in T
 
 ## In scope
 
-- Create a stable, identity-scoped QueryClient in the authenticated app branch.
+- Create one stable QueryClient in the authenticated app branch. Keep its
+  descendants mounted across identity changes, while cancelling and removing
+  SystemInfo queries from obsolete identities.
 - Fetch `/api/v1/system/info` lazily through the existing API wrapper and keep explicit refetch, loading, error, and one-attempt behavior.
 - Remove only the SystemInfo field and action from the Zustand System slice. Keep all other System state and actions there.
 - Keep the boot payload and `runtime.bootId` unchanged. Keep backend-generation, restart, and self-update reads on their independent no-store paths.
@@ -41,19 +43,20 @@ Give the About view one authoritative server snapshot and request lifecycle in T
 ## Acceptance
 
 1. Preserve `AC-PLATFORM-BACKEND-RESTART-PAGE-RECOVERY-001.1` and `.2`: use the current page boot ID and retain an independent uncached reconnect check.
-2. Query owns the About view's single SystemInfo snapshot and request state. Its key and client scope include the canonical full API base URL, page boot ID, auth mode, authenticated state, and user ID.
+2. Query owns the About view's single SystemInfo snapshot and request state. Its key includes the canonical full API base URL, page boot ID, auth mode, authenticated state, and user ID. A stable app-branch client removes obsolete SystemInfo identities without remounting unrelated shell state.
 3. About mounts trigger a lazy request; concurrent consumers with the same identity share it. Loading, error, manual retry/refetch, and the immutable process snapshot keep the current UI behavior.
 4. Query functions consume TanStack's observer signal. When an identity change
    or logout removes the last observer from an in-flight query, TanStack
-   cancels it. A replacement identity uses a separate QueryClient, and late
-   responses cannot appear in its cache. No exactly-once request promise is
-   made across StrictMode observer replay.
+   cancels it. Identity changes also remove prior SystemInfo entries from the
+   shared client, and late responses cannot appear under a new identity. No
+   exactly-once request promise is made across StrictMode observer replay.
 5. All unrelated System state remains in Zustand. No SystemInfo result is copied back into Zustand.
 
 ## Verification
 
 ```sh
-cd apps/web && pnpm exec vitest run hooks/domains/system/use-system-info.test.tsx lib/state/slices/system/system-slice.test.ts hooks/domains/system/use-backend-generation-guard.test.ts hooks/domains/system/use-kandev-restart.test.ts hooks/domains/system/use-self-update.test.ts lib/api/domains/system-api.test.ts
+cd apps/web && pnpm exec vitest run src/app-error-boundary.test.tsx components/state-provider.test.tsx hooks/domains/system/use-system-info.test.tsx lib/state/slices/system/system-slice.test.ts hooks/domains/system/use-backend-generation-guard.test.ts hooks/domains/system/use-kandev-restart.test.ts hooks/domains/system/use-self-update.test.ts lib/api/domains/system-api.test.ts
+cd apps/web && pnpm e2e:run --project mobile-chrome e2e/tests/settings/mobile-docker-build-permissions.spec.ts
 cd apps/web && pnpm run typecheck
 cd apps/web && pnpm run lint
 cd apps && pnpm install --frozen-lockfile
@@ -63,8 +66,15 @@ python3 scripts/lint-harness-files.test.py && python3 .github/scripts/lint-harne
 cd apps/web && pnpm run i18n:ratchet
 ```
 
-No Playwright E2E was warranted because the change does not alter About layout, copy, controls, or responsive behavior.
-
 ## Results
 
-Implementation and verification are complete. The linked system design and ownership decision describe the scoped Query cache and TanStack cancellation lifecycle; no product requirement was added.
+The provider keeps one client for the authenticated app branch, scopes the query
+key to the full backend/boot/auth identity, and cancels and removes obsolete
+SystemInfo entries without remounting unrelated shell state. The boot payload
+and backend remain unchanged.
+
+The focused SystemInfo, error-boundary, state-provider, System slice, restart
+guard, restart flow, self-update, and System API suite passes (80 tests across
+8 files). Typecheck, lint, frozen-lockfile install, architecture lint, docs
+validation, spec lint, and i18n ratchet pass. The managed mobile Docker
+permissions E2E passes both member and admin cases.

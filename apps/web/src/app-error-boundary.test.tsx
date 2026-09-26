@@ -15,6 +15,9 @@ vi.mock("@/components/state-provider", () => ({
     }
     return children;
   },
+  useAppStore: (
+    selector: (state: { auth: { mode: string; authenticated: boolean; user: null } }) => unknown,
+  ) => selector({ auth: { mode: "disabled", authenticated: false, user: null } }),
   useAppStoreApi: () => ({
     getState: () => ({ clearAuthenticated: vi.fn() }),
   }),

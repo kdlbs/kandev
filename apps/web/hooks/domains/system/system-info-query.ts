@@ -10,6 +10,8 @@ export type SystemInfoQueryIdentity = {
   userId: string | null;
 };
 
+export const SYSTEM_INFO_QUERY_KEY_PREFIX = ["system", "info"] as const;
+
 export function normalizeSystemInfoApiBaseUrl(apiBaseUrl: string): string {
   const url = new URL(apiBaseUrl);
   const path = url.pathname.replace(/\/+$/, "");
@@ -18,8 +20,7 @@ export function normalizeSystemInfoApiBaseUrl(apiBaseUrl: string): string {
 
 export function createSystemInfoQueryKey(identity: SystemInfoQueryIdentity) {
   return [
-    "system",
-    "info",
+    ...SYSTEM_INFO_QUERY_KEY_PREFIX,
     normalizeSystemInfoApiBaseUrl(identity.apiBaseUrl),
     identity.bootId ?? null,
     identity.authMode,

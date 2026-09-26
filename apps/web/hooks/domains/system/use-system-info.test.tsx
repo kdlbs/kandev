@@ -1,6 +1,6 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { onlineManager } from "@tanstack/react-query";
-import { StrictMode, useEffect, type ReactNode } from "react";
+import { StrictMode, useEffect, useState, type ReactNode } from "react";
 import type { StoreApi } from "zustand";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -123,6 +123,15 @@ function CapturingProbe() {
         version: query.info?.version,
       })}
     </output>
+  );
+}
+
+function StatefulShellProbe() {
+  const [value, setValue] = useState("original");
+  return (
+    <button type="button" onClick={() => setValue("edited")}>
+      {value}
+    </button>
   );
 }
 
@@ -312,34 +321,46 @@ async function isolatesAndCancelsRequestsAcrossIdentityChanges() {
   const view = render(
     <TestHarness apiBaseUrl={`${BACKEND_ORIGIN}/one`} bootId="page-boot-1" onStore={onStore}>
       <InfoProbe id="current" />
+      <StatefulShellProbe />
     </TestHarness>,
   );
   await waitFor(() => expect(requests).toHaveLength(1));
   expect(requests[0]?.url).toBe(`${BACKEND_ORIGIN}/one/api/v1/system/info`);
+  fireEvent.click(screen.getByRole("button", { name: "original" }));
 
   view.rerender(
     <TestHarness apiBaseUrl={`${BACKEND_ORIGIN}/two`} bootId="page-boot-2" onStore={onStore}>
       <InfoProbe id="current" />
+      <StatefulShellProbe />
     </TestHarness>,
   );
   await waitFor(() => expect(requests).toHaveLength(2));
   await waitFor(() => expect(requests[0]?.signal.aborted).toBe(true));
+  expect(screen.getByRole("button", { name: "edited" })).toBeTruthy();
+  expect(screen.getByTestId("current").textContent).toContain('"version":null');
+
+  act(() => {
+    store?.getState().setAuthState({ ...AUTH, user: { ...AUTH.user, id: "user-2" } });
+  });
+  await waitFor(() => expect(requests).toHaveLength(3));
+  await waitFor(() => expect(requests[1]?.signal.aborted).toBe(true));
+  expect(screen.getByRole("button", { name: "edited" })).toBeTruthy();
   expect(screen.getByTestId("current").textContent).toContain('"version":null');
 
   act(() => {
     store?.getState().clearAuthenticated();
   });
   await waitFor(() => expect(screen.getByTestId("logged-out")).toBeTruthy());
-  await waitFor(() => expect(requests[1]?.signal.aborted).toBe(true));
+  await waitFor(() => expect(requests[2]?.signal.aborted).toBe(true));
 
   act(() => {
     store?.getState().setAuthState({ ...AUTH, user: { ...AUTH.user, id: "user-2" } });
   });
-  await waitFor(() => expect(requests).toHaveLength(3));
+  await waitFor(() => expect(requests).toHaveLength(4));
   expect(screen.getByTestId("current").textContent).toContain('"version":null');
 
   await act(async () =>
-    requests[2]?.pending.resolve(makeResponse({ ...INFO, version: "current" })),
+    requests[3]?.pending.resolve(makeResponse({ ...INFO, version: "current" })),
   );
   await waitFor(() =>
     expect(screen.getByTestId("current").textContent).toContain('"version":"current"'),
@@ -348,8 +369,43 @@ async function isolatesAndCancelsRequestsAcrossIdentityChanges() {
   await act(async () => {
     requests[0]?.pending.resolve(makeResponse({ ...INFO, version: "stale-backend" }));
     requests[1]?.pending.resolve(makeResponse({ ...INFO, version: "stale-user" }));
+    requests[2]?.pending.resolve(makeResponse({ ...INFO, version: "stale-auth" }));
   });
   expect(screen.getByTestId("current").textContent).toContain('"version":"current"');
+}
+
+async function discardsSnapshotsFromPreviousAuthIdentities() {
+  let store: StoreApi<AppState> | undefined;
+  let snapshot = 0;
+  const fetchMock = vi.fn(async () => makeResponse({ ...INFO, version: `snapshot-${++snapshot}` }));
+  vi.stubGlobal("fetch", fetchMock);
+  const onStore = (nextStore: StoreApi<AppState>) => {
+    store = nextStore;
+  };
+
+  render(
+    <TestHarness onStore={onStore}>
+      <InfoProbe id="current" />
+    </TestHarness>,
+  );
+  await waitFor(() =>
+    expect(screen.getByTestId("current").textContent).toContain('"version":"snapshot-1"'),
+  );
+
+  act(() => {
+    store?.getState().setAuthState({ ...AUTH, user: { ...AUTH.user, id: "user-2" } });
+  });
+  await waitFor(() =>
+    expect(screen.getByTestId("current").textContent).toContain('"version":"snapshot-2"'),
+  );
+
+  act(() => {
+    store?.getState().setAuthState(AUTH);
+  });
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  await waitFor(() =>
+    expect(screen.getByTestId("current").textContent).toContain('"version":"snapshot-3"'),
+  );
 }
 
 function scopesTheCacheKeyToTheFullIdentity() {
@@ -401,6 +457,10 @@ describe("useSystemInfo Query cache", () => {
     attemptsOnceWhileOfflineAndDoesNotResumeOnReconnect,
   );
   it("cancels and isolates old identity requests", isolatesAndCancelsRequestsAcrossIdentityChanges);
+  it(
+    "discards snapshots from previous auth identities",
+    discardsSnapshotsFromPreviousAuthIdentities,
+  );
   it(
     "includes full backend, boot, and auth identity in its cache key",
     scopesTheCacheKeyToTheFullIdentity,

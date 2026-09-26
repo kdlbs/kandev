@@ -3,7 +3,7 @@ status: draft
 system: platform
 requirements: []
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-27
 owners:
   - kandev
 ---
@@ -26,7 +26,8 @@ records rationale and alternatives.
 ## Components and responsibilities
 
 - `SystemInfoQueryProvider` lives in the authenticated app branch. It creates
-  one stable QueryClient for the current backend and auth identity.
+  one stable QueryClient for the mounted app branch and keeps shell descendants
+  mounted when backend or auth identity changes.
 - `useSystemInfo` reads and refreshes the SystemInfo Query cache. It does not
   write data back to Zustand.
 - `AboutCard` remains the presentation consumer and preserves its current
@@ -41,14 +42,15 @@ records rationale and alternatives.
 
 The query key includes the canonical full backend API base URL, the document's
 stable `bootId`, auth mode, authenticated state, and user ID. SystemInfo is not
-scoped to a workspace. The query provider is keyed by the same identity and
-creates its QueryClient once in React state. A different identity gets a
-different client, so a late response from the old client cannot become visible
-to the new identity. Auth-gated navigation unmounts the provider when the app
-shell is left. When the last observer leaves during a pending request, TanStack
-cancels the query through the observer signal consumed by the query function.
-The old client is detached with its provider; no custom request controller,
-effect cleanup, or StrictMode replay guard is used.
+scoped to a workspace. The provider keeps one QueryClient for the authenticated
+app branch instead of keying the provider subtree by identity, so an identity
+change does not remount unrelated shell state. When identity changes, the
+provider cancels and removes SystemInfo queries for other identities through
+the QueryClient APIs. The hook moves to the new identity key, so old data cannot
+be rendered as the new identity's result. Auth-gated navigation unmounts the
+provider when the app shell is left. TanStack also cancels a pending query when
+its last observer leaves because the query function consumes the observer
+signal. No custom request controller or StrictMode replay guard is used.
 
 The Go boot payload is unchanged and does not include SystemInfo. It supplies
 only `runtime.bootId` for the existing restart guard and query identity. The
@@ -63,7 +65,9 @@ TanStack Query's query function context. TanStack Query deduplicates concurrent
 consumers and retains one in-memory snapshot. Loading, error, and explicit
 refresh state come from the query. If identity changes or logout removes the
 last observer while a request is pending, TanStack cancels the query through
-that signal. A request that has already completed needs no cancellation.
+that signal. Identity-change cleanup also removes snapshots for other
+identities from the client. A request that has already completed needs no
+cancellation.
 
 All fields in the SystemInfo response are fixed for a backend process: build
 metadata, runtime version/platform values, process start time, and process ID.
