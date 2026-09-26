@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/truncate"
+	"github.com/kandev/kandev/internal/task/repository"
 )
 
 // commentBodyMaxBytes and commentResponseBudgetBytes are the per-comment
@@ -107,7 +109,40 @@ func (s *HandoffService) ListCommentsForCaller(ctx context.Context, callerTaskID
 	if !ok {
 		return nil, ErrAccessDenied
 	}
+	return s.commentWindow(ctx, targetTaskID, limit)
+}
 
+// ListCommentsForTasklessRun returns targetTaskID's comments for a taskless
+// run caller: an agent JWT with no caller task, so the caller-task relation
+// ListCommentsForCaller enforces has nothing to relate the target to. Such a
+// caller may already list its whole workspace board and annotate any task in
+// it (REQ-OFFICE-COORDINATOR-AUTHORITY-001/-004); this grants the same
+// workspace-wide reach for reads (REQ-OFFICE-AGENT-COMMENT-READS-009). A
+// missing target and a foreign-workspace one are denied identically, mirroring
+// loadAccessPair's not-found normalization, so neither leaks which is which.
+func (s *HandoffService) ListCommentsForTasklessRun(ctx context.Context, workspaceID, targetTaskID string, limit int) (*CommentWindow, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	targetTaskID = strings.TrimSpace(targetTaskID)
+	if workspaceID == "" || targetTaskID == "" {
+		return nil, ErrAccessDenied
+	}
+	target, err := s.tasks.GetTask(ctx, targetTaskID)
+	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			return nil, ErrAccessDenied
+		}
+		return nil, err
+	}
+	if target == nil || target.WorkspaceID != workspaceID {
+		return nil, ErrAccessDenied
+	}
+	return s.commentWindow(ctx, targetTaskID, limit)
+}
+
+// commentWindow builds the guarded response shared by every agent comment
+// read entry point once its caller-specific access check has passed: window
+// clamp, byte budget and projection must not diverge between them.
+func (s *HandoffService) commentWindow(ctx context.Context, targetTaskID string, limit int) (*CommentWindow, error) {
 	if s.comments == nil {
 		return nil, errCommentReaderNotConfigured
 	}

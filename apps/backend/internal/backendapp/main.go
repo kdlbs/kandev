@@ -1651,6 +1651,10 @@ func wireOfficeSvcsDependencies(
 	// tags its row with the originating run id, matching the async
 	// subscriber it replaced.
 	services.OfficeSvcs.Dashboard.SetRunResolver(services.Office)
+	// Wire the office service as the dashboard's run event appender so a
+	// refused agent comment read is recorded on the caller's run, the same
+	// way the runtime action surface already records a refused runtime call.
+	services.OfficeSvcs.Dashboard.SetRunEventAppender(services.Office)
 	// Wire the Office activity projection before task.state_changed events
 	// reach the WebSocket broadcaster, so workflow moves have durable timeline
 	// data when the frontend refetches the task detail.
