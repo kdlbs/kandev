@@ -71,7 +71,11 @@ Deciding proposals is task 07. Backend only. On the critical path.
   session ensured through `EnsureSession` with `AutoStart: &false` and
   `ActivationSource: session_open`, 502 on an ensure failure with the task
   kept, 409 with the `coordinator_profile_unavailable` body on a status other
-  than `ok` from task 01's `profileStatus`.
+  than `ok` from task 01's `profileStatus`; a zero-row update at step 4 whose
+  re-read finds `conversation_task_id` NULL (a concurrent context change
+  cleared it after the stale read in step 2) restarts from step 2 once with
+  the fresh value; a second NULL on the retry's re-read returns 409 instead
+  of looping again.
 - `TaskOriginCoordinator` (task 01's constant) refused at HTTP and MCP task
   create. The `coordinator-proposal:` external-id prefix refusal is task 07's.
 - `ListCoordinatorOriginTasks` in the task repository (SQLite and PostgreSQL)
@@ -167,6 +171,10 @@ Required Go tests:
   session with no agent; an ensure failure returns 502 and the next open
   retries with the same task; the created task carries no
   `auto_start_on_create` marker, and no agent runs after create or open;
+- a zero-row update at step 4 whose re-read finds `conversation_task_id` NULL
+  restarts from step 2 once and succeeds with the fresh value, leaving no
+  orphaned task; a second NULL on the retry's re-read returns 409 and creates
+  no task;
 - a context change archives the old conversation task (a running turn
   stops), the next open creates a new one, and the archived one never
   resolves to a coordinator; coordinator delete removes current and archived

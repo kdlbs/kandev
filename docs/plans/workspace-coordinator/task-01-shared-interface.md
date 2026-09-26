@@ -61,9 +61,13 @@ the coordinators and proposals system designs, not a local edit.
   `internal/coordinator/validate.go` and the `agent_profile_status` and
   `executor_profile_status` fields on the coordinator GET
   ([coordinators design](../../specs/coordinator/system-design/coordinators.md#validation));
+  a profile whose `WorkspaceID` is non-empty and differs from the
+  coordinator's own workspace is refused at save (400) and reported as
+  `missing` by `profileStatus`, the same as an unreadable or absent profile;
   `open_proposals` on the coordinator list; the proposals list and get
-  routes (without the stale-claim recovery on read, which is task 07's); the
-  stalls route.
+  routes (without the stale-claim recovery on read, which is task 07's), with
+  the list route returning 400 naming `status` for any `status` value other
+  than `pending` or `all`; the stalls route.
 - Request and response types for every route of the three system designs,
   including the conversation, approve and reject routes whose handlers land in
   tasks 03 and 07, and the 409 body `coordinator_profile_unavailable`.
@@ -135,9 +139,12 @@ concurrent PATCH requests against the same coordinator commit last-write-wins,
 so the next GET returns whichever request's fields committed last
 (`AC-COORDINATOR-COORDINATORS-002.6`); flag off 404
 with the store initialised and rows kept across a restart; `profileStatus`
-over agent `missing`, agent `passthrough`, executor `missing` and a read error
-other than not found (500, never `missing`); the store methods (the claim is
-conditional on status and claim token, proposal list order and the 50-row
+over agent `missing`, agent `passthrough`, executor `missing`, a profile whose
+`WorkspaceID` is non-empty and differs from the coordinator's own workspace
+(also `missing`), and a read error other than not found (500, never
+`missing`); the proposals list route with a `status` value other than
+`pending` or `all` returns 400 naming `status`; the store methods (the claim
+is conditional on status and claim token, proposal list order and the 50-row
 limit for `status=all`, the stall upsert fence); store and upgrade
 conformance on SQLite and PostgreSQL; the forwarder delivers
 `coordinator.updated` to the workspace's subscribers. Vitest covers the API
