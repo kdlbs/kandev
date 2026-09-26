@@ -100,11 +100,15 @@ Deciding proposals is task 07. Backend only. On the critical path.
 - Every resolution site uses task 01's constants: `principalSurface`,
   the `CoordinatorLookup` interface (new here), the coordinator branches in
   `Executor.resolveTaskSessionMCPMode` and `resolveTaskSessionMCPProfile`
-  (in the five-step order of
-  [copilot#principal-and-mode](../../specs/coordinator/system-design/copilot.md#principal-and-mode):
-  `GetTask` first, a read error failing every session including config-mode
-  ones; coordinator origin next, so a coordinator-origin task never takes
-  config mode; then the no-row lookup; then config mode as today), the mode
+  (in the order of
+  [copilot#principal-and-mode](../../specs/coordinator/system-design/copilot.md#principal-and-mode),
+  where "no row" is `errors.Is(err, repoerrors.ErrTaskNotFound)` or a nil
+  task and any other `GetTask` error is a read error: `GetTask` first, a
+  read error failing every session including config-mode ones; coordinator
+  origin next, so a coordinator-origin task never takes config mode; then
+  the no-row lookup; then config mode as today; then, with no row, today's
+  per-form result (`ErrTaskNotFound` still fails, a nil task keeps
+  `Legacy`)), the mode
   cases in
   `internal/mcp/server/server.go` and `Legacy` in
   `internal/mcp/profile/profile.go`, plugin tools skipped.
@@ -149,8 +153,8 @@ Deciding proposals is task 07. Backend only. On the critical path.
   (`internal/agent/runtime/lifecycle/types.go`), set by
   `GetWorkspaceInfoForSession` (`internal/task/service/service_turns.go`)
   from the task row alone (`coordinator` when the origin is `coordinator`,
-  empty otherwise; task-read error returns the error; missing row leaves it
-  empty), carries the mode to the agentctl instances the lifecycle builds
+  empty otherwise; a read error returns the error; no row, meaning
+  `ErrTaskNotFound` or a nil task, leaves it empty with no error), carries the mode to the agentctl instances the lifecycle builds
   without the executor (workspace-only restore, admission), which start no
   agent; agentctl does not consult its own
   `cfg.AutoApprovePermissions` in this mode.
@@ -228,10 +232,15 @@ Required Go tests:
   instance, and a lookup error fails it too;
 - `handleSetMcpMode` accepts `coordinator` (200) and an unknown mode's 400
   lists `coordinator`;
-- a config-mode session whose `GetTask` errors fails with no instance; a
-  config-mode session with no task row and no coordinator match, and one with
-  a readable non-coordinator task, still resolve config mode and the
-  configuration profile;
+- a config-mode session whose `GetTask` returns a read error (not
+  `ErrTaskNotFound`) fails with no instance; a config-mode session with no
+  row and no coordinator match, and one with a readable non-coordinator
+  task, still resolve config mode and the configuration profile; a non-config
+  session with no row and no match gets the not-found error for the
+  `ErrTaskNotFound` form and the `Legacy` profile for the nil-task form; with
+  no row and a lookup match, both forms fail with no instance, config-mode
+  sessions included (every "no row" case runs once with a fake returning
+  `ErrTaskNotFound` and once with one returning a nil task);
 - each of the two lookup-wired resolvers (`main.go`, `registerMCPAndDebugRoutes`)
   resolves a coordinator conversation task to `SurfaceCoordinator` and its
   coordinator, and refuses it when built without the lookup;
@@ -239,7 +248,9 @@ Required Go tests:
   separately whose agent profile then goes missing, gets an error from the
   promoting launch and no agent subprocess;
 - `GetWorkspaceInfoForSession` returns `McpMode` `coordinator` for a
-  conversation session and empty for a Kanban session;
+  conversation session, empty for a Kanban session, empty with no error when
+  the task read returns `ErrTaskNotFound`, and an error for any other task
+  read error;
 - two racing opens against the new `conversation_task_id` conditional-UPDATE
   return the same task and one session, and the losing task is deleted, on
   SQLite and PostgreSQL (`KANDEV_TEST_POSTGRES_DSN`), matching task 01's and

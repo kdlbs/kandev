@@ -241,20 +241,24 @@ editing the stored user message.
   automation and office branches follow as today. The conversation route never
   sets `config_mode`; a test sets it on a conversation session and asserts the
   coordinator mode and six-tool profile still resolve. Because the task is now
-  read before the `config_mode` check, the order in both resolvers is exactly:
-  (1) `GetTask`; an error fails the start for every session, config-mode ones
-  included (a deliberate change: today a config-mode session never reads the
-  task, and after this it is refused on a task-read error instead of
-  launching); (2) a readable task with origin `coordinator` takes the
-  coordinator branch; (3) no row: the `CoordinatorLookup` check of
-  [Fail closed](#fail-closed) runs, and a match or a lookup error fails the
-  start; (4) otherwise a config-mode session returns config mode and config
-  profile exactly as today, whether or not the row was found; (5) the
-  automation, office and Kanban branches follow as today. Tests: a config-mode
-  session whose `GetTask` errors fails with no instance; a config-mode session
-  with no task row and no coordinator match, and one with a readable
-  non-coordinator task, each still resolve config mode and the configuration
-  profile. Quick Chat code does not
+  read before the `config_mode` check, the order in both resolvers is exactly
+  as follows. "No row" is either form a missing task takes: an error with
+  `errors.Is(err, repoerrors.ErrTaskNotFound)` (what the SQL `GetTask`
+  returns; `internal/task/repository/repoerrors`) or a nil task with a nil
+  error (executor test fakes). Any other `GetTask` error is a "read error".
+  (1) `GetTask`; a read error fails the start for every session, config-mode
+  ones included (a deliberate change: today a config-mode session never
+  reads the task). (2) A task with origin `coordinator` takes the
+  coordinator branch. (3) No row: the `CoordinatorLookup` check of
+  [Fail closed](#fail-closed) runs; a match or a lookup error fails the
+  start. (4) Otherwise a config-mode session returns config mode and config
+  profile as today. (5) Otherwise, with no row, each resolver keeps today's
+  result for the form it got: `ErrTaskNotFound` fails the start, a nil task
+  gets no restricted mode and the `Legacy` profile; so no start that fails
+  today launches after this. (6) A readable non-coordinator task follows the
+  automation, office and Kanban branches as today. The tests, including each
+  "no row" case in both forms, are listed in task 03's Verification. Quick
+  Chat code does not
   set the mode. In `internal/mcp/server/server.go`, `normalizeMode`,
   `surfaceForMode`, `modeForProfile` and `Server.SetMode`, and `Legacy` in
   `internal/mcp/profile/profile.go`, gain the coordinator case; plugin tool
@@ -379,9 +383,7 @@ and hands it to `configureExistingWorkspace` before `LaunchAgent` promotes
 the execution (`executor_execute.go`), so every fail-closed check runs again
 at promotion. Nothing carries prepare's decision forward; a coordinator
 whose flag, row or profile went away between prepare and promotion gets no
-agent. A test prepares a conversation session, then turns the lookup off
-(and, separately, makes the agent profile missing) and asserts the
-promoting launch errors and no agent subprocess starts.
+agent (tested in task 03's Verification).
 `WorkspaceInfo.McpMode` ([Permission policy](#permission-policy)) only sets
 the mode of the agentctl instance that the lifecycle builds on its own
 without an agent (workspace-only restore); it starts nothing. For a
@@ -392,21 +394,24 @@ finds no coordinator whose current `conversation_task_id` is the task, when
 the lookup errors, or when `profileStatus` for that coordinator reports either
 profile not `ok` or itself errors.
 
-**Unreadable task.** `GetTask` returning an error already fails both
-resolvers; that stays. When it returns no row, the profile resolver today
-falls back to the full `Legacy` Kanban profile. Before that fallback, both
+**Unreadable task.** A `GetTask` read error already fails both
+resolvers; that stays. "No row" and "read error" are as defined in
+[Principal and mode](#principal-and-mode): `ErrTaskNotFound` and a nil task
+are both "no row". With no row, the mode resolver today fails on
+`ErrTaskNotFound` and the profile resolver falls back to the full `Legacy`
+Kanban profile on a nil task. Before either outcome, both
 resolvers ask the `CoordinatorLookup` whether any coordinator's
 `conversation_task_id` equals the task id, a query on the coordinator store
 that needs no task row. A match, or a lookup error, fails the start with an
 error naming the coordinator task; only no match with no error keeps
-today's fallback. The lookup is wired only when the flag is on
+today's result (steps 4 and 5 of that order). The lookup is wired only when the flag is on
 ([Flag and wiring](coordinators.md#flag-and-wiring)); with the flag off a
-start whose task row is absent keeps today's fallback, which is an accepted
+start whose task row is absent keeps today's per-form result, which is an accepted
 phase-1 residual: a deleted task's sessions go with it, so the only such
 start is the existing transient case the fallback's own comment describes,
 and a readable coordinator-origin task still fails closed on the missing
-lookup. A test covers a coordinator start whose task row is absent: an error
-and no instance, with the flag on. The popover follows the profile statuses of
+lookup. A test covers a coordinator start whose task row is absent, in both
+"no row" forms: an error and no instance, with the flag on. The popover follows the profile statuses of
 [coordinators](coordinators.md#validation): when the coordinator GET reports
 `agent_profile_status` or `executor_profile_status` other than `ok`, it does
 not call the conversation route and shows the matching messages in place of
@@ -427,15 +432,16 @@ the messages built from them.
   reads the task by `session.TaskID` through the task repository and sets
   `McpMode = mcpmode.Coordinator` when `task.Origin ==
   models.TaskOriginCoordinator`, and leaves it empty (today's default) for
-  any other origin. A task-read error returns the error, as a session-read
-  error does today; a missing row leaves it empty, which is safe because
+  any other origin. "No row" and "read error" are as defined in
+  [Principal and mode](#principal-and-mode): a read error returns the error,
+  as a session-read error does today; no row (`ErrTaskNotFound` or a nil
+  task) leaves it empty and is not an error, which is safe because
   such an instance starts no agent and the agent-starting call goes through
   the executor resolvers ([Fail closed](#fail-closed)), which refuse it. The
   lifecycle passes `WorkspaceInfo.McpMode` into the instance it creates, and
   the executor paths (first launch, prepare, resume, interaction and the
   launch that promotes a workspace-only execution) pass the mode their
-  resolvers returned. A test asserts `GetWorkspaceInfoForSession` returns
-  `coordinator` for a conversation session and empty for a Kanban one. agentctl itself does not consult its own
+  resolvers returned (tests: task 03's Verification). agentctl itself does not consult its own
   `cfg.AutoApprovePermissions` when its mode is `Coordinator`; the mode, not
   the CLI's local config, decides.
 - In the coordinator mode `AutoApprovePermissionsOverride=false` is applied on
