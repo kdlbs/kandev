@@ -115,6 +115,26 @@ describe("coordinator About-prefix tag", () => {
   });
 });
 
+describe("coordinator About-prefix tag: raw view", () => {
+  it("renders the raw content verbatim, without the tag, even for coordinator-origin messages", () => {
+    render(
+      <>
+        {renderUserMessageBody({
+          hasContent: true,
+          showRaw: true,
+          hasAttachments: false,
+          content: "About KAN-418: hi",
+          taskId: "task-1",
+          taskOrigin: "coordinator",
+        })}
+      </>,
+    );
+
+    expect(screen.getByText("About KAN-418: hi")).toBeTruthy();
+    expect(screen.queryByTestId(TAG_TESTID)).toBeNull();
+  });
+});
+
 describe("coordinator About-prefix tag: fallbacks", () => {
   it("renders verbatim when the content has no ': ' separator", () => {
     render(
