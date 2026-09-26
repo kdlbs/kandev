@@ -14,10 +14,15 @@ vi.mock("@/lib/api/domains/github-api", () => ({
 }));
 
 vi.mock("./task-pr-sync-resource", () => ({
-  getTaskPRSyncResource: () => ({ invalidate: invalidateTaskPRSyncMock }),
+  getTaskPRSyncResource: () => ({
+    invalidate: invalidateTaskPRSyncMock,
+    subscribe: () => () => undefined,
+    getSnapshot: () => false,
+  }),
 }));
 
 import { useTaskPRUnlink } from "./use-task-pr-unlink";
+import { useTaskPR } from "./use-task-pr";
 
 const linkedPR = { id: "association-1", task_id: "task-1" } as TaskPR;
 
@@ -180,5 +185,34 @@ describe("useTaskPRUnlink workspace changes", () => {
     expect(state.taskPRs.workspaceId).toBe("ws-2");
     expect(state.taskPRs.byTaskId).toEqual({ "task-b": [workspaceBPR] });
     expect(invalidateTaskPRSyncMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("shared unlink pending state", () => {
+  it("blocks a second surface from unlinking the same association", async () => {
+    const pending = deferred<void>();
+    deleteTaskPRMock.mockReturnValue(pending.promise);
+    const view = renderHook(
+      () => ({ menu: useTaskPRUnlink("task-1"), topbar: useTaskPR("task-1") }),
+      { wrapper: createWrapper("ws-1") },
+    );
+    let first!: Promise<boolean>;
+    let duplicate!: Promise<void>;
+
+    act(() => {
+      first = view.result.current.menu.unlink(linkedPR.id);
+    });
+    expect(view.result.current.menu.pendingIds.has(linkedPR.id)).toBe(true);
+
+    act(() => {
+      duplicate = view.result.current.topbar.unlink(linkedPR.id);
+    });
+
+    expect(deleteTaskPRMock).toHaveBeenCalledOnce();
+    await act(async () => {
+      pending.resolve();
+      await Promise.all([first, duplicate]);
+    });
+    expect(view.result.current.menu.pendingIds.has(linkedPR.id)).toBe(false);
   });
 });

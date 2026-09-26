@@ -372,22 +372,13 @@ export function pickDefaultPR(prs: TaskPR[]): TaskPR | null {
 
 export function PRTaskIcon({ taskId, prInfo }: { taskId: string; prInfo?: TaskPRInfo }) {
   const prs = useAppStore((state) => getTaskPRsForCurrentWorkspace(state, taskId));
-  const hasDeletedAssociation = useAppStore((state) => {
-    const currentScope =
-      state.taskPRs.workspaceId === state.workspaces.activeId &&
-      state.taskPRs.workspaceContextGeneration === state.workspaceContextGeneration;
-    return (
-      currentScope &&
-      Object.keys(state.taskPRs.deletedAssociationIdsByTaskId?.[taskId] ?? {}).length > 0
-    );
-  });
   const hydration = useTaskPRTooltipHydration(taskId, { includeAutomation: true });
   const fullPRs = normalizeTaskPRs(prs);
 
   // Defensive: an upstream payload may briefly seed byTaskId[taskId] with a
   // non-array value (e.g. an empty object from a partial hydration). Bail
   // instead of falling through into a full-data summary, where for-of throws.
-  if (fullPRs.length === 0 && (!prInfo || hasDeletedAssociation)) return null;
+  if (fullPRs.length === 0 && !prInfo) return null;
 
   return (
     <PRTaskIconView

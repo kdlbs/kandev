@@ -216,8 +216,25 @@ the primary session.
 - Review follow-up: 144 focused Vitest tests passed across eleven files; the
   status-summary package tests, frontend typecheck, i18n check and ratchet,
   desktop and mobile E2E suites, specification validation, public-doc tests,
-  and diff check passed. Final-link card and sidebar indicators stayed absent
-  after reload.
+  and diff check passed. The E2E cases cover sibling preservation and persisted
+  unlink; the PR fixup follow-up below adds final-link indicator coverage.
+- PR fixup follow-up: focused UI tests cover preserving a compact indicator
+  while a deletion tombstone cannot establish that the final association was
+  removed, and hiding it after the authoritative summary drops the final PR.
+  Mutation tests cover one shared pending guard across the top bar and task
+  menus, workspace-switch isolation, and localized workspace errors. The
+  public guide already documents the desktop top-bar right-click path.
+  Validation passed:
+
+  ```bash
+  (cd apps/web && pnpm exec vitest run components/github/pr-task-icon.render.test.tsx hooks/domains/github/use-task-pr.test.tsx hooks/domains/github/use-task-pr-unlink.test.tsx hooks/domains/github/use-task-pr-unlink-menu.test.tsx hooks/domains/github/task-pr-mutations.test.ts) # 47 tests
+  (cd apps/backend && go test ./internal/task/statussummary)
+  (cd apps/web && pnpm run typecheck)
+  (cd apps/web && pnpm run build:vite)
+  (cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet)
+  (cd apps/web && pnpm exec eslint components/github/multi-pr-ci-popover.tsx components/github/pr-task-icon.render.test.tsx components/github/pr-task-icon.tsx hooks/domains/github/task-pr-mutations.ts hooks/domains/github/task-pr-mutations.test.ts hooks/domains/github/task-pr-unlink-registry.ts hooks/domains/github/use-task-pr-unlink.test.tsx hooks/domains/github/use-task-pr-unlink.ts hooks/domains/github/use-task-pr.ts hooks/domains/github/use-task-pr.test.tsx)
+  git diff --check
+  ```
 - Targeted ESLint found no code-quality errors. One existing max-lines warning
   remains in `task-switcher-context-menu.test.tsx`, which already exceeded the
   configured file limit before this work.

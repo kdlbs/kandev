@@ -7,6 +7,7 @@ import { PRCIPopover } from "@/components/github/pr-ci-popover";
 import { getPRStatusColor, pickDefaultPR } from "@/components/github/pr-task-icon";
 import { prIdentitySlug } from "@/components/github/pr-utils";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
+import { taskPRUnlinkErrorDescription } from "@/hooks/domains/github/task-pr-mutations";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import type { TaskPR } from "@/lib/types/github";
@@ -164,8 +165,11 @@ export function MultiPRCIPopover({
     } catch (error) {
       toast({
         title: t("github:failedToUnlinkPullRequest"),
-        description:
-          error instanceof Error ? error.message : t("github:thePullRequestIsStillLinked"),
+        description: taskPRUnlinkErrorDescription(
+          error,
+          t("github:selectWorkspace"),
+          t("github:thePullRequestIsStillLinked"),
+        ),
         variant: "error",
       });
     } finally {

@@ -80,9 +80,10 @@ export function useTaskPR(taskId: string | null) {
   );
 
   const unlink = useCallback(
-    (associationId: string) =>
-      unlinkTaskPRAssociation({
+    async (associationId: string) => {
+      await unlinkTaskPRAssociation({
         associationId,
+        store,
         taskId,
         workspaceId,
         workspaceContextGeneration,
@@ -92,7 +93,8 @@ export function useTaskPR(taskId: string | null) {
         invalidateSync: () => {
           if (scope) resource.invalidate(scope);
         },
-      }),
+      });
+    },
     [removeTaskPR, resource, scope, store, taskId, workspaceContextGeneration, workspaceId],
   );
 
