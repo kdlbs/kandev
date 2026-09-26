@@ -155,7 +155,7 @@ test.describe("Office taskless routine sessions", () => {
             );
             runId = run?.id ?? "";
             if (!runId) {
-              runId = await findAgentRunForRoutine(officeApi, officeSeed.agentId, routineId, seen);
+              runId = await findAgentRunForRoutine(officeApi, routineAgentId, routineId, seen);
             }
             return runId;
           },

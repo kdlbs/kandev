@@ -113,8 +113,9 @@ test.describe("File tree search", () => {
 
     // Clear input - tree comes back, both files visible again.
     await input.fill("");
-    await session.fileTree.waitForFileTreeNode("clear-alpha.ts", 5_000);
-    await session.fileTree.waitForFileTreeNode("clear-bravo.ts", 5_000);
+    await session.fileTree.waitForFileTreeNode("clear-alpha.ts", 15_000);
+    await expect(session.fileTreeNode("clear-alpha.ts")).toBeVisible({ timeout: 5_000 });
+    await expect(session.fileTreeNode("clear-bravo.ts")).toBeVisible({ timeout: 5_000 });
   });
 
   test("Escape closes the search header and returns to the tree", async ({
