@@ -6,6 +6,9 @@ the same dependency-free Python linter against tracked files and reports `path:l
 Executable tooling lives under `scripts/`, durable rule configuration lives under `config/`, and
 the GitHub Actions workflow only invokes those repository-owned entry points.
 
+The linter's system boundary is documented in the
+[architecture-lint specification](specs/architecture-lint/README.md).
+
 ## Enforced boundaries
 
 | Rule | Boundary | Intended seam |

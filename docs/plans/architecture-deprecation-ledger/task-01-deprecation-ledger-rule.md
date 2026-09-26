@@ -5,7 +5,15 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-decision: "../../decisions/2026-09-26-architecture-deprecation-ledger.md"
+requirements:
+  - REQ-ARCHITECTURE-LINT-DEPRECATION-001
+acceptance_criteria:
+  - AC-ARCHITECTURE-LINT-DEPRECATION-001.1
+  - AC-ARCHITECTURE-LINT-DEPRECATION-001.2
+  - AC-ARCHITECTURE-LINT-DEPRECATION-001.3
+  - AC-ARCHITECTURE-LINT-DEPRECATION-001.4
+system_design:
+  - ../../specs/architecture-lint/system-design/deprecation-ledger.md
 ---
 
 # Task 01: Add explicit deprecation ledger rule
@@ -16,9 +24,11 @@ New canonical production Go and TypeScript deprecation annotations require a mat
 
 ## Acceptance
 
-- `ARCH-DEPRECATION-LEDGER` detects Go `Deprecated:` declaration comments and TypeScript JSDoc `@deprecated` declarations with stable `(path, declaration, marker)` identities; TypeScript function and method overload identities include their normalized generic and parameter signatures.
-- A valid matching ledger registration passes; a missing or mismatched registration fails with deterministic actionable diagnostics.
-- Tests cover grouped Go declarations, embedded fields, nested and decorated TypeScript declarations, non-identifier member keys, overload identity stability under reordering and formatting, stale registrations after overload removal, ambiguous duplicate signatures, baseline bootstrap/shrink behavior, and generated/test/fixture/third-party/string/prose exclusions while preserving existing ledger date, version, staleness, and marker checks.
+- `AC-ARCHITECTURE-LINT-DEPRECATION-001.1`: The rule detects attached Go `Deprecated:` comments and TypeScript JSDoc `@deprecated` tags with exact path, declaration, and marker identities, while excluding generated/test/fixture/third-party sources, ordinary prose, and strings.
+- `AC-ARCHITECTURE-LINT-DEPRECATION-001.2`: A valid matching ledger registration passes; a missing, mismatched, or stale registration fails with deterministic actionable diagnostics.
+- `AC-ARCHITECTURE-LINT-DEPRECATION-001.3`: Tests prove overload identity stability under reordering and formatting and reject indistinguishable duplicate signatures.
+- `AC-ARCHITECTURE-LINT-DEPRECATION-001.4`: Baseline bootstrap/shrink behavior remains exact, and removed declarations require baseline or ledger cleanup.
+- Tests cover grouped Go declarations, embedded fields, nested and decorated TypeScript declarations, non-identifier member keys, stale registrations after overload removal, and existing ledger date, version, staleness, and marker checks.
 - The initial baseline contains exactly the current unregistered production declarations on the refreshed main head.
 
 ## Scope and exclusions
@@ -29,7 +39,7 @@ Do not add compatibility-keyword discovery, a global deprecation ban, automatic 
 
 ## Requirements and system design
 
-No product `REQ-*`, `AC-*`, or system-design document applies. This internal tooling decision is recorded in `docs/decisions/2026-09-26-architecture-deprecation-ledger.md`.
+The internal governance contract is [REQ-ARCHITECTURE-LINT-DEPRECATION-001](../../specs/architecture-lint/requirements/deprecation-ledger.md), with technical boundaries in the [system design](../../specs/architecture-lint/system-design/deprecation-ledger.md). The durable choice is recorded in [the architecture deprecation ledger decision](../../decisions/2026-09-26-architecture-deprecation-ledger.md). This is not a product requirement.
 
 ## Verification
 
@@ -53,7 +63,7 @@ Implemented and verified on refreshed main `c735b678863ba64e31bd78cd1a6e3c845be3
 - `python3 scripts/lint-architecture.test.py` — passed, 95 tests after identity hardening.
 - `make lint-architecture` — passed after identity hardening.
 - `python3 scripts/lint-architecture.py --all --baseline-base-ref origin/main --allow-missing-base-baseline` — passed after identity hardening.
-- `python3 scripts/list-docs.py validate` — passed after identity docs updates; 310 decisions and 1185 specifications validated.
+- `python3 scripts/list-docs.py validate` — passed with the internal requirement/design pair; 310 decisions and 1188 specifications validated.
 - `python3 scripts/lint-spec-files.py --all` — passed after identity docs updates.
 - `python3 scripts/lint-harness-files.test.py` — passed, 19 tests; `make lint-harness` passed for all 199 harness files.
 - `git diff --check` — passed.
