@@ -132,6 +132,57 @@ describe("buildEditMenuEntry — AC9 (plugin action registered)", () => {
   });
 });
 
+describe("buildEditMenuEntry — native GitHub PR unlink choices", () => {
+  it("keeps native unlink choices between Edit task and plugin edit actions", () => {
+    registerEnhanceAction();
+    const unlink = {
+      kind: "item" as const,
+      key: "unlink-pr-api",
+      label: "Remove acme/api #42 from task",
+      onSelect: vi.fn(),
+    };
+
+    const entry = buildEditMenuEntry({
+      onEdit: vi.fn(),
+      context: CONTEXT,
+      nativeUnlinkEntries: [unlink],
+    });
+
+    expect(entry.kind).toBe("submenu");
+    if (entry.kind !== "submenu") return;
+    expect(entry.children.map((child) => child.key)).toEqual([
+      "edit-task",
+      "unlink-pr-api",
+      `plugin-edit-${PLUGIN_ID}:enhance`,
+    ]);
+    const unlinkEntry = entry.children[1];
+    expect(unlinkEntry?.kind).toBe("item");
+    if (unlinkEntry?.kind === "item") {
+      expect(unlinkEntry.label).toBe("Remove acme/api #42 from task");
+    }
+  });
+
+  it("shows a disabled loading entry while exact task PR records are resolving", () => {
+    const entry = buildEditMenuEntry({
+      onEdit: vi.fn(),
+      context: CONTEXT,
+      loadingUnlinkLabel: "Loading pull requests...",
+    });
+
+    expect(entry.kind).toBe("submenu");
+    if (entry.kind !== "submenu") return;
+    expect(entry.children.map((child) => child.key)).toEqual([
+      "edit-task",
+      "loading-pull-requests",
+    ]);
+    expect(entry.children[1]).toMatchObject({
+      kind: "item",
+      label: "Loading pull requests...",
+      disabled: true,
+    });
+  });
+});
+
 describe("buildEditMenuEntry — AC11 (run invoked with context, rejection caught, menu still closes)", () => {
   it("invokes run(context) on select", async () => {
     const run = vi.fn().mockResolvedValue(undefined);
