@@ -22,6 +22,7 @@ import (
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -176,6 +177,44 @@ func TestHandleMoveTask_SameStepReturnsStoredTask(t *testing.T) {
 			assert.Nil(t, result.EntryOptions)
 		})
 	}
+}
+
+// @covers AC-TASKS-ATOMIC-TERMINAL-ROUTING-001.4
+func TestHandleMoveTask_SameStepReplayDoesNotMoveTaskAfterItLeavesTarget(t *testing.T) {
+	fixture := newSameStepMoveFixture(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	const nextStepID = "step-next"
+	require.NoError(t, fixture.workflowRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
+		ID: nextStepID, WorkflowID: fixture.workflowID, Name: "Next", Position: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}))
+
+	request := fixture.message(t, nil)
+	request.ID = "same-step-replay"
+	handler := fixture.handler(t, nil)
+	response, err := handler.handleMoveTask(ctx, request)
+	require.NoError(t, err)
+	assert.Equal(t, moveDispositionApplied, decodeMoveTaskResponse(t, response).Disposition)
+
+	operation, found, err := fixture.svc.GetWorkflowRouteOperation(ctx, workflowRouteOperationID("mcp-move", request.ID))
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, routing.OutcomeAlreadySatisfied, operation.Outcome)
+
+	_, err = fixture.svc.MoveTask(ctx, fixture.taskID, fixture.workflowID, nextStepID, 0)
+	require.NoError(t, err)
+	transitionsAfterMove := transitionCount(t, fixture.db, fixture.taskID)
+
+	response, err = handler.handleMoveTask(ctx, request)
+	require.NoError(t, err)
+	replayed := decodeMoveTaskResponse(t, response)
+	assert.Equal(t, moveDispositionApplied, replayed.Disposition)
+	assert.Equal(t, nextStepID, replayed.Task.WorkflowStepID)
+	current, err := fixture.svc.GetTask(ctx, fixture.taskID)
+	require.NoError(t, err)
+	assert.Equal(t, nextStepID, current.WorkflowStepID)
+	assert.Equal(t, transitionsAfterMove, transitionCount(t, fixture.db, fixture.taskID))
 }
 
 // @covers AC-TASKS-MCP-MOVE-RESULTS-001.3

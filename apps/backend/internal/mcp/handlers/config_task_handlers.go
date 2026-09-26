@@ -135,13 +135,24 @@ func (h *Handlers) replayMoveTaskOperation(ctx context.Context, msg *ws.Message,
 		return response, true, responseErr
 	}
 	switch operation.Outcome {
-	case routing.OutcomeCommitted, routing.OutcomeAlreadySatisfied:
+	case routing.OutcomeCommitted:
 		task, err := h.taskSvc.GetTask(ctx, taskID)
 		if err != nil {
 			response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to read routed task", nil)
 			return response, true, responseErr
 		}
 		response, responseErr := ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+		return response, true, responseErr
+	case routing.OutcomeAlreadySatisfied:
+		task, err := h.taskSvc.GetTask(ctx, taskID)
+		if err != nil {
+			response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to read routed task", nil)
+			return response, true, responseErr
+		}
+		response, responseErr := ws.NewResponse(msg.ID, msg.Action, dto.MoveTaskResponse{
+			Task:        dto.FromTask(task),
+			Disposition: moveDispositionApplied,
+		})
 		return response, true, responseErr
 	case routing.OutcomePending:
 		workflowID, targetStepID, position, err = h.replayPendingMoveRequest(ctx, operationID, taskID, workflowID, targetStepID, position)
@@ -212,17 +223,16 @@ func (h *Handlers) completeSameStepMove(ctx context.Context, msg *ws.Message, re
 	if code, message := h.validateSameStepMove(ctx, req, task); code != "" {
 		return moveTaskErrorResponse(msg, code, message)
 	}
-	if turnID, producer, cause, causeID := h.workflowRouteCause(ctx, req.SenderSessionID, routing.ProducerManualMove); producer == routing.ProducerMergedPR {
-		err := h.taskSvc.RecordWorkflowRouteOperation(ctx, routing.Operation{
-			ID: workflowRouteOperationID("mcp-move", msg.ID), TaskID: req.TaskID, WorkspaceID: task.WorkspaceID,
-			Producer: producer, ExpectedStepID: task.WorkflowStepID, ObservedStepID: task.WorkflowStepID,
-			TargetStepID: req.WorkflowStepID, SessionID: req.SenderSessionID, TurnID: turnID,
-			ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SenderSessionID,
-			ExternalCause: cause, ExternalCauseID: causeID, Outcome: routing.OutcomeAlreadySatisfied,
-		})
-		if err != nil {
-			return moveTaskErrorResponse(msg, ws.ErrorCodeInternalError, "failed to record already-satisfied route")
-		}
+	turnID, producer, cause, causeID := h.workflowRouteCause(ctx, req.SenderSessionID, routing.ProducerManualMove)
+	err = h.taskSvc.RecordWorkflowRouteOperation(ctx, routing.Operation{
+		ID: workflowRouteOperationID("mcp-move", msg.ID), TaskID: req.TaskID, WorkspaceID: task.WorkspaceID,
+		Producer: producer, ExpectedStepID: task.WorkflowStepID, ObservedStepID: task.WorkflowStepID,
+		TargetStepID: req.WorkflowStepID, SessionID: req.SenderSessionID, TurnID: turnID,
+		ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SenderSessionID,
+		ExternalCause: cause, ExternalCauseID: causeID, Outcome: routing.OutcomeAlreadySatisfied,
+	})
+	if err != nil {
+		return moveTaskErrorResponse(msg, ws.ErrorCodeInternalError, "failed to record already-satisfied route")
 	}
 	response, err := ws.NewResponse(msg.ID, msg.Action, dto.MoveTaskResponse{
 		Task:        dto.FromTask(task),
