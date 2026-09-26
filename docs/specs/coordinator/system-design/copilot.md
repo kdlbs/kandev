@@ -55,11 +55,26 @@ see [Residual](#residual-external-surface).
   2. When `conversation_task_id` names a live, unarchived task, ensure its
      session (step 6) and return it.
   3. Otherwise create an ephemeral task through the task service's internal
-     create call: origin `coordinator`, title `Coordinator: <name>`, the
-     coordinator's agent and executor profiles, metadata
-     `coordinator_id = <cid>` (`models.MetaKeyCoordinatorID`), no
-     `start_agent`, no `prepare_session`, no external id and no
-     `auto_start_on_create` marker, so `handleTaskCreated` starts nothing.
+     create call: origin `coordinator`, `IsEphemeral`, title
+     `Coordinator: <name>`, no workflow and no workflow step, metadata
+     `coordinator_id = <cid>` (`models.MetaKeyCoordinatorID`),
+     `agent_profile_id = <coordinator.agent_profile_id>`
+     (`models.MetaKeyAgentProfileID`) and
+     `executor_profile_id = <coordinator.executor_profile_id>`
+     (`models.MetaKeyExecutorProfileID`), no `start_agent`, no
+     `prepare_session`, no external id and no `auto_start_on_create` marker,
+     so `handleTaskCreated` starts nothing. The two profile keys are the only
+     carriers of the coordinator's profiles: with no workflow step,
+     `EnsureSession`'s `resolveTaskAgentProfile`
+     (`internal/orchestrator/session_ensure.go`) takes the agent profile from
+     `agent_profile_id` metadata before its assignee and workspace-default
+     fallbacks, and the launch path reads `executor_profile_id` metadata
+     (`internal/orchestrator/task_operations.go`), the same keys a plugin
+     conversation task stamps. The values are copied once at create; a
+     profile change archives this task ([coordinators](coordinators.md#routes)),
+     so a current conversation task never carries stale profile ids. A test
+     asserts the prepared session's agent profile and executor profile equal
+     the coordinator's, with a different workspace default agent profile set.
   4. Run `UPDATE coordinators SET conversation_task_id = ? WHERE id = ? AND
      (conversation_task_id IS NULL OR conversation_task_id = ?)` with the stale
      value read in step 2. One row updated: go to step 6 with the new task.
@@ -81,8 +96,10 @@ see [Residual](#residual-external-surface).
      per task, returns the existing primary session when there is one (a
      passive open never resumes it), and otherwise creates a `CREATED`
      session through `IntentPrepare` with `NoAgentLaunch`, which never starts
-     an agent. Its error returns 502 with the task kept as current, so the
-     next open retries only this step.
+     an agent. On its error the route re-reads the coordinator row first: a
+     row that is gone is answered as in step 7's deleted-coordinator case
+     (404); otherwise the route returns 502 with the task kept as current,
+     so the next open retries only this step.
   7. Re-read the coordinator's `conversation_task_id` and compare it to
      `taskID`. A concurrent context or profile change (steps 2 or 3 of
      [coordinators](coordinators.md#routes)) can archive exactly this task
@@ -90,6 +107,16 @@ see [Residual](#residual-external-surface).
      4's commit (the create path) and this point, in which case they no
      longer match: return 409, with no task, so the popover's next open
      retries with the fresh value, the same shape as step 4's own race.
+     When the re-read finds no coordinator row (checked before that
+     comparison, so a deleted coordinator is never answered 409; the
+     coordinator was deleted
+     after step 4's commit, or after step 2's read on the reuse path), the
+     route deletes `taskID` through the task service, counting
+     `taskrepo.ErrTaskNotFound` as done because the coordinator delete's own
+     `ListCoordinatorOriginTasks` pass may already have removed it, and
+     returns 404. A failed delete is logged at warn with the task id and the
+     route still returns 404; the task carries `coordinator_id`, which now
+     names no row, so the [startup pass](#conversation-cleanup) deletes it.
      Otherwise return the session id with the task's archive state (always
      `false` from this route, since a task this route would return as
      archived is returned as 409 instead).
@@ -167,7 +194,15 @@ editing the stored user message.
   on_enter evaluation does not run for it. The stall subscriber,
   workspace-deletion subscriber, proposal service and recovery pass never call
   the session or message services; the startup pass only archives and deletes
-  tasks.
+  tasks. One table test proves it: `TestCoordinatorConversationNoTurnStart`
+  in `internal/coordinator/no_turn_start_test.go`, whose rows live in the
+  package-level slice `noTurnStartPaths` (one row per backend path that could
+  start a turn, each asserting no prompt is sent and no agent starts). This
+  work package creates the file with the conversation-route, startup-cleanup
+  and session-recovery rows; the stall and `workspace.deleted` subscribers
+  (task 04) and the proposal decisions (task 07) append their rows to the
+  same slice, and whichever of the three merges last adds any row still
+  missing.
 - `message.add` for a coordinator task requires `workspace.manage`, enforced
   in `Service.authorizeMessageCreate` → `AuthorizeTaskSessionPromptAccess`
   (`internal/task/service/service_access.go`), the single scope check
@@ -196,13 +231,29 @@ editing the stored user message.
   `Executor.resolveTaskSessionMCPMode`
   (`internal/orchestrator/executor/executor_execute.go`), which gains a branch
   returning the coordinator mode when `task.Origin ==
-  models.TaskOriginCoordinator`, placed before the automation and office
-  branches; the sibling `resolveTaskSessionMCPProfile` gains the matching
-  branch returning a coordinator `mcpprofile.Context` with no user-question,
-  title or canvas capability. Quick Chat code does not set the mode. agentctl
-  `normalizeMode`, `surfaceForMode`, `modeForProfile`, `SetMode` and the
-  `Legacy` mapping gain the coordinator case; plugin tool registration is
-  skipped in this mode. `mcpprofile.normalizeSurface`
+  models.TaskOriginCoordinator`; the sibling `resolveTaskSessionMCPProfile`
+  gains the matching branch returning a coordinator `mcpprofile.Context` with
+  no user-question, title or canvas capability. In both resolvers the
+  coordinator branch is the FIRST decision: each loads the task before the
+  existing session `config_mode` check (today that check runs first, "config
+  mode wins"), and a coordinator-origin task returns the coordinator mode and
+  profile whatever the session's `config_mode` metadata says, then the
+  automation and office branches follow as today. The conversation route never
+  sets `config_mode`; a test sets it on a conversation session and asserts the
+  coordinator mode and six-tool profile still resolve. Quick Chat code does not
+  set the mode. In `internal/mcp/server/server.go`, `normalizeMode`,
+  `surfaceForMode`, `modeForProfile` and `Server.SetMode`, and `Legacy` in
+  `internal/mcp/profile/profile.go`, gain the coordinator case; plugin tool
+  registration is skipped in this mode.
+- `internal/common/mcpmode/mode.go` adds `Coordinator` to `instanceModes`
+  (so `InstanceModes` and `IsInstanceMode` accept it) and drops the comment
+  saying a later package owns that; the agentctl `handleSetMcpMode` handler
+  (`internal/agentctl/server/api/server.go`) builds its 400 message from
+  `mcpmode.InstanceModes()` instead of its hard-coded mode list, so
+  `SetMcpMode` with `coordinator` is accepted and an unknown mode's error lists
+  it. Without this, every prepare-then-promote and mode-switch path would 400
+  on the coordinator mode. A test posts `coordinator` to the handler (200) and
+  an unknown mode (400 naming `coordinator` among the accepted modes). `mcpprofile.normalizeSurface`
   (`internal/mcp/profile/profile.go`) also gains the `SurfaceCoordinator`
   case: every `mcpprofile.New(...)` call funnels through it unconditionally,
   and its default case silently downgrades any Surface value it does not
@@ -211,6 +262,28 @@ editing the stored user message.
   adding it here would leave the coordinator session on the full Kanban tool
   set instead of the six-tool allowlist below, so this switch is a required
   touch point, not an incidental one.
+- **Wiring.** The shared hook call site in `registerCoordinatorRoutes`
+  (`internal/backendapp/coordinator.go`) and the signature
+  `registerCoordinatorConversation(router, eventBus, *coordinator.Service,
+  logger)` stay unchanged. The dependencies reach the service first: a new
+  file `internal/backendapp/coordinator_conversation.go`, owned by this work
+  package, defines `wireCoordinatorConversation(p routeParams)`, called from
+  the existing `if p.features.Coordinator` block in `registerRoutes`
+  (`internal/backendapp/helpers.go`) on the line before
+  `registerCoordinatorRoutes(p)`, the only edit to that file. It calls
+  `svc.SetConversationDeps` with the task service (create, delete, archive)
+  and the orchestrator service (`EnsureSession`), `svc.SetConversationHooks`
+  with the archive and delete hooks, and hands `svc` as the
+  `CoordinatorLookup` to the executor (through an orchestrator setter that
+  forwards to `Executor`) and to each `mcpscope.Resolver` that scopes agent
+  MCP dispatch. `registerCoordinatorConversation` then reads the dependencies
+  from `svc`, registers the conversation route and returns the startup
+  cleanup hook; when the dependencies were not set it logs an error and
+  registers nothing, so the route is 404 rather than half-built. A resolver or
+  executor that never received the lookup resolves a coordinator-origin task
+  to no coordinator and refuses it ([Fail closed](#fail-closed)), so a missed
+  wiring site denies instead of granting. With the flag off none of this
+  runs.
 
 ## Tool surface
 
@@ -247,12 +320,43 @@ newly added action is refused unless listed.
 
 ## Fail closed
 
-Before a coordinator session starts or resumes, the lifecycle checks: flag on,
+Before a coordinator session starts or resumes, these checks run: flag on,
 coordinator resolvable, task readable, agent profile present and not
 passthrough, executor profile present,
 mode set to `Coordinator`. Any failure stops the start with an error surfaced
 through the session recovery feedback. No branch falls back to the default
-task mode. The popover follows the profile statuses of
+task mode.
+
+**Where.** The check site is the coordinator branch of the executor's two
+resolvers (`resolveTaskSessionMCPMode`, `resolveTaskSessionMCPProfile` in
+`internal/orchestrator/executor/executor_execute.go`). Every path that builds
+an agentctl instance for a task session calls them before the instance
+starts: first launch and prepare (`executor_execute.go`), resume and
+re-created executions (`executor_resume.go`) and interaction launches
+(`executor_interaction.go`); the promotion of a workspace-only execution
+reuses the mode that prepare resolved, carried on `WorkspaceInfo.McpMode`
+([Permission policy](#permission-policy)). For a coordinator-origin task the
+branch returns an error, and the caller starts nothing, when the executor has
+no `CoordinatorLookup` (the flag is off, so none was wired), when the lookup
+finds no coordinator whose current `conversation_task_id` is the task, when
+the lookup errors, or when `profileStatus` for that coordinator reports either
+profile not `ok` or itself errors.
+
+**Unreadable task.** `GetTask` returning an error already fails both
+resolvers; that stays. When it returns no row, the profile resolver today
+falls back to the full `Legacy` Kanban profile. Before that fallback, both
+resolvers ask the `CoordinatorLookup` whether any coordinator's
+`conversation_task_id` equals the task id, a query on the coordinator store
+that needs no task row. A match, or a lookup error, fails the start with an
+error naming the coordinator task; only no match with no error keeps
+today's fallback. The lookup is wired only when the flag is on
+([Flag and wiring](coordinators.md#flag-and-wiring)); with the flag off a
+start whose task row is absent keeps today's fallback, which is an accepted
+phase-1 residual: a deleted task's sessions go with it, so the only such
+start is the existing transient case the fallback's own comment describes,
+and a readable coordinator-origin task still fails closed on the missing
+lookup. A test covers a coordinator start whose task row is absent: an error
+and no instance, with the flag on. The popover follows the profile statuses of
 [coordinators](coordinators.md#validation): when the coordinator GET reports
 `agent_profile_status` or `executor_profile_status` other than `ok`, it does
 not call the conversation route and shows the matching messages in place of

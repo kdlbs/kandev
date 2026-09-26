@@ -99,15 +99,36 @@ Deciding proposals is task 07. Backend only. On the critical path.
   removes every conversation task of the coordinator (current and archived).
 - Every resolution site uses task 01's constants: `principalSurface`,
   `CoordinatorLookup`, the coordinator branches in
-  `Executor.resolveTaskSessionMCPMode` and `resolveTaskSessionMCPProfile`, the
-  agentctl mode cases, plugin tools skipped.
+  `Executor.resolveTaskSessionMCPMode` and `resolveTaskSessionMCPProfile`
+  (decided before the session `config_mode` check, so a coordinator-origin
+  task never takes config mode), the mode cases in
+  `internal/mcp/server/server.go` and `Legacy` in
+  `internal/mcp/profile/profile.go`, plugin tools skipped.
+- `Coordinator` added to `mcpmode.instanceModes` (`IsInstanceMode`,
+  `InstanceModes`) in `internal/common/mcpmode/mode.go`, and agentctl
+  `handleSetMcpMode` (`internal/agentctl/server/api/server.go`) building its
+  400 message from `mcpmode.InstanceModes()`.
+- The conversation task stamps `agent_profile_id` and `executor_profile_id`
+  metadata from the coordinator, the carriers `EnsureSession` and the launch
+  path read ([copilot step 3](../../specs/coordinator/system-design/copilot.md#conversation-task)).
+- Dependency wiring as in
+  [copilot#principal-and-mode](../../specs/coordinator/system-design/copilot.md#principal-and-mode)
+  (Wiring): new `internal/backendapp/coordinator_conversation.go` with
+  `wireCoordinatorConversation(p routeParams)`, one call line in the existing
+  `if p.features.Coordinator` block of `helpers.go`, `svc.SetConversationDeps`,
+  and the lookup handed to the executor and the MCP scope resolvers; the hook
+  call site and `registerCoordinatorConversation`'s signature unchanged.
 - `registerCoordinatorTools` with exactly the six tools of
   `AC-COORDINATOR-COPILOT-003.1`, reusing their existing handlers unchanged;
   `propose_task_kandev` (open-proposal cap under a per-coordinator lock)
   writing through task 01's proposal insert and publishing
   `coordinator.updated`; the `coordinator.propose_task` action; the guard in
   `coordinator_authorization.go`.
-- Fail-closed start checks, including the profile check at session start;
+- Fail-closed start checks in the two executor resolvers (every launch,
+  resume, interaction and prepare path), including the profile check at
+  session start and the `CoordinatorLookup` by task id when the task row is
+  absent, so the nil-task `Legacy` fallback never serves a coordinator task
+  while the flag is on;
   exact-name auto-approval; `AutoApprovePermissionsOverride=false` on every
   lifecycle path. A new `McpMode` field on `lifecycle.WorkspaceInfo`
   (`internal/agent/runtime/lifecycle/types.go`, built in
@@ -180,7 +201,17 @@ Required Go tests:
 - 30 concurrent proposes against an empty coordinator leave exactly 25 open
   on SQLite and PostgreSQL;
 - a racing coordinator delete during a conversation open returns 404 and
-  leaves no task;
+  leaves no task, both before step 4 and after it (the route's step 7
+  re-read finds no row and deletes the task, an already-deleted task counting
+  as done); an ensure failure whose re-read finds no row returns 404, not 502;
+- the prepared conversation session's agent and executor profiles equal the
+  coordinator's while the workspace default agent profile differs;
+- a coordinator-origin session with `config_mode` metadata still resolves the
+  coordinator mode and six-tool profile; with the flag on, a start whose task
+  row is absent but is some coordinator's `conversation_task_id` fails with no
+  instance, and a lookup error fails it too;
+- `handleSetMcpMode` accepts `coordinator` (200) and an unknown mode's 400
+  lists `coordinator`;
 - two racing opens against the new `conversation_task_id` conditional-UPDATE
   return the same task and one session, and the losing task is deleted, on
   SQLite and PostgreSQL (`KANDEV_TEST_POSTGRES_DSN`), matching task 01's and
@@ -223,7 +254,10 @@ Required Go tests:
 - `auto_resume_allowed` false; conversation route sends no prompt; a table
   over every backend path that can start a turn (stall and
   `workspace.deleted` subscribers, proposal decisions, startup recovery,
-  session recovery on restart) shows none starts the session; whichever of
+  session recovery on restart) shows none starts the session:
+  `TestCoordinatorConversationNoTurnStart` in
+  `apps/backend/internal/coordinator/no_turn_start_test.go`, rows in the
+  package-level slice `noTurnStartPaths`, created here; whichever of
   tasks 03, 04 and 07 merges last into this table adds the rows for the
   paths owned by the other two, so the table is complete regardless of merge
   order;
@@ -251,8 +285,12 @@ Required Go tests:
 - `apps/backend/internal/task/handlers/` and the MCP `create_task` handler
 - `apps/backend/internal/mcp/handlers/coordinator_authorization.go`
 - `apps/backend/internal/mcp/scope/` (`principalSurface`, `CoordinatorLookup`)
-- `apps/backend/internal/mcp/server/server.go` (`registerCoordinatorTools`, mode cases)
-- `apps/backend/internal/agentctl/` mode handling (`normalizeMode`, `surfaceForMode`, `modeForProfile`, `SetMode`)
+- `apps/backend/internal/mcp/server/server.go` (`registerCoordinatorTools`, `normalizeMode`, `surfaceForMode`, `modeForProfile`, `SetMode`)
+- `apps/backend/internal/mcp/profile/profile.go` (`Legacy`, `normalizeSurface`)
+- `apps/backend/internal/common/mcpmode/mode.go` (`instanceModes`)
+- `apps/backend/internal/agentctl/server/api/server.go` (`handleSetMcpMode`)
+- `apps/backend/internal/coordinator/no_turn_start_test.go`
+- `apps/backend/internal/backendapp/coordinator_conversation.go` (`wireCoordinatorConversation`) and its one call line in `helpers.go`
 - `apps/backend/internal/orchestrator/task_operations.go`
 - `apps/backend/internal/orchestrator/executor/executor_execute.go` (`resolveTaskSessionMCPMode`, `resolveTaskSessionMCPProfile`)
 - `apps/backend/internal/task/repository/sqlite/task.go` (`ListCoordinatorOriginTasks`, the expiry predicates)

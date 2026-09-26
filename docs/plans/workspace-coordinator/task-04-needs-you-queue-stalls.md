@@ -97,7 +97,9 @@ and 07.
 - Go tests seed proposal rows through task 01's store, since
   `propose_task_kandev` (task 03) may not have landed.
 - Whichever of tasks 03, 04 and 07 merges last into task 03's no-turn-start
-  table adds the rows for the paths owned by the other two (task 04's stall
+  table (`noTurnStartPaths` in
+  `apps/backend/internal/coordinator/no_turn_start_test.go`, run by
+  `TestCoordinatorConversationNoTurnStart`) adds the rows for the paths owned by the other two (task 04's stall
   and `workspace.deleted` subscribers here), so the table is complete
   regardless of merge order.
 - The `@axe-core/playwright` dependency (new to `apps/web/package.json`) and a
