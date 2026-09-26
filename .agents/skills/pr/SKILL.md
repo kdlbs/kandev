@@ -17,7 +17,7 @@ checks, and push. Ready PR monitoring and remediation continue through
 > - URL contains `gitlab` (e.g. `gitlab.com`, `gitlab.acme.corp`) → use the **GitLab flow** at the bottom of this file.
 > - For self-managed hosts, the user's repository configuration determines the host.
 >
-> **GitHub tool selection:** The GitHub flow uses `gh` CLI by default. If `gh` is unavailable or fails, use any available GitHub tools in the environment (e.g. MCP GitHub tools).
+> **GitHub tool selection:** The GitHub flow uses `gh` CLI by default. If `gh` is unavailable or fails, including a 401 authentication error, use structured GitHub connector/API tools for PR, check, and review data; authentication failure is unknown state, never clean state.
 > **GitLab tool selection:** The GitLab flow prefers `glab` CLI when available; otherwise it shells `curl` against the REST v4 API using `$GITLAB_TOKEN` (which the agent runtime injects from the user's secrets store).
 > **Azure Repos tool selection:** The Azure flow prefers `az repos pr create` with the Azure DevOps extension. Auth can come from an existing `az login` session or `AZURE_DEVOPS_EXT_PAT`.
 
@@ -114,6 +114,11 @@ explicitly requests task tracking.
    preserve the validated title, head, base, and body, and never hand-escape
    Markdown or JSON.
 
+   After creating the PR through `gh pr create` or the REST fallback, fetch it
+   with `gh pr view <number> --json url,state,headRefName,baseRefName,headRefOid`.
+   Verify it is open and its head/base match the intended branch and target
+   before reporting the URL.
+
 6. **If ready (not draft):** For GitHub, do not begin `/pr-fixup` until any
 required screenshot embedding in step 7 is complete.
 
@@ -140,6 +145,9 @@ required screenshot embedding in step 7 is complete.
      entries: `test -s apps/web/.pr-assets/manifest.json`. If it is absent or
      lacks the capture, do not treat the run as successful; rerun with `--host`
      and report the managed-runner gap.
+   - Start each publication attempt with a fresh PR-scoped capture directory.
+     Before publishing, compare the manifest entries with the explicit expected
+     viewport/capture list and reject stale files or unexpected entries.
    - Before inspecting, compressing, or publishing the assets, verify that every
      manifest entry maps to an existing file under `apps/web/.pr-assets`. If any
      entry is missing, treat the capture as incomplete and restore or recapture
@@ -188,7 +196,7 @@ required screenshot embedding in step 7 is complete.
    ```bash
    gh pr edit <PR_NUMBER> --body-file <file>
    ```
-   `gh pr edit` fails on this repo (GraphQL touches the deprecated Projects-classic API). Fall back to REST — build the payload with `jq --rawfile`, never by hand-escaping shell strings:
+   `gh pr edit` can fail on this repo (GraphQL touches the deprecated Projects-classic API), or exit successfully after only printing a Projects-classic deprecation warning without changing the body. Treat the read-back as authoritative; if the intended section is absent, fall back to REST — build the payload with `jq --rawfile`, never by hand-escaping shell strings:
    ```bash
    set -euo pipefail
    PAYLOAD="/tmp/pr-body-<PR_NUMBER>-payload.json"
@@ -214,6 +222,11 @@ required screenshot embedding in step 7 is complete.
    is created, so never PATCH a body reconstructed from the creation-time
    template or a stale `/tmp/pr-body.md`. Before every post-creation update:
 
+   This live-body procedure applies to every post-creation body edit, not only
+   screenshots. For each generated block, use operation-owned markers and
+   verify that its start and end markers occur exactly once before and after
+   the update.
+
    1. Fetch the current body from GitHub and keep that pristine live response
       as the merge base:
       `gh pr view <PR_NUMBER> --json body --jq .body > /tmp/pr-body-latest.md`.
@@ -233,7 +246,13 @@ required screenshot embedding in step 7 is complete.
       before PATCH. If it changed, re-fetch and merge again; do not overwrite
       the newer body.
    4. After PATCH, read the body back and verify both the intended change and
-      all previously present sentinel sections are still present.
+      all previously present sentinel sections are still present. For edits to
+      evidence or validation text, compare claims about files, tests, and
+      commands with the latest verification and correct stale counts before
+      reporting the PR. A body mutation can start fresh documentation/check
+      work and invalidates the prior PR snapshot, so refresh `pr-state` and
+      `pr-resolve` and rerun the appropriate `pr-await` wait before treating
+      the PR as complete.
 
    The REST PATCH endpoint replaces the complete body and does not provide a
    convenient description-level compare-and-swap, so this fetch/merge/check

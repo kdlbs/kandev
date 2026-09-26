@@ -70,7 +70,8 @@ const MAX_CHANGED_FILES = 3000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_REQUEST_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 250;
-const MAX_RETRY_SLEEP_MS = 180_000;
+// Keep room in the 10-minute workflow job for API requests and evaluation.
+const MAX_RETRY_SLEEP_MS = 7 * 60_000;
 const SECONDARY_RATE_LIMIT_DELAYS_MS = [60_000, 120_000];
 const NO_DOCS_LABEL = 'no-docs-allow';
 const STATUS_CONTEXT = 'PR documentation coverage';
@@ -2149,28 +2150,39 @@ async function publishResult(client, sha, result, targetUrl) {
   });
 }
 
-async function evaluateAffectedGroups({ client, pullNumber, targetUrl, entries }) {
+async function evaluateAffectedGroups({ client, pullNumber, targetUrl, entries, publishStatus = true }) {
   const groups = findAffectedMergeGroups({ entries, pullRequestNumber: pullNumber });
   const groupResults = [];
   for (const group of groups) {
-    await client.createCommitStatus(group.headSha, {
-      description: 'Evaluating merge-group documentation coverage',
-      state: 'pending',
-      targetUrl,
-    });
+    if (publishStatus) {
+      await client.createCommitStatus(group.headSha, {
+        description: 'Evaluating merge-group documentation coverage',
+        state: 'pending',
+        targetUrl,
+      });
+    }
     const result = await evaluateMergeGroup({
       baseSha: group.baseSha,
       client,
       entries: group.entries,
       headSha: group.headSha,
     });
-    await publishResult(client, group.headSha, result, targetUrl);
+    if (publishStatus) {
+      await publishResult(client, group.headSha, result, targetUrl);
+    }
     groupResults.push(result);
   }
   return groupResults;
 }
 
-async function run({ client, env = process.env, event, eventName, writeSummary } = {}) {
+async function run({
+  client,
+  env = process.env,
+  event,
+  eventName,
+  writeSummary,
+  publishStatus = env.PR_DOCS_DRY_RUN !== '1' && env.PR_DOCS_DRY_RUN !== 'true',
+} = {}) {
   const effectiveEventName = eventName ?? env.GITHUB_EVENT_NAME;
   const effectiveEvent = event ?? (() => {
     if (typeof env.GITHUB_EVENT_PATH !== 'string' || env.GITHUB_EVENT_PATH.length === 0) {
@@ -2214,11 +2226,13 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
         'merge-group head revision',
       );
       pendingSha = headSha;
-      await apiClient.createCommitStatus(headSha, {
-        description: 'Evaluating merge-group documentation coverage',
-        state: 'pending',
-        targetUrl,
-      });
+      if (publishStatus) {
+        await apiClient.createCommitStatus(headSha, {
+          description: 'Evaluating merge-group documentation coverage',
+          state: 'pending',
+          targetUrl,
+        });
+      }
       const entries = await apiClient.listMergeQueueEntries(targetBranch);
       result = await evaluateMergeGroup({
         baseSha,
@@ -2226,22 +2240,28 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
         entries,
         headSha,
       });
-      await publishResult(apiClient, headSha, result, targetUrl);
+      if (publishStatus) {
+        await publishResult(apiClient, headSha, result, targetUrl);
+      }
     } else {
       const pullNumber = eventPullRequestNumber(effectiveEvent);
       const current = await apiClient.getPullRequest(pullNumber);
       pendingSha = requireCommitSha(current.head.sha, 'pull-request head revision');
-      await apiClient.createCommitStatus(pendingSha, {
-        description: 'Evaluating pull-request documentation coverage',
-        state: 'pending',
-        targetUrl,
-      });
+      if (publishStatus) {
+        await apiClient.createCommitStatus(pendingSha, {
+          description: 'Evaluating pull-request documentation coverage',
+          state: 'pending',
+          targetUrl,
+        });
+      }
       result = await evaluatePullRequest({
         client: apiClient,
         initialPullRequest: current,
         pullNumber,
       });
-      await publishResult(apiClient, result.headSha ?? pendingSha, result, targetUrl);
+      if (publishStatus) {
+        await publishResult(apiClient, result.headSha ?? pendingSha, result, targetUrl);
+      }
 
       if (effectiveEventName !== 'workflow_dispatch') {
         const action = effectiveEvent.action;
@@ -2256,6 +2276,7 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
             entries,
             pullNumber,
             targetUrl,
+            publishStatus,
           });
           if (groupResults.some(groupResult => !groupResult.ok)) {
             result = {
@@ -2274,7 +2295,7 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
     }
   } catch (error) {
     result = errorCoverageResult(error.message, { headSha: pendingSha });
-    if (pendingSha) {
+    if (pendingSha && publishStatus) {
       try {
         await publishResult(apiClient, pendingSha, result, targetUrl);
       } catch {
@@ -2288,7 +2309,7 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
 }
 
 if (require.main === module) {
-  run()
+  run({ publishStatus: !process.argv.includes('--dry-run') })
     .then(({ exitCode }) => {
       process.exitCode = exitCode;
     })

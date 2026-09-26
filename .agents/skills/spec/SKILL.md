@@ -167,6 +167,9 @@ Review the artifacts before you run the linter:
   Use `rg` to confirm exact symbols before the artifact is complete.
 - New files do not copy the legacy `Migrated source detail` wrapper.
 - New artifacts appear in the catalog command output for the owning system.
+- Before adding prose to an existing specification, check its current byte
+  count against the applicable limit in `structure-and-ownership.md`; keep
+  enough headroom for the edit or split the document at a contract boundary.
 
 Run:
 
