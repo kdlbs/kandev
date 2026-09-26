@@ -402,6 +402,7 @@
     ],
     "user_settings": [
       "agent_generated_task_titles",
+      "agent_tab_close_behavior",
       "app_status_bar_enabled",
       "app_status_bar_order",
       "auto_focus_new_tasks",

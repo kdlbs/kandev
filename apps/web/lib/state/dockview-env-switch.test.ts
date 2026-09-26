@@ -12,6 +12,10 @@ vi.mock("@/lib/local-storage", () => ({
   getManualRightWidth: vi.fn(() => null),
 }));
 
+vi.mock("@/lib/env-hidden-sessions", () => ({
+  getEnvHiddenSessions: vi.fn(() => []),
+}));
+
 vi.mock("./dockview-layout-builders", () => ({
   applyLayoutFixups: vi.fn(() => ({
     sidebarGroupId: "g1",
@@ -40,6 +44,7 @@ vi.mock("./layout-manager", () => ({
 }));
 
 import { getEnvLayout } from "@/lib/local-storage";
+import { getEnvHiddenSessions } from "@/lib/env-hidden-sessions";
 import { layoutStructuresMatch, savedLayoutMatchesLive } from "./layout-manager";
 
 const NEW_SESSION_ID = "new-session";
@@ -292,6 +297,12 @@ describe("performEnvSwitch fast-path group survival", () => {
     );
     expect(order).toEqual(["add", "close"]);
   });
+});
+
+describe("performEnvSwitch fast-path sibling restoration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   it("restores sibling session tabs when the fast path replaces the outgoing session", () => {
     vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
@@ -358,6 +369,63 @@ describe("performEnvSwitch fast-path group survival", () => {
       }),
     );
     expect(closeStale).toHaveBeenCalledOnce();
+  });
+});
+
+describe("performEnvSwitch fast-path hidden sibling restoration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("does not restore a hidden sibling on the fast path", () => {
+    vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
+    vi.mocked(getEnvHiddenSessions).mockReturnValueOnce([SIBLING_SESSION_ID]);
+    type Panel = {
+      id: string;
+      api: { component: string; close: () => void };
+      group: { id: string; panels: Panel[] };
+    };
+    const group = { id: CENTER_GROUP_ID, panels: [] as Panel[] };
+    const panels: Panel[] = [];
+    const remove = (id: string) => {
+      panels.splice(
+        panels.findIndex((panel) => panel.id === id),
+        1,
+      );
+      group.panels.splice(
+        group.panels.findIndex((panel) => panel.id === id),
+        1,
+      );
+    };
+    const stale: Panel = {
+      id: OLD_SESSION_PANEL_ID,
+      api: { component: "chat", close: () => remove(OLD_SESSION_PANEL_ID) },
+      group,
+    };
+    panels.push(stale);
+    group.panels.push(stale);
+    const addPanel = vi.fn((options: { id: string; component: string }) => {
+      const panel: Panel = {
+        id: options.id,
+        api: { component: options.component, close: () => remove(options.id) },
+        group,
+      };
+      panels.push(panel);
+      group.panels.push(panel);
+    });
+    const api = {
+      ...makeMockApi(),
+      panels,
+      groups: [group],
+      getPanel: vi.fn((id: string) => panels.find((panel) => panel.id === id) ?? null),
+      addPanel,
+    } as unknown as EnvSwitchParams["api"];
+
+    performEnvSwitch(makeParams({ api, currentSessionIds: [NEW_SESSION_ID, SIBLING_SESSION_ID] }));
+
+    expect(addPanel).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: SIBLING_SESSION_PANEL_ID }),
+    );
   });
 });
 

@@ -445,6 +445,7 @@ export type UserSettingsState = {
   unreadDivider: boolean;
   agentGeneratedTaskTitles: boolean;
   autoFocusNewTasks: boolean;
+  agentTabCloseBehavior: "delete_session" | "hide_panel";
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
   showAnchoredPromptBar: boolean;
   showScrollToLastPrompt: boolean;

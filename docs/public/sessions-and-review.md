@@ -56,7 +56,7 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 | **Resume**         | Attempts to continue a completed, failed, or cancelled session                                                                                                             |
 | **Delete**         | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
 | **Share**          | Opens the publishing preview for an eligible session                                                                                                                       |
-| **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                 |
+| **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                    |
 | **Close Others**   | Closes other visible agent panels without deleting their sessions                                                                                                          |
 
 Stopping a session is not deletion. Resume needs the executor's session record. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can require a fresh session.
@@ -516,3 +516,9 @@ Before moving a task to done:
 - **Share is unavailable:** wait until the session leaves `CREATED`/`STARTING` and configure GitHub Gist access. CLI-passthrough conversations do not have the structured snapshot used by this feature.
 
 Related: [Use Kandev](use-kandev.md), [Tasks and workflows](tasks-and-workflows.md), [Coordination](coordination.md), and [Developer tools](developer-tools.md).
+
+## Agent tab close behavior
+
+On desktop, the X on a deletable Agent tab deletes the session after confirmation by default. In **Settings > Preferences > Task behavior**, choose **Hide panel** when the X should only remove that panel. The conversation remains available from **+ > Agents**, where selecting it reopens the panel.
+
+Hidden panels remain hidden when you reload the same browser tab. They are local to that browser tab and task environment. Mobile Sessions controls continue to use the existing Delete action.
