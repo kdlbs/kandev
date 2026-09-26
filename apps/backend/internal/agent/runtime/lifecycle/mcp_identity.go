@@ -9,6 +9,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -71,6 +72,9 @@ func (h *currentMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.
 }
 
 func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if mcporigin.MessageCarriesTrustedInternalCall(msg) {
+		ctx = mcporigin.WithTrustedInternalCall(ctx)
+	}
 	ctx = streams.WithMCPExecutionContext(ctx, streams.MCPExecutionContext{
 		ExecutionID: h.executionID,
 		TaskID:      h.taskID,

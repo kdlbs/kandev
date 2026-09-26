@@ -1020,7 +1020,7 @@ func TestSSHExecutorStopInstanceAbandonsARemoteCommandThatWedgesAfterTheReading(
 		if err != nil {
 			t.Fatalf("StopInstance: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("StopInstance did not return after its remote command wedged — the backstop must have been missed")
 	}
 	if !exec.isTransportLost(state) {

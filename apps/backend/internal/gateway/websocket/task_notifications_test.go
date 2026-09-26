@@ -159,6 +159,33 @@ func TestTaskEventBroadcaster_OrdersLifecycleStateNotifications(t *testing.T) {
 	}
 }
 
+func TestTaskEventBroadcaster_TransferReconcilesSourceAndDestination(t *testing.T) {
+	log := testLogger()
+	eventBus := bus.NewMemoryEventBus(log)
+	hub := NewHub(nil, log)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = RegisterTaskNotifications(ctx, eventBus, hub, log)
+
+	payload := map[string]interface{}{
+		"task_id": "task-transfer", "workspace_id": "ws-destination",
+		"workflow_id": "wf-destination", "source_workspace_id": "ws-source",
+		"source_workflow_id": "wf-source", "old_workflow_id": "wf-source",
+	}
+	_ = eventBus.Publish(ctx, events.TaskUpdated,
+		bus.NewEvent(events.TaskUpdated, "test", payload))
+
+	destination := <-hub.broadcast
+	if destination.Action != ws.ActionTaskUpdated {
+		t.Fatalf("destination transfer action = %q, want task.updated", destination.Action)
+	}
+	select {
+	case source := <-hub.broadcast:
+		t.Fatalf("global destination reader received source tombstone: %s", source.Action)
+	default:
+	}
+}
+
 func TestTaskEventBroadcaster_OrdersTranscriptMutationsAcrossTransportSubjects(t *testing.T) {
 	log := testLogger()
 	eventBus := &queuedTransportEventBus{MemoryEventBus: bus.NewMemoryEventBus(log)}

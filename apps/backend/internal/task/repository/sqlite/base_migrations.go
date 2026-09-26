@@ -347,6 +347,15 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.ensureRunnerProjectionTables(); err != nil {
 		return err
 	}
+	if err := r.migrate.Apply("workflow_steps.wip_limit", `ALTER TABLE workflow_steps ADD COLUMN wip_limit INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("migrate workflow_steps.wip_limit: %w", err)
+	}
+	if err := r.migrate.Apply("workflow_steps.pull_from_step_id", `ALTER TABLE workflow_steps ADD COLUMN pull_from_step_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate workflow_steps.pull_from_step_id: %w", err)
+	}
+	if err := r.migrate.Apply("workflow_step_participants.provenance", `ALTER TABLE workflow_step_participants ADD COLUMN provenance TEXT NOT NULL DEFAULT 'manual'`); err != nil {
+		return fmt.Errorf("migrate workflow_step_participants.provenance: %w", err)
+	}
 	// Keep the projection table compatible with existing task-only stores.
 	// The workflow repository owns this table in production, but task queries
 	// can run before that repository initializes its schema in isolated stores.

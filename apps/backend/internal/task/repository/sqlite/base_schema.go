@@ -38,6 +38,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initAttachmentsSchema,
 		r.initPreviewFeedbackSchema,
 		r.initTaskResourceCleanupSchema,
+		r.initTaskTransferSchema,
 		r.initControlServerRecordSchema,
 		r.initGitSchema,
 		r.initReviewSchema,
@@ -112,6 +113,66 @@ func (r *Repository) ensureTaskEnvironmentRecoveryClaimsSchema() error {
 		return fmt.Errorf("required task recovery claim migration: %w", err)
 	}
 	return nil
+}
+
+// The transfer ledger is additive. A binary rollback ignores these tables;
+// operators retain them so idempotency receipts and the audit trail survive.
+const taskTransferSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS task_transfer_serialization (
+		id INTEGER PRIMARY KEY,
+		version INTEGER NOT NULL DEFAULT 0
+	);
+	INSERT INTO task_transfer_serialization (id, version) VALUES (1, 0)
+		ON CONFLICT(id) DO NOTHING;
+
+	CREATE TABLE IF NOT EXISTS task_transfer_operations (
+		id TEXT PRIMARY KEY,
+		source_workspace_id TEXT NOT NULL,
+		idempotency_key TEXT NOT NULL,
+		request_digest TEXT NOT NULL,
+		actor_kind TEXT NOT NULL,
+		actor_id TEXT NOT NULL,
+		actor_session_id TEXT NOT NULL DEFAULT '',
+		task_id TEXT NOT NULL,
+		receipt_json TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL
+	);
+
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_task_transfer_operations_idempotency
+		ON task_transfer_operations(source_workspace_id, idempotency_key);
+
+	CREATE INDEX IF NOT EXISTS idx_task_transfer_operations_task
+		ON task_transfer_operations(task_id, created_at);
+
+	CREATE TABLE IF NOT EXISTS task_transfer_audit (
+		id TEXT PRIMARY KEY,
+		operation_id TEXT NOT NULL,
+		actor_kind TEXT NOT NULL,
+		actor_id TEXT NOT NULL DEFAULT '',
+		actor_session_id TEXT NOT NULL DEFAULT '',
+		task_id TEXT NOT NULL,
+		source_workspace_id TEXT NOT NULL,
+		source_workflow_id TEXT NOT NULL,
+		source_step_id TEXT NOT NULL,
+		destination_workspace_id TEXT NOT NULL,
+		destination_workflow_id TEXT NOT NULL,
+		destination_step_id TEXT NOT NULL,
+		task_generation TIMESTAMP NOT NULL,
+		session_census_json TEXT NOT NULL,
+		preservation_digest TEXT NOT NULL,
+		idempotency_key TEXT NOT NULL,
+		preservation_policy TEXT NOT NULL,
+		result TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_transfer_audit_task
+		ON task_transfer_audit(task_id, created_at);
+`
+
+func (r *Repository) initTaskTransferSchema() error {
+	_, err := r.db.Exec(taskTransferSchemaDDL)
+	return err
 }
 
 // ensureArchivedBranchCandidatesIndex runs after ownership normalization so
@@ -334,6 +395,8 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 		session_target TEXT,
 		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
 			cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
+			wip_limit INTEGER NOT NULL DEFAULT 0,
+			pull_from_step_id TEXT NOT NULL DEFAULT '',
 			complete_task_on_enter INTEGER NOT NULL DEFAULT 0,
 			order_revision INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -350,7 +413,8 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			decision_required INTEGER NOT NULL DEFAULT 0,
 			position INTEGER NOT NULL DEFAULT 0,
-			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
+			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00',
+			provenance TEXT NOT NULL DEFAULT 'manual'
 		)`); err != nil {
 		return fmt.Errorf("create workflow_step_participants projection table: %w", err)
 	}
