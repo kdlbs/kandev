@@ -4,7 +4,7 @@
 
 ## Spec authority
 
-`docs/specs/office/` (16 files, plus later requirements/system-design additions below) is the authority for what Office is and why — it outranks any card, register, or comment. **Where code and spec disagree, that is a defect in one of them; do not silently follow the code.** A seventeenth office-tagged spec, [per-agent + per-role tier selection](../../../../docs/specs/office-agent-tier-routing/spec.md), lives in a sibling directory, not under `docs/specs/office/`.
+`docs/specs/office/` (16 files, plus later requirements/system-design additions below) is the authority for what Office is and why — it outranks any card, register, or comment. **Where code and spec disagree, that is a defect in one of them; do not silently follow the code.** A seventeenth office-tagged spec, [per-agent + per-role tier selection](../../../../docs/specs/office/requirements/office-agent-tier-routing.md), lives under `docs/specs/office/requirements/` (migrated from a sibling `docs/specs/office-agent-tier-routing/spec.md`), split further into [system-design part 1](../../../../docs/specs/office/system-design/office-agent-tier-routing-01.md), [part 2](../../../../docs/specs/office/system-design/office-agent-tier-routing-02.md), [part 3](../../../../docs/specs/office/system-design/office-agent-tier-routing-03.md).
 
 | Spec | Status | Covers |
 |---|---|---|
@@ -30,7 +30,7 @@
 
 The two rows above are the only entries reflecting the newer `requirements/` + `system-design/` split; the other 15 predate that migration and this table has not been reconciled with the full current Office spec set. `docs/specs/office/README.md` no longer carries a tracked specification map (see ADR `2026-09-07-on-demand-document-catalogs`) — run `python3 scripts/list-docs.py specs --system office --format paths` for the authoritative, current list of anything not covered here.
 
-`office-agent-tier-routing/spec.md`'s own front matter still calls `routing.md` "authoritative" for tiers, provider order, execution profiles, provider health, and wake-reason policy — that predates `routing.md`'s archival in `docs/specs/INDEX.md` and is now stale; trust the INDEX status over the sibling spec's own text.
+`docs/specs/office/requirements/office-agent-tier-routing.md`'s own text still calls `routing.md` "authoritative" for tiers, provider order, execution profiles, provider health, and wake-reason policy — that predates `routing.md`'s archival in `docs/specs/INDEX.md` and is now stale; trust the INDEX status over that spec's own text.
 
 ## Traps
 
