@@ -94,7 +94,7 @@ func provideLifecycleManager(
 	}
 
 	// Register Remote Docker runtime (always available, instances are created lazily per host)
-	remoteDockerExec := lifecycle.NewRemoteDockerExecutor(log)
+	remoteDockerExec := lifecycle.NewRemoteDockerExecutor(log, agentctlResolver)
 	executorRegistry.Register(remoteDockerExec)
 	log.Info("Remote Docker runtime registered")
 
