@@ -64,10 +64,9 @@ const (
 // String implements fmt.Stringer.
 func (t RunEventType) String() string { return string(t) }
 
-// ActorKind names who performed the action that caused an enqueue, per
-// AC-OFFICE-RUN-CAUSATION-001.15: exactly one of a human user, an Office
-// agent, or the system itself. It is a property of the causing action,
-// not of the agent being woken.
+// ActorKind names who performed the action that caused an enqueue: a human
+// user, an Office agent, or the system itself. It describes the causing
+// action, not the agent being woken.
 type ActorKind string
 
 // Actor kind values. There is deliberately no "unspecified" zero value
@@ -92,10 +91,9 @@ func (k ActorKind) Valid() bool {
 	}
 }
 
-// PriorityClass is the coarse bucket that decides which queued run is
-// claimed first when capacity is scarce (AC-OFFICE-BACKPRESSURE-001.1).
-// Values are ordered most to least preferred and the integer values are
-// persisted on runs.priority_class, so they must not be renumbered.
+// PriorityClass is the coarse bucket that orders queued runs when capacity is
+// scarce. Its integer values are persisted on runs.priority_class and must not
+// be renumbered.
 type PriorityClass int
 
 const (
@@ -203,12 +201,9 @@ type Run struct {
 	// RequestedTier is the tier the resolver consumed (override > workspace
 	// default) when the run was first dispatched.
 	RequestedTier *string `json:"requested_tier,omitempty" db:"requested_tier"`
-	// Causation chain identity (REQ-OFFICE-RUN-CAUSATION-001).
-	// ChainCausationID is the root run's own ID; empty means the legacy
-	// pre-capability marker, read by AC-OFFICE-RUN-CAUSATION-001.6 as a
-	// root at depth 0. Distinct from CausationID below
-	// (REQ-OFFICE-LOOP-LIVENESS-002), an unrelated wakeup-request
-	// correlation that reached for the same name independently.
+	// ChainCausationID is the root run's own ID; empty identifies a legacy
+	// pre-capability run that readers treat as a root at depth 0. It is
+	// distinct from CausationID below, the wakeup-request correlation.
 	ChainCausationID string        `json:"chain_causation_id" db:"chain_causation_id"`
 	ParentRunID      string        `json:"parent_run_id" db:"parent_run_id"`
 	CausationDepth   int           `json:"causation_depth" db:"causation_depth"`

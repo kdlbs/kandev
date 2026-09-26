@@ -7,6 +7,8 @@ import (
 )
 
 // These tests pin the shared run and run-event wire contract.
+// @covers AC-OFFICE-RUN-CAUSATION-001.15
+// @covers AC-OFFICE-BACKPRESSURE-001.1
 func TestRunJSONContract(t *testing.T) {
 	run := Run{
 		ID: "run-1", AgentProfileID: "agent-1", Status: RunStatusQueued,
@@ -54,6 +56,8 @@ func TestRunEventJSONContract(t *testing.T) {
 	}
 }
 
+// @covers AC-OFFICE-RUN-CAUSATION-001.15
+// @covers AC-OFFICE-BACKPRESSURE-001.1
 func TestRunEnumContractMethods(t *testing.T) {
 	if !ActorKindAgent.Valid() || ActorKind("unknown").Valid() {
 		t.Fatal("ActorKind.Valid contract changed")
