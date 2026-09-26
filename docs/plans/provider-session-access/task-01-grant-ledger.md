@@ -77,6 +77,9 @@ through service/repository APIs, never trusted from plugin request fields.
 
 ## Results
 
-Grant generation replacement and exact-workspace revocation storage are
-implemented locally and have focused race-enabled tests. Administrator API,
-lease/audit ledger, Host admission and PostgreSQL coverage remain pending.
+Grant generation replacement, exact-workspace revocation, non-secret
+lease/audit storage and provider exposure receipts are implemented locally
+with focused race-enabled tests. A negative test preserves the residual
+exposure after failed provider revocation, lease expiry and store reopen.
+Administrator API, Host admission, automatic audit wiring and PostgreSQL
+coverage remain pending. No credential issuance is enabled.

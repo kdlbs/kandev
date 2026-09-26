@@ -124,6 +124,15 @@ func NewStore(db *sqlx.DB) (*Store, error) {
    at BIGINT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS provider_access_audit_workspace
    ON provider_access_audit(workspace_id, at)`,
+		`CREATE TABLE IF NOT EXISTS provider_access_exposures (
+   lease_id TEXT PRIMARY KEY, grant_id TEXT NOT NULL,
+   provider TEXT NOT NULL, provider_principal_id TEXT NOT NULL,
+   repository_id TEXT NOT NULL, permission_profile TEXT NOT NULL,
+   provider_expires_at BIGINT NOT NULL, exported_at BIGINT NOT NULL,
+   revocation_attempted_at BIGINT, revoked_at_provider BIGINT,
+   FOREIGN KEY(lease_id) REFERENCES provider_access_leases(id))`,
+		`CREATE INDEX IF NOT EXISTS provider_access_exposures_expiry
+   ON provider_access_exposures(provider_expires_at)`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {

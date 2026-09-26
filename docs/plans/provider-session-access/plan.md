@@ -60,6 +60,8 @@ contract and digest remain unchanged. `provider-access/v1` is a separate
 versioned addition, with one provider adapter/receipt slice. Host and plugin
 owners exchange request/response fixtures and a minimum compatible SDK/Host
 version before either side claims integration complete.
+The [threat model](threat-model.md) fixes the rerun permission profile,
+residual exported-bearer behavior, and the generic-egress comparison.
 
 ## Tests
 
@@ -83,6 +85,11 @@ version before either side claims integration complete.
 Pending replacement implementation. The current-main merge at local
 `1a9388dbb12aeb028877329b80e8d12b6627fa31` passed focused GitHub/MCP
 tests and public-doc validation; it is not replacement acceptance evidence.
+The local non-secret grant/lease/audit/exposure stores pass race-enabled
+package tests. A simulated failed provider revocation remains an
+expiry-bounded residual after lease expiry and store reopen; no test mints or
+exports a bearer. Host admission, token transport, plugin adapter and
+end-to-end replacement remain unimplemented.
 
 ## Risks
 
@@ -97,6 +104,9 @@ tests and public-doc validation; it is not replacement acceptance evidence.
 - Provider token issuance is disabled while the Human decides whether a
   repository-wide Actions token that can outlive Host revocation failure is
   acceptable to deliver to trusted plugin code.
+- A generic origin-only egress policy cannot enforce one PR/run after bearer
+  export. A TLS-terminating gateway with exact request/live-state checks
+  becomes a provider-operation intermediary; see the threat model.
 
 ## Open questions
 

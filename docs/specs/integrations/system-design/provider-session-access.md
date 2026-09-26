@@ -21,6 +21,9 @@ replaces the action-specific server rerun decision. The existing
 supplies connection-bound installation identity and workspace capability
 approval; the [Git credential broker](../../../decisions/2026-07-31-provider-neutral-git-credential-broker.md)
 is a pattern for exact scope and revocation, not an API-token transport.
+The [threat model](../../../plans/provider-session-access/threat-model.md)
+records the exported-bearer risk. Credential issuance and redemption remain
+disabled until the Coordinator records a Human security decision.
 
 | Contract | Design sections |
 | --- | --- |
@@ -102,9 +105,10 @@ conflicts.
 The GitHub adapter uses the existing App registration/connection resolver but
 calls the App token minter without `InstallationTokenCache`, because the cache
 shares tokens across equal repository/permission scopes. It requests exactly
-one canonical repository and the reviewed permission profile (Actions write,
-pull requests read, metadata read; contents read only when the operation
-requires reading workflow policy). It rejects PAT, named CLI, executor and
+one canonical base repository and, for rerun, only `actions:write`,
+`pull_requests:read`, and `metadata:read`. It excludes `contents:read` for
+rerun; any different operation needs a separate reviewed permission profile.
+It rejects PAT, named CLI, executor and
 legacy credentials. It stores an issued token only in process memory so it
 can call GitHub's token-revocation endpoint on release or invalidation.
 GitHub's own token expiry is the final bound after a Host crash or failed
@@ -128,6 +132,13 @@ events request revocation of every live issued token for the scope. A provider
 provider expiry but never reports `revoked_at_provider`. After process loss,
 the durable ledger still fences redemption and marks previously redeemed
 tokens as expiry-bounded residuals until their recorded provider expiry.
+The non-secret exposure row records the lease, App principal, canonical
+repository, permission profile, export time, provider expiry, revocation
+attempt, and confirmed provider revocation. Lease expiry or grant revocation
+alone makes the bearer residual, not provider-revoked. An unsuccessful
+provider revocation remains residual after Host restart; the Host has no
+persisted token with which to retry exact-token revocation. It becomes
+provider-expired only at the recorded provider expiry.
 
 All admission and lifecycle paths emit non-secret audit receipts with grant,
 lease, request, plugin installation, workspace, managed task/session, target,

@@ -25,7 +25,9 @@ write authority.
 
 The direct-call ownership direction is Human-approved. The credential handoff
 described below is a proposal and must remain disabled until the Human accepts
-the residual GitHub bearer window described in Consequences.
+the residual GitHub bearer window described in Consequences. The concrete
+[threat model](../plans/provider-session-access/threat-model.md) is part of
+that review; it does not make the handoff approved.
 
 Kandev owns a versioned, provider-neutral `provider-access/v1` Host contract
 for an administrator-approved grant, an opaque short-lived lease, credential
@@ -50,14 +52,20 @@ records whether it was confirmed. A failed or interrupted provider revocation
 is reported as a residual bearer window, never as confirmed invalidation.
 
 For GitHub, only a verified workspace App installation may mint a fresh,
-uncached installation token for one canonical repository and the minimum
-permission profile. No PAT, ambient `gh` account, executor profile, or shared
-cached token may satisfy this contract. GitHub cannot constrain an installation
+uncached installation token for one canonical repository. Rerun requires
+`actions:write`, `pull_requests:read`, and `metadata:read`; no contents or
+workflow write permission is included. No PAT, ambient `gh` account, executor
+profile, or shared cached token may satisfy this contract. GitHub cannot constrain an installation
 token to one PR or run, so the trusted plugin enforces that target from the
 lease and revalidates live provider identity before and after mutation. The
 Host records issuance/redemption/revocation without claiming to attest the
-provider action. A token that escaped before a Host crash may remain valid
-until GitHub's expiry if provider revocation could not be confirmed.
+provider action. The lease lifetime is measured in minutes, but an exported
+installation token has GitHub's one-hour provider lifetime. A token that
+escaped before a Host crash or unsuccessful provider revocation may remain
+valid until that expiry; lease expiry alone cannot invalidate it. The Host
+must retain exact-token revocation material only in memory and a durable,
+non-secret exposure receipt with the provider expiry. A restart must report
+an expiry-bounded residual, not a successful revocation.
 
 The current GitLab workspace credential is a potentially long-lived PAT or
 `glab` token. It is not eligible for this lease. GitLab direct actions fail
@@ -88,3 +96,15 @@ must be removed or superseded before the replacement is ready.
   verified workspace connection.
 - Reuse the Git HTTPS lease as an API token: rejected because its host/path
   authorization and resolver contract do not cover provider API permissions.
+- Add an origin-only plugin egress policy: it cannot constrain a bearer to a
+  PR/run within the GitHub API origin. An HTTPS-terminating gateway capable of
+  checking exact path/body and live PR/run identity becomes a provider-action
+  intermediary, recreating the proxy boundary under a different name.
+
+## Decision gate
+
+The Human must explicitly choose whether this temporary repository-wide
+Actions-write exposure is acceptable for a reviewed plugin or whether the
+plugin must own a separate App credential lifecycle. Until then issuance,
+redemption and plugin admission remain disabled. Neither choice makes a
+GitHub token cryptographically PR/run scoped.

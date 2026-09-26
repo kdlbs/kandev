@@ -78,7 +78,10 @@ provider credential.
   uninstall, and lease expiry, Kandev shall reject future redemption. It
   shall attempt provider revocation of an issued token and report whether
   provider invalidation was confirmed; a failure shall retain a bounded,
-  non-secret pending-revocation receipt until expiry or reconciliation.
+  non-secret pending-revocation receipt until provider expiry or
+  reconciliation. Lease expiry alone shall never be reported as provider
+  token revocation. A Host restart without transient token bytes shall retain
+  the expiry-bounded residual receipt.
 - **AC-INTEGRATIONS-PROVIDER-SESSION-ACCESS-001.7:** The Host shall record
   non-secret grant, issuance, redemption, denial, expiry, and revocation
   receipts bound to plugin installation, workspace, task/session, target,
