@@ -503,6 +503,7 @@ const (
 	Host_GetConfig_FullMethodName                     = "/kandev.plugin.v1.Host/GetConfig"
 	Host_ListTasks_FullMethodName                     = "/kandev.plugin.v1.Host/ListTasks"
 	Host_GetTask_FullMethodName                       = "/kandev.plugin.v1.Host/GetTask"
+	Host_GetTaskRelations_FullMethodName              = "/kandev.plugin.v1.Host/GetTaskRelations"
 	Host_ListTaskStepTransitions_FullMethodName       = "/kandev.plugin.v1.Host/ListTaskStepTransitions"
 	Host_ListWorkspaces_FullMethodName                = "/kandev.plugin.v1.Host/ListWorkspaces"
 	Host_ListWorkflows_FullMethodName                 = "/kandev.plugin.v1.Host/ListWorkflows"
@@ -583,6 +584,11 @@ type HostClient interface {
 	// Reads — capability api_read:<resource>
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*ListTasksResponse, error)
 	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*GetTaskResponse, error)
+	// Compact task relationship graph — capability api_read:task_relations.
+	// Unlike Task, RelationTask intentionally has no description, metadata,
+	// repositories, or document fields. The requested target must belong to
+	// workspace_id; foreign and unknown targets fail as NotFound.
+	GetTaskRelations(ctx context.Context, in *GetTaskRelationsRequest, opts ...grpc.CallOption) (*GetTaskRelationsResponse, error)
 	ListTaskStepTransitions(ctx context.Context, in *ListTaskStepTransitionsRequest, opts ...grpc.CallOption) (*ListTaskStepTransitionsResponse, error)
 	ListWorkspaces(ctx context.Context, in *ListWorkspacesRequest, opts ...grpc.CallOption) (*ListWorkspacesResponse, error)
 	ListWorkflows(ctx context.Context, in *ListWorkflowsRequest, opts ...grpc.CallOption) (*ListWorkflowsResponse, error)
@@ -786,6 +792,16 @@ func (c *hostClient) GetTask(ctx context.Context, in *GetTaskRequest, opts ...gr
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetTaskResponse)
 	err := c.cc.Invoke(ctx, Host_GetTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetTaskRelations(ctx context.Context, in *GetTaskRelationsRequest, opts ...grpc.CallOption) (*GetTaskRelationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTaskRelationsResponse)
+	err := c.cc.Invoke(ctx, Host_GetTaskRelations_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1113,6 +1129,11 @@ type HostServer interface {
 	// Reads — capability api_read:<resource>
 	ListTasks(context.Context, *ListTasksRequest) (*ListTasksResponse, error)
 	GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error)
+	// Compact task relationship graph — capability api_read:task_relations.
+	// Unlike Task, RelationTask intentionally has no description, metadata,
+	// repositories, or document fields. The requested target must belong to
+	// workspace_id; foreign and unknown targets fail as NotFound.
+	GetTaskRelations(context.Context, *GetTaskRelationsRequest) (*GetTaskRelationsResponse, error)
 	ListTaskStepTransitions(context.Context, *ListTaskStepTransitionsRequest) (*ListTaskStepTransitionsResponse, error)
 	ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error)
 	ListWorkflows(context.Context, *ListWorkflowsRequest) (*ListWorkflowsResponse, error)
@@ -1237,6 +1258,9 @@ func (UnimplementedHostServer) ListTasks(context.Context, *ListTasksRequest) (*L
 }
 func (UnimplementedHostServer) GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTask not implemented")
+}
+func (UnimplementedHostServer) GetTaskRelations(context.Context, *GetTaskRelationsRequest) (*GetTaskRelationsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTaskRelations not implemented")
 }
 func (UnimplementedHostServer) ListTaskStepTransitions(context.Context, *ListTaskStepTransitionsRequest) (*ListTaskStepTransitionsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTaskStepTransitions not implemented")
@@ -1552,6 +1576,24 @@ func _Host_GetTask_Handler(srv interface{}, ctx context.Context, dec func(interf
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).GetTask(ctx, req.(*GetTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetTaskRelations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTaskRelationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetTaskRelations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetTaskRelations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetTaskRelations(ctx, req.(*GetTaskRelationsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2096,6 +2138,10 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTask",
 			Handler:    _Host_GetTask_Handler,
+		},
+		{
+			MethodName: "GetTaskRelations",
+			Handler:    _Host_GetTaskRelations_Handler,
 		},
 		{
 			MethodName: "ListTaskStepTransitions",

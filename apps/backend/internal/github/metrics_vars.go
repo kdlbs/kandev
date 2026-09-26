@@ -36,6 +36,11 @@ var (
 	reviewCleanupCoreQuotaSkipsTotal = expvar.NewInt("github_review_cleanup_core_quota_skips_total")
 )
 
+const (
+	boolLabelTrue  = "true"
+	boolLabelFalse = "false"
+)
+
 // outcomeMetricLabel builds a "k1=v1;k2=v2;..." label string for an expvar
 // map key, matching the idiom in internal/office/scheduler/metrics_vars.go.
 func outcomeMetricLabel(pairs ...string) string {
@@ -58,9 +63,9 @@ func incTaskPROutcomeSync(populated bool) {
 
 func boolLabel(b bool) string {
 	if b {
-		return "true"
+		return boolLabelTrue
 	}
-	return "false"
+	return boolLabelFalse
 }
 
 // incAuthCircuitSkip records that a poll cycle skipped a workspace's PR
