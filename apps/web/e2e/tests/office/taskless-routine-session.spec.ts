@@ -32,6 +32,10 @@ test.describe("Office taskless routine sessions", () => {
 
     const sessions: string[] = [];
     for (let attempt = 1; attempt <= 2; attempt += 1) {
+      await officeApi.updateAgentStatus(officeSeed.agentId, "idle");
+      await expect
+        .poll(async () => (await officeApi.getAgent(officeSeed.agentId)).status)
+        .toBe("idle");
       const response = await officeApi.runRoutine(routineId);
       if (response.status !== 200) {
         throw new Error(

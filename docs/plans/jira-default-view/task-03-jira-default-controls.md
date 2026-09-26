@@ -197,3 +197,30 @@ PASS
 ```
 
 The original office `TypeError: fetch failed` did not recur in ten runs with CI environment settings. Exact-head CI and its zero-retry blob audit remain pending for the pushed follow-up.
+
+## PR #3936 retry follow-up after e767f4d
+
+The exact-head E2E artifact for `e767f4d698e0f88bbefdb6aa49b91ce14710088e` contained six retry-only scenarios. Fixes isolate workflow steps from mutable worker data; navigate to tasks by ID; wait for the source environment, fixture file, and causal file-tree response; restore and confirm the shared Office CEO is idle before each routine fire; and tolerate a worktree that disappears during Git status inspection. Office-specific reset/settings calls use the existing backend transport-recovery wrapper. Preview cleanup timers are drained in the fake-timer component test teardown.
+
+```text
+Four other Chromium retry scenarios, repeat-each=3, retries=0
+12 passed
+Taskless routine, repeat-each=3, retries=0
+3 passed
+Mobile changes panel, repeat-each=3, retries=0
+3 passed
+pnpm exec vitest run components/task/workflow-move-proceed-button.test.tsx
+26 passed
+pnpm run typecheck
+PASS
+Focused ESLint on changed web files
+PASS
+pnpm run e2e:sleep-ratchet
+PASS
+go test ./internal/worktree ./internal/task/service ./internal/backendapp
+PASS
+git diff --check
+PASS
+```
+
+Kubernetes compatibility had failed on the previous PR head while downloading external tools after repeated HTTP 500 responses. Exact-head CI and a zero-retry blob audit remain pending for this fixup.
