@@ -88,11 +88,15 @@ and 07.
   classified); sidebar entries in `app-sidebar-primary-nav.tsx` and
   `MobileRequiredRows`; the badge store and `coordinator.updated` handler;
   six locales. With the flag off no sidebar entry or Coordinator route renders.
-- The header's **Configure** action links unconditionally to the settings
-  coordinator page at `/settings/workspaces/:id/coordinators/:coordinatorId`
-  (declared in the
-  [coordinators design](../../specs/coordinator/system-design/coordinators.md#settings-ui),
-  built by task 02). A component test asserts the href regardless of whether
+- The header's **Configure** action links to the settings coordinator page at
+  `/settings/workspaces/:id/coordinators/:coordinatorId` whether or not task
+  02's page has merged into this branch ("unconditionally" refers to the href
+  target only). Like **Add a coordinator**, it renders only for a manager:
+  `hasScope(workspace.scopes, SCOPE.workspaceManage)`
+  (`apps/web/lib/types/team-access.ts`); a `workspace.read` viewer sees
+  neither. The settings page is declared in the
+  [coordinators design](../../specs/coordinator/system-design/coordinators.md#settings-ui)
+  and built by task 02. A component test asserts the href regardless of whether
   task 02 has merged into this branch; the page itself is task 02's to build.
 - Go tests seed proposal rows through task 01's store, since
   `propose_task_kandev` (task 03) may not have landed.
@@ -107,8 +111,9 @@ and 07.
 
 ## Out of scope
 
-- The copilot launcher and **Ask about this** behaviour (task 06); the button
-  renders and is wired in task 06.
+- The copilot launcher and **Ask about this** behaviour (task 06). This task
+  renders **Ask about this** on every item as a native `disabled` button with
+  no click handler, keeping its 44px target; task 06 enables and wires it.
 - Approve, Edit and Reject (task 08).
 - Resume, merge prompts, answering in place (later phases).
 ## ASCII UI preview
@@ -214,7 +219,9 @@ preview ("The task failed"), and with only an empty task error.
 Go tests cover the stall upsert: a newer `last_event_at` replaces the row and
 publishes `coordinator.updated`; an equal one (redelivery) and an earlier one
 (out of order) change nothing and publish nothing, on SQLite and PostgreSQL
-(`AC-COORDINATOR-NEEDS-YOU-005.1`).
+(`AC-COORDINATOR-NEEDS-YOU-005.1`). With a bus whose publish fails for the
+first of two coordinators, the row is written and the second coordinator's
+event is still published.
 
 Go tests cover startup pruning (`AC-COORDINATOR-NEEDS-YOU-005.3`): seeding a
 stall row detected 31 days ago, a row whose task is archived, a row whose task
@@ -237,6 +244,31 @@ banner shows; the load time is absent before the first success; **Try again**
 calls `requestWorkspaceContextRefresh` and only the failed workflow is
 re-fetched; with no snapshot loaded and a failed read, the banner replaces the
 lists and strip.
+
+A component test on the header and the no-coordinator state covers the
+manager gating of `AC-COORDINATOR-NEEDS-YOU-006.5` and
+`AC-COORDINATOR-NEEDS-YOU-007.2`: with `workspace.manage` in the workspace's
+scopes, **Configure** (with the settings href above) and **Add a coordinator**
+render; with only `workspace.read`, neither renders.
+
+A component test covers the unknown coordinator id
+(`AC-COORDINATOR-NEEDS-YOU-006.4`): with one coordinator in the workspace, an
+unknown id shows "This coordinator is not in this workspace." and **See
+coordinators** linking to `/settings/workspaces/:id/coordinators`, with no
+strip and no **Add a coordinator**; with none, it shows the no-coordinator
+state; with a failing coordinator list read, it shows "Could not load
+coordinators." and **Try again** re-reads the list.
+
+A component test covers the stall-record and proposal inputs
+(`AC-COORDINATOR-NEEDS-YOU-007.3`, `007.5`): with tasks loaded, a failing
+stalls read shows only the stall-records line (timeless on a first load, with
+the last load time after a success) and the lists without stall items; a
+failing proposals read shows only the proposals line; both failing show both
+lines in the order tasks, stall records, proposals; **Try again** re-issues
+only the failed reads, and each line clears when its own read succeeds.
+
+A component test asserts **Ask about this** renders on each item kind and is
+`disabled`.
 
 A component test on `app-sidebar-primary-nav.tsx` asserts the flag-off case
 directly: with `features.coordinator` off, no coordinator sidebar entry
@@ -291,13 +323,18 @@ implementation; none changes an acceptance criterion.
 9. **Age timer.** One 30-second interval per mounted screen re-evaluates
    `now`; ages render in whole minutes as `<h>h <m>m`, or `<m>m` under an hour,
    and "0m" for a reference time in the future.
+10. **Proposals read before task 08.** `app/coordinator/use-coordinator-inputs.ts`
+    (see the design's Inputs) reads the viewed coordinator's pending proposals
+    through `listProposals` alongside the stall records. This task does not
+    create `hooks/domains/coordinator/use-proposals.ts`; task 08 creates it and
+    moves the proposals input there, removing the hook's proposals read.
 
 ## Likely files
 
 - `apps/backend/internal/coordinator/{stalls,workspace_deleted}.go` and tests
 - `apps/web/src/spa-routes.tsx`
 - `apps/web/lib/coordinator/attention.ts` and test
-- `apps/web/app/coordinator/`
+- `apps/web/app/coordinator/`, including `use-coordinator-inputs.ts`
 - `apps/web/components/app-sidebar/app-sidebar-primary-nav.tsx`
 - `apps/web/components/navigation/mobile-sidebar-layout-navigation.tsx`
 - `apps/web/src/locales/*/`
