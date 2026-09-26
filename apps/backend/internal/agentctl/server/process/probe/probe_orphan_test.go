@@ -345,7 +345,7 @@ func TestOrphanScan_RevalidationDatumMismatch_Settled(t *testing.T) {
 	}
 }
 
-// AC-DW-ORPHAN-002.2a: a re-validation read that fails outright is skipped,
+// AC-DW-ORPHAN-002.7: a re-validation read that fails outright is skipped,
 // the scan continues, and the probe never returns unknown from this step.
 func TestOrphanScan_RevalidationReadError_NeverUnknownAndContinues(t *testing.T) {
 	turnStart := time.Unix(1000, 0)

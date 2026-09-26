@@ -176,7 +176,7 @@ pass. The flow, in order:
    (AC-DW-ORPHAN-001.1). Two outcomes skip the candidate and continue the scan
    with the next one: a different datum, meaning the pid was recycled between the
    snapshot and the read; and a read that fails outright, meaning the candidate is
-   gone (AC-DW-ORPHAN-002.2a). Neither is ever reported as `unknown` — that
+   gone (AC-DW-ORPHAN-002.7). Neither is ever reported as `unknown` — that
    belongs to step 1 alone.
 7. Otherwise return `settled`.
 
@@ -193,7 +193,7 @@ start time landed in the turn's truncation bucket would report `live` forever.
 Exact-equality matching (AC-DW-ORPHAN-001.10) keeps one session on a shared host
 from claiming another's workload.
 
-**The agent's own environment is never read** (AC-DW-ORPHAN-002.4a). The match
+**The agent's own environment is never read** (AC-DW-ORPHAN-002.8). The match
 compares a candidate against the session id already on the probe request, so the
 agent's own variable is not an input to anything. An agent launched without
 `KANDEV_SESSION_ID` therefore needs no special case: none of its descendants
@@ -292,7 +292,7 @@ platform is left able to match but unable to re-validate.
 
 A re-validation read that fails outright is not a probe failure. It means the
 candidate exited, which is the same answer as "does not contribute": skip it and
-continue (AC-DW-ORPHAN-002.2a).
+continue (AC-DW-ORPHAN-002.7).
 
 ### Cost
 
@@ -334,9 +334,9 @@ materially different host.
 | Platform cannot read environments at all | Descendant-only result, unchanged (AC-DW-ORPHAN-002.1). |
 | Process-table read fails | `unknown`, unchanged (AC-DW-ORPHAN-002.3). |
 | Probe session id on the request is empty | Descendant-only result; the identity scan is skipped and no environment is read (AC-DW-ORPHAN-002.4). |
-| Agent launched without `KANDEV_SESSION_ID` | Descendant-only result, reached by ordinary non-matching rather than a check. No descendant carries the variable, so the identity scan runs and matches nothing (AC-DW-ORPHAN-002.4a). |
+| Agent launched without `KANDEV_SESSION_ID` | Descendant-only result, reached by ordinary non-matching rather than a check. No descendant carries the variable, so the identity scan runs and matches nothing (AC-DW-ORPHAN-002.8). |
 | Candidate's pid recycled between the snapshot and the environment read | The re-read start-time datum differs from the snapshot's, so the candidate is skipped rather than matched, preserving the legacy (pid, start time) identity rule. |
-| Re-validation read fails outright (candidate exited before it could be read) | Skip the candidate, continue the scan. Never `unknown` (AC-DW-ORPHAN-002.2a). |
+| Re-validation read fails outright (candidate exited before it could be read) | Skip the candidate, continue the scan. Never `unknown` (AC-DW-ORPHAN-002.7). |
 | Candidate is unchanged and still running, but its start time was re-derived instead of re-read | Rejected as a false mismatch, and the live orphan reads `settled`. This is the failure AC-DW-ORPHAN-001.11 forbids by fixing the comparison to the platform's invariant datum. |
 | Orphan leaked by an earlier turn is still alive | Excluded by the start-time predicate (AC-DW-ORPHAN-001.2). It reads `live` only for the turn that started it, which is the same bound the legacy leaked-orphan row already accepts. |
 

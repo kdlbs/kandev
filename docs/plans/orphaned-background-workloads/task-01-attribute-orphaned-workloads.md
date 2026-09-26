@@ -22,10 +22,10 @@ acceptance_criteria:
   - AC-DW-ORPHAN-001.11
   - AC-DW-ORPHAN-002.1
   - AC-DW-ORPHAN-002.2
-  - AC-DW-ORPHAN-002.2a
+  - AC-DW-ORPHAN-002.7
   - AC-DW-ORPHAN-002.3
   - AC-DW-ORPHAN-002.4
-  - AC-DW-ORPHAN-002.4a
+  - AC-DW-ORPHAN-002.8
   - AC-DW-ORPHAN-002.5
 system_design:
   - ../../specs/disambiguate-waiting/system-design/orphaned-background-workloads.md
@@ -63,7 +63,7 @@ any platform that cannot read another process's environment.
     (AC-DW-ORPHAN-001.11). On Linux this test MUST fail against an implementation
     that re-derives the start time through a second `/proc/uptime` read;
   - a re-validation read that fails outright skips the candidate and continues,
-    and never turns the probe into `unknown` (AC-DW-ORPHAN-002.2a).
+    and never turns the probe into `unknown` (AC-DW-ORPHAN-002.7).
 - Extend the `processTableReader` seam with an optional environment-read
   capability. Implement it on Linux over `/proc/<pid>/environ`. Do not implement
   it on Darwin; `SysctlRaw("kern.procargs2", …)` returns a 29-byte stub for
@@ -76,7 +76,7 @@ any platform that cannot read another process's environment.
   `/proc/<pid>/stat`; Darwin: the `p_starttime` timeval), because that is what
   re-validation compares — not the derived `StartTime` the turn-start predicate
   uses.
-- Do NOT read the agent process's own environment (AC-DW-ORPHAN-002.4a). The
+- Do NOT read the agent process's own environment (AC-DW-ORPHAN-002.8). The
   spec forbids it; an implementation that adds the check is wrong even though it
   would pass the other criteria.
 - Pass `req.SessionID` at the call site in
@@ -130,7 +130,7 @@ orphan-attribution cases must be written so they skip there rather than fail.
 
 - `/proc/<pid>/environ` races with process exit. Treat every read error as
   "skip this candidate", never as a probe failure. The same holds for the
-  re-validation read (AC-DW-ORPHAN-002.2a).
+  re-validation read (AC-DW-ORPHAN-002.7).
 - **The re-validation comparison basis is the trap on this task.**
   `linuxBootTime()` anchors to `time.Now()` against `/proc/uptime`, so calling
   the reader again for one pid yields a start time that differs from the

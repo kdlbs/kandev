@@ -107,7 +107,7 @@ recorded rather than left for an operator to discover.
   because the process exited, or because it belongs to another user, that
   candidate shall be skipped and the probe shall continue. A skipped candidate
   shall not turn the result into `unknown`.
-- **AC-DW-ORPHAN-002.2a:** When the re-validation read itself fails — because the
+- **AC-DW-ORPHAN-002.7:** When the re-validation read itself fails — because the
   candidate exited before it could be read, or for any other reason — that
   candidate shall be skipped and the scan shall continue, exactly as a candidate
   whose start-time datum no longer matches is skipped. Such a failure shall never
@@ -122,7 +122,7 @@ recorded rather than left for an operator to discover.
   the missing-capability case of AC-DW-ORPHAN-002.1 these are the only two
   preconditions that skip the pass, and this is the only one carried on the
   request; no other input shall suppress it.
-- **AC-DW-ORPHAN-002.4a:** The probe shall never read the agent process's own
+- **AC-DW-ORPHAN-002.8:** The probe shall never read the agent process's own
   environment. Matching compares a candidate against the session id on the
   request, so an agent launched without `KANDEV_SESSION_ID` has no descendant
   carrying one: the identity pass runs and matches nothing, and the
