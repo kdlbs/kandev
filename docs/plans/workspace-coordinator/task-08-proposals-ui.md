@@ -44,7 +44,11 @@ transcript (task 06), on task 07's routes. Completes phase 1.
   mount and on every `coordinator.updated`, independent of the pending list.
 - `ProposalCard` states (UI-03), Edit and Reject forms in place with focus
   handling, the chat card renderer for `propose_task_kandev` with navigation
-  to the Needs-you form, decision toasts; six locales.
+  to the Needs-you form, decision toasts; six locales. Two distinct failed
+  variants keyed on whether the row carries a task id: the no-task-id variant
+  keeps Approve, Edit and Reject; the task-id-set variant omits Edit and
+  shows the "task was created but could not be finalized" copy
+  (`AC-COORDINATOR-PROPOSALS-005.3`).
 - `docs/public/coordinator.md` through `/docs-maintainer`, including what the
   coordinator's agent can still do through its own tools; update
   `docs/public/feature-status.md` if the boundary changed.
@@ -59,13 +63,19 @@ transcript (task 06), on task 07's routes. Completes phase 1.
 From [plan UI-03](plan.md#ui-03-proposal-card-states-needs-you-and-chat):
 
 ```text
-pending, can manage       approving                 failed
+pending, can manage       approving                 failed (no task id)
 ! create_task             ! create_task             ! Pending Approval
   Pending Approval          Approval in progress      Could not create the task:
   <title, workflow, step>   Edits are locked.         <error>. Nothing was created.
   [Approve] [Edit] [Reject]                           [Approve] [Edit] [Reject]
-approved (chat)           rejected (chat)
-v Approved: KAN-432       x Rejected: <reason>
+failed (task id set)      approved (chat)           rejected (chat)
+! Pending Approval        v Approved: KAN-432       x Rejected: <reason>
+  The task was created but
+  could not be finalized:
+  <error>. Open the task,
+  or retry to continue
+  from here.
+  [Approve] [Reject]
 ```
 
 ## Mockup screenshots and scenarios
@@ -106,6 +116,12 @@ The `mobile-chrome` project matches on the `mobile-*.spec.ts` filename prefix
 (`apps/web/e2e/playwright.config.ts`), not on project scope, so the 390px
 assertions live in their own `mobile-proposals.spec.ts` file rather than a
 rerun of `proposals.spec.ts` under a different project.
+
+`use-proposals.test.ts` and `proposals.spec.ts` both cover the two failed
+variants: a `failed` row with no task id renders Approve, Edit and Reject
+with the "Nothing was created" copy, and a `failed` row with a task id set
+renders only Approve and Reject with the "could not be finalized" copy and
+Approve completing with the existing task.
 
 ## Likely files
 

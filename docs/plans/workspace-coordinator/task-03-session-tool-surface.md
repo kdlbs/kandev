@@ -214,9 +214,10 @@ Required Go tests:
   paths owned by the other two, so the table is complete regardless of merge
   order;
 - propose refuses an auto-start step, a foreign repository, a step that is
-  neither start nor manual-move, a 26th open proposal; two identical calls
-  make two proposals; each successful propose publishes one
-  `coordinator.updated`.
+  neither start nor manual-move, a step that feeds an auto-start step
+  directly or through a chain of `pull_from_step_id` links, a 26th open
+  proposal; two identical calls make two proposals; each successful propose
+  publishes one `coordinator.updated`.
 
 ## Likely files
 

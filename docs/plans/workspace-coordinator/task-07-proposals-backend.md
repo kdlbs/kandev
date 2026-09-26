@@ -47,12 +47,16 @@ proposals through the store. Runs in parallel with tasks 02, 03 and 04.
 
 - In the decisions registration function of `backendapp/coordinator.go`:
   approve (from `pending` or `failed`, optional edits with the absent, null
-  and empty-string rules of the proposals design's Edits table, re-validated;
-  a failed attempt's `final_spec_json` is the base of the next), the
-  create-outcome branches (`Created` then `SettleExternalID`, `FoundSettled`,
-  `FoundUnsettled`), reject (from `pending` or `failed`, optional reason),
-  zero-row completion re-read (200 with the current row, or 404 when the row
-  is gone).
+  and empty-string rules of the proposals design's Edits table, re-validated
+  including the step-eligibility check from task 01 (an auto-start step or a
+  step that has become a feeder of an auto-start step since propose is
+  refused); a failed attempt's `final_spec_json` is the base of the next),
+  the create-outcome branches (`Created` then `SettleExternalID`,
+  `FoundSettled`, `FoundUnsettled`, and any other settle error, which sets
+  `task_id` on the `failed` row since the create already produced a real
+  task), reject (from `pending` or `failed`, optional reason), zero-row
+  completion re-read (200 with the current row, or 404 when the row is
+  gone).
 - Stale-claim recovery at startup, on approve, and on a proposal list or get
   by a `workspace.manage` caller only, gated on `Sec-Fetch-Site` so a
   same-site or cross-site read never writes (added to task 01's read routes;
@@ -119,15 +123,19 @@ relying on the CAS's atomicity by construction (`WHERE id=? AND status IN
 always matches zero rows regardless of interleaving) rather than task 03's
 true concurrent-goroutine stress of the row-contention path, since this test
 targets the application logic's branch on the CAS result, not the database
-engine's lock behaviour; edits re-validated (an
-auto-start step refused); each Edits table row (absent unchanged, null 400
-naming the field, empty title or workflow 400, empty step uses the start
-step, empty repository clears it, a changed workflow without a step resets
-to its start step), and edits to a failed attempt kept on the next approve;
-each create outcome: `Created` settles and completes, identity lost completes
-with the survivor, a settle not-found fails the proposal, `FoundSettled` and
-`FoundUnsettled` complete with the found task and never settle or release
-it; `coordinator.updated` published once after the claim and once after the
+engine's lock behaviour; edits re-validated (an auto-start step refused, and
+a step that became a feeder of an auto-start step, directly or through a
+`pull_from_step_id` chain, since propose is refused even though it passed
+task 01's eligibility check at propose time); each Edits table row (absent
+unchanged, null 400 naming the field, empty title or workflow 400, empty step
+uses the start step, empty repository clears it, a changed workflow without
+a step resets to its start step), and edits to a failed attempt kept on the
+next approve; each create outcome: `Created` settles and completes, identity
+lost completes with the survivor, a settle not-found fails the proposal, any
+other settle error fails the proposal and sets `task_id` on the `failed` row,
+and a retry of that row requires no edits and completes with the existing
+task, `FoundSettled` and `FoundUnsettled` complete with the found task and
+never settle or release it; `coordinator.updated` published once after the
 completion, and not on a zero-row write; a coordinator deleted during an
 approval returns 404 with the task kept; a reader's list of a stale claim
 writes nothing while a manager's list recovers it; a manager's list or get

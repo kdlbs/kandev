@@ -56,6 +56,17 @@ the coordinators and proposals system designs, not a local edit.
   `last_event_at`), delete and list. No later work order adds a migration.
 - `persistence/requiredstores` entry and an upgrade test from `v0.93.0` on
   SQLite and PostgreSQL.
+- A step-eligibility store method taking a workflow's full step graph (every
+  step's id, `on_enter` `auto_start_agent` flag and `pull_from_step_id` feeder
+  link) and a candidate step id, returning whether the step is an eligible
+  step: no `auto_start_agent` on-enter action, either the workflow's start
+  step or allows manual moves, and not a feeder of any step with
+  `auto_start_agent` directly or through a chain of `pull_from_step_id`
+  links. It takes the full graph, not just the candidate step, because
+  eligibility depends on reachability through other steps. Task 03 calls it
+  at propose time (`AC-COORDINATOR-PROPOSALS-001.3`) and task 07 calls it
+  again at claim time (`AC-COORDINATOR-PROPOSALS-002.2`); see
+  [system-design/proposals.md#no-agent-starts](../../specs/coordinator/system-design/proposals.md#no-agent-starts).
 - Service, validation and routes behind the flag: coordinator CRUD with the
   name, context, passthrough and missing-profile checks; `profileStatus` in
   `internal/coordinator/validate.go` and the `agent_profile_status` and
@@ -145,7 +156,11 @@ over agent `missing`, agent `passthrough`, executor `missing`, a profile whose
 `missing`); the proposals list route with a `status` value other than
 `pending` or `all` returns 400 naming `status`; the store methods (the claim
 is conditional on status and claim token, proposal list order and the 50-row
-limit for `status=all`, the stall upsert fence); store and upgrade
+limit for `status=all`, the stall upsert fence); the step-eligibility method
+returns false for a step reachable via a `pull_from_step_id` chain from any
+step with `auto_start_agent` (direct feeder and a two-hop chain), true for
+the workflow's start step and for a manual-move step with no such chain,
+given a synthetic step graph fixture; store and upgrade
 conformance on SQLite and PostgreSQL; the forwarder delivers
 `coordinator.updated` to the workspace's subscribers. Vitest covers the API
 client.

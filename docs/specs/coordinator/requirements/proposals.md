@@ -231,7 +231,11 @@ Mockup:
   retry to continue from here." and keep Approve and Reject but not Edit,
   since the frozen spec already produced a real task; Approve on this row
   behaves as `AC-COORDINATOR-PROPOSALS-002.12` (completes with the existing
-  task) and refuses any edit with 400.
+  task) and refuses any edit with 409, matching every other state-conflict
+  edit rejection in this spec (`AC-COORDINATOR-PROPOSALS-002.5`,
+  `AC-COORDINATOR-PROPOSALS-002.9`) and
+  [system-design/proposals.md#approve](../system-design/proposals.md#approve)
+  step 2.
 - **AC-COORDINATOR-PROPOSALS-005.4:** **Edit** on the Needs-you card shall open
   title, description, workflow, step (eligible steps only) and repository in
   place with **Approve with edits** and **Cancel**; an empty title shall be
