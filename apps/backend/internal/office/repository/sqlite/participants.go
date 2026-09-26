@@ -80,6 +80,32 @@ func (r *Repository) GetTaskWorkflowID(ctx context.Context, taskID string) (stri
 	return workflowID.String, nil
 }
 
+// taskWorkflowContext resolves a task's workflow_id and workflow_step_id in
+// a single read, so callers get one coherent (workflow, step) snapshot
+// instead of two independently-timed reads that a concurrent step move (or
+// cross-workflow move) could straddle — see
+// AC-OFFICE-SEAT-READ-SCOPE-001.1's single-snapshot requirement. Returns ""
+// for either value with no error when the task or its columns are unset.
+func (r *Repository) taskWorkflowContext(ctx context.Context, taskID string) (workflowID, stepID string, err error) {
+	var wf, step sql.NullString
+	scanErr := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT workflow_id, workflow_step_id FROM tasks WHERE id = ?`,
+	), taskID).Scan(&wf, &step)
+	if errors.Is(scanErr, sql.ErrNoRows) {
+		return "", "", nil
+	}
+	if scanErr != nil {
+		return "", "", scanErr
+	}
+	if wf.Valid {
+		workflowID = wf.String
+	}
+	if step.Valid {
+		stepID = step.String
+	}
+	return workflowID, stepID, nil
+}
+
 // GetWorkflowStepStageType returns the persisted stage type for a workflow
 // step. It returns an empty string when the step does not exist so callers
 // can apply compatibility fallbacks for older run payloads.
@@ -751,16 +777,12 @@ type officeSeatRow struct {
 // workflow. ListTaskParticipantsAtCurrentStep deliberately does NOT use this
 // helper — see its own doc comment.
 func (r *Repository) listWorkflowScopedSeats(ctx context.Context, taskID, roleFilter string) ([]Participant, error) {
-	stepID, err := r.stepIDForTask(ctx, taskID)
+	workflowID, stepID, err := r.taskWorkflowContext(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
 	if stepID == "" {
 		return []Participant{}, nil
-	}
-	workflowID, err := r.GetTaskWorkflowID(ctx, taskID)
-	if err != nil {
-		return nil, err
 	}
 
 	perTask, err := r.listPerTaskSeatsForWorkflow(ctx, taskID, workflowID, roleFilter)

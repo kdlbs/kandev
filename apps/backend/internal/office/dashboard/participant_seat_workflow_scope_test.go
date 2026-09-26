@@ -167,3 +167,34 @@ func TestApproveTask_QueuesReadyToCloseOnFinalApproval_AfterStepMove(t *testing.
 		t.Fatalf("reason = %s", q.runs[0].Reason)
 	}
 }
+
+// TestInbox_TaskReviewRequest_SurvivesStepMove is review round 1's
+// test-rigor finding R1-2: the card explicitly required "the inbox item
+// survives" a step move, but before this test only the repository-level
+// slate tests covered that transitively. buildReviewRequestItem's own call
+// chain (ListAllTaskParticipants -> viewerRoles -> viewerNeedsDecision) was
+// never exercised end to end through the dashboard service. Seat a reviewer
+// at step A, move to step B, and assert the agent's review-request inbox
+// item is still returned.
+func TestInbox_TaskReviewRequest_SurvivesStepMove(t *testing.T) {
+	deps := newTestDeps(t)
+	seedTwoStepWorkflowTask(t, deps.db, "ib-mv", "ws-i", "IB", "in_review",
+		"wf-ib-mv", "step-ib-mv-a", "step-ib-mv-b")
+	mustAddParticipant(t, deps, "ib-mv", "agent-A", models.ParticipantRoleReviewer)
+
+	moveTaskToWorkflowStep(t, deps.db, "ib-mv", "step-ib-mv-b")
+
+	items, err := deps.svc.GetAgentInboxItems(context.Background(), "ws-i", "agent-A")
+	if err != nil {
+		t.Fatalf("GetAgentInboxItems: %v", err)
+	}
+	found := false
+	for _, it := range items {
+		if it.Type == "task_review_request" && it.EntityID == "ib-mv" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("review request item for ib-mv missing after step move: %#v", items)
+	}
+}
