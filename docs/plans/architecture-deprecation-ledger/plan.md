@@ -21,11 +21,19 @@ Decision: [Architecture deprecation ledger](../../decisions/2026-09-26-architect
 
 - [x] [Task 01 — Deprecation ledger rule](task-01-deprecation-ledger-rule.md)
 
-## Integration order
+## Recommended integration order
 
-PR #3974 registers 31 Office aliases through `locator.declaration`. This PR
-adds the schema and validator for that field. Merge #3975 first. Then rebase
-#3974 on updated `main` and run `make lint-architecture`.
+PR #3974 registers 31 Office aliases through `locator.declaration`. Current
+`main` accepts but ignores that unknown locator field, and #3974 passes
+`make lint-architecture` against current `main`. Merge #3975 first to enable
+exact registration checks immediately. This order is recommended, not required
+for #3974 to pass against current `main`.
+
+The latest synthetic integration check combined the current #3974 tree with
+the declaration-aware schema and found 31 aliases, 31 matching registrations,
+and zero ledger diagnostics. Earlier scanner-only checks, including the
+6456bf2 revision, are historical. After both PRs land, run
+`make lint-architecture` on updated `main`.
 
 ## Verification
 
