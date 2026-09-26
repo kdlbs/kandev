@@ -188,7 +188,15 @@ editing the stored user message.
   title or canvas capability. Quick Chat code does not set the mode. agentctl
   `normalizeMode`, `surfaceForMode`, `modeForProfile`, `SetMode` and the
   `Legacy` mapping gain the coordinator case; plugin tool registration is
-  skipped in this mode.
+  skipped in this mode. `mcpprofile.normalizeSurface`
+  (`internal/mcp/profile/profile.go`) also gains the `SurfaceCoordinator`
+  case: every `mcpprofile.New(...)` call funnels through it unconditionally,
+  and its default case silently downgrades any Surface value it does not
+  recognise to `SurfaceKanbanTask`, the full task tool set. Adding
+  `SurfaceCoordinator` to the `Surface` consts and to `Legacy` without also
+  adding it here would leave the coordinator session on the full Kanban tool
+  set instead of the seven-tool allowlist below, so this switch is a required
+  touch point, not an incidental one.
 
 ## Tool surface
 
@@ -281,6 +289,18 @@ person is present for each turn and sees permission requests the CLI raises.
 Enforced containment of these tools is a gate G4 condition before any
 unattended turn. The [ADR](../../../decisions/2026-09-26-workspace-coordinator.md)
 records this risk.
+
+A second, distinct residual is the content the seven allowed tools themselves
+return: task titles, descriptions and conversation text written by any
+workspace member. Nothing in the tool surface or the guard distinguishes
+ordinary board content from content aimed at steering the coordinator's
+proposal reasoning or its explanation to the approving manager, and the "a
+person decides" containment argument for `propose_task_kandev` assumes that
+what the manager is shown about a proposal is trustworthy. This is not closed
+by the allowlist or by G4, since the agent needs no disallowed tool and no
+unattended turn to be steered this way. The
+[ADR](../../../decisions/2026-09-26-workspace-coordinator.md) records this
+risk as accepted and unmitigated for phase 1.
 
 ## Popover
 

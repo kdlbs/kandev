@@ -152,7 +152,12 @@ row get 409; status is checked before edits (invalid edits against an
 spec no longer validates gets 409, and a stale claim whose frozen spec no
 longer validates is re-claimed without validation and fails at the create);
 a claim, re-claim or reject that matches no row because the proposal was
-deleted returns 404; create error to `failed` then approve again; reject
+deleted returns 404; a sequential simulation of a racing approve and reject
+against the same `pending` row, relying on the shared CAS's atomicity by
+construction as the double-approve test above does: whichever UPDATE commits
+first leaves the row `approving` or `rejected`, and the other matches zero
+rows and returns 409 with that row (`AC-COORDINATOR-PROPOSALS-003.3`); create
+error to `failed` then approve again; reject
 from `pending` and `failed`, 409 otherwise, status checked before the
 reason (a 501-character reason on an `approved` row gets 409), and a
 501-character reason on a `pending` and on a `failed` row gets 400 naming

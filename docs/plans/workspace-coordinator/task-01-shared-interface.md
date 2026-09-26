@@ -145,7 +145,11 @@ cd apps/web && pnpm run typecheck
 
 Go tests cover: CRUD; name 1 to 60 after trimming; context at most 4,000;
 passthrough refused; missing agent or executor profile refused; list order and
-empty list; 403 for readers; foreign id 404; repeated delete 404; two
+empty list; a `workspace.read` member's coordinator list, coordinator get,
+proposal list and proposal get all succeed (`AC-COORDINATOR-PROPOSALS-004.2`'s
+reader-positive case, not just the negated write case below), while a
+`workspace.read` member's coordinator create, edit and delete each return 403;
+foreign id 404; repeated delete 404; two
 concurrent PATCH requests against the same coordinator commit last-write-wins,
 so the next GET returns whichever request's fields committed last
 (`AC-COORDINATOR-COORDINATORS-002.6`); flag off 404

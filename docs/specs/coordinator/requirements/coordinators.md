@@ -110,6 +110,17 @@ Mockup:
 - **AC-COORDINATOR-COORDINATORS-002.9:** When a request edits or deletes a
   coordinator id that does not exist in the workspace, the system shall return
   404. A repeated delete of the same id shall return 404 and change nothing.
+- **AC-COORDINATOR-COORDINATORS-002.10:** When a manager saves a coordinator
+  whose `agent_profile_id` or `executor_profile_id` differs from its stored
+  value, the system shall archive the current conversation task and clear the
+  coordinator's reference to it, the same as a context change
+  (`AC-COORDINATOR-COORDINATORS-002.7`), because a running session cannot be
+  moved onto a different profile pair mid-session. The next conversation
+  opened after the save shall create its task and session from the newly
+  saved profiles, and any missing or passthrough profile of that new pair
+  shall be reported per `AC-COORDINATOR-COORDINATORS-005.1`-`005.3` rather
+  than the conversation continuing on the old, now-archived session. Sending
+  a profile id back unchanged shall keep the conversation.
 
 ### REQ-COORDINATOR-COORDINATORS-003: Listing and permissions
 

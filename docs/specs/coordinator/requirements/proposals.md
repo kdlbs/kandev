@@ -247,9 +247,13 @@ Mockup:
   the same forms on the Needs-you card.
 - **AC-COORDINATOR-PROPOSALS-005.7:** After a decision the Needs-you card shall
   leave the list and a toast shall say "Approved. <card> created in <step>; no
-  agent starts until you start it" or "Rejected. Nothing was created", followed
-  by "Next: <n> items still need you" or "Next: nothing needs you. That is the
-  working state."
+  agent starts until you start it" or, for a reject of a row with no task id,
+  "Rejected. Nothing was created". Rejecting a `failed` proposal that already
+  carries a task id (`AC-COORDINATOR-PROPOSALS-005.3`) shall instead say
+  "Rejected. <card> stays on its board", since the earlier failed approval
+  already created that task and rejecting the proposal does not remove it.
+  Either toast is followed by "Next: <n> items still need you" or "Next:
+  nothing needs you. That is the working state."
 - **AC-COORDINATOR-PROPOSALS-005.8:** A chat card shall show the settled state
   "Approved: <card>" or "Rejected: <reason>".
 - **AC-COORDINATOR-PROPOSALS-005.9:** At a 390px-wide viewport the card actions

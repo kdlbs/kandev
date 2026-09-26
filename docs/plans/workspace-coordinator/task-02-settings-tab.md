@@ -114,6 +114,12 @@ on the `mobile-*.spec.ts` filename prefix, not on project scope: the 390px
 assertions live in their own `mobile-settings.spec.ts` file, not a rerun of
 `settings.spec.ts` under a different project.
 
+`workspace-settings-tabs.test.ts` asserts the flag-off case directly: with
+`features.coordinator` off, the workspace settings tab registry omits the
+Coordinators entry, so the route and its Vitest render are not reachable
+rather than merely unlinked (`AC-COORDINATOR-COORDINATORS-001.2`'s per-surface
+absence check for this work order).
+
 ## Likely files
 
 - `apps/web/lib/settings/workspace-settings-tabs.ts` and test

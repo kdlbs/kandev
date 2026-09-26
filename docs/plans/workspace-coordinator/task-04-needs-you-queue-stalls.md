@@ -219,6 +219,12 @@ calls `requestWorkspaceContextRefresh` and only the failed workflow is
 re-fetched; with no snapshot loaded and a failed read, the banner replaces the
 lists and strip.
 
+A component test on `app-sidebar-primary-nav.tsx` asserts the flag-off case
+directly: with `features.coordinator` off, no coordinator sidebar entry
+renders and `spa-routes.tsx` does not register the `/coordinator` route, so
+the absence in the "In scope" summary above is a checked assertion, not an
+inference from other tests.
+
 ## Likely files
 
 - `apps/backend/internal/coordinator/{stalls,workspace_deleted}.go` and tests

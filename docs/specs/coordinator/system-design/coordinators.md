@@ -116,16 +116,30 @@ is sent as `""`. Unknown fields are ignored.
 
 `name` and `context` are trimmed of leading and trailing Unicode whitespace
 before validation and stored trimmed, on create and PATCH. When PATCH carries
-`context`, the transaction compares the trimmed new value with the stored
-value byte-for-byte; when they differ it clears `conversation_task_id`, and
-after commit the service archives the old conversation task through the task
+`context`, `agent_profile_id` or `executor_profile_id`, the transaction
+compares each field's trimmed (for `context`) new value with its stored value;
+when any of the three differ it clears `conversation_task_id`, and after
+commit the service archives the old conversation task through the task
 service's `ArchiveTask`, which stops a running turn. The archived task is kept
 until the coordinator or the workspace is deleted
 ([conversation lifecycle](copilot.md#conversation-lifecycle)). A context that
-differs only in leading or trailing whitespace is therefore unchanged and
-keeps the conversation. A failed archive is logged at warn; the task is
-already unreferenced, so it resolves to no coordinator, and the next startup
-pass archives it.
+differs only in leading or trailing whitespace, or a profile id sent back
+unchanged, is therefore not a change and keeps the conversation. A failed
+archive is logged at warn; the task is already unreferenced, so it resolves to
+no coordinator, and the next startup pass archives it.
+
+A profile change takes effect only for the *next* conversation: the running
+session was created with the old profile pair, and Kandev does not migrate a
+live agentctl session onto a different agent or executor profile mid-session,
+so archiving is the only way a changed profile can take effect at all. The
+next popover open creates a fresh conversation task and session from the
+coordinator's current `agent_profile_id` and `executor_profile_id`
+([copilot](copilot.md#conversation-task)), which is also when
+`AC-COORDINATOR-COORDINATORS-005.1`/`005.2` recovery is evaluated against the
+new profile. This applies equally when the new profile is itself missing or
+passthrough: the archive still happens, and the next open reports the new
+profile's status rather than silently continuing on the old, now-stale
+session.
 
 DELETE runs one transaction deleting the coordinator's proposals and the
 coordinator row, then deletes every conversation task of the coordinator,

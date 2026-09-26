@@ -136,6 +136,11 @@ work order), and approving lets the tool call complete. This is the test that
 pins `AC-COORDINATOR-COPILOT-003.9` (task 03's, enforced by the guard and
 auto-approval policy) for a coordinator session.
 
+A component test on the coordinator controller asserts the flag-off case
+directly: with `features.coordinator` off, no launcher renders on the
+Coordinator screens, so the "In scope" summary's "no launcher renders" claim
+is a checked assertion, not an inference from the reader-visibility test.
+
 ## Likely files
 
 - `apps/web/app/coordinator/copilot/`

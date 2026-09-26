@@ -16,6 +16,7 @@ requirements:
 acceptance_criteria:
   - AC-COORDINATOR-COORDINATORS-002.7
   - AC-COORDINATOR-COORDINATORS-002.8
+  - AC-COORDINATOR-COORDINATORS-002.10
   - AC-COORDINATOR-COORDINATORS-005.1
   - AC-COORDINATOR-COORDINATORS-005.2
   - AC-COORDINATOR-COORDINATORS-005.3
@@ -87,9 +88,13 @@ Deciding proposals is task 07. Backend only. On the critical path.
 - Quick Chat idle expiry excludes origin `coordinator` in
   `ListExpiredQuickChatTasks` and `DeleteExpiredQuickChatTask`.
 - Standing-instructions system block (`sysprompt`) and launch-prompt branch;
-  a context change archives the current conversation task and clears the
-  reference; coordinator delete additionally removes every conversation task
-  of the coordinator (current and archived).
+  a context change, or a changed `agent_profile_id` or `executor_profile_id`,
+  archives the current conversation task and clears the reference
+  (`AC-COORDINATOR-COORDINATORS-002.10`: a running session cannot move onto a
+  different profile pair mid-session, so archiving is what makes a profile
+  change take effect, the next open building a fresh task and session from
+  the coordinator's current profiles); coordinator delete additionally
+  removes every conversation task of the coordinator (current and archived).
 - Every resolution site uses task 01's constants: `principalSurface`,
   `CoordinatorLookup`, the coordinator branches in
   `Executor.resolveTaskSessionMCPMode` and `resolveTaskSessionMCPProfile`, the
@@ -185,8 +190,13 @@ Required Go tests:
   no task;
 - a context change archives the old conversation task (a running turn
   stops), the next open creates a new one, and the archived one never
-  resolves to a coordinator; coordinator delete removes current and archived
-  conversation tasks and all proposals, and leaves untouched a task seeded
+  resolves to a coordinator; a changed `agent_profile_id` or
+  `executor_profile_id` archives the old conversation task the same way and
+  the next open's task and session carry the newly saved profiles
+  (`AC-COORDINATOR-COORDINATORS-002.10`), while sending either profile id
+  back unchanged keeps the conversation; coordinator delete removes current
+  and archived conversation tasks and all proposals, and leaves untouched a
+  task seeded
   with a `coordinator-proposal:`-prefixed external id and an `approved`
   proposal row created directly through task 01's store (not through task
   07's approve route, which this work order does not depend on)
@@ -213,11 +223,23 @@ Required Go tests:
   tasks 03, 04 and 07 merges last into this table adds the rows for the
   paths owned by the other two, so the table is complete regardless of merge
   order;
-- propose refuses an auto-start step, a foreign repository, a step that is
-  neither start nor manual-move, a step that feeds an auto-start step
-  directly or through a chain of `pull_from_step_id` links, a 26th open
-  proposal; two identical calls make two proposals; each successful propose
-  publishes one `coordinator.updated`.
+- propose with the step omitted uses the workflow's start step
+  (`AC-COORDINATOR-PROPOSALS-001.2`); propose refuses an empty or over-60
+  title, an over-10,000-character description and rationale, a source task
+  outside the coordinator's workspace, and a workflow outside the
+  coordinator's workspace, each naming its field
+  (`AC-COORDINATOR-PROPOSALS-001.3`'s length and cross-workspace clauses, not
+  only the step-eligibility clauses below); propose refuses an auto-start
+  step, a foreign repository, a step that is neither start nor manual-move, a
+  step that feeds an auto-start step directly or through a chain of
+  `pull_from_step_id` links, a 26th open proposal; two identical calls make
+  two proposals; each successful propose publishes one `coordinator.updated`;
+- when the conversation task no longer exists (deleted by an operator or a
+  concurrent workspace cleanup between reads), the next open creates a new
+  conversation task and session rather than erroring
+  (`AC-COORDINATOR-COPILOT-001.3`), distinct from the archived-task case
+  above, since a deleted task is never re-read as the coordinator's current
+  reference in the first place.
 
 ## Likely files
 

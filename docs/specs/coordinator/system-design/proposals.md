@@ -101,9 +101,15 @@ There is no deduplication key.
    error" branch below already created a task) refuses an edit with 409 and
    the current row: the frozen spec already produced a real task, so a
    further edit here would leave the manager believing the change applied
-   when it did not. Retry with no edits continues to step 3 as normal and
-   completes with the existing task (step 4's `CreateTaskOutcomeFoundSettled`
-   or `CreateTaskOutcomeFoundUnsettled` branch).
+   when it did not. A no-edit retry of that same row skips this step's
+   validation entirely (the source task, workflow, step and repository are
+   not re-checked against current state) and goes straight to step 3's claim
+   with the existing `final_spec_json` unchanged: the retry's job is only to
+   complete an already-created task, not to re-authorise creating one, so a
+   source task deleted or a step made ineligible after the earlier failed
+   create must not block it. Continuing to step 3 completes with the existing
+   task (step 4's `CreateTaskOutcomeFoundSettled` or
+   `CreateTaskOutcomeFoundUnsettled` branch).
 3. Claim, with a new UUID `T`: `UPDATE ... SET status='approving',
    claimed_at=now, claim_token=T, final_spec_json=?, decided_by=?, error=NULL
    WHERE id=? AND status IN ('pending','failed')`. When it matches no row, a
@@ -152,17 +158,29 @@ There is no deduplication key.
 
 `UPDATE ... SET claimed_at=now, claim_token=T WHERE id=? AND
 status='approving' AND claimed_at < now - 2 minutes`. It never writes
-`final_spec_json` or `decided_by`, and it does not validate the frozen spec
-again: the completion uses the spec frozen by the first claim and keeps the
-first approver as `decided_by`. A frozen spec the task service no longer
-accepts (its workflow was deleted, for example) fails at the create in step 4
-and sets the proposal `failed` with that error. An approve request whose body
-carries edits never reaches the re-claim (step 1 refuses it with 409), so edits
-are never silently dropped; recovery callers never send edits. A re-claim that
-commits publishes `coordinator.updated`, then runs steps 4 to 6 with its token.
-When it matches no row, re-read the row: gone returns 404 (for a recovery
-reader, no action); otherwise another reader won the re-claim and the request
-returns 409 with the current row (for a recovery reader, no action).
+`final_spec_json` or `decided_by`, and it does not re-validate the frozen
+spec's fields (title, description, workflow and repository existence): the
+completion uses the spec frozen by the first claim and keeps the first
+approver as `decided_by`. It does re-run the [step-eligibility
+check](#no-agent-starts) against the frozen spec's workflow and step
+immediately before step 4's create call, because eligibility can have changed
+in the time between the original claim and this stale re-claim (an
+`on_enter` `auto_start_agent` action added to the target step, or a new
+`pull_from_step_id` feeder link formed into an auto-starting step), and
+recovery must not create the task on a step that is no longer eligible. When
+the recheck fails, the re-claim still commits (the row leaves `approving`
+either way), but recovery sets the proposal `failed` with a descriptive error
+("the target step is no longer eligible") and never calls the task service,
+the same failure shape as the existing case where a frozen spec the task
+service no longer accepts (its workflow was deleted, for example) fails at
+the create in step 4 and sets the proposal `failed` with that error. An
+approve request whose body carries edits never reaches the re-claim (step 1
+refuses it with 409), so edits are never silently dropped; recovery callers
+never send edits. A re-claim that commits publishes `coordinator.updated`,
+then runs the eligibility recheck and steps 4 to 6 with its token. When it
+matches no row, re-read the row: gone returns 404 (for a recovery reader, no
+action); otherwise another reader won the re-claim and the request returns
+409 with the current row (for a recovery reader, no action).
 
 ### No agent starts
 
@@ -192,8 +210,10 @@ boundary: an **eligible step** (defined in
 [requirements/proposals.md](../requirements/proposals.md#terminology)) is
 also refused when it is a feeder, directly or through a chain of
 `pull_from_step_id` links, of any step with an `on_enter` `auto_start_agent`
-action. Validated at propose and again at claim time (so a step or feeder
-graph changed after proposing is caught), this means a proposal can only ever
+action. Validated at propose, again at claim time, and again by a [stale
+re-claim](#stale-re-claim) immediately before it creates the task (so a step
+or feeder graph changed after proposing, after the original claim, or during
+the recovery window is caught each time), this means a proposal can only ever
 land somewhere a manager could place a task by hand *and leave it there*,
 never somewhere the workflow itself would immediately relocate it into an
 auto-starting step. task-07 implements the feeder-graph walk as part of step
@@ -264,11 +284,14 @@ A read by a caller with only `workspace.read`, or a cross-site read, never
 writes; it returns the row as stored. Recovery takes the stale re-claim `UPDATE` in [Approve](#approve),
 which refreshes `claimed_at` and sets a new `claim_token`, so of two readers
 seeing one stale claim exactly one wins it, and a slow original claimer's
-completion no longer matches the token. It then runs steps 4 to 6: the
-idempotent create returns the task the first attempt made, if any. Recovery
-keeps `final_spec_json` and `decided_by` from the first claim, and never
-touches a session. A recovering read returns the row as it stands after
-recovery.
+completion no longer matches the token. It then re-runs the step-eligibility
+check against the frozen spec's workflow and step
+([No agent starts](#no-agent-starts)); a step that is no longer eligible sets
+the proposal `failed` with a descriptive error and skips the create entirely.
+Otherwise it runs steps 4 to 6: the idempotent create returns the task the
+first attempt made, if any. Recovery keeps `final_spec_json` and `decided_by`
+from the first claim, and never touches a session. A recovering read returns
+the row as it stands after recovery.
 
 A read recovers synchronously, before it answers:
 

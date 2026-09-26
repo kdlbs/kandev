@@ -48,7 +48,10 @@ transcript (task 06), on task 07's routes. Completes phase 1.
   variants keyed on whether the row carries a task id: the no-task-id variant
   keeps Approve, Edit and Reject; the task-id-set variant omits Edit and
   shows the "task was created but could not be finalized" copy
-  (`AC-COORDINATOR-PROPOSALS-005.3`).
+  (`AC-COORDINATOR-PROPOSALS-005.3`). Reject has a matching second toast
+  variant for the task-id-set case, "Rejected. <card> stays on its board"
+  instead of "Rejected. Nothing was created" (`AC-COORDINATOR-PROPOSALS-005.7`),
+  since that row's earlier failed approval already created the task.
 - `docs/public/coordinator.md` through `/docs-maintainer`, including what the
   coordinator's agent can still do through its own tools; update
   `docs/public/feature-status.md` if the boundary changed.
@@ -121,7 +124,18 @@ rerun of `proposals.spec.ts` under a different project.
 variants: a `failed` row with no task id renders Approve, Edit and Reject
 with the "Nothing was created" copy, and a `failed` row with a task id set
 renders only Approve and Reject with the "could not be finalized" copy and
-Approve completing with the existing task.
+Approve completing with the existing task. `proposals.spec.ts` also covers
+the rest of REQ-COORDINATOR-PROPOSALS-005 directly: the `pending` card's
+Approve/Edit/Reject set and copy (AC-005.1), the `approving` card's disabled,
+action-less state (AC-005.2), Edit's in-place fields and empty-title refusal
+plus Cancel restoring focus to Edit (AC-005.4), Reject's in-place reason field
+plus Cancel restoring focus to Reject (AC-005.5), the chat card's Edit/Reject
+navigating to and opening the same Needs-you forms (AC-005.6), the approve
+toast and the two distinct reject toasts — "Rejected. Nothing was created"
+for a no-task-id row and "Rejected. <card> stays on its board" for a
+task-id-set row — each followed by the correct "Next: ..." count line
+(AC-005.7), and the chat card's settled "Approved: <card>" / "Rejected:
+<reason>" text (AC-005.8).
 
 ## Likely files
 
