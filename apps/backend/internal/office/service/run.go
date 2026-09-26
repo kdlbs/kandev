@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
+	"github.com/kandev/kandev/internal/steptelemetry"
 )
 
 // Run reason constants. Aliases of shared's canonical declarations
@@ -295,6 +297,50 @@ func (s *Service) TaskBoundaryCarrierForRunQueue(ctx context.Context, taskID, ca
 		}
 	}
 	return s.TaskBoundaryCarrier(ctx, taskID)
+}
+
+// TaskBoundaryCarrierForStepTransition resolves the causation carrier a run
+// queued because of a workflow step-entry wake should carry
+// (AC-OFFICE-RUN-CAUSATION-001.25). A step-entry action has no claimed-run
+// scope to key off (unlike TaskBoundaryCarrierForRunQueue's
+// causingAgentProfileID): the only identity available is the
+// task_step_transitions ledger row whose own id the engine forwarded as
+// transitionID.
+//
+//   - actor_kind=agent: the wake was produced by an agent's turn completing.
+//     The run claimed on the ledger row's session_id at or before its
+//     occurred_at is that turn's run (GetRunBySessionAt deliberately isn't
+//     restricted to status='claimed' — resolution can race a fast-finishing
+//     run), and its lineage advances exactly like a live claimed-run lookup
+//     would.
+//   - actor_kind=human: the wake was produced by a human moving the task.
+//     The move itself is the causing event, so this roots a fresh,
+//     human-rooted chain rather than attributing it to any run.
+//   - anything else (system, integration, unknown, or an unresolvable
+//     ledger id): falls back to taskID's own already-resolved carrier,
+//     unchanged from pre-existing behavior.
+func (s *Service) TaskBoundaryCarrierForStepTransition(ctx context.Context, taskID, transitionID string) TaskBoundaryCarrier {
+	id, err := strconv.ParseInt(transitionID, 10, 64)
+	if err != nil || id == 0 {
+		return s.TaskBoundaryCarrier(ctx, taskID)
+	}
+	actor, err := s.repo.GetStepTransitionActor(ctx, id)
+	if err != nil || actor == nil {
+		return s.TaskBoundaryCarrier(ctx, taskID)
+	}
+	switch actor.ActorKind {
+	case steptelemetry.ActorHuman:
+		return TaskBoundaryCarrier{ActorKind: models.ActorKindUser, ActorID: actor.ActorID, HumanRooted: true}
+	case steptelemetry.ActorAgent:
+		if actor.SessionID != "" {
+			if run, err := s.repo.GetRunBySessionAt(ctx, actor.SessionID, actor.OccurredAt); err == nil && run != nil {
+				return carrierFromRunWithActor(run, models.ActorKindAgent, run.AgentProfileID)
+			}
+		}
+		return s.TaskBoundaryCarrier(ctx, taskID)
+	default:
+		return s.TaskBoundaryCarrier(ctx, taskID)
+	}
 }
 
 // queueRunInline performs the legacy in-office insert path used when

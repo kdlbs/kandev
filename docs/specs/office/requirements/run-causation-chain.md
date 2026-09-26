@@ -232,6 +232,16 @@ chain without correlating log lines by timestamp.
   causing run exists but predates this capability, and from
   AC-OFFICE-RUN-CAUSATION-001.10, where a value is malformed rather than deliberately
   empty.
+- **AC-OFFICE-RUN-CAUSATION-001.25:** When a wake is queued because a task entered a
+  workflow step, the actor and causing run shall come from the committed step
+  transition that produced the entry, not from a session that happens to be live when
+  the wake is queued. When that transition was caused by an agent session's turn, the
+  run that session was executing shall be the causing run under
+  AC-OFFICE-RUN-CAUSATION-001.3, even when that run has finished before the wake is
+  queued, so a review and rework loop between workflow steps deepens one chain. When
+  the transition was caused by a human, the wake shall be a human-rooted root under
+  AC-OFFICE-RUN-CAUSATION-001.9. Otherwise, the wake shall fall back to the task
+  carrier of AC-OFFICE-RUN-CAUSATION-001.18.
 
 ## Out of scope
 

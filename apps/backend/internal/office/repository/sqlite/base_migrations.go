@@ -77,6 +77,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateAssignmentWakeRateIndexes(); err != nil {
 		return err
 	}
+	if err := r.migrateRunSessionClaimedIndex(); err != nil {
+		return err
+	}
 	if err := r.migrate.Err(); err != nil {
 		return err
 	}
@@ -322,6 +325,21 @@ func (r *Repository) migrateAssignmentWakeRateIndexes() error {
 		"idx_runs_assignment_rate_reason_requested",
 		`CREATE INDEX IF NOT EXISTS idx_runs_assignment_rate_reason_requested
 			ON runs(reason, requested_at)`,
+	)
+}
+
+// migrateRunSessionClaimedIndex covers GetRunBySessionAt
+// (AC-OFFICE-RUN-CAUSATION-001.25's step-entry causation lookup), which
+// filters and orders by (session_id, claimed_at) — otherwise a full table
+// scan on every step-entry dispatch. The `WHERE session_id != ”` guard
+// matches idx_runs_causation_id's sparse-column pattern above and skips
+// indexing the large population of rows where session_id is still the
+// empty-string default.
+func (r *Repository) migrateRunSessionClaimedIndex() error {
+	return r.migrate.Apply(
+		"idx_runs_session_claimed",
+		`CREATE INDEX IF NOT EXISTS idx_runs_session_claimed
+			ON runs(session_id, claimed_at DESC) WHERE session_id != ''`,
 	)
 }
 
