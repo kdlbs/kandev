@@ -224,3 +224,9 @@ PASS
 ```
 
 Kubernetes compatibility had failed on the previous PR head while downloading external tools after repeated HTTP 500 responses. Exact-head CI and a zero-retry blob audit remain pending for this fixup.
+
+## PR #3936 retry follow-up after 4059bcef
+
+The exact-head retry summary for `4059bcef607b7da9050de8cfd4c7e2a111999288` reported four retry-only scenarios and one compact-stepper test that failed all attempts. The compact-stepper fixture now creates enough workflow steps to select the compact layout at the tested viewport. Symlink and rename tests wait for the prepared environment, exact fixture files, and a fresh workspace-tree response. The slow Docker task now selects its custom executor profile before environment setup. Mobile file-comment selection uses a ref so dropdown close timing cannot lose the action.
+
+Retry-free local checks pass: the workflow-stepper pair passed three repetitions each (6); directory and editor symlinks plus rename commit/cancel passed three repetitions each (15); the mobile file-comment flow passed five repetitions; and the Docker slow-bootstrap flow passed three repetitions. The review toolbar unit suite passes 12 tests. Web typecheck, focused ESLint, E2E sleep ratchet, and `git diff --check` pass. Exact-head CI and the explicit blob retry audit are pending for this fixup.

@@ -32,13 +32,22 @@ function expectStablePosition(before: Box, after: Box) {
   expect(after.y).toBeCloseTo(before.y, 0);
 }
 
-async function createProgressWorkflow(apiClient: ApiClient, workspaceId: string, name: string) {
+async function createProgressWorkflow(
+  apiClient: ApiClient,
+  workspaceId: string,
+  name: string,
+  options: { extraSteps?: number } = {},
+) {
   const workflow = await apiClient.createWorkflow(workspaceId, name);
   const startStep = await apiClient.createWorkflowStep(workflow.id, "Work", 0, {
     is_start_step: true,
   });
   const targetStep = await apiClient.createWorkflowStep(workflow.id, "Review", 1);
-  await apiClient.createWorkflowStep(workflow.id, "Done", 2);
+  const extraSteps = options.extraSteps ?? 0;
+  for (let index = 0; index < extraSteps; index += 1) {
+    await apiClient.createWorkflowStep(workflow.id, `Verification stage ${index + 1}`, index + 2);
+  }
+  await apiClient.createWorkflowStep(workflow.id, "Done", extraSteps + 2);
   return { workflowId: workflow.id, startStepId: startStep.id, targetStep };
 }
 
@@ -52,6 +61,7 @@ test.describe("Workflow step progress", () => {
       apiClient,
       seedData.workspaceId,
       "Pending workflow step progress",
+      { extraSteps: 6 },
     );
     const task = await apiClient.seedTask(seedData.workspaceId, "Workflow step progress", {
       workflow_id: workflow.workflowId,

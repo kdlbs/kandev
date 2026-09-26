@@ -115,6 +115,7 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
+        executor_profile_id: profile.id,
       });
 
       await testPage.goto(`/t/${task.id}`);
