@@ -351,7 +351,7 @@ test.describe("mobile CLI mode: passthrough composer", () => {
     await expect(promptCheckbox).toBeVisible({ timeout: 5_000 });
     const promptRow = testPage.getByTestId("context-prompt-item").filter({ hasText: promptName });
     await expectTouchTarget(promptRow);
-    await promptRow.tap();
+    await promptRow.getByText(promptName, { exact: true }).tap();
     await expect(promptCheckbox).toBeChecked();
     await expect(async () => {
       await expect(firstComposer.getByTestId("chat-context-button")).toContainText("1", {
