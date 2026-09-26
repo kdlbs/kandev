@@ -130,7 +130,10 @@ cd apps/web && pnpm run typecheck
 
 Go tests cover: CRUD; name 1 to 60 after trimming; context at most 4,000;
 passthrough refused; missing agent or executor profile refused; list order and
-empty list; 403 for readers; foreign id 404; repeated delete 404; flag off 404
+empty list; 403 for readers; foreign id 404; repeated delete 404; two
+concurrent PATCH requests against the same coordinator commit last-write-wins,
+so the next GET returns whichever request's fields committed last
+(`AC-COORDINATOR-COORDINATORS-002.6`); flag off 404
 with the store initialised and rows kept across a restart; `profileStatus`
 over agent `missing`, agent `passthrough`, executor `missing` and a read error
 other than not found (500, never `missing`); the store methods (the claim is

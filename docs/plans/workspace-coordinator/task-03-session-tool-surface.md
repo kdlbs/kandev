@@ -152,6 +152,9 @@ Required Go tests:
   coordinator tools, with no user-question, title or plugin tool;
 - foreign workspace ids refused; non-coordinator principal refused for the
   proposal action; HTTP and MCP create refuse the origin;
+- a `workspace.read` member's `message.add` on the conversation task is
+  refused and starts no turn, while a `workspace.manage` member's succeeds
+  (`AC-COORDINATOR-COPILOT-002.3`);
 - 30 concurrent proposes against an empty coordinator leave exactly 25 open
   on SQLite and PostgreSQL;
 - a racing coordinator delete during a conversation open returns 404 and
@@ -216,7 +219,7 @@ Required Go tests:
 - Task 01 (store, types, constants, event, flag). While G0 is open the branch
   starts from task 01's branch and rebases onto main after each predecessor
   merges.
-- Open PRs #2756, #2841, #2909, #2974, #3155 and #3165 also edit
+- Open PRs #2756, #2841, #2909, #2974, #3048, #3155 and #3165 also edit
   `internal/mcp`; whichever lands second rebases.
 
 ## Risks
