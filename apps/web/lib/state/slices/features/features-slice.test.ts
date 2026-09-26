@@ -39,9 +39,13 @@ describe("features slice", () => {
   it("composes with hydrated flags in the app store", () => {
     const bootFlags = flagsWith(true);
     const store = createAppStore({ features: bootFlags });
+    const unrelatedAuthState = store.getState().auth;
+    const unrelatedWorkspaceState = store.getState().workspaces;
 
     expect(store.getState().features).toEqual(bootFlags);
     store.getState().setFeatures(flagsWith(false));
     expect(store.getState().features).toEqual(flagsWith(false));
+    expect(store.getState().auth).toBe(unrelatedAuthState);
+    expect(store.getState().workspaces).toBe(unrelatedWorkspaceState);
   });
 });
