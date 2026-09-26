@@ -369,8 +369,14 @@ built or written. The validator reads the profile through the already-injected `
 (`s.agentProfiles`, the same seam `internal/office` uses to serve `ListAgentInstances`) and rejects
 with `ErrInvalidAssigneeAgentProfile` (a sentinel whose message contains `"invalid"`, so
 `isValidationError` in `internal/task/handlers/errors.go` maps it to a 4xx with no additional
-routing) unless the profile exists, is enabled, is not soft-deleted, and its `WorkspaceID` matches
-the request's own workspace exactly. A profile with `WorkspaceID == ""` (global/kanban-legacy) is
+routing) unless the profile exists, is not soft-deleted, and its `WorkspaceID` matches
+the request's own workspace exactly. It deliberately does not gate on the profile's `enabled` flag:
+`ListAgentInstances` never filters on that column either, and every Office agent instance created
+before the `enabled=1` persistence fix was stored with `enabled=0`, so gating here would have made
+every pre-existing Office agent unassignable after upgrade. A lookup failure that is not "not found"
+(`sql.ErrNoRows`) — a transient store error, for example — propagates unwrapped instead of folding
+into `ErrInvalidAssigneeAgentProfile`, so it surfaces as a 5xx rather than telling the caller their
+assignee choice was invalid. A profile with `WorkspaceID == ""` (global/kanban-legacy) is
 rejected here even though it is treated as universally allowed elsewhere
 (`normalizeWorkflowAgentOverrideSource`'s override-source rule) — the surfaces that populate this
 field never offer a global profile as an assignee, so this path holds the stricter, Office-only

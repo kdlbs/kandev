@@ -80,28 +80,31 @@ Approval's separate reviewer/approver wake path.
 **Intent:** REQ-OFFICE-SCHEDULER-002 gates the wake on the step the task lands on; this requirement
 gates what the wake is for. A task-create request may name an `assignee_agent_profile_id` to seat as
 the task's runner. That name is caller-supplied and must be checked before any task row exists —
-otherwise the system either seats a runner that cannot legitimately hold the seat (a disabled
-profile, a profile scoped to a different workspace, or a global/kanban-legacy profile with no
-workspace at all) or accepts the request and silently drops the assignment, leaving the caller with
-a task that reports success but has no runner and therefore never gets the REQ-OFFICE-SCHEDULER-002
-wake. A profile is a valid create-time assignee only if it names an enabled Office agent instance
-scoped to the same workspace as the task being created; this mirrors the eligibility filter
-`ListAgentInstances` already applies when listing assignable profiles for a workspace; a
-non-workspace-scoped ("global") profile is Office-eligible for the listing but is not this
-requirement's create-time contract, because the surfaces that supply this field never offer a global
-profile as a choice.
+otherwise the system either seats a runner that cannot legitimately hold the seat (a profile scoped
+to a different workspace, or a global/kanban-legacy profile with no workspace at all) or accepts the
+request and silently drops the assignment, leaving the caller with a task that reports success but
+has no runner and therefore never gets the REQ-OFFICE-SCHEDULER-002 wake. A profile is a valid
+create-time assignee only if it names an Office agent instance scoped to the same workspace as the
+task being created; this mirrors the eligibility filter `ListAgentInstances` already applies when
+listing assignable profiles for a workspace, which does not gate on the profile's `enabled` flag
+either — a profile the assignee picker already offers must remain assignable, so create-time
+validation is not stricter than the picker it validates against. A non-workspace-scoped ("global")
+profile is Office-eligible for the listing but is not this requirement's create-time contract,
+because the surfaces that supply this field never offer a global profile as a choice.
 
 #### Acceptance criteria
 
 - **AC-OFFICE-SCHEDULER-003.1:** A create-task request naming an `assignee_agent_profile_id` that
-  resolves to an enabled Office agent instance scoped to the request's own workspace succeeds, and
+  resolves to an Office agent instance scoped to the request's own workspace succeeds, and
   the created task's runner seat (`workflow_step_participants`, `role='runner'`) names that profile
-  before the `task.created` event is published.
+  before the `task.created` event is published. This holds regardless of the profile's `enabled`
+  flag.
 - **AC-OFFICE-SCHEDULER-003.2:** A create-task request naming an `assignee_agent_profile_id` that
-  does not resolve to any profile, resolves to a disabled profile, resolves to a profile scoped to a
-  different workspace, or resolves to a profile with no workspace (`WorkspaceID == ""`) is rejected
-  with a client error before any task row is written. No partial task, no runner seat, and no wake
-  are produced.
+  does not resolve to any profile, resolves to a profile scoped to a different workspace, or resolves
+  to a profile with no workspace (`WorkspaceID == ""`) is rejected with a client error before any
+  task row is written. No partial task, no runner seat, and no wake are produced. A lookup failure
+  unrelated to the profile's existence (e.g. a store error) is not treated as an invalid assignee and
+  surfaces as a server error instead.
 - **AC-OFFICE-SCHEDULER-003.3:** A duplicate create request sharing an already-used `external_id`
   returns the previously created task (the existing idempotent-create contract) without re-running
   this validation against the duplicate request's own `assignee_agent_profile_id` and without

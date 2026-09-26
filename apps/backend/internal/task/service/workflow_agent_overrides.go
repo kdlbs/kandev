@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
@@ -294,6 +295,10 @@ var ErrInvalidAssigneeAgentProfile = errors.New("invalid assignee_agent_profile_
 // deliberately rejected here even though normalizeWorkflowAgentOverrideSource
 // above treats it as universally allowed — the New Task dialog never offers a
 // global profile as an assignee, so this path holds to the stricter rule.
+// Unlike that sibling check, this one does not gate on profile.Enabled:
+// ListAgentInstances (the picker the dialog's assignee list is drawn from)
+// never filters on it either, so a profile the picker offers must remain
+// assignable here.
 func (s *Service) ValidateAssigneeAgentProfile(ctx context.Context, workspaceID, assigneeAgentProfileID string) error {
 	assigneeID := strings.TrimSpace(assigneeAgentProfileID)
 	if assigneeID == "" {
@@ -304,9 +309,12 @@ func (s *Service) ValidateAssigneeAgentProfile(ctx context.Context, workspaceID,
 	}
 	profile, err := s.agentProfiles.GetAgentProfile(ctx, assigneeID)
 	if err != nil {
-		return fmt.Errorf("%w: %q: %v", ErrInvalidAssigneeAgentProfile, assigneeID, err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %q is unavailable", ErrInvalidAssigneeAgentProfile, assigneeID)
+		}
+		return fmt.Errorf("look up assignee agent profile %q: %w", assigneeID, err)
 	}
-	if profile == nil || profile.DeletedAt != nil || !profile.Enabled {
+	if profile == nil || profile.DeletedAt != nil {
 		return fmt.Errorf("%w: %q is unavailable", ErrInvalidAssigneeAgentProfile, assigneeID)
 	}
 	if profile.WorkspaceID == "" || profile.WorkspaceID != workspaceID {
