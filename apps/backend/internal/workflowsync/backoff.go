@@ -43,7 +43,7 @@ func buildFailureDirective(
 	if cfg.Provider == ProviderGitHub &&
 		(kind == github.FailureInvalidCredentials || kind == github.FailureMissingResource) {
 		directive.suspended = true
-		directive.suspensionReason = syncErr.Error()
+		directive.suspensionReason = safeSyncErrorMessage(syncErr)
 		return directive
 	}
 	if cfg.Provider == ProviderGitLab {

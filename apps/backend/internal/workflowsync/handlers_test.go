@@ -251,6 +251,77 @@ func TestHTTPHandlersSanitizeLegacyStoredProviderErrorFromConfigAndSync(t *testi
 	assert.NotContains(t, syncResponse.Body.String(), providerBodyMarker)
 }
 
+func TestHTTPHandlersSanitizeSuspensionReasons(t *testing.T) {
+	const providerBodyMarker = "suspension-reason-provider-body-must-not-leak"
+	for _, tc := range []struct {
+		name           string
+		providerErr    error
+		legacy         bool
+		wantErrorClass string
+		wantReason     string
+	}{
+		{
+			name: "missing resource",
+			providerErr: &github.GitHubAPIError{
+				StatusCode: http.StatusNotFound, Body: providerBodyMarker,
+				FailureKind: github.FailureMissingResource,
+			},
+			wantErrorClass: string(github.FailureMissingResource),
+			wantReason:     "GitHub request failed with HTTP status 404",
+		},
+		{
+			name: "invalid credentials",
+			providerErr: &github.GitHubAPIError{
+				StatusCode: http.StatusUnauthorized, Body: providerBodyMarker,
+				FailureKind: github.FailureInvalidCredentials,
+			},
+			wantErrorClass: string(github.FailureInvalidCredentials),
+			wantReason:     "GitHub request failed with HTTP status 401",
+		},
+		{
+			name:           "legacy stored reason",
+			providerErr:    &github.AdmissionDeferredError{Reason: "background admission deferred"},
+			legacy:         true,
+			wantErrorClass: string(github.FailureMissingResource),
+			wantReason:     genericSyncFailureMessage,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+			require.NoError(t, err)
+			store := setupTestStore(t)
+			svc := NewService(store, failingGitHubClients{err: tc.providerErr}, nil, &fakeApplier{}, log)
+			configureWorkspace(t, svc, victimWorkspace)
+			if tc.legacy {
+				_, err = store.db.Exec(`
+					UPDATE workflow_sync_configs
+					SET last_ok = 0, last_error_class = ?, poll_suspended = 1,
+						poll_suspension_reason = ?, consecutive_failures = 1
+					WHERE workspace_id = ?
+				`, tc.wantErrorClass, "github API error: "+providerBodyMarker, victimWorkspace)
+				require.NoError(t, err)
+			}
+			router := newTestRouter(t, svc)
+
+			if !tc.legacy {
+				syncResponse := doJSON(t, router, http.MethodPost, "/api/v1/workflow-sync/sync?workspace_id="+victimWorkspace, nil)
+				require.Equal(t, http.StatusOK, syncResponse.Code)
+				assert.NotContains(t, syncResponse.Body.String(), providerBodyMarker)
+			}
+
+			configResponse := doJSON(t, router, http.MethodGet, "/api/v1/workflow-sync/config?workspace_id="+victimWorkspace, nil)
+			require.Equal(t, http.StatusOK, configResponse.Code)
+			assert.NotContains(t, configResponse.Body.String(), providerBodyMarker)
+			var config Config
+			require.NoError(t, json.Unmarshal(configResponse.Body.Bytes(), &config))
+			assert.True(t, config.PollSuspended)
+			assert.Equal(t, tc.wantErrorClass, config.LastErrorClass)
+			assert.Equal(t, tc.wantReason, config.PollSuspensionReason)
+			assert.Equal(t, 1, config.ConsecutiveFailures)
+		})
+	}
+}
+
 func TestHTTPForceSyncReturnsRateLimitDetailsWhenAdmissionWaitIsCanceled(t *testing.T) {
 	now := time.Date(2026, 8, 30, 11, 18, 0, 0, time.UTC)
 	retryAt := now.Add(2 * time.Minute)
