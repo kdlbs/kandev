@@ -193,6 +193,7 @@ func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string)
 		return cfg, err
 	}
 	cfg.LastError = safeStoredSyncErrorMessage(cfg.LastError)
+	cfg.PollSuspensionReason = safeStoredSyncErrorMessage(cfg.PollSuspensionReason)
 	return cfg, nil
 }
 
