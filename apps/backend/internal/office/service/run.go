@@ -142,6 +142,26 @@ func (s *Service) QueueRunFromTaskBoundary(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey, taskID string,
 ) error {
+	return s.queueRunFromTaskBoundary(ctx, agentInstanceID, reason, payload, idempotencyKey, taskID, nil, "")
+}
+
+// QueueRunFromTaskBoundaryWithActor is the task-boundary queue path with an
+// actor snapshot captured before a paused assignment was deferred. The
+// supplied actor overrides only the actor fields; task-boundary lineage still
+// comes from the task metadata.
+func (s *Service) QueueRunFromTaskBoundaryWithActor(
+	ctx context.Context,
+	agentInstanceID, reason, payload, idempotencyKey, taskID string,
+	actorKind models.ActorKind, actorID string,
+) error {
+	return s.queueRunFromTaskBoundary(ctx, agentInstanceID, reason, payload, idempotencyKey, taskID, &actorKind, actorID)
+}
+
+func (s *Service) queueRunFromTaskBoundary(
+	ctx context.Context,
+	agentInstanceID, reason, payload, idempotencyKey, taskID string,
+	actorKindOverride *models.ActorKind, actorIDOverride string,
+) error {
 	agent, err := s.guardAgentStatus(ctx, agentInstanceID)
 	if err != nil {
 		return err
@@ -152,13 +172,19 @@ func (s *Service) QueueRunFromTaskBoundary(
 
 	if s.runsService != nil {
 		carrier := s.TaskBoundaryCarrier(ctx, taskID)
+		actorKind := carrier.ActorKind
+		actorID := carrier.ActorID
+		if actorKindOverride != nil && actorKindOverride.Valid() {
+			actorKind = *actorKindOverride
+			actorID = actorIDOverride
+		}
 		humanRooted := carrier.HumanRooted
 		_, err := s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
 			Reason:                reason,
 			IdempotencyKey:        idempotencyKey,
 			Payload:               PayloadWithAgent(payload, agentInstanceID),
-			ActorKind:             carrier.ActorKind,
-			ActorID:               carrier.ActorID,
+			ActorKind:             actorKind,
+			ActorID:               actorID,
 			RoutineID:             carrier.RoutineID,
 			CarrierHumanRooted:    &humanRooted,
 			CarrierCreatingRunID:  carrier.CreatingRunID,
@@ -167,7 +193,13 @@ func (s *Service) QueueRunFromTaskBoundary(
 		})
 		return err
 	}
-	_, err = s.queueRunInline(ctx, agentInstanceID, reason, payload, idempotencyKey)
+	actorKind := models.ActorKindSystem
+	actorID := ""
+	if actorKindOverride != nil && actorKindOverride.Valid() {
+		actorKind = *actorKindOverride
+		actorID = actorIDOverride
+	}
+	_, err = s.queueRunInlineAsActor(ctx, agentInstanceID, reason, payload, idempotencyKey, actorKind, actorID)
 	return err
 }
 
@@ -304,6 +336,14 @@ func (s *Service) queueRunInline(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) (runsservice.QueueOutcome, error) {
+	return s.queueRunInlineAsActor(ctx, agentInstanceID, reason, payload, idempotencyKey, models.ActorKindSystem, "")
+}
+
+func (s *Service) queueRunInlineAsActor(
+	ctx context.Context,
+	agentInstanceID, reason, payload, idempotencyKey string,
+	actorKind models.ActorKind, actorID string,
+) (runsservice.QueueOutcome, error) {
 	if idempotencyKey != "" {
 		dup, err := s.repo.CheckIdempotencyKey(ctx, idempotencyKey, IdempotencyWindowHours)
 		if err != nil {
@@ -345,7 +385,9 @@ func (s *Service) queueRunInline(
 		// falsely promoting every such run to the highest claim-order
 		// preference (AC-OFFICE-BACKPRESSURE-001.1/.3). See the matching
 		// comment in office/scheduler.QueueRun, which has the same gap.
-		PriorityClass: shared.ClassifyPriority(models.ActorKindSystem, reason, false),
+		PriorityClass: shared.ClassifyPriority(actorKind, reason, false),
+		ActorKind:     actorKind,
+		ActorID:       actorID,
 	}
 	insertErr := s.repo.CreateRun(ctx, req)
 	outcome, err := runsservice.ReportInsertResult(runsservice.QueueSourceRuns, reason, idempotencyKey, agentInstanceID, insertErr)
@@ -407,6 +449,15 @@ func (s *Service) publishRunQueued(ctx context.Context, req *models.Run, idempot
 	}
 }
 
+// ErrAgentNotRunnable wraps a guardAgentStatus refusal caused by the
+// agent's own status (paused, stopped, or pending approval) — a
+// deterministic condition, unlike a transient lookup failure. Callers that
+// must distinguish "will never succeed on retry" from "might succeed later"
+// (e.g. paused-assignment replay's bounded recovery-tick backstop, R1-F1)
+// use errors.Is(err, ErrAgentNotRunnable) rather than string-matching the
+// message.
+var ErrAgentNotRunnable = errors.New("agent not runnable")
+
 // guardAgentStatus returns an error if the agent is paused or stopped,
 // and otherwise the resolved agent — callers that also need the pause
 // gate's workspace scope (checkPauseGateForAgent) reuse this fetch instead
@@ -418,11 +469,11 @@ func (s *Service) guardAgentStatus(ctx context.Context, agentInstanceID string) 
 	}
 	switch agent.Status {
 	case models.AgentStatusPaused:
-		return nil, fmt.Errorf("agent %s is paused", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is paused: %w", agentInstanceID, ErrAgentNotRunnable)
 	case models.AgentStatusStopped:
-		return nil, fmt.Errorf("agent %s is stopped", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is stopped: %w", agentInstanceID, ErrAgentNotRunnable)
 	case models.AgentStatusPendingApproval:
-		return nil, fmt.Errorf("agent %s is pending approval", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is pending approval: %w", agentInstanceID, ErrAgentNotRunnable)
 	}
 	return agent, nil
 }
@@ -465,7 +516,23 @@ func (s *Service) checkPauseGateForAgent(ctx context.Context, agent *models.Agen
 	}
 	if active != nil {
 		pause.RecordBlocked(gateName)
-		return shared.ErrWorkspacePaused
+		return &pausedQueueError{pause: active}
 	}
 	return nil
 }
+
+// pausedQueueError wraps shared.ErrWorkspacePaused with the exact pause
+// record checkPauseGateForAgent already resolved, so a caller (the
+// task-assigned event subscriber's deferred-assignment recording) can
+// recover the blocking pause's id via errors.As without a second,
+// potentially racy PauseState read. Mirrors routines/service.go's
+// pausedDispatchError and scheduler.pausedQueueError (package-local by
+// design — the two packages don't share an error type). errors.Is against
+// shared.ErrWorkspacePaused still works for every existing caller via
+// Unwrap.
+type pausedQueueError struct {
+	pause *models.WorkspacePause
+}
+
+func (e *pausedQueueError) Error() string { return shared.ErrWorkspacePaused.Error() }
+func (e *pausedQueueError) Unwrap() error { return shared.ErrWorkspacePaused }

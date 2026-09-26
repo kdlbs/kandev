@@ -134,6 +134,9 @@ func (ss *SchedulerService) ApplyTaskMutation(
 			if errors.Is(err, shared.ErrWorkspacePaused) {
 				// A confirmed operator pause is not a reactivity failure —
 				// the paused workspace already logged its own pause event.
+				if c.Reason == RunReasonTaskAssigned {
+					ss.recordDeferredAssignmentFromError(ctx, c, err)
+				}
 				ss.logger.Debug("reactivity run skipped (workspace paused)",
 					zap.String("agent", agentID),
 					zap.String("reason", c.Reason))
@@ -187,6 +190,25 @@ func (ss *SchedulerService) ApplyTaskMutation(
 // reactToStatusChange queues runs based on what the new status
 // triggers. Mutates `res` directly for results that aren't runs
 // (interrupt session ID).
+// recordDeferredAssignmentFromError persists that c's task_assigned wake
+// was blocked by a confirmed workspace pause (paused-assignment-replay),
+// so pause.Service.Resume or the recovery tick can replay it later. A no-op
+// when err does not carry a *pausedQueueError — defensive, since the
+// caller already confirmed errors.Is(err, shared.ErrWorkspacePaused).
+func (ss *SchedulerService) recordDeferredAssignmentFromError(ctx context.Context, c RunContext, err error) {
+	var pe *pausedQueueError
+	if !errors.As(err, &pe) || pe.pause == nil {
+		return
+	}
+	if c.AssignmentGeneration != nil {
+		ss.svc.RecordDeferredAssignmentWithActorAtGeneration(
+			ctx, c.TaskID, pe.pause.ID, c.ActorType, c.ActorID, *c.AssignmentGeneration,
+		)
+		return
+	}
+	ss.svc.RecordDeferredAssignmentWithActor(ctx, c.TaskID, pe.pause.ID, c.ActorType, c.ActorID)
+}
+
 func (ss *SchedulerService) reactToStatusChange(
 	ctx context.Context,
 	task *TaskSnapshot,
@@ -322,13 +344,14 @@ func (ss *SchedulerService) reactToAssigneeChange(
 		runsservice.ReportKeylessEnqueue(RunReasonTaskAssigned, runsservice.KeylessCauseUnresolved, "nil_mutation_generation")
 	}
 	queue(newAssigneeID, RunContext{
-		Reason:         RunReasonTaskAssigned,
-		TaskID:         task.ID,
-		WorkspaceID:    task.WorkspaceID,
-		ActorID:        change.ActorID,
-		ActorType:      change.ActorType,
-		CommentID:      commentID,
-		IdempotencyKey: key,
+		Reason:               RunReasonTaskAssigned,
+		TaskID:               task.ID,
+		WorkspaceID:          task.WorkspaceID,
+		ActorID:              change.ActorID,
+		ActorType:            change.ActorType,
+		AssignmentGeneration: change.AssignmentGeneration,
+		CommentID:            commentID,
+		IdempotencyKey:       key,
 	})
 }
 

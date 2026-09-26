@@ -48,6 +48,12 @@ func (h *OfficeRecoveryHandler) Tick(ctx context.Context) error {
 		return nil
 	}
 	h.scheduler.recoverUnstartedTasks(ctx, h.logger)
+	if err := h.scheduler.svc.ReplayPendingDeferredAssignments(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		h.logger.Error("recovery sweep: replay deferred assignments failed", zap.Error(err))
+	}
 	return nil
 }
 

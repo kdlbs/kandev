@@ -8,6 +8,7 @@ requirements:
   - REQ-OFFICE-KILL-SWITCH-004
   - REQ-OFFICE-KILL-SWITCH-005
   - REQ-OFFICE-KILL-SWITCH-006
+  - REQ-OFFICE-PAUSE-REPLAY-001
 ---
 
 # Office Workspace Kill Switch System Design — Part 2
@@ -95,6 +96,43 @@ other error. Three consequences, stated because two of them are costs:
   capability's to rewrite for a classification only this capability consumes. If a
   later change makes the two causes distinguishable, `failures` absorbs the lookup
   failure and this paragraph is amended.
+
+### Deferred assignments
+
+A confirmed pause refuses the `task_assigned` wake before any run row exists
+(-002.5), so the assignment itself is the only durable trace.
+`REQ-OFFICE-PAUSE-REPLAY-001` and its criteria
+keep that intent without creating a run while paused
+([requirements](../requirements/paused-assignment-replay.md)).
+
+- **Store.** `office_deferred_assignments` holds one row per task: `task_id`
+  (primary key), `workspace_id`, `agent_profile_id`, `assignment_generation`,
+  `pause_id`, the assignment `actor_type` and `actor_id`, `created_at`,
+  `resolved_at` and `outcome`. The actor snapshot keeps replay priority and
+  assignment-rate handling equal to the live scheduler path. A deferral
+  upserts the row, so a reassignment during the pause replaces the pending
+  intent. A redelivered wake for the same generation does not replace the
+  snapshot.
+- **Write sites.** Both assignment wake routes record the deferral when the
+  pause gate returns `ErrWorkspacePaused`: the scheduler reactivity handoff
+  (dashboard `PATCH assignee`) and the `task.updated` assignment subscriber.
+  `ErrPauseGateUnavailable` records nothing; that path keeps its -002.9
+  behavior.
+- **Replay.** `Resume` drains the workspace's pending rows after the release
+  commits. The Office recovery tick drains pending rows for every workspace that
+  is no longer paused, which covers a crash or restart between release and
+  replay. Each row is re-validated against the task: archived, unassigned, a
+  different runner or a different `assignment_generation` resolves it as
+  `dropped`; otherwise the replay queues `task_assigned` with the stored actor
+  and `dedupkeys.AssignmentKey(task, agent, generation)`, then resolves it as
+  `replayed`. Agent-initiated replays pass through the scheduler's rolling
+  assignment allowance. A temporary rate-limit refusal leaves the row pending.
+  The idempotency key makes a concurrent resume and tick create one run between
+  them. The recovery sweep's `TODO`/lookback/no-finished-run filter does not
+  apply to this path.
+- **Visibility.** Deferral, replay and drop each write a task-targeted activity
+  entry (`task_assignment_deferred`, `task_assignment_replayed`,
+  `task_assignment_dropped`) naming the pause.
 
 ### Residual windows
 

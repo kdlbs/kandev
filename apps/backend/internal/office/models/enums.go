@@ -493,3 +493,13 @@ const (
 	ActivityActionWorkspaceResumed   ActivityAction = "workspace_resumed"
 	ActivityActionWorkspacePauseNoop ActivityAction = "workspace_pause_noop"
 )
+
+// Deferred-assignment activity actions (paused-assignment-replay): a task
+// assignment blocked by an active workspace pause, then either replayed
+// once the workspace resumes or dropped because the task/assignee no
+// longer qualifies by the time replay runs.
+const (
+	ActivityActionTaskAssignmentDeferred ActivityAction = "task_assignment_deferred"
+	ActivityActionTaskAssignmentReplayed ActivityAction = "task_assignment_replayed"
+	ActivityActionTaskAssignmentDropped  ActivityAction = "task_assignment_dropped"
+)
