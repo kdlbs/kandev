@@ -336,6 +336,7 @@ func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
 
 func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionMessageAdd, h.wsAddMessage)
+	dispatcher.RegisterFunc(ws.ActionMessageDismissGitPushError, h.wsDismissGitPushErrorMessage)
 	dispatcher.RegisterFunc(ws.ActionMessageList, h.wsListMessages)
 	dispatcher.RegisterFunc(ws.ActionMessageSearch, h.wsSearchMessages)
 }
@@ -1853,6 +1854,46 @@ type wsSearchMessagesRequest struct {
 	TaskSessionID string `json:"session_id"`
 	Query         string `json:"query"`
 	Limit         int    `json:"limit"`
+}
+
+type wsDismissGitPushErrorMessageRequest struct {
+	MessageID string `json:"message_id"`
+}
+
+type wsDismissGitPushErrorMessageResponse struct {
+	MessageID   string `json:"message_id"`
+	DismissedAt string `json:"dismissed_at"`
+}
+
+func (h *MessageHandlers) wsDismissGitPushErrorMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsDismissGitPushErrorMessageRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload", nil)
+	}
+	messageID := strings.TrimSpace(req.MessageID)
+	if messageID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "message_id is required", nil)
+	}
+
+	dismissedAt, err := h.service.DismissGitPushErrorMessage(ctx, messageID)
+	if err != nil {
+		code := ws.ErrorCodeInternalError
+		publicMessage := "Failed to dismiss Git push error message"
+		switch {
+		case errors.Is(err, repoerrors.ErrTaskNotFound), errors.Is(err, sql.ErrNoRows):
+			code = ws.ErrorCodeNotFound
+			publicMessage = "Message not found"
+		case errors.Is(err, service.ErrNotGitPushErrorMessage):
+			code = ws.ErrorCodeValidation
+			publicMessage = "Message is not a Git push error"
+		}
+		h.logger.Warn("failed to dismiss Git push error message", zap.String("message_id", messageID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, code, publicMessage, nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, wsDismissGitPushErrorMessageResponse{
+		MessageID: messageID, DismissedAt: dismissedAt,
+	})
 }
 
 const messageSnippetRadius = 60

@@ -81,6 +81,21 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
       !payloadRetentionMarker(source.metadata)
     )
       continue;
+    if (key === "metadata" && source.metadata !== undefined) {
+      const targetMetadata = target.metadata as Record<string, unknown> | undefined;
+      const dismissedAt = targetMetadata?.git_operation_error_dismissed_at;
+      if (typeof dismissedAt === "string" && dismissedAt !== "") {
+        const sourceMetadata =
+          source.metadata !== null && typeof source.metadata === "object"
+            ? (source.metadata as Record<string, unknown>)
+            : {};
+        target.metadata = {
+          ...sourceMetadata,
+          git_operation_error_dismissed_at: dismissedAt,
+        };
+        continue;
+      }
+    }
     if (source[key] !== undefined) {
       target[key] = source[key];
     }

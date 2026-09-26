@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type ElementType, type ReactElement } from "react";
+import { useCallback, useState, type ElementType, type ReactElement, type ReactNode } from "react";
 import {
   IconAlertTriangle,
   IconArchive,
@@ -40,12 +40,14 @@ export function ActionButtons({
   onRecoveryRequested,
   compact = false,
   labelOverride,
+  extraContent,
 }: {
   actions: MessageAction[];
   taskId?: string;
   onRecoveryRequested?: () => void;
   compact?: boolean;
   labelOverride?: string;
+  extraContent?: ReactNode;
 }) {
   return (
     <div
@@ -65,6 +67,7 @@ export function ActionButtons({
           labelOverride={labelOverride}
         />
       ))}
+      {extraContent}
     </div>
   );
 }

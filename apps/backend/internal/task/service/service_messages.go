@@ -30,8 +30,19 @@ const (
 )
 
 var ErrMessageIDConflict = errors.New("client message id is already used")
+var ErrNotGitPushErrorMessage = errors.New("message is not a Git push error")
 
 var agentPlanMessageIDNamespace = uuid.MustParse("138966de-88bc-49c0-b65f-cbfbac17f729")
+
+type messageMetadataFirstWriter interface {
+	SetMessageMetadataStringIfEmptyWithConversationReceipt(
+		context.Context,
+		string,
+		string,
+		string,
+		string,
+	) (*models.Message, *models.ConversationMutationReceipt, bool, error)
+}
 
 type planCommentMessageWriter interface {
 	CreateMessageWithPlanComments(
@@ -991,6 +1002,54 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, e
 		}
 	}
 	return message, nil
+}
+
+// DismissGitPushErrorMessage records a shared acknowledgment on one eligible
+// Git push failure. The message's stored session determines read access.
+func (s *Service) DismissGitPushErrorMessage(ctx context.Context, messageID string) (string, error) {
+	message, err := s.messages.GetMessage(ctx, messageID)
+	if err != nil {
+		return "", err
+	}
+	if message == nil {
+		return "", repoerrors.ErrTaskNotFound
+	}
+	if message.TaskSessionID == "" {
+		return "", repoerrors.ErrTaskNotFound
+	}
+	if err := s.AuthorizeSessionAccess(ctx, message.TaskSessionID); err != nil {
+		return "", err
+	}
+	if message.Type != models.MessageTypeError || message.Metadata["git_operation_error"] != true || message.Metadata["operation"] != "push" {
+		return "", ErrNotGitPushErrorMessage
+	}
+	if dismissedAt, ok := message.Metadata["git_operation_error_dismissed_at"].(string); ok && dismissedAt != "" {
+		return dismissedAt, nil
+	}
+
+	writer, ok := s.messages.(messageMetadataFirstWriter)
+	if !ok {
+		return "", errors.New("atomic message metadata updates are unavailable")
+	}
+	candidate := time.Now().UTC().Format(time.RFC3339Nano)
+	stored, receipt, changed, err := writer.SetMessageMetadataStringIfEmptyWithConversationReceipt(
+		ctx,
+		message.ID,
+		message.TaskSessionID,
+		"git_operation_error_dismissed_at",
+		candidate,
+	)
+	if err != nil {
+		return "", err
+	}
+	dismissedAt, ok := stored.Metadata["git_operation_error_dismissed_at"].(string)
+	if !ok || dismissedAt == "" {
+		return "", errors.New("dismissed message is missing its acknowledgment timestamp")
+	}
+	if changed {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, stored, receipt)
+	}
+	return dismissedAt, nil
 }
 
 // RehydrateMessagePayload resolves an externalized large tool-output

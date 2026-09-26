@@ -271,6 +271,8 @@ Only one Git operation can run at a time for a given repository operator. A seco
 
 Most Git command failures are normal responses with `success:false`, `error`, and sometimes `conflict_files`; they are not WebSocket transport errors. Read the result body even when the request itself completed. The web client waits 60 seconds for an ordinary Git operation.
 
+Dismiss on a Git push error card hides only that historical message and does not change Git state; later push failures remain visible.
+
 ### Multi-repository tasks
 
 In a multi-repository task, every wire request must identify one repository with its `repo` subpath. The workspace root is not itself a Git repository, so omitting `repo` normally fails. The UI handles this for you:
