@@ -3,6 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
+import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 import {
   cleanupDelayedResumeFixture,
@@ -44,7 +45,7 @@ async function seedTaskWithSession(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-  opts: { description?: string; agentProfileId?: string } = {},
+  opts: { description?: string; agentProfileId?: string; waitForAgentctlReady?: boolean } = {},
 ): Promise<SessionPage> {
   const description = opts.description ?? "/e2e:simple-message";
   const agentProfileId = opts.agentProfileId ?? seedData.agentProfileId;
@@ -62,6 +63,9 @@ async function seedTaskWithSession(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  if (opts.waitForAgentctlReady) {
+    await waitForSessionAgentctlReady(testPage, task.session_id);
+  }
 
   return session;
 }
@@ -367,6 +371,7 @@ test.describe("Session recovery", () => {
       apiClient,
       seedData,
       "Crash Recovery Fresh Test",
+      { waitForAgentctlReady: true },
     );
 
     // Send /crash to make the agent exit with code 1
@@ -405,6 +410,7 @@ test.describe("Session recovery", () => {
       apiClient,
       seedData,
       "Crash Recovery Resume Test",
+      { waitForAgentctlReady: true },
     );
 
     // Send /crash to make the agent exit with code 1
@@ -470,7 +476,7 @@ test.describe("Session recovery", () => {
         apiClient,
         seedData,
         "Crash Recovery Resume Fails Test",
-        { agentProfileId: profile.id },
+        { agentProfileId: profile.id, waitForAgentctlReady: true },
       );
 
       // Crash the agent so the recovery message renders with action buttons.

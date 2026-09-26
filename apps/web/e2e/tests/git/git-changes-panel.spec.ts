@@ -2962,6 +2962,7 @@ test.describe("Git Changes Panel", () => {
         author_login: "local-ahead-author",
         repo_owner: "testorg",
         repo_name: "testrepo",
+        head_sha: providerHead,
       },
     ]);
     await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 903, [
@@ -2983,6 +2984,7 @@ test.describe("Git Changes Panel", () => {
       head_branch: "feature/local-ahead",
       base_branch: "main",
       author_login: "local-ahead-author",
+      head_sha: providerHead,
     });
 
     // Put the task worktree on the contribution branch before the first page

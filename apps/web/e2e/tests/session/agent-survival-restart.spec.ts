@@ -122,7 +122,10 @@ test.describe("Agent survival across backend restart", () => {
       const kanban = new KanbanPage(testPage);
       await kanban.goto();
       const card = kanban.taskCard(task.id);
-      const sidebarLoadError = testPage.getByTestId("sidebar-task-load-error");
+      const sidebarLoadError = testPage
+        .getByTestId("sidebar-task-load-error")
+        .filter({ visible: true })
+        .first();
       await expect
         .poll(async () => (await card.isVisible()) || (await sidebarLoadError.isVisible()), {
           timeout: 20_000,
