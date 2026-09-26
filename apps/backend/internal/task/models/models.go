@@ -2385,6 +2385,7 @@ const (
 	ExecutorTypeSSH          ExecutorType = "ssh"
 	ExecutorTypeKubernetes   ExecutorType = "k8s"
 	ExecutorTypeMockRemote   ExecutorType = "mock_remote"
+	ExecutorTypePluginRemote ExecutorType = "plugin_remote"
 )
 
 // IsRemoteExecutorType reports whether the given executor type represents
@@ -2392,7 +2393,7 @@ const (
 // These environments run shells inside the container/VM, not on the host.
 func IsRemoteExecutorType(t ExecutorType) bool {
 	switch t {
-	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeKubernetes, ExecutorTypeMockRemote:
+	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeKubernetes, ExecutorTypeMockRemote, ExecutorTypePluginRemote:
 		return true
 	default:
 		return false
@@ -2406,7 +2407,7 @@ func IsRemoteExecutorType(t ExecutorType) bool {
 // when adding a new ExecutorType.
 func (t ExecutorType) Runtime() agentruntime.Runtime {
 	switch t {
-	case ExecutorTypeLocal, ExecutorTypeWorktree, ExecutorTypeMockRemote:
+	case ExecutorTypeLocal, ExecutorType("local_pc"), ExecutorTypeWorktree, ExecutorTypeMockRemote:
 		return agentruntime.RuntimeStandalone
 	case ExecutorTypeLocalDocker:
 		return agentruntime.RuntimeDocker
@@ -2418,8 +2419,10 @@ func (t ExecutorType) Runtime() agentruntime.Runtime {
 		return agentruntime.RuntimeSSH
 	case ExecutorTypeKubernetes:
 		return agentruntime.RuntimeKubernetes
+	case ExecutorTypePluginRemote:
+		return agentruntime.RuntimePluginRemote
 	default:
-		return agentruntime.RuntimeStandalone
+		return agentruntime.RuntimeUnknown
 	}
 }
 
@@ -2465,6 +2468,8 @@ type Executor struct {
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	DeletedAt *time.Time        `json:"deleted_at,omitempty"`
+	// Provider is a transient projection populated from the live plugin catalog.
+	Provider *ExecutorProvider `json:"provider,omitempty" db:"-"`
 }
 
 // ExecutorRunning tracks an active executor instance for a session.
@@ -2480,9 +2485,13 @@ type ExecutorRunning struct {
 	ResumeToken        string               `json:"resume_token,omitempty"`
 	LastMessageUUID    string               `json:"last_message_uuid,omitempty"`
 	AgentExecutionID   string               `json:"agent_execution_id,omitempty"`
-	ContainerID        string               `json:"container_id,omitempty"`
-	AgentctlURL        string               `json:"agentctl_url,omitempty"`
-	AgentctlPort       int                  `json:"agentctl_port,omitempty"`
+	// TransientAuthToken carries a decrypted agentctl token only between the
+	// lifecycle recovery inventory read and the matching remote runtime. It is
+	// excluded from JSON and database persistence.
+	TransientAuthToken string `json:"-" db:"-"`
+	ContainerID        string `json:"container_id,omitempty"`
+	AgentctlURL        string `json:"agentctl_url,omitempty"`
+	AgentctlPort       int    `json:"agentctl_port,omitempty"`
 	// PID is SSH-only: the agentctl PID on the *remote* host, used by the SSH
 	// executor's remote-pid stop path. It is 0 for local/standalone rows.
 	PID int `json:"pid,omitempty"`
@@ -2500,6 +2509,9 @@ type ExecutorRunning struct {
 	LastSeenAt     *time.Time             `json:"last_seen_at,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 	UpdatedAt      time.Time              `json:"updated_at"`
+	// ExpectedPluginExecutorRevision is the inventory-envelope revision observed
+	// before a provider operation. It is transient and required for updates.
+	ExpectedPluginExecutorRevision uint64 `json:"-" db:"-"`
 }
 
 // ProfileEnvVar represents an environment variable for an executor profile.
@@ -2650,12 +2662,14 @@ type TaskEnvironmentRepo struct {
 // TaskEnvironmentRecoveryClaimRequest identifies the environment authority
 // required while an automatic host-worktree recovery is in progress.
 type TaskEnvironmentRecoveryClaimRequest struct {
-	TaskEnvironmentID   string
-	OwnerTaskID         string
-	OwnershipGeneration int64
-	SessionID           string
-	OperationID         string
-	ExecutorType        string
+	TaskEnvironmentID          string
+	OwnerTaskID                string
+	OwnershipGeneration        int64
+	SessionID                  string
+	OperationID                string
+	ExecutorType               string
+	AllowCurrentSessionRuntime bool
+	CleanupJobID               string
 }
 
 // TaskEnvironmentRecoveryClaim is the durable authority held from recovery

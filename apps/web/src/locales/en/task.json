@@ -2426,5 +2426,21 @@
   "changeWorkflowObservedSuccess": "The workflow change was confirmed after refreshing the task.",
   "changeWorkflow": "Change workflow...",
   "changeWorkflowForSelectedTasks": "Change workflow for selected tasks",
-  "changeWorkflowRefreshTask": "Refresh task"
+  "changeWorkflowRefreshTask": "Refresh task",
+  "pluginExecutorStateStarting": "Starting",
+  "pluginExecutorStateExpired": "Expired",
+  "pluginExecutorStateCleanupPending": "Cleanup pending",
+  "pluginExecutorStateUnavailable": "Unavailable",
+  "pluginExecutorStateUnknown": "Unknown",
+  "pluginExecutorRetentionLabel": "Workspace retention",
+  "pluginExecutorRetentionPersistent": "Workspace data is retained.",
+  "pluginExecutorRetentionComputeBound": "Workspace data may be lost when compute expires.",
+  "pluginExecutorRetentionUnknown": "Workspace retention is unknown.",
+  "pluginExecutorExpiresAt": "Expires",
+  "pluginExecutorExpiredDescription": "The workspace expired and cannot be resumed. Reset the environment to start again.",
+  "pluginExecutorUnknownDescription": "The provider could not confirm whether the environment still exists. Its expiry deadline has passed.",
+  "pluginExecutorUnavailableDescription": "The provider is unavailable. Remote resources may still be running. Check executor settings.",
+  "pluginExecutorCleanupPendingDescription": "Resource removal is unconfirmed. Reset the environment to retry cleanup.",
+  "pluginExecutorDeadlinePassedDescription": "The expiry deadline passed, but the provider still reports this environment as running.",
+  "pluginExecutorRetryCleanup": "Retry cleanup"
 }

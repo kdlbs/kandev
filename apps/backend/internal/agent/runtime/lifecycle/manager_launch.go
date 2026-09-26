@@ -1089,7 +1089,22 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		ComparisonTargets:              comparisonTargets,
 		ProviderGatewayAuth:            providerGatewayAuth,
 	}
+	if reqWithWorktree.ExecutorType == string(models.ExecutorTypePluginRemote) {
+		if m.pluginExecutorProfileLoader == nil {
+			return nil, nil, nil, errors.New("plugin executor profile loader is unavailable")
+		}
+		profileID := strings.TrimSpace(getMetadataString(metadata, MetadataKeyExecutorProfileID))
+		profile, loadErr := m.pluginExecutorProfileLoader.ExecutorProviderProfileForLaunch(ctx, profileID, reqWithWorktree.TaskEnvironmentID)
+		if loadErr != nil {
+			return nil, nil, nil, fmt.Errorf("resolve plugin executor profile: %w", loadErr)
+		}
+		if profile == nil {
+			return nil, nil, nil, errors.New("plugin executor profile is unavailable")
+		}
+		execReq.PluginExecutor = &PluginExecutorLaunch{Profile: *profile}
+	}
 	m.wireKubernetesInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
+	m.wirePluginExecutorInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
 
 	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
 	defer launchCancel()
@@ -1098,6 +1113,12 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	}
 
 	m.scheduleSSHLaunchWarning(launchCtx, reqWithWorktree, metadata, reqWithWorktree.SessionID)
+	if execReq.PluginExecutor != nil {
+		if err := m.registerPluginExecutorCallbacks(execReq); err != nil {
+			return nil, nil, nil, err
+		}
+		defer m.unregisterPluginExecutorCallbacks(execReq.InstanceID)
+	}
 
 	execInstance, err := rt.CreateInstance(launchCtx, execReq)
 	if err != nil {

@@ -2426,5 +2426,21 @@
   "changeWorkflowObservedSuccess": "A alteração do fluxo de trabalho foi confirmada depois de atualizar a tarefa.",
   "changeWorkflow": "Alterar fluxo de trabalho...",
   "changeWorkflowForSelectedTasks": "Alterar o fluxo de trabalho das tarefas selecionadas",
-  "changeWorkflowRefreshTask": "Atualizar tarefa"
+  "changeWorkflowRefreshTask": "Atualizar tarefa",
+  "pluginExecutorStateStarting": "A iniciar",
+  "pluginExecutorStateExpired": "Expirado",
+  "pluginExecutorStateCleanupPending": "Limpeza pendente",
+  "pluginExecutorStateUnavailable": "Indisponível",
+  "pluginExecutorStateUnknown": "Desconhecido",
+  "pluginExecutorRetentionLabel": "Retenção do espaço de trabalho",
+  "pluginExecutorRetentionPersistent": "Os dados do espaço de trabalho são mantidos.",
+  "pluginExecutorRetentionComputeBound": "Os dados do espaço de trabalho podem perder-se quando a computação expirar.",
+  "pluginExecutorRetentionUnknown": "A retenção do espaço de trabalho é desconhecida.",
+  "pluginExecutorExpiresAt": "Expira",
+  "pluginExecutorExpiredDescription": "O espaço de trabalho expirou e não pode ser retomado. Reponha o ambiente para começar de novo.",
+  "pluginExecutorUnknownDescription": "O fornecedor não conseguiu confirmar se o ambiente ainda existe. O prazo de expiração já passou.",
+  "pluginExecutorUnavailableDescription": "O fornecedor está indisponível. Os recursos remotos ainda podem estar em execução. Consulte as definições do executor.",
+  "pluginExecutorCleanupPendingDescription": "A remoção dos recursos não foi confirmada. Reponha o ambiente para tentar a limpeza novamente.",
+  "pluginExecutorDeadlinePassedDescription": "O prazo de expiração passou, mas o fornecedor ainda indica que este ambiente está em execução.",
+  "pluginExecutorRetryCleanup": "Tentar a limpeza novamente"
 }

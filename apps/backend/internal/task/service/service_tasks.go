@@ -234,6 +234,9 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	if found, result, err := s.findTaskByExternalIDIfPresent(ctx, req.WorkspaceID, externalID); found {
 		return result, err
 	}
+	if err := s.validateRequestedExecutorAdmission(ctx, req); err != nil {
+		return CreateTaskResult{}, err
+	}
 
 	prepared, err := s.prepareTaskForCreation(ctx, req, externalID)
 	if err != nil {

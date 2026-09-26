@@ -129,10 +129,13 @@ export async function enablePlugin(id: string, options?: ApiRequestOptions) {
 
 // disablePlugin transitions a plugin to disabled (POST /api/plugins/:id/disable).
 export async function disablePlugin(id: string, options?: ApiRequestOptions) {
-  return fetchJson<{ disabled: boolean }>(`${BASE}/${encodeURIComponent(id)}/disable`, {
-    ...options,
-    init: { ...(options?.init ?? {}), method: "POST" },
-  });
+  return fetchJson<{ disabled: boolean; remote_resources_may_remain: boolean }>(
+    `${BASE}/${encodeURIComponent(id)}/disable`,
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "POST" },
+    },
+  );
 }
 
 // uninstallPlugin removes a plugin's registration (DELETE /api/plugins/:id).

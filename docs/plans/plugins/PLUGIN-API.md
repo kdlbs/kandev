@@ -3,6 +3,11 @@
 This is the frozen interface every frontend + example task builds against. Do not
 diverge without updating this file.
 
+Remote executor providers are a server-side Go/gRPC plugin capability. They do
+not add browser APIs or grants. See the
+[remote executor provider contract](GRPC-CONTRACT.md#remote-executor-providers)
+and [manifest declarations](../../public/plugins-manifest.md#remote-executor-providers).
+
 ## Loading model
 
 1. Backend boot payload gains `plugins: ActivePlugin[]` where

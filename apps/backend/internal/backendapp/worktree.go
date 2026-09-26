@@ -113,6 +113,14 @@ func (a *environmentDestroyerAdapter) DestroyKubernetesEnvironment(ctx context.C
 	return a.lifecycle.DestroyKubernetesEnvironment(ctx, env)
 }
 
+func (a *environmentDestroyerAdapter) DestroyPluginExecutorEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+	return a.lifecycle.DestroyPluginExecutorEnvironment(ctx, env)
+}
+
+func (a *environmentDestroyerAdapter) GetPluginExecutorEnvironmentStatus(ctx context.Context, record *models.ExecutorRunning) (*models.PluginExecutorEnvironmentStatus, error) {
+	return a.lifecycle.GetPluginExecutorEnvironmentStatus(ctx, record)
+}
+
 func (a *environmentDestroyerAdapter) DestroyContainer(ctx context.Context, containerID string) error {
 	return a.lifecycle.DestroyContainer(ctx, containerID)
 }

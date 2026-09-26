@@ -17,7 +17,7 @@ including local, container, and SSH execution boundaries.
 ## Ownership
 
 This system owns executor profiles, environment construction, SSH lifecycle,
-runtime resource admission, process and port safety, agent process lifetime
+runtime resource admission, plugin-provided remote environments, process and port safety, agent process lifetime
 across a backend restart, and executor-specific failure and recovery contracts.
 
 ## Exclusions
@@ -33,6 +33,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 
 
 
+- [Remote executor plugins](requirements/remote-executor-plugins.md)
 - [Agent survival across a backend restart](requirements/agent-survival-across-restart.md)
 - [Survived session state and capability gating](requirements/agent-survival-session-state.md)
 - [Standalone control-server ownership](requirements/standalone-control-server-ownership.md)
@@ -51,6 +52,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 
 
 
+- [Remote executor plugins](system-design/remote-executor-plugins.md)
 - [Agent survival across a backend restart Part 1](system-design/agent-survival-across-restart-01.md)
 - [Agent survival across a backend restart Part 2](system-design/agent-survival-across-restart-02.md)
 - [Agent survival across a backend restart Part 3](system-design/agent-survival-across-restart-03.md)
@@ -85,6 +87,8 @@ security, admission, and recovery guarantees remain applicable.
 
 - [Agents](../agents/README.md): supplies the agent command and profile.
 - [Tasks](../tasks/README.md): owns task-scoped execution lifecycle.
+- [Plugins](../plugins/README.md): owns package activation and dispatch. Executor
+  providers follow the current [remote executor contract](system-design/remote-executor-plugins.md).
 
 The compact task indicator contract is extracted into
 [requirements](requirements/task-status-indicators.md) and

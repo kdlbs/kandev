@@ -48,6 +48,7 @@ export function ExecutorSettingsButton({
     env,
     container,
     ssh,
+    pluginExecutor,
     kubernetes,
     kubernetesLoaded,
     kubernetesError,
@@ -82,6 +83,7 @@ export function ExecutorSettingsButton({
         env={env}
         container={container}
         ssh={ssh}
+        pluginExecutor={pluginExecutor}
         kubernetes={kubernetes}
         kubernetesLoaded={kubernetesLoaded}
         kubernetesError={kubernetesError}

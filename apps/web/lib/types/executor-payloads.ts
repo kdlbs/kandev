@@ -1,6 +1,6 @@
 // Executor and environment payload types for WS events
 
-import type { ExecutorType } from "./executor";
+import type { ExecutorProvider, ExecutorType } from "./executor";
 
 export type ExecutorPayload = {
   id: string;
@@ -9,6 +9,7 @@ export type ExecutorPayload = {
   status: string;
   is_system: boolean;
   config?: Record<string, string>;
+  provider?: ExecutorProvider;
   created_at?: string;
   updated_at?: string;
 };
@@ -19,6 +20,8 @@ export type ExecutorProfilePayload = {
   name: string;
   mcp_policy?: string;
   config?: Record<string, string>;
+  secret_fields?: Record<string, boolean>;
+  provider?: ExecutorProvider;
   prepare_script: string;
   cleanup_script: string;
   created_at?: string;

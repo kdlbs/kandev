@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -28,6 +29,14 @@ type EnvironmentDestroyer interface {
 	// GetContainerLiveStatus returns a real-time snapshot of a Docker container,
 	// or nil when the executor type doesn't have a container layer.
 	GetContainerLiveStatus(ctx context.Context, containerID string) (*ContainerLiveStatus, error)
+}
+
+type pluginExecutorEnvironmentDestroyer interface {
+	DestroyPluginExecutorEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+}
+
+type pluginExecutorEnvironmentStatusReader interface {
+	GetPluginExecutorEnvironmentStatus(ctx context.Context, record *models.ExecutorRunning) (*models.PluginExecutorEnvironmentStatus, error)
 }
 
 // ContainerLiveStatus mirrors lifecycle.ContainerLiveStatus for the task service
@@ -115,6 +124,24 @@ func (s *Service) GetTaskEnvironmentLiveStatus(ctx context.Context, taskID strin
 		return nil, nil
 	}
 	return s.envDestroyer.GetContainerLiveStatus(ctx, env.ContainerID)
+}
+
+// GetPluginExecutorEnvironmentStatus returns a safe live status projection for
+// the task's latest plugin-backed executor, when one is present.
+func (s *Service) GetPluginExecutorEnvironmentStatus(ctx context.Context, taskID string) (*models.PluginExecutorEnvironmentStatus, error) {
+	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil || env == nil || env.ExecutorType != string(models.ExecutorTypePluginRemote) {
+		return nil, err
+	}
+	running, err := s.latestRunningForTask(ctx, taskID)
+	if err != nil || running == nil {
+		return nil, err
+	}
+	reader, ok := s.envDestroyer.(pluginExecutorEnvironmentStatusReader)
+	if !ok {
+		return &models.PluginExecutorEnvironmentStatus{State: "unknown", Retention: "unknown", Reason: "provider_unavailable"}, nil
+	}
+	return reader.GetPluginExecutorEnvironmentStatus(ctx, running)
 }
 
 // GetSSHLiveStatus returns the SSH-specific runtime info for the task's
@@ -357,13 +384,16 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 			return fmt.Errorf("push branch before reset: %w", err)
 		}
 	}
-
-	if err := s.teardownEnvironmentResources(ctx, env); err != nil {
+	cleanupCtx := ctx
+	if resetJobID != "" {
+		cleanupCtx = recoveryclaim.WithTaskCleanupJob(cleanupCtx, recoveryclaim.TaskCleanupJob{ID: resetJobID, TaskID: taskID})
+	}
+	if err := s.teardownEnvironmentResources(cleanupCtx, env); err != nil {
 		releaseReset(models.TaskResourceCleanupStateFailed, err)
 		return err
 	}
 
-	if err := s.taskEnvironments.DeleteTaskEnvironment(ctx, env.ID); err != nil {
+	if err := s.taskEnvironments.DeleteTaskEnvironment(cleanupCtx, env.ID); err != nil {
 		releaseReset(models.TaskResourceCleanupStateFailed, err)
 		return fmt.Errorf("delete task environment row: %w", err)
 	}
@@ -413,6 +443,18 @@ func (s *Service) teardownEnvironmentResourcesWithWorktrees(
 		}
 		return nil
 	}
+	if env.ExecutorType == string(models.ExecutorTypePluginRemote) {
+		if err := contextError(); err != nil {
+			return err
+		}
+		pluginDestroyer, ok := s.envDestroyer.(pluginExecutorEnvironmentDestroyer)
+		if !ok {
+			return errors.New("plugin executor environment destroyer is unavailable")
+		}
+		if err := pluginDestroyer.DestroyPluginExecutorEnvironment(ctx, env); err != nil {
+			errs = append(errs, fmt.Errorf("destroy plugin executor environment %s: %w", env.ID, err))
+		}
+	}
 	if env.ContainerID != "" {
 		if err := contextError(); err != nil {
 			return err
@@ -443,7 +485,8 @@ func (s *Service) teardownEnvironmentResourcesWithWorktrees(
 }
 
 func environmentHasResources(env *models.TaskEnvironment, includeWorktrees bool, worktreeIDs []string) bool {
-	return env.ContainerID != "" || env.SandboxID != "" || (includeWorktrees && len(worktreeIDs) > 0)
+	return env.ContainerID != "" || env.SandboxID != "" || env.ExecutorType == string(models.ExecutorTypePluginRemote) ||
+		(includeWorktrees && len(worktreeIDs) > 0)
 }
 
 func (s *Service) destroyEnvironmentWorktrees(

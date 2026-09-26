@@ -512,6 +512,7 @@ function shouldShowExecutorEnvironmentControls(executorType?: string | null): bo
     case "sprites":
     case "ssh":
     case "k8s":
+    case "plugin_remote":
       return true;
     default:
       return false;

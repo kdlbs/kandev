@@ -80,6 +80,7 @@ import {
   replaceKubernetesProfileConfig,
 } from "@/components/settings/kubernetes-config";
 import { kubernetesExecutorInvalidReason } from "@/components/settings/kubernetes-validation";
+import { PluginExecutorProfilePage } from "@/components/settings/plugin-executor-profile-page";
 import {
   useKubernetesAdminAccess,
   useKubernetesDiagnostics,
@@ -219,7 +220,13 @@ export default function ProfileEditPage({ profileId }: { profileId: string }) {
     );
   }
 
-  return (
+  return result.executor.type === "plugin_remote" ? (
+    <PluginExecutorProfilePage
+      key={result.profile.id}
+      executor={result.executor}
+      profile={result.profile}
+    />
+  ) : (
     <ProfileEditForm key={result.profile.id} executor={result.executor} profile={result.profile} />
   );
 }

@@ -2426,5 +2426,21 @@
   "changeWorkflowObservedSuccess": "刷新任務後確認工作流程已更改。",
   "changeWorkflow": "更改工作流程...",
   "changeWorkflowForSelectedTasks": "更改所選任務的工作流程",
-  "changeWorkflowRefreshTask": "刷新任務"
+  "changeWorkflowRefreshTask": "刷新任務",
+  "pluginExecutorStateStarting": "正在啟動",
+  "pluginExecutorStateExpired": "已過期",
+  "pluginExecutorStateCleanupPending": "清理待處理",
+  "pluginExecutorStateUnavailable": "不可用",
+  "pluginExecutorStateUnknown": "未知",
+  "pluginExecutorRetentionLabel": "工作區保留狀態",
+  "pluginExecutorRetentionPersistent": "工作區資料會保留。",
+  "pluginExecutorRetentionComputeBound": "計算資源到期時，工作區資料可能會遺失。",
+  "pluginExecutorRetentionUnknown": "工作區保留狀態未知。",
+  "pluginExecutorExpiresAt": "到期時間",
+  "pluginExecutorExpiredDescription": "工作區已過期，無法繼續使用。重設環境後才能重新開始。",
+  "pluginExecutorUnknownDescription": "提供者無法確認環境是否仍然存在。環境的到期時間已過。",
+  "pluginExecutorUnavailableDescription": "提供者無法使用。遠端資源可能仍在執行。請查看執行器設定。",
+  "pluginExecutorCleanupPendingDescription": "尚未確認資源已移除。重設環境以重試清理。",
+  "pluginExecutorDeadlinePassedDescription": "到期時間已過，但提供者仍回報此環境正在執行。",
+  "pluginExecutorRetryCleanup": "重試清理"
 }

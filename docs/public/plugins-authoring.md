@@ -725,6 +725,51 @@ by the plugin. There is no Host cleanup callback. Typical calls are
 `host.InvokeUtilityAgent(ctx, prompt)`; each fails with `PermissionDenied`
 when its manifest capability is absent.
 
+## Remote executor providers
+
+A managed plugin can declare one or more remote executor providers. Set
+`capabilities.executor_provider: true` and add `executor_providers` to its
+manifest. The [manifest reference](plugins-manifest.md#remote-executor-providers)
+defines the supported fields and schema subset.
+
+The provider plugin owns remote compute operations: profile validation,
+provisioning, recovery, attachment, inspection, connection leases, and cleanup.
+Kandev owns agentctl, ACP, task lifecycle, authorization, workspace
+materialization, and durable resource inventory. The provider must return the
+same resource for a retry with the same operation identity. It must not replace
+an unknown operation with a new allocation.
+
+Implement the complete `pluginsdk.ExecutorProviderPlugin` interface. Its seven
+methods use the `kandev.plugin.v1` gRPC contract documented in
+[GRPC-CONTRACT.md](../plans/plugins/GRPC-CONTRACT.md#remote-executor-providers).
+Older plugins remain compatible because this SDK extension is optional. A
+manifest that declares a provider without the complete interface is unavailable.
+
+Profile secrets arrive in the operation's transient `SecretValues` map. Keep
+them out of provider resource state, logs, command arguments, and returned URLs.
+Resource state is durable, bounded, schema-validated, and must contain only
+non-secret values. Use operation-bound Host callbacks to checkpoint resource
+state, report progress, and read the host's agentctl runtime artifact.
+
+Return short-lived HTTPS connection leases. Put credentials in HTTP or
+WebSocket headers, never in the URL. Remote environments must reach the
+configured Kandev API URL so agentctl can complete normal session work. Kandev
+validates endpoint addresses and TLS certificates for each connection.
+
+Declare the provider contract version and every resource-state version the
+plugin can read. Keep the plugin available while it owns resources. Disable,
+uninstall, or upgrade actions can be blocked while cleanup or compatibility is
+unresolved. Kandev retains cleanup inventory until the provider confirms that a
+resource is absent.
+
+The rollout flag is `features.remoteExecutorPlugins`. It is disabled in shipped
+profiles and requires a Kandev restart after an administrator enables it. A
+disabled flag prevents provider operations.
+
+The maintained fixture's [provider implementation](../../apps/backend/cmd/plugin-fixture/executor_provider.go)
+and [contract tests](../../apps/backend/cmd/plugin-fixture/executor_provider_test.go)
+show a deterministic provider and HTTPS lease service.
+
 ## Task-oriented recipes
 
 The snippets below are deliberately small. Keep the full template Makefile and

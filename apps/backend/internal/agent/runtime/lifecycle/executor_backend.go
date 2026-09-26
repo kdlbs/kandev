@@ -199,6 +199,7 @@ const (
 	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
 	MetadataKeyAgentConfigBundles       = "agent_config_bundles"
 	MetadataKeyExecutorProfileID        = "executor_profile_id"
+	MetadataKeyPluginExecutor           = "plugin_executor"
 	MetadataKeyGitUserName              = "git_user_name"
 	MetadataKeyGitUserEmail             = "git_user_email"
 	MetadataKeyImageTagOverride         = "image_tag_override"
@@ -391,6 +392,7 @@ var persistentMetadataKeys = map[string]bool{
 	"executor_mcp_policy":               true,
 	"sprites_network_policy_rules":      true,
 	MetadataKeyExecutorProfileID:        true,
+	MetadataKeyPluginExecutor:           true,
 	MetadataKeyImageTagOverride:         true,
 	MetadataKeyAllowUserNamespaces:      true,
 	MetadataKeyContainerID:              true,
@@ -655,6 +657,9 @@ type ExecutorCreateRequest struct {
 	// ReleaseRuntimeInventory removes this launch's provisional row after every
 	// created resource was rolled back. Implementations must use execution CAS.
 	ReleaseRuntimeInventory func(context.Context) error
+	// PluginExecutor contains a host-authorized provider/profile snapshot. Secret
+	// values are transient and must never be copied to runtime metadata.
+	PluginExecutor *PluginExecutorLaunch
 }
 
 // ExecutorInstance represents an agentctl instance created by a runtime.

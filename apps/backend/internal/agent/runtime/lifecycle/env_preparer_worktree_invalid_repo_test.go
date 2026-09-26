@@ -99,7 +99,7 @@ func TestWorktreePreparer_MultiRepo_ValidateRepository_FailsOnNonGitPath(t *test
 	if strings.Contains(res.ErrorMessage, staleSecondary) {
 		t.Errorf("ErrorMessage = %q, must not expose the offending absolute path %q", res.ErrorMessage, staleSecondary)
 	}
-	if !strings.Contains(res.ErrorMessage, "***") {
+	if !strings.Contains(res.ErrorMessage, "[path-redacted]") {
 		t.Errorf("ErrorMessage = %q, want credential-safe sanitization marker", res.ErrorMessage)
 	}
 }
