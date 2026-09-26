@@ -369,3 +369,21 @@ it("redacts guard summaries after a failed restore", () => {
   );
   expect(document.body.textContent).not.toContain("summary-secret-fixture");
 });
+
+it("withholds restore during a retryable guard in the composer", () => {
+  render(
+    <StateProvider>
+      <SessionRecoveryCard
+        model={{ sessionId: "session", kind: "generic" }}
+        actions={{
+          ...actions,
+          guardDetails: { kind: "session_recovery_in_progress", retryable: true },
+          recoveryError: new Error("busy"),
+        }}
+        onNewSession={vi.fn()}
+      />
+    </StateProvider>,
+  );
+  expect(screen.queryByTestId("recovery-restore-workspace-button")).toBeNull();
+  expect(screen.getByTestId(RESUME_BUTTON)).toBeTruthy();
+});

@@ -66,6 +66,7 @@ function BootstrapRecoveryActions({
   busyAction,
   hasBranchRecovery,
   blocked,
+  canRestore,
   onResume,
   onRestore,
   onFreshStart,
@@ -75,6 +76,7 @@ function BootstrapRecoveryActions({
   busyAction: SessionRecoveryBusyAction;
   hasBranchRecovery: boolean;
   blocked: boolean;
+  canRestore: boolean;
   onResume: () => void;
   onRestore: () => void;
   onFreshStart: () => void;
@@ -111,7 +113,7 @@ function BootstrapRecoveryActions({
     });
   return (
     <RecoveryActions
-      actions={actions}
+      actions={canRestore ? actions : actions.filter((action) => action.kind !== "restore")}
       busy={busyAction !== null}
       busyAction={busyAction}
       blocked={blocked}
@@ -259,6 +261,7 @@ function RecoveryCardContent({
   busyAction,
   hasBranchRecovery,
   blocked,
+  canRestore,
   onResume,
   onRestore,
   onFreshStart,
@@ -272,6 +275,7 @@ function RecoveryCardContent({
   busyAction: SessionRecoveryBusyAction;
   hasBranchRecovery: boolean;
   blocked: boolean;
+  canRestore: boolean;
   onResume: () => void;
   onRestore: () => void;
   onFreshStart: () => void;
@@ -308,6 +312,7 @@ function RecoveryCardContent({
         busyAction={busyAction}
         hasBranchRecovery={hasBranchRecovery}
         blocked={blocked}
+        canRestore={canRestore}
         onResume={onResume}
         onRestore={onRestore}
         onFreshStart={onFreshStart}
@@ -413,6 +418,7 @@ function BootstrapRecoveryControls({
         busyAction={effectiveBusyAction}
         hasBranchRecovery={branchDetails !== null}
         blocked={Boolean(guardDetails && !guardDetails.retryable)}
+        canRestore={!guardDetails}
         onResume={handleResume}
         onRestore={() => void handleRestore()}
         onFreshStart={handleFreshStart}

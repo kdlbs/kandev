@@ -57,6 +57,7 @@ vi.mock("react-i18next", () => ({
         "task:recoveryMoreOptions": MORE_OPTIONS,
         "task:couldnTStartASession": "Session recovery failed",
         "task:failedToResumeSession": "Failed to resume session",
+        "task:failedToRestoreWorkspace": "Failed to restore workspace",
       })[key] ?? key,
   }),
 }));
@@ -188,7 +189,7 @@ describe("SessionStoppedBanner basics", () => {
     );
 
     expect(screen.getByText("Executor environment is unavailable")).toBeTruthy();
-    expect(screen.getByText("Docker is offline")).toBeTruthy();
+    expect(screen.getByText(/Docker is offline/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Restart" })).toBeTruthy();
 
     expect(screen.getByTestId(FRESH_BUTTON_TEST_ID)).toBeTruthy();
@@ -247,44 +248,70 @@ it("does not claim a deleted profile when there is no session", () => {
   expect(screen.queryByText("The agent profile no longer exists.")).toBeNull();
 });
 
-it("redacts a workspace failure after a retryable guard", async () => {
-  mocks.request
-    .mockRejectedValueOnce(
-      new WebSocketRequestError("busy", "CONFLICT", {
-        kind: "session_recovery_in_progress",
-        retryable: true,
-      }),
-    )
-    .mockRejectedValueOnce(new Error("Restore failed: token=stopped-secret-fixture"));
-  render(<BannerHarness mode="recoverable" />);
-  fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));
-  fireEvent.click(await screen.findByTestId(RESTORE_BUTTON_TEST_ID));
-  await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2));
-  await waitFor(() =>
-    expect(screen.getByTestId(RESTORE_BUTTON_TEST_ID)).toHaveProperty("disabled", false),
+it("redacts retained workspace diagnostics alongside a retryable guard", () => {
+  render(
+    <BannerHarness
+      mode="recoverable"
+      recoveryActions={guardRecoveryActions(
+        "Restore failed: token=stopped-secret-fixture",
+        "restore_workspace",
+      )}
+    />,
   );
   expect(document.body.textContent).not.toContain("stopped-secret-fixture");
 });
 
 const RESTORE_BUTTON_TEST_ID = "recovery-restore-workspace-button";
 
-it("keeps a localized explanation when guard diagnostics sanitize to empty", () => {
-  render(
-    <BannerHarness
-      mode="recoverable"
-      recoveryActions={{
-        busyAction: null,
-        recoveryError: new Error("\u001b[31m\u001b[0m"),
-        branchDetails: null,
-        guardDetails: { kind: "session_recovery_in_progress", retryable: true },
-        recoveryNotice: null,
-        manualRecoveryFailure: { operation: "resume" },
-        handleRecover: vi.fn().mockResolvedValue(false),
-        handleRestore: vi.fn().mockResolvedValue(undefined),
-        handleRetry: vi.fn().mockResolvedValue(false),
-        handleNewBranch: vi.fn().mockResolvedValue(false),
-      }}
-    />,
+it.each([
+  ["resume", "Failed to resume session"],
+  ["restore_workspace", "Failed to restore workspace"],
+] as const)(
+  "keeps an operation-specific explanation for empty %s diagnostics",
+  (operation, expected) => {
+    render(
+      <BannerHarness
+        mode="recoverable"
+        recoveryActions={guardRecoveryActions("\u001b[31m\u001b[0m", operation)}
+      />,
+    );
+    expect(screen.getByTestId("session-recovery-error").textContent).toBe(expected);
+  },
+);
+
+it("withholds workspace restore while a retryable startup guard owns the session", async () => {
+  mocks.request.mockRejectedValueOnce(
+    new WebSocketRequestError("busy", "CONFLICT", {
+      kind: "session_recovery_in_progress",
+      retryable: true,
+    }),
   );
-  expect(screen.getByTestId("session-recovery-error").textContent).toBe("Failed to resume session");
+  render(<BannerHarness mode="recoverable" />);
+  fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));
+  await screen.findByTestId("session-recovery-error");
+  expect(screen.queryByTestId(RESTORE_BUTTON_TEST_ID)).toBeNull();
+  expect(screen.getByTestId(RESUME_BUTTON_TEST_ID)).toHaveProperty("disabled", false);
 });
+
+it("redacts the stopped-session primary message", () => {
+  render(<BannerHarness mode="recoverable" message="Failure: token=primary-secret-fixture" />);
+  expect(document.body.textContent).not.toContain("primary-secret-fixture");
+});
+
+function guardRecoveryActions(
+  message: string,
+  operation: "resume" | "restore_workspace",
+): NonNullable<SessionStoppedBannerProps["recoveryActions"]> {
+  return {
+    busyAction: null,
+    recoveryError: new Error(message),
+    branchDetails: null,
+    guardDetails: { kind: "session_recovery_in_progress", retryable: true },
+    recoveryNotice: null,
+    manualRecoveryFailure: { operation },
+    handleRecover: vi.fn().mockResolvedValue(false),
+    handleRestore: vi.fn().mockResolvedValue(undefined),
+    handleRetry: vi.fn().mockResolvedValue(false),
+    handleNewBranch: vi.fn().mockResolvedValue(false),
+  };
+}

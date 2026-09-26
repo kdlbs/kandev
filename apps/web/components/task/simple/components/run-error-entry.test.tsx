@@ -5,7 +5,10 @@ import { WebSocketRequestError } from "@/lib/ws/client";
 import { RunErrorEntry } from "./run-error-entry";
 
 const RECOVERY_ERROR_ID = "run-error-recovery-error";
-const { requestMock } = vi.hoisted(() => ({ requestMock: vi.fn() }));
+const { requestMock, recoveryContext } = vi.hoisted(() => ({
+  requestMock: vi.fn(),
+  recoveryContext: { value: null as { sessionId: string; model: null; pending: null } | null },
+}));
 const RUN_ERROR_RESUME_TEST_ID = "run-error-resume-button";
 
 vi.mock("@/components/state-provider", () => ({
@@ -17,8 +20,14 @@ vi.mock("@/lib/state/slices/office/selectors", () => ({
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: requestMock }),
 }));
+vi.mock("@/components/task/chat/session-recovery-context", () => ({
+  useSessionComposerRecovery: () => recoveryContext.value,
+}));
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  recoveryContext.value = null;
+});
 
 function runError(failureCode: string): RunError {
   return {
@@ -33,6 +42,13 @@ function runError(failureCode: string): RunError {
     remediationUrl: "https://opencode.ai/workspace/demo_workspace/go",
   };
 }
+
+it("keeps run remediation available when the composer has no recovery model", () => {
+  recoveryContext.value = { sessionId: "session-1", model: null, pending: null };
+  render(<RunErrorEntry taskId="task-1" error={runError("provider_auth_required")} />);
+  expect(screen.getByTestId("remediation-link")).toBeTruthy();
+  expect(screen.getByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeTruthy();
+});
 
 describe("RunErrorEntry", () => {
   it("renders managed npm policy failures on the runtime recovery surface", () => {
@@ -165,4 +181,30 @@ it("keeps an explanation when branch error sanitization removes all content", as
   fireEvent.click(screen.getByTestId(RUN_ERROR_RESUME_TEST_ID));
   const error = await screen.findByTestId(RECOVERY_ERROR_ID);
   expect(error.querySelector("p")?.textContent).toBe("Failed to resume session");
+});
+
+it("withholds workspace restore for a retryable run recovery guard", async () => {
+  requestMock.mockRejectedValueOnce(
+    new WebSocketRequestError("busy", "CONFLICT", {
+      kind: "session_recovery_in_progress",
+      retryable: true,
+    }),
+  );
+  render(<RunErrorEntry taskId="task-1" error={runError("provider_auth_required")} />);
+  fireEvent.click(screen.getByTestId(RUN_ERROR_RESUME_TEST_ID));
+  await screen.findByTestId(RECOVERY_ERROR_ID);
+  expect(screen.queryByTestId("run-error-restore-workspace-button")).toBeNull();
+});
+
+it("labels a workspace restoration failure separately from a resume failure", async () => {
+  requestMock.mockRejectedValueOnce(new Error("Provider unavailable"));
+  render(<RunErrorEntry taskId="task-1" error={runError("provider_auth_required")} />);
+  fireEvent.click(screen.getByTestId(RUN_ERROR_RESUME_TEST_ID));
+  const restore = await screen.findByTestId("run-error-restore-workspace-button");
+  requestMock.mockRejectedValueOnce(new Error("\u001b[31m\u001b[0m"));
+  fireEvent.click(restore);
+  await screen.findByText("Failed to restore workspace");
+  expect(screen.getByTestId(RECOVERY_ERROR_ID).querySelector("p")?.textContent).toBe(
+    "Failed to restore workspace",
+  );
 });

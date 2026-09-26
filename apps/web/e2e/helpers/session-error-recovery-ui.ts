@@ -159,6 +159,7 @@ export function uniformRecoveryCases() {
   resolvedFailureScenario();
   for (const scenario of [
     { name: "failed startup", state: "FAILED", kind: "generic" },
+    { name: "startup guard", state: "FAILED", kind: "generic" },
     { name: "interrupted waiting", state: "WAITING_FOR_INPUT", kind: "generic" },
     { name: "runtime installation", state: "FAILED", kind: "managed_runtime_npm_resolution" },
     { name: "provider quota", state: "FAILED", kind: "provider_quota_limited" },
@@ -199,6 +200,7 @@ export function uniformRecoveryCases() {
           error_output: "Authorization: Bearer synthetic-private-value\nConnection refused",
         },
       });
+      if (scenario.name === "startup guard") await refuseRecoveryWithGuard(testPage, sessionId);
       await testPage.goto(`/t/${task.id}`);
       const card = testPage.getByTestId("session-recovery-card");
       await expect(card).toBeVisible();
@@ -235,6 +237,12 @@ export function uniformRecoveryCases() {
         path: testInfo.outputPath("uniform-recovery.png"),
         fullPage: true,
       });
+      if (scenario.name === "startup guard") {
+        await card.getByTestId("recovery-resume-button").click();
+        await expect(card.getByTestId("session-recovery-error")).toBeVisible();
+        await expect(card.getByTestId("recovery-resume-button")).toBeEnabled();
+        await expect(card.getByTestId("recovery-restore-workspace-button")).toHaveCount(0);
+      }
       await testPage.reload();
       await expect(card).toHaveCount(1);
     });
@@ -363,4 +371,39 @@ async function setDraftSessionError(
     },
     { sessionId, error, nextState },
   );
+}
+
+async function refuseRecoveryWithGuard(page: Page, sessionId: string) {
+  await page.routeWebSocket(/\/ws$/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      if (typeof message !== "string") return server.send(message);
+      for (const part of message.split("\n").filter(Boolean)) {
+        const frame = JSON.parse(part);
+        if (
+          frame.type === "request" &&
+          frame.action === "session.recover" &&
+          frame.payload?.session_id === sessionId
+        ) {
+          socket.send(
+            JSON.stringify({
+              id: frame.id,
+              type: "error",
+              action: frame.action,
+              payload: {
+                code: "CONFLICT",
+                message: "Session recovery is in progress",
+                details: {
+                  kind: "session_recovery_in_progress",
+                  retryable: true,
+                  session_id: sessionId,
+                },
+              },
+            }),
+          );
+        } else server.send(part);
+      }
+    });
+    server.onMessage((message) => socket.send(message));
+  });
 }

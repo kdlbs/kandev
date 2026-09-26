@@ -449,7 +449,7 @@ not their own DOM hierarchy or alert roles.
 | Provider quota | No new mutation invented | Existing provider/model/reset guidance; use supplied eligible operations; absent action metadata retains manual Resume with wait/prerequisite guidance; an explicitly empty action list retains guidance only |
 | Missing profile | Existing profile-selection/new-session flow | No resume with deleted profile |
 | Branch loss | Existing confirmed continue-on-new-branch flow | Preserve branch guard and confirmation |
-| Nonretryable recovery guard | None | Localized refusal; never bypass with fresh start |
+| Startup recovery guard | Retry if retryable; otherwise none | No workspace restore; never bypass a nonretryable refusal |
 | Unknown status | Existing status check | Do not assume session is safe to resume |
 | Resolved historical failure | None | Safe details/copy only |
 

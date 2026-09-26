@@ -351,3 +351,23 @@ calculation to stay within the complexity limit, both affected suites passed all
 recovery actions, localization keys and desktop/mobile composition are unchanged.
 The preceding browser runs remain applicable to those unchanged contracts.
 Fresh exact-head CI/review verification remains externally pending after delivery.
+
+### Guard policy and remaining review concerns
+
+CodeRabbit review 5325683699 prompted operation-specific restore failure copy,
+consistent primary-message sanitization, and restoration of the startup guard's
+no-Restore policy across bootstrap, composer, stopped and legacy run surfaces.
+Related regression coverage also found that a legacy run's remediation could be
+hidden by a composer context with no active model; only a real model now owns it.
+The system design records the existing startup-guard action restriction.
+
+Eight new regressions reproduced these gaps before correction. The four affected
+component suites passed 52 tests. Desktop and native mobile managed recovery
+suites each passed eight cases without retries, including an intercepted startup
+guard refusal. Targeted lint, typecheck and specification validation passed.
+Greptile's latest assessment is 5/5 on a3cfb3e4a; it predates these final fixes.
+
+CI on that head failed the Kubernetes recovery-after-backend-restart case
+(run 36236750854, job 108390907369): resume returned an error and the composer
+remained absent. Local reproduction and final-head CI/review remain pending;
+these local UI results do not waive that failed required check.

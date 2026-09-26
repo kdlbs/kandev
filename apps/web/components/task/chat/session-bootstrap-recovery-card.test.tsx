@@ -227,3 +227,11 @@ it("keeps the resume accessible name while pending", () => {
   render(<SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />);
   expect(screen.getByTestId(RESUME_BUTTON_TEST_ID).getAttribute("aria-label")).toBe("task:resume");
 });
+
+it("withholds restore during a retryable startup guard", () => {
+  recoveryActionState.guardDetails = { retryable: true };
+  recoveryActionState.recoveryError = new Error("busy");
+  render(<SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />);
+  expect(screen.queryByTestId("recovery-restore-workspace-button")).toBeNull();
+  expect(screen.getByTestId(RESUME_BUTTON_TEST_ID)).toBeTruthy();
+});

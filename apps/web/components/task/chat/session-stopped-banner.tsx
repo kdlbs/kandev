@@ -72,7 +72,7 @@ function useStoppedRecoveryChoices(
         else void handleRecover("fresh_start");
       },
     });
-  if (recoveryError)
+  if (recoveryError && !props.actions.guardDetails)
     choices.push({
       kind: "restore",
       label: t("task:restoreReadOnlyWorkspace"),
@@ -97,7 +97,11 @@ function stoppedRecoveryCause(
   const message = actions.guardDetails
     ? sanitizeSessionErrorDetails(actions.recoveryError?.message, 240)
     : "";
-  return message || t("task:failedToResumeSession");
+  const fallback =
+    actions.manualRecoveryFailure?.operation === "restore_workspace"
+      ? t("task:failedToRestoreWorkspace")
+      : t("task:failedToResumeSession");
+  return message || fallback;
 }
 
 function StoppedSessionContent(
@@ -124,7 +128,7 @@ function StoppedSessionContent(
             <p className="wrap-anywhere text-sm">
               {completed
                 ? t("task:sessionCompleted")
-                : (props.message ?? t("task:agentHasStopped"))}
+                : sanitizeSessionErrorDetails(props.message, 240) || t("task:agentHasStopped")}
             </p>
             {props.sessionId && !profileExists && (
               <p className="mt-1 text-xs text-muted-foreground">
@@ -152,7 +156,7 @@ function StoppedSessionContent(
               blocked={blocked}
             />
             <SessionErrorDetails>
-              {[props.detail, recoveryError?.message].filter(Boolean).join("\n")}
+              {[props.message, props.detail, recoveryError?.message].filter(Boolean).join("\n")}
             </SessionErrorDetails>
           </div>
         </div>

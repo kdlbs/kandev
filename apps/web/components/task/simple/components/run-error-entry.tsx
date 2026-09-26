@@ -56,6 +56,22 @@ function TypedRunLaunchErrorEntry({
   );
 }
 
+type LegacyRunErrorProps = {
+  agentName: string;
+  error: RunError;
+  isActive: boolean;
+  onRecover: (action: SessionRecoveryAction) => Promise<boolean>;
+  onRestore: () => void;
+  onNewBranch: () => void;
+  recoveryError: Error | null;
+  recoveryNotice: string | null;
+  branchDetails: BranchRecoveryDetails | null;
+  busyAction: SessionRecoveryAction | "restore" | null;
+  blocked: boolean;
+  canRestore: boolean;
+  failureLabel: string;
+};
+
 function LegacyRunErrorEntry({
   agentName,
   error,
@@ -68,19 +84,9 @@ function LegacyRunErrorEntry({
   branchDetails,
   busyAction,
   blocked,
-}: {
-  agentName: string;
-  error: RunError;
-  isActive: boolean;
-  onRecover: (action: SessionRecoveryAction) => Promise<boolean>;
-  onRestore: () => void;
-  onNewBranch: () => void;
-  recoveryError: Error | null;
-  recoveryNotice: string | null;
-  branchDetails: BranchRecoveryDetails | null;
-  busyAction: SessionRecoveryAction | "restore" | null;
-  blocked: boolean;
-}) {
+  canRestore,
+  failureLabel,
+}: LegacyRunErrorProps) {
   const { t } = useTranslation();
   const actions: RecoveryChoice[] = [
     {
@@ -96,7 +102,7 @@ function LegacyRunErrorEntry({
       onClick: () => void onRecover("fresh_start"),
     },
   ];
-  if (recoveryError)
+  if (recoveryError && canRestore)
     actions.push({
       kind: "restore",
       label: t("task:restoreReadOnlyWorkspace"),
@@ -130,9 +136,8 @@ function LegacyRunErrorEntry({
           <div data-testid="run-error-recovery-error">
             <p role="status">
               {branchDetails || blocked
-                ? sanitizeSessionErrorDetails(recoveryError.message, 240) ||
-                  t("task:failedToResumeSession")
-                : t("task:failedToResumeSession")}
+                ? sanitizeSessionErrorDetails(recoveryError.message, 240) || failureLabel
+                : failureLabel}
             </p>
             <SessionErrorDetails>{recoveryError.message}</SessionErrorDetails>
           </div>
@@ -176,6 +181,7 @@ export function RunErrorEntry({
     branchDetails,
     guardDetails,
     recoveryNotice,
+    manualRecoveryFailure,
     handleRecover,
     handleRestore,
     handleNewBranch,
@@ -185,7 +191,7 @@ export function RunErrorEntry({
     errorStamp: error.errorStamp,
   });
 
-  if (composerOwner)
+  if (composerOwner?.model)
     return (
       <div className="min-w-0 py-3 text-xs text-muted-foreground">
         <p>{t("task:theAgentStoppedWithAnError")}</p>
@@ -231,6 +237,12 @@ export function RunErrorEntry({
       branchDetails={branchDetails}
       busyAction={busyAction}
       blocked={Boolean(guardDetails && !guardDetails.retryable)}
+      canRestore={!guardDetails}
+      failureLabel={
+        manualRecoveryFailure?.operation === "restore_workspace"
+          ? t("task:failedToRestoreWorkspace")
+          : t("task:failedToResumeSession")
+      }
     />
   );
 }

@@ -91,7 +91,7 @@ export function useRecoveryChoices(
       testId: "recovery-new-branch-button",
       onClick: () => void actions.handleNewBranch(),
     });
-  return choices;
+  return actions.guardDetails ? choices.filter((choice) => choice.kind !== "restore") : choices;
 }
 
 export function useRecoveryPresentation(
