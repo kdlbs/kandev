@@ -97,7 +97,7 @@ test.describe("Sidebar personal task colors", () => {
     const colorMenu = testPage.getByRole("menuitem", { name: /color/i });
     await expect(colorMenu).toBeVisible();
     await colorMenu.hover();
-    const blueMenuItem = testPage.getByRole("menuitem", { name: "Blue", exact: true });
+    const blueMenuItem = testPage.getByRole("menuitemradio", { name: "Blue", exact: true });
     await expect(blueMenuItem).toBeVisible();
     await blueMenuItem.click();
 

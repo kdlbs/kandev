@@ -1403,6 +1403,11 @@ func (m *Manager) restartAgentProcess(
 	if err != nil {
 		return err
 	}
+	if runtime := preparation.agentConfig.Runtime(); runtime != nil {
+		if err := m.prepareCursorMCPAuth(execution, preparation.profileInfo, execution.ExecutorType, runtime.ProjectMCPStrategy); err != nil {
+			return err
+		}
+	}
 
 	// 1. Close WebSocket streams (updates + workspace). Use per-stream Close
 	// methods rather than client.Close — the latter is a terminal drain
@@ -1504,6 +1509,7 @@ func (m *Manager) stopAgentProcessForRestart(ctx context.Context, execution *Age
 
 type agentRestartPreparation struct {
 	agentConfig   agents.Agent
+	profileInfo   *AgentProfileInfo
 	commands      agentCommands
 	runtimeConfig models.SessionRuntimeConfig
 }
@@ -1519,11 +1525,11 @@ func (m *Manager) prepareAgentRestart(
 		zap.String("task_id", execution.TaskID),
 		zap.String("session_id", execution.SessionID))
 
-	agentConfig, err := m.getAgentConfigForExecution(execution)
+	agentConfig, profileInfo, err := m.getAgentConfigAndProfileForExecution(ctx, execution)
 	if err != nil {
 		return agentRestartPreparation{}, fmt.Errorf("failed to get agent config for restart: %w", err)
 	}
-	commands, err := m.buildFreshAgentCommand(ctx, execution, agentConfig)
+	commands, err := m.buildFreshAgentCommandWithProfile(ctx, execution, agentConfig, profileInfo)
 	if err != nil {
 		return agentRestartPreparation{}, fmt.Errorf("failed to rebuild agent command for restart: %w", err)
 	}
@@ -1535,6 +1541,7 @@ func (m *Manager) prepareAgentRestart(
 	}
 	return agentRestartPreparation{
 		agentConfig:   agentConfig,
+		profileInfo:   profileInfo,
 		commands:      commands,
 		runtimeConfig: runtimeConfig,
 	}, nil
@@ -2797,7 +2804,15 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 		}
 		profileInfo = pi
 	}
+	return m.buildFreshAgentCommandWithProfile(ctx, execution, agentConfig, profileInfo)
+}
 
+func (m *Manager) buildFreshAgentCommandWithProfile(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	profileInfo *AgentProfileInfo,
+) (agentCommands, error) {
 	model := ""
 	autoApprove := false
 	permissionValues := make(map[string]bool)

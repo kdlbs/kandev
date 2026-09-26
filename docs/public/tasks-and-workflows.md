@@ -102,11 +102,33 @@ For a keyboard move, press `Cmd/Ctrl+K`, search for **Move to**, and select a de
 
 Moves keep the normal reachability, authorization, WIP, archive, workspace, and active-session rules. A move waits for a running agent to finish, and its options survive queueing and backend restarts. Instructions require an active target session or a destination that auto-starts an agent. Pull-request draft and review status use the PR step's automation. For the agent tool contract, see [Automation and MCP](automation-and-mcp.md#task-mcp).
 
+## Change a task's workflow
+
+Choose **Change workflow...** from a single task's card, sidebar, task actions,
+or command-palette menu. Select a destination workflow and the step where this
+task will enter. The form previews the destination's session and settings before
+you submit. The task keeps its identity, description, repositories, and existing
+conversations.
+
+When a destination workflow has fixed agent profiles, the form can map each
+profile to a compatible profile for this task. These replacements affect this
+task only. Reset a row to use the workflow's profile. Submitting replaces this
+task's previous workflow-agent mappings with the form's current choices. The
+form shows existing conversation relationships as read-only workflow details.
+
+If the task changed while the form was open, refresh its assignment and review
+the form again. If the server response is uncertain, the form refreshes the task
+and blocks another submission until you review the refreshed assignment. If the
+refresh confirms the requested workflow change, the form reports success;
+otherwise, review the current assignment and form choices before deciding whether
+to retry. A multi-task selection keeps the separate bulk workflow action and does
+not support per-task profile mappings.
+
 ## Task actions from the command palette
 
 While a task is open, `Cmd/Ctrl+K` offers the task actions available from its sidebar
 menu, including Pin/Unpin, Color, Priority, Edit, Rename, Create subtask, Nest under,
-Link, Move to, Send to workflow, Archive, and Delete. Detach and plugin actions
+Link, Move to, Change workflow..., Archive, and Delete. Detach and plugin actions
 appear when applicable. These commands target the open task, even when the search
 also shows other tasks. Duplicate remains disabled.
 
@@ -627,6 +649,16 @@ On desktop and tablet, drag a card up or down within its column to reorder it re
 
 On phones, Kanban focuses one workflow and one step at a time. The board navigator always names both; open it to choose either level, or use the previous/next controls and horizontal swipe to move between steps. Choosing a workflow makes it the active workflow for board actions and task creation. Tap a card to open that task directly. Its **More options** menu opens as a touch-sized bottom surface; **Move to** changes the task's workflow or step. **Edit** can still rename a task after work starts, while its original prompt remains locked.
 
+### Color several tasks
+
+Use a bulk color when a group of tasks should share the same personal marker:
+
+1. On desktop, select sidebar rows with `Cmd/Ctrl`-click or select cards on the board. On a phone, choose **Select tasks** above the Kanban board, then tap the cards.
+2. Open **Color** from the menu for a selected sidebar row or from the board selection bar.
+3. Choose one of the seven colors. Choose **None** to clear existing manual colors from the selection.
+
+The selection and active task remain in place, and the colors persist across reloads. Automatic color rules still take precedence over a manual color in the visible sidebar marker; the picker explains this while preserving the saved manual choice. If part of a large selection cannot be saved, Kandev keeps the completed changes, restores the unsaved tasks, and leaves the selection available to retry.
+
 Regular Kanban does not currently expose label editing or label filters. Do not design a supported Kanban process around labels.
 
 <details>
@@ -655,7 +687,11 @@ The session limit is off by default. Manual **Start**, **Resume**, or sending a 
 
 If session capacity blocks a start, Kandev keeps the selected destination and retries automatically. See [Agents and profiles](agents-and-profiles.md) for profile compatibility and recovery.
 
-Parked sessions share the task workspace. Resuming one while a destination session is active can create concurrent writers. Wait until the active session finishes first.
+Sessions parked by workflow transitions share the task workspace. Opening one
+can resume it when recovery rules and session capacity allow. This does not
+change the selected workflow step or primary session. Multiple sessions can
+write to the same workspace at the same time, so review their activity before
+resuming a session while another session is active.
 
 ### Change session options by workflow step
 

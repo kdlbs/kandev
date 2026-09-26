@@ -271,12 +271,20 @@ export type WorkflowMoveEntryOptions = {
   skip_step_prompt?: boolean;
 };
 
+export type WorkflowChangePayload = {
+  expected_workflow_id: string;
+  expected_step_id: string;
+  expected_updated_at: string;
+  agent_overrides: Record<string, string>;
+};
+
 export type MoveTaskPayload = {
   workflow_id: string;
   workflow_step_id: string;
   /** @deprecated Server computes arrival position per AC.28; this field is transmitted but ignored. */
   position?: number;
   entry_options?: WorkflowMoveEntryOptions | null;
+  workflow_change?: WorkflowChangePayload | null;
 };
 
 /** Move response fields added by the one-shot entry-options transport. */

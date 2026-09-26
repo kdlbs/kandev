@@ -2,6 +2,7 @@ import { expect, type Page, type Route } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { seedActionThreads, ThreadActionsPage } from "./threads-task-actions-helpers";
+import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 
 // @covers AC-TASKS-THREADS-ACTIONS-002.5, AC-TASKS-THREADS-ACTIONS-003.4
 export async function failedActionOutcomes(
@@ -10,7 +11,7 @@ export async function failedActionOutcomes(
   seed: SeedData,
   mobile: boolean,
 ) {
-  const { a, b, destination } = await seedActionThreads(api, seed);
+  const { a, b, destination, destinationStep } = await seedActionThreads(api, seed);
   const before = await api.getTask(a.id);
   const ui = new ThreadActionsPage(page, mobile);
   await api.saveUserSettings({ confirm_task_archive: true });
@@ -55,14 +56,18 @@ export async function failedActionOutcomes(
       },
     },
     {
-      action: "Send to workflow",
-      path: "/api/v1/tasks/bulk-move",
+      action: "Change workflow",
+      path: `/api/v1/tasks/${a.id}/move`,
       method: "POST",
-      error: "Failed to move task",
+      error:
+        "The result is not confirmed. The task was refreshed. Review the current assignment before trying again.",
       choose: async () => {
-        await ui.nested("Send to workflow");
-        await ui.nested(destination.name);
-        await ui.pick("Incoming");
+        await ui.pick("Change workflow...");
+        const changeWorkflow = new ChangeWorkflowPage(page, mobile);
+        await expect(changeWorkflow.form).toBeVisible();
+        await changeWorkflow.chooseWorkflow(destination.id);
+        await changeWorkflow.chooseStep(destinationStep.id);
+        await changeWorkflow.submit();
       },
     },
     {
@@ -100,6 +105,10 @@ export async function failedActionOutcomes(
       workflow_step_id: before.workflow_step_id,
     });
     await expect(ui.column(b.id)).toHaveCount(1);
+    if (scenario.action === "Change workflow") {
+      await ui.press(page.getByTestId("change-workflow-refresh-task"));
+      await ui.press(page.getByTestId("change-workflow-cancel"));
+    }
   }
   await ui.open(a.id);
   await ui.nested("Link");

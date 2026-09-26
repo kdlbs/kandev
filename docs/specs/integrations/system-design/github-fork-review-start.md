@@ -39,6 +39,16 @@ does not authorize execution.
 
 ## Identity and auto-start token
 
+`CheckReviewWatch` receives lightweight PRs from GitHub search and enriches
+untracked results with `GetPR` before publishing review events. Enrichment
+must carry the full response's head and base repository identity, head and
+base revisions, mergeability details, and maintainer modification permission
+alongside the existing branch and diff fields. A PR with branch names but no
+head repository identity still needs enrichment. If the detail fetch fails or
+the provider has no head identity, the event retains incomplete identity and
+the launch decision remains fail-closed. Search-result target identity remains
+the repository used to look up the PR.
+
 `buildReviewTaskRequest` compares the PR head owner and repository name with the
 target owner and name using case-insensitive GitHub identity. If both identities
 are present and equal, it creates the normal one-shot auto-start token. If the
@@ -77,10 +87,11 @@ creation and launch behavior therefore remains unchanged for fork PR links.
 
 ## Verification
 
-Backend tests cover same-repository auto-start tokens, fork and missing-head
-identity suppression, both review-watch auto-start paths, rejection at the
-central automatic launch boundary, and successful manual start. Existing
-browser tests continue to prove manual PR-link launch from a fork head.
+Backend tests cover search-result enrichment through review event creation,
+same-repository auto-start tokens, fork and missing-head identity suppression,
+both review-watch auto-start paths, rejection at the central automatic launch
+boundary, and successful manual start. Existing browser tests continue to
+prove manual PR-link launch from a fork head.
 
 ## Related decisions
 

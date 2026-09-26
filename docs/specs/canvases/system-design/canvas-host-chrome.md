@@ -19,6 +19,7 @@ geometry. The runtime lifecycle and authentication remain unchanged.
 | --- | --- |
 | 006.10, 006.11 | Single canvas host header |
 | 006.1-.6, 007.1-.3, 007.5-.6 | Responsive composition and state preservation below |
+| 007.5, 007.9, 007.10 | Startup-failure cause propagation |
 
 ## Single canvas host header
 
@@ -50,9 +51,38 @@ runtime when actions, status, or viewport width change.
 Delivery and browser coverage are in
 [work order 03](../../../plans/canvas-same-origin-auth/task-03-panel-toolbars.md).
 
+## Startup-failure cause propagation
+
+The guest bootstrap already reports why startup failed. The host must carry that
+cause to the state panel instead of collapsing every failure onto the
+release-unavailable state.
+
+Name the reported causes in one host-facing union owned by the web-app startup
+contract: a guest-reported `document_error`, an unreachable runtime capability
+API, and an absent acknowledgement at the startup deadline. The first two come
+from the guest message; the last is observed by the host, which never invents a
+cause it did not observe. A browser failure before the bootstrap runs produces
+no guest result, so `WebAppFrame` reports the host-observed `timeout`. The host
+cannot distinguish that case from another missing acknowledgement.
+
+`WebAppFrame` settles each startup attempt with either readiness or one of those
+causes, and its error callback carries the cause. `CanvasPage` forwards it
+unchanged. `CanvasHostRoute` records the cause and enters a runtime-startup-failure
+state that is separate from the release-unavailable state. Release status keeps
+producing the release-unavailable state, so a valid release is never described as
+unavailable.
+
+`CanvasHostStatePanel` resolves the runtime-startup-failure description from the
+recorded cause and keeps the existing Retry and release actions. Host request
+failures keep their current state and continue to display the returned error text.
+
 ## Verification
 
 Work order 03 defines component and browser evidence for desktop Dockview,
 standalone navigation, phone actions, state announcements, and Retry. Runtime
 startup and authentication checks remain in work orders 01 and 02.
 No backend, persistence, permission, or observability changes are introduced.
+
+Startup-failure cause propagation is verified by component tests in
+`web-app-frame.test.tsx`, `canvas-host-route.test.tsx`, and
+`canvas-host-components.test.tsx`. No backend change is introduced.

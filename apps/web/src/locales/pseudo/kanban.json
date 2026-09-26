@@ -94,7 +94,6 @@
   "selectRepository": "Śēĺēćţ ŕēƥōśĩţōŕŷ",
   "selectTask": "Śēĺēćţ ţàśķ {{title}}",
   "selectWorkflow": "Śēĺēćţ ŵōŕķƒĺōŵ",
-  "sendToWorkflow": "Śēńď ţō ŵōŕķƒĺōŵ",
   "selectedFilterCount_one": "{{label}}: {{count}} śēĺēćţēď",
   "selectedFilterCount_other": "{{label}}: {{count}} śēĺēćţēď",
   "sentryIssue": "Śēńţŕŷ Ĩśśũē",
@@ -129,5 +128,10 @@
   "boardSort": "Ɓōàŕď śōŕţ",
   "boardSortCreatedDesc": "Ńēŵēśţ ƒĩŕśţ",
   "boardSortPriorityDesc": "Ƥŕĩōŕĩţŷ",
-  "priorityFilter": "Ƥŕĩōŕĩţŷ ƒĩĺţēŕ"
+  "priorityFilter": "Ƥŕĩōŕĩţŷ ƒĩĺţēŕ",
+  "bulkSelected_one": "{{count}} śēĺēćţēď",
+  "bulkSelected_other": "{{count}} śēĺēćţēď",
+  "bulkActions": "Àćţĩōńś",
+  "selectTasks": "Śēĺēćţ ţàśķś",
+  "cancelTaskSelection": "Ćàńćēĺ śēĺēćţĩōń"
 }

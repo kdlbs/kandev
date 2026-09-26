@@ -381,8 +381,12 @@ func runDirectCommandOutput(ctx context.Context, command agents.Command) (string
 	if len(argv) == 0 {
 		return "", errors.New("runtime update command is empty")
 	}
+	env := filteredInstallEnv()
+	if err := managedruntime.PrepareNPMProjectPrefix(argv); err != nil {
+		return "", errors.New("managed npm project prefix could not be prepared")
+	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Env = filteredInstallEnv()
+	cmd.Env = env
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -399,7 +403,8 @@ func (u *hostRuntimeUpdater) RunUpdate(
 }
 
 func (u *hostRuntimeUpdater) npxCacheRoot(ctx context.Context) (string, error) {
-	output, err := u.executor.Output(ctx, agents.NewCommand("npm", "config", "get", "cache"))
+	args := append(managedruntime.NPMProjectPrefixArgs(), "config", "get", "cache")
+	output, err := u.executor.Output(ctx, agents.NewCommand(append([]string{"npm"}, args...)...))
 	if err != nil {
 		return "", fmt.Errorf("resolve npm cache root: %w", err)
 	}
@@ -471,8 +476,12 @@ func runDirectCommand(ctx context.Context, command agents.Command, onChunk func(
 	if len(argv) == 0 {
 		return errors.New("runtime update command is empty")
 	}
+	env := filteredInstallEnv()
+	if err := managedruntime.PrepareNPMProjectPrefix(argv); err != nil {
+		return errors.New("managed npm project prefix could not be prepared")
+	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Env = filteredInstallEnv()
+	cmd.Env = env
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err

@@ -11,6 +11,7 @@ import { TaskExternalLinkDialog } from "@/components/task/task-external-link-dia
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
+import { ChangeWorkflowDialog } from "@/components/task/change-workflow-dialog";
 import type { Task } from "@/components/kanban-card";
 import type { useTaskActionsMenu, TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 import { hydrateEditedTask } from "@/hooks/domains/kanban/use-kanban-actions";
@@ -170,6 +171,7 @@ export function TaskActionsMenuDialogs({
           menu={menu}
         />
       )}
+      <ChangeWorkflowDialogSurface taskId={taskId} workspaceId={workspaceId} menu={menu} />
       <TaskArchiveConfirmation
         {...confirmationTarget}
         open={menu.showArchiveConfirm}
@@ -235,5 +237,21 @@ export function TaskActionsMenuDialogs({
         />
       )}
     </>
+  );
+}
+
+function ChangeWorkflowDialogSurface({
+  taskId,
+  workspaceId,
+  menu,
+}: Pick<TaskActionsMenuDialogsProps, "taskId" | "workspaceId" | "menu">) {
+  return (
+    <ChangeWorkflowDialog
+      open={menu.showChangeWorkflow}
+      onOpenChange={menu.setShowChangeWorkflow}
+      taskId={taskId}
+      workspaceId={workspaceId}
+      focusReturnRef={menu.triggerRef}
+    />
   );
 }

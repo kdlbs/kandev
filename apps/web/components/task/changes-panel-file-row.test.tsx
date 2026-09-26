@@ -1,9 +1,17 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { cleanup, render, fireEvent } from "@testing-library/react";
+import { cleanup, render, fireEvent, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { FileRow } from "./changes-panel-file-row";
 
 const responsive = vi.hoisted(() => ({ isFinePointer: true, isMobile: false }));
+const clipboardMocks = vi.hoisted(() => ({ copyToClipboard: vi.fn() }));
+const toastMocks = vi.hoisted(() => ({ toast: vi.fn() }));
+
+vi.mock("@/lib/utils/copy-to-clipboard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/utils/copy-to-clipboard")>();
+  return { ...actual, copyToClipboard: clipboardMocks.copyToClipboard };
+});
+vi.mock("@/components/toast-provider", () => ({ useToast: () => toastMocks }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => responsive,
@@ -11,11 +19,18 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 
 afterEach(() => {
   cleanup();
+  clipboardMocks.copyToClipboard.mockReset();
+  toastMocks.toast.mockReset();
   responsive.isFinePointer = true;
   responsive.isMobile = false;
 });
 
 const moreActionsLabel = "Show more actions";
+const unsafePathCases = [
+  { name: "newline", path: "packages/ui/src/line\nbreak.tsx" },
+  { name: "escape", path: "packages/ui/src/escape\u001b.tsx" },
+  { name: "delete", path: "packages/ui/src/delete\u007f.tsx" },
+];
 
 const noop = () => {};
 const noopSelect = () => false;
@@ -28,7 +43,7 @@ const baseFile = {
   oldPath: undefined,
 };
 
-function renderRow(path: string) {
+function renderRow(path: string, onOpenDiff = noop) {
   return render(
     <TooltipProvider>
       <ul>
@@ -36,7 +51,7 @@ function renderRow(path: string) {
           file={{ ...baseFile, path }}
           isPending={false}
           onSelect={noopSelect}
-          onOpenDiff={noop}
+          onOpenDiff={onOpenDiff}
           onStage={noop}
           onUnstage={noop}
           onDiscard={noop}
@@ -46,6 +61,68 @@ function renderRow(path: string) {
     </TooltipProvider>,
   );
 }
+
+describe("FileRow copy path", () => {
+  it("copies the repository-relative path from the desktop actions without opening the diff", () => {
+    const onOpenDiff = vi.fn();
+    const path = "packages/ui/src/button.tsx";
+    const { getByRole } = renderRow(path, onOpenDiff);
+
+    fireEvent.click(getByRole("button", { name: "Copy path" }));
+
+    expect(clipboardMocks.copyToClipboard).toHaveBeenCalledWith(path);
+    expect(onOpenDiff).not.toHaveBeenCalled();
+  });
+
+  it("copies the repository-relative path from the phone menu without opening the diff", async () => {
+    responsive.isFinePointer = false;
+    const onOpenDiff = vi.fn();
+    const path = "packages/ui/src/mobile-button.tsx";
+    const { getByRole, findByRole } = renderRow(path, onOpenDiff);
+
+    fireEvent.keyDown(getByRole("button", { name: moreActionsLabel }), { key: "Enter" });
+    const copyPath = await findByRole("menuitem", { name: "Copy path" });
+    fireEvent.click(copyPath);
+
+    expect(clipboardMocks.copyToClipboard).toHaveBeenCalledWith(path);
+    expect(onOpenDiff).not.toHaveBeenCalled();
+    expect(copyPath.className).toContain("min-h-11");
+  });
+
+  it.each(unsafePathCases)(
+    "refuses to copy a $name control-character path from the desktop actions",
+    async ({ path }) => {
+      const { getByRole } = renderRow(path);
+
+      fireEvent.click(getByRole("button", { name: "Copy path" }));
+
+      expect(clipboardMocks.copyToClipboard).not.toHaveBeenCalled();
+      await waitFor(() =>
+        expect(toastMocks.toast).toHaveBeenCalledWith({
+          description: "This path contains control characters and cannot be copied.",
+        }),
+      );
+    },
+  );
+
+  it.each(unsafePathCases)(
+    "refuses to copy a $name control-character path from the phone menu",
+    async ({ path }) => {
+      responsive.isFinePointer = false;
+      const { getByRole, findByRole } = renderRow(path);
+
+      fireEvent.keyDown(getByRole("button", { name: moreActionsLabel }), { key: "Enter" });
+      fireEvent.click(await findByRole("menuitem", { name: "Copy path" }));
+
+      expect(clipboardMocks.copyToClipboard).not.toHaveBeenCalled();
+      await waitFor(() =>
+        expect(toastMocks.toast).toHaveBeenCalledWith({
+          description: "This path contains control characters and cannot be copied.",
+        }),
+      );
+    },
+  );
+});
 
 describe("FileRow truncation (regression: path overlaps diff stats in narrow panel)", () => {
   it("file name span allows truncation so a long name does not overflow visually", () => {

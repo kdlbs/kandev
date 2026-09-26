@@ -290,7 +290,6 @@ export function ReviewDiffHeader({
     (file.repository_name ? undefined : fallbackBaseBranch);
   const toolbar = (
     <FileDiffToolbar
-      diff={file.diff}
       filePath={file.path}
       sessionId={sessionId}
       source={file.source}

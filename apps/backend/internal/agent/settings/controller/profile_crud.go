@@ -25,6 +25,10 @@ import (
 
 const dynamicProfileKind = "dynamic"
 
+func cursorMCPAuthEnabled(value *bool) bool {
+	return value == nil || *value
+}
+
 type CreateProfileRequest struct {
 	AgentID           string
 	Name              string
@@ -51,6 +55,7 @@ type CreateProfileRequest struct {
 	ProviderKind           string
 	ProviderBaseURL        string
 	ProviderAPIKeySecretID string
+	CursorMCPAuthEnabled   *bool
 	Dynamic                *dto.DynamicAgentProfileDTO
 }
 
@@ -104,6 +109,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		AllowIndexing:          req.AllowIndexing,
 		AutoApprove:            req.AutoApprove,
 		CLIPassthrough:         req.CLIPassthrough,
+		CursorMCPAuthEnabled:   cursorMCPAuthEnabled(req.CursorMCPAuthEnabled),
 		Enabled:                true,
 		CLIFlags:               cliFlags,
 		EnvVars:                envVarsFromDTO(req.EnvVars),
@@ -141,14 +147,15 @@ func (c *Controller) createDynamicProfile(
 		return nil, err
 	}
 	profile := &models.AgentProfile{
-		ID:               uuid.NewString(),
-		AgentID:          agent.ID,
-		Name:             strings.TrimSpace(req.Name),
-		AgentDisplayName: displayName,
-		Enabled:          true,
-		CLIFlags:         []models.CLIFlag{},
-		EnvVars:          []models.ProfileEnvVar{},
-		UserModified:     true,
+		ID:                   uuid.NewString(),
+		AgentID:              agent.ID,
+		Name:                 strings.TrimSpace(req.Name),
+		AgentDisplayName:     displayName,
+		Enabled:              true,
+		CursorMCPAuthEnabled: cursorMCPAuthEnabled(req.CursorMCPAuthEnabled),
+		CLIFlags:             []models.CLIFlag{},
+		EnvVars:              []models.ProfileEnvVar{},
+		UserModified:         true,
 	}
 	routes, err := c.validateDynamicCandidates(ctx, profile.ID, req.Dynamic)
 	if err != nil {
@@ -365,6 +372,7 @@ type UpdateProfileRequest struct {
 	ProviderKind           *string
 	ProviderBaseURL        *string
 	ProviderAPIKeySecretID *string
+	CursorMCPAuthEnabled   *bool
 	Dynamic                *dto.DynamicAgentProfileDTO
 	Force                  bool
 }
@@ -378,7 +386,7 @@ func enabledOnlyUpdate(req UpdateProfileRequest) bool {
 		req.FallbackModel == nil && req.AutoFallback == nil && req.RequireExactModel == nil && req.Mode == nil &&
 		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
 		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
-		req.CommandPrefix == nil && !req.touchesProvider() && req.Dynamic == nil
+		req.CommandPrefix == nil && !req.touchesProvider() && req.CursorMCPAuthEnabled == nil && req.Dynamic == nil
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -438,6 +446,9 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	if req.CLIPassthrough != nil {
 		profile.CLIPassthrough = *req.CLIPassthrough
+	}
+	if req.CursorMCPAuthEnabled != nil {
+		profile.CursorMCPAuthEnabled = *req.CursorMCPAuthEnabled
 	}
 	if err := validateRequireExactModelPolicy(profile.Model, profile.RequireExactModel, profile.CLIPassthrough, isDynamic); err != nil {
 		return nil, err
@@ -732,6 +743,7 @@ func duplicateClone(source *models.AgentProfile) *models.AgentProfile {
 		ProviderKind:               source.ProviderKind,
 		ProviderBaseURL:            source.ProviderBaseURL,
 		ProviderAPIKeySecretID:     source.ProviderAPIKeySecretID,
+		CursorMCPAuthEnabled:       source.CursorMCPAuthEnabled,
 		UserModified:               true,
 		Enabled:                    source.Enabled,
 		WorkspaceID:                source.WorkspaceID,
@@ -1218,14 +1230,15 @@ func (c *Controller) toAgentDTO(agent *models.Agent, profiles []*models.AgentPro
 	}
 	if agent.TUIConfig != nil {
 		result.TUIConfig = &dto.TUIConfigDTO{
-			Command:         agent.TUIConfig.Command,
-			DisplayName:     agent.TUIConfig.DisplayName,
-			Model:           agent.TUIConfig.Model,
-			Description:     agent.TUIConfig.Description,
-			CommandArgs:     agent.TUIConfig.CommandArgs,
-			WaitForTerminal: agent.TUIConfig.WaitForTerminal,
-			MCPStrategy:     agent.TUIConfig.MCPStrategy,
-			Protocol:        agent.TUIConfig.Protocol,
+			Command:               agent.TUIConfig.Command,
+			DisplayName:           agent.TUIConfig.DisplayName,
+			Model:                 agent.TUIConfig.Model,
+			Description:           agent.TUIConfig.Description,
+			CommandArgs:           agent.TUIConfig.CommandArgs,
+			WaitForTerminal:       agent.TUIConfig.WaitForTerminal,
+			MCPStrategy:           agent.TUIConfig.MCPStrategy,
+			Protocol:              agent.TUIConfig.Protocol,
+			DisableBracketedPaste: agent.TUIConfig.DisableBracketedPaste,
 		}
 	}
 	if c.agentRegistry != nil {
@@ -1293,6 +1306,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		ProviderKind:           profile.ProviderKind,
 		ProviderBaseURL:        profile.ProviderBaseURL,
 		ProviderAPIKeySecretID: profile.ProviderAPIKeySecretID,
+		CursorMCPAuthEnabled:   profile.CursorMCPAuthEnabled,
 		UserModified:           profile.UserModified,
 		WorkspaceID:            profile.WorkspaceID,
 		CreatedAt:              profile.CreatedAt,

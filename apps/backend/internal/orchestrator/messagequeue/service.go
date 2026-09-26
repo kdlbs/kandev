@@ -3578,12 +3578,13 @@ func (s *Service) SnapshotSession(ctx context.Context, sessionID string) ([]Queu
 }
 
 type ownedSessionTransferRepository interface {
-	transferSessionOwned(context.Context, string, string, string) error
+	transferSessionOwned(context.Context, string, string, string, *QueueSessionIdentity, *QueueSessionIdentity) error
 }
 
 func (s *Service) transferRepositorySession(
 	ctx context.Context,
 	oldSessionID, newSessionID, operationID string,
+	source, destination *QueueSessionIdentity,
 ) error {
 	if operationID == "" {
 		return s.repo.TransferSession(ctx, oldSessionID, newSessionID)
@@ -3592,7 +3593,7 @@ func (s *Service) transferRepositorySession(
 	if !ok {
 		return errors.New("owned session transfer unavailable")
 	}
-	return repo.transferSessionOwned(ctx, oldSessionID, newSessionID, operationID)
+	return repo.transferSessionOwned(ctx, oldSessionID, newSessionID, operationID, source, destination)
 }
 
 // SnapshotSessionForIdentity captures queue and deferred-move state for one exact incarnation.
@@ -3678,25 +3679,45 @@ func (s *Service) transferRepositorySessionForTask(
 	ctx context.Context,
 	taskID, oldSessionID, newSessionID, operationID string,
 ) error {
+	transferred, err := s.transferRepositorySessionWithLiveIdentities(
+		ctx, taskID, oldSessionID, newSessionID, operationID,
+	)
+	if err != nil {
+		return err
+	}
+	if transferred {
+		return nil
+	}
+	return s.transferRepositorySession(ctx, oldSessionID, newSessionID, operationID, nil, nil)
+}
+
+func (s *Service) transferRepositorySessionWithLiveIdentities(
+	ctx context.Context,
+	taskID, oldSessionID, newSessionID, operationID string,
+) (bool, error) {
 	// Transfers that do not have a durable compensation record can use the
 	// immutable session identities. This fences a workflow handoff to one task
 	// and lets repositories reject a stale or cross-task destination. Durable
 	// transfers keep the owned-operation path because it also carries the
 	// compensation lease and operation token.
-	if taskID != "" && operationID == "" {
-		source, sourceErr := s.repo.ResolveSessionIdentity(ctx, taskID, oldSessionID)
-		if sourceErr != nil && !errors.Is(sourceErr, ErrSessionIdentityMismatch) {
-			return sourceErr
-		}
-		destination, destinationErr := s.repo.ResolveSessionIdentity(ctx, taskID, newSessionID)
-		if destinationErr != nil && !errors.Is(destinationErr, ErrSessionIdentityMismatch) {
-			return destinationErr
-		}
-		if sourceErr == nil && destinationErr == nil {
-			return s.repo.TransferSessionIdentities(ctx, source, destination)
-		}
+	if taskID == "" {
+		return false, nil
 	}
-	return s.transferRepositorySession(ctx, oldSessionID, newSessionID, operationID)
+	source, sourceErr := s.repo.ResolveSessionIdentity(ctx, taskID, oldSessionID)
+	if sourceErr != nil && !errors.Is(sourceErr, ErrSessionIdentityMismatch) {
+		return false, sourceErr
+	}
+	destination, destinationErr := s.repo.ResolveSessionIdentity(ctx, taskID, newSessionID)
+	if destinationErr != nil && !errors.Is(destinationErr, ErrSessionIdentityMismatch) {
+		return false, destinationErr
+	}
+	if sourceErr != nil || destinationErr != nil {
+		return false, nil
+	}
+	if operationID == "" {
+		return true, s.repo.TransferSessionIdentities(ctx, source, destination)
+	}
+	return true, s.transferRepositorySession(ctx, oldSessionID, newSessionID, operationID, &source, &destination)
 }
 
 type attachmentCleanupRepository interface {

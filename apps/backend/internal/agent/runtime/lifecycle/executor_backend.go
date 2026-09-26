@@ -196,6 +196,7 @@ const (
 	MetadataKeyRemoteContributions      = "remote_contributions"
 	MetadataKeyContributionDestinations = "contribution_destinations"
 	MetadataKeyComparisonTargets        = "comparison_targets"
+	MetadataKeyExecutorType             = "executor_type"
 	MetadataKeyIsRemote                 = "is_remote"
 	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
 	MetadataKeyAgentConfigBundles       = "agent_config_bundles"
@@ -348,37 +349,40 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHReclaimTaskDir:       true,
 
 	// Kubernetes connection and exact resource inventory.
-	MetadataKeyKubernetesAuthMode:              true,
-	MetadataKeyKubernetesKubeconfigPath:        true,
-	MetadataKeyKubernetesKubeContext:           true,
-	MetadataKeyKubernetesConfigNamespace:       true,
-	MetadataKeyKubernetesRequestTimeoutSeconds: true,
-	MetadataKeyKubernetesNamespace:             true,
-	MetadataKeyKubernetesPodName:               true,
-	MetadataKeyKubernetesPodUID:                true,
-	MetadataKeyKubernetesMainContainer:         true,
-	MetadataKeyKubernetesPlatform:              true,
-	MetadataKeyKubernetesRuntimeWorkspaceMode:  true,
-	MetadataKeyKubernetesPVCName:               true,
-	MetadataKeyKubernetesPVCUID:                true,
-	MetadataKeyKubernetesPVCCreated:            true,
-	MetadataKeyKubernetesAgentctlRemotePort:    true,
-	MetadataKeyKubernetesAgentctlInstanceID:    true,
-	MetadataKeyKubernetesContainerRestartCount: true,
-	MetadataKeyKubernetesResourceInstanceID:    true,
-	MetadataKeyKubernetesResourceExecutorID:    true,
-	MetadataKeyKubernetesResourceProfileID:     true,
-	MetadataKeyKubernetesResourceTaskID:        true,
-	MetadataKeyKubernetesResourceSessionID:     true,
-	MetadataKeyKubernetesResourceEnvironmentID: true,
-	MetadataKeyKubernetesExecutorConfigHash:    true,
-	MetadataKeyKubernetesProfileConfigHash:     true,
-	MetadataKeyKubernetesTemplateHash:          true,
-	MetadataKeyKubernetesProfileSnapshot:       true,
-	MetadataKeyKubernetesInventoryState:        true,
+	MetadataKeyKubernetesAuthMode:               true,
+	MetadataKeyKubernetesKubeconfigPath:         true,
+	MetadataKeyKubernetesKubeContext:            true,
+	MetadataKeyKubernetesConfigNamespace:        true,
+	MetadataKeyKubernetesRequestTimeoutSeconds:  true,
+	MetadataKeyKubernetesNamespace:              true,
+	MetadataKeyKubernetesPodName:                true,
+	MetadataKeyKubernetesPodUID:                 true,
+	MetadataKeyKubernetesMainContainer:          true,
+	MetadataKeyKubernetesPlatform:               true,
+	MetadataKeyKubernetesRuntimeWorkspaceMode:   true,
+	MetadataKeyKubernetesPVCName:                true,
+	MetadataKeyKubernetesPVCUID:                 true,
+	MetadataKeyKubernetesPVCCreated:             true,
+	MetadataKeyKubernetesAgentctlRemotePort:     true,
+	MetadataKeyKubernetesAgentctlInstanceID:     true,
+	MetadataKeyKubernetesContainerRestartCount:  true,
+	metadataKubernetesTaskOwned:                 true,
+	agentkubernetes.MetadataKeyOwnershipVersion: true,
+	MetadataKeyKubernetesResourceInstanceID:     true,
+	MetadataKeyKubernetesResourceExecutorID:     true,
+	MetadataKeyKubernetesResourceProfileID:      true,
+	MetadataKeyKubernetesResourceTaskID:         true,
+	MetadataKeyKubernetesResourceSessionID:      true,
+	MetadataKeyKubernetesResourceEnvironmentID:  true,
+	MetadataKeyKubernetesExecutorConfigHash:     true,
+	MetadataKeyKubernetesProfileConfigHash:      true,
+	MetadataKeyKubernetesTemplateHash:           true,
+	MetadataKeyKubernetesProfileSnapshot:        true,
+	MetadataKeyKubernetesInventoryState:         true,
 
 	// Executor type marker
-	MetadataKeyIsRemote: true,
+	MetadataKeyExecutorType: true,
+	MetadataKeyIsRemote:     true,
 
 	// Executor profile / auth config
 	MetadataKeyCleanupScript:            true,
@@ -449,42 +453,44 @@ var sessionScopedMetadataKeys = map[string]bool{
 	// must not be inherited by a sibling session sharing the environment.
 	MetadataKeyOfficeAgentProfileID: true,
 
-	MetadataKeySSHRemoteSessionDir:             true,
-	MetadataKeySSHRemoteAgentctlPort:           true,
-	MetadataKeySSHRemoteAgentctlPID:            true,
-	MetadataKeySSHAgentctlInstanceID:           true,
-	MetadataKeySSHLocalForwardPort:             true,
-	MetadataKeySSHRemoteAgentctlURL:            true,
-	MetadataKeySSHRuntimeAPILocalURL:           true,
-	MetadataKeySSHRuntimeAPIRemotePort:         true,
-	MetadataKeyKubernetesAuthMode:              true,
-	MetadataKeyKubernetesKubeconfigPath:        true,
-	MetadataKeyKubernetesKubeContext:           true,
-	MetadataKeyKubernetesConfigNamespace:       true,
-	MetadataKeyKubernetesRequestTimeoutSeconds: true,
-	MetadataKeyKubernetesNamespace:             true,
-	MetadataKeyKubernetesPodName:               true,
-	MetadataKeyKubernetesPodUID:                true,
-	MetadataKeyKubernetesMainContainer:         true,
-	MetadataKeyKubernetesPlatform:              true,
-	MetadataKeyKubernetesRuntimeWorkspaceMode:  true,
-	MetadataKeyKubernetesPVCName:               true,
-	MetadataKeyKubernetesPVCUID:                true,
-	MetadataKeyKubernetesPVCCreated:            true,
-	MetadataKeyKubernetesAgentctlRemotePort:    true,
-	MetadataKeyKubernetesAgentctlInstanceID:    true,
-	MetadataKeyKubernetesContainerRestartCount: true,
-	MetadataKeyKubernetesResourceInstanceID:    true,
-	MetadataKeyKubernetesResourceExecutorID:    true,
-	MetadataKeyKubernetesResourceProfileID:     true,
-	MetadataKeyKubernetesResourceTaskID:        true,
-	MetadataKeyKubernetesResourceSessionID:     true,
-	MetadataKeyKubernetesResourceEnvironmentID: true,
-	MetadataKeyKubernetesExecutorConfigHash:    true,
-	MetadataKeyKubernetesProfileConfigHash:     true,
-	MetadataKeyKubernetesTemplateHash:          true,
-	MetadataKeyKubernetesProfileSnapshot:       true,
-	MetadataKeyKubernetesInventoryState:        true,
+	MetadataKeySSHRemoteSessionDir:              true,
+	MetadataKeySSHRemoteAgentctlPort:            true,
+	MetadataKeySSHRemoteAgentctlPID:             true,
+	MetadataKeySSHAgentctlInstanceID:            true,
+	MetadataKeySSHLocalForwardPort:              true,
+	MetadataKeySSHRemoteAgentctlURL:             true,
+	MetadataKeySSHRuntimeAPILocalURL:            true,
+	MetadataKeySSHRuntimeAPIRemotePort:          true,
+	MetadataKeyKubernetesAuthMode:               true,
+	MetadataKeyKubernetesKubeconfigPath:         true,
+	MetadataKeyKubernetesKubeContext:            true,
+	MetadataKeyKubernetesConfigNamespace:        true,
+	MetadataKeyKubernetesRequestTimeoutSeconds:  true,
+	MetadataKeyKubernetesNamespace:              true,
+	MetadataKeyKubernetesPodName:                true,
+	MetadataKeyKubernetesPodUID:                 true,
+	MetadataKeyKubernetesMainContainer:          true,
+	MetadataKeyKubernetesPlatform:               true,
+	MetadataKeyKubernetesRuntimeWorkspaceMode:   true,
+	MetadataKeyKubernetesPVCName:                true,
+	MetadataKeyKubernetesPVCUID:                 true,
+	MetadataKeyKubernetesPVCCreated:             true,
+	MetadataKeyKubernetesAgentctlRemotePort:     true,
+	MetadataKeyKubernetesAgentctlInstanceID:     true,
+	MetadataKeyKubernetesContainerRestartCount:  true,
+	metadataKubernetesTaskOwned:                 true,
+	agentkubernetes.MetadataKeyOwnershipVersion: true,
+	MetadataKeyKubernetesResourceInstanceID:     true,
+	MetadataKeyKubernetesResourceExecutorID:     true,
+	MetadataKeyKubernetesResourceProfileID:      true,
+	MetadataKeyKubernetesResourceTaskID:         true,
+	MetadataKeyKubernetesResourceSessionID:      true,
+	MetadataKeyKubernetesResourceEnvironmentID:  true,
+	MetadataKeyKubernetesExecutorConfigHash:     true,
+	MetadataKeyKubernetesProfileConfigHash:      true,
+	MetadataKeyKubernetesTemplateHash:           true,
+	MetadataKeyKubernetesProfileSnapshot:        true,
+	MetadataKeyKubernetesInventoryState:         true,
 }
 
 // ShouldPersistMetadataKey returns true if the given metadata key should
@@ -619,7 +625,10 @@ type RemoteInstanceRefresher interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID        string
+	InstanceID string
+	// ExecutorType is retained in execution metadata so recovered sessions can
+	// safely re-check host-local filesystem eligibility.
+	ExecutorType      string
 	TaskID            string
 	TaskTitle         string
 	SessionID         string
@@ -760,6 +769,12 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	for k, v := range ri.Metadata {
 		metadata[k] = v
 	}
+	executorType := req.ExecutorType
+	if executorType != "" {
+		metadata[MetadataKeyExecutorType] = executorType
+	} else {
+		delete(metadata, MetadataKeyExecutorType)
+	}
 
 	workspacePath := ri.WorkspacePath
 	if workspacePath == "" {
@@ -778,6 +793,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 
 	execution := &AgentExecution{
 		ID:                   ri.InstanceID,
+		ExecutorType:         executorType,
 		RunID:                req.Env["KANDEV_RUN_ID"],
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,

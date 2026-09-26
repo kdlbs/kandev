@@ -849,6 +849,15 @@ func (e *Executor) persistSessionFullRowIfCurrentState(
 	if isStopTerminalSessionState(current.State) {
 		return &SessionStateSupersededError{SessionID: session.ID, State: current.State}
 	}
+	if expected == models.TaskSessionStateStarting && current.State == models.TaskSessionStateRunning {
+		return fmt.Errorf(
+			"%w: session %s state changed from %s to %s before runtime persistence",
+			errSessionAdvancedToRunning,
+			session.ID,
+			expected,
+			current.State,
+		)
+	}
 	return fmt.Errorf(
 		"session %s state changed from %s to %s before runtime persistence",
 		session.ID,
@@ -1752,10 +1761,6 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 
 	if err := e.resolveLaunchEnvironment(launchCtx, req, execCfg.ProfileEnvVars, allRepos); err != nil {
 		return nil, err
-	}
-
-	if startAgent {
-		e.observeSessionCoresidency(launchCtx, sessionCoresidencySiteLaunch, task.ID, sessionID)
 	}
 
 	// Fast path: workspace already launched (executors_running row exists).

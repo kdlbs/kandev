@@ -82,6 +82,34 @@ func TestCreateCustomTUIAgent_CommandArgsPersisted(t *testing.T) {
 	}
 }
 
+func TestCreateCustomTUIAgent_DisableBracketedPasteReachesRuntimeAndStorage(t *testing.T) {
+	st := newFakeStore()
+	c := newCustomTUIController(t, st)
+
+	if _, err := c.CreateCustomTUIAgent(context.Background(), CreateCustomTUIAgentRequest{
+		DisplayName:           "Raw TUI",
+		Command:               "raw-tui",
+		DisableBracketedPaste: true,
+	}); err != nil {
+		t.Fatalf("CreateCustomTUIAgent: %v", err)
+	}
+
+	ag, ok := c.agentRegistry.Get("raw-tui")
+	if !ok {
+		t.Fatal("custom agent was not registered")
+	}
+	pt, ok := ag.(agents.PassthroughAgent)
+	if !ok {
+		t.Fatal("custom agent is not a passthrough agent")
+	}
+	if !pt.PassthroughConfig().DisableBracketedPaste {
+		t.Error("runtime DisableBracketedPaste = false, want true")
+	}
+	if !st.byName["raw-tui"].TUIConfig.DisableBracketedPaste {
+		t.Error("stored DisableBracketedPaste = false, want true")
+	}
+}
+
 // TestCreateCustomTUIAgent_NoCommandArgs keeps the existing behaviour intact
 // when the caller omits the field.
 func TestCreateCustomTUIAgent_NoCommandArgs(t *testing.T) {

@@ -38,6 +38,9 @@ type CreateCustomTUIAgentRequest struct {
 	// Protocol is the runtime kandev drives the command with
 	// (registry.CustomAgentProtocol*). Empty means terminal passthrough.
 	Protocol string
+	// DisableBracketedPaste selects paced unframed delivery for terminal TUIs
+	// that do not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool
 }
 
 // validateCustomAgentProtocol rejects a protocol/strategy pair the registry
@@ -92,14 +95,15 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 
 	// Register in the in-memory registry
 	if regErr := c.agentRegistry.RegisterCustomTUIAgent(registry.CustomTUIAgentSpec{
-		Slug:           slug,
-		DisplayName:    req.DisplayName,
-		Command:        req.Command,
-		Description:    req.Description,
-		Model:          req.Model,
-		CommandArgs:    req.CommandArgs,
-		MCPStrategyKey: req.MCPStrategy,
-		Protocol:       protocol,
+		Slug:                  slug,
+		DisplayName:           req.DisplayName,
+		Command:               req.Command,
+		Description:           req.Description,
+		Model:                 req.Model,
+		CommandArgs:           req.CommandArgs,
+		MCPStrategyKey:        req.MCPStrategy,
+		Protocol:              protocol,
+		DisableBracketedPaste: req.DisableBracketedPaste,
 	}); regErr != nil {
 		return nil, fmt.Errorf("failed to register agent: %w", regErr)
 	}
@@ -107,14 +111,15 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 	// Persist to DB
 	acp := protocol == registry.CustomAgentProtocolACP
 	tuiConfig := &models.TUIConfigJSON{
-		Command:         req.Command,
-		DisplayName:     req.DisplayName,
-		Model:           req.Model,
-		Description:     req.Description,
-		CommandArgs:     req.CommandArgs,
-		WaitForTerminal: true,
-		MCPStrategy:     req.MCPStrategy,
-		Protocol:        req.Protocol,
+		Command:               req.Command,
+		DisplayName:           req.DisplayName,
+		Model:                 req.Model,
+		Description:           req.Description,
+		CommandArgs:           req.CommandArgs,
+		WaitForTerminal:       true,
+		MCPStrategy:           req.MCPStrategy,
+		Protocol:              req.Protocol,
+		DisableBracketedPaste: req.DisableBracketedPaste,
 	}
 	agent := &models.Agent{
 		Name: slug,
@@ -139,11 +144,12 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 		profileName = req.DisplayName
 	}
 	profile := &models.AgentProfile{
-		AgentID:          agent.ID,
-		Name:             profileName,
-		AgentDisplayName: req.DisplayName,
-		Model:            "passthrough",
-		CLIPassthrough:   true,
+		AgentID:              agent.ID,
+		Name:                 profileName,
+		AgentDisplayName:     req.DisplayName,
+		Model:                "passthrough",
+		CLIPassthrough:       true,
+		CursorMCPAuthEnabled: true,
 	}
 	if acp {
 		// The probe supplies a default when the operator named no model; it
@@ -251,14 +257,15 @@ func (c *Controller) reregisterCustomTUIAgent(agent *models.Agent) error {
 // silently miss the other.
 func CustomAgentSpecFromStored(name string, cfg *models.TUIConfigJSON) registry.CustomTUIAgentSpec {
 	return registry.CustomTUIAgentSpec{
-		Slug:           name,
-		DisplayName:    cfg.DisplayName,
-		Command:        cfg.Command,
-		Description:    cfg.Description,
-		Model:          cfg.Model,
-		CommandArgs:    cfg.CommandArgs,
-		MCPStrategyKey: cfg.MCPStrategy,
-		Protocol:       registry.CustomAgentProtocol(cfg.Protocol),
+		Slug:                  name,
+		DisplayName:           cfg.DisplayName,
+		Command:               cfg.Command,
+		Description:           cfg.Description,
+		Model:                 cfg.Model,
+		CommandArgs:           cfg.CommandArgs,
+		MCPStrategyKey:        cfg.MCPStrategy,
+		Protocol:              registry.CustomAgentProtocol(cfg.Protocol),
+		DisableBracketedPaste: cfg.DisableBracketedPaste,
 	}
 }
 

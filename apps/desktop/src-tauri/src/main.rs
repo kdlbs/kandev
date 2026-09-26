@@ -1,5 +1,5 @@
 use kandev_desktop::{
-    backend, external_links, folder_picker,
+    backend, downloads, external_links, folder_picker,
     native_notifications::{self, NativeNotificationState},
     shell::{self, MenuAction, ZoomState},
     updater::{self, UpdaterState},
@@ -8,6 +8,7 @@ use kandev_desktop::{
 use std::thread;
 use tauri::{
     menu::{Menu, MenuItemBuilder, PredefinedMenuItem, Submenu},
+    webview::WebviewWindowBuilder,
     Emitter, Manager, RunEvent, WindowEvent,
 };
 
@@ -48,9 +49,29 @@ fn main() {
         .menu(build_menu)
         .on_menu_event(handle_menu_event)
         .setup(|app| {
-            let window = app
-                .get_webview_window(MAIN_WINDOW_LABEL)
-                .expect("main window should exist");
+            let window_config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|config| config.label == MAIN_WINDOW_LABEL)
+                .cloned()
+                .expect("main window config should exist");
+            let backend_state = app.state::<backend::BackendState>().inner().clone();
+            let download_tracker = downloads::DownloadTracker::default();
+            app.manage(download_tracker.clone());
+            let download_app = app.handle().clone();
+            let download_tracker_for_handler = download_tracker.clone();
+            let window = WebviewWindowBuilder::from_config(app, &window_config)?
+                .on_download(move |_webview, event| {
+                    downloads::handle_download_event(
+                        &download_app,
+                        &backend_state,
+                        &download_tracker_for_handler,
+                        event,
+                    )
+                })
+                .build()?;
             let state_path = app.path().app_data_dir()?.join(WINDOW_STATE_FILE);
             let window_state = WindowStateStore::new(state_path);
             if let Err(err) = window_state.restore(&window) {
