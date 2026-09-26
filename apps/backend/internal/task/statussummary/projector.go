@@ -324,6 +324,7 @@ func (p *Projector) Start(ctx context.Context) error {
 		events.BuildPermissionRequestWildcardSubject(),
 		events.BuildGitEventWildcardSubject(),
 		events.GitHubTaskPRUpdated,
+		events.GitHubTaskPRDeleted,
 		events.GitHubTaskCIOptionsUpdated,
 		events.MessageQueueStatusChanged,
 	}
@@ -424,12 +425,17 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		return fmt.Errorf("task status summary %q has no workspace", taskID)
 	}
 	pullRequestChanged := false
-	if event.Type == events.GitHubTaskCIOptionsUpdated && p.loadPullRequests != nil {
+	if (event.Type == events.GitHubTaskCIOptionsUpdated || event.Type == events.GitHubTaskPRDeleted) && p.loadPullRequests != nil {
 		before := derivePullRequestSummary(state)
 		if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
 			return err
 		}
-		pullRequestChanged = !equalPullRequestSummary(before, derivePullRequestSummary(state))
+		after := derivePullRequestSummary(state)
+		pullRequestChanged = !equalPullRequestSummary(before, after)
+		if event.Type == events.GitHubTaskPRDeleted && state.current != nil {
+			pullRequestChanged = pullRequestChanged ||
+				!equalPullRequestSummary(state.current.PullRequest, after)
+		}
 	}
 	taskErrorChanged := false
 	if p.loadTaskLaunchError != nil && isTaskErrorRefreshEvent(event.Type) {

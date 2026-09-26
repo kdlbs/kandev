@@ -293,6 +293,7 @@
   "limitsGithubPullRequestsAndIssues": "Limita os pull requests e as issues do GitHub mostrados ou importados nesta área de trabalho.",
   "loadingAccounts": "A carregar as contas...",
   "loadingOrganizations": "A carregar as organizações...",
+  "loadingPullRequests": "A carregar os pull requests...",
   "loadingRegisteredApps": "A carregar as Apps registadas...",
   "loadingTaskAccess": "A carregar o acesso das tarefas…",
   "localAndWorktreeTasksUseHost": "As tarefas Local e Worktree usam as credenciais Git ou SSH visíveis no anfitrião. As tarefas Docker, SSH e na nuvem usam as credenciais configuradas nesse executor.",

@@ -51,7 +51,14 @@ type KanbanCardMenuProps = KanbanCardActionProps & {
 
 function KanbanCardMenu(props: KanbanCardMenuProps) {
   const { t } = useTranslation();
-  const { effectiveMenuOpen, setMenuOpen, isDeleting, isArchiving, menuTriggerRef } = props;
+  const {
+    effectiveMenuOpen,
+    setMenuOpen,
+    isDeleting,
+    isArchiving,
+    menuTriggerRef,
+    onPRMenuOpenChange,
+  } = props;
   const { menuEntries } = props;
   const isProcessing = isDeleting || isArchiving;
 
@@ -61,6 +68,7 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
       onOpenChange={(open) => {
         if (!open && isProcessing) return;
         setMenuOpen(open);
+        onPRMenuOpenChange?.(open);
       }}
     >
       <DropdownMenuTrigger asChild>
@@ -90,6 +98,7 @@ export function KanbanCardActions({
   isDeleting,
   isArchiving,
   menuTriggerRef,
+  onPRMenuOpenChange,
 }: KanbanCardActionProps) {
   const { t } = useTranslation("common");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -179,6 +188,7 @@ export function KanbanCardActions({
         isArchiving={isArchiving}
         menuEntries={menuEntries}
         menuTriggerRef={menuTriggerRef}
+        onPRMenuOpenChange={onPRMenuOpenChange}
       />
     </div>
   );

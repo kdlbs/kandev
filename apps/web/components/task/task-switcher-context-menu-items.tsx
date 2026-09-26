@@ -10,7 +10,12 @@ import {
   IconPinFilled,
   IconTrash,
 } from "@tabler/icons-react";
-import { ContextMenuItem, ContextMenuSeparator } from "@kandev/ui/context-menu";
+import {
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubTrigger,
+} from "@kandev/ui/context-menu";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
 import {
   KanbanCardContextMenuItems,
@@ -37,6 +42,7 @@ import { TaskPriorityContextMenu } from "./task-priority-context-menu";
 import type { TaskContextMenuItemsProps } from "./task-switcher-context-menu";
 import { taskRowActionAvailability } from "./task-row-action-availability";
 import { TaskMoveItems } from "./task-switcher-context-menu-move-items";
+import { TaskContextMenuSubContent } from "./task-context-menu-sub-content";
 
 type SingleSelectionMenuProps = TaskContextMenuItemsProps & {
   actingIds: string[];
@@ -72,6 +78,7 @@ type SingleGroupProps = Pick<
   | "onMoveToStep"
   | "isMixedWorkflowSelection"
   | "moveTasks"
+  | "nativeUnlinkEntries"
 > & {
   linkActions?: LinkActions;
   pluginLinkActions?: PluginLinkMenuAction[];
@@ -161,7 +168,9 @@ function SingleSelectionMenuGroups(props: SingleSelectionMenuProps & SingleMenuS
         },
         {
           key: "edit",
-          visible: Boolean(!task.isArchived || props.onRenameTask),
+          visible: Boolean(
+            !task.isArchived || props.onRenameTask || props.nativeUnlinkEntries?.length,
+          ),
           content: <SingleEditGroup {...props} />,
         },
         {
@@ -267,11 +276,33 @@ function SingleEditGroup({
   isDeleting,
   onEditTask,
   onRenameTask,
-}: Pick<SingleGroupProps, "task" | "isDeleting" | "onEditTask" | "onRenameTask">) {
+  nativeUnlinkEntries,
+}: Pick<
+  SingleGroupProps,
+  "task" | "isDeleting" | "onEditTask" | "onRenameTask" | "nativeUnlinkEntries"
+>) {
   const { t } = useTranslation();
   return (
     <>
-      <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
+      {nativeUnlinkEntries?.length ? (
+        <ContextMenuSub>
+          <ContextMenuSubTrigger data-testid="task-row-edit-submenu">
+            <IconEdit className="mr-2 h-4 w-4" />
+            {t("common:edit")}
+          </ContextMenuSubTrigger>
+          <TaskContextMenuSubContent className="w-56">
+            <TaskEditItem
+              task={task}
+              disabled={isDeleting}
+              onEditTask={onEditTask}
+              label={t("common:editTask")}
+            />
+            <KanbanCardContextMenuItems entries={nativeUnlinkEntries} />
+          </TaskContextMenuSubContent>
+        </ContextMenuSub>
+      ) : (
+        <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
+      )}
       <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
       {taskRowActionAvailability(task).mark && (
         <ContextMenuItem disabled>
@@ -569,17 +600,19 @@ function TaskEditItem({
   task,
   disabled,
   onEditTask,
+  label,
 }: {
   task: TaskSwitcherItem;
   disabled?: boolean;
   onEditTask?: (task: TaskSwitcherItem) => void;
+  label?: string;
 }) {
   const { t } = useTranslation();
   if (!onEditTask || !taskRowActionAvailability(task).edit) return null;
   return (
     <ContextMenuItem disabled={disabled} onSelect={() => onEditTask(task)}>
       <IconEdit className="mr-2 h-4 w-4" />
-      {t("common:edit")}
+      {label ?? t("common:edit")}
     </ContextMenuItem>
   );
 }

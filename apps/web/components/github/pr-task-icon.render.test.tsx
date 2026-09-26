@@ -220,6 +220,26 @@ describe("PRTaskIcon corrupted store entry", () => {
   });
 });
 
+describe("PRTaskIcon stale compact summary", () => {
+  it("hides a compact PR summary after the last association was locally deleted", () => {
+    const { container } = renderWithStore(
+      {
+        workspaces: { items: [], activeId: WORKSPACE_ID },
+        workspaceContextGeneration: 3,
+        taskPRs: {
+          workspaceId: WORKSPACE_ID,
+          workspaceContextGeneration: 3,
+          byTaskId: {},
+          deletedAssociationIdsByTaskId: { [TASK_ID]: { id: true } },
+        },
+      },
+      <PRTaskIcon taskId={TASK_ID} prInfo={{ number: 1, state: "open" }} />,
+    );
+
+    expect(container.querySelector(`[data-testid="pr-task-icon-${TASK_ID}"]`)).toBeNull();
+  });
+});
+
 describe("PRTaskIcon accessible status", () => {
   it("names draft, failing checks, and conflict for a complete task indicator", () => {
     renderWithStore(
