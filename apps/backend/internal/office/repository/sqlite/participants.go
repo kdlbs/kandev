@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -77,6 +78,32 @@ func (r *Repository) GetTaskWorkflowID(ctx context.Context, taskID string) (stri
 		return "", nil
 	}
 	return workflowID.String, nil
+}
+
+// taskWorkflowContext resolves a task's workflow_id and workflow_step_id in
+// a single read, so callers get one coherent (workflow, step) snapshot
+// instead of two independently-timed reads that a concurrent step move (or
+// cross-workflow move) could straddle — see
+// AC-OFFICE-SEAT-READ-SCOPE-001.1's single-snapshot requirement. Returns ""
+// for either value with no error when the task or its columns are unset.
+func (r *Repository) taskWorkflowContext(ctx context.Context, taskID string) (workflowID, stepID string, err error) {
+	var wf, step sql.NullString
+	scanErr := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT workflow_id, workflow_step_id FROM tasks WHERE id = ?`,
+	), taskID).Scan(&wf, &step)
+	if errors.Is(scanErr, sql.ErrNoRows) {
+		return "", "", nil
+	}
+	if scanErr != nil {
+		return "", "", scanErr
+	}
+	if wf.Valid {
+		workflowID = wf.String
+	}
+	if step.Valid {
+		stepID = step.String
+	}
+	return workflowID, stepID, nil
 }
 
 // GetWorkflowStepStageType returns the persisted stage type for a workflow
@@ -413,8 +440,16 @@ func (r *Repository) stepIDForTaskTx(ctx context.Context, tx *sqlx.Tx, taskID st
 // no new seat: reports true (unchanged) unconditionally, promoting the
 // seat's provenance to "manual" in place first when it is "auto" and is
 // the slate's sole undecided auto seat — the promotion is not a claim, so
-// it earns no fourth outcome. When no seat exists at that identity,
-// reports false so the caller proceeds to the claim search.
+// it earns no fourth outcome. When no seat exists at that exact step, it
+// also checks whether the same (task, role, agent) identity already holds a
+// per-task seat elsewhere in the task's current workflow
+// (AC-OFFICE-SEAT-READ-SCOPE-001.2): the engine's workflow-scoped quorum slate
+// already treats that seat as this identity's seat, so re-registering it
+// after a step move must be a no-op rather than a second row for the same
+// occupant. That elsewhere-in-workflow branch does not promote provenance —
+// findClaimableAutoSeat/promoteIfSoleUndecided stay step-scoped by design,
+// unaffected by this widening. Only a genuinely absent identity falls
+// through to the claim search.
 func (r *Repository) probeExistingIdentity(
 	ctx context.Context, tx *sqlx.Tx, stepID, taskID, role, agentID string,
 ) (bool, error) {
@@ -423,16 +458,68 @@ func (r *Repository) probeExistingIdentity(
 		SELECT id, provenance FROM workflow_step_participants
 		WHERE step_id = ? AND task_id = ? AND role = ? AND agent_profile_id = ?
 	`), stepID, taskID, role, agentID).Scan(&existingID, &existingProvenance)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+	if err == nil {
+		if existingProvenance == string(models.ParticipantProvenanceAuto) {
+			if err := r.promoteIfSoleUndecided(ctx, tx, stepID, taskID, role, existingID); err != nil {
+				return false, err
+			}
+		}
+		return true, nil
 	}
-	if err != nil {
+	if !errors.Is(err, sql.ErrNoRows) {
 		return false, fmt.Errorf("probe existing participant: %w", err)
 	}
-	if existingProvenance == string(models.ParticipantProvenanceAuto) {
-		if err := r.promoteIfSoleUndecided(ctx, tx, stepID, taskID, role, existingID); err != nil {
-			return false, err
-		}
+
+	elsewhere, err := r.hasParticipantIdentityElsewhereInWorkflowTx(ctx, tx, taskID, role, agentID)
+	if err != nil {
+		return false, err
+	}
+	return elsewhere, nil
+}
+
+// hasParticipantIdentityElsewhereInWorkflowTx reports whether taskID already
+// holds a per-task seat naming (role, agentID) at some OTHER step of its
+// current workflow. probeExistingIdentity calls this only after finding no
+// seat at the exact current step, so this can only match a step other than
+// stepID. Resolves workflow_id on the transaction handle, inside
+// AddTaskParticipant's exclusion, for the same reason stepIDForTaskTx reads
+// the step there: a read through the read-only pool could observe a
+// workflow_id the task has since left, racing the write it's meant to guard.
+// When the task carries no workflow_id, falls back to "any step at all" —
+// the same fallback listWorkflowScopedSeats and the engine's
+// gatherParticipantSlate take.
+func (r *Repository) hasParticipantIdentityElsewhereInWorkflowTx(
+	ctx context.Context, tx *sqlx.Tx, taskID, role, agentID string,
+) (bool, error) {
+	var workflowID sql.NullString
+	err := tx.QueryRowContext(ctx, tx.Rebind(
+		`SELECT workflow_id FROM tasks WHERE id = ?`,
+	), taskID).Scan(&workflowID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("resolve task workflow_id: %w", err)
+	}
+
+	var exists int
+	var scanErr error
+	if workflowID.Valid && workflowID.String != "" {
+		scanErr = tx.QueryRowContext(ctx, tx.Rebind(`
+			SELECT 1 FROM workflow_step_participants p
+			JOIN workflow_steps ws ON ws.id = p.step_id
+			WHERE p.task_id = ? AND p.role = ? AND p.agent_profile_id = ? AND ws.workflow_id = ?
+			LIMIT 1
+		`), taskID, role, agentID, workflowID.String).Scan(&exists)
+	} else {
+		scanErr = tx.QueryRowContext(ctx, tx.Rebind(`
+			SELECT 1 FROM workflow_step_participants
+			WHERE task_id = ? AND role = ? AND agent_profile_id = ?
+			LIMIT 1
+		`), taskID, role, agentID).Scan(&exists)
+	}
+	if errors.Is(scanErr, sql.ErrNoRows) {
+		return false, nil
+	}
+	if scanErr != nil {
+		return false, fmt.Errorf("probe participant identity elsewhere in workflow: %w", scanErr)
 	}
 	return true, nil
 }
@@ -587,57 +674,34 @@ func (r *Repository) RemoveTaskParticipant(ctx context.Context, taskID, agentID,
 	return err
 }
 
-// ListTaskParticipants returns all participants for a task filtered by role.
-// Reads from workflow_step_participants under the task's current workflow
-// step, merging template-level and per-task rows (per-task wins on
-// (role, agent_profile_id) conflicts).
+// ListTaskParticipants returns all participants for a task filtered by role,
+// workflow-scoped like the engine's own quorum slate (see
+// listWorkflowScopedSeats).
 func (r *Repository) ListTaskParticipants(ctx context.Context, taskID, role string) ([]Participant, error) {
-	stepID, err := r.stepIDForTask(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
-	if stepID == "" {
-		return []Participant{}, nil
-	}
-	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-		SELECT task_id, agent_profile_id, role, decision_required
-		FROM workflow_step_participants
-		WHERE step_id = ? AND role = ?
-		  AND (task_id = '' OR task_id = ?)
-		ORDER BY position ASC, agent_profile_id ASC, id ASC
-	`), stepID, role, taskID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	out := []Participant{}
-	for rows.Next() {
-		var p Participant
-		var rowTask sql.NullString
-		var decisionRequired int
-		if err := rows.Scan(
-			&rowTask,
-			&p.AgentProfileID,
-			&p.Role,
-			&decisionRequired,
-		); err != nil {
-			return nil, err
-		}
-		// Project the canonical task_id into the row (template-level rows
-		// have task_id = ''; we surface them as participants of the input task).
-		if rowTask.Valid {
-			p.TaskID = rowTask.String
-		}
-		p.DecisionRequired = decisionRequired != 0
-		out = append(out, p)
-	}
-	return projectOfficeParticipants(taskID, mergeOfficeParticipants(out)), rows.Err()
+	return r.listWorkflowScopedSeats(ctx, taskID, role)
 }
 
 // ListAllTaskParticipants returns every participant for a task across both
 // roles. Used by the task DTO so reviewers and approvers can be surfaced
-// without two separate round trips.
+// without two separate round trips. Workflow-scoped like the engine's own
+// quorum slate (see listWorkflowScopedSeats).
 func (r *Repository) ListAllTaskParticipants(ctx context.Context, taskID string) ([]Participant, error) {
+	return r.listWorkflowScopedSeats(ctx, taskID, "")
+}
+
+// ListTaskParticipantsAtCurrentStep returns every participant for a task at
+// its CURRENT workflow step only, merging template-level and per-task rows
+// (per-task wins on (role, agent_profile_id) conflicts) — the narrower,
+// step-scoped seat visibility AC-OFFICE-SESSION-TERM-002.3 requires for
+// session-termination capacity. Unlike ListAllTaskParticipants (workflow-
+// scoped as of AC-OFFICE-SEAT-READ-SCOPE-001.1), a seat recorded at a step the
+// task has since left must NOT count here: counting it would find a seat
+// naming a previous occupant and suppress every future termination for that
+// pair (see retainsTaskCapacity in dashboard/service_tasks.go, the sole
+// caller). Kept as the exact query ListAllTaskParticipants used before
+// AC-OFFICE-SEAT-READ-SCOPE-001.1 so that capacity determination is unchanged
+// by this fix.
+func (r *Repository) ListTaskParticipantsAtCurrentStep(ctx context.Context, taskID string) ([]Participant, error) {
 	stepID, err := r.stepIDForTask(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -678,10 +742,247 @@ func (r *Repository) ListAllTaskParticipants(ctx context.Context, taskID string)
 	return projectOfficeParticipants(taskID, mergeOfficeParticipants(out)), rows.Err()
 }
 
+// officeSeatRow is an intermediate row carrying enough identity to dedupe
+// and collapse a workflow-scoped read the same way the workflow engine's
+// gatherParticipantSlate + canonicalizeByTaskRoleAgent + collapseByRoleAgent
+// do (internal/workflow/engine/quorum.go), before projecting down to the
+// public Participant shape.
+type officeSeatRow struct {
+	id               string
+	stepID           string
+	taskID           string
+	role             string
+	agentProfileID   string
+	decisionRequired bool
+	position         int
+}
+
+// listWorkflowScopedSeats returns the effective participant slate for a task
+// across its entire current workflow, mirroring the workflow engine's
+// gatherParticipantSlate: per-task rows at ANY step of the task's current
+// workflow (or, when the task carries no workflow_id, at any step at all —
+// the same fallback the engine takes when it has no
+// WorkflowScopedParticipantStore) unioned with template rows (task_id="")
+// at the task's CURRENT step only. Rows are then deduped by
+// (role, agent_profile_id): among per-task rows the one at the current step
+// wins, else the lowest id; per-task rows win over template rows.
+// roleFilter="" returns every role. Empty stepID (no current step) still
+// returns an empty slice — there is no template context to project seats
+// onto.
+//
+// ListTaskParticipants and ListAllTaskParticipants share this helper so
+// office's read projections cannot drift from the engine's quorum slate the
+// way they did before AC-OFFICE-SEAT-READ-SCOPE-001.1: a seat cast at one step
+// must stay visible after the task moves to another step of the same
+// workflow. ListTaskParticipantsAtCurrentStep deliberately does NOT use this
+// helper — see its own doc comment.
+func (r *Repository) listWorkflowScopedSeats(ctx context.Context, taskID, roleFilter string) ([]Participant, error) {
+	workflowID, stepID, err := r.taskWorkflowContext(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if stepID == "" {
+		return []Participant{}, nil
+	}
+
+	perTask, err := r.listPerTaskSeatsForWorkflow(ctx, taskID, workflowID, roleFilter)
+	if err != nil {
+		return nil, err
+	}
+	template, err := r.listTemplateSeatsAtStep(ctx, stepID, roleFilter)
+	if err != nil {
+		return nil, err
+	}
+
+	canonPerTask := canonicalizeOfficeSeatsByRoleAgent(perTask, stepID)
+	merged := collapseOfficeSeatsPerTaskOverTemplate(append(canonPerTask, template...))
+	sortOfficeSeatRows(merged)
+
+	out := make([]Participant, 0, len(merged))
+	for _, row := range merged {
+		out = append(out, Participant{
+			TaskID:           taskID,
+			AgentProfileID:   row.agentProfileID,
+			Role:             row.role,
+			DecisionRequired: row.decisionRequired,
+		})
+	}
+	return out, nil
+}
+
+// listPerTaskSeatsForWorkflow returns every per-task row (task_id = taskID)
+// whose step belongs to workflowID. When workflowID is empty (the task
+// carries no workflow_id — e.g. a legacy row, or a schema/fixture that
+// doesn't set it), it falls back to every per-task row for taskID regardless
+// of step, mirroring gatherParticipantSlate's fallback when the engine has
+// no WorkflowScopedParticipantStore or no workflowID.
+func (r *Repository) listPerTaskSeatsForWorkflow(ctx context.Context, taskID, workflowID, roleFilter string) ([]officeSeatRow, error) {
+	query := `
+		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position
+		FROM workflow_step_participants p`
+	var args []any
+	if workflowID != "" {
+		query += `
+		JOIN workflow_steps ws ON ws.id = p.step_id
+		WHERE p.task_id = ? AND ws.workflow_id = ?`
+		args = append(args, taskID, workflowID)
+	} else {
+		query += `
+		WHERE p.task_id = ?`
+		args = append(args, taskID)
+	}
+	if roleFilter != "" {
+		query += ` AND p.role = ?`
+		args = append(args, roleFilter)
+	}
+	query += ` ORDER BY p.position ASC, p.agent_profile_id ASC, p.id ASC`
+	return r.queryOfficeSeatRows(ctx, query, args...)
+}
+
+// listTemplateSeatsAtStep returns template-level rows (task_id = ”) at
+// stepID only — template rows are never workflow-scoped, matching the
+// engine's own ListStepParticipants(stepID, "") call in
+// gatherParticipantSlate.
+func (r *Repository) listTemplateSeatsAtStep(ctx context.Context, stepID, roleFilter string) ([]officeSeatRow, error) {
+	query := `
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position
+		FROM workflow_step_participants
+		WHERE step_id = ? AND task_id = ''`
+	args := []any{stepID}
+	if roleFilter != "" {
+		query += ` AND role = ?`
+		args = append(args, roleFilter)
+	}
+	query += ` ORDER BY position ASC, agent_profile_id ASC, id ASC`
+	return r.queryOfficeSeatRows(ctx, query, args...)
+}
+
+func (r *Repository) queryOfficeSeatRows(ctx context.Context, query string, args ...any) ([]officeSeatRow, error) {
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []officeSeatRow{}
+	for rows.Next() {
+		var row officeSeatRow
+		var decisionRequired int
+		if err := rows.Scan(
+			&row.id, &row.stepID, &row.taskID, &row.role, &row.agentProfileID,
+			&decisionRequired, &row.position,
+		); err != nil {
+			return nil, err
+		}
+		row.decisionRequired = decisionRequired != 0
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// canonicalizeOfficeSeatsByRoleAgent implements the per-task half of the
+// engine's AC-44 canonicalization (canonicalizeByTaskRoleAgent): one row per
+// (role, agent_profile_id) among per-task rows, preferring the row at
+// currentStepID, else the row with the lowest id in ASCII order. All input
+// rows already share the same task_id (a single-task read), so the office
+// projection does not need the engine's task_id dimension.
+func canonicalizeOfficeSeatsByRoleAgent(rows []officeSeatRow, currentStepID string) []officeSeatRow {
+	type key struct{ role, agent string }
+	groups := map[key][]officeSeatRow{}
+	var order []key
+	for _, row := range rows {
+		k := key{row.role, row.agentProfileID}
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], row)
+	}
+	out := make([]officeSeatRow, 0, len(order))
+	for _, k := range order {
+		out = append(out, pickCanonicalOfficeSeat(groups[k], currentStepID))
+	}
+	return out
+}
+
+func pickCanonicalOfficeSeat(rows []officeSeatRow, currentStepID string) officeSeatRow {
+	for _, row := range rows {
+		if row.stepID == currentStepID {
+			return row
+		}
+	}
+	best := rows[0]
+	for _, row := range rows[1:] {
+		if row.id < best.id {
+			best = row
+		}
+	}
+	return best
+}
+
+// collapseOfficeSeatsPerTaskOverTemplate implements the engine's AC-20
+// collapse (collapseByRoleAgent): one row per (role, agent_profile_id)
+// across per-task and template rows, the per-task row (non-empty task_id)
+// winning over a template row.
+func collapseOfficeSeatsPerTaskOverTemplate(rows []officeSeatRow) []officeSeatRow {
+	type key struct{ role, agent string }
+	groups := map[key][]officeSeatRow{}
+	var order []key
+	for _, row := range rows {
+		k := key{row.role, row.agentProfileID}
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], row)
+	}
+	out := make([]officeSeatRow, 0, len(order))
+	for _, k := range order {
+		out = append(out, pickOfficeSeatPerTaskOverTemplate(groups[k]))
+	}
+	return out
+}
+
+// pickOfficeSeatPerTaskOverTemplate returns the per-task row (taskID != "")
+// when one exists among rows — the caller (listWorkflowScopedSeats) appends
+// canonPerTask before template rows, so the first taskID != "" hit is always
+// a per-task seat. Falls back to the lowest id when only template rows are present.
+func pickOfficeSeatPerTaskOverTemplate(rows []officeSeatRow) officeSeatRow {
+	for _, row := range rows {
+		if row.taskID != "" {
+			return row
+		}
+	}
+	best := rows[0]
+	for _, row := range rows[1:] {
+		if row.id < best.id {
+			best = row
+		}
+	}
+	return best
+}
+
+// sortOfficeSeatRows applies the same final ordering both public read
+// methods have always advertised: role, position, agent_profile_id, id.
+func sortOfficeSeatRows(rows []officeSeatRow) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		a, b := rows[i], rows[j]
+		if a.role != b.role {
+			return a.role < b.role
+		}
+		if a.position != b.position {
+			return a.position < b.position
+		}
+		if a.agentProfileID != b.agentProfileID {
+			return a.agentProfileID < b.agentProfileID
+		}
+		return a.id < b.id
+	})
+}
+
 // mergeOfficeParticipants enforces per-task precedence: when a
 // template-level row and a per-task row share (role, agent_profile_id),
 // the per-task row wins. workflow_step_participants stores both kinds; we
-// post-filter here because the SQL query returns the union.
+// post-filter here because the SQL query returns the union. Used only by
+// ListTaskParticipantsAtCurrentStep, whose single query still returns both
+// kinds unmerged.
 func mergeOfficeParticipants(rows []Participant) []Participant {
 	if len(rows) <= 1 {
 		return rows
