@@ -260,6 +260,15 @@ function pathExemption(pathname) {
   if (/^\.github\/(?:workflows|scripts|actions)\//.test(pathname)) {
     return 'CI infrastructure path';
   }
+  if (
+    pathname.startsWith('scripts/architecture_lint/')
+    || pathname.startsWith('scripts/architecture_lint_tests/')
+    || pathname.startsWith('config/architecture-lint/')
+    || pathname === 'scripts/lint-architecture.py'
+    || pathname === 'scripts/lint-architecture.test.py'
+  ) {
+    return 'architecture lint tooling';
+  }
 
   const basename = POSIX_PATH.basename(pathname);
   const extension = POSIX_PATH.extname(basename).slice(1).toLowerCase();

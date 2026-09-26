@@ -1,6 +1,6 @@
 ---
 created: 2026-09-10
-updated: 2026-09-21
+updated: 2026-09-26
 status: done
 requirements:
   - REQ-CI-PR-DOCS-001
@@ -66,6 +66,7 @@ Live smoke tests and required-check activation are deployment steps, not complet
 - [x] [Task 03: Support merge queue coverage](task-03-queue-coverage.md)
 - [x] [Task 04: Exempt the canonical plugin registry source](task-04-exempt-plugin-registry-source.md)
 - [x] [Task 05: Exempt CI infrastructure paths](task-05-exempt-ci-paths.md)
+- [x] [Task 06: Exempt architecture-lint tooling](task-06-exempt-architecture-lint-tooling.md)
 
 Execute sequentially. No subagents are authorized.
 
@@ -136,6 +137,31 @@ Task 05 verification completed on 2026-09-21:
 - All 24 workflow files passed action-pinning lint.
 - `zizmor .github/workflows/pr-docs.yml` reported no findings.
 - The specification catalog and linter passed; `git diff --check` passed.
+
+## Amendment: architecture-lint tooling
+
+The accepted architecture-lint decision places shared linter implementation
+under `scripts/` and reviewed baselines under `config/`, where local Make,
+pre-commit, and GitHub Actions use the same repository tooling. The existing CI
+infrastructure exemption covers only `.github/`, so architecture-lint paths
+otherwise require a delivery package because of location alone.
+
+Task 06 adds exact exemptions for `scripts/architecture_lint/**`,
+`scripts/architecture_lint_tests/**`, and `config/architecture-lint/**`, plus
+`scripts/lint-architecture.py` and `scripts/lint-architecture.test.py`. Other
+scripts and configuration remain covered, and any mixed change with a
+non-exempt path still requires linked delivery context. Renames continue to
+classify both old and new paths, and merge-group members remain independent.
+
+Task 06 verification completed on 2026-09-26:
+
+- 87 validator tests and 7 workflow contract tests passed.
+- The specification catalog validated 309 decisions and 1183 specifications;
+  the specification linter and `git diff --check` passed.
+- A read-only fixture from PR #2234 head
+  `ada835c937ed6e57822ba5b8a7fa7239be0834fa` classified all 21 changed paths
+  as exempt. GitHub reported the PR as merged during this check. The fixture
+  does not publish a GitHub status.
 
 ## Risks
 

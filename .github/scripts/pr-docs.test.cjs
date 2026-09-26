@@ -140,6 +140,86 @@ test('non-CI files under .github and CI paths outside .github require coverage',
   ]);
 });
 
+// @covers AC-CI-PR-DOCS-001.9
+test('architecture lint paths are exempt only for the named directories and entrypoints', () => {
+  const paths = [
+    'scripts/architecture_lint/rules/runtime_import.py',
+    'scripts/architecture_lint_tests/test_runtime_import.py',
+    'config/architecture-lint/runtime_import.json',
+    'scripts/lint-architecture.py',
+    'scripts/lint-architecture.test.py',
+  ];
+  const result = validator.classifyChangedFiles(paths);
+
+  assert.equal(result.requiresCoverage, false);
+  assert.deepEqual(result.triggeringPaths, []);
+  assert.deepEqual(result.exemptPaths, paths);
+});
+
+// @covers AC-CI-PR-DOCS-001.9
+test('architecture lint exemptions do not match lookalike or unrelated paths', () => {
+  const paths = [
+    'scripts/architecture_lint_extra/rule.py',
+    'config/architecture-lint-other/runtime_import.json',
+    'scripts/lint-architecture.py.bak',
+    'scripts/lint-architecture.test.py.bak',
+    'scripts/unrelated.py',
+    'config/unrelated.json',
+  ];
+  const result = validator.classifyChangedFiles(paths);
+
+  assert.equal(result.requiresCoverage, true);
+  assert.deepEqual(result.exemptPaths, []);
+  assert.deepEqual(result.triggeringPaths, paths);
+});
+
+// @covers AC-CI-PR-DOCS-001.9
+test('architecture lint paths do not exempt mixed application, script, or config changes', () => {
+  const result = validator.classifyChangedFiles([
+    'scripts/architecture_lint/rules/runtime_import.py',
+    'scripts/architecture_lint_tests/test_runtime_import.py',
+    'config/architecture-lint/runtime_import.json',
+    'scripts/lint-architecture.py',
+    'scripts/lint-architecture.test.py',
+    'apps/backend/runtime.go',
+    'scripts/release-tool.py',
+    'config/runtime.yaml',
+  ]);
+
+  assert.equal(result.requiresCoverage, true);
+  assert.deepEqual(result.exemptPaths, [
+    'scripts/architecture_lint/rules/runtime_import.py',
+    'scripts/architecture_lint_tests/test_runtime_import.py',
+    'config/architecture-lint/runtime_import.json',
+    'scripts/lint-architecture.py',
+    'scripts/lint-architecture.test.py',
+  ]);
+  assert.deepEqual(result.triggeringPaths, [
+    'apps/backend/runtime.go',
+    'scripts/release-tool.py',
+    'config/runtime.yaml',
+  ]);
+});
+
+// @covers AC-CI-PR-DOCS-001.9
+test('moving an application file into an architecture lint directory retains the old path', () => {
+  const result = validator.classifyChangedFiles([{
+    filename: 'scripts/architecture_lint/rules/runtime_import.py',
+    previous_filename: 'apps/backend/runtime_import.py',
+    status: 'renamed',
+    additions: 0,
+    deletions: 0,
+    changes: 0,
+  }]);
+
+  assert.deepEqual(result.changedPaths, [
+    'scripts/architecture_lint/rules/runtime_import.py',
+    'apps/backend/runtime_import.py',
+  ]);
+  assert.deepEqual(result.exemptPaths, ['scripts/architecture_lint/rules/runtime_import.py']);
+  assert.deepEqual(result.triggeringPaths, ['apps/backend/runtime_import.py']);
+});
+
 // @covers AC-CI-PR-DOCS-001.3
 test('shipped files and unsupported test-like paths require coverage', () => {
   const result = validator.classifyChangedFiles([
@@ -720,6 +800,36 @@ test('documentation-only changes do not load delivery artifacts', async () => {
     async getFile() {
       getFileCalls += 1;
       throw new Error('documentation-only changes should not load artifacts');
+    },
+  };
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 'exempt');
+  assert.equal(getFileCalls, 0);
+});
+
+// @covers AC-CI-PR-DOCS-001.9
+test('architecture lint tooling with already-exempt docs and tests needs no delivery package', async () => {
+  let getFileCalls = 0;
+  const client = {
+    async getPullRequest() {
+      return pullRequest(42, SHA_B);
+    },
+    async listFiles() {
+      return [
+        { filename: 'scripts/architecture_lint/rules/runtime_import.py', status: 'modified' },
+        { filename: 'scripts/architecture_lint_tests/test_runtime_import.py', status: 'modified' },
+        { filename: 'config/architecture-lint/runtime_import.json', status: 'modified' },
+        { filename: 'scripts/lint-architecture.py', status: 'modified' },
+        { filename: 'scripts/lint-architecture.test.py', status: 'modified' },
+        { filename: 'docs/plans/architecture-lint-followup/task-03-docs-and-verification.md', status: 'modified' },
+        { filename: 'apps/backend/AGENTS.md', status: 'modified' },
+      ];
+    },
+    async getFile() {
+      getFileCalls += 1;
+      throw new Error('exempt changes should not load delivery artifacts');
     },
   };
 
@@ -2084,6 +2194,42 @@ test('merge-group evaluation keeps each member policy independent', async () => 
     result.memberResults.map(member => member.expectedHeadSha),
     [SHA_D, SHA_E],
   );
+});
+
+// @covers AC-CI-PR-DOCS-001.9, AC-CI-PR-DOCS-003.4
+test('an exempt tooling member does not exempt another member\'s application changes', async () => {
+  const entries = [
+    {
+      baseCommit: { oid: SHA_A },
+      headCommit: { oid: SHA_B },
+      pullRequest: { number: 1, headRefOid: SHA_D },
+    },
+    {
+      baseCommit: { oid: SHA_B },
+      headCommit: { oid: SHA_C },
+      pullRequest: { number: 2, headRefOid: SHA_E },
+    },
+  ];
+  const client = {
+    async getPullRequest(number) {
+      return pullRequest(number, number === 1 ? SHA_D : SHA_E);
+    },
+    async listFiles(number) {
+      return number === 1
+        ? [{ filename: 'scripts/architecture_lint/rules/runtime_import.py', status: 'modified' }]
+        : [{ filename: 'apps/web/src/runtime.ts', status: 'modified' }];
+    },
+  };
+
+  const result = await validator.evaluateMergeGroup({
+    client,
+    baseSha: SHA_A,
+    headSha: SHA_C,
+    entries,
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.memberResults.map(member => member.status), ['exempt', 'missing']);
 });
 
 test('affected merge groups can be found for label-triggered reevaluation', () => {
