@@ -29,24 +29,21 @@ export async function waitForComposerQueueMode(
  */
 export async function typeWhileBusy(page: Page, editor: Locator, text: string): Promise<void> {
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
+  const coarsePointer = await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
   await editor.scrollIntoViewIfNeeded();
   for (let attempt = 0; attempt < 3; attempt++) {
     const box = await editor.boundingBox();
     if (!box) throw new Error("Editor bounding box not found");
-    await page.mouse.click(box.x + 20, box.y + box.height / 2);
-    // Typing requires the editor to own focus, and `mouse.click` only queues
-    // that: ProseMirror commits focus on a later tick. This waits for the
-    // commit rather than for a number.
-    //
-    // It replaces an `unverified` 200ms sleep. The hypothesis for that sleep
-    // was that keystrokes sent before the focus commit go to the previously
-    // focused element -- but that is NOT confirmed: with the sleep removed and
-    // nothing in its place, 9/9 calls still landed their text on the first
-    // attempt locally. So this is a precondition guard, not a fix for an
-    // observed failure. It is kept because it is free when focus is already
-    // committed and correct if a loaded shard ever does reorder the two, which
-    // a 9-call sample on an idle machine cannot rule out.
-    await expect(editor).toBeFocused({ timeout: 5_000 });
+    if (coarsePointer) {
+      await editor.tap({ position: { x: 20, y: box.height / 2 } });
+    } else {
+      await page.mouse.click(box.x + 20, box.y + box.height / 2);
+    }
+    const focused = await expect(editor)
+      .toBeFocused({ timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!focused) continue;
     await page.keyboard.type(text);
     // Auto-retrying, so it returns as soon as ProseMirror renders the text
     // rather than after a fixed settle. A miss here is the retry's cue, not a
