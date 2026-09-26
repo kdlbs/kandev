@@ -37,6 +37,8 @@ func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryRespo
 			Available:         result.Available,
 			MatchedPath:       result.MatchedPath,
 			LoginCommand:      loginCmd,
+			CLIVersion:        result.CLIVersion,
+			CLIVersionError:   result.CLIVersionError,
 		})
 	}
 	return &dto.ListDiscoveryResponse{Agents: payload, Total: len(payload)}, nil
@@ -92,7 +94,7 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 		displayName = ag.Name()
 	}
 
-	modelConfig := c.buildModelConfigFromHostUtility(ag.ID())
+	modelConfig := c.buildModelConfigFromHostUtility(ctx, ag.ID())
 
 	capabilities := dto.AgentCapabilitiesDTO{
 		SupportsSessionResume: availability.Capabilities.SupportsSessionResume,
@@ -216,7 +218,7 @@ func buildLoginCommandDTO(ag agents.Agent) *dto.LoginCommandDTO {
 // capability cache can be empty while the asynchronous host-utility probe
 // is still starting, so the dynamic-support flag comes from the registered
 // agent capability rather than from cache presence.
-func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelConfigDTO {
+func (c *Controller) buildModelConfigFromHostUtility(ctx context.Context, agentID string) dto.ModelConfigDTO {
 	// Always initialize slices so JSON marshals as [] not null — the
 	// frontend uses .some()/.find() on these without null checks.
 	cfg := dto.ModelConfigDTO{
@@ -226,11 +228,13 @@ func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelCo
 	}
 	if c.hostUtility == nil {
 		cfg.Status = "not_configured"
+		cfg.AvailableModels, cfg.Discovery = c.hostCLIModelProjection(ctx, agentID, cfg.AvailableModels, false)
 		return cfg
 	}
 	caps, ok := c.hostUtility.Get(agentID)
 	if !ok {
 		cfg.Status = "not_configured"
+		cfg.AvailableModels, cfg.Discovery = c.hostCLIModelProjection(ctx, agentID, cfg.AvailableModels, false)
 		return cfg
 	}
 	cfg.SupportsDynamicModels = true
@@ -263,6 +267,7 @@ func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelCo
 			Description: c.Description,
 		})
 	}
+	cfg.AvailableModels, cfg.Discovery = c.hostCLIModelProjection(ctx, agentID, cfg.AvailableModels, false)
 	return cfg
 }
 
@@ -612,11 +617,15 @@ func (c *Controller) synthAvailabilityFromRegistry() []discovery.Availability {
 		// SupportsMCP flag so the UI can offer plan mode in E2E runs.
 		if probe, err := ag.IsInstalled(context.Background()); err == nil && probe != nil {
 			av.SupportsMCP = probe.SupportsMCP
+			av.MatchedPath = probe.MatchedPath
 			if len(probe.MCPConfigPaths) > 0 {
 				av.MCPConfigPath = probe.MCPConfigPaths[0]
 			}
 		}
 		results = append(results, av)
 	}
+	// Mock agents declare a host CLI so E2E exercises version detection;
+	// this path bypasses the discovery sweep that fills it.
+	c.discovery.ApplyHostCLI(context.Background(), c.agentRegistry.Get, results)
 	return results
 }

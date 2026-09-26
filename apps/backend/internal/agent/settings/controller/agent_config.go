@@ -297,10 +297,10 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 		return nil, ErrAgentNotFound
 	}
 	if c.hostUtility == nil {
-		return &dto.DynamicModelsResponse{
+		return c.finishDynamicModels(ctx, agentName, &dto.DynamicModelsResponse{
 			AgentName: agentName,
 			Status:    "not_configured",
-		}, nil
+		}, refresh), nil
 	}
 
 	var caps hostutility.AgentCapabilities
@@ -309,20 +309,20 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 		caps, err = c.hostUtility.Refresh(ctx, agentName)
 		if err != nil {
 			s := err.Error()
-			return &dto.DynamicModelsResponse{
+			return c.finishDynamicModels(ctx, agentName, &dto.DynamicModelsResponse{
 				AgentName: agentName,
 				Status:    string(hostutility.StatusFailed),
 				Error:     &s,
-			}, nil
+			}, refresh), nil
 		}
 	} else {
 		var ok bool
 		caps, ok = c.hostUtility.Get(agentName)
 		if !ok {
-			return &dto.DynamicModelsResponse{
+			return c.finishDynamicModels(ctx, agentName, &dto.DynamicModelsResponse{
 				AgentName: agentName,
 				Status:    "not_configured",
-			}, nil
+			}, refresh), nil
 		}
 	}
 
@@ -355,13 +355,29 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 			Meta:        m.Meta,
 		})
 	}
-	for _, c := range caps.Commands {
+	for _, command := range caps.Commands {
 		resp.Commands = append(resp.Commands, dto.CommandEntryDTO{
-			Name:        c.Name,
-			Description: c.Description,
+			Name:        command.Name,
+			Description: command.Description,
 		})
 	}
-	return resp, nil
+	return c.finishDynamicModels(ctx, agentName, resp, refresh), nil
+}
+
+// finishDynamicModels merges the vendor CLI catalogue into a models response.
+// A refresh re-reads the CLI; every other call serves the discovered cache, so
+// listing models never spawns a process on the request path.
+func (c *Controller) finishDynamicModels(
+	ctx context.Context,
+	agentName string,
+	resp *dto.DynamicModelsResponse,
+	refresh bool,
+) *dto.DynamicModelsResponse {
+	if resp.Models == nil {
+		resp.Models = []dto.ModelEntryDTO{}
+	}
+	resp.Models, resp.Discovery = c.hostCLIModelProjection(ctx, agentName, resp.Models, refresh)
+	return resp
 }
 
 // ResolveAgentModelConfig returns the complete provider configuration-option

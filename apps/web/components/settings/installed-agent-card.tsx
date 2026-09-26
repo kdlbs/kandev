@@ -25,6 +25,7 @@ import { settingsActionClassName } from "@/components/settings/settings-control"
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateStatus, InstallJob } from "@/lib/api";
 import type { Agent, AgentDiscovery, RuntimeUpdate } from "@/lib/types/http";
+import { presentHostCLIVersion } from "@/lib/agent-host-cli";
 
 type Props = {
   agent: AgentDiscovery;
@@ -74,6 +75,7 @@ function InstalledAgentIdentity({
   onAuthClick: () => void;
 }) {
   const { t } = useTranslation();
+  const versionPresentation = presentHostCLIVersion(agent);
   return (
     <div className="space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -127,6 +129,22 @@ function InstalledAgentIdentity({
       >
         {agent.matched_path ? t("agents:detectedAt", { path: agent.matched_path }) : ""}
       </p>
+      {versionPresentation && (
+        <p
+          className="text-xs text-muted-foreground line-clamp-2"
+          data-testid={`cli-version-${agent.name}`}
+        >
+          {versionPresentation.kind === "known"
+            ? t("agents:cliVersionLabel", {
+                name: displayName,
+                version: versionPresentation.version,
+              })
+            : t("agents:cliVersionUnknown", {
+                name: displayName,
+                reason: versionPresentation.reason,
+              })}
+        </p>
+      )}
     </div>
   );
 }

@@ -62,6 +62,11 @@ type mockAgent struct {
 var _ acp.Agent = (*mockAgent)(nil)
 
 func main() {
+	// Vendor-CLI shaped entry points (`--version`, `--self-update`,
+	// `app-server`) that the hostcli package drives in E2E.
+	if runHostCLICommand(os.Args[1:], os.Stdin, os.Stdout) {
+		return
+	}
 	model := parseModelFlag()
 
 	// TUI mode: simple terminal UI for passthrough/PTY testing

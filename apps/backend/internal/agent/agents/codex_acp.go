@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
@@ -216,5 +217,17 @@ func (a *CodexACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
 		Command:   a.ManagedNPMRuntime().CachedACPCommand(),
+	}
+}
+
+// HostCLI describes the Codex CLI on the Kandev host. `codex app-server`
+// exposes the documented `model/list` request, so the CLI is a programmatic
+// model source. InstallScript installs and updates this CLI.
+func (a *CodexACP) HostCLI() hostcli.Spec {
+	return hostcli.Spec{
+		DisplayName: "Codex CLI",
+		Executable:  "codex",
+		VersionArgs: []string{"--version"},
+		ModelSource: hostcli.ModelSourceCodexAppServer,
 	}
 }

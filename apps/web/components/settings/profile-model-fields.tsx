@@ -22,7 +22,8 @@ import {
   FallbackOptionHelp,
   ModelFallbackSettingsShell,
 } from "@/components/settings/model-fallback-settings-shell";
-import type { ModelConfig, ModeEntry, ModelEntry } from "@/lib/types/http";
+import { ModelDiscoveryNote } from "@/components/settings/model-discovery-note";
+import type { ModelConfig, ModeEntry, ModelEntry, ModelDiscovery } from "@/lib/types/http";
 import type { PermissionKey } from "@/lib/agent-permissions";
 import type { CLIFlag } from "@/lib/types/http";
 import {
@@ -45,6 +46,20 @@ export type ProfileFormData = {
   command_prefix?: string;
   provider_kind?: string;
 } & Record<PermissionKey, boolean>;
+
+// A configured model that is no longer advertised ("gone") stays visible in
+// the list so the user sees what was configured instead of it silently
+// vanishing. For an agent type that allows a custom model ID, it stays
+// selectable with its own identifier; otherwise it is greyed out and
+// unselectable, as before.
+function goneModelOption(
+  modelId: string,
+  allowCustomModel: boolean,
+  goneModelLabel: string,
+): ModelSelectorOption {
+  if (allowCustomModel) return { id: modelId, name: modelId };
+  return { id: modelId, name: modelId, disabled: true, disabledReason: goneModelLabel };
+}
 
 function CustomProviderModelInput({
   profile,
@@ -86,6 +101,7 @@ export function ModelPicker({
   disabled,
   configOptionsLoading,
   keepOpenOnModelChange,
+  discovery,
 }: {
   profile: ProfileFormData;
   models: ModelEntry[];
@@ -98,6 +114,8 @@ export function ModelPicker({
   disabled?: boolean;
   configOptionsLoading?: boolean;
   keepOpenOnModelChange?: boolean;
+  /** Present only for host-CLI agent types; enables the custom model entry. */
+  discovery?: ModelDiscovery;
 }) {
   const { t } = useTranslation();
   if (profile.provider_kind === "openai_compatible") {
@@ -133,17 +151,10 @@ export function ModelPicker({
           typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
       }));
   const currentModel = profile.model || modelConfig?.currentValue || currentModelId || null;
-  // A configured model that is no longer advertised ("gone") stays visible
-  // in the list, greyed out and unselectable, so the user sees what was
-  // configured instead of it silently vanishing.
+  const allowCustomModel = Boolean(discovery?.allows_custom_model);
   const modelIsGone = Boolean(profile.model && !modelOptions.some((m) => m.id === profile.model));
   if (modelIsGone) {
-    modelOptions.unshift({
-      id: profile.model!,
-      name: profile.model!,
-      disabled: true,
-      disabledReason: goneModelLabel,
-    });
+    modelOptions.unshift(goneModelOption(profile.model, allowCustomModel, goneModelLabel));
   }
   const selectedConfigOptions = configOptions.map((option) => ({
     ...option,
@@ -151,6 +162,8 @@ export function ModelPicker({
       ? profile.model || option.currentValue
       : profile.config_options?.[option.id] || option.currentValue,
   }));
+
+  const modelIsUnavailable = modelIsGone && !allowCustomModel;
 
   return (
     <div className="space-y-1.5">
@@ -168,8 +181,10 @@ export function ModelPicker({
         disabled={disabled}
         configOptionsLoading={configOptionsLoading}
         keepOpenOnModelChange={keepOpenOnModelChange}
-        triggerClassName={modelIsGone ? "text-destructive" : undefined}
+        triggerClassName={modelIsUnavailable ? "text-destructive" : undefined}
+        allowCustomModel={allowCustomModel}
       />
+      <ModelDiscoveryNote discovery={discovery} />
     </div>
   );
 }

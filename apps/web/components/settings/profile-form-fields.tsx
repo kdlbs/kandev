@@ -45,6 +45,7 @@ import type {
   ModelConfig,
   ModeEntry,
   ModelEntry,
+  ModelDiscovery,
   PermissionSetting,
   PassthroughConfig,
 } from "@/lib/types/http";
@@ -275,6 +276,7 @@ type CapabilitiesRowProps = {
   onRetryConfig: () => Promise<void>;
   agentName: string;
   baselineProfile?: ProfileFormData;
+  discovery?: ModelDiscovery;
 };
 
 function CapabilitiesRow(props: CapabilitiesRowProps) {
@@ -335,6 +337,7 @@ function CapabilitiesRowContent({
   configIsLoading,
   onRetryConfig,
   baselineProfile,
+  discovery,
 }: CapabilitiesRowProps) {
   const { t } = useTranslation();
   const hasModes = modes.length > 0;
@@ -361,6 +364,7 @@ function CapabilitiesRowContent({
             goneModelLabel={t("settings:startModelUnavailable")}
             configOptionsLoading={configIsLoading}
             keepOpenOnModelChange={modelConfig.supports_dynamic_models}
+            discovery={discovery}
           />
         </div>
         {hasModes && (
@@ -504,19 +508,12 @@ export function ProfileFormFields({
       )}
 
       <CapabilitiesRow
+        {...caps}
         profile={profile}
-        models={caps.models}
-        modes={caps.modes}
-        commands={caps.commands}
-        currentModelId={caps.currentModelId}
-        currentModeId={caps.currentModeId}
-        status={caps.status}
         agentName={agentName}
         onChange={onChange}
         isCompact={isCompact}
-        isLoading={caps.isLoading}
         onRefresh={refresh}
-        error={caps.error}
         modelConfig={modelConfig}
         configOptions={configOptions}
         configStatus={configStatus}

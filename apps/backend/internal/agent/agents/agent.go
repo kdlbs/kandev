@@ -7,6 +7,7 @@ package agents
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -93,6 +94,16 @@ type InferenceAgent interface {
 // this capability when they run on the backend host.
 type HostUtilityInferenceAgent interface {
 	HostUtilityInferenceConfig() *InferenceConfig
+}
+
+// HostCLIAgent is an optional capability for agent types whose vendor ships a
+// command-line tool that Kandev detects on the host (for example `claude` or
+// `codex`). The spec is compiled metadata used to show the installed version
+// and discover models where the vendor documents a listing. Sessions keep
+// using BuildCommand; installing or updating the CLI stays the existing
+// agent install action.
+type HostCLIAgent interface {
+	HostCLI() hostcli.Spec
 }
 
 // ManagedNPMRuntimeAgent is an optional capability for built-in agents whose
