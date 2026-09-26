@@ -176,16 +176,17 @@ cd apps/backend && go test ./internal/coordinator/... ./internal/backendapp/...
 cd apps/web && pnpm test -- lib/coordinator/attention.test.ts
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/needs-you.spec.ts tests/coordinator/stall.spec.ts tests/coordinator/empty-states.spec.ts
-cd apps/web && pnpm e2e:run --project=auth tests/auth/coordinator-needs-you-reader.spec.ts
 cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-needs-you.spec.ts
 ```
 
-The `auth` project's `testMatch` requires an `auth/` path segment, so the
-reader case (`AC-COORDINATOR-NEEDS-YOU-002.8`: "a reader sees no decision
-actions") lives in its own `tests/auth/coordinator-needs-you-reader.spec.ts`:
-a `workspace.manage` fixture sees Approve, Edit and Reject on a proposal
-item, and a `workspace.read` fixture sees the same item's title, description,
-target and "Proposed by" line with no decision actions.
+A component test on the item card covers the reader case
+(`AC-COORDINATOR-NEEDS-YOU-002.8`: "a reader sees no decision actions"): with
+a `workspace.manage` viewer the item shows Approve, Edit and Reject, and with
+a `workspace.read` viewer the same item shows its title, description, target
+and "Proposed by" line with no decision actions. Task 02's
+`tests/auth/coordinator-settings-reader.spec.ts` is the coordinator suite's
+one `auth`-project Playwright spec; this reader-gating check does not need a
+second one.
 
 The `mobile-chrome` project matches on the `mobile-*.spec.ts` filename prefix
 (`apps/web/e2e/playwright.config.ts`), not on project scope, so the 390px and
@@ -249,7 +250,6 @@ inference from other tests.
 - `apps/web/components/navigation/mobile-sidebar-layout-navigation.tsx`
 - `apps/web/src/locales/*/`
 - `apps/web/e2e/tests/coordinator/`, including `mobile-needs-you.spec.ts`
-- `apps/web/e2e/tests/auth/coordinator-needs-you-reader.spec.ts`
 - `apps/web/e2e/helpers/axe.ts`
 
 ## Dependencies
@@ -264,5 +264,3 @@ inference from other tests.
   waiting on the rendered card.
 - Workflow snapshots must be loaded for every workflow of the workspace, or
   counts undercount.
-- The reader case needs the `auth` project with `KANDEV_FEATURES_AUTH=true`;
-  without it the local user holds every scope and the test proves nothing.

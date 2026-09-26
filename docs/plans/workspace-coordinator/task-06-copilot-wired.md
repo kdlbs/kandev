@@ -49,13 +49,13 @@ critical path.
   route's response with `kind: "chat"`, passes `archive_state` as
   `taskArchiveState`, `automaticRecovery={false}` and
   `hideSessionSelectors`.
-- The copilot half of `AC-COORDINATOR-COORDINATORS-005.1` to `005.3` (owned
+- The copilot half of `AC-COORDINATOR-COORDINATORS-005.1` (owned
   by task 03): the profile messages in place of the composer, mapped from
   `agent_profile_status` and `executor_profile_status` as the
   [coordinators design](../../specs/coordinator/system-design/coordinators.md#validation)
   tables say: from the coordinator GET without calling the conversation
   route, or from the route's `coordinator_profile_unavailable` 409 body;
-  stacked when both are not `ok`, the agent profile message first. A
+  both messages shown together when both are not `ok`. A
   component test covers agent `missing`, agent `passthrough` (the passthrough
   message, not the removed one), executor `missing`, both not `ok`, a 409 body
   after an `ok` GET, and an unknown status value (shown as that field's
@@ -121,19 +121,13 @@ mockup's `mockup/e2e/tests/`, outside this repository; see the plan's [Mockup sc
 cd apps/web && pnpm test -- hooks/domains/coordinator app/coordinator/copilot
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/copilot.spec.ts tests/config-chat
-cd apps/web && pnpm e2e:run --project=auth tests/auth/coordinator-copilot-reader.spec.ts
 cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-copilot.spec.ts
 ```
 
 The `mobile-chrome` project matches on the `mobile-*.spec.ts` filename prefix
 (`apps/web/e2e/playwright.config.ts`), not on project scope, so the 390px
 layout assertions live in their own `mobile-copilot.spec.ts` file rather than
-a rerun of `copilot.spec.ts` under a different project. The `auth` project's
-`testMatch` requires an `auth/` path segment, so the reader-visibility case
-(`AC-COORDINATOR-COPILOT-004.1`) lives in its own
-`tests/auth/coordinator-copilot-reader.spec.ts`: a `workspace.manage` fixture
-sees the launcher on both Coordinator screens, and a `workspace.read` fixture
-sees neither launcher, with no popover reachable by URL or keyboard.
+a rerun of `copilot.spec.ts` under a different project.
 
 `tests/coordinator/copilot.spec.ts` includes a permission-request case: the
 mock agent calls one of its own tools, the popover shows Approve and Deny
@@ -145,9 +139,13 @@ auto-approval policy) for a coordinator session.
 A component test on the coordinator controller asserts the flag-off case
 directly: with `features.coordinator` off, no launcher renders on the
 Coordinator screens, so the "In scope" summary's "no launcher renders" claim
-is a checked assertion, not an inference from
-`coordinator-copilot-reader.spec.ts`, which covers the flag-on,
-scope-gated case instead.
+is a checked assertion. A second component test covers the reader-visibility
+case (`AC-COORDINATOR-COPILOT-004.1`) with the flag on: a `workspace.manage`
+viewer sees the launcher on both Coordinator screens, and a `workspace.read`
+viewer sees neither launcher, with no popover reachable by URL or keyboard.
+Task 02's `tests/auth/coordinator-settings-reader.spec.ts` is the coordinator
+suite's one `auth`-project Playwright spec; this reader-gating check does not
+need a second one.
 
 ## Likely files
 
@@ -155,7 +153,6 @@ scope-gated case instead.
 - `apps/web/hooks/domains/coordinator/use-copilot.ts` and test
 - `apps/web/src/locales/*/`
 - `apps/web/e2e/tests/coordinator/copilot.spec.ts`, `mobile-copilot.spec.ts`
-- `apps/web/e2e/tests/auth/coordinator-copilot-reader.spec.ts`
 
 ## Dependencies
 
@@ -170,5 +167,3 @@ scope-gated case instead.
 
 - Tasks 03, 04 and 05 land in any order; start only when all three have
   passed Review, so the controller is built on their final interfaces.
-- The reader case needs the `auth` project with `KANDEV_FEATURES_AUTH=true`;
-  without it the local user holds every scope and the test proves nothing.

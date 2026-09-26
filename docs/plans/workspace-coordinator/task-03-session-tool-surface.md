@@ -18,9 +18,6 @@ acceptance_criteria:
   - AC-COORDINATOR-COORDINATORS-002.8
   - AC-COORDINATOR-COORDINATORS-002.10
   - AC-COORDINATOR-COORDINATORS-005.1
-  - AC-COORDINATOR-COORDINATORS-005.2
-  - AC-COORDINATOR-COORDINATORS-005.3
-  - AC-COORDINATOR-COORDINATORS-005.4
   - AC-COORDINATOR-COPILOT-001.1
   - AC-COORDINATOR-COPILOT-001.2
   - AC-COORDINATOR-COPILOT-001.3
@@ -76,9 +73,9 @@ Deciding proposals is task 07. Backend only. On the critical path.
   kept, 409 with the `coordinator_profile_unavailable` body on a status other
   than `ok` from task 01's `profileStatus`; a zero-row update at step 4 whose
   re-read finds `conversation_task_id` NULL (a concurrent context change
-  cleared it after the stale read in step 2) restarts from step 2 once with
-  the fresh value; a second NULL on the retry's re-read returns 409 instead
-  of looping again (`AC-COORDINATOR-COPILOT-001.9`).
+  cleared it after the stale read in step 2) deletes the task just created
+  and returns 409; the popover's next open retries with the fresh value
+  (`AC-COORDINATOR-COPILOT-001.9`).
 - `TaskOriginCoordinator` (task 01's constant) refused at HTTP and MCP task
   create. The `coordinator-proposal:` external-id prefix refusal is task 07's.
 - `ListCoordinatorOriginTasks` in the task repository (SQLite and PostgreSQL)
@@ -101,27 +98,29 @@ Deciding proposals is task 07. Backend only. On the critical path.
   `CoordinatorLookup`, the coordinator branches in
   `Executor.resolveTaskSessionMCPMode` and `resolveTaskSessionMCPProfile`, the
   agentctl mode cases, plugin tools skipped.
-- `registerCoordinatorTools` with exactly the seven tools of
-  `AC-COORDINATOR-COPILOT-003.1`; `propose_task_kandev` (open-proposal cap
-  under a per-coordinator lock) writing through task 01's proposal insert and
-  publishing `coordinator.updated`; the `coordinator.propose_task` action; the
-  guard in `coordinator_authorization.go`. The `list_related_tasks_kandev`
-  handler is wired to call `HandoffService.ListRelated` directly for a
-  coordinator principal, not `ListRelatedForCaller`: the guard has already
-  resolved `task_id` inside the coordinator's workspace, and the ordinary
-  caller-relation check would refuse an unrelated board task
-  (system-design/copilot.md#tool-surface).
+- `registerCoordinatorTools` with exactly the six tools of
+  `AC-COORDINATOR-COPILOT-003.1`, reusing their existing handlers unchanged;
+  `propose_task_kandev` (open-proposal cap under a per-coordinator lock)
+  writing through task 01's proposal insert and publishing
+  `coordinator.updated`; the `coordinator.propose_task` action; the guard in
+  `coordinator_authorization.go`.
 - Fail-closed start checks, including the profile check at session start;
   exact-name auto-approval; `AutoApprovePermissionsOverride=false` on every
-  lifecycle path.
+  lifecycle path. `WorkspaceInfo.McpMode`
+  (`internal/orchestrator/executor/service_turns.go`) carries the coordinator
+  mode to every agentctl instance of the task, not only its first launch: the
+  prepare path (`IntentPrepare`/`NoAgentLaunch`) and the promotion path (a
+  workspace-only execution later promoted to a full launch) both set it
+  before agentctl starts; agentctl does not consult its own
+  `cfg.AutoApprovePermissions` in this mode.
 - `autoResumeEligibility` returns `coordinator_message_only`;
   `IsRestorableQuickChatTask` excludes the origin; `message.add` needs
   `workspace.manage`.
 - Mock agent support for `e2e:mcp:kandev:propose_task_kandev({...})`.
 
 The settings-page and copilot halves of `AC-COORDINATOR-COORDINATORS-005.1`
-to `005.3` are built in tasks 02 and 06; this work order owns the criteria
-because the route's 409 and the session-start check are the enforcement.
+are built in tasks 02 and 06; this work order owns the criterion because the
+route's 409 and the session-start check are the enforcement.
 
 ## Out of scope
 
@@ -187,9 +186,8 @@ Required Go tests:
   retries with the same task; the created task carries no
   `auto_start_on_create` marker, and no agent runs after create or open;
 - a zero-row update at step 4 whose re-read finds `conversation_task_id` NULL
-  restarts from step 2 once and succeeds with the fresh value, leaving no
-  orphaned task; a second NULL on the retry's re-read returns 409 and creates
-  no task;
+  deletes the task just created, returns 409 and leaves no orphaned task; the
+  next open retries and succeeds with the fresh value;
 - a context change archives the old conversation task (a running turn
   stops), the next open creates a new one, and the archived one never
   resolves to a coordinator; a changed `agent_profile_id` or

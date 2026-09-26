@@ -48,7 +48,7 @@ Table `coordinator_proposals` in the coordinator store:
 | `final_spec_json` | text null | frozen at claim |
 | `claimed_at` | timestamp null | set with `approving` |
 | `claim_token` | text null | UUID generated per claim; fences completion |
-| `task_id` | text null | set with `approved`; also set on a `failed` row when the task was created but a later step of approval failed (see [Approve](#approve) step 4) |
+| `task_id` | text null | set with `approved` |
 | `error` | text null | set with `failed`, at most 1,000 characters |
 | `reject_reason` | text null | at most 500 characters |
 | `decided_by` | text null | user id |
@@ -97,19 +97,6 @@ There is no deduplication key.
 2. Build the candidate spec: the base is `final_spec_json` when the row has
    one (a `failed` attempt), else `spec_json`; merge the edits and validate as
    in propose. 400 leaves the row unchanged. `spec_json` is never rewritten.
-   A `failed` row whose `task_id` is already set (step 4's "any other settle
-   error" branch below already created a task) refuses an edit with 409 and
-   the current row: the frozen spec already produced a real task, so a
-   further edit here would leave the manager believing the change applied
-   when it did not. A no-edit retry of that same row skips this step's
-   validation entirely (the source task, workflow, step and repository are
-   not re-checked against current state) and goes straight to step 3's claim
-   with the existing `final_spec_json` unchanged: the retry's job is only to
-   complete an already-created task, not to re-authorise creating one, so a
-   source task deleted or a step made ineligible after the earlier failed
-   create must not block it. Continuing to step 3 completes with the existing
-   task (step 4's `CreateTaskOutcomeFoundSettled` or
-   `CreateTaskOutcomeFoundUnsettled` branch).
 3. Claim, with a new UUID `T`: `UPDATE ... SET status='approving',
    claimed_at=now, claim_token=T, final_spec_json=?, decided_by=?, error=NULL
    WHERE id=? AND status IN ('pending','failed')`. When it matches no row, a
@@ -132,9 +119,13 @@ There is no deduplication key.
      deleted while this create ran): fail with "The created task was deleted
      before approval completed" and leave `task_id` unset: the task no
      longer exists, so nothing was in fact created. Any other settle error:
-     fail with it, but this time set `task_id` to the created task's id on
-     the same `failed` update; the task stays, and the next approve's create
-     returns it as Found (step 2 above then requires no edits on that retry).
+     log it at warn and return the error to the caller without touching the
+     row (step 5 does not run for this branch); the row stays `approving`
+     with its existing claim, since the task exists but is not confirmed
+     settled. The next recovery (the next startup pass, or the claim's own
+     staleness after two minutes triggering a stale re-claim) retries the
+     create, which the external id makes idempotent, and completes through
+     the `Found*` branch below.
    - `CreateTaskOutcomeFoundSettled`: an earlier attempt created the task;
      complete with its id.
    - `CreateTaskOutcomeFoundUnsettled`: an earlier attempt created the task
@@ -216,9 +207,10 @@ or feeder graph changed after proposing, after the original claim, or during
 the recovery window is caught each time), this means a proposal can only ever
 land somewhere a manager could place a task by hand *and leave it there*,
 never somewhere the workflow itself would immediately relocate it into an
-auto-starting step. task-07 implements the feeder-graph walk as part of step
-eligibility; task-01's step-eligibility store method takes the workflow's
-full step graph, not just the candidate step, so it can check reachability.
+auto-starting step. task-01 implements the feeder-graph walk inside its
+step-eligibility store method, which takes the workflow's full step graph,
+not just the candidate step, so it can check reachability; task-03 calls it
+at propose time and task-07 calls it again at claim time and stale re-claim.
 
 ### Edits
 
@@ -276,80 +268,19 @@ winner's row. A racing approve and reject cannot both succeed.
 
 ## Recovery
 
-A claim is stale after two minutes. Three callers run recovery on an
-`approving` row with a stale claim: the startup pass, an approve request, and
-a list or single-proposal read whose caller also holds `workspace.manage`
-and that is not cross-site (see [Read-triggered writes](#read-triggered-writes)).
-A read by a caller with only `workspace.read`, or a cross-site read, never
-writes; it returns the row as stored. Recovery takes the stale re-claim `UPDATE` in [Approve](#approve),
-which refreshes `claimed_at` and sets a new `claim_token`, so of two readers
-seeing one stale claim exactly one wins it, and a slow original claimer's
-completion no longer matches the token. It then re-runs the step-eligibility
-check against the frozen spec's workflow and step
+A claim is stale after two minutes. Two callers run recovery on an
+`approving` row with a stale claim: the startup pass and an approve request.
+A proposal read, single or list, never writes; it always returns rows as
+stored. Recovery takes the stale re-claim `UPDATE` in [Approve](#approve),
+which refreshes `claimed_at` and sets a new `claim_token`, so of a startup
+pass and an approve racing on one stale claim exactly one wins it, and a slow
+original claimer's completion no longer matches the token. It then re-runs
+the step-eligibility check against the frozen spec's workflow and step
 ([No agent starts](#no-agent-starts)); a step that is no longer eligible sets
 the proposal `failed` with a descriptive error and skips the create entirely.
 Otherwise it runs steps 4 to 6: the idempotent create returns the task the
 first attempt made, if any. Recovery keeps `final_spec_json` and `decided_by`
-from the first claim, and never touches a session. A recovering read returns
-the row as it stands after recovery.
-
-A read recovers synchronously, before it answers:
-
-- A single-proposal read recovers that row when its claim is stale.
-- A list read (`pending` or `all`) first selects its page as
-  [Routes](#routes) orders it, then recovers every row of that page whose
-  claim is stale, one at a time in the page's order, then re-reads each
-  recovered row and answers with the page in the same order and membership as
-  selected (a row that became `approved`, `rejected` or `failed` stays in a
-  `pending` page for this response and drops out on the next read). The page
-  is at most 25 rows for `pending` (the open cap) and 50 for `all`, which
-  bounds the work.
-- Per row, the outcome is the one [Stale re-claim](#stale-re-claim) and steps
-  4 to 6 of [Approve](#approve) define: a re-claim lost to another reader
-  leaves the row as re-read; a create error sets the row `failed`; a row gone
-  mid-recovery is left out of the response.
-- Any other error while recovering a row (a store error in the re-claim or
-  completion) is logged at warn with the proposal id; that row is returned as
-  stored and the read continues with the next row. Recovery never turns a
-  read into an error response.
-
-### Read-triggered writes
-
-A `GET` is reachable cross-site: the session cookie is `SameSite=Lax`, so a
-top-level navigation from another site carries it, and such a navigation sends
-no `Origin` header, so `corsMiddleware` in `internal/backendapp/middleware.go`
-(which rejects a disallowed `Origin` for every method) does not stop it. The
-recovery a read performs is a write, so the two proposal read routes gate it
-on the request's `Sec-Fetch-Site` header:
-
-| `Sec-Fetch-Site` | Read recovers stale claims |
-| --- | --- |
-| absent | no; rows returned as stored, as for a `workspace.read` caller |
-| `same-origin` | yes |
-| `none` (typed or bookmarked navigation) | yes |
-| `same-site` or `cross-site` | no; rows returned as stored, as for a `workspace.read` caller |
-| any other value | no |
-
-An absent header is not proof of a non-browser, cookie-less caller: a browser
-predating the Fetch Metadata spec (Safari <16.4, Firefox <90) or sitting
-behind a header-stripping proxy or extension still attaches the ambient
-`SameSite=Lax` session cookie on a cross-site top-level navigation while
-sending no `Sec-Fetch-Site` at all. `webhookSameOriginRequest`
-(`internal/plugins/handlers.go`) already treats an absent header as refused
-by default for the same reason; this gate matches it by treating absent the
-same as `cross-site`.
-
-The gate applies only to the recovery; the read itself answers 200 either
-way. Even an ungated recovery could only replay a decision a
-`workspace.manage` caller already committed: it takes no request input, uses
-the frozen `final_spec_json` and the first `decided_by`, and creates at most
-the one task the claim authorised, which is what the startup pass would do:
-refusing recovery here only delays it, since the next startup pass, approve,
-or a same-origin read still recovers the row. The gate removes that write from
-cross-site, same-site and no-header reach so the read routes stay
-side-effect free for any request another site can cause. Approve and reject
-are `POST` with a JSON body, which `SameSite=Lax` and the origin check
-already protect.
+from the first claim, and never touches a session.
 
 ## Reserved prefix
 
@@ -379,10 +310,9 @@ The prefix is enforced in the task service, so every entry point inherits it:
 | `POST .../proposals/:pid/reject` | `workspace.manage` | proposal, 400, 403, 404 or 409 |
 
 Routes live under `/api/v1/workspaces/:id/`. A proposal of another
-coordinator or workspace is 404. Both reads need only `workspace.read` to
-answer; the stale-claim recovery they may run additionally needs
-`workspace.manage` and a request that is not cross-site
-([Read-triggered writes](#read-triggered-writes)). The coordinator list response carries
+coordinator or workspace is 404. Both reads need only `workspace.read` and
+never write: stale-claim recovery runs only in the startup pass and on
+approve ([Recovery](#recovery)). The coordinator list response carries
 `open_proposals` per coordinator for the sidebar badge.
 
 ## Events
@@ -442,9 +372,8 @@ ever having been listed.
 
 - Decisions authorise at the backend by workspace scope; the principal of the
   MCP action is resolved server-side.
-- A proposal read performs recovery only when it is not cross-site
-  ([Read-triggered writes](#read-triggered-writes)); no request another site
-  can cause writes a proposal.
+- A proposal read never writes, so no request, from any site, can trigger
+  recovery or otherwise mutate a proposal through a read route.
 - Spec strings are untrusted and rendered as text.
 - The created task is ordinary; the coordinator gains no authority over it.
 

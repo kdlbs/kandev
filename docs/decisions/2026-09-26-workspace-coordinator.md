@@ -140,27 +140,16 @@ CLI can do outside it.
 The residual above is about tools the coordinator is not supposed to have. A
 second, distinct residual is about content reaching the tools it *is* supposed
 to have: the coordinator's read tools return task titles, descriptions and
-conversation text that any workspace member can write, and
-`propose_task_kandev`'s containment argument — a person decides before
-anything is created — assumes the manager can trust what the coordinator
-shows them about that content. Neither assumption is enforced. A task title
-or conversation message can contain text aimed at the coordinator's agent
-rather than at a person (an instruction to propose a specific task, or to
-describe a proposal's rationale in a misleading way), and nothing in this
-design distinguishes board content written by a person from board content
-written, or influenced, to steer the agent. The agent never gains a new
-capability from this: every effect still routes through the same seven-tool
-allowlist and the same manager approval. What is at risk is the trustworthiness
-of what the manager is shown, not the containment boundary itself.
-
-This residual is **accepted, unmitigated, for phase 1**, and is not closed by
-G4: G4's containment is about what an unattended turn's tools can reach, not
-about whether the content those tools read is trustworthy. Mitigating it
-would mean treating board content as untrusted input to the coordinator's
-proposal reasoning — for example, surfacing the source task link next to the
-coordinator's paraphrase so a manager can check the claim against the
-original text — which is not built in phase 1 and is left for a later phase
-to decide.
+conversation text that any workspace member can write, so a title or message
+aimed at the coordinator's agent rather than at a person could steer its
+proposal or how it describes one, and nothing here distinguishes such content
+from a person's own, though every effect still routes through the same
+six-tool allowlist and the same manager approval. This residual is
+**accepted, unmitigated, for phase 1**, and is not closed by G4, since G4 is
+about what an unattended turn's tools can reach, not whether the content
+those tools read is trustworthy. Mitigating it, for example by surfacing the
+source task link next to the coordinator's paraphrase so a manager can check
+the claim, is not built in phase 1 and is left for a later phase to decide.
 
 ## Phase plan
 

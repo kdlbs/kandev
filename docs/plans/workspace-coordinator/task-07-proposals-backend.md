@@ -57,14 +57,10 @@ proposals through the store. Runs in parallel with tasks 02, 03 and 04.
   task), reject (from `pending` or `failed`, optional reason), zero-row
   completion re-read (200 with the current row, or 404 when the row is
   gone).
-- Stale-claim recovery at startup, on approve, and on a proposal list or get
-  by a `workspace.manage` caller only, gated on `Sec-Fetch-Site` so a
-  same-site or cross-site read never writes (added to task 01's read routes;
-  see the
-  [proposals design](../../specs/coordinator/system-design/proposals.md#read-triggered-writes)
-  table). The
-  startup recovery hooks into task 01's decisions registration function (its
-  startup-pass hook slot), not into the shared pass's call site.
+- Stale-claim recovery at startup and on approve only; a proposal list or get
+  never writes. The startup recovery hooks into task 01's decisions
+  registration function (its startup-pass hook slot), not into the shared
+  pass's call site.
 - The `coordinator-proposal:` external-id prefix refused in the task service:
   `CreateTask` without `AllowReservedExternalID`, and
   `ReleaseTaskExternalID`, at the HTTP and MCP task create entry points.
@@ -132,16 +128,12 @@ uses the start step, empty repository clears it, a changed workflow without
 a step resets to its start step), and edits to a failed attempt kept on the
 next approve; each create outcome: `Created` settles and completes, identity
 lost completes with the survivor, a settle not-found fails the proposal, any
-other settle error fails the proposal and sets `task_id` on the `failed` row,
-and a retry of that row requires no edits and completes with the existing
-task, `FoundSettled` and `FoundUnsettled` complete with the found task and
+other settle error leaves the row `approving` for the next recovery to
+complete, `FoundSettled` and `FoundUnsettled` complete with the found task and
 never settle or release it; `coordinator.updated` published once after the
 completion, and not on a zero-row write; a coordinator deleted during an
-approval returns 404 with the task kept; a reader's list of a stale claim
-writes nothing while a manager's list recovers it; a manager's list or get
-with `Sec-Fetch-Site` `cross-site`, `same-site`, an absent header or an
-unknown value writes nothing and returns the rows as stored, while
-`same-origin` and `none` recover; the created task gets no
+approval returns 404 with the task kept; a proposal list or get never writes,
+whatever the caller's scope, and returns rows as stored; the created task gets no
 agent on a step whose `on_enter` has `auto_start_agent` (no
 `auto_start_on_create` marker); crash after claim and after create recover to one
 task; two readers of a stale claim, one wins, keeping the first

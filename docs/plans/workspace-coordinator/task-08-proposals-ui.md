@@ -44,14 +44,9 @@ transcript (task 06), on task 07's routes. Completes phase 1.
   mount and on every `coordinator.updated`, independent of the pending list.
 - `ProposalCard` states (UI-03), Edit and Reject forms in place with focus
   handling, the chat card renderer for `propose_task_kandev` with navigation
-  to the Needs-you form, decision toasts; six locales. Two distinct failed
-  variants keyed on whether the row carries a task id: the no-task-id variant
-  keeps Approve, Edit and Reject; the task-id-set variant omits Edit and
-  shows the "task was created but could not be finalized" copy
-  (`AC-COORDINATOR-PROPOSALS-005.3`). Reject has a matching second toast
-  variant for the task-id-set case, "Rejected. <card> stays on its board"
-  instead of "Rejected. Nothing was created" (`AC-COORDINATOR-PROPOSALS-005.7`),
-  since that row's earlier failed approval already created the task.
+  to the Needs-you form, decision toasts; six locales. One `failed` variant,
+  keeping Approve, Edit and Reject with the "Could not create the task:
+  <error>. Nothing was created." copy (`AC-COORDINATOR-PROPOSALS-005.3`).
 - `docs/public/coordinator.md` through `/docs-maintainer`, including what the
   coordinator's agent can still do through its own tools; update
   `docs/public/feature-status.md` if the boundary changed.
@@ -66,19 +61,13 @@ transcript (task 06), on task 07's routes. Completes phase 1.
 From [plan UI-03](plan.md#ui-03-proposal-card-states-needs-you-and-chat):
 
 ```text
-pending, can manage       approving                 failed (no task id)
+pending, can manage       approving                 failed
 ! create_task             ! create_task             ! Pending Approval
   Pending Approval          Approval in progress      Could not create the task:
   <title, workflow, step>   Edits are locked.         <error>. Nothing was created.
   [Approve] [Edit] [Reject]                           [Approve] [Edit] [Reject]
-failed (task id set)      approved (chat)           rejected (chat)
-! Pending Approval        v Approved: KAN-432       x Rejected: <reason>
-  The task was created but
-  could not be finalized:
-  <error>. Open the task,
-  or retry to continue
-  from here.
-  [Approve] [Reject]
+approved (chat)           rejected (chat)
+v Approved: KAN-432       x Rejected: <reason>
 ```
 
 ## Mockup screenshots and scenarios
@@ -120,19 +109,16 @@ The `mobile-chrome` project matches on the `mobile-*.spec.ts` filename prefix
 assertions live in their own `mobile-proposals.spec.ts` file rather than a
 rerun of `proposals.spec.ts` under a different project.
 
-`use-proposals.test.ts` and `proposals.spec.ts` both cover the two failed
-variants: a `failed` row with no task id renders Approve, Edit and Reject
-with the "Nothing was created" copy, and a `failed` row with a task id set
-renders only Approve and Reject with the "could not be finalized" copy and
-Approve completing with the existing task. `use-proposals.test.ts` also
+`use-proposals.test.ts` and `proposals.spec.ts` both cover the `failed`
+variant: it renders Approve, Edit and Reject with the "Nothing was created"
+copy. `use-proposals.test.ts` also
 covers the reader case of `AC-COORDINATOR-PROPOSALS-005.1` ("for managers"):
 `ProposalCard` given a `workspace.read`-scoped context renders the title,
 workflow, step and "Proposed by" line with no Approve, Edit or Reject. The
-end-to-end reader assertion for this same card lives in task 04's
-`tests/auth/coordinator-needs-you-reader.spec.ts` (the card renders on Needs
-you); the copilot transcript surface needs no separate `auth`-project spec of
-its own, because `AC-COORDINATOR-COPILOT-004.1` already keeps the launcher,
-and so the popover the chat card renders inside, unreachable to a reader.
+reader assertion for this same card on Needs you is task 04's component test;
+the copilot transcript surface needs no separate coverage of its own, because
+`AC-COORDINATOR-COPILOT-004.1` already keeps the launcher, and so the popover
+the chat card renders inside, unreachable to a reader.
 
 `proposals.spec.ts` also covers
 the rest of REQ-COORDINATOR-PROPOSALS-005 directly: the `pending` card's
@@ -141,11 +127,9 @@ action-less state (AC-005.2), Edit's in-place fields and empty-title refusal
 plus Cancel restoring focus to Edit (AC-005.4), Reject's in-place reason field
 plus Cancel restoring focus to Reject (AC-005.5), the chat card's Edit/Reject
 navigating to and opening the same Needs-you forms (AC-005.6), the approve
-toast and the two distinct reject toasts — "Rejected. Nothing was created"
-for a no-task-id row and "Rejected. <card> stays on its board" for a
-task-id-set row — each followed by the correct "Next: ..." count line
-(AC-005.7), and the chat card's settled "Approved: <card>" / "Rejected:
-<reason>" text (AC-005.8).
+toast and the reject toast "Rejected. Nothing was created", each followed by
+the correct "Next: ..." count line (AC-005.7), and the chat card's settled
+"Approved: <card>" / "Rejected: <reason>" text (AC-005.8).
 
 ## Likely files
 

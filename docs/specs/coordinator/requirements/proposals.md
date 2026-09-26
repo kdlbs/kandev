@@ -127,22 +127,16 @@ Mockup:
   set the proposal `failed` with the error; a later approve shall claim it
   again.
 - **AC-COORDINATOR-PROPOSALS-002.7:** When the process stops after a claim or
-  after the task was created, the next startup, the next approve, or the next
-  proposal read by a caller holding `workspace.manage` whose request the
-  browser does not mark `cross-site` or `same-site` and does not leave
-  `Sec-Fetch-Site` absent, and that reads the stale claim, shall re-check the
-  frozen spec's target step against the eligible-step rule (the frozen spec
-  itself is not re-validated); when the step is still eligible, it shall
-  complete the approval with the same single task using the frozen spec; when
-  the step is no longer eligible, it shall set the proposal `failed` with a
-  descriptive error and create no task. A read by a caller holding only
-  `workspace.read`, or a read the browser marks as cross-site or same-site, or
-  a read with `Sec-Fetch-Site` absent, shall change nothing; when two readers
-  see the same stale claim, exactly one shall attempt the recovery, using the
-  spec frozen by the first claim and keeping the first approver as the
-  approving user. A list read by a caller holding `workspace.manage` shall
-  recover every stale claim among the rows it returns before answering, and a
-  recovery that fails shall not fail the read.
+  after the task was created, the next startup or the next approve shall
+  re-check the frozen spec's target step against the eligible-step rule (the
+  frozen spec itself is not re-validated); when the step is still eligible, it
+  shall complete the approval with the same single task using the frozen
+  spec; when the step is no longer eligible, it shall set the proposal
+  `failed` with a descriptive error and create no task. Reading a proposal,
+  whether a single get or a list, shall never write. When a startup recovery
+  and an approve's stale re-claim race on the same stale claim, exactly one
+  shall attempt the recovery, using the spec frozen by the first claim and
+  keeping the first approver as the approving user.
 - **AC-COORDINATOR-PROPOSALS-002.8:** No caller other than the coordinator
   service shall be able to create a task with an external id starting
   `coordinator-proposal:`, and no caller shall be able to release such an
@@ -229,19 +223,9 @@ Mockup:
   and **Reject** for managers.
 - **AC-COORDINATOR-PROPOSALS-005.2:** While a proposal is `approving`, the card
   shall say "Approval in progress. Edits are locked." with no actions.
-- **AC-COORDINATOR-PROPOSALS-005.3:** A `failed` proposal with no task id shall
-  say "Could not create the task: <error>. Nothing was created." and keep
-  Approve, Edit and Reject. A `failed` proposal that already carries a task id
-  (the task was created but a later step of approval failed) shall instead say
-  "The task was created but could not be finalized: <error>. Open the task, or
-  retry to continue from here." and keep Approve and Reject but not Edit,
-  since the frozen spec already produced a real task; Approve on this row
-  behaves as `AC-COORDINATOR-PROPOSALS-002.12` (completes with the existing
-  task) and refuses any edit with 409, matching every other state-conflict
-  edit rejection in this spec (`AC-COORDINATOR-PROPOSALS-002.5`,
-  `AC-COORDINATOR-PROPOSALS-002.9`) and
-  [system-design/proposals.md#approve](../system-design/proposals.md#approve)
-  step 2.
+- **AC-COORDINATOR-PROPOSALS-005.3:** A `failed` proposal shall say "Could not
+  create the task: <error>. Nothing was created." and keep Approve, Edit and
+  Reject.
 - **AC-COORDINATOR-PROPOSALS-005.4:** **Edit** on the Needs-you card shall open
   title, description, workflow, step (eligible steps only) and repository in
   place with **Approve with edits** and **Cancel**; an empty title shall be
@@ -253,13 +237,9 @@ Mockup:
   the same forms on the Needs-you card.
 - **AC-COORDINATOR-PROPOSALS-005.7:** After a decision the Needs-you card shall
   leave the list and a toast shall say "Approved. <card> created in <step>; no
-  agent starts until you start it" or, for a reject of a row with no task id,
-  "Rejected. Nothing was created". Rejecting a `failed` proposal that already
-  carries a task id (`AC-COORDINATOR-PROPOSALS-005.3`) shall instead say
-  "Rejected. <card> stays on its board", since the earlier failed approval
-  already created that task and rejecting the proposal does not remove it.
-  Either toast is followed by "Next: <n> items still need you" or "Next:
-  nothing needs you. That is the working state."
+  agent starts until you start it" or, for a reject, "Rejected. Nothing was
+  created". Either toast is followed by "Next: <n> items still need you" or
+  "Next: nothing needs you. That is the working state."
 - **AC-COORDINATOR-PROPOSALS-005.8:** A chat card shall show the settled state
   "Approved: <card>" or "Rejected: <reason>".
 - **AC-COORDINATOR-PROPOSALS-005.9:** At a 390px-wide viewport the card actions

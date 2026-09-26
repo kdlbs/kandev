@@ -135,7 +135,7 @@ so archiving is the only way a changed profile can take effect at all. The
 next popover open creates a fresh conversation task and session from the
 coordinator's current `agent_profile_id` and `executor_profile_id`
 ([copilot](copilot.md#conversation-task)), which is also when
-`AC-COORDINATOR-COORDINATORS-005.1`/`005.2` recovery is evaluated against the
+`AC-COORDINATOR-COORDINATORS-005.1` recovery is evaluated against the
 new profile. This applies equally when the new profile is itself missing or
 passthrough: the archive still happens, and the next open reports the new
 profile's status rather than silently continuing on the old, now-stale
@@ -159,10 +159,8 @@ the request returns 404, so the task stays on its board
 
 - name trimmed, 1 to 60 Unicode code points;
 - context at most 4,000 code points;
-- agent profile exists, belongs to the coordinator's own workspace (a
-  non-empty `WorkspaceID` that differs is refused the same as not found), and
-  is not CLI-passthrough (the agent settings service's existing passthrough
-  flag), else 400 with the field;
+- agent profile exists and is not CLI-passthrough (the agent settings
+  service's existing passthrough flag), else 400 with the field;
 - executor profile exists, else 400.
 
 The conversation route and session start repeat both profile checks, so an
@@ -176,7 +174,7 @@ and the GET, the conversation route and session start all use it:
 
 | Field | Values | Meaning |
 | --- | --- | --- |
-| `agent_profile_status` | `ok`, `missing`, `passthrough` | `missing`: no agent profile with the stored id, or one whose `WorkspaceID` is non-empty and differs from the coordinator's own workspace; `passthrough`: the profile exists, is in-workspace, and its `CLIPassthrough` (`internal/agent/settings/models`) is true; else `ok` |
+| `agent_profile_status` | `ok`, `missing`, `passthrough` | `missing`: no agent profile with the stored id; `passthrough`: the profile exists and its `CLIPassthrough` (`internal/agent/settings/models`) is true; else `ok` |
 | `executor_profile_status` | `ok`, `missing` | `missing`: no executor profile with the stored id; else `ok` |
 
 A profile read that fails for any reason other than not found returns 500
@@ -192,18 +190,18 @@ the statuses.
 **Messages.** The settings page and the copilot map the statuses to copy
 through `t()`, one message per status that is not `ok`:
 
-| Status | Message (meaning) | Settings page | Copilot |
-| --- | --- | --- | --- |
-| agent `missing` | the agent profile was removed; choose another | under Agent profile | first |
-| agent `passthrough` | the agent profile uses CLI passthrough, which a coordinator cannot use; choose another | under Agent profile | first |
-| executor `missing` | the executor was removed; choose another | under Executor | after the agent message |
+| Status | Message (meaning) | Settings page |
+| --- | --- | --- |
+| agent `missing` | the agent profile was removed; choose another | under Agent profile |
+| agent `passthrough` | the agent profile uses CLI passthrough, which a coordinator cannot use; choose another | under Agent profile |
+| executor `missing` | the executor was removed; choose another | under Executor |
 
-The copilot replaces the composer with these messages, stacked in the table's
-order, from the statuses of the coordinator GET it already holds, and does not
-call the conversation route while either is not `ok`. When the route returns
-409 anyway (a profile changed since the GET), the copilot shows the messages
-built from the 409 body's two statuses. A status value the client does not
-know is shown as the agent or executor `missing` message of its field.
+The copilot replaces the composer with these messages, from the statuses of
+the coordinator GET it already holds, and does not call the conversation
+route while either is not `ok`. When the route returns 409 anyway (a profile
+changed since the GET), the copilot shows the messages built from the 409
+body's two statuses. A status value the client does not know is shown as the
+agent or executor `missing` message of its field.
 
 ## Workspace deletion
 

@@ -118,18 +118,9 @@ Mockup:
   moved onto a different profile pair mid-session. The next conversation
   opened after the save shall create its task and session from the newly
   saved profiles, and any missing or passthrough profile of that new pair
-  shall be reported per `AC-COORDINATOR-COORDINATORS-005.1`-`005.3` rather
-  than the conversation continuing on the old, now-archived session. Sending
-  a profile id back unchanged shall keep the conversation.
-- **AC-COORDINATOR-COORDINATORS-002.11:** When the chosen agent profile
-  belongs to a different workspace than the coordinator's own, the system
-  shall refuse the create or edit with a 400 error naming the field, the same
-  as a profile that does not exist (`AC-COORDINATOR-COORDINATORS-002.5`).
-  Executor profiles carry no workspace scope anywhere in the codebase (the
-  same fact the Office handoff feature's AC-14b relies on), so this check
-  does not apply to `executor_profile_id`: an executor profile is validated
-  by existence only (`AC-COORDINATOR-COORDINATORS-002.5`).
-
+  shall be reported per `AC-COORDINATOR-COORDINATORS-005.1` rather than the
+  conversation continuing on the old, now-archived session. Sending a profile
+  id back unchanged shall keep the conversation.
 ### REQ-COORDINATOR-COORDINATORS-003: Listing and permissions
 
 **Intent:** Readers see coordinators; only managers change them.
@@ -182,9 +173,6 @@ Mockup:
 - **AC-COORDINATOR-COORDINATORS-004.6:** When the viewer is a reader, the list
   shall have no **+ Add coordinator** and the coordinator's page shall show its
   fields disabled with no Save or Delete.
-- **AC-COORDINATOR-COORDINATORS-004.7:** At a 390px-wide viewport the list and
-  the coordinator's page shall stack in one column with no horizontal scroll and
-  touch targets of at least 44px.
 
 ### REQ-COORDINATOR-COORDINATORS-005: Missing profile
 
@@ -198,34 +186,16 @@ Mockup:
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-COORDINATORS-005.1:** When a coordinator's agent profile no
-  longer exists, its settings page and its copilot shall say the profile was
-  removed and ask for another, and the conversation route shall return 409
-  until a manager saves an existing, non-passthrough profile.
-- **AC-COORDINATOR-COORDINATORS-005.2:** When a coordinator's executor profile
-  no longer exists, its settings page and its copilot shall say the executor
-  was removed and ask for another, and the conversation route shall return 409
-  until a manager saves an existing executor profile. When both profiles are
-  missing, both messages shall show: on the settings page each under its own
-  field, and in the copilot stacked in place of the composer, the agent
-  profile message first.
-- **AC-COORDINATOR-COORDINATORS-005.3:** When a coordinator's agent profile
-  exists but was switched to CLI passthrough after it was saved, its settings
-  page and its copilot shall say the profile uses CLI passthrough, which a
-  coordinator cannot use, and ask for another (not that it was removed), and
-  the conversation route shall return 409 until a manager saves an existing,
-  non-passthrough profile. With a missing executor profile as well, both
-  messages shall show as `AC-COORDINATOR-COORDINATORS-005.2` says.
-- **AC-COORDINATOR-COORDINATORS-005.4:** When a coordinator's agent profile
-  belongs to a different workspace than the coordinator's own (for example
-  after the profile itself was moved between workspaces), `profileStatus`
-  shall report `agent_profile_status` as `missing`, the same as an unreadable
-  or absent profile, and its settings page, copilot and conversation route
-  shall behave as `AC-COORDINATOR-COORDINATORS-005.1` says for a missing
-  agent profile. Executor profiles carry no workspace scope anywhere in the
-  codebase, so `executor_profile_status` has no equivalent case: an executor
-  profile is only ever `ok` or `missing` for non-existence
-  (`AC-COORDINATOR-COORDINATORS-005.2`).
+- **AC-COORDINATOR-COORDINATORS-005.1:** When a coordinator's `profileStatus`
+  reports `agent_profile_status` or `executor_profile_status` as anything
+  other than `ok`, its settings page and its copilot shall show that field's
+  message and ask for another: agent `missing` says the profile was removed;
+  agent `passthrough` says the profile uses CLI passthrough, which a
+  coordinator cannot use (not that it was removed); executor `missing` says
+  the executor was removed. The conversation route shall return 409 until a
+  manager saves profiles that are both `ok`. When both fields are not `ok`,
+  both messages shall show, each under its own field on the settings page and
+  both in the copilot in place of the composer.
 
 ### REQ-COORDINATOR-COORDINATORS-006: Workspace deletion
 

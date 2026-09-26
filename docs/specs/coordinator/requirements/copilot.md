@@ -86,9 +86,8 @@ Mockup:
 - **AC-COORDINATOR-COPILOT-001.9:** When an open loses the race described in
   `AC-COORDINATOR-COPILOT-001.2` and finds no other task to converge on
   because a context or profile change cleared the reference concurrently, the
-  open shall retry once from the start with the fresh value and complete
-  normally on that retry; a second such race on the retry shall return 409
-  instead of retrying again.
+  open shall return 409; the popover's next open retries with the fresh
+  value.
 
 ### REQ-COORDINATOR-COPILOT-002: Attended turns
 
@@ -121,11 +120,11 @@ Mockup:
 #### Acceptance criteria
 
 - **AC-COORDINATOR-COPILOT-003.1:** A coordinator session shall have exactly
-  these seven Kandev tools: `list_tasks_kandev`, `list_related_tasks_kandev`,
-  `get_task_conversation_kandev`, `list_workflows_kandev`,
-  `list_workflow_steps_kandev`, `list_repositories_kandev` and
-  `propose_task_kandev`. It shall have no other Kandev tool, including no
-  plan read, no user-question tool, no task-title tool and no plugin tool.
+  these six Kandev tools: `list_tasks_kandev`, `get_task_conversation_kandev`,
+  `list_workflows_kandev`, `list_workflow_steps_kandev`,
+  `list_repositories_kandev` and `propose_task_kandev`. It shall have no other
+  Kandev tool, including no `list_related_tasks_kandev`, no plan read, no
+  user-question tool, no task-title tool and no plugin tool.
 - **AC-COORDINATOR-COPILOT-003.2:** When a coordinator session calls any other
   Kandev tool or action, the system shall refuse it with an error naming the
   tool and change nothing.

@@ -15,7 +15,6 @@ acceptance_criteria:
   - AC-COORDINATOR-COORDINATORS-004.4
   - AC-COORDINATOR-COORDINATORS-004.5
   - AC-COORDINATOR-COORDINATORS-004.6
-  - AC-COORDINATOR-COORDINATORS-004.7
 system_design:
   - ../../specs/coordinator/system-design/coordinators.md
 ---
@@ -37,7 +36,7 @@ task 01's client. Runs in parallel with tasks 03, 04 and 07.
   confirmation dialog; reader gating through `canManageWorkspace` from
   `useWorkspaceTeamAccess`.
 - CLI-passthrough profiles listed disabled with their reason.
-- The settings-page half of `AC-COORDINATOR-COORDINATORS-005.1` to `005.3`
+- The settings-page half of `AC-COORDINATOR-COORDINATORS-005.1`
   (owned by task 03): warnings under the Agent profile and Executor fields
   mapped from task 01's `agent_profile_status` and `executor_profile_status`
   as the
@@ -96,7 +95,6 @@ mockup's `mockup/e2e/tests/`, outside this repository; see the plan's [Mockup sc
 - With the flag off the tab is absent.
 - A `workspace.read` member sees the list without Add, and the page with
   disabled fields and no Save or Delete.
-- At 390px the list and page stack in one column with 44px targets.
 
 ## Verification
 
@@ -105,14 +103,17 @@ cd apps/web && pnpm test -- lib/settings/workspace-settings-tabs.test.ts app/set
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/settings.spec.ts
 cd apps/web && pnpm e2e:run --project=auth tests/auth/coordinator-settings-reader.spec.ts
-cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-settings.spec.ts
 ```
 
 The `auth` project's `testMatch` requires an `auth/` path segment
-(`apps/web/e2e/playwright.config.ts`), and the `mobile-chrome` project matches
-on the `mobile-*.spec.ts` filename prefix, not on project scope: the 390px
-assertions live in their own `mobile-settings.spec.ts` file, not a rerun of
-`settings.spec.ts` under a different project.
+(`apps/web/e2e/playwright.config.ts`), so the reader case
+(`AC-COORDINATOR-COORDINATORS-003.2`) lives in its own
+`tests/auth/coordinator-settings-reader.spec.ts`: a `workspace.manage` fixture
+sees **+ Add coordinator** and an enabled page, and a `workspace.read` fixture
+sees the list without it and the page with every field disabled and no Save or
+Delete. This is the one `auth`-project Playwright spec in the coordinator
+suite; the equivalent reader-gating checks in tasks 04 and 06 are component
+tests instead.
 
 `workspace-settings-tabs.test.ts` asserts the flag-off case directly: with
 `features.coordinator` off, the workspace settings tab registry omits the
@@ -127,7 +128,7 @@ absence check for this work order).
 - `apps/web/app/settings/workspace/[id]/coordinators/`
 - `apps/web/lib/settings-discovery/catalog/workspaces.ts`
 - `apps/web/src/locales/*/`
-- `apps/web/e2e/tests/coordinator/settings.spec.ts`, `mobile-settings.spec.ts`
+- `apps/web/e2e/tests/coordinator/settings.spec.ts`
 - `apps/web/e2e/tests/auth/coordinator-settings-reader.spec.ts`
 
 ## Dependencies

@@ -41,11 +41,11 @@ see [Residual](#residual-external-surface).
 
 ## Conversation task
 
-- `internal/task/models` adds `TaskOriginCoordinator = "coordinator"` and
-  `SurfaceCoordinator`. The HTTP create handler and the MCP `create_task`
-  handler reject a request that names this origin (400), so only the
-  coordinator service creates such tasks, through the task service's internal
-  create call.
+- `internal/task/models` adds `TaskOriginCoordinator = "coordinator"`.
+  `internal/mcp/profile` adds `SurfaceCoordinator` to its `Surface` consts.
+  The HTTP create handler and the MCP `create_task` handler reject a request
+  that names this origin (400), so only the coordinator service creates such
+  tasks, through the task service's internal create call.
 - `POST /api/v1/workspaces/:id/coordinators/:cid/conversation`
   (`workspace.manage`) returns `{task_id, session_id, archive_state}`:
   1. Load the coordinator (404) and check both profiles with `profileStatus`
@@ -68,9 +68,8 @@ see [Residual](#residual-external-surface).
      so racing opens converge on one task with one session. When the re-read
      instead finds `conversation_task_id` NULL (a concurrent context or
      profile change cleared it after the stale value was read in step 2, so
-     no other task exists to converge on), restart from step 2 once with the
-     fresh row; a second NULL on that retry's re-read returns 409 instead of
-     looping again.
+     no other task exists to converge on), delete the task just created and
+     return 409; the popover's next open retries with the fresh row.
   5. When the re-read in step 4 finds no coordinator row (the coordinator was
      deleted between steps 1 and 4), the route deletes the task it created and
      returns 404. When a delete in step 4 or 5 fails, the route still answers
@@ -200,42 +199,25 @@ editing the stored user message.
   recognise to `SurfaceKanbanTask`, the full task tool set. Adding
   `SurfaceCoordinator` to the `Surface` consts and to `Legacy` without also
   adding it here would leave the coordinator session on the full Kanban tool
-  set instead of the seven-tool allowlist below, so this switch is a required
+  set instead of the six-tool allowlist below, so this switch is a required
   touch point, not an incidental one.
 
 ## Tool surface
 
 `registerCoordinatorTools` in `internal/mcp/server` registers exactly these
-seven tools, reusing the existing handlers of the first five (`list_related_tasks_kandev`
-is wired to a coordinator-specific variant, below):
+six tools, reusing the existing handlers unchanged:
 
 | Tool | Why |
 | --- | --- |
 | `list_tasks_kandev` | positions of the workspace's tasks |
-| `list_related_tasks_kandev` | parent, children and blockers of a stalled or waiting task; see below: a coordinator's ephemeral conversation task has no self/ancestor/descendant/sibling/blocker relation to an arbitrary board task, so this tool cannot use the ordinary caller-relation path |
 | `get_task_conversation_kandev` | what a task's agent last said or asked |
 | `list_workflows_kandev` | target workflow of a proposal |
 | `list_workflow_steps_kandev` | target step of a proposal |
 | `list_repositories_kandev` | repository of a proposal |
 | `propose_task_kandev` | new; sends the `coordinator.propose_task` action |
 
-The ordinary `list_related_tasks_kandev` handler calls
-`HandoffService.ListRelatedForCaller`, which requires the target task to be a
-self/ancestor/descendant/sibling/blocker of the *caller's own task*
-(`internal/task/service/handoff_service.go`); a coordinator's caller task is
-its ephemeral conversation task, which has no such relation to an arbitrary
-board task it wants to inspect, so that path would refuse essentially every
-coordinator call with `ErrAccessDenied`. For a coordinator principal, the
-server instead calls the unexported `ListRelated` directly (the same
-already-ungated method `GetTaskContext` uses for a task the caller already
-owns), passing the requested `task_id` with no caller-relation check. This is
-safe only because the backend guard (below) has already resolved that
-`task_id` inside the coordinator's own workspace before the handler runs:
-workspace membership is the isolation boundary here, not task relation.
-`task_id` still defaults to the coordinator's conversation task when omitted
-(Spec Review round 7, R7-03).
-
-It registers no other tool: in particular no `get_task_plan_kandev`, no plan,
+It registers no other tool: in particular no `list_related_tasks_kandev`, no
+`get_task_plan_kandev`, no plan,
 document or session reads, and no user-question, title, plugin, create, move,
 message, archive or delete tool. The backend guard in
 `internal/mcp/handlers/coordinator_authorization.go` runs for every action from
@@ -264,13 +246,21 @@ task mode. The popover follows the profile statuses of
 [coordinators](coordinators.md#validation): when the coordinator GET reports
 `agent_profile_status` or `executor_profile_status` other than `ok`, it does
 not call the conversation route and shows the matching messages in place of
-the composer, stacked, the agent profile message first. A 409 from the route
+the composer. A 409 from the route
 (a profile deleted or switched to passthrough since the GET) carries both
 statuses in its `coordinator_profile_unavailable` body, and the popover shows
 the messages built from them.
 
 ## Permission policy
 
+- `WorkspaceInfo.McpMode` (`internal/orchestrator/executor/service_turns.go`)
+  carries the coordinator mode to every agentctl instance of the task, not
+  only its first launch: the prepare path (`IntentPrepare`/`NoAgentLaunch`,
+  used by the conversation route's session-ensure) and the promotion path (a
+  workspace-only execution later promoted to a full launch) both set it
+  before agentctl starts. agentctl itself does not consult its own
+  `cfg.AutoApprovePermissions` when its mode is `Coordinator`; the mode, not
+  the CLI's local config, decides.
 - In the coordinator mode `AutoApprovePermissionsOverride=false` is applied on
   first launch, on a re-created or resumed execution and when a workspace-only
   execution is promoted, so the profile flag and the agentctl auto-approve
@@ -280,7 +270,7 @@ the messages built from them.
   (`internal/agentctl/types/permission_identity.go`, the
   `mcp__<server>__<tool>` form ACP clients send, for example
   `mcp__kandev__list_tasks_kandev`) to server `kandev` and a tool that is one
-  of the seven names above, each compared as the full string, never by prefix.
+  of the six names above, each compared as the full string, never by prefix.
   A name that does not parse is not auto-approved.
 - Every other request reaches the popover through the existing permission
   message flow with Approve and Deny.
@@ -295,7 +285,7 @@ Enforced containment of these tools is a gate G4 condition before any
 unattended turn. The [ADR](../../../decisions/2026-09-26-workspace-coordinator.md)
 records this risk.
 
-A second, distinct residual is the content the seven allowed tools themselves
+A second, distinct residual is the content the six allowed tools themselves
 return: task titles, descriptions and conversation text written by any
 workspace member. Nothing in the tool surface or the guard distinguishes
 ordinary board content from content aimed at steering the coordinator's
