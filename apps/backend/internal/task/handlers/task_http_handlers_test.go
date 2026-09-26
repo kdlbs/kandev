@@ -1432,10 +1432,18 @@ func TestHandleSelectedMoveError(t *testing.T) {
 
 type moveTaskConflictRepo struct {
 	mockRepository
-	task      *models.Task
-	tasks     map[string]*models.Task
-	sessions  []*models.TaskSession
-	workflows map[string]*models.Workflow
+	task       *models.Task
+	tasks      map[string]*models.Task
+	workspaces map[string]*models.Workspace
+	sessions   []*models.TaskSession
+	workflows  map[string]*models.Workflow
+}
+
+func (m *moveTaskConflictRepo) GetWorkspace(_ context.Context, id string) (*models.Workspace, error) {
+	if m.workspaces != nil {
+		return m.workspaces[id], nil
+	}
+	return nil, nil
 }
 
 func (m *moveTaskConflictRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {

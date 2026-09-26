@@ -26,6 +26,8 @@ func TestHTTPPreviewExactRetirementAuthorization(t *testing.T) {
 	for _, id := range []string{"retirement-old", "retirement-replacement"} {
 		require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: id, WorkspaceID: workspaceID, Title: "private task"}))
 	}
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "foreign-workspace", Name: "Foreign", OwnerID: "foreign-owner"}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "foreign-replacement", WorkspaceID: "foreign-workspace", Title: "foreign private task"}))
 	require.NoError(t, repo.UpsertWorkspaceMember(ctx, &models.WorkspaceMember{
 		WorkspaceID: workspaceID, UserID: "viewer", Role: "viewer",
 	}))
@@ -77,6 +79,26 @@ func TestHTTPPreviewExactRetirementAuthorization(t *testing.T) {
 		})
 	}
 
+	for _, tc := range []struct {
+		name              string
+		replacementTaskID string
+	}{
+		{name: "foreign replacement", replacementTaskID: "foreign-replacement"},
+		{name: "missing replacement", replacementTaskID: "missing-replacement"},
+	} {
+		t.Run("old writer cannot distinguish "+tc.name, func(t *testing.T) {
+			requestBody := strings.Replace(body, "retirement-replacement", tc.replacementTaskID, 1)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/retirement-old/exact-retirement/preview", strings.NewReader(requestBody))
+			req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "owner", Role: authn.RoleMember}))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+			require.NotContains(t, rec.Body.String(), "foreign private task")
+			require.NotContains(t, rec.Body.String(), `"receipts"`)
+		})
+	}
+
 	t.Run("foreign workspace is indistinguishable from missing task", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/retirement-old/exact-retirement/preview", strings.NewReader(body))
 		req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "outsider", Role: authn.RoleMember}))
@@ -98,6 +120,28 @@ func TestHTTPPreviewExactRetirementAuthorization(t *testing.T) {
 		router.ServeHTTP(rec, req)
 		require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
 		require.NotContains(t, rec.Body.String(), "private task")
+		require.NotContains(t, rec.Body.String(), `"receipts"`)
+	})
+
+	t.Run("deleted workspace is denied without receipt", func(t *testing.T) {
+		const deletedWorkspaceID = "deleted-workspace"
+		require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: deletedWorkspaceID, Name: "Deleted", OwnerID: "owner"}))
+		for _, id := range []string{"deleted-old", "deleted-replacement"} {
+			require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: id, WorkspaceID: deletedWorkspaceID, Title: id}))
+		}
+		deletedOld, err := h.service.GetTask(ctx, "deleted-old")
+		require.NoError(t, err)
+		deletedReplacement, err := h.service.GetTask(ctx, "deleted-replacement")
+		require.NoError(t, err)
+		require.NoError(t, repo.DeleteWorkspace(ctx, deletedWorkspaceID))
+		deletedBody := fmt.Sprintf(`{"replacement_task_id":"deleted-replacement","workspace_id":%q,"expected_old_generation":%q,"expected_replacement_generation":%q}`,
+			deletedWorkspaceID, deletedOld.UpdatedAt.UTC().Format(time.RFC3339Nano), deletedReplacement.UpdatedAt.UTC().Format(time.RFC3339Nano))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/deleted-old/exact-retirement/preview", strings.NewReader(deletedBody))
+		req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "test-admin", Role: authn.RoleAdmin, Synthetic: true}))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
 		require.NotContains(t, rec.Body.String(), `"receipts"`)
 	})
 

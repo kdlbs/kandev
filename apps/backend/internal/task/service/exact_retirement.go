@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // ExactRetirementPredicate is a closed inventory category. New evidence must
@@ -105,6 +106,20 @@ func (s *Service) authorizeExactRetirementPreview(ctx context.Context, replaceme
 	return nil
 }
 
+func (s *Service) authorizeExactRetirementWorkspace(ctx context.Context, workspaceID string) error {
+	if workspaceID == "" {
+		return repoerrors.ErrWorkspaceNotFound
+	}
+	workspace, err := s.workspaces.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	if workspace == nil {
+		return repoerrors.ErrWorkspaceNotFound
+	}
+	return s.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeTaskWrite)
+}
+
 // PreviewExactRetirement only reads authorized task rows. Evidence owners are
 // intentionally represented as UNKNOWN until their read-only adapters exist.
 func (s *Service) PreviewExactRetirement(ctx context.Context, request ExactRetirementPreviewRequest) (*ExactRetirementPreview, error) {
@@ -123,6 +138,9 @@ func (s *Service) PreviewExactRetirement(ctx context.Context, request ExactRetir
 		return nil, err
 	}
 	if err := s.authorizeExactRetirementPreview(ctx, replacementTask.ID); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeExactRetirementWorkspace(ctx, oldTask.WorkspaceID); err != nil {
 		return nil, err
 	}
 	if oldTask.ID == replacementTask.ID {

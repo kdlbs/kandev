@@ -21,7 +21,10 @@ func TestHTTPPreviewExactRetirementReturnsNoStoreUnknownReceipt(t *testing.T) {
 	now := time.Now().UTC().Round(0)
 	oldTask := &models.Task{ID: "old", WorkspaceID: "workspace", Title: "old", UpdatedAt: now}
 	replacement := &models.Task{ID: "replacement", WorkspaceID: "workspace", Title: "replacement", UpdatedAt: now}
-	repo := &moveTaskConflictRepo{tasks: map[string]*models.Task{"old": oldTask, "replacement": replacement}}
+	repo := &moveTaskConflictRepo{
+		tasks:      map[string]*models.Task{"old": oldTask, "replacement": replacement},
+		workspaces: map[string]*models.Workspace{"workspace": {ID: "workspace", Name: "Workspace"}},
+	}
 	h := newMovePreviewHandler(t, repo, nil, newTestLogger(t))
 	router := gin.New()
 	router.POST("/api/v1/tasks/:id/exact-retirement/preview", h.httpPreviewExactRetirement)

@@ -39,6 +39,7 @@ func TestExactRetirementReceiptsEligible(t *testing.T) {
 func TestPreviewExactRetirementFailsClosedWithoutInventoryAdapters(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace", Name: "Workspace"}))
 	for _, task := range []*models.Task{
 		{ID: "old", WorkspaceID: "workspace", Title: "old"},
 		{ID: "replacement", WorkspaceID: "workspace", Title: "replacement"},
@@ -77,6 +78,8 @@ func TestPreviewExactRetirementFailsClosedWithoutInventoryAdapters(t *testing.T)
 func TestPreviewExactRetirementRejectsMismatchedWorkspaceBeforeReceipt(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-a", Name: "Workspace A"}))
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-b", Name: "Workspace B"}))
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "old", WorkspaceID: "workspace-a", Title: "old"}))
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "replacement", WorkspaceID: "workspace-b", Title: "replacement"}))
 	oldTask, err := svc.GetTask(ctx, "old")
@@ -132,6 +135,48 @@ func TestPreviewExactRetirementHidesForeignWorkspace(t *testing.T) {
 		ExpectedOldGeneration: exactRetirementGeneration(oldTask), ExpectedReplacementGeneration: exactRetirementGeneration(replacementTask),
 	})
 	require.True(t, errors.Is(err, repoerrors.ErrTaskNotFound), "foreign task error = %v", err)
+}
+
+func TestPreviewExactRetirementRejectsDeletedWorkspace(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	const workspaceID = "retirement-ws"
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace", OwnerID: "owner"}))
+	for _, id := range []string{"old", "replacement"} {
+		require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: id, WorkspaceID: workspaceID, Title: id}))
+	}
+	oldTask, err := svc.GetTask(ctx, "old")
+	require.NoError(t, err)
+	replacementTask, err := svc.GetTask(ctx, "replacement")
+	require.NoError(t, err)
+	require.NoError(t, repo.DeleteWorkspace(ctx, workspaceID))
+
+	preview, err := svc.PreviewExactRetirement(ctxSynthetic(), ExactRetirementPreviewRequest{
+		OldTaskID: "old", ReplacementTaskID: "replacement", WorkspaceID: workspaceID,
+		ExpectedOldGeneration: exactRetirementGeneration(oldTask), ExpectedReplacementGeneration: exactRetirementGeneration(replacementTask),
+	})
+	require.ErrorIs(t, err, repoerrors.ErrWorkspaceNotFound)
+	require.Nil(t, preview)
+}
+
+func TestPreviewExactRetirementHidesForeignReplacementFromOldWriter(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "old-workspace", Name: "Old", OwnerID: "owner"}))
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "foreign-workspace", Name: "Foreign", OwnerID: "foreign-owner"}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "old", WorkspaceID: "old-workspace", Title: "old"}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "foreign-replacement", WorkspaceID: "foreign-workspace", Title: "foreign"}))
+	oldTask, err := svc.GetTask(ctx, "old")
+	require.NoError(t, err)
+	foreignReplacement, err := svc.GetTask(ctx, "foreign-replacement")
+	require.NoError(t, err)
+
+	preview, err := svc.PreviewExactRetirement(ctxAs("owner"), ExactRetirementPreviewRequest{
+		OldTaskID: "old", ReplacementTaskID: "foreign-replacement", WorkspaceID: "old-workspace",
+		ExpectedOldGeneration: exactRetirementGeneration(oldTask), ExpectedReplacementGeneration: exactRetirementGeneration(foreignReplacement),
+	})
+	require.ErrorIs(t, err, repoerrors.ErrTaskNotFound)
+	require.Nil(t, preview)
 }
 
 func TestPreviewExactRetirementRequiresAdminTaskWriter(t *testing.T) {
