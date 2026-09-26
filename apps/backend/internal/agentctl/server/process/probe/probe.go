@@ -62,11 +62,13 @@ type processTableReader interface {
 // entirely and the descendant walk's result stands.
 type environmentReader interface {
 	// HasSessionID reports whether pid's environment carries
-	// KANDEV_SESSION_ID with exactly this value. A false result covers
-	// both an absent variable and an environment that could not be read at
-	// all — either way the candidate does not contribute, and the caller
-	// skips it and keeps scanning rather than treating it as a probe
-	// failure.
+	// KANDEV_SESSION_ID with exactly this value. A non-match covers both
+	// an absent variable and a value mismatch; a read failure returns
+	// (false, err) instead. Either way the candidate does not contribute,
+	// and the caller skips it and keeps scanning rather than treating it
+	// as a probe failure — but implementations must still return the
+	// error rather than swallowing it into (false, nil), since callers
+	// distinguishing "no match" from "read failed" depend on it.
 	HasSessionID(pid int, sessionID string) (bool, error)
 
 	// StartTimeDatum re-reads pid's start-time datum straight from the

@@ -980,7 +980,7 @@ reaches agentctl only through `lifecycle.Manager`, which applies the session-acc
 | Detached launch observed but the agent has no registered recogniser | `observed_detached` is false; behaviour unchanged, and no probe is taken. |
 | Backend restarts while a session is parked | The projection is not reconstructed; the session reads as not parked. The new process's `parked_epoch` is strictly higher, so clients accept the reset (AC-77). |
 | `KANDEV_PARKED_PROBE_BUDGET` set to `0` or negative | Rejected at config load, warn-logged, default used (AC-81). |
-| Parent shell exits without waiting; workload reparents to init | Linux attributes via `KANDEV_SESSION_ID`, reads `live`. Darwin/BSD/Windows can't read another process's environment; reads `settled`. |
+| Parent shell exits without waiting; workload reparents to init | Linux attributes via `KANDEV_SESSION_ID`, reads `live`. Darwin/BSD can't read another process's environment; reads `settled`. |
 
 ## Persistence guarantees
 
