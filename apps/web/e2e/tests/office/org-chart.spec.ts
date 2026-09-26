@@ -2,14 +2,30 @@ import { test, expect } from "../../fixtures/office-fixture";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { officeTopbarTitle } from "../../helpers/office-topbar";
 
+async function seededAgentName(
+  officeApi: {
+    getAgent: (agentId: string) => Promise<Record<string, unknown>>;
+  },
+  agentId: string,
+): Promise<string> {
+  const agent = await officeApi.getAgent(agentId);
+  const name = agent.name;
+  if (typeof name !== "string" || name.length === 0) {
+    throw new Error(`office seed agent ${agentId} has no name`);
+  }
+  return name;
+}
+
 test.describe("Org chart", () => {
-  test("org chart shows CEO agent node", async ({ testPage, officeSeed: _ }) => {
+  test("org chart shows the seeded agent node", async ({ testPage, officeApi, officeSeed }) => {
+    const agentName = await seededAgentName(officeApi, officeSeed.agentId);
     await testPage.goto("/office/workspace/org");
     await expect(officeTopbarTitle(testPage)).toHaveText(/Org/i, {
       timeout: 10_000,
     });
-    // CEO agent from onboarding should appear as a node
-    await expect(testPage.getByText("CEO").first()).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText(agentName, { exact: true }).first()).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("changing an agent's manager on the configuration tab re-parents it on the org chart", async ({
@@ -17,6 +33,7 @@ test.describe("Org chart", () => {
     officeApi,
     officeSeed,
   }) => {
+    const agentName = await seededAgentName(officeApi, officeSeed.agentId);
     const worker = await officeApi.createAgent(officeSeed.workspaceId, {
       name: "Org Chart Reparent Target",
       role: "worker",
@@ -49,7 +66,7 @@ test.describe("Org chart", () => {
     await testPage.getByRole("combobox", { name: "Reports to" }).click();
     const listbox = testPage.getByRole("listbox");
     await expect(listbox).toBeVisible();
-    await listbox.getByRole("option", { name: "CEO", exact: true }).click();
+    await listbox.getByRole("option", { name: agentName, exact: true }).click();
 
     const saved = waitForHttp(testPage, "PATCH", new RegExp(`/api/v1/office/agents/${workerId}$`));
     await testPage.getByRole("button", { name: "Save Configuration" }).click();

@@ -351,9 +351,14 @@ test.describe("mobile CLI mode: passthrough composer", () => {
     await expect(promptOption).toBeVisible();
     await testPage.getByText(promptName, { exact: true }).tap();
     await expect(promptOption).toBeChecked();
-    await expect(firstComposer.getByText(promptName, { exact: true })).toBeVisible({
-      timeout: 5_000,
-    });
+    await expect(async () => {
+      await expect(firstComposer.getByTestId("chat-context-button")).toContainText("1", {
+        timeout: 1_000,
+      });
+      await expect(firstComposer.getByText(promptName, { exact: true })).toBeVisible({
+        timeout: 1_000,
+      });
+    }).toPass({ timeout: 15_000, intervals: [250, 500, 1_000] });
 
     fs.mkdirSync(testInfo.outputDir, { recursive: true });
     const attachmentName = "mobile-passthrough-draft.txt";

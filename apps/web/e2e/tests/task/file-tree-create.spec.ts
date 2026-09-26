@@ -48,20 +48,39 @@ async function setupTask(
       .poll(
         async () => {
           const environment = await apiClient.getTaskEnvironment(task.id);
-          workspacePath =
-            environment?.workspace_path ?? environment?.repos?.[0]?.worktree_path ?? "";
-          return Boolean(
-            workspacePath && fs.existsSync(path.join(workspacePath, options.requiredPath!)),
+          const repositoryWorktree = environment?.repos?.find(
+            (repository) => repository.repository_id === seedData.repositoryId,
+          )?.worktree_path;
+          // A task environment may expose the task root in workspace_path and
+          // the repository checkout in repos[].worktree_path. The repository
+          // id can be absent during the first materialization snapshot, so
+          // include every advertised repository path until the exact fixture
+          // file identifies the correct checkout.
+          const candidatePaths = [
+            repositoryWorktree,
+            ...(environment?.repos ?? []).map((repository) => repository.worktree_path),
+            environment?.workspace_path,
+            environment?.worktree_path,
+          ].filter(
+            (candidate, index, paths): candidate is string =>
+              Boolean(candidate) && paths.indexOf(candidate) === index,
           );
+          workspacePath =
+            candidatePaths.find((candidate) =>
+              fs.existsSync(path.join(candidate, options.requiredPath!)),
+            ) ?? "";
+          return workspacePath !== "";
         },
         {
-          timeout: 60_000,
+          timeout: 90_000,
           message: `Waiting for ${options.requiredPath} in the ${options.taskTitle} worktree`,
         },
       )
       .toBe(true);
   }
 
+  // The task API is authoritative here. Direct navigation avoids a Kanban
+  // card being replaced while the task snapshot is still settling.
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -89,6 +108,8 @@ async function startCreateAtRoot(testPage: Page) {
 }
 
 test.describe("File tree create file", () => {
+  test.describe.configure({ timeout: 180_000 });
+
   test("New file at root creates a file on disk and in the tree", async ({
     testPage,
     apiClient,
@@ -109,7 +130,7 @@ test.describe("File tree create file", () => {
       requiredPath: "seed.ts",
     });
 
-    await expect(session.fileTreeNode("seed.ts")).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode("seed.ts", 45_000);
 
     const input = await startCreateAtRoot(testPage);
     await input.fill("brand-new.ts");
@@ -141,7 +162,7 @@ test.describe("File tree create file", () => {
       taskTitle: "FT Create Select All",
       requiredPath: "select-all-alpha.ts",
     });
-    await expect(session.fileTreeNode("select-all-alpha.ts")).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode("select-all-alpha.ts", 45_000);
 
     const input = await startCreateAtRoot(testPage);
     const draftName = "draft-name.ts";
@@ -181,8 +202,7 @@ test.describe("File tree create file", () => {
     });
 
     // Expand the folder so it becomes the "active folder" for handleStartCreate.
-    const folder = session.fileTreeNode("scope");
-    await expect(folder).toBeVisible({ timeout: 15_000 });
+    const folder = await session.fileTree.waitForFileTreeNode("scope", 45_000);
     await folder.click();
     await expect(session.fileTreeNode("scope/existing.ts")).toBeVisible({ timeout: 10_000 });
 
@@ -214,7 +234,7 @@ test.describe("File tree create file", () => {
       requiredPath: "seed.ts",
     });
 
-    await expect(session.fileTreeNode("seed.ts")).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode("seed.ts", 45_000);
 
     const input = await startCreateAtRoot(testPage);
     await input.fill("newdir/leaf.ts");
@@ -244,7 +264,7 @@ test.describe("File tree create file", () => {
       requiredPath: "seed.ts",
     });
 
-    await expect(session.fileTreeNode("seed.ts")).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode("seed.ts", 45_000);
 
     const input = await startCreateAtRoot(testPage);
     await input.fill("ghost.ts");

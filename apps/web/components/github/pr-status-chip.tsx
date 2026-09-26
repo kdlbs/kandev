@@ -12,7 +12,7 @@ import {
   IconAlertTriangleFilled,
   IconShield,
 } from "@tabler/icons-react";
-import { Drawer } from "@kandev/ui/drawer";
+import { Drawer, DrawerTrigger } from "@kandev/ui/drawer";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
@@ -407,15 +407,16 @@ function PRStatusChipMultiDrawer({
   const [open, setOpen] = useState(false);
   return (
     <Drawer open={open} onOpenChange={setOpen}>
-      <ChangeRequestStatusChip
-        ref={triggerRef}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen(true)}
-        {...multiChipButtonAttrs(prs, status, automation, t)}
-      >
-        <MultiChipGlyph prs={prs} status={status} automation={automation} />
-      </ChangeRequestStatusChip>
+      <DrawerTrigger asChild>
+        <ChangeRequestStatusChip
+          ref={triggerRef}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          {...multiChipButtonAttrs(prs, status, automation, t)}
+        >
+          <MultiChipGlyph prs={prs} status={status} automation={automation} />
+        </ChangeRequestStatusChip>
+      </DrawerTrigger>
       <ChangeRequestStatusDrawerContent
         testId="pr-status-chip-drawer"
         closeTestId="pr-status-chip-drawer-close"
@@ -440,17 +441,18 @@ function PRStatusChipDrawer({ pr, automation, refreshTaskPR, triggerRef }: Singl
   const [open, setOpen] = useState(false);
   return (
     <Drawer open={open} onOpenChange={setOpen}>
-      <ChangeRequestStatusChip
-        ref={triggerRef}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen(true)}
-        {...chipButtonAttrs(pr, status, automation, t)}
-      >
-        <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-        <ChipStatusGlyph status={status} />
-        <AutomationFlagBadges automation={automation} />
-      </ChangeRequestStatusChip>
+      <DrawerTrigger asChild>
+        <ChangeRequestStatusChip
+          ref={triggerRef}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          {...chipButtonAttrs(pr, status, automation, t)}
+        >
+          <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          <ChipStatusGlyph status={status} />
+          <AutomationFlagBadges automation={automation} />
+        </ChangeRequestStatusChip>
+      </DrawerTrigger>
       <ChangeRequestStatusDrawerContent
         testId="pr-status-chip-drawer"
         closeTestId="pr-status-chip-drawer-close"

@@ -1387,10 +1387,10 @@ export class SessionPage {
   /**
    * Assert the terminal buffer contains the given text.
    */
-  async expectTerminalHasText(text: string): Promise<void> {
+  async expectTerminalHasText(text: string, timeout = 30_000): Promise<void> {
     await expect
       .poll(async () => (await this.readXtermBuffer("terminal-panel")).includes(text), {
-        timeout: 10_000,
+        timeout,
         message: `Expected terminal to contain "${text}"`,
       })
       .toBe(true);

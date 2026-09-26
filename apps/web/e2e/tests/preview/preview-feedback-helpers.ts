@@ -109,6 +109,7 @@ export async function chooseCapture(page: Page, name: string): Promise<void> {
   await choice.click();
 }
 
+/** Wait until the iframe has applied screenshot mode before dispatching a drag. */
 export async function waitForScreenshotCaptureMode(frame: FrameLocator): Promise<void> {
   await expect
     .poll(
