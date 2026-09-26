@@ -22,8 +22,7 @@ export class FileTreePage {
    */
   async waitForFileTreeNode(nodePath: string, timeout = 30_000): Promise<Locator> {
     const node = this.fileTreeNode(nodePath);
-    const directTimeout = Math.min(2_000, timeout);
-    if (await node.isVisible({ timeout: directTimeout }).catch(() => false)) return node;
+    if (await node.isVisible().catch(() => false)) return node;
 
     const viewport = this.fileTreeScrollViewport();
     await viewport.waitFor({ state: "visible", timeout: Math.max(1, timeout) });
@@ -50,7 +49,7 @@ export class FileTreePage {
           return false;
         },
         {
-          timeout: Math.max(1, timeout - directTimeout),
+          timeout,
           intervals: [100, 250, 500],
           message: `Waiting for file tree node ${nodePath} to mount`,
         },
