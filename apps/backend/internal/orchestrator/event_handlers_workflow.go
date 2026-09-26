@@ -381,6 +381,14 @@ type ProcessOnTurnStartResult struct {
 // ProcessOnTurnStart is the public API for triggering on_turn_start events.
 // Called by message handlers before sending a prompt to the agent.
 func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (ProcessOnTurnStartResult, error) {
+	return s.processOnTurnStartAdmission(ctx, taskID, sessionID, false)
+}
+
+func (s *Service) processOnTurnStartAdmission(
+	ctx context.Context,
+	taskID, sessionID string,
+	strict bool,
+) (ProcessOnTurnStartResult, error) {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
@@ -394,6 +402,7 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 	if err != nil {
 		return ProcessOnTurnStartResult{}, fmt.Errorf("load session for on_turn_start: %w", err)
 	}
+	s.clearInitialCreatePromptPassthroughForAcceptedUserTurn(ctx, session)
 	if isTerminalSessionState(session.State) {
 		return ProcessOnTurnStartResult{}, &executor.SessionStateSupersededError{
 			SessionID: session.ID,
@@ -417,7 +426,13 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 	// transition has fired cancels the signal (re-open semantics). The
 	// user is continuing the conversation; this step is no longer "done".
 	s.clearPendingStepSignal(ctx, session)
-	s.processOnTurnStartViaEngine(ctx, taskID, session)
+	if strict {
+		if _, err := s.processOnTurnStartViaEngineResult(ctx, taskID, session); err != nil {
+			return ProcessOnTurnStartResult{}, fmt.Errorf("evaluate on_turn_start: %w", err)
+		}
+	} else {
+		s.processOnTurnStartViaEngine(ctx, taskID, session)
+	}
 	task, err = s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		// Do not let a read race turn an unknown admission state into an
@@ -1701,6 +1716,9 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 		}
 		return
 	}
+	if s.skipForkPRAutoStart(ctx, task, eventName, autoStartOnCreateClaimed) {
+		return
+	}
 	if task.QueuedForStepID != "" {
 		if autoStartOnCreateClaimed {
 			s.restoreAutoStartOnCreate(ctx, taskID, eventName)
@@ -1933,6 +1951,9 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		}
 		return
 	}
+	if s.skipForkPRAutoStart(ctx, task, eventName, autoStartOnCreateClaimed) {
+		return
+	}
 	if models.HasAutoStartOnCreateIntent(task.Metadata) || models.HasAutoStartOnCreateInFlight(task.Metadata) || autoStartOnCreateClaimed {
 		sessions, err := s.repo.ListTaskSessions(ctx, task.ID)
 		if err != nil {
@@ -2006,7 +2027,7 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		return
 	}
 
-	workflowAgentProfileID := s.resolveStepAgentProfile(ctx, step)
+	workflowAgentProfileID := s.resolveStepAgentProfileForTask(ctx, task, step)
 	agentProfileID := workflowAgentProfileID
 	if agentProfileID == "" {
 		agentProfileID, _ = task.Metadata[models.MetaKeyAgentProfileID].(string)
@@ -2080,6 +2101,26 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 			s.completeAutoStartOnCreate(asyncCtx, task.ID, eventName)
 		}
 	}()
+}
+
+func taskRequiresManualForkPRStart(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	required, _ := task.Metadata[models.MetaKeyForkPRRequiresManualStart].(bool)
+	return required
+}
+
+func (s *Service) skipForkPRAutoStart(ctx context.Context, task *models.Task, eventName string, autoStartOnCreateClaimed bool) bool {
+	if !taskRequiresManualForkPRStart(task) {
+		return false
+	}
+	s.logger.Info(eventName+": fork review task is waiting for a manual start",
+		zap.String("task_id", task.ID))
+	if autoStartOnCreateClaimed || models.HasAutoStartOnCreateIntent(task.Metadata) || models.HasAutoStartOnCreateInFlight(task.Metadata) {
+		s.discardAutoStartOnCreate(ctx, task.ID, eventName)
+	}
+	return true
 }
 
 // autoStartOfficeTaskForLoadedStep is the Office-aware counterpart of the
@@ -2920,7 +2961,7 @@ func (s *Service) resolveStepPlanMode(ctx context.Context, session *models.TaskS
 // resolveStepAgentProfile returns the effective agent profile ID for a step.
 // Resolution order: step override -> workflow default -> empty (use current session's profile).
 func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.WorkflowStep) string {
-	if step != nil && step.SessionTarget != nil {
+	if step == nil || step.SessionTarget != nil {
 		return ""
 	}
 	if step.AgentProfileID != "" {
@@ -2938,6 +2979,35 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 		}
 	}
 	return ""
+}
+
+// resolveStepAgentProfileForTask applies a task's fixed-step substitution
+// before the ordinary workflow profile resolution. Explicit session targets
+// remain authoritative and therefore never consult this map.
+func (s *Service) resolveStepAgentProfileForTask(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep) string {
+	if task != nil && step != nil && step.SessionTarget == nil && task.WorkflowID == step.WorkflowID {
+		if replacement, ok := task.WorkflowAgentOverrides.ReplacementFor(task.WorkflowID, step.ID); ok {
+			return replacement
+		}
+	}
+	return s.resolveStepAgentProfile(ctx, step)
+}
+
+func (s *Service) resolveStepAgentProfileForTaskID(ctx context.Context, taskID string, step *wfmodels.WorkflowStep) (string, error) {
+	if taskID == "" {
+		return s.resolveStepAgentProfile(ctx, step), nil
+	}
+	if s.repo == nil {
+		return "", fmt.Errorf("task repository unavailable while resolving workflow profile for task %q", taskID)
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return "", fmt.Errorf("load task %q while resolving workflow profile: %w", taskID, err)
+	}
+	if task == nil {
+		return "", fmt.Errorf("task %q not found while resolving workflow profile", taskID)
+	}
+	return s.resolveStepAgentProfileForTask(ctx, task, step), nil
 }
 
 // resolveStepProfileSessionStartPolicy returns the destination step's session
@@ -3047,6 +3117,45 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidate(
 	endPolicy models.WorkflowProfileSessionEndPolicy,
 	validatedExisting *models.TaskSession,
 ) (*models.TaskSession, error) {
+	return s.switchSessionForStepWithPoliciesAndCandidateAndRoute(
+		ctx, taskID, currentSession, newAgentProfileID, startPolicy, endPolicy, validatedExisting, nil,
+	)
+}
+
+func (s *Service) resolveWorkflowSessionSwitchExisting(
+	ctx context.Context,
+	taskID, newAgentProfileID string,
+	currentSession *models.TaskSession,
+	startPolicy models.WorkflowProfileSessionStartPolicy,
+	validatedExisting *models.TaskSession,
+) *models.TaskSession {
+	if startPolicy != models.WorkflowProfileSessionStartPolicyReuse {
+		return nil
+	}
+	if validatedExisting != nil {
+		return validatedExisting
+	}
+	existing, err := s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
+	if err != nil {
+		s.logger.Warn("failed to look up reusable session, falling through to create new",
+			zap.String("task_id", taskID),
+			zap.String("agent_profile_id", newAgentProfileID),
+			zap.Error(err))
+		return nil
+	}
+	return existing
+}
+
+func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
+	ctx context.Context,
+	taskID string,
+	currentSession *models.TaskSession,
+	newAgentProfileID string,
+	startPolicy models.WorkflowProfileSessionStartPolicy,
+	endPolicy models.WorkflowProfileSessionEndPolicy,
+	validatedExisting *models.TaskSession,
+	workflowRoute *models.WorkflowSessionRoute,
+) (*models.TaskSession, error) {
 	startPolicy = models.NormalizeWorkflowProfileSessionStartPolicy(string(startPolicy))
 	endPolicy = models.NormalizeWorkflowProfileSessionEndPolicy(string(endPolicy))
 	s.logger.Info("switching session for workflow step agent profile change",
@@ -3056,21 +3165,9 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidate(
 		zap.String("new_profile", newAgentProfileID),
 		zap.String("profile_session_start_policy", string(startPolicy)),
 		zap.String("profile_session_end_policy", string(endPolicy)))
-	var existing *models.TaskSession
-	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse {
-		if validatedExisting != nil {
-			existing = validatedExisting
-		} else {
-			var lookupErr error
-			existing, lookupErr = s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
-			if lookupErr != nil {
-				s.logger.Warn("failed to look up reusable session, falling through to create new",
-					zap.String("task_id", taskID),
-					zap.String("agent_profile_id", newAgentProfileID),
-					zap.Error(lookupErr))
-			}
-		}
-	}
+	existing := s.resolveWorkflowSessionSwitchExisting(
+		ctx, taskID, newAgentProfileID, currentSession, startPolicy, validatedExisting,
+	)
 	targetSession := currentSession
 	if existing != nil {
 		targetSession = existing
@@ -3101,7 +3198,19 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidate(
 	}
 
 	if existing != nil {
-		reused, err := s.reuseSessionForStepWithEndPolicy(ctx, taskID, currentSession, existing, endPolicy)
+		var reused *models.TaskSession
+		var err error
+		if workflowRoute != nil {
+			route := *workflowRoute
+			route.DestinationID = existing.ID
+			route.Phase = workflowSessionRoutePrepared
+			if err := s.persistWorkflowSessionRoute(ctx, taskID, route); err != nil {
+				return nil, err
+			}
+			reused, err = s.reuseSessionForStepWithEndPolicy(ctx, taskID, currentSession, existing, endPolicy, &route)
+		} else {
+			reused, err = s.reuseSessionForStepWithEndPolicy(ctx, taskID, currentSession, existing, endPolicy)
+		}
 		if err == nil {
 			return reused, nil
 		}
@@ -3114,7 +3223,9 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidate(
 			zap.String("agent_profile_id", newAgentProfileID))
 	}
 
-	return s.createNewSessionForStepWithEndPolicy(ctx, taskID, currentSession, newAgentProfileID, endPolicy)
+	return s.createNewSessionForStepWithEndPolicyAndRoute(
+		ctx, taskID, currentSession, newAgentProfileID, endPolicy, workflowRoute,
+	)
 }
 
 // findReusableSessionForProfile returns the most-recently-updated
@@ -3805,8 +3916,19 @@ func (s *Service) prepareWorkflowStepSession(
 	if step.SessionTarget != nil {
 		return s.prepareExplicitWorkflowSession(ctx, taskID, session, step, sourceStep, entryIDs...)
 	}
-	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
+	effectiveProfile, err := s.resolveStepAgentProfileForTaskID(ctx, taskID, step)
+	if err != nil {
+		return nil, false, err
+	}
 	startPolicy := s.resolveStepProfileSessionStartPolicy(step)
+	profileRoute := workflowProfileSessionRoute(
+		taskID,
+		session,
+		step,
+		effectiveProfile,
+		s.workflowEntryIdentity(ctx, taskID, entryIDs...),
+		startPolicy,
+	)
 	if shouldKeepCurrentWorkflowStepSession(effectiveProfile, session.AgentProfileID, startPolicy) {
 		requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, session, step, sourceStep, effectiveProfile)
 		if err != nil {
@@ -3817,9 +3939,9 @@ func (s *Service) prepareWorkflowStepSession(
 				return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
 			}
 			endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
-			return s.replaceExactModelWorkflowStepSession(ctx, taskID, session, step, effectiveProfile, endPolicy, entryIDs...)
+			return s.replaceExactModelWorkflowStepSession(ctx, taskID, session, step, effectiveProfile, endPolicy, profileRoute, entryIDs...)
 		}
-		return s.keepCurrentWorkflowStepSession(ctx, taskID, session, step, entryIDs...)
+		return s.keepCurrentWorkflowStepSession(ctx, taskID, session, step, profileRoute, entryIDs...)
 	}
 	if sourceStep == nil {
 		return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
@@ -3829,7 +3951,7 @@ func (s *Service) prepareWorkflowStepSession(
 		return nil, false, err
 	}
 	endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
-	newSession, err := s.switchSessionForStepWithPoliciesAndCandidate(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy, validatedExisting)
+	newSession, err := s.switchSessionForStepWithPoliciesAndCandidateAndRoute(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy, validatedExisting, profileRoute)
 	if err != nil {
 		return nil, false, err
 	}
@@ -3850,9 +3972,10 @@ func (s *Service) replaceExactModelWorkflowStepSession(
 	step *wfmodels.WorkflowStep,
 	profileID string,
 	endPolicy models.WorkflowProfileSessionEndPolicy,
+	workflowRoute *models.WorkflowSessionRoute,
 	entryIDs ...int64,
 ) (*models.TaskSession, bool, error) {
-	newSession, err := s.createNewSessionForStepWithEndPolicy(ctx, taskID, session, profileID, endPolicy)
+	newSession, err := s.createNewSessionForStepWithEndPolicyAndRoute(ctx, taskID, session, profileID, endPolicy, workflowRoute)
 	if err != nil {
 		return nil, false, err
 	}
@@ -3940,6 +4063,9 @@ func (s *Service) sessionHasUnauthorizedExactModelDrift(
 	}
 	profile, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
 	if err != nil {
+		if errors.Is(err, agentruntime.ErrVirtualProfile) {
+			return false, nil
+		}
 		return false, fmt.Errorf("resolve exact workflow profile %q: %w", profileID, err)
 	}
 	if profile == nil {
@@ -3960,10 +4086,15 @@ func (s *Service) keepCurrentWorkflowStepSession(
 	taskID string,
 	session *models.TaskSession,
 	step *wfmodels.WorkflowStep,
+	workflowRoute *models.WorkflowSessionRoute,
 	entryIDs ...int64,
 ) (*models.TaskSession, bool, error) {
 	s.tagSessionAsWorkflowSwitchedForSnapshot(ctx, session)
-	if !session.IsPrimary {
+	if workflowRoute != nil {
+		if err := s.promoteKeptWorkflowStepSession(ctx, taskID, session, workflowRoute); err != nil {
+			return nil, false, err
+		}
+	} else if !session.IsPrimary {
 		if err := s.SetPrimarySession(ctx, session.ID); err != nil {
 			s.logger.Warn("failed to preserve session as primary for workflow step",
 				zap.String("task_id", taskID),
@@ -3980,9 +4111,41 @@ func (s *Service) keepCurrentWorkflowStepSession(
 	return session, false, nil
 }
 
+func (s *Service) promoteKeptWorkflowStepSession(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	workflowRoute *models.WorkflowSessionRoute,
+) error {
+	preparedRoute := *workflowRoute
+	preparedRoute.DestinationID = session.ID
+	preparedRoute.Phase = workflowSessionRoutePrepared
+	if err := s.persistWorkflowSessionRoute(ctx, taskID, preparedRoute); err != nil {
+		return err
+	}
+	promoted, err := s.promoteWorkflowSessionRoute(ctx, taskID, session, &preparedRoute)
+	if err != nil {
+		return err
+	}
+	if !promoted {
+		return errReusableSessionNoLongerActive
+	}
+	return nil
+}
+
 func (s *Service) preflightWorkflowStepCredentials(
 	ctx context.Context,
 	taskID string,
+	currentSession *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+) error {
+	return s.preflightWorkflowStepCredentialsWithCandidate(ctx, taskID, nil, currentSession, targetStep)
+}
+
+func (s *Service) preflightWorkflowStepCredentialsWithCandidate(
+	ctx context.Context,
+	taskID string,
+	candidate *models.Task,
 	currentSession *models.TaskSession,
 	targetStep *wfmodels.WorkflowStep,
 ) error {
@@ -3991,26 +4154,53 @@ func (s *Service) preflightWorkflowStepCredentials(
 	}
 	ctx = withWorkflowMetaCache(ctx)
 	if targetStep.SessionTarget != nil {
-		resolution, err := s.resolveWorkflowSessionTarget(ctx, taskID, targetStep)
-		if err != nil {
-			return err
-		}
-		targetSession := currentSession
-		if s.resolveStepProfileSessionStartPolicy(targetStep) == models.WorkflowProfileSessionStartPolicyReuse && resolution.session != nil {
-			targetSession = resolution.session
-		}
-		task, err := s.repo.GetTask(ctx, taskID)
-		if err != nil {
-			return fmt.Errorf("get task for explicit credential preflight: %w", err)
-		}
-		if task == nil {
-			return fmt.Errorf("task %s not found for explicit credential preflight", taskID)
-		}
-		return s.executor.PreflightManagedGitCredentials(
-			ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
-		)
+		return s.preflightExplicitWorkflowStepCredentials(ctx, taskID, candidate, currentSession, targetStep)
 	}
-	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
+	effectiveProfile, err := s.resolveWorkflowMovePreflightProfile(ctx, taskID, candidate, targetStep)
+	if err != nil {
+		return err
+	}
+	return s.preflightFixedWorkflowStepCredentials(ctx, taskID, candidate, currentSession, targetStep, effectiveProfile)
+}
+
+func (s *Service) preflightExplicitWorkflowStepCredentials(
+	ctx context.Context,
+	taskID string,
+	candidate *models.Task,
+	currentSession *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+) error {
+	var resolution workflowSessionTargetResolution
+	var err error
+	if candidate != nil {
+		resolution, err = s.resolveWorkflowSessionTargetWithTask(ctx, taskID, targetStep, candidate)
+	} else {
+		resolution, err = s.resolveWorkflowSessionTarget(ctx, taskID, targetStep)
+	}
+	if err != nil {
+		return err
+	}
+	targetSession := currentSession
+	if s.resolveStepProfileSessionStartPolicy(targetStep) == models.WorkflowProfileSessionStartPolicyReuse && resolution.session != nil {
+		targetSession = resolution.session
+	}
+	task, err := s.preflightTaskProjection(ctx, taskID, candidate)
+	if err != nil {
+		return fmt.Errorf("get task for explicit credential preflight: %w", err)
+	}
+	return s.executor.PreflightManagedGitCredentials(
+		ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
+	)
+}
+
+func (s *Service) preflightFixedWorkflowStepCredentials(
+	ctx context.Context,
+	taskID string,
+	candidate *models.Task,
+	currentSession *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+	effectiveProfile string,
+) error {
 	startPolicy := s.resolveStepProfileSessionStartPolicy(targetStep)
 	if shouldKeepCurrentWorkflowStepSession(effectiveProfile, currentSession.AgentProfileID, startPolicy) {
 		if effectiveProfile == "" || startPolicy != models.WorkflowProfileSessionStartPolicyReuse {
@@ -4034,16 +4224,39 @@ func (s *Service) preflightWorkflowStepCredentials(
 			targetSession = existing
 		}
 	}
-	task, err := s.repo.GetTask(ctx, taskID)
+	task, err := s.preflightTaskProjection(ctx, taskID, candidate)
 	if err != nil {
 		return fmt.Errorf("get task for credential preflight: %w", err)
-	}
-	if task == nil {
-		return fmt.Errorf("task %s not found for credential preflight", taskID)
 	}
 	return s.executor.PreflightManagedGitCredentials(
 		ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
 	)
+}
+
+func (s *Service) preflightTaskProjection(ctx context.Context, taskID string, candidate *models.Task) (*models.Task, error) {
+	if candidate != nil {
+		return candidate, nil
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task %s not found for credential preflight", taskID)
+	}
+	return task, nil
+}
+
+func (s *Service) resolveWorkflowMovePreflightProfile(
+	ctx context.Context,
+	taskID string,
+	candidate *models.Task,
+	targetStep *wfmodels.WorkflowStep,
+) (string, error) {
+	if candidate != nil {
+		return s.resolveStepAgentProfileForTask(ctx, candidate, targetStep), nil
+	}
+	return s.resolveStepAgentProfileForTaskID(ctx, taskID, targetStep)
 }
 
 // PreflightWorkflowStepMove exposes the destination lifecycle preflight to
@@ -4055,6 +4268,20 @@ func (s *Service) PreflightWorkflowStepMove(
 	targetStep *wfmodels.WorkflowStep,
 ) error {
 	return s.preflightWorkflowStepCredentials(ctx, taskID, currentSession, targetStep)
+}
+
+// PreflightWorkflowStepChange validates credentials against a candidate task
+// carrying the form's normalized destination profile choices.
+func (s *Service) PreflightWorkflowStepChange(
+	ctx context.Context,
+	candidate *models.Task,
+	currentSession *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+) error {
+	if candidate == nil {
+		return fmt.Errorf("workflow change candidate is required")
+	}
+	return s.preflightWorkflowStepCredentialsWithCandidate(ctx, candidate.ID, candidate, currentSession, targetStep)
 }
 
 // maybySwitchSessionForProfile preserves the legacy processOnEnter failure
@@ -4259,10 +4486,10 @@ func (s *Service) launchAfterOnEnterDispatch(
 	// launch below shares it, so a successful claim's text is reused rather
 	// than silently lost to a second, always-empty DB attempt.
 	handoffOnce := newStepHandoffOnce()
-	var effectivePrompt string
+	var effectivePrompt, promptReferenceContext string
 	if hasAutoStart || (sessionSwitched && step.Prompt != "") {
 		var err error
-		effectivePrompt, err = s.buildWorkflowEntryPrompt(
+		effectivePrompt, promptReferenceContext, err = s.buildWorkflowEntryPrompt(
 			ctx, taskDescription, step, taskID, sessionID, isPassthrough,
 		)
 		if err != nil {
@@ -4273,6 +4500,14 @@ func (s *Service) launchAfterOnEnterDispatch(
 
 	switch {
 	case hasAutoStart && isPassthrough && session.State != models.TaskSessionStateCreated:
+		if s.initialCreatePromptPassthroughQueuePending(ctx, sessionID) {
+			// Queue promotion enters the destination step before its queued
+			// creation prompt is delivered. Let the guarded queue worker send
+			// that prompt once; the destination's automatic prompt must not
+			// create a competing passthrough turn.
+			s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, handoffOnce)
+			return
+		}
 		// Started passthrough path: write prompt directly to PTY stdin.
 		// By the time processOnEnter runs (from an on_turn_complete transition),
 		// the agent has finished its previous turn and the PTY is waiting for input.
@@ -4305,7 +4540,9 @@ func (s *Service) launchAfterOnEnterDispatch(
 		// When called from applyEngineTransition (on_turn_complete), processOnEnter
 		// runs in a goroutine and the session is already WAITING_FOR_INPUT, so
 		// autoStartStepPrompt sends the prompt directly via PromptTask.
-		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true, handoffOnce); err != nil {
+		if err := s.autoStartStepPromptWithPromptContext(
+			ctx, taskID, session, step, effectivePrompt, hasPlanMode, true, handoffOnce, promptReferenceContext,
+		); err != nil {
 			if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
 				s.replaceTerminalizedAutoStartSession(
 					ctx, taskID, taskDescription, session, step, isPassthrough, hasPlanMode, handoffOnce, err,
@@ -4360,8 +4597,10 @@ func (s *Service) launchAfterOnEnterDispatch(
 					}
 					s.logger.Info("implicit profile switch: reused session terminalized before dispatch, creating replacement",
 						zap.String("task_id", taskID), zap.String("session_id", sessionID))
-					replacement, replacementErr := s.createNewSessionForStep(
+					replacementRoute := s.workflowReplacementRoute(asyncCtx, taskID, step.ID, sessionID)
+					replacement, replacementErr := s.createNewSessionForStepWithEndPolicyAndRoute(
 						asyncCtx, taskID, session, session.AgentProfileID,
+						models.WorkflowProfileSessionEndPolicyComplete, replacementRoute,
 					)
 					if replacementErr != nil {
 						s.logger.Error("failed to create replacement after terminalized profile switch",
@@ -4369,15 +4608,16 @@ func (s *Service) launchAfterOnEnterDispatch(
 						return
 					}
 					replacementCtx := withCeilingEntryBindingForSession(asyncCtx, replacement.ID)
-					replacementPrompt, promptErr := s.buildWorkflowEntryPrompt(
+					replacementPrompt, replacementReferenceContext, promptErr := s.buildWorkflowEntryPrompt(
 						replacementCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
 					)
 					if promptErr != nil {
 						s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)
 						return
 					}
-					if replacementErr = s.autoStartStepPrompt(
+					if replacementErr = s.autoStartStepPromptWithPromptContext(
 						replacementCtx, taskID, replacement, step, replacementPrompt, planMode, true, handoffOnce,
+						replacementReferenceContext,
 					); replacementErr != nil {
 						s.logger.Error("failed to auto-start replacement after terminalized profile switch",
 							zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
@@ -4389,7 +4629,9 @@ func (s *Service) launchAfterOnEnterDispatch(
 				lock.Unlock()
 				release()
 
-				err := s.autoStartStepPrompt(asyncCtx, taskID, fresh, step, effectivePrompt, planMode, true, handoffOnce)
+				err := s.autoStartStepPromptWithPromptContext(
+					asyncCtx, taskID, fresh, step, effectivePrompt, planMode, true, handoffOnce, promptReferenceContext,
+				)
 				if err != nil {
 					if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
 						if workflowAutoStartWasCancelled(err) {
@@ -4399,8 +4641,10 @@ func (s *Service) launchAfterOnEnterDispatch(
 						}
 						s.logger.Info("implicit profile switch: reused session terminalized during dispatch, creating replacement",
 							zap.String("task_id", taskID), zap.String("session_id", sessionID))
-						replacement, replacementErr := s.createNewSessionForStep(
+						replacementRoute := s.workflowReplacementRoute(asyncCtx, taskID, step.ID, sessionID)
+						replacement, replacementErr := s.createNewSessionForStepWithEndPolicyAndRoute(
 							asyncCtx, taskID, fresh, fresh.AgentProfileID,
+							models.WorkflowProfileSessionEndPolicyComplete, replacementRoute,
 						)
 						if replacementErr != nil {
 							s.logger.Error("failed to create replacement after terminalized dispatch",
@@ -4408,15 +4652,16 @@ func (s *Service) launchAfterOnEnterDispatch(
 							return
 						}
 						replacementCtx := withCeilingEntryBindingForSession(asyncCtx, replacement.ID)
-						replacementPrompt, promptErr := s.buildWorkflowEntryPrompt(
+						replacementPrompt, replacementReferenceContext, promptErr := s.buildWorkflowEntryPrompt(
 							replacementCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
 						)
 						if promptErr != nil {
 							s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)
 							return
 						}
-						if replacementErr = s.autoStartStepPrompt(
+						if replacementErr = s.autoStartStepPromptWithPromptContext(
 							replacementCtx, taskID, replacement, step, replacementPrompt, planMode, true, handoffOnce,
+							replacementReferenceContext,
 						); replacementErr != nil {
 							s.logger.Error("failed to auto-start replacement after terminalized dispatch",
 								zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
@@ -4473,8 +4718,10 @@ func (s *Service) replaceTerminalizedAutoStartSession(
 	}
 	s.logger.Info("creating fresh workflow session after reused session terminalized",
 		zap.String("task_id", taskID), zap.String("session_id", sessionID))
-	replacement, replacementErr := s.createNewSessionForStep(
+	replacementRoute := s.workflowReplacementRoute(ctx, taskID, step.ID, sessionID)
+	replacement, replacementErr := s.createNewSessionForStepWithEndPolicyAndRoute(
 		ctx, taskID, session, session.AgentProfileID,
+		models.WorkflowProfileSessionEndPolicyComplete, replacementRoute,
 	)
 	if replacementErr != nil {
 		s.logger.Error("failed to create replacement after reused session terminalized",
@@ -4482,15 +4729,16 @@ func (s *Service) replaceTerminalizedAutoStartSession(
 		return
 	}
 	replacementCtx := withCeilingEntryBindingForSession(ctx, replacement.ID)
-	replacementPrompt, promptErr := s.buildWorkflowEntryPrompt(
+	replacementPrompt, replacementReferenceContext, promptErr := s.buildWorkflowEntryPrompt(
 		replacementCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
 	)
 	if promptErr != nil {
 		s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)
 		return
 	}
-	if replacementErr = s.autoStartStepPrompt(
+	if replacementErr = s.autoStartStepPromptWithPromptContext(
 		replacementCtx, taskID, replacement, step, replacementPrompt, hasPlanMode, true, handoffOnce,
+		replacementReferenceContext,
 	); replacementErr != nil {
 		s.logger.Error("failed to auto-start replacement after reused session terminalized",
 			zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
@@ -4794,12 +5042,13 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	}
 	deferredMoveCtx := steptelemetry.WithAttribution(ctx, deferredMoveAttribution)
 	var transitionErr error
+	var transitionID int64
 	if s.messageQueue.SupportsAtomicDeferredMoveTransition() {
-		transitionErr = s.workflowStore.ApplyDeferredMoveTransition(
+		transitionID, transitionErr = s.workflowStore.ApplyDeferredMoveTransition(
 			deferredMoveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID, move.MoveID, record,
 		)
 	} else {
-		transitionErr = s.workflowStore.applyTransition(
+		transitionID, transitionErr = s.workflowStore.applyTransition(
 			deferredMoveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID,
 			engine.TriggerOnEnter, move.MoveID, nil,
 		)
@@ -4863,7 +5112,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	taskDescription := task.Description
 	go s.processStepExitAndEnterForDeferredMove(
 		context.WithoutCancel(ctx), identity, freshSession,
-		fromStepID, move.WorkflowStepID, taskDescription, move.EntryOptions,
+		fromStepID, move.WorkflowStepID, taskDescription, move.EntryOptions, transitionID,
 	)
 }
 
@@ -4912,6 +5161,7 @@ func (s *Service) processStepExitAndEnterForDeferredMove(
 	session *models.TaskSession,
 	fromStepID, toStepID, taskDescription string,
 	entryOptions *workflowmove.EntryOptions,
+	transitionID int64,
 ) {
 	current, err := s.messageQueue.ResolveSessionIdentity(ctx, identity.TaskID, identity.SessionID)
 	if err != nil || current != identity || session.QueueIncarnationID != identity.SessionIncarnationID {
@@ -4942,7 +5192,7 @@ func (s *Service) processStepExitAndEnterForDeferredMove(
 	if entryOptions != nil {
 		entryStep = workflowmove.OverlayStep(targetStep, entryOptions)
 	}
-	s.processOnEnter(ctx, identity.TaskID, fresh, entryStep, taskDescription, 0, fromStep)
+	s.processOnEnter(ctx, identity.TaskID, fresh, entryStep, taskDescription, transitionID, fromStep)
 }
 
 func (s *Service) removePendingMoveHandoffPromptForSession(
@@ -5423,8 +5673,8 @@ type passthroughRunningPreparer interface {
 // deliverPassthroughPrompt writes a prompt to PTY stdin and marks the session as running.
 // Uses the per-agent PlanPassthroughStdinChunks so Claude's inter-chunk SubmitDelay is
 // honored here too (queued / workflow-auto-start path); other agents stay on the single
-// atomic write. Falls back to the simple "\r" append if config resolution fails so a
-// transient lookup error never silently swallows the prompt.
+// atomic write. Config resolution is required: an unknown agent contract must not fall
+// back to one unframed write, because a long prompt can be silently truncated.
 //
 // Callers that already hold the per-session cancellation guard must use
 // PreparePassthroughRunning + writePassthroughPrompt instead (see handleAgentReady); this
@@ -5449,15 +5699,10 @@ func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, conte
 func (s *Service) writePassthroughPrompt(ctx context.Context, sessionID, content string) error {
 	pt, cfgErr := s.agentManager.ResolvePassthroughConfig(ctx, sessionID)
 	if cfgErr != nil {
-		s.logger.Warn("failed to resolve passthrough config, falling back to \\r submit",
+		s.logger.Warn("failed to resolve passthrough config; refusing unsafe prompt write",
 			zap.String("session_id", sessionID),
 			zap.Error(cfgErr))
-	}
-	if cfgErr != nil {
-		if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, content+"\r"); err != nil {
-			return fmt.Errorf("write to passthrough stdin: %w", err)
-		}
-		return nil
+		return fmt.Errorf("resolve passthrough config: %w", cfgErr)
 	}
 	for _, chunk := range agents.PlanPassthroughStdinChunks(content, pt) {
 		if chunk.DelayBefore > 0 {
@@ -5518,6 +5763,10 @@ const metaKeyWorkflowDispatchInputPresent = "workflow_dispatch_input_present"
 // mode as metadata so recovery can apply the transform exactly once.
 const metaKeyWorkflowConfigMode = "workflow_config_mode"
 
+// metaKeyWorkflowAutoStart identifies a queue entry whose prompt was composed
+// by workflow entry and must be re-resolved once when the queue drains.
+const metaKeyWorkflowAutoStart = "workflow_auto_start"
+
 // MetaKeyTurnStartAlreadyProcessed marks a queued prompt whose on_turn_start
 // hook already ran synchronously before queuing (see
 // task/handlers.queuePromptIfRuntimeUnavailable, which queues after
@@ -5564,7 +5813,7 @@ func workflowMessageMetadata(planMode bool, origin workflowMessageOrigin, refere
 	if meta == nil {
 		meta = make(map[string]interface{})
 	}
-	meta["workflow_auto_start"] = true
+	meta[metaKeyWorkflowAutoStart] = true
 	return meta
 }
 
@@ -5622,12 +5871,17 @@ func (s *Service) handleCreatedAutoStartLaunchFailure(
 	references []v1.EntityReference,
 	takenMsg *messagequeue.QueuedMessage,
 	handoffText string,
+	initialCreatePromptPassthrough bool,
 ) {
+	queueCtx := ctx
+	if initialCreatePromptPassthrough {
+		queueCtx = withInitialCreatePromptPassthroughQueue(ctx)
+	}
 	promptQueued := false
 	if shouldQueueIfBusy && (isAgentAlreadyRunningError(launchErr) ||
 		isSessionBusyError(launchErr) || isTransientPromptError(launchErr)) {
 		if queueErr := s.queueAutoStartPrompt(
-			ctx, taskID, sessionID, prompt, planMode,
+			queueCtx, taskID, sessionID, prompt, planMode,
 			attachments, origin, userMessageRecorded, references, handoffText,
 		); queueErr != nil {
 			s.logger.Warn("failed to queue auto-start prompt after launch failure",
@@ -5657,59 +5911,191 @@ func (s *Service) autoStartStepPrompt(
 	shouldQueueIfBusy bool,
 	handoffOnce *stepHandoffOnce,
 ) error {
-	sessionID := session.ID
-	origin := workflowOriginFromStep(step)
-	stepName := origin.StepName
+	return s.autoStartStepPromptWithPromptContext(
+		ctx, taskID, session, step, prompt, planMode, shouldQueueIfBusy, handoffOnce, "",
+	)
+}
 
-	// Take any queued message (e.g. from move_task_kandev with a hand-off
-	// prompt) and merge it with the step's auto-start prompt — auto-start
-	// content first, hand-off after — and forward attachments verbatim.
-	// Track the original message so terminal failure paths can restore it
-	// instead of dropping the user's prompt or attachments on the floor.
-	takenMsg, mergedPrompt, attachments, references, queuedHandoff := s.takeAndMergeHandoffMessage(ctx, sessionID, prompt)
-	prompt = mergedPrompt
-	agentPrompt := AppendEntityReferenceContext(prompt, references)
-	effectiveAgentPrompt := s.effectivePromptForSession(sessionID, agentPrompt, planMode, session)
-	if strings.TrimSpace(effectiveAgentPrompt) == "" && len(attachments) == 0 && queuedHandoff == "" &&
-		session.State != models.TaskSessionStateCreated {
-		// Existing sessions are already running after ensureSessionRunning; no
-		// prompt means we leave them waiting for the first user message rather
-		// than auto-starting. A CREATED session is different: the explicit
-		// auto-start action must launch its prepared workspace even when the step
-		// has no prompt, while recordAutoStartMessage still skips an empty row.
-		return nil
+type autoStartStepPromptState struct {
+	ctx                            context.Context
+	taskID                         string
+	session                        *models.TaskSession
+	sessionID                      string
+	step                           *wfmodels.WorkflowStep
+	stepName                       string
+	prompt                         string
+	agentPrompt                    string
+	effectiveAgentPrompt           string
+	recordedPrompt                 string
+	dispatchPrompt                 string
+	planMode                       bool
+	shouldQueueIfBusy              bool
+	origin                         workflowMessageOrigin
+	takenMsg                       *messagequeue.QueuedMessage
+	queuedHandoff                  string
+	initialCreatePromptPassthrough bool
+	queueCtx                       context.Context
+	attachments                    []v1.MessageAttachment
+	references                     []v1.EntityReference
+	handoffForQueue                string
+	promptReferenceContext         string
+	dispatchInputPresent           bool
+	userMessageRecorded            bool
+}
+
+func (s *Service) autoStartStepPromptWithPromptContext(
+	ctx context.Context,
+	taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, prompt string,
+	planMode bool,
+	shouldQueueIfBusy bool,
+	handoffOnce *stepHandoffOnce,
+	promptReferenceContext string,
+) error {
+	state, actionable, err := s.prepareAutoStartStepPrompt(
+		ctx, taskID, session, step, prompt, planMode, shouldQueueIfBusy, handoffOnce, promptReferenceContext,
+	)
+	if err != nil || !actionable {
+		return err
+	}
+	return s.dispatchAutoStartStepPrompt(state)
+}
+
+func (s *Service) prepareAutoStartStepPrompt(
+	ctx context.Context,
+	taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, prompt string,
+	planMode, shouldQueueIfBusy bool,
+	handoffOnce *stepHandoffOnce,
+	promptReferenceContext string,
+) (*autoStartStepPromptState, bool, error) {
+	state := &autoStartStepPromptState{
+		ctx: ctx, taskID: taskID, session: session, sessionID: session.ID, step: step, prompt: prompt,
+		planMode: planMode, shouldQueueIfBusy: shouldQueueIfBusy, promptReferenceContext: promptReferenceContext,
+		origin: workflowOriginFromStep(step),
+	}
+	state.stepName = state.origin.StepName
+	state.takenMsg, state.prompt, state.attachments, state.references, state.queuedHandoff =
+		s.takeAndMergeHandoffMessage(ctx, state.sessionID, state.prompt)
+	state.initialCreatePromptPassthrough = state.takenMsg != nil &&
+		initialCreatePromptPassthroughQueued(state.takenMsg.Metadata)
+	state.queueCtx = ctx
+	if state.initialCreatePromptPassthrough {
+		state.queueCtx = withInitialCreatePromptPassthroughQueue(ctx)
+	}
+	state.agentPrompt = AppendEntityReferenceContext(state.prompt, state.references)
+	state.effectiveAgentPrompt = s.effectivePromptForSession(state.sessionID, state.agentPrompt, planMode, session)
+	if strings.TrimSpace(state.effectiveAgentPrompt) == "" && len(state.attachments) == 0 &&
+		state.queuedHandoff == "" && state.session.State != models.TaskSessionStateCreated {
+		return state, false, nil
 	}
 
-	// The completion-handoff carry token is claimed only after the
-	// actionability decision above, and over content that excludes the
-	// handoff text, then appended last, after the queued hand-off already
-	// merged into agentPrompt/effectiveAgentPrompt above.
 	handoffText := s.resolveStepHandoffText(ctx, handoffOnce, taskID, step.ID, true)
-	if queuedHandoff != "" {
-		agentPrompt = appendStepHandoffToPrompt(agentPrompt, queuedHandoff)
-		effectiveAgentPrompt = appendStepHandoffToPrompt(effectiveAgentPrompt, queuedHandoff)
+	if state.queuedHandoff != "" {
+		state.agentPrompt = appendStepHandoffToPrompt(state.agentPrompt, state.queuedHandoff)
+		state.effectiveAgentPrompt = appendStepHandoffToPrompt(state.effectiveAgentPrompt, state.queuedHandoff)
 	}
-	agentPrompt = appendStepHandoffToPrompt(agentPrompt, handoffText)
-	effectiveAgentPrompt = appendStepHandoffToPrompt(effectiveAgentPrompt, handoffText)
-	handoffForQueue := joinStepHandoffText(queuedHandoff, handoffText)
+	state.agentPrompt = appendStepHandoffToPrompt(state.agentPrompt, handoffText)
+	state.effectiveAgentPrompt = appendStepHandoffToPrompt(state.effectiveAgentPrompt, handoffText)
+	state.handoffForQueue = joinStepHandoffText(state.queuedHandoff, handoffText)
 
-	// requeueTaken puts the original queued message back so a manual retry can
-	// pick it up. Skip when shouldQueueIfBusy successfully re-queued the
-	// concatenated prompt (the content is already preserved there).
-	requeueTaken := func() {
-		if takenMsg == nil {
-			return
+	var err error
+	state.recordedPrompt, state.dispatchPrompt, err = s.composeAutoStartStepPrompts(state)
+	if err != nil {
+		s.requeueAutoStartStepMessage(state)
+		return nil, false, err
+	}
+	state.dispatchInputPresent = strings.TrimSpace(state.recordedPrompt) != "" ||
+		strings.TrimSpace(state.dispatchPrompt) != "" || len(state.attachments) > 0
+	return state, true, nil
+}
+
+func (s *Service) composeAutoStartStepPrompts(
+	state *autoStartStepPromptState,
+) (string, string, error) {
+	recordedPrompt := state.effectiveAgentPrompt
+	dispatchPrompt := state.agentPrompt
+	titleOwner := false
+	isOfficeTask := false
+	includeCanvasGuidance := false
+	var taskForPrompt *models.Task
+	needsRuntimeContext := state.session.State == models.TaskSessionStateCreated ||
+		(state.step != nil && state.step.HasOnEnterAction(wfmodels.OnEnterResetAgentContext))
+	if needsRuntimeContext {
+		var contextErr error
+		isOfficeTask, taskForPrompt, titleOwner, includeCanvasGuidance, contextErr =
+			s.resolveAutoStartPromptContext(state.ctx, state.taskID, state.session)
+		if contextErr != nil {
+			return "", "", contextErr
 		}
-		s.requeueMessage(ctx, takenMsg, takenMsg.QueuedBy)
 	}
+	var pullRequestTargetContext string
+	if needsRuntimeContext {
+		recordedPrompt, pullRequestTargetContext = s.addTaskPullRequestTargetContext(
+			state.ctx, state.taskID, recordedPrompt, state.session.IsPassthrough,
+		)
+		dispatchPrompt, _ = s.addTaskPullRequestTargetContext(
+			state.ctx, state.taskID, dispatchPrompt, state.session.IsPassthrough,
+		)
+	}
+	recordedPrompt, dispatchPrompt = s.injectAutoStartRuntimeContext(
+		state, recordedPrompt, dispatchPrompt, isOfficeTask, taskForPrompt,
+		titleOwner, includeCanvasGuidance, pullRequestTargetContext,
+	)
+	return recordedPrompt, dispatchPrompt, nil
+}
 
-	if shouldQueueIfBusy {
-		// userMessageRecorded=false: recordAutoStartMessage has not run yet —
-		// the drain side (executeQueuedMessage) is responsible for inserting
-		// the chat-history row.
-		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode, attachments, origin, false, references, handoffForQueue)
+func (s *Service) injectAutoStartRuntimeContext(
+	state *autoStartStepPromptState,
+	recordedPrompt, dispatchPrompt string,
+	isOfficeTask bool,
+	taskForPrompt *models.Task,
+	titleOwner, includeCanvasGuidance bool,
+	pullRequestTargetContext string,
+) (string, string) {
+	if state.step == nil || (state.session.State != models.TaskSessionStateCreated &&
+		!state.step.HasOnEnterAction(wfmodels.OnEnterResetAgentContext)) ||
+		state.session.IsPassthrough || (state.agentPrompt == "" && len(state.attachments) == 0) {
+		return recordedPrompt, dispatchPrompt
+	}
+	configMode, _ := state.session.Metadata["config_mode"].(bool)
+	requiresSignal := state.step != nil && state.step.AutoAdvanceRequiresSignal
+	referenceContext := EntityReferenceContext(state.references)
+	if isOfficeTask {
+		return sysprompt.InjectOfficeContextWithOptions(
+				state.taskID, state.sessionID, recordedPrompt, requiresSignal,
+				referenceContext, pullRequestTargetContext, state.promptReferenceContext,
+			),
+			sysprompt.InjectOfficeContextWithOptions(
+				state.taskID, state.sessionID, dispatchPrompt, requiresSignal,
+				referenceContext, pullRequestTargetContext, state.promptReferenceContext,
+			)
+	}
+	options := sysprompt.KandevContextOptions{
+		RequiresCompletionSignal:       requiresSignal,
+		IncludeCoordinatorTaskControls: !configMode,
+		IncludeTaskTitleTool:           !configMode && titleOwner,
+		IncludeCanvasGuidance:          includeCanvasGuidance,
+		Autopilot:                      taskForPrompt != nil && taskForPrompt.Autopilot,
+		IncludeUserQuestionTool:        taskForPrompt == nil || !taskForPrompt.Autopilot,
+		IncludeParentQuestionTool:      taskForPrompt != nil && taskForPrompt.Autopilot && taskForPrompt.ParentID != "",
+	}
+	return sysprompt.InjectKandevContextWithOptions(
+			state.taskID, state.sessionID, recordedPrompt, options,
+			referenceContext, pullRequestTargetContext, state.promptReferenceContext,
+		),
+		sysprompt.InjectKandevContextWithOptions(
+			state.taskID, state.sessionID, dispatchPrompt, options,
+			referenceContext, pullRequestTargetContext, state.promptReferenceContext,
+		)
+}
+
+func (s *Service) dispatchAutoStartStepPrompt(state *autoStartStepPromptState) error {
+	if state.shouldQueueIfBusy {
+		queued, err := s.queueAutoStartPromptIfRunning(
+			state.queueCtx, state.taskID, state.session, state.prompt, state.planMode,
+			state.attachments, state.origin, false, state.references, state.handoffForQueue,
+		)
 		if err != nil {
-			requeueTaken()
+			s.requeueAutoStartStepMessage(state)
 			return err
 		}
 		if queued {
@@ -5717,257 +6103,173 @@ func (s *Service) autoStartStepPrompt(
 		}
 	}
 
-	// Record a user message so the auto-start prompt is visible in chat
-	// history. For CREATED sessions the agent has not started yet, so this is
-	// the first prompt of the task — wrap with the Kandev MCP system block
-	// before persisting (and before passing downstream) so the DB row matches
-	// what the agent receives. The mode-aware injectors canonicalize any
-	// pre-wrapped runtime context from current server state.
-	// Passthrough sessions skip the wrap: the prompt is typed straight into
-	// the agent CLI's TTY and the user sees it verbatim.
-	// Persist the exact effective prompt so plan/config-only turns have a
-	// durable user row, but keep agentPrompt as the dispatch input for the
-	// running-session path. PromptTask applies the mode transforms once from
-	// that raw input; passing effectiveAgentPrompt there would double-wrap the
-	// plan/config instructions. The CREATED path uses the composed-prompt seam
-	// below because StartCreatedSession otherwise composes the prompt again.
-	recordedPrompt := effectiveAgentPrompt
-	dispatchPrompt := agentPrompt
-	titleOwner := false
-	isOfficeTask := false
-	includeCanvasGuidance := false
-	var taskForPrompt *models.Task
-	needsRuntimeContext := session.State == models.TaskSessionStateCreated ||
-		(step != nil && step.HasOnEnterAction(wfmodels.OnEnterResetAgentContext))
-	if needsRuntimeContext {
-		var contextErr error
-		isOfficeTask, taskForPrompt, titleOwner, includeCanvasGuidance, contextErr = s.resolveAutoStartPromptContext(ctx, taskID, session)
-		if contextErr != nil {
-			requeueTaken()
-			return contextErr
-		}
-	}
-	var pullRequestTargetContext string
-	if needsRuntimeContext {
-		recordedPrompt, pullRequestTargetContext = s.addTaskPullRequestTargetContext(
-			ctx, taskID, recordedPrompt, session.IsPassthrough,
-		)
-		dispatchPrompt, _ = s.addTaskPullRequestTargetContext(
-			ctx, taskID, dispatchPrompt, session.IsPassthrough,
+	state.userMessageRecorded = s.recordAutoStartMessage(
+		state.ctx, state.taskID, state.sessionID, state.recordedPrompt,
+		state.planMode, state.origin, state.references, state.attachments,
+	)
+	if state.initialCreatePromptPassthrough && state.session.IsPassthrough &&
+		state.session.State != models.TaskSessionStateCreated {
+		s.armInitialCreatePromptPassthrough(
+			state.ctx, state.session, s.initialCreatePromptCurrentTurnID(state.ctx, state.sessionID),
 		)
 	}
-	if (session.State == models.TaskSessionStateCreated || step.HasOnEnterAction(wfmodels.OnEnterResetAgentContext)) && !session.IsPassthrough && (agentPrompt != "" || len(attachments) > 0) {
-		configMode, _ := session.Metadata["config_mode"].(bool)
-		requiresSignal := step != nil && step.AutoAdvanceRequiresSignal
-		referenceContext := EntityReferenceContext(references)
-		if isOfficeTask {
-			recordedPrompt = sysprompt.InjectOfficeContextWithOptions(
-				taskID, sessionID, recordedPrompt, requiresSignal,
-				referenceContext, pullRequestTargetContext,
-			)
-			dispatchPrompt = sysprompt.InjectOfficeContextWithOptions(
-				taskID, sessionID, dispatchPrompt, requiresSignal,
-				referenceContext, pullRequestTargetContext,
-			)
-		} else {
-			recordedPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, recordedPrompt, sysprompt.KandevContextOptions{
-				RequiresCompletionSignal:       requiresSignal,
-				IncludeCoordinatorTaskControls: !configMode,
-				IncludeTaskTitleTool:           !configMode && titleOwner,
-				IncludeCanvasGuidance:          includeCanvasGuidance,
-				Autopilot:                      taskForPrompt != nil && taskForPrompt.Autopilot,
-				IncludeUserQuestionTool:        taskForPrompt == nil || !taskForPrompt.Autopilot,
-				IncludeParentQuestionTool:      taskForPrompt != nil && taskForPrompt.Autopilot && taskForPrompt.ParentID != "",
-			}, referenceContext, pullRequestTargetContext)
-			dispatchPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, dispatchPrompt, sysprompt.KandevContextOptions{
-				RequiresCompletionSignal:       requiresSignal,
-				IncludeCoordinatorTaskControls: !configMode,
-				IncludeTaskTitleTool:           !configMode && titleOwner,
-				IncludeCanvasGuidance:          includeCanvasGuidance,
-				Autopilot:                      taskForPrompt != nil && taskForPrompt.Autopilot,
-				IncludeUserQuestionTool:        taskForPrompt == nil || !taskForPrompt.Autopilot,
-				IncludeParentQuestionTool:      taskForPrompt != nil && taskForPrompt.Autopilot && taskForPrompt.ParentID != "",
-			}, referenceContext, pullRequestTargetContext)
-		}
+	if state.session.State == models.TaskSessionStateCreated {
+		return s.launchCreatedAutoStartStepPrompt(state)
 	}
-	// Use the fully composed forms after references, handoff, and first-turn
-	// context have been applied. This captures mode-generated input for an
-	// empty raw prompt while the queue still receives the raw prompt plus mode
-	// metadata, avoiding a second system block during recovery.
-	dispatchInputPresent := strings.TrimSpace(recordedPrompt) != "" ||
-		strings.TrimSpace(dispatchPrompt) != "" || len(attachments) > 0
-	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin, references, attachments)
+	return s.retryAutoStartStepPrompt(state)
+}
 
-	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
-	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
-	// so use StartCreatedSession which properly launches the agent on the prepared workspace.
-	// Pass skipMessageRecord=true since recordAutoStartMessage above already recorded it.
-	// Guard against concurrent terminalization before dispatching to a CREATED
-	// session. By the time a nonterminal session was selected, promoted, and the
-	// prompt built, a concurrent completion/cancellation may have terminalized
-	// it. Reload under the cancel-in-flight guard and bail out with the
-	// standard terminalization error so the caller can create a replacement.
-	// The guard is held through the entire StartCreatedSession call to prevent
-	// terminalization between the reload and the admission of the launch.
-	if session.State == models.TaskSessionStateCreated {
-		lock, release := s.acquireCancelInFlightGuard(sessionID)
-		lock.Lock()
-		fresh, reloadErr := s.repo.GetTaskSession(ctx, sessionID)
-		if reloadErr != nil {
+func (s *Service) launchCreatedAutoStartStepPrompt(state *autoStartStepPromptState) error {
+	lock, release := s.acquireCancelInFlightGuard(state.sessionID)
+	lock.Lock()
+	fresh, reloadErr := s.repo.GetTaskSession(state.ctx, state.sessionID)
+	if reloadErr != nil {
+		lock.Unlock()
+		release()
+		s.requeueAutoStartStepMessage(state)
+		return reloadErr
+	}
+	if fresh == nil || isTerminalSessionState(fresh.State) {
+		lock.Unlock()
+		release()
+		s.requeueAutoStartStepMessage(state)
+		return newWorkflowAutoStartSessionTerminalizedError(fresh)
+	}
+	var releaseOnce sync.Once
+	heldRelease := func() {
+		releaseOnce.Do(func() {
 			lock.Unlock()
 			release()
-			requeueTaken()
-			return reloadErr
-		}
-		if fresh == nil || isTerminalSessionState(fresh.State) {
-			lock.Unlock()
-			release()
-			requeueTaken()
-			return newWorkflowAutoStartSessionTerminalizedError(fresh)
-		}
-		var releaseOnce sync.Once
-		heldRelease := func() {
-			releaseOnce.Do(func() {
-				lock.Unlock()
-				release()
-			})
-		}
-		defer heldRelease()
-
-		s.logger.Info("auto-start: session is CREATED, launching agent via StartCreatedSession",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.String("step_name", stepName))
-		queueIdentity, workflowEntry, workflowEntryRequired, captureErr := s.captureWorkflowStartPromptAdmission(ctx, taskID, fresh)
-		if captureErr != nil {
-			requeueTaken()
-			return captureErr
-		}
-		workflowAttempt := newWorkflowStartPromptAttemptWithAdmission(
-			taskID, sessionID, origin, prompt, planMode, attachments, references,
-			handoffForQueue, userMsgRecorded, dispatchInputPresent,
-			queueIdentity, workflowEntry, workflowEntryRequired,
-		)
-		workflowAttempt.workflowEntryRequired = workflowEntryRequired
-		workflowAttempt.configMode, _ = fresh.Metadata["config_mode"].(bool)
-		launchCtx := withWorkflowStartPromptAttempt(ctx, workflowAttempt)
-		execution, err := s.startCreatedSessionWithComposedPrompt(
-			launchCtx, taskID, sessionID, session.AgentProfileID,
-			recordedPrompt, agentPrompt, true, planMode, true, attachments, references,
-		)
-		if execution == nil {
-			workflowAttempt.retire()
-		}
-		// Release the guard as soon as StartCreatedSession has admitted the
-		// launch (succeeded or failed definitively). The deferred release
-		// via heldRelease ensures the guard is always released even on panic.
-		if err != nil {
-			workflowAttempt.retire()
-			s.handleCreatedAutoStartLaunchFailure(
-				ctx, taskID, sessionID, stepName, prompt, err,
-				planMode, shouldQueueIfBusy, userMsgRecorded,
-				attachments, origin, references, takenMsg, handoffForQueue,
-			)
-		}
-		return err
+		})
 	}
+	defer heldRelease()
 
+	s.logger.Info("auto-start: session is CREATED, launching agent via StartCreatedSession",
+		zap.String("task_id", state.taskID),
+		zap.String("session_id", state.sessionID),
+		zap.String("step_name", state.stepName))
+	queueIdentity, workflowEntry, workflowEntryRequired, captureErr :=
+		s.captureWorkflowStartPromptAdmission(state.ctx, state.taskID, fresh)
+	if captureErr != nil {
+		s.requeueAutoStartStepMessage(state)
+		return captureErr
+	}
+	workflowAttempt := newWorkflowStartPromptAttemptWithAdmission(
+		state.taskID, state.sessionID, state.origin, state.prompt, state.planMode,
+		state.attachments, state.references, state.handoffForQueue, state.userMessageRecorded,
+		state.dispatchInputPresent, queueIdentity, workflowEntry, workflowEntryRequired,
+	)
+	workflowAttempt.workflowEntryRequired = workflowEntryRequired
+	workflowAttempt.configMode, _ = fresh.Metadata["config_mode"].(bool)
+	launchCtx := withWorkflowStartPromptAttempt(state.ctx, workflowAttempt)
+	execution, err := s.startCreatedSessionWithComposedPrompt(
+		launchCtx, state.taskID, state.sessionID, state.session.AgentProfileID,
+		state.recordedPrompt, state.agentPrompt, state.promptReferenceContext,
+		true, state.planMode, true, state.initialCreatePromptPassthrough, state.attachments, state.references,
+	)
+	if execution == nil {
+		workflowAttempt.retire()
+	}
+	if err != nil {
+		workflowAttempt.retire()
+		s.handleCreatedAutoStartLaunchFailure(
+			state.ctx, state.taskID, state.sessionID, state.stepName, state.prompt, err,
+			state.planMode, state.shouldQueueIfBusy, state.userMessageRecorded,
+			state.attachments, state.origin, state.references, state.takenMsg,
+			state.handoffForQueue, state.initialCreatePromptPassthrough,
+		)
+	}
+	return err
+}
+
+func (s *Service) retryAutoStartStepPrompt(state *autoStartStepPromptState) error {
 	const maxRetryAttempts = 5
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		_, err := s.promptTask(ctx, taskID, sessionID, dispatchPrompt, "", planMode, attachments, false, launchOriginAutomatic, promptTaskOptions{
-			requireNonterminalSession: true,
-			// dispatchPrompt is already fully composed for this step entry
-			// (handoff included, see the ErrExecutionNotFound branch below):
-			// if promptTask's own internal ErrExecutionNotFound recovery fires
-			// first (ordinary lazy-resume race), it must use the same
-			// composed-prompt seam rather than recomposing from the
-			// destination step's own template and discarding the handoff.
-			promptAlreadyComposed: true,
-			fallbackLaunchPrompt:  recordedPrompt,
-			fallbackRetryPrompt:   dispatchPrompt,
-		})
-		if err == nil {
-			return nil
+		_, err := s.promptTask(
+			state.ctx, state.taskID, state.sessionID, state.dispatchPrompt, "",
+			state.planMode, state.attachments, false, launchOriginAutomatic, promptTaskOptions{
+				requireNonterminalSession: true,
+				promptAlreadyComposed:     true,
+				fallbackLaunchPrompt:      state.recordedPrompt,
+				fallbackRetryPrompt:       state.dispatchPrompt,
+				promptReferenceContext:    state.promptReferenceContext,
+			},
+		)
+		stop, result := s.handleAutoStartPromptAttemptError(state, err)
+		if stop {
+			return result
 		}
-		if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
-			requeueTaken()
-			return err
-		}
-		// AC-47c2: the two seam-3 dispositions carry opposite restoration
-		// obligations. A deferred refusal already holds the prompt and its
-		// AC-47c(c) strings in the written record, so requeuing here would
-		// redeliver the same content twice; an undeferred one (AC-47c1) is
-		// the caller's own to restore, exactly like the terminalized branch
-		// above.
-		if refusal, ok := isSeam3Refusal(err); ok {
-			if !refusal.deferred {
-				requeueTaken()
-			}
-			return err
-		}
-
-		// ErrExecutionNotFound means ResumeSession landed on an execution that
-		// the lifecycle manager no longer has (e.g. the post-resume agent
-		// process failed to start and runAgentProcessAsync removed it). The
-		// session's stored AgentExecutionID is now stale. Recover by clearing
-		// it and relaunching fresh through the composed-prompt seam — recordedPrompt
-		// and dispatchPrompt are already fully composed for this step entry
-		// (handoff included), so the fallback must not let StartCreatedSession
-		// recompose them from the destination step's own template.
-		if errors.Is(err, executor.ErrExecutionNotFound) {
-			s.logger.Warn("auto-start: PromptTask hit missing execution; falling back to fresh launch",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("step_name", stepName))
-			return s.fallbackFreshLaunchOnMissingExecution(
-				ctx, taskID, sessionID, recordedPrompt, true, dispatchPrompt, planMode, takenMsg, attachments, references,
-			)
-		}
-
-		// "already has an agent running" means the execution store still tracks
-		// an active agent for this session (e.g. session state is CREATED but
-		// the agent was launched by a concurrent path). Queue instead of retrying.
-		// Pass userMsgRecorded so the drain skips CreateUserMessage only when the
-		// chat row was successfully inserted above; a failed write passes false,
-		// letting the drain re-attempt insertion.
-		if isAgentAlreadyRunningError(err) && shouldQueueIfBusy {
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, handoffForQueue); queueErr != nil {
-				requeueTaken()
-				return queueErr
-			}
-			return nil
-		}
-
-		if !isSessionBusyError(err) && !isTransientPromptError(err) && !isSessionResetInProgressError(err) {
-			requeueTaken()
-			return err
-		}
-
-		if shouldQueueIfBusy {
-			// Pass userMsgRecorded so the drain skips CreateUserMessage only when
-			// the chat row was successfully inserted above by recordAutoStartMessage.
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, handoffForQueue); queueErr != nil {
-				requeueTaken()
-				return queueErr
-			}
-			return nil
-		}
-
 		if attempt == maxRetryAttempts {
-			requeueTaken()
+			s.requeueAutoStartStepMessage(state)
 			return err
 		}
-
 		delay := time.Duration(50*(1<<(attempt-1))) * time.Millisecond
 		select {
-		case <-ctx.Done():
-			requeueTaken()
-			return fmt.Errorf("auto-start context canceled: %w", ctx.Err())
+		case <-state.ctx.Done():
+			s.requeueAutoStartStepMessage(state)
+			return fmt.Errorf("auto-start context canceled: %w", state.ctx.Err())
 		case <-time.After(delay):
 		}
 	}
-
 	return nil
+}
+
+func (s *Service) handleAutoStartPromptAttemptError(
+	state *autoStartStepPromptState,
+	err error,
+) (bool, error) {
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
+		s.requeueAutoStartStepMessage(state)
+		return true, err
+	}
+	if refusal, ok := isSeam3Refusal(err); ok {
+		if !refusal.deferred {
+			s.requeueAutoStartStepMessage(state)
+		}
+		return true, err
+	}
+	if errors.Is(err, executor.ErrExecutionNotFound) {
+		s.logger.Warn("auto-start: PromptTask hit missing execution; falling back to fresh launch",
+			zap.String("task_id", state.taskID),
+			zap.String("session_id", state.sessionID),
+			zap.String("step_name", state.stepName))
+		return true, s.fallbackFreshLaunchOnMissingExecution(
+			state.ctx, state.taskID, state.sessionID, state.recordedPrompt, true,
+			state.dispatchPrompt, state.planMode, state.promptReferenceContext,
+			state.initialCreatePromptPassthrough, state.takenMsg, state.attachments, state.references,
+		)
+	}
+	if isAgentAlreadyRunningError(err) && state.shouldQueueIfBusy {
+		return true, s.queueOrRestoreAutoStartPrompt(state)
+	}
+	if !isSessionBusyError(err) && !isTransientPromptError(err) && !isSessionResetInProgressError(err) {
+		s.requeueAutoStartStepMessage(state)
+		return true, err
+	}
+	if state.shouldQueueIfBusy {
+		return true, s.queueOrRestoreAutoStartPrompt(state)
+	}
+	return false, err
+}
+
+func (s *Service) queueOrRestoreAutoStartPrompt(state *autoStartStepPromptState) error {
+	if err := s.queueAutoStartPrompt(
+		state.queueCtx, state.taskID, state.sessionID, state.prompt, state.planMode,
+		state.attachments, state.origin, state.userMessageRecorded, state.references, state.handoffForQueue,
+	); err != nil {
+		s.requeueAutoStartStepMessage(state)
+		return err
+	}
+	return nil
+}
+
+func (s *Service) requeueAutoStartStepMessage(state *autoStartStepPromptState) {
+	if state.takenMsg != nil {
+		s.requeueMessage(state.ctx, state.takenMsg, state.takenMsg.QueuedBy)
+	}
 }
 
 // fallbackFreshLaunchOnMissingExecution recovers from a PromptTask that returned
@@ -5989,6 +6291,8 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	promptAlreadyComposed bool,
 	retryPrompt string,
 	planMode bool,
+	promptReferenceContext string,
+	initialCreatePromptPassthrough bool,
 	takenMsg *messagequeue.QueuedMessage,
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
@@ -6023,12 +6327,13 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	if promptAlreadyComposed {
 		_, launchErr = s.startCreatedSessionWithComposedPrompt(
 			ctx, taskID, sessionID, fresh.AgentProfileID,
-			prompt, retryPrompt, true, planMode, true, attachments, references,
+			prompt, retryPrompt, promptReferenceContext,
+			true, planMode, true, initialCreatePromptPassthrough, attachments, references,
 		)
 	} else {
-		_, launchErr = s.StartCreatedSession(
+		_, launchErr = s.startCreatedSession(
 			ctx, taskID, sessionID, fresh.AgentProfileID,
-			prompt, true, planMode, true, attachments, references,
+			prompt, true, planMode, true, attachments, references, promptReferenceContext, startCreatedSessionOptions{},
 		)
 	}
 	if launchErr != nil {
@@ -6320,6 +6625,9 @@ func (s *Service) persistAutoStartPromptWithAdmission(
 		return nil, fmt.Errorf("message queue is not configured")
 	}
 	meta := workflowMessageMetadata(planMode, origin, references)
+	if initialCreatePromptPassthroughQueueFromContext(ctx) {
+		meta[metaKeyInitialCreatePromptPassthrough] = true
+	}
 	if userMessageRecorded {
 		meta[metaKeyUserMessageRecorded] = true
 	}
@@ -7049,6 +7357,7 @@ func assembleMachineState(task *models.Task, session *models.TaskSession, isPass
 	}
 	state.SessionID = session.ID
 	state.SessionState = string(session.State)
+	state.AgentProfileID = session.AgentProfileID
 	if session.Metadata != nil {
 		if wd, ok := session.Metadata["workflow_data"].(map[string]any); ok {
 			state.Data = wd
@@ -7444,6 +7753,53 @@ func (s *Service) applyEngineTransitionWithMode(
 		})
 }
 
+func (s *Service) recoverCompletedTurnAfterWorkflowPreflightFailure(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	result engine.HandleResult,
+) {
+	if session == nil || !result.Transitioned || s.turnService == nil ||
+		!workflowProfileSwitchGuardIsHeld(ctx, session.ID) {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("could not verify workflow source after completion preflight failure",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return
+	}
+	if task == nil || task.WorkflowStepID != result.FromStepID {
+		return
+	}
+	currentSession, err := s.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		s.logger.Warn("could not reload session after completion preflight failure",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return
+	}
+	if currentSession == nil || currentSession.TaskID != taskID ||
+		currentSession.State != models.TaskSessionStateRunning {
+		return
+	}
+	activeTurnID, err := s.peekActiveTurnID(ctx, currentSession.ID)
+	if err != nil {
+		s.logger.Warn("could not check active turn after completion preflight failure; skipping recovery",
+			zap.String("task_id", taskID),
+			zap.String("session_id", currentSession.ID),
+			zap.Error(err))
+		return
+	}
+	if activeTurnID != "" {
+		return
+	}
+	s.setSessionWaitingForInput(ctx, taskID, currentSession.ID, currentSession)
+}
+
 // applyEngineTransitionWithCommitMode applies the shared lifecycle around a
 // transition commit. The default path commits through ApplyTransition. The
 // quorum decision path supplies a CAS commit so lifecycle hooks cannot be
@@ -7462,6 +7818,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// (e.g., a template-level alias like "review" that doesn't resolve to a real UUID).
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID)
 	if err != nil {
+		recordWorkflowTransitionError(ctx, err)
 		s.logger.Warn("target step not found, skipping transition",
 			zap.String("step_id", result.ToStepID),
 			zap.Error(err))
@@ -7472,10 +7829,14 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	}
 	if sessionLifecycle {
 		if err := s.preflightWorkflowStepCredentials(ctx, taskID, session, targetStep); err != nil {
+			recordWorkflowTransitionError(ctx, err)
 			s.logger.Warn("target profile credential preflight failed, skipping transition",
 				zap.String("task_id", taskID),
 				zap.String("step_id", result.ToStepID),
 				zap.Error(err))
+			if trigger == engine.TriggerOnTurnComplete {
+				s.recoverCompletedTurnAfterWorkflowPreflightFailure(ctx, taskID, session, result)
+			}
 			return false
 		}
 	}
@@ -7484,6 +7845,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 
 	fromStep, err := s.loadWorkflowStepForLifecycle(ctx, result.FromStepID, "transition source")
 	if err != nil {
+		recordWorkflowTransitionError(ctx, err)
 		s.logger.Warn("failed to load from-step for on_exit",
 			zap.String("step_id", result.FromStepID),
 			zap.Error(err))
@@ -7508,6 +7870,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	}
 	applied, err := commit(applyCtx)
 	if err != nil {
+		recordWorkflowTransitionError(ctx, err)
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
@@ -7518,6 +7881,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		return false
 	}
 	if !applied {
+		recordWorkflowTransitionError(ctx, errors.New("workflow transition commit was not applied"))
 		return false
 	}
 
@@ -7581,6 +7945,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		// to the correct agent.
 		effectiveSession, ok := s.maybySwitchSessionForProfile(ctx, taskID, session, targetStep, fromStep)
 		if !ok {
+			recordWorkflowTransitionError(ctx, errors.New("workflow on_turn_start session preparation failed"))
 			return false
 		}
 		// A queued prompt has already claimed RUNNING before its turn-start
@@ -7656,31 +8021,40 @@ func (s *Service) launchProcessOnEnter(
 // actions. Falls back to the legacy method when the engine is not initialized.
 // Returns true if a step transition occurred.
 func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string, session *models.TaskSession) bool {
+	transitioned, _ := s.processOnTurnStartViaEngineResult(ctx, taskID, session)
+	return transitioned
+}
+
+func (s *Service) processOnTurnStartViaEngineResult(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) (bool, error) {
 	if session == nil || models.IsCompletionFollowUpSession(session.Metadata) {
-		return false
+		return false, nil
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to load task for on_turn_start",
 			zap.String("task_id", taskID), zap.Error(err))
-		return false
+		return false, err
 	}
 
 	if s.workflowEngine == nil {
-		return s.processOnTurnStart(ctx, task, session)
+		return s.processOnTurnStart(ctx, task, session), nil
 	}
 
 	if session.ID == "" || s.workflowStepGetter == nil {
-		return false
+		return false, nil
 	}
 
 	if task.WorkflowStepID == "" {
-		return false
+		return false, nil
 	}
 
 	// Skip workflow step actions for ephemeral tasks (quick chat) - they have no workflow
 	if task.IsEphemeral {
-		return false
+		return false, nil
 	}
 
 	state := s.buildMachineState(ctx, task, session)
@@ -7696,11 +8070,11 @@ func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.Error(err))
-		return false
+		return false, err
 	}
 
 	if !result.Transitioned {
-		return false
+		return false, nil
 	}
 
 	s.logger.Info("engine: on_turn_start transition",
@@ -7710,5 +8084,14 @@ func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string
 		zap.String("to_step_id", result.ToStepID))
 
 	// on_turn_start does NOT trigger on_enter (user's message is the next prompt).
-	return s.applyEngineTransitionWithMode(ctx, taskID, session, result, engine.TriggerOnTurnStart, "", transitionLifecycleOnTurnStart)
+	transitionCapture := &workflowTransitionErrorCapture{}
+	transitionCtx := withWorkflowTransitionErrorCapture(ctx, transitionCapture)
+	transitioned := s.applyEngineTransitionWithMode(transitionCtx, taskID, session, result, engine.TriggerOnTurnStart, "", transitionLifecycleOnTurnStart)
+	if transitionCapture.err != nil {
+		return false, transitionCapture.err
+	}
+	if !transitioned {
+		return false, errors.New("workflow on_turn_start transition was not applied")
+	}
+	return true, nil
 }

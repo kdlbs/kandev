@@ -55,10 +55,11 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		AgentID: agentID,
 		Model:   model,
 		InferenceConfig: &utility.InferenceConfigDTO{
-			Command:   cfg.Command.Args(),
-			ModelFlag: cfg.ModelFlag.Args(),
-			WorkDir:   execution.WorkspacePath,
-			StripEnv:  agents.StripEnvFor(ia),
+			Command:         cfg.Command.Args(),
+			ModelFlag:       cfg.ModelFlag.Args(),
+			WorkDir:         execution.WorkspacePath,
+			StripEnv:        agents.StripEnvFor(ia),
+			OperatorDefined: cfg.OperatorDefined,
 		},
 	}
 
@@ -144,7 +145,7 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 		InferenceConfig: &utility.InferenceConfigDTO{
 			Command: cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, CommandPrefix: prefix,
-			ProviderGatewayAuth: gatewayAuth,
+			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
 		},
 	})
 }

@@ -14,6 +14,7 @@ import type {
   ReviewSliceActions,
   NeedsYouInboxSliceActions,
   FailedInboxSliceActions,
+  PreviewFeedbackSliceActions,
   InboxHistorySliceActions,
 } from "./slices";
 
@@ -35,4 +36,5 @@ export type AppStateExtraActions = Pick<UIA, "setThreadActiveView" | "createThre
   ReviewSliceActions &
   NeedsYouInboxSliceActions &
   FailedInboxSliceActions &
-  InboxHistorySliceActions;
+  InboxHistorySliceActions &
+  PreviewFeedbackSliceActions;

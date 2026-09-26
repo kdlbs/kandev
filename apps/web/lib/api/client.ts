@@ -107,7 +107,15 @@ export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOption
   if (response.status === 204) return undefined as T;
   const text = await response.text();
   if (!text) return undefined as T;
-  return JSON.parse(text) as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError(
+      `Request failed: ${response.status} ${response.statusText}`,
+      response.status,
+      null,
+    );
+  }
 }
 
 /**

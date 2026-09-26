@@ -14,6 +14,7 @@ import type {
   WorkflowSessionTarget,
   TaskPriority,
   SidebarTaskColorPatchApi,
+  WorkflowAgentOverrides,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
 import type { SidebarTaskColorAutomation } from "../../lib/task-color-automation-settings";
@@ -279,6 +280,7 @@ type CreateTaskOpts = {
   description?: string;
   workflow_id?: string;
   workflow_step_id?: string;
+  workflow_agent_overrides?: Record<string, string>;
   agent_profile_id?: string;
   /** Prepare a CREATED session without launching the agent. */
   prepare_session?: boolean;
@@ -350,6 +352,7 @@ function buildCreateTaskBody(
   };
   setIf(body, "workflow_id", options.workflow_id);
   setIf(body, "workflow_step_id", options.workflow_step_id);
+  setIf(body, "workflow_agent_overrides", options.workflow_agent_overrides);
   setIf(body, "priority", options.priority);
   setIf(body, "agent_profile_id", options.agent_profile_id);
   if (options.prepare_session) body.prepare_session = true;
@@ -386,6 +389,7 @@ type MessageAttachmentInput = {
 type OptionalAgentTaskOpts = {
   workflow_id?: string;
   workflow_step_id?: string;
+  workflow_agent_overrides?: Record<string, string>;
   repository_ids?: string[];
   repositories?: TaskRepositoryInput[];
   executor_id?: string;
@@ -417,6 +421,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   if (!opts) return fields;
   setIf(fields, "workflow_id", opts.workflow_id);
   setIf(fields, "workflow_step_id", opts.workflow_step_id);
+  setIf(fields, "workflow_agent_overrides", opts.workflow_agent_overrides);
   setIf(fields, "repositories", pickRepositories(opts));
   setIf(fields, "executor_id", opts.executor_id);
   setIf(fields, "executor_profile_id", opts.executor_profile_id);
@@ -635,6 +640,31 @@ export class ApiClient {
     return this.request("GET", "/api/v1/agents/available");
   }
 
+  async createCustomTUIAgent(options: {
+    display_name: string;
+    command: string;
+    model?: string;
+    description?: string;
+    mcp_strategy?: string;
+    protocol?: "acp";
+  }): Promise<Agent> {
+    const created = await this.request<{ name: string }>("POST", "/api/v1/agents/tui", options);
+    const { agents } = await this.listAgents();
+    const agent = agents.find((candidate) => candidate.name === created.name);
+    if (!agent)
+      throw new Error(`Custom TUI agent ${created.name} was not returned by the agent list`);
+    return agent;
+  }
+
+  /** Removes a custom agent by slug, so a spec that creates one leaves the
+   * worker's agent list as it found it. Missing is not an error. */
+  async deleteCustomAgentByName(name: string): Promise<void> {
+    const { agents } = await this.listAgents();
+    const agent = agents.find((candidate) => candidate.name === name);
+    if (!agent) return;
+    await this.request("DELETE", `/api/v1/agents/${agent.id}`);
+  }
+
   async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {
     const qs = force ? "?force=true" : "";
     await this.request("DELETE", `/api/v1/agent-profiles/${profileId}${qs}`);
@@ -818,6 +848,7 @@ export class ApiClient {
       description?: string;
       workflow_id?: string;
       workflow_step_id?: string;
+      workflow_agent_overrides?: Record<string, string>;
       repository_ids?: string[];
       /** Full repository entries with optional checkout_branch / base_branch / pr_number. */
       repositories?: TaskRepositoryInput[];
@@ -1227,6 +1258,7 @@ export class ApiClient {
       terminal_font_family?: string;
       terminal_font_size?: number;
       startup_page?: "task_overview" | "last_task" | "threads";
+      sidebar_layouts_by_workspace?: Record<string, { revision: number; [key: string]: unknown }>;
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
@@ -1262,11 +1294,21 @@ export class ApiClient {
     default_utility_agent_id?: string;
     default_utility_model?: string;
     default_utility_agent_profile_id?: string;
+    sidebar_task_prefs?: {
+      pinned_task_ids?: string[];
+      ordered_task_ids?: string[];
+      subtask_order_by_parent_id?: Record<string, string[]>;
+    };
     sidebar_view_state?: {
       workspace_id: string;
       views?: unknown[];
       active_view_id?: string;
       draft?: unknown;
+    };
+    sidebar_layout_state?: {
+      workspace_id: string;
+      expected_revision: number;
+      layout?: unknown;
     };
     thread_views?: unknown[];
     thread_active_view_id?: string;
@@ -2493,7 +2535,31 @@ export class ApiClient {
       metadata?: Record<string, unknown>;
     }>;
   }> {
-    return this.request("GET", `/api/v1/task-sessions/${sessionId}/messages`);
+    // The production endpoint intentionally caps explicit pages at 100. E2E
+    // callers use this helper for authoritative fixture inspection, so follow
+    // the cursor explicitly instead of relying on the bounded default page.
+    const messages: Array<{
+      id: string;
+      content: string;
+      author_type: string;
+      type?: string;
+      raw_content?: string;
+      metadata?: Record<string, unknown>;
+    }> = [];
+    let after = "";
+    for (;;) {
+      const query = new URLSearchParams({ limit: "100", sort: "asc" });
+      if (after) query.set("after", after);
+      const page = await this.request<{
+        messages: typeof messages;
+        has_more?: boolean;
+        cursor?: string;
+      }>("GET", `/api/v1/task-sessions/${sessionId}/messages?${query.toString()}`);
+      messages.push(...page.messages);
+      if (!page.has_more || !page.cursor || page.cursor === after) break;
+      after = page.cursor;
+    }
+    return { messages };
   }
 
   async listSessionTurns(sessionId: string): Promise<{
@@ -2576,6 +2642,18 @@ export class ApiClient {
     total: number;
   }> {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
+  }
+
+  async getTaskSession(sessionId: string): Promise<{
+    session: {
+      id: string;
+      task_id: string;
+      agent_profile_id?: string;
+      agent_profile_snapshot?: Record<string, unknown> | null;
+      state: string;
+    };
+  }> {
+    return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
   }
 
   async getQueueSessionIdentity(
@@ -2669,6 +2747,8 @@ export class ApiClient {
 
   async getTask(taskId: string): Promise<{
     id: string;
+    workspace_id?: string;
+    workflow_id?: string;
     title: string;
     description?: string;
     autopilot?: boolean;
@@ -2676,6 +2756,7 @@ export class ApiClient {
     primary_executor_type?: string | null;
     state?: string;
     workflow_step_id?: string;
+    workflow_agent_overrides?: WorkflowAgentOverrides;
     wip_admitted?: boolean;
     queued_for_step_id?: string;
     priority?: TaskPriority;

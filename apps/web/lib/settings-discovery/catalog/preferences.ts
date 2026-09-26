@@ -6,7 +6,9 @@ export const TERMINAL_LINKS_TARGET = "setting-terminal-links";
 export const PREFERENCES_SETTINGS_HREF = "/settings/preferences";
 const APPEARANCE_ID = "preferences-appearance";
 export const APPEARANCE_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/appearance`;
+export const SIDEBAR_SETTINGS_HREF = "/settings/sidebar";
 export const LAYOUTS_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/layouts`;
+export const SIDEBAR_LAYOUT_TAB_HREF = `${LAYOUTS_SETTINGS_HREF}?tab=sidebar`;
 const TERMINAL_EDITORS_ID = "preferences-terminal-editors";
 export const TERMINAL_EDITORS_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/terminal-editors`;
 const NOTIFICATIONS_ID = "preferences-notifications";
@@ -196,6 +198,15 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     href: LAYOUTS_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.layoutProfiles,
     order: 21,
+  },
+  {
+    id: "layouts-sidebar",
+    kind: "section",
+    labelKey: "settings:sidebar",
+    parentId: "preferences-layouts",
+    groupId: "preferences",
+    href: SIDEBAR_LAYOUT_TAB_HREF,
+    order: 22,
   },
   {
     id: TERMINAL_EDITORS_ID,

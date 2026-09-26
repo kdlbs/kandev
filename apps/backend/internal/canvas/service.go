@@ -173,6 +173,40 @@ func (s *Service) GetCanvas(ctx context.Context, id string) (*Canvas, error) {
 	return s.Get(ctx, id)
 }
 
+// Rename updates the instance title without changing its release or runtime.
+func (s *Service) Rename(ctx context.Context, id, title string) (*Canvas, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	title = strings.TrimSpace(title)
+	if title == "" || len([]rune(title)) > MaxTitleLength {
+		return nil, ErrInvalidCanvas
+	}
+	s.mu.Lock()
+	_, instance, err := s.load(ctx, id)
+	if err == nil && instance.Status == StatusRemoved {
+		err = ErrCanvasNotFound
+	}
+	if err == nil {
+		err = s.repo.Rename(ctx, id, title, s.nowUTC())
+	}
+	var updated Canvas
+	if err == nil {
+		metadata, current, loadErr := s.load(ctx, id)
+		err = loadErr
+		if err == nil {
+			updated, err = s.buildCanvas(ctx, metadata, current)
+		}
+	}
+	publisher := s.publisher
+	s.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	publishEvent(ctx, publisher, lifecycleEvent(EventUpdated, updated))
+	return &updated, nil
+}
+
 // ListTaskCanvases lists task-scoped canvases. Removed canvases are never
 // returned; archived canvases are returned only when includeArchived is true.
 func (s *Service) ListTaskCanvases(ctx context.Context, taskID string, includeArchived bool) ([]Canvas, error) {
@@ -703,7 +737,7 @@ func (s *Service) buildCanvas(ctx context.Context, metadata CanvasMetadata, inst
 		return Canvas{}, err
 	}
 	if instance.ActiveReleaseID == "" {
-		return s.addPendingRelease(ctx, &canvas, instance.ID, instance.ScopeKind, grants)
+		return s.addPendingRelease(ctx, &canvas, instance.ID, instance.EffectiveDataScopeKind(), grants)
 	}
 	release, err := s.instances.GetRelease(ctx, instance.ActiveReleaseID)
 	if errors.Is(err, plugininstances.ErrNotFound) {
@@ -721,7 +755,7 @@ func (s *Service) buildCanvas(ctx context.Context, metadata CanvasMetadata, inst
 	canvas.ActiveReleaseStatus = release.ValidationStatus
 	canvas.ActiveReleaseError = release.ValidationError
 	canvas.EffectiveGrants = effectiveGrantProjection(instance, ReleasePermissionSummary(release), grants)
-	canvas.ActiveRelease = releaseMetadata(release, instance.ScopeKind, grants)
+	canvas.ActiveRelease = releaseMetadata(release, instance.EffectiveDataScopeKind(), grants)
 	return canvas, nil
 }
 
@@ -832,6 +866,7 @@ func canvasFromMetadataInstance(metadata CanvasMetadata, instance plugininstance
 		TaskID:             metadata.TaskID,
 		OriginTaskID:       metadata.OriginTaskID,
 		ScopeKind:          instance.ScopeKind,
+		DataScopeKind:      instance.EffectiveDataScopeKind(),
 		Title:              metadata.Title,
 		CreatedBySessionID: metadata.CreatedBySessionID,
 		PromotedByUserID:   metadata.PromotedByUserID,
@@ -855,11 +890,14 @@ func isWorkspaceCanvas(metadata CanvasMetadata, instance plugininstances.Instanc
 func lifecycleEvent(eventType string, canvas Canvas) LifecycleEvent {
 	return LifecycleEvent{
 		Type:                eventType,
+		Title:               canvas.Title,
+		UpdatedAt:           canvas.UpdatedAt,
 		CanvasID:            canvas.ID,
 		PluginInstanceID:    canvas.PluginInstanceID,
 		WorkspaceID:         canvas.WorkspaceID,
 		TaskID:              canvas.TaskID,
 		ScopeKind:           canvas.ScopeKind,
+		DataScopeKind:       canvas.DataScopeKind,
 		Status:              canvas.Status,
 		ActiveReleaseID:     canvas.ActiveReleaseID,
 		ActiveReleaseStatus: canvas.ActiveReleaseStatus,

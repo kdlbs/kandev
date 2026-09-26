@@ -9,6 +9,9 @@ var ErrWorkspaceNameMismatch = errors.New("workspace name mismatch")
 // ErrWorkspaceNotFound reports that no workspace row matched the supplied id.
 var ErrWorkspaceNotFound = errors.New("workspace not found")
 
+// ErrWorkflowNotFound reports that no workflow row matched the supplied id.
+var ErrWorkflowNotFound = errors.New("workflow not found")
+
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
@@ -37,6 +40,10 @@ var ErrTaskPlanNotFound = errors.New("task plan not found")
 // ErrTaskPlanCommentsChanged reports that a comment mutation was based on a
 // stale plan identity, row version, or caller-generated comment identity.
 var ErrTaskPlanCommentsChanged = errors.New("task plan comments changed")
+
+// ErrTaskPreviewFeedbackChanged reports an optimistic-version conflict in a
+// task's pending rendered-page feedback collection.
+var ErrTaskPreviewFeedbackChanged = errors.New("task preview feedback changed")
 
 // ErrPrimarySessionChanged reports that a guarded delivery no longer targets
 // the task's current primary session.
@@ -94,6 +101,10 @@ var ErrWorkflowResolutionConflict = errors.New("task workflow changed since reso
 // ErrTaskTransferConflict is the stable, non-leaking result for a stale,
 // ambiguous, incompatible, or idempotency-mismatched transfer request.
 var ErrTaskTransferConflict = errors.New("task transfer conflict")
+
+// ErrWorkflowChangeConflict reports that an explicit change-workflow request
+// no longer matches the task source or task version it was opened against.
+var ErrWorkflowChangeConflict = errors.New("task changed since workflow change was opened")
 
 // ErrRunnerMutabilityConflict wraps one of the ten ordered mutability reason
 // codes rejecting a runner switch. Reason is always a member of the same

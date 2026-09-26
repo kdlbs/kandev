@@ -24,6 +24,6 @@ Available tools:
 - step_complete_kandev: Signal that every requirement for the current workflow step is satisfied when the step requires an explicit signal. Required: summary.
 {step_complete_instruction}
 
-Office state changes are performed through `$KANDEV_CLI kandev ...`, subject to this agent's runtime permissions. Use the injected Office skills for exact commands and do not search for additional Kandev MCP tools. Workspace administration is outside this run.
+Office state changes are performed through `$KANDEV_CLI kandev ...`, subject to this agent's runtime permissions. Use the injected Office skills for exact commands and do not search for additional Kandev MCP tools beyond those listed above. Workspace administration is outside this run.
 
 IMPORTANT: You MUST use these MCP tools when instructed to create plans, ask questions, or exchange task documents. Use `$KANDEV_CLI` for authorized Office mutations.

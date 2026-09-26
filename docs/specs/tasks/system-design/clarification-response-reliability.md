@@ -3,6 +3,7 @@ status: current
 system: tasks
 requirements:
   - REQ-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-001
+  - REQ-TASKS-CLARIFICATION-LIFECYCLE-001
 ---
 
 # Clarification response reliability System Design
@@ -132,6 +133,68 @@ resolver loser path is the authoritative reconciliation: it returns a prior
 winner when the first request committed, or claims the still-pending bundle
 when the first request did not. A 409 `not_active` remains an expired outcome,
 not a successful submission.
+
+### Inactive-response reconciliation and late answers
+
+This section also maps `REQ-TASKS-CLARIFICATION-LIFECYCLE-001`, criteria
+`.4` through `.9`. The [late-answer decision](../../../decisions/2026-09-18-late-clarification-messages.md)
+separates operational tool authority from ordinary conversation.
+
+`useClarificationGroup` captures question prompts, option labels, custom text,
+answers, task ID, and session ID before submitting. An affirmative response
+classified as inactive transfers that snapshot to a shared late-message action.
+It does not clear the draft before message admission succeeds. Rejection instead
+retires the obsolete surface without sending an ordinary message.
+
+Use the existing `useMessageHandler` admission path for late messages. Format
+question prompts and selected labels with custom answers as ordinary user text.
+Do not interpolate them into a privileged system block. A directly opened
+historical question uses this path without retrying the obsolete response endpoint.
+A recognized inactive result after an affirmative submit uses the same path
+without requiring the user to enter the answers again.
+
+A typed host callback connects the shared question UI to message admission.
+Resolve its task/session from the source question, not global active selection.
+Retain the captured identity across navigation. Task chat and Quick Chat wire
+this callback through their existing chat handler. A transcript question opens
+an inline late-answer form using the same formatter and admission adapter.
+Read-only run surfaces link to the source conversation rather than acquire a
+second message transport. The Inbox History tab remains read-only; its existing
+conversation navigation provides access to the transcript action.
+
+Refresh message/session authority after an inactive result before deriving
+promptability. The stale question itself must not force `hasPendingClarification`
+to true and queue an otherwise idle session forever. A different active question
+retains its barrier. Reuse `deriveSessionInputMode` and queue admission for busy
+sessions; do not introduce forced interruption or a separate queue policy.
+Unavailable sessions preserve the answer and use ordinary recovery feedback.
+No automatic replacement task or session is created.
+
+Keep the existing stable admission identity across retries, including when the
+message surface closes and reopens while admission is unresolved. A rejected
+admission preserves the draft; an uncertain admission reconciles by that same
+identity. Do not send ordinary messages after timeouts, malformed responses,
+unknown conflicts, or generic server failures in the tool-response path.
+Those outcomes retain its existing retry flow.
+
+Separate tool outcomes from message outcomes. `no_longer_active` is not a
+successful tool response; sent/queued late answers need their own outcome.
+Consumers must not unmount an answer draft merely on `no_longer_active` while
+new-message admission is pending or has failed. Success-only `onResolved`
+remains specific to the original response path.
+
+Cache retirement preserves current row metadata, newer authoritative versions,
+terminal siblings, deleted rows, and request-generation ownership. Keep the
+per-row RFC3339Nano version checks from the inactive-dismissal repair. Retiring
+operational state must not remove the transcript's late-answer entry point.
+An expired surface has working Close and new-message actions. Its Escape guard
+must match an actually mounted handler. New-message admission never marks the
+historical tool request answered or reactivates its pending-action projection.
+
+Desktop and phone use the existing inline question form. Keep the current scroll
+owner and safe areas, provide 44px coarse-pointer actions, and return focus to
+the transcript opener or composer after closing. Translate new labels in all
+supported catalogs. The action explicitly says it sends a new message.
 
 Local collapse, dismiss, Escape, and task navigation do not mutate the bundle.
 Skip remains the explicit rejection path. These controls may be disabled only

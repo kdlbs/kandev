@@ -256,7 +256,11 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	}
 	client, err := dialSSH(baseCtx, target)
 	if err != nil {
-		return nil, fmt.Errorf("ssh: connect to %s@%s: %w", target.User, target.Host, err)
+		// Classified from this launch's own attempt, never from a stored
+		// reachability record — that record can predate this dial by a full
+		// probe interval and would misattribute a stale cause to a fresh
+		// failure (see task-05-launch-non-gating.md).
+		return nil, fmt.Errorf("ssh: connect to %s@%s: %s: %w", target.User, target.Host, ClassifyDialError(err), err)
 	}
 	var runtimeAPITunnel *sshRuntimeAPITunnel
 	released := false

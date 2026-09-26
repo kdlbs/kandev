@@ -741,8 +741,8 @@ func (si *SchedulerIntegration) launchAgent(
 		si.logger.Error("agent launch failed",
 			zap.String("run_id", runID), zap.Error(err))
 		si.svc.AppendRunEvent(ctx, runID, "error", "error", map[string]interface{}{
-			"phase":         "adapter.invoke",
-			"error_message": err.Error(),
+			"phase":                   "adapter.invoke",
+			runEventFieldErrorMessage: err.Error(),
 		})
 		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
@@ -763,8 +763,11 @@ func (si *SchedulerIntegration) launchAgent(
 // (the same status the routed dispatch path uses for the identical
 // disposition, see scheduler.SchedulerService.handleLaunchDeferred) keeps
 // the scheduler's own wake-up loop from ever picking the run back up on
-// its own; an operator notices via "Retry now" once capacity is known to
-// be free.
+// its own. There is no reconciliation path back from the orchestrator's
+// ceiling state today (REQ-OFFICE-LAUNCH-SAFETY-003/REQ-OFFICE-BACKPRESSURE-003
+// require a durable operator-visible record here, not a lift mechanism), so
+// the run stays parked until an operator finds it and clears the routing
+// block by hand.
 func (si *SchedulerIntegration) handleLaunchDeferred(ctx context.Context, run *models.Run) {
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.AppendRunEvent(ctx, run.ID, "adapter.invoke", "info", map[string]interface{}{
@@ -853,8 +856,8 @@ func (si *SchedulerIntegration) failTasklessRun(
 		return
 	}
 	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
-		"phase":         "scheduler.launch",
-		"error_message": msg,
+		"phase":                   "scheduler.launch",
+		runEventFieldErrorMessage: msg,
 	})
 	si.svc.recordTerminalShape(ctx, run, RunStatusFailed, nil)
 	run.ErrorMessage = msg
@@ -906,8 +909,8 @@ func (si *SchedulerIntegration) failUnlaunchableRun(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance, msg string,
 ) {
 	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
-		"phase":         "scheduler.launch",
-		"error_message": msg,
+		"phase":                   "scheduler.launch",
+		runEventFieldErrorMessage: msg,
 	})
 	si.releaseCheckoutIfNeeded(ctx, run)
 	// No lifecycle event backs a wiring fault, so there is no agent id to
@@ -947,8 +950,8 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 		si.logger.Error("routing dispatch failed",
 			zap.String("run_id", run.ID), zap.Error(err))
 		si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
-			"phase":         "routing.dispatch",
-			"error_message": err.Error(),
+			"phase":                   "routing.dispatch",
+			runEventFieldErrorMessage: err.Error(),
 		})
 		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)

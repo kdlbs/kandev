@@ -384,9 +384,10 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 		task.Metadata = make(map[string]interface{})
 	}
 	for k, v := range metadata {
-		// Deferred launch ownership is server-managed. Preserve it even if a
-		// future metadata endpoint forwards the whole request map here.
-		if k == models.MetaKeyDeferredLaunch || k == models.MetaKeyStepHandoffCarry {
+		// Lifecycle and handoff provenance are server-managed. Preserve them even
+		// if a future metadata endpoint forwards the whole request map here.
+		if k == models.MetaKeyDeferredLaunch || k == models.MetaKeyStepHandoffCarry ||
+			k == models.MetaKeyHandoffSource || k == models.MetaKeyHandoffs {
 			continue
 		}
 		task.Metadata[k] = v
@@ -420,6 +421,9 @@ type MoveTaskResult struct {
 	// this call's earlier pre-move snapshot — see Task.FromStepID's doc.
 	FromStepID   string
 	Transitioned bool
+	// WorkflowEntryIdentity identifies the committed workflow-step entry that
+	// accepted this move. Empty when the write did not transition the task.
+	WorkflowEntryIdentity string
 	// MoveID correlates the one-shot entry options carried on the transient
 	// move marker with the target-step entry. Empty for an option-less move.
 	MoveID string
@@ -465,6 +469,9 @@ type MoveTaskOptions struct {
 	// target workflow step. They are persisted privately on a transient task
 	// marker and are never included in task.moved event payloads.
 	EntryOptions *workflowmove.EntryOptions
+	// WorkflowChange opts this single-task move into source/version checks and
+	// atomically replaces the task's destination workflow agent overrides.
+	WorkflowChange *models.WorkflowChangeRequest
 }
 
 // ErrWorkflowResolutionConflict indicates a caller's pre-resolved "current
@@ -507,6 +514,19 @@ type workflowMoveAdmissionWithStateRepository interface {
 		admittedState *v1.TaskState,
 		queueExitPending bool,
 		expectedWorkflowID string,
+	) (bool, error)
+}
+
+type workflowChangeAdmissionRepository interface {
+	UpdateTaskWithWorkflowChangeAdmissionAndState(
+		context.Context,
+		*models.Task,
+		string,
+		string,
+		int,
+		*v1.TaskState,
+		bool,
+		*models.WorkflowChangeSource,
 	) (bool, error)
 }
 
@@ -578,10 +598,22 @@ func (s *Service) MoveTaskWithOptions(
 		return nil, fmt.Errorf("%w: resolved %q, task is now in %q",
 			ErrWorkflowResolutionConflict, *opts.ExpectedWorkflowID, task.WorkflowID)
 	}
+	if opts.WorkflowChange != nil {
+		if err := validateWorkflowChangeSource(task, workflowID, workflowStepID, opts.WorkflowChange); err != nil {
+			return nil, err
+		}
+	}
 
 	targetStep, err := s.validateTaskMove(ctx, task, workflowID, workflowStepID, opts)
 	if err != nil {
 		return nil, err
+	}
+	var candidateOverrides *models.WorkflowAgentOverrides
+	if opts.WorkflowChange != nil {
+		candidateOverrides, err = s.prepareWorkflowChange(ctx, task, workflowID, workflowStepID, opts.WorkflowChange)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	oldWorkflowID := task.WorkflowID
@@ -624,8 +656,22 @@ func (s *Service) MoveTaskWithOptions(
 
 	if stepChanged && targetStep != nil && s.workflowMovePreflight != nil {
 		currentSession := s.resolvePrimaryOrActiveSession(ctx, id)
-		if err := s.workflowMovePreflight.PreflightWorkflowStepMove(ctx, id, currentSession, targetStep); err != nil {
-			return nil, fmt.Errorf("failed to preflight workflow move: %w", err)
+		var preflightErr error
+		if opts.WorkflowChange != nil {
+			preflight, ok := s.workflowMovePreflight.(WorkflowChangeMovePreflight)
+			if !ok {
+				return nil, fmt.Errorf("workflow change preflight does not accept candidate task state")
+			}
+			candidate := *task
+			candidate.WorkflowID = workflowID
+			candidate.WorkflowStepID = workflowStepID
+			candidate.WorkflowAgentOverrides = candidateOverrides
+			preflightErr = preflight.PreflightWorkflowStepChange(ctx, &candidate, currentSession, targetStep)
+		} else {
+			preflightErr = s.workflowMovePreflight.PreflightWorkflowStepMove(ctx, id, currentSession, targetStep)
+		}
+		if preflightErr != nil {
+			return nil, fmt.Errorf("failed to preflight workflow move: %w", preflightErr)
 		}
 	}
 	stateAfterAdmission := *task
@@ -637,6 +683,9 @@ func (s *Service) MoveTaskWithOptions(
 
 	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
+	if opts.WorkflowChange != nil {
+		task.WorkflowAgentOverrides = candidateOverrides
+	}
 	// A move naming the task's current step is not an arrival
 	// (REQ-TASKS-KANBAN-TASK-REORDERING-001.28): it keeps the position it
 	// already holds rather than the caller-supplied literal, which the
@@ -732,6 +781,10 @@ func (s *Service) MoveTaskWithOptions(
 	resultFromWorkflowID := task.FromWorkflowID
 	resultFromStepID := task.FromStepID
 	resultTransitioned := task.WorkflowStepTransitionID != 0
+	workflowEntryIdentity := ""
+	if resultTransitioned && task.WorkflowStepTransitionID > 0 {
+		workflowEntryIdentity = fmt.Sprintf("entry:%020d", task.WorkflowStepTransitionID)
+	}
 	if resultTransitioned && resultFromWorkflowID == "" {
 		// Keep compatibility with repository implementations that predate the
 		// transient source-workflow field. SQLite populates it from the write
@@ -797,7 +850,14 @@ func (s *Service) MoveTaskWithOptions(
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Int("position", position))
 
-	result := &MoveTaskResult{Task: task, FromStepID: resultFromStepID, Transitioned: resultTransitioned, MoveID: moveID, EntryOptions: entryOptions}
+	result := &MoveTaskResult{
+		Task:                  task,
+		FromStepID:            resultFromStepID,
+		Transitioned:          resultTransitioned,
+		WorkflowEntryIdentity: workflowEntryIdentity,
+		MoveID:                moveID,
+		EntryOptions:          entryOptions,
+	}
 
 	// Fetch the workflow step info if getter is available
 	if s.workflowStepGetter != nil {
@@ -1342,6 +1402,16 @@ func (s *Service) updateMovedTaskCrossStep(
 	admittedState *v1.TaskState,
 	opts MoveTaskOptions,
 ) (bool, error) {
+	if opts.WorkflowChange != nil {
+		changeRepo, ok := s.tasks.(workflowChangeAdmissionRepository)
+		if !ok {
+			return false, fmt.Errorf("workflow change admission repository unavailable for step %s", targetStep.ID)
+		}
+		return changeRepo.UpdateTaskWithWorkflowChangeAdmissionAndState(
+			ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit,
+			admittedState, true, workflowChangeGuard(opts.WorkflowChange),
+		)
+	}
 	admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository)
 	if !ok {
 		return false, fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)

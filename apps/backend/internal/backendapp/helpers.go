@@ -46,6 +46,7 @@ import (
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events/bus"
+	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
 	"github.com/kandev/kandev/internal/failedinbox"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
@@ -84,6 +85,7 @@ import (
 	"github.com/kandev/kandev/internal/sentry"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
+	"github.com/kandev/kandev/internal/startup"
 	systemsvc "github.com/kandev/kandev/internal/system"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
@@ -728,7 +730,9 @@ type routeParams struct {
 	planCoalesceWindowConfigured  bool
 	homeDir                       string
 	interimSettingsInterlockToken string
+	sshReachabilityPoller         *reachabilitypkg.Poller
 	log                           *logger.Logger
+	progress                      *startup.Reporter
 }
 
 // registerRoutes sets up all HTTP and WebSocket routes on the given router.
@@ -742,6 +746,10 @@ func registerRoutes(p routeParams) {
 	}
 	// Per-user task scoping for plan reads/writes (opt-in auth).
 	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
+	if attachments := p.taskSvc.AttachmentService(); attachments != nil {
+		planService.SetPreviewAttachmentCleaner(attachments)
+		planService.SetPreviewScreenshotValidator(attachments)
+	}
 	// Stamps each plan revision with the task's workflow step at write time.
 	planService.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: p.services.Workflow})
 	clarificationStore := clarification.NewStore(2 * time.Hour)
@@ -1015,29 +1023,27 @@ func healthHandler(p routeParams) gin.HandlerFunc {
 func readyHandler(p routeParams) gin.HandlerFunc {
 	version := resolveVersion(p)
 	return func(c *gin.Context) {
+		body := gin.H{
+			serviceFieldKey: kandevName,
+			versionFieldKey: version,
+		}
+		if p.progress != nil {
+			body["startup"] = p.progress.Snapshot()
+		}
 		if !ready.Load() {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				statusKey:       startingStatus,
-				serviceFieldKey: kandevName,
-				versionFieldKey: version,
-			})
+			body[statusKey] = startingStatus
+			c.JSON(http.StatusServiceUnavailable, body)
 			return
 		}
 		if p.persistenceHealth != nil && !p.persistenceHealth.Healthy() {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				statusKey:       startingStatus,
-				serviceFieldKey: kandevName,
-				versionFieldKey: version,
-				"reason":        "persistence",
-				"store_ids":     p.persistenceHealth.UnhealthyStoreIDs(),
-			})
+			body[statusKey] = startingStatus
+			body["reason"] = "persistence"
+			body["store_ids"] = p.persistenceHealth.UnhealthyStoreIDs()
+			c.JSON(http.StatusServiceUnavailable, body)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			statusKey:       "ok",
-			serviceFieldKey: kandevName,
-			versionFieldKey: version,
-		})
+		body[statusKey] = "ok"
+		c.JSON(http.StatusOK, body)
 	}
 }
 
@@ -1467,6 +1473,14 @@ func registerSecondaryRoutes(
 		)
 		p.log.Debug("Registered Kubernetes handlers (HTTP + WebSocket)")
 
+		// A nil *reachabilitypkg.Poller must not be passed directly as the
+		// sshhandlers.ReachabilityProber interface parameter — that would
+		// produce a non-nil interface holding a nil pointer, defeating the
+		// handler's own nil check and panicking on first use.
+		var reachabilityPoller sshhandlers.ReachabilityProber
+		if p.sshReachabilityPoller != nil {
+			reachabilityPoller = p.sshReachabilityPoller
+		}
 		sshhandlers.RegisterRoutes(
 			p.router,
 			p.gateway.Dispatcher,
@@ -1475,6 +1489,8 @@ func registerSecondaryRoutes(
 			p.agentRegistry,
 			lifecycle.NewAgentctlResolver(p.log),
 			p.log,
+			p.taskRepo,
+			reachabilityPoller,
 		)
 		p.log.Debug("Registered SSH handlers (HTTP + WebSocket)")
 	}
@@ -1598,6 +1614,7 @@ func registerSecondaryRoutes(
 	registerE2EResetRoutes(
 		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
 	)
+	registerE2EStartupPageFixtureRoute(p.router, p.log)
 
 	if officetestharness.Enabled() {
 		var officeAgentSvc *officeagents.AgentService
@@ -1620,7 +1637,17 @@ func registerSecondaryRoutes(
 
 	// Register office routes
 	if p.services.OfficeSvcs != nil {
-		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, p.log)
+		handoffDeps := buildHandoffDependencies(
+			p.taskSvc,
+			p.taskRepo,
+			workflowCtrl,
+			p.agentSettingsController,
+			p.orchestratorSvc,
+			p.services.OfficeSvcs.Dashboard,
+			p.authSvc,
+			p.log,
+		)
+		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, handoffDeps, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
 	}
 }
@@ -1798,9 +1825,14 @@ func registerHealthRoutes(p routeParams) {
 		oslimits.NewOSLimitsChecker(oslimits.NewInotifyProbe()),
 		5*time.Minute,
 	)
+	var workflowSyncProvider health.WorkflowSyncStatusProvider
+	if p.services.WorkflowSync != nil {
+		workflowSyncProvider = workflowSyncHealthAdapter{svc: p.services.WorkflowSync}
+	}
 	checkers := []health.Checker{
 		health.NewGitExecutableChecker(),
 		githubChecker,
+		health.NewWorkflowSyncChecker(workflowSyncProvider),
 		health.NewAgentChecker(p.agentSettingsController),
 		osLimitsChecker,
 	}
@@ -1812,6 +1844,32 @@ func registerHealthRoutes(p routeParams) {
 	}
 	healthSvc := health.NewService(p.log, checkers...)
 	health.RegisterRoutes(p.router, healthSvc, p.log)
+}
+
+// workflowSyncHealthAdapter bridges workflowsync.Service's own circuit
+// summary type to the structural shape consumed by the health package
+// without importing health into workflowsync (cycle), matching
+// githubWorkspaceHealthAdapter below.
+type workflowSyncHealthAdapter struct {
+	svc *workflowsync.Service
+}
+
+func (a workflowSyncHealthAdapter) WorkflowSyncCircuitSummary(
+	ctx context.Context,
+) (health.WorkflowSyncCircuitSummary, error) {
+	if a.svc == nil {
+		return health.WorkflowSyncCircuitSummary{}, nil
+	}
+	summary, err := a.svc.WorkflowSyncCircuitSummary(ctx)
+	if err != nil {
+		return health.WorkflowSyncCircuitSummary{}, err
+	}
+	return health.WorkflowSyncCircuitSummary{
+		Total:         summary.Total,
+		OpenAuth:      summary.OpenAuth,
+		OpenConfig:    summary.OpenConfig,
+		OpenTransient: summary.OpenTransient,
+	}, nil
 }
 
 type githubWorkspaceHealthAdapter struct {
@@ -1972,6 +2030,9 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
+	if p.services.Automation != nil {
+		mcpHandlers.SetAutomationCreator(p.services.Automation.Service)
+	}
 	mcpHandlers.SetSettingsBroadcaster(p.gateway.Hub)
 	if settingsRegistry, err := buildSettingsRegistry(); err != nil {
 		p.log.Error("failed to build settings catalog", zap.Error(err))
@@ -2058,7 +2119,6 @@ func registerMCPAndDebugRoutes(
 	if handoffSvc != nil {
 		mcpHandlers.SetHandoffService(handoffSvc)
 	}
-
 	// Native code review. The runner owns background review passes, so it is
 	// started here and drained on shutdown; the orchestrator gets it too, which
 	// is what enables the run_code_review workflow step action.

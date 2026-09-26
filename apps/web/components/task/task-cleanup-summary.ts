@@ -1,10 +1,21 @@
 // Executor types match models.ExecutorType in apps/backend/internal/task/models/models.go.
 import { t } from "@/lib/i18n";
+import type { WorkspaceMode } from "@/lib/kanban/map-task";
 
 export type CleanupSummary = {
   effects: string[];
   notes: string[];
 };
+
+export type CleanupSummaryOptions = {
+  sharesParentWorkspace?: boolean;
+};
+
+export function cleanupSharesParentWorkspace(
+  workspaceMode: WorkspaceMode | null | undefined,
+): boolean | undefined {
+  return workspaceMode == null ? undefined : workspaceMode === "inherit_parent";
+}
 
 // mock_remote is test-only and intentionally falls through to the generic effect.
 type KnownExecutor =
@@ -45,6 +56,7 @@ const SINGLE_COPIES: Record<KnownExecutor, CleanupCopy> = {
 };
 
 const GENERIC_EFFECT_KEY = "task:cleanupAgentSessionsStopped";
+const INHERITED_PARENT_WORKSPACE_NOTE_KEY = "task:cleanupInheritedParentWorkspaceNote";
 
 function normalize(executorType: string | null | undefined): KnownExecutor | null {
   if (!executorType) return null;
@@ -65,7 +77,16 @@ function resolveCopy(copy: CleanupCopy, options?: { count: number }): CleanupSum
 }
 
 /** Single-task variant. */
-export function getCleanupSummary(executorType: string | null | undefined): CleanupSummary {
+export function getCleanupSummary(
+  executorType: string | null | undefined,
+  options?: CleanupSummaryOptions,
+): CleanupSummary {
+  if (options?.sharesParentWorkspace) {
+    return {
+      effects: [t(GENERIC_EFFECT_KEY)],
+      notes: [t(INHERITED_PARENT_WORKSPACE_NOTE_KEY)],
+    };
+  }
   const known = normalize(executorType);
   return known
     ? resolveCopy(SINGLE_COPIES[known])

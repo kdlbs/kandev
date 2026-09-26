@@ -17,6 +17,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { toast } from "@/lib/toast/sonner";
 import { formatRelativeTime } from "@/lib/i18n/formats";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import { linkToTask } from "@/lib/links";
 import {
   inboxHistoryClarificationQuestions,
   inboxHistoryPermissionContent,
@@ -32,8 +33,7 @@ const TOUCH_ICON_BUTTON =
   "max-md:min-h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11";
 
 function taskHrefForBundle(bundle: InboxHistoryBundle): string {
-  if (!bundle.session_id) return `/t/${bundle.task_id}`;
-  return `/t/${bundle.task_id}?sessionId=${encodeURIComponent(bundle.session_id)}`;
+  return linkToTask(bundle.task_id, { sessionId: bundle.session_id ?? undefined });
 }
 
 function InboxHistoryQuestionDetail({ bundle }: { bundle: InboxHistoryBundle }) {

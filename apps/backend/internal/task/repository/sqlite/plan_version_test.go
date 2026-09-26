@@ -115,7 +115,7 @@ func TestTaskPlanWriteVersionMigrationBackfillsAndReplays(t *testing.T) {
 	if _, err := repo.db.ExecContext(ctx, `ALTER TABLE task_plans DROP COLUMN write_version`); err != nil {
 		t.Fatalf("drop write_version for legacy fixture: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(ctx); err != nil {
 		t.Fatalf("runMigrations(backfill): %v", err)
 	}
 	migrated, err := repo.GetTaskPlan(ctx, plan.TaskID)
@@ -126,7 +126,7 @@ func TestTaskPlanWriteVersionMigrationBackfillsAndReplays(t *testing.T) {
 		t.Fatal("migration left legacy plan without a write version")
 	}
 	version := migrated.WriteVersion
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(ctx); err != nil {
 		t.Fatalf("runMigrations(replay): %v", err)
 	}
 	replayed, err := repo.GetTaskPlan(ctx, plan.TaskID)

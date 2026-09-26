@@ -17,6 +17,7 @@ import type {
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
+import type { SidebarLayoutApi } from "@/lib/types/http-user-settings";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
@@ -33,6 +34,7 @@ import type {
 } from "@/lib/agent-profile-recent-use";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { TaskColor } from "@/lib/task-colors";
+import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -41,6 +43,15 @@ export type {
 
 export type ExecutorsState = {
   items: Executor[];
+};
+
+/**
+ * SSH reachability records keyed by executor id. Populated by a per-card
+ * fetch (task 06's SSHReachabilityCard) and kept live via the
+ * executor.reachability.changed WS event.
+ */
+export type SSHReachabilityStoreState = {
+  byExecutorId: Record<string, SSHReachabilityRecord>;
 };
 
 export type SettingsAgentsState = {
@@ -450,6 +461,7 @@ export type UserSettingsState = {
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];
   sidebarViewsByWorkspace: Record<string, SidebarWorkspaceStateApi>;
+  sidebarLayoutsByWorkspace: Record<string, SidebarLayoutApi>;
   sidebarActiveViewId: string | null;
   sidebarDraft: SidebarViewDraft | null;
   threadViews: ThreadView[];
@@ -518,6 +530,7 @@ export type SettingsSliceState = {
   sleepInhibition: SleepInhibitionStoreState;
   userSettings: UserSettingsState;
   agentProfileRecentUse: AgentProfileRecentUseState;
+  sshReachability: SSHReachabilityStoreState;
 };
 
 export type SettingsSliceActions = {
@@ -566,6 +579,16 @@ export type SettingsSliceActions = {
     record: AgentProfileRecentUseRecord,
   ) => void;
   bumpAgentProfilesVersion: () => void;
+  /**
+   * Applies a reachability record (a fetch response or a pushed
+   * executor.reachability.changed event). Reconciles on updated_at, never
+   * checked_at: a connection-configuration reset clears checked_at (null)
+   * while still advancing updated_at, so comparing on checked_at would make
+   * the reset compare as older than the record it just invalidated and get
+   * discarded. A null updated_at (the synthesized never-probed placeholder)
+   * always loses to a record that has one.
+   */
+  setSSHReachability: (record: SSHReachabilityRecord) => void;
 };
 
 export type SettingsSlice = SettingsSliceState & SettingsSliceActions;

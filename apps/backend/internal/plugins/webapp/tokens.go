@@ -34,6 +34,7 @@ type CapabilityBinding struct {
 	WebAppKey       string
 	Placement       string
 	ScopeKind       string
+	DataScopeKind   string
 	WorkspaceID     string
 	TaskID          string
 	SessionID       string

@@ -161,7 +161,9 @@ type SubmitDraftArgs = {
   clearArgs: Omit<ClearSubmittedInputArgs, "submittedText" | "submittedAttachments">;
 };
 
-type DraftChatSubmitPayload = Required<Omit<ChatSubmitPayload, "planCommentRefs">>;
+type DraftChatSubmitPayload = Required<
+  Omit<ChatSubmitPayload, "planCommentRefs" | "previewFeedbackRefs" | "clientMessageId">
+>;
 
 function buildChatSubmitPayload(payload: DraftChatSubmitPayload): ChatSubmitPayload {
   return {

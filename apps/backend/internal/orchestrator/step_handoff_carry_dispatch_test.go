@@ -122,9 +122,15 @@ func TestAutoStartStepPrompt_ReplacementLaunchReusesClaimedHandoff(t *testing.T)
 		taskID    = "task-replacement-handoff"
 		sessionID = "session-replacement-handoff"
 		stepID    = "step-next"
-		autoStart = "Run the next workflow step"
 		carried   = "carried across the replacement"
 	)
+	promptService := newPromptServiceForLaunchFallbackTest(t)
+	_, err := promptService.CreatePrompt(ctx, "principles", "Apply the repository principles.")
+	require.NoError(t, err)
+	autoStart, promptReferenceContext := promptService.AppendReferenceExpansionsWithContext(
+		ctx, "Run the next workflow step. Follow @principles.", nil,
+	)
+	require.NotEmpty(t, promptReferenceContext)
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
 	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-replacement")
@@ -138,10 +144,14 @@ func TestAutoStartStepPrompt_ReplacementLaunchReusesClaimedHandoff(t *testing.T)
 	once := newStepHandoffOnce()
 
 	// First attempt: claims and delivers the token, removing it from the DB.
-	err = svc.autoStartStepPrompt(ctx, taskID, session, step, autoStart, false, false, once)
+	err = svc.autoStartStepPromptWithPromptContext(
+		ctx, taskID, session, step, autoStart, false, false, once, promptReferenceContext,
+	)
 	require.NoError(t, err)
 	require.Len(t, agentMgr.capturedPrompts, 1)
 	require.Contains(t, agentMgr.capturedPrompts[0], carried)
+	require.Contains(t, agentMgr.capturedPrompts[0], "Apply the repository principles.")
+	require.Equal(t, 1, strings.Count(agentMgr.capturedPrompts[0], sysprompt.Wrap(promptReferenceContext)))
 	if _, present := carryToken(t, repo, taskID); present {
 		t.Fatal("the token must be removed after the first claim")
 	}
@@ -154,10 +164,14 @@ func TestAutoStartStepPrompt_ReplacementLaunchReusesClaimedHandoff(t *testing.T)
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-replacement-handoff-2")
 	session, err = repo.GetTaskSession(ctx, sessionID)
 	require.NoError(t, err)
-	err = svc.autoStartStepPrompt(ctx, taskID, session, step, autoStart, false, false, once)
+	err = svc.autoStartStepPromptWithPromptContext(
+		ctx, taskID, session, step, autoStart, false, false, once, promptReferenceContext,
+	)
 	require.NoError(t, err)
 	require.Len(t, agentMgr.capturedPrompts, 2)
 	require.Contains(t, agentMgr.capturedPrompts[1], carried, "the replacement launch must reuse the already-claimed handoff text")
+	require.Contains(t, agentMgr.capturedPrompts[1], "Apply the repository principles.")
+	require.Equal(t, 1, strings.Count(agentMgr.capturedPrompts[1], sysprompt.Wrap(promptReferenceContext)))
 }
 
 // TestLaunchAfterOnEnterDispatch_PassthroughEmptyPromptDeliversViaDrain covers
@@ -368,6 +382,13 @@ func TestStartSessionForWorkflowStep_ComposedHandoffSurvivesLazyResumeFallback(t
 		stepID    = "step-workflow-step-lazy-resume"
 		handoff   = "watch out for the flaky test"
 	)
+	promptService := newPromptServiceForLaunchFallbackTest(t)
+	_, err := promptService.CreatePrompt(ctx, "principles", "Apply the repository principles.")
+	require.NoError(t, err)
+	_, promptReferenceContext := promptService.AppendReferenceExpansionsWithContext(
+		ctx, "Recomposed step instructions. Follow @principles.", nil,
+	)
+	require.NotEmpty(t, promptReferenceContext)
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
 	session, err := repo.GetTaskSession(ctx, sessionID)
@@ -381,7 +402,7 @@ func TestStartSessionForWorkflowStep_ComposedHandoffSurvivesLazyResumeFallback(t
 	stepGetter := newMockStepGetter()
 	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
 		ID: stepID, WorkflowID: "wf1", Name: "Next",
-		Prompt: "Recomposed step instructions.",
+		Prompt: "Recomposed step instructions. Follow @principles.",
 		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterEnablePlanMode}}},
 	}
 	taskRepo := newMockTaskRepo()
@@ -414,6 +435,7 @@ func TestStartSessionForWorkflowStep_ComposedHandoffSurvivesLazyResumeFallback(t
 		},
 	}
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.promptExpander = promptService
 	exec := executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 	svc.executor = exec
 	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, testLogger(), scheduler.DefaultSchedulerConfig())
@@ -428,6 +450,8 @@ func TestStartSessionForWorkflowStep_ComposedHandoffSurvivesLazyResumeFallback(t
 		"the already-composed prompt (with the claimed handoff) must survive the fresh-launch fallback")
 	require.Contains(t, freshPrompt, sysprompt.PlanMode(),
 		"the fresh-launch fallback must retain the destination step's plan-mode instructions")
+	require.Contains(t, freshPrompt, "Apply the repository principles.")
+	require.Equal(t, 1, strings.Count(freshPrompt, sysprompt.Wrap(promptReferenceContext)))
 	require.NotEqual(t, "Recomposed step instructions.", strings.TrimSpace(freshPrompt),
 		"promptAlreadyComposed must skip StartCreatedSession's own step-template recomposition")
 }

@@ -15,6 +15,7 @@ const EDITABLE_FIELDS = [
   "commandPrefix",
   "envVars",
   "cliPassthrough",
+  "cursorMcpAuthEnabled",
   "providerKind",
   "providerBaseUrl",
   "providerApiKeySecretId",

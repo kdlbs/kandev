@@ -50,6 +50,7 @@ function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: stri
   delete state.promptUsage.bySessionId[sessionId];
   delete state.sessionTodos.bySessionId[sessionId];
   delete state.prepareProgress.bySessionId[sessionId];
+  delete state.launchWarning.bySessionId[sessionId];
   delete state.sessionPollMode.bySessionId[sessionId];
   delete state.embeddedVscodeSupport.bySessionId[sessionId];
 }
@@ -121,6 +122,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionTodos: { bySessionId: {} },
   userShells: { byEnvironmentId: {}, dismissedByEnvironmentId: {}, loading: {}, loaded: {} },
   prepareProgress: { bySessionId: {} },
+  launchWarning: { bySessionId: {} },
   sessionPollMode: { bySessionId: {} },
   embeddedVscodeSupport: { bySessionId: {} },
   workspaceFilesRefresh: { bySessionId: {} },
@@ -227,6 +229,19 @@ function buildSessionCommitActions(set: ImmerSet) {
       set((draft) => {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
         const existing = draft.sessionCommits.byEnvironmentId[envKey] || [];
+        const duplicateIndex = existing.findIndex(
+          (current) =>
+            current.commit_sha === commit.commit_sha &&
+            (current.repository_name ?? "") === (commit.repository_name ?? ""),
+        );
+        // A commit_created notification can arrive again while a refetch is
+        // replacing the list. Update the fetched row in place so the same
+        // commit is never rendered twice.
+        if (duplicateIndex >= 0) {
+          existing[duplicateIndex] = { ...existing[duplicateIndex], ...commit };
+          draft.sessionCommits.byEnvironmentId[envKey] = existing;
+          return;
+        }
         // For amend: only replace HEAD (first entry) if it has the same parent
         if (existing.length > 0 && existing[0].parent_sha === commit.parent_sha) {
           existing[0] = commit;
@@ -520,6 +535,14 @@ export const createSessionRuntimeSlice: StateCreator<
   setSessionTodos: (sessionId, entries) =>
     set((draft) => {
       draft.sessionTodos.bySessionId[sessionId] = entries;
+    }),
+  setLaunchWarning: (sessionId, entry) =>
+    set((draft) => {
+      draft.launchWarning.bySessionId[sessionId] = entry;
+    }),
+  clearLaunchWarning: (sessionId) =>
+    set((draft) => {
+      delete draft.launchWarning.bySessionId[sessionId];
     }),
   ...buildUserShellActions(set),
 });

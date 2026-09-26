@@ -88,24 +88,25 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 }
 
 type wsCreateTaskRequest struct {
-	WorkspaceID       string                    `json:"workspace_id"`
-	WorkflowID        string                    `json:"workflow_id"`
-	WorkflowStepID    string                    `json:"workflow_step_id"`
-	Title             string                    `json:"title"`
-	Description       string                    `json:"description,omitempty"`
-	Autopilot         bool                      `json:"autopilot,omitempty"`
-	Priority          string                    `json:"priority,omitempty"`
-	State             *v1.TaskState             `json:"state,omitempty"`
-	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position          int                       `json:"position,omitempty"`
-	Metadata          map[string]interface{}    `json:"metadata,omitempty"`
-	StartAgent        bool                      `json:"start_agent,omitempty"`
-	AgentProfileID    string                    `json:"agent_profile_id,omitempty"`
-	ExecutorID        string                    `json:"executor_id,omitempty"`
-	ExecutorProfileID string                    `json:"executor_profile_id,omitempty"`
-	PlanMode          bool                      `json:"plan_mode,omitempty"`
-	Attachments       []v1.MessageAttachment    `json:"attachments,omitempty"`
-	ParentID          string                    `json:"parent_id,omitempty"`
+	WorkspaceID            string                    `json:"workspace_id"`
+	WorkflowID             string                    `json:"workflow_id"`
+	WorkflowStepID         string                    `json:"workflow_step_id"`
+	WorkflowAgentOverrides map[string]string         `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                    `json:"title"`
+	Description            string                    `json:"description,omitempty"`
+	Autopilot              bool                      `json:"autopilot,omitempty"`
+	Priority               string                    `json:"priority,omitempty"`
+	State                  *v1.TaskState             `json:"state,omitempty"`
+	Repositories           []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	Position               int                       `json:"position,omitempty"`
+	Metadata               map[string]interface{}    `json:"metadata,omitempty"`
+	StartAgent             bool                      `json:"start_agent,omitempty"`
+	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
+	ExecutorID             string                    `json:"executor_id,omitempty"`
+	ExecutorProfileID      string                    `json:"executor_profile_id,omitempty"`
+	PlanMode               bool                      `json:"plan_mode,omitempty"`
+	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
+	ParentID               string                    `json:"parent_id,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -186,6 +187,9 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkspaceID:                 req.WorkspaceID,
 		WorkflowID:                  req.WorkflowID,
 		WorkflowStepID:              req.WorkflowStepID,
+		WorkflowAgentOverrides:      req.WorkflowAgentOverrides,
+		ExecutorID:                  req.ExecutorID,
+		ExecutorProfileID:           req.ExecutorProfileID,
 		Title:                       title,
 		Description:                 description,
 		Autopilot:                   req.Autopilot,
@@ -456,11 +460,12 @@ func (h *TaskHandlers) wsArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 }
 
 type wsMoveTaskRequest struct {
-	ID             string                     `json:"id"`
-	WorkflowID     string                     `json:"workflow_id"`
-	WorkflowStepID string                     `json:"workflow_step_id"`
-	Position       int                        `json:"position"`
-	EntryOptions   *workflowmove.EntryOptions `json:"entry_options,omitempty"`
+	ID             string                        `json:"id"`
+	WorkflowID     string                        `json:"workflow_id"`
+	WorkflowStepID string                        `json:"workflow_step_id"`
+	Position       int                           `json:"position"`
+	EntryOptions   *workflowmove.EntryOptions    `json:"entry_options,omitempty"`
+	WorkflowChange *models.WorkflowChangeRequest `json:"workflow_change,omitempty"`
 }
 
 func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -488,6 +493,7 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 			AllowActivePrimarySession: true,
 			StepHistoryActor:          wfmodels.StepTransitionActorHuman,
 			EntryOptions:              req.EntryOptions,
+			WorkflowChange:            req.WorkflowChange,
 		},
 	)
 	if err != nil {
@@ -499,9 +505,10 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	}
 
 	response := dto.MoveTaskResponse{
-		Task:         dto.FromTask(result.Task),
-		MoveID:       result.MoveID,
-		EntryOptions: result.EntryOptions,
+		Task:                  dto.FromTask(result.Task),
+		WorkflowEntryIdentity: result.WorkflowEntryIdentity,
+		MoveID:                result.MoveID,
+		EntryOptions:          result.EntryOptions,
 	}
 	if result.WorkflowStep != nil {
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)

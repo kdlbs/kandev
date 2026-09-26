@@ -439,8 +439,8 @@ func mapToHTTPHeaders(headers map[string]string) []acp.HttpHeader {
 	return hdrs
 }
 
-// LoadSession resumes an existing session.
-// Returns an error if the agent does not support session loading (LoadSession capability).
+// LoadSession restores an existing session, preferring advertised session/resume
+// without history replay and otherwise using session/load.
 // mcpServers are passed to the agent so it can reconnect to MCP servers on the new
 // agentctl instance (critical for agents that receive MCP configs via the protocol).
 //
@@ -453,15 +453,14 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 
 	a.mu.Lock()
 	conn := a.acpConn
-	supportsLoad := a.capabilities.LoadSession
+	capabilities := a.capabilities
 	a.mu.Unlock()
 
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
 	}
 
-	// Check if the agent supports session loading
-	if !supportsLoad {
+	if !capabilities.LoadSession && capabilities.SessionCapabilities.Resume == nil {
 		a.logger.Debug("session/load rejected: agent does not advertise LoadSession capability",
 			zap.String("session_id", sessionID))
 		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
@@ -481,7 +480,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Unlock()
 	a.cancelAllAsyncTurnCompletes()
 
-	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.load")
+	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.restore")
 	defer span.End()
 
 	// Filter MCP servers by agent capabilities (same logic as NewSession).
@@ -505,7 +504,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	delete(a.usageBySession, sessionID)
 	a.mu.Unlock()
 
-	resp, err := conn.LoadSession(ctx, acp.LoadSessionRequest{
+	resp, err := a.restoreSessionState(ctx, conn, capabilities, acp.LoadSessionRequest{
 		SessionId:  acp.SessionId(sessionID),
 		Cwd:        a.cfg.WorkDir,
 		McpServers: toACPMcpServers(filteredServers),

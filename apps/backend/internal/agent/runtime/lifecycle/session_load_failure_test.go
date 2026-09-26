@@ -120,6 +120,11 @@ func TestInitializeSession_LoadCompatibilityFailureCreatesReplacement(t *testing
 			message: `load session failed: failed to load session: {"code":-32603,"message":"Internal error",` +
 				`"data":{"details":"no rollout found for thread id saved-session"}}`,
 		},
+		{
+			name: "missing auggie session",
+			message: `load session failed: failed to load session: {"code":-32602,"message":"Invalid params",` +
+				`"data":{"details":"Session not found: saved-session"}}`,
+		},
 	}
 
 	for _, tt := range tests {

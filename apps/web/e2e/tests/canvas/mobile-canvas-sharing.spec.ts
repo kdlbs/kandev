@@ -36,6 +36,7 @@ test.describe("Canvas sharing on mobile", () => {
 
       const drawer = testPage.getByRole("dialog").last();
       await expect(drawer).toBeVisible();
+      await drawer.getByText("Package details", { exact: true }).tap();
       await expectTouchControl(drawer.getByLabel("Package ID", { exact: true }));
       await expectTouchControl(drawer.getByRole("combobox", { name: "Source mode" }));
       const prepare = drawer.getByRole("button", { name: "Prepare downloads", exact: true });

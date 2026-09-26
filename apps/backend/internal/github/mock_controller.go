@@ -388,9 +388,19 @@ func (c *MockController) addPRs(ctx *gin.Context) {
 		return
 	}
 	for i := range req.PRs {
+		normalizeMockPRHeadRepository(&req.PRs[i])
 		c.mock.AddPR(&req.PRs[i])
 	}
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.PRs)})
+}
+
+// Mock PR fixtures omit a head repository only for same-repository PRs; fork
+// fixtures must provide their source identity explicitly.
+func normalizeMockPRHeadRepository(pr *PR) {
+	if pr != nil && strings.TrimSpace(pr.HeadRepoOwner) == "" && strings.TrimSpace(pr.HeadRepoName) == "" {
+		pr.HeadRepoOwner = pr.RepoOwner
+		pr.HeadRepoName = pr.RepoName
+	}
 }
 
 func (c *MockController) addIssues(ctx *gin.Context) {
@@ -840,7 +850,7 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 	if headSHA == "" {
 		headSHA = mockHeadSHA(req.Owner, req.Repo, req.PRNumber)
 	}
-	c.mock.AddPR(&PR{
+	pr := &PR{
 		Number:                                req.PRNumber,
 		Title:                                 req.PRTitle,
 		URL:                                   req.PRURL,
@@ -866,7 +876,9 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 		MergeQueueLastRemovalBeforeSHA:        req.MergeQueueLastRemovalBeforeSHA,
 		CreatedAt:                             now,
 		UpdatedAt:                             now,
-	})
+	}
+	normalizeMockPRHeadRepository(pr)
+	c.mock.AddPR(pr)
 }
 
 // seedPRFeedback registers checks (and optionally reviews / comments) for a
@@ -897,10 +909,11 @@ func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 		return
 	}
 	headSHA := mockHeadSHA(req.Owner, req.Repo, req.PRNumber)
-	// If associateTaskPR ran first, an underlying PR row exists with this
-	// HeadSHA. Otherwise synthesize a minimal one so getPRFeedback's GetPR
-	// call doesn't fail.
-	if pr, err := c.mock.GetPR(ctx.Request.Context(), req.Owner, req.Repo, req.PRNumber); err != nil || pr == nil {
+	// Feedback checks are looked up by the provider PR's head SHA. Create a
+	// minimal PR when no provider row exists yet.
+	if existingHeadSHA, found := c.mock.ensurePRHeadSHA(req.Owner, req.Repo, req.PRNumber, headSHA); found {
+		headSHA = existingHeadSHA
+	} else {
 		c.mock.AddPR(&PR{
 			Number:    req.PRNumber,
 			RepoOwner: req.Owner,
@@ -909,8 +922,6 @@ func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 			CreatedAt: time.Now().UTC(),
 			UpdatedAt: time.Now().UTC(),
 		})
-	} else if pr.HeadSHA != "" {
-		headSHA = pr.HeadSHA
 	}
 	// Replace prior seeded checks/reviews/comments so a follow-up call gives
 	// deterministic state; helpful for tests that drive a "then a check

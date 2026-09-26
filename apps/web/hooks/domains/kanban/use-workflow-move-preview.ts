@@ -5,6 +5,7 @@ import {
   previewWorkflowMove,
   type WorkflowMoveEntryOptions,
   type WorkflowMovePreviewResponse,
+  type WorkflowChangePayload,
 } from "@/lib/api";
 import { normalizeWorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
@@ -25,6 +26,7 @@ type WorkflowMovePreviewParams = {
   workflowId?: string | null;
   workflowStepId?: string | null;
   entryOptions?: WorkflowMoveEntryOptions | null;
+  workflowChange?: WorkflowChangePayload | null;
   enabled?: boolean;
   /** Changes when an external task/session/workflow projection is known stale. */
   invalidationKey?: string | number | null;
@@ -47,6 +49,7 @@ type QueuedPreview = {
   workflowId: string;
   workflowStepId: string;
   entryOptions: WorkflowMoveEntryOptions | undefined;
+  workflowChange: WorkflowChangePayload | undefined;
 };
 
 const inFlightPreviews = new Map<string, PreviewRequestEntry>();
@@ -65,18 +68,35 @@ function previewOptionKey(options: WorkflowMoveEntryOptions | null | undefined):
   });
 }
 
-function previewRequestKey(
-  taskId: string | null | undefined,
-  workflowId: string | null | undefined,
-  workflowStepId: string | null | undefined,
-  options: WorkflowMoveEntryOptions | null | undefined,
-  invalidationKey: string | number | null | undefined,
-): string {
+function previewRequestKey({
+  taskId,
+  workflowId,
+  workflowStepId,
+  entryOptions: options,
+  workflowChange,
+  invalidationKey,
+}: Pick<
+  WorkflowMovePreviewParams,
+  "taskId" | "workflowId" | "workflowStepId" | "entryOptions" | "workflowChange" | "invalidationKey"
+>): string {
+  const normalizedChange = workflowChange
+    ? {
+        expected_workflow_id: workflowChange.expected_workflow_id,
+        expected_step_id: workflowChange.expected_step_id,
+        expected_updated_at: workflowChange.expected_updated_at,
+        agent_overrides: Object.fromEntries(
+          Object.entries(workflowChange.agent_overrides).sort(([left], [right]) =>
+            left.localeCompare(right),
+          ),
+        ),
+      }
+    : undefined;
   return JSON.stringify([
     taskId ?? "",
     workflowId ?? "",
     workflowStepId ?? "",
     previewOptionKey(options),
+    normalizedChange,
     invalidationKey ?? "",
   ]);
 }
@@ -116,15 +136,16 @@ function pumpPreviewQueue(): void {
     activePreviewCount += 1;
     let request: Promise<WorkflowMovePreviewResponse>;
     try {
-      request = previewWorkflowMove(
-        queued.taskId,
-        {
-          workflow_id: queued.workflowId,
-          workflow_step_id: queued.workflowStepId,
-          entry_options: queued.entryOptions,
-        },
-        { cache: "no-store", init: { signal: entry.controller.signal } },
-      );
+      const payload = {
+        workflow_id: queued.workflowId,
+        workflow_step_id: queued.workflowStepId,
+        entry_options: queued.entryOptions,
+        ...(queued.workflowChange ? { workflow_change: queued.workflowChange } : {}),
+      };
+      request = previewWorkflowMove(queued.taskId, payload, {
+        cache: "no-store",
+        init: { signal: entry.controller.signal },
+      });
     } catch (error) {
       entry.reject(error);
       finishPreview(key, entry);
@@ -144,13 +165,17 @@ function pumpPreviewQueue(): void {
   }
 }
 
-function acquirePreview(
-  key: string,
-  taskId: string,
-  workflowId: string,
-  workflowStepId: string,
-  entryOptions: WorkflowMoveEntryOptions | undefined,
-): { promise: Promise<WorkflowMovePreviewResponse>; release: () => void } {
+function acquirePreview({
+  key,
+  taskId,
+  workflowId,
+  workflowStepId,
+  entryOptions,
+  workflowChange,
+}: Pick<
+  QueuedPreview,
+  "key" | "taskId" | "workflowId" | "workflowStepId" | "entryOptions" | "workflowChange"
+>): { promise: Promise<WorkflowMovePreviewResponse>; release: () => void } {
   let entry = inFlightPreviews.get(key);
   if (!entry || entry.controller.signal.aborted) {
     const controller = new AbortController();
@@ -174,7 +199,15 @@ function acquirePreview(
     // rejection handler. Keep cancellation from becoming an unhandled
     // rejection while the hook's generation guard handles the result.
     void entry.promise.catch(() => undefined);
-    previewQueue.push({ key, entry, taskId, workflowId, workflowStepId, entryOptions });
+    previewQueue.push({
+      key,
+      entry,
+      taskId,
+      workflowId,
+      workflowStepId,
+      entryOptions,
+      workflowChange,
+    });
     pumpPreviewQueue();
   }
 
@@ -201,6 +234,7 @@ export function useWorkflowMovePreview({
   workflowId,
   workflowStepId,
   entryOptions,
+  workflowChange,
   enabled = true,
   invalidationKey,
 }: WorkflowMovePreviewParams): WorkflowMovePreviewState {
@@ -214,13 +248,14 @@ export function useWorkflowMovePreview({
     error: null,
   });
   const generationRef = useRef(0);
-  const requestKey = previewRequestKey(
+  const requestKey = previewRequestKey({
     taskId,
     workflowId,
     workflowStepId,
-    normalizedEntryOptions,
+    entryOptions: normalizedEntryOptions,
+    workflowChange,
     invalidationKey,
-  );
+  });
 
   const retry = useCallback(() => setRetrySequence((current) => current + 1), []);
 
@@ -238,13 +273,14 @@ export function useWorkflowMovePreview({
     setState({ status: "loading", preview: null, error: null });
     const timer = window.setTimeout(() => {
       if (generationRef.current !== generation) return;
-      const request = acquirePreview(
-        requestKey,
+      const request = acquirePreview({
+        key: requestKey,
         taskId,
         workflowId,
         workflowStepId,
-        entryOptionsRef.current,
-      );
+        entryOptions: entryOptionsRef.current,
+        workflowChange: workflowChange ?? undefined,
+      });
       release = request.release;
       request.promise.then(
         (preview) => {

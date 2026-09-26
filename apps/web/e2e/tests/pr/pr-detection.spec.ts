@@ -252,6 +252,25 @@ test.describe("PR auto-detection", () => {
       ],
     });
 
+    // This test covers merged-status synchronization. Seed the existing PR
+    // association directly so branch discovery timing does not gate it.
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      workspace_id: seedData.workspaceId,
+      repository_id: githubRepo.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 101,
+      pr_url: "https://github.com/testorg/testrepo/pull/101",
+      pr_title: "Feature branch PR",
+      head_branch: "main",
+      base_branch: "develop",
+      author_login: "test-user",
+      state: "open",
+      additions: 20,
+      deletions: 3,
+    });
+
     // Navigate to kanban and subscribe to WS events
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -263,31 +282,14 @@ test.describe("PR auto-detection", () => {
       timeout: 45_000,
     });
 
-    // --- Add OPEN PR to mock GitHub ---
-    await apiClient.mockGitHubAddPRs([
-      {
-        number: 101,
-        title: "Feature branch PR",
-        state: "open",
-        head_branch: "main",
-        base_branch: "develop",
-        author_login: "test-user",
-        repo_owner: "testorg",
-        repo_name: "testrepo",
-        additions: 20,
-        deletions: 3,
-      },
-    ]);
-
-    // --- Open the task to trigger on-demand sync and detect the PR ---
+    // --- Open the task and confirm its existing PR association ---
     await kanban.taskCardInColumn("Merged PR Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // useTaskPR triggers github.task_pr.sync -> TriggerPRSync -> FindPRByBranch
-    await expect(session.prTopbarButton()).toBeVisible({ timeout: 60_000 });
+    await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
     await expect(session.prTopbarButton()).toContainText("#101");
 
     // --- Update mock PR to MERGED state ---
@@ -309,8 +311,8 @@ test.describe("PR auto-detection", () => {
 
     // --- Verify PR topbar button updates to merged state ---
     // The backend poller (every 30s) syncs the merged state and broadcasts
-    // via WS. The PRTopbarButton re-renders with the purple merged icon.
-    await expect(session.prTopbarButton().locator(".text-purple-500").first()).toBeVisible({
+    // via WS. Assert the semantic state rather than an icon styling class.
+    await expect(session.prTopbarButton()).toHaveAttribute("data-pr-state", "merged", {
       timeout: 90_000,
     });
   });

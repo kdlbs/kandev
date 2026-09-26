@@ -1,8 +1,10 @@
 "use client";
 
+import { useContext } from "react";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginSlotRegistration } from "@/lib/plugins/registry";
 import { PluginErrorBoundary } from "./plugin-error-boundary";
+import { ObservedPluginSlotContext } from "./plugin-slot-presence";
 
 export type PluginSlotProps = {
   /** Named slot to render — see PLUGIN-API.md for the initial set of slot names. */
@@ -16,6 +18,8 @@ export type PluginSlotProps = {
    * on the current plugin id themselves.
    */
   ownerPluginId?: string;
+  /** Owners whose contextual toolbar is already rendered in this surface. */
+  excludePluginIds?: readonly string[];
 };
 
 /**
@@ -24,11 +28,14 @@ export type PluginSlotProps = {
  * own error boundary so one broken plugin can't break the host surface. Pass
  * `ownerPluginId` to restrict rendering to that plugin's own components.
  */
-export function PluginSlot({ name, slotProps, ownerPluginId }: PluginSlotProps) {
+export function PluginSlot({ name, slotProps, ownerPluginId, excludePluginIds }: PluginSlotProps) {
   const registry = usePluginRegistry();
   const registrations = registry
     .getSlotRegistrations(name)
-    .filter((registration) => !ownerPluginId || registration.pluginId === ownerPluginId);
+    .filter(
+      ({ pluginId }) =>
+        (!ownerPluginId || pluginId === ownerPluginId) && !excludePluginIds?.includes(pluginId),
+    );
 
   if (registrations.length === 0) return null;
 
@@ -56,9 +63,16 @@ export function PluginSlotRegistrationView({
   slotProps?: unknown;
 }) {
   const { pluginId, Component } = registration;
-  return (
+  const observedSlot = useContext(ObservedPluginSlotContext);
+  const content = (
     <PluginErrorBoundary context={`plugin "${pluginId}" slot "${name}" component`}>
       <Component slotProps={slotProps} />
     </PluginErrorBoundary>
+  );
+  if (observedSlot !== name) return content;
+  return (
+    <div className="contents [&>*]:min-w-0 [&>*]:max-w-full" data-plugin-slot-owner={pluginId}>
+      {content}
+    </div>
   );
 }

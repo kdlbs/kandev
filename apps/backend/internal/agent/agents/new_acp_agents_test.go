@@ -26,13 +26,14 @@ type acpAgentSpec struct {
 	// to skip the test whenever ANY of these is on PATH — otherwise an
 	// agent with multiple WithCommand fallbacks flakes when a secondary binary
 	// is present.
-	detectBinaries  []string
-	expectedArgv    []string // BuildCommand and Runtime.Cmd
-	inferenceArgv   []string // InferenceConfig.Command
-	passthroughArgv []string // PassthroughCmd (zero-args allowed)
-	installViaNpm   bool     // InstallScript starts with "npm install -g"
-	installScript   string   // expected InstallScript() value (empty = unchecked)
-	stripEnv        []string // expected Runtime().StripEnv (nil = unchecked)
+	detectBinaries         []string
+	expectedArgv           []string // BuildCommand and Runtime.Cmd
+	inferenceArgv          []string // InferenceConfig.Command
+	passthroughArgv        []string // PassthroughCmd (zero-args allowed)
+	installViaNpm          bool     // InstallScript starts with "npm install -g"
+	installScript          string   // expected InstallScript() value (empty = unchecked)
+	skipInstallBinaryCheck bool     // installer is intentionally unavailable on this platform
+	stripEnv               []string // expected Runtime().StripEnv (nil = unchecked)
 	// sessionDirTemplate is the agent's on-disk session root. Pinned per
 	// agent because it is derived from what the CLI actually writes (see the
 	// evidence comment on each Runtime()), not from a naming convention —
@@ -80,8 +81,8 @@ var newACPAgentSpecs = []struct {
 	}},
 	{func() Agent { return NewPiACP() }, acpAgentSpec{
 		id: "pi-acp", displayName: "Pi", detectBinaries: []string{"pi"},
-		expectedArgv:       []string{"npx", "--yes", "--prefer-offline", "pi-acp@0.0.33"},
-		inferenceArgv:      []string{"npx", "--yes", "--prefer-offline", "pi-acp@0.0.33"},
+		expectedArgv:       []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "pi-acp@0.0.33"},
+		inferenceArgv:      []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "pi-acp@0.0.33"},
 		passthroughArgv:    []string{"pi"},
 		installViaNpm:      true,
 		installScript:      "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
@@ -169,6 +170,16 @@ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || 
 		passthroughArgv:    []string{"goose"},
 		installViaNpm:      false,
 		sessionDirTemplate: "{home}/.local/share/goose",
+	}},
+	{func() Agent { return NewMuseACP() }, acpAgentSpec{
+		id: "muse-acp", displayName: "Muse", detectBinaries: []string{"muse"},
+		expectedArgv:           []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@bex-co/muse-code-acp@0.6.1"},
+		inferenceArgv:          []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@bex-co/muse-code-acp@0.6.1"},
+		passthroughArgv:        []string{"muse"},
+		installViaNpm:          false,
+		skipInstallBinaryCheck: true,
+		stripEnv:               []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME"},
+		sessionDirTemplate:     "{home}",
 	}},
 }
 
@@ -274,7 +285,7 @@ func TestNewACPAgents_SessionDirTemplate(t *testing.T) {
 			if got := rt.SessionConfig.SessionDirTemplate; got != tc.spec.sessionDirTemplate {
 				t.Errorf("SessionDirTemplate = %q, want %q", got, tc.spec.sessionDirTemplate)
 			}
-			if !strings.HasPrefix(tc.spec.sessionDirTemplate, "{home}/") {
+			if tc.spec.sessionDirTemplate != "{home}" && !strings.HasPrefix(tc.spec.sessionDirTemplate, "{home}/") {
 				t.Errorf("SessionDirTemplate %q must be {home}-relative; SessionDirHostPath only trims that prefix",
 					tc.spec.sessionDirTemplate)
 			}
@@ -303,6 +314,9 @@ func TestNewACPAgents_InstallScript(t *testing.T) {
 			// to Install" status see a hint that resolves to the right
 			// command. Only check the first detect binary; secondaries are
 			// fallbacks that may not appear in either surface.
+			if tc.spec.skipInstallBinaryCheck {
+				return
+			}
 			primary := tc.spec.detectBinaries[0]
 			argv := ag.BuildCommand(CommandOptions{}).Args()
 			if !slices.Contains(argv, primary) && !strings.Contains(got, primary) {

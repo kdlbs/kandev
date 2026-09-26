@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // spawnAgentRunKeylessCounterHasLabel reports whether the process-global
@@ -59,7 +60,7 @@ func TestActionsSpawnAgentRun_PrefixesKeyWithCallerRunID(t *testing.T) {
 
 	if err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
 		AgentID:        "agent-2",
-		Reason:         "custom_reason",
+		Reason:         shared.RunReasonQueueRun,
 		IdempotencyKey: "custom-key",
 	}); err != nil {
 		t.Fatalf("SpawnAgentRun: %v", err)
@@ -91,7 +92,7 @@ func TestActionsSpawnAgentRun_DifferentCallerRun_ProducesDifferentKey(t *testing
 		runCtx := RunContext{WorkspaceID: "ws-1", RunID: callerRunID, Capabilities: caps}
 		if err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
 			AgentID:        "agent-2",
-			Reason:         "custom_reason",
+			Reason:         shared.RunReasonQueueRun,
 			IdempotencyKey: "same-key",
 		}); err != nil {
 			t.Fatalf("SpawnAgentRun (caller %s): %v", callerRunID, err)
@@ -127,7 +128,7 @@ func TestActionsSpawnAgentRun_EmptyKey_NotPrefixed_ByDesign(t *testing.T) {
 
 	if err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
 		AgentID: "agent-2",
-		Reason:  "test_spawn_empty_key",
+		Reason:  shared.RunReasonQueueRun,
 	}); err != nil {
 		t.Fatalf("SpawnAgentRun: %v", err)
 	}
@@ -165,7 +166,7 @@ func TestActionsSpawnAgentRun_NoCallerRunID_EnqueuesKeylessUnresolved(t *testing
 
 	if err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
 		AgentID:        "agent-2",
-		Reason:         "test_spawn_no_caller_run",
+		Reason:         shared.RunReasonQueueRun,
 		IdempotencyKey: "custom-key",
 	}); err != nil {
 		t.Fatalf("SpawnAgentRun: %v", err)

@@ -6,10 +6,16 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/common/logger"
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/system/maintenance"
 )
 
@@ -43,7 +49,7 @@ func holdWriter(t *testing.T, conn *sqlx.DB) *sqlx.Tx {
 
 func TestRuntimeHealthDefersDuringMaintenance(t *testing.T) {
 	conn, pool, tracker, health := newSQLiteHealthFixture(t, []Descriptor{{
-		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"},
+		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories,
 	}})
 	if _, err := conn.Exec("CREATE TABLE first (id TEXT PRIMARY KEY)"); err != nil {
 		t.Fatalf("create first table: %v", err)
@@ -80,8 +86,8 @@ func TestRuntimeHealthDefersDuringMaintenance(t *testing.T) {
 
 func TestRuntimeHealthDeferralPreservesMixedStoreStates(t *testing.T) {
 	conn, pool, tracker, health := newSQLiteHealthFixture(t, []Descriptor{
-		{ID: "healthy", OwnerPackage: "owner/healthy", RequiredTables: []string{"healthy"}},
-		{ID: "unhealthy", OwnerPackage: "owner/unhealthy", RequiredTables: []string{"unhealthy"}},
+		{ID: "healthy", OwnerPackage: "owner/healthy", RequiredTables: []string{"healthy"}, Sweep: startup.StepStoresRepositories},
+		{ID: "unhealthy", OwnerPackage: "owner/unhealthy", RequiredTables: []string{"unhealthy"}, Sweep: startup.StepStoresRepositories},
 	})
 	if _, err := conn.Exec("CREATE TABLE healthy (id TEXT PRIMARY KEY)"); err != nil {
 		t.Fatalf("create healthy table: %v", err)
@@ -118,7 +124,7 @@ func TestRuntimeHealthDeferralPreservesMixedStoreStates(t *testing.T) {
 
 func TestStartupHealthDoesNotDefer(t *testing.T) {
 	conn, pool, tracker, health := newSQLiteHealthFixture(t, []Descriptor{{
-		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"},
+		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories,
 	}})
 	if _, err := conn.Exec("CREATE TABLE first (id TEXT PRIMARY KEY)"); err != nil {
 		t.Fatalf("create first table: %v", err)
@@ -160,7 +166,7 @@ func TestStartupHealthDoesNotDefer(t *testing.T) {
 
 func TestRuntimeHealthResumesAfterMaintenance(t *testing.T) {
 	conn, pool, tracker, health := newSQLiteHealthFixture(t, []Descriptor{{
-		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"},
+		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories,
 	}})
 	if _, err := conn.Exec("CREATE TABLE first (id TEXT PRIMARY KEY)"); err != nil {
 		t.Fatalf("create first table: %v", err)
@@ -218,6 +224,177 @@ func TestRuntimeHealthResumesAfterMaintenance(t *testing.T) {
 	successLease()
 }
 
+func TestRuntimeHealthProbeFailureLogsBoundedStageAndRecovers(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		stage     string
+		blockedDB string
+	}{
+		{name: "writer ping", stage: "writer_ping", blockedDB: "writer"},
+		{name: "reader ping", stage: "reader_ping", blockedDB: "reader"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			writer, err := sqlx.Open("sqlite3", ":memory:")
+			if err != nil {
+				t.Fatalf("open writer: %v", err)
+			}
+			writer.SetMaxOpenConns(1)
+			reader, err := sqlx.Open("sqlite3", ":memory:")
+			if err != nil {
+				_ = writer.Close()
+				t.Fatalf("open reader: %v", err)
+			}
+			reader.SetMaxOpenConns(1)
+			pool := db.NewPool(writer, reader)
+			t.Cleanup(func() { _ = pool.Close() })
+			for _, table := range []string{"first", "second"} {
+				if _, err := writer.Exec("CREATE TABLE " + table + " (id TEXT PRIMARY KEY)"); err != nil {
+					t.Fatalf("create %s table: %v", table, err)
+				}
+			}
+
+			descriptors := []Descriptor{
+				{ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories},
+				{ID: "second", OwnerPackage: "owner/second", RequiredTables: []string{"second"}, Sweep: startup.StepStoresRepositories},
+			}
+			tracker, err := NewTracker(descriptors)
+			if err != nil {
+				t.Fatalf("NewTracker: %v", err)
+			}
+			for _, descriptor := range descriptors {
+				if err := tracker.RecordSuccess(descriptor.ID); err != nil {
+					t.Fatalf("RecordSuccess(%s): %v", descriptor.ID, err)
+				}
+			}
+
+			core, observed := observer.New(zapcore.WarnLevel)
+			warningObserved := make(chan struct{}, 1)
+			releaseWarning := make(chan struct{})
+			core = zapcore.RegisterHooks(core, func(entry zapcore.Entry) error {
+				if entry.Message == "required persistence probe failed" {
+					select {
+					case warningObserved <- struct{}{}:
+					default:
+					}
+					<-releaseWarning
+				}
+				return nil
+			})
+			log, err := logger.NewFromZap(zap.New(core))
+			if err != nil {
+				t.Fatalf("NewFromZap: %v", err)
+			}
+			health := NewHealth(tracker, pool, log)
+			if err := health.Check(context.Background()); err != nil {
+				t.Fatalf("initial Check: %v", err)
+			}
+
+			blocked := writer
+			if test.blockedDB == "reader" {
+				blocked = reader
+			}
+			tx, err := blocked.Beginx()
+			if err != nil {
+				t.Fatalf("begin blocking transaction: %v", err)
+			}
+			t.Cleanup(func() { _ = tx.Rollback() })
+
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go health.run(ctx, 200*time.Millisecond, done)
+			select {
+			case <-warningObserved:
+				cancel()
+				close(releaseWarning)
+			case <-time.After(5 * time.Second):
+				cancel()
+				close(releaseWarning)
+				<-done
+				t.Fatal("health probe loop did not emit its first failure warning")
+			}
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("health probe loop did not stop after its context was canceled")
+			}
+
+			entries := observed.FilterMessage("required persistence probe failed").All()
+			if len(entries) != 1 {
+				t.Fatalf("failure warnings = %d, want one bounded warning: %+v", len(entries), entries)
+			}
+			fields := entries[0].ContextMap()
+			if got := fields["stage"]; got != test.stage {
+				t.Fatalf("failure stage = %v, want %q", got, test.stage)
+			}
+			if got := fields["error_class"]; got != "deadline_exceeded" {
+				t.Fatalf("error_class = %v, want deadline_exceeded", got)
+			}
+			if got, ok := fields["elapsed_ms"].(float64); !ok || got <= 0 {
+				t.Fatalf("elapsed_ms = %v, want a positive number", fields["elapsed_ms"])
+			}
+			for _, field := range []string{
+				"writer_open_connections", "writer_in_use", "writer_wait_count", "writer_wait_duration_ms",
+				"reader_open_connections", "reader_in_use", "reader_wait_count", "reader_wait_duration_ms",
+			} {
+				if _, ok := fields[field]; !ok {
+					t.Fatalf("failure warning omitted %q: %#v", field, fields)
+				}
+			}
+			waitField := test.blockedDB + "_wait_count"
+			if got, ok := fields[waitField].(int64); !ok || got == 0 {
+				t.Fatalf("%s = %v, want evidence of a pool wait", waitField, fields[waitField])
+			}
+			if _, ok := fields["error"]; ok {
+				t.Fatalf("failure warning exposed raw error: %#v", fields["error"])
+			}
+			if health.Healthy() {
+				t.Fatal("health remained healthy after a timed-out probe")
+			}
+
+			if err := tx.Rollback(); err != nil {
+				t.Fatalf("release blocked connection: %v", err)
+			}
+			if err := health.Check(context.Background()); err != nil {
+				t.Fatalf("recovery Check: %v", err)
+			}
+			if !health.Healthy() {
+				t.Fatal("health did not recover after the blocked pool became available")
+			}
+		})
+	}
+}
+
+func TestHealthCheckCapturesTableProbeFailure(t *testing.T) {
+	_, _, _, health := newSQLiteHealthFixture(t, []Descriptor{{
+		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"missing"}, Sweep: startup.StepStoresRepositories,
+	}})
+
+	diagnostic, err := health.check(context.Background())
+	if err == nil {
+		t.Fatal("health check returned nil with a missing required table")
+	}
+	if diagnostic == nil {
+		t.Fatal("health check returned no probe diagnostic")
+	}
+	if diagnostic.stage != "table_probe" {
+		t.Fatalf("diagnostic stage = %q, want table_probe", diagnostic.stage)
+	}
+	if diagnostic.errorClass != "required_table_missing" {
+		t.Fatalf("diagnostic error class = %q, want required_table_missing", diagnostic.errorClass)
+	}
+	if diagnostic.storeID != "first" {
+		t.Fatalf("diagnostic store ID = %q, want first", diagnostic.storeID)
+	}
+	if diagnostic.elapsed < 0 {
+		t.Fatalf("diagnostic elapsed = %s, want a non-negative duration", diagnostic.elapsed)
+	}
+	for _, field := range diagnostic.logFields() {
+		if field.Key == "error" || field.Key == "table" {
+			t.Fatalf("table probe diagnostic contains an unsafe field %q", field.Key)
+		}
+	}
+}
+
 func TestHealthCheckMarksMissingTableUnhealthyAndRecovers(t *testing.T) {
 	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -231,7 +408,7 @@ func TestHealthCheckMarksMissingTableUnhealthyAndRecovers(t *testing.T) {
 	}
 
 	tracker, err := NewTracker([]Descriptor{{
-		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"},
+		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)
@@ -278,7 +455,7 @@ func TestProbeTablesHonorsContextDeadline(t *testing.T) {
 	}
 
 	tracker, err := NewTracker([]Descriptor{{
-		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"},
+		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)

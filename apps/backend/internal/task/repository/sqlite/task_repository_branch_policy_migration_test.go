@@ -46,10 +46,10 @@ func TestTaskRepositoryBranchPolicyMigrationPreservesLegacyRows(t *testing.T) {
 		}
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("migrate legacy task repository schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay legacy task repository migration: %v", err)
 	}
 

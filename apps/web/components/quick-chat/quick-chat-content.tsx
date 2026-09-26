@@ -15,6 +15,7 @@ import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
 import { useQuickChatInitialPrompt } from "./use-quick-chat-initial-prompt";
 import { QuickChatCancelCommands } from "./quick-chat-cancel-commands";
+import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 
 type QuickChatContentProps = {
   sessionId: string;
@@ -57,6 +58,7 @@ export const QuickChatContent = memo(function QuickChatContent({
   const state = useQuickChatState(sessionId);
   const { chatInputRef, panelState, isSending, handleSubmit, handleCancelTurn } = state;
   const { taskId, pendingClarification, pendingClarificationGroup } = panelState;
+  const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
 
   useEffect(() => {
     const timer = setTimeout(() => chatInputRef.current?.focusInput(), 50);
@@ -123,6 +125,8 @@ export const QuickChatContent = memo(function QuickChatContent({
         messages={pendingClarificationGroup}
         agentDisconnected={panelState.session?.pending_action === null}
         onResolved={handleClarificationResolved}
+        onLateAnswer={lateAnswer.send}
+        lateAnswerState={lateAnswer.state}
         shortcutScopeRef={shortcutScopeRef}
         maxHeightVh={35}
       />

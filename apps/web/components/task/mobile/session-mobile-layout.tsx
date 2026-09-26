@@ -5,7 +5,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SessionMobileTopBar } from "./session-mobile-top-bar";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
-import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
 import { MobileFileViewerPanel } from "./mobile-file-viewer-panel";
 import { TaskChatPanel, type PendingMessageScrollTarget } from "../task-chat-panel";
 import { TaskPlanPanel } from "../task-plan-panel";
@@ -42,6 +41,7 @@ import { useTranslation } from "react-i18next";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import { LaunchQueueStatus } from "../launch-queue-status";
 import { WipQueueStatus } from "../wip-queue-status";
+import type { TaskTopbarRepository } from "../task-page-content-helpers";
 
 export { resolveMobilePluginPanel } from "./mobile-plugin-panel-lifecycle";
 
@@ -94,6 +94,7 @@ type SessionMobileLayoutProps = {
   taskTitle?: string;
   /** `owner/repo` (or the repository name) of the task's primary repository. */
   repositoryLabel?: string | null;
+  topbarRepository?: TaskTopbarRepository | null;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string | null;
   remoteExecutorName?: string | null;
@@ -153,6 +154,7 @@ function MobileChatPanelContent({
         <TaskChatPanel
           sessionId={effectiveSessionId}
           taskId={effectiveSessionId ? activeTaskId : null}
+          statusTaskId={activeTaskId}
           onOpenFile={onOpenFile}
           pendingScrollTarget={scrollTarget}
           isVisible={isVisible}
@@ -283,7 +285,7 @@ export function MobilePanelArea({
         </div>
       )}
       {currentMobilePanel === "files" && (
-        <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex-1 min-h-0 flex flex-col" data-testid="files-panel">
           {selectedFile ? (
             <MobileFileViewerPanel
               key={`${selectedFile.repo ?? ""}\u0000${selectedFile.path}`}
@@ -417,10 +419,12 @@ type MobileTopBarStickyProps = {
   taskTitle?: string;
   /** `owner/repo` (or the repository name) of the task's primary repository. */
   repositoryLabel?: string | null;
+  topbarRepository?: TaskTopbarRepository | null;
   effectiveSessionId: string | null;
   baseBranch?: string;
   worktreeBranch?: string | null;
-  onMenuClick: () => void;
+  onTaskPickerClick: () => void;
+  taskPickerOpen: boolean;
   showApproveButton: boolean;
   onApprove: () => void;
   isRemoteExecutor?: boolean;
@@ -445,10 +449,12 @@ function MobileTopBarSticky(props: MobileTopBarStickyProps) {
         workspaceId={props.workspaceId}
         taskTitle={props.taskTitle}
         repositoryLabel={props.repositoryLabel}
+        topbarRepository={props.topbarRepository}
         sessionId={props.effectiveSessionId}
         baseBranch={props.baseBranch}
         worktreeBranch={props.worktreeBranch}
-        onMenuClick={props.onMenuClick}
+        onTaskPickerClick={props.onTaskPickerClick}
+        taskPickerOpen={props.taskPickerOpen}
         showApproveButton={props.showApproveButton}
         onApprove={props.onApprove}
         isRemoteExecutor={props.isRemoteExecutor}
@@ -655,7 +661,6 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     handlePanelChange,
     isTaskSwitcherOpen,
     handleMenuClick,
-    setMobileSessionTaskSwitcherOpen,
   } = useSessionLayoutState({ sessionId: props.sessionId });
   const {
     selectedFile,
@@ -664,6 +669,20 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     handleOpenFile,
     handlePanelChangeAndClearSheet,
   } = useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
+  const workflowFocusRequest = useAppStore((state) => {
+    const request = state.workflowSessionFocus.request;
+    return request && request.taskId === activeTaskId && request.sessionId === effectiveSessionId
+      ? request
+      : null;
+  });
+  const acknowledgeWorkflowSessionFocus = useAppStore(
+    (state) => state.acknowledgeWorkflowSessionFocus,
+  );
+  useEffect(() => {
+    if (!workflowFocusRequest) return;
+    handlePanelChangeAndClearSheet("chat");
+    acknowledgeWorkflowSessionFocus(workflowFocusRequest.requestId);
+  }, [acknowledgeWorkflowSessionFocus, handlePanelChangeAndClearSheet, workflowFocusRequest]);
   const [mobileScrollTarget, setMobileScrollTarget] = useState<PendingMessageScrollTarget | null>(
     null,
   );
@@ -723,7 +742,8 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         {...props}
         activeTaskId={activeTaskId}
         effectiveSessionId={effectiveSessionId}
-        onMenuClick={handleMenuClick}
+        onTaskPickerClick={handleMenuClick}
+        taskPickerOpen={isTaskSwitcherOpen}
         showApproveButton={showApproveButton}
         onApprove={handleApprove}
       />
@@ -760,13 +780,6 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         showPromptHistory={!isPassthroughMode && effectiveSessionId !== null}
         taskCanvases={props.taskCanvases}
         onOpenCanvas={props.onOpenCanvas}
-      />
-      <SessionTaskSwitcherSheet
-        open={isTaskSwitcherOpen}
-        onOpenChange={setMobileSessionTaskSwitcherOpen}
-        workspaceId={props.workspaceId}
-        workflowId={props.workflowId}
-        presentation="drawer"
       />
       <SessionMobileReviewDialog
         sessionId={effectiveSessionId}

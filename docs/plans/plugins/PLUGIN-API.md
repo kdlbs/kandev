@@ -900,6 +900,7 @@ The continuation-renew endpoint from the predecessor transport is not part of
 the source contract. Load-more and retry use a current source read and preserve
 the public state until that read succeeds. No browser code imports a persistence
 store or writes conversation history.
+
 ## `registry: PluginRegistry`
 
 ```ts
@@ -916,6 +917,11 @@ store or writes conversation history.
 // renders on no surface. Hosts predating a section value, or seeing an
 // unrecognised one, simply degrade to "main"'s placement — nothing is ever
 // silently dropped.
+// A curated name (`PLUGIN_ICONS` in the host) or a plugin-owned component.
+// Task menu entries additionally render a ready-made React element unchanged,
+// for plugins that registered one before icons were resolved this way; that
+// tolerance is menu-only (other surfaces map an element to the fallback glyph)
+// and is not part of the type.
 type PluginIcon = string | React.ComponentType<{ className?: string }>;
 export type PluginNavSection =
   | "main"
@@ -1033,9 +1039,18 @@ interface PluginRegistry {
   // mid-turn with an empty composer the button is replaced by Cancel, and the
   // decoration goes with it.
   // "chat-top-bar" renders status in the session top bar (beside the
-  // document/editor/debug controls) and forwards
-  // `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }`. Both
-  // carry the active session plus every kandev session id on the task.
+  // document/editor/debug controls on desktop) and forwards
+  // `ChatTopBarSlotProps`: `{ taskId, taskTitle, workspaceId,
+  // activeSessionId, sessionIds, presentation }`. On a phone, presentation is
+  // "mobile" and contributions live inside the shared Plugins menu section.
+  // When task controls are present, a plugin's chat-top-bar registrations
+  // replace its main-top-bar registrations in that menu. Every registration
+  // in the selected slot renders; sidebar workspace actions stay independent.
+  // Null-rendering task controls retain the workspace fallback until content
+  // appears; the fallback returns if the task content disappears.
+  // The host gives `host.ui.Button` controls a 44px touch target. Arbitrary
+  // plugin interaction does not dismiss the menu. Both presentations carry
+  // the active session plus every kandev session id on the task.
   // "main-top-bar" renders status/actions in the default app top bar on the
   // Home / Kanban / Tasks views (beside the CPU/DB metrics and the view/display
   // controls) and forwards `{ workspaceId, workspaceLabel, currentPage,
@@ -1046,6 +1061,9 @@ interface PluginRegistry {
   // contribution sizing is unchanged. It is the app-wide,
   // task-agnostic counterpart to "chat-top-bar", so it carries no task/session
   // ids.
+  // Phone listings and archived tasks retain main-top-bar controls. On other
+  // task pages, workspace-only plugins remain alongside the selected task
+  // toolbars in one group without Workspace/Task subheadings.
   // "sidebar-workspace-actions" renders icon buttons after the built-in Quick
   // Terminal and Quick Chat actions in the desktop sidebar's New Task row and
   // in the shared phone navigation sheet. It forwards
@@ -1119,7 +1137,8 @@ interface PluginRegistry {
 
   // Contributes an item to the kanban card's Edit submenu (group "edit") or
   // a flat, top-level card menu item after "Move to"/"Send to workflow"
-  // and before "Archive"/"Delete" (group "primary"). See "Kanban card contributions" below.
+  // and before "Archive"/"Delete" (group "primary"), optionally as a
+  // submenu of plugin-provided children (`items`). See "Kanban card contributions" below.
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
 
   // Contributes a client-side filter section to the kanban board's display
@@ -1411,15 +1430,39 @@ interface PluginTaskMenuContext {
   presentation: PluginPresentation; // the actual kanban layout: desktop or mobile
 }
 
+interface TaskMenuSubItemRegistration {
+  id: string; // unique within the action; contributes to the entry's React key
+  label: string;
+  icon?: PluginIcon;
+  disabled?: boolean;
+  run(context: PluginTaskMenuContext): void | Promise<void>; // a rejection is caught and logged
+}
+
 interface TaskMenuActionRegistration {
   id: string;
   label: string;
-  icon?: React.ReactNode;
+  icon?: PluginIcon;
   // "edit" nests the item in the card's Edit submenu; "primary" renders it
   // as a flat, top-level item after the "Move to"/"Send to workflow"
   // submenus and before the "Archive"/"Delete" items.
   group: "edit" | "primary";
   visible?(context: PluginTaskMenuContext): boolean; // default: always visible
+  // Declaring this renders the action as a submenu instead of a flat item:
+  // `label` becomes an unselectable trigger and these are its children, in
+  // order. Must be synchronous, and is evaluated on every menu build (see
+  // "Kanban card contributions"). Nesting stops at this one level. A child
+  // needs a non-blank id and label, a callable run, and optional fields of the
+  // shapes above (a boolean or `null` `disabled`, an `icon` that is a name,
+  // component or element; `null` means absent for both) -- ids unique within the
+  // action: children the host cannot read or render are dropped (and reported),
+  // duplicate ids keep their first occurrence, and a result with nothing usable
+  // left falls back to `run`.
+  items?(
+    context: PluginTaskMenuContext,
+  ): readonly TaskMenuSubItemRegistration[];
+  // Flat behavior, and the fallback whenever `items` is absent, yields no
+  // entries, or throws (caught and logged) -- so a host that predates
+  // `items` still renders a working flat item.
   run(context: PluginTaskMenuContext): void | Promise<void>; // a rejection is caught and logged
 }
 
@@ -1531,12 +1574,43 @@ action calls `run(context)`; a rejected promise is caught and logged to the
 console, and the menu still closes either way (Radix's own close-on-select,
 independent of the async result).
 
-Group `"primary"` renders each visible action as its own flat, top-level menu
-item instead of nesting it under `Edit`. It appears after the movement items
+Group `"primary"` renders each visible action as its own top-level menu item
+instead of nesting it under `Edit`. It appears after the movement items
 and before the Archive/Delete items on cards and on the shared desktop/mobile
 task-row menu. Group `"edit"` remains card-only. Visibility filtering,
 registration order, and `run()`/error handling are identical; the two groups
 are independent lists (an action only ever belongs to one).
+
+An action from either group that declares `items(context)` renders as a
+submenu instead of a flat item: `label` is the trigger (there is nothing to
+run on the trigger itself), and the returned items are its children in order,
+each invoked with the same `PluginTaskMenuContext` as the action. `items()` is
+called synchronously while the host builds that card's or row's menu entries —
+on every render, with a card's dropdown and context variants sharing one
+evaluation, whether or not a menu is open — so it must read cached state rather
+than fetch, and anything expensive behind it should be memoized on the state it
+reads. A child's `disabled` (or the
+action's own host-level disabled state, e.g. while a row-local move is
+running) still renders the entry, unlike `visible()`, which filters.
+
+`run` is not a second action for a submenu: it stays the flat behavior for a
+host that predates `items` — such a host ignores the unknown field and renders
+the item it has always rendered — and the fallback whenever `items` yields no
+usable children. That boundary is deliberately runtime-defensive, because a
+bundle is plain JavaScript and these types are not enforced at run time: an
+empty list, a throw, a promise (the contract is synchronous, and its rejection
+is observed so it cannot escape as an unhandled rejection), a non-array, and an
+array whose entries lack a non-blank `id` or `label`, a callable `run`, a
+boolean `disabled` or a recognizable `icon` (a name, component, element or
+`null`) all fall back to the flat item instead of crashing the render or
+producing a trigger nothing can open. Children are read once, inside the same guard, so a
+throwing getter or a Proxy fails that child rather than the card's render;
+unusable children are dropped when others remain, duplicate ids keep their
+first occurrence, and each defect is logged once per action and kind rather
+than on every menu build. An action can therefore ship both: a
+quick child list on a host that supports it, and its existing flat behavior
+elsewhere. Submenu nesting stops at this one level; a `run` rejection is
+caught and logged, and the menu closes either way.
 
 `"task-card-indicators"` (documented above with the other slots) is the
 matching read-only surface: a small icon/badge rendered beside the PR status

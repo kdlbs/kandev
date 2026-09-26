@@ -70,3 +70,32 @@ export interface SSHProbeShellsResponse {
   duration_ms: number;
   available: string[];
 }
+
+export type SSHReachabilityState = "unknown" | "reachable" | "unreachable";
+
+export type SSHReachabilityReason =
+  | ""
+  | "config"
+  | "timeout"
+  | "host_key"
+  | "auth"
+  | "network"
+  | "unknown";
+
+/** Mirrors the backend's reachability.RecordDTO wire shape. */
+export interface SSHReachabilityRecord {
+  executor_id: string;
+  state: SSHReachabilityState;
+  reason: SSHReachabilityReason;
+  message?: string;
+  consecutive_failures: number;
+  host?: string;
+  checked_at: string | null;
+  last_success_at: string | null;
+  /** Null on the synthesized "never probed" placeholder. */
+  updated_at: string | null;
+  probing_enabled: boolean;
+  /** The effective, clamped probe interval in seconds (0 when disabled). */
+  probe_interval_seconds: number;
+  persisted: boolean;
+}

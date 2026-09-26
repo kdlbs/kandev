@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -75,6 +76,8 @@ type repoInfo struct {
 	CheckoutOptions            *models.RepositoryCheckoutOptions
 	ContributionDestination    *models.ContributionDestination
 	ComparisonTarget           *models.ComparisonTarget
+	PRBase                     *models.PRBase
+	QualifiedPRBase            *models.PRBase
 	Position                   int
 	WorktreeBranchPrefix       string
 	WorktreeBranchTemplate     string
@@ -219,7 +222,9 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 			zap.Error(err))
 		return nil, err
 	}
-	e.resolvePRBaseForLaunch(ctx, tr, repo, info)
+	if err := e.resolvePRBaseForLaunch(ctx, tr, repo, info); err != nil {
+		return nil, err
+	}
 
 	// Task checkout modes select a separate cache without rewriting the repository record.
 	repoCopy := *repo
@@ -278,32 +283,271 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 
 func (e *Executor) resolvePRBaseForLaunch(
 	ctx context.Context, tr *models.TaskRepository, repo *models.Repository, info *repoInfo,
-) {
-	if e.prBaseResolver == nil || info.PRNumber <= 0 || !isGitHubRepository(repo) {
-		return
+) error {
+	if models.HasManualBaseBranchOverride(tr.Metadata) {
+		return nil
 	}
-	baseBranch, err := e.prBaseResolver.ResolvePRBaseBranch(
-		ctx, repo.WorkspaceID, repo.ProviderOwner, repo.ProviderName, info.PRNumber,
-	)
-	baseBranch = strings.TrimSpace(baseBranch)
-	if err != nil || baseBranch == "" {
+	expected, err := applyExpectedPRComparisonTarget(tr.ID, info)
+	if err != nil {
+		return err
+	}
+	if e.prBaseResolver == nil || info.PRNumber <= 0 || !isGitHubRepository(repo) {
+		return nil
+	}
+	lookup := PRBaseLookup{
+		TaskID: tr.TaskID, TaskRepositoryID: tr.ID, RepositoryID: tr.RepositoryID,
+		Number: info.PRNumber, CheckoutBranch: info.CheckoutBranch,
+		AttachedOwner: repo.ProviderOwner, AttachedRepository: repo.ProviderName,
+		Target: expected,
+	}
+	resolved, err := e.prBaseResolver.ResolvePRBase(ctx, repo.WorkspaceID, lookup)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		if expected == nil && isUnusablePRBaseAssociation(err) {
+			return fmt.Errorf("resolve PR base for task repository %q: %w", tr.ID, err)
+		}
 		e.logger.Debug("could not resolve live pull request base branch",
 			zap.String("task_id", tr.TaskID),
 			zap.Int("pr_number", info.PRNumber),
 			zap.Error(err))
-		return
+		return nil
 	}
-	if baseBranch != tr.BaseBranch {
+	if err := resolved.Validate(); err != nil {
+		e.logger.Warn("live pull request base identity mismatch",
+			zap.String("task_repository_id", tr.ID),
+			zap.Int("pr_number", info.PRNumber),
+			zap.String("mismatch_reason", string(prBaseMismatchInvalidResolvedBase)))
+		if expected == nil {
+			return NewPRBaseResolutionError(err, false, true)
+		}
+		return nil
+	}
+	attachedRepository, hasAttachedRepository := githubComparisonRepositoryFromRepository(repo)
+	headRepository := attachedRepository
+	hasHeadRepository := hasAttachedRepository
+	if info.RemoteContribution != nil {
+		headRepository, hasHeadRepository = normalizeGitHubComparisonRepository(info.RemoteContribution.SourceRepository)
+	}
+	validIdentity, mismatchReason := validPRBaseIdentity(resolved, info.PRNumber, info.CheckoutBranch, expected,
+		attachedRepository, hasAttachedRepository, headRepository, hasHeadRepository, info.RemoteContribution != nil)
+	if !validIdentity {
+		e.logger.Warn("live pull request base identity mismatch",
+			zap.String("task_repository_id", tr.ID),
+			zap.Int("pr_number", info.PRNumber),
+			zap.String("mismatch_reason", string(mismatchReason)))
+		if expected == nil {
+			return NewPRBaseResolutionError(errors.New("pull request identity did not match the task repository binding"), false, true)
+		}
+		return nil
+	}
+	if resolved.Target.TargetBranch != tr.BaseBranch {
 		e.logger.Info("pull request base branch changed since task creation",
 			zap.String("task_id", tr.TaskID),
 			zap.Int("pr_number", info.PRNumber),
 			zap.String("old_base_branch", tr.BaseBranch),
-			zap.String("new_base_branch", baseBranch))
+			zap.String("new_base_branch", resolved.Target.TargetBranch))
 	}
-	info.BaseBranch = baseBranch
+	info.PRBase = &resolved
+	info.BaseBranch = resolved.Target.TargetBranch
+	if expected != nil || !models.ComparisonTargetRepositoriesEqual(attachedRepository, resolved.Target.TargetRepository) {
+		info.QualifiedPRBase = &resolved
+		info.ComparisonTarget = &resolved.Target
+	}
 	if info.RemoteContribution != nil {
-		info.RemoteContribution.BaseBranch = baseBranch
+		info.RemoteContribution.BaseBranch = resolved.Target.TargetBranch
 	}
+	return nil
+}
+
+func applyExpectedPRComparisonTarget(
+	taskRepositoryID string, info *repoInfo,
+) (*models.ComparisonTarget, error) {
+	if info.ComparisonTarget == nil {
+		return nil, nil
+	}
+	target := *info.ComparisonTarget
+	if err := target.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid PR comparison target for task repository %q: %w", taskRepositoryID, err)
+	}
+	if info.PRNumber > 0 && target.Number != info.PRNumber {
+		return nil, fmt.Errorf("PR comparison target number does not match task repository %q", taskRepositoryID)
+	}
+	if info.CheckoutBranch != "" && target.HeadBranch != info.CheckoutBranch {
+		return nil, fmt.Errorf("PR comparison target head branch does not match task repository %q", taskRepositoryID)
+	}
+	if target.Provider != models.ComparisonTargetProviderGitHub || target.Kind != models.ComparisonTargetKindPullRequest {
+		return nil, nil
+	}
+	if info.PRNumber == 0 {
+		info.PRNumber = target.Number
+	}
+	base := models.PRBase{Target: target}
+	info.PRBase = &base
+	info.QualifiedPRBase = &base
+	info.BaseBranch = target.TargetBranch
+	if info.RemoteContribution != nil {
+		info.RemoteContribution.BaseBranch = target.TargetBranch
+	}
+	return &target, nil
+}
+
+func isUnusablePRBaseAssociation(err error) bool {
+	var knownCrossRepository interface{ KnownCrossRepository() bool }
+	if errors.As(err, &knownCrossRepository) && knownCrossRepository.KnownCrossRepository() {
+		return true
+	}
+	var invalidAssociation interface{ InvalidAssociation() bool }
+	return errors.As(err, &invalidAssociation) && invalidAssociation.InvalidAssociation()
+}
+
+type prBaseIdentityMismatchReason string
+
+const (
+	prBaseMismatchPRNumber            prBaseIdentityMismatchReason = "pr_number_mismatch"
+	prBaseMismatchProvider            prBaseIdentityMismatchReason = "provider_mismatch"
+	prBaseMismatchKind                prBaseIdentityMismatchReason = "kind_mismatch"
+	prBaseMismatchHeadBranch          prBaseIdentityMismatchReason = "head_branch_mismatch"
+	prBaseMismatchRepositoryIdentity  prBaseIdentityMismatchReason = "repository_identity_missing"
+	prBaseMismatchHeadRepository      prBaseIdentityMismatchReason = "head_repository_mismatch"
+	prBaseMismatchTargetRepository    prBaseIdentityMismatchReason = "target_repository_mismatch"
+	prBaseMismatchCheckoutBranch      prBaseIdentityMismatchReason = "checkout_branch_required"
+	prBaseMismatchComparisonTarget    prBaseIdentityMismatchReason = "comparison_target_mismatch"
+	prBaseMismatchInvalidResolvedBase prBaseIdentityMismatchReason = "invalid_resolved_pr_base"
+)
+
+func validPRBaseIdentity(
+	base models.PRBase, number int, checkoutBranch string,
+	expected *models.ComparisonTarget,
+	attachedRepository models.ComparisonTargetRepository, hasAttachedRepository bool,
+	headRepository models.ComparisonTargetRepository, hasHeadRepository bool,
+	contribution bool,
+) (bool, prBaseIdentityMismatchReason) {
+	target := base.Target
+	if target.Number != number {
+		return false, prBaseMismatchPRNumber
+	}
+	if target.Provider != models.ComparisonTargetProviderGitHub {
+		return false, prBaseMismatchProvider
+	}
+	if target.Kind != models.ComparisonTargetKindPullRequest {
+		return false, prBaseMismatchKind
+	}
+	if checkoutBranch != "" && target.HeadBranch != checkoutBranch {
+		return false, prBaseMismatchHeadBranch
+	}
+	if expected != nil || contribution {
+		return validBoundPRBaseIdentity(target, expected, attachedRepository, hasAttachedRepository,
+			headRepository, hasHeadRepository, contribution)
+	}
+	return validUnboundPRBaseIdentity(target, checkoutBranch, attachedRepository, hasAttachedRepository,
+		headRepository, hasHeadRepository)
+}
+
+func validBoundPRBaseIdentity(
+	target models.ComparisonTarget, expected *models.ComparisonTarget,
+	attachedRepository models.ComparisonTargetRepository, hasAttachedRepository bool,
+	headRepository models.ComparisonTargetRepository, hasHeadRepository, contribution bool,
+) (bool, prBaseIdentityMismatchReason) {
+	if !hasAttachedRepository || !hasHeadRepository ||
+		!models.ComparisonTargetRepositoriesEqual(target.HeadRepository, headRepository) {
+		if !hasAttachedRepository || !hasHeadRepository {
+			return false, prBaseMismatchRepositoryIdentity
+		}
+		return false, prBaseMismatchHeadRepository
+	}
+	if contribution && !models.ComparisonTargetRepositoriesEqual(target.TargetRepository, attachedRepository) {
+		return false, prBaseMismatchTargetRepository
+	}
+	if expected == nil {
+		return true, ""
+	}
+	if !expected.ChangeIdentityEqual(target) || expected.HeadBranch != target.HeadBranch ||
+		!models.ComparisonTargetRepositoriesEqual(expected.HeadRepository, target.HeadRepository) {
+		return false, prBaseMismatchComparisonTarget
+	}
+	return true, ""
+}
+
+func validUnboundPRBaseIdentity(
+	target models.ComparisonTarget, checkoutBranch string,
+	attachedRepository models.ComparisonTargetRepository, hasAttachedRepository bool,
+	headRepository models.ComparisonTargetRepository, hasHeadRepository bool,
+) (bool, prBaseIdentityMismatchReason) {
+	if !hasAttachedRepository || !hasHeadRepository {
+		return false, prBaseMismatchRepositoryIdentity
+	}
+	if models.ComparisonTargetRepositoriesEqual(target.TargetRepository, attachedRepository) {
+		if models.ComparisonTargetRepositoriesEqual(target.HeadRepository, attachedRepository) {
+			return true, ""
+		}
+		if checkoutBranch != "" {
+			return true, ""
+		}
+		return false, prBaseMismatchCheckoutBranch
+	}
+	// Fork-attached legacy tasks bind the attached repository to the PR head.
+	if models.ComparisonTargetRepositoriesEqual(target.HeadRepository, headRepository) {
+		return true, ""
+	}
+	return false, prBaseMismatchHeadRepository
+}
+
+func githubComparisonRepositoryFromRepository(repo *models.Repository) (models.ComparisonTargetRepository, bool) {
+	if repo == nil {
+		return models.ComparisonTargetRepository{}, false
+	}
+	owner := strings.TrimSpace(repo.ProviderOwner)
+	if owner == "" {
+		owner = strings.TrimSpace(repo.ProviderScope)
+	}
+	name := strings.TrimSpace(repo.ProviderName)
+	if name == "" {
+		name = strings.TrimSpace(repo.Name)
+	}
+	host := strings.TrimSpace(repo.ProviderHost)
+	if host == "" {
+		host = defaultGitHubHost
+	}
+	return normalizeGitHubComparisonRepository(models.ComparisonTargetRepository{
+		Host: host, Path: owner + "/" + name, ProviderID: strings.TrimSpace(repo.ProviderRepoID),
+	})
+}
+
+func normalizeGitHubComparisonRepository(repository models.ComparisonTargetRepository) (models.ComparisonTargetRepository, bool) {
+	if !isGitHubComparisonHost(repository.Host) {
+		return models.ComparisonTargetRepository{}, false
+	}
+	parts := strings.Split(strings.Trim(strings.TrimSpace(repository.Path), "/"), "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return models.ComparisonTargetRepository{}, false
+	}
+	owner, name := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	repository.Host = defaultGitHubHost
+	repository.Path = owner + "/" + name
+	repository.RemoteURL = fmt.Sprintf("https://%s/%s/%s.git", defaultGitHubHost, owner, name)
+	return repository, true
+}
+
+func isGitHubComparisonHost(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.User != nil || parsed.Port() != "" ||
+		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	return (strings.EqualFold(parsed.Scheme, "https") || strings.EqualFold(parsed.Scheme, "http")) &&
+		strings.EqualFold(parsed.Hostname(), defaultGitHubHost)
 }
 
 func hasProviderRepositoryIdentity(repo *models.Repository) bool {
@@ -741,6 +985,17 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 		updateErr = e.persistSessionFullRowIfCurrentState(ctx, session, expectedState)
 	}
 	if updateErr != nil {
+		if startAgent && errors.Is(updateErr, errSessionAdvancedToRunning) {
+			if resp.PrepareResult == nil || !resp.PrepareResult.Success {
+				return nil
+			}
+			return e.repo.SetSessionMetadataKey(
+				ctx,
+				sessionID,
+				"prepare_result",
+				buildPrepareResultMetadata(resp.PrepareResult),
+			)
+		}
 		e.logger.Error("failed to update agent session after launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -859,6 +1114,9 @@ func (e *Executor) resumeSession(
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return nil, err
 	}
+	if startAgent {
+		e.observeSessionCoresidency(ctx, sessionCoresidencySiteResume, task.ID, session.ID)
+	}
 
 	resumeInitialState := session.State
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
@@ -953,8 +1211,12 @@ func (e *Executor) resumeSession(
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
 			if startAgent {
-				e.rollbackResumeStateAfterFailure(
-					ctx, task.ID, session.ID, resumeInitialState, err,
+				// The live process owns this session's active lifecycle. Keep the
+				// STARTING projection for that process to reconcile instead of
+				// marking it FAILED as if this duplicate launch had failed.
+				e.restoreResumeCredentialSnapshotIfStarting(
+					ctx,
+					session.ID,
 					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
 				)
 			}
@@ -1091,9 +1353,21 @@ func (e *Executor) restoreResumeCredentialSnapshotIfStarting(
 	}
 }
 
+// terminalRollbackState prevents a failed relaunch from restoring an active
+// state when no agent process was recovered.
+func terminalRollbackState(priorState models.TaskSessionState) models.TaskSessionState {
+	switch priorState {
+	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+		return models.TaskSessionStateFailed
+	default:
+		return priorState
+	}
+}
+
 // rollbackResumeStateAfterFailure restores the state observed before a resume
 // attempt only while the session is still STARTING. A concurrent terminal
-// transition wins and is left untouched by transitionSessionState.
+// transition wins and is left untouched by transitionSessionState. Active
+// prior states become FAILED because the relaunch did not restore liveness.
 func (e *Executor) rollbackResumeStateAfterFailure(
 	ctx context.Context,
 	taskID, sessionID string,
@@ -1110,12 +1384,20 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 		defer e.onCeilingReservationRelease(sessionID)
 	}
 	e.restoreResumeCredentialSnapshotIfStarting(ctx, sessionID, credentialSnapshot)
+	targetState := terminalRollbackState(priorState)
 	if e.onSessionStateTransition != nil {
 		current, err := e.repo.GetTaskSession(ctx, sessionID)
 		if err != nil || current == nil || current.State != models.TaskSessionStateStarting {
 			return
 		}
-		_, _, rollbackErr := e.transitionSessionState(ctx, taskID, sessionID, priorState, resumeErr.Error())
+		_, _, rollbackErr := e.transitionSessionStateFrom(
+			ctx,
+			taskID,
+			sessionID,
+			models.TaskSessionStateStarting,
+			targetState,
+			resumeErr.Error(),
+		)
 		if rollbackErr != nil {
 			e.logger.Warn("failed to roll back session state after resume failure",
 				zap.String("task_id", taskID),
@@ -1131,7 +1413,7 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 			ctx,
 			sessionID,
 			models.TaskSessionStateStarting,
-			priorState,
+			targetState,
 			resumeErr.Error(),
 		); err != nil {
 			e.logger.Warn("failed to roll back session state after resume failure",
@@ -1145,7 +1427,7 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 	if err != nil || current == nil || current.State != models.TaskSessionStateStarting {
 		return
 	}
-	_, _, rollbackErr := e.transitionSessionState(ctx, taskID, sessionID, priorState, resumeErr.Error())
+	_, _, rollbackErr := e.transitionSessionState(ctx, taskID, sessionID, targetState, resumeErr.Error())
 	if rollbackErr != nil {
 		e.logger.Warn("failed to roll back session state after resume failure",
 			zap.String("task_id", taskID),
@@ -1530,7 +1812,11 @@ func (e *Executor) applyRecordedKubernetesExecutorConfigToResumeRequest(
 		ExecutorID: executorID, ExecutorType: string(current.Type), ExecutorCfg: current.Config,
 		Metadata: metadata, Resumable: current.Resumable, RuntimeName: string(current.Type),
 	}
+	if err := e.restoreKubernetesProfileEnvironment(ctx, &config, running.Metadata); err != nil {
+		return executorConfig{}, err
+	}
 	session.ExecutorID = executorID
+	session.ExecutorProfileID, _ = running.Metadata[lifecycle.MetadataKeyExecutorProfileID].(string)
 	req.ExecutorType = config.ExecutorType
 	req.ExecutorConfig = config.ExecutorCfg
 	req.Metadata = metadata
@@ -1675,16 +1961,15 @@ func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *
 	return execConfig
 }
 
-// isArchiveCancelledResumeSession reports whether session was cancelled by an
-// archive (Service.ArchiveTask's single-task path or HandoffService's cascade
-// archive) rather than an explicit user/coordinator stop. Mirrors
-// orchestrator.isArchiveCancelledSession — kept local to this package since
-// the two live on opposite sides of the executor/orchestrator boundary and
-// the check is two lines over already-exported models helpers.
-func isArchiveCancelledResumeSession(session *models.TaskSession) bool {
+// isRecoverableCancelledResumeSession reports whether session was cancelled by
+// a system reconciliation path rather than an explicit user/coordinator stop.
+// Mirrors the orchestrator's eligibility checks while keeping the executor's
+// prompt-free launch behavior aligned for legacy archive and orphan rows.
+func isRecoverableCancelledResumeSession(session *models.TaskSession) bool {
 	return session != nil &&
 		session.State == models.TaskSessionStateCancelled &&
-		models.IsArchiveCancelReason(session.ErrorMessage)
+		(models.IsArchiveCancelReason(session.ErrorMessage) ||
+			models.IsOrphanCancelReason(session.ErrorMessage))
 }
 
 // applyRunningRecordToResumeRequest loads the ExecutorRunning record and applies
@@ -1698,12 +1983,12 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 ) *models.ExecutorRunning {
 	if running == nil {
 		// Archive cleanup tears down the executors_running row entirely, so an
-		// archive-cancelled session reaches this point with running == nil. The
+		// system-cancelled session reaches this point with running == nil. The
 		// session metadata mirrors the provider conversation identity so an
 		// explicit completed follow-up can still restore the same conversation
 		// after runtime cleanup removed the operational row.
 		noAutoPromptState := session.State == models.TaskSessionStateWaitingForInput ||
-			isArchiveCancelledResumeSession(session) ||
+			isRecoverableCancelledResumeSession(session) ||
 			session.State == models.TaskSessionStateCompleted
 		if startAgent && noAutoPromptState {
 			if token := persistedSessionResumeToken(session); token != "" {
@@ -1751,9 +2036,9 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 			zap.String("session_id", session.ID),
 			zap.Bool("has_resume_token", running.ResumeToken != ""))
 	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput ||
-		isArchiveCancelledResumeSession(session) || session.State == models.TaskSessionStateCompleted) {
+		isRecoverableCancelledResumeSession(session) || session.State == models.TaskSessionStateCompleted) {
 		// Fresh-start resume (no resume token): don't auto-prompt with the task
-		// description. Also covers completed and archive-cancelled sessions whose
+		// description. Also covers completed and system-cancelled sessions whose
 		// running record survived cleanup but carries no token — the same
 		// auto-resume shape as the running==nil branch above.
 		req.TaskDescription = ""
@@ -2211,7 +2496,7 @@ func (e *Executor) startAgentProcessOnResumeWithTaskPromotion(
 	agentExecutionID string,
 	promoteTask bool,
 ) {
-	e.runAgentProcessAsync(ctx, taskID, session.ID, agentExecutionID, func(updCtx context.Context) {
+	e.runAgentProcessAsyncWithObservation(ctx, taskID, session.ID, agentExecutionID, sessionCoresidencySiteResume, func(updCtx context.Context) {
 		if promoteTask {
 			if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, session.ID); updateErr != nil {
 				e.logger.Warn("failed to update task state to IN_PROGRESS after resume start",

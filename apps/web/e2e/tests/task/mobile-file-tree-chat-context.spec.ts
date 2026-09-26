@@ -70,7 +70,7 @@ test.describe("Mobile file tree chat context", () => {
       { width: 393, height: 851 },
     );
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     const directoryNode = session.fileTreeNode(directoryPath);
     await expect(directoryNode).toBeVisible({ timeout: 15_000 });
 
@@ -197,7 +197,7 @@ test.describe("Mobile file tree chat context", () => {
     await session.fileSearchInput().press("Escape");
 
     await expect(testPage.getByTestId("mobile-file-viewer-panel")).toHaveCount(0);
-    await testPage.getByRole("button", { name: "Chat" }).tap();
+    await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
     await expect(session.chatContextFile(directoryPath)).toHaveCount(1);
     await expect(session.chatContextFile(directoryPath)).toHaveAttribute(
       "data-is-directory",

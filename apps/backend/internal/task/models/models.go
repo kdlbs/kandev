@@ -178,11 +178,14 @@ const (
 	// because the winner will (or already did) handle it.
 	// Absent on ordinary (non-watcher) auto-start tasks, which launch normally.
 	MetaKeyAutoStartClaimed = "auto_start_claimed"
-	// MetaKeyInterruptedAt is set by startup reconciliation when a task's
-	// session was mid-turn (STARTING/RUNNING) when the backend died. Its
-	// presence makes the task DTO report `interrupted: true` so task-list
-	// surfaces show the red interruption icon; the orchestrator removes the
-	// key when a session of the task next enters STARTING/RUNNING.
+	// MetaKeyForkPRRequiresManualStart blocks unattended launches of fork PR
+	// review tasks. Their worktree setup scripts can read executor-profile secrets;
+	// a user can still explicitly start the task after reviewing it.
+	MetaKeyForkPRRequiresManualStart = "fork_pr_requires_manual_start"
+	// MetaKeyInterruptedAt is set by reconciliation when a task's session lost
+	// an active turn. Its presence makes the task DTO report `interrupted: true`
+	// so task-list surfaces show the warning indicator. The orchestrator removes
+	// the key only after the provider confirms recovery.
 	MetaKeyInterruptedAt = "interrupted_at"
 	// MetaKeyAutoStartFailed is set when a workflow step's auto_start_agent
 	// on_enter action fails to launch a run (kanban StartTask error, or an
@@ -233,6 +236,23 @@ const (
 	// whose Routine workflow start step has no other transition to carry it
 	// into an auto_start_agent evaluation.
 	MetaKeyAutoStartOnCreate = "auto_start_on_create"
+
+	// The MetaKeyOfficeCarrier* keys are the task-boundary causation carrier
+	// set (AC-OFFICE-RUN-CAUSATION-001.18), persisted on a task when an
+	// Office trigger creates it (AC-OFFICE-RUN-CAUSATION-001.5): an agent
+	// creating a task through a runtime action, or a routine fire creating
+	// a task. A run later queued because of that task inherits these
+	// values as though the task creation were the causing run, without
+	// needing to read the creating run row again — which may no longer
+	// exist by the time the task is acted on.
+	MetaKeyOfficeCarrierCausationID    = "office_carrier_causation_id"
+	MetaKeyOfficeCarrierCausationDepth = "office_carrier_causation_depth"
+	MetaKeyOfficeCarrierCreatingRunID  = "office_carrier_creating_run_id"
+	MetaKeyOfficeCarrierHumanRooted    = "office_carrier_human_rooted"
+	MetaKeyOfficeCarrierRoutineID      = "office_carrier_routine_id"
+	MetaKeyOfficeCarrierActorKind      = "office_carrier_actor_kind"
+	MetaKeyOfficeCarrierActorID        = "office_carrier_actor_id"
+
 	// MetaKeyAutoStartOnCreateInFlight is a durable hand-off marker for an
 	// auto-start-on-create launch. The original intent is consumed before the
 	// detached launch starts, but this marker remains until a session or run
@@ -245,7 +265,54 @@ const (
 	// Recording it replaces any existing token (single-slot by construction);
 	// claiming it removes it. See REQ-TASKS-SIGNAL-PAYLOAD-DELIVERY-001.
 	MetaKeyStepHandoffCarry = "step_handoff_carry"
+	// MetaKeyHandoffSource records inbound handoff provenance on a delivery
+	// task created via the cross-workspace handoff runtime route: the source
+	// workspace, task, and agent that created it. Written once at creation;
+	// never mutated.
+	MetaKeyHandoffSource = "handoff_source"
+	// MetaKeyHandoffs records outbound handoff provenance on the source task:
+	// an append-only array of handoff entries, each identifying a delivery
+	// task created from it. Mutated via an optimistic compare-and-set.
+	MetaKeyHandoffs = "handoffs"
 )
+
+// officeCarrierMetadataKeys is every MetaKeyOfficeCarrier* key above, kept
+// next to that block so a new carrier key can't be added to one without
+// the other.
+var officeCarrierMetadataKeys = []string{
+	MetaKeyOfficeCarrierCausationID,
+	MetaKeyOfficeCarrierCausationDepth,
+	MetaKeyOfficeCarrierCreatingRunID,
+	MetaKeyOfficeCarrierHumanRooted,
+	MetaKeyOfficeCarrierRoutineID,
+	MetaKeyOfficeCarrierActorKind,
+	MetaKeyOfficeCarrierActorID,
+}
+
+// StripOfficeCarrierMetadata deletes every task-boundary causation carrier
+// key from metadata in place (safe to call with a nil map). The carrier
+// (AC-OFFICE-RUN-CAUSATION-001.18) may only be derived server-side from a
+// run's own record (AC-OFFICE-RUN-CAUSATION-001.17), so no metadata
+// originating from a request body may carry it.
+func StripOfficeCarrierMetadata(metadata map[string]interface{}) {
+	for _, key := range officeCarrierMetadataKeys {
+		delete(metadata, key)
+	}
+}
+
+// RestoreOfficeCarrierMetadata copies every task-boundary causation carrier
+// key present in existing onto updated (a key absent from existing is left
+// alone). Callers that apply a generic metadata replacement strip
+// request-supplied carrier keys with StripOfficeCarrierMetadata first, then
+// call this so the server-owned carrier the task already had survives the
+// replacement instead of being silently deleted.
+func RestoreOfficeCarrierMetadata(updated, existing map[string]interface{}) {
+	for _, key := range officeCarrierMetadataKeys {
+		if v, ok := existing[key]; ok {
+			updated[key] = v
+		}
+	}
+}
 
 // WorkflowInitialSessionSnapshot identifies the immutable task-initial
 // conversation and the logical profile selected when it was created.
@@ -400,7 +467,83 @@ const (
 	// latest successful agent boot. Recovery cards compare this timestamp with
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
+	// SessionMetaKeyInterruptedRecoveryPending is a durable token written by
+	// session reconciliation when execution loss returns a conversation to
+	// WAITING_FOR_INPUT. It distinguishes an interrupted waiting session from
+	// an ordinary idle conversation even when the executor row was removed.
+	SessionMetaKeyInterruptedRecoveryPending = "interrupted_recovery_pending"
+	// SessionMetaKeyRecoverySettlementPending carries the immutable recovery
+	// snapshot needed to retry post-commit effects after a partial failure.
+	SessionMetaKeyRecoverySettlementPending = "recovery_settlement_pending"
+	// SessionMetaKeyInitialCreatePromptPassthrough stores the durable
+	// execution and turn evidence for a creation prompt admitted before a
+	// passthrough agent.running event. It prevents recovery from evaluating
+	// the same on_turn_start transition a second time after restart.
+	SessionMetaKeyInitialCreatePromptPassthrough = "initial_create_prompt_passthrough"
 )
+
+// InterruptedRecoverySettlement is the durable recovery snapshot used when a
+// session transition committed but one of its cross-repository effects did
+// not. The executor identity and turn ID are compare-and-set inputs; they
+// must never be refreshed from a successor execution during retry.
+type InterruptedRecoverySettlement struct {
+	Token         string           `json:"token"`
+	ExpectedState TaskSessionState `json:"expected_state"`
+	// RecoveredUpdatedAt is the session generation written by the recovery
+	// transition. Retries must compare against this immutable timestamp rather
+	// than treating a later session read as the recovery generation.
+	RecoveredUpdatedAt               time.Time `json:"recovered_updated_at"`
+	ExpectedTurnID                   string    `json:"expected_turn_id,omitempty"`
+	ExpectedExecutorID               string    `json:"expected_executor_id,omitempty"`
+	ExpectedExecutorAgentExecutionID string    `json:"expected_executor_agent_execution_id,omitempty"`
+	ExpectedExecutorUpdatedAt        time.Time `json:"expected_executor_updated_at,omitempty"`
+}
+
+// HasInterruptedRecoveryPending reports whether metadata carries a valid
+// interrupted-session token. Older in-process callers used a boolean marker,
+// so explicit true remains accepted during the transition to tokens.
+func HasInterruptedRecoveryPending(metadata map[string]interface{}) bool {
+	if metadata == nil {
+		return false
+	}
+	value, ok := metadata[SessionMetaKeyInterruptedRecoveryPending]
+	if !ok || value == nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.TrimSpace(typed) != ""
+	default:
+		return true
+	}
+}
+
+// LoadInterruptedRecoverySettlement decodes the immutable post-commit
+// snapshot. Invalid or incomplete values fail closed so a retry cannot repair
+// a successor executor or abandon an unrelated turn.
+func LoadInterruptedRecoverySettlement(metadata map[string]interface{}) (InterruptedRecoverySettlement, bool) {
+	if metadata == nil {
+		return InterruptedRecoverySettlement{}, false
+	}
+	value, ok := metadata[SessionMetaKeyRecoverySettlementPending]
+	if !ok || value == nil {
+		return InterruptedRecoverySettlement{}, false
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return InterruptedRecoverySettlement{}, false
+	}
+	var settlement InterruptedRecoverySettlement
+	if err := json.Unmarshal(payload, &settlement); err != nil {
+		return InterruptedRecoverySettlement{}, false
+	}
+	if strings.TrimSpace(settlement.Token) == "" || settlement.ExpectedState == "" || settlement.RecoveredUpdatedAt.IsZero() {
+		return InterruptedRecoverySettlement{}, false
+	}
+	return settlement, true
+}
 
 // IsCompletionFollowUpSession reports whether a session was explicitly
 // reopened only to continue its completed conversation. The marker remains
@@ -1084,15 +1227,18 @@ const (
 
 // Task represents a task in the database
 type Task struct {
-	ID             string       `json:"id"`
-	WorkspaceID    string       `json:"workspace_id"`
-	WorkflowID     string       `json:"workflow_id"`
-	WorkflowStepID string       `json:"workflow_step_id"`
-	Title          string       `json:"title"`
-	Description    string       `json:"description"`
-	State          v1.TaskState `json:"state"`
-	Priority       string       `json:"priority"`
-	Position       int          `json:"position"` // Order within workflow step
+	ID             string `json:"id"`
+	WorkspaceID    string `json:"workspace_id"`
+	WorkflowID     string `json:"workflow_id"`
+	WorkflowStepID string `json:"workflow_step_id"`
+	// WorkflowAgentOverrides is scoped to WorkflowID and expands the grouped
+	// create choice into fixed step bindings. It is nil for ordinary tasks.
+	WorkflowAgentOverrides *WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                  `json:"title"`
+	Description            string                  `json:"description"`
+	State                  v1.TaskState            `json:"state"`
+	Priority               string                  `json:"priority"`
+	Position               int                     `json:"position"` // Order within workflow step
 	// WIPAdmitted indicates whether this task consumes an active slot in its
 	// current workflow step. Queued tasks remain visible but do not consume the
 	// destination step's WIP capacity.
@@ -1654,6 +1800,20 @@ type Message struct {
 	// non-user messages and for legacy 12-column reads, and serialized only
 	// when > 0 (json omitempty).
 	PromptIndex int `json:"prompt_index,omitempty"`
+	// PayloadDigest is the SHA-256 digest of a large tool payload (currently
+	// shell command stdout/stderr) that CreateMessage/UpdateMessage
+	// externalized into task_message_payloads instead of inlining in
+	// Metadata. Empty when the message's metadata was small enough to stay
+	// inline. Internal repository/service bookkeeping only - never
+	// serialized to API/WS clients (json "-"): the client-visible signal is
+	// already the has_output/stdout_bytes summary ProjectMessageMetadata
+	// leaves in Metadata, and GetMessage is the only reader that resolves
+	// this digest, via RehydrateMessagePayload, for explicit authorized
+	// detail loading (see httpGetShellOutput).
+	PayloadDigest string `json:"-"`
+	// PayloadSize is the uncompressed byte size of the externalized payload
+	// referenced by PayloadDigest. Zero when PayloadDigest is empty.
+	PayloadSize int64 `json:"-"`
 }
 
 // ToAPI converts internal Message to API type.
@@ -1883,6 +2043,37 @@ type TaskSession struct {
 	TokensIn       int64 `json:"tokens_in"`
 	TokensCachedIn int64 `json:"tokens_cached_in"`
 	TokensOut      int64 `json:"tokens_out"`
+}
+
+// ActiveSessionCancellationCandidate is the compare-and-set snapshot used by
+// the active-session stall healer. An empty ExpectedTurnID means that no turn
+// may be active when the cancellation is written.
+type ActiveSessionCancellationCandidate struct {
+	SessionID           string
+	ExpectedUpdatedAt   time.Time
+	ExpectedLastEventAt time.Time
+	ExpectedTurnID      string
+}
+
+// ActiveSessionRecoveryCandidate is the compare-and-set snapshot used by
+// session reconciliation when execution loss should return a conversation to
+// WAITING_FOR_INPUT. The observed state, activity clock, and turn identity
+// must still match at the write boundary; a newer launch, message, or turn
+// therefore owns the session and prevents stale recovery.
+type ActiveSessionRecoveryCandidate struct {
+	TaskID            string
+	SessionID         string
+	ExpectedState     TaskSessionState
+	ExpectedUpdatedAt time.Time
+	// RecoveredUpdatedAt is populated from the durable settlement on retry.
+	// The initial candidate leaves it zero because the repository assigns the
+	// committed generation when it performs the state transition.
+	RecoveredUpdatedAt               time.Time
+	ExpectedLastEventAt              time.Time
+	ExpectedTurnID                   string
+	ExpectedExecutorID               string
+	ExpectedExecutorAgentExecutionID string
+	ExpectedExecutorUpdatedAt        time.Time
 }
 
 // ToAPI converts internal TaskSession to API type
@@ -2586,6 +2777,57 @@ type TaskPlanCommentSnapshot struct {
 
 // TaskPlanCommentRef identifies the exact pending-comment version a delivery includes.
 type TaskPlanCommentRef struct {
+	ID      string `json:"id"`
+	Version int64  `json:"version"`
+}
+
+type TaskPreviewFeedbackKind string
+
+const (
+	TaskPreviewFeedbackText       TaskPreviewFeedbackKind = "text"
+	TaskPreviewFeedbackElement    TaskPreviewFeedbackKind = "element"
+	TaskPreviewFeedbackScreenshot TaskPreviewFeedbackKind = "screenshot"
+)
+
+type TaskPreviewFeedbackSourceKind string
+
+const (
+	TaskPreviewFeedbackBrowser  TaskPreviewFeedbackSourceKind = "browser"
+	TaskPreviewFeedbackHTMLFile TaskPreviewFeedbackSourceKind = "html_file"
+)
+
+// TaskPreviewFeedback is one immutable rendered-page capture with an editable comment.
+type TaskPreviewFeedback struct {
+	ID                     string                        `json:"id"`
+	TaskID                 string                        `json:"task_id"`
+	Kind                   TaskPreviewFeedbackKind       `json:"kind"`
+	Comment                string                        `json:"comment"`
+	SourceKind             TaskPreviewFeedbackSourceKind `json:"source_kind"`
+	SourceSessionID        string                        `json:"source_session_id,omitempty"`
+	SourceLabel            string                        `json:"source_label"`
+	SourcePath             string                        `json:"source_path,omitempty"`
+	PageRoute              string                        `json:"page_route"`
+	PageTitle              string                        `json:"page_title"`
+	SelectedText           string                        `json:"selected_text,omitempty"`
+	TextAnchor             json.RawMessage               `json:"text_anchor,omitempty"`
+	ElementSnapshot        json.RawMessage               `json:"element_snapshot,omitempty"`
+	CaptureRect            json.RawMessage               `json:"capture_rect,omitempty"`
+	ScreenshotAttachmentID string                        `json:"screenshot_attachment_id,omitempty"`
+	ScreenshotAttachment   *TaskMessageAttachment        `json:"screenshot_attachment,omitempty"`
+	Version                int64                         `json:"version"`
+	CreatedAt              time.Time                     `json:"created_at"`
+	UpdatedAt              time.Time                     `json:"updated_at"`
+}
+
+// TaskPreviewFeedbackSnapshot is the authoritative pending collection for a task.
+type TaskPreviewFeedbackSnapshot struct {
+	TaskID   string                 `json:"task_id" db:"task_id"`
+	Revision int64                  `json:"revision" db:"revision"`
+	Items    []*TaskPreviewFeedback `json:"items"`
+}
+
+// TaskPreviewFeedbackRef identifies the exact pending item version included in delivery.
+type TaskPreviewFeedbackRef struct {
 	ID      string `json:"id"`
 	Version int64  `json:"version"`
 }

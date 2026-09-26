@@ -67,7 +67,7 @@ func (r *KubernetesExecutor) RefreshRemoteInstance(
 		Instance: &ExecutorInstance{
 			InstanceID:  instance.InstanceID,
 			TaskID:      inspection.identity.TaskID,
-			SessionID:   inspection.identity.SessionID,
+			SessionID:   req.SessionID,
 			RuntimeName: r.Name(), Client: client, WorkspacePath: kubernetesWorkspacePath,
 			Metadata: metadata, AuthToken: token, BootstrapNonce: instance.BootstrapNonce,
 		},
@@ -180,6 +180,9 @@ func kubernetesActiveRefreshRequest(
 	req.InstanceID = instance.InstanceID
 	req.TaskID = identity.TaskID
 	req.SessionID = identity.SessionID
+	if getMetadataBool(instance.Metadata, metadataKubernetesTaskOwned) {
+		req.SessionID = instance.SessionID
+	}
 	req.TaskEnvironmentID = identity.EnvironmentID
 	req.Metadata = cloneKubernetesMetadata(instance.Metadata)
 	req.AuthToken = instance.AuthToken
@@ -194,6 +197,9 @@ func (r *KubernetesExecutor) connectKubernetesRefresh(
 	req *ExecutorCreateRequest,
 	inspection kubernetesRefreshInspection,
 ) (*agentctl.Client, kubeexecutor.PortForwardSession, string, int, error) {
+	if getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
+		return r.connectSharedKubernetesAgentctl(ctx, freshRuntime, req, inspection.pod, inspection.recorded.agentctlInstanceID)
+	}
 	if inspection.restarted {
 		return r.connectRestartedKubernetesAgentctl(
 			ctx, freshRuntime, req, inspection.pod, inspection.recorded.agentctlInstanceID,

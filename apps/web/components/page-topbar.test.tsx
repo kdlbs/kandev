@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PageTopbar, TOPBAR_HEIGHT_CLASSNAME } from "./page-topbar";
+import { PageTopbar, TOPBAR_HEIGHT_CLASSNAME, type ParentCrumb } from "./page-topbar";
 
 vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
   AppStatusDrawerTrigger: () => null,
@@ -108,6 +108,26 @@ describe("PageTopbar parent crumbs", () => {
     expect(screen.getByRole("link", { name: "Settings" }).closest("li")?.className).not.toContain(
       "max-md:hidden",
     );
+  });
+
+  // @covers AC-UI-REMOTE-REPO-TOPBAR-001.1, AC-UI-REMOTE-REPO-TOPBAR-001.2
+  it("renders an external repository parent as a named new-tab link with its provider icon", () => {
+    const ariaLabel = "GitHub repository owner/agent-orchestrator";
+    const repositoryCrumb = {
+      label: "agent-orchestrator",
+      externalUrl: "https://github.com/owner/agent-orchestrator",
+      ariaLabel,
+      title: "owner/agent-orchestrator",
+      icon: <svg data-testid="repository-provider-icon" />,
+    } as unknown as ParentCrumb;
+
+    render(<PageTopbar title="Explain agent connections" parents={[repositoryCrumb]} />);
+
+    const link = screen.getByRole("link", { name: ariaLabel });
+    expect(link.getAttribute("href")).toBe("https://github.com/owner/agent-orchestrator");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(link.querySelector('[data-testid="repository-provider-icon"]')).not.toBeNull();
   });
 });
 

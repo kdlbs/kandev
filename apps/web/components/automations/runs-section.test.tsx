@@ -116,7 +116,7 @@ describe("RunsSection run log", () => {
 
     fireEvent.click(screen.getByTestId("run-row-run-x"));
 
-    expect(mockPush).toHaveBeenCalledWith("/tasks/task-hidden");
+    expect(mockPush).toHaveBeenCalledWith("/t/task-hidden");
   });
 
   it("does not link a run that never produced a task", () => {

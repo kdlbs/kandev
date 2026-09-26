@@ -8,7 +8,7 @@ import { waitForStableActiveSession } from "../../helpers/session-store";
 const MOBILE_END_TOLERANCE_PX = 10;
 
 async function switchMobileTask(testPage: Page, title: string): Promise<void> {
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
   const sheet = testPage.getByRole("dialog", { name: "Tasks" });
   const taskRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: title });
   await expect(taskRow).toBeVisible({ timeout: 15_000 });

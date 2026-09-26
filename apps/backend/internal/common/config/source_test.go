@@ -34,6 +34,14 @@ planning:
   coalesceWindowMs: 2400
 office:
   schedulerTickMs: 7000
+  maxConcurrentInstance: 9
+  maxConcurrentWorkspace: 5
+  workspaceBudgetPerHour: 121
+  routineBudgetPerHour: 22
+  promotionAgeMinutes: 16
+  maxCausationDepth: 9
+  selfTriggerAllowance: 4
+  gateFailureThreshold: 5
 observability:
   otlpEndpoint: https://otel.example.test/v1/traces
 launcher:
@@ -85,6 +93,30 @@ launcher:
 	}
 	if got := nestedField(t, cfg, "Office", "SchedulerTickMs"); got.Int() != 7000 {
 		t.Fatalf("office.schedulerTickMs = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "MaxConcurrentInstance"); got.Int() != 9 {
+		t.Fatalf("office.maxConcurrentInstance = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "MaxConcurrentWorkspace"); got.Int() != 5 {
+		t.Fatalf("office.maxConcurrentWorkspace = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "WorkspaceBudgetPerHour"); got.Int() != 121 {
+		t.Fatalf("office.workspaceBudgetPerHour = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "RoutineBudgetPerHour"); got.Int() != 22 {
+		t.Fatalf("office.routineBudgetPerHour = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "PromotionAgeMinutes"); got.Int() != 16 {
+		t.Fatalf("office.promotionAgeMinutes = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "MaxCausationDepth"); got.Int() != 9 {
+		t.Fatalf("office.maxCausationDepth = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "SelfTriggerAllowance"); got.Int() != 4 {
+		t.Fatalf("office.selfTriggerAllowance = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "GateFailureThreshold"); got.Int() != 5 {
+		t.Fatalf("office.gateFailureThreshold = %d", got.Int())
 	}
 	if got := nestedField(t, cfg, "Observability", "OTLPEndpoint"); got.String() != "https://otel.example.test/v1/traces" {
 		t.Fatalf("observability.otlpEndpoint = %q", got.String())
@@ -304,6 +336,74 @@ func TestHomeConfigInvalidFirstDoesNotFallThrough(t *testing.T) {
 	_, err := Load()
 	if err == nil || !strings.Contains(err.Error(), configFile) {
 		t.Fatalf("Load error = %v, want invalid first file and no fallback", err)
+	}
+}
+
+// @covers AC-EXECUTORS-SSH-REACHABILITY-001.14
+//
+// The catalog's own fallback-and-bounds logic only ever falls back to the
+// default (60): the 0-disables/15-3600-clamp behavior belongs to the
+// reachability package's own ClampInterval, not this layer, per the design's
+// split between catalog-level normalization and package-level clamping.
+func TestExecutorsSSHReachabilityIntervalSecondsEnvironment(t *testing.T) {
+	tests := []struct {
+		name       string
+		env        string
+		wantValue  int
+		wantSource SettingSource
+	}{
+		{"absent uses default", "", 60, SourceDefault},
+		{"valid value passes through unclamped", "45", 45, SourceEnvironment},
+		{"zero passes through as the disable sentinel", "0", 0, SourceEnvironment},
+		{"negative falls back to the default", "-5", 60, SourceDefault},
+		{"unparsable falls back to the default", "not-a-number", 60, SourceDefault},
+		{"a value outside 15-3600 still passes through unclamped here", "9999", 9999, SourceEnvironment},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.env != "" {
+				t.Setenv("KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS", tt.env)
+			} else {
+				t.Setenv("KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS", "")
+			}
+			t.Setenv("KANDEV_SERVER_PORT", "")
+
+			cfg, err := LoadWithPath(t.TempDir())
+			if err != nil {
+				t.Fatalf("LoadWithPath: %v", err)
+			}
+			if cfg.Executors.SSHReachabilityIntervalSeconds != tt.wantValue {
+				t.Fatalf("executors.sshReachabilityIntervalSeconds = %d, want %d", cfg.Executors.SSHReachabilityIntervalSeconds, tt.wantValue)
+			}
+			if got := cfg.SourceFor("executors.sshReachabilityIntervalSeconds"); got != tt.wantSource {
+				t.Fatalf("executors.sshReachabilityIntervalSeconds source = %q, want %q", got, tt.wantSource)
+			}
+		})
+	}
+}
+
+// @covers AC-EXECUTORS-SSH-REACHABILITY-001.14
+//
+// A YAML value is not passed through the environment's fallback-and-bounds
+// logic at all — it decodes straight into the typed field, negative values
+// included, leaving ClampInterval as the sole place that normalizes it.
+func TestExecutorsSSHReachabilityIntervalSecondsYAMLPassesThroughUnclamped(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("executors:\n  sshReachabilityIntervalSeconds: -5\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS", "")
+	t.Setenv("KANDEV_SERVER_PORT", "")
+
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if cfg.Executors.SSHReachabilityIntervalSeconds != -5 {
+		t.Fatalf("executors.sshReachabilityIntervalSeconds = %d, want -5 (unclamped)", cfg.Executors.SSHReachabilityIntervalSeconds)
+	}
+	if got := cfg.SourceFor("executors.sshReachabilityIntervalSeconds"); got != SourceConfiguration {
+		t.Fatalf("executors.sshReachabilityIntervalSeconds source = %q, want %q", got, SourceConfiguration)
 	}
 }
 

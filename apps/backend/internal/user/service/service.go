@@ -46,6 +46,7 @@ type Service struct {
 
 type UpdateUserSettingsRequest struct {
 	SidebarViewState                  *models.SidebarWorkspacePatch
+	SidebarLayoutState                *models.SidebarLayoutPatch
 	WorkspaceID                       *string
 	KanbanViewMode                    *string
 	StartupPage                       *string
@@ -90,6 +91,7 @@ type UpdateUserSettingsRequest struct {
 	SidebarTaskColorPatch             *models.SidebarTaskColorPatch
 	TaskCreateLastUsed                *models.TaskCreateLastUsed
 	JiraSavedViews                    **json.RawMessage
+	JiraDefaultViewID                 *string
 	JiraTaskPresets                   **json.RawMessage
 	GitHubSavedPresets                **json.RawMessage
 	GitHubDefaultQueryPresets         **json.RawMessage
@@ -215,6 +217,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if err := s.validateSidebarWorkspacePatch(ctx, req, sidebarWorkspaceIDs); err != nil {
 		return nil, err
 	}
+	if err := s.validateSidebarLayoutPatch(ctx, req, sidebarWorkspaceIDs); err != nil {
+		return nil, err
+	}
 	if s.sidebarWorkspaceAccess != nil {
 		settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 		if err != nil {
@@ -236,6 +241,12 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		before := *settings
 		if err := applySidebarWorkspacePatch(settings, req); err != nil {
 			return false, err
+		}
+		if err := applySidebarLayoutPatch(settings, req); err != nil {
+			if errors.Is(err, ErrUserSettingsConflict) {
+				return false, err
+			}
+			return false, fmt.Errorf("%w: %s", ErrValidation, err)
 		}
 		if err := applyBasicSettings(settings, req); err != nil {
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
@@ -391,6 +402,9 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.JiraDefaultViewID != nil {
+		settings.JiraDefaultViewID = strings.TrimSpace(*req.JiraDefaultViewID)
+	}
 	if err := applySidebarHoverSettings(settings, req); err != nil {
 		return err
 	}
@@ -1124,6 +1138,7 @@ func (s *Service) projectSidebarSettingsForEvent(
 func addSidebarWorkspaceState(data map[string]interface{}, settings *models.UserSettings, include bool) {
 	if include {
 		data["sidebar_views_by_workspace"] = settings.SidebarViewsByWorkspace
+		data["sidebar_layouts_by_workspace"] = settings.SidebarLayoutsByWorkspace
 	}
 }
 
@@ -1178,6 +1193,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"sidebar_task_colors":                      models.CloneSidebarTaskColors(settings.SidebarTaskColors),
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
+		"jira_default_view_id":                     settings.JiraDefaultViewID,
 		"jira_task_presets":                        settings.JiraTaskPresets,
 		"github_saved_presets":                     settings.GitHubSavedPresets,
 		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,

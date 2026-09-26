@@ -520,7 +520,7 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *m
 		ctx, task.ID, models.TaskResourceCleanupTriggerWorkspaceDelete,
 		newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, task.ID),
 		cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, cleanup.attachments,
-		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}, true, true, "",
+		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}, true, true, task.WorkspaceID,
 	)
 	return cleanup, err
 }
@@ -1806,7 +1806,17 @@ func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest
 		return nil, err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorCreated, executor)
+	s.notifyExecutorSaved(ctx, nil, executor)
 	return executor, nil
+}
+
+// notifyExecutorSaved forwards a committed executor create/update to the
+// wired ExecutorSaveObserver, if any. before is nil on create.
+func (s *Service) notifyExecutorSaved(ctx context.Context, before, after *models.Executor) {
+	if s.executorSaveObserver == nil {
+		return
+	}
+	s.executorSaveObserver.OnExecutorSaved(ctx, before, after)
 }
 
 func (s *Service) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
@@ -1842,12 +1852,14 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 			return nil, ErrActiveTaskSessions
 		}
 	}
+	before := *executor
 	applyExecutorUpdates(executor, req)
 	executor.UpdatedAt = time.Now().UTC()
 	if err := s.executors.UpdateExecutor(ctx, executor); err != nil {
 		return nil, err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorUpdated, executor)
+	s.notifyExecutorSaved(ctx, &before, executor)
 	return executor, nil
 }
 
@@ -1943,6 +1955,9 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 }
 
 func (s *Service) hasExecutorRunningInventory(ctx context.Context, executorID string) (bool, error) {
+	if retained, err := s.hasKubernetesEnvironmentInventory(ctx, executorID); err != nil || retained {
+		return retained, err
+	}
 	running, err := s.executors.ListExecutorsRunning(ctx)
 	if err != nil {
 		return false, err

@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // AddTaskToWorkflow adds a task to a workflow with placement. Wrapped in a
@@ -242,7 +243,7 @@ func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workfl
 		FROM workflows WHERE id = ?
 	`, workflowSelectColumns)), id))
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("workflow not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", repoerrors.ErrWorkflowNotFound, id)
 	}
 	if err != nil {
 		return nil, err
