@@ -86,6 +86,7 @@ const HARNESS_RENDER_ERROR = "harness did not render";
 const NATIVE_SCROLL_MANAGEMENT_TEST_ID = "native-scroll-management-container";
 const AUTO_SCROLL_CONTAINER_TEST_ID = "auto-scroll-container";
 const CACHED_MESSAGE_ID = "cached-message";
+const SETTLED_MESSAGE_ID = "settled-message";
 const TEST_MESSAGES = [{} as Message];
 /** Always returns false: the harness never locks programmatic scrolling. */
 const NEVER_LOCKED = () => false;
@@ -412,18 +413,18 @@ describe("useNativeScrollManagement transcript pagination", () => {
       metrics.scrollHeight = 1400;
       rerender(
         <NativeScrollManagementHarness
-          items={[transcriptMessage("settled-message")]}
+          items={[transcriptMessage(SETTLED_MESSAGE_ID)]}
           metrics={metrics}
           sessionId="session-b"
           enabled
         />,
       );
-      act(() => {
-        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
-      });
 
       expect(scrollContainer.scrollTop).toBe(1400);
       expect(mockDockviewState.pendingChatInitialPlacement).toBeNull();
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -476,17 +477,17 @@ describe("useNativeScrollManagement transcript pagination", () => {
       metrics.scrollTop = 915;
       rerender(
         <NativeScrollManagementHarness
-          items={[transcriptMessage("settled-message")]}
+          items={[transcriptMessage(SETTLED_MESSAGE_ID)]}
           metrics={metrics}
           sessionId="session-b"
         />,
       );
-      act(() => {
-        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
-      });
 
       expect(scrollContainer.scrollTop).toBe(320);
       expect(scrollContainer.scrollTop).not.toBe(810);
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -556,19 +557,19 @@ describe("useNativeScrollManagement transcript pagination", () => {
       metrics.scrollTop = 480;
       rerender(
         <NativeScrollManagementHarness
-          items={[transcriptMessage("settled-message")]}
+          items={[transcriptMessage(SETTLED_MESSAGE_ID)]}
           metrics={metrics}
           sessionId="session-b"
           enabled
           hasUnreadDivider
         />,
       );
-      act(() => {
-        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
-      });
 
       expect(metrics.scrollTop).toBe(480);
       expect(mockDockviewState.pendingChatInitialPlacement).toBeNull();
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
     } finally {
       vi.unstubAllGlobals();
     }

@@ -19,6 +19,11 @@ import {
   STATE_GROUP_ORDER,
   type EffectiveTaskTreeState,
 } from "./effective-task-tree-state";
+import {
+  compareActivityTimestamps,
+  resolveTaskTreeActivity,
+  taskActivitySortValue,
+} from "./task-tree-activity";
 
 export type SidebarGroup = {
   key: string;
@@ -122,10 +127,6 @@ export function applyFilters(
 
 type SortComparator = (a: TaskSwitcherItem, b: TaskSwitcherItem) => number;
 
-function lastActivitySortValue(task: TaskSwitcherItem): string {
-  return task.lastActivityAt ?? task.updatedAt ?? task.createdAt ?? "";
-}
-
 const SORT_COMPARATORS: Record<Exclude<SortKey, "custom">, SortComparator> = {
   state: (a, b) => {
     const bucket = STATE_BUCKET_ORDER[getStateBucket(a)] - STATE_BUCKET_ORDER[getStateBucket(b)];
@@ -134,7 +135,8 @@ const SORT_COMPARATORS: Record<Exclude<SortKey, "custom">, SortComparator> = {
     return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
   },
   updatedAt: (a, b) => (a.updatedAt ?? "").localeCompare(b.updatedAt ?? ""),
-  lastActivityAt: (a, b) => lastActivitySortValue(a).localeCompare(lastActivitySortValue(b)),
+  lastActivityAt: (a, b) =>
+    compareActivityTimestamps(taskActivitySortValue(a), taskActivitySortValue(b)),
   createdAt: (a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""),
   title: (a, b) => (a.title ?? "").localeCompare(b.title ?? ""),
 };
@@ -176,6 +178,13 @@ export function applySort(
       if (bucket !== 0) return bucket;
       return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
     };
+  } else if (spec.key === "lastActivityAt" && subTasksByParentId) {
+    const latestActivityByTaskId = resolveTaskTreeActivity(tasks, subTasksByParentId);
+    cmp = (a, b) =>
+      compareActivityTimestamps(
+        latestActivityByTaskId.get(a.id) ?? taskActivitySortValue(a),
+        latestActivityByTaskId.get(b.id) ?? taskActivitySortValue(b),
+      );
   } else {
     cmp = spec.key === "custom" ? customComparator(orderedTaskIds) : SORT_COMPARATORS[spec.key];
   }

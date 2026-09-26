@@ -18,8 +18,17 @@ function kandevToolCall(opts: {
   toolName: string;
   input?: Record<string, unknown>;
   resultJson?: unknown;
+  output?: unknown;
   status?: "pending" | "running" | "in_progress" | "complete" | "error";
 }): Message {
+  let output = opts.output;
+  if (output === undefined && opts.resultJson !== undefined) {
+    output = {
+      _meta: null,
+      content: [{ type: "text", text: JSON.stringify(opts.resultJson) }],
+      structuredContent: null,
+    };
+  }
   return {
     id: "msg-1",
     session_id: toSessionId("s1"),
@@ -37,14 +46,7 @@ function kandevToolCall(opts: {
         generic: {
           name: "other",
           input: opts.input,
-          output:
-            opts.resultJson !== undefined
-              ? {
-                  _meta: null,
-                  content: [{ type: "text", text: JSON.stringify(opts.resultJson) }],
-                  structuredContent: null,
-                }
-              : undefined,
+          output,
         },
       },
     },
@@ -62,6 +64,9 @@ describe("hasKandevRenderer", () => {
     expect(
       hasKandevRenderer(kandevToolCall({ toolName: "mcp__kandev__show_rich_output_kandev" })),
     ).toBe(true);
+    expect(hasKandevRenderer(kandevToolCall({ toolName: "kandev: show_rich_output_kandev" }))).toBe(
+      true,
+    );
   });
 
   it("does not match unrelated tools", () => {
@@ -98,7 +103,9 @@ describe("KandevToolMessage host context", () => {
       expect.objectContaining({ sessionId: "session-1", onOpenFile }),
     );
   });
+});
 
+describe("KandevToolMessage rich output", () => {
   it("unwraps the real Codex ACP MCP arguments before rendering rich output", () => {
     const html = renderToStaticMarkup(
       <KandevToolMessage
@@ -123,44 +130,30 @@ describe("KandevToolMessage host context", () => {
     expect(html).not.toContain("This presentation is unavailable.");
   });
 
-  it("renders a CSV chart from the persisted tool-result snapshot", () => {
+  it("renders rich output from the persisted Cursor ACP MCP envelope", () => {
     const html = renderToStaticMarkup(
       <KandevToolMessage
         comment={kandevToolCall({
-          toolName: "mcp__kandev__show_rich_output_kandev",
+          toolName: "kandev: show_rich_output_kandev",
           input: {
-            version: 1,
-            title: "CSV presentation",
-            blocks: [
-              {
-                type: "chart",
-                chart_type: "bar",
-                title: "Requests by route",
-                summary: "Request volume from the workspace CSV.",
-                csv: {
-                  path: "reports/routes.csv",
-                  x_column: "route",
-                  series: [{ column: "requests" }],
-                },
+            kind: "other",
+            raw_input: {
+              providerIdentifier: "kandev",
+              toolName: "show_rich_output_kandev",
+              args: {
+                version: 1,
+                title: "Build health",
+                blocks: [{ type: "metrics", items: [{ label: "Passed", value: "38" }] }],
               },
-            ],
+            },
           },
-          resultJson: {
-            version: 1,
-            resolved_charts: [
-              {
-                block_index: 0,
-                labels: ["/api", "/health"],
-                series: [{ label: "requests", values: [2400, 800] }],
-              },
-            ],
-          },
+          output: { success: true },
         })}
       />,
     );
 
-    expect(html).toContain("CSV presentation");
-    expect(html).toContain('data-testid="rich-output-chart-bar"');
+    expect(html).toContain('data-testid="rich-output"');
+    expect(html).toContain("Build health");
     expect(html).not.toContain("This presentation is unavailable.");
   });
 });

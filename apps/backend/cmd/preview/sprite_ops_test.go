@@ -55,6 +55,33 @@ func TestGetOrCreateSpriteRetriesTransientGet(t *testing.T) {
 	}
 }
 
+func TestGetOrCreateSpriteRetriesBeyondThreeTransientErrors(t *testing.T) {
+	getCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		getCalls++
+		if getCalls <= 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`{"name":"kandev-pr-3895","status":"created"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := sprites.New("token", sprites.WithBaseURL(server.URL))
+	t.Cleanup(func() { _ = client.Close() })
+
+	sprite, err := getOrCreateSprite(t.Context(), client, "kandev-pr-3895")
+	if err != nil {
+		t.Fatalf("getOrCreateSprite() error after transient outage = %v", err)
+	}
+	if sprite.Name() != "kandev-pr-3895" {
+		t.Errorf("sprite.Name() = %q", sprite.Name())
+	}
+	if getCalls != 4 {
+		t.Errorf("get calls = %d, want 4 after three transient failures", getCalls)
+	}
+}
+
 func TestGetOrCreateSpriteReconcilesTransientCreateFailure(t *testing.T) {
 	getCalls := 0
 	createCalls := 0

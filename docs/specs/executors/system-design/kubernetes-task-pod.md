@@ -120,6 +120,49 @@ Use separate tasks with appropriately isolated executor policies when agents
 must not share trust. Regression coverage verifies distinct profiles and
 credentials use one pod without overwriting each other's launch settings.
 
+## Managed Git environment handoff
+
+Lifecycle owns the in-memory effective execution environment. Orchestrator
+credential routing issues the current session's broker contract; Kubernetes
+normalizes its helper executable to `/opt/kandev/agentctl`. Bootstrap and
+per-session auth-file construction must agree with the environment delivered
+through agentctl configure, including on an existing workspace.
+
+`ExecutorInstance.ToAgentExecution` captures the launch environment. Before
+`configureAndStartAgent` composes a later request, it must distinguish an absent
+`runtime_env` metadata entry from an explicit `SetExecutionEnv` replacement,
+including an empty replacement. Absence uses the captured launch snapshot;
+an explicit replacement removes obsolete managed fields and generated routing
+before merging the current request. An unrelated or partial replacement must
+not silently restore old leases. Ordinary profile values and user-owned indexed
+Git entries retain their existing composition rules.
+
+Apply Kubernetes helper normalization to the effective environment after
+composition and before storing or delivering it. A missing managed broker
+contract must not activate a helper. Container restart configuration uses this
+same effective snapshot, rather than recovering credentials from a stale
+pod-wide environment or a host executable path.
+
+Agentctl's configure boundary continues to clear inherited managed credentials
+before applying the delivered environment. Both configure modes must preserve
+intentional removal; do not weaken this boundary to compensate for an incomplete
+lifecycle request. Generated managed helper entries, their preceding reset and
+adjacent generated `credential.useHttpPath=true` entry must be removed on
+replacement, while unrelated user configuration remains. The unmarked legacy
+`!agentctl git-credential` helper is managed only when the inherited environment
+also contains a broker URL or lease; without that ownership evidence it remains
+user configuration. Reset matching ignores Git section and variable name case,
+but preserves URL subsection case.
+Malformed indexed configuration fails before subprocess start.
+
+The existing [GitHub credential design](../../integrations/system-design/github-authentication-02.md)
+owns policy, lease scope, connection-generation revocation and broker behavior.
+This repair does not change that security model or the task trust boundary.
+Regression evidence crosses lifecycle configuration and agentctl composition;
+acceptance must exercise actual Git subprocesses, not only preparation probes.
+The [repair package](../../../plans/kubernetes-managed-git-handoff/plan.md)
+records implementation and disposable live acceptance results.
+
 ## Session termination and task cleanup
 
 Session stop/delete terminates only that agentctl instance and its local

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconCircleCheckFilled,
@@ -81,10 +81,6 @@ type MultiChipProps = {
   onRemovePR?: (pr: TaskPR) => Promise<void>;
   triggerRef?: TriggerRef;
 };
-
-function focusAfterCollapse(triggerRef?: TriggerRef) {
-  if (triggerRef) setTimeout(() => triggerRef.current?.focus(), 0);
-}
 
 function chipStatus(pr: TaskPR): ChipStatus {
   // Terminal PRs are filtered before this helper. For active PRs, queue
@@ -183,6 +179,7 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   const { prs, refresh, unlink } = useTaskPR(taskId);
   const { options: automationOptions } = useTaskCIAutomationOptions(taskId);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const [restoreFocusAfterCollapse, setRestoreFocusAfterCollapse] = useState(false);
   // Defensive Array.isArray: a partial hydration can briefly seed the store
   // with a non-array value (same guard as PRTaskIcon).
   // Only open PRs are worth a CI chip — terminal PRs (merged/closed) are
@@ -190,6 +187,14 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   // stays visible as long as at least one is still open.
   const allPRs = Array.isArray(prs) ? prs : [];
   const openPRs = allPRs.filter((p) => p.state !== "merged" && p.state !== "closed");
+  useEffect(() => {
+    if (!restoreFocusAfterCollapse || allPRs.length !== 1) return;
+    const frame = requestAnimationFrame(() => {
+      triggerRef.current?.focus();
+      setRestoreFocusAfterCollapse(false);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [allPRs.length, restoreFocusAfterCollapse]);
   // Subscribe at the chip level so the cache warms even when the top-bar PR
   // button isn't mounted (e.g. small viewport that hides it). Warm the PR the
   // popover will actually open first (worst-status via pickDefaultPR — for a
@@ -197,6 +202,16 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   // task warm when the popover opens.
   usePRFeedbackBackgroundSync(workspaceId, pickDefaultPR(openPRs));
   if (allPRs.length === 0 || (allPRs.length === 1 && openPRs.length === 0)) return null;
+  const removePR = async (pr: TaskPR) => {
+    const collapsesToSinglePR = allPRs.length === 2;
+    if (collapsesToSinglePR) setRestoreFocusAfterCollapse(true);
+    try {
+      await unlink(pr.id);
+    } catch (error) {
+      if (collapsesToSinglePR) setRestoreFocusAfterCollapse(false);
+      throw error;
+    }
+  };
   if (allPRs.length === 1)
     return (
       <PRStatusChipInner
@@ -212,7 +227,7 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
       statusPrs={openPRs}
       automation={automationForPRs(automationOptions, openPRs)}
       refreshTaskPR={refresh}
-      onRemovePR={(pr) => unlink(pr.id)}
+      onRemovePR={removePR}
       triggerRef={triggerRef}
     />
   );
@@ -373,7 +388,6 @@ function PRStatusChipMultiHoverCard({
           enabled={open}
           refreshTaskPR={refreshTaskPR}
           onRemovePR={onRemovePR}
-          onCollapseFocus={() => focusAfterCollapse(triggerRef)}
         />
       </PopoverContent>
     </Popover>
@@ -414,7 +428,6 @@ function PRStatusChipMultiDrawer({
           enabled={open}
           refreshTaskPR={refreshTaskPR}
           onRemovePR={onRemovePR}
-          onCollapseFocus={() => focusAfterCollapse(triggerRef)}
         />
       </ChangeRequestStatusDrawerContent>
     </Drawer>

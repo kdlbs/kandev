@@ -118,6 +118,10 @@ var ErrCoordinatorGrantConflict = errors.New("coordinator grant already exists f
 // contract.
 var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")
 
+// ErrWorkflowChangeConflict reports that an explicit change-workflow request
+// no longer matches the task source or task version it was opened against.
+var ErrWorkflowChangeConflict = errors.New("task changed since workflow change was opened")
+
 // ErrRunnerMutabilityConflict wraps one of the ten ordered mutability reason
 // codes rejecting a runner switch. Reason is always a member of the same
 // closed vocabulary the projection uses, never "eligible" and never empty.

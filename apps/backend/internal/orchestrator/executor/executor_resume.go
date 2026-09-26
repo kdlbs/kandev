@@ -985,6 +985,17 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 		updateErr = e.persistSessionFullRowIfCurrentState(ctx, session, expectedState)
 	}
 	if updateErr != nil {
+		if startAgent && errors.Is(updateErr, errSessionAdvancedToRunning) {
+			if resp.PrepareResult == nil || !resp.PrepareResult.Success {
+				return nil
+			}
+			return e.repo.SetSessionMetadataKey(
+				ctx,
+				sessionID,
+				"prepare_result",
+				buildPrepareResultMetadata(resp.PrepareResult),
+			)
+		}
 		e.logger.Error("failed to update agent session after launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -1103,10 +1114,6 @@ func (e *Executor) resumeSession(
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return nil, err
 	}
-	if startAgent {
-		e.observeSessionCoresidency(ctx, sessionCoresidencySiteResume, task.ID, session.ID)
-	}
-
 	resumeInitialState := session.State
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
 	completedResume := options.AllowCompletedSessionResume &&

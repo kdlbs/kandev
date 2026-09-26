@@ -136,6 +136,34 @@ func TestCreateCustomTUIAgent_NoCommandArgs(t *testing.T) {
 	}
 }
 
+func TestCreateCustomTUIAgent_DBFailureInvalidatesDiscovery(t *testing.T) {
+	st := newFakeStore()
+	c := newCustomTUIControllerWithDiscovery(t, st)
+	st.createAgentHook = func() {
+		results, err := c.discovery.Detect(context.Background())
+		if err != nil {
+			t.Fatalf("Detect during create: %v", err)
+		}
+		if !slices.ContainsFunc(results, func(result discovery.Availability) bool {
+			return result.Name == "failed-agent"
+		}) {
+			t.Fatal("the in-flight discovery did not observe the registered agent")
+		}
+	}
+	st.createAgentErr = errors.New("create agent failed")
+
+	_, err := c.CreateCustomTUIAgent(context.Background(), CreateCustomTUIAgentRequest{
+		DisplayName: "Failed Agent",
+		Command:     "failed-cli",
+	})
+	if !errors.Is(err, st.createAgentErr) {
+		t.Fatalf("CreateCustomTUIAgent error = %v, want %v", err, st.createAgentErr)
+	}
+	if discoveryLists(t, c, "failed-agent") {
+		t.Fatal("failed agent remained in discovery after the registration rollback")
+	}
+}
+
 // --- MCP strategy ------------------------------------------------------------
 
 // TestCreateCustomTUIAgent_MCPStrategyEnablesInjection is the test that

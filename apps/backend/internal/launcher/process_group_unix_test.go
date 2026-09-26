@@ -32,6 +32,52 @@ func TestConfigureManagedProcessCreatesProcessGroup(t *testing.T) {
 	}
 }
 
+func TestManagedProcessKillTreatsNonzeroExitAsUnclean(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "exit 23")
+	configureManagedProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start fixture: %v", err)
+	}
+
+	proc := &managedProcess{cmd: cmd, done: make(chan struct{})}
+	go func() {
+		err := cmd.Wait()
+		code := 0
+		if err != nil {
+			code = 1
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				code = exitErr.ExitCode()
+			}
+		}
+		proc.mu.Lock()
+		proc.exitCode = code
+		proc.exited = true
+		proc.mu.Unlock()
+		close(proc.done)
+	}()
+	<-proc.done
+
+	supervisor := newSupervisor()
+	supervisor.add(proc)
+	backend := &restartableBackend{exitCh: make(chan int, 1)}
+	backend.exitCh <- 0
+	if got := waitForAppExit(supervisor, backend); got != 1 {
+		t.Fatalf("launcher exit code after unclean shutdown = %d, want 1", got)
+	}
+	exitCh, _ := captureLauncherExit(t)
+	supervisor.attachSignals()
+	sendLauncherTestSignal(t, os.Interrupt)
+	waitForLauncherExitCode(t, exitCh, 1)
+
+	result := proc.kill()
+	if !result.exitStatusKnown || result.exitCode != 23 {
+		t.Fatalf("managed child exit status known=%v code=%d, want true/23", result.exitStatusKnown, result.exitCode)
+	}
+	if got := shutdownExitCode([]managedProcessShutdownResult{result}); got == 0 {
+		t.Fatal("nonzero child exit was accepted as a clean shutdown")
+	}
+}
+
 func TestManagedProcessKillSendsGracefulSignalBeforeForceKill(t *testing.T) {
 	tempDir := t.TempDir()
 	readyFile := filepath.Join(tempDir, "ready")
