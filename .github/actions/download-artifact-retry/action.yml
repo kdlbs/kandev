@@ -33,13 +33,22 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Prepare artifact staging directory
+      shell: bash
+      env:
+        STAGING_PATH: ${{ runner.temp }}/kandev-artifact-retry/${{ inputs.path }}
+      run: |
+        set -euo pipefail
+        rm -rf -- "$STAGING_PATH"
+        mkdir -p "$STAGING_PATH"
+
     - name: Download artifact (attempt 1/3)
       id: download_1
       continue-on-error: true
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         name: ${{ inputs.name }}
-        path: ${{ inputs.path }}
+        path: ${{ runner.temp }}/kandev-artifact-retry/${{ inputs.path }}
         pattern: ${{ inputs.pattern }}
         merge-multiple: ${{ inputs.merge-multiple }}
         repository: ${{ inputs.repository }}
@@ -50,10 +59,11 @@ runs:
       if: steps.download_1.outcome == 'failure'
       shell: bash
       env:
-        DOWNLOAD_PATH: ${{ inputs.path }}
+        STAGING_PATH: ${{ runner.temp }}/kandev-artifact-retry/${{ inputs.path }}
       run: |
         set -euo pipefail
-        rm -rf -- "$DOWNLOAD_PATH"
+        rm -rf -- "$STAGING_PATH"
+        mkdir -p "$STAGING_PATH"
         sleep 10
 
     - name: Download artifact (attempt 2/3)
@@ -63,7 +73,7 @@ runs:
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         name: ${{ inputs.name }}
-        path: ${{ inputs.path }}
+        path: ${{ runner.temp }}/kandev-artifact-retry/${{ inputs.path }}
         pattern: ${{ inputs.pattern }}
         merge-multiple: ${{ inputs.merge-multiple }}
         repository: ${{ inputs.repository }}
@@ -74,10 +84,11 @@ runs:
       if: steps.download_2.outcome == 'failure'
       shell: bash
       env:
-        DOWNLOAD_PATH: ${{ inputs.path }}
+        STAGING_PATH: ${{ runner.temp }}/kandev-artifact-retry/${{ inputs.path }}
       run: |
         set -euo pipefail
-        rm -rf -- "$DOWNLOAD_PATH"
+        rm -rf -- "$STAGING_PATH"
+        mkdir -p "$STAGING_PATH"
         sleep 30
 
     - name: Download artifact (attempt 3/3)
@@ -87,16 +98,33 @@ runs:
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         name: ${{ inputs.name }}
-        path: ${{ inputs.path }}
+        path: ${{ runner.temp }}/kandev-artifact-retry/${{ inputs.path }}
         pattern: ${{ inputs.pattern }}
         merge-multiple: ${{ inputs.merge-multiple }}
         repository: ${{ inputs.repository }}
         run-id: ${{ inputs.run-id }}
         github-token: ${{ inputs.github-token }}
 
+    - name: Publish downloaded artifact
+      if: >-
+        steps.download_1.outcome == 'success' || steps.download_2.outcome == 'success' ||
+        steps.download_3.outcome == 'success'
+      shell: bash
+      env:
+        DOWNLOAD_PATH: ${{ inputs.path }}
+        STAGING_PATH: ${{ runner.temp }}/kandev-artifact-retry/${{ inputs.path }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$DOWNLOAD_PATH"
+        cp -a "$STAGING_PATH"/. "$DOWNLOAD_PATH"/
+        rm -rf -- "$STAGING_PATH"
+
     - name: Fail after artifact download retries
       if: steps.download_3.outcome == 'failure'
       shell: bash
+      env:
+        STAGING_PATH: ${{ runner.temp }}/kandev-artifact-retry/${{ inputs.path }}
       run: |
+        rm -rf -- "$STAGING_PATH"
         echo "::error::Artifact download failed after 3 attempts."
         exit 1
