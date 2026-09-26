@@ -7,7 +7,8 @@
       "settings": {
         "preventAutoStartAgentOnOpen": "開啟任務時不自動啟動代理程式",
         "preventAutoStartAgentOnOpenHelp": "重新啟動後，或從工作流程最後一步開啟任務時，不會自動啟動代理程式，改為顯示「啟動代理程式」按鈕。",
-        "chatAnimationsDescription": "在此裝置上為新文字、新聊天項目和滾動新增動畫。遵循減少動態效果的偏好設定。"
+        "chatAnimationsDescription": "在此裝置上為新文字、新聊天項目和滾動新增動畫。遵循減少動態效果的偏好設定。",
+        "requireExactModelHelper": "僅當此精確模型已公佈並成功套用時才啟動工作階段。關閉此選項後，已儲存的備援設定仍可使用。"
       },
       "common": {
         "nativeFolderPickerUnavailable": "原生資料夾選擇器無法使用。請重新載入 Kandev 後再試。",
@@ -36,6 +37,17 @@
       },
       "system": {
         "diskRefreshHelp": "遍歷 Kandev 資料目錄內的所有子目錄並累計檔案大小。結果會快取幾小時；點選可立即重新計算。大型工作區可能需要幾秒。"
+      },
+      "executors": {
+        "containerNetworksDescription": "選擇此設定檔的任務容器所連線的 Docker 網路。",
+        "primaryNetworkMustPublishPorts": "主網路承載已發布的 agentctl 連接埠，因此必須是可發布連接埠的網路。請改為在下方連線 macvlan 或 ipvlan 網路。"
+      },
+      "office": {
+        "exportConfigurationChanged": "設定已變更。請重新載入預覽後再下載。",
+        "selectAWorkspaceToExport": "選擇工作區以匯出。"
+      },
+      "inboxHistory": {
+        "truncatedNotice": "還有更多歷史問題可查看。"
       }
     },
     "zh-hk": {
@@ -71,6 +83,16 @@
       },
       "system": {
         "diskRefreshHelp": "遍歷 Kandev 數據目錄內的所有子目錄並累計檔案大小。結果會快取幾小時；點擊可立即重新計算。大型工作區可能需要幾秒。"
+      },
+      "executors": {
+        "containerNetworksDescription": "選擇此設定檔的任務容器所連接的 Docker 網絡。",
+        "gatewayPriority": "閘道優先順序",
+        "gatewayPriorityNote": "閘道優先順序最高的連接提供容器的預設路由。將所有優先順序留空可保留 Docker 自身的選擇。",
+        "primaryNetworkMustPublishPorts": "主網絡承載已發佈的 agentctl 連接埠，因此必須是可發佈連接埠的網絡。請改為在下方連接 macvlan 或 ipvlan 網絡。"
+      },
+      "office": {
+        "exportConfigurationChanged": "設定已變更。請重新載入預覽後再下載。",
+        "selectAWorkspaceToExport": "選擇工作區以匯出。"
       }
     }
   },

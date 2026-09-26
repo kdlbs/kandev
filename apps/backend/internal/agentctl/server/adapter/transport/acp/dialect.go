@@ -60,6 +60,8 @@ func newACPDialect(agentID string) acpDialect {
 		return newGrokACPDialect()
 	case codexAgentID:
 		return newCodexACPDialect()
+	case cursorAgentID:
+		return newCursorACPDialect()
 	case claudeAgentID:
 		return newClaudeACPDialect()
 	case mockAgentID:

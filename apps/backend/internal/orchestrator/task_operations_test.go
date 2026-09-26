@@ -308,14 +308,10 @@ func TestCreateStartSession_OfficeUnassignedReusesResolvedProfileSession(t *test
 	}
 }
 
-// TestCreateStartSession_ReviewerRunFlagOff is the regression baseline: a
-// review run whose agent (ceo-reviewer) differs from the task's runner seat
-// (pm-runner) lands in the runner's session when features.officeSessionIdentity
-// is off (the default), reproducing the FORBIDDEN bug this task fixes —
-// record_step_decision_kandev resolves the session's AgentProfileID as the
-// decider identity, so the reviewer's own decision is checked against seats
-// the runner (not the reviewer) occupies.
-func TestCreateStartSession_ReviewerRunFlagOff(t *testing.T) {
+// TestCreateStartSession_ReviewerRunUsesParticipantSession verifies that an
+// Office review run uses the reviewer's session even when no feature override
+// is configured.
+func TestCreateStartSession_ReviewerRunUsesParticipantSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()
@@ -360,16 +356,12 @@ func TestCreateStartSession_ReviewerRunFlagOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
-	if session.AgentProfileID != "pm-runner" {
-		t.Fatalf("session owner = %q, want pm-runner (flag off preserves runner-keyed identity)", session.AgentProfileID)
+	if session.AgentProfileID != "ceo-reviewer" {
+		t.Fatalf("session owner = %q, want ceo-reviewer", session.AgentProfileID)
 	}
 }
 
-// TestCreateStartSession_ReviewerRunFlagOnGetsOwnSession is the fix's green
-// case: with features.officeSessionIdentity on, the same reviewer run lands
-// in a session keyed on the run's own agent (ceo-reviewer), not the task's
-// runner seat (pm-runner).
-func TestCreateStartSession_ReviewerRunFlagOnGetsOwnSession(t *testing.T) {
+func TestCreateStartSession_ReviewerRunCreatesOwnSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()
@@ -403,8 +395,6 @@ func TestCreateStartSession_ReviewerRunFlagOnGetsOwnSession(t *testing.T) {
 	}
 
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
-	svc.config.OfficeSessionIdentity = true
-
 	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "ceo-reviewer", "", "", "")
 	if err != nil {
 		t.Fatalf("create start session: %v", err)

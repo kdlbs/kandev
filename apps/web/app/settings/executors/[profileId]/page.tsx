@@ -28,6 +28,7 @@ import {
   envVarsToRows,
 } from "@/components/settings/profile-edit/env-vars-card";
 import { ProfileScriptCards } from "@/components/settings/profile-edit/profile-script-cards";
+import { RemoteDockerConnectionSection } from "@/components/settings/remote-docker-connection-section";
 import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
 import { SSHTaskDirReclamationCard } from "@/components/settings/ssh-task-dir-reclamation-card";
 import {
@@ -71,10 +72,11 @@ import {
   parseRemoteCredentials,
 } from "@/components/settings/profile-edit/executor-profile-baselines";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
-import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
+import { useProfileRemoteAuthState } from "@/components/settings/profile-edit/use-profile-remote-auth-state";
 import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { buildSaveConfig } from "@/components/settings/profile-edit/serialize-executor-config";
 import { useUserNamespacesFormState } from "@/components/settings/profile-edit/use-user-namespaces-form-state";
+import { useDockerNetworksFormState } from "@/components/settings/profile-edit/use-docker-networks-form-state";
 import { useProfileRuntimeFormState } from "@/components/settings/profile-edit/use-profile-runtime-form-state";
 import { KubernetesProfileSections } from "@/components/settings/kubernetes-profile-sections";
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
@@ -100,44 +102,6 @@ function useProfileFromStore(profileId: string) {
   );
   const profile = executor?.profiles?.find((p: ExecutorProfile) => p.id === profileId) ?? null;
   return executor && profile ? { executor, profile } : null;
-}
-
-function useRemoteAuthState(profile: ExecutorProfile) {
-  const [networkPolicyRules, setNetworkPolicyRules] = useState<NetworkPolicyRule[]>(() =>
-    parseNetworkPolicyRules(profile.config),
-  );
-  const [remoteCredentials, setRemoteCredentials] = useState<string[]>(() =>
-    parseRemoteCredentials(profile.config),
-  );
-  const [configBundleIds, setConfigBundleIds] = useState<string[]>(() =>
-    parseAgentConfigBundles(profile.config),
-  );
-  const [agentEnvVars, setAgentEnvVars] = useState<Record<string, string | null>>(() =>
-    parseRemoteAuthSecrets(profile.config),
-  );
-
-  const handleAgentEnvVarChange = useCallback((agentId: string, secretId: string | null) => {
-    setAgentEnvVars((prev) => ({ ...prev, [agentId]: secretId }));
-  }, []);
-
-  const reset = useCallback(() => {
-    setNetworkPolicyRules(parseNetworkPolicyRules(profile.config));
-    setRemoteCredentials(parseRemoteCredentials(profile.config));
-    setConfigBundleIds(parseAgentConfigBundles(profile.config));
-    setAgentEnvVars(parseRemoteAuthSecrets(profile.config));
-  }, [profile.config]);
-
-  return {
-    networkPolicyRules,
-    setNetworkPolicyRules,
-    remoteCredentials,
-    setRemoteCredentials,
-    configBundleIds,
-    setConfigBundleIds,
-    agentEnvVars,
-    handleAgentEnvVarChange,
-    reset,
-  };
 }
 
 function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
@@ -297,6 +261,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
   const runtime = useProfileRuntimeFormState(executor, profile);
   const userNamespaces = useUserNamespacesFormState(profile.config);
+  const dockerNetworks = useDockerNetworksFormState(profile.config);
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar, resetEnvVars } = useEnvVarRows(
     profile.env_vars,
   );
@@ -305,7 +270,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     deriveSpritesSecretId(profile.env_vars),
   );
   const cursorCloud = useCursorCloudProfileSettings(profile);
-  const remoteAuth = useRemoteAuthState(profile);
+  const remoteAuth = useProfileRemoteAuthState(profile);
   const gitIdentity = useGitIdentityState(runtime.isRemote, profile);
   const mcpPolicyErrorKey = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
 
@@ -336,7 +301,17 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     cursorCloud.reset();
     remoteAuth.reset();
     gitIdentity.reset();
-  }, [cursorCloud.reset, gitIdentity, profile, remoteAuth, resetEnvVars, runtime, userNamespaces]);
+    dockerNetworks.resetDockerNetworks();
+  }, [
+    cursorCloud.reset,
+    dockerNetworks,
+    gitIdentity,
+    profile,
+    remoteAuth,
+    resetEnvVars,
+    runtime,
+    userNamespaces,
+  ]);
 
   return {
     ...runtime,
@@ -351,6 +326,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     allowUserNamespaces: userNamespaces.allowUserNamespaces,
     setAllowUserNamespaces: userNamespaces.setAllowUserNamespaces,
     resetUserNamespaces: userNamespaces.resetUserNamespaces,
+    ...dockerNetworks,
     isLocalDocker: executor.type === "local_docker",
     envVarRows,
     addEnvVar,
@@ -395,6 +371,7 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
   const canManageKubernetes = useKubernetesAdminAccess();
   return (
     <>
+      {executor.type === "remote_docker" && <RemoteDockerConnectionSection executor={executor} />}
       {executor.type === "ssh" && (
         <SSHAgentReadinessCard
           executorId={executor.id}
@@ -429,9 +406,11 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           onDockerfileChange={form.setDockerfile}
           imageTag={form.imageTag}
           onImageTagChange={form.setImageTag}
+          remoteExecutorId={executor.type === "remote_docker" ? executor.id : undefined}
           allowsUserNamespaces={form.isLocalDocker}
           allowUserNamespaces={form.allowUserNamespaces}
           onAllowUserNamespacesChange={form.setAllowUserNamespaces}
+          networks={form}
         />
       )}
       {form.isKubernetes && (

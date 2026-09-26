@@ -112,7 +112,12 @@ export default defineConfig({
       //
       // See apps/web/e2e/README.md for context and how to run locally.
       name: "containers",
-      testMatch: [/docker\/.*\.spec\.ts/, /ssh\/.*\.spec\.ts/, /kubernetes\/.*\.spec\.ts/],
+      testMatch: [
+        /docker\/.*\.spec\.ts/,
+        /remote-docker\/.*\.spec\.ts/,
+        /ssh\/.*\.spec\.ts/,
+        /kubernetes\/.*\.spec\.ts/,
+      ],
       use: { ...devices["Desktop Chrome"] },
       timeout: 180_000,
       // Local `--shard=N/6` runs can still split this project at test level.

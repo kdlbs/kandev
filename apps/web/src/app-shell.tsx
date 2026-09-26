@@ -94,6 +94,7 @@ export function AppShell({ children }: AppShellProps) {
                         className="flex h-dvh min-h-0 w-full overflow-hidden"
                         data-testid="app-shell"
                         data-window-controls-overlay={titlebar.visible ? "visible" : "hidden"}
+                        data-macos-tauri-overlay={titlebar.macTauriOverlay ? "true" : undefined}
                         style={shellStyle}
                       >
                         <AppSidebar />

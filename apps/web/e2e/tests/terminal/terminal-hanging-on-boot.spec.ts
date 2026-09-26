@@ -79,9 +79,10 @@ test.describe("Terminal hangs on Connecting", () => {
     seedData,
   }) => {
     test.setTimeout(60_000);
-    await createTaskAndWaitForDone(apiClient, seedData, "Cold Load Terminal Task");
-
-    const session = await navigateToTaskViaKanban(testPage, "Cold Load Terminal Task");
+    const task = await createTaskAndWaitForDone(apiClient, seedData, "Cold Load Terminal Task");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
   });

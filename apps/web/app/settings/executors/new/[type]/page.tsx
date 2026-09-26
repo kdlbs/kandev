@@ -40,6 +40,10 @@ import {
 } from "@/components/settings/profile-edit/docker-sections";
 import { SpritesApiKeyCard } from "@/components/settings/profile-edit/sprites-api-key-card";
 import { CursorCloudConfigCard } from "@/components/settings/profile-edit/cursor-cloud-config-card";
+import { DockerNetworkCard } from "@/components/settings/profile-edit/docker-network-card";
+import { buildProfileConfig } from "@/components/settings/profile-edit/build-create-profile-config";
+import { dockerNetworksInvalidReasonKey } from "@/components/settings/profile-edit/build-docker-network-config";
+import { useDockerNetworksFormState } from "@/components/settings/profile-edit/use-docker-networks-form-state";
 import { NetworkPoliciesCard } from "@/components/settings/profile-edit/sprites-sections";
 import {
   RemoteCredentialsCard,
@@ -50,9 +54,9 @@ import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import type { Executor, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 
 import { EXECUTOR_TYPE_MAP, executorTypeLabel, type ExecutorTypeInfo } from "./executor-types";
+import { RemoteDockerCreatePage } from "./remote-docker-create-page";
 import { SSHCreatePage } from "./ssh-create-page";
 import { KubernetesCreatePage } from "./kubernetes-create-page";
-import { buildProfileConfig } from "./create-profile-config";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
@@ -71,6 +75,9 @@ export default function CreateProfilePage({ executorType }: { executorType: stri
     return <InvalidTypeFallback />;
   }
 
+  if (executorType === "remote_docker") {
+    return <RemoteDockerCreatePage />;
+  }
   if (executorType === "ssh") {
     return <SSHCreatePage />;
   }
@@ -230,6 +237,7 @@ function useCreateProfileFormState(executorType: ExecutorType) {
   const [dockerfile, setDockerfile] = useState("");
   const [imageTag, setImageTag] = useState("");
   const [allowUserNamespaces, setAllowUserNamespaces] = useState(false);
+  const dockerNetworks = useDockerNetworksFormState(undefined);
   const [builtDockerImage, setBuiltDockerImage] = useState<DockerBuildSuccess | null>(null);
   const flags = useCreateRemoteFlags(executorType);
   const gitIdentity = useCreateGitIdentityState(flags.isRemote);
@@ -303,6 +311,7 @@ function useCreateProfileFormState(executorType: ExecutorType) {
     setImageTag,
     allowUserNamespaces,
     setAllowUserNamespaces,
+    ...dockerNetworks,
     recordDockerBuildSuccess,
     dockerImageBuilt,
     gitUserName: gitIdentity.gitUserName,
@@ -386,26 +395,7 @@ function CreateProfileSections({
           onCallbackUrlChange={form.setCursorCloudCallbackUrl}
         />
       )}
-      {form.isDocker && (
-        <>
-          <DockerfileBuildCard
-            dockerfile={form.dockerfile}
-            baselineDockerfile=""
-            onDockerfileChange={form.setDockerfile}
-            imageTag={form.imageTag}
-            baselineImageTag=""
-            onImageTagChange={form.setImageTag}
-            onBuildSuccess={form.recordDockerBuildSuccess}
-          />
-          {form.isLocalDocker && (
-            <UserNamespacesCard
-              enabled={form.allowUserNamespaces}
-              baselineEnabled={false}
-              onChange={form.setAllowUserNamespaces}
-            />
-          )}
-        </>
-      )}
+      <CreateDockerProfileSection form={form} />
       <CreateRemoteCredentialsSection executorType={executorType} form={form} secrets={secrets} />
       {form.isSprites && (
         <NetworkPoliciesCard
@@ -450,6 +440,44 @@ function CreateProfileSections({
         mcpPolicyErrorKey={form.mcpPolicyErrorKey}
         onPolicyChange={form.setMcpPolicy}
       />
+    </>
+  );
+}
+
+function CreateDockerProfileSection({
+  form,
+}: {
+  form: ReturnType<typeof useCreateProfileFormState>;
+}) {
+  if (!form.isDocker) return null;
+  return (
+    <>
+      <DockerfileBuildCard
+        dockerfile={form.dockerfile}
+        baselineDockerfile=""
+        onDockerfileChange={form.setDockerfile}
+        imageTag={form.imageTag}
+        baselineImageTag=""
+        onImageTagChange={form.setImageTag}
+        onBuildSuccess={form.recordDockerBuildSuccess}
+      />
+      <DockerNetworkCard
+        primaryNetwork={form.primaryNetwork}
+        onPrimaryNetworkChange={form.setPrimaryNetwork}
+        primaryGwPriority={form.primaryGwPriority}
+        onPrimaryGwPriorityChange={form.setPrimaryGwPriority}
+        additionalNetworks={form.additionalNetworks}
+        onAddAdditionalNetwork={form.addAdditionalNetwork}
+        onUpdateAdditionalNetwork={form.updateAdditionalNetwork}
+        onRemoveAdditionalNetwork={form.removeAdditionalNetwork}
+      />
+      {form.isLocalDocker && (
+        <UserNamespacesCard
+          enabled={form.allowUserNamespaces}
+          baselineEnabled={false}
+          onChange={form.setAllowUserNamespaces}
+        />
+      )}
     </>
   );
 }
@@ -507,7 +535,7 @@ function getCreateDisabledReasonKey(
     if (!form.dockerfile.trim()) return "executors:addDockerfileContentBeforeCreating";
     if (!form.dockerImageBuilt) return "executors:buildThisDockerImageBeforeCreating";
   }
-  return null;
+  return dockerNetworksInvalidReasonKey(form);
 }
 
 function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormState>) {
@@ -533,6 +561,9 @@ function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormS
       dockerfile: form.dockerfile,
       imageTag: form.imageTag,
       allowUserNamespaces: form.allowUserNamespaces,
+      primaryNetwork: form.primaryNetwork,
+      primaryGwPriority: form.primaryGwPriority,
+      additionalNetworks: form.additionalNetworks,
     }),
     prepare_script: form.prepareScript,
     cleanup_script: form.cleanupScript,

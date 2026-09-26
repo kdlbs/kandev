@@ -254,6 +254,7 @@ func Run(args []string, build BuildInfo) int {
 	// backend cannot reconcile or migrate the live home before its bind fails.
 	owner, err := acquireRuntimeStateOwnership(cfg)
 	if err != nil {
+		writeDesktopStartupConflictMarker(os.Stderr, cfg, err)
 		fmt.Fprintf(os.Stderr,
 			"Failed to acquire backend runtime-state ownership: %v; use a separate KANDEV_HOME_DIR for an intentional second instance\n",
 			err)
@@ -1558,7 +1559,6 @@ func initOfficeServices(
 		agentRegistry, log, services, lifecycleMgr, cfg.Office.JWTSigningKey,
 	)
 	wireOfficeSvcsDependencies(services, repos, eventBus, orchestratorSvc, agentRegistry)
-	services.OfficeSvcs.Dashboard.SetOfficeSessionIdentity(cfg.Features.OfficeSessionIdentity)
 
 	// Reconcile using the new infra package.
 	reconciler := officeinfra.NewReconciler(repos.Office, log)
@@ -1939,6 +1939,16 @@ func startSchedulingRuntime(
 		// see the exact seats the engine's own fan-out would resolve, so it
 		// is wired the same engine.ParticipantStore instance.
 		services.OfficeSvcs.Scheduler.SetParticipantStore(engineParticipants)
+		// Gate the remaining task_assigned producers (assignment events,
+		// the unstarted-task recovery sweep, and the onboarding task's
+		// initial wake) to steps that actually auto-start an agent — see
+		// shared.IsAssignmentWakeEligible. Workspaces and TreeControls are
+		// the same *service.Service singleton, so one call wires both the
+		// event-subscriber and recovery-sweep code paths.
+		services.OfficeSvcs.Workspaces.SetWorkflowStepGetter(services.Workflow)
+		if services.OfficeSvcs.Onboarding != nil {
+			services.OfficeSvcs.Onboarding.SetWorkflowStepGetter(services.Workflow)
+		}
 	}
 	// Start the runs scheduler (tick + signal listener). It drives
 	// orchScheduler.Tick on both periodic ticks and event-driven signals.

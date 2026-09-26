@@ -2223,13 +2223,10 @@ func (s *Service) recordDynamicRouteResolutionFailure(
 // resolved execution profile supplies the owner until the seat is assigned.
 //
 // The session-owner identity passed to EnsureSessionForAgentWithCreation is,
-// by default, the task's runner seat (dbTask.AssigneeAgentProfileID) — even
-// for a reviewer/approver run whose agent differs from the runner, which
-// wrongly binds that run's session (and later its decisions) to the runner's
-// identity. When features.officeSessionIdentity is on, officeAgentProfileID
-// (the run's own agent, captured by the caller before step/routing overrides
-// mutate agentProfileID) is used instead so each participant agent gets its
-// own session per task.
+// by default, the task's runner seat (dbTask.AssigneeAgentProfileID). For a
+// reviewer/approver run, officeAgentProfileID (the run's own agent, captured
+// by the caller before step/routing overrides mutate agentProfileID) is used
+// instead so each participant agent gets its own session per task.
 func (s *Service) createStartSession(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
@@ -2297,7 +2294,7 @@ func (s *Service) officeSessionOwnerID(task *models.Task, agentProfileID, office
 		}
 		return agentProfileID
 	}
-	if s.config.OfficeSessionIdentity && officeAgentProfileID != "" {
+	if officeAgentProfileID != "" {
 		return officeAgentProfileID
 	}
 	return task.AssigneeAgentProfileID

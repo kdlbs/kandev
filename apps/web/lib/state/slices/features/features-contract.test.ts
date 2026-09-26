@@ -20,6 +20,10 @@ describe("feature flag repository contract", () => {
     expect(defaultFeatureFlags.cursorCloud).toBe(false);
   });
 
+  it("omits retired Office session identity from frontend defaults", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("officeSessionIdentity");
+  });
+
   it("keeps browser-owned LSP continuity disabled by default", () => {
     expect(defaultFeatureFlags.lspBrowserContinuity).toBe(false);
   });

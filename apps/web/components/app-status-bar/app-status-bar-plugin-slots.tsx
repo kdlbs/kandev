@@ -16,6 +16,10 @@ export function AppStatusBarPluginContribution({
       registration={registration}
       name={name}
       slotProps={slotProps}
+      actionSurface={{
+        surface: slotProps.presentation === "bar" ? "status-bar" : "status-drawer",
+        presentation: slotProps.presentation === "bar" ? "desktop" : "mobile",
+      }}
     />
   );
 }

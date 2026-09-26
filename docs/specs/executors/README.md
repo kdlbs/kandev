@@ -49,6 +49,9 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Kubernetes retained compute visibility](requirements/kubernetes-retained-compute.md)
 - [SSH Session Transport Liveness](requirements/ssh-transport-liveness.md)
 - [SSH Host Reachability](requirements/ssh-reachability.md)
+- [Remote Docker Executor](requirements/remote-docker-executor.md)
+- [Remote Docker container inputs](requirements/remote-docker-container-inputs.md)
+- [Docker container network selection](requirements/docker-container-networks.md)
 
 ### System design
 
@@ -70,6 +73,9 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [SSH Session Transport Liveness](system-design/ssh-transport-liveness.md)
 - [SSH Host Reachability](system-design/ssh-reachability.md)
 - [SSH Host Reachability Surfaces](system-design/ssh-reachability-surfaces.md)
+- [Remote Docker Executor](system-design/remote-docker-executor.md)
+- [Remote Docker container inputs](system-design/remote-docker-container-inputs.md)
+- [Docker container network selection](system-design/docker-container-networks.md)
 
 ## Migration record
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   IconArrowBackUp,
   IconCopy,
@@ -272,7 +272,7 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
   const { t } = useTranslation();
   const { filePath, onCommentFile } = props;
   const [open, setOpen] = useState(false);
-  const [commentSelected, setCommentSelected] = useState(false);
+  const commentSelectedRef = useRef(false);
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -293,9 +293,9 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
       </DropdownMenuTrigger>
       <DropdownMenuContent
         onCloseAutoFocus={(event) => {
-          if (commentSelected) {
+          if (commentSelectedRef.current) {
             event.preventDefault();
-            setCommentSelected(false);
+            commentSelectedRef.current = false;
             onCommentFile?.();
           }
         }}
@@ -310,7 +310,9 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
         {onCommentFile && (
           <DropdownMenuItem
             className={`${mobileMenuItem} min-h-11`}
-            onSelect={() => setCommentSelected(true)}
+            onSelect={() => {
+              commentSelectedRef.current = true;
+            }}
           >
             <IconMessagePlus className={mobileMenuIcon} />
             {t("review:commentOnFile")}

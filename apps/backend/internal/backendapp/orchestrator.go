@@ -99,8 +99,6 @@ func provideOrchestrator(
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	serviceCfg.ClaudeMidTurnSteering =
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
-	serviceCfg.OfficeSessionIdentity =
-		cfg != nil && cfg.Features.OfficeSessionIdentity
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)
