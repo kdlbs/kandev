@@ -76,9 +76,10 @@ func TestBundleQuestions_ParsesFullQuestionIncludingOptions(t *testing.T) {
 		{
 			ID: "m1",
 			Metadata: questionMetadata("p1", "q1", 0, map[string]any{
-				"id":     "q1",
-				"title":  "Color",
-				"prompt": "Pick a color",
+				"id":                "q1",
+				"title":             "Color",
+				"prompt":            "Pick a color",
+				"allow_custom_text": false,
 				"options": []interface{}{
 					map[string]interface{}{"option_id": "opt-a", "label": "Red", "description": "Red option"},
 					map[string]interface{}{"option_id": "opt-b", "label": "Blue", "description": "Blue option"},
@@ -99,6 +100,9 @@ func TestBundleQuestions_ParsesFullQuestionIncludingOptions(t *testing.T) {
 	}
 	if q.Options[0].Label != "Red" || q.Options[0].Description != "Red option" {
 		t.Fatalf("unexpected option fields: %+v", q.Options[0])
+	}
+	if q.AllowCustomText == nil || *q.AllowCustomText {
+		t.Fatalf("custom text policy = %+v, want false", q.AllowCustomText)
 	}
 }
 
@@ -157,9 +161,10 @@ func TestBundleQuestionStatuses_L4Shape(t *testing.T) {
 		{
 			ID: "m1",
 			Metadata: questionMetadata("p1", "q1", 0, map[string]any{
-				"id":     "q1",
-				"title":  "Color",
-				"prompt": "Pick a color",
+				"id":                "q1",
+				"title":             "Color",
+				"prompt":            "Pick a color",
+				"allow_custom_text": false,
 				"options": []interface{}{
 					map[string]interface{}{"option_id": "opt-a", "label": "Red", "description": "Red option"},
 				},
@@ -176,6 +181,9 @@ func TestBundleQuestionStatuses_L4Shape(t *testing.T) {
 	}
 	if got.Status != "pending" {
 		t.Fatalf("expected status pending, got %q", got.Status)
+	}
+	if got.AllowCustomText == nil || *got.AllowCustomText {
+		t.Fatalf("custom text policy = %+v, want false", got.AllowCustomText)
 	}
 	if len(got.Options) != 1 || got.Options[0].ID != "opt-a" || got.Options[0].Label != "Red" {
 		t.Fatalf("unexpected options: %+v", got.Options)

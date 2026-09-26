@@ -906,6 +906,11 @@ func (s *Service) loadQueuePromotedTaskAndTargetStep(ctx context.Context, taskID
 		// queue reconciliation and retry destination entry.
 		return nil, nil, false
 	}
+	if s.workflowStepGetter == nil {
+		s.logger.Warn("task.queue_promoted: workflow step lookup unavailable",
+			zap.String("task_id", task.ID), zap.String("step_id", task.WorkflowStepID))
+		return nil, nil, false
+	}
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
 	if err != nil || targetStep == nil {
 		s.logger.Warn("task.queue_promoted: failed to load target step",

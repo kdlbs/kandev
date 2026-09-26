@@ -43,3 +43,4 @@ find current sources.
 - [Tasks](../tasks/README.md): consumes agent profiles for task execution.
 - [Office](../office/README.md): consumes agent identities for autonomous work.
 - [Platform](../platform/README.md): owns shared process and runtime services.
+- [Costs](../costs/README.md): owns usage accounting and conversation cost projections from normalized provider observations.

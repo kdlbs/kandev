@@ -1,9 +1,8 @@
 // Package adapter provides protocol adapters for agent communication.
-// Only ACP is supported; non-ACP variants were removed in the ACP-first migration.
 //
 // Architecture:
-//   - Transport layer (transport/*): Handles protocol-level communication (ACP is the only transport)
-//   - Factory: Creates the ACP transport adapter
+//   - Transport layer (transport/*): Handles protocol-level communication
+//   - Factory: Creates the configured ACP or native Codex adapter
 //
 // Agent configuration (commands, discovery, models) is handled by the agent/registry package
 // using agents.json as the source of truth. This package only handles protocol communication.
@@ -29,7 +28,22 @@ type (
 	PermissionResponse = types.PermissionResponse
 	PermissionOption   = streams.PermissionOption
 	PermissionHandler  = types.PermissionHandler
+	UserInputOption    = types.UserInputOption
+	UserInputQuestion  = types.UserInputQuestion
+	UserInputRequest   = types.UserInputRequest
+	UserInputAnswer    = types.UserInputAnswer
+	UserInputResponse  = types.UserInputResponse
 )
+
+// UserInputRequestHandler creates a clarification request and waits for its
+// response. Its context is cancelled when the provider resolves the request.
+type UserInputRequestHandler = types.UserInputRequestHandler
+
+// UserInputRequestHandlerSetter is an optional capability implemented by
+// adapters that support protocol-native questions.
+type UserInputRequestHandlerSetter interface {
+	SetUserInputRequestHandler(handler UserInputRequestHandler)
+}
 
 // Re-export stream types for convenience.
 type (
@@ -157,6 +171,12 @@ type SessionResettableAdapter interface {
 	ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error)
 }
 
+// ForkableSession is an optional capability for providers that can fork a
+// completed conversation without changing the active session.
+type ForkableSession interface {
+	ForkSession(ctx context.Context, sourceSessionID, completedTurnID string) (string, error)
+}
+
 // TurnStartRecorder is an optional interface implemented by adapters that
 // record a wall-clock turn-start timestamp per session, covering both a
 // human prompt dispatch and a synthetic ScheduleWakeup self-resume (spec
@@ -188,7 +208,6 @@ type AgentInfo struct {
 //  8. Call Close() when done
 type AgentAdapter interface {
 	// PrepareEnvironment performs protocol-specific setup before the agent process starts.
-	// The ACP adapter is a no-op (MCP servers are passed through the protocol).
 	// Must be called before the agent subprocess is started.
 	// Returns a map of environment variables to add to the subprocess environment.
 	PrepareEnvironment() (map[string]string, error)
@@ -202,18 +221,17 @@ type AgentAdapter interface {
 	// Must be called after the subprocess is started and before Initialize.
 	Connect(stdin io.Writer, stdout io.Reader) error
 
-	// Initialize establishes the connection with the agent and exchanges capabilities.
-	// Sends the ACP initialize request over the subprocess's stdin/stdout.
+	// Initialize establishes the protocol connection with the agent.
 	Initialize(ctx context.Context) error
 
 	// GetAgentInfo returns information about the connected agent.
 	// Returns nil if Initialize has not been called yet.
 	GetAgentInfo() *AgentInfo
 
-	// NewSession creates a new agent session and returns the session ID.
+	// NewSession creates a new provider session and returns its provider ID.
 	NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error)
 
-	// LoadSession resumes an existing session by ID.
+	// LoadSession resumes an existing provider session by ID.
 	// mcpServers contains the MCP servers to configure for the resumed session.
 	// Agents that receive MCP configs via the protocol (e.g. ACP with AssumeMcpSse)
 	// need these to reconnect to MCP servers on a new agentctl instance.

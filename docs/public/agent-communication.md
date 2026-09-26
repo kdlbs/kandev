@@ -9,6 +9,10 @@ Agents running in separate Kandev tasks can talk to each other directly. One age
 
 Communication works across all relationship types: parent to child, child to parent, sibling to sibling, and tasks in entirely different workspaces or workflows ("projects"). The only requirement is that each agent knows the other task's full UUID.
 
+## Codex subagents are session-local
+
+With the experimental Codex app-server profile enabled, Codex can run child agents and background commands inside one Kandev session. Kandev shows their activity in that session; it does not create separate Kandev tasks or task IDs for them. Use `message_task_kandev` and the task-creation tools when work needs its own durable Kandev task and conversation.
+
 The examples below use canonical MCP protocol names ending in `_kandev`. An agent client may show a server-qualified alias; use the form exposed by that client.
 
 ## Quick path
@@ -117,6 +121,11 @@ delivered. The existing primary question icon shows this wait in the sidebar.
 An autopilot root has no parent, so its task MCP profile contains no question
 tool. It must continue without asking the operator. A normal task keeps the
 operator-facing `ask_user_question_kandev` flow.
+
+Each `ask_user_question_kandev` question can set `allow_custom_text` to `false`
+when the user must select one of the offered options. If omitted, the user can
+also provide a free-text answer. Native Codex questions use the same setting
+that Codex provides for an "Other" answer.
 
 ## Reading the thread
 

@@ -203,15 +203,21 @@ func (r *Repository) insertUsageEventRowTx(ctx context.Context, tx *sqlx.Tx, eve
 		INSERT INTO task_usage_events (
 			usage_event_id, task_id, session_id, turn_id,
 			agent_profile_id, agent_type, model, provider,
+			provider_thread_id, provider_turn_id, provider_response_id,
+			native_scope, measurement_source, usage_completeness, usage_schema_version,
 			tokens_in, tokens_cached_read, tokens_cached_write, tokens_out, tokens_thought,
+			reasoning_output_tokens, reported_cache_write_tokens, reported_total_tokens,
 			tokens_total, cost_subcents, cost_source, estimated,
 			rate_input_per_million, rate_cached_read_per_million,
 			rate_cached_write_per_million, rate_output_per_million,
 			pricing_catalog_version, contract_version, occurred_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), event.UsageEventID, event.TaskID, nullableString(event.SessionID), nullableString(event.TurnID),
 		event.AgentProfileID, event.AgentType, event.Model, event.Provider,
+		event.ProviderThreadID, event.ProviderTurnID, event.ProviderResponseID,
+		event.NativeScope, event.MeasurementSource, event.UsageCompleteness, event.UsageSchemaVersion,
 		event.TokensIn, event.TokensCachedRead, event.TokensCachedWrite, event.TokensOut, event.TokensThought,
+		event.ReasoningOutputTokens, event.ReportedCacheWriteTokens, event.ReportedTotalTokens,
 		event.TokensTotal, event.CostSubcents, event.CostSource, dialect.BoolToInt(event.Estimated),
 		event.RateInputPerMillion, event.RateCachedReadPerMillion,
 		event.RateCachedWritePerMillion, event.RateOutputPerMillion,
@@ -228,7 +234,10 @@ func (r *Repository) ListTaskUsageEvents(ctx context.Context, taskID string, lim
 	query := `
 		SELECT id, usage_event_id, task_id, session_id, turn_id,
 		       agent_profile_id, agent_type, model, provider,
+		       provider_thread_id, provider_turn_id, provider_response_id,
+		       native_scope, measurement_source, usage_completeness, usage_schema_version,
 		       tokens_in, tokens_cached_read, tokens_cached_write, tokens_out, tokens_thought,
+		       reasoning_output_tokens, reported_cache_write_tokens, reported_total_tokens,
 		       tokens_total, cost_subcents, cost_source, estimated,
 		       rate_input_per_million, rate_cached_read_per_million,
 		       rate_cached_write_per_million, rate_output_per_million,
@@ -263,17 +272,88 @@ func (r *Repository) ListTaskUsageEvents(ctx context.Context, taskID string, lim
 	return events, nil
 }
 
+func (r *Repository) ListSessionUsageTurnCursors(ctx context.Context, sessionID string, afterID int64, limit int) ([]models.TaskUsageTurnCursor, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT turn_id, MIN(id) AS cursor_id
+		  FROM task_usage_events
+		 WHERE session_id = ? AND turn_id IS NOT NULL AND turn_id <> ''
+	 GROUP BY turn_id
+		HAVING (? = 0 OR MIN(id) < ?)
+	 ORDER BY MIN(id) DESC
+	 LIMIT ?
+	`), sessionID, afterID, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	turns := make([]models.TaskUsageTurnCursor, 0, limit)
+	for rows.Next() {
+		var turn models.TaskUsageTurnCursor
+		if err := rows.Scan(&turn.TurnID, &turn.Cursor); err != nil {
+			return nil, err
+		}
+		turns = append(turns, turn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return turns, nil
+}
+
+func (r *Repository) ListSessionUsageEventsByTurn(ctx context.Context, sessionID, turnID string) ([]*models.TaskUsageEvent, error) {
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT id, usage_event_id, task_id, session_id, turn_id,
+		       agent_profile_id, agent_type, model, provider,
+		       provider_thread_id, provider_turn_id, provider_response_id,
+		       native_scope, measurement_source, usage_completeness, usage_schema_version,
+		       tokens_in, tokens_cached_read, tokens_cached_write, tokens_out, tokens_thought,
+		       reasoning_output_tokens, reported_cache_write_tokens, reported_total_tokens,
+		       tokens_total, cost_subcents, cost_source, estimated,
+		       rate_input_per_million, rate_cached_read_per_million,
+		       rate_cached_write_per_million, rate_output_per_million,
+		       pricing_catalog_version, contract_version, occurred_at, created_at
+		  FROM task_usage_events
+		 WHERE session_id = ? AND turn_id = ?
+		 ORDER BY id ASC
+	`), sessionID, turnID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	events := make([]*models.TaskUsageEvent, 0)
+	for rows.Next() {
+		event, err := scanTaskUsageEventRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
 func scanTaskUsageEventRow(row *sqlx.Rows) (*models.TaskUsageEvent, error) {
 	var (
-		event                                                         models.TaskUsageEvent
-		sessionID, turnID, pricingCatalogVersion                      sql.NullString
-		tokensCachedRead, tokensCachedWrite, tokensOut, tokensThought sql.NullInt64
-		rateInput, rateCachedRead, rateCachedWrite, rateOutput        sql.NullInt64
+		event                                                                models.TaskUsageEvent
+		sessionID, turnID, pricingCatalogVersion                             sql.NullString
+		tokensCachedRead, tokensCachedWrite, tokensOut, tokensThought        sql.NullInt64
+		reasoningOutputTokens, reportedCacheWriteTokens, reportedTotalTokens sql.NullInt64
+		rateInput, rateCachedRead, rateCachedWrite, rateOutput               sql.NullInt64
 	)
 	if err := row.Scan(
 		&event.ID, &event.UsageEventID, &event.TaskID, &sessionID, &turnID,
 		&event.AgentProfileID, &event.AgentType, &event.Model, &event.Provider,
+		&event.ProviderThreadID, &event.ProviderTurnID, &event.ProviderResponseID,
+		&event.NativeScope, &event.MeasurementSource, &event.UsageCompleteness, &event.UsageSchemaVersion,
 		&event.TokensIn, &tokensCachedRead, &tokensCachedWrite, &tokensOut, &tokensThought,
+		&reasoningOutputTokens, &reportedCacheWriteTokens, &reportedTotalTokens,
 		&event.TokensTotal, &event.CostSubcents, &event.CostSource, &event.Estimated,
 		&rateInput, &rateCachedRead, &rateCachedWrite, &rateOutput,
 		&pricingCatalogVersion, &event.ContractVersion, &event.OccurredAt, &event.CreatedAt,
@@ -288,6 +368,9 @@ func scanTaskUsageEventRow(row *sqlx.Rows) (*models.TaskUsageEvent, error) {
 	event.TokensCachedWrite = nullInt64ToPtr(tokensCachedWrite)
 	event.TokensOut = nullInt64ToPtr(tokensOut)
 	event.TokensThought = nullInt64ToPtr(tokensThought)
+	event.ReasoningOutputTokens = nullInt64ToPtr(reasoningOutputTokens)
+	event.ReportedCacheWriteTokens = nullInt64ToPtr(reportedCacheWriteTokens)
+	event.ReportedTotalTokens = nullInt64ToPtr(reportedTotalTokens)
 	event.RateInputPerMillion = nullInt64ToPtr(rateInput)
 	event.RateCachedReadPerMillion = nullInt64ToPtr(rateCachedRead)
 	event.RateCachedWritePerMillion = nullInt64ToPtr(rateCachedWrite)

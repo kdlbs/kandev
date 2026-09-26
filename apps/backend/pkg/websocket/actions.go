@@ -118,6 +118,7 @@ const (
 
 	// Unified session launch
 	ActionSessionLaunch       = "session.launch"
+	ActionSessionFork         = "session.fork"
 	ActionSessionEnsure       = "session.ensure"
 	ActionSessionRecover      = "session.recover"
 	ActionSessionResetContext = "session.reset_context"
@@ -285,6 +286,7 @@ const (
 	ActionSessionSetMode                = "session.set_mode"
 	ActionSessionTodosUpdated           = "session.todos_updated"
 	ActionSessionPromptUsage            = "session.prompt_usage"
+	ActionSessionUsageUpdated           = "session.usage_updated"
 	ActionSessionPollModeChanged        = "session.poll_mode_changed"
 	ActionSessionRouteChanging          = "session.route_changing"
 	ActionSessionRouteChanged           = "session.route_changed"

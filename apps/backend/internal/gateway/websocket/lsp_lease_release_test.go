@@ -2,7 +2,6 @@ package websocket
 
 import (
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -11,7 +10,7 @@ import (
 )
 
 // @covers AC-PLATFORM-LSP-FILE-INTELLIGENCE-002.4
-func TestLSPGracefulReleaseAcknowledgesAfterUpstreamExit(t *testing.T) {
+func TestLSPGracefulReleaseAcknowledgesBeforeUpstreamExit(t *testing.T) {
 	for _, reason := range []string{lspLeaseReleaseStop, lspLeaseReleaseEditorIdle} {
 		t.Run(reason, func(t *testing.T) {
 			lease := newTestLSPLease(newLSPLeaseManager(2, testLogger()))
@@ -23,12 +22,8 @@ func TestLSPGracefulReleaseAcknowledgesAfterUpstreamExit(t *testing.T) {
 			require.NoError(t, lease.manager.add(lease))
 			go lease.readUpstream()
 
-			lease.browserWriteMu.Lock()
-			var unlockOnce sync.Once
-			unlock := func() { unlockOnce.Do(lease.browserWriteMu.Unlock) }
 			released := make(chan error, 1)
 			t.Cleanup(func() {
-				unlock()
 				lease.terminate(gorillaws.CloseNormalClosure, "test cleanup", reason)
 				lease.waitForClose(wsTestTimeout)
 			})
@@ -39,27 +34,25 @@ func TestLSPGracefulReleaseAcknowledgesAfterUpstreamExit(t *testing.T) {
 			require.NoError(t, server.WriteJSON(map[string]any{
 				"jsonrpc": "2.0", "id": shutdown["id"], "result": nil,
 			}))
+			ack := readLSPLeaseStatus(t, client)
+			require.Equal(t, "released", ack["action"])
+			require.Equal(t, "release-1", ack["requestId"])
+			require.Equal(t, reason, ack["reason"])
 			exit := readLSPJSONRPCMessage(t, server)
 			require.JSONEq(t, `"exit"`, string(exit["method"]))
 			require.NoError(t, server.Close())
 			select {
 			case <-lease.readDone:
 			case <-time.After(wsTestTimeout):
-				t.Fatal("upstream exit tried to close the browser before its release acknowledgement")
+				t.Fatal("upstream close was not observed after release")
 			}
-			require.False(t, lease.isClosed(), "graceful release owns termination until acknowledgement")
-			unlock()
-
-			ack := readLSPLeaseStatus(t, client)
-			require.Equal(t, "released", ack["action"])
-			require.Equal(t, "release-1", ack["requestId"])
-			require.Equal(t, reason, ack["reason"])
 			select {
 			case err := <-released:
 				require.NoError(t, err)
 			case <-time.After(wsTestTimeout):
 				t.Fatal("graceful release did not complete")
 			}
+			require.True(t, lease.isClosed())
 			_, _, err = client.ReadMessage()
 			var closeErr *gorillaws.CloseError
 			require.True(t, errors.As(err, &closeErr))

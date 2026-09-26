@@ -414,6 +414,25 @@ func (m *Manager) SetSessionModeBySessionID(ctx context.Context, sessionID, mode
 	return m.SetSessionMode(ctx, execution.ID, execution.ACPSessionID, modeID)
 }
 
+// ForkSessionBySessionID forks a completed provider turn in the live native
+// session. The native thread is bound to the execution, so the caller cannot
+// select a different provider identity.
+func (m *Manager) ForkSessionBySessionID(ctx context.Context, sessionID, providerTurnID string) (string, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return "", fmt.Errorf("no agent running for session %q", sessionID)
+	}
+	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
+		return "", fmt.Errorf("execution %q session is not ready", execution.ID)
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	defer release()
+	if client == nil {
+		return "", fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+	return client.ForkSession(ctx, execution.ACPSessionID, providerTurnID)
+}
+
 // SetSessionModel changes the session model for a running agent. ACP agents
 // swap the model in-place via their advertised model-selection mechanism.
 // Passthrough (TUI) agents have no protocol channel — the model is a CLI flag

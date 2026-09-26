@@ -161,6 +161,7 @@ export type AppState = KanbanSlice & {
   sessionModels: (typeof defaultSessionRuntimeState)["sessionModels"];
   sessionMcpStatus: (typeof defaultSessionRuntimeState)["sessionMcpStatus"];
   promptUsage: (typeof defaultSessionRuntimeState)["promptUsage"];
+  usageInvalidation: (typeof defaultSessionRuntimeState)["usageInvalidation"];
   sessionPollMode: (typeof defaultSessionRuntimeState)["sessionPollMode"];
   embeddedVscodeSupport: (typeof defaultSessionRuntimeState)["embeddedVscodeSupport"];
 
@@ -593,6 +594,7 @@ export type AppState = KanbanSlice & {
   ) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
+  bumpSessionUsageInvalidation: (sessionId: string) => void;
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions

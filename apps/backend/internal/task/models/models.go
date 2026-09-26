@@ -654,6 +654,14 @@ const (
 	// Startup recovery sets it after accepting an ambiguous reservation and
 	// clears it only after the task service replays the public turn events.
 	TurnMetaKeyPromptDispatchStartEventPending = "prompt_dispatch_start_event_pending"
+	// TurnMetaKeyCodexNativeTurnID binds a Kandev turn to the native provider
+	// turn required for safe conversation forks. It is backend-only metadata.
+	TurnMetaKeyCodexNativeTurnID = "codex_native_turn_id"
+
+	// SessionMetaKeyCodexForkRequestPrefix names per-request, at-most-once fork
+	// records on the source session. Ambiguous provider responses remain
+	// uncertain and are never retried automatically.
+	SessionMetaKeyCodexForkRequestPrefix = "codex_fork_request_"
 )
 
 var promptDispatchMetadataKeys = [...]string{

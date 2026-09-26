@@ -60,12 +60,14 @@ type orphanCleanupSummary struct {
 	profilesCandidatePartial bool
 	profilesDeletedCount     int
 	profileListFailureCount  int
+	preservedAgentCount      int
 	skipped                  bool
 	skipReason               string
 	enabledAgentIDs          []string
 	orphanAgentNames         []string
 	maxAgentTypesPerRun      int
 	maxProfilesPerRun        int
+	preservedAgentIDs        []string
 }
 
 // NewProfileReconciler constructs a reconciler.
@@ -228,6 +230,13 @@ func (r *ProfileReconciler) collectOrphanCleanupCandidates(
 		if _, ok := enabled[dbAgent.Name]; ok {
 			continue
 		}
+		if registered, ok := r.registry.Get(dbAgent.Name); ok {
+			if preserve, ok := registered.(agents.StoredProfilePreserver); ok && preserve.PreserveStoredProfilesWhenDisabled() {
+				summary.preservedAgentCount++
+				summary.preservedAgentIDs = append(summary.preservedAgentIDs, dbAgent.Name)
+				continue
+			}
+		}
 		summary.orphanAgentCount++
 		summary.orphanAgentNames = append(summary.orphanAgentNames, dbAgent.Name)
 		profiles, err := r.store.ListAgentProfiles(ctx, dbAgent.ID)
@@ -285,12 +294,14 @@ func (r *ProfileReconciler) logOrphanCleanupSummary(summary orphanCleanupSummary
 		zap.Bool("profiles_candidate_partial", summary.profilesCandidatePartial),
 		zap.Int("profiles_deleted_count", summary.profilesDeletedCount),
 		zap.Int("profile_list_failure_count", summary.profileListFailureCount),
+		zap.Int("preserved_agent_count", summary.preservedAgentCount),
 		zap.Bool("skipped", summary.skipped),
 		zap.String("skip_reason", summary.skipReason),
 		zap.Int("max_agent_types_per_run", summary.maxAgentTypesPerRun),
 		zap.Int("max_profiles_per_run", summary.maxProfilesPerRun),
 		zap.Strings("enabled_agents", summary.enabledAgentIDs),
 		zap.Strings("orphan_agents", summary.orphanAgentNames),
+		zap.Strings("preserved_agents", summary.preservedAgentIDs),
 	}
 	r.log.Info("orphan cleanup summary", fields...)
 }

@@ -304,18 +304,18 @@ func (m *Manager) deleteInstance(ctx context.Context, inst *instance) {
 	}
 }
 
-// eligibleAgents returns enabled agents that implement InferenceAgent AND whose
-// runtime protocol is ACP. This is the v1 scope.
+// eligibleAgents returns enabled agents that implement supported inference
+// transports.
 func (m *Manager) eligibleAgents() []agents.InferenceAgent {
 	all := m.registry.ListInferenceAgents()
 	out := make([]agents.InferenceAgent, 0, len(all))
 	for _, ia := range all {
 		ag, ok := ia.(agents.Agent)
-		if !ok {
+		if !ok || !ag.Enabled() {
 			continue
 		}
 		rt := ag.Runtime()
-		if rt == nil || rt.Protocol != agent.ProtocolACP {
+		if rt == nil || (rt.Protocol != agent.ProtocolACP && rt.Protocol != agent.ProtocolCodexAppServer) {
 			continue
 		}
 		out = append(out, ia)
@@ -506,10 +506,10 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 		return nil, nil, fmt.Errorf("agent %q not found or not inference-capable", agentType)
 	}
 	ag, ok := ia.(agents.Agent)
-	if !ok {
+	if !ok || !ag.Enabled() {
 		return nil, nil, fmt.Errorf("agent %q is not a full agent type", agentType)
 	}
-	if rt := ag.Runtime(); rt == nil || rt.Protocol != agent.ProtocolACP {
+	if rt := ag.Runtime(); rt == nil || (rt.Protocol != agent.ProtocolACP && rt.Protocol != agent.ProtocolCodexAppServer) {
 		return nil, nil, fmt.Errorf("agent %q is not ACP-capable", agentType)
 	}
 
@@ -853,10 +853,14 @@ func (m *Manager) resolveInferenceCommand(
 	if err != nil {
 		return agents.Command{}, fmt.Errorf("resolve active managed runtime version for %s: %w", agentType, err)
 	}
-	if !found || selection.Package != spec.Package {
-		return spec.ACPCommand(spec.DefaultVersion), nil
+	version := spec.DefaultVersion
+	if found && selection.Package == spec.Package {
+		version = selection.Version
 	}
-	return spec.ACPCommand(selection.Version), nil
+	if cfg.Protocol == agent.ProtocolCodexAppServer {
+		return spec.RuntimeCommand(version), nil
+	}
+	return spec.ACPCommand(version), nil
 }
 
 const modelConfigResolveTimeout = 60 * time.Second
@@ -876,6 +880,7 @@ func buildProbeRequest(
 		AgentID: inst.agentType,
 		Refresh: refresh,
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
+			Protocol:        cfg.Protocol,
 			Command:         probeCommand.Args(),
 			ModelFlag:       cfg.ModelFlag.Args(),
 			WorkDir:         inst.workDir,

@@ -262,6 +262,7 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// only). Must run after migrateSessionsAddCostColumns so a legacy DB has
 	// the columns to widen before this ALTERs their type.
 	r.migrateTaskSessionsRollupColumnsToBigint()
+	r.migrateTaskUsageObservationColumns()
 
 	// Office task extensions - net-new columns on existing main tables.
 	// Idempotent ALTERs; main upgrades pick them up at first boot.

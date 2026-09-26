@@ -879,3 +879,11 @@ type UsageRepository interface {
 	GetTaskUsageTotals(ctx context.Context, taskID string) (*models.TaskUsageTotals, error)
 	GetSessionUsageTotals(ctx context.Context, sessionID string) (*models.TaskUsageTotals, error)
 }
+
+// UsageEventReader exposes bounded per-turn ledger detail for the chat usage
+// projection. It is separate from UsageRepository so aggregate-only readers
+// remain compatible.
+type UsageEventReader interface {
+	ListSessionUsageTurnCursors(ctx context.Context, sessionID string, afterID int64, limit int) ([]models.TaskUsageTurnCursor, error)
+	ListSessionUsageEventsByTurn(ctx context.Context, sessionID, turnID string) ([]*models.TaskUsageEvent, error)
+}

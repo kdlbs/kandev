@@ -11,6 +11,13 @@ export type PermissionOption = {
   option_id: string;
   name: string;
   kind: PermissionOptionKind;
+  metadata?: Record<string, unknown>;
+};
+
+export type PermissionActionChoice = {
+  option_id: string;
+  label: string;
+  kind: PermissionOptionKind;
 };
 
 export type PermissionActionDetails = {
@@ -26,6 +33,12 @@ export type PermissionActionDetails = {
   // tool; consumers should treat keys as opaque.
   raw_input?: Record<string, unknown>;
 };
+
+type RespondPermission = (
+  optionId: string,
+  cancelled?: boolean,
+  rejected?: boolean,
+) => Promise<void>;
 
 export type PermissionRequestMetadata = {
   request_id?: string;
@@ -173,6 +186,11 @@ export function usePermissionResponseHandlers({
     }
   }, [permissionMetadata, handleRespond]);
 
+  const { offeredChoices, handleOfferedChoice } = useOfferedDecisionHandlers(
+    permissionMetadata,
+    handleRespond,
+  );
+
   return {
     isResponding,
     isUnavailable,
@@ -180,5 +198,62 @@ export function usePermissionResponseHandlers({
     handleAllowAlways,
     hasAllowAlways,
     handleReject,
+    offeredChoices,
+    handleOfferedChoice,
   };
+}
+
+function useOfferedDecisionHandlers(
+  permissionMetadata: PermissionRequestMetadata | undefined,
+  handleRespond: RespondPermission,
+) {
+  const offeredChoices: PermissionActionChoice[] = useMemo(
+    () =>
+      (permissionMetadata?.options ?? [])
+        .filter((option) => option.metadata?.codex_app_server === true)
+        .map((option) => ({
+          option_id: option.option_id,
+          kind: option.kind,
+          label: codexDecisionLabel(option),
+        })),
+    [permissionMetadata],
+  );
+  const handleOfferedChoice = useCallback(
+    (optionId: string) => {
+      const option = permissionMetadata?.options.find(
+        (candidate) =>
+          candidate.option_id === optionId && candidate.metadata?.codex_app_server === true,
+      );
+      if (!option) return;
+      if (option.metadata?.codex_decision === "cancel") {
+        handleRespond("", true);
+        return;
+      }
+      const rejected = option.kind === "reject_once" || option.kind === "reject_always";
+      handleRespond(option.option_id, false, rejected);
+    },
+    [permissionMetadata, handleRespond],
+  );
+  return { offeredChoices, handleOfferedChoice };
+}
+
+function codexDecisionLabel(option: PermissionOption): string {
+  switch (option.metadata?.codex_decision) {
+    case "accept":
+      return t("task:approve");
+    case "accept_for_session":
+      return t("task:alwaysAllow");
+    case "decline":
+      return t("task:deny");
+    case "cancel":
+      return t("common:cancel");
+    case "accept_with_execpolicy_amendment":
+      return t("task:approveWithCommandPolicy");
+    case "apply_network_policy_allow":
+      return t("task:allowNetworkAccess");
+    case "apply_network_policy_deny":
+      return t("task:blockNetworkAccess");
+    default:
+      return option.name;
+  }
 }

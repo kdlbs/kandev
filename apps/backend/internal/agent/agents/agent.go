@@ -70,6 +70,12 @@ type VirtualAgent interface {
 	IsVirtual() bool
 }
 
+// StoredProfilePreserver marks a disabled optional agent whose saved profiles
+// remain valid historical configuration and must not be orphan-cleaned.
+type StoredProfilePreserver interface {
+	PreserveStoredProfilesWhenDisabled() bool
+}
+
 // IsVirtualAgent reports whether an agent is a non-launchable virtual family.
 // Keeping this as an optional capability lets existing concrete agents remain
 // unchanged while callers can fail closed at launch and discovery boundaries.
@@ -450,7 +456,10 @@ func UserSkillDirFromRuntime(a Agent) string {
 type InferenceConfig struct {
 	// Supported indicates the agent can do one-shot inference.
 	Supported bool
-	// Command is the ACP command for one-shot inference.
+	// Protocol selects the agentctl one-shot inference transport. Empty keeps
+	// the historical ACP transport.
+	Protocol agent.Protocol
+	// Command is the protocol command for one-shot inference.
 	// e.g., ["npx", "-y", "@agentclientprotocol/claude-agent-acp"]
 	Command Command
 	// ModelFlag is the flag template for specifying the model (e.g., ["--model", "{model}"]).

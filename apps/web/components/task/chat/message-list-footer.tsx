@@ -4,10 +4,12 @@ import type { Message, TaskSessionState } from "@/lib/types/http";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { filterLaunchErrorMessages } from "./message-list-shared";
+import { ConversationUsageDisplay } from "./conversation-usage-display";
 
 type MessageListFooterProps = {
   sessionState?: TaskSessionState;
   sessionId: string | null;
+  taskId?: string;
   messages: Message[];
   isWorking?: boolean;
   footerActionMessages?: Message[];
@@ -49,6 +51,7 @@ function findCurrentActionableFailure(
 export function MessageListFooter({
   sessionState,
   sessionId,
+  taskId,
   messages,
   isWorking,
   footerActionMessages = [],
@@ -81,6 +84,11 @@ export function MessageListFooter({
       {visibleFooterActionMessages.map((message) => (
         <MessageRenderer key={message.id} comment={message} isTaskDescription={false} />
       ))}
+      {sessionId && taskId && (
+        <div className="flex justify-end pt-1">
+          <ConversationUsageDisplay taskId={taskId} sessionId={sessionId} />
+        </div>
+      )}
     </>
   );
 }

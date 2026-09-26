@@ -66,6 +66,82 @@ func (s *immediateClarificationService) WaitForResponse(context.Context, string)
 
 func (s *immediateClarificationService) CancelRequest(string) bool { return true }
 
+type recordingImmediateClarificationService struct {
+	request  *clarification.Request
+	response *clarification.Response
+}
+
+func (s *recordingImmediateClarificationService) CreateRequest(req *clarification.Request) (string, bool) {
+	s.request = req
+	return "pending-native-question", true
+}
+
+func (s *recordingImmediateClarificationService) WaitForResponse(context.Context, string) (*clarification.Response, error) {
+	return s.response, nil
+}
+
+func (s *recordingImmediateClarificationService) CancelRequest(string) bool { return true }
+
+type nativeQuestionSessionRepo struct {
+	SessionRepository
+	session *models.TaskSession
+}
+
+func (r *nativeQuestionSessionRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
+	return r.session, nil
+}
+
+func (r *nativeQuestionSessionRepo) UpdateTaskSessionState(_ context.Context, _ string, state models.TaskSessionState, _ string) error {
+	r.session.State = state
+	return nil
+}
+
+func TestHandleAskUserQuestionAllowsExplicitNativeTextOnlyQuestion(t *testing.T) {
+	allowText := true
+	service := &recordingImmediateClarificationService{
+		response: &clarification.Response{Answers: []clarification.Answer{{QuestionID: "native-q", CustomText: "Use the default timeout"}}},
+	}
+	repo := &nativeQuestionSessionRepo{session: &models.TaskSession{ID: "session-1", State: models.TaskSessionStateRunning}}
+	h := &Handlers{
+		clarificationSvc: service,
+		sessionRepo:      repo,
+		logger:           testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPAskUserQuestion, map[string]interface{}{
+		"session_id":           "session-1",
+		"allow_free_text_only": true,
+		"questions": []map[string]interface{}{{
+			"id": "native-q", "title": "Reason", "prompt": "What should change?",
+			"allow_custom_text": allowText, "options": []map[string]interface{}{},
+		}},
+	})
+	response, err := h.handleAskUserQuestion(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, service.request)
+	require.Len(t, service.request.Questions, 1)
+	question := service.request.Questions[0]
+	require.Empty(t, question.Options)
+	require.NotNil(t, question.AllowCustomText)
+	require.True(t, *question.AllowCustomText)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+}
+
+func TestHandleAskUserQuestionKeepsOrdinaryOptionRequirement(t *testing.T) {
+	service := &recordingImmediateClarificationService{}
+	h := &Handlers{clarificationSvc: service, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPAskUserQuestion, map[string]interface{}{
+		"session_id": "session-1",
+		"questions": []map[string]interface{}{{
+			"id": "native-q", "prompt": "What should change?", "allow_custom_text": true,
+			"options": []map[string]interface{}{},
+		}},
+	})
+	response, err := h.handleAskUserQuestion(context.Background(), msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, response.Type)
+	require.Nil(t, service.request)
+}
+
 // clarificationCoordinatorStopRaceRepo simulates the coordinator committing a
 // stop immediately before one clarification state write. The legacy
 // unconditional method demonstrates the stale-writer bug by restoring the

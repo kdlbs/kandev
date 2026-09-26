@@ -930,6 +930,38 @@ func TestProfileReconciler_CleansOrphanProfiles(t *testing.T) {
 	}
 }
 
+func TestProfileReconcilerPreservesDisabledCodexAppServerProfiles(t *testing.T) {
+	st := newFakeStore()
+	native := &models.Agent{Name: "codex-app-server"}
+	if err := st.CreateAgent(context.Background(), native); err != nil {
+		t.Fatalf("create native agent: %v", err)
+	}
+	profile := &models.AgentProfile{AgentID: native.ID, Name: "Native Codex", Model: "gpt-5", Enabled: true}
+	if err := st.CreateAgentProfile(context.Background(), profile); err != nil {
+		t.Fatalf("create native profile: %v", err)
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	reg := registry.NewRegistry(log)
+	if err := reg.Register(&mockInferenceAgent{id: "claude-acp", displayName: "Claude", enabled: true}); err != nil {
+		t.Fatalf("register Claude: %v", err)
+	}
+	if err := reg.Register(agents.NewCodexAppServer(false)); err != nil {
+		t.Fatalf("register disabled native agent: %v", err)
+	}
+	reg.MarkLoaded()
+	r := NewProfileReconciler(&fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}}, reg, st, log)
+	r.cleanupOrphans(context.Background())
+	if len(st.softDeleted) != 0 {
+		t.Fatalf("disabled native profile was orphan-cleaned: %v", st.softDeleted)
+	}
+	if got := len(st.profiles[native.ID]); got != 1 {
+		t.Fatalf("stored native profiles = %d, want 1", got)
+	}
+}
+
 func TestProfileReconciler_SkipsOrphanCleanupUntilRegistryReady(t *testing.T) {
 	st := newFakeStore()
 	orphanAgent := &models.Agent{Name: "removed-old-agent"}

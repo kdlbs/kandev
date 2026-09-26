@@ -4081,10 +4081,11 @@ func (h *Handlers) publishQueueStatusEvent(
 // the event-based fallback in the orchestrator handles resuming with a new turn.
 func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		SessionID string                   `json:"session_id"`
-		TaskID    string                   `json:"task_id"`
-		Questions []clarification.Question `json:"questions"`
-		Context   string                   `json:"context"`
+		SessionID         string                   `json:"session_id"`
+		TaskID            string                   `json:"task_id"`
+		Questions         []clarification.Question `json:"questions"`
+		Context           string                   `json:"context"`
+		AllowFreeTextOnly bool                     `json:"allow_free_text_only,omitempty"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -4095,7 +4096,11 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	// Single source of truth — same validator the HTTP handler uses, so
 	// duplicate IDs / bad option counts / empty prompts can't slip through
 	// either path.
-	if errMsg := clarification.NormalizeAndValidateQuestions(req.Questions); errMsg != "" {
+	validateQuestions := clarification.NormalizeAndValidateQuestions
+	if req.AllowFreeTextOnly {
+		validateQuestions = clarification.NormalizeAndValidateQuestionsAllowFreeTextOnly
+	}
+	if errMsg := validateQuestions(req.Questions); errMsg != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
 	}
 

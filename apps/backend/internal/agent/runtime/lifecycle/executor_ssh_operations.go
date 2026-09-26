@@ -667,12 +667,13 @@ func buildSSHCreateInstanceRequest(
 	agentctlBin string,
 ) agentctl.CreateInstanceRequest {
 	return agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: workspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     sshAgentTypeFromReq(req),
+		ID:                    req.InstanceID,
+		WorkspacePath:         workspacePath,
+		SessionID:             req.SessionID,
+		TaskID:                req.TaskID,
+		Protocol:              req.Protocol,
+		CodexAppServerEnabled: req.CodexAppServerEnabled,
+		AgentType:             sshAgentTypeFromReq(req),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,

@@ -107,6 +107,7 @@ type AgentExecution struct {
 	// AgentReady is published, so a queued successor cannot overwrite the
 	// completion's attribution while its stream frame is in flight.
 	promptTurnID      string
+	promptTurnIDs     map[uint64]string
 	promptLifecycleMu sync.Mutex
 
 	// recoveryAppliedControlTurnID is the control-server-assigned turn
@@ -762,6 +763,15 @@ func (e *AgentExecution) promptTurnIDSnapshot() string {
 	e.promptLifecycleMu.Lock()
 	defer e.promptLifecycleMu.Unlock()
 	return e.promptTurnID
+}
+
+func (e *AgentExecution) promptTurnIDForGeneration(generation uint64) string {
+	if e == nil || generation == 0 {
+		return ""
+	}
+	e.promptLifecycleMu.Lock()
+	defer e.promptLifecycleMu.Unlock()
+	return e.promptTurnIDs[generation]
 }
 
 func (e *AgentExecution) setPromptTurnID(turnID string) {

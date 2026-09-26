@@ -7,6 +7,20 @@ export function routePanelMouseDown(
   event: MouseEvent<HTMLDivElement>,
   ref: RefObject<HTMLDivElement | null>,
 ): void {
+  routePanelFocus(event, ref);
+}
+
+export function routePanelClick(
+  event: MouseEvent<HTMLDivElement>,
+  ref: RefObject<HTMLDivElement | null>,
+): void {
+  routePanelFocus(event, ref);
+}
+
+function routePanelFocus(
+  event: MouseEvent<HTMLDivElement>,
+  ref: RefObject<HTMLDivElement | null>,
+): void {
   const target = event.target as HTMLElement | null;
   if (!target || target.closest(interactiveSelector)) return;
   ref.current?.focus({ preventScroll: true });

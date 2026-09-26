@@ -16,10 +16,11 @@ type Option struct {
 
 // Question represents a single question with multiple choice options.
 type Question struct {
-	ID      string   `json:"id"`
-	Title   string   `json:"title"`   // Short label (max 12 chars)
-	Prompt  string   `json:"prompt"`  // Full question text
-	Options []Option `json:"options"` // 2-6 options
+	ID              string   `json:"id"`
+	Title           string   `json:"title"`   // Short label (max 12 chars)
+	Prompt          string   `json:"prompt"`  // Full question text
+	Options         []Option `json:"options"` // 2-6 options
+	AllowCustomText *bool    `json:"allow_custom_text,omitempty"`
 }
 
 // Request represents a clarification request from an agent. A request bundles

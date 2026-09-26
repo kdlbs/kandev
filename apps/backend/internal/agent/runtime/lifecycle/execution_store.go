@@ -339,15 +339,35 @@ func (s *ExecutionStore) BeginPrompt(executionID string) (uint64, error) {
 	if !exists || current != execution {
 		return 0, ErrExecutionNotFound
 	}
-	return beginExecutionPrompt(current), nil
+	return beginExecutionPromptLocked(current), nil
 }
 
 func beginExecutionPrompt(execution *AgentExecution) uint64 {
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+	return beginExecutionPromptLocked(execution)
+}
+
+func beginExecutionPromptLocked(execution *AgentExecution) uint64 {
 	// A prompt is about to be dispatched through this object, so a
 	// recovered-but-not-yet-adopted generation must not later clobber it with
 	// a stale pre-restart completion (see recoveredPromptGenerationPending).
 	execution.recoveredPromptGenerationPending.Store(false)
 	execution.promptGeneration++
+	if execution.promptTurnID != "" {
+		if execution.promptTurnIDs == nil {
+			execution.promptTurnIDs = make(map[uint64]string)
+		}
+		execution.promptTurnIDs[execution.promptGeneration] = execution.promptTurnID
+		if execution.promptGeneration > 128 {
+			minimum := execution.promptGeneration - 127
+			for generation := range execution.promptTurnIDs {
+				if generation < minimum {
+					delete(execution.promptTurnIDs, generation)
+				}
+			}
+		}
+	}
 	execution.promptCompletionGeneration = 0
 	// The new generation is not dispatched until its triggerPrompt succeeds; a
 	// steer must not reuse it until then (its buffers are still being reset).

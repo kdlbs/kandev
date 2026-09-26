@@ -301,6 +301,8 @@ export type ClarificationQuestion = {
   title: string;
   prompt: string;
   options: ClarificationOption[];
+  /** Omitted for existing agents, which retain the custom-answer field. */
+  allow_custom_text?: boolean;
 };
 
 // Each per-question chat message carries its own metadata. For multi-question

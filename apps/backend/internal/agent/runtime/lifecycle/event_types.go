@@ -164,8 +164,11 @@ func (p PrepareCompletedEventPayload) GetSessionID() string {
 
 // AgentStreamEventData contains the nested event data within AgentStreamEventPayload.
 type AgentStreamEventData struct {
-	Type                        string                 `json:"type"`
-	ACPSessionID                string                 `json:"acp_session_id,omitempty"`
+	Type         string `json:"type"`
+	ACPSessionID string `json:"acp_session_id,omitempty"`
+	// OperationID carries a provider operation identity when the protocol
+	// emits one. Native Codex turn IDs use it at turn boundaries.
+	OperationID                 string                 `json:"operation_id,omitempty"`
 	Text                        string                 `json:"text,omitempty"`
 	ProviderDiagnosticCandidate bool                   `json:"provider_diagnostic_candidate,omitempty"`
 	ToolCallID                  string                 `json:"tool_call_id,omitempty"`
@@ -265,7 +268,8 @@ type AgentStreamEventData struct {
 	SessionMeta      map[string]any `json:"session_meta,omitempty"`
 
 	// Usage (attached to "complete" event)
-	Usage *streams.PromptUsage `json:"usage,omitempty"`
+	Usage            *streams.PromptUsage            `json:"usage,omitempty"`
+	UsageObservation *streams.NativeUsageObservation `json:"usage_observation,omitempty"`
 
 	// Plan entries (from "plan" event — ACP/Codex agent todos)
 	PlanEntries []streams.PlanEntry `json:"plan_entries,omitempty"`
@@ -767,16 +771,17 @@ func (p SessionTodosEventPayload) GetSessionID() string {
 // Both are empty when unavailable (e.g. no active turn), never a synthesized
 // placeholder.
 type SessionPromptUsageEventPayload struct {
-	TaskID         string               `json:"task_id"`
-	SessionID      string               `json:"session_id"`
-	AgentID        string               `json:"agent_id"`
-	AgentProfileID string               `json:"agent_profile_id,omitempty"`
-	AgentType      string               `json:"agent_type,omitempty"`
-	Model          string               `json:"model,omitempty"`
-	Usage          *streams.PromptUsage `json:"usage"`
-	Timestamp      string               `json:"timestamp"`
-	TurnID         string               `json:"turn_id,omitempty"`
-	UsageEventID   string               `json:"usage_event_id,omitempty"`
+	TaskID           string                          `json:"task_id"`
+	SessionID        string                          `json:"session_id"`
+	AgentID          string                          `json:"agent_id"`
+	AgentProfileID   string                          `json:"agent_profile_id,omitempty"`
+	AgentType        string                          `json:"agent_type,omitempty"`
+	Model            string                          `json:"model,omitempty"`
+	Usage            *streams.PromptUsage            `json:"usage"`
+	UsageObservation *streams.NativeUsageObservation `json:"usage_observation,omitempty"`
+	Timestamp        string                          `json:"timestamp"`
+	TurnID           string                          `json:"turn_id,omitempty"`
+	UsageEventID     string                          `json:"usage_event_id,omitempty"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

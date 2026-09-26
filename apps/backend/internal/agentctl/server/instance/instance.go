@@ -148,6 +148,11 @@ type CreateRequest struct {
 	// Protocol is the protocol adapter to use (acp). If empty, default is used.
 	Protocol string `json:"protocol,omitempty"`
 
+	// CodexAppServerEnabled is an explicit backend decision for native Codex
+	// instances. The control API defaults to disabled so callers cannot select
+	// this protocol by supplying only a protocol string.
+	CodexAppServerEnabled bool `json:"codex_app_server_enabled,omitempty"`
+
 	// AgentType identifies the agent (e.g., "auggie", "codex", "claude-code").
 	// Required for debug file naming. Typically matches the agent ID from the registry.
 	AgentType string `json:"agent_type,omitempty"`

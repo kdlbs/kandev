@@ -27,6 +27,7 @@ const (
 	promptArg            = "prompt"
 	questionsArg         = "questions"
 	optionsArg           = "options"
+	allowCustomTextArg   = "allow_custom_text"
 	instructionsArg      = "instructions"
 	idArg                = "id"
 	titleArg             = "title"
@@ -1018,6 +1019,11 @@ func normalizeAndValidateQuestion(q map[string]interface{}, index int, seenIDs m
 		return mcp.NewToolResultError(fmt.Sprintf("question %d has duplicate id %q", index+1, id))
 	}
 	seenIDs[id] = true
+	if value, exists := q[allowCustomTextArg]; exists {
+		if _, ok := value.(bool); !ok {
+			return mcp.NewToolResultError(fmt.Sprintf("question %d field %q must be a boolean", index+1, allowCustomTextArg))
+		}
+	}
 
 	options, errResult := decodeOptionsForQuestion(q, index)
 	if errResult != nil {

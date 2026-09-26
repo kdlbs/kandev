@@ -326,5 +326,8 @@
   "watcherKindGithubIssue": "GitHub 议题",
   "watcherKindGithubReview": "GitHub PR 审查",
   "watcherKindJira": "Jira",
-  "watcherKindLinear": "Linear"
+  "watcherKindLinear": "Linear",
+  "nativeCodexUnavailableTitle": "原生 Codex app server 不可用",
+  "nativeCodexUnavailable": "此已保存的配置会保留，但 Codex app-server 功能关闭时无法编辑、复制、启用或启动。你可以删除此配置，或在设置中启用该功能。",
+  "nativeCodexUnavailableShort": "功能已关闭"
 }

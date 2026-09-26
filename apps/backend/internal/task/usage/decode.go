@@ -19,16 +19,32 @@ import (
 // back up the stack the wrong way; the wire contract is the JSON, not a
 // shared Go type.
 type usageEventPayload struct {
-	TaskID         string              `json:"task_id"`
-	SessionID      string              `json:"session_id"`
-	AgentID        string              `json:"agent_id"`
-	AgentProfileID string              `json:"agent_profile_id,omitempty"`
-	AgentType      string              `json:"agent_type,omitempty"`
-	Model          string              `json:"model,omitempty"`
-	Usage          *promptUsagePayload `json:"usage"`
-	Timestamp      string              `json:"timestamp"`
-	TurnID         string              `json:"turn_id,omitempty"`
-	UsageEventID   string              `json:"usage_event_id,omitempty"`
+	TaskID           string                         `json:"task_id"`
+	SessionID        string                         `json:"session_id"`
+	AgentID          string                         `json:"agent_id"`
+	AgentProfileID   string                         `json:"agent_profile_id,omitempty"`
+	AgentType        string                         `json:"agent_type,omitempty"`
+	Model            string                         `json:"model,omitempty"`
+	Usage            *promptUsagePayload            `json:"usage"`
+	Timestamp        string                         `json:"timestamp"`
+	TurnID           string                         `json:"turn_id,omitempty"`
+	UsageEventID     string                         `json:"usage_event_id,omitempty"`
+	UsageObservation *nativeUsageObservationPayload `json:"usage_observation,omitempty"`
+}
+
+type nativeUsageObservationPayload struct {
+	SchemaVersion            int    `json:"schema_version"`
+	Source                   string `json:"source"`
+	ProviderThreadID         string `json:"provider_thread_id"`
+	ProviderTurnID           string `json:"provider_turn_id"`
+	ProviderResponseID       string `json:"provider_response_id,omitempty"`
+	Scope                    string `json:"scope"`
+	Completeness             string `json:"completeness"`
+	Model                    string `json:"model,omitempty"`
+	ReasoningOutputTokens    *int64 `json:"reasoning_output_tokens,omitempty"`
+	ReportedCacheWriteTokens *int64 `json:"reported_cache_write_tokens,omitempty"`
+	ReportedTotalTokens      *int64 `json:"reported_total_tokens,omitempty"`
+	PriceSuppressed          bool   `json:"price_suppressed,omitempty"`
 }
 
 // promptUsagePayload mirrors streams.PromptUsage's JSON shape (AC-30).
@@ -48,6 +64,7 @@ type promptUsagePayload struct {
 	ProviderReportedCostSubcents int64 `json:"provider_reported_cost_subcents,omitempty"`
 	ProviderReportedCostPresent  bool  `json:"provider_reported_cost_present,omitempty"`
 	Estimated                    bool  `json:"estimated,omitempty"`
+	PriceSuppressed              bool  `json:"price_suppressed,omitempty"`
 }
 
 // decodePayload extracts a typed usageEventPayload from a bus event via a

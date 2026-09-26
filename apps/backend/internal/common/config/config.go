@@ -555,6 +555,11 @@ type FeaturesConfig struct {
 	// Windows (survival trades the platform's kill-on-job-close safeguard for
 	// an adoption handshake, which is untested there).
 	AgentSurvival bool `mapstructure:"agent_survival" json:"agentSurvival"`
+
+	// CodexAppServer enables the separate native Codex app-server agent. It is
+	// off in every shipped profile and requires a restart because its protocol
+	// adapter and profile catalogue are composed at startup.
+	CodexAppServer bool `mapstructure:"codex_app_server" json:"codexAppServer"`
 }
 
 // LoggingConfig holds logging configuration.

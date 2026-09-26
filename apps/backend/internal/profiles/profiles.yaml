@@ -85,6 +85,12 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Native Codex app-server is separate from Codex ACP and remains opt-in.
+  KANDEV_FEATURES_CODEX_APP_SERVER:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # High-risk Claude-only background prompt handoff experiment. Off in every
   # profile so it is exercised only by contributors who deliberately opt in.
   KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF:

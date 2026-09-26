@@ -326,5 +326,8 @@
   "providerApiKeyLabel": "APIキー",
   "providerApiKeyHelp": "Kandev secret。provider に送る bearer token を持つ。認証不要 router なら未設定のまま。",
   "providerModelSlash": "model 名のスラッシュを外す。OpenAI互換 provider は bare な model id を期待する。",
-  "providerPassthroughUnsupported": "OpenAI互換 provider を使うには CLI passthrough を無効にする。"
+  "providerPassthroughUnsupported": "OpenAI互換 provider を使うには CLI passthrough を無効にする。",
+  "nativeCodexUnavailableTitle": "Codex app server を利用できません",
+  "nativeCodexUnavailable": "この保存済みプロファイルは保持されていますが、Codex app server 機能がオフの間は編集、複製、有効化、開始できません。プロファイルを削除するか、設定で機能を有効にしてください。",
+  "nativeCodexUnavailableShort": "機能オフ"
 }

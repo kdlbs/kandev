@@ -23,7 +23,10 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-const sessionModelConfigKey = "model"
+const (
+	sessionModelConfigKey   = "model"
+	codexAppServerAgentType = "codex-app-server"
+)
 
 // usageEventIDNamespace seeds the deterministic UUID usageEventIDFor derives
 // for a prompt-usage completion. Arbitrary but fixed — any stable value
@@ -97,10 +100,12 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// discard a late subagent frame before its durable context is recorded.
 		// This guard runs before the event-type switch below, so handler-level
 		// recording alone would not cover the production dispatch path.
-		if eventType == agentEventToolCall || eventType == agentEventToolUpdate {
+		if eventType == agentEventToolCall || eventType == agentEventToolUpdate || eventType == streams.EventTypeUsageObservation {
 			s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 		}
-		return
+		if eventType != streams.EventTypeUsageObservation {
+			return
+		}
 	}
 	switch eventType {
 	case "message_streaming":
@@ -228,6 +233,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			s.publishForegroundActivitySnapshot(ctx, taskID, sessionID, publication)
 		}
 
+	case streams.EventTypeUsageObservation:
+		s.publishNativeUsageObservation(ctx, payload)
+
 	case "plan":
 		s.handleSessionTodosEvent(ctx, payload)
 
@@ -241,6 +249,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.handleAgentLogEvent(ctx, payload)
 
 	case streams.EventTypeTurnStarted:
+		s.persistNativeCodexTurnID(ctx, payload)
 		// D3: the single turn boundary for the whole feature. Clearing here,
 		// on the same ordered stream consumer that applies the attestation
 		// (handleToolCallEvent / trackBackgroundToolUpdate above), guarantees
@@ -258,6 +267,35 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// short-circuits on it), so this is also a safe no-op for an ordinary
 		// human-driven turn where the session already left WAITING_FOR_INPUT.
 		s.applyParkedTransition(ctx, taskID, sessionID, false, "", false, models.TaskSessionStateWaitingForInput)
+	}
+}
+
+func (s *Service) persistNativeCodexTurnID(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if !s.config.CodexAppServerEnabled || s.repo == nil || s.turnService == nil || payload == nil || payload.Data == nil {
+		return
+	}
+	providerTurnID := strings.TrimSpace(payload.Data.OperationID)
+	if providerTurnID == "" || payload.SessionID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
+	if err != nil || session == nil || session.AgentProfileSnapshot["agent_id"] != codexAppServerAgentType {
+		return
+	}
+	turn, err := s.turnService.GetActiveTurn(ctx, payload.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to resolve active Kandev turn for native Codex turn",
+			zap.String("session_id", payload.SessionID), zap.Error(err))
+		return
+	}
+	if turn == nil {
+		return
+	}
+	if err := s.turnService.PatchTurnMetadata(ctx, payload.SessionID, turn.ID, map[string]interface{}{
+		models.TurnMetaKeyCodexNativeTurnID: providerTurnID,
+	}); err != nil {
+		s.logger.Warn("failed to persist native Codex turn identity",
+			zap.String("session_id", payload.SessionID), zap.String("turn_id", turn.ID), zap.Error(err))
 	}
 }
 
@@ -3400,6 +3438,18 @@ func usageEventIDFor(sessionID, executionID string, promptGeneration uint64) str
 	return uuid.NewSHA1(usageEventIDNamespace, []byte(name)).String()
 }
 
+func nativeUsageEventIDFor(sessionID string, observation *streams.NativeUsageObservation) string {
+	if sessionID == "" || observation == nil || observation.ProviderThreadID == "" || observation.ProviderTurnID == "" {
+		return uuid.New().String()
+	}
+	identity := observation.ProviderResponseID
+	if identity == "" {
+		identity = observation.Source
+	}
+	name := fmt.Sprintf("native\x00%s\x00%s\x00%s\x00%s", sessionID, observation.ProviderThreadID, observation.ProviderTurnID, identity)
+	return uuid.NewSHA1(usageEventIDNamespace, []byte(name)).String()
+}
+
 // publishPromptUsage broadcasts prompt token usage to the WebSocket for the
 // frontend and to the office cost subscriber. Model and agent type (CLI
 // engine slug) come from payload first; when absent (which is the common
@@ -3448,6 +3498,76 @@ func (s *Service) publishPromptUsage(
 	}
 	subject := events.BuildSessionPromptUsageSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionPromptUsageUpdated, "orchestrator", eventPayload))
+}
+
+func (s *Service) publishNativeUsageObservation(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
+	if !nativeUsageObservationReady(s, payload) {
+		return
+	}
+	observation := payload.Data.UsageObservation
+	turnID, session, agentType, ok := s.resolveNativeUsageObservation(ctx, payload)
+	if !ok {
+		return
+	}
+	usage := *payload.Data.Usage
+	usage.PriceSuppressed = usage.PriceSuppressed || observation.PriceSuppressed
+	model := observation.Model
+	if model == "" && observation.Scope != "child" {
+		model = payload.Data.CurrentModelID
+	}
+	eventPayload := lifecycle.SessionPromptUsageEventPayload{
+		TaskID:           payload.TaskID,
+		SessionID:        payload.SessionID,
+		AgentID:          payload.AgentID,
+		AgentProfileID:   session.AgentProfileID,
+		AgentType:        agentType,
+		Model:            model,
+		Usage:            &usage,
+		UsageObservation: observation,
+		Timestamp:        time.Now().UTC().Format(time.RFC3339),
+		TurnID:           turnID,
+		UsageEventID:     nativeUsageEventIDFor(payload.SessionID, observation),
+	}
+	subject := events.BuildSessionPromptUsageSubject(payload.SessionID)
+	if err := s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionPromptUsageUpdated, "orchestrator", eventPayload)); err != nil {
+		s.logger.Warn("failed to publish native usage observation",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.String("provider_thread_id", observation.ProviderThreadID),
+			zap.Error(err))
+	}
+}
+
+func nativeUsageObservationReady(s *Service, payload *lifecycle.AgentStreamEventPayload) bool {
+	return s != nil && s.eventBus != nil && payload != nil && payload.Data != nil &&
+		payload.Data.UsageObservation != nil && payload.Data.Usage != nil && payload.SessionID != ""
+}
+
+func (s *Service) resolveNativeUsageObservation(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) (string, *models.TaskSession, string, bool) {
+	observation := payload.Data.UsageObservation
+	turnID := payload.Data.TurnID
+	if turnID == "" {
+		turnID = s.nonCreatingActiveTurnID(ctx, payload.SessionID)
+	}
+	if turnID == "" || observation.ProviderThreadID == "" || observation.ProviderTurnID == "" {
+		return "", nil, "", false
+	}
+	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
+	if err != nil || session == nil || session.TaskID != payload.TaskID {
+		s.logger.Warn("skipping native usage observation with unresolved session ownership",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.Error(err))
+		return "", nil, "", false
+	}
+	_, agentType := resolvePromptUsageLabels(payload, session)
+	return turnID, session, agentType, true
 }
 
 func resolvePromptUsageLabels(

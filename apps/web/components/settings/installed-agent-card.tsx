@@ -30,6 +30,7 @@ type Props = {
   agent: AgentDiscovery;
   savedAgent: Agent | undefined;
   displayName: string;
+  profileCreationDisabled?: boolean;
   /** Capability status from the host utility probe ("ok", "auth_required", etc.). */
   capabilityStatus?: string;
   runtimeUpdate?: RuntimeUpdate;
@@ -205,13 +206,28 @@ function AgentProfileActionButton({
   configured,
   hasAgentRecord,
   agentHref,
+  disabled,
 }: {
   agentName: string;
   configured: boolean;
   hasAgentRecord: boolean;
   agentHref: string;
+  disabled: boolean;
 }) {
   const { t } = useTranslation();
+  if (disabled) {
+    return (
+      <Button
+        type="button"
+        disabled
+        title={t("agents:nativeCodexUnavailable")}
+        className={settingsActionClassName("cursor-not-allowed")}
+        data-testid={`profile-unavailable-${agentName}`}
+      >
+        {t("agents:nativeCodexUnavailableShort")}
+      </Button>
+    );
+  }
   if (configured) {
     return (
       <Button className={settingsActionClassName("cursor-pointer")} asChild>
@@ -248,6 +264,7 @@ export function InstalledAgentCard({
   agent,
   savedAgent,
   displayName,
+  profileCreationDisabled = false,
   capabilityStatus,
   runtimeUpdate,
   runtimeUpdateStatus,
@@ -333,6 +350,7 @@ export function InstalledAgentCard({
             configured={configured}
             hasAgentRecord={hasAgentRecord}
             agentHref={agentHref}
+            disabled={profileCreationDisabled}
           />
         </div>
       </div>

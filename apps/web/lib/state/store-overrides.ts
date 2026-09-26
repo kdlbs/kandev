@@ -59,6 +59,7 @@ export function buildStateOverrides(m: DefaultState) {
     sessionModels: m.sessionModels,
     sessionMcpStatus: m.sessionMcpStatus,
     promptUsage: m.promptUsage,
+    usageInvalidation: m.usageInvalidation,
     sessionPollMode: m.sessionPollMode,
     githubStatus: m.githubStatus,
     githubAppRegistrations: m.githubAppRegistrations,

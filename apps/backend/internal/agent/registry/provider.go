@@ -34,23 +34,24 @@ import (
 // For the routing UI without real CLIs installed, set
 // `KANDEV_MOCK_PROVIDERS=claude-acp,codex-acp,opencode-acp` when
 // launching `make dev`.
-func Provide(log *logger.Logger) (*Registry, func() error, error) {
+func Provide(log *logger.Logger, codexAppServerEnabled ...bool) (*Registry, func() error, error) {
 	reg := NewRegistry(log)
+	nativeEnabled := len(codexAppServerEnabled) > 0 && codexAppServerEnabled[0]
 
 	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
 	mockProviders := os.Getenv("KANDEV_MOCK_PROVIDERS")
 	if mockMode == "only" {
 		// E2E mode keeps inference isolated to the mock provider, but virtual
-		// families are still part of the settings and routing contract. They do
-		// not launch a process or discover a host binary, so retaining them does
-		// not weaken the isolation boundary.
+		// families and disabled optional-agent descriptors remain available for
+		// settings and historical profile retention. They cannot dispatch work.
 		_ = reg.Register(agents.NewDynamicAgent())
 		_ = reg.Register(agents.NewMockAgent())
+		_ = reg.Register(agents.NewCodexAppServer(false))
 		configureMockAgent(reg, "mock-agent", log)
 		registerExtraMockProviders(reg, log, mockProviders)
 		validateMockProviders(reg, mockProviders, log)
 	} else {
-		reg.LoadDefaults()
+		reg.LoadDefaults(nativeEnabled)
 		if mockMode == "true" {
 			// Dev mode: enable the base mock agent alongside the real
 			// agents. KANDEV_MOCK_PROVIDERS is opt-in — when set, the

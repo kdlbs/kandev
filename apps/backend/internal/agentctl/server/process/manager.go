@@ -227,8 +227,9 @@ type Manager struct {
 	shellMgr *shell.Manager
 
 	// Protocol adapter for agent communication
-	adapter    adapter.AgentAdapter
-	adapterCfg *adapter.Config
+	adapter                 adapter.AgentAdapter
+	adapterCfg              *adapter.Config
+	userInputRequestHandler adapter.UserInputRequestHandler
 
 	// Agent event notifications (protocol-agnostic)
 	updatesCh chan adapter.AgentEvent
@@ -482,6 +483,12 @@ func (m *Manager) SetWorkspaceSourceRoots(roots []string) {
 			tracker.SetAllowedSourceRoots(canonical)
 		}
 	}
+}
+
+// SetUserInputRequestHandler configures protocol-native question routing before
+// the agent process starts. Adapters without question support ignore it.
+func (m *Manager) SetUserInputRequestHandler(handler adapter.UserInputRequestHandler) {
+	m.userInputRequestHandler = handler
 }
 
 func (m *Manager) currentWorkspaceSourceRoots() []string {
@@ -1960,6 +1967,9 @@ func (m *Manager) createAdapter() error {
 
 	// Set the permission handler
 	m.adapter.SetPermissionHandler(m.handlePermissionRequest)
+	if setter, ok := m.adapter.(adapter.UserInputRequestHandlerSetter); ok {
+		setter.SetUserInputRequestHandler(m.userInputRequestHandler)
+	}
 
 	return nil
 }

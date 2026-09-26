@@ -9,22 +9,32 @@ import "time"
 // use "" for SQL NULL since they are always either absent or a non-empty
 // identifier.
 type TaskUsageEvent struct {
-	ID             int64
-	UsageEventID   string
-	TaskID         string
-	SessionID      string
-	TurnID         string
-	AgentProfileID string
-	AgentType      string
-	Model          string
-	Provider       string
+	ID                 int64
+	UsageEventID       string
+	TaskID             string
+	SessionID          string
+	TurnID             string
+	AgentProfileID     string
+	AgentType          string
+	Model              string
+	Provider           string
+	ProviderThreadID   string
+	ProviderTurnID     string
+	ProviderResponseID string
+	NativeScope        string
+	MeasurementSource  string
+	UsageCompleteness  string
+	UsageSchemaVersion int
 
-	TokensIn          int64
-	TokensCachedRead  *int64
-	TokensCachedWrite *int64
-	TokensOut         *int64
-	TokensThought     *int64
-	TokensTotal       int64
+	TokensIn                 int64
+	TokensCachedRead         *int64
+	TokensCachedWrite        *int64
+	TokensOut                *int64
+	TokensThought            *int64
+	ReasoningOutputTokens    *int64
+	ReportedCacheWriteTokens *int64
+	ReportedTotalTokens      *int64
+	TokensTotal              int64
 
 	CostSubcents int64
 	CostSource   string
@@ -39,4 +49,15 @@ type TaskUsageEvent struct {
 	ContractVersion int
 	OccurredAt      time.Time
 	CreatedAt       time.Time
+}
+
+type TaskUsageTurnCursor struct {
+	TurnID string
+	Cursor int64
+}
+
+type TaskUsageTurnEvents struct {
+	TurnID string
+	Cursor int64
+	Events []*TaskUsageEvent
 }

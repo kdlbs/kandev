@@ -4,6 +4,7 @@
 package utility
 
 import "github.com/kandev/kandev/internal/common/acpprovider"
+import "github.com/kandev/kandev/pkg/agent"
 
 // PromptRequest is the request for executing an inference prompt.
 type PromptRequest struct {
@@ -207,7 +208,9 @@ type ProbePromptCapabilities struct {
 
 // InferenceConfigDTO is the inference configuration passed from backend to agentctl.
 type InferenceConfigDTO struct {
-	// Command is the ACP command for one-shot inference.
+	// Protocol selects the one-shot inference transport. Empty means ACP.
+	Protocol agent.Protocol `json:"protocol,omitempty"`
+	// Command is the protocol command for one-shot inference.
 	// e.g., ["npx", "-y", "@agentclientprotocol/claude-agent-acp"]
 	Command []string `json:"command"`
 	// ModelFlag is the flag template for specifying the model.

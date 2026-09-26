@@ -1833,11 +1833,11 @@ const askUserQuestionOutputSchema = `{
 func (s *Server) registerInteractionTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("ask_user_question_kandev",
-			mcp.WithDescription(`Ask the user 1-4 related questions and wait for all answers. Each question requires a prompt and 2-6 concrete options with short labels and descriptions; use a stable id when response keys matter. Call only when required input cannot be inferred, and bundle related questions in one call. Returns answers keyed by question id; a rejected bundle includes rejected=true and may include reject_reason.`),
+			mcp.WithDescription(`Ask the user 1-4 related questions and wait for all answers. Each question requires a prompt and 2-6 concrete options with short labels and descriptions; use a stable id when response keys matter. Set allow_custom_text=false when the user must choose an offered option. Call only when required input cannot be inferred, and bundle related questions in one call. Returns answers keyed by question id; a rejected bundle includes rejected=true and may include reject_reason.`),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithRawOutputSchema(json.RawMessage(askUserQuestionOutputSchema)),
 			mcp.WithArray(questionsArg, mcp.Required(),
-				mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier in the response map; auto-generated if omitted), "title" (≤12 chars short label).`),
+				mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier in the response map; auto-generated if omitted), "title" (≤12 chars short label), "allow_custom_text" (boolean, defaults to true).`),
 				mcp.MinItems(1),
 				mcp.MaxItems(4),
 				mcp.Items(buildQuestionSchemaItem()),
@@ -2116,6 +2116,10 @@ func buildQuestionSchemaItem() map[string]any {
 			idArg:     str("Stable identifier used as the key in the response map. Auto-assigned (q1, q2, ...) if omitted."),
 			titleArg:  str("Optional short label (≤12 chars) shown above the prompt."),
 			promptArg: str("The question text shown to the user."),
+			allowCustomTextArg: map[string]any{
+				typeKey:        "boolean",
+				descriptionArg: "Allow a free-text answer in addition to the offered options. Defaults to true.",
+			},
 			optionsArg: map[string]any{
 				typeKey:        "array",
 				descriptionArg: "2-6 concrete, actionable choices.",

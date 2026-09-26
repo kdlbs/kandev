@@ -136,6 +136,13 @@ export type SessionPromptUsagePayload = {
   timestamp: string;
 };
 
+export type SessionUsageUpdatedPayload = {
+  task_id: string;
+  session_id: string;
+  turn_id?: string;
+  usage_event_id: string;
+};
+
 export type SessionTodosPayload = {
   task_id: string;
   session_id: string;

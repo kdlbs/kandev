@@ -71,6 +71,9 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if !agOk {
 		return nil, fmt.Errorf("unknown agent: %s", agent.Name)
 	}
+	if isDisabledOptionalAgent(agentConfig) {
+		return nil, ErrAgentFeatureDisabled
+	}
 	if err := validateRequireExactModelPolicy(req.Model, req.RequireExactModel, req.CLIPassthrough, agent.Name == agents.DynamicAgentID); err != nil {
 		return nil, err
 	}
@@ -652,6 +655,13 @@ func (c *Controller) DuplicateProfile(ctx context.Context, req DuplicateProfileR
 	if profileKind(source) == dynamicProfileKind {
 		return nil, ErrDynamicProfileDuplicationUnsupported
 	}
+	if storedAgent, err := c.repo.GetAgent(ctx, source.AgentID); err == nil && storedAgent != nil {
+		if agentConfig, ok := c.agentRegistry.Get(storedAgent.Name); ok && isDisabledOptionalAgent(agentConfig) {
+			return nil, ErrAgentFeatureDisabled
+		}
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
 	for attempt := 0; ; attempt++ {
 		// A source without an MCP row leaves the copy without one: the
 		// default-config semantics and boot EnsureDefaultMcpConfig cover
@@ -702,6 +712,14 @@ func (c *Controller) DuplicateProfile(ctx context.Context, req DuplicateProfileR
 			return nil, err
 		}
 	}
+}
+
+func isDisabledOptionalAgent(agentConfig agents.Agent) bool {
+	if agentConfig == nil || agentConfig.Enabled() {
+		return false
+	}
+	preserver, ok := agentConfig.(agents.StoredProfilePreserver)
+	return ok && preserver.PreserveStoredProfilesWhenDisabled()
 }
 
 // maxDuplicateRetries bounds the number of re-attempts after a concurrent

@@ -225,6 +225,8 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	// AC-18): per-task and per-session usage/cost totals.
 	api.GET("/tasks/:id/usage", h.httpGetTaskUsageTotals)
 	api.GET("/tasks/:id/sessions/:sessionId/usage", h.httpGetTaskSessionUsageTotals)
+	api.GET("/tasks/:id/sessions/:sessionId/usage/turns", h.httpGetTaskSessionUsageTurns)
+	api.GET("/tasks/:id/sessions/:sessionId/usage/turns/:turnId", h.httpGetTaskSessionUsageTurn)
 
 	// Task dependencies ("this task is blocked by that one"). Task-scoped
 	// equivalents of the Office-only blocker routes; both go through the single

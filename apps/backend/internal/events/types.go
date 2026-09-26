@@ -349,6 +349,7 @@ const (
 
 const (
 	SessionPromptUsageUpdated = "session_prompt_usage.updated" // Prompt token usage updated
+	SessionUsageUpdated       = "session.usage_updated"        // A committed usage row changed session projections
 )
 
 // Event types for automations
@@ -616,6 +617,14 @@ func BuildSessionPromptUsageSubject(sessionID string) string {
 // BuildSessionPromptUsageWildcardSubject creates a wildcard subscription for all prompt usage events
 func BuildSessionPromptUsageWildcardSubject() string {
 	return SessionPromptUsageUpdated + ".*"
+}
+
+func BuildSessionUsageUpdatedSubject(sessionID string) string {
+	return SessionUsageUpdated + "." + sessionID
+}
+
+func BuildSessionUsageUpdatedWildcardSubject() string {
+	return SessionUsageUpdated + ".*"
 }
 
 // BuildOfficeRunEventSubject creates a per-run subject for run event

@@ -326,5 +326,8 @@
   "providerApiKeyLabel": "API key",
   "providerApiKeyHelp": "Kandev secret holding the bearer token sent to the provider. Leave unset for a router that needs no auth.",
   "providerModelSlash": "Remove the slash from the model name: an OpenAI-compatible provider expects a bare model id.",
-  "providerPassthroughUnsupported": "Disable CLI passthrough to use an OpenAI-compatible provider."
+  "providerPassthroughUnsupported": "Disable CLI passthrough to use an OpenAI-compatible provider.",
+  "nativeCodexUnavailableTitle": "Native Codex app server is unavailable",
+  "nativeCodexUnavailable": "This saved profile is preserved, but it cannot be edited, duplicated, enabled, or started while the Codex app-server feature is off. You can delete the profile or enable the feature in Settings.",
+  "nativeCodexUnavailableShort": "Feature off"
 }

@@ -15,6 +15,7 @@ import { SessionPage } from "../../pages/session-page";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import {
   readQuickChatViewportLayout,
+  sendQuickChatMessage,
   startQuickChatFromSetup,
   waitForQuickChatComposerReady,
 } from "./quick-chat-helpers";
@@ -22,6 +23,29 @@ import {
 const TASK_LISTING_VIEW_STORAGE_KEY = "kandev.taskListing.view.v1";
 
 test.describe("Quick Chat entry points on mobile", () => {
+  test("keeps clarification shortcuts usable after tapping a message", async ({ testPage }) => {
+    await testPage.goto("/");
+    await testPage.getByTestId("app-nav-trigger").tap();
+    await testPage.getByTestId("mobile-quick-chat-button").tap();
+
+    const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await startQuickChatFromSetup(dialog, testPage);
+    await sendQuickChatMessage(dialog, testPage, "/e2e:clarification-multi");
+
+    const clarification = dialog.getByTestId("clarification-overlay");
+    await expect(clarification).toBeVisible({ timeout: 30_000 });
+    await dialog
+      .getByTestId("quick-chat-messages")
+      .getByText("/e2e:clarification-multi", { exact: true })
+      .tap();
+    await expect(dialog.getByTestId("quick-chat-content")).toBeFocused();
+
+    await testPage.keyboard.press("1");
+    await expect(
+      clarification.locator('[data-testid="clarification-step"][data-step-index="1"]'),
+    ).toHaveAttribute("data-active", "true");
+  });
+
   // @covers AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.5 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.6
   test("preserves composer containment at the bottom of the phone dialog", async ({ testPage }) => {
     await testPage.goto("/");

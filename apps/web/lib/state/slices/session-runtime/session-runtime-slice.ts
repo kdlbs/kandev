@@ -48,6 +48,7 @@ function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: stri
   delete state.sessionModels.bySessionId[sessionId];
   delete state.sessionMcpStatus.bySessionId[sessionId];
   delete state.promptUsage.bySessionId[sessionId];
+  delete state.usageInvalidation.bySessionId[sessionId];
   delete state.sessionTodos.bySessionId[sessionId];
   delete state.prepareProgress.bySessionId[sessionId];
   delete state.launchWarning.bySessionId[sessionId];
@@ -119,6 +120,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionModels: { bySessionId: {} },
   sessionMcpStatus: { bySessionId: {} },
   promptUsage: { bySessionId: {} },
+  usageInvalidation: { bySessionId: {} },
   sessionTodos: { bySessionId: {} },
   userShells: { byEnvironmentId: {}, dismissedByEnvironmentId: {}, loading: {}, loaded: {} },
   prepareProgress: { bySessionId: {} },
@@ -531,6 +533,11 @@ export const createSessionRuntimeSlice: StateCreator<
   setPromptUsage: (sessionId, usage) =>
     set((draft) => {
       draft.promptUsage.bySessionId[sessionId] = usage;
+    }),
+  bumpSessionUsageInvalidation: (sessionId) =>
+    set((draft) => {
+      draft.usageInvalidation.bySessionId[sessionId] =
+        (draft.usageInvalidation.bySessionId[sessionId] ?? 0) + 1;
     }),
   setSessionTodos: (sessionId, entries) =>
     set((draft) => {

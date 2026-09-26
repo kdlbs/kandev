@@ -850,6 +850,12 @@ func (a *lifecycleAdapter) SetSessionModeBySessionID(ctx context.Context, sessio
 	return a.mgr.SetSessionModeBySessionID(ctx, sessionID, modeID)
 }
 
+// ForkSessionBySessionID asks an agent runtime with native fork support to
+// fork one of its completed provider turns.
+func (a *lifecycleAdapter) ForkSessionBySessionID(ctx context.Context, sessionID, providerTurnID string) (string, error) {
+	return a.mgr.ForkSessionBySessionID(ctx, sessionID, providerTurnID)
+}
+
 // RespondToPermissionBySessionID sends a response to a permission request for a session
 func (a *lifecycleAdapter) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	return a.mgr.RespondToPermissionBySessionID(sessionID, pendingID, optionID, cancelled)
@@ -1562,6 +1568,19 @@ func (a *messageCreatorAdapter) GetPermissionResolutionAudit(ctx context.Context
 // in the bundle is deleted so we don't leave a half-rendered group dangling in
 // the chat. Best-effort: if cleanup itself fails the caller still receives the
 // original error and the orphan messages stay (logged at warn-level).
+func clarificationQuestionData(question clarification.Question, options []interface{}) map[string]interface{} {
+	data := map[string]interface{}{
+		"id":      question.ID,
+		"title":   question.Title,
+		"prompt":  question.Prompt,
+		"options": options,
+	}
+	if question.AllowCustomText != nil {
+		data["allow_custom_text"] = *question.AllowCustomText
+	}
+	return data
+}
+
 func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error) {
 	ids := make([]string, 0, len(questions))
 	total := len(questions)
@@ -1575,12 +1594,7 @@ func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.C
 			}
 		}
 
-		questionData := map[string]interface{}{
-			"id":      question.ID,
-			"title":   question.Title,
-			"prompt":  question.Prompt,
-			"options": options,
-		}
+		questionData := clarificationQuestionData(question, options)
 
 		metadata := map[string]interface{}{
 			"pending_id":     pendingID,

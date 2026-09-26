@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { activeSessionId, seedClarificationSession } from "../../helpers/clarification";
 import { dwell, waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { waitForSessionSettled } from "./quick-chat-helpers";
 
 /**
@@ -11,6 +12,38 @@ import { waitForSessionSettled } from "./quick-chat-helpers";
  */
 test.describe("Mobile clarification multiline answer", () => {
   test.describe.configure({ timeout: 120_000 });
+
+  test("requires an offered choice when custom text is disabled", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Choice Only",
+      { scenario: "clarification-no-other" },
+    );
+
+    const overlay = session.clarificationOverlay();
+    await expect(overlay).toBeVisible({ timeout: 30_000 });
+    await expect(session.clarificationCustomInput()).toHaveCount(0);
+    if (prCapture.capturing) await waitForFiniteAnimations(overlay);
+    await prCapture.screenshot("mobile-clarification-choice-only", {
+      caption: "Mobile clarification offers only the choices allowed by Codex",
+    });
+    await session.clarificationOption("Fast").tap();
+
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("You answered");
+    await expect(
+      testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).resolves.toBe(true);
+  });
 
   test("Auto-run ON does not bypass a pending clarification on mobile", async ({
     testPage,

@@ -1,4 +1,4 @@
-# agentctl — HTTP server, adapters, ACP protocol
+# agentctl — HTTP server, adapters, agent protocols
 
 Scoped guidance for `apps/backend/internal/agentctl/`. Higher-level backend architecture is in `apps/backend/AGENTS.md`.
 
@@ -61,7 +61,7 @@ GitHub PR and GitLab MR URLs trigger backend association callbacks. Azure PR URL
 
 Protocol adapters in `server/adapter/transport/` normalize different agent CLIs:
 - `AgentAdapter` interface defines `Connect()`, `Initialize()`, `NewSession()`, `LoadSession()`, `Prompt()`, `Cancel()`, `Updates()`, `Close()`, among others
-- Transports: `acp` (all supported agent CLIs speak ACP), `shared` (cross-transport helpers). Only the ACP protocol is supported; non-ACP variants were removed in the ACP-first migration
+- Transports: `acp`, `codexappserver` (native Codex app-server), and `shared` (cross-transport helpers). The native Codex transport is experimental and uses the versioned schema under `pkg/codexappserver/schema/`; do not infer support for other native provider protocols from its protocol types.
 - `process.Manager` owns subprocess, wires stdio to adapter
 - `NewAdapter` in `server/adapter/factory.go` selects the adapter by protocol (`agent.Protocol`), not by agent type; agent identity and CLI-specific config come from Go constructors in `internal/agent/agents/`, registered by `internal/agent/registry.Registry.LoadDefaults()`
 

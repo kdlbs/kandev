@@ -99,6 +99,11 @@ const (
 	// never crossing the process boundary. The backend consumes it to clear
 	// the background-launch attestation for the turn that is starting.
 	EventTypeTurnStarted = "turn_started"
+
+	// EventTypeUsageObservation carries one provider-scoped native usage
+	// measurement. It is separate from turn completion because one turn can
+	// contain multiple model responses.
+	EventTypeUsageObservation = "usage_observation"
 )
 
 // AgentEventDataPromptHandoff marks a generation-bearing foreground-idle event
@@ -382,6 +387,27 @@ type AgentEvent struct {
 
 	// Usage contains token usage stats from the prompt response.
 	Usage *PromptUsage `json:"usage,omitempty"`
+
+	// UsageObservation is one immutable native response measurement or a
+	// documented estimated turn fallback.
+	UsageObservation *NativeUsageObservation `json:"usage_observation,omitempty"`
+}
+
+// NativeUsageObservation identifies the native protocol scope for one usage
+// row. Provider identifiers never replace Kandev task, session, or turn IDs.
+type NativeUsageObservation struct {
+	SchemaVersion            int    `json:"schema_version"`
+	Source                   string `json:"source"`
+	ProviderThreadID         string `json:"provider_thread_id"`
+	ProviderTurnID           string `json:"provider_turn_id"`
+	ProviderResponseID       string `json:"provider_response_id,omitempty"`
+	Scope                    string `json:"scope"`
+	Completeness             string `json:"completeness"`
+	Model                    string `json:"model,omitempty"`
+	ReasoningOutputTokens    *int64 `json:"reasoning_output_tokens,omitempty"`
+	ReportedCacheWriteTokens *int64 `json:"reported_cache_write_tokens,omitempty"`
+	ReportedTotalTokens      *int64 `json:"reported_total_tokens,omitempty"`
+	PriceSuppressed          bool   `json:"price_suppressed,omitempty"`
 }
 
 // ModelSelectionWarning is the structured, provider-neutral explanation for
@@ -604,6 +630,9 @@ type PromptUsage struct {
 	// estimation downstream.
 	ProviderReportedCostPresent bool `json:"provider_reported_cost_present,omitempty"`
 	Estimated                   bool `json:"estimated,omitempty"`
+	// PriceSuppressed marks a native measurement whose input categories do
+	// not map to the ledger's reviewed pricing components.
+	PriceSuppressed bool `json:"price_suppressed,omitempty"`
 }
 
 // ToolCallContentItem represents a content item produced by a tool call.

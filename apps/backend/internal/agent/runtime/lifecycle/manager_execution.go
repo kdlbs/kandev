@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
+	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -1045,6 +1046,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			WorkspacePath:                  info.WorkspacePath,
 			WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
 			Protocol:                       string(agentConfig.Runtime().Protocol),
+			CodexAppServerEnabled:          agentConfig.Enabled() && agentConfig.Runtime().Protocol == agent.ProtocolCodexAppServer,
 			Env:                            envPreparation.env,
 			AutoApprovePermissions:         autoApprove,
 			AutoApprovePermissionsOverride: autoApproveOverride,

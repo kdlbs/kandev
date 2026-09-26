@@ -22,6 +22,7 @@ import { useExpandState } from "./use-expand-state";
 import {
   parsePermission,
   resolvePermissionAvailability,
+  type PermissionActionChoice,
   type PermissionRequestMetadata,
   usePermissionResponseHandlers,
 } from "./use-permission-handlers";
@@ -78,6 +79,8 @@ type ToolCallExpandedContentProps = {
   onApprove: () => void;
   onReject: () => void;
   onAllowAlways?: () => void;
+  offeredChoices: PermissionActionChoice[];
+  onChooseOfferedChoice: (optionId: string) => void;
   isResponding: boolean;
 };
 
@@ -88,6 +91,8 @@ function ToolCallExpandedContent({
   onApprove,
   onReject,
   onAllowAlways,
+  offeredChoices,
+  onChooseOfferedChoice,
   isResponding,
 }: ToolCallExpandedContentProps) {
   return (
@@ -108,6 +113,8 @@ function ToolCallExpandedContent({
           onApprove={onApprove}
           onReject={onReject}
           onAllowAlways={onAllowAlways}
+          offeredChoices={offeredChoices}
+          onChooseOfferedChoice={onChooseOfferedChoice}
           isResponding={isResponding}
         />
       )}
@@ -189,6 +196,8 @@ export const ToolCallMessage = memo(function ToolCallMessage({
     handleAllowAlways,
     hasAllowAlways,
     handleReject,
+    offeredChoices,
+    handleOfferedChoice,
   } = usePermissionResponseHandlers({
     permissionMetadata,
     permissionMessage,
@@ -257,6 +266,8 @@ export const ToolCallMessage = memo(function ToolCallMessage({
         onApprove={handleApprove}
         onReject={handleReject}
         onAllowAlways={hasAllowAlways ? handleAllowAlways : undefined}
+        offeredChoices={offeredChoices}
+        onChooseOfferedChoice={handleOfferedChoice}
         isResponding={isResponding}
       />
     </ExpandableRow>

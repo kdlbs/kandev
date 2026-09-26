@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -58,6 +59,70 @@ type capableAgentAdapter struct {
 	resetErr     error
 	failWith     error
 	modelState   *streams.SessionModelState
+}
+
+type forkCapableAgentAdapter struct {
+	capableAgentAdapter
+	completedTurn string
+	forkedID      string
+	forkErr       error
+}
+
+func (a *forkCapableAgentAdapter) ForkSession(_ context.Context, sourceSessionID, completedTurnID string) (string, error) {
+	if a.forkErr != nil {
+		return "", a.forkErr
+	}
+	if sourceSessionID != a.sessionID || completedTurnID != a.completedTurn {
+		return "", errors.New("unexpected fork request")
+	}
+	return a.forkedID, nil
+}
+
+func TestAgentSessionForkReturnsConflictForKnownPreProviderRefusal(t *testing.T) {
+	s := newTestServer(t)
+	s.procMgr.SetAdapterForTest(&forkCapableAgentAdapter{
+		capableAgentAdapter: capableAgentAdapter{bareAgentAdapter: bareAgentAdapter{sessionID: "source-thread"}},
+		forkErr:             protocol.ErrForkPrecondition,
+	})
+
+	msg, err := ws.NewRequest("req-fork", "agent.session.fork", map[string]string{
+		"session_id": "source-thread", "completed_turn_id": "turn-complete",
+	})
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	payload := errorPayload(t, s.handleAgentStreamRequest(context.Background(), msg))
+	if payload.Code != ws.ErrorCodeConflict {
+		t.Fatalf("error code = %q, want %q", payload.Code, ws.ErrorCodeConflict)
+	}
+}
+
+func TestAgentSessionForkRequiresCapabilityAndReturnsNativeThread(t *testing.T) {
+	s := newTestServer(t)
+	adapter := &forkCapableAgentAdapter{
+		capableAgentAdapter: capableAgentAdapter{bareAgentAdapter: bareAgentAdapter{sessionID: "source-thread"}},
+		completedTurn:       "turn-complete",
+		forkedID:            "forked-thread",
+	}
+	s.procMgr.SetAdapterForTest(adapter)
+
+	msg, err := ws.NewRequest("req-fork", "agent.session.fork", map[string]string{
+		"session_id": "source-thread", "completed_turn_id": "turn-complete",
+	})
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	response := s.handleAgentStreamRequest(context.Background(), msg)
+	assertAdapterActionSuccess(t, response)
+	var payload struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := response.ParsePayload(&payload); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if payload.SessionID != "forked-thread" {
+		t.Fatalf("forked session_id = %q, want forked-thread", payload.SessionID)
+	}
 }
 
 func (a *capableAgentAdapter) SetMode(_ context.Context, modeID string) error {

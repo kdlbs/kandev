@@ -167,6 +167,39 @@ func TestDuplicateProfile_CopiesFullConfiguration(t *testing.T) {
 	}
 }
 
+func TestCreateProfileRejectsDisabledCodexAppServer(t *testing.T) {
+	ctrl := newTestController(nil)
+	st := newFakeStore()
+	st.agents["native-agent"] = &models.Agent{ID: "native-agent", Name: "codex-app-server"}
+	st.byName["codex-app-server"] = st.agents["native-agent"]
+	ctrl.repo = st
+	if err := ctrl.agentRegistry.Register(agents.NewCodexAppServer(false)); err != nil {
+		t.Fatalf("register native agent: %v", err)
+	}
+
+	_, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: "native-agent",
+		Name:    "Native Codex",
+	})
+	if !errors.Is(err, ErrAgentFeatureDisabled) {
+		t.Fatalf("CreateProfile error = %v, want disabled feature", err)
+	}
+}
+
+func TestDuplicateProfileRejectsDisabledCodexAppServer(t *testing.T) {
+	source := sourceProfile()
+	ctrl, st := duplicateSetup(source)
+	st.agents[source.AgentID].Name = "codex-app-server"
+	if err := ctrl.agentRegistry.Register(agents.NewCodexAppServer(false)); err != nil {
+		t.Fatalf("register native agent: %v", err)
+	}
+
+	_, err := ctrl.DuplicateProfile(context.Background(), DuplicateProfileRequest{ID: source.ID})
+	if !errors.Is(err, ErrAgentFeatureDisabled) {
+		t.Fatalf("DuplicateProfile error = %v, want disabled feature", err)
+	}
+}
+
 // TestDuplicateProfile_CopiesDisabledState verifies a disabled source produces a disabled copy.
 func TestDuplicateProfile_CopiesDisabledState(t *testing.T) {
 	source := sourceProfile()

@@ -64,6 +64,23 @@ export async function launchSession(
   return client.request<LaunchSessionResponse>("session.launch", request, effectiveTimeout);
 }
 
+export type ForkConversationResponse = {
+  task_id: string;
+  session_id: string;
+  state: string;
+};
+
+export async function forkConversation(request: {
+  task_id: string;
+  session_id: string;
+  turn_id: string;
+  request_id: string;
+}): Promise<ForkConversationResponse> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error("WebSocket client not available");
+  return client.request<ForkConversationResponse>("session.fork", request, 60_000);
+}
+
 export type EnsureSessionResponse = {
   success: boolean;
   task_id: string;

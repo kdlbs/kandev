@@ -17,6 +17,7 @@ export const defaultFeatureFlags = {
   claudeMidTurnSteering: false,
   needsYouInbox: false,
   agentSurvival: false,
+  codexAppServer: false,
 } as const;
 
 export type FeatureName = keyof typeof defaultFeatureFlags;

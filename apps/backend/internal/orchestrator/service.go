@@ -61,6 +61,10 @@ type ServiceConfig struct {
 	Scheduler  scheduler.SchedulerConfig
 	QueueSize  int
 	QueueGroup string
+	// CodexAppServerEnabled controls native-only lifecycle actions such as
+	// conversation forks. It is restart-required, matching agentctl transport
+	// composition and the feature's runtime flag.
+	CodexAppServerEnabled bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int

@@ -114,6 +114,16 @@ func (m *Manager) SetServerFactory(factory ServerFactory) {
 
 // CreateInstance creates a new agent instance.
 func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*CreateResponse, error) {
+	if req == nil {
+		return nil, errors.New("create instance request is required")
+	}
+	protocol := req.Protocol
+	if protocol == "" {
+		protocol = string(m.config.Defaults.Protocol)
+	}
+	if protocol == string(agent.ProtocolCodexAppServer) && !req.CodexAppServerEnabled {
+		return nil, errors.New("codex app-server feature is disabled")
+	}
 	// createStart includes the m.mu queue wait deliberately: that wait is the
 	// leak pathology described below, and the diagnostic agentctl_create_ready_ms
 	// metric (api.handleSystemMetrics) exists to make it visible.

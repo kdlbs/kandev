@@ -314,6 +314,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 	return &AgentStreamEventData{
 		Type:                        event.Type,
 		ACPSessionID:                event.SessionID,
+		OperationID:                 event.OperationID,
 		Text:                        event.Text,
 		ProviderDiagnosticCandidate: event.ProviderDiagnosticCandidate,
 		ToolCallID:                  event.ToolCallID,
@@ -353,6 +354,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		SessionUpdatedAt:            event.SessionUpdatedAt,
 		SessionMeta:                 event.SessionMeta,
 		Usage:                       event.Usage,
+		UsageObservation:            event.UsageObservation,
 		PlanEntries:                 event.PlanEntries,
 		PlanContent:                 event.PlanContent,
 		MCPAttachment:               event.MCPAttachment,

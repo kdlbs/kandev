@@ -82,6 +82,10 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 			},
 		},
 	}
+	if mcpBackendClient != nil && !cfg.DisableAskQuestion && cfg.SessionID != "" {
+		mcpBackendClient.SetSessionID(cfg.SessionID)
+		procMgr.SetUserInputRequestHandler(newCodexUserInputRequestHandler(cfg, mcpBackendClient, s.logger))
+	}
 
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
 	// Exempt paths from auth:

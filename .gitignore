@@ -109,12 +109,17 @@ apps/backend/kandev
 apps/backend/agentctl
 apps/backend/mock-agent
 apps/backend/acpdbg
+apps/backend/codexdbg
 apps/backend/plugin-fixture
 apps/backend/plugin-pack
 
 # acpdbg JSONL output (raw ACP wire frames from debug runs)
 apps/backend/acp-debug/
 acp-debug/
+
+# codexdbg JSONL output (raw Codex app-server wire frames from local debug runs)
+apps/backend/codex-app-server-debug/
+codex-app-server-debug/
 
 # Next.js
 .next/

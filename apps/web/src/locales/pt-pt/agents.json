@@ -326,5 +326,8 @@
   "providerApiKeyLabel": "Chave de API",
   "providerApiKeyHelp": "Segredo do Kandev que contém o token de portador enviado ao fornecedor. Deixe por definir para um router que não precisa de autenticação.",
   "providerModelSlash": "Remova a barra do nome do modelo: um fornecedor compatível com OpenAI espera um ID de modelo simples.",
-  "providerPassthroughUnsupported": "Desative o passthrough da CLI para usar um fornecedor compatível com OpenAI."
+  "providerPassthroughUnsupported": "Desative o passthrough da CLI para usar um fornecedor compatível com OpenAI.",
+  "nativeCodexUnavailableTitle": "O servidor de aplicações Codex nativo está indisponível",
+  "nativeCodexUnavailable": "Este perfil guardado é preservado, mas não pode ser editado, duplicado, ativado ou iniciado enquanto a funcionalidade do servidor de aplicações Codex estiver desativada. Pode eliminar o perfil ou ativar a funcionalidade nas Definições.",
+  "nativeCodexUnavailableShort": "Funcionalidade desativada"
 }

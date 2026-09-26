@@ -478,6 +478,7 @@ export type SessionRuntimeSliceState = {
   sessionModels: SessionModelsState;
   sessionMcpStatus: SessionMCPStatusState;
   promptUsage: PromptUsageState;
+  usageInvalidation: { bySessionId: Record<string, number> };
   sessionTodos: SessionTodosState;
   userShells: UserShellsState;
   prepareProgress: PrepareProgressState;
@@ -550,6 +551,7 @@ export type SessionRuntimeSliceActions = {
   setSessionMCPStatus: (sessionId: string, history: MCPAttachmentHistory) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
+  bumpSessionUsageInvalidation: (sessionId: string) => void;
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions — env-scoped (sessions in the same task share one shell list)

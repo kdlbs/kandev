@@ -21,7 +21,7 @@ import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { SettingsPageHeader, SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
-import { ProfileEnvVarsSection } from "@/components/settings/agent-profile-page";
+import { ProfileEnvVarsSection } from "@/components/settings/profile-edit/profile-env-vars-section";
 import { ProviderSection } from "@/components/settings/profile-edit/provider-section";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
 import type { Agent, ModelConfig, PermissionSetting, PassthroughConfig } from "@/lib/types/http";

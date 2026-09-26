@@ -510,6 +510,9 @@ func questionsEqual(a, b []Question) bool {
 		if a[i].Prompt != b[i].Prompt {
 			return false
 		}
+		if clarificationAllowsCustomText(a[i]) != clarificationAllowsCustomText(b[i]) {
+			return false
+		}
 		if !optionsEqual(a[i].Options, b[i].Options) {
 			return false
 		}

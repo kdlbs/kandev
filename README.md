@@ -83,12 +83,13 @@ We're working on **Office mode**, a feature-flagged autonomy layer for persisten
 
 Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull issues into the kanban, link tasks to PRs, and surface review activity inline. Bitbucket support is available through the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket).
 
-## Supported ACP Agents
+## Supported Agent CLIs
 
 | Agent | Package / command |
 |:-------:|:----------:|
 | **Claude Code** | `@agentclientprotocol/claude-agent-acp` |
 | **Codex** | `@agentclientprotocol/codex-acp` |
+| **Codex app server** | `@openai/codex` *(experimental; enable in System > Feature Toggles)* |
 | **GitHub Copilot** | `@github/copilot` |
 | **Gemini CLI** | `@google/gemini-cli` |
 | **Amp** | `amp-acp` |
@@ -110,12 +111,10 @@ Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull
 | **Hermes** | `hermes` *(install with the official Hermes installer)* |
 | **Antigravity** | `agy_acp_server.par` / `.exe` *(no automated install; download from the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp), extract both archive entries into one directory, and put that directory on PATH)* |
 
-> All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/public/add-agent-cli.md) for a step-by-step guide.
+> Most structured agent integrations communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Codex app-server is a separate experimental native integration. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/public/add-agent-cli.md) for a step-by-step guide.
 
-Kandev does not pin the managed npm runtimes for Claude, Codex, OpenCode,
-Copilot, or Gemini. Normal launches can reuse npm's best-effort execution
-cache. To deliberately fetch an upstream release, use **Update agent** in
-**Settings > Agents**; Kandev updates the host runtime and refreshes its
+Managed npm runtimes have reviewed defaults. To fetch a selected upstream
+release, use **Update agent** in **Settings > Agents**. Kandev refreshes its
 advertised models and modes for future sessions without restarting active
 sessions. See [Agents and Profiles](docs/public/agents-and-profiles.md#update-a-managed-agent-runtime).
 

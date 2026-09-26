@@ -109,6 +109,7 @@ export const defaultState = {
   sessionModels: defaultSessionRuntimeState.sessionModels,
   sessionMcpStatus: defaultSessionRuntimeState.sessionMcpStatus,
   promptUsage: defaultSessionRuntimeState.promptUsage,
+  usageInvalidation: defaultSessionRuntimeState.usageInvalidation,
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
   embeddedVscodeSupport: defaultSessionRuntimeState.embeddedVscodeSupport,
   workspaceRestoration: defaultSessionRuntimeState.workspaceRestoration,
@@ -524,6 +525,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     sessionModels: { ...defaultState.sessionModels, ...initialState.sessionModels },
     sessionMcpStatus: { ...defaultState.sessionMcpStatus, ...initialState.sessionMcpStatus },
     promptUsage: { ...defaultState.promptUsage, ...initialState.promptUsage },
+    usageInvalidation: { ...defaultState.usageInvalidation, ...initialState.usageInvalidation },
     sessionPollMode: { ...defaultState.sessionPollMode, ...initialState.sessionPollMode },
     embeddedVscodeSupport: {
       ...defaultState.embeddedVscodeSupport,

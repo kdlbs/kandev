@@ -27,6 +27,7 @@ import (
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
+	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -1069,6 +1070,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
 		Protocol:                       string(agentConfig.Runtime().Protocol),
+		CodexAppServerEnabled:          agentConfig.Enabled() && agentConfig.Runtime().Protocol == agent.ProtocolCodexAppServer,
 		Env:                            env,
 		AutoApprovePermissions:         profileInfo != nil && profileInfo.AutoApprove,
 		AutoApprovePermissionsOverride: autoApproveOverride,
