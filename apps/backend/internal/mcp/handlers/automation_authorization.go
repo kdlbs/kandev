@@ -21,11 +21,6 @@ type guardedMCPDispatcher struct {
 
 func (d *guardedMCPDispatcher) RegisterFunc(action string, handler ws.HandlerFunc) {
 	d.Dispatcher.RegisterFunc(action, func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-		if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && principal.HandoffFenced &&
-			msg.Action != ws.ActionMCPHandoffCoordinatorPrimary {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
-				"coordinator predecessor is fenced; only an identical handoff retry is allowed", nil)
-		}
 		guarded, replacement, err := d.handlers.authorizeAutomationRequest(ctx, msg)
 		if guarded != nil {
 			return guarded, err

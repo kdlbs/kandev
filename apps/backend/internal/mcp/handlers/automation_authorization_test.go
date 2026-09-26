@@ -182,30 +182,3 @@ func TestAuthorizeAutomationRequest_NonAutomationPrincipalUnaffected(t *testing.
 		require.Same(t, msg, replacement)
 	})
 }
-
-func TestGuardedMCPDispatcherFencedCoordinatorCanOnlyRetryHandoff(t *testing.T) {
-	dispatcher := ws.NewDispatcher()
-	h := &Handlers{}
-	guarded := &guardedMCPDispatcher{Dispatcher: dispatcher, handlers: h}
-	called := 0
-	for _, action := range []string{ws.ActionMCPListTasks, ws.ActionMCPHandoffCoordinatorPrimary} {
-		guarded.RegisterFunc(action, func(_ context.Context, msg *ws.Message) (*ws.Message, error) {
-			called++
-			return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"called": true})
-		})
-	}
-	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
-		WorkspaceID: "ws-1", CallerTaskID: "coordinator", CallerSessionID: "session-old",
-		Surface: mcpprofile.SurfaceKanbanTask, HandoffFenced: true,
-	})
-
-	denied, err := dispatcher.Dispatch(ctx, makeWSMessage(t, ws.ActionMCPListTasks, map[string]interface{}{}))
-	require.NoError(t, err)
-	assertWSError(t, denied, ws.ErrorCodeForbidden)
-	require.Zero(t, called)
-
-	replayed, err := dispatcher.Dispatch(ctx, makeWSMessage(t, ws.ActionMCPHandoffCoordinatorPrimary, map[string]interface{}{}))
-	require.NoError(t, err)
-	require.Equal(t, ws.MessageTypeResponse, replayed.Type)
-	require.Equal(t, 1, called)
-}

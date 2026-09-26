@@ -11,29 +11,20 @@ import (
 )
 
 func TestResolveTaskSessionMCPProfile_GrantsExactProfileOnlyToCanonicalCoordinator(t *testing.T) {
-	canonical := t.TempDir()
-	t.Setenv("KANDEV_COORDINATOR_REPOSITORY", canonical)
+	t.Setenv("KANDEV_COORDINATOR_TASK_ID", "coordinator")
 	repo := newMockRepository()
 	repo.tasks["coordinator"] = &models.Task{ID: "coordinator", WorkspaceID: "workspace"}
 	repo.sessions["session"] = &models.TaskSession{ID: "session", TaskID: "coordinator"}
-	repo.repositories["repository"] = &models.Repository{
-		ID: "repository", WorkspaceID: "workspace", LocalPath: canonical,
-	}
-	repo.taskRepositories["link"] = &models.TaskRepository{
-		ID: "link", TaskID: "coordinator", RepositoryID: "repository",
-	}
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
 
 	profile, err := exec.resolveTaskSessionMCPProfile(context.Background(), "coordinator", repo.sessions["session"], false)
 	require.NoError(t, err)
 	require.True(t, profile.HasCapability(mcpprofile.CapabilityExactTaskProfileAssignment))
-	require.True(t, profile.HasCapability(mcpprofile.CapabilityCoordinatorSessionHandoff))
 
-	repo.repositories["repository"].LocalPath = t.TempDir()
+	t.Setenv("KANDEV_COORDINATOR_TASK_ID", "another-task")
 	profile, err = exec.resolveTaskSessionMCPProfile(context.Background(), "coordinator", repo.sessions["session"], false)
 	require.NoError(t, err)
 	require.False(t, profile.HasCapability(mcpprofile.CapabilityExactTaskProfileAssignment))
-	require.False(t, profile.HasCapability(mcpprofile.CapabilityCoordinatorSessionHandoff))
 }
 
 func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *testing.T) {

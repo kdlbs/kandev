@@ -18,7 +18,6 @@ type Principal struct {
 	CallerTaskID    string
 	CallerSessionID string
 	Surface         mcpprofile.Surface
-	HandoffFenced   bool
 }
 
 func (p Principal) IsAutomation() bool {
@@ -50,7 +49,7 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 	if err != nil {
 		return nil, err
 	}
-	session, err := r.validatePrincipalSession(ctx, taskID, sessionID)
+	_, err = r.validatePrincipalSession(ctx, taskID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +69,6 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 		CallerTaskID:    taskID,
 		CallerSessionID: sessionID,
 		Surface:         surface,
-		HandoffFenced:   session != nil && session.RouteState == models.TaskSessionRouteStateCoordinatorHandoffFenced,
 	}), nil
 }
 

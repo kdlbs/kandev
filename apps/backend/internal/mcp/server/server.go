@@ -1091,7 +1091,6 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
 		{name: "canonical-coordinator-exact-profile", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityExactTaskProfileAssignment)), register: func(s *Server) { s.registerAssignExactTaskProfileTool() }},
-		{name: "canonical-coordinator-session-handoff", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityCoordinatorSessionHandoff)), register: func(s *Server) { s.registerCoordinatorHandoffTool() }},
 		{name: "task-pr-links", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool {
 			return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) ||
 				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)

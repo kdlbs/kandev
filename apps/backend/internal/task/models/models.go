@@ -2048,8 +2048,6 @@ type TaskSession struct {
 	ExactProfileRevision   int64 `json:"exact_profile_revision,omitempty"`
 }
 
-const TaskSessionRouteStateCoordinatorHandoffFenced = "coordinator_handoff_fenced"
-
 // ActiveSessionCancellationCandidate is the compare-and-set snapshot used by
 // the active-session stall healer. An empty ExpectedTurnID means that no turn
 // may be active when the cancellation is written.
