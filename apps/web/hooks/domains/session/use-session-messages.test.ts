@@ -376,6 +376,36 @@ describe("cached session entry history readiness", () => {
     expect(result.current.isLoading).toBe(false);
     unmount();
   });
+
+  it("keeps a failed cached refresh unavailable when a live row arrives", async () => {
+    const readiness = Promise.resolve();
+    const response = deferred<{ messages: Message[]; has_more: boolean }>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness,
+      unsubscribe: vi.fn(),
+    });
+    mockWebSocketClient.request.mockReturnValue(response.promise);
+    mockState.messages.bySession["sess-1"] = [makeMessage({ id: "cached" })];
+    mockState.messages.metaBySession["sess-1"].historyInitialized = true;
+
+    const { result, rerender, unmount } = renderHook(() => useSessionMessages("sess-1"));
+    await waitFor(() => expect(mockWebSocketClient.request).toHaveBeenCalledTimes(1));
+
+    mockState.messages.bySession["sess-1"] = [
+      makeMessage({ id: "cached" }),
+      makeMessage({ id: "live" }),
+    ];
+    rerender();
+
+    await act(async () => {
+      response.reject(new Error("refresh failed"));
+      await response.promise.catch(() => undefined);
+    });
+    await waitFor(() => expect(result.current.historyStatus).toBe("unavailable"));
+    expect(result.current.historyError).toEqual(new Error("refresh failed"));
+    unmount();
+  });
 });
 
 describe("session entry loading state", () => {

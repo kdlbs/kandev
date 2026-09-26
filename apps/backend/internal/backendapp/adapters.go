@@ -442,12 +442,15 @@ func buildLifecycleLaunchRequest(
 		TaskEnvironmentID:             req.TaskEnvironmentID,
 		WorkspaceReuseRequired:        req.WorkspaceReuseRequired,
 		AllowBranchReplacement:        req.AllowBranchReplacement,
+		ForceContextContinuation:      req.ForceContextContinuation,
+		RecoveryAction:                req.RecoveryAction,
 		TaskTitle:                     req.TaskTitle,
 		AgentProfileID:                officeProfileID,
 		ExecutionProfileID:            req.AgentProfileID,
 		StartAgent:                    req.StartAgent,
 		TurnID:                        req.TurnID,
 		WorkspacePath:                 workspacePath,
+		OriginalWorkspacePath:         req.OriginalWorkspacePath,
 		TaskDescription:               req.TaskDescription,
 		Attachments:                   convertToLifecycleAttachments(req.Attachments),
 		Env:                           req.Env,
@@ -456,6 +459,9 @@ func buildLifecycleLaunchRequest(
 		EnvironmentDefinitions:        append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...),
 		EnvironmentResolutionRequired: req.EnvironmentResolutionRequired,
 		ACPSessionID:                  req.ACPSessionID,
+		DeliveryStreamID:              req.DeliveryStreamID,
+		DeliveryIncarnationID:         req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:     req.DeliveryHarnessGeneration,
 		Metadata:                      req.Metadata,
 		ModelOverride:                 req.ModelOverride,
 		ExecutorType:                  req.ExecutorType,
@@ -1706,6 +1712,13 @@ func (a *messageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context,
 // AppendAgentMessage appends additional content to an existing streaming message.
 func (a *messageCreatorAdapter) AppendAgentMessage(ctx context.Context, messageID, additionalContent string) error {
 	return a.svc.AppendMessageContent(ctx, messageID, additionalContent)
+}
+
+// PublishMessageEvent announces a message that was already persisted by a
+// canonical projector. It is used by the orchestrator's durable streaming
+// path to notify connected clients without repeating the message write.
+func (a *messageCreatorAdapter) PublishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
+	return a.svc.PublishMessageEvent(ctx, eventType, message)
 }
 
 // CreateThinkingMessageStreaming creates a new thinking message with a pre-generated ID.

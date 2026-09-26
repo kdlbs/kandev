@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -38,6 +40,17 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 		return
 	}
 	m.appendAssistantHistoryChunk(execution, event.Text)
+	if event.CanonicalProjection {
+		trackCanonicalResponseAttemptMessage(execution, event.CanonicalMessageID, event.CanonicalMessageAppend)
+		m.publishCanonicalStreamingContent(
+			execution,
+			"message_streaming",
+			event.CanonicalMessageID,
+			event.Text,
+			event.CanonicalMessageAppend,
+		)
+		return
+	}
 	if event.ProtocolMessageID != "" {
 		m.flushPendingLegacyMessage(execution, execution.promptGenerationSnapshot(), event.AttemptID)
 		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text, event.ProviderDiagnosticCandidate, execution.promptGenerationSnapshot(), event.AttemptID)
@@ -105,6 +118,17 @@ func (m *Manager) flushMessageBufferOnDiagnosticChange(execution *AgentExecution
 // one value across the call.
 func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.ReasoningText == "" {
+		return
+	}
+	if event.CanonicalProjection {
+		trackCanonicalResponseAttemptMessage(execution, event.CanonicalMessageID, event.CanonicalMessageAppend)
+		m.publishCanonicalStreamingContent(
+			execution,
+			thinkingStreamingEventType,
+			event.CanonicalMessageID,
+			event.ReasoningText,
+			event.CanonicalMessageAppend,
+		)
 		return
 	}
 	if event.ProtocolMessageID != "" {
@@ -388,6 +412,9 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 // lease is held by the event dispatcher. Direct test and legacy callers use
 // handleCompleteEvent, which acquires that lease before entering here.
 func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *agentctl.AgentEvent) bool {
+	if event.DeliverySubmissionID != "" {
+		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
+	}
 	if event.TurnID == "" {
 		// Snapshot before publishing AgentReady. A queued successor may bind a
 		// new turn while the complete stream frame is still crossing the bus.
@@ -617,6 +644,25 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 // (available_commands_update arriving 50ms after MarkBootReady, etc.) don't
 // accidentally re-arm a freshly-booted no-prompt session as Running.
 func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
+	promptLifecycleLocked := false
+	unlockPromptLifecycle := func() {
+		if promptLifecycleLocked {
+			execution.promptLifecycleMu.Unlock()
+			promptLifecycleLocked = false
+		}
+	}
+	if event.PromptGeneration != 0 {
+		// A retained event can arrive after its prompt has completed. Keep it
+		// from reviving the execution or refreshing its activity timestamp.
+		execution.promptLifecycleMu.Lock()
+		promptLifecycleLocked = true
+		if execution.promptGeneration != event.PromptGeneration ||
+			execution.promptCompletionGeneration == event.PromptGeneration {
+			unlockPromptLifecycle()
+			return
+		}
+	}
+
 	_, isTurnContent := turnContentEventTypes[event.Type]
 	isProviderDiagnostic := event.Type == "message_chunk" && event.ProviderDiagnosticCandidate
 	if isTurnContent {
@@ -640,21 +686,30 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 	// during Initialize (before MarkBootReady), so firstActivityOnce fires
 	// while Status is still Running — this is defensive hardening.
 	if execution.Status != v1.AgentStatusReady {
+		publishRunning := false
 		execution.firstActivityOnce.Do(func() {
-			m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
+			publishRunning = true
 		})
+		unlockPromptLifecycle()
+		if publishRunning {
+			m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
+		}
 		return
 	}
 	if m.executionStore == nil {
+		unlockPromptLifecycle()
 		return
 	}
 	if isTerminalToolUpdate(event) {
+		unlockPromptLifecycle()
 		return
 	}
 	if _, ok := turnContentEventTypes[event.Type]; !ok || isProviderDiagnostic {
+		unlockPromptLifecycle()
 		return
 	}
 	if err := m.UpdateStatus(execution.ID, v1.AgentStatusRunning); err != nil {
+		unlockPromptLifecycle()
 		m.logger.Warn("failed to persist wakeup-driven running status",
 			zap.String("execution_id", execution.ID),
 			zap.Error(err))
@@ -664,6 +719,7 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
 		zap.String("trigger_event_type", event.Type))
+	unlockPromptLifecycle()
 	m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
 }
 
@@ -675,7 +731,7 @@ func (m *Manager) handleStreamDisconnect(
 	err error,
 	promptGeneration uint64,
 ) {
-	m.handleStreamDisconnectWithAttempt(execution, err, promptGeneration, "")
+	m.handleStreamDisconnectWithAttempt(execution, err, promptGeneration, "", nil)
 }
 
 func (m *Manager) handleStreamDisconnectWithAttempt(
@@ -683,7 +739,17 @@ func (m *Manager) handleStreamDisconnectWithAttempt(
 	err error,
 	promptGeneration uint64,
 	attemptID string,
+	startupGeneration *uint64,
 ) {
+	ignoreRebindDisconnect := func() bool {
+		return startupGeneration != nil && execution.recordExpectedWorkspaceRebindDisconnect(*startupGeneration)
+	}
+	if ignoreRebindDisconnect() {
+		m.logger.Debug("ignoring expected workspace rebind stream disconnect",
+			zap.String("execution_id", execution.ID),
+			zap.Uint64("startup_generation", *startupGeneration))
+		return
+	}
 	disconnectFields := []zap.Field{
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
@@ -703,14 +769,33 @@ func (m *Manager) handleStreamDisconnectWithAttempt(
 	if promptGeneration != 0 {
 		execution.promptLifecycleMu.Lock()
 		defer execution.promptLifecycleMu.Unlock()
+		if ignoreRebindDisconnect() {
+			m.logger.Debug("ignoring expected workspace rebind stream disconnect",
+				zap.String("execution_id", execution.ID),
+				zap.Uint64("startup_generation", *startupGeneration))
+			return
+		}
 
 		var claimed bool
+		var cancelEscalation bool
 		var updated *AgentExecution
+		uncertainSubmissionID := execution.deliverySubmissionIDSnapshot()
+		uncertain := uncertainSubmissionID != "" || errors.Is(err, ErrUncertainPromptDelivery)
 		statusErr := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
 			if current != execution || current.promptGeneration != promptGeneration {
 				return
 			}
+			if current.cancelEscalatedPromptGeneration.Load() == promptGeneration {
+				cancelEscalation = true
+				updated = current
+				claimed = true
+				return
+			}
 			current.Status = v1.AgentStatusFailed
+			if uncertain {
+				current.FailureCode = "DURABLE_DELIVERY_UNCERTAIN"
+				current.FailureDetails = uncertainSubmissionID
+			}
 			updated = current
 			claimed = true
 		})
@@ -730,16 +815,19 @@ func (m *Manager) handleStreamDisconnectWithAttempt(
 		m.flushMessageBuffer(execution, promptGeneration, attemptID)
 		m.flushAssistantHistory(execution)
 		m.persistExecutorRunning(context.Background(), updated)
+		if cancelEscalation {
+			m.logger.Debug("preserving execution after expected cancel disconnect",
+				zap.String("execution_id", execution.ID),
+				zap.Uint64("prompt_generation", promptGeneration))
+			return
+		}
 		m.publishStreamDisconnectErrorWithAttempt(execution, err, attemptID)
 		return
 	}
-
 	// The stream callback may race with the caller starting another prompt
 	// after promptDoneCh is signaled. Drain the partial assistant transcript
 	// here as well as at prompt setup; the shared buffer lock makes either
 	// path the single owner and prevents a later reset from dropping it.
-	// This branch does not hold execution.promptLifecycleMu, so a fresh
-	// snapshot is safe.
 	m.flushMessageBuffer(execution, execution.promptGenerationSnapshot(), attemptID)
 	m.flushAssistantHistory(execution)
 
@@ -759,11 +847,29 @@ func (m *Manager) handleStreamDisconnectWithStartupGeneration(
 	startupGeneration uint64,
 ) {
 	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		if execution.recordExpectedWorkspaceRebindDisconnect(startupGeneration) {
+			m.logger.Debug("ignoring expected workspace rebind stream disconnect",
+				zap.String("execution_id", execution.ID),
+				zap.Uint64("startup_generation", startupGeneration))
+			return
+		}
+		uncertainSubmissionID := execution.deliverySubmissionIDSnapshot()
+		uncertain := uncertainSubmissionID != "" || errors.Is(err, ErrUncertainPromptDelivery)
+		signalError := "agent stream disconnected: " + err.Error()
+		if uncertain {
+			signalError = fmt.Sprintf(
+				"%s: %s; reconcile submission %q before retrying",
+				ErrUncertainPromptDelivery,
+				err,
+				uncertainSubmissionID,
+			)
+		}
 		if !execution.signalPromptCompletionForStartupGenerationLeased(
 			startupGeneration,
 			PromptCompletionSignal{
 				IsError:          true,
-				Error:            "agent stream disconnected: " + err.Error(),
+				Uncertain:        uncertain,
+				Error:            signalError,
 				PromptGeneration: promptGeneration,
 			},
 		) {
@@ -779,7 +885,7 @@ func (m *Manager) handleStreamDisconnectWithStartupGeneration(
 				zap.Error(err))
 			return
 		}
-		m.handleStreamDisconnectWithAttempt(execution, err, promptGeneration, attemptID)
+		m.handleStreamDisconnectWithAttempt(execution, err, promptGeneration, attemptID, &startupGeneration)
 	})
 	if !accepted {
 		m.logger.Debug("ignoring stale managed-runtime stream disconnect",
@@ -799,9 +905,17 @@ func (m *Manager) publishStreamDisconnectErrorWithAttempt(
 	err error,
 	attemptID string,
 ) {
+	message := "agent stream disconnected: " + err.Error()
+	if submissionID := execution.deliverySubmissionIDSnapshot(); submissionID != "" || errors.Is(err, ErrUncertainPromptDelivery) {
+		message = fmt.Sprintf(
+			"%s: agent stream disconnected; reconcile submission %q before retrying",
+			ErrUncertainPromptDelivery,
+			submissionID,
+		)
+	}
 	m.eventPublisher.PublishAgentctlEvent(
 		WithResumeAttemptID(context.Background(), attemptID), events.AgentctlError, execution,
-		"agent stream disconnected: "+err.Error(),
+		message,
 	)
 }
 

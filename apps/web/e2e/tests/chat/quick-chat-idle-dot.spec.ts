@@ -18,7 +18,7 @@ test.describe("quick chat activity indicators", () => {
       (response) =>
         response.url().includes("/quick-chat") && response.request().method() === "POST",
     );
-    const dialog = await openQuickChatWithAgent(testPage);
+    const dialog = await openQuickChatWithAgent(testPage, true, created);
     const { session_id: sessionId, task_id: taskId } = (await (await created).json()) as {
       session_id: string;
       task_id: string;
@@ -61,7 +61,7 @@ test.describe("quick chat activity indicators", () => {
       (response) =>
         response.url().includes("/quick-chat") && response.request().method() === "POST",
     );
-    const dialog = await openQuickChatWithAgent(tabletTestPage);
+    const dialog = await openQuickChatWithAgent(tabletTestPage, true, created);
     const { session_id: sessionId, task_id: taskId } = (await (await created).json()) as {
       session_id: string;
       task_id: string;

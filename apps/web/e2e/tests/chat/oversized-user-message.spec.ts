@@ -126,9 +126,21 @@ test.describe("Oversized user-message previews", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    const messageAdded = gateway.waitForResponse("message.add", { timeout: 60_000 });
-    await session.sendMessage(source);
-    await messageAdded;
+    const editor = await session.fillMessage(source);
+    await session.submitMessageWithKeyboard(editor);
+    // The durable transcript confirms acceptance even if the large WS reply is
+    // delayed after the user message has already rendered.
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(task.session_id!);
+          return messages.some(
+            (message) => message.author_type === "user" && message.content === source,
+          );
+        },
+        { timeout: 30_000, message: "the complete oversized prompt should be stored" },
+      )
+      .toBe(true);
     await session.waitForChatIdle({ timeout: 60_000 });
 
     const chat = session.activeChat();
@@ -145,18 +157,6 @@ test.describe("Oversized user-message previews", () => {
       "kandev-message.txt",
       path.join(backend.tmpDir, `desktop-message-${Date.now()}.txt`),
     );
-
-    await expect
-      .poll(
-        async () => {
-          const { messages } = await apiClient.listSessionMessages(task.session_id!);
-          return messages.some(
-            (message) => message.author_type === "user" && message.content === source,
-          );
-        },
-        { timeout: 30_000, message: "the complete oversized prompt should be stored" },
-      )
-      .toBe(true);
 
     await testPage.reload();
     await session.waitForLoad();

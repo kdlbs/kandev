@@ -664,7 +664,7 @@ func TestReuseExistingEnvironment_RuntimeMetadata_CarriesPersistentSecrets(t *te
 		},
 	}
 	e := &Executor{logger: log, repo: repo}
-	req := &LaunchAgentRequest{TaskID: "task-1"}
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "session-old"}
 
 	e.reuseExistingEnvironment(context.Background(), req, &models.TaskEnvironment{
 		ID: "env-1",
@@ -710,7 +710,7 @@ func TestReuseExistingEnvironment_RuntimeMetadata_FallsBackToMatchingContainer(t
 		},
 	}
 	e := &Executor{logger: log, repo: repo}
-	req := &LaunchAgentRequest{TaskID: "task-1"}
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "session-old"}
 
 	e.reuseExistingEnvironment(context.Background(), req, &models.TaskEnvironment{
 		ID:          "env-1",
@@ -1038,8 +1038,9 @@ func TestReuseExistingEnvironment_FreshRepoRecoveryDropsContainerHandle(t *testi
 // remote task dir, workdir root, proxy jump) MUST still propagate so the
 // second session connects to the same host and reuses the task dir.
 func TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys(t *testing.T) {
-	req := &LaunchAgentRequest{TaskID: "task-1"}
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-2", ExecutorType: string(models.ExecutorTypeSSH)}
 	running := &models.ExecutorRunning{
+		SessionID:        "sess-1",
 		AgentExecutionID: "exec-prev",
 		Metadata: map[string]interface{}{
 			// Connection config — should propagate.
@@ -1064,8 +1065,8 @@ func TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys(t *testing.T) {
 
 	applyExecutorRunningMetadata(req, running)
 
-	if req.PreviousExecutionID != "exec-prev" {
-		t.Errorf("PreviousExecutionID = %q, want exec-prev", req.PreviousExecutionID)
+	if req.PreviousExecutionID != "" {
+		t.Errorf("PreviousExecutionID = %q, want empty for sibling session", req.PreviousExecutionID)
 	}
 	if req.Metadata == nil {
 		t.Fatal("req.Metadata is nil; expected propagated keys")
@@ -1129,7 +1130,7 @@ func TestApplyExecutorRunningMetadata_DoesNotResumeSiblingKubernetesSession(t *t
 	}
 }
 
-func TestApplyExecutorRunningMetadata_KubernetesResumeRequiresExactSessionAuthority(t *testing.T) {
+func TestApplyExecutorRunningMetadata_ResumeRequiresExactSessionAuthority(t *testing.T) {
 	tests := []struct {
 		name           string
 		requestType    string
@@ -1167,9 +1168,17 @@ func TestApplyExecutorRunningMetadata_KubernetesResumeRequiresExactSessionAuthor
 			runningSession: "session-1",
 		},
 		{
-			name: "legacy runtime keeps cross-session environment reuse", requestType: string(models.ExecutorTypeLocal),
+			name: "non-Kubernetes sibling session starts fresh", requestType: string(models.ExecutorTypeLocal),
 			requestSession: "session-new", runtime: agentruntime.RuntimeStandalone,
-			runningSession: "session-old", wantPrevious: "execution-old",
+			runningSession: "session-old",
+		},
+		{
+			name: "non-Kubernetes missing request session starts fresh", requestType: string(models.ExecutorTypeLocal),
+			runtime: agentruntime.RuntimeStandalone, runningSession: "session-old",
+		},
+		{
+			name: "non-Kubernetes missing recorded session starts fresh", requestType: string(models.ExecutorTypeLocal),
+			requestSession: "session-new", runtime: agentruntime.RuntimeStandalone,
 		},
 	}
 

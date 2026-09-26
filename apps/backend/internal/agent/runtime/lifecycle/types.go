@@ -57,13 +57,28 @@ type AgentExecution struct {
 	AgentProfileID string
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
-	OfficeAgentProfileID string
-	AgentID              string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
-	ContainerID          string
-	ContainerIP          string               // IP address of the container for agentctl communication
-	WorkspacePath        string               // Path to the workspace (worktree or repository path)
-	WorkspaceSourceRoots []string             // Canonical durable source roots permitted by agentctl file operations
-	ACPSessionID         string               // ACP session ID to resume, if available
+	OfficeAgentProfileID      string
+	AgentID                   string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
+	ContainerID               string
+	ContainerIP               string   // IP address of the container for agentctl communication
+	WorkspacePath             string   // Path to the workspace (worktree or repository path)
+	WorkspaceSourceRoots      []string // Canonical durable source roots permitted by agentctl file operations
+	ACPSessionID              string   // ACP session ID to resume, if available
+	DeliveryStreamID          string   // Generation-scoped durable agentctl stream
+	DeliveryIncarnationID     string   // Kandev session incarnation owning the stream
+	DeliveryHarnessGeneration uint64   // Native harness generation owning the stream
+	// DeliveryMode records the recovery protocol selected for this execution.
+	// It is set before an adopted execution is published so admission and stream
+	// replay cannot observe an undiscovered peer as legacy.
+	DeliveryMode DurableDeliveryMode
+	// DeliveryDescriptor is the authenticated owner snapshot captured during
+	// adoption. It is retained in memory for bounded replay and Stop
+	// reconciliation; prompt payloads are never present in it.
+	DeliveryDescriptor *agentctl.DeliveryStatus
+	// DeliveryReplayCursor is the exact SQL projected position captured during
+	// adoption. It is used to reconcile the descriptor's bounded high-water
+	// mark before a live stream is attached.
+	DeliveryReplayCursor uint64
 	AgentCommand         string               // Command to start the agent subprocess
 	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
 	AgentArgs            []string             // Structured argv for AgentCommand
@@ -74,6 +89,13 @@ type AgentExecution struct {
 	FinishedAt           *time.Time
 	ExitCode             *int
 	ErrorMessage         string
+	// OriginalWorkspacePath is the first agent-visible CWD for this native
+	// session. It is retained separately from the current target so restore
+	// policy can classify relocation before touching native state.
+	OriginalWorkspacePath string
+	// ForceContextContinuation records that this execution was explicitly
+	// authorized to replace native context with a bounded Kandev snapshot.
+	ForceContextContinuation bool
 	// FailureCode and FailureDetails carry a bounded, structured startup
 	// diagnostic to the orchestrator. They remain separate from the generic
 	// error message so user-facing recovery can choose a stable presentation.
@@ -108,6 +130,11 @@ type AgentExecution struct {
 	// completion's attribution while its stream frame is in flight.
 	promptTurnID      string
 	promptLifecycleMu sync.Mutex
+	// cancelEscalatedPromptGeneration identifies a prompt whose cancellation
+	// released the execution locally before the agentctl stream closed. The
+	// resulting disconnect is expected teardown and must not replace the
+	// reusable execution with a failed one.
+	cancelEscalatedPromptGeneration atomic.Uint64
 
 	// recoveryAppliedControlTurnID is the control-server-assigned turn
 	// identifier (streams.AgentEvent.ControlTurnID) of a retained turn
@@ -297,6 +324,13 @@ type AgentExecution struct {
 	promptFinished   chan struct{}
 	promptFinishedMu sync.Mutex
 
+	// deliverySubmissionID identifies the accepted durable prompt currently
+	// associated with this execution. It is advisory until agentctl confirms
+	// the submission state, but it prevents a stream disconnect from being
+	// mistaken for a completed or failed prompt without reconciliation.
+	deliverySubmissionID string
+	deliverySubmissionMu sync.RWMutex
+
 	// Last time a turn-content event was received (for stall detection).
 	// Advanced only by recordActivity for turnContentEventTypes, plus
 	// armPromptActivity, markAgentActivity, and recordSteerActivity. A
@@ -342,8 +376,10 @@ type AgentExecution struct {
 	// generation. The execution ID can be reused by managed-runtime repair, so
 	// callbacks must use their captured generation identity instead of the
 	// execution's current mutable label.
-	startupAttemptIDs  map[uint64]string
-	startupLifecycleMu sync.Mutex
+	startupAttemptIDs                   map[uint64]string
+	startupLifecycleMu                  sync.Mutex
+	workspaceRebindDisconnectGeneration atomic.Uint64
+	workspaceRebindDisconnectObserved   atomic.Bool
 	// startupCallbackMu leases the complete callback mutation. Startup
 	// replacement and adopted-execution binding take its write lock, so a
 	// callback cannot validate one generation and mutate another after the
@@ -387,6 +423,35 @@ type ExecutionOwner struct {
 // must fail closed when the owner is missing, stale, paused or unreadable.
 type OwnerAdmission interface {
 	AdmitExecution(ctx context.Context, owner ExecutionOwner) error
+}
+
+func (e *AgentExecution) setDeliverySubmissionID(id string) {
+	if e == nil {
+		return
+	}
+	e.deliverySubmissionMu.Lock()
+	e.deliverySubmissionID = id
+	e.deliverySubmissionMu.Unlock()
+}
+
+func (e *AgentExecution) deliverySubmissionIDSnapshot() string {
+	if e == nil {
+		return ""
+	}
+	e.deliverySubmissionMu.RLock()
+	defer e.deliverySubmissionMu.RUnlock()
+	return e.deliverySubmissionID
+}
+
+func (e *AgentExecution) clearDeliverySubmissionID(id string) {
+	if e == nil {
+		return
+	}
+	e.deliverySubmissionMu.Lock()
+	if id == "" || e.deliverySubmissionID == id {
+		e.deliverySubmissionID = ""
+	}
+	e.deliverySubmissionMu.Unlock()
 }
 
 func (e *AgentExecution) isSessionInitialized() bool {
@@ -502,6 +567,7 @@ func (e *AgentExecution) officeProfileID() string {
 type PromptCompletionSignal struct {
 	StopReason        string
 	IsError           bool
+	Uncertain         bool
 	Error             string
 	PromptGeneration  uint64
 	StartupGeneration uint64
@@ -599,6 +665,28 @@ func (e *AgentExecution) beginStartupAttemptWithID(attemptID string) uint64 {
 	e.startupRecoveryStarted = false
 	e.recordStartupAttemptIDLocked(e.startupAttemptGeneration, attemptID)
 	return e.startupAttemptGeneration
+}
+
+func (e *AgentExecution) expectWorkspaceRebindDisconnect(generation uint64) {
+	e.workspaceRebindDisconnectObserved.Store(false)
+	e.workspaceRebindDisconnectGeneration.Store(generation + 1)
+}
+
+func (e *AgentExecution) clearWorkspaceRebindDisconnectExpectation() {
+	e.workspaceRebindDisconnectGeneration.Store(0)
+	e.workspaceRebindDisconnectObserved.Store(false)
+}
+
+func (e *AgentExecution) isExpectedWorkspaceRebindDisconnect(generation uint64) bool {
+	return e.workspaceRebindDisconnectGeneration.Load() == generation+1
+}
+
+func (e *AgentExecution) recordExpectedWorkspaceRebindDisconnect(generation uint64) bool {
+	if !e.isExpectedWorkspaceRebindDisconnect(generation) {
+		return false
+	}
+	e.workspaceRebindDisconnectObserved.Store(true)
+	return true
 }
 
 // beginStartupRecovery advances the startup generation exactly once. The
@@ -1203,19 +1291,26 @@ type LaunchRequest struct {
 	// AllowBranchReplacement is an explicit user-selected recovery permission.
 	// Normal resume leaves it false so a missing branch remains a visible error.
 	AllowBranchReplacement bool
-	TaskTitle              string // Human-readable task title for semantic worktree naming
+	// ForceContextContinuation starts a new native conversation with the
+	// bounded continuation prompt instead of loading a native session.
+	ForceContextContinuation bool
+	// RecoveryAction is a server-authorized recovery settlement. It remains
+	// internal to the lifecycle launch boundary and is never client-controlled.
+	RecoveryAction string
+	TaskTitle      string // Human-readable task title for semantic worktree naming
 	// AgentProfileID is the stable Office identity for routed Office launches.
 	// For non-Office launches it is also the concrete execution profile.
 	AgentProfileID string
 	// ExecutionProfileID selects the complete CLI runtime profile. Empty keeps
 	// backward-compatible behavior by using AgentProfileID.
-	ExecutionProfileID string
-	StartAgent         bool                // Transfer launch activity through initial startup/prompt
-	TurnID             string              // Durable Kandev turn for the initial prompt, when present
-	WorkspacePath      string              // Host path to workspace (original repository path)
-	TaskDescription    string              // Task description to send via ACP prompt
-	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt
-	Env                map[string]string   // Additional env vars
+	ExecutionProfileID    string
+	StartAgent            bool                // Transfer launch activity through initial startup/prompt
+	TurnID                string              // Durable Kandev turn for the initial prompt, when present
+	WorkspacePath         string              // Host path to workspace (original repository path)
+	OriginalWorkspacePath string              // First agent-visible path for native restore policy
+	TaskDescription       string              // Task description to send via ACP prompt
+	Attachments           []MessageAttachment // Attachments (images/files) for the initial prompt
+	Env                   map[string]string   // Additional env vars
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string
@@ -1231,9 +1326,14 @@ type LaunchRequest struct {
 	// over this snapshot.
 	EnvironmentFinalized bool
 	ACPSessionID         string // ACP session ID to resume, if available
-	Metadata             map[string]interface{}
-	ModelOverride        string         // If set, use this model instead of the profile's model
-	RouteOverride        *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
+	// Durable delivery identity is resolved by the orchestrator from the
+	// persisted session incarnation and harness generation.
+	DeliveryStreamID          string
+	DeliveryIncarnationID     string
+	DeliveryHarnessGeneration uint64
+	Metadata                  map[string]interface{}
+	ModelOverride             string         // If set, use this model instead of the profile's model
+	RouteOverride             *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
 
 	// Ephemeral tasks (quick chat) get fallback workspace directories when no repo is configured.
 	// Non-ephemeral tasks without a workspace path will not receive a fallback directory.

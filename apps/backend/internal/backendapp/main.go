@@ -112,7 +112,6 @@ import (
 	officeskills "github.com/kandev/kandev/internal/office/skills"
 	officewakeup "github.com/kandev/kandev/internal/office/wakeup"
 	orchexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	// Runs queue (Phase 3 of task-model-unification)
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
@@ -127,6 +126,7 @@ import (
 	workflowengine "github.com/kandev/kandev/internal/workflow/engine"
 
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	repoerrors "github.com/kandev/kandev/internal/task/repository/repoerrors"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -150,6 +150,7 @@ import (
 	"github.com/kandev/kandev/internal/delivery"
 
 	"github.com/kandev/kandev/internal/common/ports"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Build-time variables are set by cmd/kandev before Run is called. Defaults
@@ -544,6 +545,7 @@ func startServices( //nolint:cyclop
 	var agentctlBinaryPath string
 	var recoveryDeadlineStart time.Time
 	var inheritedRecordScope lifecycle.InheritedRecordScope
+	var peerCapabilities []string
 	if agentctlResult != nil {
 		addCleanup(agentctlResult.cleanup)
 		defer func() {
@@ -561,10 +563,11 @@ func startServices( //nolint:cyclop
 		agentctlBinaryPath = agentctlResult.binaryPath
 		recoveryDeadlineStart = agentctlResult.recoveryDeadlineStart
 		inheritedRecordScope = agentctlResult.inheritedRecordScope
+		peerCapabilities = append([]string(nil), agentctlResult.peerCapabilities...)
 	}
 
 	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, agentRuntimeAvailability,
-		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, recoveryDeadlineStart, inheritedRecordScope,
+		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, recoveryDeadlineStart, inheritedRecordScope, peerCapabilities,
 		startupRecoveryGuard, runCleanups, cancelWorkers)
 }
 
@@ -587,6 +590,7 @@ func startAgentInfrastructure(
 	agentctlBinaryPath string,
 	recoveryDeadlineStart time.Time,
 	inheritedRecordScope lifecycle.InheritedRecordScope,
+	peerCapabilities []string,
 	startupRecoveryGuard *lifecycle.RecoveryGuard,
 	runCleanups func(),
 	cancelWorkers context.CancelFunc,
@@ -631,6 +635,7 @@ func startAgentInfrastructure(
 		mcpScopeResolver.ScopePrincipal,
 		recoveryDeadlineStart,
 		inheritedRecordScope,
+		peerCapabilities,
 		services.Task,
 		services.Task,
 		repos.Task,
@@ -640,6 +645,7 @@ func startAgentInfrastructure(
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
 	}
+	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
 
 	// ============================================
 	// WORKTREE MANAGER
@@ -2500,6 +2506,18 @@ func (a *officeOrchestratorTaskStarter) startTaskWithEnvAndSkills(
 	return a.orch.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
 		executorID, executorProfileID, priority, prompt,
 		workflowStepID, planMode, false, attachments, env, additionalSkillSlugs)
+}
+
+func (a *officeOrchestratorTaskStarter) GetOpenSessionRecoveryBlock(
+	ctx context.Context, sessionID string,
+) (*taskmodels.SessionRecoveryBlock, error) {
+	return a.orch.GetOpenSessionRecoveryBlock(ctx, sessionID)
+}
+
+func (a *officeOrchestratorTaskStarter) GetSessionRecoveryBlock(
+	ctx context.Context, blockID string,
+) (*taskmodels.SessionRecoveryBlock, error) {
+	return a.orch.GetSessionRecoveryBlock(ctx, blockID)
 }
 
 // newAgentAuth wraps officeagents.NewAgentAuth with a dev-mode warning when

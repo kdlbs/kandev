@@ -115,6 +115,22 @@ func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onD
 // PromptAgentWithDispatchCallback exposes agentctl acceptance to callers that
 // must keep admission serialized until the queued prompt is actually dispatched.
 func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*PromptResult, error) {
+	return m.PromptAgentWithDispatchCallbackAndSubmissionID(
+		ctx, executionID, prompt, attachments, dispatchOnly, onDispatched, "",
+	)
+}
+
+// PromptAgentWithDispatchCallbackAndSubmissionID preserves a backend-owned
+// durable submission identity through lifecycle reconnects.
+func (m *Manager) PromptAgentWithDispatchCallbackAndSubmissionID(
+	ctx context.Context,
+	executionID string,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+	submissionID string,
+) (*PromptResult, error) {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
@@ -133,7 +149,9 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 		return nil, err
 	}
 	defer operationRelease()
-	result, err := m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
+	result, err := m.sessionManager.SendPromptWithDispatchCallbackAndSubmissionID(
+		ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched, submissionID,
+	)
 	if err != nil || !dispatchOnly {
 		m.releaseActivity(key)
 		if err != nil {
@@ -258,7 +276,7 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 
 	if ch == nil {
 		if execution.dispatchedPromptPending.Load() {
-			return m.escalateStuckCancel(ctx, execution, nil)
+			return m.escalateStuckCancel(ctx, execution, nil, client)
 		}
 		if streamDisconnected {
 			m.logger.Info("agent stream already disconnected; cancel is complete",
@@ -275,7 +293,7 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 		m.logger.Warn("agent stream disconnected before cancel; escalating locally",
 			zap.String("execution_id", executionID),
 			zap.Error(cancelErr))
-		return m.escalateStuckCancel(ctx, execution, ch)
+		return m.escalateStuckCancel(ctx, execution, ch, client)
 	}
 
 	// The agent did not end the in-flight session/prompt RPC after cancel (e.g. it
@@ -285,7 +303,7 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 		m.logger.Warn("agent cancel not acknowledged; escalating immediately",
 			zap.String("execution_id", executionID),
 			zap.Error(cancelErr))
-		return m.escalateStuckCancel(ctx, execution, ch)
+		return m.escalateStuckCancel(ctx, execution, ch, client)
 	}
 
 	m.logger.Info("agent cancel sent, waiting for turn completion",
@@ -296,13 +314,13 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 	select {
 	case <-ch:
 		if execution.dispatchedPromptPending.Load() {
-			return m.escalateStuckCancel(ctx, execution, ch)
+			return m.escalateStuckCancel(ctx, execution, ch, client)
 		}
 		m.logger.Debug("in-flight prompt finished after cancel",
 			zap.String("execution_id", executionID))
 		return nil
 	case <-time.After(cancelWaitTimeout):
-		return m.escalateStuckCancel(ctx, execution, ch)
+		return m.escalateStuckCancel(ctx, execution, ch, client)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -326,7 +344,19 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 // have handleAgentReady try to re-acquire that same guard reentrantly and
 // deadlock forever on the non-reentrant sync.Mutex. See
 // markReadyEventWithContext's doc comment for the full explanation.
-func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecution, ch <-chan struct{}) error {
+func (m *Manager) escalateStuckCancel(
+	ctx context.Context,
+	execution *AgentExecution,
+	ch <-chan struct{},
+	client *agentctlclient.Client,
+) error {
+	promptGeneration := execution.promptGenerationSnapshot()
+	if promptGeneration != 0 {
+		// The agentctl stream can close after the local cancellation release.
+		// Record the generation before signaling the waiter so the disconnect
+		// callback preserves this reusable execution instead of marking it failed.
+		execution.cancelEscalatedPromptGeneration.Store(promptGeneration)
+	}
 	m.logger.Warn("timed out waiting for in-flight prompt to finish after cancel; escalating",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
@@ -373,6 +403,20 @@ func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecu
 	select {
 	case <-execution.promptDoneCh:
 	default:
+	}
+
+	if submissionID := execution.deliverySubmissionIDSnapshot(); submissionID != "" && client != nil {
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryReconciliationTimeout)
+		settleErr := client.CancelDeliverySubmission(settleCtx, submissionID)
+		cancel()
+		if settleErr != nil {
+			m.logger.Warn("failed to settle durable prompt after cancel escalation",
+				zap.String("execution_id", execution.ID),
+				zap.String("submission_id", submissionID),
+				zap.Error(settleErr))
+			return errors.Join(ErrCancelEscalated, settleErr)
+		}
+		execution.clearDeliverySubmissionID(submissionID)
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -1599,6 +1643,7 @@ func (m *Manager) initializeACPSessionForRestart(
 	}
 	result, err := m.sessionManager.InitializeSession(
 		ctx,
+		execution,
 		client,
 		agentConfig,
 		"", // empty — force session/new
@@ -1629,6 +1674,45 @@ func (m *Manager) initializeACPSessionForRestart(
 // Thread-safe: Can be called concurrently from multiple goroutines.
 func (m *Manager) GetExecution(executionID string) (*AgentExecution, bool) {
 	return m.executionStore.Get(executionID)
+}
+
+// DurableDeliveryCapabilityForExecution returns the capability advertised by
+// the active agentctl peer. The boolean preserves the distinction between a
+// legacy peer and a peer that explicitly reported a storage problem.
+func (m *Manager) DurableDeliveryCapabilityForExecution(
+	ctx context.Context,
+	executionID string,
+) (DurableDeliveryCapability, bool) {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists || execution == nil {
+		return DurableDeliveryCapability{}, false
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return DurableDeliveryCapability{}, false
+	}
+	if status, err := client.GetDeliveryStatus(ctx, execution.DeliveryStreamID); err == nil && status != nil {
+		capability := status.StorageCapability
+		return DurableDeliveryCapability{
+			Version: capability.Version, Durable: capability.Durable,
+			Unresolved: capability.Unresolved, Reason: capability.Reason,
+		}, true
+	}
+	capability, advertised := client.DurableDeliveryCapability()
+	if !advertised {
+		return DurableDeliveryCapability{}, false
+	}
+	if capability.Durable {
+		capability.Unresolved = true
+		if capability.Reason == "" {
+			capability.Reason = "delivery_status_unavailable"
+		}
+	}
+	return DurableDeliveryCapability{
+		Version: capability.Version, Durable: capability.Durable,
+		Unresolved: capability.Unresolved, Reason: capability.Reason,
+	}, true
 }
 
 // GetExecutionBySessionID returns the agent execution for a session from the in-memory store only.

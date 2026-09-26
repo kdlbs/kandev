@@ -83,7 +83,7 @@ lib/api/domains/                    # API clients
 
 For rebasing or finishing PRs written against the old Next.js runtime, follow [`docs/nextjs-spa-migration.md`](../../docs/nextjs-spa-migration.md).
 
-**Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscription + store selection. WS client deduplicates subscriptions automatically.
+**Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscription + store selection. WS client deduplicates subscriptions automatically. Session recovery keeps typed guard state, Stop, and continuation precedence across desktop/mobile; durable adoption completes before new work is admitted.
 
 ## WebSockets
 

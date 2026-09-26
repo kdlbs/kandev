@@ -167,6 +167,47 @@ func TestResponseAttemptRecordsIncludeLegacyStreams(t *testing.T) {
 	}
 }
 
+func TestResponseAttemptResetRetractsCanonicalProjectionRecords(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	generation, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin prompt: %v", err)
+	}
+	mgr.executionStore.MarkPromptDispatched(execution.ID, generation)
+	t.Cleanup(func() { mgr.closeStreamCoalescer(execution) })
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:                   streams.EventTypeMessageChunk,
+		Text:                   "abandoned answer",
+		CanonicalProjection:    true,
+		CanonicalMessageID:     "canonical-answer",
+		CanonicalMessageAppend: false,
+	})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:                   streams.EventTypeReasoning,
+		ReasoningText:          "abandoned reasoning",
+		CanonicalProjection:    true,
+		CanonicalMessageID:     "canonical-thinking",
+		CanonicalMessageAppend: false,
+	})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             streams.EventTypeResponseAttemptReset,
+		PromptGeneration: generation,
+	})
+
+	resets := streamEventsOfType(eventBus, streams.EventTypeResponseAttemptReset)
+	if len(resets) != 1 {
+		t.Fatalf("reset events = %+v, want one", resets)
+	}
+	if want := []string{"canonical-answer", "canonical-thinking"}; !reflect.DeepEqual(resets[0].Data.RetractedMessageIDs, want) {
+		t.Fatalf("canonical retracted IDs = %v, want %v", resets[0].Data.RetractedMessageIDs, want)
+	}
+}
+
 func TestResponseAttemptResetPreservesCommittedProtocolRecord(t *testing.T) {
 	mgr, eventBus := createTestManagerWithTracking()
 	execution := createTestExecution("exec-1", "task-1", "session-1")

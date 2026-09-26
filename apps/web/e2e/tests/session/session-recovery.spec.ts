@@ -3,6 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
+import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 import {
   cleanupDelayedResumeFixture,
@@ -44,7 +45,7 @@ async function seedTaskWithSession(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-  opts: { description?: string; agentProfileId?: string } = {},
+  opts: { description?: string; agentProfileId?: string; waitForPromptReady?: boolean } = {},
 ): Promise<SessionPage> {
   const description = opts.description ?? "/e2e:simple-message";
   const agentProfileId = opts.agentProfileId ?? seedData.agentProfileId;
@@ -62,6 +63,18 @@ async function seedTaskWithSession(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  if (opts.waitForPromptReady) {
+    // The composer can stay visible during an active turn. Crash tests must
+    // begin only after the seeded prompt has completed on the backend.
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: `${title} seeded prompt did not reach WAITING_FOR_INPUT`,
+      timeout: 60_000,
+    });
+    await waitForSessionAgentctlReady(testPage, task.session_id);
+  }
 
   return session;
 }
@@ -102,59 +115,65 @@ const CRASH_RECOVERY_TIMEOUT = 170_000;
 test.describe("Session recovery", () => {
   test.describe.configure({ retries: 1 });
 
-  test("cancelling delayed resume fences the old work before a retry", async ({
-    testPage,
-    apiClient,
-    seedData,
-    backend,
-  }) => {
-    test.setTimeout(150_000);
+  test.describe("unaccepted startup cancellation", () => {
+    test.describe.configure({ retries: 0 });
 
-    const fixture = await seedDelayedResumeFixture(
+    test("cancelling delayed resume fences the old work before a retry", async ({
       testPage,
       apiClient,
       seedData,
       backend,
-      "Session cancel and retry recovery",
-    );
+    }) => {
+      test.setTimeout(150_000);
 
-    try {
-      // Cancel the actual STARTING session while the provider load is held by
-      // the delayed mock agent. This is the browser path that used to leave a
-      // resume continuation alive after cancellation.
-      await expect(fixture.session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });
-      await fixture.session.cancelAgentButton().click();
-      await waitForSessionState(apiClient, {
-        taskId: fixture.task.id,
-        sessionId: fixture.identity.sessionId,
-        expectedState: "WAITING_FOR_INPUT",
-        message: "Waiting for delayed resume cancellation",
-        timeout: 30_000,
-      });
-      // Retry the same saved conversation through the normal composer. The
-      // old delayed callback must not publish a second response or consume
-      // this new attempt.
-      await waitForSessionReady(
+      const fixture = await seedDelayedResumeFixture(
         testPage,
         apiClient,
-        fixture.task.id,
-        fixture.identity.sessionId,
-        90_000,
-      );
-      await expect(fixture.session.activeChat().getByTestId("chat-input-editor")).toHaveAttribute(
-        "contenteditable",
-        "true",
-        { timeout: 30_000 },
+        seedData,
+        backend,
+        "Session cancel and retry recovery",
       );
 
-      await fixture.session.sendMessage("/e2e:simple-message");
-      await fixture.session.expectChatResponseVisible("simple mock response", 1, {
-        timeout: 60_000,
-      });
-      await expect(fixture.session.activeChat().getByText("simple mock response")).toHaveCount(2);
-    } finally {
-      await cleanupDelayedResumeFixture(apiClient, fixture);
-    }
+      try {
+        // Cancel the actual STARTING session while the provider load is held by
+        // the delayed mock agent. This is the browser path that used to leave a
+        // resume continuation alive after cancellation.
+        await expect(fixture.session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });
+        await fixture.session.cancelAgentButton().click();
+        await waitForSessionState(apiClient, {
+          taskId: fixture.task.id,
+          sessionId: fixture.identity.sessionId,
+          expectedState: "WAITING_FOR_INPUT",
+          message: "Waiting for delayed resume cancellation",
+          // Startup stop can fall back to the provider's full 30-second
+          // session/load delay before cancellation reconciliation completes.
+          timeout: 60_000,
+        });
+        // Retry the same saved conversation through the normal composer. The
+        // old delayed callback must not publish a second response or consume
+        // this new attempt.
+        await waitForSessionReady(
+          testPage,
+          apiClient,
+          fixture.task.id,
+          fixture.identity.sessionId,
+          90_000,
+        );
+        await expect(fixture.session.activeChat().getByTestId("chat-input-editor")).toHaveAttribute(
+          "contenteditable",
+          "true",
+          { timeout: 30_000 },
+        );
+
+        await fixture.session.sendMessage("/e2e:simple-message");
+        await fixture.session.expectChatResponseVisible("simple mock response", 1, {
+          timeout: 60_000,
+        });
+        await expect(fixture.session.activeChat().getByText("simple mock response")).toHaveCount(2);
+      } finally {
+        await cleanupDelayedResumeFixture(apiClient, fixture);
+      }
+    });
   });
 
   test("pausing an accepted lazy resume preserves the runtime for later turns", async ({
@@ -361,6 +380,7 @@ test.describe("Session recovery", () => {
       apiClient,
       seedData,
       "Crash Recovery Fresh Test",
+      { waitForPromptReady: true },
     );
 
     // Send /crash to make the agent exit with code 1
@@ -399,6 +419,7 @@ test.describe("Session recovery", () => {
       apiClient,
       seedData,
       "Crash Recovery Resume Test",
+      { waitForPromptReady: true },
     );
 
     // Send /crash to make the agent exit with code 1
@@ -464,7 +485,7 @@ test.describe("Session recovery", () => {
         apiClient,
         seedData,
         "Crash Recovery Resume Fails Test",
-        { agentProfileId: profile.id },
+        { agentProfileId: profile.id, waitForPromptReady: true },
       );
 
       // Crash the agent so the recovery message renders with action buttons.

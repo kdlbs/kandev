@@ -17,7 +17,28 @@ func (e *AgentExecution) clearProtocolMessageCorrelationLocked() {
 }
 
 func (e *AgentExecution) trackResponseAttemptMessageLocked(messageID string) {
+	if messageID == "" {
+		return
+	}
+	for _, trackedID := range e.responseAttemptMessageIDs {
+		if trackedID == messageID {
+			return
+		}
+	}
 	e.responseAttemptMessageIDs = append(e.responseAttemptMessageIDs, messageID)
+}
+
+// trackCanonicalResponseAttemptMessage records the stable message ID before a
+// projected stream chunk is published. Canonical chunks skip the legacy
+// protocol correlation path, but an abandoned provider attempt still owns
+// their first projected records and must retract them on reset.
+func trackCanonicalResponseAttemptMessage(execution *AgentExecution, messageID string, isAppend bool) {
+	if execution == nil || messageID == "" || isAppend {
+		return
+	}
+	execution.messageMu.Lock()
+	execution.trackResponseAttemptMessageLocked(messageID)
+	execution.messageMu.Unlock()
 }
 
 func (e *AgentExecution) commitResponseAttemptLocked() {
@@ -60,6 +81,20 @@ func (m *Manager) streamCoalescer(execution *AgentExecution) *streamCoalescer {
 	defer execution.streamMu.Unlock()
 	if execution.stream == nil {
 		execution.stream = newStreamCoalescer(defaultStreamCoalesceWindow, func(chunk coalescedStreamChunk) {
+			if chunk.canonicalProjection {
+				m.publishStreamingContentNowWithProjection(
+					execution,
+					chunk.eventType,
+					chunk.messageID,
+					chunk.content,
+					chunk.isAppend,
+					chunk.attemptID,
+					true,
+					chunk.diagnostic,
+					chunk.promptGeneration,
+				)
+				return
+			}
 			m.publishStreamingContentNow(
 				execution,
 				chunk.eventType,
@@ -342,6 +377,45 @@ func (m *Manager) publishStreamingContentNow(
 	if attemptID == "" {
 		attemptID = execution.currentStartupAttemptID()
 	}
+	m.publishStreamingContentNowWithProjection(
+		execution, eventType, messageID, content, isAppend, attemptID, false, diagnostic, promptGeneration,
+	)
+}
+
+func (m *Manager) publishCanonicalStreamingContent(
+	execution *AgentExecution,
+	eventType string,
+	messageID string,
+	content string,
+	isAppend bool,
+) {
+	if content == "" {
+		return
+	}
+	m.streamCoalescer(execution).add(coalescedStreamChunk{
+		eventType:           eventType,
+		messageID:           messageID,
+		content:             content,
+		isAppend:            isAppend,
+		attemptID:           execution.currentStartupAttemptID(),
+		canonicalProjection: true,
+	})
+}
+
+func (m *Manager) publishStreamingContentNowWithProjection(
+	execution *AgentExecution,
+	eventType string,
+	messageID string,
+	content string,
+	isAppend bool,
+	attemptID string,
+	canonicalProjection bool,
+	diagnostic bool,
+	promptGeneration uint64,
+) {
+	if attemptID == "" {
+		attemptID = execution.currentStartupAttemptID()
+	}
 	event := AgentStreamEventData{
 		Type:                        eventType,
 		Text:                        content,
@@ -349,6 +423,7 @@ func (m *Manager) publishStreamingContentNow(
 		IsAppend:                    isAppend,
 		ProviderDiagnosticCandidate: diagnostic,
 		PromptGeneration:            promptGeneration,
+		CanonicalProjection:         canonicalProjection,
 	}
 	if eventType == thinkingStreamingEventType {
 		event.MessageType = "thinking"

@@ -69,7 +69,10 @@ async function startWorkingTurn(
   await expect(session.agentStatus()).toBeVisible({ timeout: 30_000 });
   await expect(session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });
   await expect(
-    session.activeChat().getByText("cancelable turn started", { exact: false }),
+    session
+      .activeChat()
+      .getByTestId("agent-message-highlight")
+      .getByText("cancelable turn started", { exact: true }),
   ).toBeVisible({
     timeout: 15_000,
   });

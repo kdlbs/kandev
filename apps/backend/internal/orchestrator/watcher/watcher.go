@@ -49,6 +49,7 @@ type AgentEventData struct {
 	Causes             []models.AgentErrorCause `json:"causes,omitempty"`
 	ProviderError      *streams.ProviderError   `json:"provider_error,omitempty"`
 	PromptGeneration   uint64                   `json:"prompt_generation,omitempty"`
+	TurnID             string                   `json:"turn_id,omitempty"`
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.
@@ -70,11 +71,14 @@ type AgentEventData struct {
 
 // ACPSessionEventData contains data from ACP session events
 type ACPSessionEventData struct {
-	TaskID           string `json:"task_id"`
-	SessionID        string `json:"session_id"`
-	AgentExecutionID string `json:"agent_execution_id"`
-	AttemptID        string `json:"attempt_id,omitempty"`
-	ACPSessionID     string `json:"acp_session_id"`
+	TaskID                    string `json:"task_id"`
+	SessionID                 string `json:"session_id"`
+	AgentExecutionID          string `json:"agent_execution_id"`
+	AttemptID                 string `json:"attempt_id,omitempty"`
+	ACPSessionID              string `json:"acp_session_id"`
+	DeliveryStreamID          string `json:"delivery_stream_id,omitempty"`
+	DeliveryIncarnationID     string `json:"delivery_incarnation_id,omitempty"`
+	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
 }
 
 // PermissionRequestData contains data from permission_request events

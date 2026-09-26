@@ -2010,6 +2010,18 @@ test.describe("Git Changes Panel", () => {
           (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__?.getPanel("diff-viewer"),
         );
       });
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate(() => {
+            type Api = { getPanel: (id: string) => unknown };
+            return Boolean(
+              (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__?.getPanel("changes"),
+            );
+          }),
+        { timeout: 10_000, message: "the Changes panel is not registered in Dockview yet" },
+      )
+      .toBe(true);
     expect(await diffViewerOpen(), "no cumulative diff panel before clicking Diff").toBe(false);
 
     // Click the "Diff" button in the header to open the cumulative diff view
@@ -2950,6 +2962,7 @@ test.describe("Git Changes Panel", () => {
         author_login: "local-ahead-author",
         repo_owner: "testorg",
         repo_name: "testrepo",
+        head_sha: providerHead,
       },
     ]);
     await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 903, [
@@ -2971,6 +2984,7 @@ test.describe("Git Changes Panel", () => {
       head_branch: "feature/local-ahead",
       base_branch: "main",
       author_login: "local-ahead-author",
+      head_sha: providerHead,
     });
 
     // Put the task worktree on the contribution branch before the first page

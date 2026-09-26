@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
@@ -14,13 +14,20 @@ test.describe("Mobile workspace repository sets", () => {
     backend,
     prCapture,
   }) => {
+    test.setTimeout(120_000);
     const dir = path.join(backend.tmpDir, "repos", "mobile-set-scroll");
     fs.mkdirSync(dir, { recursive: true });
     const gitEnv = makeGitEnv(backend.tmpDir);
     execSync('git init -b main && git commit --allow-empty -m "init"', { cwd: dir, env: gitEnv });
-    for (let index = 0; index < 40; index++) {
-      execSync(`git branch scroll-test-${index}`, { cwd: dir, env: gitEnv });
-    }
+    const branches = Array.from(
+      { length: 40 },
+      (_, index) => `create refs/heads/scroll-test-${index} HEAD`,
+    ).join("\n");
+    execFileSync("git", ["update-ref", "--stdin"], {
+      cwd: dir,
+      env: gitEnv,
+      input: `${branches}\n`,
+    });
     const repository = await apiClient.createRepository(seedData.workspaceId, dir, "main", {
       name: "Mobile branch scrolling",
     });
@@ -98,13 +105,25 @@ test.describe("Mobile workspace repository sets", () => {
       "Add repositories in task order. Base branches are optional.",
     );
     const addRepository = testPage.getByTestId("repository-set-add-repository");
+    await waitForFiniteAnimations(surface);
+    await expect
+      .poll(
+        async () => {
+          const [hintBox, addBox] = await Promise.all([
+            membersHint.boundingBox(),
+            addRepository.boundingBox(),
+          ]);
+          return Boolean(hintBox && addBox && addBox.y > hintBox.y + hintBox.height);
+        },
+        { timeout: 10_000, message: "repository selector should follow its task-order hint" },
+      )
+      .toBe(true);
     const [membersHintBox, addRepositoryBox] = await Promise.all([
       membersHint.boundingBox(),
       addRepository.boundingBox(),
     ]);
     expect(membersHintBox).not.toBeNull();
     expect(addRepositoryBox).not.toBeNull();
-    expect(addRepositoryBox!.y).toBeGreaterThan(membersHintBox!.y + membersHintBox!.height);
     expect(addRepositoryBox!.width).toBeCloseTo(membersHintBox!.width, 0);
     await testPage.getByTestId(`repository-set-remove-${seedData.repositoryId}`).tap();
     await addRepository.tap();

@@ -383,7 +383,11 @@ test.describe("Subtask basics", () => {
 });
 
 test.describe("MCP subtask creation", () => {
-  test("agent creates subtask via MCP create_task with parent_id", async ({ testPage }) => {
+  test("agent creates subtask via MCP create_task with parent_id", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     const subtaskTitle = "MCP-subtask-e2e-verify";
 
     const script = [
@@ -418,12 +422,51 @@ test.describe("MCP subtask creation", () => {
     await session.waitForLoad();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    // 4. Go back to kanban — subtask card should be visible with parent badge
-    await kanban.goto();
+    const parentTaskId = new URL(testPage.url()).pathname.match(/\/t\/([^/]+)$/)?.[1];
+    if (!parentTaskId) throw new Error("Parent task ID missing from the session URL");
 
-    const subtaskCard = kanban.taskCardByTitle(subtaskTitle);
-    await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
-    await expect(subtaskCard.getByText("MCP Subtask Parent")).toBeVisible();
+    let subtaskId: string | undefined;
+    await expect
+      .poll(
+        async () => {
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          subtaskId = tasks.find((task) => task.title === subtaskTitle)?.id;
+          return subtaskId;
+        },
+        { timeout: 30_000, message: "Waiting for the agent-created subtask" },
+      )
+      .toBeTruthy();
+    expect((await apiClient.getTask(subtaskId!)).parent_id).toBe(parentTaskId);
+
+    const settings = (await apiClient.getUserSettings()).settings;
+    const originalWorkflowFilter =
+      typeof settings.workflow_filter_id === "string" ? settings.workflow_filter_id : "";
+    const originalWorkspaceId =
+      typeof settings.workspace_id === "string" ? settings.workspace_id : seedData.workspaceId;
+    const originalRepositoryIds = Array.isArray(settings.repository_ids)
+      ? settings.repository_ids.filter((id): id is string => typeof id === "string")
+      : [];
+
+    try {
+      // The test task uses the create-dialog workflow. Clear saved board filters
+      // so a previous workflow/repository selection cannot hide either task.
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: "",
+        repository_ids: [],
+      });
+      await kanban.goto();
+
+      const subtaskCard = kanban.taskCardByTitle(subtaskTitle);
+      await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
+      await expect(subtaskCard.getByText("MCP Subtask Parent")).toBeVisible();
+    } finally {
+      await apiClient.saveUserSettings({
+        workspace_id: originalWorkspaceId,
+        workflow_filter_id: originalWorkflowFilter,
+        repository_ids: originalRepositoryIds,
+      });
+    }
   });
 
   test("MCP-created subtask inherits parent task repositories", async ({

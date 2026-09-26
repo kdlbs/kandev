@@ -188,7 +188,7 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     await expect
       .poll(async () => (await getParticipants(apiClient, task.id, "reviewers")).length, {
         timeout: 30_000,
-        message: "Waiting for the Review participant seat",
+        message: "Review entry should finish creating its automatic reviewer seat",
       })
       .toBe(1);
 

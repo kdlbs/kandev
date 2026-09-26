@@ -13,7 +13,7 @@ import {
 } from "./preview-feedback-helpers";
 
 test.describe("Web preview feedback", () => {
-  test.describe.configure({ retries: 1, timeout: 180_000 });
+  test.describe.configure({ retries: 0, timeout: 180_000 });
 
   test("persists multi-route captures and sends them directly or through the queue", async ({
     testPage,
@@ -66,7 +66,7 @@ test.describe("Web preview feedback", () => {
 
       await chooseCapture(testPage, "Select screenshot region");
       await waitForScreenshotCaptureMode(frame);
-      await dragScreenshotRegion(testPage, frame.locator("#save"));
+      await dragScreenshotRegion(testPage, frame, frame.locator("#save"));
       const screenshotDraft = testPage.getByTestId("preview-feedback-draft");
       await expect(screenshotDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
         timeout: 15_000,
@@ -78,7 +78,7 @@ test.describe("Web preview feedback", () => {
       createFailure.failNextCreate();
       await chooseCapture(testPage, "Select screenshot region");
       await waitForScreenshotCaptureMode(frame);
-      await dragScreenshotRegion(testPage, frame.locator("#save"));
+      await dragScreenshotRegion(testPage, frame, frame.locator("#save"));
       const failedDraft = testPage.getByTestId("preview-feedback-draft");
       await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
         timeout: 15_000,

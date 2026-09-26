@@ -92,26 +92,18 @@ async function setupTask({
   return session;
 }
 
-async function dispatchHtmlDnd(testPage: Page, sourcePath: string, targetPath: string) {
+async function dispatchHtmlDnd(
+  testPage: Page,
+  session: SessionPage,
+  sourcePath: string,
+  targetPath: string,
+) {
   // Virtualized trees can unmount the source while the target is revealed.
   // Keep the browser DataTransfer on the page between the two scrolls so the
   // source and target do not need to be mounted at the same time.
-  const source = testPage.locator(
-    `[data-testid="file-tree-node"][data-path=${JSON.stringify(sourcePath)}]:visible`,
-  );
-  const target = testPage.locator(
-    `[data-testid="file-tree-node"][data-path=${JSON.stringify(targetPath)}]:visible`,
-  );
-  await expect(source).toBeVisible({ timeout: 30_000 });
+  const source = await session.fileTree.waitForFileTreeNode(sourcePath);
   await source.scrollIntoViewIfNeeded();
-  await testPage.evaluate((nodePath) => {
-    const row = Array.from(document.querySelectorAll('[data-testid="file-tree-node"]')).find(
-      (element) =>
-        element.getAttribute("data-path") === nodePath &&
-        element.getBoundingClientRect().width > 0 &&
-        element.getBoundingClientRect().height > 0,
-    );
-    if (!row) throw new Error(`DnD source is not mounted: ${nodePath}`);
+  await source.evaluate((row) => {
     const dataTransfer = new DataTransfer();
     const event = new DragEvent("dragstart", {
       bubbles: true,
@@ -124,39 +116,29 @@ async function dispatchHtmlDnd(testPage: Page, sourcePath: string, targetPath: s
       configurable: true,
       value: dataTransfer,
     });
-  }, sourcePath);
+  });
 
-  await expect(target).toBeVisible({ timeout: 30_000 });
+  const target = await session.fileTree.waitForFileTreeNode(targetPath);
   await target.scrollIntoViewIfNeeded();
-  await testPage.evaluate(
-    ({ sourcePath, targetPath: nodePath }) => {
-      const row = Array.from(document.querySelectorAll('[data-testid="file-tree-node"]')).find(
-        (element) =>
-          element.getAttribute("data-path") === nodePath &&
-          element.getBoundingClientRect().width > 0 &&
-          element.getBoundingClientRect().height > 0,
+  await target.evaluate((row, sourcePath) => {
+    const dataTransfer = (window as Window & { __kandevE2eDataTransfer?: DataTransfer })
+      .__kandevE2eDataTransfer;
+    if (!dataTransfer) throw new Error("DnD source did not establish a DataTransfer");
+    const fireOn = (element: Element, type: string) => {
+      element.dispatchEvent(
+        new DragEvent(type, { bubbles: true, cancelable: true, composed: true, dataTransfer }),
       );
-      const dataTransfer = (window as Window & { __kandevE2eDataTransfer?: DataTransfer })
-        .__kandevE2eDataTransfer;
-      if (!row || !dataTransfer) throw new Error(`DnD target is not mounted: ${nodePath}`);
-      const fireOn = (element: Element, type: string) => {
-        element.dispatchEvent(
-          new DragEvent(type, { bubbles: true, cancelable: true, composed: true, dataTransfer }),
-        );
-      };
-      fireOn(row, "dragenter");
-      fireOn(row, "dragover");
-      fireOn(row, "drop");
-      const source = Array.from(document.querySelectorAll('[data-testid="file-tree-node"]')).find(
-        (element) => element.getAttribute("data-path") === sourcePath,
-      );
-      if (source) fireOn(source, "dragend");
-      document.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer }));
-      delete (window as Window & { __kandevE2eDataTransfer?: DataTransfer })
-        .__kandevE2eDataTransfer;
-    },
-    { sourcePath, targetPath },
-  );
+    };
+    fireOn(row, "dragenter");
+    fireOn(row, "dragover");
+    fireOn(row, "drop");
+    const source = Array.from(document.querySelectorAll('[data-testid="file-tree-node"]')).find(
+      (element) => element.getAttribute("data-path") === sourcePath,
+    );
+    if (source) fireOn(source, "dragend");
+    document.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer }));
+    delete (window as Window & { __kandevE2eDataTransfer?: DataTransfer }).__kandevE2eDataTransfer;
+  }, sourcePath);
 }
 
 test.describe("File tree drag and drop", () => {
@@ -187,7 +169,7 @@ test.describe("File tree drag and drop", () => {
     await session.fileTree.waitForFileTreeNode("movable.ts");
     await session.fileTree.waitForFileTreeNode("target-dir");
 
-    await dispatchHtmlDnd(testPage, "movable.ts", "target-dir");
+    await dispatchHtmlDnd(testPage, session, "movable.ts", "target-dir");
 
     // The file is removed from the root immediately (optimistic update).
     await expect(session.fileTreeNode("movable.ts")).toHaveCount(0, { timeout: 10_000 });
@@ -231,7 +213,7 @@ test.describe("File tree drag and drop", () => {
     // preventDefault is never called, which means the browser would never
     // fire drop in real usage. Dispatching events directly bypasses that
     // guard, but the drop handler also calls isDropInvalid and bails.
-    await dispatchHtmlDnd(testPage, "selfdir", "selfdir");
+    await dispatchHtmlDnd(testPage, session, "selfdir", "selfdir");
 
     // Tree is unchanged: folder is still at root with its original child.
     await expect(session.fileTreeNode("selfdir")).toBeVisible({ timeout: 5_000 });

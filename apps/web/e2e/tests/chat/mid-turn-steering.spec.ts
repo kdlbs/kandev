@@ -2,9 +2,58 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
-import { seedRunningGeneratingSession } from "../../helpers/generating-session";
+import {
+  seedRunningGeneratingSession,
+  type SeedRunningGeneratingSessionOptions,
+} from "../../helpers/generating-session";
+import type { SeedData } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 
 registerSeparateQueueRows(test);
+
+let sessionToStopAfterTest: { taskId: string; sessionId: string } | undefined;
+
+async function seedSteeringSession(
+  testPage: Page,
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+  options: SeedRunningGeneratingSessionOptions = {},
+) {
+  return seedRunningGeneratingSession(testPage, apiClient, seedData, title, {
+    ...options,
+    onSessionCreated: (identity) => {
+      sessionToStopAfterTest = identity;
+    },
+  });
+}
+
+test.afterEach(async ({ apiClient }) => {
+  const identity = sessionToStopAfterTest;
+  sessionToStopAfterTest = undefined;
+  if (!identity) return;
+
+  const readState = async () => {
+    const { sessions } = await apiClient.listTaskSessions(identity.taskId);
+    return sessions.find((session) => session.id === identity.sessionId)?.state ?? "MISSING";
+  };
+  const terminalStates = /^(CANCELLED|COMPLETED|FAILED|WAITING_FOR_INPUT|MISSING)$/;
+  if (terminalStates.test(await readState())) return;
+
+  await apiClient
+    .stopSession({
+      session_id: identity.sessionId,
+      reason: "mid-turn-steering e2e cleanup",
+      force: true,
+    })
+    .catch(() => undefined);
+  await expect
+    .poll(readState, {
+      timeout: 20_000,
+      message: "The mid-turn steering session should stop before the next test",
+    })
+    .toMatch(terminalStates);
+});
 
 // End-to-end coverage for the mid-turn steering composer contract
 // (docs/specs/platform/requirements/mid-turn-steering.md). CONTRIBUTING.md requires Playwright
@@ -16,7 +65,7 @@ registerSeparateQueueRows(test);
 // focus, so asserting message delivery is the robust signal.
 
 test.describe.serial("Claude mid-turn steering experiment", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test.describe("enabled", () => {
     test.beforeAll(async ({ backend }) => {
@@ -36,7 +85,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const { session } = await seedRunningGeneratingSession(
+      const { session } = await seedSteeringSession(
         testPage,
         apiClient,
         seedData,
@@ -79,7 +128,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const { session, taskId, sessionId } = await seedRunningGeneratingSession(
+      const { session, taskId, sessionId } = await seedSteeringSession(
         testPage,
         apiClient,
         seedData,
@@ -128,7 +177,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const { session } = await seedRunningGeneratingSession(
+      const { session } = await seedSteeringSession(
         testPage,
         apiClient,
         seedData,
@@ -165,7 +214,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const { session } = await seedRunningGeneratingSession(
+      const { session } = await seedSteeringSession(
         testPage,
         apiClient,
         seedData,
@@ -219,7 +268,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const { session } = await seedRunningGeneratingSession(
+      const { session } = await seedSteeringSession(
         testPage,
         apiClient,
         seedData,
@@ -241,7 +290,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const { session } = await seedRunningGeneratingSession(
+      const { session } = await seedSteeringSession(
         testPage,
         apiClient,
         seedData,

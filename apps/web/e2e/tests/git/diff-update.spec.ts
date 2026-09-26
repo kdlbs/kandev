@@ -336,7 +336,7 @@ test.describe("User-save then diff view (colleague repro)", () => {
   // pre-save content (agent's edit only, not the user's save). Workaround
   // reported: leave the task and re-enter. We try to repro by driving the
   // exact UI sequence and asserting the diff contains the user's marker.
-  test.describe.configure({ retries: 2, timeout: 120_000 });
+  test.describe.configure({ timeout: 120_000 });
 
   test("diff shows user's edit after open-edit-save sequence", async ({
     testPage,

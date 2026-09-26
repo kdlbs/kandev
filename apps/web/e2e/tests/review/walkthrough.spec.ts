@@ -1,6 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
+import { activeTaskSessionId, waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
+import { waitForSessionState } from "../../helpers/session";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import type { Page, Locator } from "@playwright/test";
@@ -474,25 +476,107 @@ test.describe("Code walkthrough", () => {
     await expect(session.walkthroughEditorRange()).toHaveCount(0);
   });
 
-  test("a re-emitted walkthrough replaces the previous one without a page reload", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    // The agent emits a 2-step tour, then a different 3-step tour. Opening the
-    // card refetches the latest, so the re-emit shows without reloading.
-    await seedWalkthroughTask(
+  test.describe("live walkthrough replacement", () => {
+    test.describe.configure({ retries: 0 });
+
+    test("a re-emitted walkthrough replaces the previous one without a page reload", async ({
       testPage,
       apiClient,
       seedData,
-      "walkthrough-reemit",
-      "reemit-second-done",
-    );
-    const card = await openWalkthrough(testPage);
+    }) => {
+      test.setTimeout(180_000);
+      const walkthroughStep = await apiClient.createWorkflowStep(
+        seedData.workflowId,
+        "Walkthrough Re-emission",
+        4,
+      );
+      let taskId: string | undefined;
+      try {
+        const task = await apiClient.createTask(seedData.workspaceId, "Walkthrough re-emission", {
+          description: "/e2e:walkthrough-reemit",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: walkthroughStep.id,
+          agent_profile_id: seedData.agentProfileId,
+          repository_ids: [seedData.repositoryId],
+        });
+        taskId = task.id;
+        await testPage.goto(`/t/${task.id}`);
+        const session = new SessionPage(testPage);
+        await session.waitForLoad();
 
-    await expect(testPage.getByTestId("walkthrough-launcher")).toHaveCount(1);
-    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 3");
-    await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_SECOND");
-    await expect(card.getByTestId("walkthrough-step-body")).not.toContainText("REEMIT_FIRST");
+        const startButton = testPage.getByTestId("task-description-start-button");
+        await expect(startButton).toBeVisible({ timeout: 30_000 });
+        await startButton.click();
+        const sessionId = await activeTaskSessionId(testPage);
+        await waitForSessionAgentctlReady(testPage, sessionId, 60_000);
+        try {
+          await expect(
+            session.activeChat().getByText("reemit-first-done", { exact: false }),
+          ).toBeVisible({ timeout: 45_000 });
+        } catch (error) {
+          const [{ messages }, { sessions }] = await Promise.all([
+            apiClient.listSessionMessages(sessionId),
+            apiClient.listTaskSessions(task.id),
+          ]);
+          const failedSession = sessions.find((candidate) => candidate.id === sessionId);
+          const diagnostic = {
+            session: failedSession && {
+              id: failedSession.id,
+              state: failedSession.state,
+              updated_at: failedSession.updated_at,
+              agent_execution_id: failedSession.agent_execution_id,
+            },
+            messages: messages.map((message) => ({
+              author_type: message.author_type,
+              type: message.type,
+              content: message.content,
+              created_at: message.created_at,
+            })),
+          };
+          throw new Error(
+            `${error instanceof Error ? error.message : String(error)}\n` +
+              `First turn server state: ${JSON.stringify(diagnostic)}`,
+          );
+        }
+
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const primarySession = sessions.find((candidate) => candidate.is_primary);
+        if (!primarySession) throw new Error("walkthrough task has no primary session");
+        await waitForSessionState(apiClient, {
+          taskId: task.id,
+          sessionId: primarySession.id,
+          expectedState: "WAITING_FOR_INPUT",
+          message: "first walkthrough turn to finish",
+          timeout: 45_000,
+        });
+
+        const card = await openWalkthrough(testPage);
+        await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 2");
+        await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_FIRST");
+
+        await apiClient.addUserMessage(
+          task.id,
+          primarySession.id,
+          "/e2e:walkthrough-reemit-second",
+        );
+        await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 3");
+        await expect(testPage.getByTestId("walkthrough-launcher")).toHaveCount(1);
+        await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_SECOND");
+        await expect(card.getByTestId("walkthrough-step-body")).not.toContainText("REEMIT_FIRST");
+        await waitForSessionState(apiClient, {
+          taskId: task.id,
+          sessionId: primarySession.id,
+          expectedState: "WAITING_FOR_INPUT",
+          message: "second walkthrough turn to finish",
+          timeout: 45_000,
+        });
+      } finally {
+        try {
+          if (taskId) await apiClient.deleteTask(taskId);
+        } finally {
+          await apiClient.deleteWorkflowStep(walkthroughStep.id);
+        }
+      }
+    });
   });
 });

@@ -498,13 +498,17 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	if fromStep != nil {
 		fromStepID = fromStep.ID
 	}
-	if err := s.updateTransitionTaskWithCapacity(transitionCtx, task, fromStepID, targetStep); err != nil {
+	applied, err := s.updateTransitionTaskWithCapacityAndEffect(transitionCtx, task, fromStepID, targetStep)
+	if err != nil {
 		s.logger.Warn("workflow transition rejected or failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
 			zap.String("to_step", targetStep.Name),
 			zap.Error(err))
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return
+	}
+	if !applied {
 		return
 	}
 	queued := task.QueuedForStepID != ""
@@ -612,15 +616,33 @@ func (s *Service) updateTransitionTaskWithCapacity(
 	fromStepID string,
 	targetStep *wfmodels.WorkflowStep,
 ) error {
+	_, err := s.updateTransitionTaskWithCapacityAndEffect(ctx, task, fromStepID, targetStep)
+	return err
+}
+
+func (s *Service) updateTransitionTaskWithCapacityAndEffect(
+	ctx context.Context,
+	task *models.Task,
+	fromStepID string,
+	targetStep *wfmodels.WorkflowStep,
+) (bool, error) {
 	if targetStep == nil {
-		return s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task)
+		return true, s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task)
+	}
+	if effect := workflowEffectFromContext(ctx); effect != nil {
+		if effectRepo, ok := s.repo.(workflowMoveAdmissionEffectRepository); ok {
+			_, applied, err := effectRepo.UpdateTaskWithWorkflowStepAdmissionAndEffect(
+				ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit, effect,
+			)
+			return applied, err
+		}
 	}
 	admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository)
 	if !ok {
-		return fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
+		return false, fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
 	}
 	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit)
-	return err
+	return true, err
 }
 
 // engineTriggerIsSessionOriginated reports whether an engine.Trigger is
@@ -5407,6 +5429,14 @@ func (s *Service) drainQueuedMessageForPromptableSessionOutcome(ctx context.Cont
 			zap.String("session_id", sessionID), zap.Error(err))
 		return queueDrainSkipped
 	}
+	if session == nil {
+		return queueDrainSkipped
+	}
+	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
+		s.logger.Info("skipping queue drain while session recovery is required",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return queueDrainSkipped
+	}
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
 		s.logger.Debug("skipping drain: session is not promptable once the guard is held",
 			zap.String("session_id", sessionID), zap.Error(err))
@@ -5453,6 +5483,11 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIden
 		return queueDrainSkipped
 	}
 	if identity != nil && session.QueueIncarnationID != identity.SessionIncarnationID {
+		return queueDrainSkipped
+	}
+	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
+		s.logger.Info("skipping admission-gated queue drain while session recovery is required",
+			zap.String("session_id", sessionID), zap.Error(err))
 		return queueDrainSkipped
 	}
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
@@ -5548,6 +5583,11 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 		return queueDrainTaskAdmissionReadFailed
 	}
 	if task == nil || (!task.WIPAdmitted && task.QueuedForStepID != "") {
+		return queueDrainSkipped
+	}
+	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
+		s.logger.Info("skipping admission-gated queue reservation while session recovery is required",
+			zap.String("session_id", sessionID), zap.Error(err))
 		return queueDrainSkipped
 	}
 	queueIdentity, ok := s.resolveQueueDrainIdentity(ctx, taskID, sessionID, identity)
@@ -7393,6 +7433,9 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	unlock, task, proceed := s.acquireTurnCompletionCriticalSection(ctx, taskID, session, task)
 	defer unlock()
 	if !proceed {
+		return false
+	}
+	if s.workflowEffectAlreadyApplied(ctx, workflowEffectFromContext(ctx)) {
 		return false
 	}
 

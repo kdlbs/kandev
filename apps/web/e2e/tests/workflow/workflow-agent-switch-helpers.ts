@@ -39,6 +39,7 @@ export async function waitForWorkflowProfileSession(
   apiClient: ApiClient,
   taskId: string,
   profileId: string,
+  timeoutMs = 60_000,
 ) {
   let sessionId = "";
   let details = "";
@@ -57,7 +58,7 @@ export async function waitForWorkflowProfileSession(
         return session?.state === "WAITING_FOR_INPUT";
       },
       {
-        timeout: 60_000,
+        timeout: timeoutMs,
         intervals: [250, 500, 1_000],
         message: `profile ${profileId} never became answerable`,
       },

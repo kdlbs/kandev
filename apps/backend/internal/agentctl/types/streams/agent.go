@@ -132,6 +132,26 @@ type AgentEvent struct {
 	// SessionID is the current session identifier.
 	SessionID string `json:"session_id,omitempty"`
 
+	// DeliveryStreamID identifies the durable agentctl event stream. It is
+	// present only when the event crossed the retained delivery journal.
+	DeliveryStreamID string `json:"delivery_stream_id,omitempty"`
+
+	// DeliveryIncarnationID identifies the Kandev session incarnation that owns
+	// the durable stream. It fences events from a replaced session owner.
+	DeliveryIncarnationID string `json:"delivery_incarnation_id,omitempty"`
+
+	// DeliveryHarnessGeneration identifies the native harness conversation that
+	// produced the durable event. It fences late events after continuation.
+	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+
+	// DeliverySequence is the committed sequence within DeliveryStreamID.
+	// Consumers use it as a reconnect cursor, never as a product message ID.
+	DeliverySequence uint64 `json:"delivery_sequence,omitempty"`
+
+	// DeliverySubmissionID links an event to the immutable prompt submission
+	// when agentctl can establish that association.
+	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
+
 	// OperationID identifies an operation when the agent exposes an operation ID.
 	// It may be empty when no operation ID is available.
 	OperationID string `json:"operation_id,omitempty"`
@@ -158,6 +178,18 @@ type AgentEvent struct {
 	// PromptGeneration -- travels on both observations and survives a
 	// restart that resets the backend's own in-memory generation counter.
 	ControlTurnID int64 `json:"control_turn_id,omitempty"`
+
+	// CanonicalMessageID is assigned by the backend inbox projector for output
+	// events. It is stable across reconnects and is not a transport cursor.
+	CanonicalMessageID string `json:"canonical_message_id,omitempty"`
+
+	// CanonicalProjection marks an event whose canonical task message and inbox
+	// cursor were committed before the event was published to consumers.
+	CanonicalProjection bool `json:"canonical_projection,omitempty"`
+
+	// CanonicalMessageAppend tells lifecycle/UI consumers whether the stable
+	// canonical message already existed when this event was projected.
+	CanonicalMessageAppend bool `json:"canonical_message_append,omitempty"`
 
 	// --- Message fields (for "message_chunk" type) ---
 

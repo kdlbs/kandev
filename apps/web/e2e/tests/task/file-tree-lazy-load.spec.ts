@@ -6,8 +6,10 @@ import {
   GitHelper,
   makeGitEnv,
   openTaskSession,
+  publishSeedCommit,
   createStandardProfile,
 } from "../../helpers/git-helper";
+import { waitForWorkspaceFile } from "../../helpers/session";
 
 // Children of a directory are loaded lazily when the directory is first expanded
 // (see useFileBrowserHandlers.toggleExpand -> loadNodeChildren). The pre-refactor
@@ -21,17 +23,18 @@ async function setupTask(
   seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string },
   profileName: string,
   taskTitle: string,
-) {
+): Promise<{ session: Awaited<ReturnType<typeof openTaskSession>>; sessionId: string }> {
   const profile = await createStandardProfile(apiClient, profileName);
-  await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
+  const task = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
     description: "/e2e:simple-message",
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
     repository_ids: [seedData.repositoryId],
   });
+  if (!task.session_id) throw new Error(`${taskTitle} did not return a session_id`);
   const session = await openTaskSession(testPage, taskTitle);
-  await session.clickTab("Files");
-  return session;
+  await session.waitForChatIdle({ timeout: 45_000 });
+  return { session, sessionId: task.session_id };
 }
 
 test.describe("File tree lazy-load on expand", () => {
@@ -50,8 +53,17 @@ test.describe("File tree lazy-load on expand", () => {
     git.createFile("lazyfolder/nested/deep.ts", "deep");
     git.stageAll();
     git.commit("seed lazy folder");
+    publishSeedCommit(git, seedData.repositoryRemoteURL);
 
-    const session = await setupTask(testPage, apiClient, seedData, "ft-lazy-load", "FT Lazy Load");
+    const { session, sessionId } = await setupTask(
+      testPage,
+      apiClient,
+      seedData,
+      "ft-lazy-load",
+      "FT Lazy Load",
+    );
+    await waitForWorkspaceFile(apiClient, sessionId, "lazyfolder");
+    await session.clickTab("Files");
 
     const folder = session.fileTreeNode("lazyfolder");
     await expect(folder).toBeVisible({ timeout: 15_000 });
@@ -92,8 +104,17 @@ test.describe("File tree lazy-load on expand", () => {
     git.createFile("keepfolder/keep-b.ts", "b");
     git.stageAll();
     git.commit("seed keep folder");
+    publishSeedCommit(git, seedData.repositoryRemoteURL);
 
-    const session = await setupTask(testPage, apiClient, seedData, "ft-lazy-keep", "FT Lazy Keep");
+    const { session, sessionId } = await setupTask(
+      testPage,
+      apiClient,
+      seedData,
+      "ft-lazy-keep",
+      "FT Lazy Keep",
+    );
+    await waitForWorkspaceFile(apiClient, sessionId, "keepfolder");
+    await session.clickTab("Files");
 
     const folder = session.fileTreeNode("keepfolder");
     await expect(folder).toBeVisible({ timeout: 15_000 });

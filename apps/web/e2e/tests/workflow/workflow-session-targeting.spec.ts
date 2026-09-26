@@ -141,6 +141,18 @@ test.describe("Workflow session targeting", () => {
 
     await apiClient.moveTask(task.id, workflow.id, reviewReuse.id);
     await waitForAgentMarker(apiClient, initialSessionId, "initial-target-reuse");
+    await expect
+      .poll(
+        async () => {
+          const metadata = (await apiClient.getTask(task.id)).metadata ?? {};
+          return (
+            metadata.manual_move_lifecycle_pending === undefined &&
+            metadata.manual_move_lifecycle_completed === true
+          );
+        },
+        { timeout: 30_000, message: "reuse move lifecycle did not settle" },
+      )
+      .toBe(true);
     const afterReuse = (await apiClient.listTaskSessions(task.id)).sessions;
     expect(afterReuse.filter((session) => session.agent_profile_id === profileA.id)).toHaveLength(
       1,
@@ -301,6 +313,7 @@ test.describe("Workflow session targeting", () => {
       "Source target runtime",
       profileA.id,
       {
+        description: "/e2e:simple-message",
         workflow_id: workflow.id,
         workflow_step_id: plan.id,
         repository_ids: [seedData.repositoryId],

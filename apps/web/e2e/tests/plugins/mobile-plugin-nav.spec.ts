@@ -116,7 +116,9 @@ test.describe("Mobile plugin navigation", () => {
     const navItem = testPage.getByTestId(`mobile-plugin-nav-item-${NAV_ITEM_ID}`);
     await expect(navItem).toBeVisible();
     await expect(navItem).toHaveText(/Hello E2E/);
-    expect((await navItem.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    const navItemBox = await navItem.boundingBox();
+    expect(navItemBox).not.toBeNull();
+    expect(navItemBox!.height).toBeCloseTo(44, 1);
 
     // The sheet slides up on open and the section sits below the fold, so
     // settle both before shooting or the asset captures an empty mid-animation

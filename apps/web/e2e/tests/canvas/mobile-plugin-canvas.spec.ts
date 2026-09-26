@@ -1,5 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForSessionDone } from "../../helpers/session";
+import { waitForActiveTaskSession, waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 import { expectTaskDescription, readTaskDescription } from "../../pages/task-description-editor";
 import type { ApiClient } from "../../helpers/api-client";
@@ -312,6 +314,14 @@ test.describe("Plugin-backed canvases on mobile", () => {
 
       const canvas = await waitForTaskCanvas(apiClient, taskId, canvasTitle);
       canvasIds.push(canvas.id);
+      await waitForActiveTaskSession(testPage, taskId, taskSessionId);
+      await waitForSessionAgentctlReady(testPage, taskSessionId);
+      await waitForSessionDone(
+        apiClient,
+        taskId,
+        taskSessionId,
+        "The guided canvas task did not finish before publishing its package.",
+      );
       const published = await publishTaskCanvas({
         apiClient,
         taskId,

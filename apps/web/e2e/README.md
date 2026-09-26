@@ -258,9 +258,11 @@ every report, but only a successful `main` workflow run is eligible to seed a
 future plan. Manifests are retained for 3 days; timing profiles for 30 days;
 retry diagnostics for 14 days.
 
-Dispatch the workflow with `fail_on_flaky=true` to set
-`failOnFlakyTests: true` for a diagnostic run. Normal PR runs retain the
-existing two-retry policy while the summary makes retry groups visible.
+The standard, container-backed, and Kubernetes compatibility CI runs set
+`E2E_FAIL_ON_FLAKY=1`. Playwright retries still collect diagnostics, but a test
+that passes only after a retry fails the run. Local Playwright runs also fail on
+retries by default; set `CI=true` without `E2E_FAIL_ON_FLAKY=1` only when you
+need to reproduce CI's retry-reporting behavior without the strict gate.
 
 Container-backed CI jobs also cache the browser directory used by the host
 runner. The workflow resolves the `runtime-latest` convenience tag once to a

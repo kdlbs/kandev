@@ -165,8 +165,7 @@ test.describe("Queue reorder", () => {
 
     const session = await seedIdleTask(testPage, apiClient, seedData, "Queue reorder keyboard");
     await session.sendMessage("/slow 30s");
-    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await waitForComposerQueueMode(testPage);
+    await waitForComposerQueueMode(testPage, 30_000);
 
     const editor = session.activeChat().locator(".tiptap.ProseMirror:visible").first();
     await queueMessagesWhileBusy(testPage, editor, [

@@ -62,7 +62,12 @@ export async function createWorkflowSessionFocusScenario(
       repository_ids: [seedData.repositoryId],
     },
   );
-  const sourceSessionId = await waitForWorkflowProfileSession(apiClient, task.id, profileA.id);
+  const sourceSessionId = await waitForWorkflowProfileSession(
+    apiClient,
+    task.id,
+    profileA.id,
+    60_000,
+  );
 
   const secondary = await apiClient.launchSession({
     task_id: task.id,

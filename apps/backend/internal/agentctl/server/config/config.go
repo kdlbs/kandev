@@ -381,6 +381,21 @@ type InstanceConfig struct {
 	// linked workspace file operations.
 	WorkspaceSourceRoots []string
 
+	// DurableJournalPath is an optional owner-scoped bbolt path on retained
+	// executor storage. Empty means the instance uses legacy delivery.
+	DurableJournalPath string
+
+	// DeliveryStreamID is the generation-scoped durable event stream identity.
+	// It remains stable when agentctl is replaced within the same generation.
+	DeliveryStreamID string
+
+	// DeliveryIncarnationID identifies the owning Kandev session incarnation.
+	DeliveryIncarnationID string
+
+	// DeliveryHarnessGeneration identifies the native conversation generation
+	// that owns this agentctl instance.
+	DeliveryHarnessGeneration uint64
+
 	// CreateReadyMillis is written once by instance.Manager.CreateInstance
 	// with the elapsed milliseconds from CreateInstance's entry (including
 	// the creation-queue mutex wait) to the instant this instance's HTTP
@@ -741,6 +756,18 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.WorkspaceSourceRoots != nil {
 		cfg.WorkspaceSourceRoots = append([]string(nil), overrides.WorkspaceSourceRoots...)
 	}
+	if overrides.DurableJournalPath != "" {
+		cfg.DurableJournalPath = overrides.DurableJournalPath
+	}
+	if overrides.DeliveryStreamID != "" {
+		cfg.DeliveryStreamID = overrides.DeliveryStreamID
+	}
+	if overrides.DeliveryIncarnationID != "" {
+		cfg.DeliveryIncarnationID = overrides.DeliveryIncarnationID
+	}
+	if overrides.DeliveryHarnessGeneration > 0 {
+		cfg.DeliveryHarnessGeneration = overrides.DeliveryHarnessGeneration
+	}
 }
 
 // applyApprovalOverrides sets approval-related instance overrides. Env is a
@@ -789,6 +816,10 @@ type InstanceOverrides struct {
 	RemoteContributions        map[string]models.RemoteContribution
 	ContributionDestinations   map[string]models.ContributionDestination
 	WorkspaceSourceRoots       []string
+	DurableJournalPath         string
+	DeliveryStreamID           string
+	DeliveryIncarnationID      string
+	DeliveryHarnessGeneration  uint64
 }
 
 func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {

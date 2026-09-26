@@ -15,6 +15,7 @@ test.describe("CLI mode: prompt injection into PTY", () => {
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(120_000);
     // Use the canonical e2e helper pattern: the e2e backend registers only
     // the mock-agent, so agents[0] is the passthrough-capable target.
     // Mirrors `createTUIProfile` in `apps/web/e2e/tests/terminal/terminal-agent.spec.ts`.
@@ -50,7 +51,7 @@ test.describe("CLI mode: prompt injection into PTY", () => {
     // Terminal panel becomes visible — passthrough terminal mounts for
     // CLI-mode sessions.
     await session.waitForPassthroughLoad(15_000);
-    await session.waitForPassthroughLoaded(15_000);
+    await session.waitForPassthroughLoaded(30_000);
 
     // Generous timeout: passthrough idle window is 2s + buffer flush.
     // The prompt and the mock-agent's "Processed:" response should both

@@ -124,3 +124,33 @@ func (m *Manager) publishRecoveredExecutionRunning(ctx context.Context, executio
 	execution.recoveredPromptGenerationPending.Store(true)
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentRunning, execution)
 }
+
+// durableRecoveryHasPendingWork reports whether adoption still owns a prompt
+// or has retained events that must be replayed before the execution can be
+// ready for another prompt. An adopted durable session with no such evidence
+// is already idle, even though reconstructed executions start in Running.
+func durableRecoveryHasPendingWork(execution *AgentExecution) bool {
+	if execution == nil {
+		return false
+	}
+	if execution.deliverySubmissionIDSnapshot() != "" {
+		return true
+	}
+	descriptor := execution.DeliveryDescriptor
+	return descriptor != nil && descriptor.Stream != nil && execution.DeliveryReplayCursor < descriptor.Stream.HighWater
+}
+
+// publishRecoveredExecutionReady settles an adopted durable execution whose
+// captured stream is already projected and whose peer has no active prompt.
+func (m *Manager) publishRecoveredExecutionReady(ctx context.Context, execution *AgentExecution) {
+	if execution == nil {
+		return
+	}
+	execution.recoveredPromptGenerationPending.Store(false)
+	if err := m.markReadyEventWithContext(ctx, execution.ID, events.AgentReady, false); err != nil {
+		m.logger.Error("failed to mark idle recovered execution as ready",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID),
+			zap.Error(err))
+	}
+}

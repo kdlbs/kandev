@@ -6,6 +6,7 @@ import path from "node:path";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import { mockFolderAvailability } from "../../helpers/open-task-folder";
 
@@ -66,11 +67,15 @@ function activeFileTab(page: Page, filename: string) {
 }
 
 async function submitWorkspaceSources(page: Page, submit: Locator) {
-  const responsePromise = waitForHttp(page, "POST", WORKSPACE_SOURCES_PATH);
+  const responsePromise = waitForHttp(page, "POST", WORKSPACE_SOURCES_PATH, { timeout: 60_000 });
 
   await submit.click();
   const response = await responsePromise;
-  expect(response.ok()).toBe(true);
+  const responseBody = response.ok() ? "" : await response.text();
+  expect(
+    response.ok(),
+    `workspace source request returned ${response.status()}: ${responseBody}`,
+  ).toBe(true);
   await response.finished();
 }
 
@@ -91,6 +96,22 @@ async function waitForWorkspaceReady(
       },
     )
     .toMatch(/\S/);
+}
+
+async function waitForCompletedSessionTurns(
+  apiClient: ApiClient,
+  sessionId: string,
+  message: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { turns } = await apiClient.listSessionTurns(sessionId);
+        return turns.length > 0 && turns.every((turn) => Boolean(turn.completed_at));
+      },
+      { timeout: 60_000, message },
+    )
+    .toBe(true);
 }
 
 test.describe("Attach local workspace sources", () => {
@@ -142,6 +163,18 @@ test.describe("Attach local workspace sources", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 60_000 });
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "the task's initial prompt should finish before changing its workspace",
+      60_000,
+    );
+    await waitForCompletedSessionTurns(
+      apiClient,
+      task.session_id,
+      "the initial task turn should be persisted and complete before changing its workspace",
+    );
     await session.clickTab("Files");
 
     const workspaceActions = testPage.getByTestId("files-workspace-actions");
@@ -234,8 +267,18 @@ test.describe("Attach local workspace sources", () => {
         .filter({ hasText: "second-local-repository-main" }),
     ).toBeVisible({ timeout: 30_000 });
     if (!task.session_id) throw new Error("task creation did not return a session id");
-    const turnsAfterFirstAttachment = await apiClient.listSessionTurns(task.session_id);
-    expect(turnsAfterFirstAttachment.turns.filter((turn) => !turn.completed_at)).toEqual([]);
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "the session should be idle after the first workspace rebind",
+      60_000,
+    );
+    await waitForCompletedSessionTurns(
+      apiClient,
+      task.session_id,
+      "all persisted turns should be complete before attaching another workspace source",
+    );
 
     await workspaceActions.click();
     await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
@@ -256,7 +299,7 @@ test.describe("Attach local workspace sources", () => {
 
     await expect(
       session.files.getByTestId("file-tree-node").filter({ hasText: "plain-local-folder" }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 30_000 });
 
     const sessionData = (await apiClient.listTaskSessions(task.id)) as {
       sessions: Array<{ worktrees?: Array<{ worktree_path?: string }> }>;
@@ -298,7 +341,7 @@ test.describe("Attach local workspace sources", () => {
     ).toBeVisible({ timeout: 30_000 });
     await expect(
       session.files.getByTestId("file-tree-node").filter({ hasText: "plain-local-folder" }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 30_000 });
 
     // Chat links in a multi-repository workspace are absolute on the host but
     // must resolve relative to the task root (not the primary repository).

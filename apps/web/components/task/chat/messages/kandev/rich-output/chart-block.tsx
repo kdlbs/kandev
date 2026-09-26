@@ -127,16 +127,6 @@ function useChartPresentation(block: RichOutputChartBlock) {
     });
   }, []);
 
-  return { formatXAxisTick, formatYAxisValue, hiddenSeries, toggleSeries };
-}
-
-export const ChartBlock = memo(function ChartBlock({ block }: { block: RichOutputChartBlock }) {
-  const { formatXAxisTick, formatYAxisValue, hiddenSeries, toggleSeries } =
-    useChartPresentation(block);
-  const { plotRef, shouldMountPlot } = useChartPlotVisibility();
-  const shouldAnimate = useRichOutputChartAnimations();
-  const data = useMemo(() => chartData(block), [block.labels, block.series]);
-  const config = useMemo(() => chartConfig(block), [block.series]);
   const legend = useMemo(
     () => (
       <ChartLegend
@@ -146,13 +136,27 @@ export const ChartBlock = memo(function ChartBlock({ block }: { block: RichOutpu
     [block, hiddenSeries, toggleSeries],
   );
 
+  return { formatXAxisTick, formatYAxisValue, hiddenSeries, legend };
+}
+
+export const ChartBlock = memo(function ChartBlock({ block }: { block: RichOutputChartBlock }) {
+  const { formatXAxisTick, formatYAxisValue, hiddenSeries, legend } = useChartPresentation(block);
+  const { plotRef, shouldMountPlot } = useChartPlotVisibility();
+  const shouldAnimate = useRichOutputChartAnimations();
+  const data = useMemo(() => chartData(block), [block.labels, block.series]);
+  const config = useMemo(() => chartConfig(block), [block.series]);
+
   return (
     <figure className="min-w-0 space-y-3" data-testid={`rich-output-chart-${block.chart_type}`}>
       <figcaption className="space-y-0.5">
         <h4 className="text-xs font-medium text-foreground">{block.title}</h4>
         <p className="text-[11px] leading-relaxed text-muted-foreground">{block.summary}</p>
       </figcaption>
-      <div ref={plotRef} className="h-52 min-h-52 w-full min-w-0 max-w-full">
+      <div
+        ref={plotRef}
+        className="h-52 min-h-52 w-full min-w-0 max-w-full"
+        data-testid="rich-output-chart-plot"
+      >
         {shouldMountPlot && (
           <ChartContainer
             config={config}

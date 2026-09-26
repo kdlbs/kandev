@@ -261,7 +261,7 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 type wsRecoverSessionRequest struct {
 	TaskID    string `json:"task_id"`
 	SessionID string `json:"session_id"`
-	Action    string `json:"action"` // "resume", "resume_new_branch", "fresh_start", "runtime_retry", or "cancel_retry"
+	Action    string `json:"action"` // "resume", "resume_new_branch", "continue_from_history", "fresh_start", "runtime_retry", "retry_connection", or "cancel_retry"
 }
 
 func branchRecoveryConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
@@ -287,6 +287,40 @@ func sessionRecoveryGuardConflictResponse(msg *ws.Message, err error) (*ws.Messa
 		code = ws.ErrorCodeConflict
 	}
 	return ws.NewError(msg.ID, msg.Action, code, err.Error(), guardErr.Details())
+}
+
+// restoreRequiredRecoveryResponse exposes only the bounded restore policy
+// needed by the shared recovery UI. Provider errors and internal recovery
+// blocks must remain server-side because neither is a safe browser contract.
+func restoreRequiredRecoveryResponse(msg *ws.Message, err error, sessionID string) (*ws.Message, error) {
+	var reasoner interface{ RecoveryReason() string }
+	if !errors.As(err, &reasoner) {
+		return nil, nil
+	}
+	reason := reasoner.RecoveryReason()
+	switch reason {
+	case "native_state_missing", "native_resume_unsupported", "workspace_incompatible":
+	default:
+		return nil, nil
+	}
+	details := map[string]interface{}{
+		"kind":            "session_restore_required",
+		"recovery_action": "continue_from_history",
+		"reason":          reason,
+		"session_id":      sessionID,
+	}
+	if generationer, ok := reasoner.(interface{ RecoveryGeneration() int64 }); ok {
+		if generation := generationer.RecoveryGeneration(); generation > 0 {
+			details["generation"] = generation
+		}
+	}
+	return ws.NewError(
+		msg.ID,
+		msg.Action,
+		ws.ErrorCodeConflict,
+		"Native session state requires explicit history continuation.",
+		details,
+	)
 }
 
 func taskArchivedConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
@@ -322,8 +356,20 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": cancelled})
 	}
 
-	if req.Action != "resume" && req.Action != "resume_new_branch" && req.Action != "fresh_start" && req.Action != "runtime_retry" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume', 'resume_new_branch', 'fresh_start', 'runtime_retry', or 'cancel_retry'", nil)
+	if req.Action == "retry_connection" {
+		resp, err := h.service.RetrySessionDelivery(ctx, req.TaskID, req.SessionID)
+		if err != nil {
+			h.logger.Error("failed to reconnect session delivery",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.SessionID),
+				zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to reconnect session delivery: "+err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, resp)
+	}
+
+	if req.Action != "resume" && req.Action != "resume_new_branch" && req.Action != "continue_from_history" && req.Action != "fresh_start" && req.Action != "runtime_retry" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume', 'resume_new_branch', 'continue_from_history', 'fresh_start', 'runtime_retry', 'retry_connection', or 'cancel_retry'", nil)
 	}
 
 	resp, err := h.service.RecoverSession(ctx, req.TaskID, req.SessionID, req.Action)
@@ -336,6 +382,9 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
 			return guardResponse, responseErr
+		}
+		if recoveryResponse, responseErr := restoreRequiredRecoveryResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
 		}
 		h.logger.Error("failed to recover session",
 			zap.String("task_id", req.TaskID),

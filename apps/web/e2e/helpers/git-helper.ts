@@ -62,6 +62,18 @@ export class GitHelper {
   }
 }
 
+export function publishSeedCommit(git: GitHelper, remoteURL: string) {
+  // Task workspaces clone the repository's configured origin, not a commit
+  // that exists only in this fixture checkout.
+  const remotes = git.exec("git remote").split(/\r?\n/);
+  if (remotes.includes("origin")) {
+    git.exec(`git remote set-url origin "${remoteURL}"`);
+  } else {
+    git.exec(`git remote add origin "${remoteURL}"`);
+  }
+  git.exec("git push origin HEAD:main");
+}
+
 /**
  * Strip GIT_CONFIG_* environment variables that can inject global git hooks
  * into fresh git repos, breaking E2E test setup.

@@ -22,43 +22,44 @@ const (
 
 // scenarioRegistry maps scenario names to their handler functions.
 var scenarioRegistry = map[string]func(e *emitter){
-	"simple-message":          scenarioSimpleMessage,
-	"read-and-edit":           scenarioReadAndEdit,
-	"permission-flow":         scenarioPermissionFlow,
-	toolKeyError:              scenarioError,
-	"subagent":                scenarioSubagent,
-	"all-tools":               scenarioAllTools,
-	"multi-turn":              scenarioMultiTurn,
-	"diff-expansion-setup":    scenarioDiffExpansionSetup,
-	"diff-update-setup":       scenarioDiffUpdateSetup,
-	"diff-update-modify":      scenarioDiffUpdateModify,
-	"diff-update-streaming":   scenarioDiffUpdateStreaming,
-	"multi-file-setup":        scenarioMultiFileSetup,
-	"multi-file-modify":       scenarioMultiFileModify,
-	"untracked-file-setup":    scenarioUntrackedFileSetup,
-	"untracked-file-modify":   scenarioUntrackedFileModify,
-	"clarification":           scenarioClarification,
-	"clarification-markdown":  scenarioClarificationMarkdown,
-	"clarification-multi":     scenarioClarificationMulti,
-	"clarification-timeout":   scenarioClarificationTimeout,
-	"multi-permission":        scenarioMultiPermission,
-	"kandev-mcp-permission":   scenarioKandevMCPPermission,
-	"review-cumulative-setup": scenarioReviewCumulativeSetup,
-	"walkthrough-setup":       scenarioWalkthroughSetup,
-	"walkthrough-basic":       scenarioWalkthroughBasic,
-	"walkthrough-reemit":      scenarioWalkthroughReemit,
-	"symlink-file-setup":      scenarioSymlinkFileSetup,
-	"markdown-table":          scenarioMarkdownTable,
-	"empty-turn":              scenarioEmptyTurn,
-	"push-current-branch":     scenarioPushCurrentBranch,
-	"steer-fold-setup":        scenarioSteerFoldSetup,
-	"steer-defer-setup":       scenarioSteerDeferSetup,
-	"saved-prompt-delivery":   scenarioSavedPromptDelivery,
-	"response-retry":          scenarioResponseRetry,
-	"goal-active":             scenarioGoalActive,
-	"goal-complete":           scenarioGoalComplete,
-	"goal-clear":              scenarioGoalClear,
-	"goal-long":               scenarioGoalLong,
+	"simple-message":            scenarioSimpleMessage,
+	"read-and-edit":             scenarioReadAndEdit,
+	"permission-flow":           scenarioPermissionFlow,
+	toolKeyError:                scenarioError,
+	"subagent":                  scenarioSubagent,
+	"all-tools":                 scenarioAllTools,
+	"multi-turn":                scenarioMultiTurn,
+	"diff-expansion-setup":      scenarioDiffExpansionSetup,
+	"diff-update-setup":         scenarioDiffUpdateSetup,
+	"diff-update-modify":        scenarioDiffUpdateModify,
+	"diff-update-streaming":     scenarioDiffUpdateStreaming,
+	"multi-file-setup":          scenarioMultiFileSetup,
+	"multi-file-modify":         scenarioMultiFileModify,
+	"untracked-file-setup":      scenarioUntrackedFileSetup,
+	"untracked-file-modify":     scenarioUntrackedFileModify,
+	"clarification":             scenarioClarification,
+	"clarification-markdown":    scenarioClarificationMarkdown,
+	"clarification-multi":       scenarioClarificationMulti,
+	"clarification-timeout":     scenarioClarificationTimeout,
+	"multi-permission":          scenarioMultiPermission,
+	"kandev-mcp-permission":     scenarioKandevMCPPermission,
+	"review-cumulative-setup":   scenarioReviewCumulativeSetup,
+	"walkthrough-setup":         scenarioWalkthroughSetup,
+	"walkthrough-basic":         scenarioWalkthroughBasic,
+	"walkthrough-reemit":        scenarioWalkthroughReemit,
+	"walkthrough-reemit-second": scenarioWalkthroughReemitSecond,
+	"symlink-file-setup":        scenarioSymlinkFileSetup,
+	"markdown-table":            scenarioMarkdownTable,
+	"empty-turn":                scenarioEmptyTurn,
+	"push-current-branch":       scenarioPushCurrentBranch,
+	"steer-fold-setup":          scenarioSteerFoldSetup,
+	"steer-defer-setup":         scenarioSteerDeferSetup,
+	"saved-prompt-delivery":     scenarioSavedPromptDelivery,
+	"response-retry":            scenarioResponseRetry,
+	"goal-active":               scenarioGoalActive,
+	"goal-complete":             scenarioGoalComplete,
+	"goal-clear":                scenarioGoalClear,
+	"goal-long":                 scenarioGoalLong,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup
@@ -869,10 +870,17 @@ func scenarioClarificationTimeout(e *emitter) {
 
 	result, err := e.callMCPToolCtx(ctx, "kandev", "ask_user_question_kandev", clarificationQuestionArgs())
 	if err != nil {
-		fixedDelay(50)
-		if ctx.Err() != nil {
-			e.text("Question timed out, continuing without answer.")
+		if ctx.Err() != nil || strings.Contains(strings.ToLower(err.Error()), "timeout") {
+			// The backend cancels the in-flight ACP prompt when the MCP client
+			// times out. Keep the mock's explicit continuation update on the
+			// live transport so this scenario exercises the late-event
+			// admission path rather than dropping it with the canceled prompt
+			// context.
+			continuation := *e
+			continuation.ctx = context.WithoutCancel(e.ctx)
+			continuation.text("Question timed out, continuing without answer.")
 		} else {
+			fixedDelay(50)
 			e.text(fmt.Sprintf("Question failed: %s", err))
 		}
 		return
@@ -971,9 +979,7 @@ func wtArgs(title string, steps ...map[string]interface{}) map[string]interface{
 	return map[string]interface{}{wtKeyTitle: title, wtKeySteps: steps}
 }
 
-// scenarioWalkthroughReemit emits one walkthrough, waits, then emits a second
-// (different) one — exercising the live `task.walkthrough.updated` path so the
-// UI must reflect the re-emit without a page reload.
+// scenarioWalkthroughReemit emits the first tour so the E2E browser can open it.
 func scenarioWalkthroughReemit(e *emitter) {
 	fixedDelay(50)
 	wd, err := os.Getwd()
@@ -995,9 +1001,10 @@ func scenarioWalkthroughReemit(e *emitter) {
 		return
 	}
 	e.text("reemit-first-done")
+}
 
-	fixedDelay(200)
-
+// scenarioWalkthroughReemitSecond emits a new tour on a later user prompt.
+func scenarioWalkthroughReemitSecond(e *emitter) {
 	if _, err := e.callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("Second",
 		wtStep("Second step", "reemit.txt", "REEMIT_SECOND step one.", 1, 0),
 		wtStep("Second step 2", "reemit.txt", "REEMIT_SECOND step two.", 2, 0),

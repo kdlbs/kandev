@@ -1,5 +1,9 @@
 import type { Page } from "@playwright/test";
 import { injectLatency } from "./causal-waits";
+import type { SeedData } from "../fixtures/test-base";
+import type { CreateTaskResponse } from "../../lib/types/http";
+import type { ApiClient } from "./api-client";
+import { waitForSessionDone } from "./session";
 
 type WireFrame = {
   id?: unknown;
@@ -18,6 +22,10 @@ type DropRule = {
   sessionId?: string;
 };
 
+type HoldRule = {
+  sessionId?: string;
+};
+
 type DelayRule = {
   remaining: number;
   delayMs: number;
@@ -27,10 +35,45 @@ type DelayRule = {
 export type SessionEntryRecoveryProxy = {
   delayNextResponses: (action: string, count: number, delayMs: number, reason: string) => void;
   dropNextResponses: (action: string, count: number, scope?: { sessionId?: string }) => void;
+  failResponses: (action: string, message: string) => void;
+  allowResponses: (action: string) => void;
+  holdResponses: (action: string, scope?: { sessionId?: string }) => void;
+  releaseHeldResponses: (action: string) => void;
+  pendingRequestCount: (action: string) => number;
   requestCount: (action: string) => number;
   delayedResponseCount: (action: string) => number;
   droppedResponseCount: (action: string) => number;
+  failedResponseCount: (action: string) => number;
+  heldResponseCount: (action: string) => number;
 };
+
+export async function createSettledHistoryTask(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+): Promise<CreateTaskResponse> {
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  if (!task.session_id) throw new Error("history recovery task has no session_id");
+
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Waiting for the history recovery task's initial prompt to finish",
+    60_000,
+  );
+  return task;
+}
 
 function parseFrame(value: string): WireFrame | null {
   try {
@@ -77,6 +120,18 @@ function consumeDropRule(
   return true;
 }
 
+function consumeHoldRule(
+  context: RequestContext | undefined,
+  holdRules: Map<string, HoldRule>,
+  heldCounts: Map<string, number>,
+): boolean {
+  if (!context) return false;
+  const rule = holdRules.get(context.action);
+  if (!rule || (rule.sessionId && context.sessionId !== rule.sessionId)) return false;
+  heldCounts.set(context.action, (heldCounts.get(context.action) ?? 0) + 1);
+  return true;
+}
+
 function consumeDelayRule(
   action: string | undefined,
   message: string,
@@ -97,7 +152,7 @@ function consumeDelayRule(
 }
 
 /**
- * Delay or drop selected gateway responses while forwarding every other frame.
+ * Fail, delay, drop, or hold selected gateway responses while forwarding other frames.
  * Rules correlate replies by request id, so the test never relies on
  * action-only or payload timing and does not inspect message contents.
  */
@@ -106,10 +161,17 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
   const requestCounts = new Map<string, number>();
   const delayedCounts = new Map<string, number>();
   const droppedCounts = new Map<string, number>();
+  const failedCounts = new Map<string, number>();
+  const heldCounts = new Map<string, number>();
   const rules = new Map<string, DelayRule>();
   const dropRules = new Map<string, DropRule>();
+  const holdRules = new Map<string, HoldRule>();
+  const heldMessages = new Map<string, string[]>();
+  const failureMessages = new Map<string, string>();
+  let sendHeldMessage: ((message: string) => void) | undefined;
 
   await page.routeWebSocket(/\/ws$/, (ws) => {
+    sendHeldMessage = (message) => ws.send(message);
     const server = ws.connectToServer();
 
     ws.onMessage((message) => {
@@ -147,6 +209,26 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
         const frame = parseFrame(trimmed);
         const context = takeResponseContext(frame, requestContexts);
         if (isResponseFrame(frame)) {
+          if (consumeHoldRule(context, holdRules, heldCounts)) {
+            const messages = heldMessages.get(context!.action) ?? [];
+            messages.push(trimmed);
+            heldMessages.set(context!.action, messages);
+            continue;
+          }
+          if (frame && context && failureMessages.has(context.action)) {
+            failedCounts.set(context.action, (failedCounts.get(context.action) ?? 0) + 1);
+            ws.send(
+              JSON.stringify({
+                ...frame,
+                type: "error",
+                payload: {
+                  code: "INTERNAL_ERROR",
+                  message: failureMessages.get(context.action),
+                },
+              }),
+            );
+            continue;
+          }
           if (consumeDropRule(context, dropRules, droppedCounts)) continue;
           if (consumeDelayRule(context?.action, trimmed, rules, delayedCounts, ws.send.bind(ws)))
             continue;
@@ -167,8 +249,27 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
       if (count < 1) throw new Error("dropNextResponses requires a positive response count");
       dropRules.set(action, { remaining: count, sessionId: scope?.sessionId });
     },
+    failResponses: (action, message) => {
+      if (!message) throw new Error("failResponses requires an error message");
+      failureMessages.set(action, message);
+    },
+    allowResponses: (action) => {
+      failureMessages.delete(action);
+    },
+    holdResponses: (action, scope) => {
+      holdRules.set(action, { sessionId: scope?.sessionId });
+    },
+    releaseHeldResponses: (action) => {
+      holdRules.delete(action);
+      for (const message of heldMessages.get(action) ?? []) sendHeldMessage?.(message);
+      heldMessages.delete(action);
+    },
+    pendingRequestCount: (action) =>
+      [...requestContexts.values()].filter((context) => context.action === action).length,
     requestCount: (action) => requestCounts.get(action) ?? 0,
     delayedResponseCount: (action) => delayedCounts.get(action) ?? 0,
     droppedResponseCount: (action) => droppedCounts.get(action) ?? 0,
+    failedResponseCount: (action) => failedCounts.get(action) ?? 0,
+    heldResponseCount: (action) => heldCounts.get(action) ?? 0,
   };
 }

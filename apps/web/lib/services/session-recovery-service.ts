@@ -6,8 +6,10 @@ import { WebSocketRequestError, type WebSocketRequestErrorDetails } from "@/lib/
 export type SessionRecoveryAction =
   | "resume"
   | "resume_new_branch"
+  | "continue_from_history"
   | "fresh_start"
-  | "runtime_retry";
+  | "runtime_retry"
+  | "retry_connection";
 
 export type BranchRecoveryDetails = WebSocketRequestErrorDetails & {
   kind: "branch_unrecoverable";
@@ -22,6 +24,14 @@ export type SessionRecoveryGuardDetails = WebSocketRequestErrorDetails & {
   kind: "session_recovery_in_progress" | "session_recovery_unstoppable";
   retryable: boolean;
   session_id?: string;
+};
+
+export type ContextContinuationDetails = WebSocketRequestErrorDetails & {
+  kind: "session_restore_required";
+  recovery_action: "continue_from_history";
+  reason?: string;
+  session_id?: string;
+  generation?: number;
 };
 
 type RecoveryResponse = { success?: boolean; error?: string };
@@ -85,6 +95,18 @@ export function resolveRequestErrorMessage(
   if (guard) return sessionRecoveryGuardMessage(guard, t);
   if (error instanceof Error) return error.message;
   return fallback;
+}
+
+/** Returns the structured native-state loss context that authorizes history continuation. */
+export function contextContinuationDetails(error: unknown): ContextContinuationDetails | null {
+  if (!(error instanceof WebSocketRequestError) || !isRecord(error.details)) return null;
+  if (
+    error.details.kind !== "session_restore_required" ||
+    error.details.recovery_action !== "continue_from_history"
+  ) {
+    return null;
+  }
+  return error.details as ContextContinuationDetails;
 }
 
 /** Converts unknown request failures into an Error for an inline recovery alert. */

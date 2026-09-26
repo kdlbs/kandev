@@ -278,13 +278,6 @@ export async function openDesktopFile(
   // visible so a late panel switch cannot turn a successful visibility check
   // into a 180-second click timeout. Virtualized trees can also omit a valid
   // file row from the DOM, so use the exact file search in that case.
-  await session.clickTab("Files", { force: true });
-  await expect(session.files).toBeVisible({ timeout: 30_000 });
-  const existingSearch = session.fileSearchInput();
-  if (await existingSearch.isVisible()) {
-    await existingSearch.press("Escape");
-  }
-
   let openMode: "tree" | "search" | false = false;
   await expect
     .poll(

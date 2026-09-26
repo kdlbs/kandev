@@ -1035,6 +1035,14 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("resolve launch auth token: %w", err)
 	}
+	// The journal is opened by the agentctl process, so concurrent sessions
+	// sharing one task environment must have separate files. A session remains
+	// the stable owner across agentctl replacement; the environment fallback is
+	// only for callers that do not provide a session identity.
+	journalOwnerID := reqWithWorktree.SessionID
+	if journalOwnerID == "" {
+		journalOwnerID = reqWithWorktree.TaskEnvironmentID
+	}
 
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -1063,10 +1071,17 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		SessionID:                      launchInventorySessionID(reqWithWorktree),
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
 		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
+		ForceContextContinuation:       reqWithWorktree.ForceContextContinuation,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
+		OriginalWorkspacePath:          reqWithWorktree.OriginalWorkspacePath,
+		DeliveryStreamID:               reqWithWorktree.DeliveryStreamID,
+		DeliveryIncarnationID:          reqWithWorktree.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:      reqWithWorktree.DeliveryHarnessGeneration,
+		DurableJournalHostRoot:         m.dataDir,
+		DurableJournalOwnerID:          journalOwnerID,
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,
@@ -1524,6 +1539,13 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			execution.isResumedSession = true
 		}
 		execution.IsPassthrough = req.IsPassthrough
+		// The workspace-only execution was created before a prompt was admitted.
+		// Transfer this launch's prompt payload before StartAgentProcess reads it.
+		execution.setMetadataValue("task_description", req.TaskDescription)
+		execution.setMetadataValue("attachments", append([]MessageAttachment(nil), req.Attachments...))
+		execution.setMetadataValue("session_id", req.SessionID)
+		execution.setMetadataValue("prompt_turn_id", req.TurnID)
+		execution.setPromptTurnID(req.TurnID)
 		if !req.IsPassthrough {
 			executorType := req.ExecutorType
 			if executorType == "" {
@@ -2404,8 +2426,13 @@ func (m *Manager) createBootMessage(ctx context.Context, execution *AgentExecuti
 	return bootMsg, bootStopCh
 }
 
-// getTaskDescriptionFromMetadata extracts the task description string from execution metadata.
+// getTaskDescriptionFromMetadata returns the task description for a fresh
+// execution. A resumed execution restores its existing conversation and waits
+// for the caller's next prompt instead of replaying the original launch prompt.
 func getTaskDescriptionFromMetadata(execution *AgentExecution) string {
+	if execution.isResumedSession {
+		return ""
+	}
 	return execution.metadataString("task_description")
 }
 

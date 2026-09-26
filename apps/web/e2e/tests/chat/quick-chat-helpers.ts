@@ -98,16 +98,19 @@ export async function openQuickChatSetup(page: Page, navigateHome = true): Promi
 export async function selectAgentIfNeeded(dialog: Locator, page: Page) {
   const selector = dialog.getByTestId("agent-profile-selector");
   await expect(selector).toBeVisible({ timeout: 10_000 });
-  await expect(async () => {
-    const text = await selector.innerText();
-    if (!text.includes("Select agent")) return;
-
-    await selector.click();
+  const selectedProfile = await selector.innerText();
+  if (selectedProfile.includes("Select agent")) {
+    // Keep the picker open while its options render. Retrying the click can
+    // toggle the popover closed before a slow profile catalog becomes usable.
+    if ((await selector.getAttribute("aria-expanded")) !== "true") {
+      await selector.click();
+    }
+    await expect(selector).toHaveAttribute("aria-expanded", "true", { timeout: 10_000 });
     const option = page.getByRole("option").first();
-    await expect(option).toBeVisible({ timeout: 2_000 });
+    await expect(option).toBeVisible({ timeout: 10_000 });
     await option.click();
-    await expect(selector).not.toContainText("Select agent", { timeout: 2_000 });
-  }).toPass({ timeout: 10_000, intervals: [250, 500, 1_000] });
+    await expect(selector).not.toContainText("Select agent", { timeout: 10_000 });
+  }
 }
 
 export async function waitForQuickChatComposerReady(dialog: Locator): Promise<Locator> {
@@ -138,10 +141,15 @@ export async function waitForQuickChatDirectInput(dialog: Locator): Promise<void
   await expect(editor).toBeEditable({ timeout: 15_000 });
 }
 
-export async function startQuickChatFromSetup(dialog: Locator, page: Page) {
+export async function startQuickChatFromSetup(
+  dialog: Locator,
+  page: Page,
+  startResponse?: Promise<Response>,
+) {
   await selectAgentIfNeeded(dialog, page);
   await expect(dialog.getByTestId("quick-chat-start")).toBeEnabled({ timeout: 10_000 });
   await dialog.getByTestId("quick-chat-start").click();
+  if (startResponse) await startResponse;
 
   // The composer is intentionally editable during STARTING, so editability
   // alone is no longer a readiness signal. Wait for the submit gate to clear
@@ -150,9 +158,13 @@ export async function startQuickChatFromSetup(dialog: Locator, page: Page) {
   await waitForQuickChatComposerReady(dialog);
 }
 
-export async function openQuickChatWithAgent(page: Page, navigateHome = true): Promise<Locator> {
+export async function openQuickChatWithAgent(
+  page: Page,
+  navigateHome = true,
+  startResponse?: Promise<Response>,
+): Promise<Locator> {
   const dialog = await openQuickChatSetup(page, navigateHome);
-  await startQuickChatFromSetup(dialog, page);
+  await startQuickChatFromSetup(dialog, page, startResponse);
   // The composer becomes usable before the session model catalog is hydrated.
   // Wait for the model control as well so callers can immediately inspect or
   // change the session configuration without racing that second readiness gate.

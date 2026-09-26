@@ -136,11 +136,18 @@ func (r *resumeAttemptRegistry) begin(parent context.Context, taskID, sessionID 
 // session's cancellation guard so registration and invalidation are ordered
 // against prompt admission and lifecycle event handling.
 func (r *resumeAttemptRegistry) invalidate(sessionID string) bool {
+	return r.invalidateAttempt(sessionID) != nil
+}
+
+func (r *resumeAttemptRegistry) invalidateAttempt(sessionID string) *resumeAttempt {
+	if sessionID == "" {
+		return nil
+	}
 	r.mu.Lock()
 	attempt := r.attempts[sessionID]
 	if attempt == nil || attempt.ctx.Err() != nil || attempt.accepted {
 		r.mu.Unlock()
-		return false
+		return nil
 	}
 	attempt.cancel()
 	finishPending := attempt.awaitingInitialPrompt
@@ -151,7 +158,7 @@ func (r *resumeAttemptRegistry) invalidate(sessionID string) bool {
 		// ownership record now so a cancelled callback cannot leave it active.
 		attempt.finish(r)
 	}
-	return true
+	return attempt
 }
 
 func (r *resumeAttemptRegistry) cancelAll() {
@@ -753,11 +760,11 @@ func (s *Service) lockResumeAttemptAdmission(
 	return guard, nil
 }
 
-func (s *Service) invalidateResumeAttempt(sessionID string) {
+func (s *Service) invalidateResumeAttempt(sessionID string) *resumeAttempt {
 	if sessionID == "" {
-		return
+		return nil
 	}
-	s.resumeAttemptStore().invalidate(sessionID)
+	return s.resumeAttemptStore().invalidateAttempt(sessionID)
 }
 
 func (s *Service) cancelResumeAttempts() {
