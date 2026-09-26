@@ -57,15 +57,17 @@ export function ChangeRequestTopbarContent({
   colorClassName,
   statusIcon,
   dropdown,
+  leadingIcon,
 }: {
   label: string;
   colorClassName: string;
   statusIcon?: ReactNode;
   dropdown?: ReactNode;
+  leadingIcon?: ReactNode;
 }) {
   return (
     <>
-      <IconGitPullRequest className={cn("h-4 w-4", colorClassName)} />
+      {leadingIcon ?? <IconGitPullRequest className={cn("h-4 w-4", colorClassName)} />}
       <span className="text-xs font-medium">{label}</span>
       {dropdown ?? statusIcon}
     </>

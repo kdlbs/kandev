@@ -5,9 +5,11 @@ import { IconFlag } from "@tabler/icons-react";
 import type { StoreApi } from "zustand";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { pluginRegistry } from "@/lib/plugins/registry";
+import type { PluginTaskMenuContext, TaskMenuSubItemRegistration } from "@/lib/plugins/types";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import {
+  buildCardPluginEntries,
   buildKanbanCardMenuEntries,
   KanbanCardDropdownMenuItems,
   useKanbanCardMoveTargets,
@@ -22,6 +24,81 @@ const PluginBitbucketIcon = () => null;
 const WORKFLOW_ONE_NAME = "Workflow 1";
 
 // Regression: React synthetic events bubble through the fiber tree from a Radix portal; without stopPropagation the parent Card's onClick fires instead of the confirm dialog.
+/**
+ * A card builds its dropdown and context variants from one render with the
+ * same plugin inputs, so the plugin contributions must be built once: each
+ * plugin's `items()` is a callback into a foreign bundle, and evaluating it
+ * twice per render for identical children is the API's own documented
+ * anti-pattern ("memoize anything expensive").
+ */
+describe("buildCardPluginEntries", () => {
+  const PLUGIN_ID = "kandev-plugin-tags";
+  const CONTEXT: PluginTaskMenuContext = {
+    workspaceId: "ws-1",
+    taskId: "task-1",
+    taskTitle: "Fix the bug",
+    workflowStepId: "step-1",
+    presentation: "desktop",
+  };
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  function registerItemsAction(items: () => readonly TaskMenuSubItemRegistration[]) {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "add-tag",
+      label: "Add tag",
+      group: "primary",
+      items,
+      run: vi.fn(),
+    });
+  }
+
+  it("evaluates a plugin action's items() once when both variants share the result", () => {
+    const items = vi.fn(() => [{ id: "more", label: "More tags", run: vi.fn() }]);
+    registerItemsAction(items);
+
+    const pluginEntries = buildCardPluginEntries({ pluginMenuContext: CONTEXT });
+    const dropdown = buildKanbanCardMenuEntries({
+      workflows: [],
+      stepsByWorkflowId: {},
+      pluginMenuContext: CONTEXT,
+      pluginEntries,
+    });
+    const contextMenu = buildKanbanCardMenuEntries({
+      workflows: [],
+      stepsByWorkflowId: {},
+      pluginMenuContext: CONTEXT,
+      pluginEntries,
+    });
+
+    expect(items).toHaveBeenCalledTimes(1);
+    const fromDropdown = dropdown.find(
+      (entry) => entry.key === `plugin-primary-${PLUGIN_ID}:add-tag`,
+    );
+    const fromContext = contextMenu.find(
+      (entry) => entry.key === `plugin-primary-${PLUGIN_ID}:add-tag`,
+    );
+    expect(fromDropdown).toBeDefined();
+    expect(fromContext).toBe(fromDropdown);
+  });
+
+  it("still builds its own contributions when a caller passes none", () => {
+    const items = vi.fn(() => [{ id: "more", label: "More tags", run: vi.fn() }]);
+    registerItemsAction(items);
+
+    const entries = buildKanbanCardMenuEntries({
+      workflows: [],
+      stepsByWorkflowId: {},
+      pluginMenuContext: CONTEXT,
+    });
+
+    expect(items).toHaveBeenCalledTimes(1);
+    expect(entries.some((entry) => entry.key === `plugin-primary-${PLUGIN_ID}:add-tag`)).toBe(true);
+  });
+});
+
 describe("KanbanCardDropdownMenuItems — click propagation", () => {
   function renderWithParent(entries: KanbanCardMenuEntry[], parentOnClick: () => void) {
     return render(
@@ -205,7 +282,7 @@ describe("buildKanbanCardMenuEntries — !onEdit does not disable plugin edit ac
       (child) => child.kind === "item" && child.key === "edit-task",
     );
     const pluginAction = editMenu.children.find(
-      (child) => child.kind === "item" && child.key === `plugin-edit-${PLUGIN_ID}-enhance`,
+      (child) => child.kind === "item" && child.key === `plugin-edit-${PLUGIN_ID}:enhance`,
     );
 
     expect(editTask?.kind === "item" && editTask.disabled).toBe(true);
@@ -246,20 +323,20 @@ describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => 
         ],
         "wf-2": [{ id: "s3", title: "Step 3" }],
       },
-      onSendToWorkflow: vi.fn(),
+      onChangeWorkflow: vi.fn(),
       onLinkPullRequest: vi.fn(),
       onArchive: vi.fn(),
     });
 
     const keys = entryKeys(entries);
-    const sendToIndex = keys.indexOf("send-to-workflow");
-    const primaryIndex = keys.indexOf(`plugin-primary-${PLUGIN_ID}-quick-tag`);
+    const changeWorkflowIndex = keys.indexOf("change-workflow");
+    const primaryIndex = keys.indexOf(`plugin-primary-${PLUGIN_ID}:quick-tag`);
     const archiveIndex = keys.indexOf("archive");
 
-    expect(sendToIndex).toBeGreaterThanOrEqual(0);
+    expect(changeWorkflowIndex).toBeGreaterThanOrEqual(0);
     expect(primaryIndex).toBeGreaterThanOrEqual(0);
     expect(archiveIndex).toBeGreaterThanOrEqual(0);
-    expect(sendToIndex).toBeLessThan(primaryIndex);
+    expect(changeWorkflowIndex).toBeLessThan(primaryIndex);
     expect(primaryIndex).toBeLessThan(archiveIndex);
 
     const primaryEntry = entries[primaryIndex];
@@ -281,7 +358,7 @@ describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => 
 
     const entries = buildKanbanCardMenuEntries({ workflows: [], stepsByWorkflowId: {} });
 
-    expect(entryKeys(entries)).not.toContain(`plugin-primary-${PLUGIN_ID}-quick-tag`);
+    expect(entryKeys(entries)).not.toContain(`plugin-primary-${PLUGIN_ID}:quick-tag`);
   });
 
   it("leaves the 'edit' group submenu unaffected by 'primary' group registrations", () => {
@@ -589,7 +666,7 @@ describe("buildKanbanCardMenuEntries — move-only disabled state", () => {
       onEdit: vi.fn(),
       onSelectPriority: vi.fn(),
       onMoveToStep: vi.fn(),
-      onSendToWorkflow: vi.fn(),
+      onChangeWorkflow: vi.fn(),
       onLinkPullRequest: vi.fn(),
       onArchive: vi.fn(),
       onDelete: vi.fn(),
@@ -605,7 +682,7 @@ describe("buildKanbanCardMenuEntries — move-only disabled state", () => {
     expect(disabled("edit")).toBe(false);
     expect(disabled("priority")).toBe(false);
     expect(disabled("move-to")).toBe(true);
-    expect(disabled("send-to-workflow")).toBe(true);
+    expect(disabled("change-workflow")).toBe(true);
     expect(disabled("link")).toBe(false);
     expect(disabled("archive")).toBe(false);
     expect(disabled("delete")).toBe(false);

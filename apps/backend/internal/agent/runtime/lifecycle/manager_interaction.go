@@ -99,6 +99,19 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 	return m.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, nil)
 }
 
+// RegisterInitialPromptDispatchCallbacks installs one-shot callbacks for the
+// initial prompt sent during StartAgentProcess. Model-switch startup launches
+// that prompt asynchronously, so callers that own startup cancellation must
+// wait for either provider acceptance or a pre-acceptance delivery failure.
+func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	execution.setInitialPromptDispatchCallbacks(onDispatched, onFailure)
+	return nil
+}
+
 // PromptAgentWithDispatchCallback exposes agentctl acceptance to callers that
 // must keep admission serialized until the queued prompt is actually dispatched.
 func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*PromptResult, error) {
@@ -1138,7 +1151,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	}
 	backendForce := force
 	stopCtx := ctx
-	if shouldPreserveFailedKubernetesResume(execution, reason) {
+	if shouldPreserveKubernetesRuntime(execution, reason) {
 		backendForce = false
 		var cancelStop context.CancelFunc
 		stopCtx, cancelStop = kubernetesDurableContext(ctx)
@@ -1213,6 +1226,11 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		exec.FinishedAt = &now
 	})
 
+	if execution.Owner.Kind == ExecutionOwnerRun {
+		if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
+			return err
+		}
+	}
 	// End session trace span
 	execution.EndSessionSpan()
 
@@ -1227,11 +1245,6 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
 
 	return nil
-}
-
-func shouldPreserveFailedKubernetesResume(execution *AgentExecution, reason string) bool {
-	return execution != nil && execution.RuntimeName == executor.NameKubernetes &&
-		execution.isResumedSession && reason == StopReasonAgentBootstrapFailed
 }
 
 // detachAgentExecution implements the AC-EXECUTORS-SURVIVAL survivable-detach
@@ -1376,6 +1389,11 @@ func (m *Manager) restartAgentProcess(
 	if err != nil {
 		return err
 	}
+	if runtime := preparation.agentConfig.Runtime(); runtime != nil {
+		if err := m.prepareCursorMCPAuth(execution, preparation.profileInfo, execution.ExecutorType, runtime.ProjectMCPStrategy); err != nil {
+			return err
+		}
+	}
 
 	// 1. Close WebSocket streams (updates + workspace). Use per-stream Close
 	// methods rather than client.Close — the latter is a terminal drain
@@ -1477,6 +1495,7 @@ func (m *Manager) stopAgentProcessForRestart(ctx context.Context, execution *Age
 
 type agentRestartPreparation struct {
 	agentConfig   agents.Agent
+	profileInfo   *AgentProfileInfo
 	commands      agentCommands
 	runtimeConfig models.SessionRuntimeConfig
 }
@@ -1492,11 +1511,11 @@ func (m *Manager) prepareAgentRestart(
 		zap.String("task_id", execution.TaskID),
 		zap.String("session_id", execution.SessionID))
 
-	agentConfig, err := m.getAgentConfigForExecution(execution)
+	agentConfig, profileInfo, err := m.getAgentConfigAndProfileForExecution(ctx, execution)
 	if err != nil {
 		return agentRestartPreparation{}, fmt.Errorf("failed to get agent config for restart: %w", err)
 	}
-	commands, err := m.buildFreshAgentCommand(ctx, execution, agentConfig)
+	commands, err := m.buildFreshAgentCommandWithProfile(ctx, execution, agentConfig, profileInfo)
 	if err != nil {
 		return agentRestartPreparation{}, fmt.Errorf("failed to rebuild agent command for restart: %w", err)
 	}
@@ -1508,6 +1527,7 @@ func (m *Manager) prepareAgentRestart(
 	}
 	return agentRestartPreparation{
 		agentConfig:   agentConfig,
+		profileInfo:   profileInfo,
 		commands:      commands,
 		runtimeConfig: runtimeConfig,
 	}, nil
@@ -1878,6 +1898,10 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	}
 	if client.HasAgentStream() {
 		releaseClient()
+		if execution.Status == v1.AgentStatusFailed &&
+			execution.isSessionInitialized() && execution.ACPSessionID != "" {
+			return m.restoreRecoveredFailedExecution(ctx, execution)
+		}
 		return nil
 	}
 	releaseClient()
@@ -2625,7 +2649,7 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 	runtimeInstance := &ExecutorInstance{
 		InstanceID:           execution.ID,
 		TaskID:               execution.TaskID,
-		SessionID:            execution.SessionID,
+		SessionID:            executionInventorySessionID(execution),
 		ContainerID:          execution.ContainerID,
 		StandaloneInstanceID: execution.standaloneInstanceID,
 		StandalonePort:       execution.standalonePort,
@@ -2697,7 +2721,15 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 		}
 		profileInfo = pi
 	}
+	return m.buildFreshAgentCommandWithProfile(ctx, execution, agentConfig, profileInfo)
+}
 
+func (m *Manager) buildFreshAgentCommandWithProfile(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	profileInfo *AgentProfileInfo,
+) (agentCommands, error) {
 	model := ""
 	autoApprove := false
 	permissionValues := make(map[string]bool)

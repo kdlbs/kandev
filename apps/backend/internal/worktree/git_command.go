@@ -15,5 +15,7 @@ func newGitCommand(ctx context.Context, args ...string) *exec.Cmd {
 	commandArgs := make([]string, 0, len(args))
 	commandArgs = append(commandArgs, "-c", "core.longpaths=true")
 	commandArgs = append(commandArgs, args...)
-	return subproc.NewGitCommand(ctx, commandArgs...)
+	cmd := subproc.NewGitCommand(ctx, commandArgs...)
+	configureCheckoutCommand(ctx, cmd)
+	return cmd
 }

@@ -401,7 +401,10 @@ function renderSpecialRecovery({
       />
     );
   }
-  if (metadata?.failure_kind === "managed_runtime_npm_resolution") {
+  if (
+    metadata?.failure_kind === "managed_runtime_npm_resolution" ||
+    metadata?.failure_kind === "managed_runtime_npm_policy"
+  ) {
     return (
       <ManagedRuntimeNpmRecovery
         metadata={metadata}
@@ -423,6 +426,7 @@ function ManagedRuntimeNpmRecovery({
   onRecoveryRequested: () => void;
 }) {
   const { t } = useTranslation();
+  const isPolicyFailure = metadata.failure_kind === "managed_runtime_npm_policy";
   const actions = metadata.actions?.slice(0, 1) ?? [];
   return (
     <section
@@ -437,10 +441,12 @@ function ManagedRuntimeNpmRecovery({
         />
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-medium text-foreground">
-            {t("chat:managedRuntimeNpmTitle")}
+            {t(
+              isPolicyFailure ? "chat:managedRuntimeNpmPolicyTitle" : "chat:managedRuntimeNpmTitle",
+            )}
           </h3>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            {t("chat:managedRuntimeNpmBody")}
+            {t(isPolicyFailure ? "chat:managedRuntimeNpmPolicyBody" : "chat:managedRuntimeNpmBody")}
           </p>
           <ActionMessageDetails metadata={metadata} />
           {actions.length > 0 && (

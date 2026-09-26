@@ -28,6 +28,7 @@ import {
   envVarsToRows,
 } from "@/components/settings/profile-edit/env-vars-card";
 import { ProfileScriptCards } from "@/components/settings/profile-edit/profile-script-cards";
+import { RemoteDockerConnectionSection } from "@/components/settings/remote-docker-connection-section";
 import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
 import { SSHTaskDirReclamationCard } from "@/components/settings/ssh-task-dir-reclamation-card";
 import {
@@ -71,6 +72,7 @@ import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { buildSaveConfig } from "@/components/settings/profile-edit/serialize-executor-config";
 import { useUserNamespacesFormState } from "@/components/settings/profile-edit/use-user-namespaces-form-state";
+import { useDockerNetworksFormState } from "@/components/settings/profile-edit/use-docker-networks-form-state";
 import { useProfileRuntimeFormState } from "@/components/settings/profile-edit/use-profile-runtime-form-state";
 import { KubernetesProfileSections } from "@/components/settings/kubernetes-profile-sections";
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
@@ -293,6 +295,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
   const runtime = useProfileRuntimeFormState(executor, profile);
   const userNamespaces = useUserNamespacesFormState(profile.config);
+  const dockerNetworks = useDockerNetworksFormState(profile.config);
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar, resetEnvVars } = useEnvVarRows(
     profile.env_vars,
   );
@@ -330,7 +333,8 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     setSpritesSecretId(deriveSpritesSecretId(profile.env_vars));
     remoteAuth.reset();
     gitIdentity.reset();
-  }, [gitIdentity, profile, remoteAuth, resetEnvVars, runtime, userNamespaces]);
+    dockerNetworks.resetDockerNetworks();
+  }, [dockerNetworks, gitIdentity, profile, remoteAuth, resetEnvVars, runtime, userNamespaces]);
 
   return {
     ...runtime,
@@ -345,6 +349,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     allowUserNamespaces: userNamespaces.allowUserNamespaces,
     setAllowUserNamespaces: userNamespaces.setAllowUserNamespaces,
     resetUserNamespaces: userNamespaces.resetUserNamespaces,
+    ...dockerNetworks,
     isLocalDocker: executor.type === "local_docker",
     envVarRows,
     addEnvVar,
@@ -388,6 +393,7 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
   const canManageKubernetes = useKubernetesAdminAccess();
   return (
     <>
+      {executor.type === "remote_docker" && <RemoteDockerConnectionSection executor={executor} />}
       {executor.type === "ssh" && (
         <SSHAgentReadinessCard
           executorId={executor.id}
@@ -419,9 +425,11 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           onDockerfileChange={form.setDockerfile}
           imageTag={form.imageTag}
           onImageTagChange={form.setImageTag}
+          remoteExecutorId={executor.type === "remote_docker" ? executor.id : undefined}
           allowsUserNamespaces={form.isLocalDocker}
           allowUserNamespaces={form.allowUserNamespaces}
           onAllowUserNamespacesChange={form.setAllowUserNamespaces}
+          networks={form}
         />
       )}
       {form.isKubernetes && (

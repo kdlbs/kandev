@@ -17,6 +17,7 @@ import (
 	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/shared"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -581,7 +582,7 @@ func TestOfficeRouteGroupMountsScopeGuard(t *testing.T) {
 			c.Request.Context(), authn.Identity{UserID: officeScopeUserB, Role: authn.RoleMember}))
 		c.Next()
 	})
-	mountOfficeRoutes(engine, officeTestServices(), h.authSvc, h.taskSvc, h.officeRepo, nil, testLogger(t))
+	mountOfficeRoutes(engine, officeTestServices(), h.authSvc, h.taskSvc, h.officeRepo, nil, officeruntime.HandoffDependencies{}, testLogger(t))
 
 	// The scope guard: user B naming user A's agent must be refused before
 	// the (zero-value, would-panic) handler runs.

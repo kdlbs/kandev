@@ -50,6 +50,7 @@ type Repository interface {
 
 	CreateRoutineTrigger(ctx context.Context, t *RoutineTrigger) error
 	ListTriggersByRoutineID(ctx context.Context, routineID string) ([]*RoutineTrigger, error)
+	ListTriggersByRoutineIDs(ctx context.Context, routineIDs []string) (map[string][]*RoutineTrigger, error)
 	GetTriggerByPublicID(ctx context.Context, publicID string) (*RoutineTrigger, error)
 	GetDueTriggers(ctx context.Context, now time.Time) ([]*RoutineTrigger, error)
 	ClaimTrigger(ctx context.Context, triggerID string, oldNextRunAt time.Time) (bool, error)
@@ -84,6 +85,40 @@ type Repository interface {
 	// pause as a skipped run, keyed on (routine_id, pause_id) so a second
 	// blocked fire under the same pause writes no duplicate row.
 	CreatePauseSkippedRoutineRun(ctx context.Context, routineID, triggerID, source, pauseID string) (bool, error)
+
+	// InstallCoordinatorRoutine looks up every existing routine at the
+	// given (workspace, assignee, canonical name) identity and hands them
+	// to decide, all inside one transaction serialized — across every
+	// process sharing the database, not merely other goroutines in this
+	// one — against every other install for the same identity, bounded to
+	// a hard, non-configurable acquisition timeout
+	// (AC-OFFICE-COORDINATOR-INSTALL-001.8/.9). matches is supplied in
+	// office_routines.created_at, id order. decide may use the given
+	// tx-scoped writer to create the routine; any error it returns aborts
+	// the transaction unchanged. Deliberately does not also create the
+	// canonical trigger — see EnsureCoordinatorTrigger. Returns
+	// models.ErrCoordinatorInstallContention when the acquisition bound is
+	// reached, or ctx.Err() when the caller's own context ended first
+	// (AC-OFFICE-COORDINATOR-INSTALL-001.13).
+	InstallCoordinatorRoutine(
+		ctx context.Context,
+		workspaceID, agentID, canonicalName string,
+		decide func(ctx context.Context, matches []*Routine, tx models.CoordinatorInstallTx) error,
+	) error
+
+	// EnsureCoordinatorTrigger reads routine's existing triggers and hands
+	// them to decide, inside its own transaction serialized against every
+	// other call for the same routine id, separately from
+	// InstallCoordinatorRoutine's transaction so a trigger-creation failure
+	// can never roll back an already-committed routine
+	// (AC-OFFICE-COORDINATOR-INSTALL-001.4/.8/.9/.12). decide may use the
+	// given tx-scoped writer to create the canonical trigger; any error it
+	// returns aborts this transaction only.
+	EnsureCoordinatorTrigger(
+		ctx context.Context,
+		routineID string,
+		decide func(ctx context.Context, triggers []*RoutineTrigger, tx models.CoordinatorInstallTx) error,
+	) error
 }
 
 // WakeupEnqueuer is the slim surface routines need to enqueue + dispatch
@@ -129,10 +164,15 @@ type RoutineWorkflowEnsurer interface {
 // (the routine workflow). Mirrors the office adapter's
 // CreateOfficeTaskInWorkflow signature so the binary's existing adapter
 // satisfies it for free.
+//
+// routineID is passed through so the created task carries the
+// AC-OFFICE-RUN-CAUSATION-001.24 routine-fire carrier: no creating run,
+// so the lineage roots, but the routine attribution still applies to
+// whatever run a later task-assigned wake queues off this task.
 type RoutineTaskCreator interface {
 	CreateOfficeTaskInWorkflow(
 		ctx context.Context,
-		workspaceID, projectID, assigneeAgentID, workflowID, title, description string,
+		workspaceID, projectID, assigneeAgentID, workflowID, title, description, routineID string,
 	) (string, error)
 }
 
@@ -198,18 +238,148 @@ const CoordinatorRoutineCron = "*/5 * * * *"
 // with a max of 25, status=active, with a single cron trigger firing
 // every five minutes (UTC).
 //
-// Idempotent: if the assignee agent already has a routine with the
-// canonical name + cron expression the existing routine is returned
-// instead of inserting a duplicate.
+// Identity is the (workspace, assignee, canonical name) triple only — never
+// a trigger's enabled value, next_run_at, cron expression, or presence
+// (AC-OFFICE-COORDINATOR-INSTALL-001.1), so a routine whose trigger
+// creation previously failed, or whose trigger was later edited, still
+// matches itself instead of being duplicated.
+//
+// Runs in two separately-locked, separately-committed phases: ensuring the
+// routine exists (AC-OFFICE-COORDINATOR-INSTALL-001.2/.3/.12's routine
+// half) and, only once that has committed, ensuring its canonical trigger
+// exists (AC-OFFICE-COORDINATOR-INSTALL-001.4/.5/.12's trigger half). Kept
+// separate so a trigger-creation failure can never roll back an
+// already-committed routine.
 func (s *RoutineService) CreateDefaultCoordinatorRoutine(
 	ctx context.Context, workspaceID, agentID string,
 ) (*Routine, error) {
 	if workspaceID == "" || agentID == "" {
+		coordinatorInstallObserved(coordinatorInstallConditionEmptyIdentity, workspaceID, agentID)
+		s.logger.Warn("coordinator install rejected: empty identity",
+			zap.String("workspace_id", workspaceID), zap.String("agent_id", agentID))
 		return nil, fmt.Errorf("create default coordinator routine: workspace_id and agent_id are required")
 	}
-	if existing, ok := s.findCoordinatorRoutine(ctx, workspaceID, agentID); ok {
-		return existing, nil
+
+	now := time.Now().UTC()
+
+	routine, decision, err := s.ensureCoordinatorRoutine(ctx, workspaceID, agentID)
+	if err != nil {
+		return routine, s.reportCoordinatorLockFailure(workspaceID, agentID, decision, err,
+			coordinatorInstallConditionLookupFailed, "coordinator install: identity lookup failed")
 	}
+	if decision.created {
+		coordinatorInstallObserved(coordinatorInstallConditionRoutineCreated, workspaceID, agentID)
+		s.logger.Info("coordinator-heartbeat routine created",
+			zap.String("workspace_id", workspaceID),
+			zap.String("agent_id", agentID),
+			zap.String("routine_id", routine.ID))
+	}
+
+	var triggerDecision coordinatorInstallDecision
+	triggerErr := s.repo.EnsureCoordinatorTrigger(ctx, routine.ID,
+		func(ctx context.Context, triggers []*RoutineTrigger, tx models.CoordinatorInstallTx) error {
+			triggerDecision.ran = true
+			created, derr := s.decideCoordinatorTrigger(ctx, workspaceID, agentID, routine, triggers, tx, now)
+			triggerDecision.created = created
+			triggerDecision.errored = derr != nil
+			return derr
+		})
+	if triggerErr != nil {
+		return routine, s.reportCoordinatorLockFailure(workspaceID, agentID, triggerDecision, triggerErr,
+			coordinatorInstallConditionTriggerReadFailed, "coordinator install: read existing routine triggers failed")
+	}
+	if triggerDecision.created {
+		coordinatorInstallObserved(coordinatorInstallConditionTriggerCompleted, workspaceID, agentID)
+		s.logger.Info("coordinator install: canonical trigger created",
+			zap.String("workspace_id", workspaceID),
+			zap.String("agent_id", agentID),
+			zap.String("routine_id", routine.ID))
+	}
+	return routine, nil
+}
+
+// coordinatorInstallDecision captures what decide did inside one serialized
+// section, independent of whether that section's transaction goes on to
+// commit. Reused for both the routine phase (created means a new routine
+// row) and the trigger phase (created means a new canonical trigger row),
+// which share the same shape.
+type coordinatorInstallDecision struct {
+	ran     bool
+	errored bool
+	created bool
+}
+
+// ensureCoordinatorRoutine implements
+// AC-OFFICE-COORDINATOR-INSTALL-001.2/.3/.12's routine half inside
+// InstallCoordinatorRoutine's cross-process lock: no match creates a
+// routine; one or more matches selects the earliest (already guaranteed by
+// the repository's created_at, id ordering), reporting the duplicate
+// before continuing exactly as a single match would. decision.ran is false
+// only when InstallCoordinatorRoutine's own identity lookup failed before
+// this ever ran; decision.created is only ever true once InstallCoordinatorRoutine
+// has returned nil, i.e. once the routine it names has actually committed.
+func (s *RoutineService) ensureCoordinatorRoutine(
+	ctx context.Context, workspaceID, agentID string,
+) (*Routine, coordinatorInstallDecision, error) {
+	var result *Routine
+	var decision coordinatorInstallDecision
+	err := s.repo.InstallCoordinatorRoutine(ctx, workspaceID, agentID, CoordinatorRoutineName,
+		func(ctx context.Context, matches []*Routine, tx models.CoordinatorInstallTx) error {
+			decision.ran = true
+			routine, created, err := s.selectOrCreateCoordinatorRoutine(ctx, workspaceID, agentID, matches, tx)
+			result = routine
+			decision.created = created
+			decision.errored = err != nil
+			return err
+		})
+	return result, decision, err
+}
+
+// selectOrCreateCoordinatorRoutine picks the earliest matched routine, or
+// creates one when none matched (AC-OFFICE-COORDINATOR-INSTALL-001.2/.3/.12).
+// The returned bool reports whether a new routine was created; the caller
+// reports that fact only once the enclosing transaction has committed.
+func (s *RoutineService) selectOrCreateCoordinatorRoutine(
+	ctx context.Context, workspaceID, agentID string, matches []*Routine, tx models.CoordinatorInstallTx,
+) (*Routine, bool, error) {
+	if len(matches) == 0 {
+		routine, err := s.createCoordinatorRoutine(ctx, workspaceID, agentID, tx)
+		return routine, err == nil, err
+	}
+	selected := matches[0]
+	if len(matches) > 1 {
+		coordinatorInstallObserved(coordinatorInstallConditionDuplicateMatches, workspaceID, agentID)
+		s.logger.Warn("coordinator install: more than one routine matched identity",
+			zap.String("workspace_id", workspaceID),
+			zap.String("agent_id", agentID),
+			zap.String("routine_id", selected.ID),
+			zap.Int("match_count", len(matches)))
+	}
+	return selected, false, nil
+}
+
+// hasAnyCronTrigger reports whether the routine owns a cron trigger of any
+// kind — enabled or not, canonical expression or not. Identity depends on
+// this fact alone, never on the trigger's own mutable state
+// (AC-OFFICE-COORDINATOR-INSTALL-001.1/.5).
+func hasAnyCronTrigger(triggers []*RoutineTrigger) bool {
+	for _, t := range triggers {
+		if t.Kind == triggerKindCron {
+			return true
+		}
+	}
+	return false
+}
+
+// createCoordinatorRoutine implements
+// AC-OFFICE-COORDINATOR-INSTALL-001.12's routine half: no routine matched
+// the identity, so create one. A routine-insert failure creates nothing;
+// its canonical trigger is created separately by decideCoordinatorTrigger
+// once this commits. The success report belongs to the caller, once the
+// enclosing transaction has actually committed.
+func (s *RoutineService) createCoordinatorRoutine(
+	ctx context.Context, workspaceID, agentID string, tx models.CoordinatorInstallTx,
+) (*Routine, error) {
 	routine := &Routine{
 		ID:                     uuid.New().String(),
 		WorkspaceID:            workspaceID,
@@ -223,74 +393,125 @@ func (s *RoutineService) CreateDefaultCoordinatorRoutine(
 		CatchUpMax:             25,
 		Variables:              "{}",
 	}
-	if err := s.repo.CreateRoutine(ctx, routine); err != nil {
+	if err := tx.CreateRoutine(ctx, routine); err != nil {
+		coordinatorInstallObserved(coordinatorInstallConditionRoutineCreateFailed, workspaceID, agentID)
+		s.logger.Warn("coordinator install: create routine failed",
+			zap.String("workspace_id", workspaceID), zap.String("agent_id", agentID), zap.Error(err))
 		return nil, fmt.Errorf("create coordinator routine: %w", err)
+	}
+	return routine, nil
+}
+
+// decideCoordinatorTrigger implements
+// AC-OFFICE-COORDINATOR-INSTALL-001.4/.5/.12's trigger half inside
+// EnsureCoordinatorTrigger's cross-process lock: a routine with any cron
+// trigger (canonical or not, enabled or disabled) is left untouched and its
+// schedule state reported; a routine with no cron trigger at all — whether
+// freshly created or a previous install's half-finished routine — gets the
+// canonical trigger created. The returned bool reports whether a trigger was
+// newly created; the caller reports that fact only once the enclosing
+// transaction has committed.
+func (s *RoutineService) decideCoordinatorTrigger(
+	ctx context.Context, workspaceID, agentID string, routine *Routine,
+	triggers []*RoutineTrigger, tx models.CoordinatorInstallTx, now time.Time,
+) (bool, error) {
+	if hasAnyCronTrigger(triggers) {
+		state, _ := ClassifyRoutine(triggers, now)
+		coordinatorInstallObserved(coordinatorInstallConditionScheduleState, workspaceID, agentID)
+		s.logger.Info("coordinator install: routine already scheduled",
+			zap.String("workspace_id", workspaceID),
+			zap.String("agent_id", agentID),
+			zap.String("routine_id", routine.ID),
+			zap.String("schedule_state", string(state)))
+		return false, nil
+	}
+	if err := s.createCanonicalTrigger(ctx, workspaceID, agentID, routine, tx, now); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// createCanonicalTrigger inserts the canonical cron trigger for routine:
+// enabled, the canonical expression and timezone, and a next_run_at equal
+// to the first canonical occurrence strictly after now — the single instant
+// CreateDefaultCoordinatorRoutine captured once at the start of the install
+// (AC-OFFICE-COORDINATOR-INSTALL-001.4). Shared by the .4 (repair) and .12
+// (fresh install) branches, which both require the identical trigger shape.
+func (s *RoutineService) createCanonicalTrigger(
+	ctx context.Context, workspaceID, agentID string, routine *Routine, tx models.CoordinatorInstallTx, now time.Time,
+) error {
+	next, err := shared.NextCronTime(CoordinatorRoutineCron, "UTC", now)
+	if err != nil {
+		coordinatorInstallObserved(coordinatorInstallConditionNextOccurrenceFailed, workspaceID, agentID)
+		s.logger.Warn("coordinator install: compute canonical trigger occurrence failed",
+			zap.String("workspace_id", workspaceID),
+			zap.String("agent_id", agentID),
+			zap.String("routine_id", routine.ID),
+			zap.Error(err))
+		return fmt.Errorf("compute canonical trigger next occurrence: %w", err)
 	}
 	trigger := &RoutineTrigger{
 		ID:             uuid.New().String(),
 		RoutineID:      routine.ID,
-		Kind:           "cron",
+		Kind:           triggerKindCron,
 		CronExpression: CoordinatorRoutineCron,
 		Timezone:       "UTC",
 		Enabled:        true,
+		NextRunAt:      &next,
 	}
-	if err := s.CreateRoutineTrigger(ctx, trigger); err != nil {
-		// The routine row is in place — leave it; the user can wire a
-		// trigger from the UI. Returning the routine + the error lets
-		// callers log a warn without losing the install.
-		return routine, fmt.Errorf("create coordinator trigger: %w", err)
+	if err := tx.CreateRoutineTrigger(ctx, trigger); err != nil {
+		coordinatorInstallObserved(coordinatorInstallConditionTriggerCreateFailed, workspaceID, agentID)
+		s.logger.Warn("coordinator install: create canonical trigger failed",
+			zap.String("workspace_id", workspaceID),
+			zap.String("agent_id", agentID),
+			zap.String("routine_id", routine.ID),
+			zap.Error(err))
+		return fmt.Errorf("create coordinator trigger: %w", err)
 	}
-	s.logger.Info("coordinator-heartbeat routine installed",
-		zap.String("workspace_id", workspaceID),
-		zap.String("agent_id", agentID),
-		zap.String("routine_id", routine.ID),
-		zap.String("cron", CoordinatorRoutineCron))
-	return routine, nil
+	return nil
 }
 
-// findCoordinatorRoutine returns the existing coordinator-heartbeat
-// routine for the (workspace, agent) pair when one already exists with
-// the canonical name and a cron trigger matching CoordinatorRoutineCron.
-// The boolean is the "found" flag — errors fall through as not-found
-// so the caller proceeds to create a fresh row.
-func (s *RoutineService) findCoordinatorRoutine(
-	ctx context.Context, workspaceID, agentID string,
-) (*Routine, bool) {
-	routines, err := s.repo.ListRoutines(ctx, workspaceID)
-	if err != nil {
-		return nil, false
+// reportCoordinatorLockFailure classifies the error one of the two
+// cross-process locks (InstallCoordinatorRoutine or EnsureCoordinatorTrigger)
+// returned and reports whichever condition decide had no chance to report
+// itself: lock contention (AC-OFFICE-COORDINATOR-INSTALL-001.13), the
+// caller's own context ending while waiting (also .13, distinguishable
+// from contention), the read that precedes decide failing before decide
+// ever ran (AC-OFFICE-COORDINATOR-INSTALL-001.7, via
+// fallbackCondition/fallbackMsg), or the serialized transaction failing to
+// commit after decide itself succeeded. decision.errored is checked first
+// and gates every other case: when decide's own failure path already
+// reported its specific condition at its own failure site, nothing here
+// reports again, even though classifyCoordinatorInstallWaitErr's
+// busy-text/deadline heuristic can independently match decide's own error
+// text and would otherwise also match the contention case below.
+func (s *RoutineService) reportCoordinatorLockFailure(
+	workspaceID, agentID string, decision coordinatorInstallDecision, err error, fallbackCondition, fallbackMsg string,
+) error {
+	switch {
+	case decision.errored:
+		// decide already reported at its own failure site; nothing to add.
+	case errors.Is(err, models.ErrCoordinatorInstallContention):
+		coordinatorInstallObserved(coordinatorInstallConditionContention, workspaceID, agentID)
+		s.logger.Warn("coordinator install: lock contention",
+			zap.String("workspace_id", workspaceID), zap.String("agent_id", agentID))
+	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
+		coordinatorInstallObserved(coordinatorInstallConditionCancelled, workspaceID, agentID)
+		s.logger.Warn("coordinator install: context cancelled while waiting",
+			zap.String("workspace_id", workspaceID), zap.String("agent_id", agentID))
+	case !decision.ran:
+		coordinatorInstallObserved(fallbackCondition, workspaceID, agentID)
+		s.logger.Warn(fallbackMsg,
+			zap.String("workspace_id", workspaceID), zap.String("agent_id", agentID), zap.Error(err))
+	default:
+		// decide ran and returned nil, so the commit that failed is the
+		// only thing that went wrong (AC-OFFICE-COORDINATOR-INSTALL-001.12's
+		// "insert fails" branch: the work never became durable).
+		coordinatorInstallObserved(coordinatorInstallConditionCommitFailed, workspaceID, agentID)
+		s.logger.Warn("coordinator install: commit failed after decide succeeded",
+			zap.String("workspace_id", workspaceID), zap.String("agent_id", agentID), zap.Error(err))
 	}
-	for _, r := range routines {
-		if r.AssigneeAgentProfileID != agentID {
-			continue
-		}
-		if r.Name != CoordinatorRoutineName {
-			continue
-		}
-		if s.hasCronTrigger(ctx, r.ID, CoordinatorRoutineCron) {
-			return r, true
-		}
-	}
-	return nil, false
-}
-
-// hasCronTrigger returns true when the routine owns a cron trigger
-// with the given expression. Triggers are listed via the routines repo;
-// errors degrade to false so the caller treats the routine as missing
-// its expected trigger and fixes it up via a fresh install.
-func (s *RoutineService) hasCronTrigger(
-	ctx context.Context, routineID, cronExpr string,
-) bool {
-	triggers, err := s.repo.ListTriggersByRoutineID(ctx, routineID)
-	if err != nil {
-		return false
-	}
-	for _, t := range triggers {
-		if t.Kind == "cron" && t.CronExpression == cronExpr {
-			return true
-		}
-	}
-	return false
+	return fmt.Errorf("create default coordinator routine: %w", err)
 }
 
 // -- Routine CRUD --
@@ -358,6 +579,29 @@ func (s *RoutineService) ListRoutinesFromConfig(ctx context.Context, workspaceID
 	return s.repo.ListRoutines(ctx, workspaceID)
 }
 
+// AttachScheduleState pairs each routine with Task 01's schedule-state
+// classification, via one batch trigger read for the whole call so the
+// query count does not grow with the number of routines
+// (AC-OFFICE-ROUTINE-ARMING-002.7). A routine whose own trigger read fails
+// still carries its intent alongside schedule state ScheduleStateUnknown
+// (AC-OFFICE-ROUTINE-ARMING-002.12).
+func (s *RoutineService) AttachScheduleState(ctx context.Context, list []*Routine) ([]*RoutineWithSchedule, error) {
+	ids := make([]string, len(list))
+	for i, r := range list {
+		ids[i] = r.ID
+	}
+	classifications, err := ClassifyRoutines(ctx, s.repo, ids, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*RoutineWithSchedule, len(list))
+	for i, r := range list {
+		c := classifications[r.ID]
+		out[i] = &RoutineWithSchedule{Routine: r, ScheduleState: c.State, UnarmedCronTriggers: c.Unarmed}
+	}
+	return out, nil
+}
+
 // -- Trigger management --
 
 // CreateRoutineTrigger creates a trigger and computes next_run_at for cron.
@@ -417,8 +661,7 @@ func (s *RoutineService) ListAllRoutineRuns(ctx context.Context, wsID string, li
 // pair, not in the time argument: re-arming to the original due time
 // instead would make the trigger due again on the very next 30-second
 // scheduler tick, retrying (and failing) forever with no backoff. 24 hours
-// caps the trigger at one dispatch a day until it is deleted and
-// recreated, matching shared.findNextMatch's own give-up interval.
+// caps the trigger at one dispatch a day until it is deleted and recreated.
 const catchUpFallbackInterval = 24 * time.Hour
 
 // catchUpReclaimAfter is how stale a claimed-but-never-armed trigger's
@@ -959,7 +1202,7 @@ func (s *RoutineService) materialiseHeavyRoutineRun(
 	}
 	taskID, err := s.taskCreator.CreateOfficeTaskInWorkflow(
 		ctx, routine.WorkspaceID, "", routine.AssigneeAgentProfileID,
-		workflowID, title, description,
+		workflowID, title, description, routine.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("create routine task: %w", err)
@@ -1128,16 +1371,26 @@ func marshalRoutinePayload(routineID string, vars map[string]string, gap *gapSum
 // (office-routine-runs R1), so the gate cannot rely on that event alone
 // ever clearing it. Reading the linked task's real state here means a
 // heavy run's gate self-heals at the next fire even when that event
-// never arrives. Returns active unchanged when it is still genuinely
-// active, still lightweight (no linked task), or its state can't be
-// determined. A lookup or close-out failure fails closed, leaving the task
-// active until a later fire can retry reconciliation. Returns nil once the
-// linked task is confirmed terminal, archived, or missing and the run closes.
+// never arrives. An empty LinkedTaskID on a task_created row is never
+// produced by current code (materialiseHeavyRoutineRun always sets both
+// together), so such a row can only be a stale write from before that
+// invariant held. Its fingerprint would otherwise gate every future fire
+// forever, so it is closed the same way an absent linked task is.
+// Returns active unchanged when it is still genuinely active or its
+// state can't be determined. A lookup or close-out failure fails closed,
+// leaving the task active until a later fire can retry reconciliation.
+// Returns nil once the run closes: the linked task is confirmed
+// terminal, archived, or missing, or the run never had one.
 func (s *RoutineService) selfHealIfTaskTerminal(
 	ctx context.Context, routine *Routine, active *RoutineRun,
 ) *RoutineRun {
 	if active.LinkedTaskID == "" {
-		return active
+		if _, err := s.closeOutRun(ctx, active, "missing"); err != nil {
+			s.logger.Warn("close out legacy unlinked active run",
+				zap.String("routine", routine.Name), zap.String("run_id", active.ID), zap.Error(err))
+			return active
+		}
+		return nil
 	}
 	terminalStatus, err := s.repo.GetTaskTerminalStatus(ctx, active.LinkedTaskID)
 	if err != nil {

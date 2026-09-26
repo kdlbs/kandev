@@ -62,7 +62,8 @@ const WORK_ORDER_REQUIRED_FIELDS = [
   'system_design',
 ];
 const MAX_DOCUMENT_BYTES = 256 * 1024;
-const MAX_DOCUMENTS = 100;
+const MAX_DOCUMENTS = 200;
+const MAX_CHANGED_WORK_ORDERS = 100;
 const MAX_TOTAL_DOCUMENT_BYTES = 4 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_CHANGED_FILES = 3000;
@@ -232,6 +233,9 @@ function pathExemption(pathname) {
   if (pathname === 'docs' || pathname.startsWith('docs/')) {
     return 'documentation tree';
   }
+  if (pathname === 'plugin-registry/plugins.yaml') {
+    return 'canonical plugin registry source';
+  }
   if (/\.(?:md|mdx|markdown)$/i.test(pathname)) {
     return 'Markdown file';
   }
@@ -252,6 +256,9 @@ function pathExemption(pathname) {
   }
   if (pathname.startsWith('apps/web/e2e/')) {
     return 'web end-to-end test';
+  }
+  if (/^\.github\/(?:workflows|scripts|actions)\//.test(pathname)) {
+    return 'CI infrastructure path';
   }
 
   const basename = POSIX_PATH.basename(pathname);
@@ -838,8 +845,8 @@ function validateCoverage({ changedFiles = [], fileContents = {} } = {}) {
   }
 
   result.workOrders = selectChangedWorkOrders(changedFiles);
-  if (result.workOrders.length > MAX_DOCUMENTS) {
-    result.errors.push(`More than ${MAX_DOCUMENTS} changed work orders were supplied`);
+  if (result.workOrders.length > MAX_CHANGED_WORK_ORDERS) {
+    result.errors.push(`More than ${MAX_CHANGED_WORK_ORDERS} changed work orders were supplied`);
   }
   if (result.workOrders.length === 0) {
     result.status = 'missing';
@@ -1500,7 +1507,8 @@ function changedRequirementSources(changedFiles, requirementDirectory) {
     }
     const status = typeof change === 'string' ? undefined : change?.status;
     const headPath = status === 'removed' ? undefined : normalizedCurrent;
-    let basePath = normalizedCurrent;
+    const isAdded = status === 'added';
+    let basePath = isAdded ? undefined : normalizedCurrent;
     if (status === 'renamed' && typeof change.previous_filename === 'string') {
       try {
         basePath = normalizeRepoPath(change.previous_filename);
@@ -1519,10 +1527,16 @@ function changedRequirementSources(changedFiles, requirementDirectory) {
     }
     const key = normalizedHead ?? `base:${normalizedBase}`;
     if (!sources.has(key)) {
-      sources.set(key, { basePath: normalizedBase, headPath: normalizedHead });
+      sources.set(key, { basePath: normalizedBase, headPath: normalizedHead, isAdded });
     }
   }
   return [...sources.values()];
+}
+
+function candidateRequirementPath(requirementDirectory, requirementId) {
+  const parts = requirementId.split('-');
+  const filename = `${parts.slice(2).join('-').replace(/-\d+$/, '').toLowerCase()}.md`;
+  return `${requirementDirectory}/${filename}`;
 }
 
 async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) {
@@ -1573,6 +1587,22 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
       throw new Error(`Referenced documents exceed the ${MAX_TOTAL_DOCUMENT_BYTES}-byte total limit`);
     }
     return content;
+  }
+
+  async function listRequirementDirectory(requirementDirectory, ref) {
+    const key = JSON.stringify([requirementDirectory, ref]);
+    if (!requirementDirectories.has(key)) {
+      let entries = [];
+      try {
+        entries = await client.listDirectory(requirementDirectory, ref);
+      } catch (error) {
+        if (!isMissingResourceError(error)) {
+          throw error;
+        }
+      }
+      requirementDirectories.set(key, entries);
+    }
+    return requirementDirectories.get(key);
   }
 
   for (const workOrderPath of selectChangedWorkOrders(changedFiles)) {
@@ -1637,9 +1667,13 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
       const requirementDirectory = `docs/specs/${system}/requirements`;
       const requirementPaths = new Set();
       const baseContentByHeadPath = new Map();
+      const addedRequirementPaths = new Set();
       for (const source of changedRequirementSources(changedFiles, requirementDirectory)) {
         if (source.headPath) {
           requirementPaths.add(source.headPath);
+          if (source.isAdded) {
+            addedRequirementPaths.add(source.headPath);
+          }
           await load(source.headPath, headSha, contents);
         }
         if (source.basePath) {
@@ -1649,13 +1683,37 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
           }
         }
       }
+      const checkedAddedRequirementPaths = new Set();
+      if (addedRequirementPaths.size > 0 && typeof client.listDirectory === 'function') {
+        const entries = await listRequirementDirectory(requirementDirectory, headSha);
+        for (const entry of entries) {
+          if (
+            entry.type !== 'file'
+            || typeof entry.path !== 'string'
+            || !entry.path.startsWith(`${requirementDirectory}/`)
+            || !entry.path.endsWith('.md')
+          ) {
+            continue;
+          }
+          const pathname = normalizeRepoPath(entry.path);
+          await load(pathname, headSha, contents);
+          if (addedRequirementPaths.has(pathname)) {
+            checkedAddedRequirementPaths.add(pathname);
+          }
+        }
+      }
       const workOrderRequirements = new Set(workOrder.requirements ?? []);
       const referencedRequirementIds = designRequirements.filter(requirementId =>
         workOrderRequirements.has(requirementId)
       );
       const verifiedRequirementIds = new Set();
+      const ambiguousRequirementIds = new Set();
       for (const requirementId of referencedRequirementIds) {
         const definitions = requirementDefinitions(contents, requirementId, system);
+        if (definitions.length > 1) {
+          ambiguousRequirementIds.add(requirementId);
+          continue;
+        }
         if (definitions.length !== 1) {
           continue;
         }
@@ -1663,7 +1721,13 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
         const baseContent = baseContentByHeadPath.get(definition.pathname);
         if (
           hasRequirementHeading(definition.content, requirementId)
-          && hasRequirementHeading(baseContent, requirementId)
+          && (
+            hasRequirementHeading(baseContent, requirementId)
+            || (
+              checkedAddedRequirementPaths.has(definition.pathname)
+              && definition.pathname === candidateRequirementPath(requirementDirectory, requirementId)
+            )
+          )
         ) {
           verifiedRequirementIds.add(requirementId);
         }
@@ -1671,7 +1735,7 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
       const unresolvedRequirementIds = [];
       if (typeof client.searchCode === 'function') {
         for (const requirementId of referencedRequirementIds) {
-          if (verifiedRequirementIds.has(requirementId)) {
+          if (verifiedRequirementIds.has(requirementId) || ambiguousRequirementIds.has(requirementId)) {
             continue;
           }
           const searchKey = JSON.stringify([requirementDirectory, requirementId]);
@@ -1691,26 +1755,16 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
         }
       } else {
         unresolvedRequirementIds.push(
-          ...referencedRequirementIds.filter(requirementId => !verifiedRequirementIds.has(requirementId)),
+          ...referencedRequirementIds.filter(requirementId =>
+            !verifiedRequirementIds.has(requirementId) && !ambiguousRequirementIds.has(requirementId)
+          ),
         );
       }
       if (unresolvedRequirementIds.length > 0 && typeof client.listDirectory === 'function') {
-        if (!requirementDirectories.has(requirementDirectory)) {
-          let entries = [];
-          try {
-            entries = await client.listDirectory(requirementDirectory, headSha);
-          } catch (error) {
-            if (!isMissingResourceError(error)) {
-              throw error;
-            }
-          }
-          requirementDirectories.set(requirementDirectory, entries);
-        }
-        const entries = requirementDirectories.get(requirementDirectory);
-        const candidateNames = new Set(unresolvedRequirementIds.map(requirementId => {
-          const parts = requirementId.split('-');
-          return `${parts.slice(2).join('-').replace(/-\d+$/, '').toLowerCase()}.md`;
-        }));
+        const entries = await listRequirementDirectory(requirementDirectory, headSha);
+        const candidateNames = new Set(unresolvedRequirementIds.map(requirementId =>
+          POSIX_PATH.basename(candidateRequirementPath(requirementDirectory, requirementId))
+        ));
         for (const entry of entries) {
           if (entry.type === 'file' && candidateNames.has(POSIX_PATH.basename(entry.path))) {
             requirementPaths.add(entry.path);

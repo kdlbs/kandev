@@ -43,13 +43,15 @@ func (m *Manager) managedRuntimeNpmStartupFailure(
 	}
 	evidence := strings.Join(lines, "\n")
 	combined := strings.TrimSpace(evidence + "\n" + initErr.Error())
-	if !routingerr.ManagedRuntimeNpmResolutionMatchesPackage(combined, packageSpec) {
+	if !routingerr.ManagedRuntimeNpmResolutionMatchesPackage(combined, packageSpec) &&
+		!routingerr.ManagedRuntimeNpmReleaseAgePolicyMatchesPackage(combined, packageSpec) {
 		return nil
 	}
 	return routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhaseSessionInit,
-		ProviderID: execution.AgentID,
-		Stderr:     combined,
+		Phase:                     routingerr.PhaseSessionInit,
+		ProviderID:                execution.AgentID,
+		Stderr:                    combined,
+		ManagedRuntimePackageSpec: packageSpec,
 	})
 }
 
@@ -93,6 +95,7 @@ func (m *Manager) publishManagedRuntimeStartupFailure(
 type managedRuntimeStartupRetry struct {
 	preferOnlineArgs []string
 	packageSpec      string
+	failureCode      routingerr.Code
 	failureDetails   string
 }
 
@@ -122,12 +125,7 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 	initErr error,
 	agentConfig agents.Agent,
 ) (*managedRuntimeStartupRetry, bool) {
-	if execution == nil || !supportsManagedRuntimeCacheRepair(execution.RuntimeName) {
-		return nil, false
-	}
-	client, releaseClient := execution.AcquireAgentCtlClient()
-	releaseClient()
-	if client == nil {
+	if execution == nil {
 		return nil, false
 	}
 	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
@@ -139,12 +137,25 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 		return nil, false
 	}
 	classification := m.managedRuntimeNpmStartupFailure(ctx, execution, initErr, packageSpec)
-	if classification == nil || classification.Code != routingerr.CodeManagedRuntimeNpmResolution {
+	if classification == nil {
+		return nil, false
+	}
+	if classification.Code == routingerr.CodeManagedRuntimeNpmPolicy {
+		return &managedRuntimeStartupRetry{
+			failureCode:    classification.Code,
+			failureDetails: classification.RawExcerpt,
+		}, true
+	}
+	if classification.Code != routingerr.CodeManagedRuntimeNpmResolution {
+		return nil, false
+	}
+	if !supportsManagedRuntimeCacheRepair(execution.RuntimeName) {
 		return nil, false
 	}
 	return &managedRuntimeStartupRetry{
 		preferOnlineArgs: preferOnlineArgs,
 		packageSpec:      packageSpec,
+		failureCode:      classification.Code,
 		failureDetails:   classification.RawExcerpt,
 	}, true
 }
@@ -265,12 +276,24 @@ func (m *Manager) retryManagedRuntimeStartup(
 	if !ok {
 		return false, initErr
 	}
-	failureCode := routingerr.CodeManagedRuntimeNpmResolution
-	failureDetails := retry.failureDetails
-	var failureCause error
 	if err := managedRuntimeRecoveryAborted(ctx, m); err != nil {
 		return false, err
 	}
+	if retry.failureCode == routingerr.CodeManagedRuntimeNpmPolicy {
+		return true, m.publishManagedRuntimeStartupFailure(
+			execution,
+			"managed npm runtime blocked by npm release-date policy",
+			retry.failureCode,
+			retry.failureDetails,
+			initErr,
+		)
+	}
+	failureCode := retry.failureCode
+	if failureCode == "" {
+		failureCode = routingerr.CodeManagedRuntimeNpmResolution
+	}
+	failureDetails := retry.failureDetails
+	var failureCause error
 	retryGeneration, ok := execution.beginStartupRecovery()
 	if !ok {
 		return false, initErr

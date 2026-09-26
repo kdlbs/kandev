@@ -99,6 +99,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         workspaceId: snapshotTaskWorkspaceId(task, snapshot.workflow.workspace_id),
         workflowId: snapshot.workflow.id,
         workflowStepId,
+        workflowAgentOverrides: task.workflow_agent_overrides,
         title: task.title,
         description: task.description ?? undefined,
         autopilot: task.autopilot ?? false,

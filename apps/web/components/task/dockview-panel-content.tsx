@@ -256,7 +256,10 @@ function CanvasContent({ params }: { params: Record<string, unknown> }) {
       className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
       data-testid="canvas-panel-boundary"
     >
-      <CanvasHostRoute canvasId={typeof params.canvasId === "string" ? params.canvasId : ""} />
+      <CanvasHostRoute
+        canvasId={typeof params.canvasId === "string" ? params.canvasId : ""}
+        embedded
+      />
     </div>
   );
 }

@@ -20,13 +20,13 @@ The [CLI](cli.md) is a better fit for headless machines, browser-only access, or
 
 Download artifacts from [GitHub Releases](https://github.com/kdlbs/kandev/releases). Each desktop filename begins with `kandev-desktop-<platform>-`; use the installer format for your platform, not an updater archive.
 
-| Platform label | Installer formats | In-app update support |
-|---|---|---|
-| `macos-arm64` | `.dmg` | Signed `.app.tar.gz` updater bundle |
-| `macos-x64` | `.dmg` | Signed `.app.tar.gz` updater bundle |
-| `linux-arm64` | AppImage, `.deb`, `.rpm` | AppImage installations only |
-| `linux-x64` | AppImage, `.deb`, `.rpm` | AppImage installations only |
-| `windows-x64` | NSIS `.exe` | Signed `.nsis.zip` updater bundle |
+| Platform label | Installer formats        | In-app update support               |
+| -------------- | ------------------------ | ----------------------------------- |
+| `macos-arm64`  | `.dmg`                   | Signed `.app.tar.gz` updater bundle |
+| `macos-x64`    | `.dmg`                   | Signed `.app.tar.gz` updater bundle |
+| `linux-arm64`  | AppImage, `.deb`, `.rpm` | AppImage installations only         |
+| `linux-x64`    | AppImage, `.deb`, `.rpm` | AppImage installations only         |
+| `windows-x64`  | NSIS `.exe`              | Signed `.nsis.zip` updater bundle   |
 
 Windows ARM64 is not a native release target. x64 emulation may run the installer on some ARM Windows systems, but that is dependency-bound and not covered by the release matrix.
 
@@ -113,9 +113,19 @@ Startup waits up to 60 seconds for the owned backend. A missing packaged binary,
 
 Desktop inherits normal backend configuration. By default, persistent data lives in `~/.kandev` (below the user profile directory on Windows). Set `KANDEV_HOME_DIR` in the desktop process environment before launch to isolate or relocate it; see [Configuration](configuration.md). The desktop app's own platform app-data directory separately stores window geometry.
 
-Only one desktop instance runs per OS user/application scope. Launching the app a second time shows, unminimizes, and focuses the existing main window; it does not start a second backend.
+Normal desktop launches are single-instance. Launching the app a second time shows, unminimizes, and focuses the existing main window. Each database can also be owned by only one Kandev process at a time. If another process is using the selected home or database, the startup screen identifies the conflict and keeps the normal data unchanged.
 
 Closing the main OS window or choosing **Quit Kandev** quits the application and stops the backend it owns. There is no tray/background mode or desktop autostart service. On Unix, shutdown sends a graceful termination and force-kills after five seconds if needed; on Windows it terminates the owned process tree. Active external executor resources may have their own lifecycle, check [Executors](executors.md) before manual cleanup.
+
+If another Kandev process owns the selected home or database, the startup screen can open one or more isolated temporary test windows. Each window has a new private home and SQLite database below the operating system's temporary directory. The window shows its temporary data folder while it starts and keeps the path visible if startup fails. Data created there is separate from your normal Kandev data and is removed after a confirmed clean quit. If Kandev cannot confirm a clean stop, it keeps the folder for inspection. Do not use a temporary test window to store work you need to keep.
+
+For a reusable development home on macOS, set a separate path before starting the developer build:
+
+```bash
+KANDEV_HOME_DIR="$HOME/.kandev-desktop-dev" make desktop-dev
+```
+
+This home persists between launches. It is separate from both your normal Kandev home and each disposable temporary test window.
 
 The application menu exposes New Task, Settings (`Cmd/Ctrl+,`), contextual Close (`Cmd/Ctrl+W`), zoom, full-screen, Help, update, and Quit actions. Contextual Close asks the web UI to close its top dialog or eligible file/diff/commit/preview tab; if nothing is closeable it does not shut down the window or backend. The desktop shell saves window geometry in its platform app-data directory and clamps restored geometry to an available display.
 
@@ -125,17 +135,19 @@ Uninstalling the desktop application does not delete the Kandev home. Keep it to
 
 The desktop backend does not scan your Home directory until you select a
 discovery folder. Open **Settings → Workspaces → Repositories → Add Local
-Repository**, then choose Home or a narrower folder. The selected folders are
-saved for the desktop installation and are available to its workspaces. A
-normal browser connected to the same backend uses the HTTP folder picker. The
-browser does not receive the desktop app's native picker authority.
+Repository**, then choose a folder. The selected folders are saved for the
+desktop installation and are available to its workspaces. A normal browser
+connected to the same backend uses the HTTP folder picker. The browser does
+not receive the desktop app's native picker authority.
 
 After an upgrade, an existing installation can show **Continue Home
-Discovery**. This is a confirmation action. Kandev does not start a new Home
-scan without that action. A Home scan skips repositories directly below
-`Desktop`, `Documents`, and `Downloads` on macOS. Select one of those folders
-explicitly when it contains repositories you want to discover. Selecting that
-protected folder itself is allowed.
+Discovery**. This action saves the desktop backend's Home folder directly; it
+does not open a folder picker. Kandev does not start a new Home scan without
+that action. **Choose folders to discover repositories** still opens the
+folder picker for a separate or narrower root. A Home scan skips repositories
+directly below `Desktop`, `Documents`, and `Downloads` on macOS. Select one of
+those folders explicitly when it contains repositories you want to discover.
+Selecting that protected folder itself is allowed.
 
 Discovery results are cached for up to 30 minutes while a visible repository
 surface is open. Empty or filtered results have a **Refresh** action. If a
@@ -143,6 +155,14 @@ selected folder becomes unavailable, automatic refresh stops and the folder
 shows **Reconnect** and **Remove** actions. Reconnect selects the folder again
 and starts a fresh scan. Removal forgets that desktop discovery folder; it does
 not remove repositories or files.
+
+If one root fails while another succeeds, repository selectors keep the
+successful results and their normal **Refresh repositories** action. Failed-root
+paths stay in structured backend logs and are not shown in selectors. An
+inaccessible descendant does not make its accessible root require
+reconnection. You can use **Add Local Repository** to validate an absolute path
+when automatic discovery cannot reach its root. Kandev does not create missing
+clone directories during recovery.
 
 macOS privacy access belongs to the application identity. A replacement that
 is unsigned, re-signed, or otherwise has a different identity can require
@@ -185,7 +205,7 @@ Linux `.deb` and `.rpm` installations must be updated through their package mana
 
 Kandev has no registered public URL scheme, file association, or command-line deep-link protocol. A second application launch only activates the existing window. Links and routes inside the Kandev UI still work normally, but an external `kandev://…` link is not a supported product path.
 
-External `http`, `https`, and `mailto` destinations open through the system browser or mail client. The desktop bridge rejects URLs with embedded credentials, unsupported schemes, `localhost`/subdomains of `localhost`, loopback IPs, and unspecified IPs; Kandev routes, previews, downloads, and blob URLs remain in the WebView. RFC 1918/private-LAN hosts are not categorically blocked by this validator.
+External `http`, `https`, and `mailto` destinations open in the system browser or mail client. The desktop bridge blocks links with embedded credentials and unsupported schemes. It keeps `localhost` names, loopback IPs, and unspecified IPs in the WebView. It does not block all private-LAN hosts. Kandev routes, previews, and downloads stay in the WebView. Downloads that you start inside the desktop app open the system Save dialog. Kandev reports whether the transfer succeeds. The WebView transfers the file data.
 
 Native notifications are limited to selected agent-turn-finished and
 agent-needs-an-answer events, plus session failures. Semantic session events

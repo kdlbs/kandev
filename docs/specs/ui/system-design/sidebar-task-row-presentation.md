@@ -41,9 +41,16 @@ status. The status stays mounted and keeps its pointer and keyboard disclosure b
 The branch omits the complete cluster when no status exists. The established menu-only fallback
 continues to expose task actions.
 
-The relative-time branch keeps its existing overlay swap. Its visual time column has a fixed width,
-right-aligned text, and tabular numbers. Hover or menu-open state replaces the time with the menu in
-that same column on fine pointers.
+The relative-time branch keeps its overlay swap on desktop fine pointers. Replace both `w-11`
+constraints in `TaskItemTrailing` with intrinsic time sizing and a 24 CSS pixel minimum matching
+`TaskMenuButton`. Keep the time mounted and width-bearing at opacity zero during hover, focus,
+and menu-open state. The absolute menu aligns to the right of the same column. This allocates
+the maximum of the time width and button width without JavaScript measurement.
+
+Keep right alignment, tabular numbers, and non-wrapping localized tokens. Different timestamps
+may produce different widths; hover alone cannot. Do not restore `w-full` or add `flex-1` to
+`TaskItemTitle`: long titles already shrink into the available content width, while short titles
+must keep their badges adjacent. Preserve the normal outer `gap-2` spacing.
 
 ## Compact elapsed time
 
@@ -84,6 +91,13 @@ touch users do not depend on hover. The change-request status remains passive on
 The sidebar task list remains the only scroll owner. The change does not add an overlay, safe-area
 boundary, or horizontal scroll region.
 
+Below the existing 640px action breakpoint, retain the in-flow menu slot and visible 44px action.
+Phone and coarse-pointer time slots remain at least 44px wide and may grow for longer localized
+tokens, keeping the non-wrapping time separate from the action. At wider coarse-pointer widths, keep
+the time right-aligned within its slot and do not extend compact desktop button sizing. Scope the
+content-sized desktop slot to fine pointers. Test 639px, 640px, and 768px with pointer modes
+explicitly set.
+
 ## Accessibility
 
 The change-request status keeps its current focusable tooltip trigger. Keyboard focus can reach the
@@ -101,11 +115,14 @@ time column. Neither case changes the saved view or reports a user-facing error.
 
 Unit tests cover every time boundary, future clock skew, invalid input, the 99-year bound, and all
 shipped locales. Component tests cover idle width, hover/focus classes, status reachability, menu
-fallback, and the fixed time column.
+fallback, and accessible time semantics. Browser geometry establishes content sizing and hover stability.
 
 Desktop Playwright coverage proves the idle status reaches the row edge and hover reveals the menu
 without covering the status. Mobile Playwright coverage proves the visible touch action, primary
-row navigation, fixed time column, and absence of document horizontal overflow.
+row navigation, touch-target containment, and absence of document horizontal overflow.
+
+The [sidebar title width plan](../../../plans/sidebar-title-width/plan.md) owns the pending
+replacement of fixed desktop columns. Earlier completed plans remain historical delivery records.
 
 ## Related designs
 

@@ -102,6 +102,13 @@ test.describe("Slash command composer", () => {
     await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
 
     const editor = chatEditor(testPage);
+    // @covers AC-UI-COMPOSER-FOCUS-HINT-001.2
+    await editor.fill("");
+    await editor.blur();
+    const composer = session.chat.filter({ visible: true });
+    await expect(composer.getByText("to focus", { exact: true })).toBeVisible();
+    await editor.click();
+    await expect(composer.getByText("to focus", { exact: true })).not.toBeVisible();
     await selectSlowCommandWithEnter(testPage, editor);
 
     const chatList = session.chat.locator(".chat-message-list:visible");

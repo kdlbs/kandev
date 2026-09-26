@@ -121,11 +121,12 @@ does not need a Go backend or an injected Kandev JavaScript API.
    the app needs.
 5. Package the manifest and static files as a gzip-compressed tar archive.
 
-For a new owner-created task canvas, the first valid release can receive the
-declared supported task-scoped permissions through its initial permission
-policy. Imported packages and later permission increases need human approval.
-Keep `network_origins` as exact HTTPS origins. Do not use wildcards, paths,
-credentials, query strings, or fragments.
+For a new owner-authorized task canvas, the first valid release can receive
+only its declared supported permissions through the initial permission policy.
+Kandev data access is limited to the current workspace while the canvas stays
+placed in its creating task. Imported packages and later permission increases
+need human approval. Keep `network_origins` as exact HTTPS origins. Do not use
+wildcards, paths, credentials, query strings, or fragments.
 
 For example, a page can read task data with the browser Fetch API:
 
@@ -137,9 +138,22 @@ if (!response.ok) {
 const tasks = await response.json();
 ```
 
-Use `./_kandev/v1/events` for the event stream. Keep all protocol paths
-relative so the same package works in task and workspace scope. Do not copy a
-capability URL from the host into the app.
+Use `./_kandev/v1/events` for the event stream. Read both `scope_kind` and
+`data_scope_kind` from `./_kandev/v1/context`: the first describes placement,
+and the second describes the Kandev data boundary. Keep all protocol paths
+relative so the same package works in task and workspace placement. For task
+lists, follow `page_info.next_cursor` to load every page. Do not set
+`workspace_id` to another workspace or copy a capability URL from the host.
+
+For recorded workflow movement, the browser can GET
+`./_kandev/v1/data/tasks/{task_id}/step-transitions` with
+`api_read:tasks`. A workspace canvas can GET
+`./_kandev/v1/data/workflows/{workflow_id}/transition-groups` with both
+`api_read:tasks` and `api_read:workflows`. The latter is denied to a task
+canvas until the user promotes it. Both return bounded `{items,page_info}`
+pages; use the opaque `next_cursor` to continue. The equivalent optional
+backend Host extension is `pluginsdk.TransitionHistory(host)`. It exposes
+`ListTask` and `ListWorkflowGroups` with the same fields and grants.
 
 Kandev injects a reserved startup bootstrap into the packaged entry document.
 It runs before authored scripts, reports an initial document error when one is
@@ -150,9 +164,13 @@ the canvas recoverable after 15 seconds. Keep the entry document and its
 relative assets valid HTML, and make the app render its own loading and error
 states after startup.
 
-The frame has an opaque browser origin. Do not use `localStorage`,
-`sessionStorage`, IndexedDB, or service workers. Use the state protocol for
-small app-specific shared values and JavaScript memory for temporary values.
+The frame is same-origin with Kandev and canvas code is trusted with the
+viewing user's ordinary user-session authority. It can use `localStorage`,
+`sessionStorage`, IndexedDB, same-origin cookies, and the host DOM. Keep
+Kandev protocol requests relative and do not copy capability URLs or tokens.
+Use the state protocol for small app-specific shared values and JavaScript
+memory for temporary values. Capability URLs, release bindings, scope checks,
+and declared grants still govern every Kandev protocol operation.
 
 Network access uses exact HTTPS origins that a user approves. Wildcards,
 origin paths, query strings, credentials, and remote scripts are not allowed.
@@ -275,10 +293,12 @@ curated React, UI, and app-store surface.
   Host adapters consume the approval receipt/query surface; they do not derive
   authority from plugin IDs, package digests, or workspace state.
 
-An isolated web app has a separate browser boundary. Kandev loads it in a
-sandboxed iframe with an opaque origin. It cannot use the host DOM, cookies,
-host authentication headers, popups, top-level navigation, or a global Kandev
-JavaScript API. See [Security and trust](security.md#isolated-web-applications)
+An isolated web app has a separate iframe and sandbox boundary. Kandev loads it
+same-origin with the host, so its trusted source can use the viewing user's
+ordinary browser authority, including cookies, storage, and the host DOM. It
+still cannot open popups or navigate the top-level page, and it receives no
+global Kandev JavaScript API. Capability URLs and grants remain required for
+Kandev protocol operations. See [Security and trust](security.md#isolated-web-applications)
 for the runtime boundary.
 
 ## Storage decision table
@@ -288,7 +308,7 @@ for the runtime boundary.
 | Small JSON object owned by this plugin    | Host state: GetState, SetState, DeleteState, ListState               | instance, workspace, task, or agent; survives restart/upgrade and is included in Kandev state backups | capabilities.state: true; values are JSON objects, not bare scalars             |
 | Canvas app shared state                   | Relative `./_kandev/v1/state` protocol                              | Canvas instance; survives restart while the instance remains                 | `state` grant, store app-specific shared values, not duplicate task data       |
 | Per-user browser/plugin storage           | host.storage: get/set/delete/list/subscribe                          | instance, workspace, task, session, or repository, scoped per user                                    | capabilities.user_state: true; set/delete accept ifUnmodifiedSince and writerId |
-| Temporary canvas app value                | JavaScript memory inside the iframe                                  | Current document only                                                         | Opaque origin blocks browser storage and service workers                        |
+| Temporary canvas app value                | JavaScript memory inside the iframe                                  | Current document only                                                         | Use browser storage for user-scoped client data; keep shared app values in canvas state |
 | Operator configuration                    | Host.GetConfig and manifest config_schema                            | Plugin-owned settings; config changes restart an active subprocess                                    | Ungated GetConfig; secret fields arrive cleartext in the subprocess             |
 | Plugin-owned credentials                  | Host.GetSecret/SetSecret/DeleteSecret, or secret: true config fields | Encrypted Kandev vault, namespaced to this plugin                                                     | capabilities.secrets: true; never log values                                    |
 | Files, caches, or plugin-managed database | KANDEV_PLUGIN_DATA_DIR                                               | Shared across versions, removed on uninstall                                                          | Write only below the injected directory; own schema, locking, and migrations    |
@@ -325,11 +345,10 @@ of truth and must be updated together when the contract changes:
   [explicit plugin utility selection](../decisions/2026-09-14-explicit-plugin-utility-selection.md), and
   [Browser conversation facade ADR](../decisions/2026-09-06-browser-plugin-conversation-facade.md).
 
-The browser conversation facade ADR is still proposed while this prerequisite
-package is under review. Until that ADR is accepted, normative authority is
-split deliberately: requirements define observable behavior, the system design
-defines Host architecture, and `PLUGIN-API.md` defines the Host-only wire
-contract.
+The [source reconciliation design](../specs/plugins/system-design/conversation-source-reconciliation.md)
+defines the current storage and transport behavior. Requirements define
+observable behavior, and `PLUGIN-API.md` defines the browser API and Host-only
+v2 wire contract.
 
 ## Frontend contract
 
@@ -401,7 +420,11 @@ Panel handles are independently scoped and become inert on unmount, identity
 change, disable, or reload. `host.conversation` is the equivalent nearest-scope
 accessor; outside a panel it returns stable empty state. Use the canonical
 [PLUGIN-API contract](../plans/plugins/PLUGIN-API.md) for DTOs, pagination,
-ordered updates, lifecycle, and retryable errors.
+revision-bound updates, lifecycle, recovery, and retryable errors. A complete
+source mutation sends a transient revision receipt after commit. An incomplete
+or uninstrumented mutation sends a reset marker, and the Host reads current
+source rows to repair the panel. The transport does not retain a payload
+journal or provide a replay guarantee.
 Browser route errors use `unauthenticated`/non-retryable for `401`,
 `not_found`/non-retryable for `404`, `invalid_query`/non-retryable for `400`,
 and `upstream_failure`/retryable for every authorized `5xx`.
@@ -418,7 +441,7 @@ closing future reads.
 | --- | --- | --- |
 | Surface | `host.conversation` or `conversation.history` | `host.Messages().List` |
 | Runtime | Native UI bundle | Plugin server process |
-| Data | Sanitized browser DTOs and ordered live updates | Typed paginated reader |
+| Data | Sanitized browser DTOs and revision-bound updates | Typed paginated reader |
 | Forbidden shortcut | `host.store`, raw WS, `/api/v1` | Private application imports |
 
 ### Frontend hook/API matrix
@@ -437,7 +460,7 @@ closing future reads.
 | registerTaskAction              | Child action inside the task menu's native Link section                                                                                                                                                                                                                                                | Active ui.bundle                                                       | Action is revoked on unload; host supplies current task/workspace and desktop/mobile presentation                                                                                                               | registry.registerTaskAction({ id: "link-pr", placement: "link", ... })                                              |
 | registerReviewProvider          | Normalized task reviews, workspace associations, unlink, and shared Review panel                                                                                                                                                                                                                       | ui.bundle and matching `repository_providers[]` id                     | Snapshots/subscriptions are owner-scoped and revoked on unload; host owns status chrome, indicators, unlink UI, and responsive Review placement                                                                 | registry.registerReviewProvider({ id: "acme", ...reviews })                                                         |
 | registerTaskPanel               | { id, title, titleKey?, icon?, Component, mobileEnabled?, visible?(context) }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, sessionKind, presentation, conversation: { openMessage(messageId), history } }; `titleKey` is a plugin translation key with literal `title` fallback | Active ui.bundle | Panel renders behind its own error boundary with reactive localized titles; a throwing `visible` hides the item; handles are generation-bound and independently scoped, inert after unmount, identity change, disable, reload, or uninstall; `host.conversation` outside a panel returns stable empty state; desktop preserves layout identity on navigation and mobile uses the full-height Chat surface | registry.registerTaskPanel({ id: "notes", title: "Notes", titleKey: "panels.notes", Component: NotesPanel }) |
-| registerTaskMenuAction          | { id, label, icon?, group: "edit" \| "primary", visible?(context), run(context) }; "edit" is card-only inside Edit, while "primary" is a flat item on cards and desktop/mobile task-row menus                                                                                                          | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged                                                                                                                           | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "primary", run: doEnhance })              |
+| registerTaskMenuAction          | { id, label, icon?, group: "edit" \| "primary", visible?(context), items?(context), run(context) }; "edit" is card-only inside Edit, while "primary" is a top-level item on cards and desktop/mobile task-row menus; a synchronous `items(context)` returning TaskMenuSubItemRegistration[] ({ id, label, icon?, disabled?, run(context) }) renders the action as a submenu of those children instead | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged; an items() that throws or yields nothing usable falls back to the flat item, and unusable children are dropped                                                                                                                           | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "primary", run: doEnhance })              |
 | registerTaskFilter              | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository                                                                                                                         | Active ui.bundle                                                       | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching                  | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |
 | registerTaskListFacet           | { id, label, getValues({ taskId, workspaceId }), subscribe? }; adds page-local Sort and Group choices on `/tasks`                                                                                                                                                                                      | Active ui.bundle                                                       | Values apply only to the loaded page, callbacks are isolated, and registrations are revoked on disable/unload                                                                                                   | registry.registerTaskListFacet({ id: "tags", label: "Tag", getValues: taskTags })                                   |
 | host.React / host.jsx           | Shared React instance and React.createElement alias                                                                                                                                                                                                                                                    | Active ui.bundle                                                       | No cleanup; never bundle a second React/Radix runtime                                                                                                                                                           | const h = host.jsx                                                                                                  |
@@ -449,7 +472,7 @@ closing future reads.
 | host.api.fetch / baseUrl        | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments                                                                                                                                                                                      | Active ui.bundle; backend path must be a declared webhook when relayed | Declare `webhooks[].access: authenticated` for UI-only or billable operations; requests are generation-aborted on unload                                                                                        | host.api.fetch("webhooks/inbound", { method: "POST" })                                                              |
 | host.api.invokeAction           | Authenticated call to a declared action with host-verified workspace/task/session/repository selectors and bounded untrusted body                                                                                                                                                                      | Matching manifest `actions[]` key/scope                                | Browser abort cancels the bounded plugin RPC; safe domain statuses and `Retry-After` may be returned                                                                                                            | host.api.invokeAction("reviews.get", { taskId }, { signal })                                                        |
 | host.storage                    | Authenticated, per-user key/value storage: get(scope, scopeId, key, options?)/set(scope, scopeId, key, value, options?)/delete(scope, scopeId, key, options?)/list(scope, scopeId, options?) plus subscribe(filter, handler); no plugin backend required                                               | capabilities.user_state: true                                          | Reads and writes accept an AbortSignal; set/delete also accept writerId (appended to the host's per-tab id, not a replacement) for echo suppression; list returns every entry under the scope pair, unpaginated | host.storage.set("task", taskId, "note", value, { writerId: panelId, signal })                                      |
-| host.ui                         | Curated host instances: Alert*, Badge, Button, Card*, Checkbox, Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*, Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea, Tooltip*, RichTextEditor, RichTextReadOnly, plus Combobox, PageTopbar, TaskCreateDialog | Active ui.bundle                                                       | Host owns contexts/portals; render with host React and let modal/slot cleanup run                                                                                                                               | const Button = host.ui.Button                                                                                       |
+| host.ui                         | Curated host instances: Alert*, Badge, Button, Action, ActionGroup, Card*, Checkbox, Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*, Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea, Tooltip*, RichTextEditor, RichTextReadOnly, plus Combobox, PageTopbar, TaskCreateDialog | Active ui.bundle                                                       | Host owns contexts/portals and Action geometry; render with host React and let modal/slot cleanup run                                                                                                            | const Action = host.ui.Action                                                                                       |
 | host.theme                      | Current "light" or "dark" theme                                                                                                                                                                                                                                                                        | Active ui.bundle                                                       | Read during render; subscribe through host/app patterns if theme-sensitive                                                                                                                                      | host.theme === "dark"                                                                                               |
 | host.navigate                   | Soft SPA navigation navigate(href, { replace? })                                                                                                                                                                                                                                                       | Active ui.bundle                                                       | No registry cleanup; avoid navigating to undeclared external origins                                                                                                                                            | host.navigate("/t/" + taskId)                                                                                       |
 | host.openModal                  | Host-owned modal: { title?, content, size?, dismissible? } -> { close() }                                                                                                                                                                                                                              | Active ui.bundle                                                       | Modal auto-closes on disable/uninstall; close handles are idempotent                                                                                                                                            | const modal = host.openModal({ content: Panel })                                                                    |
@@ -621,8 +644,8 @@ to strings, but an unmounted name renders nowhere.
 | task-create-input-actions | Task creation composer toolbar                                                             | PluginComposerSlotProps                                          |
 | new-session-input-actions | New-session composer toolbar                                                               | PluginComposerSlotProps                                          |
 | chat-submit-decoration    | Layer over the composer's send button                                                      | ChatSubmitDecorationSlotProps                                    |
-| chat-top-bar              | Session top bar                                                                            | { taskId, taskTitle?, workspaceId, activeSessionId, sessionIds } |
-| main-top-bar              | Home/Kanban/Tasks top bar                                                                  | { workspaceId, workspaceLabel?, currentPage }                    |
+| chat-top-bar              | Session top bar or phone Plugins menu                                                      | ChatTopBarSlotProps                                              |
+| main-top-bar              | Home/Kanban/Tasks top bar or phone Plugins menu; a task toolbar from the same plugin takes precedence | MainTopBarSlotProps                                              |
 | app-status-bar-left       | Left side of desktop status bar or mobile status drawer                                    | AppStatusBarSlotProps                                            |
 | app-status-bar-right      | Right side of desktop status bar or mobile status drawer                                   | AppStatusBarSlotProps                                            |
 | plugin-settings           | Top of this plugin's Settings > Plugins page                                               | { pluginId, status }; owner-scoped to the plugin being viewed    |
@@ -630,6 +653,131 @@ to strings, but an unmounted name renders nowhere.
 | task-card-tags            | Kanban card, its own row below the badges row                                              | { taskId, workspaceId, workflowStepId }                          |
 | task-row-metadata         | Sidebar task tree and `/tasks` rows                                                        | TaskRowMetadataSlotProps                                         |
 | sidebar-workspace-actions | Desktop New Task row or phone navigation action group, after Quick Terminal and Quick Chat | SidebarWorkspaceActionsSlotProps                                 |
+
+### Standard actions in component slots
+
+Use `host.ui.Action` for a standard action in a mounted component slot. Use
+`host.ui.ActionGroup` when one contribution has more than one standard action.
+The plugin still owns state, visibility, callbacks, and rich content. The host
+owns the button shell, icon box, spacing, focus and disabled styles, and the
+surface-specific size. This is an optional migration path; it does not add a
+second registration API.
+
+`Action` renders one button and accepts a localized `label`, optional decorative
+`icon`, visible `text`, short `badge`, `tone`, `pressed`, `disabled`, `busy`,
+`tooltip`, a button `ref`, supported button events, and trigger ARIA metadata.
+The label stays meaningful when the visible value changes or truncates. An
+icon-only action uses its label as the tooltip on fine-pointer desktop. Pass an
+empty `tooltip` to disable it. `busy` shows activity and does not disable the
+button. `Action` does not accept `className`, `style`, `size`, `variant`,
+`asChild`, or interactive children.
+
+| Slot surface | Host presentation |
+| --- | --- |
+| `chat-input-actions`, `task-create-input-actions`, `new-session-input-actions` | 28px desktop controls with 16px icons; on phone, controls stay beside their composer and have touch-sized targets |
+| `main-top-bar`, `chat-top-bar` | Match the surrounding 28px toolbar controls; on phone, actions appear in the shared Plugins navigation section with touch-sized targets |
+| `sidebar-workspace-actions` | Compact 24px desktop actions; phone actions appear in Plugins navigation with touch-sized targets |
+| `app-status-bar-left`, `app-status-bar-right` | Inline action fitting the 24px bar; tablet/coarse-pointer status stays compact, while the phone Status drawer provides touch-sized rows |
+
+The phone and coarse-pointer targets outside the compact status bar are at least
+44px in the active dimension. The status bar remains 24px on tablet; use its
+phone drawer row for a touch-sized status action. The host owns gaps between
+registrations. `ActionGroup` owns the gap between actions inside one
+contribution. It returns `null` when it has no direct children. Existing slot
+components and their saved registration/order identity remain unchanged.
+
+This example covers a command, a recording toggle, a changing value, a bounded
+custom glyph, and a controlled disclosure trigger:
+
+```js
+function makePluginControls(host) {
+  const { jsx: h, ui } = host;
+
+  return function PluginControls() {
+    const [recording, setRecording] = host.React.useState(false);
+    const [detailsOpen, setDetailsOpen] = host.React.useState(false);
+    const { t } = host.i18n.useTranslation();
+    return h(
+      ui.ActionGroup,
+      { label: t("pluginActions") },
+      h(ui.Action, {
+        label: t("openPluginPage"),
+        icon: myIcon(h),
+        onClick: () => host.navigate("/hello-world"),
+      }),
+      h(ui.Action, {
+        label: t("voiceRecording"),
+        icon: myMicrophoneIcon(h),
+        text: recording ? t("recording") : t("record"),
+        pressed: recording,
+        busy: recording,
+        onClick: () => setRecording((value) => !value),
+      }),
+      h(ui.Action, {
+        label: t("providerUsage"),
+        icon: myAnimatedGlyph(h),
+        text: "63%",
+        badge: t("live"),
+        onClick: refreshUsage,
+      }),
+      h(
+        ui.Popover,
+        { open: detailsOpen, onOpenChange: setDetailsOpen },
+        h(
+          ui.PopoverTrigger,
+          { asChild: true },
+          h(ui.Action, {
+            label: t("usageDetails"),
+            icon: myIcon(h),
+            "aria-haspopup": "dialog",
+            "aria-expanded": detailsOpen,
+            "aria-controls": "usage-details",
+          }),
+        ),
+        h(ui.PopoverContent, { id: "usage-details" }, t("currentUsageDetails")),
+      ),
+    );
+  };
+}
+
+registry.registerComponent("main-top-bar", makePluginControls(host));
+```
+
+For a plugin that must also run on an older host, feature-detect `Action` in
+the existing component and return one tree. Keep the legacy `Button` as the
+fallback; register the component once and do not register both trees.
+
+```js
+function makeOneAction(host) {
+  return function OneAction() {
+    const { t } = host.i18n.useTranslation();
+    const Action = host.ui.Action;
+    return Action
+      ? host.jsx(Action, {
+          label: t("openPluginPage"),
+          icon: myIcon(host.jsx),
+          onClick: openPage,
+        })
+      : host.jsx(host.ui.Button, {
+          type: "button",
+          variant: "ghost",
+          size: "icon",
+          "aria-label": t("openPluginPage"),
+          onClick: openPage,
+        }, myIcon(host.jsx));
+  };
+}
+
+registry.registerComponent("chat-input-actions", makeOneAction(host));
+```
+
+Use the existing host Popover, Drawer, or Dialog for disclosure content. Compose
+it with `Action` as the trigger; do not render a second button inside an Action.
+A plugin that requires the new shell can instead declare its actual
+`min_kandev_version`. This additive UI export does not itself require a
+manifest API-version bump. Keep using raw slot components for rich controls
+that do not fit this contract, and keep `host.ui.Button` for existing controls
+and ordinary plugin pages.
 
 AppStatusBarSlotProps is { placement, presentation, density, pathname,
 activeWorkspaceId, activeTaskId, activeSessionId }. Desktop presentation is a
@@ -917,6 +1065,99 @@ The data-reader accessors return typed, paginated readers, for example
 next page. See `pkg/pluginsdk/data_types.go` for the full `Task`,
 `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`, `Repository`,
 `Session`, `Message`, and filter/page types.
+
+#### Task dependencies
+
+Every `Task` returned by `host.Tasks().Get`/`.List` carries a read-only
+dependency projection: `Blocked`, `BlockedReason`, `DependsOn`, `Blocks`,
+`DependsOnTruncated`, `BlocksTruncated`, and `StartWhenUnblocked`. `DependsOn`
+and `Blocks` are `[]TaskDependencyRef` (`ID`, `Title`, `State`, `Status`;
+`Status` is only ever set on a `DependsOn` entry, since a task cannot be
+"pending" or "resolved" against a task it blocks). Each list is capped at 512
+entries; the matching `*Truncated` flag reports whether more edges exist than
+were returned. A gRPC plugin sees no redaction: every edge end's `Title` and
+`State` are populated regardless of which workspace it belongs to, unlike the
+canvas surface described in [`canvases.md`](canvases.md), which blanks both
+fields for an edge end the caller's canvas scope does not directly admit: a
+workspace-scoped canvas admits an end sharing its workspace, a repository- or
+session-scoped canvas admits an end only when it is also returned as a
+directly readable task in the same response, and a task-scoped canvas admits
+none.
+
+If dependency derivation cannot produce a verdict for a task that a call
+does return, the host substitutes the withheld verdict rather than failing
+that call: `Blocked: true`, `BlockedReason: "unknown"`, empty
+`DependsOn`/`Blocks`, both truncation flags `false`, and
+`StartWhenUnblocked: false`. Treat this shape as "no answer," not as "task is
+actually blocked." Two distinct causes reach it: an internal read failure
+during derivation, or a task reached through `CreateTask`/`UpdateTask`/
+`MoveTask` by a caller holding `api_write:tasks` but not `api_read:tasks` (an
+independent capability those RPCs gate on writing, not reading). `List` and
+`Get` themselves never produce this verdict for a missing read capability:
+each fails the call outright with `PermissionDenied` before any task is
+returned, so accessor denial and a withheld verdict on a returned task are
+never the same signal. This is also distinct from the fan-out limit below:
+that refuses the whole call with `ResourceExhausted` rather than substituting
+a withheld verdict onto any task.
+
+Canvas event payloads do not carry the dependency projection: `Blocked`,
+`BlockedReason`, `DependsOn`, `Blocks`, the truncation flags, and
+`StartWhenUnblocked` are refetch-on-signal fields for the canvas surface.
+Native plugin `OnEvent` deliveries can carry the four dependency fields
+(`blocked`, `blocked_reason`, `depends_on`, and `blocks`) on dependency-related
+`task.updated` events. The truncation flags and `start_when_unblocked` still
+come from `host.Tasks().Get`/`.List`, so an event is never a complete
+replacement for a task read. A plugin that caches a task's dependency fields
+refetches them when: a
+`task.updated` event names that task or either end of one of its edges; a
+`task.dependencies_resolved` or `task.dependency_failed` event names that
+task; or a `task.state_changed` event names any task ID present in that
+task's cached `DependsOn` or `Blocks` list, since a predecessor or dependent
+simply advancing state is not itself one of the first three signals. A single
+`Get`/`List` response is not a transactional snapshot: with no surrounding
+lock, an edge can change while the read is being derived, so one response can
+show an edge asymmetrically (for example, a predecessor still listed as
+pending after it has already resolved). Treat what a response returns as the
+union of independently-read facts, and resolve staleness by refetching on the
+next matching signal rather than trusting any single response as
+authoritative.
+
+Reading dependencies adds no extra query per task; the host derives them for
+the whole page in one batched pass. That batch is bounded by a fixed limit on
+the number of distinct task IDs it will read across all edges on the page:
+whether an edge is expressed once or shared by many tasks, each distinct ID
+only counts once toward the limit. `ListTasks` and the plugin-owned
+task-tree preview RPC (`PreviewPluginOwnedTaskTree`) are both bound by this
+limit and fail the call with a `ResourceExhausted` error when a page (or, for
+the preview RPC, the tree itself) would cross it; the preview RPC accepts no
+page `limit` at all, so the only remedy is asking for a smaller tree. Flows
+that always return exactly one task, `GetTask` and the task-write RPCs
+(`CreateTask`, `UpdateTask`, `MoveTask`), can never exceed the limit and are
+exempt. A `ResourceExhausted` response is about the cost of deriving the
+answer, not about the size of the reply; it is never folded into the withheld
+verdict.
+
+`ListTasks`'s `Page.Limit` clamps only its upper bound: a limit above the
+host's page ceiling is lowered to that ceiling, and a limit at or below zero
+(including an unset, proto3-default zero) falls back to the host's default
+page size. That default is the largest page the endpoint will return on its
+own, so retrying a rejected call with a smaller explicit `Limit` (not with a
+zero or negative one) is the way to shrink a page that tripped the fan-out
+limit above.
+
+Declare a `min_kandev_version` manifest floor for the first Kandev release
+your plugin expects to carry these seven fields; a host older than that floor
+omits them from the wire message entirely (the SDK reports them as their zero
+values, indistinguishable from "not blocked, no edges"). This floor is a
+single host-wide capability check performed once at install time: it does
+not name `task-dependencies` or any other capability, unlike the
+capability-keyed `min_kandev_version` requirement on `api_read:messages`
+described above, which the host re-validates per declared capability. A dev
+or otherwise non-release build of the host always satisfies the floor check
+regardless of its actual age, so a plugin installed on such a build can still
+receive the same ambiguous zero-value bytes; do not rely on the floor check
+alone as proof the fields are populated when running against a non-release
+host.
 
 `host.Messages().List(ctx, MessageFilter{...}, Page{...})` reads historical
 conversation content (capability `api_read:messages`). Filter by `SessionIDs`,
@@ -1595,8 +1836,8 @@ records or mutate the SPA store.
 A plugin bundle must render with `host.React` / `host.jsx`; bundling your
 own React copy breaks hook identity against the host tree.
 
-`host.ui` is a curated `@kandev/ui` subset: Alert, Badge, Button, Card,
-Checkbox, Dialog, DropdownMenu, Input, Label, Pagination, ScrollArea, Select,
+`host.ui` is a curated `@kandev/ui` subset: Alert, Badge, Button, Action,
+ActionGroup, Card, Checkbox, Dialog, DropdownMenu, Input, Label, Pagination, ScrollArea, Select,
 Separator, Sheet, Skeleton, Spinner, Switch, Table, Tabs, Textarea, Tooltip
 (each with their compound sub-parts, e.g. `DialogContent`, `TableRow`) plus
 first-party app UI: `Combobox` (the app's picker), `PageTopbar` (the title
@@ -1770,8 +2011,8 @@ plugins at once. Available slots:
 | `task-create-input-actions` | Task creation composer toolbar                                                                         | `PluginComposerSlotProps`                                         |
 | `new-session-input-actions` | New-session composer toolbar                                                                           | `PluginComposerSlotProps`                                         |
 | `chat-submit-decoration`    | Layer over the chat composer's send button, for adornments that belong on the send affordance itself   | `ChatSubmitDecorationSlotProps`                                   |
-| `chat-top-bar`              | Session top bar, beside the CPU/DB metrics and the document/editor/debug controls                      | `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }` |
-| `main-top-bar`              | Default app top bar (Home / Kanban / Tasks), beside the CPU/DB metrics and the view/display controls   | `{ workspaceId, workspaceLabel, currentPage }`                    |
+| `chat-top-bar`              | Session top bar on desktop; shared Plugins menu section on phones                                      | `ChatTopBarSlotProps`                                             |
+| `main-top-bar`              | Default app top bar on desktop; phone Plugins menu unless the same plugin supplies task controls | `MainTopBarSlotProps`                                             |
 | `app-status-bar-left`       | Default-left item in the global status surface                                                         | `AppStatusBarSlotProps`                                           |
 | `app-status-bar-right`      | Default-right item in the global status surface                                                        | `AppStatusBarSlotProps`                                           |
 | `plugin-settings`           | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }`                                            |
@@ -1837,32 +2078,12 @@ backend over `host.api.fetch(...)`, and let the backend do the matching.
 
 ```js
 function makeChatAction(host) {
-  const { jsx: h, ui } = host;
-  const { Button, Tooltip, TooltipTrigger, TooltipContent } = ui;
-
-  return function ChatAction({ slotProps }) {
-    const { taskId } = slotProps ?? {};
-    return h(
-      Tooltip,
-      null,
-      h(
-        TooltipTrigger,
-        { asChild: true },
-        h(
-          Button,
-          {
-            type: "button",
-            variant: "ghost",
-            size: "icon",
-            className: "h-7 w-7 cursor-pointer hover:bg-muted/40",
-            "aria-label": "Open plugin page",
-            onClick: () => host.navigate("/hello-world"),
-          },
-          /* an icon element built with host.jsx */ myIcon(h),
-        ),
-      ),
-      h(TooltipContent, null, taskId ? `Task: ${taskId}` : "Plugin action"),
-    );
+  return function ChatAction() {
+    return host.jsx(host.ui.Action, {
+      label: host.i18n.t("openPluginPage"),
+      icon: myIcon(host.jsx),
+      onClick: () => host.navigate("/hello-world"),
+    });
   };
 }
 
@@ -1870,33 +2091,41 @@ function makeChatAction(host) {
 registry.registerComponent("chat-input-actions", makeChatAction(host));
 ```
 
-Match the first-party toolbar buttons: `Button` from `host.ui` with
-`variant="ghost"`, `size="icon"`, `h-7 w-7`, `cursor-pointer`, and a 16px
-(`h-4 w-4`) icon. Wrap it in `host.ui.Tooltip` so it reads like the native
-mic/attach controls. `kandev-plugin-hello/ui/bundle.js` ships a working
-example.
+`Action` selects the composer size, focus treatment, and tooltip. Do not copy
+button sizing or wrap this action in another Tooltip. The accessible label must
+come from your plugin's localized catalog. Use the fallback example above when
+one component must support a host that does not export `Action`.
 
 ### Session top bar
 
 Register a `chat-top-bar` component to surface at-a-glance status in the
-session top bar, beside first-party document/editor/debug controls. The host passes the current context as
-`slotProps`:
+session top bar. Import its context from the public SDK:
 
 ```ts
-type ChatTopBarSlotProps = {
+import type { ChatTopBarSlotProps } from "@kandev/plugin-sdk";
+
+// The exported type contains:
+type Context = {
   taskId: string | null;
   taskTitle?: string;
   workspaceId: string | null;
   activeSessionId: string | null; // session the top bar is bound to
   sessionIds: string[]; // every kandev session id on the task
+  presentation: "desktop" | "mobile";
 };
 ```
 
 Like `chat-input-actions`, both the active session and the full `sessionIds`
 list are provided (see the note above about resolving kandev session ids to
-ACP transcript ids server-side). The top bar is a compact horizontal strip, so
-keep contributions to small badges or `h-7` buttons that match the native
-metric chips.
+ACP transcript ids server-side). With `presentation: "desktop"`, the contribution
+is inline beside first-party document/editor/debug controls. Use `Action` for
+a standard action; it matches the native metric controls. Existing raw controls
+retain their own geometry. With
+`presentation: "mobile"`, the contribution is in the shared menu's **Plugins**
+section. The host wraps multiple contributions inside the menu width and gives
+`host.ui.Action` and `host.ui.Button` controls a minimum 44px touch target.
+Plugin controls retain their own interaction and disclosure state; arbitrary
+interaction does not dismiss the menu.
 
 ```js
 // inside initialize(registry, host):
@@ -1971,13 +2200,22 @@ type MainTopBarSlotProps = {
 };
 ```
 
-Because the bar is not scoped to a task, no task/session ids are provided. Like
-`chat-top-bar` it is a compact horizontal strip, so keep contributions to small
-badges or icon buttons. On a phone, `presentation` is `"mobile"`; the
-contribution joins the horizontally scrollable middle strip between the fixed
-Kandev link and menu button. Use `host.ui.Button` for documented icon actions.
-The host normalizes those buttons to a 32px box and their SVG icons to 16px.
-Do not add a second horizontal scroll container. Desktop contributions keep
+Because the bar is not scoped to a task, no task/session ids are provided. On
+desktop, keep contributions to small badges or icon buttons in the compact
+horizontal strip. On a phone, `presentation` is `"mobile"`; the contribution
+renders in the shared app menu's **Plugins** section alongside sidebar workspace
+actions. On a task with task controls, a plugin's `chat-top-bar` registrations
+replace that same plugin's `main-top-bar` registrations once task content renders.
+If task controls return `null`, the workspace toolbar remains available until
+task content appears; it returns if task content disappears. Keep task-relevant
+actions in `chat-top-bar`; every registration in that selected slot renders.
+Workspace-only plugins and sidebar workspace actions remain available. Listings
+and archived tasks use the workspace toolbar. The menu uses one wrapping group
+without Workspace/Task subheadings. The host wraps
+contributions within the menu width and gives `host.ui.Button` controls a
+minimum 44px active target. Use `host.ui.Action` for new standard actions; it
+owns the surface geometry. Existing `host.ui.Button` and raw component
+contributions keep their current sizing. Desktop legacy contributions keep
 their existing sizing.
 
 ```js
@@ -2403,7 +2641,7 @@ Host reader because event queues are bounded and delivery is best-effort.
 
 `registerTaskMenuAction` adds an item to native task menus. Group `"edit"` is
 card-only and nests inside the kanban card's `Edit` submenu. Group `"primary"`
-renders as a flat top-level item on cards and desktop/mobile task-row menus.
+renders as a top-level item on cards and desktop/mobile task-row menus.
 `task-card-indicators` (see the named slots table) is the matching read-only
 surface, rendered beside the PR status icon on every card. `task-card-tags`
 is a sibling read-only surface with the same `slotProps` shape, mounted in its
@@ -2437,6 +2675,40 @@ logged, not left to crash the card; the menu closes either way. Group
 `"primary"` actions render and behave the same way as their own top-level row,
 including in desktop and phone task-row menus. Do not patch first-party task
 components directly.
+
+An action of either group that declares `items(context)` renders as a submenu
+instead: `label` becomes an unselectable trigger and the returned
+`TaskMenuSubItemRegistration` children are its entries, in order, each called
+with the same `context` as the action. Nesting stops at that one level. A
+`primary` action's children also reach the command palette and the sidebar's
+task commands, one command each; `edit` stays card-only, as it always was. `items()` is synchronous and is called while the host builds that
+card's or row's menu entries on every render, whether or not a menu is open; a
+card's dropdown and context variants are built from one evaluation, so read
+cached state and memoize anything expensive. `run` stays required: it is the
+flat item a host that predates `items` renders, and the fallback whenever
+`items` yields nothing usable (a non-array, an empty list, a promise, or a
+throw, which is caught and logged). A child needs a non-blank, unique `id`, a
+non-blank `label` and a callable `run`, with optional fields of the shapes the
+entry builder understands: a boolean `disabled` (or `null`, meaning enabled) and
+an `icon` that is a curated name, a component, a ready-made element or `null`. A child the host cannot read
+or render is dropped, and one whose `id` repeats is reported and skipped.
+
+```js
+registry.registerTaskMenuAction({
+  id: "add-tag",
+  label: "Add tag...",
+  group: "primary",
+  // Optional. Turns this action into a submenu of these children.
+  items: (context) =>
+    recentTags(context).map((tag) => ({
+      id: tag.id,
+      label: tag.name,
+      run: (ctx) => applyTag(ctx.taskId, tag.id),
+    })),
+  // Flat behavior, and the fallback when `items` has nothing usable.
+  run: (context) => openTagPicker(context.taskId),
+});
+```
 
 `registerTaskFilter` adds a client-side, multi-select filter section to the
 kanban board's display dropdown, next to the built-in Workflow and Repository

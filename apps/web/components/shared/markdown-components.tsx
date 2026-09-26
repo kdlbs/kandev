@@ -1,9 +1,12 @@
 "use client";
 
 import { createContext, isValidElement, useContext, type MouseEvent, type ReactNode } from "react";
+import type { Options as MarkdownOptions } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkGemoji from "remark-gemoji";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { InlineCode } from "@/components/task/chat/messages/inline-code";
 import { CodeBlock } from "@/components/task/chat/messages/code-block";
 import { MermaidBlock } from "@/components/shared/mermaid-block";
@@ -12,14 +15,25 @@ import { isMermaidContent } from "@/components/editors/tiptap/tiptap-mermaid-ext
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useAppStore } from "@/components/state-provider";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
+import { remarkMathCompat } from "@/lib/markdown/remark-math-compat";
 import {
   resolveMarkdownFileTarget,
   type MarkdownFileRootAlias,
 } from "@/lib/markdown/file-link-target";
 
 /** Shared remark plugins used by all markdown renderers */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const remarkPlugins: any[] = [remarkGfm, remarkBreaks, remarkGemoji];
+type MarkdownPluginList = NonNullable<MarkdownOptions["remarkPlugins"]>;
+
+export const remarkPlugins: MarkdownPluginList = [
+  remarkGfm,
+  remarkBreaks,
+  remarkGemoji,
+  remarkMath,
+  remarkMathCompat,
+];
+
+/** Shared rehype plugins used by non-raw Markdown renderers. */
+export const rehypePlugins: NonNullable<MarkdownOptions["rehypePlugins"]> = [rehypeKatex];
 
 // `normalizeMarkdown` (pure string transform) and its cached variant live in
 // the React-free markdown cache module. Re-exported here so existing importers

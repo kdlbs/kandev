@@ -20,6 +20,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -76,6 +77,7 @@ type GitCredentialProvider interface {
 // separate so resolvers can enforce same-origin routing before returning a
 // transient secret.
 type GitCredentialRequest struct {
+	CheckoutOptions      *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
 	WorkspaceID          string
 	TaskID               string
 	SessionID            string
@@ -436,6 +438,10 @@ func (c *Cloner) EnsureWorkspaceClonedForProvider(
 func (c *Cloner) EnsureWorkspaceClonedWithCredentialRequest(
 	ctx context.Context, request GitCredentialRequest, credentialOrigin, token string,
 ) (string, error) {
+	if hasCheckoutOptions(request) {
+		path, _, err := c.ensureWorkspaceCheckoutCache(ctx, request, credentialOrigin, token)
+		return path, err
+	}
 	targetPath, err := c.WorkspaceProviderRepositoryPath(
 		request.WorkspaceID, request.Provider, request.ProviderHost, request.ProviderScope,
 		request.ProviderRepositoryID, request.Owner, request.Name,
@@ -464,6 +470,13 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithCredentialRequest(
 		request.WorkspaceID, request.Provider, request.ProviderHost, request.ProviderScope,
 		request.ProviderRepositoryID, request.Owner, request.Name,
 	)
+	if err == nil && hasCheckoutOptions(request) {
+		options, validationErr := models.NormalizeRepositoryCheckoutOptions(request.CheckoutOptions)
+		if validationErr != nil {
+			return validationErr
+		}
+		targetPath, err = c.checkoutCachePath(request, options)
+	}
 	if err != nil {
 		return err
 	}

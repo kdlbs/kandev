@@ -19,6 +19,7 @@ const snakeCaseWirePayload = {
   cli_flags: [{ flag: "--verbose", description: "v", enabled: true }],
   env_vars: [sampleEnvVar],
   cli_passthrough: false,
+  cursor_mcp_auth_enabled: false,
   enabled: false,
   workspace_id: WORKSPACE_ID,
   user_modified: true,
@@ -41,6 +42,7 @@ const expectedCamelCaseProfile = {
   cliFlags: [{ flag: "--verbose", description: "v", enabled: true }],
   envVars: [sampleEnvVar],
   cliPassthrough: false,
+  cursorMcpAuthEnabled: false,
   enabled: false,
   providerSupported: false,
   workspaceId: WORKSPACE_ID,
@@ -66,6 +68,7 @@ describe("normalizeAgentProfile", () => {
     expect(result.agentDisplayName).toBe("");
     // Legacy payloads without the flag are treated as enabled.
     expect(result.enabled).toBe(true);
+    expect(result.cursorMcpAuthEnabled).toBe(true);
   });
 
   it("preserves the office workspace scope when it is present", () => {
@@ -83,6 +86,17 @@ describe("normalizeAgentProfile", () => {
     });
     expect(result.agentId).toBe("codex");
     expect(result.cliPassthrough).toBe(true);
+  });
+
+  it("preserves the Cursor MCP auth preference through the wire round trip", () => {
+    const result = normalizeAgentProfile({
+      id: SAMPLE_ID,
+      name: "default",
+      cursor_mcp_auth_enabled: false,
+    });
+
+    expect(result.cursorMcpAuthEnabled).toBe(false);
+    expect(toAgentProfilePayload(result).cursor_mcp_auth_enabled).toBe(false);
   });
 
   it("maps command_prefix to commandPrefix", () => {

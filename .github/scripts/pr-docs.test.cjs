@@ -39,6 +39,40 @@ test('recognized documentation-only paths are exempt', () => {
   assert.equal(result.exemptPaths.length, 9);
 });
 
+// @covers AC-CI-PR-DOCS-001.7
+test('the canonical plugin registry source is exempt', () => {
+  const result = validator.classifyChangedFiles([
+    { filename: 'plugin-registry/plugins.yaml', status: 'modified' },
+  ]);
+
+  assert.equal(result.requiresCoverage, false);
+  assert.deepEqual(result.triggeringPaths, []);
+  assert.deepEqual(result.exemptPaths, ['plugin-registry/plugins.yaml']);
+});
+
+// @covers AC-CI-PR-DOCS-001.7
+test('the registry exemption does not cover other registry files or mixed changes', () => {
+  const otherRegistryFile = validator.classifyChangedFiles([
+    { filename: 'plugin-registry/schema.json', status: 'modified' },
+  ]);
+  assert.equal(otherRegistryFile.requiresCoverage, true);
+  assert.deepEqual(otherRegistryFile.triggeringPaths, ['plugin-registry/schema.json']);
+
+  const registryBuilder = validator.classifyChangedFiles([
+    { filename: 'plugin-registry/build-index.mjs', status: 'modified' },
+  ]);
+  assert.equal(registryBuilder.requiresCoverage, true);
+  assert.deepEqual(registryBuilder.triggeringPaths, ['plugin-registry/build-index.mjs']);
+
+  const mixedChange = validator.classifyChangedFiles([
+    { filename: 'plugin-registry/plugins.yaml', status: 'modified' },
+    { filename: 'apps/backend/runtime.go', status: 'modified' },
+  ]);
+  assert.equal(mixedChange.requiresCoverage, true);
+  assert.deepEqual(mixedChange.exemptPaths, ['plugin-registry/plugins.yaml']);
+  assert.deepEqual(mixedChange.triggeringPaths, ['apps/backend/runtime.go']);
+});
+
 // @covers AC-CI-PR-DOCS-001.2
 test('recognized harness configuration paths are exempt', () => {
   const result = validator.classifyChangedFiles([
@@ -58,10 +92,57 @@ test('recognized harness configuration paths are exempt', () => {
   ]);
 });
 
+// @covers AC-CI-PR-DOCS-001.8
+test('CI infrastructure paths under .github are exempt', () => {
+  const result = validator.classifyChangedFiles([
+    { filename: '.github/workflows/release.yml', status: 'modified' },
+    { filename: '.github/scripts/pr-walkthrough-workflow-contract_test.py', status: 'modified' },
+    { filename: '.github/actions/setup-opencode/action.yml', status: 'modified' },
+  ]);
+
+  assert.equal(result.requiresCoverage, false);
+  assert.deepEqual(result.triggeringPaths, []);
+  assert.deepEqual(result.exemptPaths, [
+    '.github/workflows/release.yml',
+    '.github/scripts/pr-walkthrough-workflow-contract_test.py',
+    '.github/actions/setup-opencode/action.yml',
+  ]);
+});
+
+// @covers AC-CI-PR-DOCS-001.8
+test('a CI path combined with a non-exempt path still requires coverage', () => {
+  const result = validator.classifyChangedFiles([
+    { filename: '.github/workflows/release.yml', status: 'modified' },
+    { filename: 'apps/backend/runtime.go', status: 'modified' },
+  ]);
+
+  assert.equal(result.requiresCoverage, true);
+  assert.deepEqual(result.exemptPaths, ['.github/workflows/release.yml']);
+  assert.deepEqual(result.triggeringPaths, ['apps/backend/runtime.go']);
+});
+
+// @covers AC-CI-PR-DOCS-001.8
+test('non-CI files under .github and CI paths outside .github require coverage', () => {
+  const result = validator.classifyChangedFiles([
+    { filename: '.github/dependabot.yml', status: 'modified' },
+    { filename: '.github/release-signing-key.asc', status: 'modified' },
+    { filename: 'scripts/build.sh', status: 'modified' },
+    { filename: 'workflows/ci.yml', status: 'modified' },
+  ]);
+
+  assert.equal(result.requiresCoverage, true);
+  assert.deepEqual(result.exemptPaths, []);
+  assert.deepEqual(result.triggeringPaths, [
+    '.github/dependabot.yml',
+    '.github/release-signing-key.asc',
+    'scripts/build.sh',
+    'workflows/ci.yml',
+  ]);
+});
+
 // @covers AC-CI-PR-DOCS-001.3
 test('shipped files and unsupported test-like paths require coverage', () => {
   const result = validator.classifyChangedFiles([
-    { filename: '.github/workflows/release.yml', status: 'modified' },
     { filename: 'apps/web/package.json', status: 'modified' },
     { filename: 'apps/web/lib/fixture.test.json', status: 'modified' },
     { filename: 'apps/backend/worker_test.go.txt', status: 'modified' },
@@ -72,7 +153,6 @@ test('shipped files and unsupported test-like paths require coverage', () => {
 
   assert.equal(result.requiresCoverage, true);
   assert.deepEqual(result.triggeringPaths, [
-    '.github/workflows/release.yml',
     'apps/web/package.json',
     'apps/web/lib/fixture.test.json',
     'apps/backend/worker_test.go.txt',
@@ -1609,23 +1689,23 @@ test('six work orders sharing three requirements stay within the search quota', 
 });
 
 // @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-003.2
-test('PR-only requirements and empty searches reuse a bounded directory lookup', async () => {
-  const { contents, changed, requirementPath, requirementIds } = repeatedCoverageFixture();
+test('newly added requirements resolve from the head diff without code search', async () => {
+  const { contents, changed, requirementPath: originalPath } = repeatedCoverageFixture();
+  const requirementPath = 'docs/specs/ui/requirements/coverage.md';
+  contents[requirementPath] = contents[originalPath];
+  delete contents[originalPath];
   changed.push({ filename: requirementPath, status: 'added' });
   let searches = 0;
   let listings = 0;
   const client = coverageClient(contents, changed, {
     async searchCode() {
       searches += 1;
-      return [];
+      throw new Error('code search should not run for a newly added requirement');
     },
     async listDirectory(directory, ref) {
       assert.equal(directory, 'docs/specs/ui/requirements');
       assert.equal(ref, SHA_B);
       listings += 1;
-      if (listings > 1) {
-        throw new Error('GitHub API request failed with HTTP 429: Too Many Requests');
-      }
       return [{ path: requirementPath, type: 'file' }];
     },
   });
@@ -1633,7 +1713,42 @@ test('PR-only requirements and empty searches reuse a bounded directory lookup',
   const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
 
   assert.equal(result.status, 'covered', result.errors.join('; '));
-  assert.equal(searches, requirementIds.length);
+  assert.equal(searches, 0);
+  assert.equal(listings, 1);
+});
+
+// @covers AC-CI-PR-DOCS-001.5
+test('newly added canonical requirements still reject duplicate IDs', async () => {
+  const { contents, changed, requirementPath: originalPath } = repeatedCoverageFixture();
+  const requirementPath = 'docs/specs/ui/requirements/coverage.md';
+  const duplicatePath = 'docs/specs/ui/requirements/duplicate.md';
+  contents[requirementPath] = contents[originalPath];
+  delete contents[originalPath];
+  contents[duplicatePath] = contents[requirementPath];
+  changed.push({ filename: requirementPath, status: 'added' });
+  let searches = 0;
+  let listings = 0;
+  const client = coverageClient(contents, changed, {
+    async searchCode() {
+      searches += 1;
+      return [requirementPath];
+    },
+    async listDirectory(directory, ref) {
+      assert.equal(directory, 'docs/specs/ui/requirements');
+      assert.equal(ref, SHA_B);
+      listings += 1;
+      return [
+        { path: requirementPath, type: 'file' },
+        { path: duplicatePath, type: 'file' },
+      ];
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'invalid', result.errors.join('; '));
+  assert.match(result.errors.join('; '), /ambiguous definitions/);
+  assert.equal(searches, 0);
   assert.equal(listings, 1);
 });
 
@@ -1706,20 +1821,21 @@ test('lookup errors fail closed without poisoning later evaluations', async t =>
   for (const boundary of ['searchCode', 'listDirectory']) {
     await t.test(boundary, async () => {
       const { contents, changed, requirementPath } = repeatedCoverageFixture();
-      changed.push({ filename: requirementPath, status: 'added' });
+      const directoryFallbackPath = 'docs/specs/ui/requirements/coverage.md';
+      contents[directoryFallbackPath] = contents[requirementPath];
       let fail = true;
       const client = coverageClient(contents, changed, {
         async searchCode() {
           if (fail && boundary === 'searchCode') {
             throw new Error('GitHub API request failed with HTTP 403: API rate limit exceeded');
           }
-          return [];
+          return boundary === 'listDirectory' ? [] : [requirementPath];
         },
         async listDirectory() {
           if (fail && boundary === 'listDirectory') {
             throw new Error('GitHub API request failed with HTTP 503: Service Unavailable');
           }
-          return [];
+          return [{ path: directoryFallbackPath, type: 'file' }];
         },
       });
 

@@ -7,8 +7,8 @@ import { waitForLatestSessionDone } from "../../helpers/session";
 test.describe("Shared phone listing topbar", () => {
   test("returns focus to the menu button when search is hidden", async ({ testPage }) => {
     await testPage.goto("/tasks");
-    const opener = testPage.getByTestId("mobile-topbar-menu");
-    const menu = testPage.getByRole("dialog", { name: "Menu", exact: true });
+    const opener = testPage.getByTestId("mobile-topbar-page-context");
+    const menu = testPage.getByRole("dialog", { name: "View options", exact: true });
     const search = testPage.getByPlaceholder("Search tasks...");
     await opener.tap();
     await menu.getByTestId("mobile-search-toggle").tap();
@@ -72,7 +72,7 @@ test.describe("Shared phone listing topbar", () => {
     });
 
     const header = testPage.getByTestId("threads-mobile-topbar");
-    const trigger = header.getByTestId("threads-mobile-view-trigger");
+    const trigger = header.getByTestId("mobile-topbar-page-context");
     const drawer = testPage.getByTestId("threads-mobile-view-drawer");
     await trigger.tap();
     const failedWrite = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/, {
@@ -89,7 +89,7 @@ test.describe("Shared phone listing topbar", () => {
     expect((await requireBox(header, "header during sync failure")).height).toBe(56);
     const cue = header.getByTestId("thread-swipe-cue");
     await expect(cue).toHaveText("1/2");
-    for (const target of [trigger, header.getByTestId("mobile-topbar-menu")]) {
+    for (const target of [trigger, header.getByTestId("app-nav-trigger")]) {
       expect(
         await target.evaluate((element) => {
           const box = element.getBoundingClientRect();
@@ -100,7 +100,7 @@ test.describe("Shared phone listing topbar", () => {
       ).toBe(true);
     }
     const cueBox = await requireBox(cue, "pagination during sync failure");
-    const menuBox = await requireBox(header.getByTestId("mobile-topbar-menu"), "menu");
+    const menuBox = await requireBox(header.getByTestId("app-nav-trigger"), "menu");
     expect(cueBox.x + cueBox.width).toBeLessThanOrEqual(menuBox.x);
     await assertNoDocumentHorizontalOverflow(testPage, "saved-view sync failure");
 
@@ -127,7 +127,9 @@ test.describe("Shared phone listing topbar", () => {
     await retried;
     await expect(recovery).toHaveCount(0);
     await testPage.reload();
-    await expect(trigger).toContainText("New view");
+    await trigger.tap();
+    await expect(drawer).toContainText("New view");
+    await testPage.keyboard.press("Escape");
     await expect(header.getByTestId("threads-mobile-view-sync-status")).toHaveCount(0);
   });
 
@@ -140,21 +142,19 @@ test.describe("Shared phone listing topbar", () => {
       for (const [route, label] of [
         ["/?home=overview", "Kanban"],
         ["/tasks", "List"],
-        ["/threads", "All threads"],
+        ["/threads", "Threads"],
       ]) {
         if (label === "Kanban") {
           await testPage.goto("/tasks");
-          await testPage.getByTestId("mobile-topbar-menu").tap();
+          await testPage.getByTestId("mobile-topbar-page-context").tap();
           await testPage.getByRole("radio", { name: "Kanban", exact: true }).tap();
           await expect(testPage.getByRole("dialog")).toHaveCount(0);
         } else {
           await testPage.goto(route);
         }
         const header = testPage.locator("header").first();
-        const context = header.getByTestId(
-          label === "All threads" ? "threads-mobile-view-trigger" : "mobile-topbar-page-context",
-        );
-        const menu = header.getByTestId("mobile-topbar-menu");
+        const context = header.getByTestId("mobile-topbar-page-context");
+        const menu = header.getByTestId("app-nav-trigger");
         await expect(context).toContainText(label);
         await expect(header.getByTestId("mobile-topbar-brand")).toHaveCount(0);
         await expect(header.getByTestId("mobile-topbar-action-strip")).toHaveCount(0);
@@ -193,7 +193,7 @@ test.describe("Shared phone listing topbar", () => {
     testPage,
   }) => {
     await testPage.goto("/tasks");
-    await testPage.getByTestId("mobile-topbar-menu").tap();
+    await testPage.getByTestId("app-nav-trigger").tap();
     const dialog = testPage.getByRole("dialog", { name: "Menu", exact: true });
     await dialog.getByRole("link", { name: "Home", exact: true }).tap();
     await expect(testPage).toHaveURL(
@@ -208,7 +208,7 @@ test.describe("Shared phone listing topbar", () => {
     await testPage.goto("/?home=overview");
     const header = testPage.locator("header").first();
     await expect(header.getByTestId("mobile-topbar-page-context")).toHaveCount(0);
-    await expect(header.getByTestId("mobile-topbar-menu")).toHaveCount(0);
+    await expect(header.getByTestId("app-nav-trigger")).toHaveCount(0);
     await expect(header).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage, "tablet listing header");
     const menu = header.getByRole("button", { name: "Open menu", exact: true });
@@ -239,13 +239,15 @@ test.describe("Shared phone listing topbar", () => {
       expect(await label.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
         true,
       );
-      const menu = testPage.getByTestId("mobile-topbar-menu");
+      const menu = testPage.getByTestId("app-nav-trigger");
       const box = await requireBox(menu, "menu beside long workspace");
       expect(box.width).toBe(44);
       expect(box.x + box.width).toBeLessThanOrEqual(360);
       await assertNoDocumentHorizontalOverflow(testPage, "long workspace context");
       await context.tap();
-      await expect(testPage.getByRole("dialog", { name: "Menu", exact: true })).toBeVisible();
+      await expect(
+        testPage.getByRole("dialog", { name: "View options", exact: true }),
+      ).toBeVisible();
     } finally {
       await apiClient.deleteWorkspace(workspace.id, name);
     }

@@ -1,18 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { useWorkflowMoveSubmit } from "./use-workflow-move-submit";
 import { StepDisclosureRowActions } from "./workflow-step-disclosure-actions";
 import {
   WorkflowMoveOptionsFields,
   useWorkflowMoveOptionsForm,
   workflowMoveOptionsPayload,
 } from "./workflow-move-options";
-import { WorkflowMovePreviewDisclosure } from "./workflow-move-preview";
+import { CompactWorkflowMovePreview } from "./workflow-move-preview";
 import { useWorkflowMovePreview } from "@/hooks/domains/kanban/use-workflow-move-preview";
 import { useWorkflowMovePreviewRevision } from "@/hooks/domains/kanban/use-workflow-move-preview-revision";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
 type StepDisclosureMoveControlsProps = {
+  heading: ReactNode;
   stepId: string;
   taskId: string;
   workflowId: string;
@@ -24,6 +26,7 @@ type StepDisclosureMoveControlsProps = {
 };
 
 export function StepDisclosureMoveControls({
+  heading,
   stepId,
   taskId,
   workflowId,
@@ -36,6 +39,7 @@ export function StepDisclosureMoveControls({
   const [showOptions, setShowOptions] = useState(false);
   const { draft, patchDraft } = useWorkflowMoveOptionsForm();
   const entryOptions = workflowMoveOptionsPayload(draft);
+  const submission = useWorkflowMoveSubmit(movePending, () => onMove(stepId, entryOptions));
   const invalidationKey = useWorkflowMovePreviewRevision(taskId, workflowId, stepId);
   const previewState = useWorkflowMovePreview({
     taskId,
@@ -49,23 +53,30 @@ export function StepDisclosureMoveControls({
 
   return (
     <>
-      <div className="flex justify-end">
+      <div className="flex min-w-0 items-center gap-2">
+        {heading}
         <StepDisclosureRowActions
           stepId={stepId}
           isMoving={isMoving}
-          movePending={movePending}
+          movePending={submission.busy}
           showOptions={showOptions}
           buttonSizeClass={buttonSizeClass}
-          draft={draft}
-          entryOptions={entryOptions}
           onToggleOptions={() => setShowOptions((value) => !value)}
-          onMove={onMove}
+          onSubmit={submission.submit}
         />
       </div>
+      <CompactWorkflowMovePreview
+        state={previewState}
+        isTouchSurface={isTouchSurface}
+        expanded={showOptions}
+      />
       {showOptions && (
         <div
           className="pb-1 pl-4 pr-1"
-          onKeyDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            submission.onKeyDown(event);
+            event.stopPropagation();
+          }}
           data-testid={`workflow-step-disclosure-options-panel-${stepId}`}
         >
           <WorkflowMoveOptionsFields
@@ -76,7 +87,6 @@ export function StepDisclosureMoveControls({
           />
         </div>
       )}
-      <WorkflowMovePreviewDisclosure state={previewState} isTouchSurface={isTouchSurface} />
     </>
   );
 }

@@ -236,3 +236,9 @@ The implementation review on 2026-09-17 identified six gaps. All six are now add
 GitHub repository display now uses `owner/repo` while provider-link resolution retains the linked repository identity. Multi-repository headers remain visible when author or message metadata is unavailable, and legacy targets without repository metadata show a localized unavailable label.
 
 Review-specific validation passed: the affected component suite covered 11 files and 85 tests; the focused review suite covered 5 files and 27 tests; desktop commit-navigation E2E covered fine and coarse-pointer cases (2 tests); and the mobile commit-navigation E2E covered long labels, inline historical-file activation, focus, touch hitboxes, and document containment (1 test).
+
+Merged-base PR fixup validation completed on 2026-09-26:
+
+- Focused Vitest coverage passed 13 files and 104 tests. `pnpm run typecheck` and `pnpm run i18n:check` passed, including the added Japanese translation for **Open commit**.
+- `pnpm e2e:run --project chromium e2e/tests/git/commit-file-navigation.spec.ts e2e/tests/git/git-changes-panel.spec.ts` passed 29 tests; the corresponding `mobile-chrome` run for `git/mobile-commit-file-navigation.spec.ts` and `task/mobile-changes-panel.spec.ts` passed 10 tests. Both managed runs built the web assets successfully.
+- Public-doc validation passed 62 tests and validated 47 pages. Specification validation passed with 309 decisions and 1,185 specifications.

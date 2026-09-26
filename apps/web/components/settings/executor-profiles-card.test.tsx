@@ -63,13 +63,11 @@ describe("ExecutorProfilesCard profile navigation", () => {
     expect(push).toHaveBeenCalledWith("/settings/executors/profile%2Fprimary");
   });
 
-  it("preserves the scoped legacy profile route for SSH", () => {
+  it("opens an SSH profile in the canonical editor", () => {
     renderCard(executor("ssh"));
 
     fireEvent.click(screen.getByText("Primary profile"));
 
-    expect(push).toHaveBeenCalledWith(
-      "/settings/executor/executor%2Fprimary/profile/profile%2Fprimary",
-    );
+    expect(push).toHaveBeenCalledWith("/settings/executors/profile%2Fprimary");
   });
 });

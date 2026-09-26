@@ -3,7 +3,11 @@ import {
   activateRetention,
   analyzeRetention,
   expectTouchTarget,
+  failNextRetentionStatusRead,
+  failRetentionAnalysis,
   readRetentionMessage,
+  recoverRetentionStatusPolling,
+  reloadRetentionWithFakeClock,
   resetRetention,
   RETENTION_ROUTE,
   runRetention,
@@ -12,6 +16,38 @@ import {
 } from "../../helpers/tool-payload-retention";
 
 test.describe("Tool payload retention on phones", () => {
+  test("recovers a status polling error without manual refresh on a phone", async ({
+    testPage: page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await resetRetention(page);
+    await page.goto(RETENTION_ROUTE);
+    await reloadRetentionWithFakeClock(page);
+    const removeStatusRoute = await failNextRetentionStatusRead(page);
+    try {
+      await recoverRetentionStatusPolling(page);
+    } finally {
+      await removeStatusRoute();
+    }
+  });
+
+  test("preserves an action failure after status recovery on a phone", async ({
+    testPage: page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await resetRetention(page);
+    await page.goto(RETENTION_ROUTE);
+    await reloadRetentionWithFakeClock(page);
+    const removeStatusRoute = await failNextRetentionStatusRead(page);
+    const removeActionRoute = await failRetentionAnalysis(page, true);
+    try {
+      await recoverRetentionStatusPolling(page, true);
+    } finally {
+      await removeActionRoute();
+      await removeStatusRoute();
+    }
+  });
+
   for (const width of [320, 390]) {
     test(`completes cleanup by touch at ${width}px without clipping`, async ({
       testPage: page,

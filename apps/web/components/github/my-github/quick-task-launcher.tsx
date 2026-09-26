@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useRouter } from "@/lib/routing/client-router";
+import { linkToTask } from "@/lib/links";
 import type { Icon } from "@tabler/icons-react";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { useAppStore } from "@/components/state-provider";
@@ -236,7 +237,7 @@ export function QuickTaskLauncher({
         });
     }
     onClose();
-    if (meta?.autoFocus !== false) router.push(`/tasks/${task.id}`);
+    if (meta?.autoFocus !== false) router.push(linkToTask(task.id));
   };
 
   if (!workspaceId || !defaultWorkflow || !defaultStep || !dialog) return null;

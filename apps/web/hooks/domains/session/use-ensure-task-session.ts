@@ -199,8 +199,11 @@ export function useEnsureTaskSession(
     setStatus("preparing");
     setError(null);
     const ensurePromise = isFinalStep
-      ? ensureTaskSession(taskId, { autoStart: false })
-      : ensureTaskSession(taskId);
+      ? ensureTaskSession(taskId, {
+          autoStart: false,
+          activationSource: "session_open",
+        })
+      : ensureTaskSession(taskId, { activationSource: "session_open" });
     ensurePromise
       .then(async () => {
         if (cancelled || launchedKeyRef.current !== key) return;

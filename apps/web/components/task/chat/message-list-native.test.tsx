@@ -86,6 +86,7 @@ const HARNESS_RENDER_ERROR = "harness did not render";
 const NATIVE_SCROLL_MANAGEMENT_TEST_ID = "native-scroll-management-container";
 const AUTO_SCROLL_CONTAINER_TEST_ID = "auto-scroll-container";
 const CACHED_MESSAGE_ID = "cached-message";
+const SETTLED_MESSAGE_ID = "settled-message";
 const TEST_MESSAGES = [{} as Message];
 /** Always returns false: the harness never locks programmatic scrolling. */
 const NEVER_LOCKED = () => false;
@@ -180,6 +181,7 @@ function AutoScrollHarness({
   messages = TEST_MESSAGES,
   markRef,
   enabled = true,
+  motionEnabled = false,
   isVisible = true,
   sessionId = null,
   metrics,
@@ -189,6 +191,7 @@ function AutoScrollHarness({
   messages?: Message[];
   markRef?: { current?: () => void };
   enabled?: boolean;
+  motionEnabled?: boolean;
   isVisible?: boolean;
   sessionId?: string | null;
   metrics?: NativeScrollMetrics;
@@ -203,6 +206,7 @@ function AutoScrollHarness({
     isWorking,
     sessionId,
     enabled,
+    motionEnabled,
     hasUnreadDivider,
     isProgrammaticScrollLocked: NEVER_LOCKED,
     isVisible,
@@ -409,18 +413,18 @@ describe("useNativeScrollManagement transcript pagination", () => {
       metrics.scrollHeight = 1400;
       rerender(
         <NativeScrollManagementHarness
-          items={[transcriptMessage("settled-message")]}
+          items={[transcriptMessage(SETTLED_MESSAGE_ID)]}
           metrics={metrics}
           sessionId="session-b"
           enabled
         />,
       );
-      act(() => {
-        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
-      });
 
       expect(scrollContainer.scrollTop).toBe(1400);
       expect(mockDockviewState.pendingChatInitialPlacement).toBeNull();
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -473,17 +477,17 @@ describe("useNativeScrollManagement transcript pagination", () => {
       metrics.scrollTop = 915;
       rerender(
         <NativeScrollManagementHarness
-          items={[transcriptMessage("settled-message")]}
+          items={[transcriptMessage(SETTLED_MESSAGE_ID)]}
           metrics={metrics}
           sessionId="session-b"
         />,
       );
-      act(() => {
-        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
-      });
 
       expect(scrollContainer.scrollTop).toBe(320);
       expect(scrollContainer.scrollTop).not.toBe(810);
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -553,19 +557,19 @@ describe("useNativeScrollManagement transcript pagination", () => {
       metrics.scrollTop = 480;
       rerender(
         <NativeScrollManagementHarness
-          items={[transcriptMessage("settled-message")]}
+          items={[transcriptMessage(SETTLED_MESSAGE_ID)]}
           metrics={metrics}
           sessionId="session-b"
           enabled
           hasUnreadDivider
         />,
       );
-      act(() => {
-        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
-      });
 
       expect(metrics.scrollTop).toBe(480);
       expect(mockDockviewState.pendingChatInitialPlacement).toBeNull();
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -1742,12 +1746,14 @@ type ScrollToMessageHandle = (
 function ScrollToMessageHarness({
   rows,
   onHandle,
+  motionEnabled = true,
 }: {
   rows: string[];
+  motionEnabled?: boolean;
   onHandle: (handle: ScrollToMessageHandle) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const handle = useScrollToMessage(scrollRef, (performScroll) => performScroll());
+  const handle = useScrollToMessage(scrollRef, (performScroll) => performScroll(), motionEnabled);
   useLayoutEffect(() => {
     onHandle(handle);
   }, [handle, onHandle]);
@@ -2191,4 +2197,106 @@ describe("useScrollToMessage — absent superseder", () => {
       scrollIntoView.mockRestore();
     }
   });
+});
+
+it("smooth follow defers its write and yields to manual input", () => {
+  let time = 0;
+  let serial = 0;
+  const frames = new Map<number, FrameRequestCallback>();
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+    frames.set(++serial, cb);
+    return serial;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+  const step = () =>
+    act(() => {
+      time += 16;
+      const callbacks = [...frames.values()];
+      frames.clear();
+      callbacks.forEach((cb) => cb(time));
+    });
+  const view = render(
+    <AutoScrollHarness isWorking={false} hasUnreadDivider={false} motionEnabled />,
+  );
+  const el = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+  setScrollMetrics(el);
+  el.scrollTop = 0;
+  view.rerender(
+    <AutoScrollHarness
+      isWorking={false}
+      hasUnreadDivider={false}
+      motionEnabled
+      messages={[...TEST_MESSAGES]}
+    />,
+  );
+  expect(el.scrollTop).toBe(0);
+  step();
+  step();
+  expect(el.scrollTop).toBeGreaterThan(0);
+  expect(el.scrollTop).toBeLessThan(600);
+  const top = el.scrollTop;
+  act(() => el.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 })));
+  view.rerender(
+    <AutoScrollHarness
+      isWorking={false}
+      hasUnreadDivider={false}
+      motionEnabled
+      messages={[...TEST_MESSAGES]}
+    />,
+  );
+  step();
+  expect(el.scrollTop).toBe(top);
+  view.unmount();
+  vi.unstubAllGlobals();
+});
+
+it("updates explicit navigation when chat motion is disabled", () => {
+  let handle: ScrollToMessageHandle | null = null;
+  const onHandle = (next: ScrollToMessageHandle) => {
+    handle = next;
+  };
+  const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
+  const view = render(<ScrollToMessageHarness rows={["nav"]} onHandle={onHandle} />);
+  act(() => {
+    handle!("nav");
+  });
+  expect(scroll).toHaveBeenLastCalledWith({ block: "center", behavior: "smooth" });
+  view.rerender(
+    <ScrollToMessageHarness rows={["nav"]} onHandle={onHandle} motionEnabled={false} />,
+  );
+  act(() => {
+    handle!("nav");
+  });
+  expect(scroll).toHaveBeenLastCalledWith({ block: "center", behavior: "auto" });
+});
+
+it("cancels pending navigation landing when reduced motion becomes effective", () => {
+  const frames: Array<() => void> = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+  let handle: ScrollToMessageHandle | null = null;
+  const onHandle = (next: ScrollToMessageHandle) => {
+    handle = next;
+  };
+  const view = render(<ScrollToMessageHarness rows={["cancel"]} onHandle={onHandle} />);
+  const root = screen.getByTestId(SCROLL_TO_MESSAGE_ROOT);
+  const target = root.querySelector<HTMLElement>("#msg-cancel")!;
+  root.getBoundingClientRect = () => createRect(0, 400);
+  target.getBoundingClientRect = () => createRect(120 - root.scrollTop, 20);
+  act(() => {
+    handle!("cancel", { align: "start" });
+  });
+  view.rerender(
+    <ScrollToMessageHarness rows={["cancel"]} onHandle={onHandle} motionEnabled={false} />,
+  );
+  act(() => {
+    for (let i = 0; i < 5 && frames.length; i++) frames.shift()!();
+  });
+  expect(root.scrollTop).toBe(0);
+  view.unmount();
+  vi.unstubAllGlobals();
 });

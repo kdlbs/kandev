@@ -266,11 +266,10 @@ jobs:
       - name: Run golangci-lint
         # golangci-lint is preinstalled in the kandev-ci image; invoke it
         # directly instead of going through `golangci/golangci-lint-action`,
-        # which would re-download its own binary on every run. `--timeout=5m`
-        # matches the action's previous implicit default (the binary's own
-        # default is 1m, which can trip on cold caches).
+        # which would re-download its own binary on every run. Ten minutes
+        # leaves headroom for cold caches while still bounding analysis time.
         shell: bash
-        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=5m
+        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=10m
 
   test_shards:
     name: Backend Tests (${{ matrix.shard }}/2)
@@ -644,7 +643,7 @@ jobs:
             ./internal/workflowsync
             ./internal/worktree
           )
-          go test -v -race "${POSTGRES_PACKAGES[@]}"
+          go test -v -race -timeout 15m "${POSTGRES_PACKAGES[@]}"
 
   postgres-18:
     name: Backend Postgres 18
@@ -772,6 +771,9 @@ jobs:
           go test -race -v
           -run '^(TestExplicitLocalRepositoryWindowsPathSemantics|TestListDirectory.*|TestDriveRootsFromMask|TestSplitAbsForRoot)$'
           ./internal/task/service
+
+      - name: Test Cursor project slug path normalization
+        run: go test -race -v ./internal/agent/mcpconfig -run '^TestDeriveCursorProjectSlug$'
 
       # Pure GOOS-branch logic (no syscalls), but it must actually observe
       # Windows to prove the unavailable branch, not just compile under it.

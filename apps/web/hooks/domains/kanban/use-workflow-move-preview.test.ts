@@ -1,6 +1,8 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowMovePreviewResponse } from "@/lib/api";
+import type { AppState } from "@/lib/state/store";
+import { getWorkflowMovePreviewRevision } from "./use-workflow-move-preview-revision";
 import {
   MAX_PREVIEW_CONCURRENT_REQUESTS,
   useWorkflowMovePreview,
@@ -37,6 +39,38 @@ function makePreview(stepId: string): WorkflowMovePreviewResponse {
   };
 }
 
+function makeRevisionState() {
+  return {
+    connection: { status: "connected" },
+    workspaceContextGeneration: 1,
+    kanban: {
+      workflowId: WORKFLOW_ID,
+      steps: [{ id: FIRST_STEP_ID, title: "Implement", position: 0 }],
+      tasks: [
+        {
+          id: TASK_ID,
+          workflowId: WORKFLOW_ID,
+          workflowStepId: FIRST_STEP_ID,
+          title: "Task",
+          description: "Initial description",
+          position: 0,
+        },
+      ],
+    },
+    kanbanMulti: { snapshots: {} },
+    workflows: { items: [{ id: WORKFLOW_ID }], activeId: WORKFLOW_ID },
+    taskSessions: { items: {} },
+    taskSessionsByTask: {
+      itemsByTaskId: {},
+      loadingByTaskId: {},
+      loadedByTaskId: {},
+      errorByTaskId: {},
+    },
+    agentProfiles: { items: [], version: 1 },
+    sessionModels: { bySessionId: {} },
+  } as unknown as AppState;
+}
+
 function useThreePreviews() {
   const first = useWorkflowMovePreview({
     taskId: TASK_ID,
@@ -66,6 +100,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.runOnlyPendingTimers();
   vi.useRealTimers();
 });
 
@@ -108,6 +143,73 @@ describe("useWorkflowMovePreview request lifecycle", () => {
     );
     expect(result.current.status).toBe("success");
     expect(result.current.preview?.workflow_step_id).toBe(FIRST_STEP_ID);
+  });
+
+  it("reuses a completed preview when a second surface opens after the first closes", async () => {
+    const taskId = "task-staggered-preview-surface";
+    previewWorkflowMoveMock.mockResolvedValueOnce(makePreview(FIRST_STEP_ID));
+    const first = renderHook(() =>
+      useWorkflowMovePreview({
+        taskId,
+        workflowId: WORKFLOW_ID,
+        workflowStepId: FIRST_STEP_ID,
+        enabled: true,
+      }),
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+    });
+    expect(previewWorkflowMoveMock).toHaveBeenCalledOnce();
+    expect(first.result.current.status).toBe("success");
+    first.unmount();
+
+    const second = renderHook(() =>
+      useWorkflowMovePreview({
+        taskId,
+        workflowId: WORKFLOW_ID,
+        workflowStepId: FIRST_STEP_ID,
+        enabled: true,
+      }),
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+    });
+
+    expect(previewWorkflowMoveMock).toHaveBeenCalledOnce();
+    expect(second.result.current.status).toBe("success");
+  });
+
+  it("includes the task's draft workflow-agent mapping in the preview request", async () => {
+    previewWorkflowMoveMock.mockResolvedValueOnce(makePreview(FIRST_STEP_ID));
+    const workflowChange = {
+      expected_workflow_id: "source-workflow",
+      expected_step_id: "source-step",
+      expected_updated_at: "2026-09-14T00:00:00Z",
+      agent_overrides: { "profile-source": "profile-replacement" },
+    };
+    renderHook(() =>
+      useWorkflowMovePreview({
+        taskId: TASK_ID,
+        workflowId: WORKFLOW_ID,
+        workflowStepId: FIRST_STEP_ID,
+        workflowChange,
+        enabled: true,
+      }),
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+    });
+
+    expect(previewWorkflowMoveMock).toHaveBeenCalledWith(
+      TASK_ID,
+      expect.objectContaining({ workflow_change: workflowChange }),
+      expect.anything(),
+    );
   });
 });
 
@@ -198,6 +300,55 @@ describe("useWorkflowMovePreview invalidation", () => {
     });
     expect(previewWorkflowMoveMock).toHaveBeenCalledTimes(2);
     expect(result.current.status).toBe("success");
+  });
+});
+
+describe("useWorkflowMovePreview stability", () => {
+  it("keeps success and request count stable across harmless store updates", async () => {
+    previewWorkflowMoveMock.mockResolvedValueOnce(makePreview(FIRST_STEP_ID));
+    const revisionState = makeRevisionState();
+    const { result, rerender } = renderHook(
+      ({ revision }: { revision: string }) =>
+        useWorkflowMovePreview({
+          taskId: TASK_ID,
+          workflowId: WORKFLOW_ID,
+          workflowStepId: FIRST_STEP_ID,
+          invalidationKey: revision,
+          enabled: true,
+        }),
+      {
+        initialProps: {
+          revision: getWorkflowMovePreviewRevision(
+            revisionState,
+            TASK_ID,
+            WORKFLOW_ID,
+            FIRST_STEP_ID,
+          ),
+        },
+      },
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+    });
+    expect(result.current.status).toBe("success");
+
+    (revisionState.kanban.tasks[0] as { description?: string }).description = "Updated copy";
+    const nextRevision = getWorkflowMovePreviewRevision(
+      revisionState,
+      TASK_ID,
+      WORKFLOW_ID,
+      FIRST_STEP_ID,
+    );
+    rerender({ revision: nextRevision });
+
+    expect(nextRevision).toBe(
+      getWorkflowMovePreviewRevision(revisionState, TASK_ID, WORKFLOW_ID, FIRST_STEP_ID),
+    );
+    expect(result.current.status).toBe("success");
+    expect(result.current.preview?.workflow_step_id).toBe(FIRST_STEP_ID);
+    expect(previewWorkflowMoveMock).toHaveBeenCalledOnce();
   });
 });
 

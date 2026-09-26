@@ -3,6 +3,7 @@ package statussummary
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -316,11 +317,16 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreLaunchQueue(ctx, taskID, state); err != nil {
+		return err
+	}
 	return nil
 }
 
 func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.queuedCount = summary.QueuedPromptCount
+	state.launchQueue = cloneLaunchQueue(summary.LaunchQueue)
+	state.launchQueueObserved = summary.LaunchQueue != nil
 	state.taskPending = summary.PendingAction
 	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -412,6 +418,22 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreLaunchQueue(ctx, taskID, state); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *Projector) restoreLaunchQueue(ctx context.Context, taskID string, state *projectionState) error {
+	if p.loadLaunchQueue == nil {
+		return nil
+	}
+	queue, err := p.loadLaunchQueue(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load launch queue for task status summary %q: %w", taskID, err)
+	}
+	state.launchQueue = cloneLaunchQueue(queue)
+	state.launchQueueObserved = true
 	return nil
 }
 
@@ -789,6 +811,7 @@ func (p *Projector) applyPREventLocked(state *projectionState, data map[string]i
 		reviewState:           stringField(data, "review_state"),
 		checksState:           stringField(data, "checks_state"),
 		mergeableState:        stringField(data, "mergeable_state"),
+		hasMergeConflicts:     boolPointerField(data, "has_merge_conflicts"),
 		mergeQueueState:       stringField(data, "merge_queue_state"),
 		unresolvedReviewCount: intValueOrZero(data["unresolved_review_threads"]),
 		pendingReviewCount:    intValueOrZero(data["pending_review_count"]),
@@ -813,11 +836,23 @@ func (p *Projector) applyPREventLocked(state *projectionState, data map[string]i
 	if value, ok := intValue(data["required_reviews"]); ok {
 		observation.requiredReviews = maxInt(value, 0)
 	}
-	if existing, ok := state.prs[key]; ok && existing == observation {
+	if existing, ok := state.prs[key]; ok && pullRequestObservationsEqual(existing, observation) {
 		return false
 	}
 	state.prs[key] = observation
 	return true
+}
+
+func pullRequestObservationsEqual(left, right pullRequestObservation) bool {
+	return reflect.DeepEqual(left, right)
+}
+
+func boolPointerField(data map[string]interface{}, key string) *bool {
+	value, ok := data[key].(bool)
+	if !ok {
+		return nil
+	}
+	return &value
 }
 
 func pullRequestObservationKey(data map[string]interface{}) string {

@@ -807,7 +807,7 @@ drained:
 	// as in TestServerModeTask_ToolCount and
 	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
 	// which pin the per-mode registration rather than this SetProviders rebuild.
-	require.Len(t, tools, 37, "final registry should contain the complete GitLab-only task tool set")
+	require.Len(t, tools, 41, "final registry should contain the complete GitLab-only task tool set")
 	assert.Contains(t, tools, "get_task_change_requests_kandev")
 	assert.Contains(t, tools, "manage_task_change_request_kandev")
 	assert.Contains(t, tools, "update_task_change_request_automation_kandev")
@@ -984,7 +984,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	// 20 kanban (incl. delete + archive task + stop_task + spawn_session +
 	// list_task_sessions) + 1 add_branch_to_task +
 	// 1 add_workspace_sources + 1 update_repository_base_branch +
-	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 3 walkthrough +
+	// 1 step_complete (ADR 0015) + 1 interaction + 8 plan + 3 walkthrough +
 	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle
 	// + 2 task-dependency (add/remove) + 3 neutral task change-request tools +
 	// 1 neutral outcome tool + 1 rich-output. The exact count below guards
@@ -999,7 +999,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "add_task_dependency_kandev", "dependency edges must be manageable in task mode")
 	assert.Contains(t, tools, "remove_task_dependency_kandev")
 	assert.Contains(t, tools, "show_rich_output_kandev", "native rich output must be registered in task mode")
-	assert.Equal(t, 38, len(tools))
+	assert.Equal(t, 42, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskAndOfficeOnlyAndDiscoverable(t *testing.T) {
@@ -1037,7 +1037,7 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 	// Existing configuration tools plus the five compact settings tools.
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
-	assert.Equal(t, 41, len(tools))
+	assert.Equal(t, 42, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -1068,6 +1068,10 @@ func TestServerModeOffice_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "create_task_plan_kandev")
 	assert.Contains(t, tools, "get_task_plan_kandev")
 	assert.Contains(t, tools, "update_task_plan_kandev")
+	assert.Contains(t, tools, "edit_task_plan_kandev")
+	assert.Contains(t, tools, "list_task_plan_revisions_kandev")
+	assert.Contains(t, tools, "get_task_plan_revision_kandev")
+	assert.Contains(t, tools, "restore_task_plan_revision_kandev")
 	assert.Contains(t, tools, "delete_task_plan_kandev")
 
 	// Office mode should have interaction tools
@@ -1115,12 +1119,12 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
 	tools := getRegisteredToolNames(s)
-	// 4 plan + 1 interaction + 1 related-tasks + 3 task-documents
-	// + 1 rich-output + 1 step_complete (ADR 0015) = 11.
+	// 8 plan + 1 interaction + 1 related-tasks + 3 task-documents
+	// + 1 rich-output + 1 step_complete (ADR 0015) = 15.
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
 	// (list_task_comments_kandev retired in favour of `agentctl kandev comment list …`).
 	assert.Contains(t, tools, "step_complete_kandev", "office mode must register the ADR 0015 completion signal")
-	assert.Equal(t, 11, len(tools))
+	assert.Equal(t, 15, len(tools))
 }
 
 func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
@@ -1137,10 +1141,10 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 	// delegate_task_kandev was retired from ModeOffice (now lives in
 	// the agentctl CLI as `agentctl kandev task create --parent …`).
 	assert.NotContains(t, tools, "delegate_task_kandev")
-	// 4 plan + 1 related-tasks + 3 task-documents + 1 rich-output
-	// + 1 step_complete (ADR 0015) = 10
+	// 8 plan + 1 related-tasks + 3 task-documents + 1 rich-output
+	// + 1 step_complete (ADR 0015) = 14
 	// (no ask_user_question, no delegate, no list_task_comments)
-	assert.Equal(t, 10, len(tools))
+	assert.Equal(t, 14, len(tools))
 }
 
 func TestServerModeConstants(t *testing.T) {

@@ -7,25 +7,31 @@ import {
   WorkflowMoveProceedButton,
 } from "./workflow-move-proceed-button";
 
-const previewMock = vi.hoisted(() =>
-  vi.fn().mockResolvedValue({
-    outcome: "reuse_current",
-    model: {
-      before: { known: true, label: "mock-fast" },
-      after: { known: true, label: "mock-fast" },
-    },
-    changes: [],
-    context_reset: false,
-    source_disposition: "keep",
-    dispatch: "prompt",
-  }),
-);
+const { previewMock, previewRevisionMock, TERRA_MODEL } = vi.hoisted(() => {
+  const TERRA_MODEL = "gpt-5.6-terra";
+  return {
+    TERRA_MODEL,
+    previewMock: vi.fn().mockResolvedValue({
+      outcome: "create_new",
+      model: {
+        before: { known: false },
+        after: { known: true, label: TERRA_MODEL },
+        after_source: "profile",
+      },
+      changes: [],
+      context_reset: false,
+      source_disposition: "keep",
+      dispatch: "prompt",
+    }),
+    previewRevisionMock: vi.fn(() => "revision-1"),
+  };
+});
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api")>()),
   previewWorkflowMove: previewMock,
 }));
 vi.mock("@/hooks/domains/kanban/use-workflow-move-preview-revision", () => ({
-  useWorkflowMovePreviewRevision: () => "revision-1",
+  useWorkflowMovePreviewRevision: () => previewRevisionMock(),
 }));
 
 const touchMocks = vi.hoisted(() => ({ enabled: false }));
@@ -44,8 +50,22 @@ vi.mock("@/components/state-provider", () => ({
 
 afterEach(() => {
   cleanup();
+  vi.runOnlyPendingTimers();
   vi.useRealTimers();
   touchMocks.enabled = false;
+  previewRevisionMock.mockReturnValue("revision-1");
+  previewMock.mockResolvedValue({
+    outcome: "create_new",
+    model: {
+      before: { known: false },
+      after: { known: true, label: TERRA_MODEL },
+      after_source: "profile",
+    },
+    changes: [],
+    context_reset: false,
+    source_disposition: "keep",
+    dispatch: "prompt",
+  });
 });
 
 beforeEach(() => {
@@ -222,6 +242,8 @@ describe("WorkflowMoveProceedButton label interaction", () => {
 
     const proceed = screen.getByTestId(PROCEED_TEST_ID);
     const skipCheckbox = screen.getByTestId("workflow-move-skip-step-prompt");
+    const skipLabel = screen.getByText("Skip the step prompt").closest("label");
+    expect(skipLabel?.htmlFor).toBe(skipCheckbox.id);
     fireEvent.blur(proceed, { relatedTarget: skipCheckbox });
     fireEvent.focus(skipCheckbox);
     fireEvent.click(screen.getByText("Skip the step prompt"));
@@ -426,7 +448,7 @@ describe("proceed preview footer", () => {
       fireEvent.click(screen.getByTestId(PROCEED_TEST_ID));
     } else openHoverForm();
     await act(() => vi.advanceTimersByTimeAsync(200));
-    expect(screen.getByTestId("workflow-move-preview").textContent).toContain("mock-fast");
+    expect(screen.getByTestId("workflow-move-preview").textContent).toContain(TERRA_MODEL);
     fireEvent.click(screen.getByTestId("workflow-move-skip-step-prompt"));
     await act(() => vi.advanceTimersByTimeAsync(200));
     expect(previewMock).toHaveBeenLastCalledWith(
@@ -438,5 +460,65 @@ describe("proceed preview footer", () => {
       },
       expect.anything(),
     );
+  });
+
+  it.each([false, true])("refreshes planned to actual model text on touch=%s", async (touch) => {
+    touchMocks.enabled = touch;
+    previewMock.mockReset();
+    previewMock.mockResolvedValueOnce({
+      outcome: "create_new",
+      model: {
+        before: { known: false },
+        after: { known: true, label: TERRA_MODEL },
+        after_source: "profile",
+      },
+      changes: [],
+      context_reset: false,
+      source_disposition: "keep",
+      dispatch: "prompt",
+    });
+    previewMock.mockResolvedValueOnce({
+      outcome: "reuse_current",
+      model: {
+        before: { known: true, label: TERRA_MODEL },
+        after: { known: true, label: TERRA_MODEL },
+        after_source: "override",
+      },
+      changes: [],
+      context_reset: false,
+      source_disposition: "keep",
+      dispatch: "prompt",
+    });
+    const props = {
+      nextStepName: "Review",
+      onProceed: vi.fn(),
+      isMoving: false,
+      testId: PROCEED_TEST_ID,
+      previewTarget: { taskId: "task-1", workflowId: "workflow-1", workflowStepId: "review" },
+    } as const;
+    const { rerender } = render(
+      <TooltipProvider>
+        <WorkflowMoveProceedButton {...props} />
+      </TooltipProvider>,
+    );
+    if (touch) {
+      fireEvent.pointerDown(screen.getByTestId(PROCEED_TEST_ID), touchPointer());
+      act(() => vi.advanceTimersByTime(WORKFLOW_MOVE_LONG_PRESS_MS));
+      fireEvent.pointerUp(screen.getByTestId(PROCEED_TEST_ID), touchPointer());
+      fireEvent.click(screen.getByTestId(PROCEED_TEST_ID));
+    } else {
+      openHoverForm();
+    }
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    expect(screen.getByTestId("workflow-move-preview").textContent).toContain(TERRA_MODEL);
+
+    previewRevisionMock.mockReturnValue("revision-2");
+    rerender(
+      <TooltipProvider>
+        <WorkflowMoveProceedButton {...props} />
+      </TooltipProvider>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    expect(screen.getByTestId("workflow-move-preview").textContent).toContain("override retained");
   });
 });

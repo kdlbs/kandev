@@ -241,19 +241,26 @@ func (a *Adapter) signalPromptTurnAbort() *promptTurnState {
 	return turn
 }
 
-func waitForPromptRPCAfterCancel(turn *promptTurnState) error {
+func (a *Adapter) promptCancelTimeout() time.Duration {
+	if a.cancelJoinTimeout > 0 {
+		return a.cancelJoinTimeout
+	}
+	return promptCancelJoinTimeout
+}
+
+func (a *Adapter) waitForPromptRPCAfterCancel(turn *promptTurnState) error {
 	if turn == nil {
 		return nil
 	}
 	select {
 	case <-turn.rpcDone:
 		return nil
-	case <-time.After(promptCancelJoinTimeout):
+	case <-time.After(a.promptCancelTimeout()):
 		if turn.endTurn != nil {
 			turn.endTurn(ErrTurnCancelNotAcknowledged)
 		}
 		return fmt.Errorf("%w: in-flight session/prompt did not end within %s",
-			ErrTurnCancelNotAcknowledged, promptCancelJoinTimeout)
+			ErrTurnCancelNotAcknowledged, a.promptCancelTimeout())
 	}
 }
 
@@ -280,19 +287,19 @@ func (a *Adapter) waitForPromptRPCAfterUserCancel(turn *promptTurnState, session
 			select {
 			case <-turn.rpcDone:
 				return providerErr
-			case <-time.After(promptCancelJoinTimeout):
+			case <-time.After(a.promptCancelTimeout()):
 				return providerErr
 			}
 		case <-turn.abortCh:
 			select {
 			case <-turn.rpcDone:
 				return nil
-			case <-time.After(promptCancelJoinTimeout):
+			case <-time.After(a.promptCancelTimeout()):
 				if turn.endTurn != nil {
 					turn.endTurn(ErrTurnCancelNotAcknowledged)
 				}
 				a.logger.Warn("in-flight session/prompt did not end after cancel; releasing prompt gate",
-					zap.Duration("timeout", promptCancelJoinTimeout))
+					zap.Duration("timeout", a.promptCancelTimeout()))
 				return errPromptAbandonedAfterCancel
 			}
 		}

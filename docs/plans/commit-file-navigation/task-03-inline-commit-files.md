@@ -166,3 +166,5 @@ Completed on 2026-09-17.
 - Typecheck, touched-file ESLint, all i18n checks, public-doc validation, specification validation, and whitespace checks passed. Updated `docs/public/sessions-and-review.md` with the new user flow.
 
 Review remediation on 2026-09-17 preserves the original `FileInfo` in tree-mode rows, including nonzero, zero, missing, and renamed-file metadata. It also verifies filename-first mobile rows with complete accessible paths, separate Open actions, and 28px fine-pointer versus at least 44px phone/coarse-pointer controls. The final affected component suite passed 11 files and 85 tests; the final mobile E2E passed 1 test with long labels, inline historical-file activation, focus, touch hitboxes, and no document overflow.
+
+Merged-base PR fixup validation on 2026-09-26 passed 13 affected Vitest files (104 tests), 29 desktop commit/Changes E2E tests, and 10 mobile commit/Changes E2E tests. Typecheck, i18n checks, public-doc validation (62 tests, 47 pages), and specification validation (309 decisions, 1,185 specifications) also passed.

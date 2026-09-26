@@ -6,8 +6,12 @@ import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import {
   cleanupDelayedResumeFixture,
+  countResumeBootMessages,
   createFailOnResumeProfile,
+  readSessionMessageIdsContaining,
+  readSessionRuntimeIdentity,
   seedDelayedResumeFixture,
+  waitForNewSessionMessage,
   waitForSessionReady,
 } from "../../helpers/session-resume-prompt-queue";
 import {
@@ -51,7 +55,7 @@ test.describe("mobile: delayed resume cancellation", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(150_000);
+    test.setTimeout(180_000);
 
     const fixture = await seedDelayedResumeFixture(
       testPage,
@@ -87,10 +91,20 @@ test.describe("mobile: delayed resume cancellation", () => {
         { timeout: 30_000 },
       );
 
+      const priorResponses = await readSessionMessageIdsContaining(
+        apiClient,
+        fixture.identity.sessionId,
+        "simple mock response",
+      );
       await fixture.session.sendMessageViaButton("/e2e:simple-message");
-      await fixture.session.expectChatResponseVisible("simple mock response", 1, {
-        timeout: 60_000,
-      });
+      await waitForNewSessionMessage(
+        apiClient,
+        fixture.identity.sessionId,
+        priorResponses,
+        "simple mock response",
+        90_000,
+      );
+      await fixture.session.expectChatResponseVisible("simple mock response", 1);
       const responses = fixture.session
         .activeChat()
         .locator("[data-agent-message-body][data-message-id]")
@@ -99,6 +113,116 @@ test.describe("mobile: delayed resume cancellation", () => {
       await assertNoDocumentHorizontalOverflow(testPage, "mobile delayed cancel and retry");
     } finally {
       await cleanupDelayedResumeFixture(apiClient, fixture);
+    }
+  });
+
+  test("pausing an accepted lazy resume preserves the runtime for later turns", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(150_000);
+    await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
+
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Mobile accepted lazy resume pause recovery",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      if (!task.session_id) throw new Error("mobile accepted lazy resume task has no session_id");
+
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+        timeout: 30_000,
+      });
+      await session.waitForChatIdle({ timeout: 30_000 });
+
+      await backend.restart();
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(testPage.getByTestId("composer-agent-start-hint")).toBeVisible({
+        timeout: 60_000,
+      });
+
+      const resumeBootsBeforeMessage = await countResumeBootMessages(apiClient, task.session_id);
+
+      // Provider output proves that the resumed prompt crossed acceptance
+      // before the touch cancellation is sent.
+      await session.sendMessageViaButton("/slow 8s");
+      await expect(session.chat.getByText("Running slow response", { exact: false })).toBeVisible({
+        timeout: 30_000,
+      });
+      const initialRuntimeIdentity = await readSessionRuntimeIdentity(
+        apiClient,
+        task.id,
+        task.session_id,
+      );
+      await session.cancelAgentButton().tap();
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId: task.session_id,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for mobile accepted lazy resume cancellation",
+        timeout: 30_000,
+      });
+      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      const resumeBootsAfterFirstPause = await countResumeBootMessages(apiClient, task.session_id);
+      expect(resumeBootsAfterFirstPause).toBe(resumeBootsBeforeMessage + 1);
+
+      const slowResponseMessageIdsBeforeSecond = await readSessionMessageIdsContaining(
+        apiClient,
+        task.session_id,
+        "Running slow response",
+      );
+      expect(slowResponseMessageIdsBeforeSecond.size).toBeGreaterThan(0);
+      await session.sendMessageViaButton("/slow 8s");
+      await waitForNewSessionMessage(
+        apiClient,
+        task.session_id,
+        slowResponseMessageIdsBeforeSecond,
+        "Running slow response",
+      );
+      await session.cancelAgentButton().tap();
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId: task.session_id,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for the later mobile accepted pause",
+        timeout: 30_000,
+      });
+
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      expect(await countResumeBootMessages(apiClient, task.session_id)).toBe(
+        resumeBootsAfterFirstPause,
+      );
+
+      await session.sendMessageViaButton("/e2e:simple-message");
+      await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      expect(await countResumeBootMessages(apiClient, task.session_id)).toBe(
+        resumeBootsAfterFirstPause,
+      );
+      await assertNoDocumentHorizontalOverflow(testPage, "mobile accepted lazy resume pause");
+    } finally {
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
     }
   });
 });

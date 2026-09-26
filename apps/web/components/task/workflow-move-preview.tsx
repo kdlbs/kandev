@@ -110,7 +110,9 @@ function modelSummaryParts(t: Translation, preview: WorkflowMovePreviewResponse)
   }
 
   let label: string;
-  if (before.known && before.label && before.label !== after.label) {
+  if (!before.known && preview.model.after_source === "profile") {
+    label = t("task:workflowMovePreviewModelPlanned", { model: after.label });
+  } else if (before.known && before.label && before.label !== after.label) {
     label = t("task:workflowMovePreviewModelChange", {
       before: before.label,
       after: after.label,
@@ -274,6 +276,74 @@ function WorkflowMovePreviewDetails({
         </div>
       )}
       <span>{t("task:workflowMovePreviewExecutionCheck")}</span>
+    </div>
+  );
+}
+
+type CompactWorkflowMovePreviewProps = Omit<WorkflowMovePreviewDisclosureProps, "className"> & {
+  expanded: boolean;
+};
+
+export function CompactWorkflowMovePreview({
+  state,
+  isTouchSurface,
+  expanded,
+}: CompactWorkflowMovePreviewProps) {
+  const { t } = useTranslation();
+  if (state.status === "idle") return null;
+  if (state.status === "loading") {
+    return (
+      <div
+        role="status"
+        data-testid="workflow-move-preview-loading"
+        className="pl-4 text-left text-[11px] text-muted-foreground"
+      >
+        {t("task:workflowMovePreviewChecking")}
+      </div>
+    );
+  }
+  if (state.status === "error" || !state.preview) {
+    return (
+      <div
+        role="status"
+        data-testid="workflow-move-preview-error"
+        className="flex min-w-0 items-center gap-1 pl-4 text-left text-[11px] text-muted-foreground"
+      >
+        <span className="min-w-0 truncate">{t("task:workflowMovePreviewUnavailable")}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={state.retry}
+          className={cn(
+            "shrink-0 cursor-pointer px-1.5 text-[11px]",
+            isTouchSurface ? "min-h-11" : "h-7",
+          )}
+          data-testid="workflow-move-preview-retry"
+        >
+          <IconRefresh className="h-3 w-3" aria-hidden="true" />
+          {t("task:workflowMovePreviewRetry")}
+        </Button>
+      </div>
+    );
+  }
+  const model = modelSummaryParts(t, state.preview);
+  const summary = [
+    outcomeLabel(t, state.preview),
+    model.label,
+    ...(model.changeCount > 0
+      ? [t("task:workflowMovePreviewAdditionalChanges", { count: model.changeCount })]
+      : []),
+  ].join(" · ");
+  return (
+    <div
+      data-testid="workflow-move-preview"
+      className="grid min-w-0 gap-2 pl-4 text-left text-[11px] text-muted-foreground"
+    >
+      <div role="status" aria-live="polite" className="truncate" title={summary}>
+        {summary}
+      </div>
+      {expanded && <WorkflowMovePreviewDetails preview={state.preview} t={t} />}
     </div>
   );
 }

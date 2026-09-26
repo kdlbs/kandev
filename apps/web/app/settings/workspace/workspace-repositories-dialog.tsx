@@ -170,8 +170,11 @@ export function DiscoverRepoDialog({
                   variant="outline"
                   className="[@media(pointer:coarse)]:h-11"
                   onClick={onRefreshDiscovery}
+                  disabled={isLoading}
                 >
-                  {t("workspaces:refreshRepositories")}
+                  {isLoading
+                    ? t("workspaces:scanningRepositories")
+                    : t("workspaces:refreshRepositories")}
                 </Button>
               )}
             </div>

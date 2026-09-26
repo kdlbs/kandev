@@ -61,7 +61,6 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
   const [dialogOpen, setDialogOpen] = useState(false);
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
-  const executorType = executors.find((executor) => executor.id === executorId)?.type;
 
   const refreshProfiles = useCallback(async () => {
     try {
@@ -81,9 +80,9 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
   const handleProfileCreated = useCallback(
     (profile: ExecutorProfile) => {
       refreshProfiles();
-      router.push(executorProfileSettingsPath({ id: executorId, type: executorType }, profile.id));
+      router.push(executorProfileSettingsPath(profile.id));
     },
-    [executorId, executorType, refreshProfiles, router],
+    [refreshProfiles, router],
   );
 
   const handleDelete = useCallback(
@@ -117,14 +116,7 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
                 <div
                   key={profile.id}
                   className="flex items-center justify-between rounded-md border px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
-                  onClick={() =>
-                    router.push(
-                      executorProfileSettingsPath(
-                        { id: executorId, type: executorType },
-                        profile.id,
-                      ),
-                    )
-                  }
+                  onClick={() => router.push(executorProfileSettingsPath(profile.id))}
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-sm font-medium truncate">{profile.name}</span>

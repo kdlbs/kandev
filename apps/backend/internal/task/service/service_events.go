@@ -244,6 +244,54 @@ func (s *Service) publishSessionsCancelled(
 	}
 }
 
+// publishSessionRecovered publishes the state transition produced by
+// execution-loss recovery. It mirrors the session.state_changed payload used
+// by cancellation while carrying an empty error message and the recoverable
+// WAITING_FOR_INPUT state.
+func (s *Service) publishSessionRecovered(
+	ctx context.Context,
+	taskID string,
+	oldState models.TaskSessionState,
+	session *models.TaskSession,
+) error {
+	if s.eventBus == nil || session == nil {
+		return nil
+	}
+	sessCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	data := map[string]interface{}{
+		sessionEventFieldTaskID:    taskID,
+		sessionEventFieldSessionID: session.ID,
+		"old_state":                string(oldState),
+		"new_state":                string(session.State),
+		"error_message":            "",
+		"agent_profile_id":         session.AgentProfileID,
+		"agent_profile_snapshot":   session.AgentProfileSnapshot,
+		"is_passthrough":           session.IsPassthrough,
+		"is_primary":               session.IsPrimary,
+		sessionEventFieldUpdatedAt: session.UpdatedAt.Format(time.RFC3339Nano),
+		sessionEventFieldName:      session.Name,
+	}
+	if session.ReviewStatus != models.ReviewStatusNone {
+		data["review_status"] = string(session.ReviewStatus)
+	}
+	if len(session.Metadata) > 0 {
+		data["session_metadata"] = session.Metadata
+	}
+	if session.TaskEnvironmentID != "" {
+		data["task_environment_id"] = session.TaskEnvironmentID
+	}
+	event := bus.NewEvent(events.TaskSessionStateChanged, "task-service", data)
+	if err := s.eventBus.Publish(sessCtx, events.TaskSessionStateChanged, event); err != nil {
+		s.logger.Error("failed to publish session recovery event",
+			zap.String(sessionEventFieldTaskID, taskID),
+			zap.String(sessionEventFieldSessionID, session.ID),
+			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
 // publishTaskEvent publishes task events to the event bus
 func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, oldWorkflowIDs ...string) {
 	s.publishTaskEventWithExtra(ctx, eventType, task, oldState, nil, oldWorkflowIDs...)
@@ -439,6 +487,10 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		// omitted key here would make clearTaskAutoStartFailedMarker's publish
 		// as invisible as the set it is meant to undo.
 		"auto_start_failed": task.Metadata[models.MetaKeyAutoStartFailed] != nil,
+		// Keep the interruption projection explicit on task.updated so a live
+		// client receives the warning immediately after reconciliation writes
+		// the marker; task-merge preserves omitted fields for partial updates.
+		"interrupted": task.Metadata[models.MetaKeyInterruptedAt] != nil,
 		// The human assignee, always sent, never omitted when empty, for the
 		// same reason as auto_start_failed above: the frontend pins the
 		// previous value when the key is absent, so omitting it would make
@@ -1010,8 +1062,13 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 // straight into the repository so specs can script clarification/permission
 // states deterministically, and without this it never triggers the
 // pending_action recompute a real agent turn would.
-func (s *Service) PublishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
-	return s.publishMessageEvent(ctx, eventType, message)
+func (s *Service) PublishMessageEvent(
+	ctx context.Context,
+	eventType string,
+	message *models.Message,
+	receipts ...*models.ConversationMutationReceipt,
+) error {
+	return s.publishMessageEvent(ctx, eventType, message, receipts...)
 }
 
 // publishMessageEvent publishes message events to the event bus.
@@ -1020,12 +1077,17 @@ func (s *Service) PublishMessageEvent(ctx context.Context, eventType string, mes
 // Ordinary persistence callers intentionally treat delivery as best effort
 // after their durable write succeeds. Synchronization-sensitive callers, such
 // as clarification bundle convergence, check and propagate the returned error.
-func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
+func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message, receipts ...*models.ConversationMutationReceipt) error {
 	if s.eventBus == nil {
 		s.logger.Warn("publishMessageEvent: eventBus is nil, skipping")
 		return errors.New("event bus is unavailable")
 	}
 	event := newMessageEvent(eventType, message)
+	if len(receipts) > 0 && receipts[0] != nil {
+		if data, ok := event.Data.(map[string]interface{}); ok {
+			data["conversation_receipt"] = projectConversationReceipt(receipts[0])
+		}
+	}
 	pendingProjection := s.addMessagePendingAction(ctx, eventType, message, event)
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
 		s.logger.Error("failed to publish message event",
@@ -1038,6 +1100,42 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		s.publishSessionPendingActionChanged(ctx, message, *pendingProjection)
 	}
 	return nil
+}
+
+// projectConversationReceipt keeps the transient source receipt useful to the
+// live conversation transport without exposing repository-owned metadata or
+// system-injected message content through the event bus.
+func projectConversationReceipt(receipt *models.ConversationMutationReceipt) *models.ConversationMutationReceipt {
+	if receipt == nil {
+		return nil
+	}
+	projected := &models.ConversationMutationReceipt{
+		SessionID:    receipt.SessionID,
+		BaseRevision: receipt.BaseRevision,
+		Revision:     receipt.Revision,
+		Complete:     receipt.Complete,
+		Operations:   make([]models.ConversationMutationOperation, 0, len(receipt.Operations)),
+	}
+	for _, operation := range receipt.Operations {
+		copyOperation := operation
+		if operation.Message != nil {
+			message := *operation.Message
+			message.Content = sysprompt.StripSystemContent(message.Content)
+			message.Metadata = models.ProjectMessageMetadata(message.Metadata)
+			copyOperation.Message = &message
+		}
+		if operation.Turn != nil {
+			turn := *operation.Turn
+			turn.Metadata = models.ProjectTurnMetadata(turn.Metadata)
+			copyOperation.Turn = &turn
+		}
+		if operation.HadOutput != nil {
+			hadOutput := *operation.HadOutput
+			copyOperation.HadOutput = &hadOutput
+		}
+		projected.Operations = append(projected.Operations, copyOperation)
+	}
+	return projected
 }
 
 type pendingActionProjection struct {

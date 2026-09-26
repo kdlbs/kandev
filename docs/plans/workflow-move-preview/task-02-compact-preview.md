@@ -192,3 +192,14 @@ Final post-remediation verification passed on 2026-09-15:
   `pnpm run i18n:check`, and `pnpm run i18n:ratchet`.
 - Desktop workflow move-preview E2E: 2 tests passed.
 - Mobile workflow move-preview E2E: 1 test passed.
+
+## Pull request follow-up verification
+
+The condensed disclosure review follow-up preserves the visual step-label hierarchy,
+keeps keyboard focus order aligned with the visible actions, and narrows the compact
+preview props so unsupported styling props cannot be silently ignored.
+
+Verification passed:
+
+- Focused Vitest: `workflow-move-preview.test.tsx` and `workflow-stepper.test.tsx`.
+- Changed-file ESLint and `git diff --check`.

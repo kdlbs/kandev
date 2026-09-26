@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId } from "react";
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import type { SelectConfigOption } from "@/components/model-config-selector";
@@ -9,7 +9,6 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Skeleton } from "@kandev/ui/skeleton";
 import { Switch } from "@kandev/ui/switch";
-import { useProfileModelCapabilities } from "@/hooks/domains/settings/use-profile-model-capabilities";
 import {
   PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
   PERMISSION_KEYS,
@@ -17,6 +16,7 @@ import {
   type PermissionKey,
 } from "@/lib/agent-permissions";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
+import { CursorMCPAuthPreference } from "@/components/settings/cursor-mcp-auth-preference";
 import { ProfileAdvancedOptions } from "@/components/settings/profile-advanced-options";
 import { ModelConfigResolutionStatus } from "@/components/settings/model-config-resolution-status";
 import {
@@ -28,8 +28,8 @@ import {
   findActiveMode,
   profileModeIsDirty,
   profileModelIsDirty,
+  useProfileFormCapabilities,
 } from "@/components/settings/profile-capability-helpers";
-import { modelConfigOptions } from "@/components/settings/profile-model-config";
 import {
   ModelFallbackSection,
   ModelPicker,
@@ -63,6 +63,7 @@ export type ProfileFormData = {
   cli_flags: CLIFlag[];
   command_prefix?: string;
   provider_kind?: string;
+  cursor_mcp_auth_enabled?: boolean;
 } & Record<PermissionKey, boolean>;
 
 export type ProfileFormFieldsProps = {
@@ -73,6 +74,7 @@ export type ProfileFormFieldsProps = {
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
   agentName: string;
+  cursorMcpAuthSupported?: boolean;
   onRemove?: () => void;
   canRemove?: boolean;
   variant?: "default" | "compact";
@@ -463,6 +465,7 @@ export function ProfileFormFields({
   permissionSettings,
   passthroughConfig,
   agentName,
+  cursorMcpAuthSupported = false,
   onRemove,
   canRemove = false,
   variant = "default",
@@ -474,23 +477,19 @@ export function ProfileFormFields({
   const isCompact = variant === "compact";
   const {
     capabilities: caps,
-    configOptions: resolvedConfigOptions,
+    configOptions,
     configStatus,
     configError,
     configIsLoading,
-    isConfigResolutionPending,
     refreshModelConfig,
     refresh,
-  } = useProfileModelCapabilities(agentName, profile, modelConfig, onChange, {
-    skipCapabilityProbe: profile.provider_kind === "openai_compatible",
-  });
-  const configOptions = modelConfigOptions(
-    resolvedConfigOptions ? { ...modelConfig, config_options: resolvedConfigOptions } : modelConfig,
+  } = useProfileFormCapabilities(
+    agentName,
+    profile,
+    modelConfig,
+    onChange,
+    onModelConfigResolutionPendingChange,
   );
-
-  useEffect(() => {
-    onModelConfigResolutionPendingChange?.(isConfigResolutionPending);
-  }, [isConfigResolutionPending, onModelConfigResolutionPendingChange]);
 
   return (
     <div className={isCompact ? "space-y-3" : "space-y-4"}>
@@ -536,6 +535,18 @@ export function ProfileFormFields({
         lockPassthrough={lockPassthrough}
         baselineProfile={baselineProfile}
       />
+
+      {cursorMcpAuthSupported && (
+        <CursorMCPAuthPreference
+          enabled={profile.cursor_mcp_auth_enabled ?? true}
+          savedEnabled={
+            baselineProfile === undefined
+              ? undefined
+              : (baselineProfile.cursor_mcp_auth_enabled ?? true)
+          }
+          onChange={(enabled) => onChange({ cursor_mcp_auth_enabled: enabled })}
+        />
+      )}
 
       <ProfileFormFooter
         profile={profile}

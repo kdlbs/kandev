@@ -127,6 +127,30 @@ func TestAdmitBelowCeilingReservesCapacity(t *testing.T) {
 	}
 }
 
+// A disabled ceiling must not make automatic admission depend on the
+// population reader. The reader can be unavailable during startup or a
+// transient database failure, but an unlimited controller still needs to keep
+// the launch reservation for its later lifecycle callback.
+func TestDisabledCeilingAdmitsWhenPopulationReadFails(t *testing.T) {
+	lister := &fakeAdmittedLister{}
+	lister.fail(errors.New("population unavailable"))
+	c := newTestController(t, unlimitedSessionCeiling, lister)
+
+	decision := c.admit(context.Background(), admissionRequest{
+		taskID: "unlimited-task", sessionID: "unlimited-session",
+		origin: launchOriginAutomatic, seam: "disabled-test",
+	})
+	if !decision.admitted {
+		t.Fatalf("disabled ceiling refused an automatic launch: %+v", decision)
+	}
+	if decision.manualOverride || decision.reasonCode != "" {
+		t.Fatalf("disabled ceiling recorded an override/reason: %+v", decision)
+	}
+	if decision.reservationKey != "unlimited-session" {
+		t.Fatalf("reservation key = %q, want session reservation", decision.reservationKey)
+	}
+}
+
 func TestAdmitAtCeilingRefusesAutomaticLaunch(t *testing.T) {
 	lister := &fakeAdmittedLister{}
 	lister.set("s1", "s2")

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { lspClientManager, toLspLanguage, type LspStatus } from "@/lib/lsp/lsp-client-manager";
 import { EMPTY_LSP_PROGRESS, type LspProgressSnapshot } from "@/lib/lsp/lsp-progress";
 
@@ -45,7 +46,8 @@ function toggleLsp(sessionId: string, lspLanguage: string): void {
     current.state === "ready" ||
     current.state === "connecting" ||
     current.state === "installing" ||
-    current.state === "starting"
+    current.state === "starting" ||
+    current.state === "reconnecting"
   ) {
     requestLspStop(sessionId, lspLanguage);
   }
@@ -82,6 +84,7 @@ export function useLsp(
 } {
   const lspAutoStartLanguages = useAppStore((s) => s.userSettings.lspAutoStartLanguages);
   const lspServerConfigs = useAppStore((s) => s.userSettings.lspServerConfigs);
+  const continuityEnabled = useFeature("lspBrowserContinuity");
   const lspLanguage = toLspLanguage(monacoLanguage);
   const shouldAutoStart = lspLanguage ? lspAutoStartLanguages.includes(lspLanguage) : false;
   const key = lspKey(sessionId, lspLanguage);
@@ -93,23 +96,50 @@ export function useLsp(
         ? lspClientManager.isEnabledInStorage(sessionId, lspLanguage)
         : false,
   );
+  const hasLeaseHint = useSyncExternalStore(
+    (callback) => subscribeToLspKey(key, callback),
+    () =>
+      continuityEnabled && sessionId && lspLanguage
+        ? lspClientManager.hasLeaseHint(sessionId, lspLanguage)
+        : false,
+  );
   const startRequestGeneration = useSyncExternalStore(
     (callback) => subscribeToLspKey(key, callback),
     () => (key ? (startRequestGenerations.get(key) ?? 0) : 0),
   );
+  const handledStartRequest = useRef({ key, generation: startRequestGeneration });
   const { status, progress, toggle } = useLspStatus(sessionId, lspLanguage);
+  const statusState = useRef(status.state);
+  statusState.current = status.state;
 
   // Each mounted matching editor owns one connection lease. An explicit Stop
   // suppresses global auto-start for this session/language until Start clears
   // the override; later settings/configuration renders must not reacquire it.
   useEffect(() => {
+    const previousStartRequest = handledStartRequest.current;
+    const explicitRetry =
+      previousStartRequest.key === key &&
+      previousStartRequest.generation !== startRequestGeneration;
+    handledStartRequest.current = { key, generation: startRequestGeneration };
+    if (statusState.current === "error" || statusState.current === "unavailable") {
+      if (!explicitRetry) return;
+    }
     const autoStartEnabled = shouldAutoStart && !hasManualStopOverride;
-    if ((!autoStartEnabled && !isManuallyEnabled) || !sessionId || !lspLanguage) return;
-    const disconnect = lspClientManager.connect(sessionId, lspLanguage, lspServerConfigs);
+    if ((!autoStartEnabled && !isManuallyEnabled && !hasLeaseHint) || !sessionId || !lspLanguage) {
+      return;
+    }
+    const disconnect = lspClientManager.connect(
+      sessionId,
+      lspLanguage,
+      lspServerConfigs,
+      continuityEnabled,
+    );
     return disconnect;
   }, [
     hasManualStopOverride,
     isManuallyEnabled,
+    hasLeaseHint,
+    continuityEnabled,
     shouldAutoStart,
     sessionId,
     lspLanguage,

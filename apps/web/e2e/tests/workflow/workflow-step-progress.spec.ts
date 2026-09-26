@@ -1,6 +1,8 @@
 import type { Locator } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import type { ApiClient } from "../../helpers/api-client";
 
 type Box = { x: number; y: number; width: number; height: number };
 
@@ -30,15 +32,23 @@ function expectStablePosition(before: Box, after: Box) {
   expect(after.y).toBeCloseTo(before.y, 0);
 }
 
-function adjacentStep(
-  steps: Array<{ id: string; name: string; position: number }>,
-  currentStepId: string,
-): { id: string; name: string; position: number } {
-  const sorted = [...steps].sort((left, right) => left.position - right.position);
-  const currentIndex = sorted.findIndex((step) => step.id === currentStepId);
-  const target = sorted[currentIndex + 1] ?? sorted[currentIndex - 1];
-  if (!target) throw new Error("workflow step progress test requires an adjacent target");
-  return target;
+async function createProgressWorkflow(
+  apiClient: ApiClient,
+  workspaceId: string,
+  name: string,
+  options: { extraSteps?: number } = {},
+) {
+  const workflow = await apiClient.createWorkflow(workspaceId, name);
+  const startStep = await apiClient.createWorkflowStep(workflow.id, "Work", 0, {
+    is_start_step: true,
+  });
+  const targetStep = await apiClient.createWorkflowStep(workflow.id, "Review", 1);
+  const extraSteps = options.extraSteps ?? 0;
+  for (let index = 0; index < extraSteps; index += 1) {
+    await apiClient.createWorkflowStep(workflow.id, `Verification stage ${index + 1}`, index + 2);
+  }
+  await apiClient.createWorkflowStep(workflow.id, "Done", extraSteps + 2);
+  return { workflowId: workflow.id, startStepId: startStep.id, targetStep };
 }
 
 test.describe("Workflow step progress", () => {
@@ -47,11 +57,17 @@ test.describe("Workflow step progress", () => {
     apiClient,
     seedData,
   }) => {
+    const workflow = await createProgressWorkflow(
+      apiClient,
+      seedData.workspaceId,
+      "Pending workflow step progress",
+      { extraSteps: 6 },
+    );
     const task = await apiClient.seedTask(seedData.workspaceId, "Workflow step progress", {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
+      workflow_id: workflow.workflowId,
+      workflow_step_id: workflow.startStepId,
     });
-    const targetStep = adjacentStep(seedData.steps, seedData.startStepId);
+    const targetStep = workflow.targetStep;
 
     await testPage.setViewportSize({ width: 900, height: 800 });
     await testPage.goto(`/t/${task.task_id}`);
@@ -65,6 +81,19 @@ test.describe("Workflow step progress", () => {
     const targetRow = disclosure.getByTestId(`workflow-step-disclosure-row-${targetStep.id}`);
     const marker = targetRow.locator("[data-marker-state]");
     await expect(marker).toBeVisible();
+    const move = targetRow.getByTestId(`workflow-step-disclosure-move-${targetStep.id}`);
+    await expect(move).toBeVisible();
+    await waitForFiniteAnimations(testPage.locator('[data-slot="popover-content"]:visible'));
+    const labelBox = requireBox(
+      await targetRow.getByText(targetStep.name, { exact: true }).boundingBox(),
+      "step label",
+    );
+    const moveBox = requireBox(await move.boundingBox(), "direct move button");
+    expect(
+      Math.abs(labelBox.y + labelBox.height / 2 - moveBox.y - moveBox.height / 2),
+    ).toBeLessThan(2);
+    expect(moveBox.height).toBeCloseTo(28, 0);
+    await expect(targetRow.getByTestId("workflow-move-preview-details")).toHaveCount(0);
     const before = await marker.boundingBox();
     expect(before).not.toBeNull();
 
@@ -119,11 +148,16 @@ test.describe("Workflow step progress", () => {
     apiClient,
     seedData,
   }) => {
+    const workflow = await createProgressWorkflow(
+      apiClient,
+      seedData.workspaceId,
+      "Full workflow step progress",
+    );
     const task = await apiClient.seedTask(seedData.workspaceId, "Full workflow step progress", {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
+      workflow_id: workflow.workflowId,
+      workflow_step_id: workflow.startStepId,
     });
-    const targetStep = adjacentStep(seedData.steps, seedData.startStepId);
+    const targetStep = workflow.targetStep;
 
     await testPage.setViewportSize({ width: 1600, height: 900 });
     await testPage.goto(`/t/${task.task_id}`);

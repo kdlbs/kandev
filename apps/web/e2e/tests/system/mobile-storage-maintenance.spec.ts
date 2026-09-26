@@ -118,7 +118,7 @@ test.describe("Mobile storage maintenance", () => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
     await mobile.mobileMenuButton.click();
-    await testPage.getByRole("link", { name: "Settings" }).click();
+    await testPage.getByRole("link", { name: "Settings", exact: true }).click();
     const index = testPage.getByTestId("settings-index");
     await index.locator('a[href="/settings/system/storage"]').click();
 
