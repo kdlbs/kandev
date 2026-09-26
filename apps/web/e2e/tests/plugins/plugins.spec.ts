@@ -434,7 +434,7 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
       await expect(updateButton).toHaveAttribute("data-variant", "default");
 
       await updateButton.click();
-      await expect(pluginRow.getByText(`${PLUGIN_ID} · v2.0.0`, { exact: true })).toBeVisible({
+      await expect(pluginRow.getByText("v2.0.0", { exact: true })).toBeVisible({
         timeout: 15_000,
       });
       await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible();
