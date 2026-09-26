@@ -971,7 +971,7 @@
   "workflowMovePreviewNoticeConfigurationUnavailable": "无法解析会话设置。",
   "workflowMovePreviewNoticeInvalidConfiguration": "会话设置包含无效规则。",
   "workflowMovePreviewNoticeTargetUnavailable": "所选会话目标不可用。",
-  "workflowMovePreviewNoticeProfileUnavailable": "目标代理配置不可用。",
+  "workflowMovePreviewNoticeProfileUnavailable": "目标智能体配置不可用。",
   "moveTaskToTheNextWorkflow": "将任务移至下一工作流步骤",
   "moveTo": "移动到",
   "moving": "正在移动…",

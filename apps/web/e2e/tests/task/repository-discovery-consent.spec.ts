@@ -12,6 +12,118 @@ import path from "node:path";
 useRegularMode();
 
 test.describe("Desktop repository discovery consent", () => {
+  test("confirms Home directly without opening a folder picker", async ({
+    testPage,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await backend.restart({ KANDEV_DESKTOP_RUNTIME: "true" });
+
+    let confirmationRequests = 0;
+    let confirmationBody: string | null = null;
+    let directoryListingRequests = 0;
+    await testPage.addInitScript(() => {
+      const win = window as typeof window & {
+        __TAURI_INTERNALS__?: {
+          invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+          transformCallback: () => number;
+        };
+      };
+      const commands: string[] = [];
+      Object.defineProperty(win, "__TAURI_INTERNALS__", {
+        configurable: true,
+        value: {
+          transformCallback: () => 1,
+          invoke: async (command: string) => {
+            commands.push(command);
+            if (command === "plugin:event|listen") return 1;
+            if (command === "get_native_notification_permission") return "granted";
+            if (command === "request_native_notification_permission") return "granted";
+            if (command === "get_update_state") {
+              return {
+                phase: "idle",
+                currentVersion: "",
+                latestVersion: null,
+                releaseNotes: null,
+                releaseUrl: null,
+                checkedAtEpochMs: null,
+                downloadedBytes: null,
+                totalBytes: null,
+                installSupported: false,
+                installUnsupportedReason: null,
+                error: null,
+              };
+            }
+            return null;
+          },
+        },
+      });
+      Object.defineProperty(win, "__kandevFolderPickerCommands", {
+        configurable: true,
+        value: commands,
+      });
+    });
+    await testPage.route("**/api/v1/workspaces/*/repositories/discovery**", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          json: {
+            roots: [],
+            repositories: [],
+            total: 0,
+            desktop_runtime: true,
+            root_states: [],
+            home_confirmation_required: confirmationRequests === 0,
+          },
+        });
+        return;
+      }
+      await route.continue();
+    });
+    await testPage.route("**/api/v1/repositories/discovery/roots/confirm-home", async (route) => {
+      confirmationRequests += 1;
+      confirmationBody = route.request().postData();
+      await route.fulfill({
+        json: {
+          id: "confirmed-home",
+          path: "/desktop-user-home",
+          display_path: "~",
+          state: "connected",
+        },
+      });
+    });
+    testPage.on("request", (request) => {
+      if (request.url().includes("/api/v1/fs/list-dir") && request.method() === "GET") {
+        directoryListingRequests += 1;
+      }
+    });
+
+    try {
+      await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
+      await testPage.getByRole("button", { name: "Add Local Repository" }).click();
+      const controls = testPage
+        .getByRole("dialog", { name: "Add Local Repository" })
+        .getByTestId("discovery-root-controls");
+      const continueHome = controls.getByRole("button", { name: "Continue Home Discovery" });
+      await expect(continueHome).toBeVisible();
+      await continueHome.click();
+
+      await expect.poll(() => confirmationRequests).toBe(1);
+      await expect(continueHome).toBeHidden();
+      expect(confirmationBody).toBeNull();
+      expect(directoryListingRequests).toBe(0);
+      expect(
+        await testPage.evaluate(
+          () =>
+            (window as typeof window & { __kandevFolderPickerCommands?: string[] })
+              .__kandevFolderPickerCommands ?? [],
+        ),
+      ).not.toContain("pick_directory");
+    } finally {
+      await backend.restart();
+    }
+  });
+
   test("shows compact discovery actions only inside the repository selector", async ({
     testPage,
     backend,

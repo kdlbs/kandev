@@ -38,11 +38,12 @@
 # maps them to `features.<name>` Viper keys automatically.
 features:
   # Retains supported language-server leases across browser disconnects. The
-  # task-host and bounded lease lifecycle are opt-in while the feature settles.
+  # bounded task-host lifecycle is enabled by default; this restart-required
+  # flag remains the operator kill switch.
   KANDEV_FEATURES_LSP_BROWSER_CONTINUITY:
-    prod: "false"
-    dev:  "false"
-    e2e:  "false"
+    prod: "true"
+    dev:  "true"
+    e2e:  "true"
 
   # Office (autonomous agent surface). Off in prod until the feature
   # is user-ready; on in dev/e2e so contributors and tests exercise it.
@@ -104,20 +105,6 @@ features:
     prod: "false"
     dev:  "false"
     e2e:  "false"
-
-  # High-risk Office per-agent session identity: keys an Office task's session
-  # on the run's own agent instead of the runner seat, and binds an agent's
-  # decision re-evaluation to its own calling session. Default-on in every
-  # profile; it remains a high-risk, path-scoped change to durable session
-  # identity. A live (task_id, agent_profile_id) pair is guarded in-transaction
-  # on the office session creation path instead of by a table-level constraint.
-  # Pre-existing duplicate rows stay safe by selection, not migration. Disabling
-  # this toggle and restarting reverts to runner-seat binding and task-active-
-  # session decision re-evaluation.
-  KANDEV_FEATURES_OFFICE_SESSION_IDENTITY:
-    prod: "true"
-    dev:  "true"
-    e2e:  "true"
 
   # Needs-you Inbox: a workspace-scoped sidebar destination listing exactly
   # the answerable clarification bundles for the active workspace. Off in

@@ -178,6 +178,7 @@ func TestRegisterRepositoryRoutesWiresHTTPAndWS(t *testing.T) {
 		"POST /api/v1/workspaces/:id/repositories/discovery/refresh",
 		"GET /api/v1/repositories/discovery/roots",
 		"POST /api/v1/repositories/discovery/roots",
+		"POST /api/v1/repositories/discovery/roots/confirm-home",
 		"POST /api/v1/repositories/discovery/roots/reconnect",
 		"DELETE /api/v1/repositories/discovery/roots",
 		"GET /api/v1/workspaces/:id/branches",

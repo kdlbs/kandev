@@ -26,6 +26,7 @@ import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/wor
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { TaskTopBarActionsMenu } from "@/components/task/task-top-bar-actions-menu";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
+import { SurfaceAction } from "@/components/actions/surface-action";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import {
   RemoteRepositoryProviderIcon,
@@ -265,15 +266,13 @@ function DebugOverlayToggle({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 cursor-pointer px-2"
+        <SurfaceAction
+          surface="topbar"
+          presentation="desktop"
+          label={label}
+          icon={<IconBug className="h-4 w-4" />}
           onClick={onToggleDebugOverlay}
-          aria-label={label}
-        >
-          <IconBug className="h-4 w-4" />
-        </Button>
+        />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
@@ -448,7 +447,7 @@ function TopBarRight({
       {!isArchived && (
         <TopbarCluster
           label={t("task:pluginTopBarActions")}
-          className="[&_button]:h-7 [&_button]:text-xs"
+          className="[&_button:not([data-slot=surface-action])]:h-7 [&_button:not([data-slot=surface-action])]:text-xs"
         >
           <TaskTopBarPluginActions
             sessionId={activeSessionId ?? null}

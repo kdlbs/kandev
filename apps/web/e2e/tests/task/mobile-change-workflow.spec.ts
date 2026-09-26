@@ -127,6 +127,27 @@ test("changes workflow from phone task actions with task-local agent routing", a
     originalSessionId,
   ]);
   await waitForWorkflowMoveLifecycle(apiClient, task.id);
+  await expect(actions.column(task.id)).toBeVisible();
+  await actions.open(task.id);
+  await actions.nested("Move to");
+  const currentDestinationStep = testPage.getByTestId(`task-context-step-${fixture.prStep.id}`);
+  await expect(currentDestinationStep).toBeVisible();
+  await expect(currentDestinationStep).toBeDisabled();
+  if (prCapture.capturing) {
+    await testPage.evaluate(async () => {
+      await Promise.all(
+        document
+          .getAnimations()
+          .filter((animation) => animation.playState === "running")
+          .map((animation) => animation.finished.catch(() => undefined)),
+      );
+    });
+    await prCapture.screenshot("phone-task-destination-step", {
+      caption:
+        "Phone task actions showing the task in its destination workflow step after migration.",
+    });
+  }
+
   const changed = await apiClient.getTask(task.id);
   expect(changed).toMatchObject({
     id: before.id,

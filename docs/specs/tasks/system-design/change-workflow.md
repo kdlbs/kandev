@@ -110,6 +110,38 @@ After commit, existing task events carry the complete task projection. Routing,
 future queued promotion, and restart load the new map. Never implement this as a
 move followed by an independent override update.
 
+## Open task workflow projection
+
+The open task page must keep workflow membership, current step, and step
+definitions in one destination-aware projection. `task.updated` already removes
+a cross-workflow task from the source `kanban` cache and inserts it into the
+destination `kanbanMulti` snapshot, creating a placeholder when necessary. The
+page currently merges local task details with only `kanban.tasks`, and that
+merge does not update `workflow_id`. After removal from the source cache, the
+local details therefore retain the source workflow and the top bar continues
+to read the source `kanban.steps` until a full page reload.
+
+Resolve the open task's live placement from its task ID across the active and
+multi-workflow snapshots. Use the owning snapshot's workflow ID together with
+the task's step ID. A live placement newer than local task details supersedes
+both fields; a partial task update that omits placement must preserve the known
+fields. Do not use a source workflow row after the destination event has removed
+it. Keep full task details for fields absent from board projections. A request
+started before a newer live move must not restore the older placement.
+
+The task page fetches the resolved workflow snapshot by ID, including when the
+workflow is absent from the global workflow catalog and its destination
+snapshot is only a placeholder. Fetch only the task's workflow; do not load all
+workspace workflows solely for this page. The desktop stepper uses that
+workflow's ordered steps and the freshness-resolved task step as current. Use a
+cached projection step only when task details do not contain a step and the
+cached step belongs to the resolved workflow. A newer task-detail response
+remains authoritative over an older cached row, including for a move within the
+same workflow. Keep the board's selected workflow unchanged. Reconnect and
+foreground refresh converge the same projection after missed events. The phone
+task action and list surfaces reuse the task placement state without a new
+mobile stepper.
+
 ## Routing and compatibility
 
 Use existing task-aware fixed-profile resolution. Initial and earlier-step

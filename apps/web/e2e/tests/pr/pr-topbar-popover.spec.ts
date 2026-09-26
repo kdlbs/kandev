@@ -133,6 +133,46 @@ async function openTaskAndWait(
 }
 
 test.describe("PR top-bar CI popover", () => {
+  test("single badge shows a conflict bubble beside the left status glyph and keeps its details", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Conflicting failing PR badge";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associatePR(apiClient, seed.taskId, {
+      checks_state: "failure",
+      mergeable_state: "blocked",
+      has_merge_conflicts: true,
+      checks_total: 2,
+      checks_passing: 1,
+      review_state: "changes_requested",
+    });
+    await expect
+      .poll(async () => (await apiClient.getTaskPR(seed.taskId))?.has_merge_conflicts)
+      .toBe(true);
+    const session = await openTaskAndWait(testPage, seed, title);
+    const badge = session.prTopbarButton();
+    await expect(badge).toHaveText("#42");
+    await expect(badge).toHaveAttribute(
+      "aria-label",
+      /Checks failed.*Changes requested.*Conflicts/,
+    );
+    await expect(badge.getByTestId("pr-merge-conflict-warning")).toBeVisible();
+    await expect(badge.locator("svg")).toHaveCount(2);
+    await badge.focus();
+    await expect(testPage.getByTestId("pr-topbar-popover")).toBeVisible();
+    await badge.click();
+    await expect(session.prDetailPanel()).toBeVisible();
+  });
+
   test("counts row uses TaskPR aggregates and hides zero-count buckets", async ({
     testPage,
     apiClient,

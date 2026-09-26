@@ -160,6 +160,7 @@ func TestManager_SetWorkspacePollMode_PropagatesToPerRepoTrackers(t *testing.T) 
 	}
 
 	mgr := NewManager(&config.InstanceConfig{WorkDir: taskRoot}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
 	if len(mgr.repoTrackers) != 2 {
 		t.Fatalf("expected 2 per-repo trackers, got %d", len(mgr.repoTrackers))
 	}

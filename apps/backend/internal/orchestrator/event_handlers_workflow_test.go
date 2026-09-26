@@ -452,6 +452,28 @@ func TestReconcileTaskLifecycleTokensRetriesDestinationEntryOnce(t *testing.T) {
 	}
 }
 
+func TestLoadQueuePromotedTaskDropsWhenWorkflowStepLookupIsUnavailable(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "promotion-no-step-getter", "promotion-no-step-session", "step1")
+	task, err := repo.GetTask(ctx, "promotion-no-step-getter")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	task.WIPAdmitted = true
+	task.Metadata = map[string]interface{}{models.MetaKeyQueuePromotionPending: true}
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("prepare promoted task: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.workflowStepGetter = nil
+	gotTask, gotStep, ok := svc.loadQueuePromotedTaskAndTargetStep(ctx, task.ID)
+	if ok || gotTask != nil || gotStep != nil {
+		t.Fatalf("loaded task/step = %#v/%#v (ok=%t), want dropped event", gotTask, gotStep, ok)
+	}
+}
+
 type publishedEvent struct {
 	Subject string
 	Event   *bus.Event

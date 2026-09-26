@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -80,6 +81,11 @@ func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Log
 		taskSvc.SetEnvironmentDestroyer(&environmentDestroyerAdapter{
 			lifecycle: lifecycleMgr,
 			worktrees: manager,
+			containers: &containerOpsDispatch{
+				local:     &lifecycleContainerOps{lifecycle: lifecycleMgr},
+				remote:    runtime.NewRemoteDockerContainers(log),
+				executors: taskSvc,
+			},
 		})
 	}
 	taskSvc.SetSSHTaskDirReclaimer(newSSHTaskDirReclaimerAdapter(log))
@@ -105,16 +111,17 @@ func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Log
 // Manager (for worktrees). Branch is preserved on worktree removal so unpushed
 // work is never silently dropped.
 type environmentDestroyerAdapter struct {
-	lifecycle *lifecycle.Manager
-	worktrees *worktree.Manager
+	lifecycle  *lifecycle.Manager
+	worktrees  *worktree.Manager
+	containers *containerOpsDispatch
 }
 
 func (a *environmentDestroyerAdapter) DestroyKubernetesEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
 	return a.lifecycle.DestroyKubernetesEnvironment(ctx, env)
 }
 
-func (a *environmentDestroyerAdapter) DestroyContainer(ctx context.Context, containerID string) error {
-	return a.lifecycle.DestroyContainer(ctx, containerID)
+func (a *environmentDestroyerAdapter) DestroyContainer(ctx context.Context, env *models.TaskEnvironment) error {
+	return a.containers.DestroyContainer(ctx, env)
 }
 
 func (a *environmentDestroyerAdapter) DestroySandbox(ctx context.Context, sandboxID, executionID string) error {
@@ -132,8 +139,29 @@ func (a *environmentDestroyerAdapter) DestroyWorktree(ctx context.Context, workt
 	return nil
 }
 
-func (a *environmentDestroyerAdapter) GetContainerLiveStatus(ctx context.Context, containerID string) (*taskservice.ContainerLiveStatus, error) {
-	live, err := a.lifecycle.GetContainerLiveStatus(ctx, containerID)
+func (a *environmentDestroyerAdapter) GetContainerLiveStatus(
+	ctx context.Context,
+	env *models.TaskEnvironment,
+) (*taskservice.ContainerLiveStatus, error) {
+	return a.containers.GetContainerLiveStatus(ctx, env)
+}
+
+// lifecycleContainerOps adapts the lifecycle Manager to the dispatch's local
+// container surface, translating the runtime status type here so the dispatch
+// itself does not depend on the runtime tier.
+type lifecycleContainerOps struct {
+	lifecycle *lifecycle.Manager
+}
+
+func (o *lifecycleContainerOps) DestroyContainer(ctx context.Context, containerID string) error {
+	return o.lifecycle.DestroyContainer(ctx, containerID)
+}
+
+func (o *lifecycleContainerOps) GetContainerLiveStatus(
+	ctx context.Context,
+	containerID string,
+) (*taskservice.ContainerLiveStatus, error) {
+	live, err := o.lifecycle.GetContainerLiveStatus(ctx, containerID)
 	if err != nil || live == nil {
 		return nil, err
 	}
