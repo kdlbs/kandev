@@ -1,7 +1,7 @@
 ---
 id: "02-gate-comment-prompt"
 title: "Verdict prompt for task_comment runs at a review or approval stage"
-status: todo
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -112,4 +112,12 @@ None.
 
 ## Results
 
-Not started.
+Shipped. `resolveGateCommentStage` landed in
+`internal/office/service/review_stage.go`; the `buildPromptContext` call site
+landed in `internal/office/service/scheduler_integration.go`;
+`buildGateCommentPrompt` and the `RunReasonTaskComment` branch landed in
+`internal/office/service/prompt_builder.go`. All listed Acceptance items
+(stage resolution fallback order, byte-identical no-`stage_type` prompt,
+unloadable-comment fallback, decision-contract presence/absence) verified
+against real `BuildPrompt` output in the Review step (see plan.md's REVIEW
+PHASE section).

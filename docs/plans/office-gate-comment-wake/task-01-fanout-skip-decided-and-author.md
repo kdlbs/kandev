@@ -1,7 +1,7 @@
 ---
 id: "01-fanout-skip-decided-and-author"
 title: "Participant fan-out skips decided seats and the comment author"
-status: todo
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -179,4 +179,15 @@ None.
 
 ## Results
 
-Not started.
+Shipped. `SkipDecided`, `readQueueRunForEachParticipantConfig`, and the digest
+salt landed in `internal/workflow/engine/types.go`. `wrapCommentFanOut`,
+`filterFanOutSeats`, `excludeCommentAuthor`, and `excludeDecidedSeats` landed in
+`internal/workflow/engine/phase2_callbacks.go`, wired with `Decisions`/`Logger`
+at both construction sites (`orchestrator/workflow_callbacks.go`,
+`orchestrator/event_handlers_workflow.go`). `DashboardService.CreateComment`'s
+sentinel classification landed in `office/dashboard/service_tasks.go`. The
+comment-coalescing pin landed in
+`internal/runs/service/service_comment_coalesce_test.go`. All listed
+Acceptance items verified against a real engine/dashboard/coalescing test run
+in the Review step (see plan.md's REVIEW PHASE section); `go build ./...` and
+`golangci-lint run ... --new-from-rev` both clean on this file set.
