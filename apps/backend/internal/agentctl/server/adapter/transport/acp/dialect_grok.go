@@ -28,6 +28,7 @@ func newGrokACPDialect() acpDialect {
 		},
 		contextWindow:        grokContextWindow,
 		normalizePromptUsage: normalizeGrokPromptUsage,
+		mcpToolCall:          parseCursorMCPToolCall,
 	}
 }
 

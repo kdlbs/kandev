@@ -609,6 +609,8 @@ Azure DevOps currently uses PAT authentication. It does not yet provide an Entra
 
 Jira configuration is workspace-specific. Use `/jira` to search with JQL, save views, open issue details, run supported transitions, and launch tasks with Jira prompt presets. Launch copies Jira URL/content into the task title and description; it does not store a durable Jira issue association on the task.
 
+In the **Views** picker, select the star beside a built-in or saved view to make it the default for future visits to `/jira`. Select the star again to clear the default. This does not change the current search.
+
 Enter the site URL (a missing scheme is normalized to HTTPS), choose **Cloud** or **Server/Data Center**, and optionally set a default project key. Authentication options are:
 
 | Deployment | Method | Required values |

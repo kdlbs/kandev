@@ -201,6 +201,7 @@ type pullRequestObservation struct {
 	reviewState           string
 	checksState           string
 	mergeableState        string
+	hasMergeConflicts     *bool
 	mergeQueueState       string
 	unresolvedReviewCount int
 	pendingReviewCount    int

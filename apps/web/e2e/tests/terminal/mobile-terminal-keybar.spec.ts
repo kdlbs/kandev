@@ -275,7 +275,7 @@ test.describe("Mobile terminal key-bar — user flows", () => {
     await expect(keybar.root).not.toBeVisible();
 
     for (const panel of ["Files", "Plan", "Changes"] as const) {
-      await testPage.getByRole("button", { name: panel }).tap();
+      await testPage.getByRole("button", { name: panel, exact: true }).tap();
       await expect(keybar.root).not.toBeVisible();
     }
   });

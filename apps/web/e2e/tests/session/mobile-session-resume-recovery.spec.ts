@@ -55,7 +55,7 @@ test.describe("mobile: delayed resume cancellation", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(150_000);
+    test.setTimeout(180_000);
 
     const fixture = await seedDelayedResumeFixture(
       testPage,
@@ -91,10 +91,20 @@ test.describe("mobile: delayed resume cancellation", () => {
         { timeout: 30_000 },
       );
 
+      const priorResponses = await readSessionMessageIdsContaining(
+        apiClient,
+        fixture.identity.sessionId,
+        "simple mock response",
+      );
       await fixture.session.sendMessageViaButton("/e2e:simple-message");
-      await fixture.session.expectChatResponseVisible("simple mock response", 1, {
-        timeout: 60_000,
-      });
+      await waitForNewSessionMessage(
+        apiClient,
+        fixture.identity.sessionId,
+        priorResponses,
+        "simple mock response",
+        90_000,
+      );
+      await fixture.session.expectChatResponseVisible("simple mock response", 1);
       const responses = fixture.session
         .activeChat()
         .locator("[data-agent-message-body][data-message-id]")

@@ -1187,6 +1187,81 @@ func TestSyncTaskPR_DraftOverridesCleanMergeableState(t *testing.T) {
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-PR-CONFLICT-INDICATOR-001.2
+func TestSyncTaskPR_DraftKeepsRawConflictObservation(t *testing.T) {
+	svc, store, _ := setupSyncTest(t)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "t1", Owner: "owner", Repo: "repo", PRNumber: 1,
+		PRURL: "https://github.com/owner/repo/pull/1", PRTitle: "Draft conflict",
+		HeadBranch: "feat", BaseBranch: "main", State: "open",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status := &PRStatus{
+		PR: &PR{Number: 1, Title: "Draft conflict", State: "open", Draft: true,
+			RepoOwner: "owner", RepoName: "repo"},
+		ChecksState: "failure", MergeableState: "dirty",
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetTaskPR(ctx, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.MergeableState != "draft" {
+		t.Fatalf("effective mergeable state = %q, want draft", stored.MergeableState)
+	}
+	encoded, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["has_merge_conflicts"] != true {
+		t.Fatalf("has_merge_conflicts = %v, want true", payload["has_merge_conflicts"])
+	}
+}
+
+func TestObservedPRMergeConflictPreservesUnknownAndClearsOnAuthoritativeResult(t *testing.T) {
+	previous := true
+	if got := observedPRMergeConflict(nil, "unknown"); got != nil {
+		t.Fatalf("unknown initial observation = %v, want nil", *got)
+	}
+	if got := observedPRMergeConflict(&previous, ""); got == nil || !*got {
+		t.Fatalf("empty observation lost existing conflict: %v", got)
+	}
+	if got := observedPRMergeConflict(&previous, "clean"); got == nil || *got {
+		t.Fatalf("clean observation did not clear conflict: %v", got)
+	}
+}
+
+func TestReplaceTaskPR_DraftAndConflictOnInitialAssociation(t *testing.T) {
+	_, store, _ := setupSyncTest(t)
+	ctx := context.Background()
+	tp := &TaskPR{
+		TaskID: "t1", Owner: "owner", Repo: "repo", PRNumber: 1,
+		PRURL: "https://github.com/owner/repo/pull/1", PRTitle: "Draft conflict",
+		HeadBranch: "feat", BaseBranch: "main", State: "open",
+	}
+	_, err := store.ReplaceTaskPR(ctx, tp, &PRStatus{PR: &PR{
+		Number: 1, State: "open", Draft: true, MergeableState: "dirty",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetTaskPR(ctx, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.MergeableState != "draft" || stored.HasMergeConflicts == nil || !*stored.HasMergeConflicts {
+		t.Fatalf("draft conflict association = (%q, %v)", stored.MergeableState, stored.HasMergeConflicts)
+	}
+}
+
 // TestSyncTaskPR_ChecksPopulated_PreservesOnLightweightSync verifies the
 // "preserve when batch sync didn't populate" path: a PRStatus with
 // ChecksPopulated=false must NOT clobber the persisted ChecksTotal /

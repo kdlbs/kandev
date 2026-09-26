@@ -1,6 +1,5 @@
 "use client";
 
-import { IconGitPullRequest } from "@tabler/icons-react";
 import {
   forwardRef,
   type FocusEventHandler,
@@ -24,6 +23,8 @@ import type { TaskPR } from "@/lib/types/github";
 import type { TaskPRTooltipHydrationStatus } from "@/hooks/domains/github/use-task-pr-tooltip-hydration";
 import { useChangeRequestTaskTooltipState } from "@/components/integrations/use-change-request-task-tooltip-state";
 import type { TaskPRAutomationSummary, TaskPRInfo } from "./pr-task-automation";
+import { PRStatusGlyph } from "./pr-status-glyph";
+export { AutomationIndicatorDots } from "./pr-status-glyph";
 
 export type PRTaskIconDisclosureProps = {
   taskId: string;
@@ -41,39 +42,19 @@ export type PRTaskIconDisclosureProps = {
   content: ReactNode;
 };
 
-export function AutomationIndicatorDots({
-  autoFixEnabled,
-  autoMergeEnabled,
-}: Pick<TaskPRAutomationSummary, "autoFixEnabled" | "autoMergeEnabled">) {
+export function PRTaskIconGlyph({
+  automation,
+  hasMergeConflicts,
+}: {
+  automation: TaskPRAutomationSummary;
+  hasMergeConflicts: boolean;
+}) {
   return (
-    <>
-      {autoFixEnabled && (
-        <span
-          data-testid="pr-task-automation-auto-fix"
-          className="absolute left-0 top-0 h-1.5 w-1.5 rounded-full bg-yellow-400 ring-1 ring-background"
-          aria-hidden="true"
-        />
-      )}
-      {autoMergeEnabled && (
-        <span
-          data-testid="pr-task-automation-auto-merge"
-          className="absolute right-0 top-0 h-1.5 w-1.5 rounded-full bg-purple-500 ring-1 ring-background"
-          aria-hidden="true"
-        />
-      )}
-    </>
-  );
-}
-
-export function PRTaskIconGlyph({ automation }: { automation: TaskPRAutomationSummary }) {
-  return (
-    <span className="relative inline-flex h-3.5 w-3.5 shrink-0">
-      <IconGitPullRequest aria-hidden="true" className="h-3.5 w-3.5" />
-      <AutomationIndicatorDots
-        autoFixEnabled={automation.autoFixEnabled}
-        autoMergeEnabled={automation.autoMergeEnabled}
-      />
-    </span>
+    <PRStatusGlyph
+      hasMergeConflicts={hasMergeConflicts}
+      autoFixEnabled={automation.autoFixEnabled}
+      autoMergeEnabled={automation.autoMergeEnabled}
+    />
   );
 }
 

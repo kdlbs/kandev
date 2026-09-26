@@ -193,6 +193,7 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 	if env == nil {
 		env = runtimeEnvFromMetadata(execution.MetadataSnapshot())
 	}
+	normalizeKubernetesManagedGitEnvironment(execution.RuntimeName, env)
 	approvalPolicy := "untrusted"
 	if refresh.AutoApprovePermissions {
 		approvalPolicy = "never"

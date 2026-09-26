@@ -418,6 +418,7 @@
       "github_saved_presets",
       "gitlab_saved_presets",
       "initial_setup_complete",
+      "jira_default_view_id",
       "jira_saved_views",
       "jira_task_presets",
       "kanban_hidden_step_ids",
