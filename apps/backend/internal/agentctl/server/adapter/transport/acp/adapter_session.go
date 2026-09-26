@@ -182,6 +182,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.mu.Unlock()
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	a.attachMgr.SetSessionID(sessionID)
+	a.refreshGuardedTTYAvailability(ctx, sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
 	a.logger.Info("created new session", zap.String("session_id", sessionID))
@@ -561,6 +562,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Unlock()
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	a.attachMgr.SetSessionID(sessionID)
+	a.refreshGuardedTTYAvailability(ctx, sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
 	a.logger.Info("loaded session", zap.String("session_id", sessionID))
