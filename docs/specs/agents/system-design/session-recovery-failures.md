@@ -138,7 +138,9 @@ Do not collapse every recovery entry into the latest one. Preserve unrelated err
 `ActionMessage` must retain a historical body while the session is STARTING, RUNNING, or COMPLETED.
 Neither a button click nor any later user message proves successful recovery.
 Use the existing durable recovery resolution timestamp and correlated boot evidence for outcome state.
-Only the matching current unresolved stamp can mount active recovery controls.
+Only the current unresolved stamp owns recovery, even in FAILED. Compare failure
+occurrence time before transcript time. Resolved failures yield to ordinary stopped-session
+recovery; later failures keep their own actions.
 A newer failed attempt creates a new chronological entry. The previous entry remains historical with no stale actions.
 An update within the same failure identity updates that entry without moving it.
 

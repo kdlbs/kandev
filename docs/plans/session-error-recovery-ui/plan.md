@@ -592,3 +592,23 @@ the fix and its eight-test component suite passed afterward. The optional
 context memoization suggestion is deferred: no measured performance regression
 was identified, and it is not required for the recovery correctness contract.
 Exact-head CI/review validation remains pending after this correction is pushed.
+
+### September 26 review confidence audit
+
+The original low-confidence Greptile summary refers to the initial PR head.
+Rechecked its four findings against the existing owner, remediation, navigation,
+and action-order fixes. Also audited CodeRabbit aggregate architecture concerns.
+Resolved cause-specific data could still own FAILED sessions or waiting sessions
+with retained error strings. The selector now honors durable success and matching
+boot evidence in those states, retaining ordinary stopped-session recovery and
+newer failures. Failure occurrence time takes precedence over transcript insertion.
+
+Three regressions failed before the fix. The six affected suites passed 97 tests;
+expanded selector coverage passed all 20 cases, including pre-history resolution,
+a newer failure and a foreign-session boot. Managed desktop and mobile recovery
+suites each passed seven cases without retries, including the new stale-runtime
+case. Targeted lint, type checking, specification/catalog checks and frontend build
+passed. Backend authorization, task/session correlation, lifecycle locking and
+production diagnostic sanitization were inspected; their contracts are unchanged.
+The optional memoization suggestion remains a documented performance deferral.
+Fresh external reviewer assessment and exact-head CI are pending after delivery.

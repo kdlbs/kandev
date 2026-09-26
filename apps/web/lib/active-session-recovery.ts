@@ -48,6 +48,7 @@ export function selectActiveSessionRecovery(
   const message = candidates
     .toSorted((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
     .at(-1);
+  if (isResolvedFailure(session, error, message, messages)) return null;
   if (session.state === "STARTING" && !hasUnresolvedFailure(session, error, message, messages))
     return null;
   if (
@@ -98,11 +99,22 @@ function hasUnresolvedFailure(
   messages: readonly RecoveryMessage[],
 ) {
   if (!error || (!message && session.state !== "STARTING")) return false;
-  const occurredAt = message?.created_at ?? error.occurredAt;
-  if (!occurredAt || hasSessionRecoveryResolutionAfter(session.metadata, occurredAt)) return false;
+  const occurredAt = error.occurredAt ?? message?.created_at;
+  if (!occurredAt) return false;
   const failedAt = Date.parse(occurredAt);
-  if (Number.isNaN(failedAt)) return false;
-  return !messages.some((candidate) => successfulBootAfter(candidate, session.id, failedAt));
+  return !Number.isNaN(failedAt) && !isResolvedFailure(session, error, message, messages);
+}
+
+function isResolvedFailure(
+  session: RecoverySession,
+  error: ReturnType<typeof readLastAgentError>,
+  message: RecoveryMessage | undefined,
+  messages: readonly RecoveryMessage[],
+) {
+  const occurredAt = error?.occurredAt ?? message?.created_at;
+  if (hasSessionRecoveryResolutionAfter(session.metadata, occurredAt)) return true;
+  const failedAt = Date.parse(occurredAt ?? "");
+  return messages.some((candidate) => successfulBootAfter(candidate, session.id, failedAt));
 }
 
 function successfulBootAfter(message: RecoveryMessage, sessionId: string, failedAt: number) {

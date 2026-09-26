@@ -156,6 +156,7 @@ export function sessionErrorDetailsScenario() {
 }
 
 export function uniformRecoveryCases() {
+  resolvedFailureScenario();
   for (const scenario of [
     { name: "failed startup", state: "FAILED", kind: "generic" },
     { name: "interrupted waiting", state: "WAITING_FOR_INPUT", kind: "generic" },
@@ -238,6 +239,52 @@ export function uniformRecoveryCases() {
       await expect(card).toHaveCount(1);
     });
   }
+}
+
+function resolvedFailureScenario() {
+  test("resolved runtime failure does not own recovery for a still-failed session", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Resolved runtime failure", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+      state: "FAILED",
+      completedAt: new Date().toISOString(),
+      agentProfileId: seedData.agentProfileId,
+      errorMessage: "Connection lost",
+      metadata: {
+        last_agent_error: {
+          message: "Runtime installation failed",
+          stamp: "resolved-runtime",
+          occurred_at: "2026-09-20T10:00:00Z",
+        },
+        recovery_resolved_at: "2026-09-20T11:00:00Z",
+      },
+    });
+    await apiClient.seedSessionMessage(sessionId, {
+      type: "status",
+      content: "Runtime installation failed",
+      createdAt: "2026-09-20T10:00:00Z",
+      metadata: {
+        recovery_actions: true,
+        error_stamp: "resolved-runtime",
+        failure_kind: "managed_runtime_npm_resolution",
+      },
+    });
+    await testPage.goto(`/t/${task.id}`);
+    const banner = testPage.getByTestId("failed-session-banner");
+    await expect(banner).toBeVisible();
+    await expect(testPage.getByTestId("session-recovery-card")).toHaveCount(0);
+    await expect(testPage.getByTestId("managed-runtime-npm-retry-button")).toHaveCount(0);
+    await expect(testPage.locator('[contenteditable="true"]:visible')).toHaveCount(0);
+    await assertNoDocumentHorizontalOverflow(testPage, "resolved runtime recovery");
+  });
 }
 
 export function recoveryDraftScenario() {
