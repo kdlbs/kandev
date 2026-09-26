@@ -971,7 +971,7 @@
   "workflowMovePreviewNoticeConfigurationUnavailable": "無法解析工作階段設定。",
   "workflowMovePreviewNoticeInvalidConfiguration": "工作階段設定包含無效規則。",
   "workflowMovePreviewNoticeTargetUnavailable": "所選工作階段目標不可用。",
-  "workflowMovePreviewNoticeProfileUnavailable": "目標代理設定不可用。",
+  "workflowMovePreviewNoticeProfileUnavailable": "目標代理程式設定檔不可用。",
   "moveTaskToTheNextWorkflow": "將任務移至下一工作流程步驟",
   "moveTo": "移動到",
   "moving": "正在移動…",

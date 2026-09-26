@@ -30,17 +30,17 @@ fallback-default outcome of the shipped casting rules, and when such an agent
 loses one of them the current behavior ends the session it is still using for
 the other.
 
-In the configuration every profile ships (`features.officeSessionIdentity`
-disabled), the defect is sharper than "sometimes over-eager". With that flag
-off, a task that has a runner routes *every* office run through the session
-owned by the runner, so no session is keyed on a non-runner participant at all.
-A termination aimed at a displaced or removed non-runner therefore finds
-nothing and does nothing, and a termination aimed at an agent that *is* the
-runner finds the task's only live session. On the role-removal and seat-claim
-paths, the operation is either a silent no-op or the exact case this document
-forbids. Enabling the flag gives each agent its own row and removes the no-op
-half, but not the defect: the self-review agent still holds one row for both
-capacities.
+At the time of the original investigation, every shipped profile had
+`features.officeSessionIdentity` disabled. In that historical mode, a task
+with a runner routed every office run through the runner's session, so a
+non-runner termination could be a silent no-op while a runner termination
+could end the only live session. Enabling the flag gave each agent its own row
+and removed the no-op case, but not the defect: a self-review agent still held
+one row for both capacities. The behavior later received a stable default-on
+release, and the runtime identity is now retired. Participant-specific session
+identity is unconditional; stale false environment or database values do not
+change it. This termination contract remains necessary because one agent can
+still hold multiple capacities that share one session.
 
 Office owns this contract because office owns the rule that a pair names one
 conversation, and owns all three paths that end one. The task system owns the
@@ -285,9 +285,8 @@ inconsistency it deliberately leaves in place is not "fixed".
   its guarded path performs, and shall not itself wake, queue or re-queue
   anything.
 - **AC-OFFICE-SESSION-TERM-003.5:** The behavior required by
-  REQ-OFFICE-SESSION-TERM-001 and -002 shall hold identically whether
-  `features.officeSessionIdentity` is enabled or disabled. The defect is
-  reachable in both states and the fix shall not be conditioned on either.
+  REQ-OFFICE-SESSION-TERM-001 and -002 shall hold unconditionally. No runtime
+  flag or stale environment or database value shall condition this behavior.
 - **AC-OFFICE-SESSION-TERM-003.6:** No participant casting, seat provenance, or
   claim behavior shall change. This document adds no acceptance criterion to
   the participant-seat-provenance contract and amends none of its criteria.
@@ -338,10 +337,9 @@ path that never ran, and from the leak a mistake in
   that changes the slate, for one. Those paths end no session today and this
   document does not make them start: the scope is the over-eager termination
   that exists, not an audit of session lifetime.
-- **The `features.officeSessionIdentity` rollout.** Whether that flag is
-  promoted, and what its enablement requires, is its own decision.
-  `AC-OFFICE-SESSION-TERM-003.5` only requires this contract to be indifferent
-  to it.
+- **The retired session-identity rollout.** This contract does not change the
+  retired `features.officeSessionIdentity` identity or restore its former
+  conditional behavior.
 - **The casting rules that make an agent hold two capacities.**
   `AC-OFFICE-REVIEW-SEATS-002.3` through `-002.9` are deliberate and unchanged.
 - **Any user-visible surface.** The observable consequence is that a session

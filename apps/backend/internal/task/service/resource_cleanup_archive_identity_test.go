@@ -41,7 +41,7 @@ func (c *policyRecordingWorktreeCleanup) CleanupWorktreesPreservingBranches(cont
 	return nil
 }
 
-func (*archiveManagerEnvironmentDestroyer) DestroyContainer(context.Context, string) error {
+func (*archiveManagerEnvironmentDestroyer) DestroyContainer(context.Context, *models.TaskEnvironment) error {
 	return nil
 }
 
@@ -57,7 +57,7 @@ func (*archiveManagerEnvironmentDestroyer) PushEnvironmentBranch(context.Context
 	return nil
 }
 
-func (*archiveManagerEnvironmentDestroyer) GetContainerLiveStatus(context.Context, string) (*ContainerLiveStatus, error) {
+func (*archiveManagerEnvironmentDestroyer) GetContainerLiveStatus(context.Context, *models.TaskEnvironment) (*ContainerLiveStatus, error) {
 	return nil, nil
 }
 

@@ -22,7 +22,9 @@ var (
 		supervisor.attachSignals()
 	}
 	startParentWatchFn = func(supervisor *processSupervisor) *parentWatchdog {
-		watchdog := newParentWatchdogFromEnv(supervisor.shutdown, launcherExit)
+		watchdog := newParentWatchdogFromEnv(func(reason string) {
+			supervisor.shutdown(reason)
+		}, launcherExit)
 		watchdog.start()
 		return watchdog
 	}
