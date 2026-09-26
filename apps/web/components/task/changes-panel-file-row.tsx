@@ -21,7 +21,7 @@ import { FileIcon } from "@/components/ui/file-icon";
 import { getFileCategory } from "@/lib/utils/file-types";
 import { useCopyRepositoryPath } from "@/hooks/use-copy-repository-path";
 import type { ChangedFile } from "./changes-panel-helpers";
-import type { OpenDiffOptions } from "./changes-diff-target";
+import type { OpenDiffOptions } from "@/lib/state/diff-target-types";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TouchFileRowContent } from "./changes-panel-touch-file-row";

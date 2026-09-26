@@ -19,7 +19,7 @@ import {
 } from "../remote-contribution-comparison";
 import { contributionHistoryExplanationKey } from "@/hooks/domains/session/use-contribution-history-explanation";
 import type { SelectedDiff } from "../task-layout";
-import type { OpenDiffOptions, DiffSheetMode } from "../changes-diff-target";
+import type { OpenDiffOptions, DiffSheetMode } from "@/lib/state/diff-target-types";
 
 type MobileChangesPanelProps = {
   selectedDiff: SelectedDiff | null;

@@ -13,8 +13,8 @@ import { cn } from "@/lib/utils";
 import {
   APP_SIDEBAR_COLLAPSED_WIDTH,
   APP_SIDEBAR_EXPANDED_WIDTH,
-  APP_SIDEBAR_SECTION_IDS,
-} from "./app-sidebar-constants";
+} from "@/lib/layout/app-sidebar-geometry";
+import { APP_SIDEBAR_SECTION_IDS } from "./app-sidebar-constants";
 import { PluginNavItems } from "@/components/plugins/plugin-nav-items";
 import { AppSidebarFooter } from "./app-sidebar-footer";
 import { AppSidebarHeader } from "./app-sidebar-header";

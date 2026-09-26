@@ -14,7 +14,7 @@ import { usePanelActions } from "@/hooks/use-panel-actions";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { formatRelativeTime } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
-import type { CommitDetailTarget } from "./changes-diff-target";
+import type { CommitDetailTarget } from "@/lib/state/diff-target-types";
 
 type CommitDetailPanelProps = {
   panelId: string;
