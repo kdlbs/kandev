@@ -84,6 +84,15 @@ var ErrAutoTitlePromptRequired = errors.New("description or title is required wh
 // that does not expose the one-shot title tool.
 var ErrAutoTitleUnsupportedForOffice = errors.New("auto_title is not supported for Office tasks")
 
+// ErrAssigneeSeatRequiresResolvedStep rejects a create-time request that named
+// an assignee agent profile but resolved to no workflow step (e.g. the
+// workflow has no steps yet, or step resolution failed). upsertRunnerInTx
+// only writes the runner seat when both an assignee and a step ID are
+// present, so continuing past this without rejecting would repeat the
+// ISSUE-7 pattern in a second guise: the assignee is validated, task
+// creation reports success, and no runner participant is ever written.
+var ErrAssigneeSeatRequiresResolvedStep = errors.New("invalid workflow: cannot seat assignee because no workflow step could be resolved")
+
 type pendingTaskTitleSetter interface {
 	SetTaskTitleIfPending(ctx context.Context, taskID, sessionID, title string) (bool, error)
 }
@@ -337,6 +346,12 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	}
 
 	workflowStepID := s.resolveWorkflowStep(ctx, req)
+	// Only the untrusted HTTP create path (RequireAssigneeAgentProfileValidation)
+	// promises a runner seat for its assignee; internal callers that set
+	// AssigneeAgentProfileID without it already know their step resolves.
+	if req.RequireAssigneeAgentProfileValidation && req.AssigneeAgentProfileID != "" && workflowStepID == "" {
+		return nil, ErrAssigneeSeatRequiresResolvedStep
+	}
 	task := s.buildTask(ctx, req, workflowStepID)
 	task.ExternalID = externalID
 

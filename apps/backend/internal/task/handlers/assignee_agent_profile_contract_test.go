@@ -184,6 +184,27 @@ func (f assigneeContractFixture) createTaskBody(title, assigneeAgentProfileID, e
 	return string(data)
 }
 
+// createTaskBodyNoStep omits workflow_step_id so CreateTask must resolve the
+// step itself (the New Task dialog never sends one). The fixture wires no
+// startStepResolver, which reproduces "resolution unavailable" the same way a
+// misconfigured/stepless workflow would: resolveWorkflowStep falls through to
+// an empty workflowStepID.
+func (f assigneeContractFixture) createTaskBodyNoStep(title, assigneeAgentProfileID string) string {
+	body := map[string]any{
+		"workspace_id": f.workspaceID,
+		"workflow_id":  f.workflowID,
+		"title":        title,
+	}
+	if assigneeAgentProfileID != "" {
+		body["assignee_agent_profile_id"] = assigneeAgentProfileID
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}
+
 // TestBetaOfficeCreateContract pins ISSUE-7: the New Task dialog's assignee
 // pick must reach the backend as a top-level, validated field rather than
 // being silently dropped inside metadata. Before this fix,
@@ -329,6 +350,46 @@ func TestBetaOfficeCreateContract(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, validProfile.ID, stored.AssigneeAgentProfileID,
 			"the runner seat must persist even while the workspace is paused")
+	})
+
+	t.Run("assignee is rejected, not silently unseated, when no workflow step resolves", func(t *testing.T) {
+		// Review-round finding: upsertRunnerInTx only writes the runner seat
+		// when both an assignee and a workflow step ID are present
+		// (task.go:447). Before the fix, an unresolvable step (no
+		// startStepResolver wired, or a workflow with no steps) left
+		// workflowStepID empty and CreateTask still returned 200 — the
+		// assignee was validated but the runner seat was silently never
+		// written, reproducing ISSUE-7's "success with no runner" through a
+		// second path than the one the dialog itself takes.
+		f := newAssigneeContractFixture(t, profiles)
+		rec := doCreateTask(f.handlers, f.createTaskBodyNoStep("Unresolvable step", validProfile.ID))
+		assert.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
+
+		tasks, err := f.repo.ListTasks(context.Background(), f.workflowID)
+		require.NoError(t, err)
+		assert.Empty(t, tasks, "no task should exist when the runner seat could not be written")
+	})
+
+	t.Run("a padded assignee ID is normalized before both validation and the runner seat", func(t *testing.T) {
+		// Review-round finding: ValidateAssigneeAgentProfile trims before
+		// lookup, but task creation previously stored the untrimmed request
+		// value — a profile ID with incidental whitespace could validate
+		// successfully and then be written to the runner seat under a value
+		// no exact-ID lookup would ever resolve. The HTTP handler now trims
+		// once, before either use.
+		f := newAssigneeContractFixture(t, profiles)
+		rec := doCreateTask(f.handlers, f.createTaskBody("Padded assignee", "  "+validProfile.ID+"  ", ""))
+		require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		taskID, _ := resp["id"].(string)
+		require.NotEmpty(t, taskID)
+
+		stored, err := f.repo.GetTask(context.Background(), taskID)
+		require.NoError(t, err)
+		assert.Equal(t, validProfile.ID, stored.AssigneeAgentProfileID,
+			"the stored assignee must match the exact ID an agent lookup would use, not the padded input")
 	})
 
 	t.Run("no assignee is unaffected", func(t *testing.T) {

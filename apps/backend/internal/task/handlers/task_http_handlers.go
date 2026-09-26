@@ -960,6 +960,11 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 
 	title := strings.TrimSpace(body.Title)
 	description := strings.TrimSpace(body.Description)
+	// Trimmed once here so the value ValidateAssigneeAgentProfile looks up
+	// and the value the runner seat is written under are identical — a
+	// padded ID that passed validation must not be stored un-trimmed, where
+	// an exact-ID lookup on the seat would never resolve it.
+	assigneeAgentProfileID := strings.TrimSpace(body.AssigneeAgentProfileID)
 
 	// Office task-handoffs phase 5: resolve workspace policy from the
 	// request + parent task, merge into Metadata, and remember it so the
@@ -989,7 +994,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		WorkflowID:             body.WorkflowID,
 		WorkflowStepID:         body.WorkflowStepID,
 		WorkflowAgentOverrides: body.WorkflowAgentOverrides,
-		AssigneeAgentProfileID: body.AssigneeAgentProfileID,
+		AssigneeAgentProfileID: assigneeAgentProfileID,
 		// This is untrusted browser input, unlike the internal callers
 		// (agent-created subtasks, onboarding, routines) that also populate
 		// AssigneeAgentProfileID — only this HTTP path opts into create-time
