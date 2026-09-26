@@ -27,20 +27,21 @@ ID and require a page reload after a process change.
   page `bootId`, auth mode, authenticated state, and user ID. It is not
   workspace-scoped.
 - The authenticated application shell owns one stable QueryClient per such
-  identity. The client is created once per identity in React state. The cache
-  is in memory and is discarded when the identity-scoped provider unmounts or
-  changes identity. Its request AbortController is shared by requests in that
-  client lifetime, so StrictMode effect replay does not cancel and duplicate
-  the initial request. Provider teardown aborts pending requests and clears
-  the old client's cache.
+  identity. The client is created once per identity in React state. A provider
+  key change mounts a separate client, and the authenticated shell unmounts the
+  provider on logout. Query functions pass TanStack Query's observer signal to
+  the existing transport. When the last observer leaves during an in-flight
+  request, TanStack cancels that query and aborts its signal. No provider-owned
+  AbortController or effect-based cache disposal is used.
 - The boot payload is unchanged. It supplies only the stable page `bootId` used
   to construct the query identity. The About view lazily fetches SystemInfo
   from the existing authenticated endpoint when it mounts.
-- `fetchSystemInfo` remains the transport owner. The query passes its scoped
-  request AbortSignal through the existing `RequestInit` path. Explicit refresh uses
-  Query refetch. Automatic query retries and reconnect refetch are disabled so
-  the About view retains its current one-attempt behavior and does not duplicate
-  the restart guard's required no-store request.
+- `fetchSystemInfo` remains the transport owner. The query passes TanStack's
+  observer AbortSignal through the existing `RequestInit` path. Explicit
+  refresh uses Query refetch. The query attempts even while the browser reports
+  offline, and automatic retries and reconnect refetch are disabled. This
+  prevents an offline request from remaining paused until reconnect and avoids
+  a duplicate read beside the restart guard's required no-store request.
 - Every field in the SystemInfo response is fixed for one backend process:
   build values and `started_at` are captured at startup, while Go version, OS,
   architecture, and `boot_id` are process constants. The query may treat the
@@ -57,8 +58,12 @@ ID and require a page reload after a process change.
 
 The About view has one authoritative server snapshot and one source of loading,
 error, deduplication, and refresh state. Its first HTTP request occurs only
-when the About view mounts. The restart guard continues to make its separate
-uncached request because that request proves process identity on reconnect.
+when the About view mounts. Concurrent observers share a request. During a
+development StrictMode observer replay, TanStack may cancel a pending request
+and start a replacement when the observer returns; the hook does not impose an
+exactly-once request guarantee across that lifecycle. The restart guard
+continues to make its separate uncached request because that request proves
+process identity on reconnect.
 
 TanStack Query is introduced as a bounded pilot. Its use here does not establish
 a default owner for every server-backed Zustand slice.

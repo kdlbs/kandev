@@ -3,7 +3,7 @@ import { onlineManager } from "@tanstack/react-query";
 import { StrictMode, useEffect, type ReactNode } from "react";
 import type { StoreApi } from "zustand";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { SystemInfoQueryProvider } from "@/components/system-info-query-provider";
 import type { AppState } from "@/lib/state/store";
 import type { SystemInfo } from "@/lib/types/system";
@@ -68,6 +68,21 @@ function StoreCapture({ onStore }: { onStore?: (store: StoreApi<AppState>) => vo
   return null;
 }
 
+function AuthenticatedAppBranch({
+  bootId,
+  children,
+}: {
+  bootId: string | undefined;
+  children: ReactNode;
+}) {
+  const authenticated = useAppStore((state) => state.auth.authenticated);
+  return authenticated ? (
+    <SystemInfoQueryProvider bootId={bootId}>{children}</SystemInfoQueryProvider>
+  ) : (
+    <output data-testid="logged-out" />
+  );
+}
+
 function TestHarness({
   children,
   apiBaseUrl = BACKEND_ORIGIN,
@@ -82,10 +97,8 @@ function TestHarness({
   config.apiBaseUrl = apiBaseUrl;
   return (
     <StateProvider initialState={{ auth: AUTH }}>
-      <SystemInfoQueryProvider bootId={bootId}>
-        <StoreCapture onStore={onStore} />
-        {children}
-      </SystemInfoQueryProvider>
+      <StoreCapture onStore={onStore} />
+      <AuthenticatedAppBranch bootId={bootId}>{children}</AuthenticatedAppBranch>
     </StateProvider>
   );
 }
@@ -138,12 +151,10 @@ async function fetchesLazilyAndDeduplicatesConsumers() {
   idle.unmount();
 
   const view = render(
-    <StrictMode>
-      <TestHarness>
-        <InfoProbe id="first" />
-        <InfoProbe id="second" />
-      </TestHarness>
-    </StrictMode>,
+    <TestHarness>
+      <InfoProbe id="first" />
+      <InfoProbe id="second" />
+    </TestHarness>,
   );
 
   await waitFor(() => expect(screen.getByTestId("first").textContent).toContain(VERSION_1));
@@ -157,21 +168,51 @@ async function fetchesLazilyAndDeduplicatesConsumers() {
   });
 
   view.rerender(
-    <StrictMode>
-      <TestHarness>
-        <div>away</div>
-      </TestHarness>
-    </StrictMode>,
+    <TestHarness>
+      <div>away</div>
+    </TestHarness>,
   );
   view.rerender(
-    <StrictMode>
-      <TestHarness>
-        <InfoProbe id="returned" />
-      </TestHarness>
-    </StrictMode>,
+    <TestHarness>
+      <InfoProbe id="returned" />
+    </TestHarness>,
   );
   expect(screen.getByTestId("returned").textContent).toContain(VERSION_1);
   expect(fetchMock).toHaveBeenCalledTimes(1);
+}
+
+async function resolvesDataAcrossStrictModeObserverReplay() {
+  const requests: Array<{ signal: AbortSignal }> = [];
+  const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+    const signal = init.signal as AbortSignal;
+    requests.push({ signal });
+    return new Promise<Response>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(makeResponse(INFO));
+      }, 10);
+      const onAbort = () => {
+        clearTimeout(timeout);
+        reject(new DOMException("Request aborted", "AbortError"));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <StrictMode>
+      <TestHarness>
+        <InfoProbe id="strict-mode" />
+      </TestHarness>
+    </StrictMode>,
+  );
+
+  await waitFor(() => expect(screen.getByTestId("strict-mode").textContent).toContain(VERSION_1));
+  expect(fetchMock).toHaveBeenCalled();
+  if (requests[0]?.signal.aborted) {
+    expect(requests.length).toBeGreaterThan(1);
+  }
 }
 
 async function exposesLoadingErrorsAndExplicitRetry() {
@@ -283,12 +324,19 @@ async function isolatesAndCancelsRequestsAcrossIdentityChanges() {
   );
   await waitFor(() => expect(requests).toHaveLength(2));
   await waitFor(() => expect(requests[0]?.signal.aborted).toBe(true));
+  expect(screen.getByTestId("current").textContent).toContain('"version":null');
+
+  act(() => {
+    store?.getState().clearAuthenticated();
+  });
+  await waitFor(() => expect(screen.getByTestId("logged-out")).toBeTruthy());
+  await waitFor(() => expect(requests[1]?.signal.aborted).toBe(true));
 
   act(() => {
     store?.getState().setAuthState({ ...AUTH, user: { ...AUTH.user, id: "user-2" } });
   });
   await waitFor(() => expect(requests).toHaveLength(3));
-  await waitFor(() => expect(requests[1]?.signal.aborted).toBe(true));
+  expect(screen.getByTestId("current").textContent).toContain('"version":null');
 
   await act(async () =>
     requests[2]?.pending.resolve(makeResponse({ ...INFO, version: "current" })),
@@ -302,9 +350,6 @@ async function isolatesAndCancelsRequestsAcrossIdentityChanges() {
     requests[1]?.pending.resolve(makeResponse({ ...INFO, version: "stale-user" }));
   });
   expect(screen.getByTestId("current").textContent).toContain('"version":"current"');
-
-  view.unmount();
-  await waitFor(() => expect(requests[2]?.signal.aborted).toBe(true));
 }
 
 function scopesTheCacheKeyToTheFullIdentity() {
@@ -346,6 +391,7 @@ describe("useSystemInfo Query cache", () => {
     "fetches lazily, deduplicates concurrent consumers, and retains fresh data",
     fetchesLazilyAndDeduplicatesConsumers,
   );
+  it("resolves data across StrictMode observer replay", resolvesDataAcrossStrictModeObserverReplay);
   it(
     "exposes loading and errors, then supports an explicit retry",
     exposesLoadingErrorsAndExplicitRetry,

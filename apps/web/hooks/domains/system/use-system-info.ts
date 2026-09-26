@@ -2,20 +2,16 @@
 
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  useSystemInfoBootId,
-  useSystemInfoRequestSignal,
-} from "@/components/system-info-query-provider";
+import { useSystemInfoBootId } from "@/components/system-info-query-provider";
 import { fetchSystemInfo } from "@/lib/api/domains/system-api";
 import { createSystemInfoQueryKey, useSystemInfoQueryIdentity } from "./system-info-query";
 
 export function useSystemInfo() {
   const bootId = useSystemInfoBootId();
-  const signal = useSystemInfoRequestSignal();
   const identity = useSystemInfoQueryIdentity(bootId);
   const query = useQuery({
     queryKey: createSystemInfoQueryKey(identity),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchSystemInfo({
         baseUrl: identity.apiBaseUrl,
         cache: "no-store",

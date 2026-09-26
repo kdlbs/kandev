@@ -32,8 +32,8 @@ records rationale and alternatives.
 - `AboutCard` remains the presentation consumer and preserves its current
   loading and metadata display.
 - `fetchSystemInfo` and `fetchJson` remain the transport path. The query passes
-  its scoped request AbortSignal through `RequestInit.signal`; no API transport
-  contract changes.
+  TanStack Query's observer AbortSignal through `RequestInit.signal`; no API
+  transport contract changes.
 - `BackendGenerationGuard` remains the owner of reconnect identity checks. The
   self-update and restart flows keep their explicit no-store reads.
 
@@ -45,9 +45,10 @@ scoped to a workspace. The query provider is keyed by the same identity and
 creates its QueryClient once in React state. A different identity gets a
 different client, so a late response from the old client cannot become visible
 to the new identity. Auth-gated navigation unmounts the provider when the app
-shell is left. Provider teardown aborts pending requests and clears that
-client's cache. A microtask guard prevents React StrictMode's effect replay
-from disposing the active client during development.
+shell is left. When the last observer leaves during a pending request, TanStack
+cancels the query through the observer signal consumed by the query function.
+The old client is detached with its provider; no custom request controller,
+effect cleanup, or StrictMode replay guard is used.
 
 The Go boot payload is unchanged and does not include SystemInfo. It supplies
 only `runtime.bootId` for the existing restart guard and query identity. The
@@ -57,18 +58,23 @@ when the query first mounts.
 ## Control flow and freshness
 
 On the About view's first mount, the query calls
-`fetchSystemInfo({ cache: "no-store", init: { signal } })`. TanStack Query
-deduplicates concurrent consumers and retains one in-memory snapshot. Loading,
-error, and explicit refresh state come from the query. The provider-owned
-AbortSignal flows through the existing `RequestInit.signal` support in
-`fetchJson`; unmounting or changing identity aborts pending query work before
-its client is discarded.
+`fetchSystemInfo({ cache: "no-store", init: { signal } })`, with `signal` from
+TanStack Query's query function context. TanStack Query deduplicates concurrent
+consumers and retains one in-memory snapshot. Loading, error, and explicit
+refresh state come from the query. If identity changes or logout removes the
+last observer while a request is pending, TanStack cancels the query through
+that signal. A request that has already completed needs no cancellation.
 
 All fields in the SystemInfo response are fixed for a backend process: build
 metadata, runtime version/platform values, process start time, and process ID.
-The query can keep that snapshot fresh for the page generation. Automatic retry
-and reconnect refetch stay disabled to preserve the current one-attempt UI read
-and avoid a duplicate request beside the restart guard. An explicit refresh
+The query can keep that snapshot fresh for the page generation. The query uses
+`networkMode: "always"` so an initial request runs even when the browser reports
+offline. Automatic retries and reconnect refetch stay disabled, so a settled
+offline failure is not resumed on reconnect. Concurrent consumers share a
+request.
+In development StrictMode, observer replay may cancel an in-flight request and
+start a replacement when the observer returns. The query follows TanStack's
+signal lifecycle without a second request controller. An explicit refresh
 refetches the resource. On every successful WebSocket connection,
 `BackendGenerationGuard` continues its independent no-store request. A changed
 boot ID enters the existing reload-required flow, and the next document gets a

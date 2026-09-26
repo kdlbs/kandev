@@ -29,7 +29,7 @@ Move the System > About `SystemInfo` snapshot and request state to one identity-
 
 ## Verification results
 
-- Focused SystemInfo, System slice, restart guard, restart flow, self-update, and System API tests pass (66 tests across 6 files).
+- Focused SystemInfo, System slice, restart guard, restart flow, self-update, and System API tests pass (68 tests across 6 files).
 - Web typecheck and full lint pass. `pnpm install --frozen-lockfile` passes from `apps/`.
 - Architecture lint, spec validation, harness validation, the i18n ratchet, and `git diff --check` pass.
 - No mobile E2E was needed: this data-ownership refactor leaves About layout, copy, controls, and responsive behavior unchanged.
