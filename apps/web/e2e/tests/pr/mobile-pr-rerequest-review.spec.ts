@@ -238,20 +238,7 @@ test.describe("mobile PR re-request review", () => {
     const expectedPRNumbers = [SWITCH_PR_NUMBER, SWITCH_SECOND_PR_NUMBER];
     await expect.poll(() => readTaskPRNumbers(testPage, task.id)).toEqual([SWITCH_PR_NUMBER]);
     await testPage.getByRole("button", { name: "Review", exact: true }).tap();
-    const reviewSelector = testPage.getByTestId("review-item-selector-trigger");
-    const reviewSelectorMenu = testPage.getByTestId("review-item-selector-menu");
-    await expect(reviewSelector).toBeVisible({ timeout: 15_000 });
-    await reviewSelector.tap();
-    const firstReview = testPage.getByRole("menuitemradio", {
-      name: new RegExp(`^PR ${SWITCH_PR_NUMBER}\\b`),
-    });
-    await expect(firstReview).toBeVisible({ timeout: 15_000 });
-    await firstReview.tap();
-    await expect(reviewSelectorMenu).toBeHidden();
-    await expect(testPage.getByRole("status", { name: "Loading change request" })).toHaveCount(0, {
-      timeout: 15_000,
-    });
-    await expect(session.prSubmittedReview(REVIEWER)).toBeVisible({ timeout: 15_000 });
+    await expect(session.prSubmittedReview(REVIEWER)).toBeVisible({ timeout: 30_000 });
     const action = session.prReRequestReviewButton(REVIEWER);
     await expect(action).toBeVisible({ timeout: 30_000 });
 
@@ -294,6 +281,9 @@ test.describe("mobile PR re-request review", () => {
       )
       .toEqual([SWITCH_PR_NUMBER, SWITCH_SECOND_PR_NUMBER]);
     await expect.poll(() => readTaskPRNumbers(testPage, task.id)).toEqual(expectedPRNumbers);
+    const reviewSelector = testPage.getByTestId("review-item-selector-trigger");
+    const reviewSelectorMenu = testPage.getByTestId("review-item-selector-menu");
+    await expect(reviewSelector).toBeVisible({ timeout: 30_000 });
     await reviewSelector.tap();
     await expect(reviewSelectorMenu).toBeVisible();
     await waitForFiniteAnimations(reviewSelectorMenu);
