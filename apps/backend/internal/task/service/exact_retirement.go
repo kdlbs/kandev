@@ -82,10 +82,7 @@ func exactRetirementDigest(parts ...string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func (s *Service) authorizeExactRetirementPreview(ctx context.Context, oldTaskID, replacementTaskID string) error {
-	if err := s.AuthorizeTaskScope(ctx, oldTaskID, authz.ScopeTaskWrite); err != nil {
-		return err
-	}
+func (s *Service) authorizeExactRetirementPreview(ctx context.Context, replacementTaskID string) error {
 	if err := s.AuthorizeTaskScope(ctx, replacementTaskID, authz.ScopeTaskWrite); err != nil {
 		return err
 	}
@@ -106,11 +103,14 @@ func (s *Service) PreviewExactRetirement(ctx context.Context, request ExactRetir
 	if err != nil {
 		return nil, err
 	}
+	if err := s.AuthorizeTaskScope(ctx, oldTask.ID, authz.ScopeTaskWrite); err != nil {
+		return nil, err
+	}
 	replacementTask, err := s.GetTask(ctx, request.ReplacementTaskID)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.authorizeExactRetirementPreview(ctx, oldTask.ID, replacementTask.ID); err != nil {
+	if err := s.authorizeExactRetirementPreview(ctx, replacementTask.ID); err != nil {
 		return nil, err
 	}
 	if oldTask.ID == replacementTask.ID {

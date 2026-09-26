@@ -58,6 +58,25 @@ func TestHTTPPreviewExactRetirementAuthorization(t *testing.T) {
 		require.NotContains(t, rec.Body.String(), `"receipts"`)
 	})
 
+	for _, tc := range []struct {
+		name              string
+		replacementTaskID string
+	}{
+		{name: "existing replacement", replacementTaskID: "retirement-replacement"},
+		{name: "missing replacement", replacementTaskID: "missing-replacement"},
+	} {
+		t.Run("visible non-writer is denied before "+tc.name+" lookup", func(t *testing.T) {
+			requestBody := strings.Replace(body, "retirement-replacement", tc.replacementTaskID, 1)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/retirement-old/exact-retirement/preview", strings.NewReader(requestBody))
+			req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "viewer", Role: authn.RoleMember}))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+			require.NotContains(t, rec.Body.String(), `"receipts"`)
+		})
+	}
+
 	t.Run("foreign workspace is indistinguishable from missing task", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/retirement-old/exact-retirement/preview", strings.NewReader(body))
 		req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "outsider", Role: authn.RoleMember}))
