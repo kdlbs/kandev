@@ -35,6 +35,7 @@ import type { StepDef, TaskSwitcherItem } from "./task-switcher-types";
 import { useTaskPluginPrimaryMenuEntries } from "./task-switcher-plugin-menu-items";
 import { TaskPriorityContextMenu } from "./task-priority-context-menu";
 import type { TaskContextMenuItemsProps } from "./task-switcher-context-menu";
+import { taskRowActionAvailability } from "./task-row-action-availability";
 import { TaskMoveItems } from "./task-switcher-context-menu-move-items";
 
 type SingleSelectionMenuProps = TaskContextMenuItemsProps & {
@@ -47,6 +48,8 @@ type LinkActions = ReturnType<typeof selectTaskLinkActions>;
 type SingleGroupProps = Pick<
   SingleSelectionMenuProps,
   | "task"
+  | "nestCandidateTasks"
+  | "nestHierarchyTasks"
   | "isDeleting"
   | "isArchiving"
   | "isPinned"
@@ -200,7 +203,7 @@ function hasSingleMoveGroup({
   workflowId: string | undefined;
   currentMoveSteps: StepDef[];
 }) {
-  if (task.isArchived || !workflowId) return false;
+  if (!taskRowActionAvailability(task).move) return false;
   const hasSameWorkflowMove =
     currentMoveSteps.length > 1 && (!actingOnSelection || !isMixedWorkflowSelection);
   const hasCrossWorkflowMove = (workflows ?? []).some(
@@ -241,14 +244,14 @@ function SingleMarkGroup({
         disabled={isDeleting}
         onTogglePin={withSelectionClear(actingOnSelection, onClearSelection, onTogglePin)}
       />
-      {!task.isArchived && (
+      {taskRowActionAvailability(task).mark && (
         <TaskColorMenu
           taskId={task.id}
           disabled={isDeleting}
           automaticColorSource={task.automaticColorSource}
         />
       )}
-      {!task.isArchived && (
+      {taskRowActionAvailability(task).mark && (
         <TaskPriorityContextMenu
           currentPriority={task.priority}
           disabled={isDeleting}
@@ -270,7 +273,7 @@ function SingleEditGroup({
     <>
       <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
       <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
-      {!task.isArchived && (
+      {taskRowActionAvailability(task).mark && (
         <ContextMenuItem disabled>
           <IconCopy className="mr-2 h-4 w-4" />
           {t("settings:duplicate")}
@@ -282,6 +285,8 @@ function SingleEditGroup({
 
 function SingleRelationshipsGroup({
   task,
+  nestCandidateTasks,
+  nestHierarchyTasks,
   isDeleting,
   onCreateSubtask,
   onDetachTask,
@@ -292,6 +297,8 @@ function SingleRelationshipsGroup({
 }: Pick<
   SingleGroupProps,
   | "task"
+  | "nestCandidateTasks"
+  | "nestHierarchyTasks"
   | "isDeleting"
   | "onCreateSubtask"
   | "onDetachTask"
@@ -303,7 +310,14 @@ function SingleRelationshipsGroup({
   return (
     <>
       <TaskCreateSubtaskItem task={task} disabled={isDeleting} onCreateSubtask={onCreateSubtask} />
-      {!task.isArchived && <TaskNestContextMenuItems task={task} disabled={isDeleting} />}
+      {!task.isArchived && (
+        <TaskNestContextMenuItems
+          task={task}
+          nestCandidateTasks={nestCandidateTasks}
+          nestHierarchyTasks={nestHierarchyTasks}
+          disabled={isDeleting}
+        />
+      )}
       {hasLinkGroup && linkActions && pluginLinkActions && (
         <TaskPluginLinkMenu
           disabled={isDeleting}
@@ -399,8 +413,13 @@ function BulkSelectionMenuItems(props: BulkSelectionMenuProps) {
       groups={[
         {
           key: "mark",
-          visible: Boolean(props.onBulkPin),
-          content: <BulkPinMenuItem {...props} />,
+          visible: props.actingIds.length > 0,
+          content: (
+            <>
+              <BulkPinMenuItem {...props} />
+              <TaskColorMenu taskIds={props.actingIds} />
+            </>
+          ),
         },
         {
           key: "move",
@@ -556,7 +575,7 @@ function TaskEditItem({
   onEditTask?: (task: TaskSwitcherItem) => void;
 }) {
   const { t } = useTranslation();
-  if (!onEditTask || task.isArchived || !task.workflowId || !task.workflowStepId) return null;
+  if (!onEditTask || !taskRowActionAvailability(task).edit) return null;
   return (
     <ContextMenuItem disabled={disabled} onSelect={() => onEditTask(task)}>
       <IconEdit className="mr-2 h-4 w-4" />

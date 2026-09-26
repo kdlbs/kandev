@@ -44,8 +44,8 @@ Use `@` for files, saved prompts, and the current plan. New task lookup is under
 
 Select **Quick Chat** beside **New Task** in the expanded sidebar, or select its standalone row in the collapsed sidebar.
 
-On a phone, open the topbar menu in **Kanban**, **List**, or **Threads**, then
-select **Quick Chat** or **Quick terminal**. The menu closes before the tool
+On a phone, open the hamburger app menu from a listing, task workbench, or
+shared page, then select **Quick Chat** or **Quick terminal**. The menu closes before the tool
 opens. The topbar menu button shows Quick Chat activity: a blue dot while a chat
 is running and a green dot when a reply is ready to read. Terminal tabs do not
 contribute to this activity indicator.
@@ -64,7 +64,7 @@ Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordin
 
 Your chats and their names are shared by every browser and device signed in to the same Kandev instance. Starting, renaming, or closing a chat on one device updates the others, and a device that was offline catches up when it reconnects.
 
-When **Settings > Preferences > Task Behavior > Agent-generated task titles** is enabled, an ordinary
+When **Settings > Preferences > Task Behavior > Tasks > Agent-generated task titles** is enabled, an ordinary
 Quick Chat starts with its normal provisional label and its owner agent can replace that label with a
 short title based on your first request. Structured and CLI-passthrough chats receive the title
 instruction through their existing first-turn path. The new title appears on every connected device
@@ -130,6 +130,9 @@ Closing the floating Settings panel preserves the conversation. To delete it, op
 
 Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content.
 
+Shared prompt reads and reference use are available to org members. Creating,
+editing, or deleting prompts requires `org.config.manage` permission.
+
 Type `@` in the task chat composer and select a prompt. The visible message keeps the `@name`; Kandev expands the prompt content into hidden system context for the agent. References are recognized only at the start of the text or after whitespace and must match the stored name. Prompt content can reference other saved prompts. Expansion stops at a depth of eight, skips cycles, and includes each prompt only once.
 
 In the new task form, the same completion inserts an editable `@name` chip.
@@ -145,6 +148,11 @@ the canvas authoring workflow at launch. Editing the prompt changes later
 canvas tasks; a user prompt with the same name keeps its own content.
 
 Initial task and Quick Chat launches also expand known references when no workflow step is configured. The stored message and the prompt sent to the agent keep the same saved-prompt context.
+
+Workflow-step launches, profile switches, context resets, and replacement
+launches keep one matching saved-prompt expansion in the stored message and
+agent prompt. A queued workflow prompt resolves references when it drains, and
+its recovery launch uses that same definition.
 
 The Settings prompt editor also offers the same `@name` completion when you edit a saved prompt, a workflow prompt, a workflow step, an automation instruction, a quick action, or a provider watch. The prompt being edited is excluded from its own completion list, so selecting a reference cannot create a direct self-reference by accident. The same `@name` reference works in a workflow step's Prompt field and in a GitHub Review Watch's prompt; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 
@@ -205,6 +213,14 @@ re-picks their engine and language: preferences are not carried over.
 
 ## Files and editor integrations
 
+To open a task folder in your file manager, open the **Open in editor** dropdown in the task toolbar and select **Open folder**. On a phone, use **Files → Workspace actions → Open workspace folder**. For tasks with several worktrees, choose the repository and branch to open.
+
+This opens Finder on macOS, the default file manager on Linux, or Explorer on Windows on the machine running Kandev. A browser connected to a remote Kandev instance does not open that folder on your own device. The host needs a desktop session and an available file manager.
+
+The folder action is disabled when the host folder-opening command is unavailable
+(`open` on macOS, `xdg-open` on Linux, or `explorer` on Windows), or while its
+availability is unknown. The repository picker is also unavailable in that case.
+
 > **Security:** Embedded VS Code runs code-server with `--auth none` inside the task environment. Use it only with a trusted executor and network boundary.
 
 <details>
@@ -223,6 +239,16 @@ The preview uses the native browser engine. HTML, CSS, JavaScript, inline event 
 Relative and root-relative URLs resolve from the selected task repository or workspace root. Static files use their normal browser content types, and the current entry document is held in memory. The static server does not persist the overlay, run a build, provide HMR, or proxy an application backend. It bounds one entry document to 5 MiB and keeps at most 32 recently published overlays per agentctl instance.
 
 Closing the preview, file tab, focused viewer, or optional Browser panel removes that view but does not stop the shared static server. One bounded server is reused for the agentctl session and stops when that task runtime is torn down. If the page needs a build pipeline, HMR, backend routes, or project services, start a development server and open it in the **Browser** panel instead. If the task session stops, publish the file again or select **Retry** after the session becomes available. Preview URLs and in-editor preview state are not restored as durable file state.
+
+### Comment on a rendered preview
+
+Select **Annotate** in a Browser panel or rendered HTML-file preview. Choose **Select text**, **Select element**, or **Select screenshot region**, make the selection in the page, enter a comment, and select **Save feedback**. Element mode outlines and labels the candidate under the pointer, keyboard focus, or active touch before selection. Text feedback keeps the exact selected text together with its containing element, DOM range endpoints, rendered rectangles, scroll position, viewport size, and device pixel ratio. This position data lets the agent identify text that JavaScript generated or that the live page no longer contains.
+
+Screenshot mode rasterizes the selected part of the rendered document and shows the PNG before saving. A screenshot is limited to 16 megapixels and 10 MiB, and one pending collection can contain up to 10 screenshots. Browser rendering features that cannot be read or reproduced by the rasterizer, including some canvas, video, font, and cross-origin resources, can look different or cause capture to fail. A failed capture or upload keeps a retryable draft; discarding it removes its staged image.
+
+Saved feedback belongs to the task. It remains pending while you navigate between routes, close or reopen previews, switch task sessions, reload the browser, or restart Kandev. The active task composer shows the shared pending count. Review, edit, or delete items from **Annotate**. None of the captured content reaches an agent until you use the ordinary chat **Send** action.
+
+Send addresses the selected task session. An idle session receives the feedback directly; a busy session receives the same text, element metadata, and PNG attachments through its durable queue. Kandev removes only the exact saved versions accepted with that message. A validation, capacity, attachment, or version conflict leaves the feedback and composer draft available for correction and retry. The preview server and navigated page state remain ephemeral even though the saved feedback is durable.
 
 Open the context menu on any file or folder in the Files tree: right-click on desktop or long-press on touch to see **Open in \<editor\>**, which launches your default editor at that path instead of at the worktree root. When more than one editor is configured, **Open in other editor** lists the rest. When the tree is rooted above the worktrees (a multi-worktree task or any task that has had sources attached), Kandev resolves the clicked path back to its own worktree, so no picker is needed. The action is hidden for entries that belong to no worktree, such as an attached plain folder, because the editor launch is resolved against a worktree. It is also hidden while several files are selected, because it applies to a single path.
 
@@ -283,7 +309,11 @@ The status surface separates process startup, the LSP `initialize` request, and 
 
 Kandev does not impose an automatic initialization timeout or invent a percentage or ETA. Some valid project imports take several minutes, and LSP has no universal indexing-progress contract. When a server reports standard work-done progress, Kandev shows its title, message, percentage, and concurrent work-item count when available. Those values describe only the work item the server reported; its completion does not guarantee that every cross-file definition or reference is ready. If cross-file navigation is still incomplete, leave the server running while its project model warms up, or stop it explicitly if the wait is unexpected.
 
-Each browser connection owns a language-server process; editors in one browser window share the connection for the same session and language. Kandev allows eight active connections by default; operators can change that startup limit with `KANDEV_LSP_MAX_CONNECTIONS`. A request above that limit is rejected before it can start or resume the task host. Stopping a server, closing its connection, or stopping the task reaps the task-host process tree. If the toolbar says the server is unavailable, distinguish a missing task-host binary from an unsupported executor or the active-connection limit before retrying.
+Task-owned browser continuity is controlled by the restart-required `features.lspBrowserContinuity` runtime flag. It is off in shipped profiles. When enabled, each browser window owns an independent lease for the task-host language-server process. Closing a browser window or losing its network connection detaches the window while the lease continues to drain server messages. Reopening the task can reattach to that lease without a second `initialize`; duplicated tabs and other windows receive independent leases. Current diagnostics are cleared on detach and restored only after the editor resends its open files.
+
+With continuity enabled, **Stop** releases that window's lease, and closing the last editor releases it after two minutes. Closing the browser retains a detached lease for up to one hour; reopening it resets that deadline, and an attached editor has no expiry deadline. Expiry releases the language server and lets normal task-host cleanup resume. Archiving or deleting the task starts background runtime cleanup that releases its leases. Stopping the task runtime or Kandev also releases its leases. Kandev allows eight active or detached leases by default; operators can change that startup limit with `KANDEV_LSP_MAX_CONNECTIONS`. If the limit is reached, a new request is rejected while every lease is attached. When a detached lease is available, Kandev evicts the one detached longest. After expiry, eviction, or a backend restart, the next eligible connection starts a fresh server and project analysis must run again. With continuity disabled, closing the browser connection reaps its process as before. If the toolbar says the server is unavailable, distinguish a missing task-host binary from an unsupported executor or the active-lease limit before retrying.
+
+During a temporary browser-to-backend transport failure, the status changes to **Reconnecting** while Kandev attempts to reattach; browser closes `1005` and `1006`, backend restart close `1001`, and backend transport close `4009` do not prove that the language server exited. A confirmed server process exit uses `4006` and shows the server-exited state with **Retry**. Close `4010` means the task runtime stopped, so Kandev ends that lease without reconnecting it.
 
 ## Integrated terminal
 

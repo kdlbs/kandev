@@ -587,7 +587,7 @@ func TestGetInstance_FailureModes(t *testing.T) {
 		body    string
 		wantErr string
 	}{
-		{"not found", http.StatusNotFound, `{}`, `instance "inst-3" not found`},
+		{"not found", http.StatusNotFound, `{}`, `instance not found: "inst-3"`},
 		{"other status", http.StatusInternalServerError, `{}`, "failed to get instance: status 500"},
 		{"malformed body", http.StatusOK, `{"id":`, "failed to decode response"},
 	}
@@ -599,6 +599,9 @@ func TestGetInstance_FailureModes(t *testing.T) {
 			info, err := newTestControlClient(t, srv).GetInstance(context.Background(), "inst-3")
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+			if errors.Is(err, ErrInstanceNotFound) != (tc.status == http.StatusNotFound) {
+				t.Errorf("not-found classification for status %d: %v", tc.status, err)
 			}
 			if info != nil {
 				t.Errorf("info = %+v, want nil on failure", info)

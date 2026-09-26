@@ -20,10 +20,21 @@ var (
 	// either) in a workspace that has at least one project to choose from.
 	// Caller-correctable: the caller should retry with an explicit project_id.
 	ErrProjectRequired = fmt.Errorf("project_id is required")
+	// ErrInvalidWakeReason is returned when SpawnAgentRunInput.Reason is
+	// not a member of shared.WakeReasonRegistry, the empty string
+	// included (AC-OFFICE-LAUNCH-SAFETY-004.3). Caller-correctable: the
+	// caller should retry with a registry member.
+	ErrInvalidWakeReason = fmt.Errorf("reason must be a member of the declared wake-reason registry")
 	// ErrReasonTooLong is returned when SpawnAgentRunInput.Reason exceeds
 	// maxSpawnAgentRunReasonLength. Reason is agent-supplied and becomes a
 	// label on the process-global office_run_dedup_total /
 	// office_run_dedup_keyless_total expvar maps, which never evict entries;
 	// an unbounded value lets a caller grow those maps without limit.
 	ErrReasonTooLong = fmt.Errorf("reason exceeds max length of %d characters", maxSpawnAgentRunReasonLength)
+	// ErrInvalidListParams is returned when a board-read query parameter
+	// fails validation.
+	ErrInvalidListParams = fmt.Errorf("invalid list parameters")
+	// ErrCommentBodyRequired is returned when a comment body is empty or
+	// whitespace-only.
+	ErrCommentBodyRequired = fmt.Errorf("comment body is required")
 )

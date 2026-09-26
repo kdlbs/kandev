@@ -33,6 +33,7 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 	}
 	c.applyCapabilityStatus(&result, agent.Name)
 	c.applyBillingType(&result, agent.Name)
+	c.applyProviderSupport(&result, agent.Name)
 	return &result, nil
 }
 
@@ -53,6 +54,7 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 		}
 		c.applyCapabilityStatus(&entry, agent.Name)
 		c.applyBillingType(&entry, agent.Name)
+		c.applyProviderSupport(&entry, agent.Name)
 		payload = append(payload, entry)
 	}
 	c.sortAgentsByDisplayOrder(payload)
@@ -119,12 +121,13 @@ type CreateAgentRequest struct {
 }
 
 type CreateAgentProfileRequest struct {
-	Name              string
-	Model             string
-	FallbackModel     string
-	AutoFallback      bool
-	RequireExactModel bool
-	Mode              string
+	Name                 string
+	Model                string
+	FallbackModel        string
+	AutoFallback         bool
+	RequireExactModel    bool
+	CursorMCPAuthEnabled *bool
+	Mode                 string
 	// CLIFlags is the explicit list to persist. When nil the list is seeded
 	// from the agent's curated PermissionSettings() catalogue (all disabled
 	// by default) so a fresh profile opens with the agent's suggestions.
@@ -217,6 +220,16 @@ func (c *Controller) applyBillingType(d *dto.AgentDTO, agentName string) {
 	}
 }
 
+// applyProviderSupport populates the computed ProviderSupported flag on each
+// profile in the DTO from the registered agent implementation. Mirrors
+// applyBillingType — a read-time capability lookup, never persisted.
+func (c *Controller) applyProviderSupport(d *dto.AgentDTO, agentName string) {
+	supported := c.providerSupported(agentName)
+	for i := range d.Profiles {
+		d.Profiles[i].ProviderSupported = supported
+	}
+}
+
 func (c *Controller) findMatchedAvailability(name string, results []discovery.Availability) (*discovery.Availability, error) {
 	for _, result := range results {
 		if result.Name == name {
@@ -259,17 +272,18 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 			cliFlags = seedCLIFlags(agentConfig)
 		}
 		profile := &models.AgentProfile{
-			AgentID:           agentID,
-			Name:              profileReq.Name,
-			AgentDisplayName:  displayName,
-			Model:             profileReq.Model,
-			FallbackModel:     strings.TrimSpace(profileReq.FallbackModel),
-			AutoFallback:      profileReq.AutoFallback,
-			RequireExactModel: profileReq.RequireExactModel,
-			Mode:              profileReq.Mode,
-			CLIFlags:          cliFlags,
-			EnvVars:           envVarsFromDTO(profileReq.EnvVars),
-			CommandPrefix:     strings.TrimSpace(profileReq.CommandPrefix),
+			AgentID:              agentID,
+			Name:                 profileReq.Name,
+			AgentDisplayName:     displayName,
+			Model:                profileReq.Model,
+			FallbackModel:        strings.TrimSpace(profileReq.FallbackModel),
+			AutoFallback:         profileReq.AutoFallback,
+			RequireExactModel:    profileReq.RequireExactModel,
+			CursorMCPAuthEnabled: cursorMCPAuthEnabled(profileReq.CursorMCPAuthEnabled),
+			Mode:                 profileReq.Mode,
+			CLIFlags:             cliFlags,
+			EnvVars:              envVarsFromDTO(profileReq.EnvVars),
+			CommandPrefix:        strings.TrimSpace(profileReq.CommandPrefix),
 		}
 		if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 			return nil, err
@@ -327,7 +341,8 @@ func (c *Controller) DeleteAgent(ctx context.Context, id string) error {
 		}
 		return err
 	}
-	if agent.TUIConfig != nil {
+	custom := agent.TUIConfig != nil
+	if custom {
 		_ = c.agentRegistry.Unregister(agent.Name)
 	}
 
@@ -336,6 +351,12 @@ func (c *Controller) DeleteAgent(ctx context.Context, id string) error {
 			return ErrAgentNotFound
 		}
 		return err
+	}
+	if custom {
+		// Installed Agents is rendered from the cached discovery sweep, which
+		// reports the registry. Without this the deleted agent keeps its card
+		// until the cache expires, and Rescan re-detects its binary.
+		c.InvalidateDiscoveryCache()
 	}
 	return nil
 }

@@ -15,6 +15,7 @@ import type {
 interface UseDiffCommentsOptions {
   sessionId: string;
   filePath: string;
+  repositoryName?: string;
   /** Diff string for extracting code from line selection */
   diff?: string;
   /** New content for extracting code from line selection */
@@ -46,11 +47,12 @@ interface UseDiffCommentsReturn {
 export function useDiffComments({
   sessionId,
   filePath,
+  repositoryName,
   diff,
   newContent,
   oldContent,
 }: UseDiffCommentsOptions): UseDiffCommentsReturn {
-  const comments = useDiffFileComments(sessionId, filePath);
+  const comments = useDiffFileComments(sessionId, filePath, undefined, repositoryName);
   const editingCommentId = useCommentsStore((state) => state.editingCommentId);
   const storeAddComment = useCommentsStore((state) => state.addComment);
   const storeRemoveComment = useCommentsStore((state) => state.removeComment);
@@ -81,6 +83,7 @@ export function useDiffComments({
         source: "diff",
         sessionId,
         filePath,
+        repositoryName,
         startLine,
         endLine,
         side,
@@ -93,7 +96,7 @@ export function useDiffComments({
       storeAddComment(comment);
       return comment;
     },
-    [sessionId, filePath, diff, newContent, oldContent, storeAddComment],
+    [sessionId, filePath, repositoryName, diff, newContent, oldContent, storeAddComment],
   );
 
   const removeComment = useCallback(

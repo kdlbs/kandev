@@ -68,7 +68,7 @@ test.describe("Clarification submit failure feedback", () => {
     expect(attempt).toBe(2);
   });
 
-  test("treats an inactive-bundle 409 as expired, never as a silent success", async ({
+  test("late answer fallback sends affirmative answers after an inactive-bundle 409", async ({
     testPage,
     apiClient,
     seedData,
@@ -84,7 +84,9 @@ test.describe("Clarification submit failure feedback", () => {
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
+    let attempts = 0;
     await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      attempts += 1;
       await route.fulfill({
         status: 409,
         contentType: "application/json",
@@ -95,14 +97,24 @@ test.describe("Clarification submit failure feedback", () => {
       });
     });
 
+    const sessionId = await activeSessionId(testPage);
+    if (!sessionId) throw new Error("expected an active session for late clarification answer");
     await session.clarificationOption("PostgreSQL").click();
 
-    const expiredBanner = testPage.getByTestId("clarification-expired");
-    await expect(expiredBanner).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByTestId("clarification-retry")).toHaveCount(0);
-    // A dropped answer must never flip the chat back to idle -- that would be
-    // reporting success for an answer nobody received.
-    await expect(session.idleInput()).toHaveCount(0);
-    await expect(session.clarificationOverlay()).toBeVisible();
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(sessionId);
+          return messages.some(
+            (message) =>
+              message.author_type === "user" &&
+              message.content.includes("Question 1") &&
+              message.content.includes("PostgreSQL"),
+          );
+        },
+        { timeout: 30_000, message: "inactive answer should be admitted as a new message" },
+      )
+      .toBe(true);
+    expect(attempts).toBe(1);
   });
 });

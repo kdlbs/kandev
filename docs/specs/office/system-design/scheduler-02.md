@@ -370,3 +370,14 @@ The scheduler reads all `queued` and unexpired-retry wakeup requests on boot and
 - Suppressing non-heartbeat wakeups based on task state; configuring which task states count as "actionable" per agent or workspace.
 - Recovery sweeps for non-`TODO` states (`IN_PROGRESS` tasks with no active session are covered separately by the blocked-task-escalation spec).
 - Event-based triggers from external systems beyond webhooks (GitHub event subscriptions use webhooks as transport).
+
+## Taskless execution implementation contract
+
+The [run-session design](taskless-run-sessions.md) defines durable session
+ownership, runtime admission, process startup and routing for the taskless runs
+described above. Stop controls and restart reconciliation remain required by
+`REQ-OFFICE-TASKLESS-001` and are recorded as outstanding follow-up work under
+[Outstanding: stop controls and restart recovery](../requirements/taskless-run-sessions.md#outstanding-stop-controls-and-restart-recovery).
+They are not implemented by the current coverage change. The design completes the documented
+behavior without creating task records. Its exact run/session/attempt attribution
+applies to new executions; legacy agent-only attribution is compatibility only.

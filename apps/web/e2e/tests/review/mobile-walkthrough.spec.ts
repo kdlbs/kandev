@@ -95,7 +95,10 @@ test.describe("Mobile code walkthrough", () => {
   }) => {
     await seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-setup", "changes ready");
 
-    await testPage.getByRole("button", { name: "Changes" }).click();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .click();
     const changes = testPage.getByTestId("mobile-changes-panel");
     await expect(changes).toBeVisible({ timeout: 15_000 });
     const request = changes.getByTestId("changes-request-walkthrough");
@@ -120,7 +123,7 @@ test.describe("Mobile code walkthrough", () => {
     });
     await request.click();
 
-    await testPage.getByRole("button", { name: "Chat" }).click();
+    await testPage.getByRole("button", { name: "Chat", exact: true }).click();
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.activeChat()).toContainText("Walkthrough: Tour of the change", {

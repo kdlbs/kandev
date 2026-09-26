@@ -357,3 +357,26 @@ describe("passthrough chat composer cleanup", () => {
     });
   });
 });
+
+it("sends whole-file feedback through passthrough review context", () => {
+  const result = formatPassthroughBaseMessage(
+    "Continue.",
+    undefined,
+    [
+      {
+        id: "file",
+        source: "review-file",
+        sessionId: SESSION_ID,
+        repositoryName: "api",
+        filePath: "README.md",
+        text: "Split this file",
+        createdAt: "now",
+        status: "pending",
+      },
+    ],
+    panelState(),
+  );
+  expect(result.commentsToSend.map((c) => c.id)).toEqual(["file"]);
+  expect(result.formatted).toContain("**api/README.md**");
+  expect(result.formatted).toContain("> Split this file");
+});

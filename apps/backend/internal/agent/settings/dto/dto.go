@@ -35,7 +35,21 @@ type AgentProfileDTO struct {
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string `json:"command_prefix,omitempty"`
-	UserModified  bool   `json:"user_modified"`
+	// ProviderKind is "" (native) or "openai_compatible". When
+	// "openai_compatible", Kandev injects ProviderBaseURL + the key behind
+	// ProviderAPIKeySecretID into the agent it runs.
+	ProviderKind string `json:"provider_kind,omitempty"`
+	// ProviderBaseURL is the absolute http(s) endpoint root of the
+	// OpenAI-compatible provider.
+	ProviderBaseURL string `json:"provider_base_url,omitempty"`
+	// ProviderAPIKeySecretID references the Kandev global secret holding the
+	// bearer key. The value is never returned.
+	ProviderAPIKeySecretID string `json:"provider_api_key_secret_id,omitempty"`
+	CursorMCPAuthEnabled   bool   `json:"cursor_mcp_auth_enabled"`
+	// ProviderSupported is computed at read time: true when the profile's
+	// agent advertises OpenAI-compatible provider support. Not persisted.
+	ProviderSupported bool `json:"provider_supported"`
+	UserModified      bool `json:"user_modified"`
 	// WorkspaceID scopes the profile to an office workspace. Empty for
 	// shallow kanban-only profiles. Surfaced so consumers (e.g. test
 	// cleanup helpers) can distinguish office-owned profiles from
@@ -130,6 +144,12 @@ type TUIConfigDTO struct {
 	WaitForTerminal bool     `json:"wait_for_terminal"`
 	// MCPStrategy is the selected MCP injection mechanism ("" = none).
 	MCPStrategy string `json:"mcp_strategy,omitempty"`
+	// Protocol is the runtime kandev drives the command with ("" = terminal
+	// passthrough, "acp" = ACP on stdin/stdout).
+	Protocol string `json:"protocol,omitempty"`
+	// DisableBracketedPaste selects paced unframed delivery for terminal TUIs
+	// that do not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool `json:"disable_bracketed_paste,omitempty"`
 }
 
 type AgentDTO struct {

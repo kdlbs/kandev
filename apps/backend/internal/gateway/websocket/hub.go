@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -55,6 +57,11 @@ type Hub struct {
 	sessionGitDataProvider    SessionGitDataProvider
 	userSubscriptionListeners []func(userID string)
 	pluginConversationService *plugins.Service
+	conversationSourceReader  ConversationSourceReader
+	conversationEpoch         string
+	// sessionLaunchWarnings keeps the latest launch warning long enough for a
+	// client that subscribes after the event was published to receive it.
+	sessionLaunchWarnings map[string][]byte
 
 	// clientDisconnectListener releases connection-bound resources after a
 	// client is removed from the hub. It runs asynchronously so durable cleanup
@@ -77,11 +84,8 @@ type Hub struct {
 	// value = unscoped, today's behavior. See access.go.
 	authPolicy AuthPolicy
 
-	// orderedSessionMu closes the replay/register/append race for the ordered
-	// session stream. Never acquire it while holding h.mu or a client mutex.
-	orderedSessionMu sync.Mutex
-	mu               sync.RWMutex
-	logger           *logger.Logger
+	mu     sync.RWMutex
+	logger *logger.Logger
 }
 
 // NewHub creates a new WebSocket hub
@@ -99,7 +103,9 @@ func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 		broadcast:                make(chan *ws.Message, 256),
 		dispatcher:               dispatcher,
 		sessionMode:              newSessionModeTracker(),
+		sessionLaunchWarnings:    make(map[string][]byte),
 		logger:                   log.WithFields(zap.String("component", "ws_hub")),
+		conversationEpoch:        uuid.NewString(),
 	}
 }
 
@@ -107,13 +113,19 @@ func (h *Hub) SetPluginConversationService(service *plugins.Service) {
 	h.mu.Lock()
 	h.pluginConversationService = service
 	h.mu.Unlock()
-	if service != nil {
-		service.SetSessionEventSink(func(event plugins.SessionEvent) {
-			h.orderedSessionMu.Lock()
-			defer h.orderedSessionMu.Unlock()
-			h.broadcastCommittedOrderedSessionEvent(service, event)
-		})
-	}
+}
+
+// SetConversationSourceReader wires the authorized task source used to
+// establish the initial revision for Host-only conversation subscriptions.
+func (h *Hub) SetConversationSourceReader(reader ConversationSourceReader) {
+	h.mu.Lock()
+	h.conversationSourceReader = reader
+	h.mu.Unlock()
+}
+
+type ConversationSourceReader interface {
+	GetTaskSession(context.Context, string) (*models.TaskSession, error)
+	ReadConversationRevision(context.Context, string) (models.ConversationRevision, error)
 }
 
 type SystemMetricsInterestTracker interface {
@@ -132,6 +144,9 @@ func (h *Hub) Run(ctx context.Context) {
 	h.mu.Lock()
 	h.dispatchCtx = ctx
 	h.mu.Unlock()
+	checksDone := make(chan struct{})
+	go func() { defer close(checksDone); h.runConversationChecks(ctx) }()
+	defer func() { <-checksDone }()
 
 	for {
 		select {
@@ -174,6 +189,7 @@ func (h *Hub) closeAllClients() {
 	listener := h.clientDisconnectListener
 	h.taskSubscribers = make(map[string]map[*Client]bool)
 	h.sessionSubscribers = make(map[string]map[*Client]bool)
+	h.sessionLaunchWarnings = make(map[string][]byte)
 	h.runSubscribers = make(map[string]map[*Client]bool)
 	h.systemMetricsSubscribers = make(map[*Client]bool)
 	h.sessionMode.focusByClient = make(map[string]map[*Client]bool)
@@ -533,22 +549,12 @@ func (h *Hub) getSessionRecipientsLocked(sessionID string) []*Client {
 // BroadcastToSession sends a notification to clients subscribed to OR focused on
 // a specific session. See getSessionRecipientsLocked for why focus is included.
 func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
-	h.appendAndBroadcastOrderedSessionEvent(sessionID, msg)
 	data, err := json.Marshal(msg)
 	if err != nil {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
 	clients := h.authorizedSessionRecipients(sessionID)
-	if _, ordered := orderedEventTypeByAction[msg.Action]; ordered {
-		legacyClients := clients[:0]
-		for _, client := range clients {
-			if !client.hasOrderedSessionSubscription(sessionID) {
-				legacyClients = append(legacyClients, client)
-			}
-		}
-		clients = legacyClients
-	}
 	h.logger.Debug("BroadcastToSession",
 		zap.String("session_id", sessionID),
 		zap.String("action", msg.Action),
@@ -683,6 +689,9 @@ func (h *Hub) SubscribeToSession(client *Client, sessionID string) bool {
 		zap.String("session_id", sessionID))
 
 	h.recomputeSessionMode(sessionID)
+	if !wasSubscribed {
+		h.replaySessionLaunchWarning(client, sessionID)
+	}
 	return !wasSubscribed
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -25,6 +26,10 @@ func int64Ptr(v int64) *int64 { return &v }
 // ── fakes for the narrow Host data API interfaces ───────────────────────
 
 type fakeTaskDataSource struct {
+	transitionRows   map[string][]taskmodels.StepTransition
+	transitionGroups map[string][]taskmodels.TransitionGroup
+	transitionCalls  int
+	groupCalls       int
 	workspaces       []*taskmodels.Workspace
 	tasksByWorkspace map[string][]*taskmodels.Task
 	tasksByID        map[string]*taskmodels.Task
@@ -49,6 +54,30 @@ type fakeTaskDataSource struct {
 	// can prove a workspace with more tasks than a single page issues
 	// multiple calls instead of returning a truncated first page.
 	listTasksByWorkspaceCalls int
+
+	// dependencyViews, keyed by task ID, is returned by both
+	// BuildDependencyViews and BuildDependencyViewsBounded. A nil map
+	// yields an empty map (every task unblocked), matching the zero value a
+	// test that never sets it should observe. dependencyViewsErr, when set,
+	// is returned only by the bounded variant, simulating a fan-out refusal.
+	dependencyViews             map[string]taskservice.DependencyView
+	dependencyViewsErr          error
+	dependencyViewsCalls        int
+	dependencyViewsBoundedCalls int
+	// dependencyViewsTasks records the task IDs passed to the most recent
+	// BuildDependencyViews/Bounded call, so tests can prove attachment
+	// derives over the right (e.g. post-filter) slice.
+	dependencyViewsTasks []string
+}
+
+func (f *fakeTaskDataSource) ListTaskStepTransitions(_ context.Context, taskID string, _ int, _ string) ([]taskmodels.StepTransition, string, error) {
+	f.transitionCalls++
+	return f.transitionRows[taskID], "", nil
+}
+
+func (f *fakeTaskDataSource) ListWorkflowTransitionGroups(_ context.Context, workflowID string, _ int, _ string) ([]taskmodels.TransitionGroup, string, error) {
+	f.groupCalls++
+	return f.transitionGroups[workflowID], "", nil
 }
 
 func (f *fakeTaskDataSource) ListWorkspaces(context.Context) ([]*taskmodels.Workspace, error) {
@@ -112,6 +141,35 @@ func (f *fakeTaskDataSource) GetExecutor(_ context.Context, id string) (*taskmod
 		return nil, err
 	}
 	return f.executors[id], nil
+}
+
+func (f *fakeTaskDataSource) recordDependencyViewsTasks(tasks []*taskmodels.Task) {
+	ids := make([]string, len(tasks))
+	for i, t := range tasks {
+		ids[i] = t.ID
+	}
+	f.dependencyViewsTasks = ids
+}
+
+func (f *fakeTaskDataSource) BuildDependencyViews(_ context.Context, tasks []*taskmodels.Task) map[string]taskservice.DependencyView {
+	f.dependencyViewsCalls++
+	f.recordDependencyViewsTasks(tasks)
+	if f.dependencyViews == nil {
+		return map[string]taskservice.DependencyView{}
+	}
+	return f.dependencyViews
+}
+
+func (f *fakeTaskDataSource) BuildDependencyViewsBounded(_ context.Context, tasks []*taskmodels.Task) (map[string]taskservice.DependencyView, error) {
+	f.dependencyViewsBoundedCalls++
+	f.recordDependencyViewsTasks(tasks)
+	if f.dependencyViewsErr != nil {
+		return nil, f.dependencyViewsErr
+	}
+	if f.dependencyViews == nil {
+		return map[string]taskservice.DependencyView{}, nil
+	}
+	return f.dependencyViews, nil
 }
 
 type fakeWorkflowLister struct {
@@ -356,6 +414,24 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		interactionDeps: func() interactionResponder { return d.responder },
 	}
 	return d
+}
+
+// @covers AC-PLUGINS-WORKFLOW-HISTORY-001.4 AC-PLUGINS-WORKFLOW-HISTORY-002.1
+func TestHostTransitionHistoryUsesExistingReadGrants(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": {ID: "task-1", WorkspaceID: "ws-1"}}
+	d.tasks.transitionRows = map[string][]taskmodels.StepTransition{"task-1": {{ID: 9, Trigger: "test", OccurredAt: time.Now().UTC()}}}
+	reader, ok := pluginsdk.TransitionHistory(d.host)
+	if !ok {
+		t.Fatal("plugin Host transition-history extension is unavailable")
+	}
+	items, _, err := reader.ListTask(context.Background(), "task-1", pluginsdk.Page{})
+	if err != nil || len(items) != 1 || items[0].ID != "9" {
+		t.Fatalf("task history = %+v, err=%v", items, err)
+	}
+	if _, _, err := reader.ListWorkflowGroups(context.Background(), "wf-1", pluginsdk.Page{}); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("workflow groups without workflows grant: %v", err)
+	}
 }
 
 // ── capability gating: denied without api_read:<resource> ──────────────

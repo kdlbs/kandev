@@ -32,6 +32,7 @@ type SettingsPageTemplateProps = {
   onDiscard?: () => void;
   showSaveButton?: boolean;
   showPageChrome?: boolean;
+  contentFrame?: "card" | "none";
   children: React.ReactNode;
   deleteSection?: React.ReactNode;
 };
@@ -50,6 +51,7 @@ export function SettingsPageTemplate({
   onDiscard,
   showSaveButton = true,
   showPageChrome = true,
+  contentFrame = "card",
   children,
   deleteSection,
 }: SettingsPageTemplateProps) {
@@ -72,11 +74,17 @@ export function SettingsPageTemplate({
       {showPageChrome && <Separator />}
 
       <SettingsSaveDirtyScope>
-        {(nestedIsDirty) => (
-          <SettingsCard isDirty={cardIsDirty || nestedIsDirty}>
-            <CardContent className="">{children}</CardContent>
-          </SettingsCard>
-        )}
+        {(nestedIsDirty) =>
+          contentFrame === "none" ? (
+            <div className="min-w-0" data-settings-page-content="true">
+              {children}
+            </div>
+          ) : (
+            <SettingsCard isDirty={cardIsDirty || nestedIsDirty}>
+              <CardContent>{children}</CardContent>
+            </SettingsCard>
+          )
+        }
       </SettingsSaveDirtyScope>
 
       {deleteSection}

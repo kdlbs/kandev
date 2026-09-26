@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { IconAlertTriangle, IconLayoutDashboard, IconRestore } from "@tabler/icons-react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
@@ -9,13 +9,23 @@ import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsPageHeader } from "@/components/settings/settings-typography";
+import {
+  SettingsTabs,
+  SettingsTabsList,
+  SettingsTabsPanel,
+  type SettingsTabOption,
+} from "@/components/settings/settings-tabs";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useSettingsTab } from "@/hooks/domains/settings/use-settings-tab";
 import { LayoutEditor } from "./layout-editor";
 import { LayoutProfileList } from "./layout-profile-list";
 import { LayoutProfileDeleteConfirmation } from "./layout-profile-delete-confirmation";
 import { useLayoutSettings } from "./use-layout-settings";
+import { SidebarLayoutEditor } from "../sidebar-layout-editor";
 import { useTranslation } from "react-i18next";
 import { SettingsTarget } from "@/components/settings/settings-target";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import {
   settingsActionClassName,
   settingsControlClassName,
@@ -31,19 +41,20 @@ function defaultActionHelpKey(selectedSavedDefault: boolean, selectedIsDefault: 
   return "settings:useThisLayoutAsTheStarting";
 }
 
-function LayoutSettingsHeader() {
+function LayoutSettingsHeader({ tabs }: { tabs: ReactNode }) {
   const { t } = useTranslation();
   return (
     <>
-      <div className="min-w-0">
-        <h2 className="flex items-center gap-2 text-2xl font-bold">
-          <IconLayoutDashboard className="h-5 w-5" />
-          {t("settings:layouts")}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("settings:configureTheInitialDesktopTaskWorkbench")}
-        </p>
-      </div>
+      <SettingsPageHeader
+        title={
+          <span className="flex items-center gap-2">
+            <IconLayoutDashboard className="h-5 w-5" />
+            {t("settings:layouts")}
+          </span>
+        }
+        description={t("settings:configureTheInitialDesktopTaskWorkbench")}
+        tabs={tabs}
+      />
       <Separator />
     </>
   );
@@ -149,45 +160,29 @@ function SelectedLayoutEditor({ controller }: { controller: Controller }) {
   );
 }
 
-export function LayoutSettings() {
+function LayoutProfilesPanel({
+  controller,
+  isFinePointer,
+  deleteOpen,
+  deleteAnchorRef,
+  requestDelete,
+  closeDelete,
+  confirmDelete,
+}: {
+  controller: Controller;
+  isFinePointer: boolean;
+  deleteOpen: boolean;
+  deleteAnchorRef: RefObject<HTMLButtonElement | null>;
+  requestDelete: () => void;
+  closeDelete: () => void;
+  confirmDelete: () => void;
+}) {
   const { t } = useTranslation();
-  const controller = useLayoutSettings();
-  const { isFinePointer } = useResponsiveBreakpoint();
-  const deleteAnchorRef = useRef<HTMLButtonElement>(null);
-  const [deleteProfileId, setDeleteProfileId] = useState<string | null>(null);
-  const selectedCustomId = controller.selectedCustom?.id ?? null;
-  const deleteOpen = deleteProfileId !== null && deleteProfileId === selectedCustomId;
-
-  useEffect(() => {
-    if (deleteProfileId && deleteProfileId !== selectedCustomId) setDeleteProfileId(null);
-  }, [deleteProfileId, selectedCustomId]);
-
-  const requestDelete = () => {
-    if (selectedCustomId) setDeleteProfileId(selectedCustomId);
-  };
-  const closeDelete = () => setDeleteProfileId(null);
-  const confirmDelete = () => {
-    if (!deleteOpen) return;
-    closeDelete();
-    controller.deleteSelected();
-  };
-  const invalidName = controller.profiles.some((profile) => !profile.name.trim());
-  useSettingsSaveContributor({
-    id: "layout-profiles",
-    revision: controller.profilesKey,
-    isDirty: controller.isDirty,
-    canSave: !invalidName,
-    invalidReason: invalidName ? t("settings:layoutProfileNamesMustNotBe") : undefined,
-    save: controller.save,
-    discard: controller.cancel,
-  });
   return (
     <SettingsTarget
       targetId={GENERAL_SETTINGS_TARGETS.layoutProfiles}
       className="min-w-0 space-y-6"
-      data-testid="layout-settings"
     >
-      <LayoutSettingsHeader />
       {controller.error && (
         <Alert variant="destructive">
           <IconAlertTriangle className="h-4 w-4" />
@@ -226,5 +221,76 @@ export function LayoutSettings() {
         </section>
       </div>
     </SettingsTarget>
+  );
+}
+
+export function LayoutSettings() {
+  const { t } = useTranslation();
+  const controller = useLayoutSettings();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const deleteAnchorRef = useRef<HTMLButtonElement>(null);
+  const [deleteProfileId, setDeleteProfileId] = useState<string | null>(null);
+  const selectedCustomId = controller.selectedCustom?.id ?? null;
+  const deleteOpen = deleteProfileId !== null && deleteProfileId === selectedCustomId;
+  const tabs: SettingsTabOption[] = [
+    { id: "profiles", label: t("settings:layoutProfiles") },
+    { id: "sidebar", label: t("settings:sidebar") },
+  ];
+  const { value, selectTab } = useSettingsTab({
+    tabs: tabs.map((tab) => tab.id),
+    defaultTab: "profiles",
+  });
+
+  useEffect(() => {
+    if (deleteProfileId && deleteProfileId !== selectedCustomId) setDeleteProfileId(null);
+  }, [deleteProfileId, selectedCustomId]);
+
+  const requestDelete = () => {
+    if (selectedCustomId) setDeleteProfileId(selectedCustomId);
+  };
+  const closeDelete = () => setDeleteProfileId(null);
+  const confirmDelete = () => {
+    if (!deleteOpen) return;
+    closeDelete();
+    controller.deleteSelected();
+  };
+  const invalidName = controller.profiles.some((profile) => !profile.name.trim());
+  useSettingsSaveContributor({
+    id: "layout-profiles",
+    revision: controller.profilesKey,
+    isDirty: controller.isDirty,
+    canSave: !invalidName,
+    invalidReason: invalidName ? t("settings:layoutProfileNamesMustNotBe") : undefined,
+    save: controller.save,
+    discard: controller.cancel,
+  });
+  return (
+    <SettingsTabs tabs={tabs} value={value} onValueChange={selectTab}>
+      <div className="min-w-0 space-y-6" data-testid="layout-settings">
+        <LayoutSettingsHeader tabs={<SettingsTabsList ariaLabel={t("settings:layouts")} />} />
+        <SettingsTabsPanel value="profiles">
+          <SettingsGroup title={t("settings:layoutProfiles")} contentClassName="p-0 divide-y-0">
+            <LayoutProfilesPanel
+              controller={controller}
+              isFinePointer={isFinePointer}
+              deleteOpen={deleteOpen}
+              deleteAnchorRef={deleteAnchorRef}
+              requestDelete={requestDelete}
+              closeDelete={closeDelete}
+              confirmDelete={confirmDelete}
+            />
+          </SettingsGroup>
+        </SettingsTabsPanel>
+        <SettingsTabsPanel value="sidebar" testId="settings-layouts-sidebar">
+          <SettingsGroup
+            title={t("settings:sidebar")}
+            description={t("settings:sidebarDescription")}
+            contentClassName="p-0 divide-y-0"
+          >
+            <SidebarLayoutEditor embedded />
+          </SettingsGroup>
+        </SettingsTabsPanel>
+      </div>
+    </SettingsTabs>
   );
 }

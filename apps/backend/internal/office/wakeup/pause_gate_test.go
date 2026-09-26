@@ -10,6 +10,7 @@ import (
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/office/wakeup"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // erroringAgentReader is a wakeup.AgentReader double that always fails
@@ -141,9 +142,17 @@ func TestDispatch_PauseGateAgentLookupError_FailsClosed(t *testing.T) {
 // GetAgentInstance directly (it bypasses GetAgentFromConfig), so it is
 // the only wakeup-dispatch call that can observe the wrapped
 // ErrAgentNotFound sentinel. An agent the dispatcher can no longer find
-// must not block indefinitely on a workspace it cannot resolve — launch
-// behaviour is unchanged (proceeds ungated), exactly as it was before
-// this gate existed.
+// must not block on a workspace checkPauseGate cannot resolve — the
+// pause gate itself proceeds ungated (does not return
+// shared.ErrWorkspacePaused or shared.ErrPauseGateUnavailable) exactly
+// as it did before this gate existed. The request still fails past that
+// point: createFreshRun's run-queuer routes every enqueue through the
+// authoritative causation seam (runs/service.resolveCausation), and
+// AC-OFFICE-RUN-CAUSATION-001.20 refuses an enqueue whose agent profile
+// has no resolvable workspace rather than use an empty value as a
+// countable scope — a genuinely nonexistent agent has no workspace to
+// resolve, so that refusal is expected here and is not a pause-gate
+// outcome.
 func TestDispatch_PauseGateAgentNotFound_ProceedsUngated(t *testing.T) {
 	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
 	if err := h.repo.CreateWakeupRequest(context.Background(), &officesqlite.WakeupRequest{
@@ -155,16 +164,24 @@ func TestDispatch_PauseGateAgentNotFound_ProceedsUngated(t *testing.T) {
 		{ID: "pause-1", WorkspaceID: "ws-1"},
 	}})
 
-	if err := h.dispatcher.Dispatch(context.Background(), "w-1"); err != nil {
-		t.Fatalf("dispatch: %v", err)
+	err := h.dispatcher.Dispatch(context.Background(), "w-1")
+	if errors.Is(err, shared.ErrWorkspacePaused) || errors.Is(err, shared.ErrPauseGateUnavailable) {
+		t.Fatalf("dispatch: err = %v, want neither ErrWorkspacePaused nor "+
+			"ErrPauseGateUnavailable — the pause gate must proceed ungated "+
+			"for an agent it cannot find", err)
+	}
+	var refusal *runsservice.RefusalError
+	if !errors.As(err, &refusal) || refusal.Gate != runsservice.RefusalWorkspaceMissing {
+		t.Fatalf("dispatch: err = %v, want a RefusalWorkspaceMissing RefusalError "+
+			"from the authoritative causation seam", err)
 	}
 
 	got, gErr := h.repo.GetWakeupRequest(context.Background(), "w-1")
 	if gErr != nil {
 		t.Fatalf("get wakeup request: %v", gErr)
 	}
-	if got.Status != officesqlite.WakeupStatusClaimed {
-		t.Errorf("status = %q, want claimed (ungated launch)", got.Status)
+	if got.Status != officesqlite.WakeupStatusQueued {
+		t.Errorf("status = %q, want queued (no run created, request untouched)", got.Status)
 	}
 }
 

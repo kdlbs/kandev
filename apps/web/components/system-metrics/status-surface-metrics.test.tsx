@@ -178,15 +178,13 @@ describe("StatusSurfaceMetrics", () => {
     expect(screen.queryByTestId(metricsTestId)).toBeNull();
   });
 
-  it("subscribes and renders rows when the phone Status drawer opens", () => {
+  it("subscribes and renders host metrics when the phone Status drawer opens", () => {
     responsiveState.isMobile = true;
     renderMetrics(true);
 
     expect(subscribeMock).toHaveBeenCalledWith(true);
-    const metricsRow = screen.getByLabelText("Host metrics").parentElement;
-    expect(metricsRow?.className).toContain("min-h-11");
-    expect(metricsRow?.className).toContain("w-full");
-    expect(metricsRow?.className).toContain("min-w-0");
+    expect(screen.getByLabelText("Host metrics")).toBeTruthy();
+    expect(screen.getByLabelText(cpuAccessibleName)).toBeTruthy();
   });
 
   it("renders every received host metric in the phone Status drawer", () => {

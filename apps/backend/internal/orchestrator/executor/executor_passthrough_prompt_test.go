@@ -588,6 +588,37 @@ func TestExecutor_Prompt_PassthroughSubmitDelaySplitsWrites(t *testing.T) {
 	}
 }
 
+func TestExecutor_Prompt_PassthroughCancellationStopsDelayedSubmit(t *testing.T) {
+	repo := newMockRepository()
+	ctx, cancel := context.WithCancel(context.Background())
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return true },
+		resolvePassthroughConfigFunc: func(_ context.Context, _ string) (agents.PassthroughConfig, error) {
+			return agents.PassthroughConfig{
+				Supported:             true,
+				SubmitSequence:        "\r",
+				DisableBracketedPaste: true,
+				SubmitDelay:           time.Second,
+			}, nil
+		},
+		writePassthroughStdinFunc: func(_ context.Context, _ string, data string) error {
+			if data == "hello agent" {
+				cancel()
+			}
+			return nil
+		},
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	exec := newTestExecutor(t, agentManager, repo)
+
+	if _, err := exec.Prompt(ctx, "task-1", "sess-1", "hello agent", nil, false); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Prompt error = %v, want context cancellation", err)
+	}
+	if got := len(agentManager.writePassthroughStdinCalls); got != 1 {
+		t.Fatalf("stdin calls after cancellation = %d, want 1", got)
+	}
+}
+
 func TestExecutor_Prompt_ACPPathUnchanged(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{

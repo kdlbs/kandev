@@ -10,10 +10,14 @@ owners:
 
 ## Overview
 
-One Kandev instance can start more agent sessions than its host can serve. A
-shared ceiling must limit new automatic starts while preserving explicit user
-actions and accepted work. This contract belongs to the agent system because it
+An operator can opt into a shared ceiling for new automatic starts. The ceiling
+is disabled by default and preserves explicit user actions and accepted work.
+This contract belongs to the agent system because it
 controls admission of agent executions. Tasks own their durable deferral data.
+
+The disabled default, Settings opt-in, live application, and queue explanation
+are implemented. Delivery and verification are recorded in the
+[opt-in plan](../../../plans/session-ceiling-opt-in/plan.md).
 
 ## Terminology
 
@@ -53,13 +57,58 @@ bounded instance capacity, so that one installation does not overload its host.
 - **AC-AGENTS-SESSION-CEILING-001.6:** A callback from an older execution shall
   not release or confirm a reservation held by a successor execution for the
   same session.
-- **AC-AGENTS-SESSION-CEILING-001.7:** The startup environment variable
-  `KANDEV_MAX_CONCURRENT_SESSIONS` shall accept a non-negative integer, use zero
-  for unlimited, and use a derived default with a minimum of two when unset or
-  invalid.
+- **AC-AGENTS-SESSION-CEILING-001.7:** With no explicit configuration, the ceiling
+  shall be disabled on fresh and upgraded installations, regardless of CPU count.
+  `KANDEV_MAX_CONCURRENT_SESSIONS` shall retain its explicit non-negative integer
+  override, with zero meaning disabled. Unset, blank, or invalid values shall
+  fall back to the saved setting, then to disabled.
+- **AC-AGENTS-SESSION-CEILING-001.8:** When disabled, the ceiling shall not defer
+  automatic launches or produce new manual-override notices, including when the
+  session population cannot be read. Other launch eligibility checks still apply.
+- **AC-AGENTS-SESSION-CEILING-001.9:** Disabling or increasing the ceiling shall
+  trigger retry of eligible ceiling-deferred launches without losing their
+  payload, entry ownership, or original queue time. Disabling shall not stop the
+  retry mechanism or bypass workflow WIP and task eligibility checks.
+
+### REQ-AGENTS-SESSION-CEILING-002: Configure automatic session capacity
+
+**Intent:** Let administrators enable and adjust the instance ceiling in Settings.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-SESSION-CEILING-002.1:** Settings > Task Behavior shall expose
+  "Limit automatic sessions", initially off, and a maximum that is editable when
+  enabled. The section shall state that this setting affects all workspaces.
+  Enabling shall require saving a positive whole-number maximum.
+- **AC-AGENTS-SESSION-CEILING-002.2:** A successful save shall persist the enabled
+  state and maximum across restarts and apply to subsequent admissions without
+  restart. Disabling shall retain the saved maximum for later use. An unsaved
+  edit or Reset action shall not change effective behavior.
+- **AC-AGENTS-SESSION-CEILING-002.3:** Enabling or lowering the ceiling shall
+  preserve running sessions and already admitted launches. Later automatic
+  launches shall wait until capacity permits them. Manual starts retain their
+  existing override behavior.
+- **AC-AGENTS-SESSION-CEILING-002.4:** An explicit valid environment override
+  shall take precedence over the saved setting. Settings shall show the effective
+  value and its source and prevent changes while this override applies. Removing
+  it and restarting shall restore the saved setting, or disabled when none exists.
+- **AC-AGENTS-SESSION-CEILING-002.5:** Authenticated members shall have read-only
+  access. Administrators, including the existing single-user identity when
+  authentication is disabled, shall be able to save. Invalid values, failed
+  loads, and failed saves shall show an error without claiming success or
+  changing the effective setting.
+- **AC-AGENTS-SESSION-CEILING-002.6:** Desktop and phone users shall be able to
+  find the section, enable, edit, save, reset, and disable it. Phone controls shall
+  have touch targets of at least 44px and no document horizontal overflow. Labels,
+  help, validation, and state messages shall be localized and keyboard accessible.
+- **AC-AGENTS-SESSION-CEILING-002.7:** The section shall explain that the ceiling
+  limits automatic starts, manual starts can exceed it, and workflow WIP is a
+  separate limit. The default maximum offered after enabling shall not activate
+  the ceiling before the user saves.
 
 ## Out of scope
 
 - Per-workspace or per-user ceilings.
-- A frontend settings control for this startup-only value.
+- Changing workflow WIP limits or imposing a hard limit on manual launches.
+- A new release toggle, YAML setting, or automatic CPU-based capacity selection.
 - Replacing the orchestrator's existing launch seams or task repository.

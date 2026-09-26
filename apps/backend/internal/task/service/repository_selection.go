@@ -126,6 +126,7 @@ func trustResolvedRepositorySelection(
 	// Branches and policy selectors belong to the task request. The resolver
 	// may only replace provider identity and the exact clone URL.
 	resolved.RepositoryID = ""
+	resolved.CheckoutOptions = requested.CheckoutOptions
 	resolved.BaseBranch = requested.BaseBranch
 	resolved.CheckoutBranch = requested.CheckoutBranch
 	resolved.BranchPolicyID = requested.BranchPolicyID

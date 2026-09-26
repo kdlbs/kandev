@@ -35,7 +35,10 @@ export async function runInitialTaskBriefFlow({
   const session = new SessionPage(testPage);
   await testPage.goto(`/t/${task.id}`);
   await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 45_000 });
+  // Prepared sessions can spend longer in environment setup than ordinary
+  // tasks when CI shards are starting together. Keep the wait bounded, but
+  // allow the session's own hydration/reload recovery to finish.
+  await session.waitForChatIdle({ timeout: 90_000 });
   await session.sendMessageViaButton(INITIAL_TASK_INSTRUCTION);
 
   const chat = session.activeChat();
@@ -61,7 +64,7 @@ export async function runInitialTaskBriefFlow({
   await expect(userBubbles.first()).toContainText(INITIAL_TASK_BRIEF);
   await expect(userBubbles.first()).toContainText(INITIAL_TASK_INSTRUCTION);
 
-  await session.waitForChatIdle({ timeout: 45_000 });
+  await session.waitForChatIdle({ timeout: 60_000 });
   await session.sendMessageViaButton(FOLLOWUP_INSTRUCTION);
   await expect(userBubbles).toHaveCount(2, { timeout: 15_000 });
   await expect(userBubbles.nth(1)).toContainText(FOLLOWUP_INSTRUCTION);

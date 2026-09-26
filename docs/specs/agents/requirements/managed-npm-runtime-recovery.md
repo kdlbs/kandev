@@ -17,6 +17,10 @@ Kandev repairs this error without requiring the end user to operate npm. The
 same behavior applies to host capability probes and to agent launches on local
 PC, local Docker, and remote SSH executors.
 
+Managed runtime package resolution is independent of the task repository's
+project npm configuration. A repository release-age policy must not prevent an
+operator-selected, successfully validated runtime from starting.
+
 ## Terminology
 
 - **Managed npm runtime:** A built-in ACP runtime that Kandev launches through an exact npm package version.
@@ -54,9 +58,20 @@ PC, local Docker, and remote SSH executors.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-002.4:** Cache repair shall reject broad roots, path-like package values, symbolic links, and paths outside the npm execution cache.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-002.5:** Cancellation and backend shutdown shall stop repair before a replacement process starts.
 
+### REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-003: Project-independent resolution and policy errors
+
+**Intent:** A task repository shall not control how Kandev resolves its managed agent runtime, and a remaining npm release-date restriction shall have an actionable failure.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-003.1:** When Kandev prepares, probes, or launches a built-in managed npm runtime, the task repository's project `.npmrc`, including `min-release-age` and `before`, shall not affect runtime package resolution. The npm project root shall stay outside the task workspace and mounted agent session state. This shall hold for host utility probes and local PC, local Docker, and remote SSH launches.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-003.2:** Isolation shall preserve the agent's workspace working directory, exact selected package and version, configured registry, explicit npm environment overrides, ACP arguments, and existing npm execution-cache identity. Native and passthrough commands shall remain unchanged.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-003.3:** When npm reports a release-date-qualified `ETARGET` for the exact selected managed package from configuration that still applies, during startup, a capability probe, or a Settings update, Kandev shall report a distinct, actionable npm policy failure. It shall not invalidate the execution cache or attempt an online-preferred retry for that failure.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-003.4:** The release-date failure shall retain bounded, sanitized technical details and one recovery explanation on desktop and phone. The explanation shall identify `min-release-age` or `before` as settings to check without claiming that cache repair was attempted. A Settings update error shall identify the policy without exposing the raw npm date. Unrelated packages, malformed diagnostics, and generic ACP disconnects shall not receive this classification.
+
 ## Out of scope
 
 - Automatic version rollback or selection of another package version.
 - Registry replacement, dependency substitution, or global npm cache cleanup.
 - Native runtimes, passthrough commands, unrelated npm errors, and a second online retry.
-- Sprites, remote Docker, Kubernetes, and future executors without the same authenticated executor-local repair contract.
+- Automatic cache repair and retry for Sprites, remote Docker, Kubernetes, and future executors without the same authenticated executor-local repair contract. Kandev still classifies a policy failure when bounded diagnostics are available for the exact trusted package.

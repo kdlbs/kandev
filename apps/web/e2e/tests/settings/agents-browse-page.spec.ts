@@ -99,4 +99,45 @@ test.describe("Agents browse page", () => {
     // Compatibility guard: the exact test ID PR #2544 introduced is gone too.
     await expect(testPage.getByTestId("available-to-install-trigger")).toHaveCount(0);
   });
+
+  test("renders the saved fallback summary after the model badge", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+    if (!agent || agent.profiles.length === 0) {
+      throw new Error("The E2E fixture must provide a configured agent profile");
+    }
+
+    const fallbackModel = "saved-explicit-model";
+    const profileName = "Desktop fallback summary";
+    let profileId: string | undefined;
+
+    try {
+      await testPage.goto("/settings/agents");
+      const seededRow = testPage
+        .getByTestId("agent-profile-row")
+        .filter({ hasText: agent.profiles[0].name });
+      await expect(seededRow).toBeVisible({ timeout: 15_000 });
+
+      const profile = await apiClient.createAgentProfile(agent.id, profileName, {
+        model: agent.profiles[0].model,
+        fallback_model: fallbackModel,
+      });
+      profileId = profile.id;
+      await testPage.reload();
+
+      const row = testPage.getByTestId("agent-profile-row").filter({ hasText: profile.name });
+      await expect(row).toBeVisible({ timeout: 15_000 });
+      await expect(row.locator('[data-slot="badge"]')).toHaveText([
+        profile.model,
+        `fallback: ${fallbackModel}`,
+      ]);
+    } finally {
+      if (profileId) {
+        await apiClient.deleteAgentProfile(profileId, true);
+      }
+    }
+  });
 });

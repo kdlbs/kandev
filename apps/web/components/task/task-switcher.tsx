@@ -158,12 +158,14 @@ function buildGroupSectionProps(
     pinnedSet: Set<string>;
     collapsedSet: Set<string>;
     showHeader: boolean;
+    getNestHierarchyTasks: () => TaskSwitcherProps["nestHierarchyTasks"];
   },
 ): GroupSectionProps {
-  const { group, rowProps, pinnedSet, collapsedSet, showHeader } = options;
+  const { group, rowProps, pinnedSet, collapsedSet, showHeader, getNestHierarchyTasks } = options;
   return {
     group,
     subTasksByParentId: grouped.subTasksByParentId,
+    getNestHierarchyTasks,
     rowProps,
     pinnedSet,
     isCollapsed: collapsedSet.has(group.key),
@@ -218,6 +220,11 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
     () => new Set(props.collapsedGroupKeys ?? []),
     [props.collapsedGroupKeys],
   );
+  const nestHierarchyTasksRef = useRef(props.nestHierarchyTasks);
+  useLayoutEffect(() => {
+    nestHierarchyTasksRef.current = props.nestHierarchyTasks;
+  }, [props.nestHierarchyTasks]);
+  const getNestHierarchyTasks = useMemo(() => () => nestHierarchyTasksRef.current, []);
 
   if (isLoading) return <TaskSwitcherSkeleton />;
 
@@ -258,6 +265,7 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
             pinnedSet,
             collapsedSet,
             showHeader: showHeaders,
+            getNestHierarchyTasks,
           })}
         />
       ))}

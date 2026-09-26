@@ -15,6 +15,10 @@ const EDITABLE_FIELDS = [
   "commandPrefix",
   "envVars",
   "cliPassthrough",
+  "cursorMcpAuthEnabled",
+  "providerKind",
+  "providerBaseUrl",
+  "providerApiKeySecretId",
   "enabled",
   "dynamic",
 ] as const satisfies readonly (keyof AgentProfile)[];

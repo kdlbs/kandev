@@ -20,13 +20,13 @@ The [CLI](cli.md) is a better fit for headless machines, browser-only access, or
 
 Download artifacts from [GitHub Releases](https://github.com/kdlbs/kandev/releases). Each desktop filename begins with `kandev-desktop-<platform>-`; use the installer format for your platform, not an updater archive.
 
-| Platform label | Installer formats | In-app update support |
-|---|---|---|
-| `macos-arm64` | `.dmg` | Signed `.app.tar.gz` updater bundle |
-| `macos-x64` | `.dmg` | Signed `.app.tar.gz` updater bundle |
-| `linux-arm64` | AppImage, `.deb`, `.rpm` | AppImage installations only |
-| `linux-x64` | AppImage, `.deb`, `.rpm` | AppImage installations only |
-| `windows-x64` | NSIS `.exe` | Signed `.nsis.zip` updater bundle |
+| Platform label | Installer formats        | In-app update support               |
+| -------------- | ------------------------ | ----------------------------------- |
+| `macos-arm64`  | `.dmg`                   | Signed `.app.tar.gz` updater bundle |
+| `macos-x64`    | `.dmg`                   | Signed `.app.tar.gz` updater bundle |
+| `linux-arm64`  | AppImage, `.deb`, `.rpm` | AppImage installations only         |
+| `linux-x64`    | AppImage, `.deb`, `.rpm` | AppImage installations only         |
+| `windows-x64`  | NSIS `.exe`              | Signed `.nsis.zip` updater bundle   |
 
 Windows ARM64 is not a native release target. x64 emulation may run the installer on some ARM Windows systems, but that is dependency-bound and not covered by the release matrix.
 
@@ -144,6 +144,14 @@ shows **Reconnect** and **Remove** actions. Reconnect selects the folder again
 and starts a fresh scan. Removal forgets that desktop discovery folder; it does
 not remove repositories or files.
 
+If one root fails while another succeeds, repository selectors keep the
+successful results and their normal **Refresh repositories** action. Failed-root
+paths stay in structured backend logs and are not shown in selectors. An
+inaccessible descendant does not make its accessible root require
+reconnection. You can use **Add Local Repository** to validate an absolute path
+when automatic discovery cannot reach its root. Kandev does not create missing
+clone directories during recovery.
+
 macOS privacy access belongs to the application identity. A replacement that
 is unsigned, re-signed, or otherwise has a different identity can require
 access again. Kandev cannot promise that consent survives every unsigned
@@ -185,7 +193,7 @@ Linux `.deb` and `.rpm` installations must be updated through their package mana
 
 Kandev has no registered public URL scheme, file association, or command-line deep-link protocol. A second application launch only activates the existing window. Links and routes inside the Kandev UI still work normally, but an external `kandev://…` link is not a supported product path.
 
-External `http`, `https`, and `mailto` destinations open through the system browser or mail client. The desktop bridge rejects URLs with embedded credentials, unsupported schemes, `localhost`/subdomains of `localhost`, loopback IPs, and unspecified IPs; Kandev routes, previews, downloads, and blob URLs remain in the WebView. RFC 1918/private-LAN hosts are not categorically blocked by this validator.
+External `http`, `https`, and `mailto` destinations open in the system browser or mail client. The desktop bridge blocks links with embedded credentials and unsupported schemes. It keeps `localhost` names, loopback IPs, and unspecified IPs in the WebView. It does not block all private-LAN hosts. Kandev routes, previews, and downloads stay in the WebView. Downloads that you start inside the desktop app open the system Save dialog. Kandev reports whether the transfer succeeds. The WebView transfers the file data.
 
 Native notifications are limited to selected agent-turn-finished and
 agent-needs-an-answer events, plus session failures. Semantic session events

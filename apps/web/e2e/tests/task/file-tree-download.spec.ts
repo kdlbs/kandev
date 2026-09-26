@@ -3,33 +3,57 @@ import path from "node:path";
 import fs from "node:fs";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import {
-  GitHelper,
-  makeGitEnv,
-  openTaskSession,
-  createStandardProfile,
-} from "../../helpers/git-helper";
+import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
+import { SessionPage } from "../../pages/session-page";
 
 // Download is wired in file-context-menu.tsx → useFileOperations.downloadFile →
 // downloadFileContent → triggerFileDownload (Blob + <a download>). We drive
 // the visible flow: right-click a file, pick Download, assert the browser
 // download event fires with the right filename and content.
 
-async function setupTask(
-  testPage: Page,
-  apiClient: ApiClient,
-  seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string },
-  profileName: string,
-  taskTitle: string,
-) {
+async function setupTask({
+  testPage,
+  apiClient,
+  seedData,
+  profileName,
+  taskTitle,
+  requiredPath,
+}: {
+  testPage: Page;
+  apiClient: ApiClient;
+  seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string };
+  profileName: string;
+  taskTitle: string;
+  requiredPath: string;
+}) {
   const profile = await createStandardProfile(apiClient, profileName);
-  await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
+  const task = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
     description: "/e2e:simple-message",
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
     repository_ids: [seedData.repositoryId],
   });
-  const session = await openTaskSession(testPage, taskTitle);
+
+  let workspacePath = "";
+  await expect
+    .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+      timeout: 30_000,
+      message: `Waiting for ${taskTitle} task environment to be ready`,
+    })
+    .toBe("ready");
+  await expect
+    .poll(
+      async () => {
+        const environment = await apiClient.getTaskEnvironment(task.id);
+        workspacePath = environment?.repos?.[0]?.worktree_path || environment?.workspace_path || "";
+        return Boolean(workspacePath && fs.existsSync(path.join(workspacePath, requiredPath)));
+      },
+      { timeout: 60_000, message: `Waiting for ${taskTitle} worktree materialization` },
+    )
+    .toBe(true);
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
   await session.clickTab("Files");
   return session;
 }
@@ -49,10 +73,16 @@ test.describe("File tree Download", () => {
     git.stageAll();
     git.commit("seed download file");
 
-    const session = await setupTask(testPage, apiClient, seedData, "ft-dl", "FT Download");
+    const session = await setupTask({
+      testPage,
+      apiClient,
+      seedData,
+      profileName: "ft-dl",
+      taskTitle: "FT Download",
+      requiredPath: fileName,
+    });
 
-    const node = session.fileTreeNode(fileName);
-    await expect(node).toBeVisible({ timeout: 15_000 });
+    const node = await session.fileTree.waitForFileTreeNode(fileName);
 
     await node.click({ button: "right" });
     const downloadItem = testPage.getByRole("menuitem", { name: "Download" });
@@ -83,10 +113,16 @@ test.describe("File tree Download", () => {
     git.stageAll();
     git.commit("seed subdir");
 
-    const session = await setupTask(testPage, apiClient, seedData, "ft-dl-dir", "FT Download Dir");
+    const session = await setupTask({
+      testPage,
+      apiClient,
+      seedData,
+      profileName: "ft-dl-dir",
+      taskTitle: "FT Download Dir",
+      requiredPath: "subdir/inside.txt",
+    });
 
-    const dirNode = session.fileTreeNode("subdir");
-    await expect(dirNode).toBeVisible({ timeout: 15_000 });
+    const dirNode = await session.fileTree.waitForFileTreeNode("subdir");
     await dirNode.click({ button: "right" });
 
     // The menu itself must render (Delete/Rename are still available), but

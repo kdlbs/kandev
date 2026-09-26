@@ -285,6 +285,7 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	for k, v := range req.Metadata {
 		metadata[k] = v
 	}
+	putPrimaryCheckoutOptions(metadata, req)
 	for k, v := range req.ExecutorConfig {
 		if isTrustedExecutorConfigKey(k) {
 			// Executor config wins for connection-routing keys so a malicious
@@ -746,7 +747,7 @@ func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchReq
 	//   (session-scoped, cleaned up on task delete via performTaskCleanup).
 	// Office tasks that have no repo (onboarding, planning) take the
 	// non-ephemeral branch and land under <homeDir>/tasks/...
-	if workspacePath == "" && req.SessionID != "" && m.dataDir != "" {
+	if workspacePath == "" && (req.SessionID != "" || req.Owner.Kind == ExecutionOwnerRun) && m.dataDir != "" {
 		workspacePath = m.resolveScratchWorkspace(ctx, req)
 	}
 	return
@@ -773,7 +774,7 @@ func (m *Manager) resolveScratchWorkspace(ctx context.Context, req *LaunchReques
 			zap.Error(err))
 		return ""
 	}
-	if !req.IsEphemeral {
+	if !req.IsEphemeral && req.Owner.Kind != ExecutionOwnerRun {
 		if err := storageworkspaces.WriteOwnershipMarker(scratchPath, storageworkspaces.OwnershipMarker{
 			TaskID: req.TaskID, WorkspaceID: req.WorkspaceID, TaskDirName: req.TaskID,
 			LayoutVersion: storageworkspaces.LayoutVersionScratch,
@@ -800,6 +801,15 @@ func (m *Manager) resolveScratchWorkspace(ctx context.Context, req *LaunchReques
 // scratchWorkspacePath computes the scratch workspace path for a launch request.
 // Returns empty string if the inputs are invalid (path traversal guard, missing IDs).
 func (m *Manager) scratchWorkspacePath(req *LaunchRequest) string {
+	if req.Owner.Kind == ExecutionOwnerRun {
+		if req.WorkspaceID == "" || req.Owner.RunSessionID == "" || strings.ContainsAny(req.Owner.RunSessionID, `/\\`) {
+			m.logger.Warn("run-owned scratch workspace requires safe workspace and session IDs",
+				zap.String("run_session_id", req.Owner.RunSessionID),
+				zap.String("workspace_id", req.WorkspaceID))
+			return ""
+		}
+		return filepath.Join(m.dataDir, "office-runs", req.WorkspaceID, req.Owner.RunSessionID)
+	}
 	if req.IsEphemeral {
 		// Legacy quick-chat path — session-scoped, kept for backward compat with
 		// ephemeral one-shot flows.
@@ -840,6 +850,9 @@ func invalidScratchPathID(id string) bool {
 // and populates metadata from the request fields. Runtime/profile environment
 // values are composed later, after every managed source has been collected.
 func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentProfileInfo, workspacePath string) (LaunchRequest, string, error) {
+	if err := m.validateLaunchCheckoutOptions(req); err != nil {
+		return LaunchRequest{}, "", err
+	}
 	executionID := uuid.New().String()
 	reqWithWorktree := *req
 	reqWithWorktree.WorkspacePath = workspacePath
@@ -1027,11 +1040,27 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if profileInfo != nil {
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
 	}
+
+	providerGatewayAuth, providerKeyEnvVar, providerKey, err := m.resolveProviderGatewayAuth(
+		ctx, profileInfo, agentConfig, models.ExecutorType(reqWithWorktree.ExecutorType).Runtime())
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if providerKey != "" && providerKeyEnvVar != "" {
+		if env == nil {
+			env = map[string]string{}
+		}
+		// The profile-declared provider key wins over any inherited value so a
+		// stale shell-exported OPENAI_API_KEY cannot shadow it.
+		env[providerKeyEnvVar] = providerKey
+	}
+
 	execReq := &ExecutorCreateRequest{
 		InstanceID:                     executionID,
+		ExecutorType:                   reqWithWorktree.ExecutorType,
 		TaskID:                         reqWithWorktree.TaskID,
 		TaskTitle:                      reqWithWorktree.TaskTitle,
-		SessionID:                      reqWithWorktree.SessionID,
+		SessionID:                      launchInventorySessionID(reqWithWorktree),
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
 		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
@@ -1058,6 +1087,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		RemoteContributions:            remoteContributions,
 		ContributionDestinations:       contributionDestinations,
 		ComparisonTargets:              comparisonTargets,
+		ProviderGatewayAuth:            providerGatewayAuth,
 	}
 	m.wireKubernetesInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
 
@@ -1066,6 +1096,8 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if err := resumeRemoteInstancePreflight(launchCtx, rt, execReq); err != nil {
 		return nil, nil, nil, err
 	}
+
+	m.scheduleSSHLaunchWarning(launchCtx, reqWithWorktree, metadata, reqWithWorktree.SessionID)
 
 	execInstance, err := rt.CreateInstance(launchCtx, execReq)
 	if err != nil {
@@ -1194,10 +1226,13 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		SetupScript:                req.SetupScript,
 		RepoSetupScript:            repoSetupScript,
 		BaseBranch:                 req.BaseBranch,
+		IntegrationRef:             req.IntegrationRef,
 		DefaultBranch:              req.DefaultBranch,
 		CheckoutBranch:             req.CheckoutBranch,
 		PRNumber:                   req.PRNumber,
+		QualifiedPRBase:            req.QualifiedPRBase,
 		RemoteContribution:         req.RemoteContribution,
+		CheckoutOptions:            req.CheckoutOptions,
 		ContributionDestination:    req.ContributionDestination,
 		WorktreeBranch:             getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
 		WorktreeBranchPrefix:       req.WorktreeBranchPrefix,
@@ -1230,10 +1265,13 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				RepositoryPath:             r.RepositoryPath,
 				RepoName:                   r.RepoName,
 				BaseBranch:                 r.BaseBranch,
+				IntegrationRef:             r.IntegrationRef,
 				DefaultBranch:              r.DefaultBranch,
 				CheckoutBranch:             r.CheckoutBranch,
 				PRNumber:                   r.PRNumber,
+				QualifiedPRBase:            r.QualifiedPRBase,
 				RemoteContribution:         r.RemoteContribution,
+				CheckoutOptions:            r.CheckoutOptions,
 				WorktreeID:                 r.WorktreeID,
 				AllowBranchReplacement:     req.AllowBranchReplacement || r.AllowBranchReplacement,
 				WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
@@ -1342,6 +1380,12 @@ func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvP
 // If req.SessionID is empty (quick chat / pre-session contexts), no
 // deduplication key exists and we fall through to direct execution.
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
+	if req == nil {
+		return nil, errors.New("launch request is required")
+	}
+	if err := m.admitExecutionOwner(ctx, req); err != nil {
+		return nil, err
+	}
 	// AC-EXECUTORS-SURVIVAL-002.8/002.16: refuse rather than queue or block a
 	// launch for a session whose recovery guard is currently held. Checked
 	// first, before any activity lease or singleflight coalescing, so a
@@ -1481,7 +1525,11 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		}
 		execution.IsPassthrough = req.IsPassthrough
 		if !req.IsPassthrough {
-			if err := m.materializeRuntimeProjectMCP(sharedCtx, execution, agentConfig); err != nil {
+			executorType := req.ExecutorType
+			if executorType == "" {
+				executorType = execution.ExecutorType
+			}
+			if err := m.materializeRuntimeProjectMCP(sharedCtx, execution, agentConfig, profileInfo, executorType); err != nil {
 				execution.AgentCommand = ""
 				execution.ContinueCommand = ""
 				execution.AgentArgs = nil
@@ -1675,7 +1723,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		return nil, err
 	}
 	if !reqWithWorktree.IsPassthrough {
-		if err := m.materializeRuntimeProjectMCP(ctx, execution, agentConfig); err != nil {
+		if err := m.materializeRuntimeProjectMCP(ctx, execution, agentConfig, profileInfo, reqWithWorktree.ExecutorType); err != nil {
 			m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "project MCP materialization failed")
 			return nil, err
 		}
@@ -1692,6 +1740,33 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		zap.Stringer("runtime", execution.RuntimeName))
 
 	return execution, nil
+}
+
+func (m *Manager) admitExecutionOwner(ctx context.Context, req *LaunchRequest) error {
+	if req == nil || req.Owner.Kind != ExecutionOwnerRun {
+		return nil
+	}
+	admission := req.OwnerAdmission
+	if admission == nil {
+		admission = m.ownerAdmission
+	}
+	if admission == nil {
+		return fmt.Errorf("execution owner %q has no admission provider", req.Owner.Kind)
+	}
+	return admission.AdmitExecution(ctx, req.Owner)
+}
+
+func executionOwnerKind(execution *AgentExecution) ExecutionOwnerKind {
+	if execution == nil {
+		return ""
+	}
+	if execution.RunID != "" || execution.RunSessionID != "" {
+		return ExecutionOwnerRun
+	}
+	if execution.TaskID != "" || execution.SessionID != "" {
+		return ExecutionOwnerTask
+	}
+	return ""
 }
 
 // validateLaunchWorkspaceAdmission checks host-side repository identity before
@@ -1769,8 +1844,18 @@ func (m *Manager) buildExecutionFromInstance(
 	prepResult *EnvPrepareResult,
 ) (*AgentExecution, error) {
 	execution := execInstance.ToAgentExecution(execReq)
+	execution.SessionID = req.SessionID
 	execution.ResumeAttemptID = ResumeAttemptIDFromContext(ctx)
 	execution.RuntimeName = rt.Name()
+	execution.WorkspaceID = req.WorkspaceID
+	execution.RunID = req.Owner.RunID
+	execution.RunSessionID = req.Owner.RunSessionID
+	execution.RunAttempt = req.Owner.Attempt
+	execution.Owner = req.Owner
+	execution.OwnerAdmission = req.OwnerAdmission
+	if req.Owner.AgentProfileID != "" {
+		execution.OfficeAgentProfileID = req.Owner.AgentProfileID
+	}
 	if req.ACPSessionID != "" {
 		execution.ACPSessionID = req.ACPSessionID
 	}
@@ -1805,6 +1890,27 @@ func (m *Manager) registerAndPublishExecution(
 	execInstance *ExecutorInstance,
 	sessionID string,
 ) error {
+	if execution != nil {
+		ownerReq := &LaunchRequest{
+			OwnerAdmission: execution.OwnerAdmission,
+			Owner: ExecutionOwner{
+				Kind:           executionOwnerKind(execution),
+				WorkspaceID:    execution.WorkspaceID,
+				TaskID:         execution.TaskID,
+				SessionID:      execution.SessionID,
+				RunID:          execution.RunID,
+				RunSessionID:   execution.RunSessionID,
+				Attempt:        execution.RunAttempt,
+				AgentProfileID: execution.OfficeAgentProfileID,
+			},
+		}
+		if ownerReq.Owner.Kind == ExecutionOwnerRun {
+			if err := m.admitExecutionOwner(ctx, ownerReq); err != nil {
+				m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "owner admission failed")
+				return err
+			}
+		}
+	}
 	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
 		m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "session ended during runtime creation")
 		return err
@@ -2084,7 +2190,7 @@ func (m *Manager) finishRegisteredLaunchRollback(execution *AgentExecution, task
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if !discardDurable || taskCleanupActive {
-		m.deleteExecutorRunning(cleanupCtx, execution.SessionID)
+		m.deleteExecutorRunning(cleanupCtx, executionInventorySessionID(execution))
 	} else if reader, ok := m.runningWriter.(executorRunningReader); ok {
 		running, err := reader.GetExecutorRunningBySessionID(cleanupCtx, execution.SessionID)
 		if err == nil && running != nil && running.AgentExecutionID == execution.ID {

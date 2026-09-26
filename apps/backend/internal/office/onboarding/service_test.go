@@ -66,7 +66,7 @@ func (m *mockTaskCreatorOnboarding) CreateOfficeTask(_ context.Context, wsID, pr
 }
 
 func (m *mockTaskCreatorOnboarding) CreateOfficeTaskInWorkflow(
-	_ context.Context, wsID, projID, agentID, workflowID, title, desc string,
+	_ context.Context, wsID, projID, agentID, workflowID, title, desc, _ string,
 ) (string, error) {
 	m.calls = append(m.calls, mockTaskCallOnboarding{
 		WorkspaceID: wsID, ProjectID: projID,

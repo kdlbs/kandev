@@ -1,7 +1,11 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "@/lib/plugins/registry";
-import { TaskTopBarPluginActions, type ChatTopBarSlotProps } from "./task-top-bar-plugin-actions";
+import {
+  TaskTopBarPluginActions,
+  type ChatTopBarSlotProps,
+  useHasTaskTopBarPluginActions,
+} from "./task-top-bar-plugin-actions";
 
 const SLOT = "chat-top-bar";
 
@@ -22,13 +26,13 @@ vi.mock("@/components/state-provider", () => ({
   useOptionalAppStore: (selector: (s: typeof mockState) => unknown) => selector(mockState),
 }));
 
-describe("TaskTopBarPluginActions", () => {
-  afterEach(() => {
-    cleanup();
-    pluginRegistry.unregisterPlugin("plugin-a");
-    mockState.taskSessionsByTask.itemsByTaskId.t1 = originalSessions;
-  });
+afterEach(() => {
+  cleanup();
+  pluginRegistry.unregisterPlugin("plugin-a");
+  mockState.taskSessionsByTask.itemsByTaskId.t1 = originalSessions;
+});
 
+describe("TaskTopBarPluginActions", () => {
   it("renders nothing when no plugin registered a chat-top-bar component", () => {
     const { container } = render(
       <TaskTopBarPluginActions sessionId="s1" taskId="t1" taskTitle="Demo" workspaceId="w1" />,
@@ -41,7 +45,7 @@ describe("TaskTopBarPluginActions", () => {
       const ctx = slotProps as ChatTopBarSlotProps;
       return (
         <div data-testid="plugin-topbar">
-          {`${ctx.taskId}|${ctx.workspaceId}|${ctx.activeSessionId}|${ctx.sessionIds.join(",")}`}
+          {`${ctx.taskId}|${ctx.workspaceId}|${ctx.activeSessionId}|${ctx.sessionIds.join(",")}|${ctx.presentation}`}
         </div>
       );
     });
@@ -50,7 +54,7 @@ describe("TaskTopBarPluginActions", () => {
       <TaskTopBarPluginActions sessionId="s2" taskId="t1" taskTitle="Demo" workspaceId="w1" />,
     );
 
-    expect(screen.getByTestId("plugin-topbar").textContent).toBe("t1|w1|s2|s1,s2");
+    expect(screen.getByTestId("plugin-topbar").textContent).toBe("t1|w1|s2|s1,s2|desktop");
   });
 
   it("includes the active session id even when the store list omits it", () => {
@@ -104,5 +108,45 @@ describe("TaskTopBarPluginActions", () => {
     );
 
     expect(pluginRender).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("responsive task top-bar plugin actions", () => {
+  it("identifies and contains the mobile menu presentation", () => {
+    pluginRegistry.forPlugin("plugin-a").registerComponent(SLOT, ({ slotProps }) => {
+      const ctx = slotProps as ChatTopBarSlotProps;
+      return <button data-testid="mobile-plugin-action">{ctx.presentation}</button>;
+    });
+
+    render(
+      <TaskTopBarPluginActions
+        sessionId="s2"
+        taskId="t1"
+        taskTitle="Demo"
+        workspaceId="w1"
+        presentation="mobile"
+      />,
+    );
+
+    const wrapper = screen.getByTestId("mobile-chat-top-bar-plugin-actions");
+    expect(wrapper.contains(screen.getByTestId("mobile-plugin-action"))).toBe(true);
+    expect(screen.getByTestId("mobile-plugin-action").textContent).toBe("mobile");
+  });
+
+  it("reacts when the first or last chat-top-bar registration changes", () => {
+    function Presence() {
+      return <span data-testid="slot-presence">{String(useHasTaskTopBarPluginActions())}</span>;
+    }
+
+    render(<Presence />);
+    expect(screen.getByTestId("slot-presence").textContent).toBe("false");
+
+    act(() => {
+      pluginRegistry.forPlugin("plugin-a").registerComponent(SLOT, () => null);
+    });
+    expect(screen.getByTestId("slot-presence").textContent).toBe("true");
+
+    act(() => pluginRegistry.unregisterPlugin("plugin-a"));
+    expect(screen.getByTestId("slot-presence").textContent).toBe("false");
   });
 });

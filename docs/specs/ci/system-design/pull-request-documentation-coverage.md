@@ -1,10 +1,12 @@
 ---
 status: draft
+last_updated: 2026-09-21
 system: ci
 requirements:
   - REQ-CI-PR-DOCS-001
   - REQ-CI-PR-DOCS-002
   - REQ-CI-PR-DOCS-003
+  - REQ-CI-PR-DOCS-004
 ---
 
 # Pull request documentation coverage system design
@@ -18,10 +20,11 @@ CI owns the contributor coverage policy and its trusted execution. Application s
 | REQ-CI-PR-DOCS-001 | Classification; Artifact contract |
 | REQ-CI-PR-DOCS-002 | Events and overrides |
 | REQ-CI-PR-DOCS-003 | Reporting and consistency; Merge queue; Security |
+| REQ-CI-PR-DOCS-004 | API read strategy and events and overrides |
 
 ## Components
 
-Proposed files:
+Files:
 
 - `.github/workflows/pr-docs.yml`: trusted orchestration, PR and merge-group entry points.
 - `.github/scripts/pr-docs.cjs`: pure classification and reference validation, plus a bounded GitHub API adapter.
@@ -40,11 +43,14 @@ Initial exemptions:
 - `docs/**` and Markdown files, including `AGENTS.md` and `CONTRIBUTING.md`.
 - Go `*_test.go`; JS/TS `*.test.*` and `*.spec.*` restricted to JS/TS source extensions; `apps/web/e2e/**`.
 - `apps/web/src/locales/<locale>/<namespace>.json`.
+- Exact canonical registry source `plugin-registry/plugins.yaml`.
 - Exact lock basenames `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `go.sum`, and `Cargo.lock`.
 - Recognized non-Markdown harness files: `.codex/agents/*.toml`, `.codex/config.toml`, `.claude/settings.json`, and `.cursor/rules/*.mdc`.
+- CI infrastructure paths `.github/workflows/**`, `.github/scripts/**`, and `.github/actions/**`. These change the delivery pipeline, not shipped product behavior, and are already governed by workflow contract tests.
 
-Do not exempt all JSON, YAML, assets, scripts, package manifests, Rust files, workflows, generated directories, or files containing the word `test`.
-These can change shipped behavior or repository contracts. Add exemptions later only with concrete fixtures.
+Keep other `plugin-registry/**` paths subject to normal coverage. Do not exempt all JSON, YAML, assets, scripts, package manifests, Rust files, workflows, generated directories, or files containing the word `test`.
+These can change shipped behavior or repository contracts. The `.github/` CI exemption is a directory-scoped rule; a workflow, script, or action outside `.github/` still requires coverage.
+Add exemptions later only with concrete fixtures.
 This conservative policy creates false positives for small runtime fixes and refactors. The explicit label is their escape hatch.
 
 ## Artifact contract
@@ -72,9 +78,48 @@ A handful of unrelated documentation changes does not establish the reference ch
 No PR-body schema is needed. The existing repository frontmatter supplies machine-readable links.
 Update the PR template and contributor guide with examples and the distinction between structural coverage and semantic review.
 
+## API read strategy
+
+The evaluator keeps a cache for one exact pull request head or one merge-group
+member. A retry after unstable pull request metadata starts a new cache. The
+stable pull request path has this request budget before transient retries:
+
+| Request class | Stable evaluation budget |
+| --- | --- |
+| Pull request metadata | Two reads: the initial snapshot and the consistency read. |
+| Changed files | One request per 100-file page. |
+| File contents | At most one read for each `(revision, path)` pair. |
+| Requirement search | At most one search for each unresolved `(directory, requirement ID)` pair. |
+| Commit status | One pending write and one terminal write. |
+
+The initial pull request snapshot used to choose the pending-status revision is
+also the evaluator's first snapshot. Linked work orders, plans, designs, and
+requirements reuse content already loaded at the exact head.
+
+Before code search, collect every changed Markdown requirement document in each
+referenced system directory and load it at the exact head. For an existing or
+renamed document, load its corresponding base path once. A referenced ID that
+has one exact-head definition and the same requirement heading/ID in the
+corresponding trusted base document needs no code search. The trusted base
+catalog's unique-ID validation rules out an unchanged duplicate, and scanning
+all changed requirement documents detects a duplicate introduced by the pull request.
+
+Use the existing code-search and directory fallback for a new, moved, absent,
+or unresolved ID. A moved ID needs fallback when it has no verified base
+identity. Search results name candidates only. Read every candidate
+at the exact head. Then use structural validation to establish the definition.
+Missing, incomplete, or ambiguous results fail closed. Document-count, response,
+and byte limits apply across the head and base reads.
+
 ## Events and overrides
 
-Use `pull_request_target` events `opened`, `reopened`, `synchronize`, `edited`, `labeled`, `unlabeled`, and `ready_for_review` without path filters.
+Use `pull_request_target` events `opened`, `reopened`, `synchronize`, `edited`,
+`labeled`, and `unlabeled` without path filters.
+At the job boundary, admit label events only when the event label is exactly
+`no-docs-allow`. Admit an `edited` event only when its `changes.base` field is
+present, because GitHub reports base-branch retargets as edited events. Title
+and description edits and draft-readiness transitions do not change any
+evaluator input, so they do not start the job.
 Read current PR metadata and labels, not just the event snapshot. Drafts follow the same policy.
 The exact current label `no-docs-allow` returns an override success before expensive file reads.
 Failure to read current metadata or labels is still an infrastructure error.
@@ -92,6 +137,10 @@ Use a distinct job name to avoid a status/check-name collision.
 Set pending before evaluation; publish success, failure for missing coverage, or error for incomplete data.
 The status target URL points to the run summary, which lists reasons, paths, references, and remediation.
 Also fail the workflow job on policy failure or infrastructure error. Do not post PR comments.
+On each retry and terminal request failure, write a bounded runner-log
+diagnostic. Include the request class, HTTP status or transport category,
+attempt count, and selected delay or stop reason. Do not log authorization
+headers, raw response bodies, file contents, or query text.
 
 Serialize all events by the normalized target branch with `queue: max` and
 `cancel-in-progress: false`. GitHub retains up to 100 pending runs in this
@@ -105,6 +154,24 @@ Do not report stale successes for a new head. Metadata publication is eventually
 Paginate file lists and compare the count to current `changed_files`. Reject results at GitHub's 3,000-file cap and mismatched counts.
 Reject truncated responses, invalid encodings, oversized documents, unsupported frontmatter, symlinks, submodules, and ambiguous IDs.
 Bound artifact reads to 100 documents, 256 KiB each, and 4 MiB total. Report limits explicitly; never silently discard documents.
+
+The API adapter makes at most three attempts for transient transport failures,
+HTTP 408 or 429, and retryable 5xx responses. It also retries HTTP 403 responses
+that GitHub identifies as rate limiting and successful merge-queue GraphQL
+responses with an error of type `RATE_LIMITED`. Other 4xx responses and other
+GraphQL errors fail immediately. A usable `Retry-After` value takes
+precedence. A primary limit with no remaining quota uses `X-RateLimit-Reset`.
+A secondary limit without usable guidance waits 60 seconds before the second
+attempt and 120 seconds before the third. Transport, 408, and 5xx failures use
+short exponential backoff. The 180-second sleep budget is shared across all
+requests in one client evaluation. A server wait beyond the remaining budget
+fails instead of exceeding the job timeout.
+
+Each attempt has its own request timeout. A status retry uses the same revision,
+context, state, and target URL. An uncertain response can create a duplicate
+status record. It cannot change the intended result. Request retries
+do not replace the separate bounded reevaluation used when pull request metadata
+changes.
 
 ## Merge queue
 
@@ -148,3 +215,5 @@ Existing open PRs need a supported event or dispatch to receive their first resu
 - [GitHub workflow events](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)
 - [GitHub required status checks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)
 - [GitHub merge queue API fields](https://docs.github.com/en/graphql/reference/pulls)
+- [GitHub REST API rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
+- [GitHub REST API best practices](https://docs.github.com/rest/guides/best-practices-for-integrators)
