@@ -29,6 +29,9 @@ func TestHTTPPreviewExactRetirementAuthorization(t *testing.T) {
 	require.NoError(t, repo.UpsertWorkspaceMember(ctx, &models.WorkspaceMember{
 		WorkspaceID: workspaceID, UserID: "viewer", Role: "viewer",
 	}))
+	require.NoError(t, repo.UpsertWorkspaceMember(ctx, &models.WorkspaceMember{
+		WorkspaceID: workspaceID, UserID: "collaborator", Role: "collaborator",
+	}))
 	log := h.logger
 	h.service = service.NewService(service.Repos{
 		Workspaces: repo, Tasks: repo, TaskRepos: repo, Workflows: repo, Messages: repo,
@@ -64,5 +67,26 @@ func TestHTTPPreviewExactRetirementAuthorization(t *testing.T) {
 		require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
 		require.NotContains(t, rec.Body.String(), "private task")
 		require.NotContains(t, rec.Body.String(), `"receipts"`)
+	})
+
+	t.Run("task writer without admin role is denied", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/retirement-old/exact-retirement/preview", strings.NewReader(body))
+		req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "collaborator", Role: authn.RoleMember}))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+		require.NotContains(t, rec.Body.String(), `"receipts"`)
+	})
+
+	t.Run("admin task writer receives blocked preview", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/retirement-old/exact-retirement/preview", strings.NewReader(body))
+		req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "collaborator", Role: authn.RoleAdmin}))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), `"eligible":false`)
+		require.Contains(t, rec.Body.String(), `"status":"UNKNOWN"`)
 	})
 }

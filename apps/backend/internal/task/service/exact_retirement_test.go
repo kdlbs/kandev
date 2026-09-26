@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
@@ -111,7 +112,7 @@ func TestPreviewExactRetirementHidesForeignWorkspace(t *testing.T) {
 	require.True(t, errors.Is(err, repoerrors.ErrTaskNotFound), "foreign task error = %v", err)
 }
 
-func TestPreviewExactRetirementAllowsTaskWriter(t *testing.T) {
+func TestPreviewExactRetirementRequiresAdminTaskWriter(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "retirement-ws", Name: "Workspace", OwnerID: "owner"}))
@@ -125,10 +126,31 @@ func TestPreviewExactRetirementAllowsTaskWriter(t *testing.T) {
 	require.NoError(t, err)
 	replacementTask, err := svc.GetTask(ctx, "replacement")
 	require.NoError(t, err)
-	preview, err := svc.PreviewExactRetirement(ctxAs("collaborator"), ExactRetirementPreviewRequest{
+	request := ExactRetirementPreviewRequest{
 		OldTaskID: "old", ReplacementTaskID: "replacement", WorkspaceID: "retirement-ws",
 		ExpectedOldGeneration: exactRetirementGeneration(oldTask), ExpectedReplacementGeneration: exactRetirementGeneration(replacementTask),
-	})
+	}
+	assertTasksUnchanged := func() {
+		t.Helper()
+		afterOld, err := svc.GetTask(ctx, "old")
+		require.NoError(t, err)
+		afterReplacement, err := svc.GetTask(ctx, "replacement")
+		require.NoError(t, err)
+		require.Equal(t, oldTask, afterOld)
+		require.Equal(t, replacementTask, afterReplacement)
+	}
+	preview, err := svc.PreviewExactRetirement(ctxAs("collaborator"), request)
+	require.ErrorIs(t, err, ErrForbidden)
+	require.Nil(t, preview)
+	assertTasksUnchanged()
+	preview, err = svc.PreviewExactRetirement(ctx, request)
+	require.ErrorIs(t, err, ErrForbidden)
+	require.Nil(t, preview)
+	assertTasksUnchanged()
+
+	adminCtx := authn.WithIdentity(ctx, authn.Identity{UserID: "collaborator", Role: authn.RoleAdmin})
+	preview, err = svc.PreviewExactRetirement(adminCtx, request)
 	require.NoError(t, err)
 	require.False(t, preview.Eligible)
+	assertTasksUnchanged()
 }

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -81,6 +82,20 @@ func exactRetirementDigest(parts ...string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+func (s *Service) authorizeExactRetirementPreview(ctx context.Context, oldTaskID, replacementTaskID string) error {
+	if err := s.AuthorizeTaskScope(ctx, oldTaskID, authz.ScopeTaskWrite); err != nil {
+		return err
+	}
+	if err := s.AuthorizeTaskScope(ctx, replacementTaskID, authz.ScopeTaskWrite); err != nil {
+		return err
+	}
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || !identity.IsAdmin() {
+		return ErrForbidden
+	}
+	return nil
+}
+
 // PreviewExactRetirement only reads authorized task rows. Evidence owners are
 // intentionally represented as UNKNOWN until their read-only adapters exist.
 func (s *Service) PreviewExactRetirement(ctx context.Context, request ExactRetirementPreviewRequest) (*ExactRetirementPreview, error) {
@@ -95,10 +110,7 @@ func (s *Service) PreviewExactRetirement(ctx context.Context, request ExactRetir
 	if err != nil {
 		return nil, err
 	}
-	if err := s.AuthorizeTaskScope(ctx, oldTask.ID, authz.ScopeTaskWrite); err != nil {
-		return nil, err
-	}
-	if err := s.AuthorizeTaskScope(ctx, replacementTask.ID, authz.ScopeTaskWrite); err != nil {
+	if err := s.authorizeExactRetirementPreview(ctx, oldTask.ID, replacementTask.ID); err != nil {
 		return nil, err
 	}
 	if request.WorkspaceID == "" || oldTask.WorkspaceID != request.WorkspaceID || replacementTask.WorkspaceID != request.WorkspaceID {
