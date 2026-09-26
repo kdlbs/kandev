@@ -2422,7 +2422,6 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 	runtimeSnapshot := execution.RuntimeEnvironment()
 	metadata := execution.MetadataSnapshot()
 	metadataEnv := runtimeEnvFromMetadata(metadata)
-	_, hasReplacement := metadata["runtime_env"]
 	var env map[string]string
 	if runtimeSnapshot == nil {
 		env = cloneStringMap(metadataEnv)
@@ -2433,7 +2432,10 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
 			return "", fmt.Errorf("resolve agent profile environment: %w", err)
 		}
-	} else if !hasReplacement {
+	} else if !hasRuntimeEnvOverlay(metadata) {
+		// Without a SetExecutionEnv overlay the snapshot is the environment
+		// this launch composed, including the managed credential broker
+		// values its helper entries expand. Nothing newer can replace them.
 		env = runtimeSnapshot
 	} else {
 		// SetExecutionEnv carries per-run values such as repository credentials.
@@ -2478,6 +2480,13 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 		bootCommand = execution.AgentCommand
 	}
 	return bootCommand, nil
+}
+
+// hasRuntimeEnvOverlay reports whether SetExecutionEnv delivered a per-run
+// environment for the next start.
+func hasRuntimeEnvOverlay(metadata map[string]interface{}) bool {
+	_, ok := metadata["runtime_env"]
+	return ok
 }
 
 func runtimeEnvFromMetadata(metadata map[string]interface{}) map[string]string {
