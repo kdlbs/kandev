@@ -77,7 +77,16 @@ export function buildSidebarTaskCommands(ctx: TaskCommandContext): CommandItem[]
     items.push(command("task-detach", t("task:detachFromParent"), IconUnlink, ctx.onDetach));
   if (available.move) {
     choices("task-move", t("task:moveTo"), IconArrowRight, ctx.steps);
-    choices("task-send-workflow", t("task:sendToWorkflow"), IconLogicBuffer, ctx.workflows);
+    if (ctx.workflows.length) {
+      items.push(
+        command(
+          "task-change-workflow",
+          t("task:changeWorkflow"),
+          IconLogicBuffer,
+          ctx.workflows[0]?.action,
+        ),
+      );
+    }
   }
   items.push(...ctx.plugins);
   items.push({

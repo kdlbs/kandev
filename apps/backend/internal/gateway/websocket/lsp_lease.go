@@ -76,7 +76,7 @@ type lspLease struct {
 	detachedAt                    time.Time
 	expiryTimer                   *time.Timer
 	closed                        bool
-	releasing                     bool
+	expectedUpstreamClose         bool
 	readDone                      chan struct{}
 	ready                         bool
 	readyStatus                   map[string]any
@@ -617,13 +617,13 @@ func (l *lspLease) readUpstream() {
 		messageType, message, err := l.upstream.ReadMessage()
 		if err != nil {
 			l.mu.Lock()
-			releasing := l.releasing
+			expectedClose := l.expectedUpstreamClose
 			l.mu.Unlock()
-			// The release owner acknowledges the browser and performs teardown.
-			if !releasing {
-				code, text, reason := classifyLSPUpstreamClose(err)
-				l.terminate(code, text, reason)
+			if expectedClose {
+				return
 			}
+			code, text, reason := classifyLSPUpstreamClose(err)
+			l.terminate(code, text, reason)
 			return
 		}
 		if messageType != websocket.TextMessage {

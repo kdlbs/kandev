@@ -173,7 +173,7 @@ func (ss *SchedulerService) ApplyTaskMutation(
 	// gates on the two ids differing. reactToAssigneeChange itself guards the
 	// session interrupt.
 	if change.NewAssigneeID != nil {
-		ss.reactToAssigneeChange(task, *change.NewAssigneeID, change, queue, res)
+		ss.reactToAssigneeChange(ctx, task, *change.NewAssigneeID, change, queue, res)
 	}
 
 	// --- Comment reactions (assignee + @mentions) ---
@@ -285,6 +285,7 @@ func (ss *SchedulerService) reactToStatusChange(
 // gate, this comparison stays local to the interrupt decision and does not
 // also guard the wake.
 func (ss *SchedulerService) reactToAssigneeChange(
+	ctx context.Context,
 	task *TaskSnapshot,
 	newAssigneeID string,
 	change TaskMutation,
@@ -300,6 +301,13 @@ func (ss *SchedulerService) reactToAssigneeChange(
 		// own empty-agent-id guard would catch this too, but there is no key
 		// to build or keyless cause to report for a run that will never be
 		// attempted.
+		return
+	}
+
+	// The current step must accept an auto-started run before this wake is
+	// queued — the interrupt above already fired and is unaffected. See
+	// shared.IsAssignmentWakeEligible for the fail-open rationale.
+	if !shared.IsAssignmentWakeEligible(ctx, ss.logger, ss.repo, ss.workflowStepGetter, task.ID, "reactivity.assignee_change") {
 		return
 	}
 

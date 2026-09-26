@@ -472,7 +472,7 @@ closing future reads.
 | host.api.fetch / baseUrl        | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments                                                                                                                                                                                      | Active ui.bundle; backend path must be a declared webhook when relayed | Declare `webhooks[].access: authenticated` for UI-only or billable operations; requests are generation-aborted on unload                                                                                        | host.api.fetch("webhooks/inbound", { method: "POST" })                                                              |
 | host.api.invokeAction           | Authenticated call to a declared action with host-verified workspace/task/session/repository selectors and bounded untrusted body                                                                                                                                                                      | Matching manifest `actions[]` key/scope                                | Browser abort cancels the bounded plugin RPC; safe domain statuses and `Retry-After` may be returned                                                                                                            | host.api.invokeAction("reviews.get", { taskId }, { signal })                                                        |
 | host.storage                    | Authenticated, per-user key/value storage: get(scope, scopeId, key, options?)/set(scope, scopeId, key, value, options?)/delete(scope, scopeId, key, options?)/list(scope, scopeId, options?) plus subscribe(filter, handler); no plugin backend required                                               | capabilities.user_state: true                                          | Reads and writes accept an AbortSignal; set/delete also accept writerId (appended to the host's per-tab id, not a replacement) for echo suppression; list returns every entry under the scope pair, unpaginated | host.storage.set("task", taskId, "note", value, { writerId: panelId, signal })                                      |
-| host.ui                         | Curated host instances: Alert*, Badge, Button, Card*, Checkbox, Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*, Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea, Tooltip*, RichTextEditor, RichTextReadOnly, plus Combobox, PageTopbar, TaskCreateDialog | Active ui.bundle                                                       | Host owns contexts/portals; render with host React and let modal/slot cleanup run                                                                                                                               | const Button = host.ui.Button                                                                                       |
+| host.ui                         | Curated host instances: Alert*, Badge, Button, Action, ActionGroup, Card*, Checkbox, Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*, Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea, Tooltip*, RichTextEditor, RichTextReadOnly, plus Combobox, PageTopbar, TaskCreateDialog | Active ui.bundle                                                       | Host owns contexts/portals and Action geometry; render with host React and let modal/slot cleanup run                                                                                                            | const Action = host.ui.Action                                                                                       |
 | host.theme                      | Current "light" or "dark" theme                                                                                                                                                                                                                                                                        | Active ui.bundle                                                       | Read during render; subscribe through host/app patterns if theme-sensitive                                                                                                                                      | host.theme === "dark"                                                                                               |
 | host.navigate                   | Soft SPA navigation navigate(href, { replace? })                                                                                                                                                                                                                                                       | Active ui.bundle                                                       | No registry cleanup; avoid navigating to undeclared external origins                                                                                                                                            | host.navigate("/t/" + taskId)                                                                                       |
 | host.openModal                  | Host-owned modal: { title?, content, size?, dismissible? } -> { close() }                                                                                                                                                                                                                              | Active ui.bundle                                                       | Modal auto-closes on disable/uninstall; close handles are idempotent                                                                                                                                            | const modal = host.openModal({ content: Panel })                                                                    |
@@ -645,7 +645,7 @@ to strings, but an unmounted name renders nowhere.
 | new-session-input-actions | New-session composer toolbar                                                               | PluginComposerSlotProps                                          |
 | chat-submit-decoration    | Layer over the composer's send button                                                      | ChatSubmitDecorationSlotProps                                    |
 | chat-top-bar              | Session top bar or phone Plugins menu                                                      | ChatTopBarSlotProps                                              |
-| main-top-bar              | Home/Kanban/Tasks top bar or phone Plugins menu                                             | MainTopBarSlotProps                                              |
+| main-top-bar              | Home/Kanban/Tasks top bar or phone Plugins menu; a task toolbar from the same plugin takes precedence | MainTopBarSlotProps                                              |
 | app-status-bar-left       | Left side of desktop status bar or mobile status drawer                                    | AppStatusBarSlotProps                                            |
 | app-status-bar-right      | Right side of desktop status bar or mobile status drawer                                   | AppStatusBarSlotProps                                            |
 | plugin-settings           | Top of this plugin's Settings > Plugins page                                               | { pluginId, status }; owner-scoped to the plugin being viewed    |
@@ -653,6 +653,131 @@ to strings, but an unmounted name renders nowhere.
 | task-card-tags            | Kanban card, its own row below the badges row                                              | { taskId, workspaceId, workflowStepId }                          |
 | task-row-metadata         | Sidebar task tree and `/tasks` rows                                                        | TaskRowMetadataSlotProps                                         |
 | sidebar-workspace-actions | Desktop New Task row or phone navigation action group, after Quick Terminal and Quick Chat | SidebarWorkspaceActionsSlotProps                                 |
+
+### Standard actions in component slots
+
+Use `host.ui.Action` for a standard action in a mounted component slot. Use
+`host.ui.ActionGroup` when one contribution has more than one standard action.
+The plugin still owns state, visibility, callbacks, and rich content. The host
+owns the button shell, icon box, spacing, focus and disabled styles, and the
+surface-specific size. This is an optional migration path; it does not add a
+second registration API.
+
+`Action` renders one button and accepts a localized `label`, optional decorative
+`icon`, visible `text`, short `badge`, `tone`, `pressed`, `disabled`, `busy`,
+`tooltip`, a button `ref`, supported button events, and trigger ARIA metadata.
+The label stays meaningful when the visible value changes or truncates. An
+icon-only action uses its label as the tooltip on fine-pointer desktop. Pass an
+empty `tooltip` to disable it. `busy` shows activity and does not disable the
+button. `Action` does not accept `className`, `style`, `size`, `variant`,
+`asChild`, or interactive children.
+
+| Slot surface | Host presentation |
+| --- | --- |
+| `chat-input-actions`, `task-create-input-actions`, `new-session-input-actions` | 28px desktop controls with 16px icons; on phone, controls stay beside their composer and have touch-sized targets |
+| `main-top-bar`, `chat-top-bar` | Match the surrounding 28px toolbar controls; on phone, actions appear in the shared Plugins navigation section with touch-sized targets |
+| `sidebar-workspace-actions` | Compact 24px desktop actions; phone actions appear in Plugins navigation with touch-sized targets |
+| `app-status-bar-left`, `app-status-bar-right` | Inline action fitting the 24px bar; tablet/coarse-pointer status stays compact, while the phone Status drawer provides touch-sized rows |
+
+The phone and coarse-pointer targets outside the compact status bar are at least
+44px in the active dimension. The status bar remains 24px on tablet; use its
+phone drawer row for a touch-sized status action. The host owns gaps between
+registrations. `ActionGroup` owns the gap between actions inside one
+contribution. It returns `null` when it has no direct children. Existing slot
+components and their saved registration/order identity remain unchanged.
+
+This example covers a command, a recording toggle, a changing value, a bounded
+custom glyph, and a controlled disclosure trigger:
+
+```js
+function makePluginControls(host) {
+  const { jsx: h, ui } = host;
+
+  return function PluginControls() {
+    const [recording, setRecording] = host.React.useState(false);
+    const [detailsOpen, setDetailsOpen] = host.React.useState(false);
+    const { t } = host.i18n.useTranslation();
+    return h(
+      ui.ActionGroup,
+      { label: t("pluginActions") },
+      h(ui.Action, {
+        label: t("openPluginPage"),
+        icon: myIcon(h),
+        onClick: () => host.navigate("/hello-world"),
+      }),
+      h(ui.Action, {
+        label: t("voiceRecording"),
+        icon: myMicrophoneIcon(h),
+        text: recording ? t("recording") : t("record"),
+        pressed: recording,
+        busy: recording,
+        onClick: () => setRecording((value) => !value),
+      }),
+      h(ui.Action, {
+        label: t("providerUsage"),
+        icon: myAnimatedGlyph(h),
+        text: "63%",
+        badge: t("live"),
+        onClick: refreshUsage,
+      }),
+      h(
+        ui.Popover,
+        { open: detailsOpen, onOpenChange: setDetailsOpen },
+        h(
+          ui.PopoverTrigger,
+          { asChild: true },
+          h(ui.Action, {
+            label: t("usageDetails"),
+            icon: myIcon(h),
+            "aria-haspopup": "dialog",
+            "aria-expanded": detailsOpen,
+            "aria-controls": "usage-details",
+          }),
+        ),
+        h(ui.PopoverContent, { id: "usage-details" }, t("currentUsageDetails")),
+      ),
+    );
+  };
+}
+
+registry.registerComponent("main-top-bar", makePluginControls(host));
+```
+
+For a plugin that must also run on an older host, feature-detect `Action` in
+the existing component and return one tree. Keep the legacy `Button` as the
+fallback; register the component once and do not register both trees.
+
+```js
+function makeOneAction(host) {
+  return function OneAction() {
+    const { t } = host.i18n.useTranslation();
+    const Action = host.ui.Action;
+    return Action
+      ? host.jsx(Action, {
+          label: t("openPluginPage"),
+          icon: myIcon(host.jsx),
+          onClick: openPage,
+        })
+      : host.jsx(host.ui.Button, {
+          type: "button",
+          variant: "ghost",
+          size: "icon",
+          "aria-label": t("openPluginPage"),
+          onClick: openPage,
+        }, myIcon(host.jsx));
+  };
+}
+
+registry.registerComponent("chat-input-actions", makeOneAction(host));
+```
+
+Use the existing host Popover, Drawer, or Dialog for disclosure content. Compose
+it with `Action` as the trigger; do not render a second button inside an Action.
+A plugin that requires the new shell can instead declare its actual
+`min_kandev_version`. This additive UI export does not itself require a
+manifest API-version bump. Keep using raw slot components for rich controls
+that do not fit this contract, and keep `host.ui.Button` for existing controls
+and ordinary plugin pages.
 
 AppStatusBarSlotProps is { placement, presentation, density, pathname,
 activeWorkspaceId, activeTaskId, activeSessionId }. Desktop presentation is a
@@ -1711,8 +1836,8 @@ records or mutate the SPA store.
 A plugin bundle must render with `host.React` / `host.jsx`; bundling your
 own React copy breaks hook identity against the host tree.
 
-`host.ui` is a curated `@kandev/ui` subset: Alert, Badge, Button, Card,
-Checkbox, Dialog, DropdownMenu, Input, Label, Pagination, ScrollArea, Select,
+`host.ui` is a curated `@kandev/ui` subset: Alert, Badge, Button, Action,
+ActionGroup, Card, Checkbox, Dialog, DropdownMenu, Input, Label, Pagination, ScrollArea, Select,
 Separator, Sheet, Skeleton, Spinner, Switch, Table, Tabs, Textarea, Tooltip
 (each with their compound sub-parts, e.g. `DialogContent`, `TableRow`) plus
 first-party app UI: `Combobox` (the app's picker), `PageTopbar` (the title
@@ -1887,7 +2012,7 @@ plugins at once. Available slots:
 | `new-session-input-actions` | New-session composer toolbar                                                                           | `PluginComposerSlotProps`                                         |
 | `chat-submit-decoration`    | Layer over the chat composer's send button, for adornments that belong on the send affordance itself   | `ChatSubmitDecorationSlotProps`                                   |
 | `chat-top-bar`              | Session top bar on desktop; shared Plugins menu section on phones                                      | `ChatTopBarSlotProps`                                             |
-| `main-top-bar`              | Default app top bar on desktop; shared Plugins menu section on phones                               | `MainTopBarSlotProps`                                             |
+| `main-top-bar`              | Default app top bar on desktop; phone Plugins menu unless the same plugin supplies task controls | `MainTopBarSlotProps`                                             |
 | `app-status-bar-left`       | Default-left item in the global status surface                                                         | `AppStatusBarSlotProps`                                           |
 | `app-status-bar-right`      | Default-right item in the global status surface                                                        | `AppStatusBarSlotProps`                                           |
 | `plugin-settings`           | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }`                                            |
@@ -1953,32 +2078,12 @@ backend over `host.api.fetch(...)`, and let the backend do the matching.
 
 ```js
 function makeChatAction(host) {
-  const { jsx: h, ui } = host;
-  const { Button, Tooltip, TooltipTrigger, TooltipContent } = ui;
-
-  return function ChatAction({ slotProps }) {
-    const { taskId } = slotProps ?? {};
-    return h(
-      Tooltip,
-      null,
-      h(
-        TooltipTrigger,
-        { asChild: true },
-        h(
-          Button,
-          {
-            type: "button",
-            variant: "ghost",
-            size: "icon",
-            className: "h-7 w-7 cursor-pointer hover:bg-muted/40",
-            "aria-label": "Open plugin page",
-            onClick: () => host.navigate("/hello-world"),
-          },
-          /* an icon element built with host.jsx */ myIcon(h),
-        ),
-      ),
-      h(TooltipContent, null, taskId ? `Task: ${taskId}` : "Plugin action"),
-    );
+  return function ChatAction() {
+    return host.jsx(host.ui.Action, {
+      label: host.i18n.t("openPluginPage"),
+      icon: myIcon(host.jsx),
+      onClick: () => host.navigate("/hello-world"),
+    });
   };
 }
 
@@ -1986,11 +2091,10 @@ function makeChatAction(host) {
 registry.registerComponent("chat-input-actions", makeChatAction(host));
 ```
 
-Match the first-party toolbar buttons: `Button` from `host.ui` with
-`variant="ghost"`, `size="icon"`, `h-7 w-7`, `cursor-pointer`, and a 16px
-(`h-4 w-4`) icon. Wrap it in `host.ui.Tooltip` so it reads like the native
-mic/attach controls. `kandev-plugin-hello/ui/bundle.js` ships a working
-example.
+`Action` selects the composer size, focus treatment, and tooltip. Do not copy
+button sizing or wrap this action in another Tooltip. The accessible label must
+come from your plugin's localized catalog. Use the fallback example above when
+one component must support a host that does not export `Action`.
 
 ### Session top bar
 
@@ -2014,13 +2118,14 @@ type Context = {
 Like `chat-input-actions`, both the active session and the full `sessionIds`
 list are provided (see the note above about resolving kandev session ids to
 ACP transcript ids server-side). With `presentation: "desktop"`, the contribution
-is inline beside first-party document/editor/debug controls, so keep it to a
-small badge or `h-7` button that matches the native metric chips. With
+is inline beside first-party document/editor/debug controls. Use `Action` for
+a standard action; it matches the native metric controls. Existing raw controls
+retain their own geometry. With
 `presentation: "mobile"`, the contribution is in the shared menu's **Plugins**
 section. The host wraps multiple contributions inside the menu width and gives
-`host.ui.Button` controls a minimum 44px touch target. Plugin controls retain
-their own interaction and disclosure state; arbitrary interaction does not
-dismiss the menu.
+`host.ui.Action` and `host.ui.Button` controls a minimum 44px touch target.
+Plugin controls retain their own interaction and disclosure state; arbitrary
+interaction does not dismiss the menu.
 
 ```js
 // inside initialize(registry, host):
@@ -2099,12 +2204,19 @@ Because the bar is not scoped to a task, no task/session ids are provided. On
 desktop, keep contributions to small badges or icon buttons in the compact
 horizontal strip. On a phone, `presentation` is `"mobile"`; the contribution
 renders in the shared app menu's **Plugins** section alongside sidebar workspace
-actions. When task contributions are also present, **Workspace** and **Task**
-labels distinguish their context. The host wraps
+actions. On a task with task controls, a plugin's `chat-top-bar` registrations
+replace that same plugin's `main-top-bar` registrations once task content renders.
+If task controls return `null`, the workspace toolbar remains available until
+task content appears; it returns if task content disappears. Keep task-relevant
+actions in `chat-top-bar`; every registration in that selected slot renders.
+Workspace-only plugins and sidebar workspace actions remain available. Listings
+and archived tasks use the workspace toolbar. The menu uses one wrapping group
+without Workspace/Task subheadings. The host wraps
 contributions within the menu width and gives `host.ui.Button` controls a
-minimum 44px active target. Use `host.ui.Button` for documented icon actions;
-the host normalizes their SVG icons to 16px. Desktop contributions keep their
-existing sizing.
+minimum 44px active target. Use `host.ui.Action` for new standard actions; it
+owns the surface geometry. Existing `host.ui.Button` and raw component
+contributions keep their current sizing. Desktop legacy contributions keep
+their existing sizing.
 
 ```js
 // inside initialize(registry, host):

@@ -9,6 +9,7 @@ import {
   IconCheck,
   IconLoader2,
   IconPencil,
+  IconCopy,
 } from "@tabler/icons-react";
 
 import { Button } from "@kandev/ui/button";
@@ -18,6 +19,7 @@ import { LineStat } from "@/components/diff-stat";
 import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import { FileIcon } from "@/components/ui/file-icon";
 import { getFileCategory } from "@/lib/utils/file-types";
+import { useCopyRepositoryPath } from "@/hooks/use-copy-repository-path";
 import type { ChangedFile } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
 import { useTranslation } from "react-i18next";
@@ -59,11 +61,16 @@ export type FileRowProps = {
   indentPx?: number;
 };
 
-export type FileRowContentProps = FileRowProps & { folder: string; name: string };
+export type FileRowContentProps = FileRowProps & {
+  folder: string;
+  name: string;
+  onCopyPath: () => void;
+};
 
 export function FileRow(props: FileRowProps) {
   const { file, isSelected, isActive, onSelect, onEditFile, onOpenDiff } = props;
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const copyRepositoryPath = useCopyRepositoryPath();
   const touchMode = isMobile || !isFinePointer;
   const { folder, file: name } = splitPath(file.path);
 
@@ -83,6 +90,10 @@ export function FileRow(props: FileRowProps) {
     }
   };
 
+  const handleCopyPath = () => {
+    void copyRepositoryPath(file.path);
+  };
+
   return (
     <li
       data-testid={`file-row-${file.path.replace(/[/\\]/g, "-")}`}
@@ -99,9 +110,9 @@ export function FileRow(props: FileRowProps) {
       onClick={handleClick}
     >
       {touchMode ? (
-        <TouchFileRowContent {...props} folder={folder} name={name} />
+        <TouchFileRowContent {...props} folder={folder} name={name} onCopyPath={handleCopyPath} />
       ) : (
-        <DesktopFileRowContent {...props} folder={folder} name={name} />
+        <DesktopFileRowContent {...props} folder={folder} name={name} onCopyPath={handleCopyPath} />
       )}
     </li>
   );
@@ -118,6 +129,7 @@ function DesktopFileRowContent({
   indentPx,
   folder,
   name,
+  onCopyPath,
 }: FileRowContentProps) {
   const showFolder = !treeMode && folder;
   return (
@@ -163,6 +175,7 @@ function DesktopFileRowContent({
         <FileRowActions
           path={file.path}
           repo={file.repositoryName}
+          onCopyPath={onCopyPath}
           onDiscard={onDiscard}
           onEditFile={onEditFile}
         />
@@ -173,7 +186,7 @@ function DesktopFileRowContent({
 
 function FileRowStats({ file }: { file: ChangedFile }) {
   return (
-    <div className="flex items-center gap-2 justify-end transition-opacity pointer-events-none group-hover:opacity-0">
+    <div className="flex items-center gap-2 justify-end transition-opacity pointer-events-none group-hover:opacity-0 group-focus-within:opacity-0">
       <LineStat added={file.plus} removed={file.minus} />
       <FileStatusIcon status={file.status} oldPath={file.oldPath} />
     </div>
@@ -285,11 +298,13 @@ function StageButton({
 function FileRowActions({
   path,
   repo,
+  onCopyPath,
   onDiscard,
   onEditFile,
 }: {
   path: string;
   repo?: string;
+  onCopyPath: () => void;
   onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   onEditFile: (path: string, repo?: string) => void;
 }) {
@@ -297,7 +312,7 @@ function FileRowActions({
   return (
     <div
       data-testid="file-row-hover-actions"
-      className="flex items-center gap-1 justify-end transition-opacity opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
+      className="flex items-center gap-1 justify-end transition-opacity opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
     >
       <Tooltip>
         <TooltipTrigger asChild>
@@ -330,6 +345,22 @@ function FileRowActions({
           </button>
         </TooltipTrigger>
         <TooltipContent>{t("common:edit")}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={t("task:copyPath")}
+            className="text-muted-foreground hover:text-foreground cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCopyPath();
+            }}
+          >
+            <IconCopy className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{t("task:copyPath")}</TooltipContent>
       </Tooltip>
     </div>
   );

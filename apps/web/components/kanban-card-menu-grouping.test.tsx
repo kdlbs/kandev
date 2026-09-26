@@ -5,6 +5,7 @@ import { pluginRegistry } from "@/lib/plugins/registry";
 const PLUGIN_ID = "kandev-plugin-tags";
 const ACTION_ID = "quick-tag";
 const ACTION_LABEL = "Quick tag";
+const CHANGE_WORKFLOW_ENTRY_KEY = "change-workflow";
 const WORKFLOW_ONE = "wf-1";
 const WORKFLOW_TWO = "wf-2";
 
@@ -52,20 +53,20 @@ describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => 
 
     const entries = buildKanbanCardMenuEntries({
       ...movementArgs(),
-      onSendToWorkflow: vi.fn(),
+      onChangeWorkflow: vi.fn(),
       onLinkPullRequest: vi.fn(),
     });
 
     const keys = entryKeys(entries);
-    const sendToIndex = keys.indexOf("send-to-workflow");
+    const changeWorkflowIndex = keys.indexOf(CHANGE_WORKFLOW_ENTRY_KEY);
     const primaryIndex = keys.indexOf(`plugin-primary-${PLUGIN_ID}:${ACTION_ID}`);
     const linkIndex = keys.indexOf("link");
 
-    expect(sendToIndex).toBeGreaterThanOrEqual(0);
+    expect(changeWorkflowIndex).toBeGreaterThanOrEqual(0);
     expect(primaryIndex).toBeGreaterThanOrEqual(0);
     expect(linkIndex).toBeGreaterThanOrEqual(0);
-    expect(linkIndex).toBeLessThan(sendToIndex);
-    expect(sendToIndex).toBeLessThan(primaryIndex);
+    expect(linkIndex).toBeLessThan(changeWorkflowIndex);
+    expect(changeWorkflowIndex).toBeLessThan(primaryIndex);
 
     const archiveIndex = keys.indexOf("archive");
     expect(primaryIndex).toBeLessThan(archiveIndex);
@@ -91,7 +92,7 @@ describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => 
       parentTaskId: "parent-1",
       onDetach: vi.fn(),
       onMoveToStep: vi.fn(),
-      onSendToWorkflow: vi.fn(),
+      onChangeWorkflow: vi.fn(),
       onArchive: vi.fn(),
       onDelete: vi.fn(),
     });
@@ -105,13 +106,30 @@ describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => 
       "detach",
       "move-separator",
       "move-to",
-      "send-to-workflow",
+      CHANGE_WORKFLOW_ENTRY_KEY,
       "plugins-separator",
       `plugin-primary-${PLUGIN_ID}:${ACTION_ID}`,
       "remove-separator",
       "archive",
       "delete",
     ]);
+  });
+
+  it("offers one single-task Change workflow action instead of a workflow submenu", () => {
+    const onChangeWorkflow = vi.fn();
+    const entries = buildKanbanCardMenuEntries({
+      ...movementArgs(),
+      currentStepId: "s1",
+      onMoveToStep: vi.fn(),
+      onChangeWorkflow,
+    });
+
+    expect(entryKeys(entries)).toContain(CHANGE_WORKFLOW_ENTRY_KEY);
+    expect(entryKeys(entries)).not.toContain("send-to-workflow");
+    const entry = entries.find((candidate) => candidate.key === CHANGE_WORKFLOW_ENTRY_KEY);
+    expect(entry?.kind).toBe("item");
+    if (entry?.kind === "item") entry.onSelect?.();
+    expect(onChangeWorkflow).toHaveBeenCalledOnce();
   });
 
   it("does not add a 'primary' entry when visible(context) returns false", () => {

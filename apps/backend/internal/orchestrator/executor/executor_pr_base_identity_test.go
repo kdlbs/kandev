@@ -3,8 +3,15 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -52,6 +59,164 @@ func TestResolveTaskRepoInfo_PRBaseUsesTargetRepository(t *testing.T) {
 	}
 	if info.BaseBranch != "stable" || info.QualifiedPRBase == nil || info.QualifiedPRBase.OID == "" {
 		t.Fatalf("resolved PR base = %#v, branch = %q, want stable with observed OID", info.QualifiedPRBase, info.BaseBranch)
+	}
+}
+
+// @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.3
+func TestPRBaseIdentityReturnsBoundedMismatchReasons(t *testing.T) {
+	type identityCase struct {
+		name           string
+		target         models.ComparisonTarget
+		number         int
+		checkoutBranch string
+		expected       *models.ComparisonTarget
+		attached       models.ComparisonTargetRepository
+		hasAttached    bool
+		head           models.ComparisonTargetRepository
+		hasHead        bool
+		contribution   bool
+		wantValid      bool
+		wantMismatch   prBaseIdentityMismatchReason
+	}
+	base := *forkPRComparisonTarget()
+	makeCase := func(name string, configure func(*identityCase)) identityCase {
+		result := identityCase{
+			name: name, target: base, number: base.Number, checkoutBranch: base.HeadBranch,
+			attached: base.TargetRepository, hasAttached: true,
+			head: base.HeadRepository, hasHead: true,
+		}
+		if configure != nil {
+			configure(&result)
+		}
+		return result
+	}
+
+	tests := []identityCase{
+		makeCase("PR number", func(c *identityCase) {
+			c.target.Number++
+			c.wantMismatch = prBaseMismatchPRNumber
+		}),
+		makeCase("provider", func(c *identityCase) {
+			c.target.Provider = "gitlab"
+			c.wantMismatch = prBaseMismatchProvider
+		}),
+		makeCase("kind", func(c *identityCase) {
+			c.target.Kind = "issue"
+			c.wantMismatch = prBaseMismatchKind
+		}),
+		makeCase("head branch", func(c *identityCase) {
+			c.checkoutBranch = "other"
+			c.wantMismatch = prBaseMismatchHeadBranch
+		}),
+		makeCase("repository identity missing", func(c *identityCase) {
+			c.hasAttached = false
+			c.wantMismatch = prBaseMismatchRepositoryIdentity
+		}),
+		makeCase("head repository", func(c *identityCase) {
+			c.target.TargetRepository.Path = "other/widgets"
+			c.head.Path = "another/widgets"
+			c.wantMismatch = prBaseMismatchHeadRepository
+		}),
+		makeCase("target repository", func(c *identityCase) {
+			c.contribution = true
+			c.target.TargetRepository.Path = "other/widgets"
+			c.wantMismatch = prBaseMismatchTargetRepository
+		}),
+		makeCase("checkout branch required", func(c *identityCase) {
+			c.checkoutBranch = ""
+			c.wantMismatch = prBaseMismatchCheckoutBranch
+		}),
+		makeCase("comparison target", func(c *identityCase) {
+			expected := base
+			c.expected = &expected
+			c.target.TargetRepository.Path = "other/widgets"
+			c.wantMismatch = prBaseMismatchComparisonTarget
+		}),
+		makeCase("valid unbound fork", func(c *identityCase) { c.wantValid = true }),
+		makeCase("valid contribution fork", func(c *identityCase) {
+			c.contribution = true
+			c.wantValid = true
+		}),
+		makeCase("valid expected binding", func(c *identityCase) {
+			expected := base
+			c.expected = &expected
+			c.wantValid = true
+		}),
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			valid, reason := validPRBaseIdentity(models.PRBase{Target: test.target}, test.number, test.checkoutBranch,
+				test.expected, test.attached, test.hasAttached, test.head, test.hasHead, test.contribution)
+			if valid != test.wantValid {
+				t.Fatalf("validPRBaseIdentity() valid = %v, want %v", valid, test.wantValid)
+			}
+			if reason != test.wantMismatch {
+				t.Fatalf("validPRBaseIdentity() reason = %q, want %q", reason, test.wantMismatch)
+			}
+		})
+	}
+}
+
+// @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.3
+func TestResolvePRBaseForLaunchLogsInvalidResolvedBaseWithoutProviderData(t *testing.T) {
+	const rawProvider = "provider-value-must-not-be-logged"
+	tests := []struct {
+		name           string
+		withBinding    bool
+		wantInvalidErr bool
+	}{
+		{name: "unbound target", wantInvalidErr: true},
+		{name: "bound target", withBinding: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repository := targetAttachedPRRepository(t)
+			base := forkPRComparisonTarget()
+			invalid := *base
+			invalid.Provider = rawProvider
+
+			core, observed := observer.New(zapcore.DebugLevel)
+			observedLogger, err := logger.NewFromZap(zap.New(core))
+			if err != nil {
+				t.Fatalf("NewFromZap: %v", err)
+			}
+			exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+			exec.logger = observedLogger
+			exec.SetPRBaseResolver(&recordingPRBaseResolver{result: &models.PRBase{Target: invalid}})
+
+			info := &repoInfo{PRNumber: 42, CheckoutBranch: "feature"}
+			if test.withBinding {
+				info.ComparisonTarget = base
+			}
+			tr := &models.TaskRepository{ID: "task-repo-safe-log", TaskID: "task-safe-log", BaseBranch: "main"}
+			resolveErr := exec.resolvePRBaseForLaunch(context.Background(), tr, repository, info)
+			switch {
+			case test.wantInvalidErr:
+				var resolutionErr *PRBaseResolutionError
+				if !errors.As(resolveErr, &resolutionErr) || !resolutionErr.InvalidAssociation() {
+					t.Fatalf("resolvePRBaseForLaunch() error = %v, want invalid-association error", resolveErr)
+				}
+			case resolveErr != nil:
+				t.Fatalf("resolvePRBaseForLaunch() error = %v, want safe fallback", resolveErr)
+			case info.BaseBranch != base.TargetBranch:
+				t.Fatalf("fallback base branch = %q, want bound branch %q", info.BaseBranch, base.TargetBranch)
+			}
+
+			entries := observed.FilterMessage("live pull request base identity mismatch").All()
+			if len(entries) != 1 {
+				t.Fatalf("identity mismatch logs = %d, want one", len(entries))
+			}
+			fields := entries[0].ContextMap()
+			if fields["task_repository_id"] != tr.ID || fmt.Sprint(fields["pr_number"]) != "42" ||
+				fields["mismatch_reason"] != "invalid_resolved_pr_base" {
+				t.Fatalf("identity mismatch fields = %#v, want safe identity and fixed invalid-base reason", fields)
+			}
+			for _, entry := range observed.All() {
+				if strings.Contains(fmt.Sprint(entry.ContextMap()), rawProvider) {
+					t.Fatalf("identity mismatch log exposed raw provider data: %#v", entry)
+				}
+			}
+		})
 	}
 }
 
@@ -254,6 +419,12 @@ func TestResolveAllRepoInfoRejectsLaunchWhenOnePRBindingIsInvalid(t *testing.T) 
 	target.TargetBranch = "main"
 	resolver := &recordingPRBaseResolver{result: &models.PRBase{Target: *target}}
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	core, observed := observer.New(zapcore.DebugLevel)
+	observedLogger, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap: %v", err)
+	}
+	exec.logger = observedLogger
 	exec.SetPRBaseResolver(resolver)
 	infos, err := exec.resolveAllRepoInfo(context.Background(), "task-1")
 	if err == nil || infos != nil {
@@ -261,6 +432,18 @@ func TestResolveAllRepoInfoRejectsLaunchWhenOnePRBindingIsInvalid(t *testing.T) 
 	}
 	if len(resolver.calls) != 2 {
 		t.Fatalf("resolver calls = %d, want both repository bindings checked", len(resolver.calls))
+	}
+	entries := observed.FilterMessage("live pull request base identity mismatch").All()
+	if len(entries) != 1 {
+		t.Fatalf("identity mismatch logs = %d, want one", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if fields["task_repository_id"] != "task-repo-repo-2" || fmt.Sprint(fields["pr_number"]) != "42" ||
+		fields["mismatch_reason"] != "head_repository_mismatch" {
+		t.Fatalf("identity mismatch fields = %#v, want task repository, PR number and fixed head mismatch reason", fields)
+	}
+	if strings.Contains(fmt.Sprint(fields), "https://github.com") || strings.Contains(fmt.Sprint(fields), "upstream/widgets") {
+		t.Fatalf("identity mismatch log exposed repository identity: %#v", fields)
 	}
 }
 

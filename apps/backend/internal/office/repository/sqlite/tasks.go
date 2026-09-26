@@ -1093,8 +1093,6 @@ func (r *Repository) HasOfficeAdoption(ctx context.Context) (bool, error) {
 	return adopted, err
 }
 
-// ListUnstartedTasks returns TODO tasks with an assignee, not archived,
-// within the lookback window, that have no active run (queued/claimed/finished).
 // CountTasksByWorkspace returns the number of non-archived, non-ephemeral tasks
 // for a workspace.
 func (r *Repository) CountTasksByWorkspace(ctx context.Context, workspaceID string) (int, error) {
@@ -1112,28 +1110,38 @@ func (r *Repository) CountTasksByWorkspace(ctx context.Context, workspaceID stri
 // finds. Automation runs are excluded: they are started once, explicitly, at
 // trigger time, and recovery picking one up would launch it a second time
 // through a lifecycle path that knows nothing about the automation's run row
-// or its concurrency cap.
+// or its concurrency cap. Optional excludedTaskIDs let recovery scan past
+// candidates that it already inspected in the current tick but could not queue.
 func (r *Repository) ListUnstartedTasks(
-	ctx context.Context, lookbackHours int, limit int,
+	ctx context.Context, lookbackHours int, limit int, excludedTaskIDs ...string,
 ) ([]*UnstartedTaskRow, error) {
 	var rows []*UnstartedTaskRow
-	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+	query := `
 		SELECT t.id,
-		       `+RunnerProjection("t")+` AS assignee_agent_profile_id,
+		       ` + RunnerProjection("t") + ` AS assignee_agent_profile_id,
 		       t.workspace_id
 		FROM tasks t
 		WHERE t.state = 'TODO'
-		  AND `+taskrepo.IsFromOfficePredicate("t")+`
-		  AND `+RunnerProjection("t")+` != ''
-		  AND t.archived_at IS NULL`+andNotAutomationOriginT+`
+		  AND ` + taskrepo.IsFromOfficePredicate("t") + `
+		  AND ` + RunnerProjection("t") + ` != ''
+		  AND t.archived_at IS NULL` + andNotAutomationOriginT + `
 		  AND t.created_at >= datetime('now', '-' || ? || ' hours')
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
 		      WHERE json_extract(w.payload, '$.task_id') = t.id
 		        AND w.status IN ('queued', 'claimed', 'finished')
 		  )
-		LIMIT ?
-	`), lookbackHours, limit)
+	`
+	args := []interface{}{lookbackHours}
+	if len(excludedTaskIDs) > 0 {
+		query += " AND t.id NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(excludedTaskIDs)), ",") + ")"
+		for _, taskID := range excludedTaskIDs {
+			args = append(args, taskID)
+		}
+	}
+	query += " ORDER BY t.created_at, t.id LIMIT ?"
+	args = append(args, limit)
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}

@@ -1,7 +1,8 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "@/lib/plugins/registry";
+import { PluginSlot } from "./plugin-slot";
 import {
   MobilePluginNavSection,
   type MobilePluginWorkspaceContext,
@@ -9,6 +10,15 @@ import {
 
 const HELLO_PATH = "/plugins/hello";
 const HELLO_ITEM_TEST_ID = "mobile-plugin-nav-item-hello";
+const MAIN_SLOT = "main-top-bar";
+const TASK_SLOT = "chat-top-bar";
+const SIDEBAR_SLOT = "sidebar-workspace-actions";
+const WORKSPACE_USAGE = "Workspace usage";
+const workspaceContext = {
+  workspaceId: "ws-1",
+  workspaceLabel: "Demo",
+  currentPage: "tasks",
+} as const;
 
 vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => "/",
@@ -37,12 +47,6 @@ afterEach(() => {
 });
 
 describe("MobilePluginNavSection workspace grouping", () => {
-  const workspaceContext = {
-    workspaceId: "ws-1",
-    workspaceLabel: "Demo",
-    currentPage: "tasks",
-  } as const;
-
   it("omits the section when the phone has no contributions", () => {
     const { container } = renderSection(undefined, undefined, true, workspaceContext);
     expect(container.innerHTML).toBe("");
@@ -50,7 +54,7 @@ describe("MobilePluginNavSection workspace grouping", () => {
 
   it("keeps workspace slots with task controls even when a saved layout owns destinations", () => {
     const received: unknown[] = [];
-    for (const name of ["main-top-bar", "sidebar-workspace-actions"]) {
+    for (const name of [MAIN_SLOT, SIDEBAR_SLOT]) {
       pluginRegistry.forPlugin("plugin-a").registerComponent(name, ({ slotProps }) => {
         received.push(slotProps);
         return <button data-testid={name}>{name}</button>;
@@ -62,7 +66,7 @@ describe("MobilePluginNavSection workspace grouping", () => {
     renderSection(undefined, <button>Task control</button>, false, workspaceContext);
 
     const section = screen.getByRole("region", { name: "Plugins" });
-    for (const label of ["main-top-bar", "sidebar-workspace-actions", "Task control"]) {
+    for (const label of [MAIN_SLOT, SIDEBAR_SLOT, "Task control"]) {
       expect(section.contains(screen.getByRole("button", { name: label }))).toBe(true);
     }
     expect(received).toContainEqual({ ...workspaceContext, presentation: "mobile" });
@@ -71,16 +75,84 @@ describe("MobilePluginNavSection workspace grouping", () => {
       workspaceLabel: "Demo",
       presentation: "mobile",
     });
-    expect(screen.getByRole("heading", { name: "Workspace" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Task" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Workspace" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Task" })).toBeNull();
     expect(screen.queryByTestId(HELLO_ITEM_TEST_ID)).toBeNull();
     expect(screen.getAllByText("Plugins")).toHaveLength(1);
+  });
+
+  // @covers AC-UI-MOBILE-MENU-008.1
+  it("prefers a plugin's task toolbar while retaining every task and independent workspace action", () => {
+    const plugin = pluginRegistry.forPlugin("plugin-a");
+    plugin.registerComponent(MAIN_SLOT, () => <button>Workspace usage</button>);
+    plugin.registerComponent(TASK_SLOT, () => <button>Task usage</button>);
+    plugin.registerComponent(TASK_SLOT, () => <button>Task details</button>);
+    plugin.registerComponent(SIDEBAR_SLOT, () => <button>New workspace note</button>);
+    pluginRegistry.forPlugin("plugin-b").registerComponent(MAIN_SLOT, () => <button>CPU</button>);
+
+    renderSection(undefined, <PluginSlot name={TASK_SLOT} />, false, workspaceContext);
+
+    expect(screen.queryByRole("button", { name: WORKSPACE_USAGE })).toBeNull();
+    for (const name of ["Task usage", "Task details", "New workspace note", "CPU"]) {
+      expect(screen.getAllByRole("button", { name })).toHaveLength(1);
+    }
+  });
+
+  // @covers AC-UI-MOBILE-MENU-008.2
+  it("restores the workspace toolbar when task actions are absent and follows live registrations", async () => {
+    const plugin = pluginRegistry.forPlugin("plugin-a");
+    plugin.registerComponent(MAIN_SLOT, () => <button>Workspace usage</button>);
+    const { rerender } = renderSection(
+      undefined,
+      <PluginSlot name={TASK_SLOT} />,
+      true,
+      workspaceContext,
+    );
+    expect(screen.getByRole("button", { name: WORKSPACE_USAGE })).toBeTruthy();
+
+    await act(async () => plugin.registerComponent(TASK_SLOT, () => <button>Task usage</button>));
+    expect(screen.queryByRole("button", { name: WORKSPACE_USAGE })).toBeNull();
+    expect(screen.getByRole("button", { name: "Task usage" })).toBeTruthy();
+
+    rerender(<MobilePluginNavSection onNavigate={() => {}} workspaceContext={workspaceContext} />);
+    expect(screen.getByRole("button", { name: WORKSPACE_USAGE })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Task usage" })).toBeNull();
+
+    act(() => pluginRegistry.unregisterPlugin("plugin-a"));
+    expect(screen.queryByTestId("mobile-plugin-nav-section")).toBeNull();
+  });
+});
+
+describe("MobilePluginNavSection workspace fallback", () => {
+  it("keeps a workspace fallback until a task control renders and restores it when that control disappears", async () => {
+    const plugin = pluginRegistry.forPlugin("plugin-a");
+    plugin.registerComponent(MAIN_SLOT, () => <button>Workspace usage</button>);
+    plugin.registerComponent(TASK_SLOT, ({ slotProps }) =>
+      (slotProps as { available: boolean }).available ? <button>Session quota</button> : null,
+    );
+    const section = (available: boolean) => (
+      <MobilePluginNavSection
+        onNavigate={() => {}}
+        workspaceContext={workspaceContext}
+        actions={<PluginSlot name={TASK_SLOT} slotProps={{ available }} />}
+      />
+    );
+    const { rerender } = render(section(false));
+    expect(screen.getByRole("button", { name: WORKSPACE_USAGE })).toBeTruthy();
+
+    rerender(section(true));
+    await waitFor(() => expect(screen.queryByRole("button", { name: WORKSPACE_USAGE })).toBeNull());
+    expect(screen.getByRole("button", { name: "Session quota" })).toBeTruthy();
+
+    rerender(section(false));
+    await waitFor(() => expect(screen.getByRole("button", { name: WORKSPACE_USAGE })).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Session quota" })).toBeNull();
   });
 
   it("does not invent task context for workspace-only controls and removes unloaded contributions", () => {
     pluginRegistry
       .forPlugin("plugin-a")
-      .registerComponent("main-top-bar", () => <button>Workspace control</button>);
+      .registerComponent(MAIN_SLOT, () => <button>Workspace control</button>);
     const { rerender, container } = renderSection(undefined, undefined, true, workspaceContext);
     expect(screen.getByRole("button", { name: "Workspace control" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Task" })).toBeNull();
@@ -92,7 +164,7 @@ describe("MobilePluginNavSection workspace grouping", () => {
   it("omits sidebar actions when there is no active workspace", () => {
     pluginRegistry
       .forPlugin("plugin-a")
-      .registerComponent("sidebar-workspace-actions", () => <button>Workspace control</button>);
+      .registerComponent(SIDEBAR_SLOT, () => <button>Workspace control</button>);
     const { container } = renderSection(undefined, undefined, true, { currentPage: "kanban" });
     expect(container.innerHTML).toBe("");
   });

@@ -216,3 +216,23 @@ Validation after remediation:
 - `go test -race ./internal/gateway/websocket -count=3`: passed.
 - Full backend `golangci-lint run ./... --new-from-rev=9fae7ab50045990e1bec2d363be3c553f268946c --timeout=5m`: passed, zero issues.
 - Catalog/spec lint and whitespace checks: passed.
+
+### Current-main conflict resolution (2026-09-26)
+
+Merged main `5c3dc31b2b65b35ff3121f3b5400c6c99dfb67d9` into the PR branch.
+Upstream independently fixed expected LSP closure and synchronized its admission
+fence test. Retained upstream's `expectedUpstreamClose` field and fence test,
+with this PR's release-owner teardown and acknowledgement-failure regression.
+Upstream now observes co-residency once through the shared process-start hook;
+its synchronized one-observation test replaces the earlier two-observation
+fixture. The managed Git configuration boundary and removal regressions remain
+intact. No durable requirements changed during conflict resolution.
+
+Post-merge validation from `apps/backend`:
+
+- `go test -race ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process ./internal/orchestrator/executor ./internal/githubauth ./internal/gitconfigenv ./internal/gateway/websocket`: passed.
+- Specification catalog/lint, public documentation tests/validator and whitespace checks: passed.
+- `go test -race ./internal/gateway/websocket -run 'TestLSP(GracefulRelease.*|ContinuityReconnectsToSameTaskHostStream)$' -count=20`: passed.
+- `golangci-lint run ./... --new-from-rev=5c3dc31b2b65b35ff3121f3b5400c6c99dfb67d9 --timeout=5m`: passed, zero issues. The first run timed out loading packages; the post-compilation retry passed.
+- Hooked-commit and new-head CI results are recorded in the PR description and task plan. Earlier live acceptance remains historical;
+  no main service/profile changes or new live resources were needed.

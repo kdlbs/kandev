@@ -279,8 +279,20 @@ func TestRefreshStaleWorkspaceWatches_HealsUnwatchedRow(t *testing.T) {
 	if watchedUpdate.PRNumber != 1299 {
 		t.Fatalf("second background update PR = %d, want watched PR 1299", watchedUpdate.PRNumber)
 	}
-	// Drain the goroutine before the in-memory DB closes. Both observable writes
-	// have completed, so Stop has no database operation left to cancel.
+	// The event is published before the refresh goroutine finishes its final
+	// watch bookkeeping. Wait for the worker itself to leave the in-flight set
+	// before stopping the service, otherwise Stop can cancel that final write
+	// and close the sole :memory: connection before the assertion below.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, active := svc.inflightWorkspaceRefreshes.Load(testWorkspaceID); !active {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("workspace refresh did not finish after publishing both updates")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	svc.Stop()
 
 	got, err := store.GetTaskPRByRepoAndNumber(ctx, "task-1", "repo-1", 1293)

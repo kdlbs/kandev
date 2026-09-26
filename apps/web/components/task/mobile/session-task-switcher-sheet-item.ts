@@ -58,6 +58,10 @@ function sheetLaunchQueue(task: KanbanState["tasks"][number]) {
   return task.statusSummary?.launch_queue;
 }
 
+function sheetLastActivity(task: KanbanState["tasks"][number]) {
+  return task.statusSummary?.last_activity_at ?? task.updatedAt ?? task.createdAt;
+}
+
 function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
   const summary = task.statusSummary;
   const hasSummary = summary != null;
@@ -104,6 +108,8 @@ export function toSheetItem(
     title: task.title,
     autopilot: task.autopilot,
     priority: task.priority,
+    createdAt: task.createdAt,
+    lastActivityAt: sheetLastActivity(task),
     parentTaskId: task.parentTaskId ?? undefined,
     workspaceMode: task.workspaceMode,
     state: task.state as TaskState | undefined,

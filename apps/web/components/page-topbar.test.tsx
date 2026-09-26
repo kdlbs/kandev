@@ -1,6 +1,12 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PageTopbar, TOPBAR_HEIGHT_CLASSNAME } from "./page-topbar";
+import { PageTopbar, TOPBAR_HEIGHT_CLASSNAME, type ParentCrumb } from "./page-topbar";
+
+const isMacTauriWebview = vi.hoisted(() => vi.fn(() => false));
+vi.mock("@/lib/desktop/window-chrome", () => ({
+  isMacTauriWebview,
+  macTauriDragRegionProps: () => (isMacTauriWebview() ? { "data-tauri-drag-region": "deep" } : {}),
+}));
 
 vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
   AppStatusDrawerTrigger: () => null,
@@ -9,7 +15,10 @@ vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
 const PHONE_HOME = "topbar-phone-home";
 
 describe("PageTopbar home crumb", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    isMacTauriWebview.mockReturnValue(false);
+  });
 
   it("renders a phone-only home crumb by default", () => {
     render(<PageTopbar title="Hello E2E" />);
@@ -54,6 +63,15 @@ describe("PageTopbar home crumb", () => {
     for (const ghostHome of screen.getAllByTestId("topbar-ghost-home")) {
       expect(ghostHome.className).toContain("md:hidden");
     }
+  });
+
+  it("marks the header as a native drag region only for macOS Tauri", () => {
+    isMacTauriWebview.mockReturnValue(true);
+    render(<PageTopbar title="Settings" testId="native-titlebar" />);
+
+    expect(screen.getByTestId("native-titlebar").getAttribute("data-tauri-drag-region")).toBe(
+      "deep",
+    );
   });
 
   it("omits it when the page already shows a real back link", () => {
@@ -108,6 +126,26 @@ describe("PageTopbar parent crumbs", () => {
     expect(screen.getByRole("link", { name: "Settings" }).closest("li")?.className).not.toContain(
       "max-md:hidden",
     );
+  });
+
+  // @covers AC-UI-REMOTE-REPO-TOPBAR-001.1, AC-UI-REMOTE-REPO-TOPBAR-001.2
+  it("renders an external repository parent as a named new-tab link with its provider icon", () => {
+    const ariaLabel = "GitHub repository owner/agent-orchestrator";
+    const repositoryCrumb = {
+      label: "agent-orchestrator",
+      externalUrl: "https://github.com/owner/agent-orchestrator",
+      ariaLabel,
+      title: "owner/agent-orchestrator",
+      icon: <svg data-testid="repository-provider-icon" />,
+    } as unknown as ParentCrumb;
+
+    render(<PageTopbar title="Explain agent connections" parents={[repositoryCrumb]} />);
+
+    const link = screen.getByRole("link", { name: ariaLabel });
+    expect(link.getAttribute("href")).toBe("https://github.com/owner/agent-orchestrator");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(link.querySelector('[data-testid="repository-provider-icon"]')).not.toBeNull();
   });
 });
 

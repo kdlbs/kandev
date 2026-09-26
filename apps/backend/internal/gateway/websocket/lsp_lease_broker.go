@@ -20,7 +20,7 @@ func (l *lspLease) gracefulRelease(generation uint64, reason, requestID string) 
 	}
 	defer l.terminate(websocket.CloseNormalClosure, text, reason)
 	l.mu.Lock()
-	l.releasing = true
+	l.expectedUpstreamClose = true
 	requests := make([]lspLeaseClientRequest, 0, len(l.clientRequests))
 	for key, request := range l.clientRequests {
 		if request.generation == generation {

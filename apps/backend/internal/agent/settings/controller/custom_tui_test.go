@@ -82,6 +82,34 @@ func TestCreateCustomTUIAgent_CommandArgsPersisted(t *testing.T) {
 	}
 }
 
+func TestCreateCustomTUIAgent_DisableBracketedPasteReachesRuntimeAndStorage(t *testing.T) {
+	st := newFakeStore()
+	c := newCustomTUIController(t, st)
+
+	if _, err := c.CreateCustomTUIAgent(context.Background(), CreateCustomTUIAgentRequest{
+		DisplayName:           "Raw TUI",
+		Command:               "raw-tui",
+		DisableBracketedPaste: true,
+	}); err != nil {
+		t.Fatalf("CreateCustomTUIAgent: %v", err)
+	}
+
+	ag, ok := c.agentRegistry.Get("raw-tui")
+	if !ok {
+		t.Fatal("custom agent was not registered")
+	}
+	pt, ok := ag.(agents.PassthroughAgent)
+	if !ok {
+		t.Fatal("custom agent is not a passthrough agent")
+	}
+	if !pt.PassthroughConfig().DisableBracketedPaste {
+		t.Error("runtime DisableBracketedPaste = false, want true")
+	}
+	if !st.byName["raw-tui"].TUIConfig.DisableBracketedPaste {
+		t.Error("stored DisableBracketedPaste = false, want true")
+	}
+}
+
 // TestCreateCustomTUIAgent_NoCommandArgs keeps the existing behaviour intact
 // when the caller omits the field.
 func TestCreateCustomTUIAgent_NoCommandArgs(t *testing.T) {
@@ -105,6 +133,34 @@ func TestCreateCustomTUIAgent_NoCommandArgs(t *testing.T) {
 	}
 	if got := st.byName["plain"].TUIConfig.CommandArgs; len(got) != 0 {
 		t.Errorf("stored CommandArgs = %#v, want empty", got)
+	}
+}
+
+func TestCreateCustomTUIAgent_DBFailureInvalidatesDiscovery(t *testing.T) {
+	st := newFakeStore()
+	c := newCustomTUIControllerWithDiscovery(t, st)
+	st.createAgentHook = func() {
+		results, err := c.discovery.Detect(context.Background())
+		if err != nil {
+			t.Fatalf("Detect during create: %v", err)
+		}
+		if !slices.ContainsFunc(results, func(result discovery.Availability) bool {
+			return result.Name == "failed-agent"
+		}) {
+			t.Fatal("the in-flight discovery did not observe the registered agent")
+		}
+	}
+	st.createAgentErr = errors.New("create agent failed")
+
+	_, err := c.CreateCustomTUIAgent(context.Background(), CreateCustomTUIAgentRequest{
+		DisplayName: "Failed Agent",
+		Command:     "failed-cli",
+	})
+	if !errors.Is(err, st.createAgentErr) {
+		t.Fatalf("CreateCustomTUIAgent error = %v, want %v", err, st.createAgentErr)
+	}
+	if discoveryLists(t, c, "failed-agent") {
+		t.Fatal("failed agent remained in discovery after the registration rollback")
 	}
 }
 

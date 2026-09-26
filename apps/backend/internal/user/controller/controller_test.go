@@ -80,6 +80,26 @@ func TestUpdateUserSettingsMapsMCPTaskAgentProfileDefault(t *testing.T) {
 	}
 }
 
+func TestUpdateUserSettingsMapsJiraDefaultViewID(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &settingsRepository{settings: &models.UserSettings{JiraDefaultViewID: "old-view"}}
+	controller := NewController(service.NewService(repo, nil, log))
+	want := "custom-view"
+
+	response, err := controller.UpdateUserSettings(context.Background(), dto.UpdateUserSettingsRequest{
+		JiraDefaultViewID: &want,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	if response.Settings.JiraDefaultViewID != want {
+		t.Fatalf("JiraDefaultViewID = %q, want %q", response.Settings.JiraDefaultViewID, want)
+	}
+}
+
 func TestUpdateUserSettingsMapsSidebarTaskColorPatch(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {

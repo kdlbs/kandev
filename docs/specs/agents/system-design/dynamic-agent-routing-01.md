@@ -453,6 +453,10 @@ and never derive historical attribution from current session state.
 
 ## Delivery and rollout
 
+This section records the initial gated delivery. The later
+[graduation design](dynamic-routing-graduation.md) owns default-on promotion and
+retirement after the base implementation plan is complete.
+
 - The feature is guarded by `features.dynamicAgentRouting` and
   `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING`. The backend is authoritative and
   rejects dynamic-profile CRUD and execution while disabled. Concrete-profile

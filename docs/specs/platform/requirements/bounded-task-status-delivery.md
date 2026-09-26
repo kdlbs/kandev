@@ -37,6 +37,10 @@ Task rows currently obtain compact status indicators by observing large, session
   an idle agent after a restart, `status_summary.last_activity_at` shall remain
   unchanged. A later task mutation, user prompt, or conversational agent turn
   can advance it.
+- **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.11:** When a queue-status event
+  arrives after its task is deleted, the projector shall discard the task's
+  cached summary state without publishing a replacement. A transient task read
+  failure shall remain an error.
 
 ## System design
 

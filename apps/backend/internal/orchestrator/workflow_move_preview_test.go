@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -30,6 +31,96 @@ func TestPreviewStepAgentProfileUsesTaskWorkflowOverride(t *testing.T) {
 	}
 	if profileID != "profile-terra" {
 		t.Fatalf("preview profile = %q, want profile-terra", profileID)
+	}
+}
+
+func TestPreviewWorkflowMoveUsesDraftOverrideWithoutWriting(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-preview-change", Name: "Preview change", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	for _, workflow := range []*models.Workflow{
+		{ID: "workflow-preview-source", WorkspaceID: "workspace-preview-change", Name: "Source"},
+		{ID: "workflow-preview-target", WorkspaceID: "workspace-preview-change", Name: "Target"},
+	} {
+		if err := repo.CreateWorkflow(ctx, workflow); err != nil {
+			t.Fatalf("CreateWorkflow(%s): %v", workflow.ID, err)
+		}
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-preview-change", WorkspaceID: "workspace-preview-change",
+		WorkflowID: "workflow-preview-source", WorkflowStepID: "preview-source-step",
+		Title: "Preview task", State: v1.TaskStateCreated,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	task, err := repo.GetTask(ctx, "task-preview-change")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	steps := newMockStepGetter()
+	steps.steps["preview-source-step"] = &wfmodels.WorkflowStep{ID: "preview-source-step", WorkflowID: task.WorkflowID}
+	steps.steps["preview-target-step"] = &wfmodels.WorkflowStep{
+		ID: "preview-target-step", WorkflowID: "workflow-preview-target", AgentProfileID: "workflow-default-profile",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}},
+	}
+	svc := createTestServiceWithAgent(repo, steps, newMockTaskRepo(), &mockAgentManager{
+		resolveProfileInfo: &executor.AgentProfileInfo{ProfileID: "replacement-profile", ProfileName: "Replacement", Model: "model-b"},
+	})
+	draftOverrides, err := models.NewWorkflowAgentOverrides("workflow-preview-target", []models.WorkflowAgentOverrideBinding{{
+		StepID: "preview-target-step", SourceProfileID: "workflow-default-profile", ReplacementProfileID: "replacement-profile",
+	}})
+	if err != nil {
+		t.Fatalf("NewWorkflowAgentOverrides: %v", err)
+	}
+	preview, err := svc.PreviewWorkflowMove(ctx, WorkflowMovePreviewRequest{
+		TaskID: "task-preview-change", WorkflowID: "workflow-preview-target", WorkflowStepID: "preview-target-step",
+		WorkflowChange: &models.WorkflowChangeRequest{
+			ExpectedWorkflowID: task.WorkflowID, ExpectedStepID: task.WorkflowStepID, ExpectedUpdatedAt: task.UpdatedAt,
+			AgentOverrides: map[string]string{"workflow-default-profile": "replacement-profile"},
+		},
+		CandidateWorkflowOverrides: draftOverrides,
+	})
+	if err != nil {
+		t.Fatalf("PreviewWorkflowMove: %v", err)
+	}
+	if preview.Recipient == nil || preview.Recipient.ProfileID != "replacement-profile" || preview.Recipient.ProfileName != "Replacement" {
+		t.Fatalf("draft preview recipient = %#v, want replacement profile", preview.Recipient)
+	}
+	stored, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask after preview: %v", err)
+	}
+	if stored.WorkflowID != task.WorkflowID || stored.WorkflowStepID != task.WorkflowStepID || stored.WorkflowAgentOverrides != nil {
+		t.Fatalf("preview persisted draft state: %+v", stored)
+	}
+}
+
+func TestPreviewWorkflowMoveRejectsCandidateOverridesForAnotherWorkflowAsValidation(t *testing.T) {
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	task, err := fixture.repo.GetTask(context.Background(), "t1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	wrongWorkflowOverrides, err := models.NewWorkflowAgentOverrides("other-workflow", []models.WorkflowAgentOverrideBinding{{
+		StepID: "some-step", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b",
+	}})
+	if err != nil {
+		t.Fatalf("NewWorkflowAgentOverrides: %v", err)
+	}
+	_, err = fixture.svc.PreviewWorkflowMove(context.Background(), WorkflowMovePreviewRequest{
+		TaskID: "t1", WorkflowID: "wf1", WorkflowStepID: "step-a",
+		WorkflowChange: &models.WorkflowChangeRequest{
+			ExpectedWorkflowID: task.WorkflowID, ExpectedStepID: task.WorkflowStepID,
+			ExpectedUpdatedAt: task.UpdatedAt, AgentOverrides: map[string]string{},
+		},
+		CandidateWorkflowOverrides: wrongWorkflowOverrides,
+	})
+	var validationErr *taskservice.WorkflowChangeValidationError
+	if !errors.As(err, &validationErr) || validationErr.Code != taskservice.WorkflowChangeErrorInvalid {
+		t.Fatalf("PreviewWorkflowMove error = %#v, want invalid workflow-change validation", err)
 	}
 }
 
@@ -66,6 +157,133 @@ func TestPreviewWorkflowSessionTargetUsesTaskWorkflowOverride(t *testing.T) {
 	}
 	if profileID != "profile-b" {
 		t.Fatalf("preview source profile = %q, want profile-b", profileID)
+	}
+}
+
+func TestPreviewWorkflowMoveUsesDraftProfileForExplicitStepTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		bindingProfileID   string
+		wantSessionID      string
+		wantPreviewOutcome WorkflowMovePreviewOutcome
+	}{
+		{name: "no existing binding", wantPreviewOutcome: WorkflowMovePreviewOutcomeCreateNew},
+		{name: "candidate profile binding", bindingProfileID: "profile-b", wantSessionID: "session-b", wantPreviewOutcome: WorkflowMovePreviewOutcomeReuseOther},
+		{name: "stale source profile binding", bindingProfileID: "profile-a", wantPreviewOutcome: WorkflowMovePreviewOutcomeCreateNew},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+			now := time.Now().UTC()
+			if err := fixture.repo.CreateWorkflow(ctx, &models.Workflow{
+				ID: "wf-destination", WorkspaceID: "ws1", Name: "Destination", CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatalf("CreateWorkflow: %v", err)
+			}
+			task, err := fixture.repo.GetTask(ctx, "t1")
+			if err != nil {
+				t.Fatalf("GetTask: %v", err)
+			}
+			draftOverrides, err := models.NewWorkflowAgentOverrides("wf-destination", []models.WorkflowAgentOverrideBinding{{
+				StepID: "implement", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b",
+			}})
+			if err != nil {
+				t.Fatalf("NewWorkflowAgentOverrides: %v", err)
+			}
+			source := &wfmodels.WorkflowStep{
+				ID: "implement", WorkflowID: "wf-destination", Position: 0, AgentProfileID: "profile-a",
+			}
+			destination := &wfmodels.WorkflowStep{
+				ID: "pr", WorkflowID: "wf-destination", Position: 1,
+				ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyReuse,
+				SessionTarget:             &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetStep, StepID: source.ID},
+			}
+			fixture.stepGetter.steps[source.ID] = source
+			fixture.stepGetter.steps[destination.ID] = destination
+			fixture.agentMgr.resolveProfileInfo = &executor.AgentProfileInfo{
+				ProfileID: "profile-b", ProfileName: "Agent B", Model: "model-b",
+			}
+
+			if tc.bindingProfileID != "" {
+				session := fixture.current
+				if tc.bindingProfileID == "profile-b" {
+					session = &models.TaskSession{
+						ID: "session-b", TaskID: task.ID, AgentProfileID: "profile-b",
+						State:                models.TaskSessionStateWaitingForInput,
+						AgentProfileSnapshot: map[string]interface{}{"name": "Agent B", "model": "model-b"},
+					}
+					if err := fixture.repo.CreateTaskSession(ctx, session); err != nil {
+						t.Fatalf("CreateTaskSession: %v", err)
+					}
+				}
+				if _, err := fixture.repo.UpsertWorkflowSessionBinding(ctx, &models.WorkflowSessionBinding{
+					TaskID: task.ID, TargetKey: workflowSessionBindingTargetKey(source.ID),
+					WorkflowID: "wf-destination", AgentProfileID: tc.bindingProfileID,
+					SessionID: session.ID, OperationID: "preview-test-binding", UpdatedAt: now,
+				}); err != nil {
+					t.Fatalf("UpsertWorkflowSessionBinding: %v", err)
+				}
+			}
+
+			preview, err := fixture.svc.PreviewWorkflowMove(ctx, WorkflowMovePreviewRequest{
+				TaskID: task.ID, WorkflowID: "wf-destination", WorkflowStepID: destination.ID,
+				WorkflowChange: &models.WorkflowChangeRequest{
+					ExpectedWorkflowID: task.WorkflowID, ExpectedStepID: task.WorkflowStepID,
+					ExpectedUpdatedAt: task.UpdatedAt,
+					AgentOverrides:    map[string]string{"profile-a": "profile-b"},
+				},
+				CandidateWorkflowOverrides: draftOverrides,
+			})
+			if err != nil {
+				t.Fatalf("PreviewWorkflowMove: %v", err)
+			}
+			storedBeforeCommit, err := fixture.repo.GetTask(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("GetTask after read-only preview: %v", err)
+			}
+			if storedBeforeCommit.WorkflowID != task.WorkflowID || storedBeforeCommit.WorkflowAgentOverrides != nil {
+				t.Fatalf("preview persisted candidate state: %+v", storedBeforeCommit)
+			}
+
+			committedTask := *task
+			committedTask.WorkflowID = "wf-destination"
+			committedTask.WorkflowStepID = destination.ID
+			committedTask.WorkflowAgentOverrides = draftOverrides
+			if err := fixture.repo.UpdateTask(ctx, &committedTask); err != nil {
+				t.Fatalf("UpdateTask to committed candidate: %v", err)
+			}
+			routed, err := fixture.svc.resolveWorkflowSessionTarget(ctx, task.ID, destination)
+			if err != nil {
+				t.Fatalf("resolve committed workflow target: %v", err)
+			}
+
+			if preview.Outcome != tc.wantPreviewOutcome {
+				t.Errorf("preview outcome = %q, want %q", preview.Outcome, tc.wantPreviewOutcome)
+			}
+			if preview.Recipient == nil || preview.Recipient.ProfileID != routed.profileID {
+				t.Errorf("preview recipient = %#v, committed profile = %q", preview.Recipient, routed.profileID)
+			}
+			if preview.Model.After.ID != "model-b" {
+				t.Errorf("preview destination model = %q, want model-b", preview.Model.After.ID)
+			}
+			gotSessionID := ""
+			if preview.Recipient != nil {
+				gotSessionID = preview.Recipient.SessionID
+			}
+			if routed.session != nil && routed.session.ID != tc.wantSessionID {
+				t.Errorf("committed target session = %q, want %q", routed.session.ID, tc.wantSessionID)
+			}
+			if gotSessionID != sessionID(routed.session) {
+				t.Errorf("preview target session = %q, committed target session = %q", gotSessionID, sessionID(routed.session))
+			}
+			stored, err := fixture.repo.GetTask(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("GetTask after preview and simulated commit: %v", err)
+			}
+			if stored.WorkflowID != "wf-destination" || stored.WorkflowAgentOverrides.WorkflowID != "wf-destination" {
+				t.Errorf("committed task candidate was not stored as expected: %+v", stored)
+			}
+		})
 	}
 }
 

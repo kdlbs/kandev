@@ -1,62 +1,64 @@
 package runtimeflags
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/common/config"
 )
 
-// TestOfficeSessionIdentityDoesNotClaimUniqueIndexPrecondition pins
-// AC-OFFICE-IDENTITY-GRADUATION-003.7: no operator-visible description of
-// features.officeSessionIdentity may state that an unshipped
-// (task_id, agent_profile_id) unique index is a precondition for enabling
-// it. That precondition was dropped in favor of selection-only safety
-// (REQ-OFFICE-IDENTITY-GRADUATION-003); a reintroduced claim would tell
-// operators to wait on work that will never ship.
-func TestOfficeSessionIdentityDoesNotClaimUniqueIndexPrecondition(t *testing.T) {
-	def, ok := DefinitionByKey("features.officeSessionIdentity")
-	if !ok {
-		t.Fatal("features.officeSessionIdentity definition missing")
+func TestOfficeSessionIdentityIsRetiredAndStaleValuesAreInert(t *testing.T) {
+	const key = "features.officeSessionIdentity"
+	const envVar = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
+	if _, ok := DefinitionByKey(key); ok {
+		t.Fatalf("retired runtime flag %q is still active", key)
 	}
-	assertNoUniqueIndexClaim(t, "runtime flag registry RiskDescription", def.RiskDescription)
+	if _, ok := ValuesFromConfig(&config.Config{})[key]; ok {
+		t.Fatalf("retired runtime flag %q is still returned from config", key)
+	}
+	retired := false
+	for _, identity := range retiredRuntimeFlagIdentities {
+		if identity.key == key && identity.envVar == envVar {
+			retired = true
+			break
+		}
+	}
+	if !retired {
+		t.Fatalf("retired identity pair %q / %q is missing", key, envVar)
+	}
+
+	t.Setenv(envVar, "false")
+	cfg := &config.Config{}
+	ApplyStatesToConfig(cfg, []RuntimeFlagState{{Key: key, EffectiveValue: false}})
+	if _, active := OptionsFromConfig(cfg).EnvValues[envVar]; active {
+		t.Fatalf("retired environment variable %q is still read by runtime flags", envVar)
+	}
+	encoded, err := json.Marshal(cfg.Features)
+	if err != nil {
+		t.Fatalf("marshal feature response: %v", err)
+	}
+	if strings.Contains(string(encoded), "officeSessionIdentity") {
+		t.Fatalf("retired feature remains in /api/v1/features shape: %s", encoded)
+	}
 
 	repoRoot := officeSessionIdentityRepoRoot(t)
-	for _, relPath := range []struct {
-		path    string
-		locator string
-	}{
-		{path: "apps/backend/internal/profiles/profiles.yaml", locator: "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"},
-		{path: "docs/public/configuration.md", locator: "features.officeSessionIdentity"},
-		{path: "docs/public/operations.md", locator: "Office session identity"},
+	for _, relPath := range []string{
+		"profiles.yaml",
+		"apps/backend/internal/profiles/profiles.yaml",
+		"apps/backend/internal/common/config/catalog.go",
 	} {
-		content, err := os.ReadFile(filepath.Join(repoRoot, relPath.path))
+		content, err := os.ReadFile(filepath.Join(repoRoot, relPath))
 		if err != nil {
-			t.Fatalf("read %s: %v", relPath.path, err)
+			t.Fatalf("read %s: %v", relPath, err)
 		}
-		assertNoUniqueIndexClaimInSection(t, relPath.path, string(content), relPath.locator)
+		if strings.Contains(string(content), envVar) {
+			t.Fatalf("retired environment variable %q remains in %s", envVar, relPath)
+		}
 	}
-}
-
-func assertNoUniqueIndexClaim(t *testing.T, surface, content string) {
-	t.Helper()
-	if strings.Contains(strings.ToLower(content), "unique index") ||
-		strings.Contains(strings.ToLower(content), "unique-index") {
-		t.Fatalf("%s still claims a unique-index precondition for features.officeSessionIdentity", surface)
-	}
-}
-
-func assertNoUniqueIndexClaimInSection(t *testing.T, surface, content, locator string) {
-	t.Helper()
-	lowerContent := strings.ToLower(content)
-	index := strings.Index(lowerContent, strings.ToLower(locator))
-	if index < 0 {
-		return
-	}
-	start := max(0, index-100)
-	end := min(len(content), index+600)
-	assertNoUniqueIndexClaim(t, surface, content[start:end])
 }
 
 func officeSessionIdentityRepoRoot(t *testing.T) string {

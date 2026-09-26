@@ -354,6 +354,7 @@ transport/runtime errors become 503 without exposing internal error text. Plugin
 should use explicit statuses only for safe domain outcomes that callers can act on.
 
 `host.ui` contents: shadcn primitives (Accordion*, Alert*, Badge, Button,
+`Action`, `ActionGroup`,
 Card*, Checkbox, Collapsible*, Dialog*, DropdownMenu*, Empty*, Input, Kbd,
 KbdGroup, Label, Pagination*, Popover*, Progress, ScrollArea, Select*,
 Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea,
@@ -371,6 +372,54 @@ provider-neutral code-host dashboard set: `ChangeRequestList`,
 `IntegrationAuthStatusBanner`, `IntegrationEnabledControl`, `SettingsSection`,
 `SettingsCard`, and `WorkspaceScopedSection`. The authoritative list is
 `apps/web/lib/plugins/host-api.ts` (`PLUGIN_UI`).
+
+### Standard actions in existing slots
+
+The SDK exports these additive host-owned controls. `PluginActionProps` has a
+required localized `label` and optional `icon`, visible `text`, short `badge`,
+semantic `tone`, `pressed`, `disabled`, `busy`, `tooltip`, `ref`, trigger
+ARIA metadata, and supported button events. Busy shows activity but does not
+disable the action. Icon-only actions use the label as the fine-pointer desktop
+tooltip unless `tooltip` is an empty string.
+
+```ts
+interface PluginActionGroupProps {
+  children?: HostNode;
+  label?: string;
+}
+
+interface PluginUIShape {
+  Action: Component<PluginActionProps>;
+  ActionGroup: Component<PluginActionGroupProps>;
+}
+```
+
+The complete `PluginActionProps`, including exact event/ref field types, is exported from
+`@kandev/plugin-sdk` and defined in `apps/packages/plugin-sdk/src/index.ts`.
+`Action` renders one native button. The host owns its outer geometry, icon box,
+state styling, tooltip behavior, and responsive presentation. It does not
+accept `className`, `style`, `size`, `variant`, `asChild`, arbitrary props, or
+interactive children. Use `ActionGroup` to space multiple standard actions in
+one contribution. The host owns spacing between different registrations.
+
+| Slot locations | Action presentation |
+| --- | --- |
+| `chat-input-actions`, `task-create-input-actions`, `new-session-input-actions` | Composer-sized controls on desktop; stay beside the active composer on phone |
+| `main-top-bar`, `chat-top-bar` | Match the adjacent 28px toolbar controls; phone actions render in the shared Plugins navigation section |
+| `sidebar-workspace-actions` | Compact 24px desktop action; phone actions render in Plugins navigation |
+| `app-status-bar-left`, `app-status-bar-right` | Fit the 24px status bar; phone uses a touch-sized Status drawer row |
+
+Phone/coarse-pointer controls outside the compact status bar have at least a
+44px active dimension. Tablet status-bar actions retain the existing 24px
+exception. Use `Action` from a component registered in one of these slots;
+there is no separate action registry. Existing raw component slots and
+`host.ui.Button` remain supported, and their appearance is unchanged.
+
+For mixed host versions, feature-detect `host.ui.Action` inside the existing
+component and return either the Action tree or the current legacy Button tree.
+Register one component, do not register both branches. A plugin that cannot use
+a legacy fallback can declare its actual `min_kandev_version`. This additive UI
+export does not require a manifest API-version bump by itself.
 
 In create mode, `TaskCreateDialog` accepts this optional transport seam:
 
@@ -1018,6 +1067,9 @@ interface PluginRegistry {
   // "new-session-input-actions" render composer actions for task/Quick Chat,
   // task creation, and new-session creation. Each forwards the typed
   // `PluginComposerSlotProps`, including native insert/focus/submit capabilities.
+  // These composer slots, both topbars, sidebar workspace actions, and both
+  // status-bar slots support host.ui.Action and ActionGroup. Existing raw
+  // components remain valid and retain their current appearance.
   // "chat-submit-decoration" renders *over* the chat composer's send button
   // rather than beside it — for adornments that belong on the send affordance
   // itself (a progress ring, a state dot), which a sibling slot cannot draw.
@@ -1043,7 +1095,13 @@ interface PluginRegistry {
   // `ChatTopBarSlotProps`: `{ taskId, taskTitle, workspaceId,
   // activeSessionId, sessionIds, presentation }`. On a phone, presentation is
   // "mobile" and contributions live inside the shared Plugins menu section.
-  // The host gives `host.ui.Button` controls a 44px touch target. Arbitrary
+  // When task controls are present, a plugin's chat-top-bar registrations
+  // replace its main-top-bar registrations in that menu. Every registration
+  // in the selected slot renders; sidebar workspace actions stay independent.
+  // Null-rendering task controls retain the workspace fallback until content
+  // appears; the fallback returns if the task content disappears.
+  // The host gives `host.ui.Button` controls a 44px touch target. `Action`
+  // selects the host-owned surface geometry. Arbitrary
   // plugin interaction does not dismiss the menu. Both presentations carry
   // the active session plus every kandev session id on the task.
   // "main-top-bar" renders status/actions in the default app top bar on the
@@ -1055,7 +1113,11 @@ interface PluginRegistry {
   // does not dismiss the menu on arbitrary plugin interactions. Desktop
   // contribution sizing is unchanged. It is the app-wide,
   // task-agnostic counterpart to "chat-top-bar", so it carries no task/session
-  // ids.
+  // ids. `Action` provides native 28px desktop geometry and touch-sized phone
+  // presentation; legacy component controls keep their prior sizing.
+  // Phone listings and archived tasks retain main-top-bar controls. On other
+  // task pages, workspace-only plugins remain alongside the selected task
+  // toolbars in one group without Workspace/Task subheadings.
   // "sidebar-workspace-actions" renders icon buttons after the built-in Quick
   // Terminal and Quick Chat actions in the desktop sidebar's New Task row and
   // in the shared phone navigation sheet. It forwards
@@ -1519,6 +1581,10 @@ is isolated by an owner-aware error boundary, so plugins must tolerate remountin
 render a compact bar control or touch-usable drawer row for the supplied presentation.
 The host neither inspects nor separately reorders children inside a registration, and
 does not add a nested interactive wrapper.
+
+Use `host.ui.Action` for a standard action inside a status contribution. It fits
+the 24px bar on desktop and tablet; the phone Status drawer uses a touch-sized
+row. Keep the registration and ordering identity unchanged when adopting it.
 
 A full-bleed plugin route (`topbar: false`) opts out of host chrome. It may mount
 the host-provided Status drawer trigger when its own chrome should expose status;

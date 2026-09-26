@@ -754,10 +754,11 @@ func managedRuntimeProbeRetry(
 	spec agents.ManagedNPMRuntimeSpec,
 ) (agents.Command, string, bool) {
 	args := command.Args()
-	if len(args) < 4 || args[0] != "npx" || args[1] != "--yes" || args[2] != "--prefer-offline" {
+	if len(args) < 6 || args[0] != "npx" || args[1] != "--yes" || args[2] != "--prefer-offline" ||
+		args[3] != "--prefix" || args[4] != managedruntime.NPMProjectPrefix {
 		return agents.Command{}, "", false
 	}
-	packageSpec := args[3]
+	packageSpec := args[5]
 	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
 		return agents.Command{}, "", false
 	}

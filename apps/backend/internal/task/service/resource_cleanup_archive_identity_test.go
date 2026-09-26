@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -40,7 +41,7 @@ func (c *policyRecordingWorktreeCleanup) CleanupWorktreesPreservingBranches(cont
 	return nil
 }
 
-func (*archiveManagerEnvironmentDestroyer) DestroyContainer(context.Context, string) error {
+func (*archiveManagerEnvironmentDestroyer) DestroyContainer(context.Context, *models.TaskEnvironment) error {
 	return nil
 }
 
@@ -56,7 +57,7 @@ func (*archiveManagerEnvironmentDestroyer) PushEnvironmentBranch(context.Context
 	return nil
 }
 
-func (*archiveManagerEnvironmentDestroyer) GetContainerLiveStatus(context.Context, string) (*ContainerLiveStatus, error) {
+func (*archiveManagerEnvironmentDestroyer) GetContainerLiveStatus(context.Context, *models.TaskEnvironment) (*ContainerLiveStatus, error) {
 	return nil, nil
 }
 
@@ -109,6 +110,12 @@ func TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity(t *testing.T) {
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("UpdateTaskSession: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "README.md"), []byte("changed before archive\n"), 0o644); err != nil {
+		t.Fatalf("write tracked change: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "untracked.txt"), []byte("untracked before archive\n"), 0o644); err != nil {
+		t.Fatalf("write untracked change: %v", err)
+	}
 
 	svc.SetWorktreeCleanup(mgr)
 	svc.SetEnvironmentDestroyer(&archiveManagerEnvironmentDestroyer{mgr: mgr})
@@ -128,6 +135,55 @@ func TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity(t *testing.T) {
 	}
 	if cleanupState != models.TaskResourceCleanupStateSucceeded {
 		t.Fatalf("cleanup state = %q, want %q", cleanupState, models.TaskResourceCleanupStateSucceeded)
+	}
+	var encodedSnapshot string
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT resource_snapshot FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger = 'archive'
+		ORDER BY created_at DESC LIMIT 1
+	`, taskID).Scan(&encodedSnapshot); err != nil {
+		t.Fatalf("load archive cleanup snapshot: %v", err)
+	}
+	var snapshot struct {
+		ArchiveSourceManifest []struct {
+			TaskID           string `json:"task_id"`
+			CleanupJobID     string `json:"cleanup_job_id"`
+			WorktreeID       string `json:"worktree_id"`
+			RepositoryID     string `json:"repository_id"`
+			HeadOID          string `json:"head_oid"`
+			IndexStateSHA256 string `json:"index_state_sha256"`
+			Entries          []struct {
+				Path          string `json:"path"`
+				ContentSHA256 string `json:"content_sha256"`
+			} `json:"entries"`
+		} `json:"archive_source_manifest"`
+	}
+	if err := json.Unmarshal([]byte(encodedSnapshot), &snapshot); err != nil {
+		t.Fatalf("decode archive source manifest: %v", err)
+	}
+	if len(snapshot.ArchiveSourceManifest) != 1 {
+		t.Fatalf("archive source manifest = %#v, want one worktree", snapshot.ArchiveSourceManifest)
+	}
+	manifest := snapshot.ArchiveSourceManifest[0]
+	if manifest.TaskID != taskID || manifest.CleanupJobID == "" || manifest.WorktreeID != wt.ID || manifest.RepositoryID != repositoryID {
+		t.Fatalf("archive source manifest identity = %+v, want task/job/worktree/repository binding", manifest)
+	}
+	if manifest.HeadOID == "" || manifest.IndexStateSHA256 == "" {
+		t.Fatalf("archive source manifest lacks git identities: %+v", manifest)
+	}
+	entries := make(map[string]string, len(manifest.Entries))
+	for _, entry := range manifest.Entries {
+		entries[entry.Path] = entry.ContentSHA256
+	}
+	if entries["README.md"] == "" || entries["untracked.txt"] == "" {
+		t.Fatalf("archive source manifest entries = %#v, want tracked and untracked content identities", entries)
+	}
+	retrieved, err := svc.GetArchiveSourceManifest(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetArchiveSourceManifest: %v", err)
+	}
+	if len(retrieved) != 1 || retrieved[0].CleanupJobID != manifest.CleanupJobID || retrieved[0].WorktreeID != wt.ID {
+		t.Fatalf("retrieved archive source manifest = %#v, want persisted task-scoped evidence", retrieved)
 	}
 
 	env, err := repo.GetTaskEnvironment(ctx, environmentID)

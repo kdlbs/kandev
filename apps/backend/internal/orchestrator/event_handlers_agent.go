@@ -1122,8 +1122,9 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 				releaseReservation()
 				return
 			}
-			return
 		}
+		// A delivered (or empty) reservation is acknowledged; a reservation
+		// left in place is re-reserved and re-delivered at every turn end.
 		if err := s.messageQueue.AcknowledgeQueuedForSession(
 			context.WithoutCancel(ctx), identity, queuedMsg,
 		); err != nil &&
@@ -1173,6 +1174,14 @@ func queuedMessagePromptContent(queuedMsg *messagequeue.QueuedMessage) string {
 		content = AppendEntityReferenceContext(content, references)
 	}
 	return appendStepHandoffToPrompt(content, stepHandoffFromQueuedMetadata(queuedMsg.Metadata))
+}
+
+func isQueuedWorkflowAutoStart(queuedMsg *messagequeue.QueuedMessage) bool {
+	if queuedMsg == nil || queuedMsg.QueuedBy != messagequeue.QueuedByWorkflow {
+		return false
+	}
+	autoStart, _ := queuedMsg.Metadata[metaKeyWorkflowAutoStart].(bool)
+	return autoStart
 }
 
 func (s *Service) queuedMessageHasDispatchInput(ctx context.Context, queuedMsg *messagequeue.QueuedMessage) (bool, error) {
@@ -1282,6 +1291,16 @@ func (s *Service) recordQueuedUserMessage(
 	attachments []v1.MessageAttachment,
 	sourceIDs ...string,
 ) error {
+	return s.recordQueuedUserMessageWithPromptContent(ctx, queuedMsg, attachments, nil, sourceIDs...)
+}
+
+func (s *Service) recordQueuedUserMessageWithPromptContent(
+	ctx context.Context,
+	queuedMsg *messagequeue.QueuedMessage,
+	attachments []v1.MessageAttachment,
+	preparedPromptContent *string,
+	sourceIDs ...string,
+) error {
 	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
 	if alreadyRecorded {
 		return nil
@@ -1305,6 +1324,9 @@ func (s *Service) recordQueuedUserMessage(
 	}
 	references := entityrefs.NormalizePersisted(queuedMsg.Metadata[messagequeue.MetadataEntityReferences])
 	promptContent := queuedMessagePromptContent(queuedMsg)
+	if preparedPromptContent != nil {
+		promptContent = *preparedPromptContent
+	}
 	meta := NewUserMessageMeta().
 		WithPlanMode(queuedMsg.PlanMode).
 		WithAttachments(attachments).
@@ -1601,6 +1623,17 @@ func (s *Service) executeQueuedMessageWithReservation(
 		return
 	}
 	promptContent := queuedMessagePromptContent(queuedMsg)
+	var promptReferenceContext string
+	var preparedPromptContent *string
+	if isQueuedWorkflowAutoStart(queuedMsg) {
+		// Resolve workflow aliases at the drain boundary, before persistence.
+		// Recovery must carry this exact server-generated context because the
+		// shared saved definition can change while PromptAgent is in flight.
+		promptContent, promptReferenceContext = s.expandPromptReferencesWithContext(
+			promptCtx, promptContent, false,
+		)
+		preparedPromptContent = &promptContent
+	}
 	userMessageRecorded := false
 	deliveryAttempted := false
 	if queuedMsg.IsDurablePlanComment() {
@@ -1623,6 +1656,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 	afterClaim := s.queuedMessageAfterClaim(
 		promptCtx, dispatchIdentity, queuedMsg, attachments, lifecyclePrompt, &userMessageRecorded,
+		preparedPromptContent,
 	)
 	afterDispatch := s.queuedMessageAfterDispatch(promptCtx, queuedMsg, lifecyclePrompt)
 	var beforeDispatch func() error
@@ -1631,21 +1665,27 @@ func (s *Service) executeQueuedMessageWithReservation(
 			promptCtx, dispatchIdentity, queuedMsg, &deliveryAttempted,
 		)
 	}
+	options := promptTaskOptions{
+		claimEntryID:         claimEntryID,
+		lifecyclePrompt:      lifecyclePrompt,
+		afterClaim:           afterClaim,
+		afterDispatch:        afterDispatch,
+		beforeDispatch:       beforeDispatch,
+		disableDispatchRetry: queuedMsg.IsDurablePlanComment(),
+		configModeOverride:   workflowQueuedConfigModeOverride(queuedMsg),
+		onAccepted: func(turnID string) {
+			s.bindQueuedCIAutoFixAttempt(promptCtx, queuedMsg, turnID)
+		},
+	}
+	if preparedPromptContent != nil {
+		options.promptAlreadyComposed = true
+		options.fallbackUsesEffectivePrompt = true
+		options.promptReferenceContext = promptReferenceContext
+	}
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
 		launchOriginAutomatic,
-		promptTaskOptions{
-			claimEntryID:         claimEntryID,
-			lifecyclePrompt:      lifecyclePrompt,
-			afterClaim:           afterClaim,
-			afterDispatch:        afterDispatch,
-			beforeDispatch:       beforeDispatch,
-			disableDispatchRetry: queuedMsg.IsDurablePlanComment(),
-			configModeOverride:   workflowQueuedConfigModeOverride(queuedMsg),
-			onAccepted: func(turnID string) {
-				s.bindQueuedCIAutoFixAttempt(promptCtx, queuedMsg, turnID)
-			},
-		})
+		options)
 	if err != nil {
 		s.reconcileQueuedCIAutoFixDispatchFailure(promptCtx, queuedMsg)
 		if initialCreatePromptPassthroughQueued(queuedMsg.Metadata) {
@@ -1680,6 +1720,7 @@ func (s *Service) queuedMessageAfterClaim(
 	attachments []v1.MessageAttachment,
 	lifecyclePrompt bool,
 	userMessageRecorded *bool,
+	preparedPromptContent *string,
 ) func() error {
 	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
 	if userMessageRecorded != nil {
@@ -1696,7 +1737,9 @@ func (s *Service) queuedMessageAfterClaim(
 			return nil
 		}
 		if !alreadyRecorded {
-			if err := s.recordQueuedUserMessage(ctx, queuedMsg, attachments); err != nil {
+			if err := s.recordQueuedUserMessageWithPromptContent(
+				ctx, queuedMsg, attachments, preparedPromptContent,
+			); err != nil {
 				if lifecyclePrompt || queuedMsg.IsDurablePlanComment() {
 					return err
 				}
@@ -3375,9 +3418,9 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		"is_auth_error":    authErr,
 		"resume_corrupted": resumeCorrupted,
 	}
-	managedRuntimeNpmFailure := data.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution)
+	managedRuntimeNpmFailure := isManagedRuntimeNpmFailureCode(data.FailureCode)
 	if managedRuntimeNpmFailure {
-		meta["failure_kind"] = string(routingerr.CodeManagedRuntimeNpmResolution)
+		meta["failure_kind"] = data.FailureCode
 	}
 	// The validated remediation URL is carried independently of quota
 	// classification so the generic recoverable card can still show the link.
@@ -3557,7 +3600,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 	}
 	if classified := classifyManagedRuntimeNpmStartFailure(err); classified != nil {
 		failureData.ErrorMessage = "managed npm runtime failed to prepare"
-		failureData.FailureCode = string(routingerr.CodeManagedRuntimeNpmResolution)
+		failureData.FailureCode = string(classified.Code)
 		failureData.FailureDetails = classified.RawExcerpt
 	}
 	var unlockGuard func()
@@ -3613,7 +3656,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		}
 		s.preserveWorkflowStartPromptAfterFailure(ctx, taskID, sessionID, agentExecutionID)
 	}
-	if failureData.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution) {
+	if isManagedRuntimeNpmFailureCode(failureData.FailureCode) {
 		s.logger.Info("managed npm runtime startup failure is recoverable",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -3649,7 +3692,8 @@ func classifyManagedRuntimeNpmStartFailure(err error) *routingerr.Error {
 	}
 	var structured *routingerr.ManagedRuntimeStartupError
 	if errors.As(err, &structured) {
-		if structured.Code != routingerr.CodeManagedRuntimeNpmResolution {
+		if structured.Code != routingerr.CodeManagedRuntimeNpmResolution &&
+			structured.Code != routingerr.CodeManagedRuntimeNpmPolicy {
 			return nil
 		}
 		return &routingerr.Error{
@@ -3660,6 +3704,11 @@ func classifyManagedRuntimeNpmStartFailure(err error) *routingerr.Error {
 		}
 	}
 	return nil
+}
+
+func isManagedRuntimeNpmFailureCode(code string) bool {
+	return code == string(routingerr.CodeManagedRuntimeNpmResolution) ||
+		code == string(routingerr.CodeManagedRuntimeNpmPolicy)
 }
 
 // actionMetaKey* are the shared keys of the frontend ActionMessage button
