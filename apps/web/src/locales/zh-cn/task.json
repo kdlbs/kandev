@@ -1093,6 +1093,7 @@
   "openEditor": "打开编辑器",
   "openEntityReference": "打开 {{label}}：{{title}}",
   "openFile": "打开文件",
+  "openCommit": "打开提交",
   "openImage": "打开 {{alt}}",
   "openInAdvancedView": "在高级视图中打开",
   "openInBrowserPanel": "在浏览器面板中打开",

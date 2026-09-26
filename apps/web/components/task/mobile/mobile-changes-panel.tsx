@@ -19,7 +19,11 @@ import {
 } from "../remote-contribution-comparison";
 import { contributionHistoryExplanationKey } from "@/hooks/domains/session/use-contribution-history-explanation";
 import type { SelectedDiff } from "../task-layout";
-import type { OpenDiffOptions, DiffSheetMode } from "../changes-diff-target";
+import type {
+  CommitFileNavigationRequest,
+  OpenDiffOptions,
+  DiffSheetMode,
+} from "../changes-diff-target";
 
 type MobileChangesPanelProps = {
   selectedDiff: SelectedDiff | null;
@@ -151,8 +155,8 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   const bodyProps = buildChangesPanelBodyProps(data, {
     onOpenDiffFile: handleOpenDiffFile,
     onEditFile: onOpenFile ?? (() => {}),
-    onOpenCommitDetail: (target) => {
-      setDiffSheet({ kind: "commit", target });
+    onOpenCommitDetail: (target, fileNavigation?: CommitFileNavigationRequest) => {
+      setDiffSheet({ kind: "commit", target, fileNavigation });
     },
     onOpenReview: handleOpenReview,
   });

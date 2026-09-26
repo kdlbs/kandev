@@ -1151,6 +1151,7 @@
   "openEditor": "Open editor",
   "openEntityReference": "Open {{label}}: {{title}}",
   "openFile": "Open file",
+  "openCommit": "Open commit",
   "openImage": "Open {{alt}}",
   "openInAdvancedView": "Open in advanced view",
   "openInBrowserPanel": "Open in browser panel",

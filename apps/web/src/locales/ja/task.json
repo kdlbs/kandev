@@ -1151,6 +1151,7 @@
   "openEditor": "エディタを開く",
   "openEntityReference": "{{label}} を開く: {{title}}",
   "openFile": "ファイルを開く",
+  "openCommit": "コミットを開く",
   "openImage": "{{alt}} を開く",
   "openInAdvancedView": "詳細ビューで開く",
   "openInBrowserPanel": "ブラウザパネルで開く",

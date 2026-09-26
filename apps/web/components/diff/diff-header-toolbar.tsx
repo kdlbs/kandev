@@ -76,7 +76,7 @@ interface DiffHeaderToolbarOptions {
   onToggleExpandUnchanged?: () => void;
 }
 
-type ToolbarButtonsProps = Omit<DiffHeaderToolbarOptions, "filePath" | "diff"> & {
+export type DiffHeaderToolbarButtonsProps = Omit<DiffHeaderToolbarOptions, "filePath" | "diff"> & {
   resolvedPath: string;
   onCopyDiff: () => void;
   isMarkdownFile: boolean;
@@ -84,7 +84,7 @@ type ToolbarButtonsProps = Omit<DiffHeaderToolbarOptions, "filePath" | "diff"> &
   externalLinkSize: "xs" | "touch";
 };
 
-function DiffHeaderToolbarButtons({
+export function DiffHeaderToolbarButtons({
   resolvedPath,
   onCopyDiff,
   onRevert,
@@ -100,7 +100,7 @@ function DiffHeaderToolbarButtons({
   isMarkdownFile,
   externalLink,
   externalLinkSize,
-}: ToolbarButtonsProps) {
+}: DiffHeaderToolbarButtonsProps) {
   const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1">
@@ -168,7 +168,7 @@ function DiffHeaderToolbarButtons({
   );
 }
 
-function checkIsMarkdown(filePath: string): boolean {
+export function checkIsMarkdown(filePath: string): boolean {
   const ext = filePath.split(".").pop()?.toLowerCase();
   return ext === "md" || ext === "mdx";
 }

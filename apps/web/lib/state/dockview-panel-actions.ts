@@ -1,5 +1,9 @@
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
-import type { ChangeLayer, CommitDetailTarget } from "@/components/task/changes-diff-target";
+import type {
+  ChangeLayer,
+  CommitDetailTarget,
+  CommitFileNavigationRequest,
+} from "@/components/task/changes-diff-target";
 import { t } from "@/lib/i18n";
 import { focusOrAddPanel } from "./dockview-layout-builders";
 import { reviewPanelId, type ReviewPanelTarget } from "./dockview-review-panel-id";
@@ -237,6 +241,9 @@ function openOrReplacePreview(args: OpenPreviewArgs): void {
   // Always prefer an existing pinned panel for this item — never disturb it.
   const pinned = api.getPanel(pinnedId);
   if (pinned) {
+    if (type === "commit-detail") {
+      pinned.api.updateParameters({ ...(pinned.params ?? {}), ...params });
+    }
     if (!quiet) pinned.api.setActive();
     return;
   }
@@ -449,7 +456,11 @@ function buildCommitItemId(
 function buildCommitDetailAction(get: StoreGet) {
   return (
     requestedTarget: CommitDetailTarget | string,
-    opts?: OpenPanelOpts & { groupId?: string; repo?: string },
+    opts?: OpenPanelOpts & {
+      groupId?: string;
+      repo?: string;
+      fileNavigation?: CommitFileNavigationRequest;
+    },
   ) => {
     const { api, centerGroupId } = get();
     if (!api) return;
@@ -473,6 +484,7 @@ function buildCommitDetailAction(get: StoreGet) {
         target,
         commitSha: target.sha,
         ...(target.source === "local" && target.repo ? { repo: target.repo } : {}),
+        fileNavigation: opts?.fileNavigation,
       },
       groupId: opts?.groupId ?? centerGroupId,
       quiet: opts?.quiet,
