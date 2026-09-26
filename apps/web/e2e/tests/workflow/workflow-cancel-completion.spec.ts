@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 import { test as e2eTest } from "../../fixtures/test-base";
 import { ApiClient } from "../../helpers/api-client";
 import { expectCancelToSettlePromptly } from "../../helpers/cancellation";
+import { waitForActiveSessionCancellationPendingOrSettled } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 
 type CancellationWorkflow = {
@@ -99,6 +100,7 @@ e2eTest.describe("Cancelled turn completion", () => {
       expect(sessionsBeforeCancel.sessions).toHaveLength(1);
 
       await session.cancelAgentButton().click();
+      await waitForActiveSessionCancellationPendingOrSettled(testPage);
       await expectCancelToSettlePromptly(session);
       await expect(session.stepperStep("Done")).toHaveAttribute("aria-current", "step", {
         timeout: 30_000,
@@ -130,6 +132,7 @@ e2eTest.describe("Cancelled turn completion", () => {
       expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(1);
 
       await session.cancelAgentButton().click();
+      await waitForActiveSessionCancellationPendingOrSettled(testPage);
       await expectCancelToSettlePromptly(session);
       await expect(session.stepperStep("Working")).toHaveAttribute("aria-current", "step");
 

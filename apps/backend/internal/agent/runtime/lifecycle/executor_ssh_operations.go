@@ -118,7 +118,7 @@ func runSSHCommand(ctx context.Context, client *ssh.Client, cmd string) (stdout,
 // command string — that keeps them out of the remote shell's argv and out
 // of `ps aux` / `/proc/PID/cmdline` for the brief window the script runs.
 func runSSHCommandStdin(ctx context.Context, client *ssh.Client, cmd string, stdin io.Reader) (stdout, stderr string, err error) {
-	session, err := client.NewSession()
+	session, err := openSSHSession(ctx, client)
 	if err != nil {
 		return "", "", fmt.Errorf("ssh: new session: %w", err)
 	}
@@ -143,6 +143,43 @@ func runSSHCommandStdin(ctx context.Context, client *ssh.Client, cmd string, std
 		return outBuf.String(), errBuf.String(), ctx.Err()
 	case err := <-done:
 		return outBuf.String(), errBuf.String(), err
+	}
+}
+
+// openSSHSession makes the channel-open part of a command context-aware.
+// x/crypto/ssh does not accept a context for Client.NewSession, and a remote
+// transport can leave that call blocked after the caller has cancelled. Close
+// the client on cancellation to release the blocked mux. A client whose
+// channel open cannot complete before its context expires is no longer safe to
+// reuse, so closing it is the only bounded outcome.
+func openSSHSession(ctx context.Context, client *ssh.Client) (*ssh.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if client == nil {
+		return nil, errors.New("nil SSH client")
+	}
+
+	type result struct {
+		session *ssh.Session
+		err     error
+	}
+	opened := make(chan result, 1)
+	go func() {
+		session, err := client.NewSession()
+		opened <- result{session: session, err: err}
+	}()
+
+	select {
+	case result := <-opened:
+		return result.session, result.err
+	case <-ctx.Done():
+		_ = client.Close()
+		result := <-opened
+		if result.session != nil {
+			_ = result.session.Close()
+		}
+		return nil, ctx.Err()
 	}
 }
 

@@ -128,6 +128,15 @@ type CreateTaskRequest struct {
 	Labels                 string   `json:"labels,omitempty"`
 	BlockedBy              []string `json:"blocked_by,omitempty"`
 
+	// RequireAssigneeAgentProfileValidation opts this request into create-time
+	// validation of AssigneeAgentProfileID (must name an Office agent instance
+	// scoped to WorkspaceID) before any task row is written. Only the
+	// untrusted HTTP create-task handler sets this; internal callers that
+	// share this same request struct (agent-created subtasks, onboarding,
+	// routines) already trust their own AssigneeAgentProfileID and leave this
+	// false. Never accepted from a JSON request body.
+	RequireAssigneeAgentProfileValidation bool `json:"-"`
+
 	// OfficeCarrierMetadata is the task-boundary causation carrier set
 	// (AC-OFFICE-RUN-CAUSATION-001.18), resolved server-side from the
 	// causing run's own record. It is never accepted from REST, WebSocket,

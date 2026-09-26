@@ -1,6 +1,6 @@
 ---
 status: draft
-last_updated: 2026-09-21
+last_updated: 2026-09-26
 system: ci
 requirements:
   - REQ-CI-PR-DOCS-001
@@ -47,9 +47,11 @@ Initial exemptions:
 - Exact lock basenames `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `go.sum`, and `Cargo.lock`.
 - Recognized non-Markdown harness files: `.codex/agents/*.toml`, `.codex/config.toml`, `.claude/settings.json`, and `.cursor/rules/*.mdc`.
 - CI infrastructure paths `.github/workflows/**`, `.github/scripts/**`, and `.github/actions/**`. These change the delivery pipeline, not shipped product behavior, and are already governed by workflow contract tests.
+- Architecture-lint tooling under `scripts/architecture_lint/**`, `scripts/architecture_lint_tests/**`, and `config/architecture-lint/**`, plus the exact entrypoints `scripts/lint-architecture.py` and `scripts/lint-architecture.test.py`. This boundary follows the repository-tooling ownership recorded in the [architecture lint decision](../../../decisions/2026-08-01-architecture-lint-budgets.md); it does not cover other `scripts/` or `config/` paths.
 
 Keep other `plugin-registry/**` paths subject to normal coverage. Do not exempt all JSON, YAML, assets, scripts, package manifests, Rust files, workflows, generated directories, or files containing the word `test`.
 These can change shipped behavior or repository contracts. The `.github/` CI exemption is a directory-scoped rule; a workflow, script, or action outside `.github/` still requires coverage.
+Architecture-lint paths are also explicit and boundary-scoped. A mixed pull request still requires coverage for each unrelated or application path, and a rename into an exempt path retains the original path for classification.
 Add exemptions later only with concrete fixtures.
 This conservative policy creates false positives for small runtime fixes and refactors. The explicit label is their escape hatch.
 

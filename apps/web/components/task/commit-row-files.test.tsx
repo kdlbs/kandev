@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileInfo } from "@/lib/state/store";
-import type { CommitDetailTarget } from "./changes-diff-target";
+import type { CommitDetailTarget } from "@/lib/state/diff-target-types";
 
 const mocks = vi.hoisted(() => ({
   layout: "flat" as "flat" | "tree",

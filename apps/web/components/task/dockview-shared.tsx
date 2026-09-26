@@ -39,7 +39,7 @@ import type {
   CommitDetailTarget,
   CommitFileNavigationRequest,
   OpenDiffOptions,
-} from "./changes-diff-target";
+} from "@/lib/state/diff-target-types";
 import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { PluginTaskPanel } from "./plugin-task-panel";

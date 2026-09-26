@@ -15,7 +15,7 @@ import type {
   CommitDetailTarget,
   CommitFileNavigationRequest,
   OpenDiffOptions,
-} from "./changes-diff-target";
+} from "@/lib/state/diff-target-types";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import {
   consumeContributionComparisonRequest,

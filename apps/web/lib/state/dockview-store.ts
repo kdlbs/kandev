@@ -36,7 +36,7 @@ import {
   materializeReusableChatPanel,
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
-import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
+import type { ChangeLayer, CommitDetailTarget } from "@/lib/state/diff-target-types";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
 import { performEnvSwitch, replaceStaleSessionPanels } from "./dockview-env-switch";
 import {
@@ -76,6 +76,12 @@ const debugSave = createDebugLogger("dockview:save");
 const debugWidths = createDebugLogger("dockview:widths");
 
 const DEFAULT_LAYOUT_PROFILE: LayoutProfileIdentity = { kind: "built-in", id: "default" };
+
+export type PendingChatScrollRestore = {
+  scrollTop: number;
+  sessionId: string | null;
+  token: number;
+};
 
 function profileForCustomLayout(layout: Pick<SavedLayoutConfig, "id">): LayoutProfileIdentity {
   return getLayoutProfileIdentity(layout);
@@ -215,7 +221,7 @@ type DockviewStore = {
       source?: string;
       repositoryName?: string;
       prKey?: string;
-      changeLayer?: import("@/components/task/changes-diff-target").ChangeLayer;
+      changeLayer?: ChangeLayer;
     },
   ) => void;
   addCommitDetailPanel: (
@@ -223,7 +229,7 @@ type DockviewStore = {
     opts?: OpenPanelOpts & {
       groupId?: string;
       repo?: string;
-      fileNavigation?: import("@/components/task/changes-diff-target").CommitFileNavigationRequest;
+      fileNavigation?: import("@/lib/state/diff-target-types").CommitFileNavigationRequest;
     },
   ) => void;
   addFileEditorPanel: (path: string, name: string, opts?: OpenPanelOpts) => void;
@@ -324,8 +330,10 @@ type DockviewStore = {
   activeFilePath: string | null;
   activeFileRepo: string | null;
   activePanelComponent: string | null;
-  pendingChatScrollTop: number | null;
-  setPendingChatScrollTop: (value: number | null) => void;
+  pendingChatScrollTop: PendingChatScrollRestore | null;
+  completedChatScrollRestore: { sessionId: string | null; token: number } | null;
+  setPendingChatScrollTop: (value: PendingChatScrollRestore) => void;
+  completePendingChatScrollTop: (token: number, applied: boolean) => void;
   pendingChatInitialPlacement: { sessionId: string; token: number } | null;
   completePendingChatInitialPlacement: (token: number) => void;
   /** Saved layout from before a manual maximize. Null when not maximized. */
@@ -1565,7 +1573,18 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   buildDefaultLayout: (api, intentName) => performBuildDefault(api, set, get, intentName),
   resetLayout: () => resetToEffectiveDefault(set, get),
   pendingChatScrollTop: null,
-  setPendingChatScrollTop: (value) => set({ pendingChatScrollTop: value }),
+  completedChatScrollRestore: null,
+  setPendingChatScrollTop: (value) =>
+    set({ pendingChatScrollTop: value, completedChatScrollRestore: null }),
+  completePendingChatScrollTop: (token, applied) =>
+    set((state) => {
+      const pending = state.pendingChatScrollTop;
+      if (!pending || pending.token !== token) return {};
+      return {
+        pendingChatScrollTop: null,
+        completedChatScrollRestore: applied ? { sessionId: pending.sessionId, token } : null,
+      };
+    }),
   pendingChatInitialPlacement: null,
   completePendingChatInitialPlacement: (token) =>
     set((state) =>

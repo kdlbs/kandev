@@ -3,7 +3,7 @@ import type {
   ChangeLayer,
   CommitDetailTarget,
   CommitFileNavigationRequest,
-} from "@/components/task/changes-diff-target";
+} from "@/lib/state/diff-target-types";
 import { t } from "@/lib/i18n";
 import { focusOrAddPanel } from "./dockview-layout-builders";
 import { reviewPanelId, type ReviewPanelTarget } from "./dockview-review-panel-id";

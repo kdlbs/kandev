@@ -329,6 +329,27 @@ func TestEnableDisableHandlersTransitionStatus(t *testing.T) {
 	}
 }
 
+func TestDisableHandlerWarnsThatRemoteExecutorResourcesMayRemain(t *testing.T) {
+	router, svc := newAdminTestRouter(t)
+	if _, err := svc.Install(context.Background(), testExecutorProviderPackage(t, "1.0.0", "lambda", []int{1})); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-remote-test/disable", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("disable status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Disabled                 bool `json:"disabled"`
+		RemoteResourcesMayRemain bool `json:"remote_resources_may_remain"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode disable response: %v", err)
+	}
+	if !response.Disabled || !response.RemoteResourcesMayRemain {
+		t.Fatalf("disable response = %+v; want disabled with remote-resource warning", response)
+	}
+}
+
 func TestUpdateConfigHandlerAdminPersists(t *testing.T) {
 	router, svc := newAdminTestRouter(t)
 	installTestPlugin(t, svc, "kandev-plugin-slack")

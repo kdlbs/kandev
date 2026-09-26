@@ -8,7 +8,7 @@ import { useCommitDetail } from "@/hooks/domains/session/use-commit-detail";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTree } from "@/hooks/use-tree";
 import type { FileInfo } from "@/lib/state/store";
-import type { CommitDetailTarget } from "./changes-diff-target";
+import type { CommitDetailTarget } from "@/lib/state/diff-target-types";
 import type { ChangedFile } from "./changes-panel-helpers";
 import { buildChangesTree, type ChangesTreeNode } from "./changes-file-tree-model";
 import { FileRow } from "./changes-panel-file-row";

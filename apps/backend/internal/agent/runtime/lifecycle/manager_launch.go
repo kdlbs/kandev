@@ -1089,7 +1089,22 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		ComparisonTargets:              comparisonTargets,
 		ProviderGatewayAuth:            providerGatewayAuth,
 	}
+	if reqWithWorktree.ExecutorType == string(models.ExecutorTypePluginRemote) {
+		if m.pluginExecutorProfileLoader == nil {
+			return nil, nil, nil, errors.New("plugin executor profile loader is unavailable")
+		}
+		profileID := strings.TrimSpace(getMetadataString(metadata, MetadataKeyExecutorProfileID))
+		profile, loadErr := m.pluginExecutorProfileLoader.ExecutorProviderProfileForLaunch(ctx, profileID, reqWithWorktree.TaskEnvironmentID)
+		if loadErr != nil {
+			return nil, nil, nil, fmt.Errorf("resolve plugin executor profile: %w", loadErr)
+		}
+		if profile == nil {
+			return nil, nil, nil, errors.New("plugin executor profile is unavailable")
+		}
+		execReq.PluginExecutor = &PluginExecutorLaunch{Profile: *profile}
+	}
 	m.wireKubernetesInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
+	m.wirePluginExecutorInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
 
 	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
 	defer launchCancel()
@@ -1098,6 +1113,12 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	}
 
 	m.scheduleSSHLaunchWarning(launchCtx, reqWithWorktree, metadata, reqWithWorktree.SessionID)
+	if execReq.PluginExecutor != nil {
+		if err := m.registerPluginExecutorCallbacks(execReq); err != nil {
+			return nil, nil, nil, err
+		}
+		defer m.unregisterPluginExecutorCallbacks(execReq.InstanceID)
+	}
 
 	execInstance, err := rt.CreateInstance(launchCtx, execReq)
 	if err != nil {
@@ -2420,7 +2441,8 @@ func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution, approvalPolicy string) (string, error) {
 	runtimeSnapshot := execution.RuntimeEnvironment()
-	metadataEnv := runtimeEnvFromMetadata(execution.MetadataSnapshot())
+	metadata := execution.MetadataSnapshot()
+	metadataEnv := runtimeEnvFromMetadata(metadata)
 	var env map[string]string
 	if runtimeSnapshot == nil {
 		env = cloneStringMap(metadataEnv)
@@ -2431,10 +2453,15 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
 			return "", fmt.Errorf("resolve agent profile environment: %w", err)
 		}
+	} else if !hasRuntimeEnvOverlay(metadata) {
+		// Without a SetExecutionEnv overlay the snapshot is the environment
+		// this launch composed, including the managed credential broker
+		// values its helper entries expand. Nothing newer can replace them.
+		env = runtimeSnapshot
 	} else {
 		// SetExecutionEnv carries per-run values such as repository credentials.
 		// Compose them with the launch snapshot without re-reading profile
-		// secrets. Host bridge entries are filtered here, while the normal
+		// secrets. Generated credential entries are filtered here, while the normal
 		// agentctl Configure boundary composes the request with the instance's
 		// canonical environment and preserves inherited user entries.
 		var err error
@@ -2444,6 +2471,7 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 			return "", fmt.Errorf("compose agent environment: %w", err)
 		}
 	}
+	normalizeKubernetesManagedGitEnvironment(execution.RuntimeName, env)
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
 		m.updateExecutionError(execution.ID, "failed to prepare agent env: "+err.Error())
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)
@@ -2473,6 +2501,13 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 		bootCommand = execution.AgentCommand
 	}
 	return bootCommand, nil
+}
+
+// hasRuntimeEnvOverlay reports whether SetExecutionEnv delivered a per-run
+// environment for the next start.
+func hasRuntimeEnvOverlay(metadata map[string]interface{}) bool {
+	_, ok := metadata["runtime_env"]
+	return ok
 }
 
 func runtimeEnvFromMetadata(metadata map[string]interface{}) map[string]string {

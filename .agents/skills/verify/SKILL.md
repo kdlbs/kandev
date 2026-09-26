@@ -97,6 +97,20 @@ After quiet formatting, inspect the intended diff because formatter changes
 still require review. When a quiet command fails, use its returned log path for
 targeted inspection instead of rerunning the command with streamed output.
 
+Large Go package output can bury the actual failure in the execution relay,
+especially when tests emit expected simulated-error logs. Keep the command's
+exit status and capture its output with `scripts/run-quiet` or an explicit
+temporary log, then extract targeted markers before reading the surrounding
+context:
+
+```bash
+rg -n -- '--- FAIL|^FAIL[[:space:]]|panic:|DATA RACE|WARNING: DATA RACE' <log>
+```
+
+Treat truncated tool output as incomplete evidence. Use the extracted package
+and test names to inspect the focused log section, and report the log path with
+the verification result.
+
 ### Disk-constrained runners
 
 If format, typecheck, tests, lint, or E2E reports `ENOSPC`, cache

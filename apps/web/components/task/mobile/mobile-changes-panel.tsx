@@ -23,7 +23,7 @@ import type {
   CommitFileNavigationRequest,
   OpenDiffOptions,
   DiffSheetMode,
-} from "../changes-diff-target";
+} from "@/lib/state/diff-target-types";
 
 type MobileChangesPanelProps = {
   selectedDiff: SelectedDiff | null;

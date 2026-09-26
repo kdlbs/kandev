@@ -23,7 +23,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskRepositories } from "@/hooks/domains/kanban/use-task-repositories";
 import { formatRelativeTime } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
-import type { CommitDetailTarget, CommitFileNavigationRequest } from "./changes-diff-target";
+import type { CommitDetailTarget, CommitFileNavigationRequest } from "@/lib/state/diff-target-types";
 import { CommitFileToolbar } from "./commit-file-toolbar";
 import { useTranslation } from "react-i18next";
 

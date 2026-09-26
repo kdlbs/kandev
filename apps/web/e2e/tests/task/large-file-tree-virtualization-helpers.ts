@@ -106,6 +106,7 @@ export function seedLargeFileTree(backend: BackendContext): void {
     path.join(backend.tmpDir, "repos", "e2e-repo"),
     makeGitEnv(backend.tmpDir),
   );
+  git.exec("git checkout main");
   for (let index = 0; index < LARGE_FILE_TREE_COUNT; index += 1) {
     git.createFile(largeFileTreePath(index), `large tree entry ${index}\n`);
   }
@@ -113,6 +114,7 @@ export function seedLargeFileTree(backend: BackendContext): void {
   if (git.exec("git status --short").trim()) {
     git.commit("seed large file tree");
   }
+  git.exec("git push origin main");
 }
 
 export async function setupLargeFileTreeTask({
@@ -142,6 +144,9 @@ export async function setupLargeFileTreeTask({
   );
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  await session.waitForChatIdle({ timeout: 45_000 });
+  await testPage.reload();
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 45_000 });
   return session;

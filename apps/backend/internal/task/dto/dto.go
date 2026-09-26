@@ -140,31 +140,34 @@ type ShellOutputSnapshotResponse struct {
 }
 
 type ExecutorDTO struct {
-	ID        string                `json:"id"`
-	Name      string                `json:"name"`
-	Type      models.ExecutorType   `json:"type"`
-	Status    models.ExecutorStatus `json:"status"`
-	IsSystem  bool                  `json:"is_system"`
-	Resumable bool                  `json:"resumable"`
-	Config    map[string]string     `json:"config,omitempty"`
-	Profiles  []ExecutorProfileDTO  `json:"profiles,omitempty"`
-	CreatedAt time.Time             `json:"created_at"`
-	UpdatedAt time.Time             `json:"updated_at"`
+	ID        string                   `json:"id"`
+	Name      string                   `json:"name"`
+	Type      models.ExecutorType      `json:"type"`
+	Status    models.ExecutorStatus    `json:"status"`
+	IsSystem  bool                     `json:"is_system"`
+	Resumable bool                     `json:"resumable"`
+	Config    map[string]string        `json:"config,omitempty"`
+	Profiles  []ExecutorProfileDTO     `json:"profiles,omitempty"`
+	Provider  *models.ExecutorProvider `json:"provider,omitempty"`
+	CreatedAt time.Time                `json:"created_at"`
+	UpdatedAt time.Time                `json:"updated_at"`
 }
 
 type ExecutorProfileDTO struct {
-	ID            string                 `json:"id"`
-	ExecutorID    string                 `json:"executor_id"`
-	ExecutorType  string                 `json:"executor_type,omitempty"`
-	ExecutorName  string                 `json:"executor_name,omitempty"`
-	Name          string                 `json:"name"`
-	McpPolicy     string                 `json:"mcp_policy,omitempty"`
-	Config        map[string]string      `json:"config,omitempty"`
-	PrepareScript string                 `json:"prepare_script"`
-	CleanupScript string                 `json:"cleanup_script"`
-	EnvVars       []models.ProfileEnvVar `json:"env_vars,omitempty"`
-	CreatedAt     time.Time              `json:"created_at"`
-	UpdatedAt     time.Time              `json:"updated_at"`
+	ID            string                   `json:"id"`
+	ExecutorID    string                   `json:"executor_id"`
+	ExecutorType  string                   `json:"executor_type,omitempty"`
+	ExecutorName  string                   `json:"executor_name,omitempty"`
+	Name          string                   `json:"name"`
+	McpPolicy     string                   `json:"mcp_policy,omitempty"`
+	Config        map[string]string        `json:"config,omitempty"`
+	SecretFields  map[string]bool          `json:"secret_fields,omitempty"`
+	Provider      *models.ExecutorProvider `json:"provider,omitempty"`
+	PrepareScript string                   `json:"prepare_script"`
+	CleanupScript string                   `json:"cleanup_script"`
+	EnvVars       []models.ProfileEnvVar   `json:"env_vars,omitempty"`
+	CreatedAt     time.Time                `json:"created_at"`
+	UpdatedAt     time.Time                `json:"updated_at"`
 }
 
 type ListExecutorProfilesResponse struct {
@@ -841,18 +844,21 @@ func FromExecutor(executor *models.Executor) ExecutorDTO {
 		IsSystem:  executor.IsSystem,
 		Resumable: executor.Resumable,
 		Config:    executor.Config,
+		Provider:  executor.Provider,
 		CreatedAt: executor.CreatedAt,
 		UpdatedAt: executor.UpdatedAt,
 	}
 }
 
 func FromExecutorProfile(profile *models.ExecutorProfile) ExecutorProfileDTO {
+	config, secretFields := models.RedactExecutorProfileConfig(profile.Config)
 	return ExecutorProfileDTO{
 		ID:            profile.ID,
 		ExecutorID:    profile.ExecutorID,
 		Name:          profile.Name,
 		McpPolicy:     profile.McpPolicy,
-		Config:        profile.Config,
+		Config:        config,
+		SecretFields:  secretFields,
 		PrepareScript: profile.PrepareScript,
 		CleanupScript: profile.CleanupScript,
 		EnvVars:       profile.EnvVars,
@@ -868,6 +874,7 @@ func FromExecutorProfileWithExecutor(profile *models.ExecutorProfile, executor *
 	if executor != nil {
 		d.ExecutorType = string(executor.Type)
 		d.ExecutorName = executor.Name
+		d.Provider = executor.Provider
 	}
 	return d
 }

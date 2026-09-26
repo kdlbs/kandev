@@ -44,7 +44,7 @@ import type {
   CommitDetailTarget,
   CommitFileNavigationRequest,
   OpenDiffOptions,
-} from "./changes-diff-target";
+} from "@/lib/state/diff-target-types";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import { gitOperationLabel } from "@/hooks/use-git-with-feedback";
 import { getGitCredentialDisplay } from "./changes-git-credential-display";

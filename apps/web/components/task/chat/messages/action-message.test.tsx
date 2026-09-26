@@ -642,7 +642,11 @@ describe("ActionMessage — managed npm runtime recovery", () => {
     expect(card.textContent).toContain("Kandev refreshed package data");
     expect(card.textContent).not.toMatch(/ACP/i);
     expect(screen.getByText(TECHNICAL_DETAILS).closest("details")?.open).toBe(false);
-    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(
+      screen
+        .getAllByRole("button")
+        .filter((button) => button.getAttribute("data-testid") === MANAGED_RUNTIME_RETRY_TEST_ID),
+    ).toHaveLength(1);
     expect(screen.getByTestId(MANAGED_RUNTIME_RETRY_TEST_ID).textContent).toContain(
       "Retry runtime",
     );
@@ -695,7 +699,7 @@ describe("ActionMessage — managed npm runtime recovery", () => {
     expect(card.textContent).not.toContain("refreshed package data");
     expect(card.textContent).not.toContain("2026-09-20T10:30:00Z");
     expect(screen.getByText(TECHNICAL_DETAILS).closest("details")?.open).toBe(false);
-    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getAllByTestId(MANAGED_RUNTIME_RETRY_TEST_ID)).toHaveLength(1);
     expect(screen.getByTestId(MANAGED_RUNTIME_RETRY_TEST_ID).textContent).toContain(
       "Retry runtime",
     );
@@ -765,4 +769,15 @@ describe("ActionMessage — remediation link", () => {
     expect(screen.queryByTestId("remediation-link")).toBeNull();
     expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
   });
+});
+
+it("moves unsafe long legacy summaries into redacted technical details", () => {
+  const comment = {
+    ...recoveryMessage(true),
+    content: "failed: token=synthetic-private-value\n" + "nested diagnostic ".repeat(100),
+  };
+  const { container } = renderAction(comment, "FAILED");
+  expect(container.textContent).not.toContain("synthetic-private-value");
+  expect(screen.getByText("An error occurred")).toBeTruthy();
+  expect(container.querySelector("pre")?.textContent).toContain("nested diagnostic");
 });

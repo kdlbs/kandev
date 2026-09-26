@@ -24,7 +24,7 @@ import type {
   CommitDetailTarget,
   CommitFileNavigationRequest,
   OpenDiffOptions,
-} from "./changes-diff-target";
+} from "@/lib/state/diff-target-types";
 import { useTranslation } from "react-i18next";
 
 // --- Timeline visual components ---

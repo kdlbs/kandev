@@ -273,9 +273,14 @@ describe("enablePlugin / disablePlugin / uninstallPlugin", () => {
   });
 
   it("POSTs /api/plugins/:id/disable", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ disabled: true }));
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ disabled: true, remote_resources_may_remain: true }),
+    );
 
-    await disablePlugin(PLUGIN_ID);
+    await expect(disablePlugin(PLUGIN_ID)).resolves.toEqual({
+      disabled: true,
+      remote_resources_may_remain: true,
+    });
 
     const [url, init] = fetchSpy.mock.calls.at(-1) ?? [];
     expect(String(url)).toBe(`${PLUGIN_URL}/disable`);

@@ -75,6 +75,7 @@ export class OfficeApiClient {
       name: string;
       role: string;
       agent_profile_id?: string;
+      executor_preference?: string;
     },
   ): Promise<Record<string, unknown>> {
     const res = await this.request<{ agent: Record<string, unknown> }>(

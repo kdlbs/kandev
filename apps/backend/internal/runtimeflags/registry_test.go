@@ -37,6 +37,29 @@ func TestDefinitionsIncludeOfficeExperimentalMetadata(t *testing.T) {
 	}
 }
 
+func TestDefinitionsIncludeRemoteExecutorPluginsMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.remoteExecutorPlugins")
+	if !ok {
+		t.Fatal("features.remoteExecutorPlugins definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental || def.RiskLevel != RiskHigh {
+		t.Fatalf("stability/risk = %q/%q, want experimental/high", def.Stability, def.RiskLevel)
+	}
+	if !def.RestartRequired || !def.Mutable || def.RiskDescription == "" {
+		t.Fatalf("flag metadata = %+v, want restart-required mutable flag with risk description", def)
+	}
+	defaults, err := profiles.FeatureFlagDefaults()
+	if err != nil {
+		t.Fatalf("profiles.FeatureFlagDefaults: %v", err)
+	}
+	if got := defaults["remote_executor_plugins"]; got != "false" {
+		t.Fatalf("profiles.yaml remote_executor_plugins default = %q, want false", got)
+	}
+}
+
 func TestDefinitionsIncludeDynamicAgentRoutingMetadata(t *testing.T) {
 	def, ok := DefinitionByKey("features.dynamicAgentRouting")
 	if !ok {

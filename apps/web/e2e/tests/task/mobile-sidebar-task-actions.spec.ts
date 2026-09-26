@@ -930,6 +930,11 @@ test.describe("Mobile sidebar task actions", () => {
       test.skip(true, "No local executor available");
       return;
     }
+    const localProfile = localExecutor.profiles?.[0];
+    if (!localProfile) {
+      test.skip(true, "No local executor profile available");
+      return;
+    }
 
     const policy = await apiClient.createRepositoryBranchPolicy(seedData.repositoryId, {
       name: `Mobile subtask policy ${Date.now()}`,
@@ -937,15 +942,10 @@ test.describe("Mobile sidebar task actions", () => {
       branch_template: "feature/{title}-{suffix}",
       pull_request_target: "develop",
     });
-    let localProfile: { id: string; name: string } | undefined;
     const parentTitle = `Mobile policy subtask parent ${Date.now()}`;
     const childTitle = `Mobile policy subtask child ${Date.now()}`;
 
     try {
-      localProfile = await apiClient.createExecutorProfile(
-        localExecutor.id,
-        `E2E Mobile Subtask Local ${Date.now()}`,
-      );
       const parent = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         parentTitle,
@@ -972,13 +972,15 @@ test.describe("Mobile sidebar task actions", () => {
       const dialog = testPage.getByTestId("new-subtask-dialog");
       await dialog.getByTestId("subtask-workspace-mode-new").tap();
       const executorSelector = dialog.getByTestId("executor-profile-selector");
-      await expect(async () => {
-        await executorSelector.tap();
-        await testPage
-          .getByRole("option", { name: new RegExp(localProfile.name) })
-          .tap({ force: true });
-        await expect(executorSelector).toContainText(localProfile.name, { timeout: 1_000 });
-      }).toPass({ timeout: 10_000 });
+      await executorSelector.tap();
+      const executorDrawer = testPage.getByTestId("executor-profile-selector-dropdown");
+      await expect(executorDrawer).toBeVisible();
+      const localProfileOption = executorDrawer.getByRole("option", {
+        name: new RegExp(localProfile.name),
+      });
+      await expect(localProfileOption).toBeVisible();
+      await localProfileOption.tap();
+      await expect(executorSelector).toContainText(localProfile.name);
       await dialog.getByTestId("branch-chip-trigger").tap();
       await testPage.getByRole("option", { name: new RegExp(policy.name) }).tap({ force: true });
       await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
@@ -1041,7 +1043,6 @@ test.describe("Mobile sidebar task actions", () => {
         )
         .toBe(repository!.base_branch);
     } finally {
-      if (localProfile) await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
       await apiClient.deleteRepositoryBranchPolicy(policy.id).catch(() => {});
       normalizeSeedRepository();
     }

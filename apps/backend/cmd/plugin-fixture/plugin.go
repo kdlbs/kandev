@@ -72,6 +72,10 @@ type fixturePlugin struct {
 	mu                   sync.Mutex
 	sawFirstEvent        bool
 	revokedByWorkspaceID map[string]bool
+	executorMu           sync.Mutex
+	executorState        fixtureExecutorState
+	executorTransports   map[string]*fixtureExecutorTransport
+	executorStateErr     error
 }
 
 var _ pluginsdk.Plugin = (*fixturePlugin)(nil)
@@ -92,7 +96,27 @@ func (p *fixturePlugin) InvokeAgentTool(_ context.Context, req *pluginsdk.AgentT
 // from KANDEV_PLUGIN_DATA_DIR (falling back to the current working
 // directory), per §2 of docs/plans/plugins/GRPC-CONTRACT.md.
 func newFixturePlugin() *fixturePlugin {
-	return &fixturePlugin{dataDir: resolveDataDir()}
+	return newFixturePluginAt(resolveDataDir())
+}
+
+func newFixturePluginAt(dataDir string) *fixturePlugin {
+	plugin := &fixturePlugin{
+		dataDir: dataDir, revokedByWorkspaceID: make(map[string]bool),
+		executorTransports: make(map[string]*fixtureExecutorTransport),
+		executorState:      fixtureExecutorState{Environments: make(map[string]fixtureExecutorResource)},
+	}
+	data, err := os.ReadFile(filepath.Join(dataDir, fixtureExecutorStateFileName))
+	if err == nil {
+		if err := json.Unmarshal(data, &plugin.executorState); err != nil {
+			plugin.executorStateErr = fmt.Errorf("plugin-fixture: decode provider inventory: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		plugin.executorStateErr = fmt.Errorf("plugin-fixture: read provider inventory: %w", err)
+	}
+	if plugin.executorState.Environments == nil {
+		plugin.executorState.Environments = make(map[string]fixtureExecutorResource)
+	}
+	return plugin
 }
 
 // resolveDataDir returns KANDEV_PLUGIN_DATA_DIR if set, otherwise the

@@ -11,7 +11,7 @@ import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useCommitDetail } from "@/hooks/domains/session/use-commit-detail";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
-import type { CommitDetailTarget, CommitFileNavigationRequest } from "./changes-diff-target";
+import type { CommitDetailTarget, CommitFileNavigationRequest } from "@/lib/state/diff-target-types";
 import { CommitDetailContent, type CommitDetailHeaderCommit } from "./commit-detail-content";
 
 type CommitDetailPanelProps = {

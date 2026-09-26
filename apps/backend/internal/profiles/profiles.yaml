@@ -118,6 +118,13 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Plugin-provided remote task environments remain disabled until provider
+  # admission, authenticated transport, durable cleanup, and recovery ship.
+  KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

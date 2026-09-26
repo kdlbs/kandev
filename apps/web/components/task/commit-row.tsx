@@ -18,7 +18,7 @@ import {
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import { timeAgo } from "@/lib/utils/time";
-import type { CommitDetailTarget, CommitFileNavigationRequest } from "./changes-diff-target";
+import type { CommitDetailTarget, CommitFileNavigationRequest } from "@/lib/state/diff-target-types";
 import { CommitRowFiles } from "./commit-row-files";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";

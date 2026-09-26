@@ -76,11 +76,25 @@ test.describe("compact desktop responsive layout", () => {
     await testPage.setViewportSize(COMPACT_DESKTOP_VIEWPORT);
 
     for (const step of seedData.steps) {
-      await apiClient.createTask(seedData.workspaceId, `Compact ${step.title}`, {
+      await apiClient.createTask(seedData.workspaceId, `Compact ${step.name}`, {
         workflow_id: seedData.workflowId,
         workflow_step_id: step.id,
       });
     }
+    // The board hides empty columns. Wait for the task snapshot to include
+    // every seeded step before opening the page, so a slow WS projection
+    // cannot make a populated column look empty.
+    await expect
+      .poll(
+        async () => {
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          return seedData.steps.every((step) =>
+            tasks.some((task) => task.workflow_step_id === step.id),
+          );
+        },
+        { timeout: 30_000, message: "Waiting for one task in every workflow step" },
+      )
+      .toBe(true);
     const parent = await apiClient.createTask(
       seedData.workspaceId,
       "A deliberately long parent task title in compact kanban card",

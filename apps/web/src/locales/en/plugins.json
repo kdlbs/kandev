@@ -16,6 +16,7 @@
   "enable": "Enable",
   "failedToAddSource": "Failed to add source",
   "failedToDisable": "Failed to disable {{name}}",
+  "remoteResourcesMayRemain": "Remote environments can keep running after you disable this plugin. Re-enable it and clean up its task environments before uninstalling.",
   "failedToEnable": "Failed to enable {{name}}",
   "failedToInstallPlugin": "Failed to install plugin",
   "failedToLoadMarketplace": "Failed to load marketplace",

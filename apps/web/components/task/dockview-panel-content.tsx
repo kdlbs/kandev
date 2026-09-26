@@ -20,7 +20,7 @@ import type {
   CommitDetailTarget,
   CommitFileNavigationRequest,
   OpenDiffOptions,
-} from "./changes-diff-target";
+} from "@/lib/state/diff-target-types";
 import { ChangesPanel } from "./changes-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
 import { FileEditorPanel } from "./file-editor-panel";

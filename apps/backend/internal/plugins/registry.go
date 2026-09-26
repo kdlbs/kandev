@@ -198,6 +198,22 @@ func (r *Registry) activeRepositoryProviderOwner(provider, excludeID string) (st
 	return "", false
 }
 
+func (r *Registry) activeExecutorProviderOwner(identity, excludeID string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for id, rec := range r.byID {
+		if id == excludeID || rec.Status != StatusActive {
+			continue
+		}
+		for _, declared := range rec.ExecutorProviders {
+			if ExecutorProviderIdentity(id, declared.Key) == identity {
+				return id, true
+			}
+		}
+	}
+	return "", false
+}
+
 // activeReferenceSourceOwner returns the active plugin that owns source,
 // excluding excludeID (used while validating an in-place upgrade).
 func (r *Registry) activeReferenceSourceOwner(source, excludeID string) (string, bool) {
