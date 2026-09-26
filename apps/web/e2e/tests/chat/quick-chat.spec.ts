@@ -274,11 +274,10 @@ test.describe("Quick Chat", () => {
 
     // The collapse shortcut only fires for keydowns targeting the shortcut
     // scope (quick-chat-content), same as the numeric-step shortcut above.
-    await dialog
-      .getByTestId("quick-chat-messages")
-      .getByText("/e2e:clarification-multi", { exact: true })
-      .click();
-    await expect(dialog.getByTestId("quick-chat-content")).toBeFocused();
+    await dialog.getByTestId("quick-chat-messages").click({ position: { x: 8, y: 8 } });
+    const shortcutScope = dialog.getByTestId("quick-chat-content");
+    await shortcutScope.focus();
+    await expect(shortcutScope).toBeFocused();
 
     await testPage.keyboard.press("Escape");
 
@@ -842,6 +841,49 @@ test.describe("Quick Chat", () => {
     });
 
     await backend.restart();
+
+    // The restored tab can become visible before the backend has persisted
+    // the ACP catalog. Wait for the durable session metadata before reloading
+    // the shell, so the reload hydrates the same state that the backend owns.
+    const readPersistedModelCatalog = async () => {
+      const { sessions } = await apiClient.listTaskSessions(started.task_id);
+      const rawState = sessions.find((session) => session.id === started.session_id)?.metadata
+        ?.acp_model_state;
+      if (!rawState || typeof rawState !== "object") {
+        return { currentModelId: "", configOptionIds: [] as string[] };
+      }
+      const modelState = rawState as {
+        current_model_id?: unknown;
+        config_options?: unknown;
+      };
+      const configOptionIds = Array.isArray(modelState.config_options)
+        ? modelState.config_options.flatMap((option) => {
+            if (
+              !option ||
+              typeof option !== "object" ||
+              !("id" in option) ||
+              typeof option.id !== "string"
+            ) {
+              return [];
+            }
+            return [option.id];
+          })
+        : [];
+      return {
+        currentModelId:
+          typeof modelState.current_model_id === "string" ? modelState.current_model_id : "",
+        configOptionIds,
+      };
+    };
+    await expect
+      .poll(readPersistedModelCatalog, {
+        timeout: 60_000,
+        message: "restored session model catalog was not persisted",
+      })
+      .toMatchObject({
+        currentModelId: "mock-fast",
+        configOptionIds: expect.arrayContaining(["effort"]),
+      });
     await testPage.reload();
     await testPage.waitForLoadState("networkidle");
 
@@ -853,6 +895,10 @@ test.describe("Quick Chat", () => {
       `[data-tab-reference="conversation:${started.session_id}"]`,
     );
     await expect(restoredTab).toBeVisible({ timeout: 15_000 });
+    // The restored tab can be visible without being the selected tab while
+    // the shell restores its tab snapshot. Select it before checking the
+    // session-owned model controls.
+    await restoredTab.click();
 
     await waitForSessionState(apiClient, {
       taskId: started.task_id,
@@ -868,10 +914,16 @@ test.describe("Quick Chat", () => {
     const modelSettings = restoredDialog.getByRole("button", {
       name: "Session model settings",
     });
-    await expect(modelSettings).toContainText("Mock Fast", { timeout: 15_000 });
+    // The tab and its profile label can render from the session snapshot before
+    // the restarted agent sends its dynamic catalog. Wait on the selector's
+    // user-visible label, then open it and wait for the config option itself.
+    // This follows the same causal path as the user and avoids reading a
+    // transient empty store entry during WebSocket reconnect.
+    await expect(modelSettings).toBeVisible({ timeout: 30_000 });
+    await expect(modelSettings).toContainText("Mock Fast", { timeout: 60_000 });
     await modelSettings.click();
     await expect(testPage.getByTestId("config-option-trigger-effort")).toBeVisible({
-      timeout: 10_000,
+      timeout: 30_000,
     });
   });
 

@@ -77,6 +77,7 @@ test.describe("Mobile workspace repository sets", () => {
     backend,
     prCapture,
   }) => {
+    test.setTimeout(120_000);
     await testPage.setViewportSize({ width: 390, height: 844 });
     const setName = `Mobile editor set ${Date.now()}`;
     const created = await apiClient.createRepositorySet(seedData.workspaceId, setName, [

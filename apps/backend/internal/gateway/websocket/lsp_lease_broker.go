@@ -14,7 +14,13 @@ import (
 const lspShutdownTimeout = 3 * time.Second
 
 func (l *lspLease) gracefulRelease(generation uint64, reason, requestID string) error {
+	text := "language server stopped"
+	if reason == lspLeaseReleaseEditorIdle {
+		text = "language server released after editor idle"
+	}
+	defer l.terminate(websocket.CloseNormalClosure, text, reason)
 	l.mu.Lock()
+	l.expectedUpstreamClose = true
 	requests := make([]lspLeaseClientRequest, 0, len(l.clientRequests))
 	for key, request := range l.clientRequests {
 		if request.generation == generation {
@@ -31,9 +37,6 @@ func (l *lspLease) gracefulRelease(generation uint64, reason, requestID string) 
 	if _, err := l.sendBrokerRequest(ctx, "shutdown", nil); err != nil {
 		l.manager.logger.Debug("LSP shutdown request did not complete before release", zap.String("language", l.language), zap.Error(err))
 	}
-	l.mu.Lock()
-	l.expectedUpstreamClose = true
-	l.mu.Unlock()
 	ackErr := l.writeBrowser(generation, map[string]any{
 		lspControlField: lspControlKind,
 		"action":        lspControlAck,
@@ -41,16 +44,7 @@ func (l *lspLease) gracefulRelease(generation uint64, reason, requestID string) 
 		"reason":        reason,
 	})
 	_ = l.writeUpstream(jsonRPCNotification("exit", nil))
-	if ackErr != nil {
-		return ackErr
-	}
-	code := websocket.CloseNormalClosure
-	text := "language server stopped"
-	if reason == lspLeaseReleaseEditorIdle {
-		text = "language server released after editor idle"
-	}
-	l.terminate(code, text, reason)
-	return nil
+	return ackErr
 }
 
 func (l *lspLease) sendBrokerRequest(ctx context.Context, method string, params any) (jsonRPCResponse, error) {

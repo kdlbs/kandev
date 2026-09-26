@@ -192,6 +192,13 @@ receives a bearer token with all scopes and repositories granted by GitHub. An e
 `GITHUB_TOKEN` or `GH_TOKEN` bypasses managed broker selection entirely and is the operator's
 unmanaged grant. Personal GitHub tokens and App registration private keys never enter executors.
 
+For Kubernetes tasks using managed Git access, both preparation and the agent's
+commands use the session's current repository leases. Stop/Resume on a retained
+Pod refreshes that access for the resumed agent. Changing task access or replacing
+the GitHub connection takes effect on the next launch or resume; old managed
+leases and generated helpers are not inherited by that new process. Git tokens
+do not need to be added to the worker image or executor profile.
+
 Managed Docker, Kubernetes, Sprites, and SSH launches probe the exact credential-resolution route from inside
 the executor before clone or agent startup and require its `204 No Content` readiness response.
 Network failures, redirects, proxy routing errors, and broker server errors stop launch instead of

@@ -429,10 +429,10 @@ jobs:
     container:
       image: ghcr.io/kdlbs/kandev-ci:runtime-latest
       options: --ipc=host
-    # 35 min covers the serial count-fallback tail and setup overhead. The
-    # first queue runs reached the old 25-minute cap with a healthy 167-test
-    # shard before the main timing profile had bootstrapped.
-    timeout-minutes: 35
+    # 45 min covers the serial count-fallback tail and setup overhead. The
+    # largest current shard has 248 tests and exceeded 35 min under hosted
+    # runner load without a test failure, so the shorter cap cancelled it.
+    timeout-minutes: 45
     # Container jobs default to `sh`; pin to bash.
     defaults:
       run:
