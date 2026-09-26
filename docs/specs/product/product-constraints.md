@@ -14,6 +14,9 @@ exception belongs in an ADR and in the owning system documentation.
   internal plan exists. Use the documented feature-status categories.
 - Office autonomy, routines, budgets, coordinator behavior, and quorum flows
   remain feature-flagged and in progress until explicitly graduated.
+- The workspace coordinator remains feature-flagged and in progress until
+  explicitly graduated. It may never move, archive, delete or stop a task,
+  merge, or move a task to Done; this rule applies to the coordinator actor only.
 - Provider, agent, executor, platform, credential, and install-channel
   dependencies must be visible to users and operators.
 
