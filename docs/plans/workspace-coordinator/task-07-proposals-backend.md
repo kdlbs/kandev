@@ -54,7 +54,11 @@ proposals through the store. Runs in parallel with tasks 02, 03 and 04.
   zero-row completion re-read (200 with the current row, or 404 when the row
   is gone).
 - Stale-claim recovery at startup, on approve, and on a proposal list or get
-  by a `workspace.manage` caller only (added to task 01's read routes). The
+  by a `workspace.manage` caller only, gated on `Sec-Fetch-Site` so a
+  same-site or cross-site read never writes (added to task 01's read routes;
+  see the
+  [proposals design](../../specs/coordinator/system-design/proposals.md#read-triggered-writes)
+  table). The
   startup recovery hooks into task 01's decisions registration function (its
   startup-pass hook slot), not into the shared pass's call site.
 - The `coordinator-proposal:` external-id prefix refused in the task service:
@@ -120,7 +124,10 @@ with the survivor, a settle not-found fails the proposal, `FoundSettled` and
 it; `coordinator.updated` published once after the claim and once after the
 completion, and not on a zero-row write; a coordinator deleted during an
 approval returns 404 with the task kept; a reader's list of a stale claim
-writes nothing while a manager's list recovers it; the created task gets no
+writes nothing while a manager's list recovers it; a manager's list or get
+with `Sec-Fetch-Site` `cross-site`, `same-site` or an unknown value writes
+nothing and returns the rows as stored, while `same-origin`, `none` and an
+absent header recover; the created task gets no
 agent on a step whose `on_enter` has `auto_start_agent` (no
 `auto_start_on_create` marker); crash after claim and after create recover to one
 task; two readers of a stale claim, one wins, keeping the first

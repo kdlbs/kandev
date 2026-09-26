@@ -150,7 +150,10 @@ Required Go tests:
   run for a coordinator principal;
 - `Legacy` instance and `SetMcpMode` from task mode both list exactly the
   coordinator tools, with no user-question, title or plugin tool;
-- foreign workspace ids refused; non-coordinator principal refused for the
+- foreign workspace ids refused, including a `workspace_id` argument other
+  than the principal's to `list_workflows_kandev` and
+  `list_repositories_kandev` (refused before the handler runs, no data
+  returned); non-coordinator principal refused for the
   proposal action; HTTP and MCP create refuse the origin;
 - a `workspace.read` member's `message.add` on the conversation task is
   refused and starts no turn, while a `workspace.manage` member's succeeds

@@ -205,8 +205,15 @@ document or session reads, and no user-question, title, plugin, create, move,
 message, archive or delete tool. The backend guard in
 `internal/mcp/handlers/coordinator_authorization.go` runs for every action from
 a coordinator principal: an allowlist of action names (anything else is
-refused with an error naming it), and a workspace check that every task,
-workflow, step and repository id resolves inside the coordinator's workspace.
+refused with an error naming it), and a workspace check over four categories
+of id: workspace, task, workflow and step, and repository. A `workspace_id`
+argument must equal `principal.WorkspaceID`; `list_workflows_kandev` and
+`list_repositories_kandev` take a client-supplied `workspace_id` as their only
+scope (`internal/mcp/server/config_handlers.go`), so without this check they
+would enumerate any workspace. Every task, workflow, step and repository id
+must resolve inside the coordinator's workspace. A call failing either check is
+refused with an error naming the argument, before the handler runs, and
+returns no data.
 `coordinator.propose_task` from a principal that is not a coordinator is
 refused. The guard is tested by a table over every registered MCP action, so a
 newly added action is refused unless listed.

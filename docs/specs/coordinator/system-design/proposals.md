@@ -212,16 +212,21 @@ proposal that cannot be created can be closed, matching the failed-card
 design (UI-03 in the [plan](../../../plans/workspace-coordinator/plan.md)).
 This departs from the source analysis plan (`implementation-plan.md`
 revision 9, section 6.5.4, kept outside this repository), which allowed
-reject from `pending` only. The claim and reject conditions are
-disjoint on status, so a racing approve and reject cannot both succeed.
+reject from `pending` only. The approve claim and the reject share the
+same condition, `WHERE id=? AND status IN ('pending','failed')`, and each sets
+a status outside that set (`approving` or `rejected`). The row's `status` is
+therefore an atomic compare-and-swap: whichever UPDATE commits first matches
+one row, and the other then matches none, re-reads and returns 409 with the
+winner's row. A racing approve and reject cannot both succeed.
 
 ## Recovery
 
 A claim is stale after two minutes. Three callers run recovery on an
 `approving` row with a stale claim: the startup pass, an approve request, and
-a list or single-proposal read whose caller also holds `workspace.manage`. A
-read by a caller with only `workspace.read` never writes; it returns the row
-as stored. Recovery takes the stale re-claim `UPDATE` in [Approve](#approve),
+a list or single-proposal read whose caller also holds `workspace.manage`
+and that is not cross-site (see [Read-triggered writes](#read-triggered-writes)).
+A read by a caller with only `workspace.read`, or a cross-site read, never
+writes; it returns the row as stored. Recovery takes the stale re-claim `UPDATE` in [Approve](#approve),
 which refreshes `claimed_at` and sets a new `claim_token`, so of two readers
 seeing one stale claim exactly one wins it, and a slow original claimer's
 completion no longer matches the token. It then runs steps 4 to 6: the
@@ -249,6 +254,33 @@ A read recovers synchronously, before it answers:
   completion) is logged at warn with the proposal id; that row is returned as
   stored and the read continues with the next row. Recovery never turns a
   read into an error response.
+
+### Read-triggered writes
+
+A `GET` is reachable cross-site: the session cookie is `SameSite=Lax`, so a
+top-level navigation from another site carries it, and such a navigation sends
+no `Origin` header, so `corsMiddleware` in `internal/backendapp/middleware.go`
+(which rejects a disallowed `Origin` for every method) does not stop it. The
+recovery a read performs is a write, so the two proposal read routes gate it
+on the request's `Sec-Fetch-Site` header:
+
+| `Sec-Fetch-Site` | Read recovers stale claims |
+| --- | --- |
+| absent (non-browser client, no ambient cookie) | yes |
+| `same-origin` | yes |
+| `none` (typed or bookmarked navigation) | yes |
+| `same-site` or `cross-site` | no; rows returned as stored, as for a `workspace.read` caller |
+| any other value | no |
+
+The gate applies only to the recovery; the read itself answers 200 either
+way. Even an ungated recovery could only replay a decision a
+`workspace.manage` caller already committed: it takes no request input, uses
+the frozen `final_spec_json` and the first `decided_by`, and creates at most
+the one task the claim authorised, which is what the startup pass would do.
+The gate removes that write from cross-site reach so the read routes stay
+side-effect free for any request another site can cause. Approve and reject
+are `POST` with a JSON body, which `SameSite=Lax` and the origin check
+already protect.
 
 ## Reserved prefix
 
@@ -278,7 +310,10 @@ The prefix is enforced in the task service, so every entry point inherits it:
 | `POST .../proposals/:pid/reject` | `workspace.manage` | proposal, 400, 403, 404 or 409 |
 
 Routes live under `/api/v1/workspaces/:id/`. A proposal of another
-coordinator or workspace is 404. The coordinator list response carries
+coordinator or workspace is 404. Both reads need only `workspace.read` to
+answer; the stale-claim recovery they may run additionally needs
+`workspace.manage` and a request that is not cross-site
+([Read-triggered writes](#read-triggered-writes)). The coordinator list response carries
 `open_proposals` per coordinator for the sidebar badge.
 
 ## Events
@@ -314,6 +349,9 @@ decided card.
 
 - Decisions authorise at the backend by workspace scope; the principal of the
   MCP action is resolved server-side.
+- A proposal read performs recovery only when it is not cross-site
+  ([Read-triggered writes](#read-triggered-writes)); no request another site
+  can cause writes a proposal.
 - Spec strings are untrusted and rendered as text.
 - The created task is ordinary; the coordinator gains no authority over it.
 

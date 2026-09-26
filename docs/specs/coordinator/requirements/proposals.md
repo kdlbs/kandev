@@ -123,7 +123,8 @@ Mockup:
   next proposal read by a caller holding `workspace.manage` that reads the
   stale claim, shall complete the approval with the same single task, using
   the frozen spec without validating it again; a read
-  by a caller holding only `workspace.read` shall change nothing; when two readers see the same stale claim, exactly one shall
+  by a caller holding only `workspace.read`, or a read the browser marks as
+  cross-site or same-site (`Sec-Fetch-Site`), shall change nothing; when two readers see the same stale claim, exactly one shall
   complete it, using the spec frozen by the first claim and keeping the first
   approver as the approving user. A list read by a caller holding
   `workspace.manage` shall recover every stale claim among the rows it

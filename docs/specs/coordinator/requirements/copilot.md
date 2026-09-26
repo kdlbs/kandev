@@ -123,9 +123,11 @@ Mockup:
 - **AC-COORDINATOR-COPILOT-003.2:** When a coordinator session calls any other
   Kandev tool or action, the system shall refuse it with an error naming the
   tool and change nothing.
-- **AC-COORDINATOR-COPILOT-003.3:** When a coordinator session names a task,
+- **AC-COORDINATOR-COPILOT-003.3:** When a coordinator session names a
+  workspace other than its coordinator's (including a `workspace_id` argument
+  of `list_workflows_kandev` or `list_repositories_kandev`), or a task,
   workflow, step or repository of another workspace, the system shall refuse
-  the call.
+  the call and return nothing from that workspace.
 - **AC-COORDINATOR-COPILOT-003.4:** When a session that is not a coordinator
   session sends the proposal action, the system shall refuse it.
 - **AC-COORDINATOR-COPILOT-003.5:** A session is a coordinator session only when
