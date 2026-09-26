@@ -3,7 +3,7 @@ id: "05-system-account"
 title: "System, account, and plugin settings"
 status: complete
 wave: 5
-depends_on: 
+depends_on:
   - 04-workspace-integration
 plan: "plan.md"
 requirements:

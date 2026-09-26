@@ -39,6 +39,16 @@ func TestWsRecoverSessionCancelRetryReportsServiceResult(t *testing.T) {
 	require.False(t, payload.Cancelled)
 }
 
+func TestWsRecoverWorkspaceInventoryRequiresIdempotencyKeyBeforeServiceAccess(t *testing.T) {
+	handlers := setupOrchestratorHandlers(t)
+	response, err := handlers.wsRecoverSession(context.Background(), createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{
+		"task_id": "t1", "session_id": "s1", "action": "repair_workspace_inventory",
+	}))
+	require.NoError(t, err)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeValidation, payload.Code)
+}
+
 func TestBranchRecoveryConflictResponsePreservesRecoveryDetails(t *testing.T) {
 	msg := createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{})
 	err := &orchestrator.BranchRecoveryError{
