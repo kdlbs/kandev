@@ -53,7 +53,7 @@ func classifySyncErr(err error) authcircuit.FailureClass {
 	if errors.As(err, &glErr) {
 		return classifyStatusCode(glErr.StatusCode)
 	}
-	if errors.Is(err, github.ErrGitHubConnectionInvalid) || errors.Is(err, github.ErrGitHubNotConfigured) {
+	if errors.Is(err, github.ErrNoClient) || errors.Is(err, github.ErrGitHubConnectionInvalid) || errors.Is(err, github.ErrGitHubNotConfigured) {
 		return authcircuit.FailureClassAuth
 	}
 	if errors.Is(err, gitlab.ErrInvalidToken) {

@@ -76,6 +76,7 @@ func TestClassifySyncErr_GitLabAPIErrorByStatus(t *testing.T) {
 }
 
 func TestClassifySyncErr_SentinelFallbacksAreAuth(t *testing.T) {
+	assert.Equal(t, authcircuit.FailureClassAuth, classifySyncErr(github.ErrNoClient))
 	assert.Equal(t, authcircuit.FailureClassAuth, classifySyncErr(github.ErrGitHubConnectionInvalid))
 	assert.Equal(t, authcircuit.FailureClassAuth, classifySyncErr(github.ErrGitHubNotConfigured))
 	assert.Equal(t, authcircuit.FailureClassAuth, classifySyncErr(gitlab.ErrInvalidToken))
