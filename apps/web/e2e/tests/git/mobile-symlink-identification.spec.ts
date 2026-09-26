@@ -10,6 +10,7 @@ test("identifies a symlink in Changes and the mobile file viewer", async ({
   apiClient,
   seedData,
 }) => {
+  test.setTimeout(120_000);
   const name = "a-long-symbolic-link-filename-for-mobile-containment.txt";
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,

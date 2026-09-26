@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow import/export", () => {
@@ -105,7 +106,13 @@ workflows:
     await dialog.locator("textarea").fill(yamlContent);
 
     // Click Import button in dialog
+    const imported = waitForHttp(
+      testPage,
+      "POST",
+      new RegExp(`/api/v1/workspaces/${seedData.workspaceId}/workflows/import$`),
+    );
     await dialog.getByRole("button", { name: "Import" }).click();
+    await imported;
 
     // Dialog should close and toast should appear
     await expect(dialog).not.toBeVisible();

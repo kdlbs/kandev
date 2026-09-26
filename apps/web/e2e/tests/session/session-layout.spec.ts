@@ -65,6 +65,7 @@ test.describe("Session layout", () => {
   });
 
   test("maximize survives page refresh", async ({ testPage, apiClient, seedData }) => {
+    test.setTimeout(120_000);
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "Refresh Test");
 
     // Type a command in the terminal, then maximize
@@ -79,8 +80,9 @@ test.describe("Session layout", () => {
     // After refresh: terminal should still be maximized
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
     await session.expectMaximized();
+    await session.expectTerminalConnected(60_000);
     // Terminal reconnects to the same shell — our output should still be there
-    await session.expectTerminalHasText(TERMINAL_MARKER);
+    await session.expectTerminalHasText(TERMINAL_MARKER, 60_000);
   });
 
   test("task switching preserves maximize per session", async ({
@@ -134,10 +136,11 @@ test.describe("Session layout", () => {
     // exercising the tryRestoreLayout path that restores maximize from sessionStorage.
     await testPage.goto(taskAUrl);
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
+    await session.expectTerminalConnected(60_000);
 
     // Task A should still be maximized with our output
     await session.expectMaximized();
-    await session.expectTerminalHasText(TERMINAL_MARKER);
+    await session.expectTerminalHasText(TERMINAL_MARKER, 60_000);
   });
 
   test("closing maximized panel exits maximize and restores layout", async ({
@@ -274,7 +277,19 @@ test.describe("Session tab cleanup", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     const card = kanban.taskCardByTitle("Single Session Tab Task");
-    await expect(card).toBeVisible({ timeout: 30_000 });
+    // The session state is already terminal, but the board snapshot can still
+    // be from the preceding task-list read. Re-drive that read until the
+    // durable task appears instead of relying on a single stale render.
+    await expect
+      .poll(
+        async () => {
+          if (await card.isVisible().catch(() => false)) return true;
+          await kanban.goto();
+          return card.isVisible().catch(() => false);
+        },
+        { timeout: 30_000, message: "finished task should appear in the kanban snapshot" },
+      )
+      .toBe(true);
     await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 

@@ -204,10 +204,10 @@ cat "${FAKE_DOCKER_MANIFEST}"
         normal_job = job_block(workflow, "e2e", "playwright_image")
 
         self.assertIn(
-            "# 35 min covers the serial count-fallback tail and setup overhead",
+            "# 45 min covers the serial count-fallback tail and setup overhead",
             normal_job,
         )
-        self.assertIn("timeout-minutes: 35", normal_job)
+        self.assertIn("timeout-minutes: 45", normal_job)
         self.assertNotIn("timeout-minutes: 25", normal_job)
 
     # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.1

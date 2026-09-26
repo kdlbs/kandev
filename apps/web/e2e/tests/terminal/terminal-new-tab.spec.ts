@@ -1,7 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
 
@@ -40,13 +39,11 @@ async function createTaskAndWaitForDone(apiClient: ApiClient, seedData: SeedData
   return task;
 }
 
-async function navigateToTaskViaKanban(page: Page, title: string): Promise<SessionPage> {
-  const kanban = new KanbanPage(page);
-  await kanban.goto();
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 15_000 });
-  await card.click();
-  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
+async function navigateToTask(page: Page, taskId: string): Promise<SessionPage> {
+  // The task API is already the source of truth in this test. Going directly
+  // to the task avoids racing the kanban snapshot refresh after the agent
+  // settles, which can leave the card out of the board for one render.
+  await page.goto(`/t/${taskId}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
   return session;
@@ -99,8 +96,8 @@ test.describe("Terminal new tab — env-keyed user shell RPCs", () => {
     test.setTimeout(60_000);
     const recorder = recordUserShellCreatePayloads(testPage);
 
-    await createTaskAndWaitForDone(apiClient, seedData, "New Tab Dockview Menu");
-    const session = await navigateToTaskViaKanban(testPage, "New Tab Dockview Menu");
+    const task = await createTaskAndWaitForDone(apiClient, seedData, "New Tab Dockview Menu");
+    const session = await navigateToTask(testPage, task.id);
 
     // Base terminal must be connected before we add tabs.
     await session.clickTab("Terminal");

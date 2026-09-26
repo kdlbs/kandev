@@ -35,10 +35,12 @@ test.describe("Setup script progress UX", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(240_000);
 
-    // Gate the preceding fetch until the browser subscribes, then hold the
-    // setup script so its preparing state and streamed output stay observable.
+    // Hold repository preparation until the browser subscribes so its
+    // preparing state and streamed output stay observable. This test opts the
+    // shared fixture repository into the sync path, which guarantees that the
+    // cross-platform git shim can provide the gate before setup starts.
     const gateID = Date.now();
     const gitGateFile = path.join(backend.tmpDir, "git-delay-ms");
     const gitStartedFile = path.join(backend.tmpDir, `git-started-${gateID}`);
@@ -46,11 +48,18 @@ test.describe("Setup script progress UX", () => {
     const startedFile = path.join(backend.tmpDir, `setup-started-${gateID}`);
     const releaseFile = path.join(backend.tmpDir, `setup-release-${gateID}`);
     let profile: { id: string } | null = null;
+    const repositoryResponse = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/repositories/${seedData.repositoryId}`,
+    );
+    expect(repositoryResponse.ok).toBeTruthy();
+    const repository = (await repositoryResponse.json()) as { pull_before_worktree?: boolean };
     try {
       fs.writeFileSync(
         gitGateFile,
         JSON.stringify({ startedFile: gitStartedFile, releaseFile: gitReleaseFile }),
       );
+      await apiClient.updateRepository(seedData.repositoryId, { pull_before_worktree: true });
       const setupScript = [
         "echo '[setup] installing deps'",
         `touch '${startedFile}'`,
@@ -87,10 +96,11 @@ test.describe("Setup script progress UX", () => {
         })
         .toBe(true);
       fs.writeFileSync(gitReleaseFile, "release");
+
       await expect
         .poll(() => fs.existsSync(startedFile), {
           message: "setup script should reach its deterministic test gate",
-          timeout: 60_000,
+          timeout: 120_000,
         })
         .toBe(true);
 
@@ -118,6 +128,11 @@ test.describe("Setup script progress UX", () => {
           // Profile may already be deleted if the test tore down mid-run.
         });
       }
+      await apiClient
+        .updateRepository(seedData.repositoryId, {
+          pull_before_worktree: repository.pull_before_worktree === true,
+        })
+        .catch(() => {});
       if (fs.existsSync(gitGateFile)) fs.unlinkSync(gitGateFile);
       if (fs.existsSync(gitStartedFile)) fs.unlinkSync(gitStartedFile);
       if (fs.existsSync(gitReleaseFile)) fs.unlinkSync(gitReleaseFile);

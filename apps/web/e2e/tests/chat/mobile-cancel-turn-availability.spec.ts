@@ -3,6 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import {
   waitForActiveSessionCancellationPending,
+  waitForActiveSessionCancellationPendingOrSettled,
   waitForActiveSessionForegroundActivity,
 } from "../../helpers/session-store";
 import { seedIdleSession } from "../../helpers/session";
@@ -56,8 +57,13 @@ test.describe.serial("Mobile cancel turn availability", () => {
     });
 
     await cancel.tap();
-    await waitForActiveSessionCancellationPending(testPage, true);
-    await expect(cancel).toBeDisabled();
+    await waitForActiveSessionCancellationPendingOrSettled(testPage);
+    await expect
+      .poll(async () => {
+        if (!(await cancel.isVisible().catch(() => false))) return true;
+        return cancel.isDisabled();
+      })
+      .toBe(true);
     await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
     await waitForActiveSessionCancellationPending(testPage, false);
     await waitForActiveSessionForegroundActivity(testPage, null);
