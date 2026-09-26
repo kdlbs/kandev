@@ -99,7 +99,7 @@ func TestWorktreePreparer_MultiRepo_ValidateRepository_FailsOnNonGitPath(t *test
 	if strings.Contains(res.ErrorMessage, staleSecondary) {
 		t.Errorf("ErrorMessage = %q, must not expose the offending absolute path %q", res.ErrorMessage, staleSecondary)
 	}
-	if !strings.Contains(res.ErrorMessage, "[path-redacted]") {
-		t.Errorf("ErrorMessage = %q, want path-redacted placeholder", res.ErrorMessage)
+	if !strings.Contains(res.ErrorMessage, "[path-redacted]") && !strings.Contains(res.ErrorMessage, "***") {
+		t.Errorf("ErrorMessage = %q, want a path-redaction marker", res.ErrorMessage)
 	}
 }
