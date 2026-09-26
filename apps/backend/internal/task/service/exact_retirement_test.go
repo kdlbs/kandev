@@ -12,6 +12,28 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
+func TestExactRetirementReceiptsEligible(t *testing.T) {
+	tests := []struct {
+		name     string
+		statuses []ExactRetirementReceiptStatus
+		want     bool
+	}{
+		{name: "all pass", statuses: []ExactRetirementReceiptStatus{ExactRetirementReceiptPass, ExactRetirementReceiptPass}, want: true},
+		{name: "unknown blocks", statuses: []ExactRetirementReceiptStatus{ExactRetirementReceiptPass, ExactRetirementReceiptUnknown}},
+		{name: "blocked blocks", statuses: []ExactRetirementReceiptStatus{ExactRetirementReceiptPass, ExactRetirementReceiptBlocked}},
+		{name: "empty receipt set", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			receipts := make([]ExactRetirementPredicateReceipt, len(tt.statuses))
+			for i, status := range tt.statuses {
+				receipts[i].Status = status
+			}
+			require.Equal(t, tt.want, exactRetirementReceiptsEligible(receipts))
+		})
+	}
+}
+
 // @covers AC-TASKS-EXACT-RETIREMENT-001.2
 // @covers AC-TASKS-EXACT-RETIREMENT-001.3
 func TestPreviewExactRetirementFailsClosedWithoutInventoryAdapters(t *testing.T) {

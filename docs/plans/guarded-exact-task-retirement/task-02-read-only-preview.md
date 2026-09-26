@@ -8,6 +8,11 @@ depends_on:
 plan: "plan.md"
 requirements:
   - REQ-TASKS-EXACT-RETIREMENT-001
+acceptance_criteria:
+  - AC-TASKS-EXACT-RETIREMENT-001.1
+  - AC-TASKS-EXACT-RETIREMENT-001.2
+  - AC-TASKS-EXACT-RETIREMENT-001.3
+  - AC-TASKS-EXACT-RETIREMENT-001.4
 system_design:
   - ../../specs/tasks/system-design/guarded-exact-task-retirement.md
 ---
@@ -47,7 +52,11 @@ queue, Git, and consumer predicates with independently verified adapters.
 The preview route requires trusted authentication, authorizes both task IDs,
 requires a distinct same-workspace pair with matching generations, and returns
 a no-store receipt. Its fixed registry reports unavailable evidence as
-`UNKNOWN`, so it cannot claim eligibility or initiate cleanup.
+`UNKNOWN`, so it cannot initiate cleanup. Eligibility is derived from the
+complete non-empty receipt set and is true only when every predicate passes.
+Read-only members are denied on the old task before the replacement lookup,
+so their response does not reveal whether a supplied replacement exists.
 
-- `cd apps/backend && go test -count=1 ./internal/task/handlers -run 'TestHTTPPreviewExactRetirement'` - passed.
-- `cd apps/backend && go test -count=1 ./internal/task/service -run 'TestPreviewExactRetirement'` - passed.
+- `cd apps/backend && go test -count=1 ./internal/task/handlers ./internal/task/service -run 'Test(HTTPPreviewExactRetirement|PreviewExactRetirement|ExactRetirementReceiptsEligible)'` - passed.
+- `python3 scripts/list-docs.py validate` - passed.
+- `python3 scripts/lint-spec-files.py --all` - passed.

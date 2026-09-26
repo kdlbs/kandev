@@ -82,6 +82,18 @@ func exactRetirementDigest(parts ...string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+func exactRetirementReceiptsEligible(receipts []ExactRetirementPredicateReceipt) bool {
+	if len(receipts) == 0 {
+		return false
+	}
+	for _, receipt := range receipts {
+		if receipt.Status != ExactRetirementReceiptPass {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Service) authorizeExactRetirementPreview(ctx context.Context, replacementTaskID string) error {
 	if err := s.AuthorizeTaskScope(ctx, replacementTaskID, authz.ScopeTaskWrite); err != nil {
 		return err
@@ -142,5 +154,8 @@ func (s *Service) PreviewExactRetirement(ctx context.Context, request ExactRetir
 		})
 	}
 	sort.Slice(receipts, func(i, j int) bool { return receipts[i].Predicate < receipts[j].Predicate })
-	return &ExactRetirementPreview{OldTaskID: oldTask.ID, ReplacementTaskID: replacementTask.ID, WorkspaceID: request.WorkspaceID, Receipts: receipts}, nil
+	return &ExactRetirementPreview{
+		OldTaskID: oldTask.ID, ReplacementTaskID: replacementTask.ID, WorkspaceID: request.WorkspaceID,
+		Eligible: exactRetirementReceiptsEligible(receipts), Receipts: receipts,
+	}, nil
 }
