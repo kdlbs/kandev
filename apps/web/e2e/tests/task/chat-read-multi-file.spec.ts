@@ -7,6 +7,8 @@
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
+import { waitForWorkspaceFile } from "../../helpers/session";
+import { waitForActiveTaskSession } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Chat multi-file read links", () => {
@@ -66,6 +68,8 @@ test.describe("Chat multi-file read links", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    await waitForActiveTaskSession(testPage, task.id, task.session_id);
+    await waitForWorkspaceFile(apiClient, task.session_id, fileB);
 
     // Each file is its own openable link (FilePathButton renders the bare path as
     // both the title and the button text) — never a single combined link.
