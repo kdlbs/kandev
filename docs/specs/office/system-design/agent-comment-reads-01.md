@@ -10,6 +10,7 @@ requirements:
   - REQ-OFFICE-AGENT-COMMENT-READS-006
   - REQ-OFFICE-AGENT-COMMENT-READS-007
   - REQ-OFFICE-AGENT-COMMENT-READS-008
+  - REQ-OFFICE-AGENT-COMMENT-READS-009
 ---
 
 # Office: Agent Comment Reads System Design
@@ -67,6 +68,7 @@ context-key constants.
 | `REQ-OFFICE-AGENT-COMMENT-READS-006` | [Persistence](#persistence) |
 | `REQ-OFFICE-AGENT-COMMENT-READS-007` | [The advertised-surface contract](#the-advertised-surface-contract) |
 | `REQ-OFFICE-AGENT-COMMENT-READS-008` | [Control flow](#control-flow) |
+| `REQ-OFFICE-AGENT-COMMENT-READS-009` | [Taskless run callers](#taskless-run-callers), [Security](#security), [Observability](#observability) |
 
 ## Components and responsibilities
 
@@ -160,6 +162,37 @@ away from a silently truncated thread. A permission that no builder is required
 to exercise is one no test can observe either way, so it is settled here in the
 negative: the browser branch ignores `limit` entirely and returns the full
 list, which is what the same criterion's own first clause already requires.
+
+### Taskless run callers
+
+A lightweight routine fire, such as the coordinator heartbeat, runs with a JWT
+whose task claim is empty. The read relation needs a caller task, so it denies
+such a caller for every target. The taskless coordinator authority design
+already gives the same run workspace-wide board reads and annotation
+(`taskless-coordinator-authority-01.md`, "The authority boundary"). Reads follow
+annotation's shape, not a new rule.
+
+The agent branch of the handler splits once more, on the claims alone:
+
+| Claims | Rule |
+| --- | --- |
+| Task claim non-empty after trimming | Read relation, unchanged |
+| Task claim empty, run claim non-empty, workspace claim non-empty | Target workspace must equal the workspace claim |
+| Anything else | Forbidden for every target |
+
+The workspace rule is owned by the task system's handoff comment service beside
+the relation guard, as `ListCommentsForTasklessRun(ctx, workspaceID,
+targetTaskID, limit)`. It resolves the target through the same task lookup and
+normalises a missing target to the shared access-denied sentinel, exactly as
+`loadAccessPair` does, so a missing target and a foreign one cannot be told
+apart. A failed lookup is returned as an error. Both entry points then share one
+private window builder, so the limit clamp, ordering, byte budget and
+projection cannot diverge between them.
+
+The run claim is required so that a token that is not a run, one minted
+without a run identifier, keeps AC-OFFICE-AGENT-COMMENT-READS-001.13's denial.
+The run claim is not otherwise trusted: it names the run a refusal is recorded
+on and grants nothing.
 
 ### Where the limit decision is made
 
@@ -352,7 +385,11 @@ indistinguishable from an existing unrelated one on every surface using the
 guard.
 
 The caller identity comes from validated JWT claims, so a caller cannot claim
-to be a task it is not, and a token with no task claim reads nothing.
+to be a task it is not. A token with no task claim reads nothing unless it is a
+taskless run token, which reads only inside its own workspace claim. That reach
+equals what the same run can already enumerate through the runtime board read
+and annotate through the runtime comment action, so no new data becomes
+reachable to it. A task-bound token gains nothing.
 
 Recorded so it is not mistaken for a new hole: the dashboard task **document**
 routes apply no relation check either. That gap predates this work, is the same
@@ -381,6 +418,17 @@ Requests are visible in the office route group's existing HTTP logging, so a
 coordinator's read attempts are traceable alongside its other runtime calls. No
 new metric: the failure this addresses is a missing capability and an unguarded
 read, not a rate to watch.
+
+A refused agent read is also recorded on the caller's run. When the caller's
+JWT carries a run identifier, the handler appends one `runtime.denied` event
+(`action=read_comments`, `target_type=task`, `target_id`, `agent_id`,
+`session_id`, `error`) through the Office service's run-event appender, the
+same event type and payload shape the runtime action surface already writes.
+The dashboard service receives that appender through an optional setter wired
+in `backendapp` beside `SetRunResolver`. With no appender, or no run identifier,
+nothing is recorded. The append is best effort: it never changes the response,
+and it never changes the run's outcome. A run in which every read was refused
+therefore still completes, but its event stream says why it did nothing.
 
 ## Related decisions
 
