@@ -117,3 +117,25 @@ func TestWSMessageDismissGitPushError(t *testing.T) {
 		}
 	})
 }
+
+func TestWSMessageDismissGitPushErrorTrimsMessageID(t *testing.T) {
+	repo := &dismissalWSMessageRepository{message: &models.Message{
+		ID: "push-failure", TaskSessionID: "session-1", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeError, Content: "push failed",
+		Metadata: map[string]any{"git_operation_error": true, "operation": "push"},
+	}}
+	response := dispatchGitPushDismissal(t, repo, context.Background(), map[string]string{"message_id": " push-failure "})
+	if response.Type != ws.MessageTypeResponse {
+		t.Fatalf("padded message ID response type = %q, want response", response.Type)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(response.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["message_id"] != "push-failure" {
+		t.Fatalf("response message_id = %#v, want trimmed ID", payload["message_id"])
+	}
+	if _, ok := repo.message.Metadata["git_operation_error_dismissed_at"].(string); !ok {
+		t.Fatalf("message metadata = %#v, want persisted dismissal marker", repo.message.Metadata)
+	}
+}

@@ -1018,9 +1018,6 @@ func (s *Service) DismissGitPushErrorMessage(ctx context.Context, messageID stri
 	}
 
 	dismissedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	if message.Metadata == nil {
-		message.Metadata = make(map[string]any)
-	}
 	message.Metadata["git_operation_error_dismissed_at"] = dismissedAt
 	if err := s.UpdateMessage(ctx, message); err != nil {
 		return "", err

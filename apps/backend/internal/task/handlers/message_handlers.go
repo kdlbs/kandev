@@ -1870,18 +1870,16 @@ func (h *MessageHandlers) wsDismissGitPushErrorMessage(ctx context.Context, msg 
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload", nil)
 	}
-	if strings.TrimSpace(req.MessageID) == "" {
+	messageID := strings.TrimSpace(req.MessageID)
+	if messageID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "message_id is required", nil)
 	}
 
-	dismissedAt, err := h.service.DismissGitPushErrorMessage(ctx, req.MessageID)
+	dismissedAt, err := h.service.DismissGitPushErrorMessage(ctx, messageID)
 	if err != nil {
 		code := ws.ErrorCodeInternalError
 		publicMessage := "Failed to dismiss Git push error message"
 		switch {
-		case errors.Is(err, service.ErrForbidden):
-			code = ws.ErrorCodeForbidden
-			publicMessage = "Cannot dismiss this message"
 		case errors.Is(err, repoerrors.ErrTaskNotFound), errors.Is(err, sql.ErrNoRows):
 			code = ws.ErrorCodeNotFound
 			publicMessage = "Message not found"
@@ -1889,12 +1887,12 @@ func (h *MessageHandlers) wsDismissGitPushErrorMessage(ctx context.Context, msg 
 			code = ws.ErrorCodeValidation
 			publicMessage = "Message is not a Git push error"
 		}
-		h.logger.Warn("failed to dismiss Git push error message", zap.String("message_id", req.MessageID), zap.Error(err))
+		h.logger.Warn("failed to dismiss Git push error message", zap.String("message_id", messageID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, code, publicMessage, nil)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, wsDismissGitPushErrorMessageResponse{
-		MessageID: req.MessageID, DismissedAt: dismissedAt,
+		MessageID: messageID, DismissedAt: dismissedAt,
 	})
 }
 

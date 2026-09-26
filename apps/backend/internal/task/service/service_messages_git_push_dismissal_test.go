@@ -232,3 +232,25 @@ func TestDismissGitPushErrorMessage(t *testing.T) {
 		}
 	})
 }
+
+func TestDismissGitPushErrorMessageRejectsNilMetadataBeforeWrite(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-nil-metadata")
+	message := &models.Message{
+		ID: "nil-metadata", TaskID: "task-123", TaskSessionID: sessionID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Type: models.MessageTypeError,
+	}
+	tracking := &dismissalTrackingMessageRepository{MessageRepository: repo, message: message}
+	svc.messages = tracking
+	eventBus.ClearEvents()
+
+	if _, err := svc.DismissGitPushErrorMessage(ctx, message.ID); !errors.Is(err, ErrNotGitPushErrorMessage) {
+		t.Fatalf("nil metadata error = %v, want ErrNotGitPushErrorMessage", err)
+	}
+	if tracking.writes != 0 || len(eventBus.GetPublishedEvents()) != 0 {
+		t.Fatalf("nil metadata writes/events = %d/%d, want 0/0", tracking.writes, len(eventBus.GetPublishedEvents()))
+	}
+}
