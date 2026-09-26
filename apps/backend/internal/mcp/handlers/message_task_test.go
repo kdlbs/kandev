@@ -45,6 +45,7 @@ type fakeOrchestrator struct {
 	launchErr               error
 	launchFunc              func(context.Context, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
 	launchResponseProfileID string
+	peerStartFunc           func(context.Context, messagequeue.QueueSessionIdentity, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) (*executor.TaskExecution, error)
 	renameCalls             []renameCall
 	renameErr               error
 
@@ -188,6 +189,23 @@ func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessio
 		return nil, f.startCreatedErr
 	}
 	return &executor.TaskExecution{SessionID: sessionID}, nil
+}
+
+func (f *fakeOrchestrator) StartCreatedSessionForPeerMessage(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+) (*executor.TaskExecution, error) {
+	if f.peerStartFunc != nil {
+		return f.peerStartFunc(ctx, identity, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references)
+	}
+	return f.StartCreatedSession(
+		ctx, identity.TaskID, identity.SessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references,
+	)
 }
 
 func (f *fakeOrchestrator) ResumeTaskSession(_ context.Context, _, _ string) (*executor.TaskExecution, error) {

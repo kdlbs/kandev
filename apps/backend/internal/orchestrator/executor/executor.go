@@ -220,12 +220,15 @@ var (
 	ErrTaskArchived            = errors.New("task is archived")
 	ErrStaleExecution          = errors.New("stale execution: no live execution in memory")
 	ErrAgentCommandMissing     = errors.New("existing execution has no agent command configured")
+	// ErrSessionAdvancedToRunning reports that another launch advanced the
+	// session before this launch could persist its prepared runtime data.
+	ErrSessionAdvancedToRunning = errors.New("session state advanced to RUNNING before runtime persistence")
 	// ErrSessionStateSuperseded means a runtime registered successfully, but a
 	// concurrent terminal session transition won the persistence race. Callers
 	// must not start the process and must arbitrate exact-execution teardown
 	// ownership before deciding whether to force-stop the registered runtime.
 	ErrSessionStateSuperseded   = errors.New("session state superseded by terminal transition")
-	errSessionAdvancedToRunning = errors.New("session state advanced to RUNNING before runtime persistence")
+	errSessionAdvancedToRunning = ErrSessionAdvancedToRunning
 	// ErrOrphanRecoveryIncomplete means StopByTaskID stopped every session it
 	// found but could not load at least one registry-only orphan's row, so the
 	// task-scoped stop is not fully confirmed. Callers that already observed a
@@ -673,10 +676,14 @@ type LaunchOptions struct {
 	PriorACPSession     string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID      string
 	StartAgent          bool
-	McpMode             string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
-	McpProfile          *mcpprofile.Context
-	Attachments         []v1.MessageAttachment
-	Env                 map[string]string
+	// RefuseIfAgentRunning makes peer-message admission fail closed when the
+	// selected session already has an active agent. Other internal launch paths
+	// retain their existing workspace reuse behavior.
+	RefuseIfAgentRunning bool
+	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
+	McpProfile           *mcpprofile.Context
+	Attachments          []v1.MessageAttachment
+	Env                  map[string]string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string

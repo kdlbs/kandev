@@ -3727,10 +3727,8 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 			atomic.AddInt64(&launchCount, 1)
 			entered <- struct{}{}
 			<-gate
-			// Simulate the lifecycle manager's persistExecutorRunning: the row
-			// must exist after the first launch so the second caller's
-			// HasExecutorRunningRow check returns true and routes to the
-			// fast path (startAgentOnExistingWorkspace) instead of launching again.
+			// Simulate the lifecycle manager's persistExecutorRunning so the
+			// second caller observes the first launch's durable ownership.
 			repo.executorsRunning[req.SessionID] = &models.ExecutorRunning{
 				ID:               req.SessionID,
 				SessionID:        req.SessionID,
@@ -3740,13 +3738,8 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 			}
 			return &LaunchAgentResponse{AgentExecutionID: "exec-race", Status: v1.AgentStatusStarting}, nil
 		},
-		// Fast path lookup must succeed for the second caller; mirror what
-		// the live store would return after the first caller registered.
-		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
-			return "exec-race", nil
-		},
 		// The repository mock returns shared pointers, unlike the production
-		// database store. Hold both async process-start callbacks until the
+		// database store. Hold the async process-start callback until the
 		// serialized launch calls finish mutating their session snapshots.
 		startAgentProcessFunc: func(_ context.Context, _ string) error {
 			<-startProcessGate
@@ -3793,16 +3786,25 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 	wg.Wait()
 	releaseStartProcessGate()
 	waitForUpdateTaskStateIfNotArchivedCall(t, repo)
-	waitForUpdateTaskStateIfNotArchivedCall(t, repo)
 
-	// First call ran LaunchAgent; second call took the fast path so total
-	// stays at 1. Both return non-error (the second is a no-op start).
+	// First call ran LaunchAgent. The second call observes that the winner owns
+	// the starting session and returns a typed busy outcome without reconfiguring
+	// or rewriting its state.
 	if got := atomic.LoadInt64(&launchCount); got != 1 {
 		t.Errorf("LaunchAgent total calls = %d, want 1", got)
 	}
+	successes, busy := 0, 0
 	for i, err := range results {
-		if err != nil {
-			t.Errorf("results[%d] = %v, want nil", i, err)
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrExecutionAlreadyRunning):
+			busy++
+		default:
+			t.Errorf("results[%d] = %v, want nil or ErrExecutionAlreadyRunning", i, err)
 		}
+	}
+	if successes != 1 || busy != 1 {
+		t.Errorf("launch outcomes = %d success, %d busy, want one of each", successes, busy)
 	}
 }

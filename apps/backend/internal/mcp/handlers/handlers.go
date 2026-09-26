@@ -185,6 +185,7 @@ type SessionLauncher interface {
 	LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) (*executor.TaskExecution, error)
+	StartCreatedSessionForPeerMessage(ctx context.Context, identity messagequeue.QueueSessionIdentity, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) (*executor.TaskExecution, error)
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error)
 	QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error
@@ -206,6 +207,13 @@ type SessionLauncher interface {
 	// RenameSession sets the user-visible session tab label and broadcasts
 	// the change. Used by spawn_session_kandev's optional name parameter.
 	RenameSession(ctx context.Context, sessionID, name string) error
+}
+
+type peerMessageStartAdmissionProvider interface {
+	BeginPeerMessageStart(
+		context.Context,
+		messagequeue.QueueSessionIdentity,
+	) (orchestrator.PeerMessageStartAdmission, error)
 }
 
 // TaskStopper exposes the narrow coordinator halt operation used by
@@ -3026,6 +3034,19 @@ type queueFullDispatchError struct {
 	entries   []messagequeue.QueuedMessage
 }
 
+type unownedPeerMessageStartError struct{ cause error }
+
+func (e *unownedPeerMessageStartError) Error() string {
+	return e.cause.Error()
+}
+
+func (e *unownedPeerMessageStartError) Unwrap() error { return e.cause }
+
+func isUnownedPeerMessageStartError(err error) bool {
+	var unowned *unownedPeerMessageStartError
+	return errors.As(err, &unowned)
+}
+
 func (e *queueFullDispatchError) Error() string {
 	return fmt.Sprintf("queue full: %d/%d messages pending for session %s", e.queueSize, e.max, e.sessionID)
 }
@@ -3116,15 +3137,17 @@ type taskMessageDispatchResult struct {
 }
 
 type taskMessageReviewRollback struct {
-	taskID         string
-	changed        bool
-	restoreTask    bool
-	taskState      v1.TaskState
-	workflowStepID string
-	sessions       []taskMessageSessionRollback
-	sessionIDs     map[string]struct{}
-	selectedID     string
-	queues         map[string]taskMessageQueueRollback
+	taskID           string
+	changed          bool
+	restoreTask      bool
+	taskState        v1.TaskState
+	workflowStepID   string
+	sessions         []taskMessageSessionRollback
+	sessionIDs       map[string]struct{}
+	selectedID       string
+	selectedState    models.TaskSessionState
+	hasSelectedState bool
+	queues           map[string]taskMessageQueueRollback
 }
 
 type taskMessageSessionRollback struct {
@@ -3132,6 +3155,8 @@ type taskMessageSessionRollback struct {
 	taskID               string
 	sessionIncarnationID string
 	state                models.TaskSessionState
+	expectedState        models.TaskSessionState
+	hasExpectedState     bool
 	error                string
 	completedAt          *time.Time
 	isPrimary            bool
@@ -3234,6 +3259,47 @@ func (r *taskMessageReviewRollback) captureSelectedSession(session *models.TaskS
 		return
 	}
 	r.selectedID = session.ID
+	r.selectedState = session.State
+	r.hasSelectedState = true
+	for index := range r.sessions {
+		if r.sessions[index].sessionID == session.ID {
+			r.sessions[index].expectedState = session.State
+			r.sessions[index].hasExpectedState = true
+		}
+	}
+}
+
+func (r *taskMessageReviewRollback) captureExpectedSessionStates(
+	ctx context.Context,
+	repo SessionRepository,
+) error {
+	if !r.changed {
+		return nil
+	}
+	for index := range r.sessions {
+		session, err := repo.GetTaskSession(ctx, r.sessions[index].sessionID)
+		if err != nil {
+			return err
+		}
+		if session == nil || session.TaskID != r.sessions[index].taskID ||
+			(r.sessions[index].sessionIncarnationID != "" && session.QueueIncarnationID != r.sessions[index].sessionIncarnationID) {
+			return messagequeue.ErrSessionIdentityMismatch
+		}
+		r.sessions[index].expectedState = session.State
+		r.sessions[index].hasExpectedState = true
+	}
+	if r.selectedID != "" {
+		selected, err := repo.GetTaskSession(ctx, r.selectedID)
+		if err != nil {
+			return err
+		}
+		if selected == nil || (selected.TaskID != "" && selected.TaskID != r.taskID) {
+			return messagequeue.ErrSessionIdentityMismatch
+		}
+		r.selectedState = selected.State
+		r.hasSelectedState = true
+	}
+	return nil
 }
 
 func captureTaskMessageSession(session *models.TaskSession) taskMessageSessionRollback {
@@ -3247,6 +3313,8 @@ func captureTaskMessageSession(session *models.TaskSession) taskMessageSessionRo
 		taskID:               session.TaskID,
 		sessionIncarnationID: session.QueueIncarnationID,
 		state:                session.State,
+		expectedState:        session.State,
+		hasExpectedState:     true,
 		error:                session.ErrorMessage,
 		completedAt:          completedAt,
 		isPrimary:            session.IsPrimary,
@@ -3343,47 +3411,181 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
 
 	default:
-		reviewRollback, err := h.ensureTaskInProgressForTaskMessage(ctx, taskID)
-		if err != nil {
-			return taskMessageDispatchResult{}, err
-		}
-		if err := reviewRollback.captureSessions(ctx, h.sessionRepo, taskID, session); err != nil {
-			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
-			return taskMessageDispatchResult{}, err
-		}
-		if err := reviewRollback.captureQueues(ctx, h.sessionLauncher.GetMessageQueue()); err != nil {
-			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
-			return taskMessageDispatchResult{}, err
-		}
-		session, turnStartResult, err := h.prepareSessionForTaskMessage(ctx, taskID, session, pinnedTarget)
-		if err != nil {
-			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
-			return taskMessageDispatchResult{}, err
-		}
-		reviewRollback.captureSelectedSession(session)
-		if turnStartResult.Queued {
-			if err := h.sessionLauncher.QueueUserPrompt(
-				ctx,
-				taskID,
-				session.ID,
-				prompt,
-				"",
-				false,
-				nil,
-				metadata,
-				false,
-			); err != nil {
-				h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
-				return taskMessageDispatchResult{}, fmt.Errorf("failed to queue prompt until workflow promotion: %w", err)
-			}
-			return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID}, nil
-		}
-		result, err := h.dispatchPreparedTaskMessage(ctx, taskID, session, prompt, metadata)
-		if err != nil {
-			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
-		}
-		return result, err
+		return h.dispatchUnpreparedTaskMessage(ctx, taskID, session, prompt, metadata, pinnedTarget)
 	}
+}
+
+func (h *Handlers) dispatchUnpreparedTaskMessage(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	pinnedTarget bool,
+) (taskMessageDispatchResult, error) {
+	admission, queued, err := h.beginUnpreparedPeerMessageStart(ctx, taskID, session, prompt, metadata)
+	if err != nil {
+		return taskMessageDispatchResult{}, err
+	}
+	if queued != nil {
+		return *queued, nil
+	}
+	if admission != nil {
+		defer admission.Release()
+	}
+	return h.prepareAndDispatchTaskMessage(ctx, taskID, session, prompt, metadata, pinnedTarget, admission)
+}
+
+func (h *Handlers) beginUnpreparedPeerMessageStart(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+) (orchestrator.PeerMessageStartAdmission, *taskMessageDispatchResult, error) {
+	if !h.shouldStartTaskMessageSession(ctx, session) {
+		return nil, nil, nil
+	}
+	provider, ok := h.sessionLauncher.(peerMessageStartAdmissionProvider)
+	if !ok {
+		return nil, nil, nil
+	}
+	identity, err := h.resolveTaskMessageQueueIdentity(ctx, taskID, session)
+	if err != nil {
+		return nil, nil, err
+	}
+	admission, err := provider.BeginPeerMessageStart(ctx, identity)
+	if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
+		result, queueErr := h.queueTaskMessageForIdentity(ctx, taskID, session, identity, prompt, metadata)
+		if queueErr != nil {
+			return nil, nil, queueErr
+		}
+		return nil, &result, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return admission, nil, nil
+}
+
+func (h *Handlers) prepareAndDispatchTaskMessage(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	pinnedTarget bool,
+	admission orchestrator.PeerMessageStartAdmission,
+) (taskMessageDispatchResult, error) {
+	reviewRollback, err := h.captureTaskMessageReviewRollback(ctx, taskID, session, admission)
+	if err != nil {
+		return taskMessageDispatchResult{}, err
+	}
+	session, turnStartResult, err := h.prepareSessionForTaskMessage(ctx, taskID, session, pinnedTarget, admission)
+	if err != nil {
+		return h.handleTaskMessagePreparationError(ctx, taskID, session, prompt, metadata, reviewRollback, admission, err)
+	}
+	reviewRollback.captureSelectedSession(session)
+	if err := reviewRollback.captureExpectedSessionStates(ctx, h.sessionRepo); err != nil {
+		h.rollbackTaskMessageReview(ctx, taskID, reviewRollback, admission)
+		return taskMessageDispatchResult{}, err
+	}
+	if turnStartResult.Queued {
+		return h.queueTaskMessageUntilWorkflowPromotion(ctx, taskID, session, prompt, metadata, reviewRollback, admission)
+	}
+	return h.dispatchPreparedTaskMessageWithReviewRollback(ctx, taskID, session, prompt, metadata, admission, reviewRollback)
+}
+
+func (h *Handlers) captureTaskMessageReviewRollback(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	admission orchestrator.PeerMessageStartAdmission,
+) (*taskMessageReviewRollback, error) {
+	reviewRollback, err := h.ensureTaskInProgressForTaskMessage(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if err := reviewRollback.captureSessions(ctx, h.sessionRepo, taskID, session); err != nil {
+		h.rollbackTaskMessageReview(ctx, taskID, &reviewRollback, admission)
+		return nil, err
+	}
+	if err := reviewRollback.captureQueues(ctx, h.sessionLauncher.GetMessageQueue()); err != nil {
+		h.rollbackTaskMessageReview(ctx, taskID, &reviewRollback, admission)
+		return nil, err
+	}
+	return &reviewRollback, nil
+}
+
+func (h *Handlers) handleTaskMessagePreparationError(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	reviewRollback *taskMessageReviewRollback,
+	admission orchestrator.PeerMessageStartAdmission,
+	prepErr error,
+) (taskMessageDispatchResult, error) {
+	if errors.Is(prepErr, executor.ErrExecutionAlreadyRunning) && admission != nil {
+		identity := admission.SessionIdentity()
+		releasePeerMessageStartAdmission(admission)
+		return h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata)
+	}
+	if admission != nil {
+		_ = reviewRollback.captureExpectedSessionStates(ctx, h.sessionRepo)
+	}
+	h.rollbackTaskMessageReview(ctx, taskID, reviewRollback, admission)
+	return taskMessageDispatchResult{}, prepErr
+}
+
+func (h *Handlers) rollbackTaskMessageReview(
+	ctx context.Context,
+	taskID string,
+	reviewRollback *taskMessageReviewRollback,
+	admission orchestrator.PeerMessageStartAdmission,
+) {
+	releasePeerMessageStartAdmission(admission)
+	h.restoreTaskReviewForTaskMessage(ctx, taskID, *reviewRollback)
+}
+
+func (h *Handlers) queueTaskMessageUntilWorkflowPromotion(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	reviewRollback *taskMessageReviewRollback,
+	admission orchestrator.PeerMessageStartAdmission,
+) (taskMessageDispatchResult, error) {
+	releasePeerMessageStartAdmission(admission)
+	if err := h.sessionLauncher.QueueUserPrompt(ctx, taskID, session.ID, prompt, "", false, nil, metadata, false); err != nil {
+		h.restoreTaskReviewForTaskMessage(ctx, taskID, *reviewRollback)
+		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue prompt until workflow promotion: %w", err)
+	}
+	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID}, nil
+}
+
+func (h *Handlers) dispatchPreparedTaskMessageWithReviewRollback(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	admission orchestrator.PeerMessageStartAdmission,
+	reviewRollback *taskMessageReviewRollback,
+) (taskMessageDispatchResult, error) {
+	result, err := h.dispatchPreparedTaskMessageWithAdmission(ctx, taskID, session, prompt, metadata, admission)
+	if err != nil {
+		if isUnownedPeerMessageStartError(err) {
+			return taskMessageDispatchResult{}, err
+		}
+		if admission != nil && admission.IsActive() {
+			_ = reviewRollback.captureExpectedSessionStates(ctx, h.sessionRepo)
+		}
+		h.restoreTaskReviewForTaskMessage(ctx, taskID, *reviewRollback)
+	}
+	return result, err
 }
 
 // resumeCompletedTaskMessageSession admits a pinned completed target through
@@ -3414,33 +3616,136 @@ func (h *Handlers) resumeCompletedTaskMessageSession(ctx context.Context, taskID
 }
 
 func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
+	return h.dispatchPreparedTaskMessageWithAdmission(ctx, taskID, session, prompt, metadata, nil)
+}
+
+func (h *Handlers) dispatchPreparedTaskMessageWithAdmission(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	admission orchestrator.PeerMessageStartAdmission,
+) (taskMessageDispatchResult, error) {
 	switch session.State {
 	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
+		releasePeerMessageStartAdmission(admission)
 		return taskMessageDispatchResult{}, terminalSessionDispatchError(session)
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+		releasePeerMessageStartAdmission(admission)
 		return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
 	default:
 		if h.shouldStartTaskMessageSession(ctx, session) {
-			// Record before starting so the message is tied to the turn produced
-			// by launch. If launch fails, delete the row below.
-			recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
-			if _, err := h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil, nil); err != nil {
-				h.deleteRecordedUserMessage(ctx, recorded)
-				return taskMessageDispatchResult{}, fmt.Errorf("failed to start session: %w", err)
-			}
-			return taskMessageDispatchResult{status: "started", sessionID: session.ID}, nil
+			return h.startPreparedPeerTaskMessage(ctx, taskID, session, prompt, metadata, admission)
 		}
-		// Record before prompting so the message is tied to the turn that
-		// PromptTask dispatches. If dispatch fails, delete the row below so a
-		// REVIEW rollback does not keep a prompt the agent never saw.
-		recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
-		status, err := h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
-		if err != nil {
-			h.deleteRecordedUserMessage(ctx, recorded)
+		return h.promptPreparedTaskMessage(ctx, taskID, session, prompt, metadata, admission)
+	}
+}
+
+func releasePeerMessageStartAdmission(admission orchestrator.PeerMessageStartAdmission) {
+	if admission != nil {
+		admission.Release()
+	}
+}
+
+func (h *Handlers) startPreparedPeerTaskMessage(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	admission orchestrator.PeerMessageStartAdmission,
+) (taskMessageDispatchResult, error) {
+	identity, admission, queued, err := h.admitPreparedPeerTaskMessage(ctx, taskID, session, prompt, metadata, admission)
+	if err != nil {
+		return taskMessageDispatchResult{}, err
+	}
+	if queued != nil {
+		return *queued, nil
+	}
+	recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
+	if admission != nil {
+		_, err = admission.StartCreatedSession(ctx, session.AgentProfileID, prompt, true, false, true, nil, nil)
+	} else {
+		_, err = h.sessionLauncher.StartCreatedSessionForPeerMessage(
+			ctx, identity, session.AgentProfileID, prompt, true, false, true, nil, nil,
+		)
+	}
+	if err != nil {
+		// The start admission owns cleanup for any turn it created. The handler
+		// removes only its message so it cannot abandon another launch's turn.
+		h.deleteRecordedUserMessageWithoutTurnRollback(ctx, recorded)
+		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
+			releasePeerMessageStartAdmission(admission)
+			return h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata)
+		}
+		if errors.Is(err, messagequeue.ErrSessionIdentityMismatch) {
+			releasePeerMessageStartAdmission(admission)
 			return taskMessageDispatchResult{}, err
 		}
-		return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil
+		releasePeerMessageStartAdmission(admission)
+		return taskMessageDispatchResult{}, fmt.Errorf("failed to start session: %w", err)
 	}
+	releasePeerMessageStartAdmission(admission)
+	return taskMessageDispatchResult{status: "started", sessionID: session.ID}, nil
+}
+
+func (h *Handlers) admitPreparedPeerTaskMessage(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	admission orchestrator.PeerMessageStartAdmission,
+) (messagequeue.QueueSessionIdentity, orchestrator.PeerMessageStartAdmission, *taskMessageDispatchResult, error) {
+	identity, err := h.resolveTaskMessageQueueIdentity(ctx, taskID, session)
+	if err != nil {
+		releasePeerMessageStartAdmission(admission)
+		return messagequeue.QueueSessionIdentity{}, nil, nil, err
+	}
+	if admission != nil && admission.SessionIdentity() != identity {
+		releasePeerMessageStartAdmission(admission)
+		admission = nil
+	}
+	if admission != nil {
+		return identity, admission, nil, nil
+	}
+	provider, ok := h.sessionLauncher.(peerMessageStartAdmissionProvider)
+	if !ok {
+		return identity, nil, nil, nil
+	}
+	admission, err = provider.BeginPeerMessageStart(ctx, identity)
+	if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
+		result, queueErr := h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata)
+		if queueErr != nil {
+			return messagequeue.QueueSessionIdentity{}, nil, nil, queueErr
+		}
+		return identity, nil, &result, nil
+	}
+	if err != nil {
+		return messagequeue.QueueSessionIdentity{}, nil, nil, err
+	}
+	return identity, admission, nil, nil
+}
+
+func (h *Handlers) promptPreparedTaskMessage(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	admission orchestrator.PeerMessageStartAdmission,
+) (taskMessageDispatchResult, error) {
+	releasePeerMessageStartAdmission(admission)
+	// Record before prompting so the message is tied to the turn PromptTask
+	// dispatches. If dispatch fails, remove the row before REVIEW rollback.
+	recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
+	status, err := h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
+	if err != nil {
+		h.deleteRecordedUserMessage(ctx, recorded)
+		return taskMessageDispatchResult{}, err
+	}
+	return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil
 }
 
 func (h *Handlers) shouldStartTaskMessageSession(ctx context.Context, session *models.TaskSession) bool {
@@ -3472,16 +3777,61 @@ func (h *Handlers) shouldStartTaskMessageSession(ctx context.Context, session *m
 // that need to target this exact entry (rather than the FIFO head) can do
 // so later.
 func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
+	identity, err := h.resolveTaskMessageQueueIdentity(ctx, taskID, session)
+	if err != nil {
+		return taskMessageDispatchResult{}, err
+	}
+	return h.queueTaskMessageForIdentity(ctx, taskID, session, identity, prompt, metadata)
+}
+
+func (h *Handlers) resolveTaskMessageQueueIdentity(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) (messagequeue.QueueSessionIdentity, error) {
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil {
+		return messagequeue.QueueSessionIdentity{}, errors.New("message queue not available")
+	}
+	identity, err := queue.ResolveSessionIdentity(ctx, taskID, session.ID)
+	if err != nil {
+		return messagequeue.QueueSessionIdentity{}, fmt.Errorf("resolve queue session identity: %w", err)
+	}
+	if session.QueueIncarnationID != "" && identity.SessionIncarnationID != session.QueueIncarnationID {
+		return messagequeue.QueueSessionIdentity{}, messagequeue.ErrSessionIdentityMismatch
+	}
+	return identity, nil
+}
+
+func (h *Handlers) queueAfterUnownedPeerStart(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	identity messagequeue.QueueSessionIdentity,
+	prompt string,
+	metadata map[string]interface{},
+) (taskMessageDispatchResult, error) {
+	result, err := h.queueTaskMessageForIdentity(ctx, taskID, session, identity, prompt, metadata)
+	if err != nil {
+		return taskMessageDispatchResult{}, &unownedPeerMessageStartError{cause: err}
+	}
+	return result, nil
+}
+
+func (h *Handlers) queueTaskMessageForIdentity(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	identity messagequeue.QueueSessionIdentity,
+	prompt string,
+	metadata map[string]interface{},
+) (taskMessageDispatchResult, error) {
 	queue := h.sessionLauncher.GetMessageQueue()
 	if queue == nil {
 		return taskMessageDispatchResult{}, errors.New("message queue not available")
 	}
-	identity, err := queue.ResolveSessionIdentity(ctx, taskID, session.ID)
-	if err != nil {
-		return taskMessageDispatchResult{}, fmt.Errorf("resolve queue session identity: %w", err)
-	}
-	if session.QueueIncarnationID != "" &&
-		identity.SessionIncarnationID != session.QueueIncarnationID {
+	if identity.TaskID != taskID || identity.SessionID != session.ID ||
+		(session.QueueIncarnationID != "" && identity.SessionIncarnationID != session.QueueIncarnationID) {
 		return taskMessageDispatchResult{}, messagequeue.ErrSessionIdentityMismatch
 	}
 	queued, err := queue.QueueMessageWithMetadataForSession(
@@ -3587,8 +3937,20 @@ func (h *Handlers) queueThenInterruptTaskMessage(ctx context.Context, taskID str
 	return result, nil
 }
 
-func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, pinnedTarget bool) (*models.TaskSession, orchestrator.ProcessOnTurnStartResult, error) {
-	turnStartResult, err := h.sessionLauncher.ProcessOnTurnStart(ctx, taskID, session.ID)
+func (h *Handlers) prepareSessionForTaskMessage(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	pinnedTarget bool,
+	admission orchestrator.PeerMessageStartAdmission,
+) (*models.TaskSession, orchestrator.ProcessOnTurnStartResult, error) {
+	var turnStartResult orchestrator.ProcessOnTurnStartResult
+	var err error
+	if admission != nil && admission.SessionIdentity().TaskID == taskID && admission.SessionIdentity().SessionID == session.ID {
+		turnStartResult, err = admission.ProcessOnTurnStart(ctx, taskID, session.ID)
+	} else {
+		turnStartResult, err = h.sessionLauncher.ProcessOnTurnStart(ctx, taskID, session.ID)
+	}
 	if err != nil {
 		return nil, orchestrator.ProcessOnTurnStartResult{}, fmt.Errorf("failed to process on_turn_start for task message: %w", err)
 	}
@@ -3694,13 +4056,13 @@ func (r taskMessageReviewRollback) taskRestoreOwner() (string, models.TaskSessio
 	primaryID := r.primarySessionID()
 	for _, snapshot := range r.sessions {
 		if snapshot.sessionID == primaryID {
-			return snapshot.sessionID, snapshot.state, true
+			return snapshot.sessionID, snapshot.state, snapshot.hasExpectedState
 		}
 	}
 	if len(r.sessions) == 0 {
 		return "", "", false
 	}
-	return r.sessions[0].sessionID, r.sessions[0].state, true
+	return r.sessions[0].sessionID, r.sessions[0].state, r.sessions[0].hasExpectedState
 }
 
 func (h *Handlers) restoreTaskMessageSessions(ctx context.Context, rollback taskMessageReviewRollback) error {
@@ -3723,16 +4085,19 @@ func (h *Handlers) restoreSelectedTaskMessageSession(ctx context.Context, repo t
 	if rollback.selectedID == "" {
 		return nil
 	}
-	primaryID := rollback.primarySessionID()
 	if _, ok := rollback.sessionIDs[rollback.selectedID]; ok {
 		return nil
 	}
+	primaryID := rollback.primarySessionID()
 	selected, err := repo.GetTaskSession(ctx, rollback.selectedID)
 	if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
 		return err
 	}
 	if selected != nil && selected.State == models.TaskSessionStateCancelled {
 		return errTaskMessageRollbackSuperseded
+	}
+	if selected != nil && (!rollback.hasSelectedState || selected.State != rollback.selectedState) {
+		return fmt.Errorf("task message rollback lost selected session %q state ownership", rollback.selectedID)
 	}
 	taskID := rollback.taskID
 	if selected != nil && selected.TaskID != "" {
@@ -3889,6 +4254,9 @@ func (h *Handlers) restoreTaskMessageQueueOwner(ctx context.Context, taskID, sel
 	return nil
 }
 func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSessionRollbackRepository, rollback taskMessageSessionRollback) error {
+	if !rollback.hasExpectedState {
+		return fmt.Errorf("task message rollback has no owning state for session %q", rollback.sessionID)
+	}
 	session, err := repo.GetTaskSession(ctx, rollback.sessionID)
 	if err != nil {
 		return err
@@ -3899,7 +4267,10 @@ func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSess
 	if session.State == models.TaskSessionStateCancelled {
 		return errTaskMessageRollbackSuperseded
 	}
-	expectedState := session.State
+	if session.State != rollback.expectedState {
+		return fmt.Errorf("task message rollback lost session %q state ownership", rollback.sessionID)
+	}
+	expectedState := rollback.expectedState
 	session.State = rollback.state
 	session.ErrorMessage = rollback.error
 	session.CompletedAt = rollback.completedAt
@@ -3988,6 +4359,14 @@ func (h *Handlers) recordUserMessage(ctx context.Context, taskID, sessionID, pro
 }
 
 func (h *Handlers) deleteRecordedUserMessage(ctx context.Context, message *models.Message) {
+	h.deleteRecordedUserMessageWithTurnRollback(ctx, message, true)
+}
+
+func (h *Handlers) deleteRecordedUserMessageWithoutTurnRollback(ctx context.Context, message *models.Message) {
+	h.deleteRecordedUserMessageWithTurnRollback(ctx, message, false)
+}
+
+func (h *Handlers) deleteRecordedUserMessageWithTurnRollback(ctx context.Context, message *models.Message, abandonOpenTurns bool) {
 	if h.taskSvc == nil || message == nil {
 		return
 	}
@@ -3998,12 +4377,14 @@ func (h *Handlers) deleteRecordedUserMessage(ctx context.Context, message *model
 			zap.String("session_id", message.TaskSessionID),
 			zap.Error(err))
 	}
-	if err := h.taskSvc.AbandonOpenTurns(ctx, message.TaskSessionID); err != nil {
-		h.logger.Warn("failed to abandon rejected user message turn for message_task",
-			zap.String("message_id", message.ID),
-			zap.String("task_id", message.TaskID),
-			zap.String("session_id", message.TaskSessionID),
-			zap.Error(err))
+	if abandonOpenTurns {
+		if err := h.taskSvc.AbandonOpenTurns(ctx, message.TaskSessionID); err != nil {
+			h.logger.Warn("failed to abandon rejected user message turn for message_task",
+				zap.String("message_id", message.ID),
+				zap.String("task_id", message.TaskID),
+				zap.String("session_id", message.TaskSessionID),
+				zap.Error(err))
+		}
 	}
 }
 

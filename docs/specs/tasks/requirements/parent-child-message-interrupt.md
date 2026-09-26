@@ -20,6 +20,8 @@ This document is the migrated task-system source for the capability. The source 
 #### Acceptance criteria
 
 - **AC-TASKS-PARENT-CHILD-MESSAGE-INTERRUPT-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-PARENT-CHILD-MESSAGE-INTERRUPT-001.2:** When an accepted initial launch is preparing or starting, a queued peer message shall preserve that launch and its original prompt. The message shall remain pending until normal queue policy permits delivery. It shall not start another agent or interrupt the original turn.
+- **AC-TASKS-PARENT-CHILD-MESSAGE-INTERRUPT-001.3:** When a competing start loses ownership, its failure or rollback shall not reset, fail, or stop the winning session. Accepted peer messages shall remain accounted for under existing queue policy.
 
 ## Migrated source detail
 
@@ -56,7 +58,12 @@ calling.
   the message is delivered immediately instead of waiting for the turn to end naturally.
 
 `delivery_mode` only affects dispatch when the target session is `RUNNING` or `STARTING`.
-For every other session state (`WAITING_FOR_INPUT`, `COMPLETED`, `CREATED`) the message is
+An accepted initial launch also counts as busy during preparation, even while
+its session row remains `CREATED`. Queued messages preserve that launch under
+criterion 001.2. Explicit interrupt retains its guarded cancel-and-dispatch
+contract and cannot create a second startup.
+
+For other eligible sessions without an accepted launch, the message is
 delivered through its normal path (prompt-with-resume or session start) regardless of
 `delivery_mode` — there is no in-flight turn to interrupt.
 

@@ -2294,6 +2294,24 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 	if isTerminalSessionState(latest.State) {
 		return &executor.SessionStateSupersededError{SessionID: session.ID, State: latest.State}
 	}
+	if latest.State == models.TaskSessionStateRunning {
+		return fmt.Errorf(
+			"session %s state advanced from %s to %s before full-row persistence: %w",
+			session.ID,
+			expected,
+			latest.State,
+			errors.Join(executor.ErrExecutionAlreadyRunning, executor.ErrSessionAdvancedToRunning),
+		)
+	}
+	if latest.State == models.TaskSessionStateStarting {
+		return fmt.Errorf(
+			"session %s state changed from %s to %s before full-row persistence: %w",
+			session.ID,
+			expected,
+			latest.State,
+			executor.ErrExecutionAlreadyRunning,
+		)
+	}
 	return fmt.Errorf(
 		"session %s state changed from %s to %s before full-row persistence",
 		session.ID,
