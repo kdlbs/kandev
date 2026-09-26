@@ -18,6 +18,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	officemodels "github.com/kandev/kandev/internal/office/models"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -71,6 +73,7 @@ func (g assigneeContractStepGetter) GetNextStepByPosition(context.Context, strin
 type assigneeContractFixture struct {
 	handlers    *TaskHandlers
 	repo        *taskrepo.Repository
+	db          *sqlx.DB
 	workspaceID string
 	workflowID  string
 	stepID      string
@@ -124,10 +127,41 @@ func newAssigneeContractFixtureWithStoreErrors(
 	return assigneeContractFixture{
 		handlers:    &TaskHandlers{service: svc, logger: log},
 		repo:        repo,
+		db:          sqlxDB,
 		workspaceID: workspaceID,
 		workflowID:  workflowID,
 		stepID:      stepID,
 	}
+}
+
+// pauseWorkspace records an active office workspace pause directly against
+// the fixture's own database (the same shared writer/reader pool production
+// wires both repositories onto — internal/backendapp/storage.go), the same
+// pattern internal/office/repository/sqlite/workspace_group_runner_switch_test.go
+// uses to combine the two repositories. Task creation and the runner-seat
+// write are unconditional on pause state — PR #3947's workspace kill switch
+// gates run/launch admission, not the create-task path — so this only needs
+// an active pause row to exist; it does not exercise the halt sweep.
+func (f assigneeContractFixture) pauseWorkspace(t *testing.T) {
+	t.Helper()
+	officeRepo, err := officesqlite.NewWithDB(f.db, f.db, nil)
+	require.NoError(t, err)
+	pause := &officemodels.WorkspacePause{
+		WorkspaceID:   f.workspaceID,
+		Reason:        "regression test pause",
+		CreatedBy:     "test-user",
+		CreatedByKind: "user",
+	}
+	activity := &officemodels.ActivityEntry{
+		WorkspaceID: f.workspaceID,
+		ActorType:   officemodels.ActivityActorUser,
+		ActorID:     "test-user",
+		Action:      officemodels.ActivityActionWorkspacePaused,
+		TargetType:  officemodels.ActivityTargetWorkspace,
+		TargetID:    f.workspaceID,
+		Details:     "regression test pause",
+	}
+	require.NoError(t, officeRepo.CreateWorkspacePauseWithActivity(context.Background(), pause, activity))
 }
 
 func (f assigneeContractFixture) createTaskBody(title, assigneeAgentProfileID, externalID string) string {
@@ -272,6 +306,29 @@ func TestBetaOfficeCreateContract(t *testing.T) {
 		tasks, err := f.repo.ListTasksByWorkflowStep(context.Background(), f.stepID)
 		require.NoError(t, err)
 		assert.Empty(t, tasks)
+	})
+
+	t.Run("creating with an assignee while the workspace is paused still seats the runner", func(t *testing.T) {
+		// The card asked to cover "creation while the workspace is paused":
+		// PR #3947's workspace kill switch gates run/launch admission, not
+		// task creation, so an active pause must not change this contract's
+		// outcome. This does not assert anything about pause/halt semantics
+		// themselves (out of scope here) — only that this create path is
+		// unaffected by them.
+		f := newAssigneeContractFixture(t, profiles)
+		f.pauseWorkspace(t)
+		rec := doCreateTask(f.handlers, f.createTaskBody("Assigned while paused", validProfile.ID, ""))
+		require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		taskID, _ := resp["id"].(string)
+		require.NotEmpty(t, taskID)
+
+		stored, err := f.repo.GetTask(context.Background(), taskID)
+		require.NoError(t, err)
+		assert.Equal(t, validProfile.ID, stored.AssigneeAgentProfileID,
+			"the runner seat must persist even while the workspace is paused")
 	})
 
 	t.Run("no assignee is unaffected", func(t *testing.T) {

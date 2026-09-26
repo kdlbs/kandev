@@ -66,8 +66,12 @@ that gate.
      (`s.agentProfiles`, wired at `Service` construction — no new
      dependency injection needed).
   3. Reject (wrapping `ErrInvalidAssigneeAgentProfile`) unless the profile
-     exists, is not soft-deleted, `Enabled == true`, and
-     `WorkspaceID == workspaceID` with `WorkspaceID` non-empty.
+     exists, is not soft-deleted, and `WorkspaceID == workspaceID` with
+     `WorkspaceID` non-empty. Deliberately does not gate on `Enabled`
+     (Review round 1 finding R1-F1): `ListAgentInstances`, the picker the
+     dialog's assignee list is drawn from, never filtered on it either, so
+     pre-existing `enabled=0` Office agent rows would otherwise become
+     unassignable after upgrade.
 
   The last check is deliberately **stricter** than
   `normalizeWorkflowAgentOverrideSource`'s existing rule elsewhere in the

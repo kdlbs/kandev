@@ -15,14 +15,13 @@ spec: "../../specs/office/requirements/scheduler.md"
 - `POST` task-create accepts `assignee_agent_profile_id` in the request body
   and forwards it into `service.CreateTaskRequest`.
 - A request naming an `assignee_agent_profile_id` that resolves to an
-  enabled Office agent instance scoped to the request's own workspace
-  succeeds, and the created task's runner seat
-  (`workflow_step_participants`, `role='runner'`) names that profile.
+  Office agent instance scoped to the request's own workspace succeeds
+  regardless of the profile's `enabled` flag, and the created task's runner
+  seat (`workflow_step_participants`, `role='runner'`) names that profile.
 - A request naming an `assignee_agent_profile_id` that does not resolve to
-  any profile, resolves to a disabled profile, resolves to a profile scoped
-  to a different workspace, or resolves to a profile with no workspace
-  (`WorkspaceID == ""`) is rejected with an HTTP 4xx before any task row is
-  written.
+  any profile, resolves to a profile scoped to a different workspace, or
+  resolves to a profile with no workspace (`WorkspaceID == ""`) is rejected
+  with an HTTP 4xx before any task row is written.
 - A duplicate request sharing an already-used `external_id` returns the
   previously created task without re-running this validation against the
   duplicate's own `assignee_agent_profile_id` and without writing a second

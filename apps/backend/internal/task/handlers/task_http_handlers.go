@@ -788,7 +788,7 @@ type httpCreateTaskRequest struct {
 	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
 	// AssigneeAgentProfileID names an Office agent instance to seat as the
 	// task's runner at create time. Optional, and always workspace-scoped;
-	// see service.validateAssigneeAgentProfile for eligibility rules.
+	// see service.ValidateAssigneeAgentProfile for eligibility rules.
 	AssigneeAgentProfileID string                 `json:"assignee_agent_profile_id,omitempty"`
 	ExecutorID             string                 `json:"executor_id,omitempty"`
 	ExecutorProfileID      string                 `json:"executor_profile_id,omitempty"`

@@ -273,8 +273,8 @@ func (s *Service) resolveWorkflowAgentOverrideExecutorProfile(
 }
 
 // ErrInvalidAssigneeAgentProfile identifies a create-time
-// assignee_agent_profile_id that does not name an enabled Office agent
-// instance scoped to the task's own workspace.
+// assignee_agent_profile_id that does not name an Office agent instance
+// scoped to the task's own workspace.
 var ErrInvalidAssigneeAgentProfile = errors.New("invalid assignee_agent_profile_id")
 
 // ValidateAssigneeAgentProfile checks a caller-supplied create-time assignee
