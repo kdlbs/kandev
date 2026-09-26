@@ -2222,6 +2222,9 @@ func (m *mockSessionLauncher) PromptTask(context.Context, string, string, string
 func (m *mockSessionLauncher) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) (*executor.TaskExecution, error) {
 	return nil, nil
 }
+func (m *mockSessionLauncher) StartCreatedSessionForPeerMessage(context.Context, messagequeue.QueueSessionIdentity, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) (*executor.TaskExecution, error) {
+	return nil, nil
+}
 func (m *mockSessionLauncher) ResumeTaskSession(context.Context, string, string) (*executor.TaskExecution, error) {
 	return nil, nil
 }

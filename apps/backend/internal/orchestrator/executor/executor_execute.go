@@ -849,10 +849,20 @@ func (e *Executor) persistSessionFullRowIfCurrentState(
 	if isStopTerminalSessionState(current.State) {
 		return &SessionStateSupersededError{SessionID: session.ID, State: current.State}
 	}
-	if expected == models.TaskSessionStateStarting && current.State == models.TaskSessionStateRunning {
+	if current.State == models.TaskSessionStateStarting || current.State == models.TaskSessionStateRunning {
+		if current.State == models.TaskSessionStateRunning {
+			return fmt.Errorf(
+				"%w: %w: session %s state changed from %s to %s before runtime persistence",
+				ErrExecutionAlreadyRunning,
+				errSessionAdvancedToRunning,
+				session.ID,
+				expected,
+				current.State,
+			)
+		}
 		return fmt.Errorf(
 			"%w: session %s state changed from %s to %s before runtime persistence",
-			errSessionAdvancedToRunning,
+			ErrExecutionAlreadyRunning,
 			session.ID,
 			expected,
 			current.State,
@@ -1578,6 +1588,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
 		return nil, fmt.Errorf("load runtime inventory for session %q: %w", sessionID, runningErr)
 	}
+	if startAgent && (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
+		((running != nil && executorRunningStatusMayOwnAgent(running.Status)) || e.agentManager.IsAgentRunningForSession(ctx, sessionID)) {
+		return nil, ErrExecutionAlreadyRunning
+	}
+	if startAgent && opts.RefuseIfAgentRunning && e.executorHasActiveAgent(ctx, session, running) {
+		return nil, ErrExecutionAlreadyRunning
+	}
 	if running != nil && running.ExecutionProfileID != "" &&
 		running.ExecutionProfileID != agentProfileID {
 		if running.AgentExecutionID != "" {
@@ -1770,7 +1787,10 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, fmt.Errorf("check runtime inventory for session %q: %w", sessionID, hasRunningErr)
 	}
 	if hasRunning {
-		result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(launchCtx, task, session, prompt, startAgent, opts.McpMode, req, opts.OnExecutionAdmitted, opts.TurnID)
+		result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(
+			launchCtx, task, session, prompt, startAgent, opts.McpMode, req,
+			opts.OnExecutionAdmitted, opts.RefuseIfAgentRunning, opts.TurnID,
+		)
 		if !errors.Is(existingErr, ErrStaleExecution) && !errors.Is(existingErr, ErrAgentCommandMissing) {
 			if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
 				return nil, errors.Join(existingErr, fmt.Errorf("release worktree recovery admission: %w", releaseErr))
@@ -2473,7 +2493,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		SessionID:   session.ID,
 		Env:         cloneStringMap(env),
 	}
-	return e.startAgentOnExistingWorkspaceWithRequest(ctx, task, session, prompt, startAgent, mcpMode, request, nil, turnIDs...)
+	return e.startAgentOnExistingWorkspaceWithRequest(ctx, task, session, prompt, startAgent, mcpMode, request, nil, false, turnIDs...)
 }
 
 func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
@@ -2485,6 +2505,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	mcpMode string,
 	request *LaunchAgentRequest,
 	onExecutionAdmitted func(string),
+	refuseIfAgentRunning bool,
 	turnIDs ...string,
 ) (*TaskExecution, error) {
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
@@ -2511,6 +2532,17 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 			LastUpdate:       now,
 			SessionID:        session.ID,
 		}, nil
+	}
+	running, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
+		return nil, fmt.Errorf("check existing workspace runtime: %w", runningErr)
+	}
+	if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
+		((running != nil && executorRunningStatusMayOwnAgent(running.Status)) || e.agentManager.IsAgentRunningForSession(ctx, session.ID)) {
+		return nil, ErrExecutionAlreadyRunning
+	}
+	if refuseIfAgentRunning && e.executorHasActiveAgent(ctx, session, running) {
+		return nil, ErrExecutionAlreadyRunning
 	}
 
 	// Update the task description in the existing execution so StartAgentProcess picks it up
@@ -2544,6 +2576,9 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
 	if err := e.updateSessionStarting(ctx, task.ID, session, expectedState, true); err != nil {
+		if errors.Is(err, errSessionAdvancedToRunning) {
+			return nil, fmt.Errorf("%w: %w", ErrExecutionAlreadyRunning, err)
+		}
 		e.logger.Error("failed to update session state for agent start",
 			zap.String("session_id", session.ID),
 			zap.Error(err))
@@ -2572,6 +2607,49 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 		zap.String("agent_execution_id", executionID))
 
 	return execution, nil
+}
+
+func executorRunningStatusMayOwnAgent(status string) bool {
+	switch status {
+	case models.ExecutorRunningStatusStarting,
+		models.ExecutorRunningStatusRunning:
+		return true
+	case models.ExecutorRunningStatusFailed,
+		models.ExecutorRunningStatusStopped,
+		models.ExecutorRunningStatusComplete,
+		models.ExecutorRunningStatusPrepared,
+		models.ExecutorRunningStatusReady:
+		return false
+	default:
+		return false
+	}
+}
+
+func (e *Executor) executorHasActiveAgent(
+	ctx context.Context,
+	session *models.TaskSession,
+	running *models.ExecutorRunning,
+) bool {
+	if e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
+		return true
+	}
+	if running == nil {
+		return false
+	}
+	switch running.Status {
+	case models.ExecutorRunningStatusRunning:
+		return true
+	case models.ExecutorRunningStatusStarting:
+		return session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning
+	case models.ExecutorRunningStatusFailed,
+		models.ExecutorRunningStatusStopped,
+		models.ExecutorRunningStatusComplete,
+		models.ExecutorRunningStatusPrepared,
+		models.ExecutorRunningStatusReady:
+		return false
+	default:
+		return true
+	}
 }
 
 func (e *Executor) configureExistingWorkspace(
