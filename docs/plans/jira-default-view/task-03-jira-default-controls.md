@@ -242,3 +242,28 @@ The changed no-retry E2E cases pass three repetitions each (21 total): PR detect
 The exact-head blob audit for `3a6e83b1d6245bb42bff774874bb11786791d967` found three retry-only E2E flakes and one preview-session test that failed all attempts. The preview test now follows the persisted primary session and checks that session's response. The Office manager test waits for the browser's agent-list response and verifies the CEO and worker fixtures before opening the picker. Workflow paste import waits for the refreshed row without starting a competing navigation. Mobile merge-queue recovery keeps its fixture turn active until the queue-removal transition has been observed.
 
 The failures were reproduced locally. The preview, Office, and workflow tests pass three no-retry repetitions each (9 total); mobile queue recovery passes three no-retry repetitions. E2E backend and web bundle builds pass. Typecheck, focused ESLint, E2E sleep ratchet, whitespace check, and `list-docs.py validate` pass. Exact-head CI and the complete blob audit must confirm zero retries, errors, and unexpected statuses.
+
+## PR #3936 no-retry follow-up after dd62af1
+
+The exact-head Playwright blob audit for `dd62af16265ee35bf1df38670ac86585655d6fb7` found eight retry-only attempts across workflow stepper, Office onboarding, transient retry notices, task workflow layout, a virtualized file tree, Docker launch, and mobile symlink flows. The tests now wait for authoritative WebSocket or fixture readiness, use task-scoped symlink setup, tolerate the supported compact workflow layout, and let the Jira task page own its single idempotent session ensure. The Office retry exposed a lazy system-skill sync path that inserted bundled skills without reapplying role-default skills to an existing CEO. Lazy sync now triggers the existing workspace backfill when it inserts or removes system skills; a focused regression test covers that state. This preserves the existing Office agent onboarding contract, so no Office requirements or design change was needed.
+
+The affected E2E cases pass locally without retries: the five-spec Chromium group passes 45/45 at three repetitions, mobile symlink and transient retry pass 6/6 at three repetitions, Docker slow bootstrap passes 3/3 in host/container mode, and the full Office system-skills file passes 15/15 at five repetitions after the backend fix. Backend skills, agents, and onboarding Go tests pass; Go lint reports zero issues. Web typecheck, focused ESLint and Prettier, E2E sleep ratchet, E2E backend/web build, and `git diff --check` pass. The first build and lint attempts hit `ENOSPC`; after removing the task-owned 711 MB prior-head artifact bundle, both reruns passed. Exact-head CI and its blob audit remain pending.
+
+```text
+chromium workflow stepper, workflow change, virtualized file tree, system skills, and transient retry; repeat-each=3, retries=0
+45 passed
+mobile symlink and transient retry; repeat-each=3, retries=0
+6 passed
+Docker slow bootstrap in host/container mode; repeat-each=3, retries=0
+3 passed
+Office system-skills file; repeat-each=5, retries=0
+15 passed
+go test ./internal/office/skills ./internal/office/agents ./internal/office/onboarding
+PASS
+golangci-lint run ./... --new-from-rev=852a867fd5c59f5845ca1eaf0291138ebc113660 --timeout=5m
+0 issues
+pnpm run typecheck; focused ESLint and Prettier; pnpm run e2e:sleep-ratchet
+PASS
+git diff --check
+PASS
+```

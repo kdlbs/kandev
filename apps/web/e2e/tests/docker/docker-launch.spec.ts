@@ -110,28 +110,23 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     expect(persistedProfile.prepare_script).toBe("sleep 20");
 
     try {
-      const task = await apiClient.createTask(seedData.workspaceId, "Docker Slow Progress", {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-        executor_profile_id: profile.id,
-      });
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Docker Slow Progress",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+          executor_profile_id: profile.id,
+          start_agent: false,
+        },
+      );
 
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
-
-      const launchPromise = apiClient.launchSession(
-        {
-          task_id: task.id,
-          agent_profile_id: seedData.agentProfileId,
-          executor_profile_id: profile.id,
-          workflow_step_id: seedData.startStepId,
-          prompt: "/e2e:simple-message",
-        },
-        90_000,
-      );
 
       const panel = testPage.getByTestId("prepare-progress-panel");
       await expect(panel).toBeVisible({ timeout: 15_000 });
@@ -142,13 +137,6 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
         timeout: 15_000,
       });
 
-      const launched = await launchPromise;
-      await waitForSessionDone(
-        apiClient,
-        task.id,
-        launched.session_id,
-        "Waiting for slow Docker session",
-      );
       await expect(panel).toHaveAttribute("data-status", "completed", { timeout: 30_000 });
     } finally {
       await apiClient.deleteExecutorProfile(profile.id).catch(() => {});

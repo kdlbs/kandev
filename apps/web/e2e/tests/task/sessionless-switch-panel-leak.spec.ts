@@ -91,8 +91,7 @@ async function setupTaskWithFilePanel(args: {
   await session.clickTab("Files");
   await expect(session.files).toBeVisible({ timeout: 10_000 });
 
-  const node = session.fileTreeNode(filename);
-  await expect(node).toBeVisible({ timeout: 15_000 });
+  const node = await session.fileTree.waitForFileTreeNode(filename, 15_000);
   await node.click();
   // The file-editor panel is env-scoped — exactly the kind that used to leak.
   await expect(args.testPage.getByTestId("preview-tab-file-editor")).toBeVisible({
