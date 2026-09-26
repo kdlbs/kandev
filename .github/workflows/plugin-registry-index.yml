@@ -12,12 +12,24 @@ on:
     paths:
       - "plugin-registry/**"
       - ".github/workflows/plugin-registry-index.yml"
+      - "apps/backend/cmd/plugin-package/**"
+      - "apps/backend/cmd/canvas-package/**"
+      - "apps/backend/internal/plugins/**"
+      - "apps/backend/internal/canvas/**"
+      - "apps/backend/go.mod"
+      - "apps/backend/go.sum"
   # Validate registry edits before merge (the build job runs; the separate
   # deploy job is gated to non-PR events, so a PR never deploys to Pages).
   pull_request:
     paths:
       - "plugin-registry/**"
       - ".github/workflows/plugin-registry-index.yml"
+      - "apps/backend/cmd/plugin-package/**"
+      - "apps/backend/cmd/canvas-package/**"
+      - "apps/backend/internal/plugins/**"
+      - "apps/backend/internal/canvas/**"
+      - "apps/backend/go.mod"
+      - "apps/backend/go.sum"
   # Manual rebuild.
   workflow_dispatch:
   # Allow a sibling workflow (star refresh) to invoke this build.
@@ -57,13 +69,13 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Build canvas package inspector
+      - name: Build package inspectors
         working-directory: apps/backend
-        run: go build -o bin/canvas-package ./cmd/canvas-package
+        run: |
+          go build -o bin/canvas-package ./cmd/canvas-package
+          go build -o bin/plugin-package ./cmd/plugin-package
 
       - name: Test build script
-        env:
-          KANDEV_CANVAS_PACKAGE_INSPECTOR: apps/backend/bin/canvas-package
         run: node --test plugin-registry/build-index.test.mjs
 
       - name: Build index.json
@@ -75,6 +87,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KANDEV_CANVAS_PACKAGE_INSPECTOR: apps/backend/bin/canvas-package
+          KANDEV_PLUGIN_PACKAGE_INSPECTOR: apps/backend/bin/plugin-package
         run: node plugin-registry/build-index.mjs
 
       - name: Stage Pages site

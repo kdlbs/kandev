@@ -18,11 +18,15 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/provenance"
 )
 
 var (
 	ErrCanvasListingNotFound = errors.New("canvas marketplace listing not found")
 	ErrCanvasListingStale    = errors.New("canvas marketplace listing is stale")
+	ErrPluginListingNotFound = errors.New("plugin marketplace listing not found")
+	ErrPluginListingStale    = errors.New("plugin marketplace listing is stale")
+	ErrCatalogUnavailable    = errors.New("plugin marketplace catalog unavailable")
 )
 
 // maxIndexBytes caps the index.json body read from any source, bounding
@@ -48,6 +52,10 @@ type Service struct {
 
 	ttl time.Duration
 	now func() time.Time
+	// canonicalOfficialURL is fixed to OfficialSourceURL in production. Tests
+	// replace it with a local fixture to exercise the canonical transport
+	// boundary without reaching the public registry.
+	canonicalOfficialURL string
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
@@ -65,13 +73,30 @@ type cacheEntry struct {
 // NewService builds a marketplace Service over the given source store.
 func NewService(store *SourceStore, log *logger.Logger) *Service {
 	return &Service{
-		store:  store,
-		client: &http.Client{Timeout: 20 * time.Second},
-		log:    log,
-		ttl:    defaultCacheTTL,
-		now:    time.Now,
-		cache:  map[string]cacheEntry{},
+		store:                store,
+		client:               &http.Client{Timeout: 20 * time.Second, CheckRedirect: rejectRedirect},
+		log:                  log,
+		ttl:                  defaultCacheTTL,
+		now:                  time.Now,
+		cache:                map[string]cacheEntry{},
+		canonicalOfficialURL: OfficialSourceURL,
 	}
+}
+
+func rejectRedirect(_ *http.Request, _ []*http.Request) error {
+	return http.ErrUseLastResponse
+}
+
+// SetHTTPClient replaces the catalog transport. Production uses the default
+// client with normal TLS and redirect behavior; tests inject a transport that
+// maps the canonical URL to an isolated fixture.
+func (s *Service) SetHTTPClient(client *http.Client) {
+	if client == nil {
+		return
+	}
+	s.mu.Lock()
+	s.client = client
+	s.mu.Unlock()
 }
 
 // Sources returns every configured source (built-in first).
@@ -145,7 +170,7 @@ func (s *Service) Catalog(ctx context.Context, installed []InstalledPlugin) (*Ca
 			status.Healthy = false
 			status.Error = fetched[i].doc.warning
 		}
-		for _, entry := range mergeEntries(fetched[i].doc, src, installedByID, seen) {
+		for _, entry := range s.mergeEntries(fetched[i].doc, src, installedByID, seen) {
 			if entry.Kind == marketplaceKindCanvas {
 				result.Canvases = append(result.Canvases, entry)
 				continue
@@ -157,35 +182,121 @@ func (s *Service) Catalog(ctx context.Context, installed []InstalledPlugin) (*Ca
 	return result, nil
 }
 
-// ResolveCanvasPackage resolves an exact canvas listing from the configured
-// source. The caller supplies only the source and expected identity/digest;
-// the package URL and repository URL come from the freshly validated source
-// document.
-func (s *Service) ResolveCanvasPackage(ctx context.Context, sourceID, packageID, version, digest string) (string, string, error) {
+// ResolvePluginPackage resolves an exact native package from a freshly
+// fetched, enabled source. The caller supplies only selection constraints;
+// package URL and publisher evidence are taken from the validated document.
+// A cached Browse result is never used for installation.
+func (s *Service) ResolvePluginPackage(ctx context.Context, sourceID, packageID, version, digest string) (*PluginPackageResolution, error) {
+	source, err := s.store.Get(strings.TrimSpace(sourceID))
+	if err != nil || !source.Enabled {
+		return nil, ErrPluginListingNotFound
+	}
+	doc, err := s.fetchFresh(ctx, source.URL)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCatalogUnavailable, err)
+	}
+	for _, entry := range doc.Plugins {
+		if entry.Kind == marketplaceKindCanvas || entry.ID != strings.TrimSpace(packageID) {
+			continue
+		}
+		if entry.Version != strings.TrimSpace(version) {
+			return nil, ErrPluginListingStale
+		}
+		catalogDigest := strings.ToLower(strings.TrimSpace(entry.PackageSHA256))
+		expectedDigest := strings.ToLower(strings.TrimSpace(digest))
+		if (catalogDigest == "") != (expectedDigest == "") || (catalogDigest != "" && catalogDigest != expectedDigest) {
+			return nil, ErrPluginListingStale
+		}
+		if entry.PackageURL == "" {
+			return nil, ErrPluginListingNotFound
+		}
+		publisher := projectPublisher(entry, *source, s.canonicalOfficialURL)
+		return &PluginPackageResolution{
+			Entry:      entry,
+			Source:     *source,
+			PackageURL: entry.PackageURL,
+			Provenance: buildProvenance(entry, *source, publisher, s.now().UTC()),
+			Publisher:  publisher,
+		}, nil
+	}
+	return nil, ErrPluginListingNotFound
+}
+
+// ResolveOfficialPluginPackage resolves an exact native version from the
+// canonical built-in source. It does not accept an URL override, a custom
+// source, or a caller-provided repository identity.
+func (s *Service) ResolveOfficialPluginPackage(ctx context.Context, packageID, version string) (*PluginPackageResolution, error) {
+	sources, err := s.store.List()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCatalogUnavailable, err)
+	}
+	for _, source := range sources {
+		if !source.Builtin || source.URL != s.canonicalOfficialURL || !source.Enabled {
+			continue
+		}
+		doc, fetchErr := s.fetchFresh(ctx, source.URL)
+		if fetchErr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrCatalogUnavailable, fetchErr)
+		}
+		for _, entry := range doc.Plugins {
+			if entry.Kind == marketplaceKindCanvas || entry.ID != strings.TrimSpace(packageID) {
+				continue
+			}
+			if entry.Version != strings.TrimSpace(version) || !validSHA256(entry.PackageSHA256) || entry.PackageURL == "" {
+				return nil, ErrPluginListingStale
+			}
+			publisher := projectPublisher(entry, source, s.canonicalOfficialURL)
+			return &PluginPackageResolution{
+				Entry:      entry,
+				Source:     source,
+				PackageURL: entry.PackageURL,
+				Provenance: buildProvenance(entry, source, publisher, s.now().UTC()),
+				Publisher:  publisher,
+			}, nil
+		}
+		return nil, ErrPluginListingNotFound
+	}
+	return nil, ErrPluginListingNotFound
+}
+
+// ResolveCanvasPackageWithProvenance resolves an exact canvas listing from a
+// freshly fetched source document and returns the host-created provenance
+// tuple. The source and expected identity/digest are selection constraints;
+// neither can create publisher evidence.
+func (s *Service) ResolveCanvasPackageWithProvenance(ctx context.Context, sourceID, packageID, version, digest string) (string, string, *provenance.InstallationProvenance, error) {
 	source, err := s.store.Get(strings.TrimSpace(sourceID))
 	if err != nil {
-		return "", "", ErrCanvasListingNotFound
+		return "", "", nil, ErrCanvasListingNotFound
 	}
 	if !source.Enabled {
-		return "", "", ErrCanvasListingNotFound
+		return "", "", nil, ErrCanvasListingNotFound
 	}
-	doc, err := s.fetch(ctx, source.URL)
+	doc, err := s.fetchFresh(ctx, source.URL)
 	if err != nil {
-		return "", "", ErrCanvasListingNotFound
+		return "", "", nil, ErrCanvasListingNotFound
 	}
 	for _, entry := range doc.Plugins {
 		if entry.Kind != marketplaceKindCanvas || entry.ID != packageID {
 			continue
 		}
-		if entry.Version != version || !strings.EqualFold(entry.PackageSHA256, digest) {
-			return "", "", ErrCanvasListingStale
+		if entry.Version != version || !validSHA256(entry.PackageSHA256) || !strings.EqualFold(entry.PackageSHA256, digest) {
+			return "", "", nil, ErrCanvasListingStale
 		}
 		if entry.PackageURL == "" {
-			return "", "", ErrCanvasListingNotFound
+			return "", "", nil, ErrCanvasListingNotFound
 		}
-		return entry.PackageURL, entry.RepoURL, nil
+		publisher := projectPublisher(entry, *source, s.canonicalOfficialURL)
+		return entry.PackageURL, entry.RepoURL, buildProvenance(entry, *source, publisher, s.now().UTC()), nil
 	}
-	return "", "", ErrCanvasListingNotFound
+	return "", "", nil, ErrCanvasListingNotFound
+}
+
+// ResolveCanvasPackage resolves an exact canvas listing from the configured
+// source. It preserves the original URL/repository-only API for callers that
+// do not consume publisher provenance.
+func (s *Service) ResolveCanvasPackage(ctx context.Context, sourceID, packageID, version, digest string) (string, string, error) {
+	packageURL, repositoryURL, _, err := s.ResolveCanvasPackageWithProvenance(ctx, sourceID, packageID, version, digest)
+	return packageURL, repositoryURL, err
 }
 
 type fetchOutcome struct {
@@ -216,14 +327,14 @@ func (s *Service) fetchAll(ctx context.Context, sources []SourceRecord) []fetchO
 
 // mergeEntries appends this source's not-yet-seen entries as annotated catalog
 // entries, marking their ids seen so later sources can't shadow them.
-func mergeEntries(doc *IndexDocument, src SourceRecord, installed map[string]string, seen map[string]bool) []CatalogEntry {
+func (s *Service) mergeEntries(doc *IndexDocument, src SourceRecord, installed map[string]string, seen map[string]bool) []CatalogEntry {
 	out := make([]CatalogEntry, 0, len(doc.Plugins))
 	for _, e := range doc.Plugins {
 		if e.ID == "" || seen[e.ID] {
 			continue
 		}
 		seen[e.ID] = true
-		out = append(out, annotate(e, src, installed))
+		out = append(out, annotate(e, src, installed, s.canonicalOfficialURL))
 	}
 	return out
 }
@@ -248,11 +359,17 @@ func indexInstalled(installed []InstalledPlugin) map[string]string {
 }
 
 // annotate derives a catalog entry's install state from what is installed.
-func annotate(e IndexEntry, src SourceRecord, installed map[string]string) CatalogEntry {
+func annotate(e IndexEntry, src SourceRecord, installed map[string]string, canonicalOfficialURL string) CatalogEntry {
 	if e.Kind == "" {
 		e.Kind = marketplaceKindPlugin
 	}
-	ce := CatalogEntry{IndexEntry: e, SourceID: src.ID, SourceName: src.Name, InstallState: StateAvailable}
+	ce := CatalogEntry{
+		IndexEntry:        e,
+		SourceID:          src.ID,
+		SourceName:        src.Name,
+		InstallState:      StateAvailable,
+		PublisherIdentity: projectPublisher(e, src, canonicalOfficialURL),
+	}
 	if v, ok := installed[e.ID]; ok {
 		ce.InstalledVersion = v
 		if manifest.CompareVersions(v, e.Version) < 0 {
@@ -262,6 +379,50 @@ func annotate(e IndexEntry, src SourceRecord, installed map[string]string) Catal
 		}
 	}
 	return ce
+}
+
+func projectPublisher(entry IndexEntry, source SourceRecord, canonicalOfficialURL string) *provenance.PublisherIdentity {
+	if entry.Publisher == nil || !source.Builtin || source.URL != canonicalOfficialURL || entry.PackageSHA256 == "" {
+		return provenance.NewUnverified()
+	}
+	evidence := *entry.Publisher
+	if err := evidence.Validate(); err != nil || !validSHA256(entry.PackageSHA256) {
+		return provenance.NewUnverified()
+	}
+	if evidence.Official && !strings.EqualFold(evidence.Login, "kdlbs") {
+		return provenance.NewUnverified()
+	}
+	if evidence.PackageSHA256 != "" && !strings.EqualFold(evidence.PackageSHA256, entry.PackageSHA256) {
+		return provenance.NewUnverified()
+	}
+	return &provenance.PublisherIdentity{
+		Status:       provenance.StatusVerified,
+		RepositoryID: evidence.RepositoryID,
+		OwnerID:      evidence.OwnerID,
+		Login:        evidence.Login,
+		Repository:   evidence.Repository,
+		Official:     evidence.Official,
+	}
+}
+
+func buildProvenance(entry IndexEntry, source SourceRecord, publisher *provenance.PublisherIdentity, verifiedAt time.Time) *provenance.InstallationProvenance {
+	p := &provenance.InstallationProvenance{
+		Origin:        provenance.OriginCatalog,
+		SourceID:      source.ID,
+		SourceURL:     source.URL,
+		PackageID:     entry.ID,
+		Version:       entry.Version,
+		PackageSHA256: strings.ToLower(strings.TrimSpace(entry.PackageSHA256)),
+	}
+	p.SanitizePublicURLs()
+	if publisher == nil || publisher.Status != provenance.StatusVerified || entry.Publisher == nil {
+		return p
+	}
+	evidence := *entry.Publisher
+	p.Publisher = &evidence
+	p.VerifiedAt = &verifiedAt
+	p.VerificationMethod = provenance.VerificationArchiveDownload
+	return p
 }
 
 // fetch returns a source's index document from cache when fresh, otherwise
@@ -295,6 +456,13 @@ func (s *Service) fetch(ctx context.Context, url string) (*IndexDocument, error)
 	return v.(*IndexDocument), nil
 }
 
+// fetchFresh bypasses the Browse cache. Installation and existing-version
+// verification must resolve the current source document before accepting a
+// package identity or digest.
+func (s *Service) fetchFresh(ctx context.Context, sourceURL string) (*IndexDocument, error) {
+	return s.download(context.WithoutCancel(ctx), sourceURL)
+}
+
 // cached returns a still-fresh cached document for url, if any.
 func (s *Service) cached(url string) (*IndexDocument, bool) {
 	s.mu.Lock()
@@ -311,7 +479,7 @@ func (s *Service) download(ctx context.Context, url string) (*IndexDocument, err
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := s.client.Do(req)
+	resp, err := s.clientForSource(url).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -334,6 +502,24 @@ func (s *Service) download(ctx context.Context, url string) (*IndexDocument, err
 		return nil, err
 	}
 	return &doc, nil
+}
+
+// clientForSource applies the redirect policy at the trust boundary. The
+// canonical source is fetched without redirects so its HTTPS origin cannot be
+// silently replaced by an untrusted host. Operator-managed sources retain the
+// normal HTTP client redirect behavior because their entries are unverified.
+func (s *Service) clientForSource(sourceURL string) *http.Client {
+	s.mu.Lock()
+	client := s.client
+	canonicalURL := s.canonicalOfficialURL
+	s.mu.Unlock()
+	clone := *client
+	if sourceURL == canonicalURL {
+		clone.CheckRedirect = rejectRedirect
+	} else {
+		clone.CheckRedirect = nil
+	}
+	return &clone
 }
 
 func validateIndexDocument(doc *IndexDocument) error {
@@ -368,9 +554,19 @@ func validateIndexDocument(doc *IndexDocument) error {
 			warnings = append(warnings, "entry "+entry.ID+": "+err.Error())
 			continue
 		}
+		if entry.PackageSHA256 != "" && !validSHA256(entry.PackageSHA256) {
+			warnings = append(warnings, "entry "+entry.ID+": package digest is invalid")
+			continue
+		}
 		if kind == marketplaceKindCanvas && !validSHA256(entry.PackageSHA256) {
 			warnings = append(warnings, "entry "+entry.ID+": canvas package digest is missing or invalid")
 			continue
+		}
+		if entry.Publisher != nil {
+			if err := entry.Publisher.Validate(); err != nil {
+				warnings = append(warnings, "entry "+entry.ID+": publisher evidence is invalid")
+				entry.Publisher = nil
+			}
 		}
 		entry.Kind = kind
 		valid = append(valid, entry)

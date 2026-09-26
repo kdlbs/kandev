@@ -16,6 +16,18 @@ export type PluginsSliceActions = {
   setPluginsLoading: (loading: boolean) => void;
   setPluginsError: (error: string | null) => void;
   upsertPlugin: (plugin: PluginRecord) => void;
+  updatePluginPublisher: (
+    id: string,
+    expectedInstallationID: string,
+    expectedVersion: string,
+    publisherIdentity: PluginRecord["publisher_identity"],
+    publisherProvenance: PluginRecord["publisher_provenance"],
+  ) => boolean;
+  verifyPluginPublisher: (
+    id: string,
+    expectedInstallationID: string,
+    expectedVersion: string,
+  ) => Promise<boolean>;
   removePlugin: (id: string) => void;
 };
 

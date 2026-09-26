@@ -1,10 +1,10 @@
 // Package pkgtar implements the kandev plugin package format described in
 // docs/plans/plugins/GRPC-CONTRACT.md §6: a tar.gz archive containing
 // manifest.yaml, a set of per-platform server/ executables, an optional
-// ui/ bundle, and a checksums.txt covering every other file. Inspect reads
-// only the manifest (no disk writes); Install verifies and atomically
-// extracts a package into a per-plugin, per-version directory; Remove
-// deletes an installed plugin's directory tree.
+// ui/ bundle, and a checksums.txt covering every other file. InspectPackage
+// validates the complete archive without disk writes; Install verifies and
+// atomically extracts a package into a per-plugin, per-version directory;
+// Remove deletes an installed plugin's directory tree.
 package pkgtar
 
 import (
@@ -106,35 +106,50 @@ type InstallResult struct {
 	Signed bool
 }
 
-// Inspect streams r (a kandev plugin tar.gz package), extracts only
-// manifest.yaml into memory (capped at maxManifestSize), and parses +
-// validates it. It performs no checksum verification and writes nothing to
-// disk; it exists to preview a package's declared capabilities before
-// installing it.
-func Inspect(r io.Reader) (*manifest.Manifest, error) {
-	tr, closeReader, err := openTarGz(r)
+// Inspection is the complete, non-extracting validation result for a plugin
+// archive. Files contains the exact bytes of every regular archive entry,
+// including checksums.txt and an optional checksums.txt.sig. The map is
+// bounded by the same package limits as Install and is safe for trusted
+// callers to use when deriving package metadata.
+type Inspection struct {
+	Manifest *manifest.Manifest
+	Files    map[string][]byte
+	// Modes mirrors the installer's normalized permissions: executable paths
+	// are 0755 and every other regular archive entry is 0644.
+	Modes  map[string]os.FileMode
+	Signed bool
+}
+
+// InspectPackage validates a complete plugin archive without executing or
+// extracting package content. Unlike the lightweight historical preview
+// behavior, it verifies checksums and confirms that every manifest-declared
+// executable is present, without requiring the current host platform.
+func InspectPackage(r io.Reader) (*Inspection, error) {
+	files, err := readArchive(r)
 	if err != nil {
 		return nil, err
 	}
-	defer closeReader()
-
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("pkgtar: %s not found in package", manifestFileName)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("pkgtar: reading tar entry: %w", err)
-		}
-		if hdr.Typeflag != tar.TypeReg {
-			continue
-		}
-		name, err := cleanArchivePath(hdr.Name)
-		if err != nil || name != manifestFileName {
-			continue
-		}
-		return parseManifestEntry(tr, hdr.Size)
+	signed, err := verifyPackageIntegrity(files)
+	if err != nil {
+		return nil, err
 	}
+	m, err := validateInspectionManifest(files)
+	if err != nil {
+		return nil, err
+	}
+	return &Inspection{Manifest: m, Files: files, Modes: packageFileModes(m, files), Signed: signed}, nil
+}
+
+// Inspect validates a complete archive and returns its manifest. It retains
+// the original manifest-only return shape for callers that only need the
+// declared identity, while applying the stronger package validation used by
+// registry admission.
+func Inspect(r io.Reader) (*manifest.Manifest, error) {
+	inspection, err := InspectPackage(r)
+	if err != nil {
+		return nil, err
+	}
+	return inspection.Manifest, nil
 }
 
 // parseManifestEntry reads a manifest.yaml tar entry (capped at
@@ -259,6 +274,34 @@ func validateInstallManifest(files map[string][]byte) (*manifest.Manifest, strin
 	return m, execPath, nil
 }
 
+// validateInspectionManifest applies manifest and package-shape checks that
+// do not depend on the host platform. Registry inspection must accept a
+// package containing executables for another platform, but it must never
+// publish a package whose declared executable set is incomplete.
+func validateInspectionManifest(files map[string][]byte) (*manifest.Manifest, error) {
+	manifestData, ok := files[manifestFileName]
+	if !ok {
+		return nil, fmt.Errorf("%w: missing %s", ErrManifestInvalid, manifestFileName)
+	}
+
+	m, err := manifest.Parse(manifestData)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrManifestInvalid, err)
+	}
+	if err := m.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrManifestInvalid, err)
+	}
+	if !m.IsManaged() {
+		return nil, fmt.Errorf("%w: manifest is not runtime-managed (runtime.type must be \"binary\")", ErrManifestInvalid)
+	}
+	for platform, execPath := range m.Runtime.Executables {
+		if _, ok := files[execPath]; !ok {
+			return nil, fmt.Errorf("%w: declared executable %q for %s not found in package", ErrManifestInvalid, execPath, platform)
+		}
+	}
+	return m, nil
+}
+
 // extractPackage writes files into a temp dir under destRoot/<id>/, chmods
 // every declared runtime executable to 0755, and atomically renames the
 // temp dir to destRoot/<id>/<version>. It fails with ErrVersionExists if
@@ -328,6 +371,9 @@ func writePackageFiles(root string, files map[string][]byte, execSet map[string]
 		if err := os.WriteFile(dest, data, mode); err != nil {
 			return fmt.Errorf("pkgtar: writing %s: %w", name, err)
 		}
+		if err := os.Chmod(dest, mode); err != nil {
+			return fmt.Errorf("pkgtar: setting mode for %s: %w", name, err)
+		}
 	}
 	return nil
 }
@@ -364,6 +410,19 @@ func executablePaths(m *manifest.Manifest) map[string]bool {
 		set[p] = true
 	}
 	return set
+}
+
+func packageFileModes(m *manifest.Manifest, files map[string][]byte) map[string]os.FileMode {
+	executableSet := executablePaths(m)
+	modes := make(map[string]os.FileMode, len(files))
+	for name := range files {
+		mode := os.FileMode(0o644)
+		if executableSet[name] {
+			mode = 0o755
+		}
+		modes[name] = mode
+	}
+	return modes
 }
 
 // Remove deletes destRoot/<id>/ entirely: every installed version plus the
@@ -426,6 +485,9 @@ func readArchive(r io.Reader) (map[string][]byte, error) {
 		name, err := cleanArchivePath(hdr.Name)
 		if err != nil {
 			return nil, err
+		}
+		if _, exists := files[name]; exists {
+			return nil, fmt.Errorf("pkgtar: duplicate archive entry %q", name)
 		}
 		if hdr.Size > maxPackageFileSize {
 			// Fast pre-check: reject an implausible declared size before
@@ -507,6 +569,12 @@ func parseChecksums(data []byte) (map[string]string, error) {
 		fields := strings.Fields(line)
 		if len(fields) != 2 {
 			return nil, fmt.Errorf("pkgtar: malformed %s line: %q", checksumsFileName, line)
+		}
+		if len(fields[0]) != sha256.Size*2 {
+			return nil, fmt.Errorf("pkgtar: malformed %s digest: %q", checksumsFileName, fields[0])
+		}
+		if _, err := hex.DecodeString(fields[0]); err != nil {
+			return nil, fmt.Errorf("pkgtar: malformed %s digest: %q", checksumsFileName, fields[0])
 		}
 		name, err := cleanArchivePath(fields[1])
 		if err != nil {

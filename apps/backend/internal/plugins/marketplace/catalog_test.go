@@ -244,6 +244,52 @@ func TestDownloadRejectsNon200AndOversized(t *testing.T) {
 	}
 }
 
+func TestCustomSourceFollowsRedirects(t *testing.T) {
+	index := indexJSON(entryJSON("redirected", "1.0.0", 1))
+	target := serve(t, index)
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	t.Cleanup(redirect.Close)
+
+	s := newTestService(t)
+	if _, err := s.store.Add("Custom", redirect.URL); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.Catalog(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	if findEntry(result.Plugins, "redirected") == nil {
+		t.Fatalf("redirected custom source did not contribute an entry: %+v", result.Sources)
+	}
+}
+
+func TestCanonicalSourceRejectsRedirects(t *testing.T) {
+	target := serve(t, indexJSON(entryJSON("redirected", "1.0.0", 1)))
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	t.Cleanup(redirect.Close)
+
+	s := newTestService(t)
+	s.canonicalOfficialURL = redirect.URL
+	if err := s.store.EnsureBuiltin("Official", redirect.URL); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.Catalog(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	if findEntry(result.Plugins, "redirected") != nil {
+		t.Fatal("canonical source followed a redirect")
+	}
+	status := findSource(result.Sources, "Official")
+	if status == nil || status.Healthy {
+		t.Fatalf("canonical redirect should degrade source: %+v", status)
+	}
+}
+
 func TestCatalogPreservesIconURL(t *testing.T) {
 	body := indexJSON(`{"id":"withicon","name":"With Icon","version":"1.0.0","stars":1,` +
 		`"icon_url":"https://cdn.example/icon.svg","package_url":"https://ex/withicon.tar.gz"},` +

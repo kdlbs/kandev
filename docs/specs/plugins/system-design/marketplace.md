@@ -14,6 +14,12 @@ owners:
 
 This design preserves the technical source detail for `REQ-PLUGINS-MARKETPLACE-001` during migration.
 
+The [publisher identity design](publisher-identity.md) replaces this document's
+historical author-only attribution, advisory native digest, URL-only catalog
+installation, and update provenance rules. Those historical sections describe
+the pre-fix implementation. Discovery, galleries, permissions, and source
+management remain governed here.
+
 The [canvas distribution design](../../canvases/system-design/marketplace-sharing.md)
 extends this catalog with validated static canvas packages, registry preview URLs,
 and workspace installation. Its canvas path does not use the managed-binary
@@ -93,13 +99,8 @@ while keeping install-by-URL and sideloading as escape hatches.
   or actively-maintained plugins are not buried under older high-star incumbents.
 - Each catalog entry shows: display name, description, author, categories, the source
   repository link, the latest published version, and its star count.
-- Release authors and registry reviewers SHALL apply the attribution convention:
-  first-party `kdlbs/kandev-plugin-*` releases declare `author: "kandev"`,
-  community releases declare the contributor's stable identity, and a plugin is
-  not labeled `kandev` only because a maintainer curated it into the official
-  source. This is a release and curation check, not an index-builder ownership
-  validation rule. The builder preserves a declared manifest author and falls
-  back to the repository owner for legacy releases without one.
+- Publisher attribution follows the [publisher identity design](publisher-identity.md).
+  Declared author credit does not establish publisher identity.
 - The catalog source repository link SHALL identify the repository named by the
   registry entry. The index builder derives this value from the registry pointer.
   A release manifest's `repo_url`, when present, SHOULD identify the same
@@ -223,9 +224,12 @@ Constraints:
   resolved by the index-build from the plugin manifest's optional `icon` field
   (a package-relative path such as `icon.svg`) → a `raw.githubusercontent.com`
   URL pinned to the release tag.
-- `package_sha256`, when present, is the digest the client MAY use to confirm the
-  downloaded tarball matches what was curated, in addition to the package's own
-  internal `checksums.txt` gate.
+- `package_sha256`, when present, is the expected SHA-256 for the exact release
+  archive. The backend compares it with the downloaded bytes before activation,
+  in addition to the package's own internal `checksums.txt` gate. This is an
+  integrity binding; it does not establish publisher identity. Legacy entries
+  without a digest remain installable but cannot establish verified publisher
+  evidence.
 
 ### Marketplace sources (client-side configuration — SQLite)
 
@@ -321,10 +325,9 @@ response but stays `enabled`.
   existing install pipeline surfaces the install error unchanged; the catalog entry
   is unaffected.
 - **`package_sha256` mismatch** between the catalog and the downloaded tarball:
-  once digest enforcement is enabled (a planned option — see "Open questions"),
-  install fails closed with a provenance error even though the tarball's own
-  `checksums.txt` may be internally consistent. In v1 the digest is advisory and
-  install proceeds through the existing pipeline unchanged.
+  catalog installation fails closed with a provenance error before lifecycle
+  mutation, even when the tarball's own `checksums.txt` is internally consistent.
+  Entries without a digest follow the legacy install path and remain unverified.
 - **Duplicate `id` across sources:** the first configured source wins; later
   duplicates are silently hidden (documented, not an error).
 - **GitHub star-refresh Action hits API rate limits:** the previous star counts in
@@ -357,8 +360,9 @@ response but stays `enabled`.
   entries whose name or description matches remain; **AND WHEN** the user picks a
   category filter, **THEN** only entries in that category remain.
 - **GIVEN** a catalog entry with `install_state: available`, **WHEN** the user clicks
-  Install, **THEN** kandev calls `POST /api/plugins/install` with the entry's
-  `package_url` and the plugin installs via the normal verified pipeline.
+  Install, **THEN** kandev calls `POST /api/plugins/install` with the selected
+  source, package ID, version, and available digest, and the backend resolves the
+  fresh entry before installing it.
 - **GIVEN** a plugin is already installed at the catalog's latest version, **WHEN**
   the catalog renders, **THEN** its entry shows **Installed** and no Install button.
 - **GIVEN** a plugin is installed at a version older than the catalog's, **WHEN** the
@@ -399,10 +403,9 @@ response but stays `enabled`.
 - **GIVEN** a configured source is unreachable, **WHEN** the catalog is fetched,
   **THEN** the response marks that source `degraded`, omits its entries, and still
   returns entries from the reachable sources.
-- **GIVEN** digest enforcement is enabled (planned) and a catalog entry whose
-  `package_sha256` does not match the downloaded tarball, **WHEN** the user installs
-  it, **THEN** the install fails closed with a provenance error and no plugin process
-  is spawned. (In v1 the digest is advisory; install is unchanged.)
+- **GIVEN** a catalog entry whose `package_sha256` does not match the downloaded
+  tarball, **WHEN** the user installs it, **THEN** the install fails closed with a
+  provenance error and no plugin process is spawned.
 - **GIVEN** the marketplace is empty or entirely offline, **WHEN** the user opens the
   install dialog, **THEN** install-by-URL and upload still work exactly as before.
 - **GIVEN** a PR that adds an entry to `plugins.yaml` whose `id` does not match the
@@ -410,20 +413,22 @@ response but stays `enabled`.
   schema/consistency check fails and the PR is blocked.
 - **GIVEN** the latest release of the first-party Bitbucket plugin declares
   `author: "kandev"` and its `repo_url` points to `kdlbs/kandev-plugin-bitbucket`,
-  **WHEN** the official index is built, **THEN** the catalog shows **by kandev** and
-  links to the `kdlbs` Bitbucket repository.
+  **WHEN** the official index is built, **THEN** the catalog shows the Official
+  Kandev publisher, keeps `kandev` as declared author credit, and links to the
+  `kdlbs` Bitbucket repository.
 - **GIVEN** the latest release of the community YouTrack plugin is owned by
   `ahmedbally` and declares `author: "ahmedbally"` with its matching repository URL,
-  **WHEN** the official index is built, **THEN** the catalog shows **by ahmedbally**
-  and links to `ahmedbally/kandev-plugin-youtrack`, not a `kdlbs` repository.
+  **WHEN** the official index is built, **THEN** the catalog shows verified publisher
+  `ahmedbally`, keeps the declared author separately, and links to
+  `ahmedbally/kandev-plugin-youtrack`.
 
 ## Auto-update (opt-in)
 
 Beyond the manual **Update** affordance, kandev can update installed
 plugins in the background — **off by default, opt-in**. This does not add a new
-install mechanism: an auto-update is exactly the existing verified reinstall of a
-newer catalog `package_url` (`Service.InstallFromURL`), driven automatically
-instead of by a click.
+install mechanism: an auto-update resolves the selected catalog source, package,
+version, and digest through the same evidence-bound path as a manual update,
+driven automatically instead of by a click.
 
 - **Two-tier toggle (Settings > Plugins).** An instance-wide **"Automatically
   update plugins"** switch sets the default for every installed plugin. Each
@@ -471,9 +476,10 @@ authority as the rest of plugin management.
 - **A hosted web marketplace browse *site*.** GitHub Pages serves the `index.json`
   document; a rich public browsing website is a later phase (the in-app catalog is the
   v1 surface).
-- **Signature *requirement*.** Package signing/provenance stays optional exactly as in
-  the [plugins spec](../requirements/plugins.md); the marketplace adds an *advisory* `package_sha256` but
-  does not make signing mandatory.
+- **Signature *requirement*.** Package signing stays optional exactly as in the
+  [plugins spec](../requirements/plugins.md); the marketplace compares an
+  available `package_sha256` for archive integrity but does not make signing
+  mandatory.
 - **Runtime hardening / sandboxing of plugin JS.** Unchanged from the plugins spec;
   the marketplace does not alter the trust boundary of an installed plugin.
 
@@ -488,14 +494,10 @@ authority as the rest of plugin management.
 - **Star refresh cadence & storage.** Confirm the schedule (daily?) and that star
   counts live only in the generated `index.json` (not committed back to
   `plugins.yaml`, to avoid noisy commits).
-- **`package_sha256` provenance.** Confirm the index build pins the digest and the
-  client enforces it (recommended above) vs. relying solely on the package's internal
-  `checksums.txt`.
+- **`package_sha256` provenance.** Implemented by the [publisher identity design](publisher-identity.md).
 - **Cross-source id collisions.** v1 hides later-source duplicates (official wins). Do
   we instead want Homebrew-style **fully-qualified `source/id`** names so a corporate
   source can intentionally ship its own build of an official plugin without it being
   silently hidden?
-- **Anti-typosquatting / verified authorship.** Worth adopting Open VSX's
-  verified-namespace idea (a "verified" badge only when repo ownership is proven) and
-  cheap publish-time scans in the registry-validation Action (secret-leak / blocklist /
-  typosquat checks on the PR)? Deferred, but flagged as the natural next trust layer.
+- **Verified publisher identity.** Resolved by the [publisher identity design](publisher-identity.md).
+  General typosquatting and secret scanning remain outside that package.

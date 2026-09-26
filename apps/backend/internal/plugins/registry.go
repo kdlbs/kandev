@@ -177,6 +177,15 @@ func cloneRecord(rec *store.Record) *store.Record {
 		at := *rec.LastErrorAt
 		clone.LastErrorAt = &at
 	}
+	clone.PublisherProvenance = rec.PublisherProvenance.Clone()
+	if rec.PublisherIdentity != nil {
+		identity := *rec.PublisherIdentity
+		if rec.PublisherIdentity.VerifiedAt != nil {
+			at := *rec.PublisherIdentity.VerifiedAt
+			identity.VerifiedAt = &at
+		}
+		clone.PublisherIdentity = &identity
+	}
 	return &clone
 }
 

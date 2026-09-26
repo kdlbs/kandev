@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import type { MarketplaceEntry } from "@/lib/types/plugins";
 import { MarketplacePreviewGallery } from "./marketplace-preview-gallery";
 import { PluginRepoLink } from "./plugin-repo-link";
+import { PluginPublisherIdentity } from "./plugin-publisher-identity";
 
 export function CanvasMarketplaceDetail({
   entry,
@@ -39,9 +40,12 @@ export function CanvasMarketplaceDetail({
               <h2 className="text-xl font-semibold">{entry.name}</h2>
               <Badge variant="secondary">v{entry.version}</Badge>
             </div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("plugins:byAuthor", { author: entry.author })}
-            </p>
+            <PluginPublisherIdentity
+              identity={entry.publisher_identity}
+              sourceName={entry.source_name}
+              author={entry.author}
+              className="mt-2"
+            />
           </div>
           <p className="text-sm leading-6 text-muted-foreground">{entry.description}</p>
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">

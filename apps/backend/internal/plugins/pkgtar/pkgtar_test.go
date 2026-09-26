@@ -246,6 +246,44 @@ func TestInspect_RejectsInvalidManifest(t *testing.T) {
 	}
 }
 
+func TestInspect_RejectsArchiveWithUnlistedFile(t *testing.T) {
+	files := buildValidFiles("1.0.0")
+	checksums := checksumsFor(files)
+	files["unexpected.txt"] = []byte("must be checksum-covered")
+	files["checksums.txt"] = checksums
+	pkg := buildRawPackage(t, files)
+
+	if _, err := Inspect(bytes.NewReader(pkg)); err == nil {
+		t.Fatal("Inspect() expected error for an unlisted archive file, got nil")
+	}
+}
+
+func TestInspect_RejectsMissingDeclaredExecutable(t *testing.T) {
+	files := buildValidFiles("1.0.0")
+	manifestYAML := `
+id: "kandev-plugin-hello"
+api_version: 1
+version: "1.0.0"
+display_name: "Hello Plugin"
+description: "A runtime-managed example plugin"
+author: "kandev"
+categories: ["tools"]
+
+runtime:
+  type: binary
+  executables:
+    linux-amd64: "server/plugin-linux-amd64"
+    darwin-arm64: "server/plugin-darwin-arm64"
+`
+	files["manifest.yaml"] = []byte(manifestYAML)
+	delete(files, "server/plugin-darwin-arm64")
+	pkg := buildRawPackageWithChecksums(t, files)
+
+	if _, err := Inspect(bytes.NewReader(pkg)); err == nil {
+		t.Fatal("Inspect() expected error for a missing declared executable, got nil")
+	}
+}
+
 func TestInstall_BadChecksumRejected(t *testing.T) {
 	destRoot := t.TempDir()
 	files := buildValidFiles("1.0.0")

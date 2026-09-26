@@ -80,6 +80,14 @@ test.describe.serial("member plugin settings", () => {
       await expect(settingsPanel.getByTestId("plugin-manifest-card")).toBeVisible();
       await expect(settingsPanel.getByTestId("plugin-settings-card")).toHaveCount(0);
       await expect(settingsPanel.getByRole("button", { name: "Uninstall" })).toHaveCount(0);
+      const publisherIdentity = settingsPanel.getByTestId("plugin-publisher-identity");
+      await expect(publisherIdentity).toBeVisible();
+      await expect(
+        publisherIdentity.getByText("Unverified publisher", { exact: true }),
+      ).toBeVisible();
+      await expect(publisherIdentity.getByText("Declared author:", { exact: true })).toBeVisible();
+      await expect(publisherIdentity.getByText("kandev", { exact: true })).toBeVisible();
+      await expect(settingsPanel.getByTestId("plugin-verify-publisher")).toHaveCount(0);
 
       // Members can edit personal plugin shortcuts even though operator controls stay hidden.
       const shortcutCard = settingsPanel.getByTestId("plugin-shortcuts-card");

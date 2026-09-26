@@ -8,6 +8,43 @@
 
 export type PluginStatus = "registered" | "active" | "error" | "disabled" | "uninstalled";
 
+export type PublisherStatus = "verified" | "unverified";
+
+/** Host-owned publisher projection. Manifest author text never populates this type. */
+export interface PublisherIdentity {
+  status: PublisherStatus;
+  repository_id?: string;
+  owner_id?: string;
+  login?: string;
+  repository?: string;
+  official?: boolean;
+  verified_at?: string;
+  matched_source?: string;
+}
+
+/** Host-owned origin and verification record for an installed package. */
+export interface PublisherProvenance {
+  origin: "unknown" | "catalog" | "url" | "upload" | "sideload" | string;
+  source_id?: string;
+  source_url?: string;
+  package_id: string;
+  version: string;
+  package_sha256?: string;
+  publisher?: {
+    schema_version: number;
+    repository_id: string;
+    owner_id: string;
+    login: string;
+    repository: string;
+    official: boolean;
+    package_sha256?: string;
+  };
+  verified_at?: string;
+  verification_method?: "archive_download" | "installed_files" | string;
+  matched_source_id?: string;
+  matched_source_url?: string;
+}
+
 export interface PluginCapabilities {
   events?: string[];
   api_read?: string[];
@@ -93,6 +130,7 @@ export interface PluginRecord {
   status: PluginStatus;
   /** Absolute path the package was extracted to: ~/.kandev/plugins/<id>/<version>/ */
   install_path: string;
+  installation_id?: string;
   /** false when checksums.txt.sig was missing/unverifiable at install time. */
   signed: boolean;
   installed_at: string;
@@ -111,6 +149,9 @@ export interface PluginRecord {
    * (`auto_update`, omitempty), so an absent field decodes as "inherit".
    */
   auto_update?: boolean | null;
+  /** Host-derived identity. Legacy records receive an unverified projection. */
+  publisher_identity?: PublisherIdentity;
+  publisher_provenance?: PublisherProvenance;
 }
 
 /**
@@ -176,6 +217,8 @@ export interface MarketplaceEntry {
   installed_version?: string;
   source_id: string;
   source_name: string;
+  /** Host-derived identity. Source labels and manifest authors do not supply it. */
+  publisher_identity?: PublisherIdentity;
 }
 
 /**

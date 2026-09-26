@@ -37,6 +37,11 @@
               "type": "string"
             }
           },
+          "official": {
+            "type": "boolean",
+            "description": "Reviewed first-party designation. Valid only when GitHub ownership resolves to kdlbs.",
+            "default": false
+          },
           "kind": {
             "type": "string",
             "enum": ["plugin", "canvas"],

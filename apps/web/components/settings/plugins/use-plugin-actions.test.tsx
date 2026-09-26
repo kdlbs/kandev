@@ -2,12 +2,13 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
-import type { PluginRecord } from "@/lib/types/plugins";
+import type { MarketplaceEntry, PluginRecord } from "@/lib/types/plugins";
 import type { InstallResult } from "@/lib/api/domains/plugins-api";
 
 const loadPlugins = vi.fn(async () => {});
 const unloadPlugin = vi.fn();
 const installPluginFromUrl = vi.fn<() => Promise<InstallResult>>();
+const installPluginFromCatalog = vi.fn<() => Promise<InstallResult>>();
 const installPluginUpload = vi.fn<() => Promise<InstallResult>>();
 const enablePlugin = vi.fn(async () => ({ enabled: true }));
 const getPlugin = vi.fn<() => Promise<PluginRecord>>();
@@ -40,6 +41,7 @@ vi.mock("@/lib/api/domains/plugins-api", async () => {
   return {
     ...actual,
     installPluginFromUrl: (...args: unknown[]) => installPluginFromUrl(...(args as [])),
+    installPluginFromCatalog: (...args: unknown[]) => installPluginFromCatalog(...(args as [])),
     installPluginUpload: (...args: unknown[]) => installPluginUpload(...(args as [])),
     enablePlugin: (...args: unknown[]) => enablePlugin(...(args as [])),
     getPlugin: (...args: unknown[]) => getPlugin(...(args as [])),
@@ -79,6 +81,7 @@ beforeEach(() => {
   loadPlugins.mockClear();
   unloadPlugin.mockClear();
   installPluginFromUrl.mockReset();
+  installPluginFromCatalog.mockReset();
   installPluginUpload.mockReset();
   enablePlugin.mockClear();
   getPlugin.mockReset();
@@ -214,6 +217,45 @@ describe("usePluginActions — marketplaceInstall result", () => {
     });
 
     expect(outcome).toEqual({ ok: false, error: "bad checksum" });
+  });
+
+  it("passes a catalog selector for marketplace entries", async () => {
+    const plugin = activeRecord();
+    installPluginFromCatalog.mockResolvedValue({ plugin });
+    const entry: MarketplaceEntry = {
+      id: plugin.id,
+      name: plugin.display_name,
+      description: "",
+      author: "declared author",
+      categories: [],
+      icon_url: "",
+      repo_url: "https://example.test/repo",
+      version: "3.0.0",
+      min_kandev_version: "",
+      package_url: "https://example.test/acme-tools-3.0.0.tar.gz",
+      package_sha256: "a".repeat(64),
+      stars: 0,
+      updated_at: "",
+      install_state: "update_available",
+      source_id: "official",
+      source_name: "Kandev Official",
+    };
+
+    const { result } = renderHook(() => usePluginActions(), { wrapper });
+    await act(async () => {
+      await expect(result.current.marketplaceInstall(entry)).resolves.toEqual({
+        ok: true,
+        pluginId: plugin.id,
+      });
+    });
+
+    expect(installPluginFromCatalog).toHaveBeenCalledWith({
+      source_id: "official",
+      package_id: plugin.id,
+      expected_version: "3.0.0",
+      expected_sha256: "a".repeat(64),
+    });
+    expect(installPluginFromUrl).not.toHaveBeenCalled();
   });
 });
 
