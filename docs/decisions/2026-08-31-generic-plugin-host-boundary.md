@@ -484,3 +484,16 @@ or target resource between calls.
 
 Rejected because current source does not prove stable provider-neutral identities or
 exact-head/idempotency/audit semantics for any of the three candidates.
+
+## Supersession: workspace coordinator placement
+
+**Date:** 2026-09-26
+
+[ADR-2026-09-26-workspace-coordinator](2026-09-26-workspace-coordinator.md)
+supersedes this ADR only where it placed the Coordinator product in a plugin
+and barred Coordinator vocabulary from core (the Context paragraph on the
+product moving into a plugin, the ownership paragraph, and the core vocabulary
+prohibition). The workspace coordinator is a core page behind
+`features.coordinator`. The generic Host contracts, capability approvals,
+exact writers, transition guards and the plugin v1 fence in this ADR remain
+unchanged.
