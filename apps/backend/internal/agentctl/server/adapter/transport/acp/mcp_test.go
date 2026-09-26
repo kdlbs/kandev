@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -81,6 +82,44 @@ func TestFilterMcpServersWithDecisionsMarksSupportedDuplicateAsFiltered(t *testi
 	}
 	if decisions[1].Included || decisions[1].ReasonCode != mcpFilterReasonDuplicateName {
 		t.Fatalf("duplicate decision = %+v", decisions[1])
+	}
+}
+
+func TestFilterMcpServersWithDecisionsClassifiesHTTPAndSSECapabilityMatrix(t *testing.T) {
+	log := newTestLoggerForMcp()
+	servers := []types.McpServer{
+		{Name: "http", Type: "http", URL: "https://kandev.example/mcp"},
+		{Name: "sse", Type: "sse", URL: "https://kandev.example/sse"},
+		{Name: "stdio", Type: "stdio", Command: "mcp-server"},
+	}
+	tests := []struct {
+		name     string
+		caps     acp.McpCapabilities
+		selected []string
+		reasons  []string
+	}{
+		{name: "neither remote transport", selected: []string{"stdio"}, reasons: []string{mcpFilterReasonHTTPUnsupported, mcpFilterReasonSSEUnsupported, ""}},
+		{name: "HTTP only", caps: acp.McpCapabilities{Http: true}, selected: []string{"http", "stdio"}, reasons: []string{"", mcpFilterReasonSSEUnsupported, ""}},
+		{name: "SSE only", caps: acp.McpCapabilities{Sse: true}, selected: []string{"sse", "stdio"}, reasons: []string{mcpFilterReasonHTTPUnsupported, "", ""}},
+		{name: "both remote transports", caps: acp.McpCapabilities{Http: true, Sse: true}, selected: []string{"http", "sse", "stdio"}, reasons: []string{"", "", ""}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			selected, decisions := filterMcpServersWithDecisions(servers, tt.caps, log)
+			gotNames := make([]string, 0, len(selected))
+			for _, server := range selected {
+				gotNames = append(gotNames, server.Name)
+			}
+			if !reflect.DeepEqual(tt.selected, gotNames) {
+				t.Fatalf("selected = %v, want %v", gotNames, tt.selected)
+			}
+			for i, decision := range decisions {
+				if decision.ReasonCode != tt.reasons[i] {
+					t.Errorf("decision %q reason = %q, want %q", decision.Server.Name, decision.ReasonCode, tt.reasons[i])
+				}
+			}
+		})
 	}
 }
 

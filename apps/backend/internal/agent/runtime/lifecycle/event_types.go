@@ -176,8 +176,11 @@ type AgentStreamEventData struct {
 	ProviderError               *streams.ProviderError `json:"provider_error,omitempty"`
 	SessionStatus               string                 `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
 	PromptGeneration            uint64                 `json:"prompt_generation,omitempty"`
-	TurnID                      string                 `json:"turn_id,omitempty"`
-	Data                        interface{}            `json:"data,omitempty"`
+	// StartupGeneration fences launch receipt facts when one execution is
+	// replaced before a delayed lifecycle callback arrives.
+	StartupGeneration uint64      `json:"startup_generation,omitempty"`
+	TurnID            string      `json:"turn_id,omitempty"`
+	Data              interface{} `json:"data,omitempty"`
 
 	// ParentToolCallID identifies the parent Task tool call when this event
 	// comes from a subagent. Used for visual nesting in the UI.

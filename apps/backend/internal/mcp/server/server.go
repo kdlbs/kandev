@@ -546,23 +546,27 @@ func (s *Server) reportMCPConnectionWithTools(
 	summary string,
 	tools []streams.MCPToolSummary,
 ) {
+	var catalogHash, catalogHashAlgorithm string
 	if kind == streams.MCPAttachmentEvidenceToolsListObserved {
+		catalogHash, catalogHashAlgorithm = streams.MCPToolCatalogDigest(tools)
 		// Bound summaries at the publication boundary before the callback can
 		// expose evidence to the agent update stream. Apply repeats the bound as
 		// a defense for any other evidence producer.
 		tools, _ = streams.NormalizeMCPToolCatalog(tools, toolCount)
 	}
 	reporter(streams.MCPAttachmentEvidence{
-		AttemptID:          attempt.AttemptID,
-		ServerName:         "kandev",
-		Kind:               kind,
-		OccurredAt:         time.Now().UTC(),
-		Source:             streams.MCPServerSourceKandev,
-		ConnectionID:       opaqueMCPConnectionID(connectionID),
-		ToolCount:          toolCount,
-		Tools:              tools,
-		ToolTokenEstimator: toolTokenEstimator(tools),
-		Summary:            streams.SanitizeMCPErrorSummary(summary),
+		AttemptID:                attempt.AttemptID,
+		ServerName:               "kandev",
+		Kind:                     kind,
+		OccurredAt:               time.Now().UTC(),
+		Source:                   streams.MCPServerSourceKandev,
+		ConnectionID:             opaqueMCPConnectionID(connectionID),
+		ToolCount:                toolCount,
+		ToolCatalogHash:          catalogHash,
+		ToolCatalogHashAlgorithm: catalogHashAlgorithm,
+		Tools:                    tools,
+		ToolTokenEstimator:       toolTokenEstimator(tools),
+		Summary:                  streams.SanitizeMCPErrorSummary(summary),
 	})
 }
 

@@ -56,6 +56,24 @@ func TestHandleCompleteEventMarkState_DefersUninitializedStartupFailure(t *testi
 	}
 }
 
+func TestPublishLaunchReceiptCarriesProcessFactOnTheSessionStream(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-receipt", "task-receipt", "session-receipt")
+	execution.beginStartupAttempt()
+
+	mgr.publishLaunchReceipt(execution, launchReceiptProcessStarted)
+
+	streamEvents := eventBus.getStreamEvents()
+	if len(streamEvents) != 1 {
+		t.Fatalf("launch receipt stream events = %d, want 1", len(streamEvents))
+	}
+	event := streamEvents[0]
+	if event.ExecutionID != execution.ID || event.SessionID != execution.SessionID || event.Data == nil ||
+		event.Data.Type != "launch_receipt" || event.Data.Data != launchReceiptProcessStarted || event.Data.StartupGeneration == 0 {
+		t.Fatalf("launch receipt event = %+v, want session-scoped process fact", event)
+	}
+}
+
 func TestMarkCompleted_DefersUninitializedStartupFailure(t *testing.T) {
 	mgr, eventBus := createTestManagerWithTracking()
 	execution := createTestExecution("exec-1", "task-1", "session-1")
@@ -333,5 +351,8 @@ func TestStartupGenerationCapturesAttemptIDForReusedExecutionMessageChunk(t *tes
 	}
 	if streamEvents[0].AttemptID != "attempt-new" {
 		t.Fatalf("message stream attempt ID = %q, want attempt-new", streamEvents[0].AttemptID)
+	}
+	if streamEvents[0].Data.StartupGeneration != newGeneration {
+		t.Fatalf("message stream startup generation = %d, want %d", streamEvents[0].Data.StartupGeneration, newGeneration)
 	}
 }

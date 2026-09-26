@@ -1993,6 +1993,39 @@ func TestHandleMessageTask_PromptFailsWithExecutionNotFound_AutoResumes(t *testi
 	})
 }
 
+func TestHandleMessageTask_CrossWorkspaceQueuedMessageIsPreserved(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, _, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-foreign", Name: "Foreign"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-foreign", WorkspaceID: "ws-foreign", Name: "Foreign board"}))
+	targetResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{WorkspaceID: "ws-foreign", WorkflowID: "wf-foreign", Title: "Foreign target"})
+	require.NoError(t, err)
+	target := targetResult.Task
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "foreign-session", TaskID: target.ID, AgentProfileID: "agent-profile-1", State: models.TaskSessionStateRunning}))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	resp, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask,
+		senderPayloadWithMode(target.ID, "cross workspace", sender.ID, "queued")))
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var response map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &response))
+	assert.Equal(t, "queued", response[stopTaskStatusKey])
+	assert.Equal(t, "foreign-session", response["session_id"])
+	assert.Empty(t, orch.interruptCalls, "queued delivery must not interrupt")
+	assert.Len(t, orch.promptCalls, 0, "running target keeps queued delivery")
+
+	status := orch.queue.GetStatus(ctx, "foreign-session")
+	require.Len(t, status.Entries, 1, "queued delivery must retain exactly one FIFO entry")
+	entry := status.Entries[0]
+	assert.Equal(t, "foreign-session", entry.SessionID)
+	assert.Equal(t, target.ID, entry.TaskID)
+	assert.Contains(t, entry.Content, "cross workspace")
+	assert.Equal(t, sender.ID, entry.Metadata["sender_task_id"])
+	assert.Equal(t, "sender-sess-1", entry.Metadata["sender_session_id"])
+}
+
 func TestHandleMessageTask_CreatedSession_StartsAgent(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)

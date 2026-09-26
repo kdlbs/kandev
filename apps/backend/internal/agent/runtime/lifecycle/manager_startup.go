@@ -107,6 +107,15 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	execution.beginStartupAttemptWithID(ResumeAttemptIDFromContext(ctx))
+	m.publishLaunchReceipt(execution, launchReceiptStarted)
+	processStarted := false
+	defer func() {
+		if retErr != nil && !processStarted {
+			m.publishLaunchReceipt(execution, launchReceiptTerminalPreflightFailure)
+		}
+		retErr = wrapBootstrapFailure(execution, retErr)
+	}()
 	if err := execution.contextResetAdmissionError(); err != nil {
 		return err
 	}
@@ -116,9 +125,6 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}); err != nil {
 		return err
 	}
-	defer func() {
-		retErr = wrapBootstrapFailure(execution, retErr)
-	}()
 	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionAgent); err != nil {
 		return err
 	}
@@ -162,7 +168,6 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if isPassthrough {
 		return m.startPassthroughExecution(operationCtx, execution, profileInfo)
 	}
-	execution.beginStartupAttemptWithID(ResumeAttemptIDFromContext(operationCtx))
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if client == nil {
@@ -219,6 +224,8 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		m.logger.Info("reusing existing agent process, skipping subprocess launch",
 			zap.String("execution_id", executionID),
 			zap.String("task_id", execution.TaskID))
+		processStarted = true
+		m.publishLaunchReceipt(execution, launchReceiptProcessStarted)
 	} else {
 		m.logger.Info("StartAgentProcess: starting subprocess",
 			zap.String("execution_id", executionID),
@@ -232,6 +239,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 			execution.remoteInstanceLifecycleMu.Unlock()
 			return err
 		}
+		processStarted = true
 
 		m.logger.Info("agent process started",
 			zap.String("execution_id", executionID),
