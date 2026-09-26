@@ -45,12 +45,15 @@ stable `bootId`, auth mode, authenticated state, and user ID. SystemInfo is not
 scoped to a workspace. The provider keeps one QueryClient for the authenticated
 app branch instead of keying the provider subtree by identity, so an identity
 change does not remount unrelated shell state. When identity changes, the
-provider cancels and removes SystemInfo queries for other identities through
-the QueryClient APIs. The hook moves to the new identity key, so old data cannot
-be rendered as the new identity's result. Auth-gated navigation unmounts the
-provider when the app shell is left. TanStack also cancels a pending query when
-its last observer leaves because the query function consumes the observer
-signal. No custom request controller or StrictMode replay guard is used.
+provider targets only obsolete SystemInfo keys, calls `cancelQueries`, then
+immediately calls `removeQueries` with the same filter in that effect. It does
+not defer removal to the cancellation promise, so a delayed cleanup cannot
+remove a query after that identity becomes current again. The hook moves to the
+new identity key, so old data cannot be rendered as the new identity's result.
+Auth-gated navigation unmounts the provider when the app shell is left. TanStack
+also cancels a pending query when its last observer leaves because the query
+function consumes the observer signal. No custom request controller or
+StrictMode replay guard is used.
 
 The Go boot payload is unchanged and does not include SystemInfo. It supplies
 only `runtime.bootId` for the existing restart guard and query identity. The
@@ -66,8 +69,9 @@ consumers and retains one in-memory snapshot. Loading, error, and explicit
 refresh state come from the query. If identity changes or logout removes the
 last observer while a request is pending, TanStack cancels the query through
 that signal. Identity-change cleanup also removes snapshots for other
-identities from the client. A request that has already completed needs no
-cancellation.
+identities from the client in the same effect; cleanup does not leave a
+removal promise pending across subsequent identity changes. A request that has
+already completed needs no cancellation.
 
 All fields in the SystemInfo response are fixed for a backend process: build
 metadata, runtime version/platform values, process start time, and process ID.

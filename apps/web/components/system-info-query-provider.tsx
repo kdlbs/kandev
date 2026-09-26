@@ -46,9 +46,8 @@ function ScopedQueryClient({
       predicate: (query: { queryKey: readonly unknown[] }) =>
         JSON.stringify(query.queryKey) !== identityKey,
     };
-    void queryClient.cancelQueries(obsoleteQueries).then(() => {
-      queryClient.removeQueries(obsoleteQueries);
-    });
+    void queryClient.cancelQueries(obsoleteQueries);
+    queryClient.removeQueries(obsoleteQueries);
   }, [identityKey, queryClient]);
 
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;

@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { onlineManager } from "@tanstack/react-query";
+import { onlineManager, QueryClient, useQueryClient } from "@tanstack/react-query";
 import { StrictMode, useEffect, useState, type ReactNode } from "react";
 import type { StoreApi } from "zustand";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,7 @@ import type { SystemInfo } from "@/lib/types/system";
 import { createSystemInfoQueryKey, normalizeSystemInfoApiBaseUrl } from "./system-info-query";
 
 const BACKEND_ORIGIN = "https://backend.example";
+const PAGE_BOOT_ID = "page-boot-1";
 const SYSTEM_INFO_ERROR = "system info failed";
 const VERSION_1 = '"version":"1.2.3"';
 const LOADING = '"isLoading":true';
@@ -70,35 +71,54 @@ function StoreCapture({ onStore }: { onStore?: (store: StoreApi<AppState>) => vo
 
 function AuthenticatedAppBranch({
   bootId,
+  onQueryClient,
   children,
 }: {
   bootId: string | undefined;
+  onQueryClient?: (queryClient: QueryClient) => void;
   children: ReactNode;
 }) {
   const authenticated = useAppStore((state) => state.auth.authenticated);
   return authenticated ? (
-    <SystemInfoQueryProvider bootId={bootId}>{children}</SystemInfoQueryProvider>
+    <SystemInfoQueryProvider bootId={bootId}>
+      <QueryClientCapture onQueryClient={onQueryClient} />
+      {children}
+    </SystemInfoQueryProvider>
   ) : (
     <output data-testid="logged-out" />
   );
 }
 
+function QueryClientCapture({
+  onQueryClient,
+}: {
+  onQueryClient?: (queryClient: QueryClient) => void;
+}) {
+  const queryClient = useQueryClient();
+  useEffect(() => onQueryClient?.(queryClient), [onQueryClient, queryClient]);
+  return null;
+}
+
 function TestHarness({
   children,
   apiBaseUrl = BACKEND_ORIGIN,
-  bootId = "page-boot-1",
+  bootId = PAGE_BOOT_ID,
   onStore,
+  onQueryClient,
 }: {
   children: ReactNode;
   apiBaseUrl?: string;
   bootId?: string;
   onStore?: (store: StoreApi<AppState>) => void;
+  onQueryClient?: (queryClient: QueryClient) => void;
 }) {
   config.apiBaseUrl = apiBaseUrl;
   return (
     <StateProvider initialState={{ auth: AUTH }}>
       <StoreCapture onStore={onStore} />
-      <AuthenticatedAppBranch bootId={bootId}>{children}</AuthenticatedAppBranch>
+      <AuthenticatedAppBranch bootId={bootId} onQueryClient={onQueryClient}>
+        {children}
+      </AuthenticatedAppBranch>
     </StateProvider>
   );
 }
@@ -319,7 +339,7 @@ async function isolatesAndCancelsRequestsAcrossIdentityChanges() {
   };
 
   const view = render(
-    <TestHarness apiBaseUrl={`${BACKEND_ORIGIN}/one`} bootId="page-boot-1" onStore={onStore}>
+    <TestHarness apiBaseUrl={`${BACKEND_ORIGIN}/one`} bootId={PAGE_BOOT_ID} onStore={onStore}>
       <InfoProbe id="current" />
       <StatefulShellProbe />
     </TestHarness>,
@@ -408,10 +428,82 @@ async function discardsSnapshotsFromPreviousAuthIdentities() {
   );
 }
 
+async function protectsReturnedIdentityFromDelayedCleanup() {
+  const requests: Array<{
+    signal: AbortSignal;
+    pending: ReturnType<typeof deferred<Response>>;
+  }> = [];
+  const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+    const pending = deferred<Response>();
+    requests.push({ signal: init.signal as AbortSignal, pending });
+    return pending.promise;
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  let store: StoreApi<AppState> | undefined;
+  let queryClient: QueryClient | undefined;
+  const onStore = (nextStore: StoreApi<AppState>) => {
+    store = nextStore;
+  };
+  const onQueryClient = (nextClient: QueryClient) => {
+    queryClient = nextClient;
+  };
+
+  render(
+    <TestHarness onStore={onStore} onQueryClient={onQueryClient}>
+      <InfoProbe id="current" />
+    </TestHarness>,
+  );
+  await waitFor(() => expect(requests).toHaveLength(1));
+  await act(async () => requests[0]?.pending.resolve(makeResponse(INFO)));
+  await waitFor(() =>
+    expect(screen.getByTestId("current").textContent).toContain('"version":"1.2.3"'),
+  );
+
+  const releaseCleanup = deferred<void>();
+  const cancelQueries = queryClient?.cancelQueries.bind(queryClient);
+  if (!queryClient || !cancelQueries) throw new Error("query client was not provided");
+  queryClient.cancelQueries = ((...args: Parameters<QueryClient["cancelQueries"]>) =>
+    cancelQueries(...args).then(
+      async () => releaseCleanup.promise,
+    )) as QueryClient["cancelQueries"];
+
+  try {
+    act(() => {
+      store?.getState().setAuthState({ ...AUTH, user: { ...AUTH.user, id: "user-2" } });
+    });
+    await waitFor(() => expect(requests).toHaveLength(2));
+
+    act(() => store?.getState().setAuthState(AUTH));
+    await waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[1]?.signal.aborted).toBe(true);
+    expect(requests[2]?.signal.aborted).toBe(false);
+
+    const currentInfo = { ...INFO, version: "current-a" };
+    await act(async () => requests[2]?.pending.resolve(makeResponse(currentInfo)));
+    await waitFor(() =>
+      expect(screen.getByTestId("current").textContent).toContain('"version":"current-a"'),
+    );
+
+    await act(async () => releaseCleanup.resolve());
+    const currentKey = createSystemInfoQueryKey({
+      apiBaseUrl: BACKEND_ORIGIN,
+      bootId: PAGE_BOOT_ID,
+      authMode: AUTH.mode,
+      authenticated: AUTH.authenticated,
+      userId: AUTH.user.id,
+    });
+    expect(queryClient.getQueryData(currentKey)).toEqual(currentInfo);
+    expect(requests[2]?.signal.aborted).toBe(false);
+  } finally {
+    releaseCleanup.resolve();
+  }
+}
+
 function scopesTheCacheKeyToTheFullIdentity() {
   const identity = {
     apiBaseUrl: `${BACKEND_ORIGIN}/system/`,
-    bootId: "page-boot-1",
+    bootId: PAGE_BOOT_ID,
     authMode: "enabled" as const,
     authenticated: true,
     userId: "user-1",
@@ -432,7 +524,7 @@ function scopesTheCacheKeyToTheFullIdentity() {
     "system",
     "info",
     `${BACKEND_ORIGIN}/system`,
-    "page-boot-1",
+    PAGE_BOOT_ID,
     "enabled",
     true,
     "user-1",
@@ -460,6 +552,10 @@ describe("useSystemInfo Query cache", () => {
   it(
     "discards snapshots from previous auth identities",
     discardsSnapshotsFromPreviousAuthIdentities,
+  );
+  it(
+    "does not let delayed identity cleanup remove a newly active query",
+    protectsReturnedIdentityFromDelayedCleanup,
   );
   it(
     "includes full backend, boot, and auth identity in its cache key",

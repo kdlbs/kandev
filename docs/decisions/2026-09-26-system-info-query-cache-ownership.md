@@ -30,11 +30,14 @@ ID and require a page reload after a process change.
   branch. The client remains stable across backend and auth identity changes;
   the provider is not keyed by identity because doing so remounts unrelated
   shell state. The query key scopes data to the full identity, and the provider
-  cancels and removes SystemInfo queries for identities that are no longer
-  current through QueryClient APIs. The authenticated shell unmounts the
-  provider on logout. Query functions pass TanStack Query's observer signal to
-  the existing transport, so leaving an in-flight query cancels its request.
-  No provider-owned AbortController or StrictMode replay guard is used.
+  targets only SystemInfo queries for identities that are no longer current.
+  In the identity-change effect it calls `cancelQueries` and immediately calls
+  `removeQueries` with the same obsolete-key filter; it does not defer removal
+  to the cancellation promise, so a later return to that identity cannot be
+  removed by stale cleanup. The authenticated shell unmounts the provider on
+  logout. Query functions pass TanStack Query's observer signal to the existing
+  transport, so leaving an in-flight query cancels its request. No
+  provider-owned AbortController or StrictMode replay guard is used.
 - The boot payload is unchanged. It supplies only the stable page `bootId` used
   to construct the query identity. The About view lazily fetches SystemInfo
   from the existing authenticated endpoint when it mounts.
@@ -65,7 +68,9 @@ development StrictMode observer replay, TanStack may cancel a pending request
 and start a replacement when the observer returns; the hook does not impose an
 exactly-once request guarantee across that lifecycle. Backend or auth identity
 changes retain unrelated shell state while removing prior SystemInfo snapshots
-and cancelling their pending requests. Logout unmounts the provider, and the
+and cancelling their pending requests. Cleanup only targets obsolete
+SystemInfo keys and does not leave a removal callback pending across a later
+identity change. Logout unmounts the provider, and the
 restart guard continues to make its separate uncached request because that
 request proves process identity on reconnect.
 

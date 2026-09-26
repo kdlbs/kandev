@@ -25,7 +25,9 @@ Give the About view one authoritative server snapshot and request lifecycle in T
 
 - Create one stable QueryClient in the authenticated app branch. Keep its
   descendants mounted across identity changes, while cancelling and removing
-  SystemInfo queries from obsolete identities.
+  only SystemInfo queries from obsolete identities. Call targeted cancellation
+  and removal in the same identity-change effect so cleanup cannot outlive a
+  later A-to-B-to-A switch.
 - Fetch `/api/v1/system/info` lazily through the existing API wrapper and keep explicit refetch, loading, error, and one-attempt behavior.
 - Remove only the SystemInfo field and action from the Zustand System slice. Keep all other System state and actions there.
 - Keep the boot payload and `runtime.bootId` unchanged. Keep backend-generation, restart, and self-update reads on their independent no-store paths.
@@ -43,13 +45,15 @@ Give the About view one authoritative server snapshot and request lifecycle in T
 ## Acceptance
 
 1. Preserve `AC-PLATFORM-BACKEND-RESTART-PAGE-RECOVERY-001.1` and `.2`: use the current page boot ID and retain an independent uncached reconnect check.
-2. Query owns the About view's single SystemInfo snapshot and request state. Its key includes the canonical full API base URL, page boot ID, auth mode, authenticated state, and user ID. A stable app-branch client removes obsolete SystemInfo identities without remounting unrelated shell state.
+2. Query owns the About view's single SystemInfo snapshot and request state. Its key includes the canonical full API base URL, page boot ID, auth mode, authenticated state, and user ID. A stable app-branch client removes obsolete SystemInfo identities in the identity-change effect without remounting unrelated shell state or leaving a stale removal promise pending.
 3. About mounts trigger a lazy request; concurrent consumers with the same identity share it. Loading, error, manual retry/refetch, and the immutable process snapshot keep the current UI behavior.
 4. Query functions consume TanStack's observer signal. When an identity change
    or logout removes the last observer from an in-flight query, TanStack
-   cancels it. Identity changes also remove prior SystemInfo entries from the
-   shared client, and late responses cannot appear under a new identity. No
-   exactly-once request promise is made across StrictMode observer replay.
+   cancels it. Identity changes immediately remove prior SystemInfo entries
+   from the shared client using targeted QueryClient calls, and late responses
+   cannot appear under a new identity. A deferred cleanup regression covers a
+   rapid A-to-B-to-A switch. No exactly-once request promise is made across
+   StrictMode observer replay.
 5. All unrelated System state remains in Zustand. No SystemInfo result is copied back into Zustand.
 
 ## Verification
@@ -69,12 +73,15 @@ cd apps/web && pnpm run i18n:ratchet
 ## Results
 
 The provider keeps one client for the authenticated app branch, scopes the query
-key to the full backend/boot/auth identity, and cancels and removes obsolete
-SystemInfo entries without remounting unrelated shell state. The boot payload
-and backend remain unchanged.
+key to the full backend/boot/auth identity, and cancels then immediately removes
+obsolete SystemInfo entries without remounting unrelated shell state. It does
+not defer cache removal until cancellation settles. The boot payload and backend
+remain unchanged.
 
 The focused SystemInfo, error-boundary, state-provider, System slice, restart
-guard, restart flow, self-update, and System API suite passes (80 tests across
-8 files). Typecheck, lint, frozen-lockfile install, architecture lint, docs
-validation, spec lint, and i18n ratchet pass. The managed mobile Docker
-permissions E2E passes both member and admin cases.
+guard, restart flow, self-update, and System API suite passes (81 tests across
+8 files). It also proves an edited non-query child keeps its state through
+identity changes and that delayed cancellation completion cannot remove the
+returned identity's active cache entry. Typecheck, lint, frozen-lockfile
+install, architecture lint, docs validation, spec lint, and i18n ratchet pass.
+The managed mobile Docker permissions E2E passes both member and admin cases.

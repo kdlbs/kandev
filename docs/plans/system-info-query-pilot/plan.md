@@ -29,7 +29,7 @@ Move the System > About `SystemInfo` snapshot and request state to one identity-
 
 ## Verification results
 
-- The focused SystemInfo, app error-boundary, state-provider, System slice, restart guard, restart flow, self-update, and System API suite passes: 80 tests across 8 files.
+- The focused SystemInfo, app error-boundary, state-provider, System slice, restart guard, restart flow, self-update, and System API suite passes: 81 tests across 8 files. The provider tests preserve an edited non-query child's state across identity changes and prevent delayed cleanup from removing a returned identity's cache entry.
 - Web typecheck and lint pass. `pnpm install --frozen-lockfile` passes from `apps/`.
 - Architecture lint, documentation validation, specification lint, the i18n ratchet, and `git diff --check` pass.
-- The managed mobile Docker permissions E2E passes both member and admin cases, including the edited-form identity-change regression.
+- The managed mobile Docker permissions E2E passes both member and admin cases.
