@@ -322,6 +322,7 @@ test.describe("Workflow session targeting", () => {
       "Source target runtime",
       profileA.id,
       {
+        description: "/e2e:simple-message",
         workflow_id: workflow.id,
         workflow_step_id: plan.id,
         repository_ids: [seedData.repositoryId],

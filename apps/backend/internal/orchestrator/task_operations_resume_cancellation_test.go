@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -154,6 +155,43 @@ func TestCancelAgentStopsUnacceptedResumeStartupWithoutWaitingForAgentCancel(t *
 		}
 	default:
 		t.Fatal("CancelAgent did not stop the exact resume startup execution")
+	}
+	assertResumeSessionState(t, repo, sessionID, models.TaskSessionStateWaitingForInput)
+}
+
+func TestCancelAgentSettlesSessionStateChangedDuringStartupStop(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-cancel-resume-state-race"
+		sessionID   = "session-cancel-resume-state-race"
+		executionID = "execution-cancel-resume-state-race"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
+	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
+
+	agentManager := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		stopAgentWithReasonFunc: func(stopCtx context.Context, stoppedID, _ string, _ bool) error {
+			if stoppedID != executionID {
+				return fmt.Errorf("stopped execution = %q, want %q", stoppedID, executionID)
+			}
+			return repo.UpdateTaskSessionState(stopCtx, sessionID, models.TaskSessionStateRunning, "")
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentManager)
+	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	attempt, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
+	if err != nil || !owner {
+		t.Fatalf("begin resume attempt: owner=%v err=%v", owner, err)
+	}
+	attempt.setExecutionID(executionID)
+	t.Cleanup(func() { attempt.finish(svc.resumeAttemptStore()) })
+
+	if err := svc.CancelAgent(ctx, sessionID); err != nil {
+		t.Fatalf("CancelAgent after startup state changed during stop: %v", err)
 	}
 	assertResumeSessionState(t, repo, sessionID, models.TaskSessionStateWaitingForInput)
 }
