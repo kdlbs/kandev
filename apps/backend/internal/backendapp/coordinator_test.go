@@ -14,6 +14,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/startup"
 )
@@ -225,5 +227,94 @@ func TestRegisterCoordinatorRoutes_DisabledReturns404AndPreservesRows(t *testing
 	}
 	if found.ID != seed.ID {
 		t.Errorf("GetCoordinator().ID = %q, want %q", found.ID, seed.ID)
+	}
+}
+
+// TestRegisterCoordinatorSubscribers_NilInputsReturnsNoop mirrors the other
+// registration functions' nil guard: called without an event bus or
+// service, it must return a hook that does nothing rather than panic.
+func TestRegisterCoordinatorSubscribers_NilInputsReturnsNoop(t *testing.T) {
+	hook := registerCoordinatorSubscribers(nil, nil, nil, newTestLogger())
+	hook(context.Background(), time.Now().UTC())
+}
+
+// TestRegisterCoordinatorSubscribers_WiresStallSubscriptionAndPruneHook
+// verifies the actual wiring at task 04's registration site: calling
+// registerCoordinatorSubscribers subscribes the coordinator package to
+// task.stalled on the given bus (needs-you.md#stall-records), and the hook
+// it returns runs startup pruning through the service.
+func TestRegisterCoordinatorSubscribers_WiresStallSubscriptionAndPruneHook(t *testing.T) {
+	tracker := newCoordinatorTestTracker(t)
+	pool := newCoordinatorTestPool(t)
+	log := newTestLogger()
+
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, true, log)
+	if err != nil {
+		t.Fatalf("initCoordinatorWiring: %v", err)
+	}
+
+	// A second Store handle onto the same pool, used only to seed/read rows
+	// directly, bypassing svc's workspace-scope authorization (svc's
+	// authorizer is a nil *taskservice.Service in this test, since no HTTP
+	// request ever reaches these subscriber-driven paths).
+	store, err := coordinator.NewStore(pool.Writer(), pool.Reader())
+	if err != nil {
+		t.Fatalf("coordinator.NewStore: %v", err)
+	}
+	seed := &coordinator.Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e"}
+	if err := store.CreateCoordinator(context.Background(), seed); err != nil {
+		t.Fatalf("seed CreateCoordinator: %v", err)
+	}
+
+	memBus := bus.NewMemoryEventBus(log)
+	hook := registerCoordinatorSubscribers(nil, memBus, svc, log)
+
+	lastEventAt := time.Now().UTC()
+	stalledEvt := bus.NewEvent(events.TaskStalled, "task-service", map[string]interface{}{
+		"task_id":        "task-1",
+		"workspace_id":   "ws-1",
+		"stalled_for":    (90 * time.Second).String(),
+		"last_event_at":  lastEventAt.Format(time.RFC3339Nano),
+		"detection_only": true,
+	})
+	if err := memBus.Publish(context.Background(), events.TaskStalled, stalledEvt); err != nil {
+		t.Fatalf("Publish task.stalled: %v", err)
+	}
+
+	stalls, err := store.ListStalls(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("ListStalls: %v", err)
+	}
+	if len(stalls) != 1 || stalls[0].TaskID != "task-1" {
+		t.Fatalf("ListStalls = %+v, want one row for task-1", stalls)
+	}
+
+	// Seed a second, 31-day-old stall directly, then run the hook: it must
+	// prune that row without disturbing the fresh one task.stalled just
+	// wrote.
+	old := &coordinator.Stall{
+		TaskID:       "task-old",
+		WorkspaceID:  "ws-1",
+		StalledForMs: 1000,
+		LastEventAt:  lastEventAt,
+		DetectedAt:   time.Now().UTC().Add(-31 * 24 * time.Hour),
+	}
+	if _, err := store.UpsertStall(context.Background(), old); err != nil {
+		t.Fatalf("seed old UpsertStall: %v", err)
+	}
+
+	// The hook spawns a goroutine that releases its subscriptions on
+	// ctx.Done(); use a cancellable context and cancel it before the test
+	// ends so that goroutine doesn't leak into later tests' leak checks.
+	hookCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	hook(hookCtx, time.Now().UTC())
+
+	stalls, err = store.ListStalls(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("ListStalls after hook: %v", err)
+	}
+	if len(stalls) != 1 || stalls[0].TaskID != "task-1" {
+		t.Fatalf("ListStalls after hook = %+v, want only the fresh task-1 row (task-old pruned)", stalls)
 	}
 }
