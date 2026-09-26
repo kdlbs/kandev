@@ -28,6 +28,7 @@ capabilities:
   events: ["task.created"]
   api_write: ["tasks"]
   agent_invoke: true
+  agent_conversation: true
   state: true
   secrets: true
   user_state: true
@@ -46,6 +47,9 @@ actions:
     scope: "workspace"
     max_body_bytes: 4096
   - key: "utility-preference"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-chat.ensure"
     scope: "workspace"
     max_body_bytes: 4096
   - key: "repositories.inspect"

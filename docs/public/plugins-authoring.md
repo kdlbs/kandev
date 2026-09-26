@@ -1037,6 +1037,13 @@ removes conversations owned by the calling plugin. Disabling or uninstalling
 the plugin removes all of that plugin's managed conversations across
 workspaces.
 
+A native UI bundle can render that descriptor through the host-owned
+`WorkspaceAgentChat` surface. Pass the descriptor's `WorkspaceID` and
+`SessionID` as `workspaceId` and `conversationId`; use a replacement descriptor
+version for `resourceVersion`. The host owns transcript streaming, the composer,
+clarification handling, and responsive presentation. Set `readOnly` when the
+plugin should show history without allowing a reply.
+
 **Host state** is a small key/value store kandev keeps for your plugin in
 its own database. Each entry is addressed by a `(scope, scopeID, key)`
 triple and holds a JSON object (`map[string]any`): `SetState` upserts one,

@@ -16,7 +16,9 @@ Port the maintained `agent_conversation` Host contract to canonical Kandev so a
 plugin can manage one hidden conversation per plugin, workspace, and conversation
 key through the existing typed gRPC Host channel. The source contract is
 `yattdev/kandev` commit `612f46f7a4b206c7cd81863efc4202c123901542`; the target
-branch is canonical `main` as it stood at merge base `753e5549e`.
+branch is canonical `main` as it stood at merge base `753e5549e`. The delivery
+also exposes the managed descriptor through a host-owned native UI surface while
+keeping its backing task outside ordinary task discovery.
 
 ## Scope
 
@@ -27,14 +29,15 @@ creates or repairs a hidden, workflowless ephemeral task/session; `Dispatch`
 records durable occurrence keys so retries do not double-send; `Delete` removes
 only conversations owned by the calling plugin. Installation, disable, and
 uninstall paths clean up plugin-owned conversations. Quick Chat and its expiry
-sweeper exclude those managed sessions.
+sweeper exclude those managed sessions. The native UI delivery adds
+`host.ui.WorkspaceAgentChat`, which resolves and revalidates only the supplied
+managed descriptor for transcript reads, turn dispatch, and live updates.
 
 The port preserves typed `PermissionDenied` for an undeclared
 `agent_conversation` capability, replay-safe dispatch statuses, workspace
 isolation, pagination, cancellation-safe cleanup, and the published manifest and
 authoring guidance. It does not add workspace-agent-principal binding, a general
-metadata query API, a user-facing UI, or a schema index unrelated to the scoped
-contract.
+metadata query API, or a schema index unrelated to the scoped contract.
 
 ## Compatibility and rollback
 
@@ -57,3 +60,4 @@ inert; normal plugin uninstall or the lifecycle cleanup path removes them.
 ## Work orders
 
 - [x] [Task 01: Port the AgentConversation Host contract](task-01-port-agent-conversation-host.md)
+- [x] [Task 02: Expose managed conversation chat to native plugin UI](task-02-workspace-agent-chat.md)

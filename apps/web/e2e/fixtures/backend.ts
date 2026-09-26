@@ -1,5 +1,6 @@
 import { test as base } from "@playwright/test";
 import { type ChildProcess, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -24,6 +25,7 @@ if (!Number.isInteger(E2E_PORT_OFFSET) || E2E_PORT_OFFSET < 0 || E2E_PORT_OFFSET
 const BACKEND_BASE_PORT = 18080 + E2E_PORT_OFFSET;
 const HEALTH_TIMEOUT_MS = 30_000;
 const HEALTH_POLL_MS = 250;
+const STARTUP_ARTIFACT_MAX_BYTES = 64 * 1024;
 
 /**
  * Returns true when the current run is the heavyweight container-backed
@@ -178,6 +180,23 @@ async function waitForPortFree(port: number, timeoutMs = 10_000): Promise<void> 
 type BackendFixtureLifecycle = {
   stopProcess?: (proc: ChildProcess) => Promise<void>;
   removeTempRoot?: (tmpDir: string) => void;
+  onFailure?: (failure: unknown) => Promise<void> | void;
+};
+
+export type BackendStartupArtifactOptions = {
+  outputDir: string;
+  projectName: string;
+  shard: string;
+  workerIndex: number;
+  parallelIndex: number;
+  port: number;
+  startedAt: Date;
+  elapsedMs: number;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  processLogPath: string;
+  backendLogPath: string;
+  failure: unknown;
 };
 
 type BackendProcess = ChildProcess & {
@@ -248,6 +267,8 @@ export async function runOwnedBackendFixture<T>(
     }
   }
 
+  if (failures.length > 0) await notifyBackendFixtureFailure(lifecycle.onFailure, failures[0]);
+
   try {
     removeTempRoot(tmpDir);
   } catch (error) {
@@ -260,6 +281,90 @@ export async function runOwnedBackendFixture<T>(
   }
 
   return result as T;
+}
+
+async function notifyBackendFixtureFailure(
+  onFailure: BackendFixtureLifecycle["onFailure"],
+  failure: unknown,
+): Promise<void> {
+  if (!onFailure) return;
+  try {
+    await onFailure(failure);
+  } catch {
+    // Diagnostics must not replace the startup failure that triggered them.
+  }
+}
+
+export function writeBackendStartupArtifact(options: BackendStartupArtifactOptions): string {
+  const artifactDir = path.join(options.outputDir, "worker-backend");
+  fs.mkdirSync(artifactDir, { recursive: true, mode: 0o700 });
+  const basename = [
+    safeArtifactSegment(options.projectName),
+    `shard-${safeArtifactSegment(options.shard)}`,
+    `worker-${options.workerIndex}`,
+    `parallel-${options.parallelIndex}`,
+    randomUUID(),
+  ].join("-");
+  const relativeLocator = path.join("worker-backend", `${basename}-backend-startup.log`);
+  const artifactPath = path.join(options.outputDir, relativeLocator);
+  const header = [
+    "backend startup diagnostic",
+    `utc=${options.startedAt.toISOString()}`,
+    `elapsed_ms=${options.elapsedMs}`,
+    `port=${options.port}`,
+    `exit_code=${options.exitCode ?? "none"}`,
+    `signal=${options.signal ?? "none"}`,
+    `failure=${sanitizeStartupDiagnostic(String(options.failure))}`,
+    "--- combined backend output (sanitized tail) ---",
+  ].join("\n");
+  const combined = [readLogTail(options.processLogPath), readLogTail(options.backendLogPath)]
+    .filter(Boolean)
+    .join("\n");
+  const availableLogBytes = Math.max(
+    0,
+    STARTUP_ARTIFACT_MAX_BYTES - Buffer.byteLength(`${header}\n\n`),
+  );
+  const contents = `${header}\n${tailUtf8(sanitizeStartupDiagnostic(combined), availableLogBytes)}\n`;
+  fs.writeFileSync(artifactPath, contents, { encoding: "utf8", mode: 0o600 });
+  if (process.platform !== "win32") fs.chmodSync(artifactPath, 0o600);
+  return relativeLocator;
+}
+
+function readLogTail(logPath: string): string {
+  try {
+    const stat = fs.statSync(logPath);
+    if (stat.size === 0) return "";
+    const size = Math.min(stat.size, STARTUP_ARTIFACT_MAX_BYTES);
+    const buffer = Buffer.alloc(size);
+    const file = fs.openSync(logPath, "r");
+    try {
+      fs.readSync(file, buffer, 0, size, stat.size - size);
+    } finally {
+      fs.closeSync(file);
+    }
+    return buffer.toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+function tailUtf8(value: string, maxBytes: number): string {
+  const buffer = Buffer.from(value, "utf8");
+  if (buffer.length <= maxBytes) return value;
+  return buffer.subarray(buffer.length - maxBytes).toString("utf8");
+}
+
+function sanitizeStartupDiagnostic(value: string): string {
+  return value
+    .replace(
+      /\b(authorization|token|secret|password|api[_-]?key)\s*([=:])\s*(?:Bearer\s+)?[^\s'"\n]+/gi,
+      "$1$2<redacted>",
+    )
+    .replace(/(?:[A-Za-z]:\\|\/(?:data|home|tmp|var|workspace|Users)\/)[^\s'"\n]*/g, "<path>");
+}
+
+function safeArtifactSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
 }
 
 /**
@@ -321,211 +426,242 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       const processLogPath = path.join(tmpDir, "backend-process.log");
       const backendLogPath = path.join(tmpDir, ".kandev", "logs", "backend-logs.log");
       let backendProc: ChildProcess | undefined;
+      let startupFailure: unknown;
+      const startedAt = new Date();
 
-      await runOwnedBackendFixture(tmpDir, async (registerProcess) => {
-        const homeDir = path.join(tmpDir, ".kandev");
-        const systemTemporaryRoot = path.join(tmpDir, "system-temporary");
-        const dbPath = path.join(tmpDir, "kandev.db");
-        const worktreeBase = path.join(tmpDir, "worktrees");
-        const repoCloneBase = path.join(tmpDir, "managed-repos");
+      await runOwnedBackendFixture(
+        tmpDir,
+        async (registerProcess) => {
+          const homeDir = path.join(tmpDir, ".kandev");
+          const systemTemporaryRoot = path.join(tmpDir, "system-temporary");
+          const dbPath = path.join(tmpDir, "kandev.db");
+          const worktreeBase = path.join(tmpDir, "worktrees");
+          const repoCloneBase = path.join(tmpDir, "managed-repos");
 
-        fs.mkdirSync(homeDir, { recursive: true });
-        fs.mkdirSync(systemTemporaryRoot, { recursive: true });
-        fs.mkdirSync(worktreeBase, { recursive: true });
-        fs.mkdirSync(repoCloneBase, { recursive: true });
+          fs.mkdirSync(homeDir, { recursive: true });
+          fs.mkdirSync(systemTemporaryRoot, { recursive: true });
+          fs.mkdirSync(worktreeBase, { recursive: true });
+          fs.mkdirSync(repoCloneBase, { recursive: true });
 
-        // Write a minimal .gitconfig so git doesn't prompt for identity
-        // and disable signing to avoid SSH/GPG key lookups in the isolated HOME.
-        fs.writeFileSync(
-          path.join(tmpDir, ".gitconfig"),
-          "[user]\n  name = E2E Test\n  email = e2e@test.local\n[commit]\n  gpgsign = false\n[tag]\n  gpgsign = false\n",
-        );
+          // Write a minimal .gitconfig so git doesn't prompt for identity
+          // and disable signing to avoid SSH/GPG key lookups in the isolated HOME.
+          fs.writeFileSync(
+            path.join(tmpDir, ".gitconfig"),
+            "[user]\n  name = E2E Test\n  email = e2e@test.local\n[commit]\n  gpgsign = false\n[tag]\n  gpgsign = false\n",
+          );
 
-        // Give each worker its own agentctl port range, offset from the default
-        // range (41001-41100) to avoid conflicts with a running dev instance.
-        // The async cleanup of agent instances runs after each test deletes its
-        // tasks, so during a 60+ test shard the in-flight cleanup queue can hold
-        // several dozen ports at any given moment. 200 ports per worker keeps
-        // headroom for that without overflowing the 65535 port space. With the
-        // current playwright config (workers: 1, so workerIndex == 0) and shard
-        // offsets capped at 29, the highest port used is 30001 + 29*1000 + 199
-        // = 59200. The `workerIndex * 200` term is defensive for the case where
-        // a future config sets workers > 1.
-        const agentctlPortBase = 30001 + E2E_PORT_OFFSET * 1000 + workerInfo.workerIndex * 200;
-        const agentctlPortMax = agentctlPortBase + 199;
+          // Give each worker its own agentctl port range, offset from the default
+          // range (41001-41100) to avoid conflicts with a running dev instance.
+          // The async cleanup of agent instances runs after each test deletes its
+          // tasks, so during a 60+ test shard the in-flight cleanup queue can hold
+          // several dozen ports at any given moment. 200 ports per worker keeps
+          // headroom for that without overflowing the 65535 port space. With the
+          // current playwright config (workers: 1, so workerIndex == 0) and shard
+          // offsets capped at 29, the highest port used is 30001 + 29*1000 + 199
+          // = 59200. The `workerIndex * 200` term is defensive for the case where
+          // a future config sets workers > 1.
+          const agentctlPortBase = 30001 + E2E_PORT_OFFSET * 1000 + workerInfo.workerIndex * 200;
+          const agentctlPortMax = agentctlPortBase + 199;
 
-        // Install a `git` shim that can sleep on `fetch`/`pull` before execing
-        // the real git binary. Tests that need to simulate slow network git
-        // operations write a millisecond value to `${tmpDir}/git-delay-ms`; the
-        // shim reads it on every invocation and sleeps the matching duration.
-        // When the file is absent the shim is a transparent passthrough, so
-        // other tests in the same worker are unaffected.
-        //
-        // The shim logic lives in `git-shim.mjs` (Node) so it behaves the same
-        // on macOS, Linux, and Windows and never depends on the developer's
-        // login shell (bash/zsh/fish) or a POSIX `sh`. Only a tiny launcher is
-        // generated here to hand control to Node: an extensionless `git`
-        // shebang file on POSIX, and a `git.cmd` on Windows (extensionless
-        // files aren't executable via PATHEXT there).
-        const shimDir = path.join(tmpDir, "bin");
-        const shimScript = path.join(__dirname, "git-shim.mjs");
-        const shimDelayFile = path.join(tmpDir, "git-delay-ms");
-        const shimGitLabPushFile = path.join(tmpDir, "gitlab-push-remote");
-        const shimGitLabPushRecordFile = path.join(tmpDir, "gitlab-push-record");
-        const originalPath = process.env.PATH ?? "";
-        fs.mkdirSync(shimDir, { recursive: true });
-        writeGitShimLauncher(shimDir, shimScript);
+          // Install a `git` shim that can sleep on `fetch`/`pull` before execing
+          // the real git binary. Tests that need to simulate slow network git
+          // operations write a millisecond value to `${tmpDir}/git-delay-ms`; the
+          // shim reads it on every invocation and sleeps the matching duration.
+          // When the file is absent the shim is a transparent passthrough, so
+          // other tests in the same worker are unaffected.
+          //
+          // The shim logic lives in `git-shim.mjs` (Node) so it behaves the same
+          // on macOS, Linux, and Windows and never depends on the developer's
+          // login shell (bash/zsh/fish) or a POSIX `sh`. Only a tiny launcher is
+          // generated here to hand control to Node: an extensionless `git`
+          // shebang file on POSIX, and a `git.cmd` on Windows (extensionless
+          // files aren't executable via PATHEXT there).
+          const shimDir = path.join(tmpDir, "bin");
+          const shimScript = path.join(__dirname, "git-shim.mjs");
+          const shimDelayFile = path.join(tmpDir, "git-delay-ms");
+          const shimGitLabPushFile = path.join(tmpDir, "gitlab-push-remote");
+          const shimGitLabPushRecordFile = path.join(tmpDir, "gitlab-push-record");
+          const originalPath = process.env.PATH ?? "";
+          fs.mkdirSync(shimDir, { recursive: true });
+          writeGitShimLauncher(shimDir, shimScript);
 
-        // Opt-in: Docker E2E project or KANDEV_E2E_DOCKER=1 enables real
-        // container execution. Default is off so the regular suite stays fast
-        // and runs without a Docker daemon. See e2e/README.md.
-        const dockerEnabled = isContainerProjectActive(workerInfo.project.name);
-        const mockAgentLinuxBinary = path.join(BACKEND_DIR, "bin", "mock-agent-linux-amd64");
-        const agentctlLinuxBinary = path.join(BACKEND_DIR, "bin", "agentctl-linux-amd64");
+          // Opt-in: Docker E2E project or KANDEV_E2E_DOCKER=1 enables real
+          // container execution. Default is off so the regular suite stays fast
+          // and runs without a Docker daemon. See e2e/README.md.
+          const dockerEnabled = isContainerProjectActive(workerInfo.project.name);
+          const mockAgentLinuxBinary = path.join(BACKEND_DIR, "bin", "mock-agent-linux-amd64");
+          const agentctlLinuxBinary = path.join(BACKEND_DIR, "bin", "agentctl-linux-amd64");
 
-        const backendEnv = {
-          ...sanitizeInheritedEnv(process.env as Record<string, string>),
-          // Prepend the kandev bin dir so the host utility probe can locate
-          // the `mock-agent` binary via PATH. In production that dir is the
-          // same as the running kandev binary's dir, but e2e spawns via an
-          // absolute path and doesn't inherit that location.
-          PATH: [shimDir, path.join(BACKEND_DIR, "bin"), originalPath]
-            .filter(Boolean)
-            .join(path.delimiter),
-          KANDEV_E2E_ORIGINAL_PATH: originalPath,
-          KANDEV_E2E_GIT_DELAY_FILE: shimDelayFile,
-          KANDEV_E2E_GITLAB_PUSH_FILE: shimGitLabPushFile,
-          KANDEV_E2E_GITLAB_PUSH_RECORD_FILE: shimGitLabPushRecordFile,
-          KANDEV_E2E_GITLAB_REMOTE_URL: `http://localhost:${backendPort}/platform/kandev.git`,
-          HOME: tmpDir,
-          KANDEV_HOME_DIR: homeDir,
-          KANDEV_SERVER_PORT: String(backendPort),
-          KANDEV_WEB_DIST_DIR: WEB_DIST_DIR,
-          KANDEV_DATABASE_PATH: dbPath,
-          KANDEV_E2E_SYSTEM_TEMP_ROOT: systemTemporaryRoot,
-          // Profile selector. KANDEV_E2E_MOCK=true tells the backend to
-          // apply the `e2e:` profile from profiles.yaml at startup —
-          // which sets the mock agent and third-party provider flags,
-          // KANDEV_FEATURES_OFFICE, AGENTCTL_AUTO_APPROVE_PERMISSIONS,
-          // KANDEV_PLAN_COALESCE_WINDOW_MS, etc. We don't re-set those
-          // here. KANDEV_MOCK_PROVIDERS stays opt-in per-spec because it
-          // changes agent counts; the five office-routing-* specs pass
-          // it to backend.restart() when needed (see
-          // registry.RoutableProviderIDs).
-          KANDEV_E2E_MOCK: "true",
-          KANDEV_DOCKER_ENABLED: dockerEnabled ? "true" : "false",
-          // When Docker is on, point the lifecycle resolvers at the linux/amd64
-          // binaries the test runner pre-built, so containers can bind-mount them.
-          ...(dockerEnabled
-            ? {
-                KANDEV_E2E_DOCKER_SCOPE: E2E_DOCKER_SCOPE,
-                KANDEV_AGENTCTL_LINUX_BINARY: agentctlLinuxBinary,
-                KANDEV_MOCK_AGENT_LINUX_BINARY: mockAgentLinuxBinary,
-              }
-            : {}),
-          KANDEV_WORKTREE_ENABLED: "true",
-          KANDEV_WORKTREE_BASEPATH: worktreeBase,
-          KANDEV_REPOCLONE_BASEPATH: repoCloneBase,
-          KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "info",
-          AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
-          AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
-          // AGENTCTL_AUTO_APPROVE_PERMISSIONS=true and
-          // KANDEV_PLAN_COALESCE_WINDOW_MS=2000 are applied by the
-          // backend's profile loader (profiles.yaml `e2e:` column).
-          // Specs that need different values (e.g.
-          // permission-approval.spec.ts setting auto-approve=false) set
-          // process.env.X before spawn — that already flows through the
-          // `...sanitizeInheritedEnv(process.env)` spread above, and the
-          // backend's ApplyProfile leaves already-set vars alone. (Note:
-          // KANDEV_FEATURES_* and KANDEV_WEB_TITLE_PREFIX are exceptions —
-          // they are stripped from the inherited env so the e2e profile
-          // always controls the baseline.)
-          GIT_AUTHOR_NAME: "E2E Test",
-          GIT_AUTHOR_EMAIL: "e2e@test.local",
-          GIT_COMMITTER_NAME: "E2E Test",
-          GIT_COMMITTER_EMAIL: "e2e@test.local",
-        };
+          const backendEnv = {
+            ...sanitizeInheritedEnv(process.env as Record<string, string>),
+            // Prepend the kandev bin dir so the host utility probe can locate
+            // the `mock-agent` binary via PATH. In production that dir is the
+            // same as the running kandev binary's dir, but e2e spawns via an
+            // absolute path and doesn't inherit that location.
+            PATH: [shimDir, path.join(BACKEND_DIR, "bin"), originalPath]
+              .filter(Boolean)
+              .join(path.delimiter),
+            KANDEV_E2E_ORIGINAL_PATH: originalPath,
+            KANDEV_E2E_GIT_DELAY_FILE: shimDelayFile,
+            KANDEV_E2E_GITLAB_PUSH_FILE: shimGitLabPushFile,
+            KANDEV_E2E_GITLAB_PUSH_RECORD_FILE: shimGitLabPushRecordFile,
+            KANDEV_E2E_GITLAB_REMOTE_URL: `http://localhost:${backendPort}/platform/kandev.git`,
+            HOME: tmpDir,
+            KANDEV_HOME_DIR: homeDir,
+            KANDEV_SERVER_PORT: String(backendPort),
+            KANDEV_WEB_DIST_DIR: WEB_DIST_DIR,
+            KANDEV_DATABASE_PATH: dbPath,
+            KANDEV_E2E_SYSTEM_TEMP_ROOT: systemTemporaryRoot,
+            // Profile selector. KANDEV_E2E_MOCK=true tells the backend to
+            // apply the `e2e:` profile from profiles.yaml at startup —
+            // which sets the mock agent and third-party provider flags,
+            // KANDEV_FEATURES_OFFICE, AGENTCTL_AUTO_APPROVE_PERMISSIONS,
+            // KANDEV_PLAN_COALESCE_WINDOW_MS, etc. We don't re-set those
+            // here. KANDEV_MOCK_PROVIDERS stays opt-in per-spec because it
+            // changes agent counts; the five office-routing-* specs pass
+            // it to backend.restart() when needed (see
+            // registry.RoutableProviderIDs).
+            KANDEV_E2E_MOCK: "true",
+            KANDEV_DOCKER_ENABLED: dockerEnabled ? "true" : "false",
+            // When Docker is on, point the lifecycle resolvers at the linux/amd64
+            // binaries the test runner pre-built, so containers can bind-mount them.
+            ...(dockerEnabled
+              ? {
+                  KANDEV_E2E_DOCKER_SCOPE: E2E_DOCKER_SCOPE,
+                  KANDEV_AGENTCTL_LINUX_BINARY: agentctlLinuxBinary,
+                  KANDEV_MOCK_AGENT_LINUX_BINARY: mockAgentLinuxBinary,
+                }
+              : {}),
+            KANDEV_WORKTREE_ENABLED: "true",
+            KANDEV_WORKTREE_BASEPATH: worktreeBase,
+            KANDEV_REPOCLONE_BASEPATH: repoCloneBase,
+            KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "info",
+            AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
+            AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
+            // AGENTCTL_AUTO_APPROVE_PERMISSIONS=true and
+            // KANDEV_PLAN_COALESCE_WINDOW_MS=2000 are applied by the
+            // backend's profile loader (profiles.yaml `e2e:` column).
+            // Specs that need different values (e.g.
+            // permission-approval.spec.ts setting auto-approve=false) set
+            // process.env.X before spawn — that already flows through the
+            // `...sanitizeInheritedEnv(process.env)` spread above, and the
+            // backend's ApplyProfile leaves already-set vars alone. (Note:
+            // KANDEV_FEATURES_* and KANDEV_WEB_TITLE_PREFIX are exceptions —
+            // they are stripped from the inherited env so the e2e profile
+            // always controls the baseline.)
+            GIT_AUTHOR_NAME: "E2E Test",
+            GIT_AUTHOR_EMAIL: "e2e@test.local",
+            GIT_COMMITTER_NAME: "E2E Test",
+            GIT_COMMITTER_EMAIL: "e2e@test.local",
+          };
 
-        const debug = !!process.env.E2E_DEBUG;
-        const baseUrl = `http://localhost:${backendPort}`;
+          const debug = !!process.env.E2E_DEBUG;
+          const baseUrl = `http://localhost:${backendPort}`;
 
-        // Snapshot the baseline env so `restart(envOverrides)` rebuilds from
-        // a clean copy each call instead of accumulating leftover keys (e.g.
-        // KANDEV_MOCK_PROVIDERS, KANDEV_PROVIDER_FAILURES) from prior tests.
-        const baselineEnv = { ...backendEnv } as Record<string, string>;
-        const scopedEnv = new BackendFixtureEnvOverrides();
+          // Snapshot the baseline env so `restart(envOverrides)` rebuilds from
+          // a clean copy each call instead of accumulating leftover keys (e.g.
+          // KANDEV_MOCK_PROVIDERS, KANDEV_PROVIDER_FAILURES) from prior tests.
+          const baselineEnv = { ...backendEnv } as Record<string, string>;
+          const scopedEnv = new BackendFixtureEnvOverrides();
 
-        // --- Spawn backend ---
-        backendProc = spawnBackendProcess(
-          scopedEnv.apply(baselineEnv),
-          debug,
-          backendPort,
-          processLogPath,
-        );
-        registerProcess(backendProc);
-        // /ready (not /health) — /health flips green as soon as the listener
-        // is bound, before routes are wired; tests that immediately issue API
-        // requests need the readiness contract instead.
-        await waitForHealth(`${baseUrl}/ready`, HEALTH_TIMEOUT_MS, backendProc);
-        const frontendUrl = baseUrl;
-
-        /**
-         * Kill the backend process group and respawn with the same config.
-         * SQLite DB, tmpDir, and all persisted data survive the restart.
-         * Only in-memory execution state (running agents, WS connections) is lost.
-         */
-        const restart = async (envOverrides?: Record<string, string>) => {
-          // Rebuild from the baseline snapshot so a previous restart's
-          // overrides don't leak into this one (e.g. KANDEV_MOCK_PROVIDERS
-          // set by the routing specs would otherwise stick for the rest of
-          // the worker's lifetime and register canonical agent IDs that
-          // sibling specs count).
-          const nextEnv = scopedEnv.apply(baselineEnv, envOverrides);
-          const runningProcess = backendProc;
-          if (!runningProcess) throw new Error("Backend process is not running");
-          await killProcessGroup(runningProcess);
-          // Poll until the OS releases the TCP port rather than sleeping a fixed
-          // 2 s. TIME_WAIT can linger for 30–120 s under load; the probe exits
-          // as soon as the port stops accepting connections (typically <200 ms).
-          await waitForPortFree(backendPort);
-          backendProc = spawnBackendProcess(nextEnv, debug, backendPort, processLogPath);
+          // --- Spawn backend ---
+          backendProc = spawnBackendProcess(
+            scopedEnv.apply(baselineEnv),
+            debug,
+            backendPort,
+            processLogPath,
+          );
           registerProcess(backendProc);
-          // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use).
-          // /ready, not /health — see the comment on the initial spawn above.
-          await waitForHealth(`${baseUrl}/ready`, HEALTH_TIMEOUT_MS, backendProc);
-        };
-
-        let recovery: Promise<void> | null = null;
-        const ensureReady = async () => {
+          // /ready (not /health) — /health flips green as soon as the listener
+          // is bound, before routes are wired; tests that immediately issue API
+          // requests need the readiness contract instead.
           try {
-            await waitForHealth(`${baseUrl}/ready`, 5_000, backendProc);
-            return;
-          } catch {
-            // A worker can outlive a backend process that a prior test left
-            // stopped. Restart the isolated fixture before the next page is
-            // created so its setup requests do not hit a refused port.
-            recovery ??= restart().finally(() => {
-              recovery = null;
-            });
-            await recovery;
+            await waitForHealth(`${baseUrl}/ready`, HEALTH_TIMEOUT_MS, backendProc);
+          } catch (error) {
+            startupFailure = error;
+            throw error;
           }
-        };
+          const frontendUrl = baseUrl;
 
-        const useEnv = createScopedEnvUse(scopedEnv, restart);
+          /**
+           * Kill the backend process group and respawn with the same config.
+           * SQLite DB, tmpDir, and all persisted data survive the restart.
+           * Only in-memory execution state (running agents, WS connections) is lost.
+           */
+          const restart = async (envOverrides?: Record<string, string>) => {
+            // Rebuild from the baseline snapshot so a previous restart's
+            // overrides don't leak into this one (e.g. KANDEV_MOCK_PROVIDERS
+            // set by the routing specs would otherwise stick for the rest of
+            // the worker's lifetime and register canonical agent IDs that
+            // sibling specs count).
+            const nextEnv = scopedEnv.apply(baselineEnv, envOverrides);
+            const runningProcess = backendProc;
+            if (!runningProcess) throw new Error("Backend process is not running");
+            await killProcessGroup(runningProcess);
+            // Poll until the OS releases the TCP port rather than sleeping a fixed
+            // 2 s. TIME_WAIT can linger for 30–120 s under load; the probe exits
+            // as soon as the port stops accepting connections (typically <200 ms).
+            await waitForPortFree(backendPort);
+            backendProc = spawnBackendProcess(nextEnv, debug, backendPort, processLogPath);
+            registerProcess(backendProc);
+            // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use).
+            // /ready, not /health — see the comment on the initial spawn above.
+            await waitForHealth(`${baseUrl}/ready`, HEALTH_TIMEOUT_MS, backendProc);
+          };
 
-        await use({
-          port: backendPort,
-          baseUrl,
-          frontendPort,
-          frontendUrl,
-          tmpDir,
-          logPath: backendLogPath,
-          pid: () => backendProc?.pid,
-          restart,
-          ensureReady,
-          useEnv,
-        });
-      });
+          let recovery: Promise<void> | null = null;
+          const ensureReady = async () => {
+            try {
+              await waitForHealth(`${baseUrl}/ready`, 5_000, backendProc);
+              return;
+            } catch {
+              // A worker can outlive a backend process that a prior test left
+              // stopped. Restart the isolated fixture before the next page is
+              // created so its setup requests do not hit a refused port.
+              recovery ??= restart().finally(() => {
+                recovery = null;
+              });
+              await recovery;
+            }
+          };
+
+          const useEnv = createScopedEnvUse(scopedEnv, restart);
+
+          await use({
+            port: backendPort,
+            baseUrl,
+            frontendPort,
+            frontendUrl,
+            tmpDir,
+            logPath: backendLogPath,
+            pid: () => backendProc?.pid,
+            restart,
+            ensureReady,
+            useEnv,
+          });
+        },
+        {
+          onFailure: (failure) => {
+            if (failure !== startupFailure) return;
+            const locator = writeBackendStartupArtifact({
+              outputDir: workerInfo.project.outputDir,
+              projectName: workerInfo.project.name,
+              shard: process.env.TEST_SHARD_INDEX ?? "local",
+              workerIndex: workerInfo.workerIndex,
+              parallelIndex: workerInfo.parallelIndex,
+              port: backendPort,
+              startedAt,
+              elapsedMs: Date.now() - startedAt.getTime(),
+              exitCode: backendProc?.exitCode ?? null,
+              signal: backendProc?.signalCode ?? null,
+              processLogPath,
+              backendLogPath,
+              failure,
+            });
+            process.stderr.write(`[e2e backend startup artifact] ${locator}\n`);
+          },
+        },
+      );
     },
     { scope: "worker", timeout: 60_000 },
   ],

@@ -7,14 +7,19 @@ import (
 	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/store"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -24,6 +29,30 @@ type conversationSourceFixture struct {
 	revision models.ConversationRevision
 }
 
+type managedConversationGatewayStub struct {
+	descriptor pluginsdk.AgentConversationDescriptor
+}
+
+func (s *managedConversationGatewayStub) Ensure(context.Context, string, pluginsdk.AgentConversationSpec) (pluginsdk.AgentConversationDescriptor, string, error) {
+	return pluginsdk.AgentConversationDescriptor{}, "", nil
+}
+
+func (s *managedConversationGatewayStub) Dispatch(context.Context, string, string, string, string, string) (pluginsdk.AgentConversationDispatch, error) {
+	return pluginsdk.AgentConversationDispatch{}, nil
+}
+
+func (s *managedConversationGatewayStub) Delete(context.Context, string, string, string) (int32, error) {
+	return 0, nil
+}
+
+func (s *managedConversationGatewayStub) DeleteAllForPlugin(context.Context, string) (int32, error) {
+	return 0, nil
+}
+
+func (s *managedConversationGatewayStub) ResolveManagedConversation(context.Context, string, string, string) (pluginsdk.AgentConversationDescriptor, error) {
+	return s.descriptor, nil
+}
+
 func (f conversationSourceFixture) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
 	if f.session == nil || f.session.ID != id {
 		return nil, models.ErrTaskSessionNotFound
@@ -31,11 +60,23 @@ func (f conversationSourceFixture) GetTaskSession(_ context.Context, id string) 
 	return f.session, nil
 }
 
+func (conversationSourceFixture) ListMessagesPaginated(context.Context, taskservice.ListMessagesRequest) ([]*models.Message, bool, error) {
+	return nil, false, nil
+}
+
+func (conversationSourceFixture) ListTurnsBySession(context.Context, string) ([]*models.Turn, error) {
+	return nil, nil
+}
+
 func (f conversationSourceFixture) ReadConversationRevision(context.Context, string) (models.ConversationRevision, error) {
 	if f.reads != nil {
 		f.reads.Add(1)
 	}
 	return f.revision, nil
+}
+
+func (f conversationSourceFixture) AuthorizeWorkspaceAccess(context.Context, string) error {
+	return nil
 }
 
 func TestConversationDeliveryProjectsSelectedUpsertAndCoverage(t *testing.T) {
@@ -266,6 +307,195 @@ func TestConversationSubscribeReturnsSourceRevisionForCore(t *testing.T) {
 	if payload["revision"] != "17" || payload["epoch"] == "" || payload["success"] != true {
 		t.Fatalf("subscribe payload = %+v", payload)
 	}
+}
+
+func TestManagedConversationV2SubscriptionIsolation(t *testing.T) {
+	hub := NewHub(ws.NewDispatcher(), testLogger())
+	registry := plugins.NewRegistry()
+	installedAt := time.Date(2026, 9, 19, 14, 0, 0, 0, time.UTC)
+	registry.Add(&store.Record{
+		Manifest: manifest.Manifest{ID: "managed-plugin", Capabilities: manifest.Capabilities{AgentConversation: true}},
+		Status:   plugins.StatusActive, InstalledAt: installedAt,
+	})
+	service := plugins.NewService(nil, registry, nil, testLogger())
+	bridge := &managedConversationGatewayStub{descriptor: pluginsdk.AgentConversationDescriptor{
+		TaskID: "managed-task", SessionID: "managed-session", WorkspaceID: "managed-workspace",
+	}}
+	service.SetAgentConversations(bridge)
+	hub.SetPluginConversationService(service)
+	client := NewClient("managed-client", authn.Identity{UserID: "user-1"}, nil, hub, testLogger())
+	hub.clients[client] = true
+	client.conversationSubscriptions["managed-scope"] = conversationSubscription{
+		ScopeID: "managed-scope", SessionID: "managed-session", ConsumerKind: conversationConsumerPlugin,
+		PluginID: "managed-plugin", Generation: installedAt.UnixMicro(), UserID: "user-1", Epoch: "epoch",
+		Managed: &plugins.ManagedConversationIdentity{
+			PluginID: "managed-plugin", UserID: "user-1", Generation: installedAt.UnixMicro(),
+			WorkspaceID: "managed-workspace", TaskID: "managed-task", SessionID: "managed-session",
+		},
+	}
+
+	if !hub.conversationAuthorized(client, client.conversationSubscriptions["managed-scope"]) {
+		t.Fatal("exact managed descriptor must authorize subscription")
+	}
+	bridge.descriptor.TaskID = "cross-task"
+	if hub.conversationAuthorized(client, client.conversationSubscriptions["managed-scope"]) {
+		t.Fatal("cross-task descriptor replacement must revoke subscription")
+	}
+	hub.BroadcastConversationMutation(&models.ConversationMutationReceipt{SessionID: "managed-session", Revision: 1, Complete: true})
+	if len(client.conversationSubscriptions) != 0 {
+		t.Fatal("revoked managed subscription remains active")
+	}
+}
+
+func TestManagedConversationV2SubscriptionRequestIsolation(t *testing.T) {
+	identity := authn.Identity{UserID: "user-1", Role: authn.RoleMember}
+	installedAt := time.Date(2026, 9, 19, 15, 0, 0, 0, time.UTC)
+	reads := &atomic.Int64{}
+	source := conversationSourceFixture{
+		reads: reads, session: &models.TaskSession{ID: "managed-session", TaskID: "managed-task"},
+		revision: models.ConversationRevision{Exists: true, Revision: 17},
+	}
+	registry := plugins.NewRegistry()
+	registry.Add(&store.Record{
+		Manifest: manifest.Manifest{ID: "managed-plugin", Capabilities: manifest.Capabilities{AgentConversation: true}},
+		Status:   plugins.StatusActive, InstalledAt: installedAt,
+	})
+	service := plugins.NewService(nil, registry, nil, testLogger())
+	bridge := &managedConversationGatewayStub{descriptor: pluginsdk.AgentConversationDescriptor{
+		TaskID: "managed-task", SessionID: "managed-session", WorkspaceID: "managed-workspace",
+	}}
+	service.SetAgentConversations(bridge)
+	router := gin.New()
+	router.Use(func(ctx *gin.Context) {
+		ctx.Request = ctx.Request.WithContext(authn.WithIdentity(ctx.Request.Context(), identity))
+		ctx.Next()
+	})
+	plugins.RegisterRoutes(router, service, nil, testLogger(), source)
+
+	get := func(path string, headers map[string]string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		for name, value := range headers {
+			request.Header.Set(name, value)
+		}
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	var binding struct {
+		BindingToken string `json:"bindingToken"`
+		Generation   int64  `json:"generation"`
+	}
+	bindingResponse := get("/api/plugins/managed-plugin/conversation/binding", nil)
+	if bindingResponse.Code != http.StatusOK || json.Unmarshal(bindingResponse.Body.Bytes(), &binding) != nil {
+		t.Fatalf("binding response = %d %s", bindingResponse.Code, bindingResponse.Body.String())
+	}
+	var grant struct {
+		TaskID                   string `json:"taskId"`
+		SessionID                string `json:"sessionId"`
+		WorkspaceID              string `json:"workspaceId"`
+		ManagedConversationToken string `json:"managedConversationToken"`
+	}
+	grantResponse := get(
+		"/api/plugins/managed-plugin/conversation/managed/managed-session?workspace_id=managed-workspace",
+		map[string]string{"X-Kandev-Plugin-Binding": binding.BindingToken},
+	)
+	if grantResponse.Code != http.StatusOK || json.Unmarshal(grantResponse.Body.Bytes(), &grant) != nil {
+		t.Fatalf("grant response = %d %s", grantResponse.Code, grantResponse.Body.String())
+	}
+
+	hub := NewHub(ws.NewDispatcher(), testLogger())
+	hub.SetPluginConversationService(service)
+	hub.SetConversationSourceReader(source)
+	client := NewClient("managed-client", identity, nil, hub, testLogger())
+	hub.clients[client] = true
+	subscribe := func(requestID, scopeID, sessionID, taskID string, generation int64) conversationSubscribeResponse {
+		request, err := ws.NewRequest(requestID, ws.ActionSessionConversationSubscribe, map[string]any{
+			"scope_id": scopeID, "session_id": sessionID, "consumer_kind": conversationConsumerPlugin,
+			"plugin_id": "managed-plugin", "generation": generation, "binding_token": binding.BindingToken,
+			"managed_conversation_token": grant.ManagedConversationToken, "task_id": taskID,
+		})
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		client.handleConversationSubscribe(request)
+		var response ws.Message
+		if err := json.Unmarshal(<-client.controlSend, &response); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		var payload conversationSubscribeResponse
+		if err := json.Unmarshal(response.Payload, &payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		return payload
+	}
+
+	for _, denied := range []struct {
+		name, sessionID, taskID string
+		generation              int64
+		code                    string
+		retryable               bool
+	}{
+		{name: "cross-task", sessionID: grant.SessionID, taskID: "other-task", generation: binding.Generation, code: "invalid_binding"},
+		{name: "cross-session", sessionID: "other-session", taskID: grant.TaskID, generation: binding.Generation, code: "invalid_binding"},
+		{name: "stale-generation", sessionID: grant.SessionID, taskID: grant.TaskID, generation: binding.Generation - 1, code: "generation_superseded", retryable: true},
+	} {
+		t.Run(denied.name, func(t *testing.T) {
+			scopeID := "managed:" + denied.name
+			payload := subscribe(denied.name, scopeID, denied.sessionID, denied.taskID, denied.generation)
+			if payload.Success || payload.Error.Code != denied.code || payload.Error.Retryable != denied.retryable {
+				t.Fatalf("denied payload = %+v", payload)
+			}
+			if _, exists := client.conversationSubscriptions[scopeID]; exists || reads.Load() != 0 {
+				t.Fatalf("denied %s subscribed or read source: subscriptions=%+v reads=%d", denied.name, client.conversationSubscriptions, reads.Load())
+			}
+		})
+	}
+
+	payload := subscribe("valid", "managed:valid", grant.SessionID, grant.TaskID, binding.Generation)
+	if !payload.Success || payload.ProtocolVersion != 2 || payload.Revision != "17" {
+		t.Fatalf("valid payload = %+v", payload)
+	}
+	if reads.Load() != 1 {
+		t.Fatalf("source reads = %d, want 1", reads.Load())
+	}
+	subscription, exists := client.conversationSubscriptions["managed:valid"]
+	if !exists || subscription.Managed == nil || *subscription.Managed != (plugins.ManagedConversationIdentity{
+		PluginID: "managed-plugin", UserID: "user-1", Generation: binding.Generation,
+		WorkspaceID: grant.WorkspaceID, TaskID: grant.TaskID, SessionID: grant.SessionID,
+	}) {
+		t.Fatalf("managed subscription = %+v", subscription)
+	}
+
+	bridge.descriptor.TaskID = "replacement-task"
+	hub.BroadcastConversationMutation(&models.ConversationMutationReceipt{
+		SessionID: grant.SessionID, BaseRevision: 17, Revision: 18, Complete: true,
+	})
+	if _, exists := client.conversationSubscriptions["managed:valid"]; exists {
+		t.Fatal("revoked managed subscription remains active")
+	}
+	var terminal ws.Message
+	if err := json.Unmarshal(<-client.send, &terminal); err != nil {
+		t.Fatalf("decode terminal frame: %v", err)
+	}
+	var terminalPayload conversationChangedPayload
+	if err := json.Unmarshal(terminal.Payload, &terminalPayload); err != nil {
+		t.Fatalf("decode terminal payload: %v", err)
+	}
+	if terminal.Action != ws.ActionSessionConversationChanged || !terminalPayload.Terminal ||
+		terminalPayload.ScopeID != "managed:valid" || terminalPayload.SessionID != grant.SessionID ||
+		len(terminalPayload.Operations) != 0 {
+		t.Fatalf("terminal payload = %+v", terminalPayload)
+	}
+}
+
+type conversationSubscribeResponse struct {
+	Success         bool   `json:"success"`
+	ProtocolVersion int    `json:"protocol_version"`
+	Revision        string `json:"revision"`
+	Error           struct {
+		Code      string `json:"code"`
+		Retryable bool   `json:"retryable"`
+	} `json:"error"`
 }
 
 func TestConversationDeliveryStopsAfterRevocation(t *testing.T) {

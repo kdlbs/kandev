@@ -59,6 +59,7 @@ export type ConversationScope = {
   pluginId: string;
   taskId: string;
   sessionId: string | null;
+  managedConversationToken?: string;
   signal: AbortSignal;
   ready(): Promise<OrderedReady>;
   renewContinuation(cursor: string, queryIdentity?: string): Promise<ContinuationResult>;
@@ -115,6 +116,46 @@ export async function fetchConversationBinding(
     signal,
   });
   return parseConversationResponse<Binding>(response);
+}
+
+// i18n-exempt: managed conversation dispatch protocol statuses, not user-facing copy.
+const acceptedManagedDispatchStatuses = new Set(["started", "sent", "duplicate_occurrence"]);
+
+export async function dispatchManagedConversation({
+  pluginId,
+  sessionId,
+  workspaceId,
+  content,
+  occurrenceKey,
+  bindingToken,
+}: {
+  pluginId: string;
+  sessionId: string;
+  workspaceId: string;
+  content: string;
+  occurrenceKey: string;
+  bindingToken: string;
+}): Promise<void> {
+  const response = await fetch(
+    pluginConversationUrl(
+      pluginId,
+      `/conversation/managed/${encodeURIComponent(sessionId)}/dispatch?workspace_id=${encodeURIComponent(workspaceId)}`,
+    ),
+    {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Kandev-Plugin-Binding": bindingToken,
+      },
+      body: JSON.stringify({ content, occurrenceKey }),
+    },
+  );
+  const delivery = (await response.json().catch(() => null)) as { status?: string } | null;
+  if (!response.ok || !delivery?.status || !acceptedManagedDispatchStatuses.has(delivery.status)) {
+    // i18n-exempt: internal transport error, rendered through localized component copy.
+    throw new Error("managed conversation dispatch failed");
+  }
 }
 
 const SESSION_REMOVED_EVENT = "session.removed";
@@ -226,6 +267,7 @@ class OrderedConversationScope implements ConversationScope {
     readonly taskId: string,
     readonly sessionId: string | null,
     private readonly controller: AbortController,
+    readonly managedConversationToken?: string,
   ) {
     this.signal = controller.signal;
   }
@@ -263,6 +305,9 @@ class OrderedConversationScope implements ConversationScope {
         headers: {
           "Content-Type": "application/json",
           "X-Kandev-Plugin-Binding": current.bindingToken,
+          ...(this.managedConversationToken
+            ? { "X-Kandev-Managed-Conversation": this.managedConversationToken }
+            : {}),
         },
         body: JSON.stringify({ cursor, snapshot_token: current.snapshotToken }),
         signal: this.signal,
@@ -447,6 +492,15 @@ class OrderedConversationScope implements ConversationScope {
       throw error;
     });
   }
+
+  private managedSubscriptionIdentity(): Record<string, string> {
+    return this.managedConversationToken
+      ? {
+          task_id: this.taskId,
+          managed_conversation_token: this.managedConversationToken,
+        }
+      : {};
+  }
   private async initializeReady(): Promise<OrderedReady> {
     const binding = await this.getBinding();
     if (!this.sessionId) {
@@ -470,6 +524,7 @@ class OrderedConversationScope implements ConversationScope {
       consumer_id: this.consumerId,
       plugin_id: this.pluginId,
       generation: binding.generation,
+      ...this.managedSubscriptionIdentity(),
       binding_token: binding.bindingToken,
     });
     if (!ack.success) throw ack.error;
@@ -589,6 +644,7 @@ class OrderedConversationScope implements ConversationScope {
       consumer_id: this.consumerId,
       plugin_id: this.pluginId,
       generation: binding.generation,
+      ...this.managedSubscriptionIdentity(),
       binding_token: binding.bindingToken,
     });
     if (!ack.success) {
@@ -651,6 +707,7 @@ class OrderedConversationScope implements ConversationScope {
       consumer_id: this.consumerId,
       plugin_id: this.pluginId,
       generation: ready.generation,
+      ...this.managedSubscriptionIdentity(),
       binding_token: ready.bindingToken,
       last_seen_sequence: this.acknowledgedSequence,
       resume_token: this.currentResumeToken,
@@ -709,6 +766,7 @@ class OrderedConversationScope implements ConversationScope {
       consumer_id: this.consumerId,
       plugin_id: this.pluginId,
       generation: ready.generation,
+      ...this.managedSubscriptionIdentity(),
       binding_token: ready.bindingToken,
       last_seen_sequence: this.acknowledgedSequence,
       resume_token: this.currentResumeToken,
@@ -752,6 +810,7 @@ export function PluginConversationScopeProvider({
   taskId,
   sessionId,
   generation = 0,
+  managedConversationToken,
   presentation = "desktop",
   children,
 }: React.PropsWithChildren<{
@@ -759,19 +818,32 @@ export function PluginConversationScopeProvider({
   taskId: string;
   sessionId: string | null;
   generation?: number;
+  managedConversationToken?: string;
   presentation?: "desktop" | "mobile";
 }>) {
   const controller = React.useMemo(
     () => new AbortController(),
-    [generation, pluginId, presentation, sessionId, taskId],
+    [generation, managedConversationToken, pluginId, presentation, sessionId, taskId],
   );
   const sourceTransport = typeof getWebSocketClient()?.on === "function";
   const scope = React.useMemo<ConversationScope>(
     () =>
       sourceTransport
-        ? new SourceConversationScope(pluginId, taskId, sessionId, controller)
-        : new OrderedConversationScope(pluginId, taskId, sessionId, controller),
-    [controller, pluginId, sessionId, sourceTransport, taskId],
+        ? new SourceConversationScope(
+            pluginId,
+            taskId,
+            sessionId,
+            controller,
+            managedConversationToken,
+          )
+        : new OrderedConversationScope(
+            pluginId,
+            taskId,
+            sessionId,
+            controller,
+            managedConversationToken,
+          ),
+    [controller, managedConversationToken, pluginId, sessionId, sourceTransport, taskId],
   );
   React.useLayoutEffect(() => {
     const client = getWebSocketClient();

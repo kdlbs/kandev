@@ -607,6 +607,57 @@ func (s *AgentConversationService) Dispatch(ctx context.Context, pluginID, works
 	return agentConversationDispatch(existing, primary, workspaceID, conversationKey, deliverStatus), nil
 }
 
+// ResolveManagedConversation returns a descriptor only when sessionID remains
+// the primary session of a managed conversation owned by pluginID in the exact
+// workspace. The browser bridge uses this narrow check before it reads or
+// dispatches, so hidden tasks never need to enter the public Kanban state.
+func (s *AgentConversationService) ResolveManagedConversation(ctx context.Context, pluginID, workspaceID, sessionID string) (pluginsdk.AgentConversationDescriptor, error) {
+	if pluginID == "" || workspaceID == "" || sessionID == "" {
+		return pluginsdk.AgentConversationDescriptor{}, status.Error(codes.InvalidArgument, "plugin_id, workspace_id, and session_id are required")
+	}
+	for page := 1; ; page++ {
+		tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, "", "", "", page, managedConversationPageSize, "", false, true, true, false)
+		if err != nil {
+			return pluginsdk.AgentConversationDescriptor{}, err
+		}
+		for _, task := range tasks {
+			if !isManagedConversationOwnedByPlugin(task, pluginID) || task.WorkspaceID != workspaceID {
+				continue
+			}
+			primary, err := s.managedConversationPrimarySession(ctx, task.ID, sessionID)
+			if err != nil {
+				return pluginsdk.AgentConversationDescriptor{}, err
+			}
+			if primary == nil {
+				continue
+			}
+			key, _ := task.Metadata[metaKeyConversationKey].(string)
+			if key == "" {
+				continue
+			}
+			return pluginsdk.AgentConversationDescriptor{TaskID: task.ID, SessionID: primary.ID, WorkspaceID: workspaceID, ConversationKey: key, AgentProfileID: primary.AgentProfileID}, nil
+		}
+		if len(tasks) < managedConversationPageSize || page*managedConversationPageSize >= total {
+			break
+		}
+	}
+	return pluginsdk.AgentConversationDescriptor{}, status.Error(codes.NotFound, "managed conversation not found")
+}
+
+func (s *AgentConversationService) managedConversationPrimarySession(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
+	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, taskrepo.ErrNoPrimarySession) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if primary == nil || primary.ID != sessionID {
+		return nil, nil
+	}
+	return primary, nil
+}
+
 func agentConversationDispatch(task *models.Task, session *models.TaskSession, workspaceID, conversationKey, dispatchStatus string) pluginsdk.AgentConversationDispatch {
 	return pluginsdk.AgentConversationDispatch{
 		SessionID: session.ID,

@@ -93,6 +93,9 @@ func (h *Hub) conversationAuthorized(client *Client, subscription conversationSu
 	if service == nil {
 		return false
 	}
+	if subscription.Managed != nil {
+		return service.ValidateManagedConversationIdentity(ctx, *subscription.Managed)
+	}
 	record, err := service.Get(subscription.PluginID)
 	return err == nil && record.Status == plugins.StatusActive && record.Capabilities.CanRead("messages") &&
 		record.InstalledAt.UnixMicro() == subscription.Generation

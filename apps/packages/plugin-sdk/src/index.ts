@@ -783,6 +783,8 @@ interface PluginUIShape {
   SettingsSection: unknown;
   SettingsCard: unknown;
   WorkspaceScopedSection: unknown;
+  /** Host-owned transcript and composer for a managed agent conversation. */
+  WorkspaceAgentChat: Component<WorkspaceAgentChatProps>;
 }
 
 export type SettingsSaveRevision = string | number;
@@ -803,6 +805,29 @@ export type PluginUIApi = {
     ? Component<Props>
     : HostComponent;
 };
+
+export type WorkspaceAgentChatStatus =
+  | "loading"
+  | "ready"
+  | "unavailable"
+  | "deleted"
+  | "permission-denied";
+
+/** Props for the host-owned managed conversation surface. */
+export interface WorkspaceAgentChatProps {
+  /** Workspace that owns the managed conversation. */
+  workspaceId: string;
+  /** The managed conversation's session identity from its host descriptor. */
+  conversationId: string;
+  /** Changes whenever the descriptor supplied by the plugin is replaced. */
+  resourceVersion: string;
+  /** Hides the composer while retaining the transcript. */
+  readOnly?: boolean;
+  /** Reports host-owned lifecycle state without granting additional authority. */
+  onStatus?(status: WorkspaceAgentChatStatus): void;
+  /** Optional idle-composer placeholder. */
+  placeholderOverride?: string;
+}
 
 export interface PluginToastApi {
   (message: string, options?: Record<string, unknown>): string | number;

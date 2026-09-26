@@ -145,6 +145,13 @@ type fakeConversationReader struct {
 	sourceRevision       taskmodels.ConversationRevision
 	sourceMessageRequest taskmodels.ConversationMessagePageRequest
 	sourceTurnRequest    taskmodels.ConversationTurnPageRequest
+	sourceMessageReads   int
+	sourceTurnReads      int
+	sourceRevisionReads  int
+}
+
+func (f *fakeConversationReader) AuthorizeWorkspaceAccess(context.Context, string) error {
+	return nil
 }
 
 func (f *fakeConversationReader) GetTaskSession(
@@ -196,6 +203,7 @@ func (f *fakeConversationReader) ReadConversationRevision(
 	_ context.Context,
 	_ string,
 ) (taskmodels.ConversationRevision, error) {
+	f.sourceRevisionReads++
 	return f.sourceRevision, nil
 }
 
@@ -203,6 +211,7 @@ func (f *fakeConversationReader) ReadConversationMessagesPage(
 	_ context.Context,
 	request taskmodels.ConversationMessagePageRequest,
 ) (taskmodels.ConversationMessagePage, error) {
+	f.sourceMessageReads++
 	f.sourceMessageRequest = request
 	return f.sourceMessages, nil
 }
@@ -211,6 +220,7 @@ func (f *fakeConversationReader) ReadConversationTurnsPage(
 	_ context.Context,
 	request taskmodels.ConversationTurnPageRequest,
 ) (taskmodels.ConversationTurnPage, error) {
+	f.sourceTurnReads++
 	f.sourceTurnRequest = request
 	return f.sourceTurns, nil
 }
@@ -640,6 +650,47 @@ func TestConversationContinuationRenewPreservesSnapshot(t *testing.T) {
 	require.Equal(t, int64(47), renewed.Cutoff)
 	require.Equal(t, "fingerprint-1", renewed.Fingerprint)
 	require.WithinDuration(t, time.Now().UTC().Add(10*time.Minute), renewed.ExpiresAt, time.Second)
+}
+
+func TestConversationContinuationRenewAuthenticatesBeforeParsing(t *testing.T) {
+	installedAt := time.Date(2026, 9, 19, 15, 0, 0, 0, time.UTC)
+	service, _, _ := newTestService(t)
+	service.registry.Add(conversationPluginRecord("messages-plugin", installedAt))
+	service.registry.Add(&store.Record{
+		Manifest:    manifest.Manifest{ID: "non-conversation-plugin"},
+		Status:      StatusActive,
+		InstalledAt: installedAt,
+	})
+	router := registerPluginRoutesWithIdentity(
+		t, service, authn.Identity{UserID: "user_1", Role: authn.RoleMember}, &fakeConversationReader{},
+	)
+
+	for _, pluginID := range []string{"missing-plugin", "non-conversation-plugin"} {
+		response := doAuthedRequest(
+			router,
+			http.MethodPost,
+			"/api/plugins/"+pluginID+"/conversation/continuation/renew",
+			`{`,
+			map[string]string{"Content-Type": "application/json"},
+		)
+		require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+		require.JSONEq(t, `{"error":{"code":"not_found","message":"plugin not found","retryable":false}}`, response.Body.String())
+	}
+
+	for _, binding := range []string{"", "invalid-binding"} {
+		response := doAuthedRequest(
+			router,
+			http.MethodPost,
+			"/api/plugins/messages-plugin/conversation/continuation/renew",
+			`{"cursor":"invalid","snapshot_token":"invalid"}`,
+			map[string]string{
+				"Content-Type":            "application/json",
+				"X-Kandev-Plugin-Binding": binding,
+			},
+		)
+		require.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
+		require.JSONEq(t, `{"error":{"code":"unauthenticated","message":"invalid conversation binding","retryable":false}}`, response.Body.String())
+	}
 }
 
 // @covers AC-PLUGINS-PROMPT-HISTORY-HOST-002.7
