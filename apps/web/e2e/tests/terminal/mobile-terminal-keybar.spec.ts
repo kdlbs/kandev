@@ -274,8 +274,13 @@ test.describe("Mobile terminal key-bar — user flows", () => {
     // Default panel (chat) — hidden.
     await expect(keybar.root).not.toBeVisible();
 
+    const mobileNavigation = testPage.getByTestId("session-mobile-bottom-nav");
     for (const panel of ["Files", "Plan", "Changes"] as const) {
-      await testPage.getByRole("button", { name: panel, exact: true }).tap();
+      const panelButton =
+        panel === "Changes"
+          ? mobileNavigation.getByRole("button", { name: /\bChanges$/ })
+          : mobileNavigation.getByRole("button", { name: panel, exact: true });
+      await panelButton.tap();
       await expect(keybar.root).not.toBeVisible();
     }
   });
