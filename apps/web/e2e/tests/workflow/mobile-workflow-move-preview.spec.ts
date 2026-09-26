@@ -9,6 +9,20 @@ import {
   movePreviewRequestPredicate,
 } from "./workflow-move-preview-stability-helpers";
 
+type PreviewStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      taskSessionsByTask: {
+        loadedByTaskId: Record<string, boolean>;
+        itemsByTaskId: Record<string, Array<{ id: string; state?: string }>>;
+      };
+      sessionModels: {
+        bySessionId: Record<string, { currentModelId: string; models: Array<{ modelId: string }> }>;
+      };
+    };
+  };
+};
+
 test.describe("mobile: workflow move preview", () => {
   test("shows the same prediction and details inside the touch drawer", async ({
     tabletTestPage,
@@ -53,10 +67,37 @@ test.describe("mobile: workflow move preview", () => {
       const trigger = previewPanel.getByTestId("workflow-stepper-minimal");
       await expect(trigger).toBeVisible({ timeout: 15_000 });
 
+      // The preview revision includes the task-session projection. Wait for
+      // that projection before opening the drawer, so its initial load cannot
+      // invalidate the first request and look like a refresh caused by the
+      // harmless bookkeeping updates below.
+      await tabletTestPage.waitForFunction(
+        ({ taskId, sessionId }) => {
+          const store = (window as PreviewStoreWindow).__KANDEV_E2E_STORE__;
+          if (!store) return false;
+          const state = store.getState();
+          const sessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
+          const primarySession = sessions.find((session) => session.id === sessionId);
+          const modelCatalog = state.sessionModels.bySessionId[sessionId];
+          return (
+            state.taskSessionsByTask.loadedByTaskId[taskId] === true &&
+            (primarySession?.state === "WAITING_FOR_INPUT" ||
+              primarySession?.state === "COMPLETED") &&
+            modelCatalog !== undefined &&
+            modelCatalog.currentModelId !== "" &&
+            modelCatalog.models.length > 0
+          );
+        },
+        { taskId: task.id, sessionId: task.primary_session_id ?? task.session_id ?? "" },
+        { timeout: 15_000 },
+      );
+
       const isMovePreviewRequest = movePreviewRequestPredicate(task.id, targetStep.id);
       let requestCount = 0;
       const requestListener = (request: Request) => {
-        if (isMovePreviewRequest(request)) requestCount += 1;
+        if (isMovePreviewRequest(request)) {
+          requestCount += 1;
+        }
       };
       tabletTestPage.on("request", requestListener);
 
@@ -80,9 +121,12 @@ test.describe("mobile: workflow move preview", () => {
         const moveBox = await move.boundingBox();
         expect(labelBox).not.toBeNull();
         expect(moveBox).not.toBeNull();
+        // Text glyph bounds and the 44px touch target use different font
+        // metrics on Chromium. Keep the check strict enough to catch a row
+        // that is visibly off-center while allowing the normal glyph offset.
         expect(
           Math.abs(labelBox!.y + labelBox!.height / 2 - moveBox!.y - moveBox!.height / 2),
-        ).toBeLessThan(3);
+        ).toBeLessThan(8);
         await expect(preview).toHaveCSS("text-align", "left");
         const detailsToggle = row.getByTestId(`workflow-step-disclosure-options-${targetStep.id}`);
         const toggleBox = await detailsToggle.boundingBox();

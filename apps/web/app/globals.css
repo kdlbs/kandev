@@ -422,6 +422,10 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
     will-change: auto !important;
   }
 
+  [data-radix-popper-content-wrapper]:has(> [data-mobile-review-selector-menu]) {
+    bottom: calc(4rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
   /* The root positioner owns one backdrop outside the scrolling menu.
      Submenus keep that layer, and Radix retains outside-interaction handling. */
   [data-radix-popper-content-wrapper]:has(> .mobile-menu-root)::before {
@@ -2225,6 +2229,34 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
     0.75rem,
     calc(100vw - var(--titlebar-area-x) - var(--titlebar-area-width) + 0.75rem)
   );
+}
+
+/* Native macOS Tauri title-bar geometry is separate from the browser PWA API. */
+[data-macos-tauri-overlay="true"] [data-window-controls-overlay-region="sidebar"] {
+  -webkit-app-region: drag;
+  padding-left: calc(72px + 0.75rem);
+}
+
+[data-macos-tauri-overlay="true"] [data-window-controls-overlay-region="content"] {
+  -webkit-app-region: drag;
+}
+
+[data-macos-tauri-overlay="true"]
+  [data-window-controls-overlay-region]
+  :is(a, button, input, select, textarea, [role="button"], [tabindex]) {
+  -webkit-app-region: no-drag;
+}
+
+[data-macos-tauri-overlay="true"] [data-sidebar-header-collapsed="true"] {
+  height: auto;
+  min-height: 112px;
+  padding-left: 0.25rem;
+  padding-top: calc(40px + 0.375rem);
+}
+
+[data-macos-tauri-overlay="true"]:has([data-testid="app-sidebar"][data-collapsed="true"])
+  [data-window-controls-overlay-region="content"] {
+  padding-left: calc(72px + 0.5rem);
 }
 
 @media (prefers-reduced-motion: reduce) {

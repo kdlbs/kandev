@@ -33,9 +33,17 @@ test("renders and persists native rich output with an explicit file preview", as
   await expect(lineChart.locator(".recharts-line-curve")).toHaveAttribute("stroke-dasharray", /\d/);
   await expect(lineChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(lineChart.locator(".recharts-xAxis")).toContainText("Aug 12");
-  await barChart.scrollIntoViewIfNeeded();
-  await waitForFiniteAnimations(barChart);
-  await expect(barChart.locator("svg")).toBeVisible({ timeout: 30_000 });
+  // The chart plot is mounted by an IntersectionObserver. Re-issue the
+  // scroll while waiting so the observer sees the chart after its effect
+  // attaches, even when the first scroll happens during initial render.
+  await expect(async () => {
+    await barChart.scrollIntoViewIfNeeded();
+    await barChart.evaluate((element) =>
+      element.scrollIntoView({ block: "center", inline: "nearest" }),
+    );
+    await waitForFiniteAnimations(barChart);
+    await expect(barChart.locator("svg")).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 60_000, intervals: [250, 500, 1_000] });
   await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible({ timeout: 30_000 });
   await expect(barChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(barChart.locator(".recharts-xAxis")).toContainText("/api");
@@ -108,6 +116,43 @@ test("renders complete chart geometry when device animation is disabled", async 
 }) => {
   await testPage.addInitScript(() => {
     window.localStorage.setItem("kandev.settings.richOutputAnimations", "false");
+    // This case checks static Recharts geometry. The lazy plot mount has its
+    // own coverage above; make visibility callbacks immediate here so the
+    // animation assertion cannot race with an inner transcript scroll.
+    class ImmediateIntersectionObserver {
+      private readonly callback: IntersectionObserverCallback;
+
+      constructor(callback: IntersectionObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(target: Element) {
+        this.callback(
+          [
+            {
+              isIntersecting: true,
+              intersectionRatio: 1,
+              target,
+              boundingClientRect: target.getBoundingClientRect(),
+              intersectionRect: target.getBoundingClientRect(),
+              rootBounds: null,
+              time: performance.now(),
+            } as IntersectionObserverEntry,
+          ],
+          this as unknown as IntersectionObserver,
+        );
+      }
+
+      unobserve() {}
+      disconnect() {}
+      takeRecords(): IntersectionObserverEntry[] {
+        return [];
+      }
+    }
+    Object.defineProperty(window, "IntersectionObserver", {
+      configurable: true,
+      value: ImmediateIntersectionObserver,
+    });
   });
   const session = await seedRichOutputTask({
     page: testPage,
@@ -119,11 +164,23 @@ test("renders complete chart geometry when device animation is disabled", async 
   const lineChart = richOutput.getByTestId("rich-output-chart-line");
   const barChart = richOutput.getByTestId("rich-output-chart-bar");
 
+  await expect(richOutput).toBeVisible({ timeout: 30_000 });
+  await expect(barChart).toBeVisible({ timeout: 30_000 });
   await lineChart.scrollIntoViewIfNeeded();
   const line = lineChart.locator(".recharts-line-curve");
   await expect(line).toBeVisible({ timeout: 30_000 });
   await expect(line).not.toHaveAttribute("stroke-dasharray", /\d/);
 
   await barChart.scrollIntoViewIfNeeded();
-  await expect(barChart.locator(".recharts-bar-rectangle")).toHaveCount(6);
+  // Recharts mounts the plot after its intersection observer runs. Under CI
+  // load the chart shell can be visible before the bar rectangles exist.
+  await expect(async () => {
+    await barChart.scrollIntoViewIfNeeded();
+    await barChart.evaluate((element) =>
+      element.scrollIntoView({ block: "center", inline: "nearest" }),
+    );
+    await waitForFiniteAnimations(barChart);
+    await expect(barChart.locator("svg")).toBeVisible({ timeout: 1_000 });
+    await expect(barChart.locator(".recharts-bar-rectangle")).toHaveCount(6, { timeout: 1_000 });
+  }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
 });

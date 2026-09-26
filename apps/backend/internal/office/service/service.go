@@ -448,6 +448,12 @@ type Service struct {
 	// gate is not wired (older tests, transitional deployments).
 	pauseGate               shared.PauseGate
 	deferredAssignmentQueue DeferredAssignmentQueue
+
+	// workflowStepGetter resolves a task's current workflow step so
+	// task_assigned wakes (queueTaskAssignedRun, the unstarted-task
+	// recovery sweep) can be gated to steps that actually auto-start an
+	// agent. Optional — nil fails open (see shared.IsAssignmentWakeEligible).
+	workflowStepGetter shared.AssignmentStepGetter
 }
 
 // RoutineRunSyncer is the surface the office service needs from the
@@ -505,6 +511,11 @@ func (s *Service) SetPricingLookup(p shared.PricingLookup) { s.pricingLookup = p
 // processing to enforce the operator kill switch. Optional — when nil,
 // neither gate is enforced.
 func (s *Service) SetPauseGate(g shared.PauseGate) { s.pauseGate = g }
+
+// SetWorkflowStepGetter wires the workflow step lookup used to gate
+// task_assigned wakes to steps that auto-start an agent. Left nil, the
+// gate fails open (see shared.IsAssignmentWakeEligible).
+func (s *Service) SetWorkflowStepGetter(g shared.AssignmentStepGetter) { s.workflowStepGetter = g }
 
 // SetAgentTokenMinter wires the runtime token minter after feature services are constructed.
 func (s *Service) SetAgentTokenMinter(minter AgentTokenMinter) {

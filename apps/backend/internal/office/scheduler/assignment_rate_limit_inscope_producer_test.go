@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -16,7 +17,7 @@ import (
 // JSON payload end to end through encodeRunContext — the exact shape
 // classifyAssignmentWake's predicate looks for.
 func TestReactToAssigneeChange_AgentActorPayloadCarriesActorTypeAgent(t *testing.T) {
-	ss := &SchedulerService{logger: logger.Default()}
+	ss := &SchedulerService{repo: newReactivityTestRepo(t), logger: logger.Default()}
 	task := &TaskSnapshot{
 		ID:                     "task-inscope",
 		WorkspaceID:            "ws-1",
@@ -33,7 +34,7 @@ func TestReactToAssigneeChange_AgentActorPayloadCarriesActorTypeAgent(t *testing
 		calls = append(calls, recordedQueueCall{agentID: agentID, ctx: c})
 	}
 
-	ss.reactToAssigneeChange(task, "new-assignee", change, queue, &ApplyTaskMutationResult{})
+	ss.reactToAssigneeChange(context.Background(), task, "new-assignee", change, queue, &ApplyTaskMutationResult{})
 
 	if len(calls) != 1 {
 		t.Fatalf("got %d queue calls, want 1", len(calls))
@@ -67,7 +68,7 @@ func TestReactToAssigneeChange_AgentActorPayloadCarriesActorTypeAgent(t *testing
 // negative half: a user-initiated assignment produces a payload the
 // predicate classifies out of scope.
 func TestReactToAssigneeChange_UserActorPayloadNeverCarriesAgent(t *testing.T) {
-	ss := &SchedulerService{logger: logger.Default()}
+	ss := &SchedulerService{repo: newReactivityTestRepo(t), logger: logger.Default()}
 	task := &TaskSnapshot{ID: "task-inscope-2", WorkspaceID: "ws-1", State: "TODO"}
 	change := TaskMutation{ActorID: "", ActorType: "user"}
 
@@ -76,7 +77,7 @@ func TestReactToAssigneeChange_UserActorPayloadNeverCarriesAgent(t *testing.T) {
 		calls = append(calls, recordedQueueCall{agentID: agentID, ctx: c})
 	}
 
-	ss.reactToAssigneeChange(task, "new-assignee", change, queue, &ApplyTaskMutationResult{})
+	ss.reactToAssigneeChange(context.Background(), task, "new-assignee", change, queue, &ApplyTaskMutationResult{})
 
 	if len(calls) != 1 {
 		t.Fatalf("got %d queue calls, want 1", len(calls))

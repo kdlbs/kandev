@@ -1,8 +1,10 @@
 "use client";
 
+import { useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import {
   addDesktopDiscoveryRootAction,
+  confirmHomeDesktopDiscoveryAction,
   reconnectDesktopDiscoveryRootAction,
   removeDesktopDiscoveryRootAction,
 } from "@/app/actions/workspaces";
@@ -38,10 +40,26 @@ async function runDiscoveryAction(
 }
 
 export function useDiscoveryRootActions(discovery: DiscoveryRefresh, toast: Toast, t: TFunction) {
+  const confirmingHomeRef = useRef(false);
+  const [isConfirmingHomeDiscovery, setIsConfirmingHomeDiscovery] = useState(false);
   const refreshDiscovery = () =>
     runDiscoveryAction(() => Promise.resolve(), discovery.refresh, toast, t);
   const handleChooseDiscoveryRoot = (path: string) =>
     runDiscoveryAction(() => addDesktopDiscoveryRootAction(path), discovery.load, toast, t);
+  const handleConfirmHomeDiscovery = async () => {
+    if (confirmingHomeRef.current) return;
+    confirmingHomeRef.current = true;
+    setIsConfirmingHomeDiscovery(true);
+    try {
+      await confirmHomeDesktopDiscoveryAction();
+      await discovery.load();
+    } catch (error) {
+      reportDiscoveryError(toast, t, error);
+    } finally {
+      confirmingHomeRef.current = false;
+      setIsConfirmingHomeDiscovery(false);
+    }
+  };
   const handleReconnectDiscoveryRoot = (oldPath: string, newPath: string) =>
     runDiscoveryAction(
       () => reconnectDesktopDiscoveryRootAction(oldPath, newPath),
@@ -55,6 +73,8 @@ export function useDiscoveryRootActions(discovery: DiscoveryRefresh, toast: Toas
   return {
     refreshDiscovery,
     handleChooseDiscoveryRoot,
+    handleConfirmHomeDiscovery,
+    isConfirmingHomeDiscovery,
     handleReconnectDiscoveryRoot,
     handleRemoveDiscoveryRoot,
   };

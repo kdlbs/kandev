@@ -20,7 +20,8 @@ const FULLSCREEN_ACCELERATOR: &str = "Ctrl+Cmd+F";
 const FULLSCREEN_ACCELERATOR: &str = "F11";
 
 fn main() {
-    let app = tauri::Builder::default()
+    let temporary_test = backend::is_temporary_test_process();
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -28,18 +29,30 @@ fn main() {
             tauri_plugin_opener::Builder::new()
                 .open_js_links_on_click(false)
                 .build(),
-        )
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        );
+    if !temporary_test {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             activate_main_window(app);
-        }))
-        .manage(backend::BackendState::default())
-        .manage(UpdaterState::new(env!("CARGO_PKG_VERSION")))
+        }));
+    }
+    let backend_state = if temporary_test {
+        backend::BackendState::temporary_test_instance()
+    } else {
+        backend::BackendState::default()
+    };
+    let app = builder
+        .manage(backend_state)
+        .manage(UpdaterState::new_with_install_enabled(
+            env!("CARGO_PKG_VERSION"),
+            !temporary_test,
+        ))
         .manage(NativeNotificationState::default())
         .manage(ZoomState::default())
         .invoke_handler(tauri::generate_handler![
             updater::get_update_state,
             updater::check_for_updates,
             updater::install_update,
+            backend::start_temporary_test_instance,
             native_notifications::show_native_notification,
             native_notifications::get_native_notification_permission,
             native_notifications::request_native_notification_permission,
@@ -48,7 +61,7 @@ fn main() {
         ])
         .menu(build_menu)
         .on_menu_event(handle_menu_event)
-        .setup(|app| {
+        .setup(move |app| {
             let window_config = app
                 .config()
                 .app
@@ -72,15 +85,17 @@ fn main() {
                     )
                 })
                 .build()?;
-            let state_path = app.path().app_data_dir()?.join(WINDOW_STATE_FILE);
-            let window_state = WindowStateStore::new(state_path);
-            if let Err(err) = window_state.restore(&window) {
-                eprintln!("Could not restore desktop window state: {err}");
+            if !temporary_test {
+                let state_path = app.path().app_data_dir()?.join(WINDOW_STATE_FILE);
+                let window_state = WindowStateStore::new(state_path);
+                if let Err(err) = window_state.restore(&window) {
+                    eprintln!("Could not restore desktop window state: {err}");
+                }
+                if let Err(err) = window_state.save(&window) {
+                    eprintln!("Could not initialize desktop window state: {err}");
+                }
+                app.manage(window_state);
             }
-            if let Err(err) = window_state.save(&window) {
-                eprintln!("Could not initialize desktop window state: {err}");
-            }
-            app.manage(window_state);
             window.show()?;
             backend::start_desktop_backend(app.handle().clone(), window);
             Ok(())

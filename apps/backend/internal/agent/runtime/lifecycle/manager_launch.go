@@ -2420,7 +2420,9 @@ func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution, approvalPolicy string) (string, error) {
 	runtimeSnapshot := execution.RuntimeEnvironment()
-	metadataEnv := runtimeEnvFromMetadata(execution.MetadataSnapshot())
+	metadata := execution.MetadataSnapshot()
+	metadataEnv := runtimeEnvFromMetadata(metadata)
+	_, hasReplacement := metadata["runtime_env"]
 	var env map[string]string
 	if runtimeSnapshot == nil {
 		env = cloneStringMap(metadataEnv)
@@ -2431,10 +2433,12 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
 			return "", fmt.Errorf("resolve agent profile environment: %w", err)
 		}
+	} else if !hasReplacement {
+		env = runtimeSnapshot
 	} else {
 		// SetExecutionEnv carries per-run values such as repository credentials.
 		// Compose them with the launch snapshot without re-reading profile
-		// secrets. Host bridge entries are filtered here, while the normal
+		// secrets. Generated credential entries are filtered here, while the normal
 		// agentctl Configure boundary composes the request with the instance's
 		// canonical environment and preserves inherited user entries.
 		var err error
@@ -2444,6 +2448,7 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 			return "", fmt.Errorf("compose agent environment: %w", err)
 		}
 	}
+	normalizeKubernetesManagedGitEnvironment(execution.RuntimeName, env)
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
 		m.updateExecutionError(execution.ID, "failed to prepare agent env: "+err.Error())
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)

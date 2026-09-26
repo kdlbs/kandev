@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/shared"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
@@ -70,20 +71,56 @@ func (si *SchedulerIntegration) recoverUnstartedTasks(ctx context.Context, log *
 		return
 	}
 
-	for _, t := range tasks {
-		log.Info("recovery sweep: re-queueing unstarted task",
-			zap.String("task_id", t.ID),
-			zap.String("agent_profile_id", t.AssigneeAgentProfileID))
-
-		payload := mustJSON(map[string]string{"task_id": t.ID})
-		runsservice.ReportKeylessEnqueue(RunReasonTaskAssigned, runsservice.KeylessCauseByDesign, "")
-		if _, err := si.svc.QueueRun(ctx, t.AssigneeAgentProfileID,
-			RunReasonTaskAssigned, payload, ""); err != nil {
-			if ctx.Err() != nil {
+	seen := make(map[string]struct{}, maxRecoveryPerTick)
+	excluded := make([]string, 0, maxRecoveryPerTick)
+	recovered := 0
+	for recovered < maxRecoveryPerTick {
+		if len(tasks) == 0 {
+			tasks, err = si.svc.repo.ListUnstartedTasks(ctx, lookbackHours, maxRecoveryPerTick-recovered, excluded...)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				log.Error("recovery sweep: list unstarted tasks failed", zap.Error(err))
 				return
 			}
-			log.Error("recovery sweep: queue run failed",
-				zap.String("task_id", t.ID), zap.Error(err))
+			if len(tasks) == 0 {
+				return
+			}
 		}
+
+		for _, t := range tasks {
+			if _, alreadySeen := seen[t.ID]; alreadySeen {
+				continue
+			}
+			seen[t.ID] = struct{}{}
+			excluded = append(excluded, t.ID)
+			// The current step must accept an auto-started run before this
+			// recovery wake is queued. See shared.IsAssignmentWakeEligible
+			// for the fail-open rationale.
+			if !shared.IsAssignmentWakeEligible(ctx, log, si.svc.repo, si.svc.workflowStepGetter, t.ID, "scheduler_recovery.recover_unstarted_tasks") {
+				continue
+			}
+
+			log.Info("recovery sweep: re-queueing unstarted task",
+				zap.String("task_id", t.ID),
+				zap.String("agent_profile_id", t.AssigneeAgentProfileID))
+
+			payload := mustJSON(map[string]string{"task_id": t.ID})
+			runsservice.ReportKeylessEnqueue(RunReasonTaskAssigned, runsservice.KeylessCauseByDesign, "")
+			if _, err := si.svc.QueueRun(ctx, t.AssigneeAgentProfileID,
+				RunReasonTaskAssigned, payload, ""); err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				log.Error("recovery sweep: queue run failed",
+					zap.String("task_id", t.ID), zap.Error(err))
+			}
+			recovered++
+			if recovered == maxRecoveryPerTick {
+				return
+			}
+		}
+		tasks = nil
 	}
 }

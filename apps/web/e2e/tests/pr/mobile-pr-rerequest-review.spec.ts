@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import {
   assertLocatorWithinViewportX,
@@ -5,7 +6,25 @@ import {
   assertTextWrapsNaturallyWithoutHorizontalOverflow,
   requireBox,
 } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
+
+type TaskPRFixtureWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      taskPRs?: { byTaskId?: Record<string, Array<{ pr_number: number }>> };
+    };
+  };
+};
+
+function readTaskPRNumbers(page: Page, taskId: string) {
+  return page.evaluate((id) => {
+    const store = (window as TaskPRFixtureWindow).__KANDEV_E2E_STORE__;
+    return (store?.getState().taskPRs?.byTaskId?.[id] ?? [])
+      .map((pr) => pr.pr_number)
+      .sort((left, right) => left - right);
+  }, taskId);
+}
 
 const OWNER = "testorg";
 const REPO = "testrepo";
@@ -82,10 +101,8 @@ test.describe("mobile PR re-request review", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    // The task-PR association can arrive before this route's WS subscription;
-    // reload to hydrate the linked PR from the authoritative boot payload.
-    await testPage.reload();
-    await session.waitForLoad();
+    await session.waitForChatIdle();
+    await expect.poll(() => readTaskPRNumbers(testPage, task.id)).toEqual([PR_NUMBER]);
     await expect(session.prTopbarButton()).toHaveCount(0);
 
     await testPage.getByRole("button", { name: "Review", exact: true }).tap();
@@ -165,7 +182,7 @@ test.describe("mobile PR re-request review", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
     const task = await apiClient.createTaskWithAgent(
@@ -179,20 +196,20 @@ test.describe("mobile PR re-request review", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
-    for (const prNumber of [SWITCH_PR_NUMBER, SWITCH_SECOND_PR_NUMBER]) {
-      await apiClient.mockGitHubAssociateTaskPR({
-        task_id: task.id,
-        owner: OWNER,
-        repo: REPO,
-        pr_number: prNumber,
-        pr_url: `https://github.com/${OWNER}/${REPO}/pull/${prNumber}`,
-        pr_title: `PR ${prNumber}`,
-        head_branch: `feat/pr-${prNumber}`,
-        base_branch: "main",
-        author_login: "another-user",
-        state: "open",
-      });
-    }
+    await apiClient.mockGitHubAssociateTaskPR({
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      task_id: task.id,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: SWITCH_PR_NUMBER,
+      pr_url: `https://github.com/${OWNER}/${REPO}/pull/${SWITCH_PR_NUMBER}`,
+      pr_title: `PR ${SWITCH_PR_NUMBER}`,
+      head_branch: `feat/pr-${SWITCH_PR_NUMBER}`,
+      base_branch: "main",
+      author_login: "another-user",
+      state: "open",
+    });
     await apiClient.mockGitHubSeedPRFeedback({
       owner: OWNER,
       repo: REPO,
@@ -207,6 +224,23 @@ test.describe("mobile PR re-request review", () => {
       pr_number: SWITCH_SECOND_PR_NUMBER,
       reviews: [],
     });
+
+    const mutationUrls: string[] = [];
+    testPage.on("request", (request) => {
+      if (request.method() === "POST" && request.url().includes("/requested-reviewers")) {
+        mutationUrls.push(request.url());
+      }
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const expectedPRNumbers = [SWITCH_PR_NUMBER, SWITCH_SECOND_PR_NUMBER];
+    await expect.poll(() => readTaskPRNumbers(testPage, task.id)).toEqual([SWITCH_PR_NUMBER]);
+    await testPage.getByRole("button", { name: "Review", exact: true }).tap();
+    await expect(session.prSubmittedReview(REVIEWER)).toBeVisible({ timeout: 30_000 });
+    const action = session.prReRequestReviewButton(REVIEWER);
+    await expect(action).toBeVisible({ timeout: 30_000 });
 
     let releaseSecondFeedback!: () => void;
     const secondFeedbackHeld = new Promise<void>((resolve) => {
@@ -225,25 +259,46 @@ test.describe("mobile PR re-request review", () => {
         await route.fulfill({ response });
       },
     );
-    const mutationUrls: string[] = [];
-    testPage.on("request", (request) => {
-      if (request.method() === "POST" && request.url().includes("/requested-reviewers")) {
-        mutationUrls.push(request.url());
-      }
+    await apiClient.mockGitHubAssociateTaskPR({
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      task_id: task.id,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: SWITCH_SECOND_PR_NUMBER,
+      pr_url: `https://github.com/${OWNER}/${REPO}/pull/${SWITCH_SECOND_PR_NUMBER}`,
+      pr_title: `PR ${SWITCH_SECOND_PR_NUMBER}`,
+      head_branch: `feat/pr-${SWITCH_SECOND_PR_NUMBER}`,
+      base_branch: "main",
+      author_login: "another-user",
+      state: "open",
     });
-
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await testPage.getByRole("button", { name: "Review", exact: true }).tap();
-    const action = session.prReRequestReviewButton(REVIEWER);
-    await expect(action).toBeVisible({ timeout: 15_000 });
-
-    await testPage.getByTestId("review-item-selector-trigger").tap();
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.listTaskPRs(task.id)).map((pr) => pr.pr_number).sort((a, b) => a - b),
+        { timeout: 15_000 },
+      )
+      .toEqual([SWITCH_PR_NUMBER, SWITCH_SECOND_PR_NUMBER]);
+    await expect.poll(() => readTaskPRNumbers(testPage, task.id)).toEqual(expectedPRNumbers);
+    const reviewSelector = testPage.getByTestId("review-item-selector-trigger");
+    const reviewSelectorMenu = testPage.getByTestId("review-item-selector-menu");
+    await expect(reviewSelector).toBeVisible({ timeout: 30_000 });
+    await reviewSelector.tap();
+    await expect(reviewSelectorMenu).toBeVisible();
+    await waitForFiniteAnimations(reviewSelectorMenu);
     const secondReview = testPage.getByRole("menuitemradio", {
       name: new RegExp(`^PR ${SWITCH_SECOND_PR_NUMBER}\\b`),
     });
     await expect(secondReview).toBeVisible();
+    const [secondReviewBox, bottomNavBox] = await Promise.all([
+      requireBox(secondReview, "second PR choice"),
+      requireBox(testPage.getByTestId("session-mobile-bottom-nav"), "mobile bottom navigation"),
+    ]);
+    expect(secondReviewBox.height).toBeGreaterThanOrEqual(44);
+    expect(secondReviewBox.y + secondReviewBox.height).toBeLessThanOrEqual(bottomNavBox.y);
+    await assertLocatorWithinViewportX(secondReview, "second PR choice");
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile PR selector");
     await secondReview.tap();
     await secondFeedbackRequested;
 

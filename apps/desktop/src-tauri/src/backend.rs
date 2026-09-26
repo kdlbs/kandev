@@ -1,7 +1,9 @@
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     env,
     ffi::{OsStr, OsString},
+    fs::{self, OpenOptions},
     io::{ErrorKind, Read, Write},
     net::{TcpListener, TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
@@ -16,9 +18,11 @@ use std::{
 use url::Url;
 
 #[cfg(feature = "desktop-runtime")]
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::{AppHandle, Manager, State, WebviewWindow};
 
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
+// Keep this above the Go launcher's graceful stop and forced-exit bounds.
+const DESKTOP_LAUNCHER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(80);
 const LOOPBACK_HOST: &str = "127.0.0.1";
 const DEFAULT_DESKTOP_PORT: u16 = 38430;
 const DESKTOP_PORT_ENV: &str = "KANDEV_DESKTOP_PORT";
@@ -26,8 +30,12 @@ const DESKTOP_HEALTH_TOKEN_ENV: &str = "KANDEV_DESKTOP_HEALTH_TOKEN";
 const DESKTOP_NATIVE_NOTIFICATIONS_ENV: &str = "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS";
 const DESKTOP_RUNTIME_ENV: &str = "KANDEV_DESKTOP_RUNTIME";
 const LAUNCHER_PARENT_PID_ENV: &str = "KANDEV_LAUNCHER_PARENT_PID";
+const TEMPORARY_TEST_ARGUMENT: &str = "--kandev-temporary-test";
+const INTERNAL_CONFIG_FILE_ENV: &str = "KANDEV_INTERNAL_CONFIG_FILE";
 const DESKTOP_HEALTH_TOKEN_HEADER: &str = "x-kandev-desktop-health-token";
 const STARTUP_OUTPUT_LIMIT: usize = 12 * 1024;
+const STARTUP_CONFLICT_MARKER_PREFIX: &[u8] = b"KANDEV_DESKTOP_CONFLICT_V1 ";
+const STARTUP_CONFLICT_LINE_LIMIT: usize = 16 * 1024;
 const HEALTH_READY_SETTLE: Duration = Duration::from_millis(100);
 const REMOTE_AGENTCTL_HELPERS: [(&str, &str); 4] = [
     ("agentctl-linux-amd64", "agentctl linux/amd64 helper"),
@@ -40,8 +48,15 @@ const REMOTE_AGENTCTL_HELPERS: [(&str, &str); 4] = [
 pub struct BackendState {
     child: Arc<Mutex<Option<Child>>>,
     startup_output: Arc<Mutex<StartupOutput>>,
+    startup_output_readers: Arc<Mutex<Vec<std::sync::mpsc::Receiver<()>>>>,
+    startup_conflict: Arc<Mutex<Option<StartupConflict>>>,
     shutdown_started: Arc<AtomicBool>,
     owned_origin: Arc<Mutex<Option<String>>>,
+    temporary_test: bool,
+    temporary_home: Arc<Mutex<Option<TemporaryHome>>>,
+    temporary_home_error: Arc<Mutex<Option<String>>>,
+    retain_temporary_home: Arc<AtomicBool>,
+    backend_ready: Arc<AtomicBool>,
 }
 
 impl Default for BackendState {
@@ -49,13 +64,40 @@ impl Default for BackendState {
         Self {
             child: Arc::new(Mutex::new(None)),
             startup_output: Arc::new(Mutex::new(StartupOutput::default())),
+            startup_output_readers: Arc::new(Mutex::new(Vec::new())),
+            startup_conflict: Arc::new(Mutex::new(None)),
             shutdown_started: Arc::new(AtomicBool::new(false)),
             owned_origin: Arc::new(Mutex::new(None)),
+            temporary_test: false,
+            temporary_home: Arc::new(Mutex::new(None)),
+            temporary_home_error: Arc::new(Mutex::new(None)),
+            retain_temporary_home: Arc::new(AtomicBool::new(false)),
+            backend_ready: Arc::new(AtomicBool::new(false)),
         }
     }
 }
 
 impl BackendState {
+    pub fn temporary_test_instance() -> Self {
+        let mut state = Self::default();
+        state.temporary_test = true;
+        match TemporaryHome::create() {
+            Ok(home) => {
+                *state
+                    .temporary_home
+                    .lock()
+                    .expect("temporary home mutex poisoned") = Some(home);
+            }
+            Err(err) => {
+                *state
+                    .temporary_home_error
+                    .lock()
+                    .expect("temporary home error mutex poisoned") = Some(err);
+            }
+        }
+        state
+    }
+
     pub fn begin_shutdown(&self) -> bool {
         !self.shutdown_started.swap(true, Ordering::SeqCst)
     }
@@ -68,9 +110,10 @@ impl BackendState {
             .lock()
             .expect("backend child mutex poisoned")
             .take();
-        if let Some(mut child) = child {
-            terminate_child(&mut child);
-        }
+        let clean_stop = child
+            .map(|mut child| terminate_child(&mut child))
+            .unwrap_or(false);
+        self.cleanup_temporary_home_after_stop(clean_stop);
     }
 
     fn is_shutdown_started(&self) -> bool {
@@ -118,6 +161,90 @@ impl BackendState {
             .expect("desktop origin mutex poisoned") = None;
     }
 
+    fn is_temporary_test(&self) -> bool {
+        self.temporary_test
+    }
+
+    fn can_start_temporary_test(&self, url: &str) -> bool {
+        !self.temporary_test
+            && self.startup_conflict().is_some()
+            && !self.has_live_child()
+            && is_local_startup_url(url)
+    }
+
+    #[cfg(feature = "desktop-runtime")]
+    fn require_conflict_startup(&self, webview: &WebviewWindow) -> Result<(), String> {
+        let url = webview
+            .url()
+            .map_err(|err| format!("Could not read desktop startup URL: {err}"))?;
+        if self.can_start_temporary_test(url.as_str()) {
+            Ok(())
+        } else {
+            Err(
+                "Temporary test instances can only start from a detected startup conflict"
+                    .to_string(),
+            )
+        }
+    }
+
+    pub fn temporary_home_path(&self) -> Option<PathBuf> {
+        self.temporary_home
+            .lock()
+            .expect("temporary home mutex poisoned")
+            .as_ref()
+            .map(|home| home.path.clone())
+    }
+
+    fn temporary_home_for_launch(&self) -> Result<Option<TemporaryHome>, String> {
+        if !self.temporary_test {
+            return Ok(None);
+        }
+        if let Some(err) = self
+            .temporary_home_error
+            .lock()
+            .expect("temporary home error mutex poisoned")
+            .as_ref()
+        {
+            return Err(err.clone());
+        }
+        self.temporary_home
+            .lock()
+            .expect("temporary home mutex poisoned")
+            .clone()
+            .map(Some)
+            .ok_or_else(|| "Temporary Kandev home is unavailable".to_string())
+    }
+
+    fn mark_backend_ready(&self) {
+        self.backend_ready.store(true, Ordering::SeqCst);
+    }
+
+    fn cleanup_temporary_home_after_stop(&self, clean_stop: bool) -> bool {
+        if !self.temporary_test
+            || !clean_stop
+            || !self.backend_ready.load(Ordering::SeqCst)
+            || self.retain_temporary_home.load(Ordering::SeqCst)
+        {
+            return false;
+        }
+        let mut home = self
+            .temporary_home
+            .lock()
+            .expect("temporary home mutex poisoned");
+        let Some(owned_home) = home.as_ref() else {
+            return false;
+        };
+        if !owned_home.remove_if_owned() {
+            return false;
+        }
+        home.take();
+        true
+    }
+
+    fn retain_temporary_home(&self) {
+        self.retain_temporary_home.store(true, Ordering::SeqCst);
+    }
+
     fn has_live_child(&self) -> bool {
         self.child
             .lock()
@@ -142,6 +269,14 @@ impl BackendState {
             .lock()
             .expect("startup output mutex poisoned")
             .clear();
+        self.startup_output_readers
+            .lock()
+            .expect("startup output reader mutex poisoned")
+            .clear();
+        *self
+            .startup_conflict
+            .lock()
+            .expect("startup conflict mutex poisoned") = None;
     }
 
     fn recent_startup_output(&self) -> Option<String> {
@@ -155,30 +290,199 @@ impl BackendState {
         let mut guard = self.child.lock().expect("backend child mutex poisoned");
         if let Some(child) = guard.as_mut() {
             if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
-                thread::sleep(Duration::from_millis(50));
-                return Ok(Some(launcher_exit_message(
-                    &status.to_string(),
-                    self.recent_startup_output(),
-                )));
+                let output_drained = wait_for_startup_output_readers(
+                    std::mem::take(
+                        &mut *self
+                            .startup_output_readers
+                            .lock()
+                            .expect("startup output reader mutex poisoned"),
+                    ),
+                    Duration::from_secs(2),
+                );
+                let (output, conflict) = {
+                    let output = self
+                        .startup_output
+                        .lock()
+                        .expect("startup output mutex poisoned");
+                    (
+                        output.text(),
+                        output_drained.then(|| output.startup_conflict()).flatten(),
+                    )
+                };
+                *self
+                    .startup_conflict
+                    .lock()
+                    .expect("startup conflict mutex poisoned") = conflict;
+                return Ok(Some(launcher_exit_message(&status.to_string(), output)));
             }
         }
         Ok(None)
+    }
+
+    pub fn startup_conflict(&self) -> Option<StartupConflict> {
+        self.startup_conflict
+            .lock()
+            .expect("startup conflict mutex poisoned")
+            .clone()
+    }
+}
+
+pub fn is_temporary_test_process() -> bool {
+    is_temporary_test_args(env::args_os())
+}
+
+fn is_temporary_test_args(args: impl IntoIterator<Item = OsString>) -> bool {
+    args.into_iter()
+        .any(|arg| arg == OsStr::new(TEMPORARY_TEST_ARGUMENT))
+}
+
+fn is_local_startup_url(input: &str) -> bool {
+    let Ok(url) = Url::parse(input) else {
+        return false;
+    };
+    if url.scheme() == "tauri" {
+        return url.host_str() == Some("localhost");
+    }
+    if url.scheme() != "http" {
+        return false;
+    }
+    if url.host_str() == Some("tauri.localhost") {
+        return true;
+    }
+    cfg!(debug_assertions)
+        && url.port() == Some(1420)
+        && matches!(url.host_str(), Some("localhost" | "127.0.0.1"))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemporaryHome {
+    pub path: PathBuf,
+    temp_root: PathBuf,
+}
+
+impl TemporaryHome {
+    fn create() -> Result<Self, String> {
+        let temp_root = env::temp_dir().canonicalize().map_err(|err| {
+            format!("Could not resolve the operating-system temporary directory: {err}")
+        })?;
+        let mut created_path = None;
+        for _ in 0..8 {
+            let mut random = [0_u8; 16];
+            getrandom::fill(&mut random)
+                .map_err(|err| format!("Could not create a private temporary home name: {err}"))?;
+            let path = temp_root.join(format!(
+                "kandev-test-{}-{}",
+                std::process::id(),
+                hex_encode(&random)
+            ));
+            let mut builder = fs::DirBuilder::new();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            match builder.create(&path) {
+                Ok(()) => {
+                    created_path = Some(path);
+                    break;
+                }
+                Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+                Err(err) => {
+                    return Err(format!("Could not create a private temporary home: {err}"))
+                }
+            }
+        }
+        let path = created_path.ok_or_else(|| {
+            "Could not allocate a unique private temporary Kandev home".to_string()
+        })?;
+        let canonical_path = match path.canonicalize() {
+            Ok(path) if path.parent() == Some(temp_root.as_path()) => path,
+            Ok(_) => {
+                let _ = fs::remove_dir_all(&path);
+                return Err(
+                    "The temporary Kandev home is outside the operating-system temporary directory"
+                        .to_string(),
+                );
+            }
+            Err(err) => {
+                let _ = fs::remove_dir_all(&path);
+                return Err(format!("Could not verify the temporary Kandev home: {err}"));
+            }
+        };
+        let config_path = canonical_path.join("config.yaml");
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let config_file = match options.open(&config_path) {
+            Ok(file) => file,
+            Err(err) => {
+                let _ = fs::remove_dir_all(&canonical_path);
+                return Err(format!(
+                    "Could not create the temporary Kandev config: {err}"
+                ));
+            }
+        };
+        drop(config_file);
+        Ok(Self {
+            path: canonical_path,
+            temp_root,
+        })
+    }
+
+    fn remove_if_owned(&self) -> bool {
+        if self
+            .path
+            .file_name()
+            .is_none_or(|name| !name.to_string_lossy().starts_with("kandev-test-"))
+        {
+            return false;
+        }
+        let Ok(metadata) = fs::symlink_metadata(&self.path) else {
+            return false;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return false;
+        }
+        let Ok(canonical_path) = self.path.canonicalize() else {
+            return false;
+        };
+        if canonical_path != self.path || canonical_path.parent() != Some(self.temp_root.as_path())
+        {
+            return false;
+        }
+        fs::remove_dir_all(&canonical_path).is_ok()
     }
 }
 
 #[derive(Default)]
 struct StartupOutput {
     bytes: Vec<u8>,
+    conflict_line: Vec<u8>,
+    discarding_conflict_line: bool,
+    conflict_marker_count: usize,
+    conflict: Option<StartupConflict>,
 }
 
 impl StartupOutput {
     fn clear(&mut self) {
         self.bytes.clear();
+        self.conflict_line.clear();
+        self.discarding_conflict_line = false;
+        self.conflict_marker_count = 0;
+        self.conflict = None;
     }
 
     fn push(&mut self, stream: &str, chunk: &[u8]) {
         if chunk.is_empty() {
             return;
+        }
+
+        if stream == "stderr" {
+            self.push_conflict_bytes(chunk);
         }
 
         self.bytes
@@ -190,6 +494,61 @@ impl StartupOutput {
         }
     }
 
+    fn push_conflict_bytes(&mut self, chunk: &[u8]) {
+        for byte in chunk {
+            if *byte == b'\n' {
+                if !self.discarding_conflict_line {
+                    self.parse_conflict_line();
+                }
+                self.conflict_line.clear();
+                self.discarding_conflict_line = false;
+                continue;
+            }
+            if self.discarding_conflict_line {
+                continue;
+            }
+            if self.conflict_line.len() >= STARTUP_CONFLICT_LINE_LIMIT {
+                self.conflict_line.clear();
+                self.discarding_conflict_line = true;
+                continue;
+            }
+            self.conflict_line.push(*byte);
+        }
+    }
+
+    fn parse_conflict_line(&mut self) {
+        let line = self
+            .conflict_line
+            .strip_suffix(b"\r")
+            .unwrap_or(&self.conflict_line);
+        let Some(json) = line.strip_prefix(STARTUP_CONFLICT_MARKER_PREFIX) else {
+            return;
+        };
+        let Ok(json) = std::str::from_utf8(json) else {
+            return;
+        };
+        let Ok(conflict) = serde_json::from_str::<StartupConflict>(json) else {
+            return;
+        };
+        if !conflict.is_valid() {
+            return;
+        }
+        self.conflict_marker_count += 1;
+        if self.conflict_marker_count == 1 {
+            self.conflict = Some(conflict);
+        } else {
+            self.conflict = None;
+        }
+    }
+
+    fn startup_conflict(&self) -> Option<StartupConflict> {
+        if self.conflict_marker_count == 1 {
+            self.conflict.clone()
+        } else {
+            None
+        }
+    }
+
     fn text(&self) -> Option<String> {
         let text = String::from_utf8_lossy(&self.bytes).trim().to_string();
         if text.is_empty() {
@@ -198,6 +557,70 @@ impl StartupOutput {
             Some(text)
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct StartupConflict {
+    version: u8,
+    pub target_kind: ConflictTargetKind,
+    pub target_path: String,
+    pub storage_kind: ConflictStorageKind,
+    pub database_path: Option<String>,
+    pub owner: Option<StartupConflictOwner>,
+}
+
+impl StartupConflict {
+    fn is_valid(&self) -> bool {
+        if self.version != 1
+            || self.target_path.len() > 4096
+            || !Path::new(&self.target_path).is_absolute()
+            || self.owner.as_ref().is_some_and(|owner| {
+                owner.pid.is_some_and(|pid| pid <= 0)
+                    || owner.executable.as_ref().is_some_and(|value| {
+                        value.len() > 256 || value.chars().any(char::is_control)
+                    })
+                    || owner.started_at.as_ref().is_some_and(|value| {
+                        value.len() > 256 || value.chars().any(char::is_control)
+                    })
+            })
+        {
+            return false;
+        }
+        let storage_valid = match self.storage_kind {
+            ConflictStorageKind::SqliteInHome | ConflictStorageKind::SqliteExternal => self
+                .database_path
+                .as_ref()
+                .is_some_and(|path| path.len() <= 4096 && Path::new(path).is_absolute()),
+            ConflictStorageKind::Postgres => self.database_path.is_none(),
+        };
+        storage_valid
+            && (self.target_kind != ConflictTargetKind::Database
+                || self.storage_kind == ConflictStorageKind::SqliteExternal)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictTargetKind {
+    Home,
+    Database,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictStorageKind {
+    SqliteInHome,
+    SqliteExternal,
+    Postgres,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct StartupConflictOwner {
+    pub pid: Option<i64>,
+    pub executable: Option<String>,
+    pub started_at: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -212,12 +635,23 @@ pub struct BackendCommandSpec {
 pub fn start_desktop_backend(app: AppHandle, window: WebviewWindow) {
     let state = app.state::<BackendState>().inner().clone();
     thread::spawn(move || {
-        set_status(
-            &window,
-            "Starting backend",
-            "Preparing the local runtime and opening your workspace.",
-            false,
-        );
+        if let Err(err) = state.temporary_home_for_launch() {
+            let home = state
+                .temporary_home_path()
+                .map(|path| path.to_string_lossy().into_owned());
+            state.stop();
+            set_status(&window, "failure", Some(&err), None, home);
+            return;
+        }
+        let startup_kind = if state.is_temporary_test() {
+            "temporary"
+        } else {
+            "loading"
+        };
+        let home = state
+            .temporary_home_path()
+            .map(|path| path.to_string_lossy().into_owned());
+        set_status(&window, startup_kind, None, None, home.clone());
         match launch_and_wait(&app, &state) {
             Ok(url) => {
                 if let Err(err) = state
@@ -225,20 +659,24 @@ pub fn start_desktop_backend(app: AppHandle, window: WebviewWindow) {
                     .and_then(|_| navigate_to_backend(&window, &url))
                 {
                     state.clear_owned_origin();
+                    state.retain_temporary_home();
                     state.stop();
-                    set_status(
-                        &window,
-                        "Desktop startup failed",
-                        &format!("Backend started, but the window could not navigate: {err}"),
-                        true,
-                    );
+                    let detail =
+                        format!("Backend started, but the window could not navigate: {err}");
+                    set_status(&window, "failure", Some(&detail), None, home.clone());
                 } else {
-                    crate::updater::start_automatic_checks(app);
+                    if !state.is_temporary_test() {
+                        crate::updater::start_automatic_checks(app);
+                    }
                 }
             }
             Err(err) => {
                 state.stop();
-                set_status(&window, "Desktop startup failed", &err, true);
+                if let Some(conflict) = state.startup_conflict() {
+                    set_status(&window, "conflict", None, Some(conflict), None);
+                } else {
+                    set_status(&window, "failure", Some(&err), None, home.clone());
+                }
             }
         }
     });
@@ -264,9 +702,17 @@ fn same_origin(expected: &str, input: &str) -> bool {
 #[cfg(feature = "desktop-runtime")]
 fn launch_and_wait(app: &AppHandle, state: &BackendState) -> Result<String, String> {
     let runtime_dir = resolve_runtime_dir(app)?;
-    let port = pick_desktop_port()?;
+    let temporary_home = state.temporary_home_for_launch()?;
+    let port = if state.is_temporary_test() {
+        pick_loopback_port()?
+    } else {
+        pick_desktop_port()?
+    };
     let health_token = desktop_health_token()?;
     let mut inherited_env: BTreeMap<OsString, OsString> = env::vars_os().collect();
+    if let Some(home) = temporary_home.as_ref() {
+        inherited_env = temporary_test_backend_environment(inherited_env, home);
+    }
     inherited_env.insert(
         OsString::from(DESKTOP_HEALTH_TOKEN_ENV),
         OsString::from(&health_token),
@@ -283,13 +729,52 @@ fn launch_and_wait(app: &AppHandle, state: &BackendState) -> Result<String, Stri
         return Err("Desktop startup cancelled".to_string());
     }
     let mut child = spawn_backend_command(&spec)?;
-    capture_child_output(&mut child, state.startup_output.clone());
+    let output_readers = capture_child_output(&mut child, state.startup_output.clone());
+    *state
+        .startup_output_readers
+        .lock()
+        .expect("startup output reader mutex poisoned") = output_readers;
     if !state.set_child(child) {
         return Err("Desktop startup cancelled".to_string());
     }
     wait_for_backend(port, state, HEALTH_TIMEOUT, &health_token)?;
     wait_for_ready(port, state)?;
+    state.mark_backend_ready();
     Ok(format!("http://{LOOPBACK_HOST}:{port}/"))
+}
+
+fn temporary_test_backend_environment(
+    mut inherited: BTreeMap<OsString, OsString>,
+    home: &TemporaryHome,
+) -> BTreeMap<OsString, OsString> {
+    inherited.retain(|key, _| {
+        let key = key.to_string_lossy();
+        !key.to_ascii_uppercase().starts_with("KANDEV_")
+            || [
+                "KANDEV_DEBUG_DEV_MODE",
+                "KANDEV_E2E_MOCK",
+                "KANDEV_DESKTOP_RUNTIME_DIR",
+            ]
+            .iter()
+            .any(|preserved| key.eq_ignore_ascii_case(preserved))
+    });
+    inherited.insert(
+        OsString::from("KANDEV_HOME_DIR"),
+        home.path.as_os_str().to_os_string(),
+    );
+    inherited.insert(
+        OsString::from("KANDEV_DATABASE_DRIVER"),
+        OsString::from("sqlite"),
+    );
+    inherited.insert(
+        OsString::from("KANDEV_DATABASE_PATH"),
+        home.path.join("data/kandev.db").into_os_string(),
+    );
+    inherited.insert(
+        OsString::from(INTERNAL_CONFIG_FILE_ENV),
+        home.path.join("config.yaml").into_os_string(),
+    );
+    inherited
 }
 
 fn add_launcher_parent_pid(env: &mut BTreeMap<OsString, OsString>) {
@@ -471,33 +956,62 @@ fn spawn_backend_command(spec: &BackendCommandSpec) -> Result<Child, String> {
     })
 }
 
-fn capture_child_output(child: &mut Child, output: Arc<Mutex<StartupOutput>>) {
+fn capture_child_output(
+    child: &mut Child,
+    output: Arc<Mutex<StartupOutput>>,
+) -> Vec<std::sync::mpsc::Receiver<()>> {
+    let mut readers = Vec::new();
     if let Some(stdout) = child.stdout.take() {
-        capture_stream("stdout", stdout, output.clone());
+        readers.push(capture_stream("stdout", stdout, output.clone()));
     }
     if let Some(stderr) = child.stderr.take() {
-        capture_stream("stderr", stderr, output);
+        readers.push(capture_stream("stderr", stderr, output));
     }
+    readers
 }
 
-fn capture_stream<R>(stream: &'static str, mut reader: R, output: Arc<Mutex<StartupOutput>>)
+fn capture_stream<R>(
+    stream: &'static str,
+    mut reader: R,
+    output: Arc<Mutex<StartupOutput>>,
+) -> std::sync::mpsc::Receiver<()>
 where
     R: Read + Send + 'static,
 {
+    let (finished_tx, finished_rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
         let mut buffer = [0_u8; 1024];
         loop {
             match reader.read(&mut buffer) {
-                Ok(0) => return,
+                Ok(0) => break,
                 Err(err) if err.kind() == ErrorKind::Interrupted => continue,
-                Err(_) => return,
+                Err(_) => break,
                 Ok(n) => output
                     .lock()
                     .expect("startup output mutex poisoned")
                     .push(stream, &buffer[..n]),
             }
         }
+        drop(finished_tx);
     });
+    finished_rx
+}
+
+fn wait_for_startup_output_readers(
+    readers: Vec<std::sync::mpsc::Receiver<()>>,
+    timeout: Duration,
+) -> bool {
+    let deadline = Instant::now() + timeout;
+    for reader in readers {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if matches!(
+            reader.recv_timeout(remaining),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ) {
+            return false;
+        }
+    }
+    true
 }
 
 fn wait_for_backend(
@@ -746,11 +1260,37 @@ fn executable_name(name: &str) -> OsString {
 }
 
 #[cfg(feature = "desktop-runtime")]
-fn set_status(window: &WebviewWindow, title: &str, detail: &str, failed: bool) {
+#[tauri::command]
+pub fn start_temporary_test_instance(
+    state: State<'_, BackendState>,
+    webview: WebviewWindow,
+) -> Result<(), String> {
+    state.require_conflict_startup(&webview)?;
+    let executable = env::current_exe()
+        .map_err(|err| format!("Could not locate the Kandev desktop application: {err}"))?;
+    Command::new(&executable)
+        .arg(TEMPORARY_TEST_ARGUMENT)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("Could not open a temporary Kandev test window: {err}"))
+}
+
+#[cfg(feature = "desktop-runtime")]
+fn set_status(
+    window: &WebviewWindow,
+    kind: &str,
+    detail: Option<&str>,
+    conflict: Option<StartupConflict>,
+    home: Option<String>,
+) {
     let payload = serde_json::json!({
-        "title": title,
+        "kind": kind,
         "detail": detail,
-        "failed": failed,
+        "conflict": conflict,
+        "home": home,
     });
     let script = format!(
         "window.__KANDEV_DESKTOP_PENDING_STATUS={payload};window.__KANDEV_DESKTOP_SET_STATUS?.({payload});"
@@ -767,32 +1307,72 @@ fn navigate_to_backend(window: &WebviewWindow, url: &str) -> Result<(), String> 
 }
 
 #[cfg(unix)]
-fn terminate_child(child: &mut Child) {
-    let _ = unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
-    wait_or_kill(child, Duration::from_secs(5));
+fn terminate_child(child: &mut Child) -> bool {
+    terminate_child_with_timeout(child, DESKTOP_LAUNCHER_SHUTDOWN_TIMEOUT)
 }
 
 #[cfg(windows)]
-fn terminate_child(child: &mut Child) {
-    wait_or_kill(child, Duration::from_secs(0));
+fn terminate_child(child: &mut Child) -> bool {
+    terminate_child_with_timeout(child, DESKTOP_LAUNCHER_SHUTDOWN_TIMEOUT)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn terminate_child(child: &mut Child) {
-    wait_or_kill(child, Duration::from_secs(0));
+fn terminate_child(child: &mut Child) -> bool {
+    terminate_child_with_timeout(child, Duration::from_secs(0))
 }
 
-fn wait_or_kill(child: &mut Child, graceful_timeout: Duration) {
+fn terminate_child_with_timeout(child: &mut Child, graceful_timeout: Duration) -> bool {
+    match child.try_wait() {
+        Ok(Some(_)) => return false,
+        Err(_) => {
+            force_kill_child(child);
+            let _ = child.wait();
+            return false;
+        }
+        Ok(None) => {}
+    }
+    if !request_graceful_child_shutdown(child) {
+        force_kill_child(child);
+        let _ = child.wait();
+        return false;
+    }
+    wait_or_kill(child, graceful_timeout)
+}
+
+#[cfg(unix)]
+fn request_graceful_child_shutdown(child: &Child) -> bool {
+    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) == 0 }
+}
+
+#[cfg(windows)]
+fn request_graceful_child_shutdown(child: &Child) -> bool {
+    let pid = child.id().to_string();
+    Command::new("taskkill")
+        .args(["/T", "/PID", &pid])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn request_graceful_child_shutdown(_child: &Child) -> bool {
+    false
+}
+
+fn wait_or_kill(child: &mut Child, graceful_timeout: Duration) -> bool {
     let deadline = Instant::now() + graceful_timeout;
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => return,
+            Ok(Some(status)) => return status.success(),
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(100)),
             Ok(None) | Err(_) => break,
         }
     }
     force_kill_child(child);
     let _ = child.wait();
+    false
 }
 
 #[cfg(windows)]
@@ -1106,6 +1686,51 @@ mod tests {
         assert!(!BackendState::default().accepts_url("http://127.0.0.1:38430"));
     }
 
+    #[test]
+    fn temporary_test_process_mode_requires_the_internal_launch_argument() {
+        assert!(!is_temporary_test_args([OsString::from("kandev")]));
+        assert!(is_temporary_test_args([
+            OsString::from("kandev"),
+            OsString::from(TEMPORARY_TEST_ARGUMENT)
+        ]));
+    }
+
+    #[test]
+    fn isolated_window_action_only_accepts_the_local_startup_origin() {
+        assert!(is_local_startup_url("tauri://localhost/"));
+        assert!(is_local_startup_url("http://tauri.localhost/"));
+        assert!(is_local_startup_url("http://localhost:1420/"));
+        assert!(!is_local_startup_url("http://127.0.0.1:38430/"));
+        assert!(!is_local_startup_url("https://example.com/"));
+    }
+
+    #[test]
+    fn temporary_test_action_requires_a_detected_conflict_in_normal_mode() {
+        let state = BackendState::default();
+        let conflict = StartupConflict {
+            version: 1,
+            target_kind: ConflictTargetKind::Home,
+            target_path: "/tmp/kandev-home".to_string(),
+            storage_kind: ConflictStorageKind::SqliteInHome,
+            database_path: Some("/tmp/kandev-home/data/kandev.db".to_string()),
+            owner: None,
+        };
+        assert!(!state.can_start_temporary_test("tauri://localhost/"));
+        *state
+            .startup_conflict
+            .lock()
+            .expect("startup conflict mutex poisoned") = Some(conflict.clone());
+        assert!(state.can_start_temporary_test("tauri://localhost/"));
+        assert!(!state.can_start_temporary_test("http://127.0.0.1:38430/"));
+
+        let temporary = BackendState::temporary_test_instance();
+        *temporary
+            .startup_conflict
+            .lock()
+            .expect("startup conflict mutex poisoned") = Some(conflict);
+        assert!(!temporary.can_start_temporary_test("tauri://localhost/"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn live_child_is_recognized_as_running() {
@@ -1140,28 +1765,360 @@ mod tests {
     }
 
     #[test]
+    fn startup_output_parses_typed_conflict_across_stderr_chunks() {
+        let mut output = StartupOutput::default();
+        let marker = concat!(
+            "KANDEV_DESKTOP_CONFLICT_V1 {\"version\":1,\"target_kind\":\"home\",",
+            "\"target_path\":\"/tmp/kandev-home\",\"storage_kind\":\"sqlite_in_home\",",
+            "\"database_path\":\"/tmp/kandev-home/data/kandev.db\",",
+            "\"owner\":{\"pid\":1234,\"executable\":\"/usr/bin/kandev\",",
+            "\"started_at\":\"2026-09-25T12:00:00Z\"}}\n"
+        );
+        let split = marker.len() / 2;
+
+        output.push("stdout", marker.as_bytes());
+        output.push("stderr", &marker.as_bytes()[..split]);
+        assert!(output.startup_conflict().is_none());
+        output.push("stderr", &marker.as_bytes()[split..]);
+
+        let conflict = output.startup_conflict().expect("complete conflict marker");
+        assert_eq!(conflict.target_kind, ConflictTargetKind::Home);
+        assert_eq!(conflict.target_path, "/tmp/kandev-home");
+        assert_eq!(conflict.storage_kind, ConflictStorageKind::SqliteInHome);
+        assert_eq!(
+            conflict.database_path.as_deref(),
+            Some("/tmp/kandev-home/data/kandev.db")
+        );
+        assert_eq!(
+            conflict.owner.as_ref().and_then(|owner| owner.pid),
+            Some(1234)
+        );
+    }
+
+    #[test]
+    fn startup_output_rejects_malformed_duplicate_and_stdout_conflicts() {
+        let valid = concat!(
+            "KANDEV_DESKTOP_CONFLICT_V1 {\"version\":1,\"target_kind\":\"home\",",
+            "\"target_path\":\"/tmp/kandev-home\",\"storage_kind\":\"sqlite_in_home\",",
+            "\"database_path\":\"/tmp/kandev-home/data/kandev.db\"}\n"
+        );
+        let mut output = StartupOutput::default();
+        output.push("stderr", b"KANDEV_DESKTOP_CONFLICT_V1 {bad json}\n");
+        output.push("stdout", valid.as_bytes());
+        assert!(output.startup_conflict().is_none());
+
+        output.push("stderr", valid.as_bytes());
+        output.push("stderr", valid.as_bytes());
+        assert!(output.startup_conflict().is_none());
+
+        let oversized_owner = format!(
+            "KANDEV_DESKTOP_CONFLICT_V1 {{\"version\":1,\"target_kind\":\"home\",\
+             \"target_path\":\"/tmp/kandev-home\",\"storage_kind\":\"sqlite_in_home\",\
+             \"database_path\":\"/tmp/kandev-home/data/kandev.db\",\
+             \"owner\":{{\"executable\":\"{}\"}}}}\n",
+            "x".repeat(257)
+        );
+        let mut output = StartupOutput::default();
+        output.push("stderr", oversized_owner.as_bytes());
+        assert!(output.startup_conflict().is_none());
+    }
+
+    #[test]
+    fn temporary_test_homes_are_private_and_contain_an_empty_config() {
+        let first = TemporaryHome::create().expect("first temporary home");
+        let second = TemporaryHome::create().expect("second temporary home");
+
+        assert_ne!(first.path, second.path);
+        assert_eq!(first.path.parent(), Some(first.temp_root.as_path()));
+        assert!(first.path.join("config.yaml").is_file());
+        assert!(!first.path.join("data/kandev.db").exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&first.path)
+                .expect("temporary home metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o700);
+        }
+
+        assert!(first.remove_if_owned());
+        assert!(second.remove_if_owned());
+    }
+
+    #[test]
+    fn temporary_test_environment_pins_home_database_and_profile() {
+        let home = TemporaryHome::create().expect("temporary home");
+        let inherited = BTreeMap::from([
+            (OsString::from("CUSTOM_ENV"), OsString::from("keep")),
+            (OsString::from("PATH"), OsString::from("/existing/bin")),
+            (
+                OsString::from("KANDEV_HOME_DIR"),
+                OsString::from("/shared/home"),
+            ),
+            (
+                OsString::from("KANDEV_DATABASE_DRIVER"),
+                OsString::from("postgres"),
+            ),
+            (
+                OsString::from("KANDEV_DATABASE_PATH"),
+                OsString::from("/shared/database.db"),
+            ),
+            (
+                OsString::from("KANDEV_INTERNAL_CONFIG_HOME_FILE"),
+                OsString::from("/shared/config.yaml"),
+            ),
+            (
+                OsString::from("KANDEV_DESKTOP_PORT"),
+                OsString::from("38430"),
+            ),
+            (
+                OsString::from("KANDEV_DEBUG_DEV_MODE"),
+                OsString::from("true"),
+            ),
+            (OsString::from("KANDEV_E2E_MOCK"), OsString::from("true")),
+            (
+                OsString::from("KANDEV_DESKTOP_RUNTIME_DIR"),
+                OsString::from("/test/runtime"),
+            ),
+        ]);
+
+        let isolated = temporary_test_backend_environment(inherited, &home);
+
+        assert_eq!(
+            isolated.get(OsStr::new("CUSTOM_ENV")),
+            Some(&OsString::from("keep"))
+        );
+        assert_eq!(
+            isolated.get(OsStr::new("KANDEV_HOME_DIR")),
+            Some(&home.path.as_os_str().to_os_string())
+        );
+        assert_eq!(
+            isolated.get(OsStr::new("KANDEV_DATABASE_DRIVER")),
+            Some(&OsString::from("sqlite"))
+        );
+        assert_eq!(
+            isolated.get(OsStr::new("KANDEV_DATABASE_PATH")),
+            Some(&home.path.join("data/kandev.db").into_os_string())
+        );
+        assert_eq!(
+            isolated.get(OsStr::new("KANDEV_INTERNAL_CONFIG_FILE")),
+            Some(&home.path.join("config.yaml").into_os_string())
+        );
+        assert!(isolated.get(OsStr::new("KANDEV_DESKTOP_PORT")).is_none());
+        assert!(isolated
+            .get(OsStr::new("KANDEV_INTERNAL_CONFIG_HOME_FILE"))
+            .is_none());
+        assert_eq!(
+            isolated.get(OsStr::new("KANDEV_DEBUG_DEV_MODE")),
+            Some(&OsString::from("true"))
+        );
+        assert_eq!(
+            isolated.get(OsStr::new("KANDEV_E2E_MOCK")),
+            Some(&OsString::from("true"))
+        );
+        assert_eq!(
+            isolated.get(OsStr::new("KANDEV_DESKTOP_RUNTIME_DIR")),
+            Some(&OsString::from("/test/runtime"))
+        );
+        assert!(home.remove_if_owned());
+    }
+
+    #[test]
+    fn temporary_home_cleanup_requires_ready_backend_and_clean_stop() {
+        let state = BackendState::temporary_test_instance();
+        let home = state
+            .temporary_home_path()
+            .expect("temporary test home path");
+
+        assert!(!state.cleanup_temporary_home_after_stop(true));
+        assert!(home.exists());
+        state.mark_backend_ready();
+        assert!(!state.cleanup_temporary_home_after_stop(false));
+        assert!(home.exists());
+        assert!(state.cleanup_temporary_home_after_stop(true));
+        assert!(!home.exists());
+    }
+
+    #[test]
+    fn temporary_home_is_retained_after_navigation_failure() {
+        let state = BackendState::temporary_test_instance();
+        let home = state
+            .temporary_home_path()
+            .expect("temporary test home path");
+        state.mark_backend_ready();
+        state.retain_temporary_home();
+
+        assert!(!state.cleanup_temporary_home_after_stop(true));
+        assert!(
+            home.exists(),
+            "failed navigation must retain temporary data"
+        );
+        fs::remove_dir_all(home).expect("remove retained test home");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_home_is_retained_when_launcher_exits_unsuccessfully() {
+        let state = BackendState::temporary_test_instance();
+        let home = state
+            .temporary_home_path()
+            .expect("temporary test home path");
+        state.mark_backend_ready();
+        assert!(state.set_child(child_with_term_handler("exit 1")));
+
+        state.stop();
+
+        assert!(
+            home.exists(),
+            "failed launcher shutdown must retain its home"
+        );
+        fs::remove_dir_all(home).expect("remove retained test home");
+    }
+
+    #[test]
+    fn desktop_stop_deadline_exceeds_the_launcher_shutdown_budget() {
+        let launcher_grace = Duration::from_secs(75);
+        let launcher_force_kill_wait = Duration::from_secs(2);
+
+        assert!(
+            DESKTOP_LAUNCHER_SHUTDOWN_TIMEOUT > launcher_grace + launcher_force_kill_wait,
+            "desktop must allow the launcher to finish graceful and forced cleanup"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_home_cleanup_does_not_follow_a_replaced_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let home = TemporaryHome::create().expect("temporary home");
+        let outside =
+            std::env::temp_dir().join(format!("kandev-test-outside-{}", std::process::id()));
+        fs::create_dir(&outside).expect("outside directory");
+        let outside_file = outside.join("keep.txt");
+        fs::write(&outside_file, "keep").expect("outside file");
+        fs::remove_dir_all(&home.path).expect("remove original home");
+        symlink(&outside, &home.path).expect("replace home with symlink");
+
+        assert!(!home.remove_if_owned());
+        assert_eq!(
+            fs::read_to_string(outside_file).expect("read outside file"),
+            "keep"
+        );
+
+        fs::remove_file(&home.path).expect("remove test symlink");
+        fs::remove_dir_all(outside).expect("remove outside fixture");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_home_cleanup_requires_graceful_child_stop() {
+        let mut child = child_with_term_handler("exit 0");
+        assert!(terminate_child_with_timeout(
+            &mut child,
+            Duration::from_secs(1)
+        ));
+
+        let mut child = child_with_term_handler(":");
+        assert!(!terminate_child_with_timeout(
+            &mut child,
+            Duration::from_millis(20)
+        ));
+    }
+
+    #[cfg(unix)]
+    fn child_with_term_handler(handler: &str) -> Child {
+        use std::io::{BufRead, BufReader};
+
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "trap '{handler}' TERM; printf 'ready\\n'; while :; do :; done"
+            ))
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("start termination test child");
+        let mut output = BufReader::new(child.stdout.take().expect("child stdout"));
+        let mut ready = String::new();
+        output.read_line(&mut ready).expect("read child readiness");
+        assert_eq!(ready, "ready\n");
+        child
+    }
+
+    #[test]
     fn capture_stream_retries_interrupted_reads() {
         let output = Arc::new(Mutex::new(StartupOutput::default()));
 
-        capture_stream(
+        let reader_finished = capture_stream(
             "stdout",
             InterruptedThenData::new(b"backend ready"),
             output.clone(),
         );
 
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while Instant::now() < deadline {
-            if output
-                .lock()
-                .expect("startup output mutex poisoned")
-                .text()
-                .is_some_and(|text| text.contains("backend ready"))
-            {
-                return;
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-        panic!("capture_stream did not retry interrupted read");
+        assert!(wait_for_startup_output_readers(
+            vec![reader_finished],
+            Duration::from_secs(1)
+        ));
+        assert!(output
+            .lock()
+            .expect("startup output mutex poisoned")
+            .text()
+            .is_some_and(|text| text.contains("backend ready")));
+    }
+
+    #[test]
+    fn startup_conflict_waits_until_stderr_capture_finishes() {
+        let output = Arc::new(Mutex::new(StartupOutput::default()));
+        let marker = concat!(
+            "KANDEV_DESKTOP_CONFLICT_V1 {\"version\":1,\"target_kind\":\"home\",",
+            "\"target_path\":\"/tmp/kandev-home\",\"storage_kind\":\"sqlite_in_home\",",
+            "\"database_path\":\"/tmp/kandev-home/data/kandev.db\"}\n"
+        );
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let (reader_started_tx, reader_started_rx) = std::sync::mpsc::sync_channel(0);
+        let reader_finished = capture_stream(
+            "stderr",
+            GatedReader {
+                release: release_rx,
+                started: Some(reader_started_tx),
+                delivered: false,
+            },
+            output.clone(),
+        );
+        reader_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("stderr reader should wait for its final chunk");
+
+        let (drained_tx, drained_rx) = std::sync::mpsc::channel();
+        let waiter = thread::spawn(move || {
+            let drained =
+                wait_for_startup_output_readers(vec![reader_finished], Duration::from_secs(1));
+            drained_tx.send(drained).expect("send drain result");
+        });
+        assert!(
+            matches!(
+                drained_rx.recv_timeout(Duration::from_millis(50)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ),
+            "conflict classification must wait for stderr EOF"
+        );
+
+        release_tx
+            .send(marker.as_bytes().to_vec())
+            .expect("release stderr");
+        assert!(drained_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("reader drain result"));
+        waiter.join().expect("join output reader waiter");
+        let output = output.lock().expect("startup output mutex poisoned");
+        assert_eq!(
+            output
+                .startup_conflict()
+                .map(|conflict| conflict.target_path),
+            Some("/tmp/kandev-home".to_string())
+        );
     }
 
     #[test]
@@ -1358,6 +2315,30 @@ mod tests {
         data: &'static [u8],
         position: usize,
         chunk_size: usize,
+    }
+
+    struct GatedReader {
+        release: std::sync::mpsc::Receiver<Vec<u8>>,
+        started: Option<std::sync::mpsc::SyncSender<()>>,
+        delivered: bool,
+    }
+
+    impl Read for GatedReader {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if self.delivered {
+                return Ok(0);
+            }
+            self.started
+                .take()
+                .expect("reader start sender")
+                .send(())
+                .expect("notify reader start");
+            let bytes = self.release.recv().expect("release gated reader");
+            let length = buffer.len().min(bytes.len());
+            buffer[..length].copy_from_slice(&bytes[..length]);
+            self.delivered = true;
+            Ok(length)
+        }
     }
 
     impl ShortReader {
