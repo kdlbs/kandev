@@ -81,16 +81,23 @@ create noisy false positives.
 The deprecation rule recognizes these attached forms:
 
 - Go line comments whose paragraph begins `Deprecated:` and is attached to a top-level `type`,
-  `func`, `const`, or `var`, a struct field, or an interface method. A trailing `// Deprecated:`
-  field comment is also recognized.
+  `func`, `const`, or `var`, including individual declarations in grouped `type`, `const`, and
+  `var` blocks; a struct or interface field, including embedded fields; or an interface method. A
+  trailing `// Deprecated:` field comment is also recognized.
 - TypeScript JSDoc blocks with an `@deprecated` tag attached to a top-level type, class, interface,
-  enum, function, or variable, or to a class/interface/type-literal member.
+  enum, function, or variable, or to a class/interface/type-literal member. Decorators between the
+  JSDoc and declaration are supported, as are nested type literals and identifier, string, numeric,
+  or computed member keys.
 
 The exact finding identity is `(path, declaration, marker)`. A declaration identity is a normalized
-kind and qualified symbol name followed by an occurrence number such as `#1`; it does not contain
-the line number or explanatory comment text. The marker is exactly `Deprecated:` or `@deprecated`.
-This keeps comment wording and line movement from changing the exemption while distinguishing
-repeated declarations in one file.
+kind and qualified symbol name followed by an occurrence number such as `#1`. Go names use forms
+such as `type:Old`, `field:Wrapper.Old`, and `method:Service.Close`; each name in a grouped
+declaration has its own identity. TypeScript member identifiers use forms such as
+`property:Options.config.old`, while non-identifier keys use canonical brackets such as
+`property:Keys["old-key"]`, `property:Keys[4]`, or `method:Keys[Symbol.iterator]`. It does not
+contain the line number or explanatory comment text. The marker is exactly `Deprecated:` or
+`@deprecated`. This keeps comment wording, quote style, and line movement from changing the
+exemption while distinguishing repeated declarations in one file.
 
 Generated headers and generated path/file names, test and fixture paths/files, and third-party
 `vendor`, `third_party`, or `node_modules` paths are excluded. Ordinary comments and strings are

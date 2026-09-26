@@ -22,12 +22,11 @@ Run the architecture-lint suite and full lint, compare the initial baseline agai
 
 ## Results
 
-Completed on refreshed main `b82bfd2cead7c3e74b99fbc47ee2202c92a36c39`. The exact initial baseline contains 15 unregistered declarations: 4 Go and 11 TypeScript.
+Completed on refreshed main `c735b678863ba64e31bd78cd1a6e3c845be3b4e9`. The exact initial baseline contains 15 unregistered declarations: 4 Go and 11 TypeScript. Review regressions expanded the scanner to grouped and embedded Go declarations, nested and decorated TypeScript declarations, and canonical non-identifier member keys.
 
-- `python3 scripts/lint-architecture.test.py` — passed, 80 tests.
-- `python3 scripts/lint-architecture.py --all` — passed.
-- `python3 scripts/lint-architecture.py --all --baseline-base-ref origin/main --allow-missing-base-baseline` — passed; the new baseline is absent from the target branch and bootstraps at 15 exact current findings.
+- `python3 scripts/lint-architecture.test.py` — passed, 89 tests.
 - `make lint-architecture` — passed.
+- `python3 scripts/lint-architecture.py --all --baseline-base-ref origin/main --allow-missing-base-baseline` — passed; the new baseline bootstraps at 15 exact current findings.
 - `python3 scripts/list-docs.py validate` — passed; 310 decisions and 1185 specifications validated.
 - `python3 scripts/list-docs.py decisions --format paths` — includes the new decision.
 - `python3 scripts/lint-spec-files.py --all` — passed.

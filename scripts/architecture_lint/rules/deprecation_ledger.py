@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,19 +36,31 @@ TYPESCRIPT_MARKER = "@deprecated"
 GO_DECLARATION = re.compile(r"^\s*(?:type|func|const|var)\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\b")
 GO_METHOD = re.compile(r"^\s*func\s*\(([^)]*)\)\s*([A-Za-z_]\w*)\b")
 GO_SCOPE = re.compile(r"\btype\s+([A-Za-z_]\w*)\s*(?:\[[^\]\n]+\])?\s+(struct|interface)\s*\{")
+GO_TYPE_SPEC_SCOPE = re.compile(
+    r"^\s*([A-Za-z_]\w*)\s*(?:\[[^\]\n]+\])?\s+(struct|interface)\s*\{"
+)
 GO_FIELD = re.compile(r"^\s*([A-Za-z_]\w*)\s+")
+GO_EMBEDDED_FIELD = re.compile(
+    r"^\s*\*?(?:[A-Za-z_]\w*\s*\.\s*)?([A-Za-z_]\w*)"
+    r"(?:\s*\[[^\]\n]+\])?(?:\s|$|`)"
+)
 GO_INTERFACE_METHOD = re.compile(r"^\s*([A-Za-z_]\w*)\s*\(")
+GO_GROUP = re.compile(r"^\s*(type|const|var)\s*\(")
+GO_GROUPED_NAMES = re.compile(r"^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\b")
 TS_DECLARATION = re.compile(
     r"^\s*(?:(?:export|declare|default|abstract|async)\s+)*"
     r"(type|class|interface|enum|function|const|let|var)\s+([A-Za-z_$][\w$]*)\b"
 )
 TS_SCOPE = re.compile(r"\b(interface|class|enum)\s+([A-Za-z_$][\w$]*)\b[^{};]*$")
-TS_TYPE_SCOPE = re.compile(r"\btype\s+([A-Za-z_$][\w$]*)\b[^{};]*=\s*[^{}]*$")
+TS_TYPE_SCOPE = re.compile(r"\btype\s+([A-Za-z_$][\w$]*)\b[^{};]*$")
 TS_MEMBER = re.compile(
     r"^\s*(?:(?:public|private|protected|static|readonly|declare|abstract|override|async|"
-    r"accessor|get|set)\s+)*([A-Za-z_$][\w$]*)\s*(?:[?!])?"
-    r"(?P<tail>[:(<=>,;\[]|$)"
+    r"accessor|get|set)\s+)*(?P<key>"
+    r"[A-Za-z_$][\w$]*|\d+(?:\.\d+)?|\"(?:\\.|[^\"\\])*\"|"
+    r"'(?:\\.|[^'\\])*'|\[[^\]\n]+\])\s*(?:[?!])?"
+    r"(?P<tail>[:(<=>,;]|$)"
 )
+TS_DECORATOR = re.compile(r"@[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*")
 
 
 @dataclass(frozen=True)
@@ -158,49 +172,107 @@ def _next_code_index(masked: str, start: int) -> int | None:
     return start if start < len(masked) else None
 
 
+def _next_typescript_code_index(masked: str, start: int, source: str) -> int | None:
+    target = _next_code_index(masked, start)
+    raw_target = _next_code_index(source, start)
+    if raw_target is not None and source[raw_target] in {'"', "'"}:
+        target = raw_target
+    while target is not None and masked[target] == "@":
+        decorator = TS_DECORATOR.match(masked, target)
+        if decorator is None:
+            return target
+        cursor = decorator.end()
+        while (
+            cursor < len(masked)
+            and masked[cursor].isspace()
+            and masked[cursor] != "\n"
+        ):
+            cursor += 1
+        while cursor < len(masked) and masked[cursor] == "(":
+            depth = 0
+            while cursor < len(masked):
+                if masked[cursor] == "(":
+                    depth += 1
+                elif masked[cursor] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        cursor += 1
+                        break
+                cursor += 1
+        while cursor < len(masked) and masked[cursor].isspace():
+            cursor += 1
+        target = cursor if cursor < len(masked) else None
+    return target
+
+
 def _is_attached(source: str, comment_end: int, target: int) -> bool:
     gap = source[comment_end:target]
     return re.search(r"(?:\r\n|\r|\n)[ \t]*(?:\r\n|\r|\n)", gap) is None
 
 
-def _go_contexts(masked: str) -> list[tuple[int, tuple[str, str] | None]]:
+def _go_contexts(masked: str) -> list[tuple[int, tuple[str, str] | None, str | None]]:
     depth = 0
+    paren_depth = 0
     scopes: list[tuple[str, str, int]] = []
-    contexts: list[tuple[int, tuple[str, str] | None]] = []
+    groups: list[tuple[str, int]] = []
+    contexts: list[tuple[int, tuple[str, str] | None, str | None]] = []
     for line in masked.splitlines():
         scope = (scopes[-1][1], scopes[-1][0]) if scopes and scopes[-1][2] == depth else None
-        contexts.append((depth, scope))
+        group_kind = groups[-1][0] if groups else None
+        contexts.append((depth, scope, group_kind))
         open_scope = GO_SCOPE.search(line)
+        if open_scope is None and group_kind == "type":
+            open_scope = GO_TYPE_SPEC_SCOPE.match(line)
         depth += line.count("{") - line.count("}")
         while scopes and scopes[-1][2] > depth:
             scopes.pop()
         if open_scope and depth > 0:
             scopes.append((open_scope.group(1), open_scope.group(2), depth))
+        group = GO_GROUP.match(line)
+        paren_before = paren_depth
+        paren_depth += line.count("(") - line.count(")")
+        if group:
+            groups.append((group.group(1), paren_before))
+        while groups and paren_depth <= groups[-1][1]:
+            groups.pop()
     return contexts
 
 
-def _go_declaration(code: str, context: tuple[int, tuple[str, str] | None]) -> str | None:
-    depth, scope = context
+def _go_declaration(
+    code: str, context: tuple[int, tuple[str, str] | None, str | None]
+) -> list[str]:
+    depth, scope, group_kind = context
     if scope is not None:
         scope_kind, scope_name = scope
         if scope_kind == "interface":
             method = GO_INTERFACE_METHOD.match(code)
             if method:
-                return f"method:{scope_name}.{method.group(1)}"
+                return [f"method:{scope_name}.{method.group(1)}"]
         field = GO_FIELD.match(code)
-        return f"field:{scope_name}.{field.group(1)}" if field else None
+        if field:
+            return [f"field:{scope_name}.{field.group(1)}"]
+        embedded = GO_EMBEDDED_FIELD.match(code)
+        return [f"field:{scope_name}.{embedded.group(1)}"] if embedded else []
     if depth != 0:
-        return None
+        return []
+    if group_kind:
+        if group_kind in {"const", "var"}:
+            code = code.split("=", 1)[0]
+        grouped = GO_GROUPED_NAMES.match(code)
+        if grouped:
+            names = re.findall(r"[A-Za-z_]\w*", grouped.group(1))
+            return [f"{group_kind}:{name}" for name in names]
+        return []
     method = GO_METHOD.match(code)
     if method:
         receiver = method.group(1).strip().lstrip("*").split()[-1]
-        return f"method:{receiver}.{method.group(2)}"
+        return [f"method:{receiver}.{method.group(2)}"]
     declaration = GO_DECLARATION.match(code)
     if declaration:
         kind = re.search(r"\b(type|func|const|var)\b", code)
         if kind:
-            return f"{kind.group(1)}:{declaration.group(1)}"
-    return None
+            return [f"{kind.group(1)}:{declaration.group(1)}"]
+    return []
 
 
 def _go_findings(masked: str, comments: list[Comment], source: str) -> list[tuple[int, str, str]]:
@@ -216,8 +288,7 @@ def _go_findings(masked: str, comments: list[Comment], source: str) -> list[tupl
         prefix = masked[line_start : comment.start]
         if prefix.strip():
             declaration = _go_declaration(prefix, contexts[comment_line_index])
-            if declaration:
-                findings.append((marker_line, declaration, GO_MARKER))
+            findings.extend((marker_line, item, GO_MARKER) for item in declaration)
             continue
         target_index = _next_code_index(masked, comment.end)
         if target_index is None or not _is_attached(source, comment.end, target_index):
@@ -225,12 +296,13 @@ def _go_findings(masked: str, comments: list[Comment], source: str) -> list[tupl
         target_line = masked.count("\n", 0, target_index) + 1
         if target_line <= len(lines):
             declaration = _go_declaration(lines[target_line - 1], contexts[target_line - 1])
-            if declaration:
-                findings.append((marker_line, declaration, GO_MARKER))
+            findings.extend((marker_line, item, GO_MARKER) for item in declaration)
     return findings
 
 
-def _typescript_scope(masked: str, position: int) -> str | None:
+def _typescript_scope(
+    masked: str, position: int, source: str
+) -> tuple[str | None, bool]:
     scopes: list[str | None] = []
     index = 0
     while index < position:
@@ -246,20 +318,77 @@ def _typescript_scope(masked: str, position: int) -> str | None:
                 scopes.append(scope_match.group(2))
             else:
                 type_match = TS_TYPE_SCOPE.search(header)
-                scopes.append(type_match.group(1) if type_match else None)
+                if type_match:
+                    scopes.append(type_match.group(1))
+                else:
+                    parent_scope = scopes[-1] if scopes else None
+                    member = TS_MEMBER.match(header)
+                    if member is None:
+                        member = TS_MEMBER.match(source[boundary:index])
+                    if (
+                        parent_scope
+                        and member
+                        and header.rstrip().endswith((":", "extends", "<"))
+                    ):
+                        key = _canonical_typescript_key(member.group("key"))
+                        key_path = key if key.startswith("[") else f".{key}"
+                        scopes.append(f"{parent_scope}{key_path}")
+                    else:
+                        scopes.append(None)
         elif masked[index] == "}" and scopes:
             scopes.pop()
         index += 1
-    return scopes[-1] if scopes else None
+    return (scopes[-1], False) if scopes else (None, True)
 
 
-def _typescript_declaration(code: str, scope: str | None) -> str | None:
+def _compact_computed_key(expression: str) -> str:
+    compact: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for char in expression:
+        if quote:
+            compact.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in {'"', "'", "`"}:
+            quote = char
+            compact.append(char)
+        elif not char.isspace():
+            compact.append(char)
+    return "".join(compact)
+
+
+def _canonical_typescript_key(key: str) -> str:
+    if key.startswith(("'", '"')):
+        try:
+            value = ast.literal_eval(key)
+        except (SyntaxError, ValueError):
+            value = key[1:-1]
+        return f"[{json.dumps(value, ensure_ascii=False)}]"
+    if key.startswith("["):
+        return f"[{_compact_computed_key(key[1:-1])}]"
+    if key[0].isdigit():
+        return f"[{key}]"
+    return key
+
+
+def _typescript_declaration(
+    code: str, scope: str | None, raw_code: str | None = None, top_level: bool = True
+) -> str | None:
     if scope:
-        member = TS_MEMBER.match(code)
+        member = TS_MEMBER.match(raw_code if raw_code is not None else code)
         if not member:
             return None
         kind = "method" if member.group("tail").startswith(("(", "<")) else "property"
-        return f"{kind}:{scope}.{member.group(1)}"
+        key = _canonical_typescript_key(member.group("key"))
+        qualified_key = key if key.startswith("[") else f".{key}"
+        return f"{kind}:{scope}{qualified_key}"
+    if not top_level:
+        return None
     declaration = TS_DECLARATION.match(code)
     if declaration:
         return f"{declaration.group(1)}:{declaration.group(2)}"
@@ -274,15 +403,16 @@ def _typescript_findings(
         marker_line = _comment_has_typescript_marker(comment)
         if marker_line is None:
             continue
-        target_index = _next_code_index(masked, comment.end)
+        target_index = _next_typescript_code_index(masked, comment.end, source)
         if target_index is None or not _is_attached(source, comment.end, target_index):
             continue
         line_end = masked.find("\n", target_index)
         if line_end < 0:
             line_end = len(masked)
         code = masked[target_index:line_end]
-        scope = _typescript_scope(masked, target_index)
-        declaration = _typescript_declaration(code, scope)
+        raw_code = source[target_index:line_end]
+        scope, top_level = _typescript_scope(masked, target_index, source)
+        declaration = _typescript_declaration(code, scope, raw_code, top_level)
         if declaration:
             findings.append((marker_line, declaration, TYPESCRIPT_MARKER))
     return findings

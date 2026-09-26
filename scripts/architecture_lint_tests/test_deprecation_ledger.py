@@ -250,6 +250,86 @@ class DeprecationLedgerTest(ArchitectureFixture):
             ],
         )
 
+    def test_go_grouped_declarations_are_detected_by_declared_name(self) -> None:
+        source = """\
+        package example
+        const (
+          // Deprecated: use CurrentValue.
+          OldValue, OldAlias = 1, 2
+        )
+        var (
+          // Deprecated: use CurrentVar.
+          OldVar struct{}
+        )
+        type (
+          // Deprecated: use CurrentType.
+          OldType int
+        )
+        """
+
+        findings = find_declarations("apps/backend/internal/example/grouped.go", source)
+
+        self.assertEqual(
+            findings,
+            [
+                (3, "const:OldValue", "Deprecated:"),
+                (3, "const:OldAlias", "Deprecated:"),
+                (7, "var:OldVar", "Deprecated:"),
+                (11, "type:OldType", "Deprecated:"),
+            ],
+        )
+
+    def test_go_embedded_fields_are_detected_with_normalized_names(self) -> None:
+        source = """\
+        package example
+        type Wrapper struct {
+          // Deprecated: use CurrentType.
+          OldType
+          // Deprecated: use CurrentPointer.
+          *pkg.OldPointer
+          // Deprecated: use CurrentGeneric.
+          OldGeneric[T]
+        }
+        type Service interface {
+          // Deprecated: use CurrentService.
+          OldService
+        }
+        """
+
+        findings = find_declarations("apps/backend/internal/example/embedded.go", source)
+
+        self.assertEqual(
+            findings,
+            [
+                (3, "field:Wrapper.OldType", "Deprecated:"),
+                (5, "field:Wrapper.OldPointer", "Deprecated:"),
+                (7, "field:Wrapper.OldGeneric", "Deprecated:"),
+                (11, "field:Service.OldService", "Deprecated:"),
+            ],
+        )
+
+    def test_go_grouped_type_spec_keeps_struct_field_scope(self) -> None:
+        source = """\
+        package example
+        type (
+          // Deprecated: use CurrentPayload.
+          OldPayload struct {
+            // Deprecated: use CurrentField.
+            OldField string
+          }
+        )
+        """
+
+        findings = find_declarations("apps/backend/internal/example/grouped_type.go", source)
+
+        self.assertEqual(
+            findings,
+            [
+                (3, "type:OldPayload", "Deprecated:"),
+                (5, "field:OldPayload.OldField", "Deprecated:"),
+            ],
+        )
+
     def test_existing_unregistered_declaration_passes_its_exact_baseline(self) -> None:
         path = "apps/web/lib/old-api.ts"
         self.write(
@@ -366,6 +446,133 @@ class DeprecationLedgerTest(ArchitectureFixture):
         findings = find_declarations("apps/web/lib/payload.ts", source)
 
         self.assertEqual(findings, [(3, "property:Payload.oldField", "@deprecated")])
+
+    def test_nested_typescript_type_literals_keep_their_declaration_scope(self) -> None:
+        source = """\
+        export interface Options {
+          config: {
+            /** @deprecated Use current instead. */
+            old: string;
+          };
+        }
+        export type Constrained<T extends {
+          /** @deprecated Use current instead. */
+          old: string;
+        }> = T;
+        """
+
+        findings = find_declarations("apps/web/lib/options.ts", source)
+
+        self.assertEqual(
+            findings,
+            [
+                (3, "property:Options.config.old", "@deprecated"),
+                (8, "property:Constrained.old", "@deprecated"),
+            ],
+        )
+
+    def test_nested_typescript_type_literals_under_string_keys_keep_identity(self) -> None:
+        source = """\
+        export interface Options {
+          "legacy-config": {
+            /** @deprecated Use current instead. */
+            old: string;
+          };
+        }
+        """
+
+        self.assertEqual(
+            find_declarations("apps/web/lib/options.ts", source),
+            [(3, 'property:Options["legacy-config"].old', "@deprecated")],
+        )
+
+    def test_typescript_declarations_after_decorators_are_detected(self) -> None:
+        source = """\
+        /** @deprecated Use CurrentClass instead. */
+        @sealed
+        export class OldClass {}
+        export interface Service {
+          /** @deprecated Use currentMethod instead. */
+          @trace
+          oldMethod(): void;
+        }
+        """
+
+        findings = find_declarations("apps/web/lib/decorated.ts", source)
+
+        self.assertEqual(
+            findings,
+            [
+                (1, "class:OldClass", "@deprecated"),
+                (5, "method:Service.oldMethod", "@deprecated"),
+            ],
+        )
+
+    def test_typescript_local_variables_are_not_api_declarations(self) -> None:
+        source = """\
+        export class Example {
+          run() {
+            /** @deprecated This is local state. */
+            const oldValue = 1;
+          }
+        }
+        """
+
+        self.assertEqual(
+            find_declarations("apps/web/lib/example.ts", source),
+            [],
+        )
+
+    def test_typescript_member_identity_supports_string_numeric_and_computed_keys(self) -> None:
+        source = """\
+        export interface Keys {
+          /** @deprecated Use currentKey instead. */
+          "old-key": string;
+          /** @deprecated Use currentIndex instead. */
+          4: string;
+          /** @deprecated Use currentIterator instead. */
+          [Symbol.iterator](): Iterator<string>;
+        }
+        """
+
+        findings = find_declarations("apps/web/lib/keys.ts", source)
+
+        self.assertEqual(
+            findings,
+            [
+                (2, 'property:Keys["old-key"]', "@deprecated"),
+                (4, "property:Keys[4]", "@deprecated"),
+                (6, "method:Keys[Symbol.iterator]", "@deprecated"),
+            ],
+        )
+
+    def test_typescript_member_keys_have_format_stable_identities(self) -> None:
+        double_quoted = '''\
+        interface Keys {
+          /** @deprecated Use current. */
+          "old-key": string;
+          /** @deprecated Use current. */
+          [Symbol.iterator](): Iterator<string>;
+        }
+        '''
+        reformatted = '''\
+        interface Keys {
+          /**
+           * @deprecated Keep the explanation here.
+           */
+          'old-key': string;
+          /** @deprecated Use current. */
+          [Symbol . iterator](): Iterator<string>;
+        }
+        '''
+
+        first = scan("apps/web/lib/keys.ts", double_quoted)
+        second = scan("apps/web/lib/keys.ts", reformatted)
+
+        self.assertEqual(
+            [finding.identity_dict()["declaration"] for finding in first],
+            [finding.identity_dict()["declaration"] for finding in second],
+        )
 
     def test_repeated_declarations_in_one_file_have_distinct_identities(self) -> None:
         source = """\

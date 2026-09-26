@@ -12,9 +12,9 @@ This is an internal repository check and changes no product behavior. No product
 
 ## Decision
 
-Add `ARCH-DEPRECATION-LEDGER` to the modular architecture linter. It recognizes handwritten production Go line-comment annotations beginning with `Deprecated:` when attached to a declaration, including a trailing field comment, and TypeScript JSDoc blocks containing `@deprecated` when attached to a declaration or member. It does not infer deprecation from words in ordinary prose, comments, or strings.
+Add `ARCH-DEPRECATION-LEDGER` to the modular architecture linter. It recognizes handwritten production Go line-comment annotations beginning with `Deprecated:` when attached to top-level or grouped declarations, struct or interface fields (including embedded fields), interface methods, or a trailing field comment. It recognizes TypeScript JSDoc blocks containing `@deprecated` when attached to top-level declarations or class/interface/type-literal members, including nested type literals and declarations preceded by decorators. It does not infer deprecation from words in ordinary prose, comments, or strings.
 
-The rule's exact finding identity is `(path, declaration, marker)`. `declaration` is the scanner's normalized symbol identity, and `marker` is `Deprecated:` or `@deprecated`. Line numbers and comment prose are diagnostic context, not identity.
+The rule's exact finding identity is `(path, declaration, marker)`. `declaration` is the scanner's normalized symbol identity, and `marker` is `Deprecated:` or `@deprecated`. TypeScript string, numeric, and computed member keys use canonical bracketed names; quote and insignificant whitespace changes do not change their identity. Line numbers and comment prose are diagnostic context, not identity. See the architecture-lint guide for examples.
 
 Compatibility-ledger entries may add `locator.declaration`. For these entries, `locator.path`, `locator.declaration`, and `locator.marker` must match one current annotated declaration. The existing ledger metadata requirements continue to apply. A matching registration satisfies the rule; each current unregistered annotation remains an exact, shrink-only rule-baseline finding. Registrations that do not match a current annotated declaration fail validation.
 
