@@ -3,11 +3,6 @@ spec: docs/specs/agents/requirements/runtime-updates.md
 decision: docs/decisions/2026-08-12-validated-managed-runtime-version-selection.md
 created: 2026-08-21
 status: complete
-updated: 2026-09-26
-requirements:
-  - REQ-AGENTS-RUNTIME-UPDATES-001
-system_design:
-  - ../../specs/agents/system-design/runtime-updates-01.md
 ---
 
 # Implementation Plan: Managed Runtime Version Awareness
@@ -275,10 +270,6 @@ Wave 5:
 
 Task 07 is parallel-safe after Tasks 01-05 because it owns documentation only;
 Task 06 owns E2E fixtures and specs.
-
-Wave 6, sequential follow-up:
-
-- [x] [Task 08: Refresh stable managed runtime pins](task-08-refresh-stable-pins.md)
 
 ---
 

@@ -1,9 +1,9 @@
 ---
-id: "08-refresh-stable-pins"
+id: "01-refresh-stable-pins"
 title: "Refresh stable managed runtime pins"
 status: done
-wave: 6
-depends_on: ["04-weekly-pin-workflow"]
+wave: 1
+depends_on: []
 plan: "plan.md"
 requirements:
   - REQ-AGENTS-RUNTIME-UPDATES-001
@@ -13,7 +13,7 @@ system_design:
   - ../../specs/agents/system-design/runtime-updates-01.md
 ---
 
-# Task 08: Refresh stable managed runtime pins
+# Task 01: Refresh stable managed runtime pins
 
 ## Summary
 
