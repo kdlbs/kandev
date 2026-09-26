@@ -1012,49 +1012,6 @@ func (r *Repository) UpdateTaskPriority(ctx context.Context, taskID, priority st
 	return nil
 }
 
-// UpdateTaskParentID changes a task's parent relationship without replacing
-// the caller's full task snapshot. A reparent request can otherwise restore a
-// title or state that was current when the request started but changed before
-// it committed.
-func (r *Repository) UpdateTaskParentID(ctx context.Context, taskID, parentID string) error {
-	var query string
-	if dialect.IsPostgres(r.db.DriverName()) {
-		query = `
-			UPDATE tasks SET parent_id = ?,
-				metadata = CASE
-					WHEN parent_id IS DISTINCT FROM ?
-						AND jsonb_extract_path_text(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, 'workspace', 'mode') = 'inherit_parent'
-					THEN jsonb_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ARRAY['workspace', 'mode']::text[], '"shared_group"'::jsonb, true)::text
-					ELSE metadata
-				END,
-				updated_at = ?
-			WHERE id = ?`
-	} else {
-		query = `
-			UPDATE tasks SET parent_id = ?,
-				metadata = CASE
-					WHEN parent_id IS NOT ? AND json_valid(metadata)
-						AND json_extract(metadata, '$.workspace.mode') = 'inherit_parent'
-					THEN json_set(metadata, '$.workspace.mode', 'shared_group')
-					ELSE metadata
-				END,
-				updated_at = ?
-			WHERE id = ?`
-	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), parentID, parentID, r.nowUTC(), taskID)
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
-	}
-	return nil
-}
-
 // UpdateTask updates an existing task. The runner write lands as an
 // upsert/clear on workflow_step_participants inside the same tx as the
 // task UPDATE.
@@ -1074,6 +1031,17 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 // replace semantics, including deletion by omission.
 func (r *Repository) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
 	return r.updateTaskCommit(ctx, task, "", true, true)
+}
+
+// UpdateTaskWithParentPreservingConcurrentFields writes a reparent request
+// while retaining title and state fields the caller did not request. Other
+// requested fields keep ordinary update semantics.
+func (r *Repository) UpdateTaskWithParentPreservingConcurrentFields(
+	ctx context.Context, task *models.Task, preserveTitle, preserveState bool,
+) error {
+	return r.updateTaskCommit(ctx, task, "", true, true, taskConcurrentFields{
+		title: preserveTitle, state: preserveState,
+	})
 }
 
 // UpdateTaskWithTerminalRetentionIfParent applies an ordinary task update and
@@ -1131,7 +1099,18 @@ func (r *Repository) readTaskParentScopeInTx(ctx context.Context, tx *sql.Tx, ta
 	return parentID, workspaceID, true, nil
 }
 
-func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, expectedWorkflowID string, preservePosition, protectDeferredLaunch bool) error {
+type taskConcurrentFields struct {
+	title bool
+	state bool
+}
+
+func (r *Repository) updateTaskCommit(
+	ctx context.Context,
+	task *models.Task,
+	expectedWorkflowID string,
+	preservePosition, protectDeferredLaunch bool,
+	preserveConcurrentFields ...taskConcurrentFields,
+) error {
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
 		metadata = []byte("{}")
@@ -1143,7 +1122,9 @@ func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, ex
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, preservePosition, protectDeferredLaunch, nil)
+	entryID, markerEntryID, err := r.updateTaskTx(
+		ctx, tx, task, metadata, expectedWorkflowID, preservePosition, protectDeferredLaunch, nil, preserveConcurrentFields...,
+	)
 	if err != nil {
 		return err
 	}
@@ -1290,7 +1271,7 @@ func (r *Repository) applyPreservedPositionInTx(ctx context.Context, tx *sql.Tx,
 // session ceiling's concurrent CAS writes. Other metadata keeps replace
 // semantics, including deletion by omission.
 func (r *Repository) buildTaskUpdateQuery(
-	task *models.Task, metadata []byte, protectDeferredLaunch bool,
+	task *models.Task, metadata []byte, protectDeferredLaunch, preserveTitle, preserveState bool,
 ) (query string, finalMetadata []byte, workflowAgentOverrides interface{}, err error) {
 	encodedWorkflowAgentOverrides, err := models.EncodeWorkflowAgentOverrides(task.WorkflowAgentOverrides)
 	if err != nil {
@@ -1311,7 +1292,7 @@ func (r *Repository) buildTaskUpdateQuery(
 		metadataExpr = protectedTaskMetadataMergeExpression(r.db.DriverName(), protectDeferredLaunch)
 	}
 	updateQuery := fmt.Sprintf(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = CASE WHEN ? THEN title ELSE ? END, description = ?, state = CASE WHEN ? THEN state ELSE ? END, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
 		WHERE id = ?
 	`, metadataExpr)
 	if models.IsAgentTitlePending(task.Metadata) {
@@ -1319,8 +1300,8 @@ func (r *Repository) buildTaskUpdateQuery(
 		metadataMerge := pendingTaskMetadataMergeExpression(r.db.DriverName())
 		updateQuery = fmt.Sprintf(`
 			UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?,
-				title = CASE WHEN %s THEN ? ELSE title END,
-				description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?,
+				title = CASE WHEN %s THEN CASE WHEN ? THEN title ELSE ? END ELSE title END,
+				description = ?, state = CASE WHEN ? THEN state ELSE ? END, priority = ?, position = ?, wip_admitted = ?,
 				queued_for_step_id = ?, queued_at = ?,
 				metadata = %s,
 				parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
@@ -1360,7 +1341,12 @@ func (r *Repository) updateTaskTx(
 	expectedWorkflowID string,
 	preservePosition, protectDeferredLaunch bool,
 	workflowChangeSource *models.WorkflowChangeSource,
+	preserveConcurrentFields ...taskConcurrentFields,
 ) (entryID string, markerEntryID int64, err error) {
+	var preserveLive taskConcurrentFields
+	if len(preserveConcurrentFields) > 0 {
+		preserveLive = preserveConcurrentFields[0]
+	}
 	fromWorkflowID, fromStepID, err := r.readAndValidateTaskUpdateSourceInTx(
 		ctx, tx, task, expectedWorkflowID, preservePosition, workflowChangeSource,
 	)
@@ -1381,11 +1367,11 @@ func (r *Repository) updateTaskTx(
 	// was invisible until exercised against Postgres with real concurrency.
 	task.UpdatedAt = r.nowUTC()
 
-	updateQuery, metadata, workflowAgentOverrides, err := r.buildTaskUpdateQuery(task, metadata, protectDeferredLaunch)
+	updateQuery, metadata, workflowAgentOverrides, err := r.buildTaskUpdateQuery(task, metadata, protectDeferredLaunch, preserveLive.title, preserveLive.state)
 	if err != nil {
 		return "", 0, err
 	}
-	args := []interface{}{task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID}
+	args := []interface{}{task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, preserveLive.title, task.Title, task.Description, preserveLive.state, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID}
 	if workflowChangeSource != nil {
 		updateQuery += ` AND workflow_id = ? AND workflow_step_id = ? AND updated_at = ?`
 		args = append(args, workflowChangeSource.WorkflowID, workflowChangeSource.StepID, workflowChangeSource.UpdatedAt)

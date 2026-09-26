@@ -2080,11 +2080,13 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	}
 	var updateErr error
 	switch {
-	case parentChanged && isParentOnlyTaskUpdate(req):
+	case parentChanged:
 		if writer, ok := s.tasks.(interface {
-			UpdateTaskParentID(context.Context, string, string) error
+			UpdateTaskWithParentPreservingConcurrentFields(context.Context, *models.Task, bool, bool) error
 		}); ok {
-			updateErr = writer.UpdateTaskParentID(updateCtx, task.ID, task.ParentID)
+			updateErr = writer.UpdateTaskWithParentPreservingConcurrentFields(
+				updateCtx, task, req.Title == nil, req.State == nil,
+			)
 		} else {
 			updateErr = s.tasks.UpdateTaskPreservingDeferredLaunch(updateCtx, task)
 		}
@@ -2174,20 +2176,6 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	s.logger.Info("task updated", zap.String("task_id", task.ID))
 
 	return task, nil
-}
-
-func isParentOnlyTaskUpdate(req *UpdateTaskRequest) bool {
-	return req.Title == nil &&
-		req.TerminalRetention == nil &&
-		req.Description == nil &&
-		req.Priority == nil &&
-		req.State == nil &&
-		req.WorkflowStepID == nil &&
-		len(req.Repositories) == 0 &&
-		req.Position == nil &&
-		req.Metadata == nil &&
-		req.AssigneeUserID == nil &&
-		req.terminalRetentionScope == nil
 }
 
 // UpdateTaskWithTerminalRetention applies ordinary task fields and a scoped
