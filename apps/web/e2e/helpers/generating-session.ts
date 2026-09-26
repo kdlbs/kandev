@@ -17,6 +17,8 @@ export interface SeedRunningGeneratingSessionOptions {
   // folded/deferred tests to seed steer-fold-setup / steer-defer-setup
   // instead.
   predecessorPrompt?: string;
+  // Lets a caller stop the newly created session if a later setup step fails.
+  onSessionCreated?: (identity: { taskId: string; sessionId: string }) => void;
 }
 
 /**
@@ -45,6 +47,7 @@ export async function seedRunningGeneratingSession(
     },
   );
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+  options.onSessionCreated?.({ taskId: task.id, sessionId: task.session_id });
   await waitForSessionDone(
     apiClient,
     task.id,

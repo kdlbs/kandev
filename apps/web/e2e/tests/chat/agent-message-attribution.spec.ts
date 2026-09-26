@@ -132,6 +132,35 @@ test.describe("Cross-task agent message attribution", () => {
   // target's first turn can remain RUNNING well after its message is visible.
   test.describe.configure({ timeout: 180_000 });
 
+  let longRunningTarget: { taskId: string; sessionId: string } | undefined;
+
+  test.afterEach(async ({ apiClient }) => {
+    const target = longRunningTarget;
+    longRunningTarget = undefined;
+    if (!target) return;
+
+    const readState = async () => {
+      const { sessions } = await apiClient.listTaskSessions(target.taskId);
+      return sessions.find((session) => session.id === target.sessionId)?.state ?? "MISSING";
+    };
+    const terminalStates = /^(CANCELLED|COMPLETED|FAILED|WAITING_FOR_INPUT|MISSING)$/;
+    if (terminalStates.test(await readState())) return;
+
+    await apiClient
+      .stopSession({
+        session_id: target.sessionId,
+        reason: "agent message attribution e2e cleanup",
+        force: true,
+      })
+      .catch(() => undefined);
+    await expect
+      .poll(readState, {
+        timeout: 20_000,
+        message: "The message-attribution target should stop before the next test",
+      })
+      .toMatch(terminalStates);
+  });
+
   test("full agent-origin queue supports remove, clear-all, and new admission", async ({
     testPage,
     apiClient,
@@ -145,6 +174,7 @@ test.describe("Cross-task agent message attribution", () => {
       "Target — full agent queue",
       ["e2e:delay(90000)", 'e2e:message("target finished")'].join("\n"),
     );
+    longRunningTarget = { taskId: target.id, sessionId: target.sessionId };
     const session = await openTask(testPage, target.id);
     await expect
       .poll(
@@ -232,6 +262,7 @@ test.describe("Cross-task agent message attribution", () => {
       "Target — slow initial turn",
       ["e2e:delay(90000)", 'e2e:message("first turn done")'].join("\n"),
     );
+    longRunningTarget = { taskId: target.id, sessionId: target.sessionId };
     const session = await openTask(testPage, target.id);
     await waitForSessionState(apiClient, {
       taskId: target.id,
