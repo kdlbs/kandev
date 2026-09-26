@@ -171,7 +171,7 @@ func TestRateCoordinatorInteractiveAdmissionCancellationPreservesRateDetails(t *
 	}
 }
 
-func TestRateCoordinatorNonBlockingBackgroundAdmissionWaitsForLocalPacing(t *testing.T) {
+func TestRateCoordinatorNonBlockingBackgroundAdmissionDefersLocalPacing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		coordinator := NewRateCoordinator(nil, nil)
 		_, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
@@ -187,26 +187,25 @@ func TestRateCoordinatorNonBlockingBackgroundAdmissionWaitsForLocalPacing(t *tes
 		}
 		firstRelease()
 
-		secondResult := make(chan error, 1)
-		go func() {
-			release, acquireErr := admission.acquire(ctx, ResourceCore)
-			if acquireErr == nil {
-				release()
-			}
-			secondResult <- acquireErr
-		}()
-		synctest.Wait()
-		select {
-		case acquireErr := <-secondResult:
-			t.Fatalf("second acquire returned before pacing elapsed: %v", acquireErr)
-		default:
+		release, err := admission.acquire(ctx, ResourceCore)
+		if release != nil {
+			t.Fatal("paced background request acquired a slot")
 		}
-
-		time.Sleep(defaultBackgroundPace)
-		synctest.Wait()
-		if acquireErr := <-secondResult; acquireErr != nil {
-			t.Fatalf("second acquire: %v", acquireErr)
+		var deferred *AdmissionDeferredError
+		if !errors.As(err, &deferred) || deferred.Reason != rateLimitBlockBackgroundPacing {
+			t.Fatalf("second acquire = %v, want local pacing deferral", err)
 		}
+		if deferred.Delay <= 0 || deferred.Delay > defaultBackgroundPace {
+			t.Fatalf("pacing delay = %s, want positive delay up to %s", deferred.Delay, defaultBackgroundPace)
+		}
+		if err := deferred.Wait(ctx); err != nil {
+			t.Fatalf("wait for pacing: %v", err)
+		}
+		release, err = admission.acquire(ctx, ResourceCore)
+		if err != nil {
+			t.Fatalf("acquire after pacing: %v", err)
+		}
+		release()
 	})
 }
 
@@ -226,46 +225,22 @@ func TestRateCoordinatorNonBlockingBackgroundAdmissionDefersWhenThrottleStartsDu
 	}
 	firstRelease()
 
-	secondResult := make(chan error, 1)
-	go func() {
-		_, acquireErr := admission.acquire(ctx, ResourceCore)
-		secondResult <- acquireErr
-	}()
-	select {
-	case acquireErr := <-secondResult:
-		t.Fatalf("second acquire returned before pacing elapsed: %v", acquireErr)
-	case <-time.After(25 * time.Millisecond):
+	_, err = admission.acquire(ctx, ResourceCore)
+	var pacing *AdmissionDeferredError
+	if !errors.As(err, &pacing) || pacing.Reason != rateLimitBlockBackgroundPacing {
+		t.Fatalf("second acquire = %v, want local pacing deferral", err)
 	}
 
 	tracker.ObserveSecondary(
 		ResourceCore, time.Now().Add(time.Hour), RetrySourceConservativeFallback, "fixture",
 	)
-	select {
-	case acquireErr := <-secondResult:
-		var deferred *AdmissionDeferredError
-		if !errors.As(acquireErr, &deferred) {
-			t.Fatalf("second acquire = %v, want AdmissionDeferredError", acquireErr)
-		}
-	case <-time.After(100 * time.Millisecond):
-		cancel()
-		<-secondResult
-		t.Fatal("second acquire remained blocked after the throttle started")
+	if err := pacing.Wait(ctx); err != nil {
+		t.Fatalf("pacing wait did not wake for throttle: %v", err)
 	}
-}
-
-func TestRateAdmissionWaitForLocalPacingReturnsWhenDeadlineHasElapsed(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer cancel()
-	if err := waitForLocalPacing(ctx, -time.Millisecond, make(chan struct{}), make(chan struct{})); err != nil {
-		t.Fatalf("wait for elapsed pacing deadline: %v", err)
-	}
-}
-
-func TestRateAdmissionWaitForLocalPacingUsesCapturedStateChange(t *testing.T) {
-	stateChanged := make(chan struct{})
-	close(stateChanged)
-	if err := waitForLocalPacing(context.Background(), time.Hour, make(chan struct{}), stateChanged); err != nil {
-		t.Fatalf("wait for captured state change: %v", err)
+	_, err = admission.acquire(ctx, ResourceCore)
+	var deferred *AdmissionDeferredError
+	if !errors.As(err, &deferred) || deferred.Reason != rateLimitBlockSecondary {
+		t.Fatalf("acquire after throttle = %v, want secondary deferral", err)
 	}
 }
 
