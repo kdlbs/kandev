@@ -118,10 +118,24 @@ re-dispatches an accepted prompt; the recovery-claim tests pin it.
 
 ## Results
 
-Implemented across the PR #2909 backend history through f30b3bd67. The
-settlement path settles an eligible quiet intent atomically with its audit;
-refusals record `not_stale` without mutation; the unattributed
-CREATED-session anomaly regression passes; supersession delivers one
-successor prompt for the current transition only; delivery receipts
-acknowledge their ordinary-dispatch claim; and the plan-package linter and
-spec linter pass on the recorded contracts.
+Implemented across PR #2909. Manual stale settlement now commits the captured
+turn completion, terminal intent transition, and audit event in one
+transaction. A failed audit insert leaves the turn open and the intent
+settling, and an injected settlement failure leaves the turn open. Refusals
+record `not_stale` without mutation; the unattributed CREATED-session anomaly
+regression passes; supersession delivers one successor prompt for the current
+transition only; and delivery receipts acknowledge their ordinary-dispatch
+claim.
+
+Verification on commit `14eb594ecf3aece40c1010155b1d5ef225fbcae1`:
+
+```bash
+go test ./internal/orchestrator/ -run 'SettleStaleSession|HandleStepComplete|MessageTask' -count=1
+go test ./internal/task/repository/sqlite/ -run 'CompleteTurnAndTransitionCompletionIntent|TransitionCompletionIntentWithControlEvent' -count=1
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+```
+
+All four commands passed. PR CI was started for this commit; its final gate
+remains unresolved because required-check policy lookup failed and the PR
+documentation-coverage job hit GitHub code-search rate limits.

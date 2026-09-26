@@ -94,3 +94,9 @@ receipts with source-turn idempotency and bounded retry, ordinary-dispatch
 claim cleanup in the durable acknowledgement, and the unattributed
 CREATED-session refusal regression. Focused orchestrator, MCP, messagequeue,
 and lifecycle suites pass; spec lint and plan/work-order lint pass.
+
+PR #2909 commit `14eb594ecf3aece40c1010155b1d5ef225fbcae1` closes the remaining
+manual-settlement atomicity gap: turn completion, terminal intent transition,
+and authorization audit now commit together. The focused failure-path tests and
+spec validation pass. Exact-head CI remains blocked by unavailable required-
+check policy and a GitHub code-search rate limit in PR documentation coverage.
