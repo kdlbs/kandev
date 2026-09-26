@@ -15,3 +15,11 @@ func TestExecutorTypeToBackendMapsKubernetes(t *testing.T) {
 		t.Fatalf("ExecutorTypeToBackend(k8s) = %q, want k8s", got)
 	}
 }
+
+func TestExecutorTypeToBackendMapsCursorCloudWithoutStandaloneFallback(t *testing.T) {
+	t.Parallel()
+
+	if got := ExecutorTypeToBackend(models.ExecutorTypeCursorCloud); got != agentruntime.RuntimeCursorCloud {
+		t.Fatalf("ExecutorTypeToBackend(cursor_cloud) = %q, want %q", got, agentruntime.RuntimeCursorCloud)
+	}
+}

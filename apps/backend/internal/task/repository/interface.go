@@ -25,6 +25,17 @@ var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
 var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
+var ErrManagedAgentBindingConflict = repoerrors.ErrManagedAgentBindingConflict
+var ErrManagedAgentBindingNotFound = repoerrors.ErrManagedAgentBindingNotFound
+var ErrManagedAgentOperationConflict = repoerrors.ErrManagedAgentOperationConflict
+var ErrManagedAgentOperationNotFound = repoerrors.ErrManagedAgentOperationNotFound
+var ErrManagedAgentStreamNotFound = repoerrors.ErrManagedAgentStreamNotFound
+var ErrManagedAgentToolGrantNotFound = repoerrors.ErrManagedAgentToolGrantNotFound
+var ErrManagedAgentRevisionConflict = repoerrors.ErrManagedAgentRevisionConflict
+var ErrManagedAgentLeaseHeld = repoerrors.ErrManagedAgentLeaseHeld
+var ErrManagedAgentActiveOperation = repoerrors.ErrManagedAgentActiveOperation
+var ErrManagedAgentOperationTransition = repoerrors.ErrManagedAgentOperationTransition
+var ErrManagedAgentStreamIdentityConflict = repoerrors.ErrManagedAgentStreamIdentityConflict
 var ErrStepChanged = repoerrors.ErrStepChanged
 var ErrInvalidReorder = repoerrors.ErrInvalidReorder
 
@@ -878,4 +889,29 @@ type SubagentContextRepository interface {
 type UsageRepository interface {
 	GetTaskUsageTotals(ctx context.Context, taskID string) (*models.TaskUsageTotals, error)
 	GetSessionUsageTotals(ctx context.Context, sessionID string) (*models.TaskUsageTotals, error)
+}
+
+// ManagedAgentRepository stores remote conversation identity and submission
+// authority independently of local executor records.
+type ManagedAgentRepository interface {
+	ReserveManagedAgentStart(ctx context.Context, binding *models.ManagedAgentBinding, operation *models.ManagedAgentOperation, leaseOwner string, leaseUntil time.Time) (*models.ManagedAgentBinding, *models.ManagedAgentOperation, bool, error)
+	ReserveManagedAgentOperation(ctx context.Context, operation *models.ManagedAgentOperation, expectedBindingRevision int64, leaseOwner string, leaseUntil time.Time) (*models.ManagedAgentBinding, *models.ManagedAgentOperation, bool, error)
+	ClaimManagedAgentDispatchLease(ctx context.Context, bindingID, operationID string, expectedBindingRevision int64, leaseOwner string, leaseUntil time.Time) (*models.ManagedAgentBinding, error)
+	GetManagedAgentBindingBySession(ctx context.Context, sessionID string) (*models.ManagedAgentBinding, error)
+	GetManagedAgentBindingByExecution(ctx context.Context, executionID string) (*models.ManagedAgentBinding, error)
+	GetManagedAgentBinding(ctx context.Context, bindingID string) (*models.ManagedAgentBinding, error)
+	GetManagedAgentOperationByPromptTurnID(ctx context.Context, promptTurnID string) (*models.ManagedAgentOperation, error)
+	GetManagedAgentOperation(ctx context.Context, operationID string) (*models.ManagedAgentOperation, error)
+	GetManagedAgentLatestOperation(ctx context.Context, bindingID string) (*models.ManagedAgentOperation, error)
+	ListActiveManagedAgentBindings(ctx context.Context) ([]*models.ManagedAgentBinding, error)
+	BeginManagedAgentTermination(ctx context.Context, bindingID string, at time.Time) error
+	ResolveManagedAgentTermination(ctx context.Context, bindingID string, lifecycle models.ManagedAgentBindingLifecycle, at time.Time) error
+	DeleteManagedAgentBindingIfTerminal(ctx context.Context, bindingID string) error
+	CompareAndSwapManagedAgentOperation(ctx context.Context, update models.ManagedAgentOperationUpdate) (*models.ManagedAgentOperation, error)
+	AcknowledgeManagedAgentCompletion(ctx context.Context, operationID string) error
+	CommitManagedAgentStreamEvent(ctx context.Context, event models.ManagedAgentStreamEvent) (bool, error)
+	GetManagedAgentStreamCheckpoint(ctx context.Context, bindingID, remoteRunID string) (*models.ManagedAgentStreamCheckpoint, error)
+	CreateManagedAgentToolGrant(ctx context.Context, grant *models.ManagedAgentToolGrant) error
+	GetManagedAgentToolGrantByHash(ctx context.Context, tokenHash string) (*models.ManagedAgentToolGrant, error)
+	RevokeManagedAgentToolGrants(ctx context.Context, bindingID, operationID string, revokedAt time.Time) (int64, error)
 }

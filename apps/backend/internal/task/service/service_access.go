@@ -327,12 +327,36 @@ func (s *Service) AuthorizeSessionAccess(ctx context.Context, sessionID string) 
 // authz.ScopeSessionExec so a viewer who may read a transcript never gets a
 // shell in the worktree.
 func (s *Service) AuthorizeSessionScope(ctx context.Context, sessionID string, scope authz.Scope) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	_, scoped := callerScope(ctx)
+	if !scoped && scope != authz.ScopeSessionExec {
 		return nil
+	}
+	if s.sessions == nil {
+		if !scoped {
+			return nil
+		}
+		return repoerrors.ErrTaskNotFound
 	}
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
+		if !scoped {
+			return nil
+		}
 		return err
+	}
+	if session == nil {
+		if !scoped {
+			return nil
+		}
+		return repoerrors.ErrTaskNotFound
+	}
+	if scope == authz.ScopeSessionExec && session != nil {
+		if capabilities := models.SessionExecutionCapabilities(session); capabilities != nil && !capabilities.WorkspaceFiles {
+			return ErrExecutionCapabilityUnavailable
+		}
+	}
+	if !scoped {
+		return nil
 	}
 	return s.authorizeTaskScope(ctx, session.TaskID, scope)
 }
@@ -396,12 +420,34 @@ func (s *Service) AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmen
 
 // AuthorizeEnvironmentScope enforces one scope on a task environment.
 func (s *Service) AuthorizeEnvironmentScope(ctx context.Context, taskEnvironmentID string, scope authz.Scope) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	_, scoped := callerScope(ctx)
+	if !scoped && scope != authz.ScopeSessionExec {
 		return nil
+	}
+	if s.taskEnvironments == nil {
+		if !scoped {
+			return nil
+		}
+		return repoerrors.ErrTaskNotFound
 	}
 	env, err := s.taskEnvironments.GetTaskEnvironment(ctx, taskEnvironmentID)
 	if err != nil {
+		if !scoped {
+			return nil
+		}
 		return err
+	}
+	if env == nil {
+		if !scoped {
+			return nil
+		}
+		return repoerrors.ErrTaskNotFound
+	}
+	if scope == authz.ScopeSessionExec && env != nil && env.ExecutorType == string(models.ExecutorTypeCursorCloud) {
+		return ErrExecutionCapabilityUnavailable
+	}
+	if !scoped {
+		return nil
 	}
 	return s.authorizeTaskScope(ctx, env.TaskID, scope)
 }

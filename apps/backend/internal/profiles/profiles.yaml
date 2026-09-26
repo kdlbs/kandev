@@ -37,6 +37,13 @@
 # go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
 # maps them to `features.<name>` Viper keys automatically.
 features:
+  # Managed Cursor Cloud execution submits paid remote work and remains opt-in
+  # in every profile until its provider, persistence, and callback paths ship.
+  KANDEV_FEATURES_CURSOR_CLOUD:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Retains supported language-server leases across browser disconnects. The
   # task-host and bounded lease lifecycle are opt-in while the feature settles.
   KANDEV_FEATURES_LSP_BROWSER_CONTINUITY:
@@ -136,6 +143,13 @@ features:
 # leaves all of these unset (real APIs). Dev opts into the mock agent
 # CLI alongside real CLIs; e2e isolates to mocks only.
 mocks:
+  # Cursor Cloud API and callback fixture. Its origin is honored only by e2e
+  # composition when KANDEV_E2E_MOCK selects the e2e profile.
+  KANDEV_MOCK_CURSOR_CLOUD:
+    prod: ""
+    dev:  ""
+    e2e:  "true"
+
   # Mock agent CLI registration.
   #   ""     real CLIs only (prod)
   #   "true" mock alongside real CLIs (dev — try the UI without installing every agent)

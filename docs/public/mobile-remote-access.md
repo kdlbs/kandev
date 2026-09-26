@@ -64,6 +64,23 @@ executor and repository.
 The access path protects the Kandev origin. Each path reaches the same Kandev web app and task features.
 Kandev authentication remains a separate user and workspace boundary.
 
+### Use a Cursor Cloud task from a phone
+
+After an administrator enables Cursor Cloud and saves a configured executor
+profile, you can start a normal Cursor Cloud task in the Kandev phone UI. The
+conversation, streamed activity, and stop state use the same task page as
+desktop. Open **Results** to review the Cursor branch and pull-request link.
+Follow-up prompts stay in the same cloud conversation. If a submission has an
+unknown outcome, resolve it from the recovery sheet before sending another
+prompt. See [Cursor Cloud executor setup](executors.md#cursor-cloud).
+
+The phone's route to Kandev and Cursor Cloud's callback route are separate
+connections. Tailscale or a private VPN can protect phone access, but Cursor
+Cloud must also reach the configured callback over HTTPS. A private callback
+that Cursor cannot reach will prevent the remote agent from using Kandev's
+scoped tools. Verify callback reachability with the live installation smoke
+test before enabling the feature.
+
 ## Choose an access boundary
 
 Use one of these boundaries:

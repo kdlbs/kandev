@@ -132,6 +132,7 @@ type Server struct {
 	pluginToolsMu              sync.Mutex
 	pluginTools                plugintools.Snapshot
 	pluginToolsReady           bool
+	managedRuntime             bool
 }
 
 // ServerOption configures the per-instance MCP transport.
@@ -190,6 +191,32 @@ func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, l
 		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
 	return s
+}
+
+// NewManagedHTTPHandler builds one operation-scoped, stateless task MCP
+// endpoint. The outer managed transport authenticates and scopes every HTTP
+// request before it reaches this handler.
+func NewManagedHTTPHandler(
+	backend BackendClient,
+	sessionID, taskID string,
+	log *logger.Logger,
+	profileContext mcpprofile.Context,
+	endpointPath string,
+) (http.Handler, error) {
+	if profileContext.Surface != mcpprofile.SurfaceManagedTask || sessionID == "" || taskID == "" || endpointPath == "" {
+		return nil, fmt.Errorf("managed MCP endpoint authority is incomplete")
+	}
+	if log == nil {
+		log = logger.Default()
+	}
+	s := newServerWithProfile(backend, sessionID, taskID, log, "", profileContext)
+	s.managedRuntime = true
+	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
+		server.WithEndpointPath(endpointPath),
+		server.WithStateLess(true),
+		server.WithHTTPContextFunc(s.mcpHTTPContext),
+	)
+	return s.httpServer, nil
 }
 
 // NewExternal creates an MCP server for the Kandev backend's external endpoint.
@@ -351,6 +378,8 @@ func modeForProfile(profileContext mcpprofile.Context) string {
 		if profileContext.HasCapability(mcpprofile.CapabilityTaskTitle) {
 			return ModeTaskTitlePending
 		}
+		return ModeTask
+	case mcpprofile.SurfaceManagedTask:
 		return ModeTask
 	default:
 		return ModeTask
@@ -654,9 +683,10 @@ func (s *Server) wrapSensitiveHandler(toolName string, handler server.ToolHandle
 func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.ToolHandlerFunc, logArguments bool) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		start := time.Now()
+		includeArguments := logArguments && !s.managedRuntime
 
 		fields := []zap.Field{zap.String("tool", toolName)}
-		if logArguments {
+		if includeArguments {
 			fields = append(fields, zap.Any("args", req.GetArguments()))
 		}
 		s.logger.Debug("MCP tool call", fields...)
@@ -667,6 +697,9 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 		}
 
 		validatedReq, validationErr := s.validateToolArguments(toolName, req)
+		if validationErr == nil {
+			validationErr = s.validateManagedTaskArguments(validatedReq)
+		}
 		var result *mcp.CallToolResult
 		var err error
 		if validationErr != nil {
@@ -694,7 +727,7 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 				zap.String("tool", toolName),
 				zap.Duration("duration", duration),
 			}
-			if logArguments {
+			if includeArguments {
 				resultFields = append(resultFields, zap.Any("result", result.Content))
 			}
 			s.logger.Debug("MCP tool returned error", resultFields...)
@@ -717,6 +750,20 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 
 		return result, err
 	}
+}
+
+func (s *Server) validateManagedTaskArguments(request mcp.CallToolRequest) error {
+	if s.profile.Surface != mcpprofile.SurfaceManagedTask {
+		return nil
+	}
+	arguments := request.GetArguments()
+	if target, ok := arguments["task_id"].(string); ok && target != "" && target != s.taskID {
+		return fmt.Errorf("managed task MCP tools can address only their current task")
+	}
+	if target, ok := arguments["session_id"].(string); ok && target != "" && target != s.sessionID {
+		return fmt.Errorf("managed task MCP tools can address only their current session")
+	}
+	return nil
 }
 
 // SetMode changes the MCP server mode and re-registers tools accordingly.
@@ -1073,6 +1120,8 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 	external := surfaceEnabled(mcpprofile.SurfaceExternal)
 	office := surfaceEnabled(mcpprofile.SurfaceOfficeTask)
 	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
+	managedTask := surfaceEnabled(mcpprofile.SurfaceManagedTask)
+	taskSession := func(ctx mcpprofile.Context) bool { return kanban(ctx) || managedTask(ctx) }
 	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
 	return []profileToolGroup{
 		{name: "configuration-automations", enabled: config, register: func(s *Server) { s.registerConfigAutomationTools() }},
@@ -1097,8 +1146,8 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
 		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
 		{name: "parent-question", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityParentQuestion)), register: func(s *Server) { s.registerParentQuestionTool() }},
-		{name: "plan", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerPlanTools() }},
-		{name: "rich-output", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRichOutputTool() }},
+		{name: "plan", enabled: func(ctx mcpprofile.Context) bool { return taskSession(ctx) || office(ctx) }, register: func(s *Server) { s.registerPlanTools() }},
+		{name: "rich-output", enabled: func(ctx mcpprofile.Context) bool { return taskSession(ctx) || office(ctx) }, register: func(s *Server) { s.registerRichOutputTool() }},
 		{name: "walkthrough", enabled: kanban, register: func(s *Server) { s.registerWalkthroughTools() }},
 		{name: "review", enabled: kanban, register: func(s *Server) { s.registerReviewTools() }},
 		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},
@@ -1108,8 +1157,8 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 			s.registerAddWorkspaceSourcesTool()
 			s.registerUpdateRepositoryBaseBranchTool()
 		}},
-		{name: "step-completion", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerStepCompleteTool() }},
-		{name: "task-title", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
+		{name: "step-completion", enabled: func(ctx mcpprofile.Context) bool { return taskSession(ctx) || office(ctx) }, register: func(s *Server) { s.registerStepCompleteTool() }},
+		{name: "task-title", enabled: andProfilePredicates(taskSession, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
 		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
 		{name: "canvas-authoring", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityCanvas)), register: func(s *Server) { s.registerCanvasTools() }},
 	}

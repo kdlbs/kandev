@@ -24,6 +24,7 @@ export function buildStartRequest(
     autoStart?: boolean;
     profileExplicit?: boolean;
     attachments?: MessageAttachment[];
+    autoCreatePR?: boolean;
   },
 ): BuildResult {
   return {
@@ -38,6 +39,7 @@ export function buildStartRequest(
       priority: opts?.priority,
       auto_start: opts?.autoStart,
       attachments: opts?.attachments,
+      auto_create_pr: opts?.autoCreatePR || undefined,
       ...(opts?.profileExplicit !== undefined ? { profile_explicit: opts.profileExplicit } : {}),
     },
     layout: opts?.planMode ? "plan" : "default",

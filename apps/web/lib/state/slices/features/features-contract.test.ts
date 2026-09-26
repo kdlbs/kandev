@@ -16,6 +16,10 @@ function backendFeatureKeys(source: string): string[] {
 }
 
 describe("feature flag repository contract", () => {
+  it("keeps Cursor Cloud disabled by default", () => {
+    expect(defaultFeatureFlags.cursorCloud).toBe(false);
+  });
+
   it("keeps browser-owned LSP continuity disabled by default", () => {
     expect(defaultFeatureFlags.lspBrowserContinuity).toBe(false);
   });

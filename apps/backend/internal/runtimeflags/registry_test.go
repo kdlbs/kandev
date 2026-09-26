@@ -506,6 +506,29 @@ func TestDefinitionsIncludeClaudeMidTurnSteeringMetadata(t *testing.T) {
 	}
 }
 
+func TestCursorCloudFlagContract(t *testing.T) {
+	definition, ok := DefinitionByKey("features.cursorCloud")
+	if !ok {
+		t.Fatal("features.cursorCloud definition missing")
+	}
+	if definition.EnvVar != "KANDEV_FEATURES_CURSOR_CLOUD" || !definition.RestartRequired || !definition.Mutable {
+		t.Fatalf("unexpected Cursor Cloud flag metadata: %#v", definition)
+	}
+	if definition.RiskLevel != RiskHigh || definition.Stability != StabilityExperimental || definition.RiskDescription == "" {
+		t.Fatalf("Cursor Cloud must be marked experimental and high risk: %#v", definition)
+	}
+	if ValuesFromConfig(&config.Config{})["features.cursorCloud"] {
+		t.Fatal("Cursor Cloud must default off")
+	}
+	defaults, err := profiles.FeatureFlagDefaults()
+	if err != nil {
+		t.Fatalf("FeatureFlagDefaults: %v", err)
+	}
+	if got := defaults["cursor_cloud"]; got != "false" {
+		t.Fatalf("profile default = %q, want false", got)
+	}
+}
+
 // TestDefinitionsIncludeAgentSurvivalMetadata pins the registration for
 // AC-EXECUTORS-SURVIVAL-005.2/5.4: off by default, restart-required, and
 // carrying a host-availability probe (checked separately below).

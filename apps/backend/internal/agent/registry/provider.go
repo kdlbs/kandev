@@ -45,6 +45,7 @@ func Provide(log *logger.Logger) (*Registry, func() error, error) {
 		// not launch a process or discover a host binary, so retaining them does
 		// not weaken the isolation boundary.
 		_ = reg.Register(agents.NewDynamicAgent())
+		_ = reg.Register(agents.NewCursorCloudAgent())
 		_ = reg.Register(agents.NewMockAgent())
 		configureMockAgent(reg, "mock-agent", log)
 		registerExtraMockProviders(reg, log, mockProviders)

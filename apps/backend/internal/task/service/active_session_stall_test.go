@@ -139,6 +139,138 @@ func TestService_ActiveSessionSweepEmitsStalledTaskEvent(t *testing.T) {
 	}
 }
 
+func TestService_ActiveSessionSweepPreservesManagedRemoteOperation(t *testing.T) {
+	fixture := newSweepFixture(t, 5*time.Hour)
+	ctx := context.Background()
+	binding := &models.ManagedAgentBinding{
+		ID: "managed-binding", SessionID: "session-1", TaskID: "task-1", WorkspaceID: "ws-1",
+		UserID: "user-1", ExecutionID: "cloud-execution", ProviderKind: "cursor_cloud",
+		ExecutorID: "cursor-cloud", ExecutorProfileID: "profile-1", CredentialRef: "secret-ref",
+		RemoteAgentID: "bc-123", Lifecycle: models.ManagedAgentBindingCreating,
+		Launch: models.ManagedAgentLaunchSnapshot{
+			RepositoryID: "repo-1", RepositoryURL: "https://github.com/acme/repo",
+			StartingRef: "main", Model: "model-1", CallbackURL: "https://kandev.example",
+		},
+	}
+	operation := &models.ManagedAgentOperation{
+		ID: "managed-operation", BindingID: binding.ID, PromptTurnID: "turn-1",
+		Kind: models.ManagedAgentOperationCreate, RequestDigest: "digest",
+		RequestSnapshot: models.ManagedAgentRequestSnapshot{
+			Prompt: "do the task", TurnID: "turn-1", RepositoryURL: binding.Launch.RepositoryURL,
+			StartingRef: "main", Model: "model-1", CallbackURL: binding.Launch.CallbackURL,
+		},
+	}
+	if _, _, _, err := fixture.rawRepo.ReserveManagedAgentStart(ctx, binding, operation, "worker", time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("reserve managed operation: %v", err)
+	}
+
+	fixture.svc.runActiveSessionSweep(ctx, fixture.now)
+	session, err := fixture.repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if session.State != models.TaskSessionStateRunning {
+		t.Fatalf("managed session state = %s, want RUNNING", session.State)
+	}
+	if stalled := findTaskStalledEvents(fixture.eventBus); len(stalled) != 0 {
+		t.Fatalf("stalled events = %d, want 0 while remote operation is unsettled", len(stalled))
+	}
+}
+
+func TestService_TaskDeleteBlocksUntilManagedRunIsConfirmedTerminal(t *testing.T) {
+	fixture := newSweepFixture(t, time.Hour)
+	ctx := context.Background()
+	binding := &models.ManagedAgentBinding{
+		ID: "delete-binding", SessionID: "session-1", TaskID: "task-1", WorkspaceID: "ws-1",
+		UserID: "user-1", ExecutionID: "cloud-execution", ProviderKind: "cursor_cloud",
+		ExecutorID: "cursor-cloud", ExecutorProfileID: "profile-1", CredentialRef: "secret-ref",
+		RemoteAgentID: "bc-123", Lifecycle: models.ManagedAgentBindingCreating,
+		Launch: models.ManagedAgentLaunchSnapshot{
+			RepositoryID: "repo-1", RepositoryURL: "https://github.com/acme/repo",
+			StartingRef: "main", Model: "model-1", CallbackURL: "https://kandev.example",
+		},
+	}
+	operation := &models.ManagedAgentOperation{
+		ID: "delete-operation", BindingID: binding.ID, PromptTurnID: "delete-turn",
+		Kind: models.ManagedAgentOperationCreate, RequestDigest: "digest",
+		RequestSnapshot: models.ManagedAgentRequestSnapshot{
+			Prompt: "do the task", TurnID: "delete-turn", RepositoryURL: binding.Launch.RepositoryURL,
+			StartingRef: "main", Model: "model-1", CallbackURL: binding.Launch.CallbackURL,
+		},
+	}
+	if _, _, _, err := fixture.rawRepo.ReserveManagedAgentStart(ctx, binding, operation, "worker", time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("reserve managed operation: %v", err)
+	}
+	stopper := newRecordingTaskExecutionStopper()
+	fixture.svc.executionStopper = stopper
+	session, err := fixture.repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	err = fixture.svc.resolveManagedAgentsBeforeTaskDelete(ctx, []*models.TaskSession{session})
+	if !errors.Is(err, ErrManagedAgentDeleteBlocked) {
+		t.Fatalf("managed deletion result = %v, want an unresolved-run blocker", err)
+	}
+	call := stopper.waitForStopExecution(t)
+	if call.executionID != binding.ExecutionID || call.reason != "task_deleted" {
+		t.Fatalf("remote stop call = %+v, want task deletion cancellation", call)
+	}
+	if _, err := fixture.rawRepo.GetManagedAgentBindingBySession(ctx, session.ID); err != nil {
+		t.Fatalf("unresolved binding was removed: %v", err)
+	}
+}
+
+func TestService_ArchiveTerminationIntentRevokesManagedAgentGrants(t *testing.T) {
+	fixture := newSweepFixture(t, time.Hour)
+	ctx := context.Background()
+	binding := &models.ManagedAgentBinding{
+		ID: "archive-binding", SessionID: "session-1", TaskID: "task-1", WorkspaceID: "ws-1",
+		UserID: "user-1", ExecutionID: "cloud-execution", ProviderKind: "cursor_cloud",
+		ExecutorID: "cursor-cloud", ExecutorProfileID: "profile-1", CredentialRef: "secret-ref",
+		RemoteAgentID: "bc-123", Lifecycle: models.ManagedAgentBindingCreating,
+		Launch: models.ManagedAgentLaunchSnapshot{
+			RepositoryID: "repo-1", RepositoryURL: "https://github.com/acme/repo",
+			StartingRef: "main", Model: "model-1", CallbackURL: "https://kandev.example",
+		},
+	}
+	operation := &models.ManagedAgentOperation{
+		ID: "archive-operation", BindingID: binding.ID, PromptTurnID: "archive-turn",
+		Kind: models.ManagedAgentOperationCreate, RequestDigest: "archive-digest",
+		RequestSnapshot: models.ManagedAgentRequestSnapshot{
+			Prompt: "do the task", TurnID: "archive-turn", RepositoryURL: binding.Launch.RepositoryURL,
+			StartingRef: "main", Model: "model-1", CallbackURL: binding.Launch.CallbackURL,
+		},
+	}
+	if _, _, _, err := fixture.rawRepo.ReserveManagedAgentStart(ctx, binding, operation, "worker", time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("reserve managed operation: %v", err)
+	}
+	if err := fixture.rawRepo.CreateManagedAgentToolGrant(ctx, &models.ManagedAgentToolGrant{
+		ID: "archive-grant", BindingID: binding.ID, OperationID: operation.ID,
+		TokenHash: "archive-grant-hash", Scope: "{}", Generation: 1,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("create managed tool grant: %v", err)
+	}
+	session, err := fixture.repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.svc.beginManagedAgentTerminations(ctx, []*models.TaskSession{session}); err != nil {
+		t.Fatalf("persist archive termination intent: %v", err)
+	}
+	storedBinding, err := fixture.rawRepo.GetManagedAgentBinding(ctx, binding.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storedBinding.Lifecycle != models.ManagedAgentBindingTerminationPending {
+		t.Fatalf("managed lifecycle = %s, want termination pending", storedBinding.Lifecycle)
+	}
+	grant, err := fixture.rawRepo.GetManagedAgentToolGrantByHash(ctx, "archive-grant-hash")
+	if err != nil || grant.RevokedAt == nil {
+		t.Fatalf("managed grant = %+v, %v; want revoked", grant, err)
+	}
+}
+
 // TestService_ActiveSessionSweepSkipsLiveExecution proves the ExecutionStore
 // guard: an event-silent session that still has a registered live execution
 // is healthy and must not fire a stall event.

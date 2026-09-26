@@ -51,6 +51,11 @@ export type SessionStatus = {
   remote_created_at?: string;
   remote_checked_at?: string;
   remote_status_error?: string;
+  remote_repository_id?: string;
+  remote_branch?: string;
+  remote_pull_request_url?: string;
+  remote_agent_url?: string;
+  remote_history_gap?: boolean;
   capabilities?: {
     embedded_vscode: boolean;
   };

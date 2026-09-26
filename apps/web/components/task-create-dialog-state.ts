@@ -10,6 +10,7 @@ import { resetTaskForm, type FormResetters } from "@/components/task-create-dial
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
 import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskCreateDialogRuntimeOptions } from "@/components/task-create-dialog-runtime-options";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useEnsureUserSettings } from "@/hooks/use-ensure-user-settings";
@@ -291,6 +292,7 @@ function useGitHubUrlState() {
 
 /** Core form state declarations */
 function useFormStateValues(workflowId: string | null) {
+  const runtimeOptions = useTaskCreateDialogRuntimeOptions();
   // openCycle increments each time dialog opens - used in key to force TaskFormInputs remount
   const [openCycle, setOpenCycle] = useState(0);
   // Start as false so a fresh mount with open=true is detected as a rising edge
@@ -319,13 +321,6 @@ function useFormStateValues(workflowId: string | null) {
   const [fetchedSteps, setFetchedSteps] = useState<StepType[] | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
-  // No-repo mode: when true, the task is created with no repositories. The
-  // optional workspacePath points the agent at an existing host folder; empty
-  // means kandev creates a scratch workspace.
-  const [noRepository, setNoRepository] = useState(false);
-  const [preferLocalExecutor, setPreferLocalExecutor] = useState(false);
-  const [workspacePath, setWorkspacePath] = useState("");
-  const [autopilot, setAutopilot] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>("medium");
   return {
     taskName,
@@ -360,14 +355,7 @@ function useFormStateValues(workflowId: string | null) {
     currentDefaults,
     setCurrentDefaults,
     prevDialogRef,
-    noRepository,
-    setNoRepository,
-    preferLocalExecutor,
-    setPreferLocalExecutor,
-    workspacePath,
-    setWorkspacePath,
-    autopilot,
-    setAutopilot,
+    ...runtimeOptions,
     priority,
     setPriority,
   };
@@ -444,6 +432,7 @@ export function useDialogFormState(
       setPreferLocalExecutor: form.setPreferLocalExecutor,
       setWorkspacePath: form.setWorkspacePath,
       setAutopilot: form.setAutopilot,
+      setAutoCreatePR: form.setAutoCreatePR,
       setPriority: form.setPriority,
     },
   });

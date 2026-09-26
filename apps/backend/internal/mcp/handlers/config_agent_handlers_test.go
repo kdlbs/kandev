@@ -106,6 +106,7 @@ func TestHandleUpdateAgentProfile_AppliesExplicitAutoApprove(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h, repo, _ := newAgentSettingsHandlers(t)
 			ctx := context.Background()
+			require.NoError(t, repo.CreateAgent(ctx, &settingsmodels.Agent{ID: "agent-1", Name: "codex-acp"}))
 			profile := &settingsmodels.AgentProfile{
 				AgentID: "agent-1", Name: "Profile", Model: "gpt-5", AutoApprove: tt.initial,
 			}
@@ -129,6 +130,7 @@ func TestHandleUpdateAgentProfile_AppliesExplicitAutoApprove(t *testing.T) {
 func TestHandleUpdateAgentProfile_OmittedAutoApprovePreservesValue(t *testing.T) {
 	h, repo, _ := newAgentSettingsHandlers(t)
 	ctx := context.Background()
+	require.NoError(t, repo.CreateAgent(ctx, &settingsmodels.Agent{ID: "agent-1", Name: "codex-acp"}))
 	profile := &settingsmodels.AgentProfile{
 		AgentID: "agent-1", Name: "Profile", Model: "gpt-5", AutoApprove: true,
 	}

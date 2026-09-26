@@ -56,6 +56,18 @@ var ErrTaskSessionMismatch = errors.New("session does not belong to task")
 // terminal or otherwise changed state before final prompt admission.
 var ErrTaskSessionUnavailable = errors.New("session is unavailable for prompt admission")
 
+var ErrManagedAgentBindingConflict = errors.New("managed agent binding conflict")
+var ErrManagedAgentBindingNotFound = errors.New("managed agent binding not found")
+var ErrManagedAgentOperationConflict = errors.New("managed agent operation conflict")
+var ErrManagedAgentOperationNotFound = errors.New("managed agent operation not found")
+var ErrManagedAgentStreamNotFound = errors.New("managed agent stream not found")
+var ErrManagedAgentToolGrantNotFound = errors.New("managed agent tool grant not found")
+var ErrManagedAgentRevisionConflict = errors.New("managed agent revision conflict")
+var ErrManagedAgentLeaseHeld = errors.New("managed agent dispatch lease held")
+var ErrManagedAgentActiveOperation = errors.New("managed agent operation is still active")
+var ErrManagedAgentOperationTransition = errors.New("managed agent operation transition is invalid")
+var ErrManagedAgentStreamIdentityConflict = errors.New("managed agent stream identity conflict")
+
 // ErrRepositoryNotFound reports that no live repository row matched the supplied id.
 var ErrRepositoryNotFound = errors.New("repository not found")
 

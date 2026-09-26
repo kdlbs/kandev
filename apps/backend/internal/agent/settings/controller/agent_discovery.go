@@ -62,6 +62,13 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 		}
 		payload = append(payload, c.buildAvailableAgentDTO(ctx, ag, availability, now))
 	}
+	if c.cursorCloudEnabled && c.managedAgentAvailable != nil && c.managedAgentAvailable(ctx) {
+		if ag, ok := c.agentRegistry.Get(agents.CursorCloudAgentID); ok {
+			payload = append(payload, c.buildAvailableAgentDTO(ctx, ag, discovery.Availability{
+				Name: agents.CursorCloudAgentID, Available: true,
+			}, now))
+		}
+	}
 	tools := c.detectTools()
 	return &dto.ListAvailableAgentsResponse{Agents: payload, Tools: tools, Total: len(payload)}, nil
 }
@@ -76,6 +83,9 @@ func (c *Controller) HasAvailableAgents(ctx context.Context) (bool, error) {
 		if r.Available {
 			return true, nil
 		}
+	}
+	if c.cursorCloudEnabled && c.managedAgentAvailable != nil && c.managedAgentAvailable(ctx) {
+		return true, nil
 	}
 	return false, nil
 }

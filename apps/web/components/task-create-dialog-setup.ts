@@ -177,6 +177,8 @@ function useSubmitHandlersWiring({
     isEditMode,
     autoTitle,
     autopilot: fs.autopilot,
+    autoCreatePR: fs.autoCreatePR,
+    selectedExecutorType: computed.selectedExecutorType,
     isPassthroughProfile: computed.isPassthroughProfile,
     taskName: fs.taskName,
     workspaceId,

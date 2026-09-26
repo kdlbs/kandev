@@ -500,7 +500,8 @@ jobs:
           name: e2e-shard-manifests
           path: e2e-manifests
 
-      # Pinned to chromium + mobile-chrome so the dedicated `e2e-containers`
+      # Pinned by the normal shard manifest to chromium, mobile-chrome, and the
+      # dedicated mock-backed Cursor Cloud desktop/mobile projects so the `e2e-containers`
       # job below owns the real-Docker project (which covers both the Docker
       # executor and the SSH executor's sshd target). Without --project the
       # container-bound specs would run here too, fail seeding (Docker not

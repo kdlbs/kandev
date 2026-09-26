@@ -39,6 +39,7 @@ import {
   type DockerBuildSuccess,
 } from "@/components/settings/profile-edit/docker-sections";
 import { SpritesApiKeyCard } from "@/components/settings/profile-edit/sprites-api-key-card";
+import { CursorCloudConfigCard } from "@/components/settings/profile-edit/cursor-cloud-config-card";
 import { NetworkPoliciesCard } from "@/components/settings/profile-edit/sprites-sections";
 import {
   RemoteCredentialsCard,
@@ -51,6 +52,7 @@ import type { Executor, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 import { EXECUTOR_TYPE_MAP, executorTypeLabel, type ExecutorTypeInfo } from "./executor-types";
 import { SSHCreatePage } from "./ssh-create-page";
 import { KubernetesCreatePage } from "./kubernetes-create-page";
+import { buildProfileConfig } from "./create-profile-config";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
@@ -124,84 +126,6 @@ function CreateProfileHeader({ type, typeInfo }: { type: string; typeInfo: Execu
       <Separator />
     </>
   );
-}
-
-type BuildProfileConfigInput = {
-  isRemote: boolean;
-  isSprites: boolean;
-  isDocker: boolean;
-  isLocalDocker: boolean;
-  networkPolicyRules: NetworkPolicyRule[];
-  remoteCredentials: string[];
-  configBundleIds: string[];
-  agentEnvVars: Record<string, string | null>;
-  gitIdentityMode: GitIdentityMode;
-  localGitIdentity: GitIdentityState;
-  gitUserName: string;
-  gitUserEmail: string;
-  dockerfile: string;
-  imageTag: string;
-  allowUserNamespaces: boolean;
-};
-
-function buildProfileConfig(input: BuildProfileConfigInput): Record<string, string> | undefined {
-  const {
-    isRemote,
-    isSprites,
-    networkPolicyRules,
-    remoteCredentials,
-    configBundleIds,
-    agentEnvVars,
-    gitIdentityMode,
-    localGitIdentity,
-    gitUserName,
-    gitUserEmail,
-  } = input;
-  const config: Record<string, string> = {};
-  if (isSprites && networkPolicyRules.length > 0) {
-    config.sprites_network_policy_rules = JSON.stringify(networkPolicyRules);
-  }
-  if (isRemote && remoteCredentials.length > 0) {
-    config.remote_credentials = JSON.stringify(remoteCredentials);
-  }
-  if (isRemote && configBundleIds.length > 0) {
-    config.agent_config_bundles = JSON.stringify(configBundleIds);
-  }
-  const nonNullEnvVars = Object.fromEntries(
-    Object.entries(agentEnvVars).filter(([, v]) => v != null),
-  );
-  if (isRemote && Object.keys(nonNullEnvVars).length > 0) {
-    config.remote_auth_secrets = JSON.stringify(nonNullEnvVars);
-  }
-  if (isRemote) {
-    const effectiveName =
-      gitIdentityMode === "local" ? localGitIdentity.userName.trim() : gitUserName.trim();
-    const effectiveEmail =
-      gitIdentityMode === "local" ? localGitIdentity.userEmail.trim() : gitUserEmail.trim();
-    if (effectiveName) {
-      config.git_user_name = effectiveName;
-    }
-    if (effectiveEmail) {
-      config.git_user_email = effectiveEmail;
-    }
-  }
-  applyDockerCreateConfig(config, input);
-  return Object.keys(config).length > 0 ? config : undefined;
-}
-
-function applyDockerCreateConfig(
-  config: Record<string, string>,
-  input: BuildProfileConfigInput,
-): void {
-  if (input.isDocker && input.dockerfile.trim()) {
-    config.dockerfile = input.dockerfile;
-  }
-  if (input.isDocker && input.imageTag.trim()) {
-    config.image_tag = input.imageTag.trim();
-  }
-  if (input.isLocalDocker && input.allowUserNamespaces) {
-    config.allow_user_namespaces = "true";
-  }
 }
 
 function useDefaultScripts(executorType: string, setPrepareScript: (v: string) => void) {
@@ -300,6 +224,8 @@ function useCreateProfileFormState(executorType: ExecutorType) {
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows([]);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(null);
+  const [cursorCloudSecretId, setCursorCloudSecretId] = useState<string | null>(null);
+  const [cursorCloudCallbackUrl, setCursorCloudCallbackUrl] = useState("");
   const remoteAuth = useCreateRemoteAuthState();
   const [dockerfile, setDockerfile] = useState("");
   const [imageTag, setImageTag] = useState("");
@@ -356,6 +282,10 @@ function useCreateProfileFormState(executorType: ExecutorType) {
     placeholders,
     spritesSecretId,
     setSpritesSecretId,
+    cursorCloudSecretId,
+    setCursorCloudSecretId,
+    cursorCloudCallbackUrl,
+    setCursorCloudCallbackUrl,
     networkPolicyRules: remoteAuth.networkPolicyRules,
     setNetworkPolicyRules: remoteAuth.setNetworkPolicyRules,
     remoteCredentials: remoteAuth.remoteCredentials,
@@ -443,6 +373,17 @@ function CreateProfileSections({
           baselineSecretId={null}
           onSecretIdChange={form.setSpritesSecretId}
           secrets={secrets}
+        />
+      )}
+      {executorType === "cursor_cloud" && (
+        <CursorCloudConfigCard
+          secretId={form.cursorCloudSecretId}
+          baselineSecretId={null}
+          callbackUrl={form.cursorCloudCallbackUrl}
+          baselineCallbackUrl=""
+          secrets={secrets}
+          onSecretIdChange={form.setCursorCloudSecretId}
+          onCallbackUrlChange={form.setCursorCloudCallbackUrl}
         />
       )}
       {form.isDocker && (
@@ -574,6 +515,9 @@ function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormS
     name: form.name.trim(),
     mcp_policy: form.mcpPolicy || undefined,
     config: buildProfileConfig({
+      isCursorCloud: form.cursorCloudSecretId !== null || form.cursorCloudCallbackUrl.length > 0,
+      cursorCloudSecretId: form.cursorCloudSecretId,
+      cursorCloudCallbackUrl: form.cursorCloudCallbackUrl,
       isRemote: form.isRemote,
       isSprites: form.isSprites,
       isDocker: form.isDocker,

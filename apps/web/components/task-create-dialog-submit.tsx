@@ -298,6 +298,8 @@ export function useTaskSubmitHandlers({
   isEditMode,
   autoTitle = false,
   autopilot = false,
+  autoCreatePR = false,
+  selectedExecutorType,
   isPassthroughProfile,
   taskName,
   workspaceId,
@@ -355,6 +357,7 @@ export function useTaskSubmitHandlers({
   const setPlanMode = useAppStore((state) => state.setPlanMode);
   const applyAgentProfileRecentUse = useAppStore((state) => state.applyAgentProfileRecentUse);
   const isStartedEdit = computeIsTaskStarted(isEditMode, editingTask);
+  const cursorCloudAutoCreatePR = selectedExecutorType === "cursor_cloud" && autoCreatePR;
   const seededRunnerRef = useRef(seededExecutorProfileId);
   const confirmedRunnerRef = useRef<string | null>(seededExecutorProfileId);
   if (seededRunnerRef.current !== seededExecutorProfileId) {
@@ -522,6 +525,7 @@ export function useTaskSubmitHandlers({
         agentProfileId,
         executorId,
         attachments: toMessageAttachments(attachments),
+        autoCreatePR: cursorCloudAutoCreatePR,
       });
       onOpenChange(false);
       return;
@@ -536,6 +540,7 @@ export function useTaskSubmitHandlers({
         executorProfileId: executorProfileId || undefined,
         prompt: trimmedDescription,
         attachments: toMessageAttachments(attachments),
+        autoCreatePR: cursorCloudAutoCreatePR,
       });
       const response = await launchSession(request);
       if (response.session_id) {
@@ -569,6 +574,7 @@ export function useTaskSubmitHandlers({
     descriptionInputRef,
     setIsCreatingSession,
     applyAgentProfileRecentUse,
+    cursorCloudAutoCreatePR,
   ]);
 
   const performTaskUpdate = useCallback(async () => {
@@ -641,6 +647,7 @@ export function useTaskSubmitHandlers({
             executorId,
             executorProfileId: executorProfileId || undefined,
             prompt: trimmedDescription || "",
+            autoCreatePR: cursorCloudAutoCreatePR,
           });
           const response = await launchSession(request);
           taskSessionId = response?.session_id ?? null;
@@ -739,6 +746,7 @@ export function useTaskSubmitHandlers({
           trimmedTitle: opts.trimmedTitle,
           trimmedDescription: opts.trimmedDescription,
           autoTitle,
+          autoCreatePR: opts.withAgent ? cursorCloudAutoCreatePR : undefined,
           repositoriesPayload: getRepositoriesPayload(c),
           agentProfileId,
           executorId,
@@ -811,6 +819,7 @@ export function useTaskSubmitHandlers({
       isPassthroughProfile,
       parentTaskId,
       autopilot,
+      cursorCloudAutoCreatePR,
       noRepository,
       workspacePath,
       priority,
@@ -856,6 +865,7 @@ export function useTaskSubmitHandlers({
       executorProfileId: executorProfileId || undefined,
       prompt: trimmedDescription || "",
       planMode: true,
+      autoCreatePR: cursorCloudAutoCreatePR,
     });
     const response = await launchSession(request);
     const newSessionId = response?.session_id ?? null;

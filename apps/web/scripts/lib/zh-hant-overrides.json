@@ -29,6 +29,7 @@
         "failedToSaveRepository": "無法儲存此儲存庫"
       },
       "workflows": {
+        "openAgentSettings": "開啟代理程式設定",
         "profileSessionLifecycleIntro": "這些設定適用於工作流程更改代理程式設定檔的情況。",
         "profileSessionStartReuseDescription": "繼續使用此代理程式設定檔最近可用的工作階段。如果沒有可用工作階段，則開始新工作階段。"
       },
@@ -62,6 +63,7 @@
         "failedToSaveRepository": "無法儲存此儲存庫"
       },
       "workflows": {
+        "openAgentSettings": "開啟代理程式設定",
         "profileSessionLifecycleIntro": "這些設定適用於工作流程更改代理程式設定檔的情況。",
         "profileSessionStartReuseDescription": "繼續使用此代理程式設定檔最近可用的工作階段。如果沒有可用工作階段，則開始新工作階段。"
       },

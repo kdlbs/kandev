@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agent/hostutility"
@@ -90,6 +91,8 @@ type Controller struct {
 	runtimeUpdateStatusResolver RuntimeUpdateStatusResolver
 	runtimeUpdateStatusLookup   chan struct{}
 	dynamicAgentRoutingEnabled  bool
+	cursorCloudEnabled          bool
+	managedAgentAvailable       func(context.Context) bool
 }
 
 // SetDynamicAgentRoutingEnabled applies the authoritative runtime flag to the
@@ -97,6 +100,24 @@ type Controller struct {
 // all dynamic writes fail before they create or alter rows.
 func (c *Controller) SetDynamicAgentRoutingEnabled(enabled bool) {
 	c.dynamicAgentRoutingEnabled = enabled
+}
+
+// SetCursorCloudEnabled controls new Cursor Cloud profile configuration.
+func (c *Controller) SetCursorCloudEnabled(enabled bool) {
+	c.cursorCloudEnabled = enabled
+}
+
+// SetManagedAgentAvailability supplies the user-scoped saved-executor check
+// for managed agent discovery. It does not perform a live provider probe.
+func (c *Controller) SetManagedAgentAvailability(check func(context.Context) bool) {
+	c.managedAgentAvailable = check
+}
+
+func (c *Controller) managedAgentConfigurationAllowed(ctx context.Context, agentName string) bool {
+	if agentName != agents.CursorCloudAgentID {
+		return true
+	}
+	return c.cursorCloudEnabled && c.managedAgentAvailable != nil && c.managedAgentAvailable(ctx)
 }
 
 // SetSecretStore wires the metadata-only validator used by shared agent

@@ -3198,9 +3198,26 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return err
 	}
+	if observers, ok := s.agentManager.(interface {
+		StartManagedRuntimeObservers(context.Context) error
+		StopManagedRuntimeObservers()
+	}); ok {
+		if err := observers.StartManagedRuntimeObservers(ctx); err != nil {
+			if stopErr := s.watcher.Stop(); stopErr != nil {
+				s.logger.Warn("failed to stop watcher after managed-runtime recovery failure", zap.Error(stopErr))
+			}
+			s.mu.Lock()
+			s.running = false
+			s.mu.Unlock()
+			return err
+		}
+	}
 
 	// Start the scheduler processing loop
 	if err := s.scheduler.Start(ctx); err != nil {
+		if observers, ok := s.agentManager.(interface{ StopManagedRuntimeObservers() }); ok {
+			observers.StopManagedRuntimeObservers()
+		}
 		if stopErr := s.watcher.Stop(); stopErr != nil {
 			s.logger.Warn("failed to stop watcher after scheduler start failure", zap.Error(stopErr))
 		}
@@ -3317,6 +3334,9 @@ func (s *Service) Stop() error {
 	s.mu.Unlock()
 
 	s.logger.Info("stopping orchestrator service")
+	if observers, ok := s.agentManager.(interface{ StopManagedRuntimeObservers() }); ok {
+		observers.StopManagedRuntimeObservers()
+	}
 	// Stop owns every in-flight resume attempt. Its detached request context
 	// must not let startup callbacks outlive the service generation.
 	s.cancelResumeAttempts()
@@ -3562,6 +3582,13 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		s.logger.Warn("failed to load session for reconciliation; preserving executor record",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return
+	}
+
+	if s.managedAgentOperationActive(ctx, sessionID) {
+		s.logger.Info("preserving active managed remote session during startup reconciliation",
+			zap.String("task_id", running.TaskID),
+			zap.String("session_id", sessionID))
 		return
 	}
 

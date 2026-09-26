@@ -46,6 +46,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		streamGuard = s.lockCancelInFlightGuard(payload.SessionID)
 		defer streamGuard.release()
 	}
+	if !s.shouldProcessManagedCompletion(ctx, payload.ManagedAgentOperationID) {
+		return
+	}
 	// Cancellation owns the yielded interval between the guarded preparation
 	// and lifecycle wait. Terminal frames from that captured execution/prompt
 	// remain admissible so the lifecycle manager can drain them; frames from a
@@ -182,7 +185,14 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.handleToolUpdateEvent(ctx, payload)
 
 	case agentEventComplete:
-		s.handleCompleteStreamEventWithGuardRelease(ctx, payload, streamGuard)
+		if s.handleCompleteStreamEventWithGuardRelease(ctx, payload, streamGuard) && payload.ManagedAgentOperationID != "" {
+			if delivery, ok := s.agentManager.(managedAgentCompletionDelivery); ok {
+				if err := delivery.AcknowledgeManagedAgentCompletion(ctx, payload.ManagedAgentOperationID); err != nil {
+					s.logger.Warn("failed to acknowledge managed-agent completion",
+						zap.String("operation_id", payload.ManagedAgentOperationID), zap.Error(err))
+				}
+			}
+		}
 
 	case agentEventError:
 		s.handleAgentErrorEvent(ctx, payload)
@@ -259,6 +269,28 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// human-driven turn where the session already left WAITING_FOR_INPUT.
 		s.applyParkedTransition(ctx, taskID, sessionID, false, "", false, models.TaskSessionStateWaitingForInput)
 	}
+}
+
+type managedAgentCompletionDelivery interface {
+	ManagedAgentCompletionPending(context.Context, string) (bool, error)
+	AcknowledgeManagedAgentCompletion(context.Context, string) error
+}
+
+func (s *Service) shouldProcessManagedCompletion(ctx context.Context, operationID string) bool {
+	if operationID == "" {
+		return true
+	}
+	delivery, ok := s.agentManager.(managedAgentCompletionDelivery)
+	if !ok {
+		return true
+	}
+	pending, err := delivery.ManagedAgentCompletionPending(ctx, operationID)
+	if err != nil {
+		s.logger.Warn("failed to read managed-agent completion receipt",
+			zap.String("operation_id", operationID), zap.Error(err))
+		return false
+	}
+	return pending
 }
 
 func (s *Service) responseAttemptResetOwnsCurrentPrompt(
@@ -2934,7 +2966,7 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 	ctx context.Context,
 	payload *lifecycle.AgentStreamEventPayload,
 	streamGuard *lockedCancelInFlightGuard,
-) {
+) bool {
 	s.logger.Debug("handling complete stream event",
 		zap.String("task_id", payload.TaskID),
 		zap.String("session_id", payload.SessionID))
@@ -2943,7 +2975,7 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 	// Load session once up front — used by storeResumeToken, state check, and setSessionWaitingForInput.
 	session, ok := s.loadCompleteEventSession(ctx, payload)
 	if !ok {
-		return
+		return false
 	}
 
 	// Update resume token with latest ACP session ID and message UUID on every turn.
@@ -2963,7 +2995,7 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 
 	if terminalCompleteStream {
 		s.flushTerminalCompleteStream(ctx, payload, session, terminalMarker)
-		return
+		return true
 	}
 
 	s.persistCompleteStreamOutput(ctx, payload, session, completionTurnID)
@@ -3002,13 +3034,13 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 
 	// Office sessions park at IDLE between scheduler runs; cancelled turns skip that path so the session stays promptable.
 	if s.reconcileCompleteEventRuntime(ctx, payload, session, completionTurnID) {
-		return
+		return true
 	}
 
 	// READY events own workflow transitions and queued prompt execution.
 	// If we're still RUNNING here, avoid racing READY by forcing WAITING/REVIEW.
 	if s.deferCompleteEventStateTransition(payload, session) {
-		return
+		return true
 	}
 
 	// Positive path: this complete event owns the running→WAITING_FOR_INPUT
@@ -3025,6 +3057,7 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 	// task still flips to WAITING — only subtasks (ParentID non-empty)
 	// get the guard.
 	s.setSessionWaitingForInputAfterComplete(ctx, payload, session, streamGuard)
+	return true
 }
 
 func (s *Service) storeCompleteEventResumeToken(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
@@ -3137,6 +3170,9 @@ func (s *Service) deferCompleteEventStateTransition(
 	if session == nil || session.State != models.TaskSessionStateRunning {
 		return false
 	}
+	if isRemoteTerminalCompletion(payload) {
+		return false
+	}
 	// Deferring the running→waiting transition to a READY event. If no READY
 	// follows, the session stays RUNNING and the chat UI keeps showing the
 	// agent as working even though the turn already completed. This is the
@@ -3146,6 +3182,18 @@ func (s *Service) deferCompleteEventStateTransition(
 		zap.String("task_id", payload.TaskID),
 		zap.String("session_id", payload.SessionID))
 	return true
+}
+
+func isRemoteTerminalCompletion(payload *lifecycle.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil {
+		return false
+	}
+	data, ok := payload.Data.Data.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	terminal, _ := data["remote_terminal"].(bool)
+	return terminal
 }
 
 func (s *Service) setSessionWaitingForInputAfterComplete(

@@ -283,6 +283,8 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     taskName: "Task title",
     autopilot: false,
     setAutopilot: () => undefined,
+    autoCreatePR: false,
+    setAutoCreatePR: () => undefined,
     priority: "medium",
     setPriority: () => undefined,
     setTaskName: () => undefined,

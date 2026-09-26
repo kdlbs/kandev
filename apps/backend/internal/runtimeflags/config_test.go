@@ -59,6 +59,25 @@ func TestOptionsFromConfigParsesUppercaseTruthyEnv(t *testing.T) {
 	}
 }
 
+func TestCursorCloudFlagConfigRoundTrip(t *testing.T) {
+	const envVar = "KANDEV_FEATURES_CURSOR_CLOUD"
+	preserveEnv(t, envVar)
+	t.Setenv(envVar, "TRUE")
+	if !OptionsFromConfig(&config.Config{}).EnvValues[envVar] {
+		t.Fatalf("%s TRUE parsed false", envVar)
+	}
+
+	cfg := &config.Config{}
+	ApplyStatesToConfig(cfg, []RuntimeFlagState{{Key: "features.cursorCloud", EffectiveValue: true}})
+	if !cfg.Features.CursorCloud || !ValuesFromConfig(cfg)["features.cursorCloud"] {
+		t.Fatal("features.cursorCloud did not round-trip through typed config")
+	}
+	ApplyStatesToConfig(cfg, []RuntimeFlagState{{Key: "features.cursorCloud", EffectiveValue: false}})
+	if cfg.Features.CursorCloud || ValuesFromConfig(cfg)["features.cursorCloud"] {
+		t.Fatal("features.cursorCloud did not clear through typed config")
+	}
+}
+
 func TestOptionsFromConfigIgnoresRetiredAppStatusBarEnv(t *testing.T) {
 	preserveEnv(t, retiredAppStatusBarEnvVar)
 	t.Setenv(retiredAppStatusBarEnvVar, "TRUE")

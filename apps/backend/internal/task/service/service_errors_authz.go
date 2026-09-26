@@ -19,6 +19,10 @@ import (
 // am looking at does not exist?").
 var ErrForbidden = errors.New("insufficient permissions for this action")
 
+// ErrExecutionCapabilityUnavailable marks a session action that the selected
+// executor cannot perform, independent of the caller's workspace permissions.
+var ErrExecutionCapabilityUnavailable = errors.New("execution capability unavailable")
+
 // IsForbidden reports whether an error is the scope-denied sentinel.
 func IsForbidden(err error) bool { return errors.Is(err, ErrForbidden) }
 

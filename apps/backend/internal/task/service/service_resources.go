@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/securityutil"
+	"github.com/kandev/kandev/internal/cursorcloud"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -1754,6 +1755,7 @@ func (s *Service) ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []stri
 // Executor operations
 
 var ErrKubernetesAdminRequired = errors.New("administrator identity required for Kubernetes settings")
+var ErrCursorCloudDisabled = errors.New("cursor cloud is disabled")
 
 func requireKubernetesAdmin(ctx context.Context) error {
 	identity, ok := authn.IdentityFromContext(ctx)
@@ -1784,6 +1786,9 @@ func validateKubernetesProfileConfig(config map[string]string) error {
 }
 
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
+	if req.Type == models.ExecutorTypeCursorCloud && !s.cursorCloudEnabled {
+		return nil, ErrCursorCloudDisabled
+	}
 	if req.Type == models.ExecutorTypeKubernetes {
 		if err := requireKubernetesAdmin(ctx); err != nil {
 			return nil, err
@@ -1831,6 +1836,9 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	targetType := executor.Type
 	if req.Type != nil {
 		targetType = *req.Type
+	}
+	if targetType == models.ExecutorTypeCursorCloud && !s.cursorCloudEnabled {
+		return nil, ErrCursorCloudDisabled
 	}
 	if executor.Type == models.ExecutorTypeKubernetes || targetType == models.ExecutorTypeKubernetes {
 		if err := requireKubernetesAdmin(ctx); err != nil {
@@ -2003,6 +2011,11 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 	if err != nil {
 		return nil, fmt.Errorf("executor not found: %w", err)
 	}
+	if executor.Type == models.ExecutorTypeCursorCloud {
+		if err := s.validateCursorCloudProfileConfig(ctx, req.Config); err != nil {
+			return nil, err
+		}
+	}
 	if executor.Type == models.ExecutorTypeKubernetes {
 		if err := requireKubernetesAdmin(ctx); err != nil {
 			return nil, err
@@ -2058,6 +2071,15 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 			return nil, err
 		}
 	}
+	if executor.Type == models.ExecutorTypeCursorCloud {
+		config := profile.Config
+		if req.Config != nil {
+			config = req.Config
+		}
+		if err := s.validateCursorCloudProfileConfig(ctx, config); err != nil {
+			return nil, err
+		}
+	}
 	if req.Name != nil {
 		profile.Name = *req.Name
 	}
@@ -2093,6 +2115,23 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	}
 	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileUpdated, profile)
 	return profile, nil
+}
+
+func (s *Service) validateCursorCloudProfileConfig(ctx context.Context, config map[string]string) error {
+	if !s.cursorCloudEnabled {
+		return ErrCursorCloudDisabled
+	}
+	secretID := strings.TrimSpace(config[cursorcloud.ExecutorConfigSecretID])
+	if secretID == "" || s.secretStore == nil {
+		return fmt.Errorf("cursor cloud API key secret reference is required")
+	}
+	if err := secrets.ValidateGlobalReference(ctx, s.secretStore, secretID); err != nil {
+		return fmt.Errorf("cursor cloud API key must reference an accessible global secret")
+	}
+	if err := cursorcloud.ValidateCallbackURL(config[cursorcloud.ExecutorConfigCallbackURL]); err != nil {
+		return fmt.Errorf("invalid Cursor Cloud callback URL")
+	}
+	return nil
 }
 
 func (s *Service) validateGlobalProfileEnvRefs(ctx context.Context, envVars []models.ProfileEnvVar) error {

@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/archivecascade"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"go.uber.org/zap"
 )
 
@@ -107,7 +108,7 @@ func (s *Service) sweepTaskSessions(
 		if session == nil {
 			continue
 		}
-		if _, live := liveSessions[session.ID]; !live {
+		if !hasLiveSession(liveSessions, session.ID) {
 			orphaned = append(orphaned, session)
 		}
 	}
@@ -242,7 +243,27 @@ func (s *Service) liveSessionSet(taskID string) map[string]struct{} {
 			live[id] = struct{}{}
 		}
 	}
+	if managed, ok := s.tasks.(repository.ManagedAgentRepository); ok {
+		bindings, err := managed.ListActiveManagedAgentBindings(context.Background())
+		if err != nil {
+			live["*"] = struct{}{}
+			return live
+		}
+		for _, binding := range bindings {
+			if binding != nil && binding.TaskID == taskID && binding.SessionID != "" {
+				live[binding.SessionID] = struct{}{}
+			}
+		}
+	}
 	return live
+}
+
+func hasLiveSession(live map[string]struct{}, sessionID string) bool {
+	if _, unknown := live["*"]; unknown {
+		return true
+	}
+	_, ok := live[sessionID]
+	return ok
 }
 
 // stallPayload field keys (task_id / workspace_id exist as constants for
@@ -402,7 +423,7 @@ func (s *Service) healOrphanedSessions(
 		if !time.Now().Before(deadline) {
 			return
 		}
-		if _, live := s.liveSessionSet(task.ID)[candidate.SessionID]; live {
+		if hasLiveSession(s.liveSessionSet(task.ID), candidate.SessionID) {
 			continue
 		}
 		recovered, err := repo.RecoverTaskSessionByCandidate(healCtx, candidate, time.Time{})

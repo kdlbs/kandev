@@ -640,6 +640,14 @@ export class ApiClient {
     return this.request("GET", "/api/v1/agents/available");
   }
 
+  async createAgent(name: string): Promise<Agent> {
+    const agent = await this.request<Agent>("POST", "/api/v1/agents", { name });
+    return {
+      ...agent,
+      profiles: (agent.profiles ?? []).map(normalizeAgentProfile),
+    };
+  }
+
   /** Removes a custom agent by slug, so a spec that creates one leaves the
    * worker's agent list as it found it. Missing is not an error. */
   async deleteCustomAgentByName(name: string): Promise<void> {
@@ -1196,6 +1204,7 @@ export class ApiClient {
       id: string;
       name: string;
       type: string;
+      status?: string;
       profiles?: Array<{ id: string; name: string }>;
     }>;
   }> {
@@ -3707,7 +3716,7 @@ export class ApiClient {
 
   async updateExecutor(
     executorId: string,
-    patch: { name?: string; config?: Record<string, string> },
+    patch: { name?: string; config?: Record<string, string>; status?: "active" | "disabled" },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/executors/${executorId}`, patch);
   }

@@ -89,6 +89,7 @@ type LaunchSessionRequest struct {
 	LaunchWorkspace   bool   `json:"launch_workspace,omitempty"`
 	SkipMessageRecord bool   `json:"skip_message_record,omitempty"`
 	AutoStart         bool   `json:"auto_start,omitempty"`
+	AutoCreatePR      bool   `json:"auto_create_pr,omitempty"`
 	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
 	// agent launch, even for passthrough profiles (whose prepare would normally
 	// be eagerly upgraded so the PTY exists). It backs the session.ensure
@@ -440,7 +441,7 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
-		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin},
+		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin, AutoCreatePR: req.AutoCreatePR},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {
 		return s.deferredLaunchResponse(ctx, req, "")
@@ -501,9 +502,10 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	}
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
-	execution, err := s.StartCreatedSession(
+	execution, err := s.startCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,
-		req.Prompt, req.SkipMessageRecord, req.PlanMode, autoStart, req.Attachments, nil,
+		req.Prompt, req.SkipMessageRecord, req.PlanMode, autoStart, req.Attachments, nil, "",
+		startCreatedSessionOptions{AutoCreatePR: req.AutoCreatePR},
 	)
 	if err != nil {
 		return nil, err

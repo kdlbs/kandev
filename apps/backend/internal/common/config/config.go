@@ -488,6 +488,11 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
+	// CursorCloud gates managed Cursor Cloud configuration, discovery, and new
+	// dispatch. Existing bound conversations retain the narrow observation and
+	// cancellation drain path while the feature is disabled.
+	CursorCloud bool `mapstructure:"cursor_cloud" json:"cursorCloud"`
+
 	// LSPBrowserContinuity gates runtime-owned language-server leases that stay
 	// connected across browser attachment loss. Off in every embedded profile.
 	LSPBrowserContinuity bool `mapstructure:"lsp_browser_continuity" json:"lspBrowserContinuity"`

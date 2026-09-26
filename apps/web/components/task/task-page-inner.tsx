@@ -48,6 +48,7 @@ import type {
 import { useTranslation } from "react-i18next";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
+import { CursorCloudTaskSurface } from "@/components/task/cursor-cloud-task-surface";
 
 export type TaskPageInnerProps = {
   task: Task | null;
@@ -83,6 +84,11 @@ type RemoteExecutorStatus = {
   remote_created_at?: string | null;
   remote_checked_at?: string | null;
   remote_status_error?: string | null;
+  remote_repository_id?: string | null;
+  remote_branch?: string | null;
+  remote_pull_request_url?: string | null;
+  remote_agent_url?: string | null;
+  remote_history_gap?: boolean;
   capabilities?: {
     embedded_vscode?: boolean;
   };
@@ -102,6 +108,17 @@ function resolveRemoteExecutor(status?: RemoteExecutorStatus | null) {
     remoteCreatedAt: toNullable(status?.remote_created_at),
     remoteCheckedAt: toNullable(status?.remote_checked_at),
     remoteStatusError: toNullable(status?.remote_status_error),
+    remoteHistoryGap: status?.remote_history_gap ?? false,
+    ...resolveRemoteExecutorResults(status),
+  };
+}
+
+function resolveRemoteExecutorResults(status?: RemoteExecutorStatus | null) {
+  return {
+    remoteRepositoryID: toNullable(status?.remote_repository_id),
+    remoteBranch: toNullable(status?.remote_branch),
+    remotePullRequestURL: toNullable(status?.remote_pull_request_url),
+    remoteAgentURL: toNullable(status?.remote_agent_url),
   };
 }
 
@@ -363,7 +380,56 @@ function useTaskPageDerivedProps({
     taskCanvasesStatus,
   });
 
-  return { taskProps, debugEntries, topBarProps, layoutProps };
+  return { taskProps, debugEntries, topBarProps, layoutProps, remote };
+}
+
+function CursorCloudTaskPage({
+  props,
+  task,
+  archivedValue,
+  sessionId,
+  remote,
+  repositoryLabel,
+}: {
+  props: TaskPageInnerProps;
+  task: Task;
+  archivedValue: TaskPageInnerProps["archivedValue"];
+  sessionId: string | null;
+  remote: ReturnType<typeof resolveRemoteExecutor>;
+  repositoryLabel: string | null;
+}) {
+  return (
+    <TooltipProvider>
+      <TaskArchivedProvider value={archivedValue}>
+        <TaskLaunchErrorProvider
+          value={{
+            taskId: task.id,
+            workspaceId: task.workspace_id,
+            statusSummary: task.status_summary,
+            repositories: task.repositories,
+            automaticRecovery: props.resumption,
+          }}
+        >
+          <CursorCloudTaskSurface
+            task={task}
+            sessionId={sessionId}
+            status={{
+              remote_state: remote.remoteState,
+              remote_status_error: remote.remoteStatusError,
+              remote_repository_id: remote.remoteRepositoryID,
+              remote_branch: remote.remoteBranch,
+              remote_pull_request_url: remote.remotePullRequestURL,
+              remote_agent_url: remote.remoteAgentURL,
+              remote_history_gap: remote.remoteHistoryGap,
+            }}
+            repositoryLabel={repositoryLabel}
+            connectionStatus={props.connectionStatus}
+            resumption={props.resumption}
+          />
+        </TaskLaunchErrorProvider>
+      </TaskArchivedProvider>
+    </TooltipProvider>
+  );
 }
 
 export function TaskPageInner(props: TaskPageInnerProps) {
@@ -375,8 +441,26 @@ export function TaskPageInner(props: TaskPageInnerProps) {
   useEffect(() => {
     setTaskMoveError(null);
   }, [task?.id]);
-  const { taskProps, debugEntries, topBarProps, layoutProps } = useTaskPageDerivedProps(props);
+  const { taskProps, debugEntries, topBarProps, layoutProps, remote } =
+    useTaskPageDerivedProps(props);
   if (!task) return null;
+
+  const isCursorCloudTask =
+    task.primary_executor_type === "cursor_cloud" ||
+    props.resumption.sessionStatus?.executor_type === "cursor_cloud";
+
+  if (isCursorCloudTask) {
+    return (
+      <CursorCloudTaskPage
+        props={props}
+        task={task}
+        archivedValue={archivedValue}
+        sessionId={effectiveSessionId}
+        remote={remote}
+        repositoryLabel={topBarProps.repositoryLabel}
+      />
+    );
+  }
 
   return (
     <TooltipProvider>

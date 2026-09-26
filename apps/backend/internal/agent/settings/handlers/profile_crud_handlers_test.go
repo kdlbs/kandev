@@ -220,6 +220,7 @@ func TestUpdateProfileEndpoint(t *testing.T) {
 
 	t.Run("disabling a profile a utility agent uses is 409 unless forced", func(t *testing.T) {
 		repo := newFakeSettingsRepo()
+		seedAgent(repo, "agent-1", "claude_code", false)
 		seedProfile(repo, "profile-1", "agent-1", "Original", "")
 		hub := &duplicateHub{}
 		router, ctrl, _ := newSettingsHarness(t, repo, hub)
@@ -418,6 +419,7 @@ func TestProfileWriteStoreFailuresAre500(t *testing.T) {
 func TestProfileBroadcastIsWorkspaceScoped(t *testing.T) {
 	t.Run("workspace-aware hub receives it on the workspace channel only", func(t *testing.T) {
 		repo := newFakeSettingsRepo()
+		seedAgent(repo, "agent-1", "claude_code", false)
 		seedProfile(repo, "profile-1", "agent-1", "Office", "ws-7")
 		hub := newWorkspaceDuplicateHub()
 		router := newSettingsRouter(t, repo, hub)
@@ -437,6 +439,7 @@ func TestProfileBroadcastIsWorkspaceScoped(t *testing.T) {
 
 	t.Run("hub without workspace routing drops the event fail-closed", func(t *testing.T) {
 		repo := newFakeSettingsRepo()
+		seedAgent(repo, "agent-1", "claude_code", false)
 		seedProfile(repo, "profile-1", "agent-1", "Office", "ws-7")
 		hub := &duplicateHub{}
 		router := newSettingsRouter(t, repo, hub)

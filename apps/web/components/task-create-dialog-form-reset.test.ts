@@ -23,6 +23,7 @@ function makeResetters(): FormResetters {
     setWorkspacePath: vi.fn(),
     setPreferLocalExecutor: vi.fn(),
     setAutopilot: vi.fn(),
+    setAutoCreatePR: vi.fn(),
     setPriority: vi.fn(),
     setGitHubUrlError: vi.fn(),
     setFreshBranchEnabled: vi.fn(),

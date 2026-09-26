@@ -236,6 +236,23 @@ interactive credential flow when a secret is required.
 
 Model, mode, command, and configuration choices are probed from the locally installed CLI and cached. The managed **Update agent** action refreshes them automatically; after other CLI changes, refresh the profile manually. Probe status can report **auth required**, **not installed**, **not configured**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
+### Cursor Cloud agent profiles
+
+The **Cursor Cloud** agent type appears after your workspace has a saved,
+configured Cursor Cloud executor profile. An unsaved or incomplete executor
+does not make the agent type available. A temporary API connection failure does
+not hide it, and removing the last configured executor does not delete its
+saved agent profiles or existing task conversations. See
+[Cursor Cloud executor setup](executors.md#cursor-cloud) for the API key,
+callback, billing, and rollout requirements.
+
+Open **Settings > Agents > Cursor Cloud** and create an agent profile. The
+model selector uses the catalog from the saved Cursor Cloud executor profiles
+you can access. Test the executor connection and save its profile before
+selecting a model. Each task keeps its selected executor, model, repository,
+and starting ref for that cloud conversation. Changing an agent profile does
+not change an existing conversation.
+
 ### Use an OpenAI-compatible provider
 
 Open the **Provider** section in a profile that supports this feature. Select

@@ -20,5 +20,6 @@ export type ExecutorType =
   | "ssh"
   | "remote_docker"
   | "remote_vps"
+  | "cursor_cloud"
   | "k8s"
   | "worktree";

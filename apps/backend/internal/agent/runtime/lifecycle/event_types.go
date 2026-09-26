@@ -287,21 +287,22 @@ type AgentStreamEventData struct {
 // for execution-scoped logic (e.g., resume-token CAS that must reject writes from
 // a defunct execution).
 type AgentStreamEventPayload struct {
-	Type           string                `json:"type"` // Always "agent/event"
-	Timestamp      string                `json:"timestamp"`
-	AgentID        string                `json:"agent_id"`             // Historical: execution.ID. Prefer ExecutionID.
-	ExecutionID    string                `json:"execution_id"`         // Lifecycle execution ID; stable across the payload's lifetime.
-	AttemptID      string                `json:"attempt_id,omitempty"` // Immutable recovery attempt that owns this callback.
-	OwnerKind      ExecutionOwnerKind    `json:"owner_kind,omitempty"`
-	WorkspaceID    string                `json:"workspace_id,omitempty"`
-	RunID          string                `json:"run_id,omitempty"`
-	RunSessionID   string                `json:"run_session_id,omitempty"`
-	RunAttempt     int                   `json:"run_attempt,omitempty"`
-	AgentProfileID string                `json:"agent_profile_id,omitempty"` // Stable Office identity (execution.officeProfileID()); the agent that is actually running, not the task's assignee.
-	AgentType      string                `json:"agent_type,omitempty"`
-	TaskID         string                `json:"task_id"`
-	SessionID      string                `json:"session_id"` // Task session ID
-	Data           *AgentStreamEventData `json:"data"`
+	Type                    string                `json:"type"` // Always "agent/event"
+	Timestamp               string                `json:"timestamp"`
+	AgentID                 string                `json:"agent_id"`             // Historical: execution.ID. Prefer ExecutionID.
+	ExecutionID             string                `json:"execution_id"`         // Lifecycle execution ID; stable across the payload's lifetime.
+	AttemptID               string                `json:"attempt_id,omitempty"` // Immutable recovery attempt that owns this callback.
+	OwnerKind               ExecutionOwnerKind    `json:"owner_kind,omitempty"`
+	WorkspaceID             string                `json:"workspace_id,omitempty"`
+	RunID                   string                `json:"run_id,omitempty"`
+	RunSessionID            string                `json:"run_session_id,omitempty"`
+	RunAttempt              int                   `json:"run_attempt,omitempty"`
+	AgentProfileID          string                `json:"agent_profile_id,omitempty"` // Stable Office identity (execution.officeProfileID()); the agent that is actually running, not the task's assignee.
+	AgentType               string                `json:"agent_type,omitempty"`
+	TaskID                  string                `json:"task_id"`
+	SessionID               string                `json:"session_id"` // Task session ID
+	ManagedAgentOperationID string                `json:"managed_agent_operation_id,omitempty"`
+	Data                    *AgentStreamEventData `json:"data"`
 }
 
 // GitEventType discriminates the type of git event

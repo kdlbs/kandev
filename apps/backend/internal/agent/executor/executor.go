@@ -20,6 +20,7 @@ const (
 	NameSprites           = agentruntime.RuntimeSprites
 	NameSSH               = agentruntime.RuntimeSSH
 	NameKubernetes        = agentruntime.RuntimeKubernetes
+	NameCursorCloud       = agentruntime.RuntimeCursorCloud
 )
 
 // ExecutorTypeToBackend maps an ExecutorType to its corresponding executor Name.
@@ -41,6 +42,8 @@ func ExecutorTypeToBackend(execType models.ExecutorType) Name {
 		return NameKubernetes
 	case models.ExecutorTypeMockRemote:
 		return NameStandalone
+	case models.ExecutorTypeCursorCloud:
+		return NameCursorCloud
 	default:
 		return NameStandalone
 	}

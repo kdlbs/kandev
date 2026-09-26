@@ -62,6 +62,9 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if err != nil {
 		return nil, err
 	}
+	if !c.managedAgentConfigurationAllowed(ctx, agent.Name) {
+		return nil, fmt.Errorf("managed agent configuration is unavailable")
+	}
 	agentConfig, agOk := c.agentRegistry.Get(agent.Name)
 	if !agOk {
 		return nil, fmt.Errorf("unknown agent: %s", agent.Name)
@@ -386,6 +389,13 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	if err != nil {
 		return nil, ErrAgentProfileNotFound
 	}
+	agent, err := c.repo.GetAgent(ctx, profile.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	if !c.managedAgentConfigurationAllowed(ctx, agent.Name) {
+		return nil, fmt.Errorf("managed agent configuration is unavailable")
+	}
 	isDynamic := profileKind(profile) == dynamicProfileKind
 	if isDynamic && !c.dynamicAgentRoutingEnabled {
 		return nil, ErrDynamicAgentRoutingDisabled
@@ -637,6 +647,13 @@ func (c *Controller) DuplicateProfile(ctx context.Context, req DuplicateProfileR
 	// 404 keeps the existence of office profiles hidden.
 	if source.WorkspaceID != "" {
 		return nil, ErrAgentProfileNotFound
+	}
+	agent, err := c.repo.GetAgent(ctx, source.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	if !c.managedAgentConfigurationAllowed(ctx, agent.Name) {
+		return nil, fmt.Errorf("managed agent configuration is unavailable")
 	}
 	if profileKind(source) == dynamicProfileKind {
 		return nil, ErrDynamicProfileDuplicationUnsupported

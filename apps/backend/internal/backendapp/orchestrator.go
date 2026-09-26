@@ -78,13 +78,21 @@ func provideOrchestrator(
 	settingsStore *systemsettings.Store,
 	sessionCapacityEnvironment sessioncapacity.Environment,
 	trackers ...*requiredstores.Tracker,
-) (*orchestrator.Service, *messageCreatorAdapter, error) {
+) (*orchestrator.Service, *messageCreatorAdapter, *cursorCloudAgentManager, error) {
 	if lifecycleMgr == nil {
-		return nil, nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
+		return nil, nil, nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
 	}
 
 	taskRepoAdapter := &taskRepositoryAdapter{repo: taskRepo, svc: taskSvc}
-	agentManagerClient := newLifecycleAdapter(lifecycleMgr, agentRegistry, log)
+	lifecycleClient := newLifecycleAdapter(lifecycleMgr, agentRegistry, log)
+	cursorCloudEnabled := cfg != nil && cfg.Features.CursorCloud
+	agentManagerClient, err := newCursorCloudAgentManager(
+		lifecycleClient, taskRepo, taskSvc, githubSvc, secretStore,
+		func() bool { return cursorCloudEnabled },
+	)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("initialize Cursor Cloud runtime: %w", err)
+	}
 
 	serviceCfg := orchestrator.DefaultServiceConfig()
 	serviceCfg.ClaudeBackgroundPromptHandoff =
@@ -97,7 +105,7 @@ func provideOrchestrator(
 		settingsStore, sessionCapacityEnvironment, log,
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolve session capacity settings: %w", err)
+		return nil, nil, nil, fmt.Errorf("resolve session capacity settings: %w", err)
 	}
 	serviceCfg.SessionCapacity = effectiveSessionCapacity(sessionCapacityResolution)
 	log.Info("Session capacity initialized",
@@ -119,11 +127,11 @@ func provideOrchestrator(
 	queueRepo, err := messagequeue.NewSQLiteRepository(pool.Writer(), pool.Reader())
 	if len(trackers) > 0 && trackers[0] != nil {
 		if recordErr := recordRequiredStore(ctx, trackers[0], "message-queue", err); recordErr != nil {
-			return nil, nil, fmt.Errorf("message queue store: %w", recordErr)
+			return nil, nil, nil, fmt.Errorf("message queue store: %w", recordErr)
 		}
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
+		return nil, nil, nil, fmt.Errorf("init message queue repo: %w", err)
 	}
 	queueResolution := resolveQueueSettingsWithStore(settingsStore, pool, log, queueConfiguration(cfg))
 	queueSettings := queueResolution.Effective
@@ -142,7 +150,7 @@ func provideOrchestrator(
 			taskSvc.AttachmentRepository(), cfg.ResolvedHomeDir(), taskSvc.AuthorizeWorkspaceAccess, log,
 		)
 		if attachmentErr != nil {
-			return nil, nil, fmt.Errorf("initialize prompt attachment storage: %w", attachmentErr)
+			return nil, nil, nil, fmt.Errorf("initialize prompt attachment storage: %w", attachmentErr)
 		}
 		taskSvc.SetAttachmentService(attachmentSvc)
 	}
@@ -327,7 +335,7 @@ func provideOrchestrator(
 	// lifecycle and worktree packages remain task-agnostic.
 	orchestratorSvc.SetTaskRepositoryBaseBranchUpdater(&repoLocalPathUpdater{svc: taskSvc})
 
-	return orchestratorSvc, msgCreator, nil
+	return orchestratorSvc, msgCreator, agentManagerClient, nil
 }
 
 type githubCredentialPolicyService interface {

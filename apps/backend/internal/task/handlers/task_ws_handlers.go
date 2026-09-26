@@ -105,6 +105,7 @@ type wsCreateTaskRequest struct {
 	ExecutorID             string                    `json:"executor_id,omitempty"`
 	ExecutorProfileID      string                    `json:"executor_profile_id,omitempty"`
 	PlanMode               bool                      `json:"plan_mode,omitempty"`
+	AutoCreatePR           bool                      `json:"auto_create_pr,omitempty"`
 	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
 	ParentID               string                    `json:"parent_id,omitempty"`
 }
@@ -178,8 +179,9 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		deferredLaunch = map[string]interface{}{
 			"intent": "start", "agent_profile_id": req.AgentProfileID, "executor_id": req.ExecutorID,
 			"executor_profile_id": req.ExecutorProfileID, "prompt": description,
-			"plan_mode":   req.PlanMode,
-			"attachments": req.Attachments,
+			"plan_mode":      req.PlanMode,
+			"auto_create_pr": req.AutoCreatePR,
+			"attachments":    req.Attachments,
 		}
 	}
 
@@ -260,6 +262,7 @@ func (h *TaskHandlers) launchAgentForNewTask(ctx context.Context, taskDTO dto.Ta
 		Prompt:            taskDTO.Description,
 		WorkflowStepID:    taskDTO.WorkflowStepID,
 		PlanMode:          req.PlanMode,
+		AutoCreatePR:      req.AutoCreatePR,
 		Attachments:       req.Attachments,
 	})
 	if err != nil {
