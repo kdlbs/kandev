@@ -13,6 +13,7 @@ import (
 )
 
 const genericSyncFailureMessage = "Workflow sync failed"
+const githubConnectionFailureMessage = "GitHub connection is not configured"
 
 // classifySyncErr maps a sync failure to an authcircuit.FailureClass so the
 // caller can decide whether to back off on the short transient schedule or
@@ -84,6 +85,10 @@ func classifyStatusCode(status int) authcircuit.FailureClass {
 // is persisted or returned. The remaining provider and status identify the
 // failure without retaining arbitrary upstream content.
 func safeSyncErrorMessage(err error) string {
+	if errors.Is(err, errGitHubClientNotConfigured) || errors.Is(err, github.ErrNoClient) ||
+		errors.Is(err, github.ErrGitHubNotConfigured) || errors.Is(err, github.ErrGitHubConnectionInvalid) {
+		return githubConnectionFailureMessage
+	}
 	var ghErr *github.GitHubAPIError
 	if errors.As(err, &ghErr) {
 		return fmt.Sprintf("GitHub request failed with HTTP status %d", ghErr.StatusCode)
@@ -100,7 +105,7 @@ func safeSyncErrorMessage(err error) string {
 // arbitrary upstream response bodies, so only retain the exact safe summaries
 // written by the current code.
 func safeStoredSyncErrorMessage(message string) string {
-	if message == "" || message == genericSyncFailureMessage {
+	if message == "" || message == genericSyncFailureMessage || message == githubConnectionFailureMessage {
 		return message
 	}
 	for _, prefix := range []string{

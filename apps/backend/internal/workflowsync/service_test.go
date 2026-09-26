@@ -292,6 +292,11 @@ func TestSyncWorkspace_NilClientRecordsFailure(t *testing.T) {
 	cfg, cfgErr := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 	require.NoError(t, cfgErr)
 	assert.False(t, cfg.LastOk)
+	assert.True(t, cfg.PollSuspended)
+	assert.Equal(t, string(github.FailureInvalidCredentials), cfg.LastErrorClass)
+	assert.Equal(t, githubConnectionFailureMessage, cfg.LastError)
+	assert.Equal(t, githubConnectionFailureMessage, cfg.PollSuspensionReason)
+	assert.Nil(t, cfg.NextRetryAt)
 }
 
 func TestSyncDueConfigs_HonorsInterval(t *testing.T) {
