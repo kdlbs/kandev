@@ -35,10 +35,13 @@ not eligible without changing either task.
 
 - **AC-TASKS-EXACT-RETIREMENT-001.1:** The system shall deny an unauthenticated
   or foreign-workspace caller through the existing denial contract without
-  returning retirement inventory or mutating state.
+  returning retirement inventory or mutating state. The caller must have an
+  admin identity and `task.write` on both tasks. An admin identity does not
+  grant access to a workspace. When authentication is disabled, the existing
+  synthetic admin identity follows the same route policy.
 - **AC-TASKS-EXACT-RETIREMENT-001.2:** The system shall require distinct old and
-  replacement IDs in the same workspace and require their supplied generations
-  to match the observed generations.
+  replacement IDs in the same existing workspace and require their supplied
+  generations to match the observed generations.
 - **AC-TASKS-EXACT-RETIREMENT-001.3:** Preview shall return one stable receipt
   per predicate with its status (`PASS`, `BLOCKED`, or `UNKNOWN`), reason code,
   resource identity, observed generation, and evidence digest.

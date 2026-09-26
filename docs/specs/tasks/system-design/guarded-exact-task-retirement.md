@@ -77,10 +77,15 @@ survive old-card deletion. The final delete transaction is old-row scoped.
 
 ## Security
 
-The service derives authority from context rather than the request. It obtains
-the old and replacement through task authorization, so a caller cannot use one
-visible ID to probe a foreign replacement. Receipts contain only identifiers,
-generations, codes, and evidence digests.
+The service derives authority from request context rather than the request
+body. The caller must have an admin identity and `task.write` on both tasks.
+Admin status does not grant workspace access. The preview also requires the
+old task's workspace to exist and requires workspace write access. A missing or
+foreign task does not produce a receipt. When authentication is disabled, the
+existing synthetic admin identity follows the same route policy.
+
+Receipts contain only identifiers, generations, reason codes, and evidence
+digests.
 
 ## Observability
 

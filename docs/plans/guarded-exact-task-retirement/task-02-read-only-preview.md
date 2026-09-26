@@ -27,8 +27,9 @@ adapters do not yet exist.
 
 ## Acceptance
 
-1. Both IDs are authorized before inventory disclosure and must be distinct,
-   same-workspace tasks with matching expected generations.
+1. The caller has an admin identity and `task.write` on both tasks. Admin
+   status does not grant workspace access. The workspace exists, and both IDs
+   identify distinct tasks in that workspace with matching generations.
 2. Each fixed predicate returns a receipt with status, reason, resource,
    observed generation, and digest.
 3. Unavailable evidence returns `UNKNOWN`; preview never changes task, session,
@@ -56,7 +57,10 @@ a no-store receipt. Its fixed registry reports unavailable evidence as
 complete non-empty receipt set and is true only when every predicate passes.
 Read-only members are denied on the old task before the replacement lookup,
 so their response does not reveal whether a supplied replacement exists.
+The requirements and system design also record the admin identity, workspace
+access, and synthetic-admin policy used by this route.
 
 - `cd apps/backend && go test -count=1 ./internal/task/handlers ./internal/task/service -run 'Test(HTTPPreviewExactRetirement|PreviewExactRetirement|ExactRetirementReceiptsEligible)'` - passed.
+- `cd apps/backend && go test -count=1 ./internal/task/handlers ./internal/task/service -run 'Test(HTTPPreviewExactRetirementRejectsAuthorizedEqualAndStaleGenerations|PreviewExactRetirementRejectsAuthorizedInvalidPairs)'` - passed.
 - `python3 scripts/list-docs.py validate` - passed.
 - `python3 scripts/lint-spec-files.py --all` - passed.

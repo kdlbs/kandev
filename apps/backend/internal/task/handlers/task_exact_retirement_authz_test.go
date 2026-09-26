@@ -166,3 +166,66 @@ func TestHTTPPreviewExactRetirementAuthorization(t *testing.T) {
 		require.Contains(t, rec.Body.String(), `"status":"UNKNOWN"`)
 	})
 }
+
+func TestHTTPPreviewExactRetirementRejectsAuthorizedEqualAndStaleGenerations(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, repo := newPlanTestHandlersWithRepo(t)
+	ctx := context.Background()
+	const workspaceID = "authorized-retirement"
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: workspaceID, Name: "Workspace", OwnerID: "operator",
+	}))
+	for _, id := range []string{"old", "replacement"} {
+		require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: id, WorkspaceID: workspaceID, Title: id}))
+	}
+	log := h.logger
+	h.service = service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo, Workflows: repo, Messages: repo,
+		Turns: repo, Sessions: repo, GitSnapshots: repo, RepoEntities: repo, Executors: repo,
+		Environments: repo, TaskEnvironments: repo, Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	oldTask, err := h.service.GetTask(ctx, "old")
+	require.NoError(t, err)
+	replacementTask, err := h.service.GetTask(ctx, "replacement")
+	require.NoError(t, err)
+	oldGeneration := oldTask.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	replacementGeneration := replacementTask.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	adminCtx := authn.WithIdentity(ctx, authn.Identity{UserID: "operator", Role: authn.RoleAdmin})
+	router := gin.New()
+	router.POST("/api/v1/tasks/:id/exact-retirement/preview", h.httpPreviewExactRetirement)
+
+	cases := []struct {
+		name           string
+		replacementID  string
+		oldGeneration  string
+		replacementGen string
+	}{
+		{name: "equal task IDs", replacementID: "old", oldGeneration: oldGeneration, replacementGen: oldGeneration},
+		{name: "stale old generation", replacementID: "replacement", oldGeneration: "stale", replacementGen: replacementGeneration},
+		{name: "stale replacement generation", replacementID: "replacement", oldGeneration: oldGeneration, replacementGen: "stale"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"replacement_task_id":%q,"workspace_id":%q,"expected_old_generation":%q,"expected_replacement_generation":%q}`,
+				tc.replacementID, workspaceID, tc.oldGeneration, tc.replacementGen)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/old/exact-retirement/preview", strings.NewReader(body))
+			req = req.WithContext(adminCtx)
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+			require.NotContains(t, rec.Body.String(), `"receipts"`)
+			require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+		})
+	}
+
+	validBody := fmt.Sprintf(`{"replacement_task_id":"replacement","workspace_id":%q,"expected_old_generation":%q,"expected_replacement_generation":%q}`,
+		workspaceID, oldGeneration, replacementGeneration)
+	validReq := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/old/exact-retirement/preview", strings.NewReader(validBody))
+	validReq = validReq.WithContext(adminCtx)
+	validReq.Header.Set("Content-Type", "application/json")
+	validRec := httptest.NewRecorder()
+	router.ServeHTTP(validRec, validReq)
+	require.Equal(t, http.StatusOK, validRec.Code, validRec.Body.String())
+	require.Equal(t, "no-store", validRec.Header().Get("Cache-Control"))
+}

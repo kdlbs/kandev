@@ -221,3 +221,63 @@ func TestPreviewExactRetirementRequiresAdminTaskWriter(t *testing.T) {
 	require.False(t, preview.Eligible)
 	assertTasksUnchanged()
 }
+
+func TestPreviewExactRetirementRejectsAuthorizedInvalidPairs(t *testing.T) {
+	tests := []struct {
+		name           string
+		replacementID  string
+		oldGeneration  string
+		replacementGen string
+		wantErr        error
+	}{
+		{name: "equal task IDs", replacementID: "old", wantErr: ErrExactRetirementPairInvalid},
+		{name: "stale old generation", replacementID: "replacement", oldGeneration: "stale", wantErr: ErrExactRetirementGenerationStale},
+		{name: "stale replacement generation", replacementID: "replacement", replacementGen: "stale", wantErr: ErrExactRetirementGenerationStale},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			const workspaceID = "retirement-ws"
+			require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+				ID: workspaceID, Name: "Workspace", OwnerID: "operator",
+			}))
+			for _, id := range []string{"old", "replacement"} {
+				require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: id, WorkspaceID: workspaceID, Title: id}))
+			}
+			oldTask, err := svc.GetTask(ctx, "old")
+			require.NoError(t, err)
+			replacementTask, err := svc.GetTask(ctx, "replacement")
+			require.NoError(t, err)
+			adminCtx := authn.WithIdentity(ctx, authn.Identity{UserID: "operator", Role: authn.RoleAdmin})
+
+			oldGeneration := exactRetirementGeneration(oldTask)
+			replacementGeneration := exactRetirementGeneration(replacementTask)
+			if tt.replacementID == "old" {
+				replacementGeneration = oldGeneration
+			}
+			if tt.oldGeneration != "" {
+				oldGeneration = tt.oldGeneration
+			}
+			if tt.replacementGen != "" {
+				replacementGeneration = tt.replacementGen
+			}
+
+			preview, err := svc.PreviewExactRetirement(adminCtx, ExactRetirementPreviewRequest{
+				OldTaskID: "old", ReplacementTaskID: tt.replacementID,
+				WorkspaceID: workspaceID, ExpectedOldGeneration: oldGeneration,
+				ExpectedReplacementGeneration: replacementGeneration,
+			})
+			require.ErrorIs(t, err, tt.wantErr)
+			require.Nil(t, preview)
+
+			afterOld, err := svc.GetTask(adminCtx, "old")
+			require.NoError(t, err)
+			afterReplacement, err := svc.GetTask(adminCtx, "replacement")
+			require.NoError(t, err)
+			require.Equal(t, oldTask, afterOld)
+			require.Equal(t, replacementTask, afterReplacement)
+		})
+	}
+}
