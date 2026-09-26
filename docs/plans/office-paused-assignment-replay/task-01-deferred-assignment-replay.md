@@ -28,7 +28,8 @@ system_design:
   and the `task.updated` assignment subscriber.
 - Drain pending deferrals from `pause.Service.Resume` and from the Office
   recovery tick for unpaused workspaces, re-validating each against the task and
-  queueing with the assignment idempotency key.
+  queueing with the assignment actor and idempotency key. Agent-initiated
+  replays use the scheduler assignment allowance.
 - Write task-targeted activity entries for deferral, replay and drop.
 
 ## Validation

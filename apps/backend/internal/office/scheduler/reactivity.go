@@ -200,7 +200,13 @@ func (ss *SchedulerService) recordDeferredAssignmentFromError(ctx context.Contex
 	if !errors.As(err, &pe) || pe.pause == nil {
 		return
 	}
-	ss.svc.RecordDeferredAssignment(ctx, c.TaskID, pe.pause.ID)
+	if c.AssignmentGeneration != nil {
+		ss.svc.RecordDeferredAssignmentWithActorAtGeneration(
+			ctx, c.TaskID, pe.pause.ID, c.ActorType, c.ActorID, *c.AssignmentGeneration,
+		)
+		return
+	}
+	ss.svc.RecordDeferredAssignmentWithActor(ctx, c.TaskID, pe.pause.ID, c.ActorType, c.ActorID)
 }
 
 func (ss *SchedulerService) reactToStatusChange(
@@ -330,13 +336,14 @@ func (ss *SchedulerService) reactToAssigneeChange(
 		runsservice.ReportKeylessEnqueue(RunReasonTaskAssigned, runsservice.KeylessCauseUnresolved, "nil_mutation_generation")
 	}
 	queue(newAssigneeID, RunContext{
-		Reason:         RunReasonTaskAssigned,
-		TaskID:         task.ID,
-		WorkspaceID:    task.WorkspaceID,
-		ActorID:        change.ActorID,
-		ActorType:      change.ActorType,
-		CommentID:      commentID,
-		IdempotencyKey: key,
+		Reason:               RunReasonTaskAssigned,
+		TaskID:               task.ID,
+		WorkspaceID:          task.WorkspaceID,
+		ActorID:              change.ActorID,
+		ActorType:            change.ActorType,
+		AssignmentGeneration: change.AssignmentGeneration,
+		CommentID:            commentID,
+		IdempotencyKey:       key,
 	})
 }
 

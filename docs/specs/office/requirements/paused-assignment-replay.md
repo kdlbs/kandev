@@ -40,15 +40,15 @@ paused to start once I resume, so that pausing never loses work.
 - **AC-OFFICE-PAUSE-REPLAY-001.1:** While a workspace is paused, when an
   assignment of an Office task to an agent is persisted and its wake is refused
   by the pause gate, the system shall durably record a deferred assignment for
-  that task, keeping only the task's latest assignment, and the record shall
-  survive backend restarts.
+  that task, keeping only the task's latest assignment and the actor that caused
+  it, and the record shall survive backend restarts.
 - **AC-OFFICE-PAUSE-REPLAY-001.2:** While a workspace is paused, the system shall
   create no run for a deferred assignment.
 - **AC-OFFICE-PAUSE-REPLAY-001.3:** When a workspace is resumed, the system shall
   create exactly one `task_assigned` run for each deferred assignment whose task
   is not archived and whose current runner and assignment generation still match
-  the record, whatever the task's state and whatever runs the task finished
-  before the pause.
+  the record, using the recorded actor and its queue policy, whatever the task's
+  state and whatever runs the task finished before the pause.
 - **AC-OFFICE-PAUSE-REPLAY-001.4:** When a workspace is resumed, the system shall
   create no run for a deferred assignment whose task was archived, unassigned or
   reassigned after the record was written, other than the run the latest

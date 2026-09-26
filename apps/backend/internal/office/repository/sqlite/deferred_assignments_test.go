@@ -91,6 +91,53 @@ func TestRecordDeferredAssignment_DoesNotRegressToOlderGeneration(t *testing.T) 
 	}
 }
 
+// TestRecordDeferredAssignment_SameGenerationKeepsTheOriginalActor proves a
+// duplicate delivery for one assignment cannot replace the actor snapshot
+// captured by the scheduler with the actor-less event-subscriber fallback.
+func TestRecordDeferredAssignment_SameGenerationKeepsTheOriginalActor(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if _, err := repo.RecordDeferredAssignmentWithActor(ctx, "task-1", "ws-1", "agent-1", 1, "pause-1", "agent", "actor-1"); err != nil {
+		t.Fatalf("record initial actor snapshot: %v", err)
+	}
+	recorded, err := repo.RecordDeferredAssignmentWithActor(ctx, "task-1", "ws-1", "agent-1", 1, "pause-1", "", "")
+	if err != nil {
+		t.Fatalf("record same-generation redelivery: %v", err)
+	}
+	if recorded {
+		t.Fatal("same-generation redelivery must not replace the pending row")
+	}
+
+	pending, err := repo.ListPendingDeferredAssignmentsForWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending count = %d, want 1", len(pending))
+	}
+	if pending[0].ActorType != "agent" || pending[0].ActorID != "actor-1" {
+		t.Fatalf("actor snapshot = %s/%s, want agent/actor-1", pending[0].ActorType, pending[0].ActorID)
+	}
+
+	if _, err := repo.ResolveDeferredAssignment(ctx, "task-1", 1, "agent-1", "pause-1", "dropped"); err != nil {
+		t.Fatalf("resolve first row: %v", err)
+	}
+	if _, err := repo.RecordDeferredAssignmentWithActor(ctx, "task-1", "ws-1", "agent-1", 1, "pause-1", "", ""); err != nil {
+		t.Fatalf("record actor-less fresh row: %v", err)
+	}
+	if _, err := repo.RecordDeferredAssignmentWithActor(ctx, "task-1", "ws-1", "agent-1", 1, "pause-1", "user", "user-1"); err != nil {
+		t.Fatalf("enrich same-generation actor snapshot: %v", err)
+	}
+	pending, err = repo.ListPendingDeferredAssignmentsForWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list enriched pending: %v", err)
+	}
+	if len(pending) != 1 || pending[0].ActorType != "user" || pending[0].ActorID != "user-1" {
+		t.Fatalf("enriched actor snapshot = %+v, want user/user-1", pending)
+	}
+}
+
 // TestRecordDeferredAssignment_OverwritesAResolvedRowRegardlessOfGeneration
 // proves the generation guard in RecordDeferredAssignment only blocks
 // regressing a still-*pending* row — a fresh pause after an earlier

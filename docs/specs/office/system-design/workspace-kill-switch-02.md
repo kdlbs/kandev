@@ -107,9 +107,12 @@ keep that intent without creating a run while paused
 
 - **Store.** `office_deferred_assignments` holds one row per task: `task_id`
   (primary key), `workspace_id`, `agent_profile_id`, `assignment_generation`,
-  `pause_id`, `created_at`, `resolved_at` and `outcome`. A deferral upserts the
-  row, so a reassignment during the pause replaces the pending intent and a
-  redelivered wake for the same generation changes nothing.
+  `pause_id`, the assignment `actor_type` and `actor_id`, `created_at`,
+  `resolved_at` and `outcome`. The actor snapshot keeps replay priority and
+  assignment-rate handling equal to the live scheduler path. A deferral
+  upserts the row, so a reassignment during the pause replaces the pending
+  intent. A redelivered wake for the same generation does not replace the
+  snapshot.
 - **Write sites.** Both assignment wake routes record the deferral when the
   pause gate returns `ErrWorkspacePaused`: the scheduler reactivity handoff
   (dashboard `PATCH assignee`) and the `task.updated` assignment subscriber.
@@ -120,11 +123,13 @@ keep that intent without creating a run while paused
   is no longer paused, which covers a crash or restart between release and
   replay. Each row is re-validated against the task: archived, unassigned, a
   different runner or a different `assignment_generation` resolves it as
-  `dropped`; otherwise the replay queues `task_assigned` with
-  `dedupkeys.AssignmentKey(task, agent, generation)` and resolves it as
-  `replayed`. The idempotency key makes a concurrent resume and tick create one
-  run between them. The recovery sweep's `TODO`/lookback/no-finished-run filter
-  does not apply to this path.
+  `dropped`; otherwise the replay queues `task_assigned` with the stored actor
+  and `dedupkeys.AssignmentKey(task, agent, generation)`, then resolves it as
+  `replayed`. Agent-initiated replays pass through the scheduler's rolling
+  assignment allowance. A temporary rate-limit refusal leaves the row pending.
+  The idempotency key makes a concurrent resume and tick create one run between
+  them. The recovery sweep's `TODO`/lookback/no-finished-run filter does not
+  apply to this path.
 - **Visibility.** Deferral, replay and drop each write a task-targeted activity
   entry (`task_assignment_deferred`, `task_assignment_replayed`,
   `task_assignment_dropped`) naming the pause.

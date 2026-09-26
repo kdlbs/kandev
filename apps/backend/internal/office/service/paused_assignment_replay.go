@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/dedupkeys"
 )
 
@@ -25,6 +26,10 @@ const (
 	deferredAssignmentOutcomeDropped  = "dropped"
 )
 
+// ErrDeferredAssignmentRateLimited keeps a deferred row pending when the
+// scheduler's assignment-wake allowance temporarily refuses replay.
+var ErrDeferredAssignmentRateLimited = errors.New("deferred assignment replay rate limited")
+
 // RecordDeferredAssignment persists that taskID's task_assigned wake was
 // blocked by pauseID (docs/specs/office/requirements/paused-assignment-replay.md),
 // so pause.Service.Resume or the recovery tick can replay it once the
@@ -36,6 +41,26 @@ const (
 // propagated — the caller has already decided the paused write itself is
 // not an error.
 func (s *Service) RecordDeferredAssignment(ctx context.Context, taskID, pauseID string) {
+	s.recordDeferredAssignment(ctx, taskID, pauseID, "", "", nil)
+}
+
+// RecordDeferredAssignmentWithActor is the scheduler-facing form of
+// RecordDeferredAssignment. The actor snapshot lets replay keep the same
+// priority and assignment-rate semantics as the original wake.
+func (s *Service) RecordDeferredAssignmentWithActor(ctx context.Context, taskID, pauseID, actorType, actorID string) {
+	s.recordDeferredAssignment(ctx, taskID, pauseID, actorType, actorID, nil)
+}
+
+// RecordDeferredAssignmentWithActorAtGeneration records the actor only when
+// the task still has the generation that produced the paused wake. A late
+// callback from an older assignment must not attach its actor to a newer row.
+func (s *Service) RecordDeferredAssignmentWithActorAtGeneration(
+	ctx context.Context, taskID, pauseID, actorType, actorID string, assignmentGeneration int64,
+) {
+	s.recordDeferredAssignment(ctx, taskID, pauseID, actorType, actorID, &assignmentGeneration)
+}
+
+func (s *Service) recordDeferredAssignment(ctx context.Context, taskID, pauseID, actorType, actorID string, expectedGeneration *int64) {
 	fields, err := s.repo.GetTaskExecutionFields(ctx, taskID)
 	if err != nil {
 		if !errors.Is(err, sqlite.ErrTaskNotFound) {
@@ -47,8 +72,11 @@ func (s *Service) RecordDeferredAssignment(ctx context.Context, taskID, pauseID 
 	if fields.AssigneeAgentProfileID == "" {
 		return
 	}
-	recorded, err := s.repo.RecordDeferredAssignment(
-		ctx, taskID, fields.WorkspaceID, fields.AssigneeAgentProfileID, fields.AssignmentGeneration, pauseID,
+	if expectedGeneration != nil && fields.AssignmentGeneration != *expectedGeneration {
+		return
+	}
+	recorded, err := s.repo.RecordDeferredAssignmentWithActor(
+		ctx, taskID, fields.WorkspaceID, fields.AssigneeAgentProfileID, fields.AssignmentGeneration, pauseID, actorType, actorID,
 	)
 	if err != nil {
 		s.logger.Warn("record deferred assignment failed",
@@ -136,15 +164,33 @@ func (s *Service) replayDeferredAssignment(ctx context.Context, da *models.Defer
 
 	payload := mustJSON(map[string]string{"task_id": da.TaskID}) //nolint:goconst // "task_id" is the run-payload wire key used throughout this package
 	key := dedupkeys.AssignmentKey(da.TaskID, da.AgentProfileID, da.AssignmentGeneration)
-	if err := s.QueueRunFromTaskBoundary(ctx, da.AgentProfileID, RunReasonTaskAssigned, payload, key, da.TaskID); err != nil {
+	var queueErr error
+	if s.deferredAssignmentQueue != nil {
+		queueErr = s.deferredAssignmentQueue.QueueDeferredAssignment(ctx, *da)
+	} else if actorKind := models.ActorKind(da.ActorType); actorKind.Valid() {
+		queueErr = s.QueueRunFromTaskBoundaryWithActor(ctx, da.AgentProfileID, RunReasonTaskAssigned, payload, key, da.TaskID, actorKind, da.ActorID)
+	} else {
+		queueErr = s.QueueRunFromTaskBoundary(ctx, da.AgentProfileID, RunReasonTaskAssigned, payload, key, da.TaskID)
+	}
+	if queueErr != nil {
+		if errors.Is(queueErr, ErrDeferredAssignmentRateLimited) {
+			// The scheduler's rolling allowance is a temporary refusal. Keep
+			// the row pending so a later recovery tick can retry it.
+			return
+		}
+		if errors.Is(queueErr, shared.ErrWorkspacePaused) {
+			// A fresh pause raced the replay. Keep the row pending for the
+			// next resume or recovery tick.
+			return
+		}
 		var pe *pausedQueueError
-		if errors.As(err, &pe) {
+		if errors.As(queueErr, &pe) {
 			// Paused again by the time replay ran (a fresh pause raced the
 			// resume/tick that read this row as replayable) — leave it
 			// pending so the next resume or tick retries it.
 			return
 		}
-		if errors.Is(err, ErrAgentNotRunnable) || errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(queueErr, ErrAgentNotRunnable) || errors.Is(queueErr, sql.ErrNoRows) {
 			// A deterministic, non-retryable refusal: the assignee is
 			// paused/stopped/pending-approval, or no longer exists. This is
 			// not a transient failure that a later retry could resolve, so
@@ -155,7 +201,7 @@ func (s *Service) replayDeferredAssignment(ctx context.Context, da *models.Defer
 			return
 		}
 		s.logger.Warn("replay deferred assignment: queue run failed",
-			zap.String("task_id", da.TaskID), zap.Error(err))
+			zap.String("task_id", da.TaskID), zap.Error(queueErr))
 		return
 	}
 	s.resolveDeferredAssignment(ctx, da, deferredAssignmentOutcomeReplayed, "")

@@ -20,5 +20,6 @@ durable deferred assignment and replays it once after resume.
 ## Outcome
 
 An assignment made during a pause launches exactly one run after resume, a task
-archived, unassigned or reassigned during the pause is handled by its latest
-state, and each deferral is visible in the task's activity.
+keeps the assignment actor and its queue policy, a task archived, unassigned
+or reassigned during the pause is handled by its latest state, and each
+deferral is visible in the task's activity.

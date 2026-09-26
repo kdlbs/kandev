@@ -94,6 +94,7 @@ type RunContext struct {
 	WorkflowStepID        string   `json:"workflow_step_id,omitempty"`
 	ActorID               string   `json:"actor_id,omitempty"`
 	ActorType             string   `json:"actor_type,omitempty"` // "user" | "agent"
+	AssignmentGeneration  *int64   `json:"-"`
 	CommentID             string   `json:"comment_id,omitempty"`
 	ResolvedBlockerTaskID string   `json:"resolved_blocker_task_id,omitempty"`
 	ChildTaskID           string   `json:"child_task_id,omitempty"`

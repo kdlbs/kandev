@@ -142,6 +142,26 @@ func (s *Service) QueueRunFromTaskBoundary(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey, taskID string,
 ) error {
+	return s.queueRunFromTaskBoundary(ctx, agentInstanceID, reason, payload, idempotencyKey, taskID, nil, "")
+}
+
+// QueueRunFromTaskBoundaryWithActor is the task-boundary queue path with an
+// actor snapshot captured before a paused assignment was deferred. The
+// supplied actor overrides only the actor fields; task-boundary lineage still
+// comes from the task metadata.
+func (s *Service) QueueRunFromTaskBoundaryWithActor(
+	ctx context.Context,
+	agentInstanceID, reason, payload, idempotencyKey, taskID string,
+	actorKind models.ActorKind, actorID string,
+) error {
+	return s.queueRunFromTaskBoundary(ctx, agentInstanceID, reason, payload, idempotencyKey, taskID, &actorKind, actorID)
+}
+
+func (s *Service) queueRunFromTaskBoundary(
+	ctx context.Context,
+	agentInstanceID, reason, payload, idempotencyKey, taskID string,
+	actorKindOverride *models.ActorKind, actorIDOverride string,
+) error {
 	agent, err := s.guardAgentStatus(ctx, agentInstanceID)
 	if err != nil {
 		return err
@@ -152,13 +172,19 @@ func (s *Service) QueueRunFromTaskBoundary(
 
 	if s.runsService != nil {
 		carrier := s.TaskBoundaryCarrier(ctx, taskID)
+		actorKind := carrier.ActorKind
+		actorID := carrier.ActorID
+		if actorKindOverride != nil && actorKindOverride.Valid() {
+			actorKind = *actorKindOverride
+			actorID = actorIDOverride
+		}
 		humanRooted := carrier.HumanRooted
 		_, err := s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
 			Reason:                reason,
 			IdempotencyKey:        idempotencyKey,
 			Payload:               PayloadWithAgent(payload, agentInstanceID),
-			ActorKind:             carrier.ActorKind,
-			ActorID:               carrier.ActorID,
+			ActorKind:             actorKind,
+			ActorID:               actorID,
 			RoutineID:             carrier.RoutineID,
 			CarrierHumanRooted:    &humanRooted,
 			CarrierCreatingRunID:  carrier.CreatingRunID,
@@ -167,7 +193,13 @@ func (s *Service) QueueRunFromTaskBoundary(
 		})
 		return err
 	}
-	_, err = s.queueRunInline(ctx, agentInstanceID, reason, payload, idempotencyKey)
+	actorKind := models.ActorKindSystem
+	actorID := ""
+	if actorKindOverride != nil && actorKindOverride.Valid() {
+		actorKind = *actorKindOverride
+		actorID = actorIDOverride
+	}
+	_, err = s.queueRunInlineAsActor(ctx, agentInstanceID, reason, payload, idempotencyKey, actorKind, actorID)
 	return err
 }
 
@@ -304,6 +336,14 @@ func (s *Service) queueRunInline(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) (runsservice.QueueOutcome, error) {
+	return s.queueRunInlineAsActor(ctx, agentInstanceID, reason, payload, idempotencyKey, models.ActorKindSystem, "")
+}
+
+func (s *Service) queueRunInlineAsActor(
+	ctx context.Context,
+	agentInstanceID, reason, payload, idempotencyKey string,
+	actorKind models.ActorKind, actorID string,
+) (runsservice.QueueOutcome, error) {
 	if idempotencyKey != "" {
 		dup, err := s.repo.CheckIdempotencyKey(ctx, idempotencyKey, IdempotencyWindowHours)
 		if err != nil {
@@ -345,7 +385,9 @@ func (s *Service) queueRunInline(
 		// falsely promoting every such run to the highest claim-order
 		// preference (AC-OFFICE-BACKPRESSURE-001.1/.3). See the matching
 		// comment in office/scheduler.QueueRun, which has the same gap.
-		PriorityClass: shared.ClassifyPriority(models.ActorKindSystem, reason, false),
+		PriorityClass: shared.ClassifyPriority(actorKind, reason, false),
+		ActorKind:     actorKind,
+		ActorID:       actorID,
 	}
 	insertErr := s.repo.CreateRun(ctx, req)
 	outcome, err := runsservice.ReportInsertResult(runsservice.QueueSourceRuns, reason, idempotencyKey, agentInstanceID, insertErr)

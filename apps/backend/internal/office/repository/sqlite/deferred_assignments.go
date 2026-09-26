@@ -15,6 +15,8 @@ func (r *Repository) createDeferredAssignmentsTable() error {
 		agent_profile_id      TEXT NOT NULL,
 		assignment_generation INTEGER NOT NULL DEFAULT 0,
 		pause_id              TEXT NOT NULL DEFAULT '',
+		actor_type            TEXT NOT NULL DEFAULT '',
+		actor_id              TEXT NOT NULL DEFAULT '',
 		created_at            TIMESTAMP NOT NULL,
 		resolved_at           TIMESTAMP,
 		outcome               TEXT NOT NULL DEFAULT ''
@@ -34,8 +36,10 @@ func (r *Repository) createDeferredAssignmentsTable() error {
 // deferral already resolved) replaces the row, so replay acts on the
 // latest assigning occurrence (see models.DeferredAssignment). The
 // overwrite only applies when the stored row is already resolved, or its
-// assignment_generation is <= the incoming one: two paused assignments can
-// interleave (A reads gen1, B commits and records gen2, A's write lands
+// assignment_generation is < the incoming one: a same-generation redelivery
+// must keep the first actor snapshot, except that an actor-less defensive
+// record may be enriched by a later actor-aware record. Two paused
+// assignments can interleave (A reads gen1, B commits and records gen2, A's write lands
 // last), and an unconditional overwrite would let A's stale write regress
 // a still-pending gen2 row back to gen1 — silently losing B's assignment
 // (R1-F3). The returned bool reports whether this call actually wrote a
@@ -46,12 +50,24 @@ func (r *Repository) createDeferredAssignmentsTable() error {
 func (r *Repository) RecordDeferredAssignment(
 	ctx context.Context, taskID, workspaceID, agentProfileID string, assignmentGeneration int64, pauseID string,
 ) (bool, error) {
+	return r.RecordDeferredAssignmentWithActor(
+		ctx, taskID, workspaceID, agentProfileID, assignmentGeneration, pauseID, "", "",
+	)
+}
+
+// RecordDeferredAssignmentWithActor is RecordDeferredAssignment with the
+// actor that caused the assignment. The actor is part of the deferred wake's
+// identity because replay must keep the same priority and assignment-rate
+// policy as the live scheduler path.
+func (r *Repository) RecordDeferredAssignmentWithActor(
+	ctx context.Context, taskID, workspaceID, agentProfileID string, assignmentGeneration int64, pauseID, actorType, actorID string,
+) (bool, error) {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO office_deferred_assignments (
-			task_id, workspace_id, agent_profile_id, assignment_generation, pause_id, created_at
-		) VALUES (?, ?, ?, ?, ?, ?)
-	`), taskID, workspaceID, agentProfileID, assignmentGeneration, pauseID, now)
+			task_id, workspace_id, agent_profile_id, assignment_generation, pause_id, actor_type, actor_id, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`), taskID, workspaceID, agentProfileID, assignmentGeneration, pauseID, actorType, actorID, now)
 	if err == nil {
 		return true, nil
 	}
@@ -60,10 +76,13 @@ func (r *Repository) RecordDeferredAssignment(
 	}
 	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE office_deferred_assignments
-		SET workspace_id = ?, agent_profile_id = ?, assignment_generation = ?, pause_id = ?, created_at = ?,
+		SET workspace_id = ?, agent_profile_id = ?, assignment_generation = ?, pause_id = ?, actor_type = ?, actor_id = ?, created_at = ?,
 		    resolved_at = NULL, outcome = ''
-		WHERE task_id = ? AND (resolved_at IS NOT NULL OR assignment_generation <= ?)
-	`), workspaceID, agentProfileID, assignmentGeneration, pauseID, now, taskID, assignmentGeneration)
+		WHERE task_id = ? AND (
+			resolved_at IS NOT NULL OR assignment_generation < ? OR
+			(assignment_generation = ? AND actor_type = '' AND ? != '')
+		)
+	`), workspaceID, agentProfileID, assignmentGeneration, pauseID, actorType, actorID, now, taskID, assignmentGeneration, assignmentGeneration, actorType)
 	if err != nil {
 		return false, err
 	}

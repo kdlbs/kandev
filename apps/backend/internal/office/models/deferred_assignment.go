@@ -17,6 +17,8 @@ type DeferredAssignment struct {
 	AgentProfileID       string     `json:"agent_profile_id" db:"agent_profile_id"`
 	AssignmentGeneration int64      `json:"assignment_generation" db:"assignment_generation"`
 	PauseID              string     `json:"pause_id" db:"pause_id"`
+	ActorType            string     `json:"actor_type,omitempty" db:"actor_type"`
+	ActorID              string     `json:"actor_id,omitempty" db:"actor_id"`
 	CreatedAt            time.Time  `json:"created_at" db:"created_at"`
 	ResolvedAt           *time.Time `json:"resolved_at,omitempty" db:"resolved_at"`
 	Outcome              string     `json:"outcome,omitempty" db:"outcome"`
