@@ -121,11 +121,14 @@ Mockup:
   shall be reported per `AC-COORDINATOR-COORDINATORS-005.1`-`005.3` rather
   than the conversation continuing on the old, now-archived session. Sending
   a profile id back unchanged shall keep the conversation.
-- **AC-COORDINATOR-COORDINATORS-002.11:** When the chosen agent profile or
-  executor profile belongs to a different workspace than the coordinator's
-  own, the system shall refuse the create or edit with a 400 error naming the
-  field, the same as a profile that does not exist
-  (`AC-COORDINATOR-COORDINATORS-002.5`).
+- **AC-COORDINATOR-COORDINATORS-002.11:** When the chosen agent profile
+  belongs to a different workspace than the coordinator's own, the system
+  shall refuse the create or edit with a 400 error naming the field, the same
+  as a profile that does not exist (`AC-COORDINATOR-COORDINATORS-002.5`).
+  Executor profiles carry no workspace scope anywhere in the codebase (the
+  same fact the Office handoff feature's AC-14b relies on), so this check
+  does not apply to `executor_profile_id`: an executor profile is validated
+  by existence only (`AC-COORDINATOR-COORDINATORS-002.5`).
 
 ### REQ-COORDINATOR-COORDINATORS-003: Listing and permissions
 
@@ -213,13 +216,16 @@ Mockup:
   the conversation route shall return 409 until a manager saves an existing,
   non-passthrough profile. With a missing executor profile as well, both
   messages shall show as `AC-COORDINATOR-COORDINATORS-005.2` says.
-- **AC-COORDINATOR-COORDINATORS-005.4:** When a coordinator's agent profile or
-  executor profile belongs to a different workspace than the coordinator's own
-  (for example after the profile itself was moved between workspaces),
-  `profileStatus` shall report it `missing`, the same as an unreadable or
-  absent profile, and its settings page, copilot and conversation route shall
-  behave as `AC-COORDINATOR-COORDINATORS-005.1` or `005.2` says for a missing
-  profile.
+- **AC-COORDINATOR-COORDINATORS-005.4:** When a coordinator's agent profile
+  belongs to a different workspace than the coordinator's own (for example
+  after the profile itself was moved between workspaces), `profileStatus`
+  shall report `agent_profile_status` as `missing`, the same as an unreadable
+  or absent profile, and its settings page, copilot and conversation route
+  shall behave as `AC-COORDINATOR-COORDINATORS-005.1` says for a missing
+  agent profile. Executor profiles carry no workspace scope anywhere in the
+  codebase, so `executor_profile_status` has no equivalent case: an executor
+  profile is only ever `ok` or `missing` for non-existence
+  (`AC-COORDINATOR-COORDINATORS-005.2`).
 
 ### REQ-COORDINATOR-COORDINATORS-006: Workspace deletion
 
