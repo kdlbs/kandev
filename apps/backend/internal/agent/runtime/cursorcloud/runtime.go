@@ -25,6 +25,7 @@ const (
 	LaunchMetadataKey  = "cursor_cloud_launch"
 	initialTurnPrefix  = "cursor-cloud-initial:"
 	leaseDuration      = 2 * time.Minute
+	runStatusFinished  = "FINISHED"
 	runStatusRunning   = "RUNNING"
 	runStatusError     = "ERROR"
 	runStatusCancelled = "CANCELLED"
@@ -611,7 +612,7 @@ func safeCursorAgentURL(raw string) string {
 
 func terminalEventType(status string) string {
 	switch strings.ToUpper(strings.TrimSpace(status)) {
-	case "FINISHED":
+	case runStatusFinished:
 		return "complete"
 	case runStatusCancelled:
 		return "cancelled"

@@ -552,7 +552,7 @@ func (r *Runtime) publishPendingCompletion(ctx context.Context, binding *models.
 	if r.publishStream == nil || binding == nil || operation == nil || !operation.CompletionPending {
 		return
 	}
-	status := "FINISHED"
+	status := runStatusFinished
 	switch operation.State {
 	case models.ManagedAgentSubmissionFailed:
 		status = runStatusError

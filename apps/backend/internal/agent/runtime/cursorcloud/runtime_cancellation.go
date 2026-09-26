@@ -122,7 +122,7 @@ func (r *Runtime) settleCancelledRun(
 
 func terminalSubmissionState(status string) (models.ManagedAgentSubmissionState, bool) {
 	switch strings.ToUpper(strings.TrimSpace(status)) {
-	case "FINISHED":
+	case runStatusFinished:
 		return models.ManagedAgentSubmissionSucceeded, true
 	case runStatusError, runStatusExpired:
 		return models.ManagedAgentSubmissionFailed, true

@@ -129,7 +129,7 @@ func TestFollowupJournalReadFailureFailsClosed(t *testing.T) {
 	repository := newMemoryRepository()
 	provider := &fakeProvider{createResponse: cursorcloud.CreateAgentResponse{
 		Agent: cursorcloud.Agent{ID: "bc-00000000-0000-4000-8000-000000000001", LatestRunID: "run-1"},
-		Run:   cursorcloud.Run{ID: "run-1", AgentID: "bc-00000000-0000-4000-8000-000000000001", Status: "FINISHED"},
+		Run:   cursorcloud.Run{ID: "run-1", AgentID: "bc-00000000-0000-4000-8000-000000000001", Status: runStatusFinished},
 	}}
 	runtime := newTestRuntime(t, repository, provider, nil)
 	input := testLaunchInput()
@@ -195,7 +195,7 @@ func TestFollowupUnknownSubmissionIsNotRetried(t *testing.T) {
 	}
 	provider.createResponse = cursorcloud.CreateAgentResponse{
 		Agent: cursorcloud.Agent{ID: input.Binding.RemoteAgentID, LatestRunID: "run-1"},
-		Run:   cursorcloud.Run{ID: "run-1", AgentID: input.Binding.RemoteAgentID, Status: "FINISHED"},
+		Run:   cursorcloud.Run{ID: "run-1", AgentID: input.Binding.RemoteAgentID, Status: runStatusFinished},
 	}
 	if err := runtime.StartExecution(context.Background(), input.Binding.ExecutionID); err != nil {
 		t.Fatalf("StartExecution: %v", err)
@@ -220,7 +220,7 @@ func TestUnknownFollowupCandidateMustBeBoundFromVerifiedPostSubmitRuns(t *testin
 	input := testLaunchInput()
 	provider := &fakeProvider{createResponse: cursorcloud.CreateAgentResponse{
 		Agent: cursorcloud.Agent{ID: input.Binding.RemoteAgentID, LatestRunID: "run-1"},
-		Run:   cursorcloud.Run{ID: "run-1", AgentID: input.Binding.RemoteAgentID, Status: "FINISHED"},
+		Run:   cursorcloud.Run{ID: "run-1", AgentID: input.Binding.RemoteAgentID, Status: runStatusFinished},
 	}, createRunErr: cursorcloud.ErrOutcomeUnknown, getRunStatus: "RUNNING"}
 	runtime := newTestRuntime(t, repository, provider, nil)
 	if _, err := runtime.Launch(context.Background(), launchSpec(input)); err != nil {
@@ -231,7 +231,7 @@ func TestUnknownFollowupCandidateMustBeBoundFromVerifiedPostSubmitRuns(t *testin
 	}
 	repository.operation.State = models.ManagedAgentSubmissionSucceeded
 	provider.runs = []cursorcloud.Run{
-		{ID: "run-1", AgentID: input.Binding.RemoteAgentID, Status: "FINISHED", CreatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339Nano)},
+		{ID: "run-1", AgentID: input.Binding.RemoteAgentID, Status: runStatusFinished, CreatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339Nano)},
 		{ID: "run-2", AgentID: input.Binding.RemoteAgentID, Status: "RUNNING", CreatedAt: time.Now().Add(time.Hour).Format(time.RFC3339Nano)},
 		{ID: "other-agent-run", AgentID: "bc-00000000-0000-4000-8000-000000000999", Status: "RUNNING", CreatedAt: time.Now().Add(time.Hour).Format(time.RFC3339Nano)},
 	}
@@ -262,7 +262,7 @@ func TestUnknownFollowupRetryRequiresExplicitDuplicateWorkAcknowledgment(t *test
 	input := testLaunchInput()
 	provider := &fakeProvider{createResponse: cursorcloud.CreateAgentResponse{
 		Agent: cursorcloud.Agent{ID: input.Binding.RemoteAgentID, LatestRunID: "run-1"},
-		Run:   cursorcloud.Run{ID: "run-1", AgentID: input.Binding.RemoteAgentID, Status: "FINISHED"},
+		Run:   cursorcloud.Run{ID: "run-1", AgentID: input.Binding.RemoteAgentID, Status: runStatusFinished},
 	}, createRunErr: cursorcloud.ErrOutcomeUnknown}
 	runtime := newTestRuntime(t, repository, provider, nil)
 	if _, err := runtime.Launch(context.Background(), launchSpec(input)); err != nil {
@@ -368,7 +368,7 @@ func TestRestartResumesReservedFollowupAndClassifiesInterruptedSubmit(t *testing
 	input := testLaunchInput()
 	provider := &fakeProvider{createResponse: cursorcloud.CreateAgentResponse{
 		Agent: cursorcloud.Agent{ID: input.Binding.RemoteAgentID, LatestRunID: "run-1"},
-		Run:   cursorcloud.Run{ID: "run-1", AgentID: input.Binding.RemoteAgentID, Status: "FINISHED"},
+		Run:   cursorcloud.Run{ID: "run-1", AgentID: input.Binding.RemoteAgentID, Status: runStatusFinished},
 	}, createRun: cursorcloud.Run{ID: "run-2", AgentID: input.Binding.RemoteAgentID, Status: "RUNNING"}}
 	runtime := newTestRuntime(t, repository, provider, nil)
 	if _, err := runtime.Launch(context.Background(), launchSpec(input)); err != nil {

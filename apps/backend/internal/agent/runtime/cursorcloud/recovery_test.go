@@ -48,7 +48,7 @@ func TestTerminalResultSettlesAndPublishesOnce(t *testing.T) {
 		{ID: "1", Type: "assistant", Data: json.RawMessage(`{"text":"partial"}`)},
 		{ID: "2", Type: "result", Data: json.RawMessage(`{"status":"FINISHED","text":"complete result"}`)},
 	}
-	providerClient.getRunStatus = "FINISHED"
+	providerClient.getRunStatus = runStatusFinished
 	providerClient.getRun.Git = &provider.GitResult{Branches: []provider.GitBranch{
 		{RepositoryURL: "github.com/acme/widget", Branch: "cursor/fix", PRURL: "https://github.com/acme/widget/pull/9"},
 	}}
@@ -87,7 +87,7 @@ func TestTerminalResultSettlesAndPublishesOnce(t *testing.T) {
 func TestTerminalRunReadbackReplacesAssistantResultAfterHistoryGap(t *testing.T) {
 	providerClient := observerProvider()
 	providerClient.streamErr = &provider.APIError{StatusCode: 410, Code: "stream_expired"}
-	providerClient.getRunStatus = "FINISHED"
+	providerClient.getRunStatus = runStatusFinished
 	providerClient.getRun.Result = "final answer from run readback"
 	var published []*lifecycle.AgentStreamEventPayload
 	repo, runtime, input := newObserverRuntime(t, providerClient, &published)
@@ -115,7 +115,7 @@ func TestTerminalRunReadbackReplacesPartialAssistantResult(t *testing.T) {
 		{ID: "1", Type: "assistant", Data: json.RawMessage(`{"text":"partial answer"}`)},
 	}
 	providerClient.streamErr = &provider.APIError{StatusCode: 410, Code: "stream_expired"}
-	providerClient.getRunStatus = "FINISHED"
+	providerClient.getRunStatus = runStatusFinished
 	providerClient.getRun.Result = "complete answer from run readback"
 	var published []*lifecycle.AgentStreamEventPayload
 	repo, runtime, input := newObserverRuntime(t, providerClient, &published)
@@ -142,7 +142,7 @@ func TestTerminalRunReadbackReplacesPartialAssistantResult(t *testing.T) {
 
 func TestTerminalCompletionReplaysAfterPersistenceBeforeDeliveryAndAcknowledgesOnce(t *testing.T) {
 	providerClient := observerProvider()
-	providerClient.getRunStatus = "FINISHED"
+	providerClient.getRunStatus = runStatusFinished
 	var published []*lifecycle.AgentStreamEventPayload
 	repo, runtime, input := newObserverRuntime(t, providerClient, &published)
 	startObserverRuntime(t, runtime, input)
@@ -212,7 +212,7 @@ func TestCloudResultIdentity(t *testing.T) {
 
 func TestRemoteLivenessProbeSettlesOnlyProviderConfirmedTerminalState(t *testing.T) {
 	providerClient := observerProvider()
-	providerClient.getRunStatus = "FINISHED"
+	providerClient.getRunStatus = runStatusFinished
 	var published []*lifecycle.AgentStreamEventPayload
 	repo, managedRuntime, input := newObserverRuntime(t, providerClient, &published)
 	startObserverRuntime(t, managedRuntime, input)

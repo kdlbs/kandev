@@ -123,7 +123,7 @@ func sortedSubmissionCandidates(candidates map[string]SubmissionCandidate) []Sub
 
 func boundedRunStatus(raw string) string {
 	switch strings.ToUpper(strings.TrimSpace(raw)) {
-	case "CREATING", "RUNNING", "FINISHED", "FAILED", "ERROR", "CANCELLED", "EXPIRED":
+	case "CREATING", "RUNNING", runStatusFinished, "FAILED", "ERROR", "CANCELLED", "EXPIRED":
 		return strings.ToLower(strings.TrimSpace(raw))
 	default:
 		return "unknown"
