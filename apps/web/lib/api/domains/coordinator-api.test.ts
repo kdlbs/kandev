@@ -10,6 +10,7 @@ import {
   listCoordinators,
   listCoordinatorStalls,
   listProposals,
+  openConversation,
   patchCoordinator,
   rejectProposal,
   type Coordinator,
@@ -306,5 +307,76 @@ describe("getProposalConflict", () => {
 
   it("returns null for a non-ApiError", () => {
     expect(getProposalConflict(new Error("network down"))).toBeNull();
+  });
+
+  it("returns null when the 409 body's proposal field is not an object", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(
+        { error: "proposal_conflict", error_code: "proposal_conflict", proposal: "not-an-object" },
+        409,
+      ),
+    );
+
+    let error: unknown;
+    try {
+      await approveProposal(WORKSPACE_ID, COORDINATOR_ID, PROPOSAL_ID, undefined, OPTS);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(getProposalConflict(error)).toBeNull();
+  });
+});
+
+describe("openConversation", () => {
+  it("posts to the conversation route and resolves to the response body", async () => {
+    const response = { task_id: "task-1", session_id: "session-1", archive_state: false };
+    fetchSpy.mockResolvedValueOnce(jsonResponse(response));
+
+    await expect(openConversation(WORKSPACE_ID, COORDINATOR_ID, OPTS)).resolves.toEqual(response);
+
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${COORDINATOR_PATH}/conversation`);
+    expect(init?.method).toBe("POST");
+  });
+
+  it("throws an ApiError on a 409 conversation_conflict", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ error: "conversation_conflict", error_code: "conversation_conflict" }, 409),
+    );
+
+    let error: unknown;
+    try {
+      await openConversation(WORKSPACE_ID, COORDINATOR_ID, OPTS);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).errorCode).toBe("conversation_conflict");
+  });
+
+  it("throws an ApiError on a 409 coordinator_profile_unavailable", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          error: "coordinator_profile_unavailable",
+          agent_profile_status: "missing",
+          executor_profile_status: "ok",
+        },
+        409,
+      ),
+    );
+
+    let error: unknown;
+    try {
+      await openConversation(WORKSPACE_ID, COORDINATOR_ID, OPTS);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(409);
+    expect((error as ApiError).body).toMatchObject({ error: "coordinator_profile_unavailable" });
   });
 });

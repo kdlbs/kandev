@@ -128,6 +128,34 @@ export type CoordinatorUpdatedPayload = {
   open_proposals: number;
 };
 
+// Mirrors internal/coordinator/dto.go's ConversationResponse: the
+// conversation route's 200 body. archive_state is always false from this
+// route (docs/specs/coordinator/system-design/copilot.md#conversation-task).
+// The route's handler lands in task 03.
+export type ConversationResponse = {
+  task_id: string;
+  session_id: string;
+  archive_state: boolean;
+};
+
+// Mirrors internal/coordinator/dto.go's ConversationConflictResponse: the
+// 409 body the conversation route returns for both race outcomes of
+// copilot.md's conversation-route steps 4 and 7. Both keys are always
+// present.
+export type ConversationConflictBody = {
+  error: "conversation_conflict";
+  error_code: "conversation_conflict";
+};
+
+// Mirrors internal/coordinator/dto.go's CoordinatorProfileUnavailableResponse:
+// the 409 body returned when either coordinator profile is not ok
+// (docs/specs/coordinator/system-design/coordinators.md#validation).
+export type CoordinatorProfileUnavailableResponse = {
+  error: "coordinator_profile_unavailable";
+  agent_profile_status: ProfileStatus;
+  executor_profile_status: ProfileStatus;
+};
+
 function workspacePath(workspaceId: string, suffix: string): string {
   return `/api/v1/workspaces/${encodeURIComponent(workspaceId)}${suffix}`;
 }
@@ -264,8 +292,33 @@ export function getProposalConflict(error: unknown): Proposal | null {
   if (!(error instanceof ApiError) || error.status !== 409) return null;
   if (!error.body || typeof error.body !== "object") return null;
   const body = error.body as Partial<ProposalConflictBody>;
-  if (body.error_code !== "proposal_conflict" || !body.proposal) return null;
+  if (
+    body.error_code !== "proposal_conflict" ||
+    typeof body.proposal !== "object" ||
+    !body.proposal
+  ) {
+    return null;
+  }
   return body.proposal;
+}
+
+// openConversation resolves to the conversation route's 200 body, and
+// throws an ApiError on any non-2xx status: a 409 conversation_conflict or
+// coordinator_profile_unavailable, both distinguishable via
+// ApiError.errorCode. The route's handler lands in task 03; this client
+// function is available now so that work order does not also need to touch
+// this file.
+export function openConversation(
+  workspaceId: string,
+  coordinatorId: string,
+  options?: ApiRequestOptions,
+): Promise<ConversationResponse> {
+  return mutate<ConversationResponse>(
+    coordinatorPath(workspaceId, coordinatorId, "/conversation"),
+    "POST",
+    undefined,
+    options,
+  );
 }
 
 function mutate<T>(
