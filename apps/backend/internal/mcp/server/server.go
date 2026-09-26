@@ -753,7 +753,10 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 }
 
 func (s *Server) validateManagedTaskArguments(request mcp.CallToolRequest) error {
-	if s.profile.Surface != mcpprofile.SurfaceManagedTask {
+	s.mu.RLock()
+	managedTask := s.profile.Surface == mcpprofile.SurfaceManagedTask
+	s.mu.RUnlock()
+	if !managedTask {
 		return nil
 	}
 	arguments := request.GetArguments()
