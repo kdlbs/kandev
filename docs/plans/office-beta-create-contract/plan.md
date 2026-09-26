@@ -1,7 +1,11 @@
 ---
-spec: docs/specs/office/requirements/scheduler.md
 created: 2026-09-26
 status: complete
+requirements:
+  - REQ-OFFICE-SCHEDULER-003
+system_design:
+  - ../../specs/office/system-design/scheduler-02.md
+legacy_specs: []
 ---
 
 # Implementation Plan: Office New Task Create Contract (assignee)

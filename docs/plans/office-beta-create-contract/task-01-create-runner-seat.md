@@ -5,7 +5,15 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/requirements/scheduler.md"
+requirements:
+  - REQ-OFFICE-SCHEDULER-003
+acceptance_criteria:
+  - AC-OFFICE-SCHEDULER-003.1
+  - AC-OFFICE-SCHEDULER-003.2
+  - AC-OFFICE-SCHEDULER-003.3
+  - AC-OFFICE-SCHEDULER-003.4
+system_design:
+  - ../../specs/office/system-design/scheduler-02.md
 ---
 
 # Task 01: Validate and seat the create-time Office assignee
