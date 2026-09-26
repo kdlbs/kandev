@@ -304,10 +304,12 @@ export function getProposalConflict(error: unknown): Proposal | null {
 
 // openConversation resolves to the conversation route's 200 body, and
 // throws an ApiError on any non-2xx status: a 409 conversation_conflict or
-// coordinator_profile_unavailable, both distinguishable via
-// ApiError.errorCode. The route's handler lands in task 03; this client
-// function is available now so that work order does not also need to touch
-// this file.
+// coordinator_profile_unavailable. Only conversation_conflict carries
+// error_code, so ApiError.errorCode identifies that case; distinguish
+// coordinator_profile_unavailable by its error field or body shape
+// (CoordinatorProfileUnavailableResponse) instead. The route's handler lands
+// in task 03; this client function is available now so that work order does
+// not also need to touch this file.
 export function openConversation(
   workspaceId: string,
   coordinatorId: string,
