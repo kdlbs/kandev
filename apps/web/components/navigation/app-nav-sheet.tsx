@@ -22,7 +22,7 @@ import { AppNavSurface } from "./app-nav-surface";
 import { useMobileTaskNavigationOutlet } from "./mobile-task-navigation-provider";
 import { useWorkbenchTaskSelection } from "@/components/task/mobile/task-sheet-selection-context";
 import { useRouter } from "@/lib/routing/client-router";
-import { linkToTask, replaceTaskUrl } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
 
 type AppNavSheetProps = {
   pageNav?: ReactNode | ((close: () => void) => ReactNode);
@@ -217,9 +217,10 @@ function MobileTaskOutlet({ close }: { close: () => void }) {
   const router = useRouter();
   const element = useRef<HTMLDivElement>(null);
   const navigate = useCallback(
-    (id: string) => {
-      if (selection) replaceTaskUrl(id);
-      else router.push(linkToTask(id));
+    (id: string, sessionId?: string) => {
+      const href = linkToTask(id, { sessionId });
+      if (selection) router.replace(href);
+      else router.push(href);
     },
     [router, selection],
   );

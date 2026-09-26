@@ -19,7 +19,7 @@ type SelectionActions = {
   ) => Promise<TaskSession[]>;
   setActiveSession: (taskId: string, sessionId: string) => void;
   setActiveTask: (taskId: string) => void;
-  navigate?: (taskId: string) => void;
+  navigate?: (taskId: string, sessionId?: string) => void;
   onOpenChange: (open: boolean) => void;
   isSelectionCurrent?: () => boolean;
   getTaskPendingSnapshot?: (taskId: string) => TaskPendingSelectionSnapshot | undefined;
@@ -182,9 +182,35 @@ export function selectTaskFromSheet(
   };
   const navigate = params.navigate ?? replaceTaskUrl;
   if (task?.isArchived) {
-    params.setActiveTask(taskId);
-    navigate(taskId);
-    params.onOpenChange(false);
+    void (async () => {
+      let sessionId: string | undefined;
+      try {
+        const sessions = await params.loadTaskSessionsForTask(taskId);
+        if (!selectionIsCurrent(guardedParams)) return;
+        const preferredSessionId = task.primarySessionId
+          ? resolvePreferredSessionId({
+              taskId,
+              primarySessionId: task.primarySessionId,
+              lastSessionByTaskId: state.lastSessionByTaskId,
+              environmentIdBySessionId: state.environmentIdBySessionId,
+              taskSessionsById: state.taskSessionsById,
+            })
+          : "";
+        const ownedSessions = sessions.filter((session) => session.task_id === taskId);
+        sessionId =
+          ownedSessions.find((session) => session.id === preferredSessionId)?.id ??
+          ownedSessions.find((session) => session.id === task.primarySessionId)?.id ??
+          ownedSessions.find((session) => session.is_primary)?.id ??
+          ownedSessions[0]?.id;
+      } catch (error) {
+        if (isAbortError(error)) return;
+      }
+      if (!selectionIsCurrent(guardedParams)) return;
+      if (sessionId) params.setActiveSession(taskId, sessionId);
+      else params.setActiveTask(taskId);
+      navigate(taskId, sessionId);
+      params.onOpenChange(false);
+    })();
     return;
   }
   const pendingAction = effectiveTaskPendingAction(task);

@@ -1335,6 +1335,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
 		taskH.SetAgentProfileRecentUseRecorder(p.services.User)
+		taskH.SetSidebarTaskSettingsReader(p.services.User)
 	}
 	if handoffSvc != nil {
 		taskH.SetHandoffService(handoffSvc)

@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useMemo, useState, memo, type ReactNode } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  memo,
+  type MutableRefObject,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { IconCheck, IconNetwork, IconPlus } from "@tabler/icons-react";
 import { SheetHeader, SheetTitle } from "@kandev/ui/sheet";
@@ -8,6 +16,7 @@ import { DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
 import { useTaskSheetSelectionController } from "./task-sheet-selection-context";
 export { useTaskSheetSelectionController } from "./task-sheet-selection-context";
 import type { TaskSheetSelectionController } from "./session-task-switcher-sheet-selection";
+import { useTaskReadStatus } from "./session-task-switcher-sheet-read-status";
 import { TaskPickerSurface, InlineTaskHeader } from "./task-picker-surface";
 import { Button } from "@kandev/ui/button";
 import { QuickChatSheetButton } from "./quick-chat-sheet-button";
@@ -36,13 +45,16 @@ import { useSidebarTaskEdit } from "../task-session-sidebar-edit";
 import { useOptionalPortForwardingVisibility } from "../port-forwarding-visibility-provider";
 import { buildMobileTaskSwitcherProps } from "./session-task-switcher-sheet-props";
 import { TaskSwitcherDialogs } from "./session-task-switcher-sheet-dialogs";
+import { SidebarTaskPagination } from "../sidebar-task-pagination";
+import { groupSidebarTaskPage } from "../task-session-sidebar-grouped-view";
+import type { SidebarTaskPageEntry, SidebarTaskPageResponse } from "@/lib/types/http";
 type SessionTaskSwitcherSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workspaceId: string | null;
   workflowId: string | null;
   presentation?: "sheet" | "drawer";
-  navigate?: (taskId: string) => void;
+  navigate?: (taskId: string, sessionId?: string) => void;
   onCloseAutoFocus?: (event: Event) => void;
   renderInline?: (body: ReactNode) => ReactNode;
   selection?: TaskSheetSelectionController;
@@ -112,6 +124,13 @@ export type MobileTaskListProps = {
   loadError?: string | null;
   onRetryLoad?: () => void;
   retryLabel?: string;
+  pageEntries?: SidebarTaskPageEntry[];
+  page?: SidebarTaskPageResponse | null;
+  pagePending?: boolean;
+  pageError?: string | null;
+  onPageChange?: (page: number, afterSuccess: () => void) => void;
+  onPageRetry?: () => void;
+  scrollContainerRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
 /**
@@ -133,15 +152,24 @@ export function MobileTaskList(props: MobileTaskListProps) {
   const handleToggleGroup = useSidebarGroupToggle(view.id);
   // See useGroupedSidebarView: the executorType group label is catalog-backed.
   const { i18n } = useTranslation();
-  const grouped = useMemo(
-    () =>
-      applyView(props.tasks, view, {
-        pinnedTaskIds,
-        orderedTaskIds,
-        subtaskOrderByParentId,
-      }),
-    [props.tasks, view, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId, i18n.language],
-  );
+  const grouped = useMemo(() => {
+    if (props.pageEntries !== undefined) {
+      return groupSidebarTaskPage(props.tasks, props.pageEntries, view.group);
+    }
+    return applyView(props.tasks, view, {
+      pinnedTaskIds,
+      orderedTaskIds,
+      subtaskOrderByParentId,
+    });
+  }, [
+    i18n.language,
+    pinnedTaskIds,
+    orderedTaskIds,
+    props.pageEntries,
+    props.tasks,
+    subtaskOrderByParentId,
+    view,
+  ]);
   const switcherProps = buildMobileTaskSwitcherProps(props, {
     grouped,
     collapsedGroupKeys: view.collapsedGroups,
@@ -155,7 +183,23 @@ export function MobileTaskList(props: MobileTaskListProps) {
     showActivityTime: view.sort.key === "lastActivityAt",
     taskRowPresentation: view.taskRow,
   });
-  return <TaskSwitcher {...switcherProps} />;
+  return (
+    <>
+      <TaskSwitcher {...switcherProps} />
+      <SidebarTaskPagination
+        page={props.page ?? null}
+        pending={props.pagePending ?? false}
+        error={props.pageError ?? null}
+        onPageChange={(nextPage) =>
+          props.onPageChange?.(nextPage, () =>
+            props.scrollContainerRef?.current?.scrollTo({ top: 0 }),
+          )
+        }
+        onRetry={props.onPageRetry ?? (() => undefined)}
+        touchTargets
+      />
+    </>
+  );
 }
 
 function TaskSwitcherSurfaceHeader({
@@ -340,6 +384,7 @@ function TaskSwitcherSurfaceContent({
   onExpandedChange,
 }: TaskSwitcherSurfaceContentProps) {
   const { t } = useTranslation();
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
   const { taskLoadError, retryTaskLoad } = useTaskReadStatus(data);
   const moveOptions = useMobileTaskMoveOptions({
     open,
@@ -400,6 +445,7 @@ function TaskSwitcherSurfaceContent({
         <div
           className={inline ? "p-2" : "flex-1 min-h-0 overflow-y-auto p-2"}
           data-testid="mobile-task-switcher-list"
+          ref={listScrollRef}
         >
           <PluginTaskLinkActionSurfaceProvider
             beforePluginRun={presentation === "drawer" ? () => onOpenChange(false) : undefined}
@@ -425,6 +471,13 @@ function TaskSwitcherSurfaceContent({
               loadError={taskLoadError}
               onRetryLoad={retryTaskLoad}
               retryLabel={t("sidebar:retry")}
+              pageEntries={data.pageEntries}
+              page={data.page.response}
+              pagePending={data.page.requestedPage !== null}
+              pageError={data.page.error}
+              onPageChange={data.page.goToPage}
+              onPageRetry={data.page.retry}
+              scrollContainerRef={listScrollRef}
             />
           </PluginTaskLinkActionSurfaceProvider>
         </div>
@@ -563,19 +616,3 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     </>
   );
 });
-
-function useTaskReadStatus(data: ReturnType<typeof useSheetData>) {
-  const { t } = useTranslation();
-  let taskLoadError: string | null = null;
-  if (data.workspaceContextError) {
-    taskLoadError = data.workspaceContextAccessDenied
-      ? t("sidebar:workspaceContextAccessDenied")
-      : t("sidebar:workspaceContextRefreshFailed");
-  } else if (data.archivedError) {
-    taskLoadError = t("sidebar:archivedLoadFailed");
-  }
-  const retryTaskLoad = data.workspaceContextError
-    ? data.retryWorkspaceContext
-    : data.retryArchivedTasks;
-  return { taskLoadError, retryTaskLoad };
-}

@@ -277,6 +277,27 @@ The structured chat composer's `#` search calls `GET /api/v1/workspaces/:workspa
 
 A successful response returns the normalized query and an ordered `groups` array. Each group includes `source`, `provider`, `kind`, `display_name`, `kind_label`, `status`, and `results`. One source can report `not_configured`, `unauthorized`, `rate_limited`, `timeout`, `upstream_error`, or `unsupported_scope` while the request remains HTTP 200 and other groups remain usable. Each result is a versioned `EntityReference` with the fields described below; raw provider errors and credentials are not returned.
 
+### Query sidebar tasks over HTTP
+
+The web sidebar reads one bounded page through `POST /api/v1/workspaces/:workspaceId/sidebar/query`. The route uses the normal workspace authorization boundary and the authenticated user's saved pin and ordering preferences.
+
+```json
+{
+  "filters": [{ "dimension": "archived", "op": "is", "value": false }],
+  "sort": { "key": "lastActivityAt", "direction": "desc" },
+  "group": "none",
+  "collapsed_group_keys": [],
+  "collapsed_task_ids": [],
+  "page": 1,
+  "page_size": 100,
+  "locale": "en"
+}
+```
+
+`page` is one-based. `page_size` defaults to 100 and cannot exceed 100. The server filters and orders the complete view before selecting the page. It clamps a page that is beyond the current result and returns `query_key`, `page`, `page_size`, `total_tasks`, `total_visible_tasks`, `has_previous`, `has_next`, and ordered `entries`. Entries can be group headings, task rows, or continuation context for a task whose parent is on another page. Group headings and continuation entries are not included in `total_visible_tasks`.
+
+The route is read-only. It rejects unknown request fields and limits the request body to 256 KiB. Clients must not send pin, manual ordering, or subtask-order preferences in the query; the server reads those from the authenticated user's settings. The existing workspace task-list route remains available for its other callers.
+
 ### Send a user turn
 
 `message.add` requires `task_id`, `session_id`, and either non-whitespace `content` or at least one attachment. Optional fields are `author_id`, `model`, `plan_mode`, `has_review_comments`, `attachments`, `context_files`, and `entity_references`.

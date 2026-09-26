@@ -6,6 +6,7 @@ import {
   deleteTask,
   getTaskDeletePreflight,
   listTasksByWorkspace,
+  querySidebarTasks,
   moveTask,
   previewWorkflowMove,
   reorderStepTasks,
@@ -380,6 +381,49 @@ describe("listTasksByWorkspace", () => {
     expect(fetchSpy.mock.calls[0][0]).toBe(
       `${API_BASE_URL}/api/v1/workspaces/ws-1/tasks?page=2&page_size=100&only_archived=true&sort=updated_desc`,
     );
+  });
+});
+
+describe("querySidebarTasks", () => {
+  it("posts the bounded complete-view query to the additive route", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          query_key: "query-key",
+          page: 1,
+          page_size: 100,
+          total_entries: 2,
+          total_tasks: 1,
+          total_visible_tasks: 1,
+          has_previous: false,
+          has_next: false,
+          entries: [{ kind: "task", task_id: "task-1", task: { id: "task-1" } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const query = {
+      filters: [{ dimension: "archived", op: "is", value: true }],
+      sort: { key: "updatedAt", direction: "desc" },
+      group: "none",
+      collapsed_group_keys: [],
+      collapsed_task_ids: [],
+      page: 1,
+      page_size: 100,
+      locale: "en",
+    };
+
+    await expect(
+      querySidebarTasks("ws-1", query, { baseUrl: API_BASE_URL }),
+    ).resolves.toMatchObject({
+      query_key: "query-key",
+      total_visible_tasks: 1,
+    });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/workspaces/ws-1/sidebar/query`);
+    expect(init).toMatchObject({ method: "POST", body: JSON.stringify(query) });
   });
 });
 

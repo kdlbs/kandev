@@ -1,6 +1,9 @@
 import type { AppState } from "@/lib/state/store";
 import { isNewerStatusSummary } from "@/lib/task-status-summary";
-import type { KanbanTask } from "@/lib/ws/handlers/task-archive-cache";
+import {
+  bumpSidebarTaskQueryRevision,
+  type KanbanTask,
+} from "@/lib/ws/handlers/task-archive-cache";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 
 type TaskStatusSummaryUpdatedMessage = Parameters<
@@ -47,7 +50,10 @@ export function updateTaskStatusSummaryInBothKanbans(
     };
   }
 
-  return updateTaskStatusSummaryInArchivedCache(next, taskId, shouldReplace, updateTask);
+  return bumpSidebarTaskQueryRevision(
+    updateTaskStatusSummaryInArchivedCache(next, taskId, shouldReplace, updateTask),
+    message.payload.workspace_id,
+  );
 }
 
 function updateTaskStatusSummaryInArchivedCache(

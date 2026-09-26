@@ -2,7 +2,12 @@
 
 import { useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { getExecutorLabel } from "@/lib/executor-icons";
+import { t } from "@/lib/i18n";
 import { applyView, type GroupedSidebarList, type SidebarGroup } from "@/lib/sidebar/apply-view";
+import { formatTaskStateLabel } from "@/lib/ui/state-labels";
+import type { SidebarTaskPageEntry } from "@/lib/types/http";
+import type { TaskState } from "@/lib/types/http";
 import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import type { TaskSwitcherItem } from "./task-switcher-types";
@@ -84,9 +89,28 @@ function shareGroup(
   next: SidebarGroup,
   priorById: Map<string, TaskSwitcherItem>,
 ): SidebarGroup {
-  if (!previous || previous.label !== next.label) return next;
+  if (
+    !previous ||
+    previous.label !== next.label ||
+    previous.isContinuation !== next.isContinuation ||
+    previous.matchingCount !== next.matchingCount
+  )
+    return next;
   const tasks = shareTaskArray(previous.tasks, next.tasks, priorById);
   return tasks === previous.tasks ? previous : { ...next, tasks };
+}
+
+function pageGroupLabel(group: GroupedSidebarList["groupKey"], key: string, label: string): string {
+  if (key === "__unassigned__") return t("sidebar:groupUnassigned");
+  if (key === "__all__") return t("sidebar:groupAll");
+  if (key === "__multi__") return t("sidebar:groupMultiRepo");
+  if (group === "state") {
+    return key === "__not_started__"
+      ? formatTaskStateLabel(undefined)
+      : formatTaskStateLabel(key as TaskState);
+  }
+  if (group === "executorType") return getExecutorLabel(key);
+  return label;
 }
 
 function shareGroups(
@@ -142,6 +166,92 @@ export function useSharedGroupedSidebarList(next: GroupedSidebarList): GroupedSi
   const shared = shareGroupedSidebarList(previousRef.current, next);
   previousRef.current = shared;
   return shared;
+}
+
+function ensurePageGroup(params: {
+  groups: SidebarGroup[];
+  groupByKey: Map<string, SidebarGroup>;
+  groupKey: GroupedSidebarList["groupKey"];
+  key: string;
+  label: string;
+  matchingCount?: number;
+  isContinuation?: boolean;
+}): SidebarGroup {
+  const { groups, groupByKey, groupKey, key, label, matchingCount, isContinuation } = params;
+  const existing = groupByKey.get(key);
+  if (existing) return existing;
+  const group: SidebarGroup = {
+    key,
+    label: pageGroupLabel(groupKey, key, label),
+    tasks: [],
+    matchingCount,
+    isContinuation,
+  };
+  groupByKey.set(key, group);
+  groups.push(group);
+  return group;
+}
+
+function appendPageTask(
+  entry: SidebarTaskPageEntry,
+  task: TaskSwitcherItem,
+  group: SidebarGroup,
+  taskById: Map<string, TaskSwitcherItem>,
+  subTasksByParentId: Map<string, TaskSwitcherItem[]>,
+): void {
+  const parent = entry.parent_id ? taskById.get(entry.parent_id) : undefined;
+  if ((entry.depth ?? 0) > 0 && parent && entry.parent_id) {
+    const children = subTasksByParentId.get(entry.parent_id) ?? [];
+    children.push(task);
+    subTasksByParentId.set(entry.parent_id, children);
+    return;
+  }
+  if (entry.parent_id) {
+    task.parentTaskId = entry.parent_id;
+    task.continuationParentTitle = entry.parent_title ?? task.parentTaskTitle;
+  }
+  group.tasks.push(task);
+}
+
+/** Rebuild the display tree from the server's already-filtered and ordered page. */
+export function groupSidebarTaskPage(
+  tasks: TaskSwitcherItem[],
+  entries: SidebarTaskPageEntry[],
+  groupKey: GroupedSidebarList["groupKey"],
+): GroupedSidebarList {
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  const groups: SidebarGroup[] = [];
+  const groupByKey = new Map<string, SidebarGroup>();
+  const subTasksByParentId = new Map<string, TaskSwitcherItem[]>();
+  for (const entry of entries) {
+    if (entry.kind === "group") {
+      if (entry.group_key)
+        ensurePageGroup({
+          groups,
+          groupByKey,
+          groupKey,
+          key: entry.group_key,
+          label: entry.group_label ?? entry.group_key,
+          matchingCount: entry.matching_count,
+          isContinuation: entry.continuation,
+        });
+      continue;
+    }
+    if (entry.kind !== "task" || !entry.task_id) continue;
+    const task = taskById.get(entry.task_id);
+    if (!task) continue;
+    const groupKeyForTask = entry.group_key ?? "__all__";
+    const group = ensurePageGroup({
+      groups,
+      groupByKey,
+      groupKey,
+      key: groupKeyForTask,
+      label: entry.group_label ?? groupKeyForTask,
+      matchingCount: entry.matching_count,
+    });
+    appendPageTask(entry, task, group, taskById, subTasksByParentId);
+  }
+  return { groups, subTasksByParentId, groupKey };
 }
 
 export function useGroupedSidebarView(displayTasks: TaskSwitcherItem[]) {

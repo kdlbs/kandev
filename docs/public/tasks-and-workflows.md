@@ -637,6 +637,8 @@ The **TASKS** list in the left sidebar has two time-based sort choices. These ch
 
 Choose **Last activity** when you want to review tasks by the least recent user or agent interaction.
 
+Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
+
 - Search matches tasks without changing their state.
 - The display menu groups its controls into collapsible **Filters**, **Sort**, **Preview panel**, and, in **List**, **List rows** sections. Each section shows its current values while collapsed. Filters cover **Workflow**, **Repository**, and, in Kanban, **Priority**; registered plugin filters appear there when available. In Kanban/Pipeline, each workflow lane has a **Columns** menu outside these groups to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, tap the listing-title dropdown to open **View options** and expand the same display groups and change columns for the focused workflow.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
@@ -843,6 +845,8 @@ The archive confirmation is on by default in **Settings → Preferences → Task
 If **Prevent auto-start on open** is on, select **Start agent** to begin recovery.
 
 While archived, a task keeps its history. Kandev does not start its agent or restore its workspace. If unarchive fails, the task stays archived.
+
+Select an archived task to read its saved conversation in the current page. Archived conversations are read-only. Kandev does not launch, prepare, or resume an agent while you browse them. Unarchive the task to use its normal start or resume actions.
 
 If task or workspace preparation fails, select **Show details** in the error strip above the session tabs. It opens the available recovery actions. The strip stays visible when you switch sessions and disappears after recovery succeeds. Archiving during recovery stops that recovery path without starting a fallback restore. For session recovery behavior, see [Sessions and review](sessions-and-review.md).
 

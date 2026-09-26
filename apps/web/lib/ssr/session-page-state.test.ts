@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { mergeInitialState } from "@/lib/state/default-state";
 import type { AppState } from "@/lib/state/store";
-import { workflowId } from "@/lib/types/ids";
+import { sessionId, workflowId } from "@/lib/types/ids";
 import type { Task } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({
@@ -115,6 +115,39 @@ describe("fetchSessionDataForTask initial hydration", () => {
     expect(initialState.workspaces?.items[0]?.office_workflow_id).toBe("workflow-office");
   });
 
+  it("hydrates the requested session only when it belongs to the route task", async () => {
+    const primary = makeSession();
+    const requested = { ...makeSession(), id: sessionId("session-requested") };
+    mocks.fetchTask.mockResolvedValue(makeTask({ primary_session_id: sessionId(primary.id) }));
+    mocks.listTaskSessions.mockResolvedValue({ sessions: [primary, requested], total: 2 });
+    mocks.fetchTaskSession.mockResolvedValue({ session: requested });
+
+    const result = await fetchSessionDataForTask(TASK_ID, requested.id);
+
+    expect(mocks.fetchTaskSession).toHaveBeenCalledWith(requested.id, { cache: "no-store" });
+    expect(result.sessionId).toBe(requested.id);
+  });
+
+  it("rejects a requested session that is not in the route task's session list", async () => {
+    const primary = makeSession();
+    mocks.fetchTask.mockResolvedValue(makeTask({ primary_session_id: sessionId(primary.id) }));
+    mocks.listTaskSessions.mockResolvedValue({
+      sessions: [
+        primary,
+        { ...makeSession(), id: sessionId("other-task-session"), task_id: "task-other" },
+      ],
+      total: 2,
+    });
+    mocks.fetchTaskSession.mockResolvedValue({ session: primary });
+
+    const result = await fetchSessionDataForTask(TASK_ID, sessionId("other-task-session"));
+
+    expect(mocks.fetchTaskSession).toHaveBeenCalledWith(primary.id, { cache: "no-store" });
+    expect(result.sessionId).toBe(primary.id);
+  });
+});
+
+describe("fetchSessionDataForTask per-turn hydration", () => {
   it("hydrates persisted per-turn runtime configuration after a page reload", async () => {
     const session = makeSession();
     const runtimeConfigSnapshot = {
@@ -178,7 +211,9 @@ describe("fetchSessionDataForTask initial hydration", () => {
     expect(hydratedState.turns.loadedBySession[SESSION_ID]).toBeUndefined();
     expect(hydratedState.turns.loadedBySession).toEqual({});
   });
+});
 
+describe("fetchSessionDataForTask model hydration", () => {
   it("hydrates the persisted model selector before the first render", async () => {
     const session = {
       ...makeSession(),

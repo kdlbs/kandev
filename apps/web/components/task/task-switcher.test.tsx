@@ -147,6 +147,28 @@ describe("TaskSwitcher — nested subtasks beyond depth 1", () => {
   });
 });
 
+describe("TaskSwitcher cross-page selection", () => {
+  it("shows the total selected count and a clear action", () => {
+    const clearSelection = vi.fn();
+    render(
+      <Providers>
+        <TaskSwitcher
+          grouped={grouped()}
+          activeTaskId={null}
+          selectedTaskId={null}
+          selectedTaskIds={new Set(["Root", "off-page-task"])}
+          onClearSelection={clearSelection}
+          onSelectTask={vi.fn()}
+        />
+      </Providers>,
+    );
+
+    expect(screen.getByRole("status").textContent).toContain("2 tasks selected");
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+    expect(clearSelection).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("TaskSwitcher — workflow completion icons", () => {
   it("derives workflow completion from the final ordered step for each task", () => {
     const finalStepId = "step-final";

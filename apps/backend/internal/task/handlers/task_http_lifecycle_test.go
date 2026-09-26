@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -16,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 )
 
 // httpTaskRepo extends the WS fixture with the paging and counting surfaces
@@ -39,6 +42,31 @@ type httpTaskRepo struct {
 	countedStepID     string
 	cleanupJobs       []*models.TaskResourceCleanupJob
 	cleanupJobsByOp   map[string]*models.TaskResourceCleanupJob
+	sidebarPage       *models.SidebarTaskPageResult
+	sidebarWorkspace  string
+	sidebarQuery      models.SidebarTaskViewQuery
+	sidebarPrefs      models.SidebarTaskViewPreferences
+}
+
+func (r *httpTaskRepo) QuerySidebarTaskPage(
+	_ context.Context,
+	workspaceID string,
+	query models.SidebarTaskViewQuery,
+	prefs models.SidebarTaskViewPreferences,
+) (*models.SidebarTaskPageResult, error) {
+	r.sidebarWorkspace = workspaceID
+	r.sidebarQuery = query
+	r.sidebarPrefs = prefs
+	return r.sidebarPage, nil
+}
+
+type sidebarSettingsReader struct {
+	settings *usermodels.UserSettings
+	err      error
+}
+
+func (r sidebarSettingsReader) GetUserSettings(context.Context) (*usermodels.UserSettings, error) {
+	return r.settings, r.err
 }
 
 func (r *httpTaskRepo) CreateTaskResourceCleanupJob(
@@ -340,6 +368,69 @@ func TestHTTPListTasksByWorkspaceDeniesForeignWorkspace(t *testing.T) {
 
 	require.Equal(t, http.StatusNotFound, rec.Code)
 	require.Empty(t, repo.listedWorkspaceID, "a denied list must not reach the repository")
+}
+
+func TestHTTPQuerySidebarTasksUsesDefaultsAndAuthenticatedPreferences(t *testing.T) {
+	repo := &httpTaskRepo{sidebarPage: &models.SidebarTaskPageResult{
+		QueryKey: "key", Page: 1, PageSize: 100, TotalTasks: 1, TotalVisibleTasks: 1,
+		Entries: []models.SidebarTaskPageEntry{{
+			Kind: "task", TaskID: "task-b", WIPQueuePosition: 3, WIPQueueTotal: 7,
+		}},
+		Tasks: []*models.Task{{ID: "task-b", WorkspaceID: "ws-b", Title: "Mine"}},
+	}}
+	h := newHTTPTaskHandlers(t, repo)
+	h.SetSidebarTaskSettingsReader(sidebarSettingsReader{settings: &usermodels.UserSettings{
+		SidebarTaskPrefs: usermodels.SidebarTaskPrefs{PinnedTaskIDs: []string{"task-b"}, OrderedTaskIDs: []string{"task-b"}},
+	}})
+	c, rec := taskRequestAs(t, "", http.MethodPost, "/api/v1/workspaces/ws-b/sidebar/query", "ws-b")
+	c.Request.Body = io.NopCloser(strings.NewReader(`{"filters":[],"locale":"en"}`))
+
+	h.httpQuerySidebarTasks(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "ws-b", repo.sidebarWorkspace)
+	require.Equal(t, 1, repo.sidebarQuery.Page)
+	require.Equal(t, 100, repo.sidebarQuery.PageSize)
+	require.Equal(t, "updatedAt", repo.sidebarQuery.Sort.Key)
+	require.Equal(t, "desc", repo.sidebarQuery.Sort.Direction)
+	require.Equal(t, "none", repo.sidebarQuery.Group)
+	require.Equal(t, []string{"task-b"}, repo.sidebarPrefs.PinnedTaskIDs)
+	require.Contains(t, rec.Body.String(), `"query_key":"key"`)
+	require.Contains(t, rec.Body.String(), `"task":{"id":"task-b"`)
+	require.Contains(t, rec.Body.String(), `"wip_queue_position":3`)
+	require.Contains(t, rec.Body.String(), `"wip_queue_total":7`)
+}
+
+func TestHTTPQuerySidebarTasksRejectsInvalidAndOversizedBodies(t *testing.T) {
+	for name, body := range map[string]string{
+		"unknown field": `{"filters":[],"locale":"en","arbitrary_sql":"1=1"}`,
+		"bad filter":    `{"filters":[{"dimension":"other","op":"is","value":"x"}],"locale":"en"}`,
+		"oversized":     `{"unused":"` + strings.Repeat("x", sidebarTaskRequestLimit) + `"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &httpTaskRepo{}
+			h := newHTTPTaskHandlers(t, repo)
+			c, rec := taskRequestAs(t, "", http.MethodPost, "/api/v1/workspaces/ws-b/sidebar/query", "ws-b")
+			c.Request.Body = io.NopCloser(strings.NewReader(body))
+
+			h.httpQuerySidebarTasks(c)
+
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Empty(t, repo.sidebarWorkspace, "invalid input must not reach the repository")
+		})
+	}
+}
+
+func TestHTTPQuerySidebarTasksDeniesForeignWorkspace(t *testing.T) {
+	repo := &httpTaskRepo{}
+	h := newHTTPTaskHandlers(t, repo)
+	c, rec := taskRequestAs(t, "user-a", http.MethodPost, "/api/v1/workspaces/ws-b/sidebar/query", "ws-b")
+	c.Request.Body = io.NopCloser(strings.NewReader(`{"locale":"en"}`))
+
+	h.httpQuerySidebarTasks(c)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Empty(t, repo.sidebarWorkspace, "a denied query must not reach the repository")
 }
 
 func TestHTTPGetWorkflowTaskCount(t *testing.T) {

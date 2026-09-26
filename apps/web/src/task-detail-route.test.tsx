@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   fetchSessionDataForTask: vi.fn(),
 }));
 const KANBAN_TASK_SHELL_TEST_ID = "kanban-task-shell";
+const TASK_DATA_ATTRIBUTE = "data-task-id";
+const TASK_ONE_ID = "task-1";
+const TASK_TWO_ID = "task-2";
 
 vi.mock("@/components/state-hydrator", () => ({
   StateHydrator: () => <div data-testid="state-hydrator" />,
@@ -45,7 +48,7 @@ function deferred<T>() {
 function makeFetchedData(): FetchedSessionData {
   return {
     task: {
-      id: taskId("task-1"),
+      id: taskId(TASK_ONE_ID),
       title: "Task one",
       description: "",
       workspace_id: workspaceId("workspace-1"),
@@ -74,7 +77,7 @@ describe("TaskDetailRoute", () => {
     const routeData = deferred<FetchedSessionData>();
     mocks.fetchSessionDataForTask.mockReturnValueOnce(routeData.promise);
 
-    render(<TaskDetailRoute taskId="task-1" />);
+    render(<TaskDetailRoute taskId={TASK_ONE_ID} />);
 
     expect(screen.queryByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("Loading task");
@@ -86,20 +89,44 @@ describe("TaskDetailRoute", () => {
     routeData.resolve(makeFetchedData());
 
     await waitFor(() => {
-      expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute("data-task-id")).toBe(
-        "task-1",
+      expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(TASK_DATA_ATTRIBUTE)).toBe(
+        TASK_ONE_ID,
       );
     });
   });
 
   it("uses boot route data without fetching again", async () => {
-    render(<TaskDetailRoute taskId="task-1" initialData={makeFetchedData()} />);
+    render(<TaskDetailRoute taskId={TASK_ONE_ID} initialData={makeFetchedData()} />);
 
     expect(mocks.fetchSessionDataForTask).not.toHaveBeenCalled();
-    expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute("data-task-id")).toBe(
-      "task-1",
+    expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(TASK_DATA_ATTRIBUTE)).toBe(
+      TASK_ONE_ID,
     );
     expect(screen.getByTestId("state-hydrator")).toBeTruthy();
+  });
+
+  it("does not render the previous task's data on the first frame after route reuse", async () => {
+    const routeData = deferred<FetchedSessionData>();
+    mocks.fetchSessionDataForTask.mockReturnValueOnce(routeData.promise);
+    const { rerender } = render(
+      <TaskDetailRoute taskId={TASK_ONE_ID} initialData={makeFetchedData()} />,
+    );
+
+    rerender(<TaskDetailRoute taskId={TASK_TWO_ID} />);
+
+    expect(screen.queryByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Loading task");
+    expect(mocks.fetchSessionDataForTask).toHaveBeenCalledWith(TASK_TWO_ID, undefined);
+
+    routeData.resolve({
+      ...makeFetchedData(),
+      task: { ...makeFetchedData().task, id: taskId(TASK_TWO_ID), title: "Task two" },
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(TASK_DATA_ATTRIBUTE)).toBe(
+        TASK_TWO_ID,
+      );
+    });
   });
 
   it("reaches the unavailable task shell when route data fails", async () => {
@@ -110,7 +137,9 @@ describe("TaskDetailRoute", () => {
     await waitFor(() => {
       expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBeTruthy();
     });
-    expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute("data-task-id")).toBe("");
+    expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(TASK_DATA_ATTRIBUTE)).toBe(
+      "",
+    );
     expect(screen.queryByTestId("state-hydrator")).toBeNull();
   });
 });

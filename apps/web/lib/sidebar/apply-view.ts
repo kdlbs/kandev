@@ -29,6 +29,8 @@ export type SidebarGroup = {
   key: string;
   label: string;
   tasks: TaskSwitcherItem[];
+  matchingCount?: number;
+  isContinuation?: boolean;
 };
 
 export type GroupedSidebarList = {
@@ -432,6 +434,22 @@ export function mergeGroupOrder(current: string[], groupTaskIds: string[]): stri
   // Items before `firstIdx` in `current` are all non-group (firstIdx is the
   // first group occurrence), so translation to `remaining` is identity.
   return [...remaining.slice(0, firstIdx), ...groupTaskIds, ...remaining.slice(firstIdx)];
+}
+
+/** Replace the order slots occupied by visible siblings and retain off-page slots. */
+export function mergeVisibleOrder(current: string[], visibleTaskIds: string[]): string[] {
+  const visibleSet = new Set(visibleTaskIds);
+  const positions = current.flatMap((id, index) => (visibleSet.has(id) ? [index] : []));
+  if (positions.length === 0) return [...current, ...visibleTaskIds];
+  const result = [...current];
+  const placedCount = Math.min(positions.length, visibleTaskIds.length);
+  for (let index = 0; index < placedCount; index++) {
+    result[positions[index]] = visibleTaskIds[index];
+  }
+  if (visibleTaskIds.length > placedCount) {
+    result.splice(positions[placedCount - 1] + 1, 0, ...visibleTaskIds.slice(placedCount));
+  }
+  return result;
 }
 
 function buildIndex(ids: string[]): Map<string, number> {

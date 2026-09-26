@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useSidebarMultiSelect } from "@/hooks/use-sidebar-multi-select";
 import {
@@ -69,10 +69,20 @@ export function useSelectionHandlers(args: {
   pinnedTaskIds: string[];
   visibleTaskIds: string[];
   movableSelectedIds: Set<string>;
+  workflowIdByTaskId?: ReadonlyMap<string, string>;
+  selectionScopeKey?: string;
 }) {
-  const { multiSelect, pinTasks, unpinTasks, pinnedTaskIds, visibleTaskIds, movableSelectedIds } =
-    args;
-  const { isSelecting, clearSelection, selectRange, pruneToVisible, bulkMove } = multiSelect;
+  const {
+    multiSelect,
+    pinTasks,
+    unpinTasks,
+    pinnedTaskIds,
+    visibleTaskIds,
+    movableSelectedIds,
+    workflowIdByTaskId,
+    selectionScopeKey,
+  } = args;
+  const { isSelecting, clearSelection, selectRange, bulkMove } = multiSelect;
 
   // Escape clears an active selection.
   useEffect(() => {
@@ -84,11 +94,12 @@ export function useSelectionHandlers(args: {
     return () => window.removeEventListener("keydown", onKey);
   }, [isSelecting, clearSelection]);
 
-  // Prune selections that scroll out of view (collapsed group / filter change)
-  // so plain clicks on visible rows stop behaving as selection-mode.
+  const selectionScopeRef = useRef(selectionScopeKey);
   useEffect(() => {
-    pruneToVisible(visibleTaskIds);
-  }, [visibleTaskIds, pruneToVisible]);
+    if (selectionScopeRef.current === selectionScopeKey) return;
+    selectionScopeRef.current = selectionScopeKey;
+    clearSelection();
+  }, [clearSelection, selectionScopeKey]);
 
   // Stable ref so TaskSwitcher's React.memo isn't defeated by a fresh closure.
   const onSelectTaskRange = useCallback(
@@ -107,8 +118,9 @@ export function useSelectionHandlers(args: {
         ),
         targetWorkflowId,
         targetStepId,
+        workflowIdByTaskId,
       ),
-    [bulkMove, visibleTaskIds, movableSelectedIds],
+    [bulkMove, visibleTaskIds, movableSelectedIds, workflowIdByTaskId],
   );
 
   const onBulkPin = useCallback(
@@ -139,20 +151,50 @@ export function useSidebarSelection({
   collapsedGroups,
   collapsedSubtaskParents,
   displayTasks,
+  selectionScopeKey,
 }: {
   workspaceId: string | null;
   grouped: GroupedSidebarList;
   collapsedGroups: string[];
   collapsedSubtaskParents: string[];
   displayTasks: Array<{ id: string; workflowId?: string; remoteExecutorType?: string | null }>;
+  selectionScopeKey?: string;
 }) {
   const multiSelect = useSidebarMultiSelect(workspaceId);
   const { selectedIds, clearSelection, toggleSelect } = multiSelect;
   const pinTasks = useAppStore((s) => s.pinTasks);
   const unpinTasks = useAppStore((s) => s.unpinTasks);
   const pinnedTaskIds = useAppStore((s) => s.sidebarTaskPrefs.pinnedTaskIds);
-  const archiveDialog = useBulkConfirmDialog(displayTasks, multiSelect.bulkArchive);
-  const deleteDialog = useBulkConfirmDialog(displayTasks, multiSelect.bulkDelete);
+  const selectedTaskDetailsRef = useRef(new Map<string, (typeof displayTasks)[number]>());
+  const currentTasksById = useMemo(
+    () => new Map(displayTasks.map((task) => [task.id, task])),
+    [displayTasks],
+  );
+  const selectedTaskDetails = useMemo(() => {
+    const cache = selectedTaskDetailsRef.current;
+    for (const id of selectedIds) {
+      const task = currentTasksById.get(id);
+      if (task) cache.set(id, task);
+    }
+    for (const id of cache.keys()) {
+      if (!selectedIds.has(id)) cache.delete(id);
+    }
+    return [...selectedIds].map((id) => cache.get(id)).filter((task) => task !== undefined);
+  }, [currentTasksById, selectedIds]);
+  const selectedWorkflowByTaskId = useMemo(
+    () =>
+      new Map(
+        selectedTaskDetails
+          .filter(
+            (task): task is (typeof displayTasks)[number] & { workflowId: string } =>
+              !!task.workflowId,
+          )
+          .map((task) => [task.id, task.workflowId]),
+      ),
+    [selectedTaskDetails],
+  );
+  const archiveDialog = useBulkConfirmDialog(selectedTaskDetails, multiSelect.bulkArchive);
+  const deleteDialog = useBulkConfirmDialog(selectedTaskDetails, multiSelect.bulkDelete);
 
   const visibleTaskIds = useMemo(
     () => flattenVisibleTaskIds(grouped, collapsedGroups, collapsedSubtaskParents),
@@ -163,8 +205,8 @@ export function useSidebarSelection({
   // so treat its presence as a mixed selection (disables "Move to step") and
   // filter such ids out of the actual move.
   const { isMixedWorkflowSelection, movableSelectedIds } = useMemo(
-    () => computeMixedWorkflowSelection(displayTasks, selectedIds),
-    [displayTasks, selectedIds],
+    () => computeMixedWorkflowSelection(selectedTaskDetails, selectedIds),
+    [selectedTaskDetails, selectedIds],
   );
 
   const { onSelectTaskRange, onBulkMove, onBulkPin } = useSelectionHandlers({
@@ -174,6 +216,8 @@ export function useSidebarSelection({
     pinnedTaskIds,
     visibleTaskIds,
     movableSelectedIds,
+    workflowIdByTaskId: selectedWorkflowByTaskId,
+    selectionScopeKey,
   });
 
   const switcherProps = {

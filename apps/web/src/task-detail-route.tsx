@@ -23,9 +23,13 @@ type TaskDetailRouteProps = {
 };
 
 type TaskDetailRouteState =
-  | { status: "loading"; data: null }
-  | { status: "loaded"; data: FetchedSessionData }
-  | { status: "error"; data: null };
+  | { routeKey: string; status: "loading"; data: null }
+  | { routeKey: string; status: "loaded"; data: FetchedSessionData }
+  | { routeKey: string; status: "error"; data: null };
+
+function taskRouteKey(taskId: string, sessionId?: string): string {
+  return `${taskId}\u0000${sessionId ?? ""}`;
+}
 
 function routeDataMatchesTask(
   data: FetchedSessionData | undefined,
@@ -37,11 +41,16 @@ function routeDataMatchesTask(
 function initialRouteState(
   initialData: FetchedSessionData | undefined,
   taskId: string,
+  sessionId?: string,
 ): TaskDetailRouteState {
-  if (routeDataMatchesTask(initialData, taskId)) {
-    return { status: "loaded", data: initialData };
+  const routeKey = taskRouteKey(taskId, sessionId);
+  if (
+    routeDataMatchesTask(initialData, taskId) &&
+    (!sessionId || initialData.sessionId === sessionId)
+  ) {
+    return { routeKey, status: "loaded", data: initialData };
   }
-  return { status: "loading", data: null };
+  return { routeKey, status: "loading", data: null };
 }
 
 export function TaskDetailRoute({
@@ -54,19 +63,27 @@ export function TaskDetailRoute({
 }: TaskDetailRouteProps) {
   const { t } = useTranslation();
   const [routeState, setRouteState] = useState<TaskDetailRouteState>(() =>
-    initialRouteState(initialData, taskId),
+    initialRouteState(initialData, taskId, sessionId),
   );
+  const routeKey = taskRouteKey(taskId, sessionId);
+  const currentRouteState =
+    routeState.routeKey === routeKey
+      ? routeState
+      : initialRouteState(initialData, taskId, sessionId);
 
   useEffect(() => {
-    if (routeDataMatchesTask(initialData, taskId)) {
-      setRouteState({ status: "loaded", data: initialData });
+    if (
+      routeDataMatchesTask(initialData, taskId) &&
+      (!sessionId || initialData.sessionId === sessionId)
+    ) {
+      setRouteState({ routeKey, status: "loaded", data: initialData });
       return;
     }
     let cancelled = false;
-    setRouteState({ status: "loading", data: null });
-    fetchSessionDataForTask(taskId)
+    setRouteState({ routeKey, status: "loading", data: null });
+    fetchSessionDataForTask(taskId, sessionId)
       .then((next) => {
-        if (!cancelled) setRouteState({ status: "loaded", data: next });
+        if (!cancelled) setRouteState({ routeKey, status: "loaded", data: next });
       })
       .catch((error) => {
         if (!cancelled) {
@@ -74,15 +91,15 @@ export function TaskDetailRoute({
             "Could not load /t/:taskId route data; task page will fall back to client fetches:",
             error instanceof Error ? error.message : String(error),
           );
-          setRouteState({ status: "error", data: null });
+          setRouteState({ routeKey, status: "error", data: null });
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [initialData, taskId]);
+  }, [initialData, routeKey, sessionId, taskId]);
 
-  if (routeState.status === "loading") {
+  if (currentRouteState.status === "loading") {
     return (
       <div className="flex h-full min-h-0 w-full items-center justify-center bg-background">
         <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
@@ -92,7 +109,7 @@ export function TaskDetailRoute({
     );
   }
 
-  const data = routeState.data;
+  const data = currentRouteState.data;
   const activeSessionId = sessionId ?? data?.sessionId ?? null;
   const initialState = data?.initialState ?? null;
   const task = data?.task ?? null;

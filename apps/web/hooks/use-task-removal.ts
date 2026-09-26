@@ -12,6 +12,10 @@ import { createAbortError, isAbortError } from "@/lib/utils/abort-error";
 import { softNavigate } from "@/lib/routing/client-router";
 import { ownsTaskRemovalDeparture, type TaskRemovalAction } from "@/lib/state/task-removal";
 import { coordinateTaskRemovalBatch } from "./task-removal-coordinator";
+import {
+  loadSidebarFallbackTasks,
+  mergeSidebarFallbackTasks,
+} from "./task-removal-sidebar-fallback";
 import { useToast } from "@/components/toast-provider";
 import { useTranslation } from "react-i18next";
 
@@ -542,21 +546,20 @@ async function switchAfterRemoval(params: {
     useLayoutSwitch,
     loadTaskSessionsForTask,
   } = params;
-  const nextTask = await selectNextTaskAfterRemoval(
-    collectRemainingTasks(store),
-    taskId,
-    taskIsLive,
-    {
-      excludedTaskIds,
-      workspaceId: opts?.workspaceId,
-      validateTaskAncestry: opts?.validateTaskAncestry,
-    },
-  );
-  if (!nextTask) return { candidateFound: false, switchedTaskId: null };
+  const workspaceId = opts?.workspaceId ?? store.getState().workspaces?.activeId;
+  const cachedTasks = collectRemainingTasks(store);
+  const pageTasks = await loadSidebarFallbackTasks(workspaceId);
+  const fallbackTasks = mergeSidebarFallbackTasks(pageTasks, cachedTasks);
+  const candidate = await selectNextTaskAfterRemoval(fallbackTasks, taskId, taskIsLive, {
+    excludedTaskIds,
+    workspaceId,
+    validateTaskAncestry: opts?.validateTaskAncestry,
+  });
+  if (!candidate) return { candidateFound: false, switchedTaskId: null };
 
   const switched = await switchToNextTask({
     store,
-    nextTask,
+    nextTask: candidate,
     oldEnvId,
     useLayoutSwitch,
     loadTaskSessionsForTask,
@@ -570,7 +573,7 @@ async function switchAfterRemoval(params: {
             )
         : undefined,
   });
-  return { candidateFound: true, switchedTaskId: switched ? nextTask.id : null };
+  return { candidateFound: true, switchedTaskId: switched ? candidate.id : null };
 }
 
 function shouldRedirectAfterNoRemovalCandidate(

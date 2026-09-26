@@ -1472,6 +1472,10 @@ export class ApiClient {
     await this.request("POST", `/api/v1/tasks/${taskId}/archive`);
   }
 
+  async unarchiveTask(taskId: string): Promise<void> {
+    await this.request("POST", `/api/v1/tasks/${taskId}/unarchive`);
+  }
+
   async getAgentProfileMcpConfig(
     profileId: string,
   ): Promise<{ profile_id: string; enabled: boolean; servers: Record<string, unknown> }> {
