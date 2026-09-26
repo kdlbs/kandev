@@ -1,5 +1,9 @@
 import type { Page } from "@playwright/test";
 import { injectLatency } from "./causal-waits";
+import type { SeedData } from "../fixtures/test-base";
+import type { CreateTaskResponse } from "../../lib/types/http";
+import type { ApiClient } from "./api-client";
+import { waitForSessionDone } from "./session";
 
 type WireFrame = {
   id?: unknown;
@@ -42,6 +46,34 @@ export type SessionEntryRecoveryProxy = {
   failedResponseCount: (action: string) => number;
   heldResponseCount: (action: string) => number;
 };
+
+export async function createSettledHistoryTask(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+): Promise<CreateTaskResponse> {
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  if (!task.session_id) throw new Error("history recovery task has no session_id");
+
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Waiting for the history recovery task's initial prompt to finish",
+    60_000,
+  );
+  return task;
+}
 
 function parseFrame(value: string): WireFrame | null {
   try {
@@ -134,9 +166,12 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
   const rules = new Map<string, DelayRule>();
   const dropRules = new Map<string, DropRule>();
   const holdRules = new Map<string, HoldRule>();
+  const heldMessages = new Map<string, string[]>();
   const failureMessages = new Map<string, string>();
+  let sendHeldMessage: ((message: string) => void) | undefined;
 
   await page.routeWebSocket(/\/ws$/, (ws) => {
+    sendHeldMessage = (message) => ws.send(message);
     const server = ws.connectToServer();
 
     ws.onMessage((message) => {
@@ -174,7 +209,12 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
         const frame = parseFrame(trimmed);
         const context = takeResponseContext(frame, requestContexts);
         if (isResponseFrame(frame)) {
-          if (consumeHoldRule(context, holdRules, heldCounts)) continue;
+          if (consumeHoldRule(context, holdRules, heldCounts)) {
+            const messages = heldMessages.get(context!.action) ?? [];
+            messages.push(trimmed);
+            heldMessages.set(context!.action, messages);
+            continue;
+          }
           if (frame && context && failureMessages.has(context.action)) {
             failedCounts.set(context.action, (failedCounts.get(context.action) ?? 0) + 1);
             ws.send(
@@ -221,6 +261,8 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
     },
     releaseHeldResponses: (action) => {
       holdRules.delete(action);
+      for (const message of heldMessages.get(action) ?? []) sendHeldMessage?.(message);
+      heldMessages.delete(action);
     },
     pendingRequestCount: (action) =>
       [...requestContexts.values()].filter((context) => context.action === action).length,

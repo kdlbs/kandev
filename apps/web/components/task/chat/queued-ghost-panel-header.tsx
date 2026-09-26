@@ -154,6 +154,7 @@ export function QueuePanelHeader({
           size="sm"
           className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:px-3"
           onClick={onClear}
+          disabled={isLoading || cancellationPending}
           title={t("chat:clearAllQueuedMessages")}
           data-testid="queue-clear-all"
         >

@@ -5,7 +5,6 @@ import type { Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
-import { watchWs } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv, publishSeedCommit } from "../../helpers/git-helper";
 import { waitForWorkspaceFile } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
@@ -61,7 +60,6 @@ async function setupDesktopContextTask(
     )
     .toBe(true);
 
-  const gateway = watchWs(testPage);
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -69,9 +67,6 @@ async function setupDesktopContextTask(
   if (!task.session_id) throw new Error("file tree context task did not return a session_id");
   await waitForWorkspaceFile(apiClient, task.session_id, filePath);
   await waitForWorkspaceFile(apiClient, task.session_id, directoryPath);
-  const treeResponse = gateway.waitForResponse("workspace.tree.get");
-  await session.clickTab("Files");
-  await treeResponse;
   return { session, filePath, directoryPath };
 }
 

@@ -249,6 +249,18 @@ describe("QueueAffordance", () => {
     expect(state.clearAll).toHaveBeenCalledTimes(1);
   });
 
+  it("disables clear-all while a queue operation is pending", () => {
+    const state = queueState([entry()], { isLoading: true });
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+
+    const clearAll = screen.getByTestId("queue-clear-all");
+    expect((clearAll as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(clearAll);
+    expect(state.clearAll).not.toHaveBeenCalled();
+  });
+
   it("shows compact Auto-run and Auto-merge controls without legacy dispatch actions", () => {
     const state = queueState([entry()]);
     useQueueMock.mockReturnValue(state);
