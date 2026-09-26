@@ -6,6 +6,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { setChatDraftContent } from "@/lib/local-storage";
 import { moveTask } from "@/lib/api/domains/kanban-api";
 import { getTaskMoveErrorDetail } from "@/components/task/task-move-error-message";
+import { resolveLatestTaskProjection } from "@/components/task/task-page-content-helpers";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -17,20 +18,29 @@ import type {
   MessageAttachment,
 } from "@/components/task/chat/chat-input-container";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
+import type { KanbanState } from "@/lib/state/slices";
 
 const PLAN_CONTEXT_PATH = "plan:context";
+const EMPTY_WORKFLOW_STEPS: KanbanState["steps"] = [];
 
 const AUTO_TRANSITION_ACTIONS = ["move_to_next", "move_to_previous", "move_to_step"];
 
 export function useNextWorkflowStep(taskId: string | null) {
   const { toast } = useToast();
   const { t } = useTranslation("task");
-  const workflowId = useAppStore((s) => s.kanban.workflowId);
-  const steps = useAppStore((s) => s.kanban.steps);
-  const taskStepId = useAppStore((s) => {
-    if (!taskId) return null;
-    const task = s.kanban.tasks.find((t) => t.id === taskId);
-    return task?.workflowStepId ?? null;
+  const taskProjection = useAppStore((s) =>
+    resolveLatestTaskProjection(taskId, s.kanban.tasks, s.kanbanMulti.snapshots),
+  );
+  const workflowId = taskProjection?.workflowId ?? null;
+  const taskStepId = taskProjection?.workflowStepId ?? null;
+  const steps = useAppStore((s) => {
+    if (!workflowId) return EMPTY_WORKFLOW_STEPS;
+    if (workflowId === s.kanban.workflowId) return s.kanban.steps;
+    const snapshot = s.kanbanMulti.snapshots[workflowId];
+    if (!snapshot || snapshot.isPlaceholder === true || snapshot.workflowId !== workflowId) {
+      return EMPTY_WORKFLOW_STEPS;
+    }
+    return snapshot.steps;
   });
 
   // Track agent switching: isMoving stays true from "proceed" click until the
