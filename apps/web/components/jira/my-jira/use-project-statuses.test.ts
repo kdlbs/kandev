@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { cleanup, render, renderHook, waitFor } from "@testing-library/react";
+import { createElement, useEffect } from "react";
 import type { JiraStatus } from "@/lib/types/jira";
 
 const listJiraProjectStatusesMock =
@@ -10,7 +11,11 @@ vi.mock("@/lib/api/domains/jira-api", () => ({
     listJiraProjectStatusesMock(key, options),
 }));
 
-import { reconcileStatuses, useProjectStatuses } from "./use-project-statuses";
+import {
+  reconcileStatuses,
+  reconcileStatusesForQuery,
+  useProjectStatuses,
+} from "./use-project-statuses";
 
 afterEach(() => {
   cleanup();
@@ -22,6 +27,15 @@ function status(id: string, name: string): JiraStatus {
 }
 
 const IN_DEV = "In Development";
+const WORKSPACE_ID = "workspace-1";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
 
 describe("reconcileStatuses", () => {
   it("returns the same reference when nothing is selected", () => {
@@ -50,6 +64,25 @@ describe("reconcileStatuses", () => {
     const result = reconcileStatuses(selected, [status("1", "Open")]);
     expect(result).toBe(selected);
   });
+
+  it("preserves structured statuses when saved custom JQL owns the query", () => {
+    const selected = ["Ready"];
+    const customJql = "project = CLIP AND status = Ready ORDER BY priority DESC";
+
+    expect(reconcileStatusesForQuery(true, customJql, selected, [])).toBe(selected);
+  });
+
+  it("does not reconcile while the current status lookup is pending", () => {
+    const selected = ["Ready"];
+
+    expect(reconcileStatusesForQuery(false, null, selected, [])).toBe(selected);
+  });
+
+  it("does not reconcile against an empty list from a failed status lookup", () => {
+    const selected = ["Ready"];
+
+    expect(reconcileStatusesForQuery(true, null, selected, [], false)).toBe(selected);
+  });
 });
 
 describe("useProjectStatuses", () => {
@@ -57,6 +90,7 @@ describe("useProjectStatuses", () => {
     const { result } = renderHook(() => useProjectStatuses([]));
     await waitFor(() => expect(result.current.loaded).toBe(true));
     expect(result.current.options).toEqual([]);
+    expect(result.current.authoritative).toBe(true);
     expect(listJiraProjectStatusesMock).not.toHaveBeenCalled();
   });
 
@@ -68,7 +102,7 @@ describe("useProjectStatuses", () => {
       }),
     );
 
-    const { result } = renderHook(() => useProjectStatuses(["CLIP"], "workspace-1"));
+    const { result } = renderHook(() => useProjectStatuses(["CLIP"], WORKSPACE_ID));
 
     // Before the fetch resolves the hook must not claim to be loaded, otherwise
     // callers would reconcile a saved status selection against empty options.
@@ -80,7 +114,61 @@ describe("useProjectStatuses", () => {
     await waitFor(() => expect(result.current.loaded).toBe(true));
     expect(result.current.options).toEqual([status("1", IN_DEV)]);
     expect(listJiraProjectStatusesMock).toHaveBeenCalledWith("CLIP", {
-      workspaceId: "workspace-1",
+      workspaceId: WORKSPACE_ID,
     });
+  });
+
+  it("marks failed project lookups as non-authoritative", async () => {
+    listJiraProjectStatusesMock.mockRejectedValueOnce(new Error("status lookup unavailable"));
+
+    const { result } = renderHook(() => useProjectStatuses(["CLIP"], WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.authoritative).toBe(false);
+    expect(result.current.options).toEqual([]);
+  });
+
+  it("does not report stale options as loaded after project keys change", async () => {
+    listJiraProjectStatusesMock.mockResolvedValueOnce({ statuses: [status("1", "Old status")] });
+    const next = deferred<{ statuses: JiraStatus[] }>();
+    listJiraProjectStatusesMock.mockReturnValueOnce(next.promise);
+    const { result, rerender } = renderHook(
+      ({ keys }: { keys: string[] }) => useProjectStatuses(keys, WORKSPACE_ID),
+      { initialProps: { keys: ["OLD"] } },
+    );
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    rerender({ keys: ["NEW"] });
+
+    expect(result.current.loaded).toBe(false);
+    expect(result.current.options).toEqual([status("1", "Old status")]);
+    next.resolve({ statuses: [status("2", "New status")] });
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.options).toEqual([status("2", "New status")]);
+  });
+
+  it("does not expose the prior loaded state to effects on the first render for new keys", async () => {
+    listJiraProjectStatusesMock.mockResolvedValueOnce({ statuses: [status("1", "Old status")] });
+    const next = deferred<{ statuses: JiraStatus[] }>();
+    listJiraProjectStatusesMock.mockReturnValueOnce(next.promise);
+    const loadedSnapshots: Array<{ key: string; loaded: boolean }> = [];
+
+    function StatusConsumer({ projectKey }: { projectKey: string }) {
+      const { loaded } = useProjectStatuses([projectKey], WORKSPACE_ID);
+      useEffect(() => {
+        loadedSnapshots.push({ key: projectKey, loaded });
+      }, [loaded, projectKey]);
+      return null;
+    }
+
+    const { rerender } = render(createElement(StatusConsumer, { projectKey: "OLD" }));
+    await waitFor(() => expect(loadedSnapshots.at(-1)).toEqual({ key: "OLD", loaded: true }));
+    loadedSnapshots.length = 0;
+
+    rerender(createElement(StatusConsumer, { projectKey: "NEW" }));
+
+    expect(loadedSnapshots).toEqual([{ key: "NEW", loaded: false }]);
+    next.resolve({ statuses: [status("2", "New status")] });
+    await waitFor(() => expect(loadedSnapshots.at(-1)).toEqual({ key: "NEW", loaded: true }));
   });
 });

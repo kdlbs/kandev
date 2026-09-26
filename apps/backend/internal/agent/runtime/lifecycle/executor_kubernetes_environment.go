@@ -102,13 +102,13 @@ func (r *KubernetesExecutor) adoptKubernetesEnvironment(ctx context.Context, req
 			continue
 		}
 		if getMetadataString(row.Metadata, MetadataKeyKubernetesResourceEnvironmentID) != req.TaskEnvironmentID {
-			return models.ErrWorkspaceReuseUnsafe
+			return fmt.Errorf("%w: retained Kubernetes runtime belongs to a different task environment", models.ErrWorkspaceReuseUnsafe)
 		}
 		if getMetadataString(row.Metadata, MetadataKeyKubernetesPodUID) == "" {
-			return models.ErrWorkspaceReuseUnsafe
+			return fmt.Errorf("%w: retained Kubernetes runtime has no Pod identity", models.ErrWorkspaceReuseUnsafe)
 		}
 		if candidate != nil && !kubernetesLegacyInventoriesAgree(candidate.Metadata, row.Metadata) {
-			return models.ErrWorkspaceReuseUnsafe
+			return fmt.Errorf("%w: retained Kubernetes runtime inventories disagree", models.ErrWorkspaceReuseUnsafe)
 		}
 		candidate = row
 	}
@@ -123,10 +123,10 @@ func (r *KubernetesExecutor) adoptKubernetesEnvironment(ctx context.Context, req
 
 func (r *KubernetesExecutor) attachKubernetesEnvironmentRequest(ctx context.Context, req *ExecutorCreateRequest, record *models.KubernetesEnvironment) error {
 	if getMetadataString(req.Metadata, "executor_id") != getMetadataString(record.Metadata, MetadataKeyKubernetesResourceExecutorID) || getMetadataString(req.Metadata, MetadataKeyExecutorProfileID) != getMetadataString(record.Metadata, MetadataKeyKubernetesResourceProfileID) {
-		return models.ErrWorkspaceReuseUnsafe
+		return fmt.Errorf("%w: current Kubernetes executor profile does not match retained runtime", models.ErrWorkspaceReuseUnsafe)
 	}
 	if record.ControlSecretID == "" || record.BootstrapSecretID == "" {
-		return models.ErrWorkspaceReuseUnsafe
+		return fmt.Errorf("%w: retained Kubernetes runtime credentials are unavailable", models.ErrWorkspaceReuseUnsafe)
 	}
 	token, err := r.secretStore.Reveal(ctx, record.ControlSecretID)
 	if err != nil {
@@ -137,7 +137,7 @@ func (r *KubernetesExecutor) attachKubernetesEnvironmentRequest(ctx context.Cont
 		return err
 	}
 	if strings.TrimSpace(token) == "" || strings.TrimSpace(nonce) == "" {
-		return models.ErrWorkspaceReuseUnsafe
+		return fmt.Errorf("%w: retained Kubernetes runtime credentials are empty", models.ErrWorkspaceReuseUnsafe)
 	}
 	remoteID := req.InstanceID
 	if req.PreviousExecutionID != "" {
@@ -206,13 +206,13 @@ func (r *KubernetesExecutor) claimTaskKubernetesEnvironment(ctx context.Context,
 		return nil, fmt.Errorf("load Kubernetes task environment: %w", err)
 	}
 	if env == nil || env.TaskID != original.TaskID || env.ExecutorType != "k8s" {
-		return nil, models.ErrWorkspaceReuseUnsafe
+		return nil, fmt.Errorf("%w: Kubernetes task environment identity is invalid", models.ErrWorkspaceReuseUnsafe)
 	}
 	if original.WorkspaceReuseRequired && env.Status != models.TaskEnvironmentStatusReady {
 		if env.Status == models.TaskEnvironmentStatusCreating {
 			return nil, models.ErrWorkspacePreparing
 		}
-		return nil, models.ErrWorkspaceReuseUnsafe
+		return nil, fmt.Errorf("%w: Kubernetes task environment is not ready", models.ErrWorkspaceReuseUnsafe)
 	}
 	if r.secretStore == nil {
 		return nil, errors.New("kubernetes environment secret store is unavailable")
@@ -238,7 +238,7 @@ func (r *KubernetesExecutor) taskKubernetesCreateRequest(ctx context.Context, or
 			return nil, err
 		}
 	} else if req.WorkspaceReuseRequired {
-		return nil, models.ErrWorkspaceReuseUnsafe
+		return nil, fmt.Errorf("%w: retained Kubernetes runtime inventory is missing", models.ErrWorkspaceReuseUnsafe)
 	}
 	previousCheckpoint := req.CheckpointRuntimeInventory
 	req.CheckpointRuntimeInventory = func(checkpointCtx context.Context, metadata map[string]interface{}) error {
@@ -269,7 +269,7 @@ func (r *KubernetesExecutor) isUnadoptedKubernetesResume(ctx context.Context, re
 		return false, err
 	}
 	if env == nil || env.TaskID != req.TaskID || env.ExecutorType != "k8s" {
-		return false, models.ErrWorkspaceReuseUnsafe
+		return false, fmt.Errorf("%w: Kubernetes task environment identity is invalid", models.ErrWorkspaceReuseUnsafe)
 	}
 	return true, nil
 }

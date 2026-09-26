@@ -10,6 +10,7 @@ import type { KanbanState } from "@/lib/state/slices";
 import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
 import { repositorySlug } from "@/lib/repository-slug";
 import { remoteRepositoryBrowserUrl } from "@/lib/utils/remote-repository-browser-url";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 import { useAppStore } from "@/components/state-provider";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
@@ -141,29 +142,77 @@ export function resolveEffectiveTask(
   return null;
 }
 
+export function resolveLatestTaskProjection(
+  taskId: string | null,
+  activeTasks: KanbanState["tasks"],
+  snapshots: Record<string, { tasks: KanbanState["tasks"] }>,
+): KanbanState["tasks"][number] | null {
+  if (!taskId) return null;
+  const candidates = [activeTasks, ...Object.values(snapshots).map((snapshot) => snapshot.tasks)];
+  let latestTask: KanbanState["tasks"][number] | null = null;
+  let latestTimestamp: bigint | null = null;
+
+  for (const tasks of candidates) {
+    for (const task of tasks) {
+      if (task.id !== taskId) continue;
+      const updatedAt = parseTurnTimestamp(task.updatedAt ?? undefined);
+      if (
+        !latestTask ||
+        (updatedAt !== null && (latestTimestamp === null || updatedAt > latestTimestamp))
+      ) {
+        latestTask = task;
+        latestTimestamp = updatedAt;
+      }
+    }
+  }
+
+  return latestTask;
+}
+
+export function resolveWorkflowCurrentStepId(
+  sessionStepId: string | null,
+  taskStepId: string | null,
+  workflowStepIds: readonly string[],
+): string | null {
+  // The resolved task step is freshest across sources. Only use the session
+  // step as a fallback when it belongs to this workflow.
+  if (taskStepId) return taskStepId;
+  if (sessionStepId && workflowStepIds.includes(sessionStepId)) return sessionStepId;
+  return null;
+}
+
+function hasNewerKanbanState(
+  baseTask: Task,
+  kanbanTimestamp: bigint,
+  baseTimestamp: bigint | null,
+): boolean {
+  return Boolean(baseTask.archived_at && baseTimestamp !== null && kanbanTimestamp > baseTimestamp);
+}
+
 export function mergeBaseWithKanban(
   baseTask: Task,
   kanbanTask: KanbanState["tasks"][number] | null,
 ): Task {
   if (!kanbanTask) return baseTask;
-  const kanbanUpdatedAt = Date.parse(kanbanTask.updatedAt ?? "");
-  const baseUpdatedAt = Date.parse(baseTask.updated_at ?? "");
-  const hasNewerKanbanState =
-    Boolean(baseTask.archived_at) &&
-    Number.isFinite(kanbanUpdatedAt) &&
-    Number.isFinite(baseUpdatedAt) &&
-    kanbanUpdatedAt > baseUpdatedAt;
+  const kanbanTimestamp = parseTurnTimestamp(kanbanTask.updatedAt ?? undefined);
+  const baseTimestamp = parseTurnTimestamp(baseTask.updated_at);
+  if (kanbanTimestamp === null || (baseTimestamp !== null && kanbanTimestamp < baseTimestamp)) {
+    return baseTask;
+  }
+  const hasCompletePlacement = Boolean(kanbanTask.workflowId && kanbanTask.workflowStepId);
   return {
     ...baseTask,
     title: kanbanTask.title ?? baseTask.title,
     description: kanbanTask.description ?? baseTask.description,
-    workflow_step_id:
-      (kanbanTask.workflowStepId as string | undefined) ?? baseTask.workflow_step_id,
+    workflow_id: hasCompletePlacement ? toWorkflowId(kanbanTask.workflowId) : baseTask.workflow_id,
+    workflow_step_id: hasCompletePlacement ? kanbanTask.workflowStepId : baseTask.workflow_step_id,
     position: kanbanTask.position ?? baseTask.position,
     state: (kanbanTask.state as Task["state"] | undefined) ?? baseTask.state,
     repositories: baseTask.repositories,
     metadata: kanbanTask.metadata !== undefined ? kanbanTask.metadata : baseTask.metadata,
-    archived_at: hasNewerKanbanState ? null : baseTask.archived_at,
+    archived_at: hasNewerKanbanState(baseTask, kanbanTimestamp, baseTimestamp)
+      ? null
+      : baseTask.archived_at,
   };
 }
 
@@ -176,7 +225,7 @@ export function buildTaskFromKanban(kanbanTask: KanbanState["tasks"][number]): T
     position: kanbanTask.position,
     state: kanbanTask.state ?? "CREATED",
     workspace_id: toWorkspaceId(""),
-    workflow_id: toWorkflowId(""),
+    workflow_id: toWorkflowId(kanbanTask.workflowId ?? ""),
     priority: kanbanTask.priority ?? "medium",
     repositories: [],
     created_at: "",

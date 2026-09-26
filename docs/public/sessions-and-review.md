@@ -64,11 +64,13 @@ Stopping a session is not deletion. Resume needs the executor's session record. 
 When startup or resume fails:
 
 - Kandev adds one recovery entry to the selected session's chat.
-- The current unresolved failure shows recovery controls. Older entries keep their message and technical details without stale controls.
+- The current unresolved failure replaces the blocked message composer with one recovery card. Older entries keep their message and technical details without stale controls.
 - Repeated delivery of the same failure does not add another entry.
 - History loading and new messages keep the normal chat scroll behavior.
 
 **Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. The session entry remains visible until the session resumes successfully. Kandev uses stacked touch-sized actions on phones. A failure in another session remains in that session's history.
+
+The recovery card places the recommended action first and shows every available alternative as an individual button, including **Restore read-only workspace** and **Start fresh session** when eligible. Buttons wrap on desktop and stack at touch size on phones. Runtime installation failures offer **Retry**; provider quota failures show reset guidance, while Archive and Delete remain in the task menu. Restoring the workspace does not restart the agent. Expand **Technical details** for wrapped, bounded diagnostics; **Copy details** copies the same redacted text you see. When a workspace pane can identify the same failure and its visible recovery entry, **View recovery** opens Chat and focuses the recovery card. Independent workspace failures retain their own retry.
 
 Failures during task or workspace preparation appear as one task error strip below the task header and above the session and Plan tabs. The strip remains visible when you switch sessions or tabs and disappears only after task recovery succeeds. Select **Show details** to open the available guarded actions in a desktop dialog or phone drawer.
 
@@ -317,6 +319,10 @@ and leaves the session's auto-scroll preference unchanged. Scroll up to read
 history without being pulled back by incoming content. Rich-output chart
 animations have their own Appearance setting.
 
+Select **Jump to latest** above the composer to return to the newest message,
+including agent replies. The action appears only when newer content is below
+the transcript. It does not change the session's auto-scroll preference.
+
 ## Inspect changes
 
 Open **+ > Changes** on desktop. A repository-less task has no Git state, so Kandev closes this panel automatically.
@@ -370,7 +376,9 @@ Review compares each submodule with the gitlink commit recorded by its parent an
 
 When a task has multiple linked pull requests, use the PR selector in the Changes diff header or Review toolbar to inspect one PR revision at a time. The selection is scoped to that task for the current app session. Switching PRs replaces only the remote PR contribution; uncommitted and committed sources keep their normal precedence. Selecting a file from a specific PR row opens that exact PR revision, even when a sibling PR changes the same path.
 
-When several pull requests are linked to a task, hover the PR control in the desktop top bar or tap the PR status chip on mobile to open the tabbed CI surface. Each PR tab has a **Remove from task** button. Removing a tab only detaches that Kandev task association; it does not close or modify the GitHub pull request, its branch or commits, the task repositories, or sibling PR associations. Explicitly linking that PR again restores the association.
+When several pull requests are linked to a task, hover the PR control in the desktop top bar or tap the PR status chip on mobile to open the tabbed CI surface. Right-click the top-bar PR control on desktop to open **Edit** and remove a selected association. Each PR tab also has a **Remove from task** button. Removing a tab only detaches that Kandev task association; it does not close or modify the GitHub pull request, its branch or commits, the task repositories, or sibling PR associations. Explicitly linking that PR again restores the association.
+
+Task rows and Kanban cards also let you remove an association. Open the menu, select **Edit**, then select `Remove owner/repo #number from task`. On a phone, open row actions or the card dots, then make the same selections. This action removes only that association. It does not change the GitHub pull request, its branch, or commits.
 
 An automatic-merge error shows **Retry** in the selected PR tab on desktop and mobile. This action requests one new evaluation for that pull request. Kandev applies all current readiness rules before it sends another merge request. Other automation and state-loading errors show **Refresh**. Refresh loads the current state and does not authorize a merge.
 

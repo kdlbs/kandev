@@ -29,6 +29,8 @@ func TestRestoreTaskMessageRollback_RejectionReturnsPersistedTask(t *testing.T) 
 		before.ID,
 		sessionID,
 		models.TaskSessionStateRunning,
+		before.State,
+		before.WorkflowStepID,
 		v1.TaskStateReview,
 		"restored-step",
 	)
@@ -71,6 +73,8 @@ func TestRestoreTaskMessageRollback_AttributesCausalSession(t *testing.T) {
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID: "sender-sess-1", TaskID: "task-123", State: models.TaskSessionStateRunning,
 	}))
+	before, err := repo.GetTask(ctx, "task-123")
+	require.NoError(t, err)
 
 	senderCtx := steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
 		ActorKind: steptelemetry.ActorAgent,
@@ -82,6 +86,8 @@ func TestRestoreTaskMessageRollback_AttributesCausalSession(t *testing.T) {
 		"task-123",
 		sessionID,
 		models.TaskSessionStateRunning,
+		before.State,
+		before.WorkflowStepID,
 		v1.TaskStateReview,
 		"restored-step",
 	)
@@ -110,12 +116,16 @@ func TestRestoreTaskMessageRollback_NoPresetFallsBackToSystem(t *testing.T) {
 		models.TaskSessionStateRunning,
 		"",
 	))
+	before, err := repo.GetTask(ctx, "task-123")
+	require.NoError(t, err)
 
 	_, updated, err := svc.RestoreTaskMessageRollback(
 		ctx,
 		"task-123",
 		sessionID,
 		models.TaskSessionStateRunning,
+		before.State,
+		before.WorkflowStepID,
 		v1.TaskStateReview,
 		"restored-step",
 	)

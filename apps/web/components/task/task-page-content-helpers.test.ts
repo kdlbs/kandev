@@ -22,6 +22,7 @@ import {
 
 type KanbanTask = KanbanState["tasks"][number];
 const ARCHIVED_AT = "2026-07-19T00:00:00Z";
+const FRESH_KANBAN_UPDATED_AT = "2026-07-20T00:00:00Z";
 
 function makeArchivedTaskDetails(overrides: Partial<Task> = {}): Task {
   return {
@@ -561,7 +562,10 @@ describe("resolveEffectiveTask archived state", () => {
     const enabled = resolveEffectiveTask(
       base,
       null,
-      makeKanbanTask({ metadata: { port_forwarding_enabled: true } }),
+      makeKanbanTask({
+        metadata: { port_forwarding_enabled: true },
+        updatedAt: FRESH_KANBAN_UPDATED_AT,
+      }),
       "task-1",
     );
     expect(enabled?.metadata).toEqual({ port_forwarding_enabled: true });
@@ -601,7 +605,11 @@ describe("resolveEffectiveTask archived state", () => {
 
   it("prefers live kanban title/state while preserving base-only fields", () => {
     const taskDetails = makeArchivedTaskDetails({ archived_at: null });
-    const kanbanTask = makeKanbanTask({ title: "Live title", state: "IN_PROGRESS" });
+    const kanbanTask = makeKanbanTask({
+      title: "Live title",
+      state: "IN_PROGRESS",
+      updatedAt: FRESH_KANBAN_UPDATED_AT,
+    });
 
     const resolved = resolveEffectiveTask(taskDetails, null, kanbanTask, "task-1");
 

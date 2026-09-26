@@ -27,6 +27,12 @@ func (m *Manager) SetExecutorProfileReader(reader ExecutorProfileReader) {
 	m.executorProfileReader = reader
 }
 
+// SetPluginExecutorProfileLoader wires the host-owned profile and transient
+// secret reader used by the plugin remote runtime.
+func (m *Manager) SetPluginExecutorProfileLoader(loader PluginExecutorProfileLoader) {
+	m.pluginExecutorProfileLoader = loader
+}
+
 // ExecutorProfileEnvForSession resolves the executor profile's env vars for a
 // terminal, revealing secret-backed entries. It mirrors what the agent
 // subprocess receives (the orchestrator merges the same profile env into the

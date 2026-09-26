@@ -398,6 +398,7 @@ var (
 	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded
 	ErrInvalidRepositorySettings = errors.New("invalid repository settings")
 	ErrInvalidExecutorConfig     = errors.New("invalid executor config")
+	ErrExecutorProfileInUse      = errors.New("executor profile is referenced by a retained environment")
 	// Workspace-source sentinels are the service boundary consumed by the HTTP
 	// and MCP adapters. Keep categories stable rather than making callers parse
 	// a validation or runtime error string.
@@ -478,6 +479,8 @@ type Service struct {
 	branchPolicies                  repository.RepositoryBranchPolicyRepository
 	repositoryCleanup               repository.RepositoryCleanupRepository
 	executors                       repository.ExecutorRepository
+	executorProviderCatalog         models.ExecutorProviderCatalog
+	executorProviderCatalogMu       sync.Mutex
 	environments                    repository.EnvironmentRepository
 	taskEnvironments                repository.TaskEnvironmentRepository
 	reviews                         repository.ReviewRepository
@@ -501,6 +504,7 @@ type Service struct {
 	logger                          *logger.Logger
 	discoveryConfig                 RepositoryDiscoveryConfig
 	discoveryCacheMu                sync.Mutex
+	discoveryRootMutationMu         sync.Mutex
 	discoveryCache                  map[string]discoveryCacheEntry
 	discoveryRootCache              map[string]discoveryRootCacheEntry
 	discoveryFlights                map[string]*discoveryFlight
@@ -697,6 +701,12 @@ func (s *Service) AttachmentRepository() repository.AttachmentRepository {
 // Workspace-scoped secret references are rejected before a profile is saved.
 func (s *Service) SetSecretStore(secretStore secrets.SecretStore) {
 	s.secretStore = secretStore
+}
+
+// SetExecutorProviderCatalog wires the plugin-owned remote executor catalog.
+// The narrow model interface keeps task orchestration independent of plugins.
+func (s *Service) SetExecutorProviderCatalog(catalog models.ExecutorProviderCatalog) {
+	s.executorProviderCatalog = catalog
 }
 
 // SetWorkspaceSecretDeleter wires workspace-secret cleanup to workspace

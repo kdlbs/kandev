@@ -31,6 +31,8 @@ const EXPECTED_UI_PRIMITIVES = [
   "Alert",
   "Badge",
   "Button",
+  "Action",
+  "ActionGroup",
   "Card",
   "ChartContainer",
   "ChartLegend",

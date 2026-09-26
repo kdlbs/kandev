@@ -5,6 +5,10 @@ import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginSlotRegistration } from "@/lib/plugins/registry";
 import { PluginErrorBoundary } from "./plugin-error-boundary";
 import { ObservedPluginSlotContext } from "./plugin-slot-presence";
+import {
+  PluginActionSurfaceProvider,
+  type PluginActionSurfaceValue,
+} from "./plugin-action-surface";
 
 export type PluginSlotProps = {
   /** Named slot to render — see PLUGIN-API.md for the initial set of slot names. */
@@ -20,6 +24,8 @@ export type PluginSlotProps = {
   ownerPluginId?: string;
   /** Owners whose contextual toolbar is already rendered in this surface. */
   excludePluginIds?: readonly string[];
+  /** Explicit host-owned visual context for standard plugin actions. */
+  actionSurface?: PluginActionSurfaceValue;
 };
 
 /**
@@ -28,7 +34,13 @@ export type PluginSlotProps = {
  * own error boundary so one broken plugin can't break the host surface. Pass
  * `ownerPluginId` to restrict rendering to that plugin's own components.
  */
-export function PluginSlot({ name, slotProps, ownerPluginId, excludePluginIds }: PluginSlotProps) {
+export function PluginSlot({
+  name,
+  slotProps,
+  ownerPluginId,
+  excludePluginIds,
+  actionSurface,
+}: PluginSlotProps) {
   const registry = usePluginRegistry();
   const registrations = registry
     .getSlotRegistrations(name)
@@ -47,6 +59,7 @@ export function PluginSlot({ name, slotProps, ownerPluginId, excludePluginIds }:
           registration={registration}
           name={name}
           slotProps={slotProps}
+          actionSurface={actionSurface}
         />
       ))}
     </>
@@ -57,17 +70,21 @@ export function PluginSlotRegistrationView({
   registration,
   name,
   slotProps,
+  actionSurface,
 }: {
   registration: PluginSlotRegistration;
   name: string;
   slotProps?: unknown;
+  actionSurface?: PluginActionSurfaceValue;
 }) {
   const { pluginId, Component } = registration;
   const observedSlot = useContext(ObservedPluginSlotContext);
   const content = (
-    <PluginErrorBoundary context={`plugin "${pluginId}" slot "${name}" component`}>
-      <Component slotProps={slotProps} />
-    </PluginErrorBoundary>
+    <PluginActionSurfaceProvider value={actionSurface ?? null}>
+      <PluginErrorBoundary context={`plugin "${pluginId}" slot "${name}" component`}>
+        <Component slotProps={slotProps} />
+      </PluginErrorBoundary>
+    </PluginActionSurfaceProvider>
   );
   if (observedSlot !== name) return content;
   return (

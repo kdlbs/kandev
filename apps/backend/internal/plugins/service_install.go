@@ -78,11 +78,21 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	lock := s.lifecycleLocks.lockFor(result.Manifest.ID)
 	lock.Lock()
 	defer lock.Unlock()
+	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
+	if (hadOldRec && len(oldRec.ExecutorProviders) > 0) || len(result.Manifest.ExecutorProviders) > 0 {
+		s.closeExecutorProviderAdmission(result.Manifest.ID)
+		defer s.reopenExecutorProviderAdmissionIfActive(result.Manifest.ID)
+	}
 	dispatchLock := s.dispatchLocks.lockFor(result.Manifest.ID)
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
 
-	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
+	if hadOldRec {
+		if err := s.guardExecutorProviderUpgrade(ctx, oldRec, result.Manifest); err != nil {
+			_ = os.RemoveAll(result.InstallPath)
+			return nil, err
+		}
+	}
 	if err := s.ensureOwnershipAvailable(result.Manifest); err != nil {
 		// pkgtar.Install has already atomically extracted exactly this new
 		// version before manifest-wide active-owner checks can run. Remove
@@ -372,12 +382,26 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	rec, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	if len(rec.ExecutorProviders) > 0 {
+		s.closeExecutorProviderAdmission(id)
+		defer s.reopenExecutorProviderAdmissionIfActive(id)
+	}
 	dispatchLock := s.dispatchLocks.lockFor(id)
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
 
-	rec, err := s.Get(id)
+	rec, err = s.Get(id)
 	if err != nil {
+		return err
+	}
+	// The dispatch write lease above drains allocation and cleanup RPCs before
+	// this authoritative inventory check. Keep it before runtime stop and secret
+	// deletion so a rejected uninstall leaves the provider usable for cleanup.
+	if err := s.guardExecutorProviderUninstall(ctx, rec); err != nil {
 		return err
 	}
 	if err := s.cancelAutomationDeliveries(id); err != nil {

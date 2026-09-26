@@ -2,7 +2,7 @@
 status: draft
 system: ci
 created: 2026-09-10
-updated: 2026-09-21
+updated: 2026-09-26
 owners:
   - kandev
 ---
@@ -36,6 +36,7 @@ Contributors can write the artifacts manually; use of the repository harness is 
 - **AC-CI-PR-DOCS-001.6:** The result shall identify triggering paths, accepted references, missing artifacts, and corrective steps. Structural coverage shall not claim semantic completeness or prove that planning preceded coding.
 - **AC-CI-PR-DOCS-001.7:** A pull request that changes only `plugin-registry/plugins.yaml` and other already exempt paths shall pass without a delivery package. Any additional non-exempt path shall continue to require coverage.
 - **AC-CI-PR-DOCS-001.8:** A pull request that changes only recognized CI infrastructure paths under `.github/workflows/**`, `.github/scripts/**`, or `.github/actions/**` shall pass without a delivery package. Any additional non-exempt path shall continue to require coverage.
+- **AC-CI-PR-DOCS-001.9:** A pull request that changes only architecture-lint tooling under `scripts/architecture_lint/**`, `scripts/architecture_lint_tests/**`, or `config/architecture-lint/**`, the exact entrypoints `scripts/lint-architecture.py` and `scripts/lint-architecture.test.py`, and already exempt paths shall pass without a delivery package. Any additional non-exempt path shall continue to require coverage.
 
 ### REQ-CI-PR-DOCS-002: Explicit documentation exception
 

@@ -16,6 +16,7 @@
   "enable": "启用",
   "failedToAddSource": "添加来源失败",
   "failedToDisable": "禁用 {{name}} 失败",
+  "remoteResourcesMayRemain": "停用此插件后，远程环境仍可能继续运行。请重新启用插件，并在卸载前清理其任务环境。",
   "failedToEnable": "启用 {{name}} 失败",
   "failedToInstallPlugin": "安装插件失败",
   "failedToLoadMarketplace": "加载市场失败",

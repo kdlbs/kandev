@@ -357,6 +357,13 @@ type TaskPRLister interface {
 	ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]TaskPRLink, error)
 }
 
+// DeferredAssignmentQueue is the scheduler-owned queue seam used when a
+// deferred assignment is replayed. The scheduler owns the assignment wake
+// rate gate; the office service owns the deferred row and its lifecycle.
+type DeferredAssignmentQueue interface {
+	QueueDeferredAssignment(ctx context.Context, assignment models.DeferredAssignment) error
+}
+
 // ServiceOptions holds all dependencies for the office Service constructor.
 // Required fields: Repo and Logger. All other fields are optional and may be
 // set to nil/zero to disable the corresponding feature.
@@ -439,7 +446,14 @@ type Service struct {
 	// (QueueRun) and finalize processing terminally (see
 	// scheduler_integration.go). Optional — nil means the kill switch
 	// gate is not wired (older tests, transitional deployments).
-	pauseGate shared.PauseGate
+	pauseGate               shared.PauseGate
+	deferredAssignmentQueue DeferredAssignmentQueue
+
+	// workflowStepGetter resolves a task's current workflow step so
+	// task_assigned wakes (queueTaskAssignedRun, the unstarted-task
+	// recovery sweep) can be gated to steps that actually auto-start an
+	// agent. Optional — nil fails open (see shared.IsAssignmentWakeEligible).
+	workflowStepGetter shared.AssignmentStepGetter
 }
 
 // RoutineRunSyncer is the surface the office service needs from the
@@ -498,6 +512,11 @@ func (s *Service) SetPricingLookup(p shared.PricingLookup) { s.pricingLookup = p
 // neither gate is enforced.
 func (s *Service) SetPauseGate(g shared.PauseGate) { s.pauseGate = g }
 
+// SetWorkflowStepGetter wires the workflow step lookup used to gate
+// task_assigned wakes to steps that auto-start an agent. Left nil, the
+// gate fails open (see shared.IsAssignmentWakeEligible).
+func (s *Service) SetWorkflowStepGetter(g shared.AssignmentStepGetter) { s.workflowStepGetter = g }
+
 // SetAgentTokenMinter wires the runtime token minter after feature services are constructed.
 func (s *Service) SetAgentTokenMinter(minter AgentTokenMinter) {
 	s.agentTokenMinter = minter
@@ -536,6 +555,14 @@ func (s *Service) RoutingDispatcherHandle() RoutingDispatcher {
 // in-package implementation that writes through the office repo.
 func (s *Service) SetRunsService(runs *runsservice.Service) {
 	s.runsService = runs
+}
+
+// SetDeferredAssignmentQueue wires the scheduler-owned queue seam used by
+// deferred assignment replay. Keeping this optional preserves isolated
+// service tests and the defensive task-boundary fallback used during startup
+// composition.
+func (s *Service) SetDeferredAssignmentQueue(q DeferredAssignmentQueue) {
+	s.deferredAssignmentQueue = q
 }
 
 // CancelTaskExecution delegates to the configured TaskCanceller (the

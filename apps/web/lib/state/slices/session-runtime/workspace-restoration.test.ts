@@ -83,17 +83,18 @@ describe("workspace restoration attempt state", () => {
 
   it("strips control characters and bounds diagnostics", () => {
     const details = sanitizeWorkspaceRestorationDetails(
-      new Error(`before\u0000${"x".repeat(600)}`),
+      new Error(`before\u0000${"word ".repeat(1000)}`),
     );
 
-    expect(details).toHaveLength(512);
+    expect(details.length).toBeLessThanOrEqual(4096);
+    expect(details.length).toBeGreaterThan(4000);
     expect(details).not.toContain("\u0000");
   });
 
   it("does not leave a trailing high surrogate in bounded diagnostics", () => {
-    const details = sanitizeWorkspaceRestorationDetails("x".repeat(511) + "😀");
+    const details = sanitizeWorkspaceRestorationDetails("x ".repeat(2047) + "x😀");
 
-    expect(details).toHaveLength(511);
-    expect(details).toBe("x".repeat(511));
+    expect(details).toHaveLength(4095);
+    expect(details).toBe("x ".repeat(2047) + "x");
   });
 });

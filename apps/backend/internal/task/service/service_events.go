@@ -1019,12 +1019,19 @@ func (s *Service) publishExecutorProfileEvent(ctx context.Context, eventType str
 	if s.eventBus == nil || profile == nil {
 		return
 	}
+	config, secretFields := models.RedactExecutorProfileConfig(profile.Config)
+	var provider *models.ExecutorProvider
+	if executor, err := s.GetExecutor(ctx, profile.ExecutorID); err == nil {
+		provider = executor.Provider
+	}
 	data := map[string]interface{}{
 		"id":             profile.ID,
 		"executor_id":    profile.ExecutorID,
 		"name":           profile.Name,
 		"mcp_policy":     profile.McpPolicy,
-		"config":         profile.Config,
+		"config":         config,
+		"secret_fields":  secretFields,
+		"provider":       provider,
 		"prepare_script": profile.PrepareScript,
 		"cleanup_script": profile.CleanupScript,
 		"created_at":     profile.CreatedAt.Format(time.RFC3339),

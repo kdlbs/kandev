@@ -49,6 +49,8 @@ type fakeStore struct {
 	nextAgentID          int
 	nextProfID           int
 	getByNameErr         error
+	createAgentErr       error
+	createAgentHook      func()
 	listAgentsErr        error
 	listProfErr          map[string]error
 	duplicateProfErr     error
@@ -146,6 +148,12 @@ func (f *fakeStore) CreateAgent(_ context.Context, a *models.Agent) error {
 	if a.ID == "" {
 		f.nextAgentID++
 		a.ID = "agent-" + strconv.Itoa(f.nextAgentID)
+	}
+	if f.createAgentHook != nil {
+		f.createAgentHook()
+	}
+	if f.createAgentErr != nil {
+		return f.createAgentErr
 	}
 	stored := copyAgent(a)
 	f.agents[a.ID] = stored

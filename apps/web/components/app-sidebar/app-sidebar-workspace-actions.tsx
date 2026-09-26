@@ -45,13 +45,17 @@ export function AppSidebarWorkspaceActions(props: {
       className={cn(
         "flex shrink-0 items-center",
         presentation === "mobile"
-          ? "min-w-0 max-w-full flex-wrap gap-2 [&_a]:min-h-11 [&_a]:min-w-11 [&_button]:min-h-11 [&_button]:min-w-11"
+          ? "min-w-0 max-w-full flex-wrap gap-2 [&_a:not([data-slot=surface-action])]:min-h-11 [&_a:not([data-slot=surface-action])]:min-w-11 [&_button:not([data-slot=surface-action])]:min-h-11 [&_button:not([data-slot=surface-action])]:min-w-11"
           : "gap-1",
       )}
       data-plugin-slot="sidebar-workspace-actions"
       data-presentation={presentation}
     >
-      <PluginSlot name="sidebar-workspace-actions" slotProps={slotProps} />
+      <PluginSlot
+        name="sidebar-workspace-actions"
+        slotProps={slotProps}
+        actionSurface={{ surface: "sidebar", presentation }}
+      />
     </div>
   );
 }

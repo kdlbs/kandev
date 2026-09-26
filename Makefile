@@ -257,8 +257,14 @@ desktop-runtime:
 		--output-dir "$(DESKTOP_RUNTIME_DIR)"
 
 .PHONY: desktop-dev
+DESKTOP_DEV_ENV = KANDEV_HOME_DIR="$(CURDIR)/.kandev-dev" \
+	KANDEV_DATABASE_PATH="$(CURDIR)/.kandev-dev/data/kandev.db" \
+	KANDEV_DATABASE_DRIVER=sqlite \
+	KANDEV_E2E_MOCK=false \
+	KANDEV_DEBUG_DEV_MODE=true
 desktop-dev: desktop-runtime
-	@KANDEV_DESKTOP_RUNTIME_DIR="$(CURDIR)/$(DESKTOP_RUNTIME_DIR)" \
+	@$(DESKTOP_DEV_ENV) \
+		KANDEV_DESKTOP_RUNTIME_DIR="$(CURDIR)/$(DESKTOP_RUNTIME_DIR)" \
 		$(PNPM) -C $(APPS_DIR) --filter @kandev/desktop dev
 
 .PHONY: desktop-build
@@ -564,6 +570,7 @@ test-scripts:
 	@bash scripts/pr-await.test.sh
 	@bash scripts/run-quiet.test.sh
 	@bash scripts/dev-prod-db-path.test.sh
+	@bash scripts/desktop-dev-env.test.sh
 	@bash scripts/opencode-code-review.test.sh
 	@python3 scripts/opencode-code-review.test.py
 	@python3 scripts/lint-harness-files.test.py

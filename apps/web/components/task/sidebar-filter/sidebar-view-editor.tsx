@@ -122,14 +122,14 @@ function FilterSection({
 }) {
   const { t } = useTranslation();
   return (
-    <div className={`border-b px-2 pb-2 ${isDrawerLayout ? "pt-2" : "pt-0"}`}>
-      <div className={`${isDrawerLayout ? "" : "-mt-1 "}mb-1 flex items-center justify-between`}>
+    <div className="border-b px-2 pb-2 pt-2.5">
+      <div className="mb-1 flex items-center justify-between">
         <span className={SECTION_LABEL_CLASS}>{t("task:filters")}</span>
         <Button
           type="button"
           size="sm"
           variant="ghost"
-          className={`${isDrawerLayout ? "" : "-my-1 "}h-6 cursor-pointer text-xs`}
+          className={`h-6 ${isDrawerLayout ? "min-h-11 " : ""}cursor-pointer text-xs`}
           onClick={onAdd}
           data-testid="filter-add-button"
         >
