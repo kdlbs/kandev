@@ -59,11 +59,11 @@ func (r *reparentWriteBarrierRepository) UpdateTaskPreservingDeferredLaunch(
 }
 
 func (r *reparentWriteBarrierRepository) UpdateTaskWithParentPreservingConcurrentFields(
-	ctx context.Context, task *models.Task, preserveTitle, preserveState bool,
+	ctx context.Context, task *models.Task, preserveTitle, preserveState, preservePosition bool,
 ) error {
 	r.once.Do(func() { r.beforeWrite <- struct{}{} })
 	<-r.release
-	return r.Repository.UpdateTaskWithParentPreservingConcurrentFields(ctx, task, preserveTitle, preserveState)
+	return r.Repository.UpdateTaskWithParentPreservingConcurrentFields(ctx, task, preserveTitle, preserveState, preservePosition)
 }
 
 func TestService_UpdateTask_NestsUnderParent(t *testing.T) {
@@ -119,12 +119,14 @@ func TestService_UpdateTask_ReparentWithDescriptionPreservesLaterTitleAndState(t
 		Repository: repo, beforeWrite: make(chan struct{}, 1), release: make(chan struct{}),
 	}
 	svc.tasks = barrier
+	position := 17
 
 	result := make(chan error, 1)
 	go func() {
 		_, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{
 			ParentID:    strptr(newParent.ID),
 			Description: strptr("description written with reparent"),
+			Position:    &position,
 		})
 		result <- err
 	}()
@@ -159,6 +161,9 @@ func TestService_UpdateTask_ReparentWithDescriptionPreservesLaterTitleAndState(t
 	}
 	if got.State != "DONE" {
 		t.Errorf("State = %q, want later state", got.State)
+	}
+	if got.Position != position {
+		t.Errorf("Position = %d, want requested %d", got.Position, position)
 	}
 }
 

@@ -2082,10 +2082,10 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	switch {
 	case parentChanged:
 		if writer, ok := s.tasks.(interface {
-			UpdateTaskWithParentPreservingConcurrentFields(context.Context, *models.Task, bool, bool) error
+			UpdateTaskWithParentPreservingConcurrentFields(context.Context, *models.Task, bool, bool, bool) error
 		}); ok {
 			updateErr = writer.UpdateTaskWithParentPreservingConcurrentFields(
-				updateCtx, task, req.Title == nil, req.State == nil,
+				updateCtx, task, req.Title == nil, req.State == nil, req.Position == nil,
 			)
 		} else {
 			updateErr = s.tasks.UpdateTaskPreservingDeferredLaunch(updateCtx, task)

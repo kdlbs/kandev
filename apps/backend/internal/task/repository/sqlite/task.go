@@ -1034,12 +1034,12 @@ func (r *Repository) UpdateTaskPreservingDeferredLaunch(ctx context.Context, tas
 }
 
 // UpdateTaskWithParentPreservingConcurrentFields writes a reparent request
-// while retaining title and state fields the caller did not request. Other
-// requested fields keep ordinary update semantics.
+// while retaining title and state fields the caller did not request. It also
+// keeps the current position unless the caller explicitly requested one.
 func (r *Repository) UpdateTaskWithParentPreservingConcurrentFields(
-	ctx context.Context, task *models.Task, preserveTitle, preserveState bool,
+	ctx context.Context, task *models.Task, preserveTitle, preserveState, preservePosition bool,
 ) error {
-	return r.updateTaskCommit(ctx, task, "", true, true, taskConcurrentFields{
+	return r.updateTaskCommit(ctx, task, "", preservePosition, true, taskConcurrentFields{
 		title: preserveTitle, state: preserveState,
 	})
 }
