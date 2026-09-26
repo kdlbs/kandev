@@ -75,6 +75,10 @@ var ErrInvalidTaskWorkflow = errors.New("invalid task workflow")
 // aborting the whole operation.
 var ErrTaskAlreadyArchived = errors.New("task is already archived")
 
+// ErrTaskArchiveHeld prevents cleanup of a task with an explicit terminal
+// retention hold until a scoped caller clears that hold.
+var ErrTaskArchiveHeld = taskrepo.ErrTaskArchiveHeld
+
 // ErrAutoTitlePromptRequired is returned when auto-title creation has neither
 // a prompt nor a usable provisional title.
 var ErrAutoTitlePromptRequired = errors.New("description or title is required when auto_title is enabled")
@@ -2039,6 +2043,12 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if req.Metadata != nil {
 		task.Metadata = protectedTaskMetadataUpdate(task.Metadata, req.Metadata)
 	}
+	if req.TerminalRetention != nil {
+		if task.Metadata == nil {
+			task.Metadata = make(map[string]interface{})
+		}
+		task.Metadata[models.MetaKeyTerminalRetention] = *req.TerminalRetention
+	}
 	if req.Title != nil {
 		task.Title = *req.Title
 		if task.Metadata != nil {
@@ -2046,7 +2056,8 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			delete(task.Metadata, models.MetaKeyAgentTitleOwnerSessionID)
 		}
 	}
-	if req.ParentID != nil && *req.ParentID != task.ParentID {
+	parentChanged := req.ParentID != nil && *req.ParentID != task.ParentID
+	if parentChanged {
 		if err := s.resolveParentID(ctx, task, *req.ParentID); err != nil {
 			return nil, err
 		}
@@ -2068,14 +2079,57 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		})
 	}
 	var updateErr error
-	if req.Position != nil {
+	switch {
+	case parentChanged:
+		if writer, ok := s.tasks.(interface {
+			UpdateTaskWithParentPreservingConcurrentFields(context.Context, *models.Task, bool, bool, bool) error
+		}); ok {
+			updateErr = writer.UpdateTaskWithParentPreservingConcurrentFields(
+				updateCtx, task, req.Title == nil, req.State == nil, req.Position == nil,
+			)
+		} else {
+			updateErr = s.tasks.UpdateTaskPreservingDeferredLaunch(updateCtx, task)
+		}
+	case req.terminalRetentionScope != nil:
+		writer, ok := s.tasks.(interface {
+			UpdateTaskWithTerminalRetentionIfParent(context.Context, *models.Task, string, string, bool) (bool, error)
+		})
+		if !ok {
+			return nil, errors.New("task repository does not support combined terminal retention updates")
+		}
+		updated, err := writer.UpdateTaskWithTerminalRetentionIfParent(
+			updateCtx, task, req.terminalRetentionScope.parentID, req.terminalRetentionScope.workspaceID, req.terminalRetentionScope.held,
+		)
+		if err != nil {
+			updateErr = err
+		} else if !updated {
+			updateErr = repoerrors.ErrTaskParentMismatch
+		}
+	case req.Position != nil:
 		updateErr = s.tasks.UpdateTaskWithExplicitPosition(updateCtx, task)
-	} else {
+	default:
 		updateErr = s.tasks.UpdateTaskPreservingDeferredLaunch(updateCtx, task)
 	}
 	if updateErr != nil {
 		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(updateErr))
 		return nil, updateErr
+	}
+	if req.terminalRetentionScope == nil && req.TerminalRetention != nil {
+		writer, ok := s.tasks.(interface {
+			UpdateTaskTerminalRetentionIfParent(context.Context, string, string, string, bool) (bool, error)
+		})
+		if !ok {
+			return nil, errors.New("task repository does not support terminal retention updates")
+		}
+		updated, err := writer.UpdateTaskTerminalRetentionIfParent(
+			ctx, id, task.ParentID, task.WorkspaceID, *req.TerminalRetention,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if !updated {
+			return nil, taskrepo.ErrTaskNotFound
+		}
 	}
 	// UpdateTask may have applied a conditional title/metadata patch because
 	// this snapshot was stale. Publish and return the row that actually won so
@@ -2122,6 +2176,50 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	s.logger.Info("task updated", zap.String("task_id", task.ID))
 
 	return task, nil
+}
+
+// UpdateTaskWithTerminalRetention applies ordinary task fields and a scoped
+// terminal-retention change atomically while the direct-parent relationship
+// remains valid.
+func (s *Service) UpdateTaskWithTerminalRetention(
+	ctx context.Context, id, parentID, workspaceID string, req *UpdateTaskRequest, held bool,
+) (*models.Task, bool, error) {
+	combinedReq := *req
+	combinedReq.terminalRetentionScope = &terminalRetentionScope{parentID: parentID, workspaceID: workspaceID, held: held}
+	task, err := s.UpdateTask(ctx, id, &combinedReq)
+	if errors.Is(err, repoerrors.ErrTaskParentMismatch) {
+		return nil, false, nil
+	}
+	return task, err == nil, err
+}
+
+// UpdateTaskTerminalRetention atomically changes the scoped retention flag
+// only while the authorized parent relationship still holds.
+func (s *Service) UpdateTaskTerminalRetention(
+	ctx context.Context, id, parentID, workspaceID string, held bool,
+) (*models.Task, bool, error) {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+		return nil, false, err
+	}
+	writer, ok := s.tasks.(interface {
+		UpdateTaskTerminalRetentionIfParent(context.Context, string, string, string, bool) (bool, error)
+	})
+	if !ok {
+		return nil, false, errors.New("task repository does not support scoped terminal retention updates")
+	}
+	updated, err := writer.UpdateTaskTerminalRetentionIfParent(ctx, id, parentID, workspaceID, held)
+	if err != nil {
+		return nil, false, err
+	}
+	if !updated {
+		return nil, false, nil
+	}
+	task, err := s.tasks.GetTask(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	return task, true, nil
 }
 
 func (s *Service) reloadTaskAfterMutation(ctx context.Context, id string, fallback *models.Task, operation string) *models.Task {
@@ -2389,6 +2487,9 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	if task.ArchivedAt != nil {
 		return fmt.Errorf("%w: %s", ErrTaskAlreadyArchived, id)
+	}
+	if models.IsTerminalRetentionHeld(task.Metadata) {
+		return fmt.Errorf("%w: %s", ErrTaskArchiveHeld, id)
 	}
 
 	// 2. Gather data needed for cleanup BEFORE archive

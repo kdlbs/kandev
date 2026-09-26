@@ -1263,6 +1263,7 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString("title", mcp.MaxLength(service.TaskTitleMaxLength), mcp.Description("New concise task title (maximum 60 characters)")),
 			mcp.WithString("description", mcp.Description("New description")),
 			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
+			mcp.WithBoolean("terminal_retention", mcp.Description("Hold this task's worktree and environment on Done; prevents automatic and direct archive cleanup until cleared by a scoped task update.")),
 			mcp.WithString("deferred_launch_prompt", mcp.Description("Replace the prompt a not-yet-started task will launch with. Only valid for a task created with blocked_by (+ start_agent), whose launch is still waiting on its dependencies — use it to refresh a brief that went stale while the chain ran. Rejected once the task has started; send new context with message_task_kandev instead. When this is rejected, no other field in the same call is applied.")),
 		),
 		s.wrapHandler("update_task_kandev", s.updateTaskHandler()),

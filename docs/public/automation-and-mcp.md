@@ -574,6 +574,12 @@ launch (agent profile, executor) is preserved. Once the task has started the
 update is rejected, because nothing would read the new prompt; send the new
 context with `message_task_kandev` instead.
 
+A parent task can set `terminal_retention: true` on one of its direct children
+with `update_task_kandev`. This keeps the child’s worktree and environment when
+it reaches Done by rejecting automatic, direct, and cascade archive cleanup.
+Only the direct parent can set or clear the hold. Clear it before archiving the
+child when its retained resources are no longer needed.
+
 ### Autopilot tasks and MCP profiles
 
 Task creation accepts one optional boolean:
@@ -724,6 +730,16 @@ After an accepted stop, Kandev attempts to move an unarchived, non-Office task f
 The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. An exact normalized retry succeeds as a no-op. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for contradictory duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
 
 `step_complete_kandev` is registered and discoverable in every task-mode session, and in Office sessions per ADR 0015. Kandev includes its completion instruction, and acts on its signal, only on steps whose auto-advance action explicitly requires that signal: on Kanban boards this is opt-in per step, while office-default's `work` step ships with the requirement on. A user message arriving before transition can cancel that automatic move.
+
+`move_task_kandev` commits a terminal destination before returning success,
+even when the calling task session is in the middle of a turn. Nonterminal
+moves from an active session remain deferred until turn end. If that turn then
+calls `step_complete_kandev` for its old lane, the signal fails as stale and
+does not undo the terminal move or create another pending move. Retrying the
+same terminal operation is idempotent; reusing its request identity for another
+task or destination is rejected. Ordinary task agents can route only
+their own task; the Coordinator automation surface retains its same-workspace
+cross-task authority.
 
 When the response says that the workflow step changed, the calling turn is stale. The error identifies the launch and current steps, and a retry in that turn cannot recover. End the turn and have the user resume the session, then complete the current step and call the tool from the fresh turn. A normal manual workflow move remains available to an operator after verifying the work and destination. This recovery path does not grant an agent automatic move authority.
 

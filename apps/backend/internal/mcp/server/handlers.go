@@ -290,6 +290,9 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 		if state := req.GetString("state", ""); state != "" {
 			payload["state"] = state
 		}
+		if retention, ok := req.GetArguments()["terminal_retention"].(bool); ok {
+			payload["terminal_retention"] = retention
+		}
 		if launchPrompt := req.GetString("deferred_launch_prompt", ""); launchPrompt != "" {
 			payload["deferred_launch_prompt"] = launchPrompt
 		}

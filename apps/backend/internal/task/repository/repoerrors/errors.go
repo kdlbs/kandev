@@ -15,6 +15,9 @@ var ErrWorkflowNotFound = errors.New("workflow not found")
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
+// ErrTaskArchiveHeld prevents archive mutations while terminal resources are retained.
+var ErrTaskArchiveHeld = errors.New("task has a terminal retention hold")
+
 // ErrNoPrimarySession reports that a task exists but has no primary session.
 // Callers can repair that state without hiding other repository failures.
 var ErrNoPrimarySession = errors.New("no primary session")
@@ -97,6 +100,11 @@ var ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
 // did. See task/service.MoveTaskOptions.ExpectedWorkflowID for the caller
 // contract.
 var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")
+
+// ErrWorkflowStepChanged reports that a route's expected source step no
+// longer matches the task inside its write transaction. Callers use this
+// typed error to settle the route as a durable stale-source outcome.
+var ErrWorkflowStepChanged = errors.New("workflow step changed before route commit")
 
 // ErrWorkflowChangeConflict reports that an explicit change-workflow request
 // no longer matches the task source or task version it was opened against.

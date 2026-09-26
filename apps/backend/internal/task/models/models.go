@@ -98,7 +98,10 @@ type PluginMessageFilter struct {
 
 // Task metadata keys used for deferred agent start (e.g., task.moved → handleTaskMovedNoSession).
 const (
-	MetaKeyAgentProfileID    = "agent_profile_id"
+	MetaKeyAgentProfileID = "agent_profile_id"
+	// MetaKeyTerminalRetention holds a task on a terminal workflow step without
+	// allowing archive cleanup to remove its source and environment resources.
+	MetaKeyTerminalRetention = "terminal_retention"
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
 	// Automation target metadata is written to continuation tasks so a
@@ -411,6 +414,13 @@ type StepHandoffCarryToken struct {
 func IsAgentTitlePending(metadata map[string]interface{}) bool {
 	pending, ok := metadata[MetaKeyAgentTitlePending].(bool)
 	return ok && pending
+}
+
+// IsTerminalRetentionHeld reports an explicit task-scoped archive hold.
+// Only a literal boolean true enables the hold.
+func IsTerminalRetentionHeld(metadata map[string]interface{}) bool {
+	held, ok := metadata[MetaKeyTerminalRetention].(bool)
+	return ok && held
 }
 
 // AgentTitleOwnerSessionID returns the session that owns the pending title
@@ -1057,12 +1067,13 @@ const (
 // that the orchestrator should consume to drive a workflow step transition.
 // See ADR 0015 for the lifecycle (set → read → clear).
 type PendingStepCompletionSignal struct {
-	StepID     string    `json:"step_id"`
-	Source     string    `json:"source"`
-	Summary    string    `json:"summary"`
-	Handoff    string    `json:"handoff,omitempty"`
-	Blockers   string    `json:"blockers,omitempty"`
-	SignaledAt time.Time `json:"signaled_at"`
+	OperationID string    `json:"operation_id,omitempty"`
+	StepID      string    `json:"step_id"`
+	Source      string    `json:"source"`
+	Summary     string    `json:"summary"`
+	Handoff     string    `json:"handoff,omitempty"`
+	Blockers    string    `json:"blockers,omitempty"`
+	SignaledAt  time.Time `json:"signaled_at"`
 }
 
 // LoadSessionRuntimeConfig decodes the runtime-config bag entry from session
@@ -1185,11 +1196,12 @@ func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompleti
 		return v, true
 	case map[string]interface{}:
 		out := PendingStepCompletionSignal{
-			StepID:   StringFromAny(v["step_id"]),
-			Source:   StringFromAny(v["source"]),
-			Summary:  StringFromAny(v["summary"]),
-			Handoff:  StringFromAny(v["handoff"]),
-			Blockers: StringFromAny(v["blockers"]),
+			OperationID: StringFromAny(v["operation_id"]),
+			StepID:      StringFromAny(v["step_id"]),
+			Source:      StringFromAny(v["source"]),
+			Summary:     StringFromAny(v["summary"]),
+			Handoff:     StringFromAny(v["handoff"]),
+			Blockers:    StringFromAny(v["blockers"]),
 		}
 		if ts, ok := v["signaled_at"].(string); ok {
 			if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {

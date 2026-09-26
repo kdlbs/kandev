@@ -63,6 +63,10 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
+	if errors.Is(err, service.ErrTaskArchiveHeld) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
 	var dirtyWorktreeErr *service.TaskDeleteDirtyWorktreeError
 	if errors.As(err, &dirtyWorktreeErr) {
 		c.JSON(http.StatusConflict, taskErrorBody(err))

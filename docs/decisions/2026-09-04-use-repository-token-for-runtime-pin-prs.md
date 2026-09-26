@@ -1,7 +1,7 @@
 # ADR-2026-09-04-use-repository-token-for-runtime-pin-PRs: Use the built-in Actions token for runtime pin PRs
 
-**Status:** accepted  
-**Date:** 2026-09-04  
+**Status:** accepted
+**Date:** 2026-09-04
 **Area:** workflow, security
 
 ## Context

@@ -231,10 +231,11 @@ requires that the read of the old step and the write of the new one be
 serialized against other writers of the same task row, not read outside the
 write transaction.
 
-**Concurrency.** Two callers moving the same task to different steps produce two
-rows with an intact chain, in the order the transactions committed. This spec
-does not change which move wins — last committed writer still wins, as today.
-Neither move is rejected merely because the other raced it.
+**Concurrency.** A move captures the task's source step before validation and
+rechecks it under the task-row lock. Two callers moving the same observed source
+to different steps therefore produce one committed row and one stale-source
+rejection. The winner's row and task update remain atomic, so the chain stays
+intact and its final destination equals the task's current step.
 
 **No-op writes.** A committed update whose `workflow_step_id` is unchanged
 writes no row, whatever else it changed. This is the whole of the feature's

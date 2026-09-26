@@ -39,6 +39,7 @@ import (
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	workflowsvc "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/workflow/signalmetrics"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -1920,6 +1921,7 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Title                *string `json:"title"`
 		Description          *string `json:"description"`
 		State                *string `json:"state"`
+		TerminalRetention    *bool   `json:"terminal_retention"`
 		DeferredLaunchPrompt *string `json:"deferred_launch_prompt"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
@@ -1927,6 +1929,23 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	var retentionParentID, retentionWorkspaceID string
+	if req.TerminalRetention != nil {
+		principal, ok := mcpscope.PrincipalFromContext(ctx)
+		if !ok || principal.IsAutomation() || principal.CallerTaskID == "" || principal.CallerTaskID == req.TaskID {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "parent task authority is required for terminal retention", nil)
+		}
+		target, err := h.taskSvc.GetTask(ctx, req.TaskID)
+		if err != nil {
+			h.logger.Error("failed to load terminal retention target", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to load task", nil)
+		}
+		if target == nil || target.ParentID != principal.CallerTaskID || target.WorkspaceID != principal.WorkspaceID {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "parent task authority is required for terminal retention", nil)
+		}
+		retentionParentID = principal.CallerTaskID
+		retentionWorkspaceID = principal.WorkspaceID
 	}
 
 	// Applied before the ordinary field update so a rejected prompt edit does
@@ -1947,11 +1966,22 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		state = &normalized
 	}
 
-	task, err := h.taskSvc.UpdateTask(ctx, req.TaskID, &service.UpdateTaskRequest{
+	updateReq := &service.UpdateTaskRequest{
 		Title:       req.Title,
 		Description: req.Description,
 		State:       state,
-	})
+	}
+	var task *models.Task
+	var err error
+	if req.TerminalRetention == nil {
+		task, err = h.taskSvc.UpdateTask(ctx, req.TaskID, updateReq)
+	} else {
+		var changed bool
+		task, changed, err = h.updateTaskWithTerminalRetention(ctx, req.TaskID, retentionParentID, retentionWorkspaceID, updateReq, *req.TerminalRetention)
+		if err == nil && !changed {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "parent task authority is required for terminal retention", nil)
+		}
+	}
 	if err != nil {
 		h.logger.Error("failed to update task", zap.Error(err))
 		if errors.Is(err, service.ErrTaskTitleTooLong) {
@@ -1961,6 +1991,12 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+}
+
+func (h *Handlers) updateTaskWithTerminalRetention(
+	ctx context.Context, taskID, parentID, workspaceID string, updateReq *service.UpdateTaskRequest, held bool,
+) (*models.Task, bool, error) {
+	return h.taskSvc.UpdateTaskWithTerminalRetention(ctx, taskID, parentID, workspaceID, updateReq, held)
 }
 
 // handleSetTaskTitle resolves the one-shot provisional title created for a
@@ -2410,6 +2446,18 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to resolve calling turn", nil)
 	}
 	if launchStepID != task.WorkflowStepID {
+		turnID, _, _, _ := h.workflowRouteCause(ctx, req.SessionID, routing.ProducerStepComplete)
+		operation := routing.Operation{
+			ID: workflowRouteOperationID("step-complete", msg.ID), TaskID: req.TaskID,
+			WorkspaceID: task.WorkspaceID, Producer: routing.ProducerStepComplete,
+			ExpectedStepID: launchStepID, ObservedStepID: task.WorkflowStepID,
+			SessionID: req.SessionID, TurnID: turnID,
+			ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SessionID,
+			Outcome: routing.OutcomeStaleSource,
+		}
+		if err := h.taskSvc.RecordWorkflowRouteOperation(ctx, operation); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record stale signal", nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fmt.Sprintf(
 			"workflow step changed before signal was recorded. This turn started in step %s. "+
 				"The current step is %s. No signal was recorded. Retrying in this turn cannot recover. "+
@@ -2438,6 +2486,25 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 	if !stored {
+		observed, loadErr := h.taskSvc.GetTask(ctx, req.TaskID)
+		if loadErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to classify completion signal", nil)
+		}
+		if observed.WorkflowStepID != launchStepID {
+			turnID, _, _, _ := h.workflowRouteCause(ctx, req.SessionID, routing.ProducerStepComplete)
+			operation := routing.Operation{
+				ID: workflowRouteOperationID("step-complete", msg.ID), TaskID: req.TaskID,
+				WorkspaceID: observed.WorkspaceID, Producer: routing.ProducerStepComplete,
+				ExpectedStepID: launchStepID, ObservedStepID: observed.WorkflowStepID,
+				SessionID: req.SessionID, TurnID: turnID,
+				ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SessionID,
+				Outcome: routing.OutcomeStaleSource,
+			}
+			if err := h.taskSvc.RecordWorkflowRouteOperation(ctx, operation); err != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record stale signal", nil)
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow step changed before signal was recorded", nil)
+		}
 		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session)
 	}
 

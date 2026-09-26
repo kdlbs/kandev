@@ -58,6 +58,10 @@ type automationContinuationState interface {
 	SetContinuationTaskID(ctx context.Context, automationID, taskID string) error
 }
 
+type automationCoordinatorGrantWriter interface {
+	DesignateAutomationCoordinator(context.Context, string, string) error
+}
+
 // StopAutomationRun cancels only the currently active turn identified by the
 // exact task/session/turn triple. A false result means the binding is stale or
 // already terminal and no successor turn was touched.
@@ -353,6 +357,17 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 		}
 		return
 	}
+	if task.Origin == models.TaskOriginAutomationRun {
+		writer, ok := s.repo.(automationCoordinatorGrantWriter)
+		if !ok {
+			s.recordFailedAutomationDispatch(ctx, evt, task, action, "coordinator grant writer unavailable")
+			return
+		}
+		if err := writer.DesignateAutomationCoordinator(ctx, task.ID, a.ID); err != nil {
+			s.recordFailedAutomationDispatch(ctx, evt, task, action, err.Error())
+			return
+		}
+	}
 
 	// Associate PR with task for github_pr triggers (same as PR Watcher).
 	if evt.TriggerType == automation.TriggerTypeGitHubPR {
@@ -386,6 +401,21 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 type automationRunReasons struct {
 	Thread     string
 	Repository string
+}
+
+func (s *Service) recordFailedAutomationDispatch(
+	ctx context.Context,
+	evt *automation.AutomationTriggeredEvent,
+	task *models.Task,
+	action automation.ThreadAction,
+	reason string,
+) {
+	if !s.markExactAutomationRunTerminal(ctx, evt.RunID, "", "", false, reason) {
+		s.markAutomationRunTerminal(ctx, task.ID, false, reason)
+	}
+	if action != automation.ThreadActionResumed {
+		s.deleteAbandonedTask(ctx, evt.AutomationID, task.ID)
+	}
 }
 
 func (s *Service) prepareAutomationTask(
