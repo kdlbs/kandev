@@ -90,8 +90,15 @@ type Repository struct {
 	// without touching the database, and decrements the counter. Same
 	// rationale as failParticipantSeatReconcileAttempts above.
 	failAgentErrorReconcileAttempts int
-	failUsageEventRollupAttempts    int
-	failUsageEventRollupErr         error
+	// failOnCommentReconcileAttempts is a test-only failpoint for the
+	// on_comment fan-out reconciler's bounded retry loop
+	// (REQ-OFFICE-GATE-COMMENT-004): while > 0, tryHealOnCommentRow reports a
+	// synthetic concurrent-modification retry without touching the database,
+	// and decrements the counter. Same rationale as
+	// failAgentErrorReconcileAttempts above.
+	failOnCommentReconcileAttempts int
+	failUsageEventRollupAttempts   int
+	failUsageEventRollupErr        error
 	// usageEventPreRollupHook is a test-only synchronization seam, called (if
 	// set) inside insertUsageEventAndRollup's transaction at the same point as
 	// the failUsageEventRollup* failpoint - after the ledger row insert

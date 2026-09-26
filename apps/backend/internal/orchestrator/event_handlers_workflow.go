@@ -4913,7 +4913,12 @@ func (s *Service) engineOnEnterCallback(kind engine.ActionKind) engine.ActionCal
 	case engine.ActionClearDecisions:
 		return engine.ClearDecisionsCallback{Decisions: s.engineDecisions}
 	case engine.ActionQueueRunForEachParticipant:
-		return engine.QueueRunForEachParticipantCallback{Adapter: s.engineRunQueue, Participants: s.engineParticipants}
+		return engine.QueueRunForEachParticipantCallback{
+			Adapter:      s.engineRunQueue,
+			Participants: s.engineParticipants,
+			Decisions:    s.engineDecisions,
+			Logger:       s.logger,
+		}
 	default:
 		return nil
 	}

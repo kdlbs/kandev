@@ -1160,7 +1160,7 @@ func (s *DashboardService) publishCanonicalTaskUpdated(ctx context.Context, task
 // comment is a self-comment or the task is closed; resolves @mentions.
 // Best-effort.
 func (s *DashboardService) runReactivityForComment(
-	ctx context.Context, comment *models.TaskComment, engineHandled bool,
+	ctx context.Context, comment *models.TaskComment, skipAssigneeWake bool,
 ) {
 	if s.reactivity == nil || comment == nil || comment.ID == "" {
 		return
@@ -1174,7 +1174,7 @@ func (s *DashboardService) runReactivityForComment(
 			AuthorType: comment.AuthorType,
 			AuthorID:   comment.AuthorID,
 		},
-		SkipAssigneeCommentWake: engineHandled,
+		SkipAssigneeCommentWake: skipAssigneeWake,
 	}
 	if _, err := s.reactivity.ApplyTaskMutation(ctx, comment.TaskID, "", change); err != nil {
 		s.logger.Warn("reactivity pipeline failed (comment)",
@@ -1182,25 +1182,46 @@ func (s *DashboardService) runReactivityForComment(
 	}
 }
 
-func (s *DashboardService) dispatchCommentEngineTrigger(ctx context.Context, comment *models.TaskComment) bool {
+// commentEngineDispatchResult separates "the engine trigger ran a
+// transition/action" (handled) from "the legacy assignee wake must not
+// fire regardless" (suppressAssigneeWake). The two only diverge for a gate
+// comment fan-out failure (ErrCommentFanOutIncomplete): the trigger did not
+// finish successfully, so handled stays false, but falling back to the
+// legacy wake would wake the runner instead of the seats the fan-out was
+// trying (and partly failing) to reach, so suppressAssigneeWake is true.
+type commentEngineDispatchResult struct {
+	handled              bool
+	suppressAssigneeWake bool
+}
+
+func (s *DashboardService) dispatchCommentEngineTrigger(
+	ctx context.Context, comment *models.TaskComment,
+) commentEngineDispatchResult {
 	if s.engineDispatcher == nil || comment == nil || comment.TaskID == "" || comment.ID == "" {
-		return false
+		return commentEngineDispatchResult{}
 	}
 	if s.isSelfComment(ctx, comment) {
-		return false
+		return commentEngineDispatchResult{}
 	}
 	handled, err := s.dispatchCommentEngineTriggerOnce(ctx, comment)
 	if err == nil {
-		return handled
+		return commentEngineDispatchResult{handled: handled}
 	}
 	if errors.Is(err, shared.ErrEngineNoSession) {
-		return false
+		return commentEngineDispatchResult{}
+	}
+	if errors.Is(err, engine.ErrCommentFanOutIncomplete) {
+		s.logger.Warn("gate comment fan-out incomplete, suppressing legacy assignee wake",
+			zap.String("task_id", comment.TaskID),
+			zap.String("comment_id", comment.ID),
+			zap.Error(err))
+		return commentEngineDispatchResult{suppressAssigneeWake: true}
 	}
 	s.logger.Warn("engine comment trigger failed",
 		zap.String("task_id", comment.TaskID),
 		zap.String("comment_id", comment.ID),
 		zap.Error(err))
-	return false
+	return commentEngineDispatchResult{}
 }
 
 type handledWorkflowEngineDispatcher interface {
