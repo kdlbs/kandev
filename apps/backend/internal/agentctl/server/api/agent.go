@@ -791,6 +791,11 @@ func (s *Server) handleWSStderr(_ context.Context, msg *ws.Message) *ws.Message 
 	return resp
 }
 
+// probeBackgroundWorkloads is a seam over probe.ProbeBackgroundWorkloads so
+// tests can assert handleWSBackgroundProbe forwards req.SessionID without
+// exercising a real process table.
+var probeBackgroundWorkloads = probe.ProbeBackgroundWorkloads
+
 // handleWSBackgroundProbe implements agent.background.probe (spec
 // docs/specs/disambiguate-waiting/spec.md, §"Probe transport"). It samples
 // the running agent process's transitive descendant set for a member
@@ -826,7 +831,7 @@ func (s *Server) handleWSBackgroundProbe(_ context.Context, msg *ws.Message) *ws
 		return resp
 	}
 
-	result, err := probe.ProbeBackgroundWorkloads(s.procMgr.AgentPID(), turnStart)
+	result, err := probeBackgroundWorkloads(s.procMgr.AgentPID(), turnStart, req.SessionID)
 	if err != nil {
 		s.logger.Warn("background probe failed", zap.String("session_id", req.SessionID), zap.Error(err))
 	}

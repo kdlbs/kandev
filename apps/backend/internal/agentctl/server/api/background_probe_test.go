@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+	"github.com/kandev/kandev/internal/agentctl/server/process/probe"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -72,6 +73,33 @@ func TestHandleWSBackgroundProbe_RecordedTurnStart_NoRunningProcess_Unknown(t *t
 
 	resp := s.handleWSBackgroundProbe(context.Background(), msg)
 	assertBackgroundProbeResult(t, resp, "unknown")
+}
+
+// AC-002.4: the handler must forward req.SessionID into
+// probe.ProbeBackgroundWorkloads unchanged. Every other case in this file
+// short-circuits before the identity scan (no adapter, no recorder, or
+// AgentPID()==0 reading unknown before sessionID is ever used), so none of
+// them can catch a call site that drops or blanks the session id — this
+// stubs the probe seam to capture what the handler actually forwards.
+func TestHandleWSBackgroundProbe_ForwardsSessionID(t *testing.T) {
+	s := newTestServer(t)
+	s.procMgr.SetAdapterForTest(turnStartRecordingAdapter{turnStart: time.Now(), recorded: true})
+
+	var gotSessionID string
+	orig := probeBackgroundWorkloads
+	probeBackgroundWorkloads = func(_ int, _ time.Time, sessionID string) (probe.Result, error) {
+		gotSessionID = sessionID
+		return probe.ResultLive, nil
+	}
+	t.Cleanup(func() { probeBackgroundWorkloads = orig })
+
+	msg, _ := ws.NewRequest("req-1", "agent.background.probe", map[string]string{"session_id": "sess-42"})
+	resp := s.handleWSBackgroundProbe(context.Background(), msg)
+
+	assertBackgroundProbeResult(t, resp, "live")
+	if gotSessionID != "sess-42" {
+		t.Fatalf("handler forwarded session id %q, want %q", gotSessionID, "sess-42")
+	}
 }
 
 func assertBackgroundProbeResult(t *testing.T, resp *ws.Message, want string) {
