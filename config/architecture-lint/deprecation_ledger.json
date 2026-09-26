@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "rule": "ARCH-DEPRECATION-LEDGER",
+  "entries": [
+    {
+      "path": "apps/backend/internal/agent/runtime/lifecycle/types.go",
+      "declaration": "field:AgentProfileInfo.AllowIndexing#1",
+      "marker": "Deprecated:"
+    },
+    {
+      "path": "apps/backend/internal/agent/runtime/lifecycle/types.go",
+      "declaration": "field:AgentProfileInfo.AutoApprove#1",
+      "marker": "Deprecated:"
+    },
+    {
+      "path": "apps/backend/internal/agent/settings/dto/dto.go",
+      "declaration": "field:AgentProfileDTO.AllowIndexing#1",
+      "marker": "Deprecated:"
+    },
+    {
+      "path": "apps/backend/pkg/pluginsdk/data_types.go",
+      "declaration": "field:Task.Labels#1",
+      "marker": "Deprecated:"
+    },
+    {
+      "path": "apps/web/components/task-create-dialog-types.ts",
+      "declaration": "property:TaskCreateDialogInitialValues.githubUrl#1",
+      "marker": "@deprecated"
+    },
+    {
+      "path": "apps/web/lib/agent-permissions.ts",
+      "declaration": "function:profileToPermissionsMap#1",
+      "marker": "@deprecated"
+    },
+    {
+      "path": "apps/web/lib/api/domains/kanban-api.ts",
+      "declaration": "property:MoveTaskPayload.position#1",
+      "marker": "@deprecated"
+    },
+    {
+      "path": "apps/web/lib/api/domains/office-api.ts",
+      "declaration": "function:getInboxCount#1",
+      "marker": "@deprecated"
+    },
+    {
+      "path": "apps/web/lib/diff/types.ts",
+      "declaration": "interface:DiffCommentsState#1",
+      "marker": "@deprecated"
+    },
+    {
+      "path": "apps/web/lib/diff/types.ts",
+      "declaration": "interface:DiffCommentsActions#1",
+      "marker": "@deprecated"
+    },
+    {
+      "path": "apps/web/lib/diff/types.ts",
+      "declaration": "type:DiffCommentsSlice#1",
+      "marker": "@deprecated"
+    },
+    {
+      "path": "apps/web/lib/state/slices/office/routing-types.ts",
+      "declaration": "property:ProviderProfile.tier_profile_ids#1",
+      "marker": "@deprecated"
+    },
+    {
+      "path": "apps/web/lib/types/agent-profile.ts",
+      "declaration": "property:AgentProfile.allowIndexing#1",
+      "marker": "@deprecated"
+    },
+    {
+      "path": "apps/web/lib/types/http.ts",
+      "declaration": "property:RepositoryPathValidationResponse.allowed#1",
+      "marker": "@deprecated"
+    },
+    {
+      "path": "apps/web/lib/utils/time.ts",
+      "declaration": "function:timeAgo#1",
+      "marker": "@deprecated"
+    }
+  ]
+}
