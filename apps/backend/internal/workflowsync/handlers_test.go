@@ -253,12 +253,15 @@ func TestHTTPHandlersSanitizeLegacyStoredProviderErrorFromConfigAndSync(t *testi
 
 func TestHTTPHandlersSanitizeSuspensionReasons(t *testing.T) {
 	const providerBodyMarker = "suspension-reason-provider-body-must-not-leak"
+	legacyRetryAt := time.Date(2026, 9, 26, 1, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
-		name           string
-		providerErr    error
-		legacy         bool
-		wantErrorClass string
-		wantReason     string
+		name             string
+		providerErr      error
+		legacy           bool
+		wantFailureClass string
+		wantErrorClass   string
+		wantReason       string
+		wantRetryAt      *time.Time
 	}{
 		{
 			name: "missing resource",
@@ -266,8 +269,9 @@ func TestHTTPHandlersSanitizeSuspensionReasons(t *testing.T) {
 				StatusCode: http.StatusNotFound, Body: providerBodyMarker,
 				FailureKind: github.FailureMissingResource,
 			},
-			wantErrorClass: string(github.FailureMissingResource),
-			wantReason:     "GitHub request failed with HTTP status 404",
+			wantFailureClass: "config",
+			wantErrorClass:   string(github.FailureMissingResource),
+			wantReason:       "GitHub request failed with HTTP status 404",
 		},
 		{
 			name: "invalid credentials",
@@ -275,15 +279,18 @@ func TestHTTPHandlersSanitizeSuspensionReasons(t *testing.T) {
 				StatusCode: http.StatusUnauthorized, Body: providerBodyMarker,
 				FailureKind: github.FailureInvalidCredentials,
 			},
-			wantErrorClass: string(github.FailureInvalidCredentials),
-			wantReason:     "GitHub request failed with HTTP status 401",
+			wantFailureClass: "auth",
+			wantErrorClass:   string(github.FailureInvalidCredentials),
+			wantReason:       "GitHub request failed with HTTP status 401",
 		},
 		{
-			name:           "legacy stored reason",
-			providerErr:    &github.AdmissionDeferredError{Reason: "background admission deferred"},
-			legacy:         true,
-			wantErrorClass: string(github.FailureMissingResource),
-			wantReason:     genericSyncFailureMessage,
+			name:             "legacy stored reason",
+			providerErr:      &github.AdmissionDeferredError{Reason: "background admission deferred"},
+			legacy:           true,
+			wantFailureClass: "config",
+			wantErrorClass:   string(github.FailureMissingResource),
+			wantReason:       genericSyncFailureMessage,
+			wantRetryAt:      &legacyRetryAt,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -295,10 +302,10 @@ func TestHTTPHandlersSanitizeSuspensionReasons(t *testing.T) {
 			if tc.legacy {
 				_, err = store.db.Exec(`
 					UPDATE workflow_sync_configs
-					SET last_ok = 0, last_error_class = ?, poll_suspended = 1,
-						poll_suspension_reason = ?, consecutive_failures = 1
+					SET last_ok = 0, failure_class = ?, last_error_class = ?, poll_suspended = 1,
+						poll_suspension_reason = ?, consecutive_failures = 1, next_retry_at = ?
 					WHERE workspace_id = ?
-				`, tc.wantErrorClass, "github API error: "+providerBodyMarker, victimWorkspace)
+				`, tc.wantFailureClass, tc.wantErrorClass, "github API error: "+providerBodyMarker, tc.wantRetryAt, victimWorkspace)
 				require.NoError(t, err)
 			}
 			router := newTestRouter(t, svc)
@@ -315,9 +322,16 @@ func TestHTTPHandlersSanitizeSuspensionReasons(t *testing.T) {
 			var config Config
 			require.NoError(t, json.Unmarshal(configResponse.Body.Bytes(), &config))
 			assert.True(t, config.PollSuspended)
+			assert.Equal(t, tc.wantFailureClass, string(config.FailureClass))
 			assert.Equal(t, tc.wantErrorClass, config.LastErrorClass)
 			assert.Equal(t, tc.wantReason, config.PollSuspensionReason)
 			assert.Equal(t, 1, config.ConsecutiveFailures)
+			if tc.wantRetryAt == nil {
+				assert.Nil(t, config.NextRetryAt)
+			} else {
+				require.NotNil(t, config.NextRetryAt)
+				assert.Equal(t, *tc.wantRetryAt, *config.NextRetryAt)
+			}
 		})
 	}
 }
