@@ -432,3 +432,10 @@ The same constrained command then passed all 24 cases across three full-spec
 repetitions without retries. Targeted lint passed. This supersedes the initial
 normal-run conclusion above; the retry was a reproducible fixture defect.
 Current-head CI and renewed reviews remain pending after delivery.
+
+
+### Kubernetes recovery CI diagnostics
+
+The recoverable-agent-error Kubernetes scenario failed again after a manual resume, while its pod and workspace volume remained present. The test now asserts the correlated `session.recover` response before checking composer readiness, using the existing WebSocket watcher and sanitizing request errors. This preserves the UI and workspace assertions and does not retry or extend a timeout. The change improves failure attribution; it is not a claimed runtime fix.
+
+A temporary local host-executor probe exercised the same request assertion through the real UI and passed without retries. Targeted lint and Kubernetes test discovery passed. Local Kind reproduction remained blocked during image loading and container cleanup before the test body ran. The owned test container was removed. Current-head CI is still required to diagnose or clear the Kubernetes failure; completion remains pending.
