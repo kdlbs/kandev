@@ -1012,6 +1012,49 @@ func (r *Repository) UpdateTaskPriority(ctx context.Context, taskID, priority st
 	return nil
 }
 
+// UpdateTaskParentID changes a task's parent relationship without replacing
+// the caller's full task snapshot. A reparent request can otherwise restore a
+// title or state that was current when the request started but changed before
+// it committed.
+func (r *Repository) UpdateTaskParentID(ctx context.Context, taskID, parentID string) error {
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE tasks SET parent_id = ?,
+				metadata = CASE
+					WHEN parent_id IS DISTINCT FROM ?
+						AND jsonb_extract_path_text(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, 'workspace', 'mode') = 'inherit_parent'
+					THEN jsonb_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ARRAY['workspace', 'mode']::text[], '"shared_group"'::jsonb, true)::text
+					ELSE metadata
+				END,
+				updated_at = ?
+			WHERE id = ?`
+	} else {
+		query = `
+			UPDATE tasks SET parent_id = ?,
+				metadata = CASE
+					WHEN parent_id IS NOT ? AND json_valid(metadata)
+						AND json_extract(metadata, '$.workspace.mode') = 'inherit_parent'
+					THEN json_set(metadata, '$.workspace.mode', 'shared_group')
+					ELSE metadata
+				END,
+				updated_at = ?
+			WHERE id = ?`
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), parentID, parentID, r.nowUTC(), taskID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	}
+	return nil
+}
+
 // UpdateTask updates an existing task. The runner write lands as an
 // upsert/clear on workflow_step_participants inside the same tx as the
 // task UPDATE.

@@ -324,6 +324,75 @@ func TestReparentDirectChildrenMovesEveryChildIncludingArchived(t *testing.T) {
 	}
 }
 
+// A direct-child reparent must not write the task snapshot captured before a
+// concurrent title/state change. The barrier forces that reverse order.
+func TestUpdateTaskParentIDPreservesTitleAndStateWrittenAfterSnapshot(t *testing.T) {
+	repo := seedHierarchy(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-hierarchy-new-parent", WorkspaceID: hierarchyWorkspaceID, Title: "new parent",
+	}); err != nil {
+		t.Fatalf("CreateTask(new parent): %v", err)
+	}
+
+	snapshotReady := make(chan *models.Task, 1)
+	releaseReparent := make(chan struct{})
+	reparentDone := make(chan error, 1)
+	go func() {
+		stale, err := repo.GetTask(ctx, "task-child-a")
+		if err != nil {
+			reparentDone <- err
+			return
+		}
+		snapshotReady <- stale
+		<-releaseReparent
+		writer, ok := any(repo).(interface {
+			UpdateTaskParentID(context.Context, string, string) error
+		})
+		if ok {
+			reparentDone <- writer.UpdateTaskParentID(ctx, stale.ID, "task-hierarchy-new-parent")
+			return
+		}
+		// This is the former full-row reparent path. It makes the RED case
+		// reproduce the stale title/state rollback before the parent-only
+		// writer is introduced.
+		stale.ParentID = "task-hierarchy-new-parent"
+		reparentDone <- repo.UpdateTask(ctx, stale)
+	}()
+
+	stale := <-snapshotReady
+	if stale.Title != "task-child-a" || stale.State != "" {
+		t.Fatalf("stale snapshot = title %q, state %q", stale.Title, stale.State)
+	}
+	live, err := repo.GetTask(ctx, stale.ID)
+	if err != nil {
+		t.Fatalf("GetTask(live): %v", err)
+	}
+	live.Title = "Title written after snapshot"
+	live.State = "DONE"
+	if err := repo.UpdateTask(ctx, live); err != nil {
+		t.Fatalf("UpdateTask(live): %v", err)
+	}
+	close(releaseReparent)
+	if err := <-reparentDone; err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repo.GetTask(ctx, stale.ID)
+	if err != nil {
+		t.Fatalf("GetTask(after reparent): %v", err)
+	}
+	if got.ParentID != "task-hierarchy-new-parent" {
+		t.Errorf("ParentID = %q, want new parent", got.ParentID)
+	}
+	if got.Title != "Title written after snapshot" {
+		t.Errorf("Title = %q, want the later title", got.Title)
+	}
+	if got.State != "DONE" {
+		t.Errorf("State = %q, want the later state", got.State)
+	}
+}
+
 func TestGetTasksByIDsFetchesRequestedRowsAndSkipsUnknown(t *testing.T) {
 	repo := seedHierarchy(t)
 	ctx := context.Background()
