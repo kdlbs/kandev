@@ -72,7 +72,22 @@ changing it.
   close the shell, as they do not today. `ConfigChatPanel` passes Expand as
   `headerActions` and keeps `config-chat-popover`, every aria-label and every
   class, so its rendered DOM does not change. The snapshot that pins it is
-  recorded from the unrefactored panel before the extraction.
+  recorded from the unrefactored panel before the extraction, in a new
+  `components/config-chat/config-chat-panel.test.tsx`. It covers three
+  states: (1) closed, with the trigger button; (2) open with no config
+  session, the setup body branch, with Expand disabled while `isStarting`
+  is true and enabled when it is false; (3) open with a config session, the
+  session body branch. Each open state is serialized from `document.body`
+  after clicking the trigger, because the content renders in a Radix
+  portal. The fixture mocks `useAppStore` (the `quickChat.sessions` list,
+  empty or holding one `kind: "config"` session for the workspace,
+  `openQuickChat` and `setQuickChatInitialPrompt`) and `useConfigChat`,
+  and stubs `QuickChatSessionView` and `ConfigChatSetup` with marker
+  elements. The snapshot therefore pins the shell, the header, Expand,
+  Close and the floating-actions host, and which body branch renders, not
+  the bodies' own DOM, which this work order does not change. The same
+  file asserts that Expand calls `openQuickChat` with kind `config` and
+  closes the popover.
 - **`hideSessionSelectors`.** When `true`, the view renders `QuickChatContent`
   with `minimalToolbar`, which has Submit and Stop and no mode or model
   selector; the placeholder stays the chat placeholder. Kind `config` keeps
@@ -86,13 +101,35 @@ changing it.
   retry effect do nothing; `resumeSession`, `retryStatus` and the workspace
   `restore` stay manual actions, and the session row is still read from the
   store.
-- **`initialDraft`** is `string | undefined`. When the composer handle exists
-  and the prop holds a non-empty string different from the last one applied
-  by this view, the view calls `clear()`, then `insertText(draft, 0, 0)`, then
-  `focusInput()`. It never submits. The same value on a later render is not
-  applied again; `undefined` or `""` leaves the composer as it is and resets
-  nothing, so a caller re-applies an identical draft by passing `undefined`
-  first.
+- **`initialDraft`** is `string | undefined`. `QuickChatSessionView` passes it
+  unchanged to `QuickChatContent` as a new `initialDraft` prop, just as it
+  passes `initialPrompt` today. `QuickChatContent` owns `chatInputRef`, so it
+  applies the draft, and it keeps the last applied value in a ref of its own.
+  That ref lives outside `ChatInputContainer`, so the container's remount on
+  a clarification key change does not re-apply the draft.
+  - **Applying.** A draft is *pending* when it is a non-empty string that
+    differs from the last applied value. A pending draft is applied in the
+    first commit in which `chatInputRef.current` is non-null and
+    `initialPrompt` is empty or `undefined`. Applying calls `clear()`, then
+    `insertText(draft, 0, 0)`, then `focusInput()`, and records the value as
+    applied. It never submits. The trigger re-checks in every commit and is
+    not keyed on the prop alone, so a draft that arrives before the composer
+    mounts is held, not dropped. After applying, the composer holds exactly
+    the draft, replacing any text the composer restored from its saved
+    per-session draft.
+  - **Repeats and resets.** The same value on a later render is not applied
+    again. `undefined` or `""` leaves the composer as it is and resets
+    nothing, so a caller re-applies an identical draft by passing `undefined`
+    first.
+  - **`initialPrompt` wins.** While `initialPrompt` is non-empty, the draft
+    stays pending, and it is applied once the prompt clears (the caller
+    clears it through `onInitialPromptAttempted`). The coordinator popover
+    passes no `initialPrompt`.
+  - **Passthrough sessions.** These render `PassthroughTerminal`, not
+    `QuickChatContent`, so they have no composer and the draft has no
+    effect. A `QuickChatContent` mounted later (a different session, or a
+    session that stops being passthrough) starts with no applied value, so it
+    applies the current non-empty draft once under the rule above.
 - **`transformOutgoing`** is `(message: string) => string`, passed to
   `useSubmitHandler(panelState, onSend, { transformOutgoing })`. It is applied
   to `payload.message` once per submit, before `buildSubmitMessage`, on both
@@ -109,10 +146,20 @@ changing it.
   off and the content starts with `About ` (case-sensitive): the id is the
   text between `About ` and the first `: `, and it must be non-empty and hold
   no line break; otherwise the message renders verbatim. The remainder goes
-  through `MessageSegments` as today; an empty remainder renders the tag
-  alone. The tag is a `Badge` with `data-testid="coordinator-about-tag"` and
-  the copy `chat:coordinatorAboutTag` (`about {{id}}`) in all six locales. The
-  raw view shows the stored text with the prefix.
+  through `MessageSegments` as today, and the tag follows it, as in the
+  mockup's transcript: the body renders the remainder first, then the tag
+  on its own line below it, left-aligned inside the same bubble (a block
+  wrapper, not inline with the last text line). An empty remainder renders
+  the tag alone. The tag is a `Badge` with
+  `data-testid="coordinator-about-tag"` and the copy
+  `chat:coordinatorAboutTag` (`about {{id}}`) in all six locales. The raw
+  view shows the stored text with the prefix.
+- **Download and copy keep the stored text.** `MessageSegments` gains an
+  optional `downloadSource` prop (default: its `content`, as today). The
+  coordinator branch passes the full stored `content`, prefix included, so
+  a long message's download matches the stored message. Copy already uses
+  `message.content` in `MessageActions` and is unchanged; a test pins that
+  it copies the text with the prefix.
 - **Tests.** Vitest only for the new props and the tag, because nothing on
   `main` renders them until task 06; the existing Configuration chat
   Playwright specs (`e2e/tests/settings/config-chat-popover.spec.ts`, which
@@ -136,7 +183,8 @@ this work order provides (shell, transcript tag, composer props):
                                      +---------------------------------+
                                      | * Coordinator: Planner      [x] |  shell
                                      |---------------------------------|
-                                     | You: [about KAN-418] why ...    |  tag
+                                     |        why is KAN-418 here? ... |  text,
+                                     |        [about KAN-418]          |  then tag
                                      |---------------------------------|
                                      | Ask the coordinator...     [>]  |  draft, transform
                                      +---------------------------------+
@@ -170,7 +218,7 @@ cd apps/web && pnpm e2e:run tests/settings/config-chat-popover.spec.ts tests/set
 
 ## Likely files
 
-- `apps/web/components/config-chat/chat-popover-shell.tsx`, `config-chat-panel.tsx`
+- `apps/web/components/config-chat/chat-popover-shell.tsx`, `config-chat-panel.tsx`, `config-chat-panel.test.tsx` (new)
 - `apps/web/components/quick-chat/` (`QuickChatSessionView`, `QuickChatContent`)
 - `apps/web/hooks/domains/session/use-session-resumption.ts` and test
 - `apps/web/components/task/chat/messages/user-message-body.tsx` and test
