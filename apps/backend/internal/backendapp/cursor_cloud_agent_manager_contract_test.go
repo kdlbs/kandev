@@ -182,6 +182,8 @@ func TestNeedsSubmissionCandidateScan(t *testing.T) {
 		{name: "initial operation accepted", operation: &models.ManagedAgentOperation{Kind: models.ManagedAgentOperationCreate, State: models.ManagedAgentSubmissionAccepted}},
 		{name: "follow-up accepted", operation: &models.ManagedAgentOperation{Kind: models.ManagedAgentOperationFollowup, State: models.ManagedAgentSubmissionAccepted}},
 		{name: "follow-up succeeded", operation: &models.ManagedAgentOperation{Kind: models.ManagedAgentOperationFollowup, State: models.ManagedAgentSubmissionSucceeded}},
+		{name: "unknown initial create", operation: &models.ManagedAgentOperation{Kind: models.ManagedAgentOperationCreate, State: models.ManagedAgentSubmissionUnknown}, want: true},
+		{name: "submitting initial create", operation: &models.ManagedAgentOperation{Kind: models.ManagedAgentOperationCreate, State: models.ManagedAgentSubmissionSubmitting}, want: true},
 		{name: "unknown follow-up", operation: &models.ManagedAgentOperation{Kind: models.ManagedAgentOperationFollowup, State: models.ManagedAgentSubmissionUnknown}, want: true},
 		{name: "submitting follow-up", operation: &models.ManagedAgentOperation{Kind: models.ManagedAgentOperationFollowup, State: models.ManagedAgentSubmissionSubmitting}, want: true},
 		{name: "missing operation"},

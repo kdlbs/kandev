@@ -3216,6 +3216,7 @@ func (s *Service) resolveManagedAgentsBeforeTaskDelete(ctx context.Context, sess
 	if !ok {
 		return nil
 	}
+	bindings := make([]*models.ManagedAgentBinding, 0, len(sessions))
 	for _, session := range sessions {
 		if session == nil || session.ID == "" {
 			continue
@@ -3227,25 +3228,40 @@ func (s *Service) resolveManagedAgentsBeforeTaskDelete(ctx context.Context, sess
 		if err != nil {
 			return fmt.Errorf("read managed execution before task deletion: %w", err)
 		}
-		operation, err := managed.GetManagedAgentLatestOperation(ctx, binding.ID)
-		if err != nil {
-			return fmt.Errorf("read managed operation before task deletion: %w", err)
+		if err := s.stopManagedAgentBeforeTaskDelete(ctx, managed, binding); err != nil {
+			return err
 		}
-		if models.ManagedAgentOperationActive(operation.State) {
-			if s.executionStopper == nil || s.executionStopper.StopExecution(ctx, binding.ExecutionID, "task_deleted", false) != nil {
-				return ErrManagedAgentDeleteBlocked
-			}
-			operation, err = managed.GetManagedAgentLatestOperation(ctx, binding.ID)
-			if err != nil || models.ManagedAgentOperationActive(operation.State) {
-				return ErrManagedAgentDeleteBlocked
-			}
-		}
+		bindings = append(bindings, binding)
+	}
+	for _, binding := range bindings {
 		if err := managed.DeleteManagedAgentBindingIfTerminal(ctx, binding.ID); err != nil {
 			if errors.Is(err, taskrepo.ErrManagedAgentActiveOperation) {
 				return ErrManagedAgentDeleteBlocked
 			}
 			return fmt.Errorf("remove terminal managed execution before task deletion: %w", err)
 		}
+	}
+	return nil
+}
+
+func (s *Service) stopManagedAgentBeforeTaskDelete(
+	ctx context.Context,
+	managed taskrepo.ManagedAgentRepository,
+	binding *models.ManagedAgentBinding,
+) error {
+	operation, err := managed.GetManagedAgentLatestOperation(ctx, binding.ID)
+	if err != nil {
+		return fmt.Errorf("read managed operation before task deletion: %w", err)
+	}
+	if !models.ManagedAgentOperationActive(operation.State) {
+		return nil
+	}
+	if s.executionStopper == nil || s.executionStopper.StopExecution(ctx, binding.ExecutionID, "task_deleted", false) != nil {
+		return ErrManagedAgentDeleteBlocked
+	}
+	operation, err = managed.GetManagedAgentLatestOperation(ctx, binding.ID)
+	if err != nil || models.ManagedAgentOperationActive(operation.State) {
+		return ErrManagedAgentDeleteBlocked
 	}
 	return nil
 }

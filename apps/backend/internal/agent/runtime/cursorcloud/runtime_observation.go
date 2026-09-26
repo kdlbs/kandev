@@ -509,6 +509,14 @@ func (r *Runtime) persistRunResult(
 	if binding == nil || operation == nil || run.Result == "" {
 		return nil
 	}
+	assistantMessageStarted := false
+	checkpoint, checkpointErr := r.repository.GetManagedAgentStreamCheckpoint(ctx, binding.ID, operation.RemoteRunID)
+	if checkpointErr != nil && !errors.Is(checkpointErr, repository.ErrManagedAgentStreamNotFound) {
+		return fmt.Errorf("load Cursor Cloud stream checkpoint for final result: %w", checkpointErr)
+	}
+	if checkpointErr == nil {
+		assistantMessageStarted = checkpoint.AssistantMessageStarted
+	}
 	messageID := "cursor-cloud-assistant-" + operation.ID
 	message := &models.Message{
 		ID: messageID, TaskSessionID: binding.SessionID, TaskID: binding.TaskID,
@@ -518,20 +526,23 @@ func (r *Runtime) persistRunResult(
 	payload := &lifecycle.AgentStreamEventPayload{
 		Type: "agent/event", Timestamp: r.now().UTC().Format(time.RFC3339Nano),
 		AgentID: binding.ExecutionID, ExecutionID: binding.ExecutionID,
-		TaskID: binding.TaskID, SessionID: binding.SessionID,
+		TaskID: binding.TaskID, SessionID: binding.SessionID, ManagedAgentOperationID: operation.ID,
 		Data: &lifecycle.AgentStreamEventData{
 			Type: "message_streaming", TurnID: operation.RequestSnapshot.TurnID,
 			Text: run.Result, MessageID: messageID, MessageType: string(models.MessageTypeMessage),
+			MessageUpdated: assistantMessageStarted,
 		},
 	}
-	if _, err := r.repository.CommitManagedAgentStreamEvent(ctx, models.ManagedAgentStreamEvent{
+	recorded, err := r.repository.CommitManagedAgentStreamEvent(ctx, models.ManagedAgentStreamEvent{
 		BindingID: binding.ID, OperationID: operation.ID, RemoteRunID: operation.RemoteRunID,
+		EventID:            "cursor-cloud-result-" + operation.ID,
 		EventType:          "terminal_result_readback",
 		DispatchGeneration: operation.DispatchGeneration, Message: message,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("persist Cursor Cloud run result: %w", err)
 	}
-	if r.publishStream != nil {
+	if recorded && r.publishStream != nil {
 		r.publishStream(ctx, payload)
 	}
 	return nil

@@ -292,6 +292,77 @@ func TestUnknownFollowupRetryRequiresExplicitDuplicateWorkAcknowledgment(t *test
 	}
 }
 
+func TestUnknownCreateSubmissionCanBindVerifiedRun(t *testing.T) {
+	repository := newMemoryRepository()
+	input := testLaunchInput()
+	provider := &fakeProvider{
+		createErr:   cursorcloud.ErrOutcomeUnknown,
+		getAgentErr: errors.New("agent read is temporarily unavailable"),
+		getRun:      cursorcloud.Run{Status: "RUNNING"},
+	}
+	runtime := newTestRuntime(t, repository, provider, nil)
+	if _, err := runtime.Launch(context.Background(), launchSpec(input)); err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if err := runtime.StartExecution(context.Background(), input.Binding.ExecutionID); !errors.Is(err, cursorcloud.ErrOutcomeUnknown) {
+		t.Fatalf("StartExecution error = %v, want unknown create outcome", err)
+	}
+	startedAt := repository.operation.DispatchStartedAt
+	if startedAt == nil {
+		t.Fatal("initial create has no durable dispatch timestamp")
+	}
+	provider.runs = []cursorcloud.Run{{
+		ID: "run-initial", AgentID: input.Binding.RemoteAgentID, Status: "RUNNING",
+		CreatedAt: startedAt.Add(-time.Second).Format(time.RFC3339Nano),
+	}}
+	operation, candidates, err := runtime.ListSubmissionCandidates(context.Background(), input.Binding.ExecutionID)
+	if err != nil {
+		t.Fatalf("ListSubmissionCandidates: %v", err)
+	}
+	if operation.Kind != models.ManagedAgentOperationCreate || len(candidates) != 1 || candidates[0].RunID != "run-initial" {
+		t.Fatalf("unknown create operation=%+v candidates=%+v, want verified initial run", operation, candidates)
+	}
+	accepted, err := runtime.BindSubmissionCandidate(context.Background(), input.Binding.ExecutionID, "run-initial")
+	if err != nil {
+		t.Fatalf("BindSubmissionCandidate: %v", err)
+	}
+	if accepted.State != models.ManagedAgentSubmissionAccepted || accepted.RemoteRunID != "run-initial" {
+		t.Fatalf("bound initial operation=%+v, want accepted run-initial", accepted)
+	}
+}
+
+func TestUnknownCreateRetryRequiresAcknowledgmentAndRecordsNewCreate(t *testing.T) {
+	repository := newMemoryRepository()
+	input := testLaunchInput()
+	provider := &fakeProvider{
+		createErr:   cursorcloud.ErrOutcomeUnknown,
+		getAgentErr: errors.New("agent read is temporarily unavailable"),
+	}
+	runtime := newTestRuntime(t, repository, provider, nil)
+	if _, err := runtime.Launch(context.Background(), launchSpec(input)); err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if err := runtime.StartExecution(context.Background(), input.Binding.ExecutionID); !errors.Is(err, cursorcloud.ErrOutcomeUnknown) {
+		t.Fatalf("StartExecution error = %v, want unknown create outcome", err)
+	}
+	original := repository.operation
+	if _, err := runtime.RetryUnknownSubmission(context.Background(), input.Binding.ExecutionID, "create-retry-1", false); !errors.Is(err, ErrRetryAcknowledgmentRequired) {
+		t.Fatalf("unacknowledged create retry error = %v, want acknowledgment requirement", err)
+	}
+	if provider.createCalls != 1 {
+		t.Fatalf("CreateAgent calls before acknowledgment = %d, want 1", provider.createCalls)
+	}
+	retried, err := runtime.RetryUnknownSubmission(context.Background(), input.Binding.ExecutionID, "create-retry-1", true)
+	if !errors.Is(err, cursorcloud.ErrOutcomeUnknown) {
+		t.Fatalf("acknowledged create retry error = %v, want unknown outcome from new attempt", err)
+	}
+	if original.State != models.ManagedAgentSubmissionRetryAcked || retried.ID == original.ID ||
+		retried.Kind != models.ManagedAgentOperationCreate || retried.State != models.ManagedAgentSubmissionUnknown ||
+		retried.RequestSnapshot.TurnID != original.RequestSnapshot.TurnID || provider.createCalls != 2 {
+		t.Fatalf("original=%+v retried=%+v create calls=%d, want a new create with preserved turn identity", original, retried, provider.createCalls)
+	}
+}
+
 func TestRestartResumesReservedFollowupAndClassifiesInterruptedSubmit(t *testing.T) {
 	repository := newMemoryRepository()
 	input := testLaunchInput()

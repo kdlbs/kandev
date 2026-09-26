@@ -34,7 +34,7 @@ type runLister interface {
 }
 
 func (r *Runtime) ListSubmissionCandidates(ctx context.Context, executionID string) (*models.ManagedAgentOperation, []SubmissionCandidate, error) {
-	binding, operation, client, err := r.loadUnknownFollowup(ctx, executionID)
+	binding, operation, client, err := r.loadUnknownSubmission(ctx, executionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -103,7 +103,7 @@ func eligibleSubmissionRun(
 		return time.Time{}, false
 	}
 	createdAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(run.CreatedAt))
-	if err != nil || createdAt.Before(*operation.DispatchStartedAt) {
+	if err != nil || operation.Kind != models.ManagedAgentOperationCreate && createdAt.Before(*operation.DispatchStartedAt) {
 		return time.Time{}, false
 	}
 	return createdAt, true
@@ -135,7 +135,7 @@ func (r *Runtime) BindSubmissionCandidate(ctx context.Context, executionID, runI
 	if runID == "" {
 		return nil, ErrSubmissionCandidateUnavailable
 	}
-	binding, operation, client, err := r.loadUnknownFollowup(ctx, executionID)
+	binding, operation, client, err := r.loadUnknownSubmission(ctx, executionID)
 	if err != nil {
 		return nil, err
 	}
@@ -230,15 +230,17 @@ func (r *Runtime) RetryUnknownSubmission(ctx context.Context, executionID, resol
 	if resolutionID == "" || len(resolutionID) > 128 {
 		return nil, errors.New("cursor cloud retry identity is invalid")
 	}
-	binding, original, _, err := r.loadUnknownFollowup(ctx, executionID)
+	binding, original, _, err := r.loadUnknownSubmission(ctx, executionID)
 	if err != nil {
 		return nil, err
 	}
 	turnID := "cursor-cloud-retry:" + original.ID + ":" + resolutionID
 	snapshot := original.RequestSnapshot
-	snapshot.TurnID = turnID
+	if original.Kind == models.ManagedAgentOperationFollowup {
+		snapshot.TurnID = turnID
+	}
 	operation := &models.ManagedAgentOperation{
-		ID: r.newID(), BindingID: binding.ID, PromptTurnID: turnID, Kind: models.ManagedAgentOperationFollowup,
+		ID: r.newID(), BindingID: binding.ID, PromptTurnID: turnID, Kind: original.Kind,
 		RequestDigest: digestRequest(snapshot.Prompt, turnID, binding.Launch), RequestSnapshot: snapshot,
 		RetryAcknowledgesOperationID: original.ID, DuplicationRiskAcknowledged: true,
 	}
@@ -249,15 +251,7 @@ func (r *Runtime) RetryUnknownSubmission(ctx context.Context, executionID, resol
 	if err != nil {
 		return nil, fmt.Errorf("reserve explicitly acknowledged Cursor Cloud retry: %w", err)
 	}
-	dispatchOwner := reservedBinding.DispatchOwner
-	if reserved.State == models.ManagedAgentSubmissionReserved &&
-		(reservedBinding.DispatchLeaseUntil == nil || !reservedBinding.DispatchLeaseUntil.After(r.now())) {
-		reservedBinding, dispatchOwner, err = r.ensureLease(ctx, reservedBinding, reserved)
-		if err != nil {
-			return nil, err
-		}
-	}
-	err = r.dispatchFollowup(ctx, reservedBinding, reserved, dispatchOwner)
+	err = r.dispatchAcknowledgedRetry(ctx, reservedBinding, reserved)
 	latest, readErr := r.repository.GetManagedAgentLatestOperation(ctx, binding.ID)
 	if readErr != nil {
 		return nil, errors.Join(err, readErr)
@@ -268,7 +262,27 @@ func (r *Runtime) RetryUnknownSubmission(ctx context.Context, executionID, resol
 	return latest, err
 }
 
-func (r *Runtime) loadUnknownFollowup(ctx context.Context, executionID string) (*models.ManagedAgentBinding, *models.ManagedAgentOperation, Provider, error) {
+func (r *Runtime) dispatchAcknowledgedRetry(
+	ctx context.Context,
+	binding *models.ManagedAgentBinding,
+	operation *models.ManagedAgentOperation,
+) error {
+	dispatchOwner := binding.DispatchOwner
+	if operation.State == models.ManagedAgentSubmissionReserved &&
+		(binding.DispatchLeaseUntil == nil || !binding.DispatchLeaseUntil.After(r.now())) {
+		var err error
+		binding, dispatchOwner, err = r.ensureLease(ctx, binding, operation)
+		if err != nil {
+			return err
+		}
+	}
+	if operation.Kind == models.ManagedAgentOperationCreate {
+		return r.dispatchCreate(ctx, binding, operation)
+	}
+	return r.dispatchFollowup(ctx, binding, operation, dispatchOwner)
+}
+
+func (r *Runtime) loadUnknownSubmission(ctx context.Context, executionID string) (*models.ManagedAgentBinding, *models.ManagedAgentOperation, Provider, error) {
 	binding, err := r.repository.GetManagedAgentBindingByExecution(ctx, executionID)
 	if err != nil {
 		return nil, nil, nil, err
@@ -277,7 +291,7 @@ func (r *Runtime) loadUnknownFollowup(ctx context.Context, executionID string) (
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if operation.Kind != models.ManagedAgentOperationFollowup ||
+	if operation.Kind != models.ManagedAgentOperationFollowup && operation.Kind != models.ManagedAgentOperationCreate ||
 		operation.State != models.ManagedAgentSubmissionUnknown && operation.State != models.ManagedAgentSubmissionSubmitting {
 		return nil, nil, nil, ErrSubmissionResolutionUnavailable
 	}

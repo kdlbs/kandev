@@ -89,7 +89,8 @@ func validateManagedAgentOperationReservation(
 	if err := validateManagedAgentRetryAcknowledgment(ctx, tx, db, binding, operation, now); err != nil {
 		return err
 	}
-	if operation.RetryAcknowledgesOperationID != "" {
+	if operation.RetryAcknowledgesOperationID != "" &&
+		(binding.Lifecycle == models.ManagedAgentBindingArchived || binding.Lifecycle == models.ManagedAgentBindingTerminationPending) {
 		binding.Lifecycle = models.ManagedAgentBindingReady
 	}
 	if managedAgentLeaseHeldByOther(binding, leaseOwner, now) {
@@ -124,7 +125,9 @@ func validateManagedAgentRetryAcknowledgment(
 	if operation.RetryAcknowledgesOperationID == "" {
 		return ErrManagedAgentActiveOperation
 	}
-	if err := acknowledgeManagedAgentUnknownRetryTx(ctx, tx, db, binding.ID, operation.RetryAcknowledgesOperationID, now); err != nil {
+	if err := acknowledgeManagedAgentUnknownRetryTx(
+		ctx, tx, db, binding.ID, operation.RetryAcknowledgesOperationID, operation.Kind, now,
+	); err != nil {
 		return err
 	}
 	active, err = hasManagedAgentActiveOperation(ctx, tx, db, binding.ID)

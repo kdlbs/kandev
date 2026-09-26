@@ -108,6 +108,10 @@ func upsertManagedAgentCheckpoint(
 	event models.ManagedAgentStreamEvent,
 ) error {
 	now := time.Now().UTC()
+	checkpointEventID, checkpointCursor := event.EventID, event.Cursor
+	if event.EventType == "terminal_result_readback" {
+		checkpointEventID, checkpointCursor = "", ""
+	}
 	if _, err := tx.ExecContext(ctx, db.Rebind(`
 		INSERT INTO managed_agent_streams (
 			binding_id, remote_run_id, last_event_id, cursor, terminal_event_type,
@@ -121,7 +125,7 @@ func upsertManagedAgentCheckpoint(
 			assistant_message_started = CASE WHEN managed_agent_streams.assistant_message_started = 1 OR excluded.assistant_message_started = 1 THEN 1 ELSE 0 END,
 			updated_at = excluded.updated_at
 		WHERE managed_agent_streams.dispatch_generation = excluded.dispatch_generation
-	`), event.BindingID, event.RemoteRunID, event.EventID, event.Cursor, event.TerminalEventType,
+	`), event.BindingID, event.RemoteRunID, checkpointEventID, checkpointCursor, event.TerminalEventType,
 		managedAgentBool(event.HistoryGap), event.DispatchGeneration, now,
 		managedAgentBool(event.AssistantMessageStarted || event.AppendMessage)); err != nil {
 		return fmt.Errorf("upsert managed agent stream checkpoint: %w", err)

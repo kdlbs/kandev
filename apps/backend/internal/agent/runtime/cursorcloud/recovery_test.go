@@ -103,7 +103,8 @@ func TestTerminalRunReadbackReplacesAssistantResultAfterHistoryGap(t *testing.T)
 		t.Fatalf("durable assistant result = %q, want provider readback", repo.operation.ResultSnapshot.AssistantResult)
 	}
 	if len(published) != 2 || published[0].Data.Type != "message_streaming" || published[0].Data.Text != providerClient.getRun.Result ||
-		published[0].Data.IsAppend || published[0].Data.MessageID != "cursor-cloud-assistant-"+repo.operation.ID {
+		published[0].Data.IsAppend || published[0].Data.MessageUpdated ||
+		published[0].Data.MessageID != "cursor-cloud-assistant-"+repo.operation.ID {
 		t.Fatalf("readback publications = %#v, want a stable replacement before completion", published)
 	}
 }
@@ -134,7 +135,7 @@ func TestTerminalRunReadbackReplacesPartialAssistantResult(t *testing.T) {
 		t.Fatalf("provider stream cursor after result readback = %+v, %v; want the last provider event ID", checkpoint, err)
 	}
 	if len(published) != 3 || published[0].Data.Text != "partial answer" || published[1].Data.Text != providerClient.getRun.Result ||
-		published[1].Data.IsAppend || published[1].Data.MessageID != published[0].Data.MessageID {
+		published[1].Data.IsAppend || !published[1].Data.MessageUpdated || published[1].Data.MessageID != published[0].Data.MessageID {
 		t.Fatalf("partial and readback publications = %#v, want same-message replacement before completion", published)
 	}
 }
@@ -298,7 +299,7 @@ func newObserverRuntime(t *testing.T, providerClient *fakeProvider, published *[
 		ProjectStream: projectRecoveryEvent,
 		PublishStream: func(ctx context.Context, event *lifecycle.AgentStreamEventPayload) {
 			*published = append(*published, event)
-			if event.ManagedAgentOperationID != "" {
+			if event.ManagedAgentOperationID != "" && event.Data != nil && event.Data.Type == "complete" {
 				if err := repo.AcknowledgeManagedAgentCompletion(ctx, event.ManagedAgentOperationID); err != nil {
 					t.Errorf("acknowledge delivered completion: %v", err)
 				}

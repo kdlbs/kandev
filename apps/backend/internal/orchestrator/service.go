@@ -2726,7 +2726,7 @@ func (s *Service) completeTurnForTaskSessionWithSuccessorPolicy(
 	ctx context.Context,
 	taskID, sessionID string,
 	preserveAcceptedSuccessor bool,
-) {
+) error {
 	// Stream-only completion of a cancelled predecessor must not wipe a
 	// Send Now / FIFO successor that has already claimed prompt ownership.
 	// The ready-path wrapper (completeTurnForSession) still clears the
@@ -2734,21 +2734,25 @@ func (s *Service) completeTurnForTaskSessionWithSuccessorPolicy(
 	// action is not blocked forever.
 	if preserveAcceptedSuccessor && s.acceptedDispatchInFlight(sessionID) {
 		if successor := s.acceptedDispatchSuccessorTurn(sessionID); successor != "" {
-			if err := s.completeTurnsExcept(ctx, sessionID, successor); err != nil {
+			err := s.completeTurnsExcept(ctx, sessionID, successor)
+			if err != nil {
 				s.logger.Warn("failed to reconcile predecessor turn while successor dispatch is accepted",
 					zap.String("session_id", sessionID),
 					zap.String("successor_turn_id", successor),
 					zap.Error(err))
 			}
+			return err
 		}
-		return
+		return nil
 	}
-	s.clearAcceptedQueuedDispatch(sessionID)
 	if err := s.completeTurnForTaskSessionChecked(ctx, taskID, sessionID); err != nil {
 		s.logger.Warn("failed to reconcile active turn",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return err
 	}
+	s.clearAcceptedQueuedDispatch(sessionID)
+	return nil
 }
 
 // completeTurnForTaskSessionChecked closes every open turn for a session and

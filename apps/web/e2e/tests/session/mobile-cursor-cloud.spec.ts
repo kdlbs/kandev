@@ -19,7 +19,7 @@ test("shows cloud task controls and results in phone surfaces", async ({
   testPage,
 }) => {
   cursorCloud.reset();
-  const { task } = await createCursorCloudTask(
+  const { task, executorProfile } = await createCursorCloudTask(
     apiClient,
     backend,
     seedData,
@@ -27,6 +27,21 @@ test("shows cloud task controls and results in phone surfaces", async ({
   );
 
   await expect.poll(() => cursorCloud.count("POST", "/v1/agents")).toBe(1);
+  await testPage.goto(`/settings/executors/${executorProfile.id}`);
+  const testConnection = testPage.getByRole("button", { name: "Test connection" });
+  await testConnection.scrollIntoViewIfNeeded();
+  await expect(testConnection).toHaveCSS("min-height", "44px");
+  const buttonBox = await testConnection.boundingBox();
+  expect(buttonBox?.height).toBeGreaterThanOrEqual(44);
+  const centerHitsButton = await testConnection.evaluate((button) => {
+    const box = button.getBoundingClientRect();
+    const target = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return Boolean(target && button.contains(target));
+  });
+  expect(centerHitsButton).toBe(true);
+  await testConnection.click();
+  await expect(testPage.getByText("Mock Cursor Model")).toBeVisible();
+
   await testPage.goto(`/tasks/${task.id}`);
   await expect(testPage.getByTestId("cursor-cloud-task-surface")).toBeVisible();
   await expect(testPage.getByRole("button", { name: "Results" })).toBeVisible();

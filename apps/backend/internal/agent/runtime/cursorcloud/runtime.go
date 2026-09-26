@@ -46,6 +46,7 @@ type Repository interface {
 	ReserveManagedAgentStart(context.Context, *models.ManagedAgentBinding, *models.ManagedAgentOperation, string, time.Time) (*models.ManagedAgentBinding, *models.ManagedAgentOperation, bool, error)
 	ReserveManagedAgentOperation(context.Context, *models.ManagedAgentOperation, int64, string, time.Time) (*models.ManagedAgentBinding, *models.ManagedAgentOperation, bool, error)
 	ClaimManagedAgentDispatchLease(context.Context, string, string, int64, string, time.Time) (*models.ManagedAgentBinding, error)
+	ClaimManagedAgentCancellationLease(context.Context, string, string, int64, string, time.Time) (*models.ManagedAgentBinding, error)
 	GetManagedAgentBindingBySession(context.Context, string) (*models.ManagedAgentBinding, error)
 	GetManagedAgentBindingByExecution(context.Context, string) (*models.ManagedAgentBinding, error)
 	GetManagedAgentOperationByPromptTurnID(context.Context, string) (*models.ManagedAgentOperation, error)
@@ -187,6 +188,13 @@ func (r *Runtime) StartExecution(ctx context.Context, executionID string) error 
 	operation, err := r.repository.GetManagedAgentOperationByPromptTurnID(ctx, InitialPromptTurnID(binding.SessionID))
 	if err != nil {
 		return fmt.Errorf("load Cursor Cloud create operation: %w", err)
+	}
+	latest, err := r.repository.GetManagedAgentLatestOperation(ctx, binding.ID)
+	if err != nil {
+		return fmt.Errorf("load latest Cursor Cloud operation: %w", err)
+	}
+	if latest.Kind == models.ManagedAgentOperationCreate {
+		operation = latest
 	}
 	return r.dispatchCreate(ctx, binding, operation)
 }
@@ -427,6 +435,24 @@ func (r *Runtime) ensureLease(ctx context.Context, binding *models.ManagedAgentB
 	claimed, err := r.repository.ClaimManagedAgentDispatchLease(ctx, binding.ID, operation.ID, binding.Revision, owner, r.now().Add(leaseDuration))
 	if err != nil {
 		return nil, "", fmt.Errorf("claim Cursor Cloud dispatch lease: %w", err)
+	}
+	return claimed, owner, nil
+}
+
+func (r *Runtime) ensureCancellationLease(
+	ctx context.Context,
+	binding *models.ManagedAgentBinding,
+	operation *models.ManagedAgentOperation,
+) (*models.ManagedAgentBinding, string, error) {
+	if binding.DispatchOwner != "" && binding.DispatchLeaseUntil != nil && binding.DispatchLeaseUntil.After(r.now()) {
+		return binding, binding.DispatchOwner, nil
+	}
+	owner := r.newID()
+	claimed, err := r.repository.ClaimManagedAgentCancellationLease(
+		ctx, binding.ID, operation.ID, binding.Revision, owner, r.now().Add(leaseDuration),
+	)
+	if err != nil {
+		return nil, "", fmt.Errorf("claim Cursor Cloud cancellation lease: %w", err)
 	}
 	return claimed, owner, nil
 }

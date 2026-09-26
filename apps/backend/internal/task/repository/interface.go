@@ -897,6 +897,7 @@ type ManagedAgentRepository interface {
 	ReserveManagedAgentStart(ctx context.Context, binding *models.ManagedAgentBinding, operation *models.ManagedAgentOperation, leaseOwner string, leaseUntil time.Time) (*models.ManagedAgentBinding, *models.ManagedAgentOperation, bool, error)
 	ReserveManagedAgentOperation(ctx context.Context, operation *models.ManagedAgentOperation, expectedBindingRevision int64, leaseOwner string, leaseUntil time.Time) (*models.ManagedAgentBinding, *models.ManagedAgentOperation, bool, error)
 	ClaimManagedAgentDispatchLease(ctx context.Context, bindingID, operationID string, expectedBindingRevision int64, leaseOwner string, leaseUntil time.Time) (*models.ManagedAgentBinding, error)
+	ClaimManagedAgentCancellationLease(ctx context.Context, bindingID, operationID string, expectedBindingRevision int64, leaseOwner string, leaseUntil time.Time) (*models.ManagedAgentBinding, error)
 	GetManagedAgentBindingBySession(ctx context.Context, sessionID string) (*models.ManagedAgentBinding, error)
 	GetManagedAgentBindingByExecution(ctx context.Context, executionID string) (*models.ManagedAgentBinding, error)
 	GetManagedAgentBinding(ctx context.Context, bindingID string) (*models.ManagedAgentBinding, error)

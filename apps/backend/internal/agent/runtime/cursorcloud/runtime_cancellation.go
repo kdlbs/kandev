@@ -40,7 +40,7 @@ func (r *Runtime) ensureCancellationIntent(
 	if operation.State == models.ManagedAgentSubmissionCancelling {
 		return binding, operation, nil
 	}
-	leaseBinding, owner, err := r.ensureLease(ctx, binding, operation)
+	leaseBinding, owner, err := r.ensureCancellationLease(ctx, binding, operation)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -104,7 +104,7 @@ func (r *Runtime) settleCancelledRun(
 	if err := r.persistRunResult(ctx, binding, operation, run); err != nil {
 		return nil, err
 	}
-	leaseBinding, owner, err := r.ensureLease(ctx, binding, operation)
+	leaseBinding, owner, err := r.ensureCancellationLease(ctx, binding, operation)
 	if err != nil {
 		return nil, err
 	}

@@ -52,7 +52,7 @@ func (r *memoryRepository) ReserveManagedAgentOperation(_ context.Context, opera
 	if operation.RetryAcknowledgesOperationID != "" {
 		if !operation.DuplicationRiskAcknowledged || r.operation.ID != operation.RetryAcknowledgesOperationID ||
 			(r.operation.State != models.ManagedAgentSubmissionUnknown && r.operation.State != models.ManagedAgentSubmissionSubmitting) ||
-			r.operation.Kind != models.ManagedAgentOperationFollowup {
+			r.operation.Kind != operation.Kind {
 			return nil, nil, false, errors.New("retry acknowledgment does not match the unknown operation")
 		}
 		r.operation.State = models.ManagedAgentSubmissionRetryAcked
@@ -86,6 +86,10 @@ func (r *memoryRepository) ClaimManagedAgentDispatchLease(_ context.Context, bin
 	r.binding.DispatchOwner = owner
 	r.binding.DispatchLeaseUntil = &until
 	return cloneBinding(r.binding), nil
+}
+
+func (r *memoryRepository) ClaimManagedAgentCancellationLease(ctx context.Context, bindingID, operationID string, expectedRevision int64, owner string, until time.Time) (*models.ManagedAgentBinding, error) {
+	return r.ClaimManagedAgentDispatchLease(ctx, bindingID, operationID, expectedRevision, owner, until)
 }
 
 func (r *memoryRepository) GetManagedAgentBindingBySession(_ context.Context, sessionID string) (*models.ManagedAgentBinding, error) {
@@ -215,7 +219,7 @@ func (r *memoryRepository) CommitManagedAgentStreamEvent(_ context.Context, even
 	if r.streamCheckpoint != nil {
 		*checkpoint = *r.streamCheckpoint
 	}
-	if event.EventID != "" {
+	if event.EventID != "" && event.EventType != "terminal_result_readback" {
 		checkpoint.LastEventID, checkpoint.Cursor = event.EventID, event.Cursor
 	}
 	checkpoint.AssistantMessageStarted = checkpoint.AssistantMessageStarted || event.AssistantMessageStarted

@@ -128,6 +128,7 @@ export function CursorCloudConfigCard({
           type="button"
           variant="outline"
           size="sm"
+          className="[@media(pointer:coarse)]:min-h-11"
           disabled={!secretId || !callbackUrl.trim() || testing}
           onClick={() => void testConnection()}
         >

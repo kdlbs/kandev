@@ -428,6 +428,38 @@ func TestManagedAgentLeaseClaimRejectsReservedCreateAfterArchiveIntent(t *testin
 	}
 }
 
+func TestManagedAgentCancellationLeaseCanDrainArchivedRun(t *testing.T) {
+	repo, _, _ := newManagedAgentTestRepo(t)
+	ctx := context.Background()
+	const sessionID = "session-cancel-archived-run"
+	seedManagedAgentSession(t, repo, "task-"+sessionID, sessionID)
+	binding, operation := reserveManagedAgentStart(t, repo, sessionID, "turn-cancel-archived-run")
+	accepted := transitionManagedAgentOperation(t, repo, operation, binding.Revision, "worker-1",
+		models.ManagedAgentSubmissionAccepted, "run-1", "")
+	if err := repo.ArchiveTask(ctx, binding.TaskID); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+	if err := repo.BeginManagedAgentTermination(ctx, binding.ID, time.Now().UTC()); err != nil {
+		t.Fatalf("begin binding termination: %v", err)
+	}
+	binding, err := repo.GetManagedAgentBindingBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("reload terminating binding: %v", err)
+	}
+	if _, err := repo.ClaimManagedAgentDispatchLease(ctx, binding.ID, accepted.ID, binding.Revision,
+		"dispatch-after-archive", time.Now().Add(time.Minute)); !errors.Is(err, ErrManagedAgentBindingConflict) {
+		t.Fatalf("dispatch lease claim after archive = %v, want binding conflict", err)
+	}
+	claimed, err := repo.ClaimManagedAgentCancellationLease(ctx, binding.ID, accepted.ID, binding.Revision,
+		"cancel-after-archive", time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("cancellation lease claim after archive: %v", err)
+	}
+	if claimed.DispatchOwner != "cancel-after-archive" || claimed.Lifecycle != models.ManagedAgentBindingTerminationPending {
+		t.Fatalf("cancellation claim binding = %+v, want lease without reopening dispatch", claimed)
+	}
+}
+
 func TestUnarchiveLeavesConfirmedCloudBindingIdleUntilExplicitFollowup(t *testing.T) {
 	repo, _, _ := newManagedAgentTestRepo(t)
 	ctx := context.Background()
@@ -528,6 +560,51 @@ func TestManagedUnknownRetryAcknowledgmentAndReservationAreAtomic(t *testing.T) 
 	}
 	if _, err := repo.GetManagedAgentOperationByPromptTurnID(ctx, settled.PromptTurnID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManagedCreateUnknownRetryAcknowledgmentIsAtomic(t *testing.T) {
+	repo, _, _ := newManagedAgentTestRepo(t)
+	ctx := context.Background()
+	const sessionID = "session-create-explicit-retry"
+	seedManagedAgentSession(t, repo, "task-"+sessionID, sessionID)
+	binding, initial := reserveManagedAgentStart(t, repo, sessionID, "turn-create-initial")
+	submitting := transitionManagedAgentOperation(t, repo, initial, binding.Revision, "worker-1",
+		models.ManagedAgentSubmissionSubmitting, "", "")
+	unknown := transitionManagedAgentOperation(t, repo, submitting, binding.Revision, "worker-1",
+		models.ManagedAgentSubmissionUnknown, "", "response timed out")
+	binding, err := repo.GetManagedAgentBindingBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retrySnapshot := unknown.RequestSnapshot
+	retry := &models.ManagedAgentOperation{
+		ID: "operation-create-retry", BindingID: binding.ID, PromptTurnID: "turn-create-retry",
+		Kind: models.ManagedAgentOperationCreate, RequestDigest: "digest-create-retry",
+		RequestSnapshot: retrySnapshot, RetryAcknowledgesOperationID: unknown.ID,
+		DuplicationRiskAcknowledged: true,
+	}
+	reservedBinding, reserved, replayed, err := repo.ReserveManagedAgentOperation(
+		ctx, retry, binding.Revision, "worker-2", time.Now().Add(time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("reserve acknowledged create retry: %v", err)
+	}
+	if replayed || reserved.State != models.ManagedAgentSubmissionReserved ||
+		reservedBinding.Lifecycle != models.ManagedAgentBindingCreating {
+		t.Fatalf("create retry reservation binding=%+v operation=%+v replayed=%t, want creating binding and reserved operation", reservedBinding, reserved, replayed)
+	}
+	storedUnknown, err := repo.GetManagedAgentOperation(ctx, unknown.ID)
+	if err != nil || storedUnknown.State != models.ManagedAgentSubmissionRetryAcked {
+		t.Fatalf("original create operation = %+v, %v; want explicit retry acknowledgment", storedUnknown, err)
+	}
+	started := transitionManagedAgentOperation(t, repo, reserved, reservedBinding.Revision, "worker-2",
+		models.ManagedAgentSubmissionSubmitting, "", "")
+	accepted := transitionManagedAgentOperation(t, repo, started, reservedBinding.Revision, "worker-2",
+		models.ManagedAgentSubmissionAccepted, "run-create-retry", "")
+	finalBinding, err := repo.GetManagedAgentBindingBySession(ctx, sessionID)
+	if err != nil || finalBinding.Lifecycle != models.ManagedAgentBindingReady || accepted.RemoteRunID != "run-create-retry" {
+		t.Fatalf("accepted create retry binding=%+v operation=%+v error=%v, want ready binding", finalBinding, accepted, err)
 	}
 }
 

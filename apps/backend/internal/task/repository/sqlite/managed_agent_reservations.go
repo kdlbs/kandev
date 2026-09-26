@@ -195,7 +195,8 @@ func (r *Repository) ReserveManagedAgentOperation(
 	if err := validateManagedAgentOperation(operation); err != nil {
 		return nil, nil, false, err
 	}
-	if operation.Kind != models.ManagedAgentOperationFollowup || leaseOwner == "" || !leaseUntil.After(time.Now()) {
+	if operation.Kind != models.ManagedAgentOperationFollowup && operation.Kind != models.ManagedAgentOperationCreate ||
+		leaseOwner == "" || !leaseUntil.After(time.Now()) {
 		return nil, nil, false, fmt.Errorf("managed agent operation reservation is invalid")
 	}
 	if operation.DuplicationRiskAcknowledged != (operation.RetryAcknowledgesOperationID != "") {
@@ -223,6 +224,7 @@ func acknowledgeManagedAgentUnknownRetryTx(
 	tx *sqlx.Tx,
 	db *sqlx.DB,
 	bindingID, operationID string,
+	expectedKind models.ManagedAgentOperationKind,
 	at time.Time,
 ) error {
 	query := `SELECT operation_kind, submission_state FROM managed_agent_operations WHERE id = ? AND binding_id = ?` + managedAgentLockSuffix(db.DriverName())
@@ -234,7 +236,7 @@ func acknowledgeManagedAgentUnknownRetryTx(
 		}
 		return fmt.Errorf("load uncertain operation for acknowledged retry: %w", err)
 	}
-	if kind != models.ManagedAgentOperationFollowup ||
+	if kind != expectedKind || kind != models.ManagedAgentOperationFollowup && kind != models.ManagedAgentOperationCreate ||
 		state != models.ManagedAgentSubmissionUnknown && state != models.ManagedAgentSubmissionSubmitting {
 		return ErrManagedAgentOperationTransition
 	}
@@ -348,6 +350,27 @@ func (r *Repository) ClaimManagedAgentDispatchLease(
 	leaseOwner string,
 	leaseUntil time.Time,
 ) (*models.ManagedAgentBinding, error) {
+	return r.claimManagedAgentLease(ctx, bindingID, operationID, expectedBindingRevision, leaseOwner, leaseUntil, false)
+}
+
+func (r *Repository) ClaimManagedAgentCancellationLease(
+	ctx context.Context,
+	bindingID, operationID string,
+	expectedBindingRevision int64,
+	leaseOwner string,
+	leaseUntil time.Time,
+) (*models.ManagedAgentBinding, error) {
+	return r.claimManagedAgentLease(ctx, bindingID, operationID, expectedBindingRevision, leaseOwner, leaseUntil, true)
+}
+
+func (r *Repository) claimManagedAgentLease(
+	ctx context.Context,
+	bindingID, operationID string,
+	expectedBindingRevision int64,
+	leaseOwner string,
+	leaseUntil time.Time,
+	cancellation bool,
+) (*models.ManagedAgentBinding, error) {
 	if bindingID == "" || operationID == "" || leaseOwner == "" || !leaseUntil.After(time.Now()) {
 		return nil, fmt.Errorf("managed agent dispatch lease claim is invalid")
 	}
@@ -356,7 +379,7 @@ func (r *Repository) ClaimManagedAgentDispatchLease(
 		return nil, fmt.Errorf("begin managed agent dispatch lease claim: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	binding, err := managedAgentLeaseCandidate(ctx, tx, r.db, bindingID, operationID, expectedBindingRevision)
+	binding, err := managedAgentLeaseCandidate(ctx, tx, r.db, bindingID, operationID, expectedBindingRevision, cancellation)
 	if err != nil {
 		return nil, err
 	}
@@ -383,6 +406,7 @@ func managedAgentLeaseCandidate(
 	db *sqlx.DB,
 	bindingID, operationID string,
 	expectedRevision int64,
+	cancellation bool,
 ) (*models.ManagedAgentBinding, error) {
 	query := `SELECT ` + managedAgentBindingColumns + ` FROM managed_agent_bindings WHERE id = ?` + managedAgentLockSuffix(db.DriverName())
 	binding, err := scanManagedAgentBinding(tx.QueryRowContext(ctx, db.Rebind(query), bindingID))
@@ -392,27 +416,57 @@ func managedAgentLeaseCandidate(
 	if binding.Revision != expectedRevision {
 		return nil, ErrManagedAgentRevisionConflict
 	}
-	if binding.Lifecycle == models.ManagedAgentBindingArchived || binding.Lifecycle == models.ManagedAgentBindingTerminationPending {
-		return nil, ErrManagedAgentBindingConflict
+	if err := validateManagedAgentLeaseBinding(ctx, tx, db, binding, cancellation); err != nil {
+		return nil, err
+	}
+	if err := validateManagedAgentLeaseOperation(ctx, tx, db, bindingID, operationID, cancellation); err != nil {
+		return nil, err
+	}
+	return binding, nil
+}
+
+func validateManagedAgentLeaseBinding(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	binding *models.ManagedAgentBinding,
+	cancellation bool,
+) error {
+	if !cancellation && (binding.Lifecycle == models.ManagedAgentBindingArchived || binding.Lifecycle == models.ManagedAgentBindingTerminationPending) {
+		return ErrManagedAgentBindingConflict
 	}
 	archived, err := managedAgentTaskArchived(ctx, tx, db, binding.TaskID)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if archived {
-		return nil, ErrManagedAgentBindingConflict
+	if archived && !cancellation {
+		return ErrManagedAgentBindingConflict
 	}
+	return nil
+}
+
+func validateManagedAgentLeaseOperation(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	bindingID, operationID string,
+	cancellation bool,
+) error {
 	var state models.ManagedAgentSubmissionState
-	err = tx.QueryRowContext(ctx, db.Rebind(`
-		SELECT submission_state FROM managed_agent_operations WHERE id = ? AND binding_id = ?
-	`), operationID, bindingID).Scan(&state)
+	var remoteRunID string
+	err := tx.QueryRowContext(ctx, db.Rebind(`
+		SELECT submission_state, remote_run_id FROM managed_agent_operations WHERE id = ? AND binding_id = ?
+	`), operationID, bindingID).Scan(&state, &remoteRunID)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && !managedAgentOperationActive(state) {
-		return nil, ErrManagedAgentOperationNotFound
+		return ErrManagedAgentOperationNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("load operation for managed agent lease: %w", err)
+		return fmt.Errorf("load operation for managed agent lease: %w", err)
 	}
-	return binding, nil
+	if cancellation && (remoteRunID == "" || state != models.ManagedAgentSubmissionAccepted && state != models.ManagedAgentSubmissionCancelling) {
+		return ErrManagedAgentOperationNotFound
+	}
+	return nil
 }
 
 func updateManagedAgentLeaseTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, binding *models.ManagedAgentBinding, expectedRevision int64) error {

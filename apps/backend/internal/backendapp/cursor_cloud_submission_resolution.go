@@ -43,7 +43,8 @@ func (m *cursorCloudAgentManager) getSubmissionResolution(
 }
 
 func needsSubmissionCandidateScan(operation *models.ManagedAgentOperation) bool {
-	return operation != nil && operation.Kind == models.ManagedAgentOperationFollowup &&
+	return operation != nil && (operation.Kind == models.ManagedAgentOperationFollowup ||
+		operation.Kind == models.ManagedAgentOperationCreate) &&
 		(operation.State == models.ManagedAgentSubmissionUnknown ||
 			operation.State == models.ManagedAgentSubmissionSubmitting)
 }
