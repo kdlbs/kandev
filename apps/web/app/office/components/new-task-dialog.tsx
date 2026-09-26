@@ -12,18 +12,11 @@ import { createTask } from "@/lib/api/domains/kanban-api";
 import { useIssueDraft, type IssueDraft } from "./new-task-draft";
 import { NewTaskSelectorRow } from "./new-task-selector-row";
 import { NewTaskBottomBar } from "./new-task-bottom-bar";
-import {
-  NewTaskStages,
-  buildExecutionPolicy,
-  EMPTY_STAGES,
-  type StagesDraft,
-} from "./new-task-stages";
 import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 import { useTranslation } from "react-i18next";
 
 function buildMetadata(draft: IssueDraft): Record<string, unknown> | undefined {
   const meta: Record<string, unknown> = {};
-  if (draft.assigneeId) meta.assignee_agent_profile_id = draft.assigneeId;
   if (draft.status && draft.status !== "todo") meta.initial_status = draft.status;
   return Object.keys(meta).length > 0 ? meta : undefined;
 }
@@ -46,24 +39,16 @@ export function NewTaskDialog({
   const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const [submitting, setSubmitting] = useState(false);
-  const [stages, setStages] = useState<StagesDraft>(EMPTY_STAGES);
 
   const { draft, updateDraft, clearDraft } = useIssueDraft(workspaceId, parentTaskId, {
     projectId: defaultProjectId,
     assigneeId: defaultAssigneeId,
   });
 
-  const updateStages = useCallback(
-    (patch: Partial<StagesDraft>) => setStages((prev) => ({ ...prev, ...patch })),
-    [],
-  );
-
   const handleCreate = useCallback(async () => {
     if (!draft.title.trim() || !draft.projectId || !workspaceId) return;
     setSubmitting(true);
     try {
-      const executionPolicy = buildExecutionPolicy(stages);
-      const metadata = buildMetadata(draft);
       await createTask({
         workspace_id: workspaceId,
         workflow_id: "",
@@ -72,10 +57,10 @@ export function NewTaskDialog({
         parent_id: parentTaskId,
         priority: draft.priority,
         project_id: draft.projectId || undefined,
-        metadata: executionPolicy ? { ...metadata, execution_policy: executionPolicy } : metadata,
+        assignee_agent_profile_id: draft.assigneeId || undefined,
+        metadata: buildMetadata(draft),
       });
       clearDraft();
-      setStages(EMPTY_STAGES);
       onOpenChange(false);
       toast.success(t("office:taskCreated"));
     } catch (err) {
@@ -83,7 +68,7 @@ export function NewTaskDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [draft, stages, workspaceId, parentTaskId, clearDraft, onOpenChange, t]);
+  }, [draft, workspaceId, parentTaskId, clearDraft, onOpenChange, t]);
 
   const handleDiscard = useCallback(() => {
     clearDraft();
@@ -99,8 +84,6 @@ export function NewTaskDialog({
         <NewIssueDialogBody
           draft={draft}
           updateDraft={updateDraft}
-          stages={stages}
-          updateStages={updateStages}
           parentTaskId={parentTaskId}
           submitting={submitting}
           onDiscard={handleDiscard}
@@ -114,8 +97,6 @@ export function NewTaskDialog({
 function NewIssueDialogBody({
   draft,
   updateDraft,
-  stages,
-  updateStages,
   parentTaskId,
   submitting,
   onDiscard,
@@ -123,8 +104,6 @@ function NewIssueDialogBody({
 }: {
   draft: IssueDraft;
   updateDraft: (patch: Partial<IssueDraft>) => void;
-  stages: StagesDraft;
-  updateStages: (patch: Partial<StagesDraft>) => void;
   parentTaskId?: string;
   submitting: boolean;
   onDiscard: () => void;
@@ -166,7 +145,6 @@ function NewIssueDialogBody({
           onChange={(e) => updateDraft({ description: e.target.value })}
           className="min-h-[120px] text-sm"
         />
-        <NewTaskStages stages={stages} onUpdate={updateStages} />
         <NewTaskBottomBar draft={draft} onUpdate={updateDraft} />
       </div>
 

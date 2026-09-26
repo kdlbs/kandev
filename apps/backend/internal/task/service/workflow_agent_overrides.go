@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -268,6 +269,50 @@ func (s *Service) resolveWorkflowAgentOverrideExecutorProfile(
 		return nil, "", fmt.Errorf("executor profile %q does not belong to executor %q", executorProfileID, executorID)
 	}
 	return executorProfile, executorProfile.ExecutorID, nil
+}
+
+// ErrInvalidAssigneeAgentProfile identifies a create-time
+// assignee_agent_profile_id that does not name an enabled Office agent
+// instance scoped to the task's own workspace.
+var ErrInvalidAssigneeAgentProfile = errors.New("invalid assignee_agent_profile_id")
+
+// ValidateAssigneeAgentProfile checks a caller-supplied create-time assignee
+// before any task row is written. prepareTaskForCreation calls this only when
+// req.RequireAssigneeAgentProfileValidation is set — the untrusted HTTP
+// create-task handler is the only caller that sets it, because
+// CreateTaskRequest.AssigneeAgentProfileID is also used by trusted internal
+// callers (agent-created subtasks, onboarding, routines) that already know
+// the profile is valid and must not be re-gated by a workspace-scoped Office
+// eligibility rule that doesn't apply to them. Gating inside
+// prepareTaskForCreation (rather than validating in the handler before
+// CreateTask runs) also means a duplicate external_id request short-circuits
+// to the existing task before this validation ever runs against it.
+//
+// Office eligibility mirrors ListAgentInstances' own filter
+// (agentInstanceFilter, workspace_id != ” AND deleted_at IS NULL, plus a
+// workspace_id match): a global/kanban-legacy profile (WorkspaceID == "") is
+// deliberately rejected here even though normalizeWorkflowAgentOverrideSource
+// above treats it as universally allowed — the New Task dialog never offers a
+// global profile as an assignee, so this path holds to the stricter rule.
+func (s *Service) ValidateAssigneeAgentProfile(ctx context.Context, workspaceID, assigneeAgentProfileID string) error {
+	assigneeID := strings.TrimSpace(assigneeAgentProfileID)
+	if assigneeID == "" {
+		return nil
+	}
+	if s.agentProfiles == nil {
+		return fmt.Errorf("%w: profile validation unavailable", ErrInvalidAssigneeAgentProfile)
+	}
+	profile, err := s.agentProfiles.GetAgentProfile(ctx, assigneeID)
+	if err != nil {
+		return fmt.Errorf("%w: %q: %v", ErrInvalidAssigneeAgentProfile, assigneeID, err)
+	}
+	if profile == nil || profile.DeletedAt != nil || !profile.Enabled {
+		return fmt.Errorf("%w: %q is unavailable", ErrInvalidAssigneeAgentProfile, assigneeID)
+	}
+	if profile.WorkspaceID == "" || profile.WorkspaceID != workspaceID {
+		return fmt.Errorf("%w: %q is not an office agent in this workspace", ErrInvalidAssigneeAgentProfile, assigneeID)
+	}
+	return nil
 }
 
 func (s *Service) resolveWorkflowAgentOverrideWorkspaceExecutor(

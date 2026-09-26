@@ -75,6 +75,40 @@ Approval's separate reviewer/approver wake path.
   never silently swallowed: an eligible-vs-ineligible outcome is logged at Info, and a failed lookup
   is logged at Warn.
 
+### REQ-OFFICE-SCHEDULER-003: Create-time assignee validation and runner seat
+
+**Intent:** REQ-OFFICE-SCHEDULER-002 gates the wake on the step the task lands on; this requirement
+gates what the wake is for. A task-create request may name an `assignee_agent_profile_id` to seat as
+the task's runner. That name is caller-supplied and must be checked before any task row exists —
+otherwise the system either seats a runner that cannot legitimately hold the seat (a disabled
+profile, a profile scoped to a different workspace, or a global/kanban-legacy profile with no
+workspace at all) or accepts the request and silently drops the assignment, leaving the caller with
+a task that reports success but has no runner and therefore never gets the REQ-OFFICE-SCHEDULER-002
+wake. A profile is a valid create-time assignee only if it names an enabled Office agent instance
+scoped to the same workspace as the task being created; this mirrors the eligibility filter
+`ListAgentInstances` already applies when listing assignable profiles for a workspace; a
+non-workspace-scoped ("global") profile is Office-eligible for the listing but is not this
+requirement's create-time contract, because the surfaces that supply this field never offer a global
+profile as a choice.
+
+#### Acceptance criteria
+
+- **AC-OFFICE-SCHEDULER-003.1:** A create-task request naming an `assignee_agent_profile_id` that
+  resolves to an enabled Office agent instance scoped to the request's own workspace succeeds, and
+  the created task's runner seat (`workflow_step_participants`, `role='runner'`) names that profile
+  before the `task.created` event is published.
+- **AC-OFFICE-SCHEDULER-003.2:** A create-task request naming an `assignee_agent_profile_id` that
+  does not resolve to any profile, resolves to a disabled profile, resolves to a profile scoped to a
+  different workspace, or resolves to a profile with no workspace (`WorkspaceID == ""`) is rejected
+  with a client error before any task row is written. No partial task, no runner seat, and no wake
+  are produced.
+- **AC-OFFICE-SCHEDULER-003.3:** A duplicate create request sharing an already-used `external_id`
+  returns the previously created task (the existing idempotent-create contract) without re-running
+  this validation against the duplicate request's own `assignee_agent_profile_id` and without
+  writing a second runner seat or a second wake.
+- **AC-OFFICE-SCHEDULER-003.4:** A create-task request that omits `assignee_agent_profile_id` is
+  unaffected: the task is created with no runner seat, exactly as before this requirement.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/scheduler-01.md), [part 2](../system-design/scheduler-02.md).
