@@ -3,9 +3,11 @@
 package probe
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -119,6 +121,46 @@ func TestLinuxHasSessionID_PrefixOrCaseMismatch(t *testing.T) {
 			}
 			if matched {
 				t.Errorf("expected stored value %q to not match requested value %q", tt.stored, tt.requested)
+			}
+		})
+	}
+}
+
+func TestIsLinuxProcessGone(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "missing proc entry",
+			err:  &os.PathError{Op: "read", Path: "/proc/123/stat", Err: syscall.ENOENT},
+			want: true,
+		},
+		{
+			name: "process exited during read",
+			err:  &os.PathError{Op: "read", Path: "/proc/123/stat", Err: syscall.ESRCH},
+			want: true,
+		},
+		{
+			name: "permission failure",
+			err:  &os.PathError{Op: "read", Path: "/proc/123/stat", Err: syscall.EACCES},
+			want: false,
+		},
+		{
+			name: "unrelated failure",
+			err:  errors.New("read failed"),
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isLinuxProcessGone(tt.err); got != tt.want {
+				t.Fatalf("isLinuxProcessGone() = %v, want %v", got, tt.want)
 			}
 		})
 	}

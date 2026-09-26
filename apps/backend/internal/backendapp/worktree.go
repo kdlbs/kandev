@@ -109,6 +109,10 @@ type environmentDestroyerAdapter struct {
 	worktrees *worktree.Manager
 }
 
+func (a *environmentDestroyerAdapter) DestroyKubernetesEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+	return a.lifecycle.DestroyKubernetesEnvironment(ctx, env)
+}
+
 func (a *environmentDestroyerAdapter) DestroyContainer(ctx context.Context, containerID string) error {
 	return a.lifecycle.DestroyContainer(ctx, containerID)
 }

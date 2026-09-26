@@ -3,6 +3,19 @@ import { waitForSessionDone, seedIdleSession } from "../../helpers/session";
 import { waitForActiveSessionCancellationPending } from "../../helpers/session-store";
 
 test.describe("Cancel progress across task switches", () => {
+  let releaseBackendEnv: (() => Promise<void>) | undefined;
+
+  test.beforeEach(async ({ backend }) => {
+    releaseBackendEnv = await backend.useEnv({
+      KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT: "12s",
+    });
+  });
+
+  test.afterEach(async () => {
+    await releaseBackendEnv?.();
+    releaseBackendEnv = undefined;
+  });
+
   test("keeps backend-owned cancel progress across task switches", async ({
     testPage,
     apiClient,
@@ -30,9 +43,8 @@ test.describe("Cancel progress across task switches", () => {
     );
 
     const session = await seedIdleSession(testPage, apiClient, seedData, "Cancel progress A");
-    // Reload hydration is covered independently by mobile-cancel-progress-reload.spec.ts.
-    // Keep this regression focused on the two component remounts caused by task navigation.
-    await session.sendMessage("/slow 30s");
+    // /e2e:cancel-hold keeps an acknowledged backend cancellation pending through task switching.
+    await session.sendMessage("/e2e:cancel-hold");
 
     const activeCancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(activeCancel).toBeVisible({ timeout: 15_000 });

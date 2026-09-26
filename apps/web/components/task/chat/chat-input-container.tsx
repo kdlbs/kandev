@@ -7,7 +7,7 @@ import type { ReviewComment } from "@/lib/state/slices/comments";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
-import type { TaskPlanCommentRef } from "@/lib/types/http";
+import type { TaskPlanCommentRef, TaskPreviewFeedbackRef } from "@/lib/types/http";
 import { useChatInputContainer } from "./use-chat-input-container";
 import { SessionStoppedBanner } from "./session-stopped-banner";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
@@ -56,12 +56,15 @@ export type ChatSubmitResult = void | boolean | Promise<void | boolean>;
 
 export type ChatSubmitPayload = {
   message: string;
+  /** Reused by recovery-aware adapters when an admission survives remounting. */
+  clientMessageId?: string;
   reviewComments?: ReviewComment[];
   attachments?: MessageAttachment[];
   inlineMentions?: ContextFile[];
   inlineTaskMentions?: TaskMentionData[];
   entityReferences?: EntityReference[];
   planCommentRefs?: TaskPlanCommentRef[];
+  previewFeedbackRefs?: TaskPreviewFeedbackRef[];
 };
 
 type ChatInputContainerProps = {

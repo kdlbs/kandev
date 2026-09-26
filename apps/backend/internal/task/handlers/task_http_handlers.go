@@ -467,6 +467,21 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 	c.JSON(http.StatusOK, dtos[0])
 }
 
+// httpGetArchiveSourceManifest exposes only durable archive-time evidence.
+// Service authorization binds each decoded cleanup snapshot to its workspace.
+func (h *TaskHandlers) httpGetArchiveSourceManifest(c *gin.Context) {
+	manifest, err := h.service.GetArchiveSourceManifest(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		if errors.Is(err, service.ErrTaskSourceManifestNotFound) {
+			handleNotFound(c, h.logger, taskrepo.ErrTaskNotFound, "archive source manifest not found")
+			return
+		}
+		handleNotFound(c, h.logger, err, "archive source manifest not found")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"worktrees": manifest})
+}
+
 func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 	ctx := c.Request.Context()
 	sessions, err := h.service.ListTaskSessions(ctx, c.Param("id"))
@@ -755,28 +770,29 @@ type httpTaskRepositoryInput struct {
 }
 
 type httpCreateTaskRequest struct {
-	WorkspaceID       string                    `json:"workspace_id"`
-	WorkflowID        string                    `json:"workflow_id"`
-	WorkflowStepID    string                    `json:"workflow_step_id"`
-	Title             string                    `json:"title"`
-	Description       string                    `json:"description,omitempty"`
-	AutoTitle         bool                      `json:"auto_title,omitempty"`
-	Autopilot         bool                      `json:"autopilot,omitempty"`
-	Priority          string                    `json:"priority,omitempty"`
-	State             *v1.TaskState             `json:"state,omitempty"`
-	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position          int                       `json:"position,omitempty"`
-	Metadata          map[string]interface{}    `json:"metadata,omitempty"`
-	StartAgent        bool                      `json:"start_agent,omitempty"`
-	PrepareSession    bool                      `json:"prepare_session,omitempty"`
-	AgentProfileID    string                    `json:"agent_profile_id,omitempty"`
-	ExecutorID        string                    `json:"executor_id,omitempty"`
-	ExecutorProfileID string                    `json:"executor_profile_id,omitempty"`
-	PlanMode          bool                      `json:"plan_mode,omitempty"`
-	Attachments       []v1.MessageAttachment    `json:"attachments,omitempty"`
-	ParentID          string                    `json:"parent_id,omitempty"`
-	WorkspacePath     string                    `json:"workspace_path,omitempty"`
-	BlockedBy         []string                  `json:"blocked_by,omitempty"`
+	WorkspaceID            string                    `json:"workspace_id"`
+	WorkflowID             string                    `json:"workflow_id"`
+	WorkflowStepID         string                    `json:"workflow_step_id"`
+	WorkflowAgentOverrides map[string]string         `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                    `json:"title"`
+	Description            string                    `json:"description,omitempty"`
+	AutoTitle              bool                      `json:"auto_title,omitempty"`
+	Autopilot              bool                      `json:"autopilot,omitempty"`
+	Priority               string                    `json:"priority,omitempty"`
+	State                  *v1.TaskState             `json:"state,omitempty"`
+	Repositories           []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	Position               int                       `json:"position,omitempty"`
+	Metadata               map[string]interface{}    `json:"metadata,omitempty"`
+	StartAgent             bool                      `json:"start_agent,omitempty"`
+	PrepareSession         bool                      `json:"prepare_session,omitempty"`
+	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
+	ExecutorID             string                    `json:"executor_id,omitempty"`
+	ExecutorProfileID      string                    `json:"executor_profile_id,omitempty"`
+	PlanMode               bool                      `json:"plan_mode,omitempty"`
+	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
+	ParentID               string                    `json:"parent_id,omitempty"`
+	WorkspacePath          string                    `json:"workspace_path,omitempty"`
+	BlockedBy              []string                  `json:"blocked_by,omitempty"`
 	// StartWhenUnblocked records the agent start as an intent consumed by
 	// dependency resolution. nil derives it from StartAgent when BlockedBy is set.
 	StartWhenUnblocked *bool  `json:"start_when_unblocked,omitempty"`
@@ -969,6 +985,9 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		WorkspaceID:                 body.WorkspaceID,
 		WorkflowID:                  body.WorkflowID,
 		WorkflowStepID:              body.WorkflowStepID,
+		WorkflowAgentOverrides:      body.WorkflowAgentOverrides,
+		ExecutorID:                  body.ExecutorID,
+		ExecutorProfileID:           body.ExecutorProfileID,
 		Title:                       title,
 		Description:                 description,
 		AutoTitle:                   body.AutoTitle,
@@ -1420,7 +1439,12 @@ func (h *TaskHandlers) associatePRFromRepoInputs(taskID, sessionID string, repos
 // succeeded. A nil *startAgentDispatch means there is nothing to dispatch —
 // prepare-only, start_agent not requested, or prepare itself failed.
 type startAgentDispatch struct {
-	sessionID string
+	sessionID           string
+	initialCreatePrompt bool
+}
+
+func eligibleInitialCreatePrompt(body httpCreateTaskRequest) bool {
+	return body.StartAgent && body.WorkflowStepID != "" && strings.TrimSpace(body.Description) != ""
 }
 
 // prepareTaskSession runs the create sequence's synchronous session-setup
@@ -1525,7 +1549,14 @@ func (h *TaskHandlers) prepareStartAgentSession(
 	} else {
 		response.State = updatedTask.State
 	}
-	return &startAgentDispatch{sessionID: sessionID}
+	return &startAgentDispatch{
+		sessionID: sessionID,
+		// body.WorkflowStepID is the caller's original explicit selection.
+		// resolvedStepID may have been inferred or normalized before this
+		// helper runs, so it cannot establish the provenance required for the
+		// initial creation-prompt path.
+		initialCreatePrompt: eligibleInitialCreatePrompt(body),
+	}
 }
 
 // dispatchTaskSession launches the agent asynchronously (create-sequence
@@ -1547,14 +1578,15 @@ func (h *TaskHandlers) dispatchTaskSession(
 		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 		launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
-			TaskID:            taskID,
-			Intent:            orchestrator.IntentStartCreated,
-			SessionID:         sessionID,
-			AgentProfileID:    body.AgentProfileID,
-			Prompt:            description,
-			SkipMessageRecord: false,
-			PlanMode:          body.PlanMode,
-			Attachments:       body.Attachments,
+			TaskID:              taskID,
+			Intent:              orchestrator.IntentStartCreated,
+			SessionID:           sessionID,
+			AgentProfileID:      body.AgentProfileID,
+			Prompt:              description,
+			SkipMessageRecord:   false,
+			PlanMode:            body.PlanMode,
+			Attachments:         body.Attachments,
+			InitialCreatePrompt: dispatch.initialCreatePrompt,
 		})
 		if err != nil {
 			h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", taskID), zap.String("session_id", sessionID))
@@ -1747,10 +1779,11 @@ func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
 }
 
 type httpMoveTaskRequest struct {
-	WorkflowID     string                     `json:"workflow_id"`
-	WorkflowStepID string                     `json:"workflow_step_id"`
-	Position       int                        `json:"position"`
-	EntryOptions   *workflowmove.EntryOptions `json:"entry_options,omitempty"`
+	WorkflowID     string                        `json:"workflow_id"`
+	WorkflowStepID string                        `json:"workflow_step_id"`
+	Position       int                           `json:"position"`
+	EntryOptions   *workflowmove.EntryOptions    `json:"entry_options,omitempty"`
+	WorkflowChange *models.WorkflowChangeRequest `json:"workflow_change,omitempty"`
 }
 
 // httpReorderStepTasksRequest is the frozen reorder request contract
@@ -1830,6 +1863,7 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 			AllowActivePrimarySession: true,
 			StepHistoryActor:          wfmodels.StepTransitionActorHuman,
 			EntryOptions:              body.EntryOptions,
+			WorkflowChange:            body.WorkflowChange,
 		},
 	)
 	if err != nil {
@@ -1838,9 +1872,10 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 	}
 
 	response := dto.MoveTaskResponse{
-		Task:         dto.FromTask(result.Task),
-		MoveID:       result.MoveID,
-		EntryOptions: result.EntryOptions,
+		Task:                  dto.FromTask(result.Task),
+		WorkflowEntryIdentity: result.WorkflowEntryIdentity,
+		MoveID:                result.MoveID,
+		EntryOptions:          result.EntryOptions,
 	}
 	if result.WorkflowStep != nil {
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)

@@ -394,6 +394,10 @@ func (s *Service) teardownEnvironmentResourcesWithWorktrees(
 	if cause := context.Cause(ctx); cause != nil {
 		return cause
 	}
+	if err := s.teardownKubernetesEnvironment(ctx, env); err != nil {
+		return err
+	}
+
 	worktreeIDs := environmentWorktreeIDs(env)
 	if !environmentHasResources(env, includeWorktrees, worktreeIDs) {
 		return nil

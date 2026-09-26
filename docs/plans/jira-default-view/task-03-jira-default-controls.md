@@ -1,0 +1,137 @@
+---
+id: 03-jira-default-controls
+title: Add picker controls and prove the flow
+status: done
+wave: 3
+depends_on:
+  - 02-restore-jira-default
+plan: plan.md
+requirements:
+  - REQ-INTEGRATIONS-JIRA-DEFAULT-VIEW-001
+acceptance_criteria:
+  - AC-INTEGRATIONS-JIRA-DEFAULT-VIEW-001.1
+  - AC-INTEGRATIONS-JIRA-DEFAULT-VIEW-001.2
+  - AC-INTEGRATIONS-JIRA-DEFAULT-VIEW-001.4
+  - AC-INTEGRATIONS-JIRA-DEFAULT-VIEW-001.5
+  - AC-INTEGRATIONS-JIRA-DEFAULT-VIEW-001.6
+  - AC-INTEGRATIONS-JIRA-DEFAULT-VIEW-001.7
+system_design:
+  - ../../specs/integrations/system-design/jira-default-view.md
+---
+
+# Task 03: Add picker controls and prove the flow
+
+## Summary
+
+Add a default marker and accessible set/clear action to every Jira view row, then verify the behavior in desktop and phone browsers. Update the public Jira guide.
+
+## Scope and likely files
+
+- `apps/web/components/jira/my-jira/list-toolbar.tsx` and `list-toolbar.test.tsx`
+- `apps/web/app/jira/jira-page-client.tsx` for action props and user-visible failure feedback
+- `apps/web/src/locales/{en,pt-pt,zh-cn,zh-hk,zh-tw,ja,pseudo}/jira.json`; use `pnpm run i18n:zh-hant` for the Traditional Chinese pair
+- `apps/web/e2e/tests/integrations/jira-default-view.spec.ts`
+- `apps/web/e2e/tests/integrations/mobile-jira-default-view.spec.ts`
+- `docs/public/integrations.md`
+
+## Exclusions
+
+- No new phone navigation surface and no other provider's picker changes.
+
+## Implementation acceptance
+
+1. Both built-in and custom rows show their default state; set/clear actions leave the current view and delete action untouched, including while a write is pending or fails.
+2. Desktop and phone browser flows prove a custom JQL default on revisit and fallback after deletion; phone actions have at least 44px touch targets and no document horizontal overflow.
+3. All new copy is localized in the required catalogs, and the public Jira guide explains how to choose or clear a default.
+
+## ASCII UI preview
+
+`UI-01`, excerpt from the [combined plan preview](plan.md#ascii-ui-preview). The star is a sibling action, not part of the select button.
+
+```text
+Desktop: [check] Assigned to me       [Set default]
+                 My open tickets [star: default] [Delete]
+
+Phone:   [check] Assigned to me   [star, 44px]
+                 My open tickets  [star, 44px] [Delete, 44px]
+```
+
+The picker remains the entry point and its list owns scrolling. The marker is visible; its localized accessible name distinguishes set from clear. This covers `AC-INTEGRATIONS-JIRA-DEFAULT-VIEW-001.6`.
+
+## TDD and verification
+
+Add a toolbar regression for action isolation and accessibility and browser scenarios for desktop and phone. Confirm expected red failures, implement, then run:
+
+```bash
+cd apps/web && pnpm exec vitest run components/jira/my-jira/list-toolbar.test.tsx
+cd apps/web && pnpm run i18n:check
+make build-web
+cd apps/web && pnpm e2e:run tests/integrations/jira-default-view.spec.ts
+cd apps/web && pnpm e2e:run --project mobile-chrome tests/integrations/mobile-jira-default-view.spec.ts
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+```
+
+Run `make build-web` and both documentation commands from the repository root. Record exact red and green results here.
+
+## Dependencies and risks
+
+Depends on Task 02's mutation and selection API. The current picker is narrow; verify actual touch hit boxes and viewport containment in the phone scenario. A pending default update must not allow a conflicting delete or star action.
+
+## Result
+
+The Jira saved-view picker now marks the active default and provides a sibling set/clear action for built-in and custom views. The action has a localized accessible name without a duplicate toggle-state announcement, does not select or delete its row, and stays at least 48px square on phones. The active default star remains visible on fine-pointer desktop. The picker owns vertical scrolling. Default writes publish only after persistence succeeds; pending writes disable save, star, and delete controls. Save and delete failures show localized retryable feedback. Jira project discovery no longer blocks the page while the initial view resolves, and status reconciliation prunes saved statuses only after authoritative metadata arrives for the current workspace and project set.
+
+The public Jira guide now explains how to set or clear the default. The required Jira copy is present in English, Portuguese, Simplified Chinese, both generated Traditional Chinese catalogs, Japanese, and the pseudo-locale.
+
+Red: the toolbar tests failed because the default buttons were absent. The desktop browser scenario timed out waiting for the missing set-default action. A new first-render status-readiness regression test failed because an effect observed the previous key set as loaded.
+
+Green:
+
+```text
+pnpm exec vitest run components/jira/my-jira/use-project-statuses.test.ts components/jira/my-jira/jira-default-view.test.ts components/jira/my-jira/use-saved-views.test.ts app/jira/jira-page-client.test.tsx components/jira/my-jira/use-jira-search.test.ts components/jira/my-jira/list-toolbar.test.tsx
+6 files passed, 33 tests passed
+pnpm run typecheck
+PASS
+pnpm run i18n:check
+PASS
+pnpm e2e:run tests/integrations/jira-default-view.spec.ts
+1 passed
+pnpm e2e:run --project mobile-chrome tests/integrations/mobile-jira-default-view.spec.ts
+1 passed
+make build-web
+PASS
+go test ./internal/user/dto ./internal/user/service ./internal/user/store ./internal/settingscatalog ./internal/user/controller
+PASS
+node --test scripts/validate-public-docs.test.mjs
+62 passed
+node scripts/validate-public-docs.mjs
+47 pages validated
+git diff --check
+PASS
+```
+
+The broad `pnpm run i18n:zh-hant` command was blocked by two pre-existing Simplified Chinese-looking workflow catalog entries. The Jira Traditional Chinese pair was generated successfully with `node scripts/convert-zh-cn-to-zh-hant.mjs --locale all --namespace jira --write`; the full i18n check passes.
+
+## Review follow-up
+
+Follow-up review fixes preserve saved structured statuses and custom JQL when project-status metadata is unavailable. They serialize saved-view list mutations, publish a new view only after its settings write succeeds, and keep the active default star visible on fine-pointer desktop. A newer selection or filter edit also wins over a pending save or deletion response. Save is disabled during settings mutations; rejected saves leave no local view to mark default and show localized failure feedback. The desktop and mobile browser specs use the causal HTTP wait helper for settings writes.
+
+The focused regressions cover failed status lookups for saved queries, a deferred save or deletion followed by a newer selection, rejected saves followed by an attempt to set the missing ID as default, both pending-mutation states, active desktop-star visibility, and initial-search loading.
+
+```text
+pnpm exec vitest run components/jira/my-jira/use-project-statuses.test.ts components/jira/my-jira/use-saved-views.test.ts components/jira/my-jira/jira-default-view.test.ts components/jira/my-jira/use-jira-search.test.ts components/jira/my-jira/list-toolbar.test.tsx app/jira/jira-page-client.test.tsx
+6 files passed, 47 tests passed
+pnpm run typecheck
+PASS
+pnpm exec eslint app/jira/jira-page-client.tsx app/jira/jira-page-client.test.tsx components/jira/my-jira/jira-default-view.ts components/jira/my-jira/jira-default-view.test.ts components/jira/my-jira/jira-default-view-action.tsx components/jira/my-jira/list-toolbar.test.tsx components/jira/my-jira/use-jira-filter-state.ts components/jira/my-jira/use-project-statuses.ts components/jira/my-jira/use-project-statuses.test.ts components/jira/my-jira/use-saved-views.ts e2e/tests/integrations/jira-default-view.spec.ts e2e/tests/integrations/mobile-jira-default-view.spec.ts
+PASS
+pnpm run i18n:check
+PASS
+pnpm run e2e:sleep-ratchet
+PASS
+pnpm e2e:run tests/integrations/jira-default-view.spec.ts
+1 passed
+pnpm e2e:run --project mobile-chrome tests/integrations/mobile-jira-default-view.spec.ts
+1 passed
+```

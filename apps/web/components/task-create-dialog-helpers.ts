@@ -213,31 +213,81 @@ export type BuildCreatePayloadArgs = {
   /** Task IDs this task must wait for. */
   blockedBy?: string[];
   priority?: TaskPriority;
+  /** Task-only replacements for fixed workflow step agent profiles. */
+  workflowAgentOverrides?: Record<string, string>;
 };
+
+function optionalString(value?: string): string | undefined {
+  return value || undefined;
+}
+
+function nonEmptyArray<T>(value?: T[]): T[] | undefined {
+  return value && value.length > 0 ? value : undefined;
+}
+
+function nonEmptyRecord<T extends Record<string, string>>(value?: T): T | undefined {
+  return value && Object.keys(value).length > 0 ? value : undefined;
+}
+
+type CreateTaskTitleFields =
+  | { title: string; auto_title?: false }
+  | { title?: never; auto_title: true };
+
+function buildCreateTaskTitle(args: BuildCreatePayloadArgs): CreateTaskTitleFields {
+  if (args.autoTitle) return { auto_title: true };
+  return { title: args.trimmedTitle };
+}
+
+type CreateTaskStateFields = {
+  state: "IN_PROGRESS" | "CREATED";
+  start_agent?: boolean;
+  prepare_session?: boolean;
+};
+
+function buildCreateTaskState(withAgent: boolean): CreateTaskStateFields {
+  if (withAgent) return { state: "IN_PROGRESS", start_agent: true };
+  return { state: "CREATED", prepare_session: true };
+}
+
+type OptionalCreateTaskFields = {
+  agent_profile_id?: string;
+  executor_id?: string;
+  executor_profile_id?: string;
+  plan_mode?: boolean;
+  attachments?: MessageAttachment[];
+  parent_id?: string;
+  workspace_path?: string;
+  autopilot?: boolean;
+};
+
+function buildOptionalCreateTaskFields(args: BuildCreatePayloadArgs): OptionalCreateTaskFields {
+  return {
+    agent_profile_id: optionalString(args.agentProfileId),
+    executor_id: optionalString(args.executorId),
+    executor_profile_id: optionalString(args.executorProfileId),
+    plan_mode: args.planMode || undefined,
+    attachments: args.attachments,
+    parent_id: optionalString(args.parentId),
+    workspace_path: optionalString(args.workspacePath),
+    autopilot: args.autopilot || undefined,
+  };
+}
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
   return {
     workspace_id: args.workspaceId,
     workflow_id: args.effectiveWorkflowId,
-    ...(args.autoTitle ? { auto_title: true } : { title: args.trimmedTitle }),
+    ...buildCreateTaskTitle(args),
     description: args.trimmedDescription,
     repositories: args.repositoriesPayload,
-    state: args.withAgent ? "IN_PROGRESS" : "CREATED",
-    start_agent: args.withAgent ? true : undefined,
-    prepare_session: args.withAgent ? undefined : true,
-    agent_profile_id: args.agentProfileId || undefined,
-    executor_id: args.executorId || undefined,
-    executor_profile_id: args.executorProfileId || undefined,
-    plan_mode: args.planMode || undefined,
-    attachments: args.attachments,
-    parent_id: args.parentId || undefined,
-    workspace_path: args.workspacePath || undefined,
-    autopilot: args.autopilot || undefined,
+    ...buildCreateTaskState(args.withAgent),
+    ...buildOptionalCreateTaskFields(args),
     priority: args.priority ?? "medium",
+    workflow_agent_overrides: nonEmptyRecord(args.workflowAgentOverrides),
     // Dependencies declared at creation time. With edges present the backend
     // records the requested agent start as a start-when-unblocked intent rather
     // than launching now, so a chain runs in order instead of all at once.
-    blocked_by: args.blockedBy && args.blockedBy.length > 0 ? args.blockedBy : undefined,
+    blocked_by: nonEmptyArray(args.blockedBy),
   };
 }
 

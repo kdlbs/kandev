@@ -138,7 +138,9 @@ test.describe("Mobile workspace repository sets", () => {
     await expect(dropdown).toBeVisible();
     await expect(dropdown.getByPlaceholder("Search branches...")).toBeVisible();
     await expect(dropdown.getByText("origin/main")).toBeVisible();
-    await expect(dropdown.getByText("origin", { exact: true })).toBeVisible();
+    const remoteMainOption = dropdown.getByRole("option", { name: /^origin\/main origin/ });
+    await expect(remoteMainOption).toBeVisible();
+    await expect(remoteMainOption.getByText("origin", { exact: true })).toBeVisible();
 
     const search = dropdown.getByPlaceholder("Search branches...");
     await search.fill("origin");

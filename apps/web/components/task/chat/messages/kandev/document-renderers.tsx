@@ -12,7 +12,11 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
-import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
+import {
+  markdownComponents,
+  rehypePlugins,
+  remarkPlugins,
+} from "@/components/shared/markdown-components";
 import { EmptyListNote, IdChip, KandevBody, KandevRow, KeyValueRow, SummaryDot } from "./shared";
 import { pickArray, pickNumber, pickString } from "./parse";
 import type { KandevRenderer } from "./types";
@@ -26,7 +30,11 @@ function MarkdownBody({ content }: { content: string | undefined }) {
   if (!content) return null;
   return (
     <div className="prose prose-sm dark:prose-invert max-w-none break-words">
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={markdownComponents}
+      >
         {content}
       </ReactMarkdown>
     </div>

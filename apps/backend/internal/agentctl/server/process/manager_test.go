@@ -488,6 +488,7 @@ func TestBuildAdapterConfigForwardsNotificationQueueCapacity(t *testing.T) {
 			AgentEnv:                  []string{"PATH=/usr/bin"},
 			Protocol:                  agent.ProtocolACP,
 			NotificationQueueCapacity: 4096,
+			PromptCancelJoinTimeout:   12 * time.Second,
 		},
 		logger: newTestLogger(t),
 	}
@@ -499,6 +500,9 @@ func TestBuildAdapterConfigForwardsNotificationQueueCapacity(t *testing.T) {
 
 	if got := m.adapterCfg.NotificationQueueCapacity; got != 4096 {
 		t.Fatalf("adapter notification queue capacity = %d, want 4096", got)
+	}
+	if got := m.adapterCfg.PromptCancelJoinTimeout; got != 12*time.Second {
+		t.Fatalf("adapter prompt cancel join timeout = %s, want 12s", got)
 	}
 }
 

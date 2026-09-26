@@ -54,16 +54,14 @@ import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
 import { useTranslation } from "react-i18next";
 
 import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-window";
+import { LaunchWarning } from "./launch-warning";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
 import { statusSummaryTaskError } from "@/lib/task-status-summary";
-import {
-  hasWorkflowParkingMarker,
-  LaunchQueueStatus,
-  ParkedSessionNote,
-} from "./launch-queue-status";
+import { LaunchQueueStatus } from "./launch-queue-status";
 import { WipQueueStatus } from "./wip-queue-status";
+import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -444,6 +442,60 @@ export function usePendingMessageScroll({
     setIsLoading,
   });
   return { isLoading };
+}
+
+const SCROLL_TO_START_RETRY_DELAY_MS = 50;
+const MAX_SCROLL_TO_START_ATTEMPTS = 120;
+
+type PendingScrollToStartOptions = {
+  messageListRef: RefObject<MessageListHandle | null>;
+  firstMessageId: string | null;
+  hasMore: boolean;
+  pending: boolean;
+  requestKey: number;
+  onComplete: (didScroll: boolean) => void;
+};
+
+/** Keeps a scroll-to-start request alive until the final page's row is mounted. */
+export function usePendingScrollToStart({
+  messageListRef,
+  firstMessageId,
+  hasMore,
+  pending,
+  requestKey,
+  onComplete,
+}: PendingScrollToStartOptions) {
+  useEffect(() => {
+    if (!pending || hasMore) return;
+    if (!firstMessageId) {
+      onComplete(false);
+      return;
+    }
+
+    let cancelled = false;
+    let frameId: number | null = null;
+    let timeoutId: number | null = null;
+    let attempts = 0;
+    const attempt = () => {
+      if (cancelled) return;
+      attempts += 1;
+      const didScroll = Boolean(
+        messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" }),
+      );
+      if (didScroll || attempts >= MAX_SCROLL_TO_START_ATTEMPTS) {
+        onComplete(didScroll);
+        return;
+      }
+      timeoutId = window.setTimeout(attempt, SCROLL_TO_START_RETRY_DELAY_MS);
+    };
+
+    frameId = requestAnimationFrame(attempt);
+    return () => {
+      cancelled = true;
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [firstMessageId, hasMore, messageListRef, onComplete, pending, requestKey]);
 }
 
 /** Computes the render-item key the unread "New" divider should appear
@@ -1048,6 +1100,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarificationGroup,
   } = panelState;
   const taskLaunchError = statusSummaryTaskError(launchStatusSummary);
+  const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
   const launchErrorOwned = Boolean(taskLaunchError);
   const showAgentStartHint = useComposerAgentStartHint(
     resolvedSessionId,
@@ -1137,23 +1190,24 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   // which grows as pages prepend) has settled on the true first prompt by the
   // time the scroll fires.
   const [pendingScrollToStart, setPendingScrollToStart] = useState(false);
+  const [scrollToStartRequest, setScrollToStartRequest] = useState(0);
   useDrainOlderMessages(resolvedSessionId, pendingScrollToStart && hasMore);
-  useEffect(() => {
-    if (!pendingScrollToStart || hasMore) return;
+  const completeScrollToStart = useCallback((didScroll: boolean) => {
     setPendingScrollToStart(false);
-    if (firstMessageId) {
-      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
-    }
-  }, [pendingScrollToStart, hasMore, firstMessageId]);
+    if (didScroll) setIsFirstMessageHidden(false);
+  }, []);
+  usePendingScrollToStart({
+    messageListRef,
+    firstMessageId,
+    hasMore,
+    pending: pendingScrollToStart,
+    requestKey: scrollToStartRequest,
+    onComplete: completeScrollToStart,
+  });
   const scrollToStart = useCallback(() => {
-    if (hasMore) {
-      setPendingScrollToStart(true);
-      return;
-    }
-    if (firstMessageId) {
-      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
-    }
-  }, [hasMore, firstMessageId]);
+    setScrollToStartRequest((request) => request + 1);
+    setPendingScrollToStart(true);
+  }, []);
   // Search can target backend rows before the visible transcript boundary.
   const navigateSearchHit = useCallback(
     (id: string) => {
@@ -1195,55 +1249,67 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     >
       {!hideLaunchQueueStatus && <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />}
       {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
-      <ParkedSessionNote visible={hasWorkflowParkingMarker(session?.metadata)} />
-      <PanelBody padding={false} scroll={false} className="relative overflow-hidden">
-        <TaskMarkdownFileLinkProvider
-          taskId={taskId}
-          sessionId={resolvedSessionId}
-          worktreePath={getSessionWorkspacePath(session)}
-          onOpenFile={onOpenFile}
-        >
-          <MessageList
-            ref={messageListRef}
-            items={groupedItems}
-            messages={allMessages}
-            footerActionMessages={footerActionMessages}
-            permissionsByToolCallId={permissionsByToolCallId}
-            childrenByParentToolCallId={childrenByParentToolCallId}
-            taskId={taskId ?? undefined}
-            sessionId={resolvedSessionId}
-            messagesLoading={messagesLoading}
-            historyRefreshPending={historyRefreshPending}
-            historyStatus={historyStatus}
-            historyError={historyError}
-            onRetryHistory={retryHistory}
-            isWorking={isWorking}
-            sessionState={session?.state}
-            worktreePath={getSessionWorkspacePath(session)}
-            onOpenFile={onOpenFile}
-            dividerBeforeItemKey={dividerBeforeItemKey}
-            lastPromptMessageId={lastPromptMessageId}
-            onLastPromptEdgeChange={setLastPromptEdge}
-            firstMessageId={firstMessageId}
-            onFirstMessageHiddenChange={setIsFirstMessageHidden}
-            anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
-            isVisible={transcriptIsVisible}
-            launchErrorOwned={launchErrorOwned}
-            launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
-            launchErrorOccurredAt={launchErrorOwned ? taskLaunchError?.occurred_at : undefined}
-            stickyPromptBar={
-              showAnchoredBar && lastPromptMessage ? (
-                <AnchoredLastPromptBar
-                  promptText={lastPromptMessage.content}
-                  isVisible={anchoredBarVisible}
-                  onScrollUp={scrollToLastPrompt}
-                  showScrollToLastPrompt={showScrollToLastPrompt}
-                  onHeightChange={setAnchoredBarHeight}
-                />
-              ) : undefined
-            }
-          />
-        </TaskMarkdownFileLinkProvider>
+      <PanelBody
+        padding={false}
+        scroll={false}
+        className="relative flex min-h-0 flex-col overflow-hidden"
+      >
+        <div className="flex min-h-0 flex-1 flex-col">
+          {resolvedSessionId ? (
+            <div className="shrink-0 px-2">
+              <LaunchWarning sessionId={resolvedSessionId} />
+            </div>
+          ) : null}
+          <div className="min-h-0 flex-1">
+            <TaskMarkdownFileLinkProvider
+              taskId={taskId}
+              sessionId={resolvedSessionId}
+              worktreePath={getSessionWorkspacePath(session)}
+              onOpenFile={onOpenFile}
+            >
+              <MessageList
+                ref={messageListRef}
+                items={groupedItems}
+                messages={allMessages}
+                footerActionMessages={footerActionMessages}
+                permissionsByToolCallId={permissionsByToolCallId}
+                childrenByParentToolCallId={childrenByParentToolCallId}
+                taskId={taskId ?? undefined}
+                sessionId={resolvedSessionId}
+                messagesLoading={messagesLoading}
+                historyRefreshPending={historyRefreshPending}
+                historyStatus={historyStatus}
+                historyError={historyError}
+                onRetryHistory={retryHistory}
+                isWorking={isWorking}
+                sessionState={session?.state}
+                worktreePath={getSessionWorkspacePath(session)}
+                onOpenFile={onOpenFile}
+                dividerBeforeItemKey={dividerBeforeItemKey}
+                lastPromptMessageId={lastPromptMessageId}
+                onLastPromptEdgeChange={setLastPromptEdge}
+                firstMessageId={firstMessageId}
+                onFirstMessageHiddenChange={setIsFirstMessageHidden}
+                anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
+                isVisible={transcriptIsVisible}
+                launchErrorOwned={launchErrorOwned}
+                launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
+                launchErrorOccurredAt={launchErrorOwned ? taskLaunchError?.occurred_at : undefined}
+                stickyPromptBar={
+                  showAnchoredBar && lastPromptMessage ? (
+                    <AnchoredLastPromptBar
+                      promptText={lastPromptMessage.content}
+                      isVisible={anchoredBarVisible}
+                      onScrollUp={scrollToLastPrompt}
+                      showScrollToLastPrompt={showScrollToLastPrompt}
+                      onHeightChange={setAnchoredBarHeight}
+                    />
+                  ) : undefined
+                }
+              />
+            </TaskMarkdownFileLinkProvider>
+          </div>
+        </div>
         {isJumpLoading && (
           <div
             data-testid="transcript-jump-loading"
@@ -1263,6 +1329,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             messages={pendingClarificationGroup}
             agentDisconnected={session?.pending_action === null}
             onResolved={handleClarificationResolved}
+            onLateAnswer={lateAnswer.send}
+            lateAnswerState={lateAnswer.state}
             shortcutScopeRef={panelRef}
             maxHeightVh={50}
           />

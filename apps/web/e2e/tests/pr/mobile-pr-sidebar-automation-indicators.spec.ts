@@ -41,7 +41,9 @@ async function seedSidebarAutomation(
     state: "open",
     review_state: "approved",
     checks_state: "success",
-    mergeable_state: "clean",
+    // Keep auto-merge enabled for the indicator, but leave the PR blocked so
+    // the background CI automation cannot merge it before the picker opens.
+    mergeable_state: "blocked",
   });
   await apiClient.updateTaskCIAutomationOptions(targetTask.task_id, {
     repository_id: seedData.repositoryId,
@@ -78,7 +80,7 @@ test.describe("Mobile sidebar PR automation indicators", () => {
 
     await testPage.goto(`/t/${navigationTaskId}`);
     await new SessionPage(testPage).waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const targetRow = sheet.locator(`[data-task-row-id="${targetTaskId}"]`);

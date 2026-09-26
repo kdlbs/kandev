@@ -143,6 +143,36 @@ describe("useWorkflowMovePreview request lifecycle", () => {
     expect(result.current.status).toBe("success");
     expect(result.current.preview?.workflow_step_id).toBe(FIRST_STEP_ID);
   });
+
+  it("includes the task's draft workflow-agent mapping in the preview request", async () => {
+    previewWorkflowMoveMock.mockResolvedValueOnce(makePreview(FIRST_STEP_ID));
+    const workflowChange = {
+      expected_workflow_id: "source-workflow",
+      expected_step_id: "source-step",
+      expected_updated_at: "2026-09-14T00:00:00Z",
+      agent_overrides: { "profile-source": "profile-replacement" },
+    };
+    renderHook(() =>
+      useWorkflowMovePreview({
+        taskId: TASK_ID,
+        workflowId: WORKFLOW_ID,
+        workflowStepId: FIRST_STEP_ID,
+        workflowChange,
+        enabled: true,
+      }),
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+    });
+
+    expect(previewWorkflowMoveMock).toHaveBeenCalledWith(
+      TASK_ID,
+      expect.objectContaining({ workflow_change: workflowChange }),
+      expect.anything(),
+    );
+  });
 });
 
 describe("useWorkflowMovePreview invalidation", () => {

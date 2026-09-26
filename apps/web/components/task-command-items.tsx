@@ -77,7 +77,16 @@ export function buildSidebarTaskCommands(ctx: TaskCommandContext): CommandItem[]
     items.push(command("task-detach", t("task:detachFromParent"), IconUnlink, ctx.onDetach));
   if (available.move) {
     choices("task-move", t("task:moveTo"), IconArrowRight, ctx.steps);
-    choices("task-send-workflow", t("task:sendToWorkflow"), IconLogicBuffer, ctx.workflows);
+    if (ctx.workflows.length) {
+      items.push(
+        command(
+          "task-change-workflow",
+          t("task:changeWorkflow"),
+          IconLogicBuffer,
+          ctx.workflows[0]?.action,
+        ),
+      );
+    }
   }
   items.push(...ctx.plugins);
   items.push({
@@ -88,6 +97,9 @@ export function buildSidebarTaskCommands(ctx: TaskCommandContext): CommandItem[]
     ...item,
     priority: 0,
     disabled: item.disabled || ctx.disabled,
-    context: task.title,
+    // An item that names its own context keeps it (a plugin submenu child
+    // carries the trigger it came from); the task title is only the default
+    // second line for everything else.
+    context: item.context ?? task.title,
   }));
 }

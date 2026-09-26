@@ -3,10 +3,12 @@
 package probe
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -103,7 +105,7 @@ func linuxBootTime() (time.Time, error) {
 func readLinuxStatFields(pid int) (fields []string, ok bool, err error) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		if os.IsNotExist(err) {
+		if isLinuxProcessGone(err) {
 			return nil, false, nil
 		}
 		return nil, false, err
@@ -246,4 +248,11 @@ func parseFirstEnvVar(data []byte, name string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// isLinuxProcessGone reports whether err indicates pid no longer exists: the
+// ordinary os.IsNotExist race between listing and reading, plus ESRCH, which
+// the kernel can also return for a pid that exited between the two.
+func isLinuxProcessGone(err error) bool {
+	return os.IsNotExist(err) || errors.Is(err, syscall.ESRCH)
 }

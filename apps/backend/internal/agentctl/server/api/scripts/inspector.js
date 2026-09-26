@@ -2,130 +2,45 @@
   'use strict';
 
   var SOURCE = 'kandev-inspector';
-  var DRAG_THRESHOLD = 5;
-  var Z = 2147483640;
-
-  var active = false;
-  var mouseDownAt = null;
-  var dragRect = null;
-  var hoverEl = null;
-  var counter = 0;
-
-  var hoverOverlay = null;
-  var dragOverlay = null;
-  var popup = null;
-  var pendingAnnotation = null;
+  var PROTOCOL_VERSION = 2;
+  var Z_INDEX = 2147483640;
+  var MAX_OUTER_HTML = 65536;
+  var mode = null;
+  var candidate = null;
+  var candidateOverlay = null;
+  var candidateLabel = null;
+  var screenshotOverlay = null;
+  var screenshotStart = null;
+  var screenshotCurrent = null;
+  var projectedMarkers = [];
+  var originalCursor = document.documentElement.style.cursor;
+  var originalTouchAction = document.documentElement.style.touchAction;
 
   function send(type, payload) {
     try {
-      window.parent.postMessage({ source: SOURCE, type: type, payload: payload }, '*');
-    } catch (e) {}
+      window.parent.postMessage({
+        source: SOURCE,
+        version: PROTOCOL_VERSION,
+        type: type,
+        payload: payload,
+      }, '*');
+    } catch (error) {}
   }
 
-  function getSelector(el) {
-    var parts = [];
-    var cur = el;
-    while (cur && cur.nodeType === 1 && parts.length < 5) {
-      var tag = cur.tagName.toLowerCase();
-      var id = cur.getAttribute && cur.getAttribute('id');
-      if (id) { parts.unshift(tag + '#' + CSS.escape(id)); break; }
-      var cls = '';
-      if (cur.classList && cur.classList.length) {
-        cls = Array.from(cur.classList).slice(0, 2)
-          .map(function (c) { return '.' + CSS.escape(c); }).join('');
-      }
-      var part = tag + cls;
-      var parent = cur.parentElement;
-      if (parent) {
-        var sibs = Array.from(parent.children).filter(function (c) { return c.tagName === cur.tagName; });
-        if (sibs.length > 1) part += ':nth-of-type(' + (sibs.indexOf(cur) + 1) + ')';
-      }
-      parts.unshift(part);
-      cur = parent;
-    }
-    return parts.join(' > ');
+  function sanitizedSearch() {
+    var sensitiveQueryParameter = /(?:^|[_-])(access[_-]?token|id[_-]?token|token|secret|password|passwd|auth(?:orization)?|credential|cookie|session|capability|signature|sig|nonce|code|state|key)(?:$|[_-])/i;
+    var kept = [];
+    try {
+      var params = new URLSearchParams(location.search);
+      params.forEach(function (value, name) {
+        if (sensitiveQueryParameter.test(name)) return;
+        kept.push(encodeURIComponent(name) + '=' + encodeURIComponent(value));
+      });
+    } catch (error) {}
+    return kept.length ? '?' + kept.join('&') : '';
   }
 
-  function captureElement(el) {
-    if (!el || el.nodeType !== 1) return null;
-    var cls = '';
-    if (el.className && typeof el.className === 'string') {
-      cls = el.className.trim().split(/\s+/).slice(0, 3).join(' ') || '';
-    }
-    return {
-      tag: el.tagName.toLowerCase(),
-      id: el.id || undefined,
-      classes: cls || undefined,
-      role: el.getAttribute('role') || undefined,
-      ariaLabel: el.getAttribute('aria-label') || undefined,
-      text: ((el.textContent || '').replace(/\s+/g, ' ').trim()).slice(0, 120) || undefined,
-      selector: getSelector(el),
-    };
-  }
-
-  function elementsInRect(rect) {
-    var out = [];
-    var all = document.querySelectorAll('body *');
-    for (var i = 0; i < all.length && out.length < 5; i++) {
-      var el = all[i];
-      if (el === hoverOverlay || el === dragOverlay || el === popup) continue;
-      if (popup && popup.contains(el)) continue;
-      var r = el.getBoundingClientRect();
-      if (r.width < 4 || r.height < 4) continue;
-      if (r.left >= rect.x && r.top >= rect.y
-        && r.right <= rect.x + rect.w && r.bottom <= rect.y + rect.h) {
-        out.push(captureElement(el));
-      }
-    }
-    return out;
-  }
-
-  function makeOverlay(borderColor, bg) {
-    var d = document.createElement('div');
-    d.style.cssText = 'position:fixed;pointer-events:none;box-sizing:border-box;display:none;z-index:' + Z + ';'
-      + 'border:2px solid ' + borderColor + ';background:' + bg + ';';
-    document.body.appendChild(d);
-    return d;
-  }
-
-  function ensureOverlays() {
-    if (!hoverOverlay) hoverOverlay = makeOverlay('#6366f1', 'rgba(99,102,241,0.10)');
-    if (!dragOverlay) dragOverlay = makeOverlay('#f59e0b', 'rgba(245,158,11,0.15)');
-  }
-
-  function positionOverlay(o, x, y, w, h) {
-    o.style.display = 'block';
-    o.style.left = x + 'px';
-    o.style.top = y + 'px';
-    o.style.width = w + 'px';
-    o.style.height = h + 'px';
-  }
-
-  function hideOverlay(o) { if (o) o.style.display = 'none'; }
-
-  function placeMarker(num, x, y) {
-    var m = document.createElement('div');
-    m.setAttribute('data-kandev-marker', String(num));
-    m.style.cssText = 'position:fixed;left:' + (x - 12) + 'px;top:' + (y - 12) + 'px;width:24px;height:24px;'
-      + 'border-radius:50%;background:#6366f1;color:#fff;font:600 12px/24px system-ui,sans-serif;'
-      + 'text-align:center;z-index:' + Z + ';pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,0.3);';
-    m.textContent = String(num);
-    document.body.appendChild(m);
-  }
-
-  function clearMarkers() {
-    var nodes = document.querySelectorAll('[data-kandev-marker]');
-    for (var i = 0; i < nodes.length; i++) nodes[i].parentNode.removeChild(nodes[i]);
-    counter = 0;
-  }
-
-  function closePopup() {
-    if (popup && popup.parentNode) popup.parentNode.removeChild(popup);
-    popup = null;
-    pendingAnnotation = null;
-  }
-
-  function currentPagePath() {
+  function currentPageRoute() {
     var path = location.pathname;
     var prefix = window.__kandevProxyPrefix;
     if (typeof prefix === 'string' && prefix) {
@@ -133,179 +48,538 @@
         path = path.slice(prefix.length) || '/';
       }
     }
-    return path + location.search;
+    return path + sanitizedSearch();
   }
 
-  function openCommentPopup(anchorX, anchorY, onSubmit) {
-    var keep = pendingAnnotation;
-    closePopup();
-    pendingAnnotation = keep;
-    popup = document.createElement('div');
-    popup.style.cssText = 'position:fixed;left:' + anchorX + 'px;top:' + anchorY + 'px;z-index:' + (Z + 1) + ';'
-      + 'background:#fff;border:1px solid #e5e7eb;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.15);'
-      + 'padding:8px;width:280px;font-family:system-ui,sans-serif;';
-    var ta = document.createElement('textarea');
-    ta.placeholder = 'Describe the change (Enter to save, Esc to cancel)';
-    ta.style.cssText = 'width:100%;min-height:60px;border:1px solid #e5e7eb;border-radius:4px;padding:6px;'
-      + 'font:13px system-ui,sans-serif;resize:vertical;outline:none;box-sizing:border-box;';
-    var row = document.createElement('div');
-    row.style.cssText = 'display:flex;gap:6px;justify-content:flex-end;margin-top:6px;';
-    var cancel = document.createElement('button');
-    cancel.textContent = 'Cancel';
-    cancel.style.cssText = 'padding:4px 10px;border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font:12px system-ui,sans-serif;';
-    var save = document.createElement('button');
-    save.textContent = 'Save';
-    save.style.cssText = 'padding:4px 10px;border:0;background:#6366f1;color:#fff;border-radius:4px;cursor:pointer;font:12px system-ui,sans-serif;';
-
-    cancel.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); closePopup(); });
-    save.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); onSubmit(ta.value.trim()); });
-    ta.addEventListener('keydown', function (e) {
-      e.stopPropagation();
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSubmit(ta.value.trim()); }
-      if (e.key === 'Escape') { e.preventDefault(); closePopup(); }
-    });
-
-    popup.appendChild(ta);
-    row.appendChild(cancel); row.appendChild(save);
-    popup.appendChild(row);
-    document.body.appendChild(popup);
-    ta.focus();
-  }
-
-  function commitAnnotation(comment) {
-    if (!pendingAnnotation) return;
-    counter += 1;
-    var a = pendingAnnotation;
-    a.id = 'a-' + Date.now() + '-' + counter;
-    a.comment = comment || '';
-    placeMarker(counter, a.markerX, a.markerY);
-    // Note: we do NOT set `a.number` here. The React parent assigns numbers
-    // so they remain monotonic across iframe refreshes.
-    send('annotation-added', a);
-    pendingAnnotation = null;
-    closePopup();
-  }
-
-  function startPending(kind, rect, element, elements, markerX, markerY) {
-    pendingAnnotation = {
-      kind: kind,
-      rect: rect,
-      element: element || null,
-      elements: elements || null,
-      markerX: markerX,
-      markerY: markerY,
-      pagePath: currentPagePath(),
+  function pageIdentity() {
+    return {
+      page_route: currentPageRoute(),
+      page_title: String(document.title || '').slice(0, 1024),
     };
-    var popupX = Math.min(markerX + 14, window.innerWidth - 296);
-    var popupY = Math.min(markerY + 14, window.innerHeight - 140);
-    openCommentPopup(popupX, popupY, commitAnnotation);
   }
 
-  function onMouseDown(e) {
-    if (popup && popup.contains(e.target)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    mouseDownAt = { x: e.clientX, y: e.clientY };
-    dragRect = null;
+  function escapeSelector(value) {
+    if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(value);
+    return String(value).replace(/[^a-zA-Z0-9_-]/g, function (character) {
+      return '\\' + character;
+    });
   }
 
-  function onMouseMove(e) {
-    if (popup && popup.contains(e.target)) return;
-    if (mouseDownAt) {
-      var dx = e.clientX - mouseDownAt.x;
-      var dy = e.clientY - mouseDownAt.y;
-      if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
-        dragRect = {
-          x: Math.min(mouseDownAt.x, e.clientX),
-          y: Math.min(mouseDownAt.y, e.clientY),
-          w: Math.abs(dx),
-          h: Math.abs(dy),
-        };
-        hideOverlay(hoverOverlay);
-        positionOverlay(dragOverlay, dragRect.x, dragRect.y, dragRect.w, dragRect.h);
+  function selectorIsUnique(selector) {
+    try {
+      return document.querySelectorAll(selector).length === 1;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function getSelector(element) {
+    var parts = [];
+    var current = element;
+    while (current && current.nodeType === Node.ELEMENT_NODE && parts.length < 8) {
+      var tag = current.tagName.toLowerCase();
+      var id = current.getAttribute('id');
+      if (id) {
+        parts.unshift(tag + '#' + escapeSelector(id));
+      } else {
+        var part = tag;
+        var parent = current.parentElement;
+        if (parent) {
+          var siblings = Array.prototype.filter.call(parent.children, function (child) {
+            return child.tagName === current.tagName;
+          });
+          if (siblings.length > 1) {
+            part += ':nth-of-type(' + (siblings.indexOf(current) + 1) + ')';
+          }
+        }
+        parts.unshift(part);
+      }
+      var selector = parts.join(' > ');
+      if (selector.length <= 4096 && selectorIsUnique(selector)) return selector;
+      current = current.parentElement;
+    }
+    return undefined;
+  }
+
+  function elementClasses(element) {
+    if (!element.classList) return [];
+    return Array.prototype.slice.call(element.classList, 0, 128)
+      .map(function (value) { return String(value).slice(0, 1024); });
+  }
+
+  function accessibleLabel(element) {
+    var explicit = element.getAttribute('aria-label');
+    if (explicit) return explicit.slice(0, 16384);
+    var labelledBy = element.getAttribute('aria-labelledby');
+    if (labelledBy) {
+      var labels = labelledBy.split(/\s+/).map(function (id) {
+        var label = document.getElementById(id);
+        return label ? label.textContent || '' : '';
+      }).join(' ').replace(/\s+/g, ' ').trim();
+      if (labels) return labels.slice(0, 16384);
+    }
+    var alt = element.getAttribute('alt') || element.getAttribute('title');
+    return alt ? alt.slice(0, 16384) : undefined;
+  }
+
+  function captureElement(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE) return null;
+    var html = element.outerHTML || '';
+    return {
+      tag: element.tagName.toLowerCase().slice(0, 128),
+      id: element.id ? String(element.id).slice(0, 1024) : undefined,
+      classes: elementClasses(element),
+      role: (element.getAttribute('role') || '').slice(0, 1024) || undefined,
+      accessible_label: accessibleLabel(element),
+      visible_text: (element.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 16384) || undefined,
+      selector: getSelector(element),
+      outer_html: html.length > MAX_OUTER_HTML ? html.slice(0, MAX_OUTER_HTML) : html,
+    };
+  }
+
+  function rectSnapshot(rect) {
+    return {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+      document_x: rect.left + window.scrollX,
+      document_y: rect.top + window.scrollY,
+      scroll_x: window.scrollX,
+      scroll_y: window.scrollY,
+      viewport_width: window.innerWidth,
+      viewport_height: window.innerHeight,
+      device_pixel_ratio: window.devicePixelRatio || 1,
+    };
+  }
+
+  function unionRect(rects) {
+    if (!rects.length) return null;
+    var left = rects[0].left;
+    var top = rects[0].top;
+    var right = rects[0].right;
+    var bottom = rects[0].bottom;
+    for (var index = 1; index < rects.length; index += 1) {
+      left = Math.min(left, rects[index].left);
+      top = Math.min(top, rects[index].top);
+      right = Math.max(right, rects[index].right);
+      bottom = Math.max(bottom, rects[index].bottom);
+    }
+    return rectSnapshot({
+      left: left,
+      top: top,
+      width: right - left,
+      height: bottom - top,
+    });
+  }
+
+  function commonElement(range) {
+    var node = range.commonAncestorContainer;
+    if (node.nodeType === Node.ELEMENT_NODE) return node;
+    return node.parentElement;
+  }
+
+  function nodePath(root, node) {
+    var path = [];
+    var current = node;
+    while (current && current !== root) {
+      var parent = current.parentNode;
+      if (!parent) return [];
+      var index = Array.prototype.indexOf.call(parent.childNodes, current);
+      if (index < 0) return [];
+      path.unshift(index);
+      current = parent;
+      if (path.length > 128) return [];
+    }
+    return current === root ? path : [];
+  }
+
+  function captureTextEndpoint(node, offset, root) {
+    return {
+      selector: getSelector(root),
+      node_path: nodePath(root, node),
+      offset: offset,
+    };
+  }
+
+  function captureTextSelection() {
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+    var selectedText = selection.toString();
+    if (!selectedText) return false;
+    var range = selection.getRangeAt(0);
+    var container = commonElement(range);
+    var element = captureElement(container);
+    if (!container || !element) return false;
+    var clientRects = Array.prototype.slice.call(range.getClientRects(), 0, 512);
+    var identity = pageIdentity();
+    send('capture-completed', {
+      kind: 'text',
+      page_route: identity.page_route,
+      page_title: identity.page_title,
+      selected_text: selectedText.slice(0, 262144),
+      text_anchor: {
+        start: captureTextEndpoint(range.startContainer, range.startOffset, container),
+        end: captureTextEndpoint(range.endContainer, range.endOffset, container),
+        rects: clientRects.map(rectSnapshot),
+        union_rect: unionRect(clientRects),
+        scroll_x: window.scrollX,
+        scroll_y: window.scrollY,
+        viewport_width: window.innerWidth,
+        viewport_height: window.innerHeight,
+        device_pixel_ratio: window.devicePixelRatio || 1,
+        containing_element: element,
+      },
+    });
+    setMode(null);
+    return true;
+  }
+
+  function isInspectorNode(element) {
+    return !!(element && element.closest && element.closest('[data-kandev-inspector-ui]'));
+  }
+
+  function candidateName(element) {
+    var name = element.tagName.toLowerCase();
+    if (element.id) name += '#' + element.id;
+    var classes = elementClasses(element).slice(0, 2);
+    if (classes.length) name += '.' + classes.join('.');
+    return name.slice(0, 1024);
+  }
+
+  function ensureCandidateOverlay() {
+    if (candidateOverlay) return;
+    candidateOverlay = document.createElement('div');
+    candidateOverlay.setAttribute('data-kandev-inspector-ui', 'candidate');
+    candidateOverlay.setAttribute('aria-hidden', 'true');
+    candidateOverlay.style.cssText = 'position:fixed;display:none;pointer-events:none;box-sizing:border-box;'
+      + 'border:2px solid #6366f1;background:rgba(99,102,241,0.14);z-index:' + Z_INDEX + ';';
+    candidateLabel = document.createElement('div');
+    candidateLabel.style.cssText = 'position:absolute;left:-2px;bottom:100%;max-width:320px;padding:3px 6px;'
+      + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:#4f46e5;color:#fff;'
+      + 'font:600 11px/16px system-ui,sans-serif;border-radius:3px 3px 0 0;';
+    candidateOverlay.appendChild(candidateLabel);
+    document.documentElement.appendChild(candidateOverlay);
+  }
+
+  function showCandidate(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE || isInspectorNode(element)) return;
+    ensureCandidateOverlay();
+    candidate = element;
+    var rect = element.getBoundingClientRect();
+    candidateOverlay.style.display = 'block';
+    candidateOverlay.style.left = rect.left + 'px';
+    candidateOverlay.style.top = rect.top + 'px';
+    candidateOverlay.style.width = rect.width + 'px';
+    candidateOverlay.style.height = rect.height + 'px';
+    candidateLabel.textContent = candidateName(element);
+    send('candidate-changed', { label: candidateLabel.textContent });
+  }
+
+  function hideCandidate() {
+    candidate = null;
+    if (candidateOverlay) candidateOverlay.style.display = 'none';
+    send('candidate-changed', { label: null });
+  }
+
+  function ensureScreenshotOverlay() {
+    if (screenshotOverlay) return;
+    screenshotOverlay = document.createElement('div');
+    screenshotOverlay.setAttribute('data-kandev-inspector-ui', 'screenshot-region');
+    screenshotOverlay.setAttribute('aria-hidden', 'true');
+    screenshotOverlay.style.cssText = 'position:fixed;display:none;pointer-events:none;box-sizing:border-box;'
+      + 'border:2px solid #f59e0b;background:rgba(245,158,11,0.16);z-index:' + Z_INDEX + ';';
+    document.documentElement.appendChild(screenshotOverlay);
+  }
+
+  function positionScreenshotOverlay(start, end) {
+    ensureScreenshotOverlay();
+    var left = Math.min(start.x, end.x);
+    var top = Math.min(start.y, end.y);
+    var width = Math.abs(end.x - start.x);
+    var height = Math.abs(end.y - start.y);
+    screenshotOverlay.style.display = 'block';
+    screenshotOverlay.style.left = left + 'px';
+    screenshotOverlay.style.top = top + 'px';
+    screenshotOverlay.style.width = width + 'px';
+    screenshotOverlay.style.height = height + 'px';
+  }
+
+  function hideScreenshotOverlay() {
+    screenshotStart = null;
+    screenshotCurrent = null;
+    if (screenshotOverlay) screenshotOverlay.style.display = 'none';
+  }
+
+  function captureCandidate(element) {
+    if (!element || isInspectorNode(element)) return;
+    var snapshot = captureElement(element);
+    if (!snapshot) return;
+    var identity = pageIdentity();
+    send('capture-completed', {
+      kind: 'element',
+      page_route: identity.page_route,
+      page_title: identity.page_title,
+      element_snapshot: snapshot,
+      capture_rect: rectSnapshot(element.getBoundingClientRect()),
+    });
+    setMode(null);
+  }
+
+  function onElementPointerMove(event) {
+    if (mode !== 'element') return;
+    showCandidate(event.target);
+  }
+
+  function onElementFocus(event) {
+    if (mode !== 'element') return;
+    showCandidate(event.target);
+  }
+
+  function onElementTouchStart(event) {
+    if (mode !== 'element' || !event.touches || !event.touches.length) return;
+    var touch = event.touches[0];
+    showCandidate(document.elementFromPoint(touch.clientX, touch.clientY));
+  }
+
+  function onElementTouchEnd(event) {
+    if (mode !== 'element' || !candidate) return;
+    event.preventDefault();
+    event.stopPropagation();
+    captureCandidate(candidate);
+  }
+
+  function onElementClick(event) {
+    if (mode !== 'element' || isInspectorNode(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    captureCandidate(event.target);
+  }
+
+  function onTextMouseUp() {
+    if (mode !== 'text') return;
+    window.setTimeout(captureTextSelection, 0);
+  }
+
+  function onTextTouchEnd() {
+    if (mode !== 'text') return;
+    window.setTimeout(captureTextSelection, 0);
+  }
+
+  function onScreenshotPointerDown(event) {
+    if (mode !== 'screenshot') return;
+    event.preventDefault();
+    event.stopPropagation();
+    screenshotStart = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    screenshotCurrent = { x: event.clientX, y: event.clientY };
+    positionScreenshotOverlay(screenshotStart, screenshotStart);
+  }
+
+  function onScreenshotPointerMove(event) {
+    if (mode !== 'screenshot') return;
+    if (!screenshotStart || screenshotStart.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    screenshotCurrent = { x: event.clientX, y: event.clientY };
+    positionScreenshotOverlay(screenshotStart, screenshotCurrent);
+  }
+
+  function completeScreenshot(end) {
+    if (mode !== 'screenshot' || !screenshotStart || !end) return false;
+    var start = screenshotStart;
+    var left = Math.min(start.x, end.x);
+    var top = Math.min(start.y, end.y);
+    var width = Math.abs(end.x - start.x);
+    var height = Math.abs(end.y - start.y);
+    hideScreenshotOverlay();
+    if (width < 5 || height < 5) return false;
+    var identity = pageIdentity();
+    send('screenshot-region-selected', {
+      page_route: identity.page_route,
+      page_title: identity.page_title,
+      capture_rect: rectSnapshot({ left: left, top: top, width: width, height: height }),
+    });
+    setMode(null);
+    return true;
+  }
+
+  function onScreenshotPointerUp(event) {
+    if (mode !== 'screenshot') return;
+    if (!screenshotStart || screenshotStart.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    completeScreenshot({ x: event.clientX, y: event.clientY });
+  }
+
+  function onScreenshotPointerCancel(event) {
+    if (mode !== 'screenshot') return;
+    if (screenshotStart && screenshotStart.pointerId !== event.pointerId) return;
+    hideScreenshotOverlay();
+  }
+
+  function onCaptureKeyDown(event) {
+    if (!mode) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      event.stopPropagation();
+      if (mode === 'text') {
+        window.setTimeout(captureTextSelection, 0);
+      } else if (mode === 'screenshot') {
+        completeScreenshot(screenshotCurrent);
       }
       return;
     }
-    var el = e.target;
-    if (el === hoverOverlay || el === dragOverlay || (popup && popup.contains(el))) return;
-    hoverEl = el;
-    var r = el.getBoundingClientRect();
-    positionOverlay(hoverOverlay, r.left, r.top, r.width, r.height);
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    setMode(null);
+    send('capture-cancelled', {});
   }
 
-  function onMouseUp(e) {
-    if (popup && popup.contains(e.target)) return;
-    var wasDragging = !!dragRect;
-    var rect = dragRect;
-    var down = mouseDownAt;
-    mouseDownAt = null;
-    dragRect = null;
-    hideOverlay(dragOverlay);
+  function removeCaptureListeners() {
+    document.removeEventListener('mousemove', onElementPointerMove, true);
+    document.removeEventListener('focusin', onElementFocus, true);
+    document.removeEventListener('touchstart', onElementTouchStart, true);
+    document.removeEventListener('touchend', onElementTouchEnd, true);
+    document.removeEventListener('click', onElementClick, true);
+    document.removeEventListener('mouseup', onTextMouseUp, true);
+    document.removeEventListener('touchend', onTextTouchEnd, true);
+    document.removeEventListener('pointerdown', onScreenshotPointerDown, true);
+    document.removeEventListener('pointermove', onScreenshotPointerMove, true);
+    document.removeEventListener('pointerup', onScreenshotPointerUp, true);
+    document.removeEventListener('pointercancel', onScreenshotPointerCancel, true);
+    document.removeEventListener('keydown', onCaptureKeyDown, true);
+  }
 
-    if (wasDragging && rect && rect.w > DRAG_THRESHOLD && rect.h > DRAG_THRESHOLD) {
-      var inside = elementsInRect(rect);
-      startPending('area', rect, null, inside, rect.x + rect.w, rect.y);
-      return;
+  function setMode(nextMode) {
+    removeCaptureListeners();
+    mode = nextMode;
+    hideCandidate();
+    hideScreenshotOverlay();
+    document.documentElement.style.cursor = mode === 'element' || mode === 'screenshot'
+      ? 'crosshair'
+      : originalCursor;
+    document.documentElement.style.touchAction = mode === 'screenshot' ? 'none' : originalTouchAction;
+    if (!mode) return;
+    document.addEventListener('keydown', onCaptureKeyDown, true);
+    switch (mode) {
+      case 'element':
+        document.addEventListener('mousemove', onElementPointerMove, true);
+        document.addEventListener('focusin', onElementFocus, true);
+        document.addEventListener('touchstart', onElementTouchStart, true);
+        document.addEventListener('touchend', onElementTouchEnd, true);
+        document.addEventListener('click', onElementClick, true);
+        break;
+      case 'text':
+        document.addEventListener('mouseup', onTextMouseUp, true);
+        document.addEventListener('touchend', onTextTouchEnd, true);
+        break;
+      case 'screenshot':
+        document.addEventListener('pointerdown', onScreenshotPointerDown, true);
+        document.addEventListener('pointermove', onScreenshotPointerMove, true);
+        document.addEventListener('pointerup', onScreenshotPointerUp, true);
+        document.addEventListener('pointercancel', onScreenshotPointerCancel, true);
+        break;
+      default:
+        break;
     }
-    if (down) {
-      var clickEl = document.elementFromPoint(down.x, down.y);
-      if (!clickEl || clickEl === hoverOverlay || clickEl === dragOverlay) return;
-      if (popup && popup.contains(clickEl)) return;
-      var el = captureElement(clickEl);
-      startPending('pin', null, el, null, down.x, down.y);
+  }
+
+  function clearMarkerNodes() {
+    var markers = document.querySelectorAll('[data-kandev-inspector-marker]');
+    for (var index = 0; index < markers.length; index += 1) {
+      if (markers[index].parentNode) markers[index].parentNode.removeChild(markers[index]);
     }
   }
 
-  function onClickCapture(e) {
-    if (popup && popup.contains(e.target)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
+  function markerRect(marker) {
+    var selector = marker.element_snapshot && marker.element_snapshot.selector;
+    if (selector) {
+      try {
+        var element = document.querySelector(selector);
+        if (element) return element.getBoundingClientRect();
+      } catch (error) {}
+    }
+    var rect = marker.capture_rect || (marker.text_anchor && marker.text_anchor.union_rect);
+    if (!rect) return null;
+    var documentX = typeof rect.document_x === 'number'
+      ? rect.document_x
+      : rect.x + (typeof rect.scroll_x === 'number' ? rect.scroll_x : 0);
+    var documentY = typeof rect.document_y === 'number'
+      ? rect.document_y
+      : rect.y + (typeof rect.scroll_y === 'number' ? rect.scroll_y : 0);
+    return { left: documentX - window.scrollX, top: documentY - window.scrollY };
   }
 
-  function onKeyDown(e) {
-    if (popup) return;
-    if (e.key === 'Escape') { e.preventDefault(); setActive(false); send('inspect-exited', {}); }
+  function renderMarkers() {
+    clearMarkerNodes();
+    var route = currentPageRoute();
+    var visible = projectedMarkers.filter(function (marker) { return marker.page_route === route; });
+    visible.forEach(function (marker, index) {
+      var rect = markerRect(marker);
+      if (!rect) return;
+      var node = document.createElement('div');
+      node.setAttribute('data-kandev-inspector-marker', marker.id);
+      node.setAttribute('aria-hidden', 'true');
+      node.style.cssText = 'position:fixed;left:' + (rect.left - 11) + 'px;top:' + (rect.top - 11)
+        + 'px;width:22px;height:22px;border-radius:50%;background:#4f46e5;color:#fff;'
+        + 'font:600 11px/22px system-ui,sans-serif;text-align:center;pointer-events:none;'
+        + 'box-shadow:0 1px 4px rgba(0,0,0,0.3);z-index:' + Z_INDEX + ';';
+      node.textContent = String(index + 1);
+      document.documentElement.appendChild(node);
+    });
   }
 
-  function setActive(isOn) {
-    if (isOn === active) return;
-    active = isOn;
-    if (isOn) {
-      ensureOverlays();
-      document.body.style.cursor = 'crosshair';
-      document.addEventListener('mousedown', onMouseDown, true);
-      document.addEventListener('mousemove', onMouseMove, true);
-      document.addEventListener('mouseup', onMouseUp, true);
-      document.addEventListener('click', onClickCapture, true);
-      document.addEventListener('keydown', onKeyDown, true);
+  function routeDidChange() {
+    if (mode) {
+      setMode(null);
+      send('capture-cancelled', {});
     } else {
-      document.removeEventListener('mousedown', onMouseDown, true);
-      document.removeEventListener('mousemove', onMouseMove, true);
-      document.removeEventListener('mouseup', onMouseUp, true);
-      document.removeEventListener('click', onClickCapture, true);
-      document.removeEventListener('keydown', onKeyDown, true);
-      document.body.style.cursor = '';
-      hideOverlay(hoverOverlay);
-      hideOverlay(dragOverlay);
-      closePopup();
+      hideCandidate();
     }
+    var identity = pageIdentity();
+    send('route-changed', identity);
+    renderMarkers();
   }
 
-  function removeMarker(num) {
-    if (num == null) return;
-    var nodes = document.querySelectorAll('[data-kandev-marker="' + String(num) + '"]');
-    for (var i = 0; i < nodes.length; i++) {
-      if (nodes[i].parentNode) nodes[i].parentNode.removeChild(nodes[i]);
-    }
-  }
-
-  window.addEventListener('message', function (e) {
-    if (!e.data || e.data.source !== SOURCE) return;
-    if (e.data.type === 'toggle-inspect') setActive(!!(e.data.payload && e.data.payload.active));
-    if (e.data.type === 'clear-annotations') clearMarkers();
-    if (e.data.type === 'remove-marker') removeMarker(e.data.payload && e.data.payload.number);
+  var originalPushState = history.pushState;
+  history.pushState = function () {
+    var result = originalPushState.apply(this, arguments);
+    routeDidChange();
+    return result;
+  };
+  var originalReplaceState = history.replaceState;
+  history.replaceState = function () {
+    var result = originalReplaceState.apply(this, arguments);
+    routeDidChange();
+    return result;
+  };
+  window.addEventListener('popstate', routeDidChange);
+  window.addEventListener('hashchange', routeDidChange);
+  window.addEventListener('scroll', renderMarkers, true);
+  window.addEventListener('resize', function () {
+    if (candidate) showCandidate(candidate);
+    renderMarkers();
   });
 
-  send('inspector-ready', {});
+  window.addEventListener('message', function (event) {
+    var message = event.data;
+    if (!message || message.source !== SOURCE || message.version !== PROTOCOL_VERSION) return;
+    switch (message.type) {
+      case 'set-capture-mode':
+        setMode(message.payload && message.payload.mode);
+        break;
+      case 'project-markers':
+        projectedMarkers = message.payload && Array.isArray(message.payload.markers)
+          ? message.payload.markers.slice()
+          : [];
+        renderMarkers();
+        break;
+      default:
+        break;
+    }
+  });
+
+  send('inspector-ready', pageIdentity());
 })();

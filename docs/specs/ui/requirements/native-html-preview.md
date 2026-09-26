@@ -98,6 +98,7 @@ development-server command is not necessary.
 - Framework build pipelines, hot-module replacement, package installation, or
   replacing an application's configured development-server command.
 - Rendering HTML reconstructed from a Review diff.
-- Mapping rendered elements to source lines, inspector annotations, or console
-  forwarding beyond existing Browser-panel behavior.
+- Mapping rendered elements to source lines or forwarding console output.
+  Task-owned text, element, and screenshot review feedback is specified by
+  [Web Preview Feedback Requirements](../../tasks/requirements/web-preview-feedback.md).
 - Publishing the preview server as a production website or a durable URL.

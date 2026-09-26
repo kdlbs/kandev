@@ -39,7 +39,7 @@ desktop boundaries. Link to an existing UI contract when the feature reuses one.
 
 ## Mobile Design Contract
 
-When a task changes composition, navigation, overlays, touch behavior, scrolling, or breakpoint behavior, state these choices in the working plan or task notes. Keep them brief; do not create a separate document unless the task already uses a spec or committed plan. For copy, icon, color, or content-only styling inside an unchanged surface, identify the nearest mobile exemplar and the rendered mobile check instead of forcing the full contract.
+When a task changes composition, navigation, overlays, touch behavior, scrolling, or breakpoint behavior, state these choices in the working plan or task notes. Keep them brief; do not create a separate document unless the task already uses a spec or plan. For copy, icon, color, or content-only styling inside an unchanged surface, identify the nearest mobile exemplar and the rendered mobile check instead of forcing the full contract.
 
 - desktop user outcome and mobile entry point
 - nearest shipped mobile exemplar and which interaction/geometry it contributes

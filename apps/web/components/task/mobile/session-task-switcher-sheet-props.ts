@@ -25,6 +25,7 @@ export function buildMobileTaskSwitcherProps(
     stepsByWorkflowId: props.stepsByWorkflowId,
     activeTaskId: props.activeTaskId,
     selectedTaskId: props.selectedTaskId,
+    onMoveToStep: props.onMoveToStep,
     onRequestMoveOptions: props.onRequestMoveOptions,
     onBeforeMoveOptionsOpen: props.onBeforeMoveOptionsOpen,
     collapsedGroupKeys: helpers.collapsedGroupKeys,

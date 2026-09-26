@@ -52,7 +52,10 @@ test.describe("Mobile empty remote repository", () => {
       const taskCommit = git.commit("Add empty remote mobile fixture");
       const taskBranch = git.exec("git branch --show-current").trim();
 
-      await testPage.getByRole("button", { name: "Changes" }).tap();
+      await testPage
+        .getByRole("navigation")
+        .getByRole("button", { name: /Changes$/ })
+        .tap();
       const changesPanel = testPage.getByTestId("mobile-changes-panel");
       await expect(changesPanel).toBeVisible({ timeout: 15_000 });
       const commitsToggle = changesPanel.getByTestId("commits-section-collapse-toggle");

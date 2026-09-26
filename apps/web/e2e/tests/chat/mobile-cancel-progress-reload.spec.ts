@@ -3,6 +3,19 @@ import { seedIdleSession } from "../../helpers/session";
 import { waitForActiveSessionCancellationPending } from "../../helpers/session-store";
 
 test.describe("Mobile cancel progress across reloads", () => {
+  let releaseBackendEnv: (() => Promise<void>) | undefined;
+
+  test.beforeEach(async ({ backend }) => {
+    releaseBackendEnv = await backend.useEnv({
+      KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT: "12s",
+    });
+  });
+
+  test.afterEach(async () => {
+    await releaseBackendEnv?.();
+    releaseBackendEnv = undefined;
+  });
+
   test("keeps backend-owned cancel progress after a reload", async ({
     testPage,
     apiClient,
@@ -11,7 +24,8 @@ test.describe("Mobile cancel progress across reloads", () => {
     test.setTimeout(120_000);
 
     const session = await seedIdleSession(testPage, apiClient, seedData, "Mobile cancel progress");
-    await session.sendMessageViaButton("/slow 8s");
+    // /e2e:cancel-hold keeps an acknowledged backend cancellation pending through reload hydration.
+    await session.sendMessageViaButton("/e2e:cancel-hold");
 
     const cancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(cancel).toBeVisible({ timeout: 15_000 });

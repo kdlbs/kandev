@@ -15,6 +15,17 @@ import {
 
 const INCIDENT_LOG_LINE_COUNT = 3_921;
 
+test.beforeEach(async ({ backend }) => {
+  // This test asserts the queue UI. Pin the feature off so a steering-enabled
+  // shard cannot change the input mode while the test is running.
+  await backend.restart({ KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING: "false" });
+});
+
+test.afterEach(async ({ backend }) => {
+  // Restore the worker baseline for the next test in the shard.
+  await backend.restart();
+});
+
 function oversizedMessage(prefix: string): { source: string; tail: string; firstLine: string } {
   const tail = `${prefix}-TAIL-MARKER`;
   const logLine = (index: number) =>
@@ -64,7 +75,7 @@ async function createTask(apiClient: ApiClient, seedData: SeedData, title: strin
 }
 
 async function switchMobileTask(testPage: Page, title: string) {
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
   const sheet = testPage.getByRole("dialog", { name: "Tasks" });
   const taskRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: title });
   await expect(taskRow).toBeVisible({ timeout: 15_000 });
@@ -80,6 +91,7 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
 }) => {
   test.setTimeout(180_000);
   const { source, tail, firstLine } = oversizedMessage("MOBILE-OVERSIZED");
+  const slowPrompt = "/slow 30s";
   const firstTitle = `Mobile oversized message ${Date.now()}`;
   const task = await createTask(apiClient, seedData, firstTitle);
   if (!task.session_id) throw new Error("oversized mobile task has no session_id");
@@ -145,11 +157,13 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
     1,
   );
 
-  await session.sendMessageViaButton("/slow 10s");
+  await session.sendMessageViaButton(slowPrompt);
   await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
   await waitForComposerQueueMode(testPage);
   const queued = oversizedMessage("MOBILE-QUEUED");
   const identity = await apiClient.getQueueSessionIdentity(task.id, task.session_id);
+  // Keep the preview available even if the agent finishes during the touch checks.
+  await apiClient.setQueueAutoRun(identity, false);
   await apiClient.queueMessage(identity, queued.source);
   await expect(chat.getByTestId("queue-chip")).toBeVisible({ timeout: 15_000 });
   await chat.getByTestId("queue-chip").tap();
@@ -197,7 +211,7 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
       async () => {
         const { messages } = await apiClient.listSessionMessages(task.session_id!);
         return messages.some(
-          (message) => message.author_type === "user" && message.content === "/slow 10s",
+          (message) => message.author_type === "user" && message.content === slowPrompt,
         );
       },
       { timeout: 30_000, message: "the mobile follow-up prompt should be stored" },

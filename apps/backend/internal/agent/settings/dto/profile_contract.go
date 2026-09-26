@@ -26,6 +26,7 @@ type ProfileCreateRequest struct {
 	ProviderKind           string                  `json:"provider_kind,omitempty"`
 	ProviderBaseURL        string                  `json:"provider_base_url,omitempty"`
 	ProviderAPIKeySecretID string                  `json:"provider_api_key_secret_id,omitempty"`
+	CursorMCPAuthEnabled   *bool                   `json:"cursor_mcp_auth_enabled,omitempty"`
 	Dynamic                *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 }
 
@@ -53,6 +54,7 @@ type ProfileUpdateRequest struct {
 	ProviderKind           *string                 `json:"provider_kind,omitempty"`
 	ProviderBaseURL        *string                 `json:"provider_base_url,omitempty"`
 	ProviderAPIKeySecretID *string                 `json:"provider_api_key_secret_id,omitempty"`
+	CursorMCPAuthEnabled   *bool                   `json:"cursor_mcp_auth_enabled,omitempty"`
 	Dynamic                *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 	Force                  bool                    `json:"force,omitempty"`
 }
@@ -106,6 +108,7 @@ func ProfileContractFields() []ProfileContractField {
 		{Path: "provider_kind", JSONType: "string", Support: "read_write", Description: "Provider routing kind."},
 		{Path: "provider_base_url", JSONType: "string", Support: "read_write", Description: "OpenAI-compatible provider base URL."},
 		{Path: "provider_api_key_secret_id", JSONType: "string", Support: "read_write", Description: "Global secret reference for the provider API key.", Sensitive: true},
+		{Path: "cursor_mcp_auth_enabled", JSONType: "boolean", Support: "read_write", Description: "Share local Cursor MCP credentials. Defaults to true for new profiles."},
 		{Path: "dynamic", JSONType: "object", Support: "read_write", Description: "Versioned dynamic routing document.", Replacement: true},
 	}
 }

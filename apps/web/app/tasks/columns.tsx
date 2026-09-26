@@ -9,12 +9,14 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { formatTimeDistance, useDateLocale } from "@/lib/i18n/date-locale";
+import { cleanupSharesParentWorkspace } from "@/components/task/task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { linkToTask } from "@/lib/links";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 
 type TaskWithResolution = Task & {
   workflowName?: string;
@@ -132,6 +134,9 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
         taskTitle={task.title}
         taskId={task.id}
         executorType={task.primary_executor_type}
+        sharesParentWorkspace={cleanupSharesParentWorkspace(
+          workspaceModeFromMetadata(task.metadata),
+        )}
         isDeleting={isDeleting}
         onConfirm={({ cascade, discardWorktreeChanges }) =>
           ctx.onDelete(task.id, { cascade, discardWorktreeChanges })

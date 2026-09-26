@@ -9,6 +9,7 @@ import { Input } from "@kandev/ui/input";
 import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
 import { PromptRowActions } from "@/components/settings/prompt-row-actions";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import { useToast } from "@/components/toast-provider";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
@@ -501,56 +502,57 @@ export function PromptsSettings() {
       onSave={showCreate ? handleCreate : handleUpdate}
       onDiscard={resetForm}
     >
-      <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
-        <Trans i18nKey="settings:promptMentionHelp" values={{ token: PROMPT_MENTION_TOKEN }}>
-          Use <span className="font-medium text-foreground">{PROMPT_MENTION_TOKEN}</span> in the
-          chat input to insert a prompt’s content. Prompts are matched by name and expanded in
-          place.
-        </Trans>
-      </div>
-      <div className="space-y-6 mt-4">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm font-medium text-foreground">
-            {t("settings:promptsCustomHeading")}
+      <div className="space-y-6">
+        <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
+          <Trans i18nKey="settings:promptMentionHelp" values={{ token: PROMPT_MENTION_TOKEN }}>
+            Use <span className="font-medium text-foreground">{PROMPT_MENTION_TOKEN}</span> in the
+            chat input to insert a prompt’s content. Prompts are matched by name and expanded in
+            place.
+          </Trans>
+        </div>
+        <SettingsGroup
+          title={t("settings:promptsCustomHeading")}
+          contentClassName="space-y-6 divide-y-0"
+          action={
+            <Button
+              onClick={startCreate}
+              disabled={isBusy || isEditing || showCreate}
+              className={settingsActionClassName()}
+              data-testid="prompt-create-button"
+            >
+              {t("settings:promptAdd")}
+            </Button>
+          }
+        >
+          {showCreate && (
+            <PromptCreateForm
+              formState={formState}
+              onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
+              onCancel={resetForm}
+              isBusy={isBusy}
+            />
+          )}
+
+          <div className="space-y-3">
+            <PromptListContent
+              promptsLoaded={promptsLoaded}
+              prompts={prompts}
+              editingId={editingId}
+              editingRef={editingRef}
+              formState={formState}
+              onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
+              onStartEditing={startEditing}
+              onOpenDelete={openDeleteDialog}
+              onDeleteCancel={closeDeleteDialog}
+              onDeleteConfirm={confirmDelete}
+              onCancel={resetForm}
+              isBusy={isBusy}
+              showCreate={showCreate}
+              isFinePointer={isFinePointer}
+              deleteTargetId={deleteTarget?.id ?? null}
+            />
           </div>
-          <Button
-            onClick={startCreate}
-            disabled={isBusy || isEditing || showCreate}
-            className={settingsActionClassName()}
-            data-testid="prompt-create-button"
-          >
-            {t("settings:promptAdd")}
-          </Button>
-        </div>
-
-        {showCreate && (
-          <PromptCreateForm
-            formState={formState}
-            onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
-            onCancel={resetForm}
-            isBusy={isBusy}
-          />
-        )}
-
-        <div className="space-y-3">
-          <PromptListContent
-            promptsLoaded={promptsLoaded}
-            prompts={prompts}
-            editingId={editingId}
-            editingRef={editingRef}
-            formState={formState}
-            onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
-            onStartEditing={startEditing}
-            onOpenDelete={openDeleteDialog}
-            onDeleteCancel={closeDeleteDialog}
-            onDeleteConfirm={confirmDelete}
-            onCancel={resetForm}
-            isBusy={isBusy}
-            showCreate={showCreate}
-            isFinePointer={isFinePointer}
-            deleteTargetId={deleteTarget?.id ?? null}
-          />
-        </div>
+        </SettingsGroup>
       </div>
     </SettingsPageTemplate>
   );

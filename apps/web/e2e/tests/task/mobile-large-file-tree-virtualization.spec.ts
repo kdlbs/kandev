@@ -28,7 +28,7 @@ test.describe("Mobile large file tree virtualization", () => {
       title: "Mobile large file tree virtualization",
     });
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     const folder = session.fileTreeNode(LARGE_FILE_TREE_FOLDER);
     const viewport = session.fileTreeScrollViewport();
     await expect(folder).toBeVisible({ timeout: 15_000 });
@@ -37,9 +37,9 @@ test.describe("Mobile large file tree virtualization", () => {
     await expectContiguousVisibleFileTreeRows(viewport);
     const collapsedPaths = await visibleFileTreePaths(viewport);
 
-    await testPage.getByRole("button", { name: "Chat" }).tap();
+    await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
     await expect(viewport).toBeHidden();
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     await expect(folder).toBeVisible({ timeout: 15_000 });
     await expectContiguousVisibleFileTreeRows(viewport);
     await expectVisibleFileTreePaths(viewport, collapsedPaths);

@@ -94,7 +94,6 @@
   "selectRepository": "Select repository",
   "selectTask": "Select task {{title}}",
   "selectWorkflow": "Select workflow",
-  "sendToWorkflow": "Send to workflow",
   "selectedFilterCount_one": "{{label}}: {{count}} selected",
   "selectedFilterCount_other": "{{label}}: {{count}} selected",
   "sentryIssue": "Sentry Issue",
@@ -129,5 +128,10 @@
   "boardSort": "Board sort",
   "boardSortCreatedDesc": "Newest first",
   "boardSortPriorityDesc": "Priority",
-  "priorityFilter": "Priority filter"
+  "priorityFilter": "Priority filter",
+  "bulkSelected_one": "{{count}} selected",
+  "bulkSelected_other": "{{count}} selected",
+  "bulkActions": "Actions",
+  "selectTasks": "Select tasks",
+  "cancelTaskSelection": "Cancel selection"
 }

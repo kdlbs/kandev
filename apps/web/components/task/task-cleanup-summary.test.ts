@@ -25,6 +25,15 @@ describe("getCleanupSummary (single task)", () => {
     expect(notes.join(" ")).toMatch(/not affected/i);
   });
 
+  it("preserves the parent workspace for inherited-parent tasks", () => {
+    expect(getCleanupSummary("worktree", { sharesParentWorkspace: true })).toEqual({
+      effects: [AGENT_STOP_EFFECT],
+      notes: [
+        "This task shares its parent's workspace. The parent task's worktree, branch, and files are not touched.",
+      ],
+    });
+  });
+
   it("describes local_docker container removal", () => {
     const { effects, notes } = getCleanupSummary("local_docker");
     expect(effects[0]).toMatch(/Docker container/i);

@@ -16,6 +16,7 @@ type UserDTO struct {
 
 type UserSettingsDTO struct {
 	SidebarViewsByWorkspace           map[string]models.SidebarWorkspaceState `json:"sidebar_views_by_workspace"`
+	SidebarLayoutsByWorkspace         map[string]models.SidebarLayout         `json:"sidebar_layouts_by_workspace,omitempty"`
 	UserID                            string                                  `json:"user_id"`
 	WorkspaceID                       string                                  `json:"workspace_id"`
 	KanbanViewMode                    string                                  `json:"kanban_view_mode"`
@@ -61,6 +62,7 @@ type UserSettingsDTO struct {
 	SidebarTaskColors                 map[string]*string                      `json:"sidebar_task_colors"`
 	TaskCreateLastUsed                models.TaskCreateLastUsed               `json:"task_create_last_used"`
 	JiraSavedViews                    json.RawMessage                         `json:"jira_saved_views,omitempty"`
+	JiraDefaultViewID                 string                                  `json:"jira_default_view_id"`
 	JiraTaskPresets                   json.RawMessage                         `json:"jira_task_presets,omitempty"`
 	GitHubSavedPresets                json.RawMessage                         `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets         json.RawMessage                         `json:"github_default_query_presets,omitempty"`
@@ -132,6 +134,7 @@ type ShellOption struct {
 
 type UpdateUserSettingsRequest struct {
 	SidebarViewState                  *models.SidebarWorkspacePatch      `json:"sidebar_view_state,omitempty"`
+	SidebarLayoutState                *models.SidebarLayoutPatch         `json:"sidebar_layout_state,omitempty"`
 	WorkspaceID                       *string                            `json:"workspace_id,omitempty"`
 	KanbanViewMode                    *string                            `json:"kanban_view_mode,omitempty"`
 	StartupPage                       *string                            `json:"startup_page,omitempty"`
@@ -176,6 +179,7 @@ type UpdateUserSettingsRequest struct {
 	SidebarTaskColorPatch             *models.SidebarTaskColorPatch      `json:"sidebar_task_color_patch,omitempty"`
 	TaskCreateLastUsed                *models.TaskCreateLastUsed         `json:"task_create_last_used,omitempty"`
 	JiraSavedViews                    NullableRawMessage                 `json:"jira_saved_views,omitempty"`
+	JiraDefaultViewID                 *string                            `json:"jira_default_view_id,omitempty"`
 	JiraTaskPresets                   NullableRawMessage                 `json:"jira_task_presets,omitempty"`
 	GitHubSavedPresets                NullableRawMessage                 `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets         NullableRawMessage                 `json:"github_default_query_presets,omitempty"`
@@ -330,6 +334,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 	}
 	return UserSettingsDTO{
 		UserID:                            settings.UserID,
+		SidebarLayoutsByWorkspace:         settings.SidebarLayoutsByWorkspace,
 		WorkspaceID:                       settings.WorkspaceID,
 		KanbanViewMode:                    settings.KanbanViewMode,
 		StartupPage:                       models.NormalizeStartupPage(settings.StartupPage),
@@ -375,6 +380,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		SidebarTaskColors:                 models.CloneSidebarTaskColors(settings.SidebarTaskColors),
 		TaskCreateLastUsed:                settings.TaskCreateLastUsed,
 		JiraSavedViews:                    settings.JiraSavedViews,
+		JiraDefaultViewID:                 settings.JiraDefaultViewID,
 		JiraTaskPresets:                   settings.JiraTaskPresets,
 		GitHubSavedPresets:                settings.GitHubSavedPresets,
 		GitHubDefaultQueryPresets:         settings.GitHubDefaultQueryPresets,

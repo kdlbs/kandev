@@ -646,6 +646,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"saved_layouts":                            savedLayouts,
 		"sidebar_views":                            sidebarViews,
 		"sidebar_views_by_workspace":               settings.SidebarViewsByWorkspace,
+		"sidebar_layouts_by_workspace":             settings.SidebarLayoutsByWorkspace,
 		"sidebar_workspace_version":                settings.SidebarWorkspaceVersion,
 		"sidebar_active_view_id":                   settings.SidebarActiveViewID,
 		"sidebar_draft":                            settings.SidebarDraft,
@@ -657,6 +658,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"sidebar_task_colors":                      sidebarTaskColors,
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
+		"jira_default_view_id":                     settings.JiraDefaultViewID,
 		"jira_task_presets":                        settings.JiraTaskPresets,
 		"github_saved_presets":                     settings.GitHubSavedPresets,
 		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
@@ -751,6 +753,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		LspServerConfigs:                  map[string]map[string]interface{}{},
 		LspStatusLocation:                 models.LspStatusLocationToolbar,
 		SavedLayouts:                      []models.SavedLayout{},
+		SidebarLayoutsByWorkspace:         map[string]models.SidebarLayout{},
 		ChatSubmitKey:                     "cmd_enter",
 		KeyboardShortcuts:                 map[string]interface{}{},
 		TerminalLinkBehavior:              "new_tab",
@@ -835,6 +838,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LspStatusLocation                 string                                  `json:"lsp_status_location"`
 		SavedLayouts                      []models.SavedLayout                    `json:"saved_layouts"`
 		SidebarViewsByWorkspace           map[string]models.SidebarWorkspaceState `json:"sidebar_views_by_workspace"`
+		SidebarLayoutsByWorkspace         map[string]models.SidebarLayout         `json:"sidebar_layouts_by_workspace"`
 		SidebarWorkspaceVersion           int                                     `json:"sidebar_workspace_version"`
 		SidebarViews                      json.RawMessage                         `json:"sidebar_views"`
 		SidebarActiveViewID               json.RawMessage                         `json:"sidebar_active_view_id"`
@@ -847,6 +851,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		SidebarTaskColors                 json.RawMessage                         `json:"sidebar_task_colors"`
 		TaskCreateLastUsed                models.TaskCreateLastUsed               `json:"task_create_last_used"`
 		JiraSavedViews                    json.RawMessage                         `json:"jira_saved_views"`
+		JiraDefaultViewID                 string                                  `json:"jira_default_view_id"`
 		JiraTaskPresets                   json.RawMessage                         `json:"jira_task_presets"`
 		GitHubSavedPresets                json.RawMessage                         `json:"github_saved_presets"`
 		GitHubDefaultQueryPresets         json.RawMessage                         `json:"github_default_query_presets"`
@@ -972,6 +977,10 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		}
 	}
 	settings.SidebarViewsByWorkspace = payload.SidebarViewsByWorkspace
+	settings.SidebarLayoutsByWorkspace = payload.SidebarLayoutsByWorkspace
+	if settings.SidebarLayoutsByWorkspace == nil {
+		settings.SidebarLayoutsByWorkspace = map[string]models.SidebarLayout{}
+	}
 	settings.SidebarWorkspaceVersion = payload.SidebarWorkspaceVersion
 	settings.SidebarDraft = payload.SidebarDraft
 	if len(payload.ThreadViews) > 0 {
@@ -1010,6 +1019,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.SidebarTaskColors = decodeSidebarTaskColors(payload.SidebarTaskColors)
 	settings.TaskCreateLastUsed = payload.TaskCreateLastUsed
 	settings.JiraSavedViews = payload.JiraSavedViews
+	settings.JiraDefaultViewID = payload.JiraDefaultViewID
 	settings.JiraTaskPresets = payload.JiraTaskPresets
 	settings.GitHubSavedPresets = payload.GitHubSavedPresets
 	settings.GitHubDefaultQueryPresets = payload.GitHubDefaultQueryPresets

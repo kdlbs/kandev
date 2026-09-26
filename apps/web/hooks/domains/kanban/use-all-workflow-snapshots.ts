@@ -24,7 +24,7 @@ type Workflow = { id: string; name: string };
 type WorkspaceContextRequest = { workspaceId: string; generation: number };
 
 function isBootHydratedSnapshot(snapshot: WorkflowSnapshotData | undefined): boolean {
-  return !!snapshot && snapshot.isPlaceholder !== true;
+  return !!snapshot && snapshot.isPlaceholder !== true && snapshot.fetchFailed !== true;
 }
 
 function hasNewerLivePlacement(existing: KanbanTask, fetchStart: KanbanTask | undefined): boolean {
@@ -60,6 +60,20 @@ function hasNewerLiveAutoStartFailed(
   return existing.autoStartFailed !== fetchStart.autoStartFailed;
 }
 
+function hasNewerLiveInterrupted(
+  existing: KanbanTask,
+  fetchStart: KanbanTask | undefined,
+): boolean {
+  if (!fetchStart) return true;
+  if (
+    existing.interruptedGeneration !== undefined ||
+    fetchStart.interruptedGeneration !== undefined
+  ) {
+    return existing.interruptedGeneration !== fetchStart.interruptedGeneration;
+  }
+  return existing.interrupted !== fetchStart.interrupted;
+}
+
 function hasNewerLiveWorkspaceOrphaned(
   existing: KanbanTask,
   fetchStart: KanbanTask | undefined,
@@ -85,6 +99,12 @@ function preserveLiveMarkerFields(
 ): void {
   // A task.updated event can set or clear either marker while the snapshot
   // is in flight. Preserve the newer live value instead of rolling it back.
+  if (merged.interrupted === undefined || hasNewerLiveInterrupted(existing, fetchStart)) {
+    merged.interrupted = existing.interrupted;
+  }
+  if (existing.interruptedGeneration !== undefined) {
+    merged.interruptedGeneration = existing.interruptedGeneration;
+  }
   if (merged.autoStartFailed === undefined || hasNewerLiveAutoStartFailed(existing, fetchStart)) {
     merged.autoStartFailed = existing.autoStartFailed;
   }
@@ -235,6 +255,7 @@ async function fetchAndWriteSnapshot(
       is_start_step: step.is_start_step,
       show_in_command_panel: step.show_in_command_panel,
       agent_profile_id: step.agent_profile_id,
+      session_target: step.session_target ?? null,
       wip_limit: step.wip_limit,
       pull_from_step_id: step.pull_from_step_id ?? null,
       stage_type: step.stage_type,
@@ -252,7 +273,7 @@ async function fetchAndWriteSnapshot(
 
     const workflowSnapshot = {
       workflowId: wf.id,
-      workflowName: wf.name,
+      workflowName: snapshot.workflow?.name ?? wf.name,
       steps,
       tasks,
     };
@@ -282,11 +303,15 @@ async function fetchAndWriteSnapshot(
     }
     markFailed(wf.id, err);
     // A failed fetch must not leave a placeholder permanently "unknown": that
-    // would block the final-step ensure forever. Transition to an explicit
-    // known-but-empty state so the ensure proceeds ungated (safe default).
+    // would block the final-step ensure forever. Keep it known-but-empty for
+    // now, and mark it retryable for a later task-page mount.
     const current = store.getState().kanbanMulti.snapshots[wf.id];
     if (current?.isPlaceholder) {
-      store.getState().setWorkflowSnapshot(wf.id, { ...current, isPlaceholder: false });
+      store.getState().setWorkflowSnapshot(wf.id, {
+        ...current,
+        isPlaceholder: false,
+        fetchFailed: true,
+      });
     }
   }
 }
@@ -298,6 +323,74 @@ function safeErrorMessage(error: unknown): string {
 function mapSnapshotTask(task: Task, stepIds: Set<string>): KanbanTask | null {
   if (!task.workflow_step_id || !stepIds.has(task.workflow_step_id)) return null;
   return toKanbanTask(task);
+}
+
+export function useWorkflowSnapshotById(
+  workspaceId: string | null,
+  workflowId: string | null | undefined,
+) {
+  const store = useAppStoreApi();
+  const connectionStatus = useAppStore((state) => state.connection.status);
+  const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration);
+  const workspaceContextRetryVersion = useAppStore(
+    (state) => state.workspaceContextRead?.retryVersion ?? 0,
+  );
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const fetchGenRef = useRef(0);
+  const lastRefreshNonceRef = useRef(refreshNonce);
+  const lastConnectionStatusRef = useRef(connectionStatus);
+  const lastContextGenerationRef = useRef(workspaceContextGeneration);
+  const lastRecoveryRetryVersionRef = useRef(workspaceContextRetryVersion);
+  const refresh = useCallback(() => setRefreshNonce((current) => current + 1), []);
+
+  useForegroundRefresh(refresh, Boolean(workspaceId && workflowId), `${workspaceId}:${workflowId}`);
+
+  useEffect(() => {
+    if (!workspaceId || !workflowId) return;
+
+    const forceRefresh =
+      refreshNonce !== lastRefreshNonceRef.current ||
+      connectionStatus !== lastConnectionStatusRef.current ||
+      workspaceContextGeneration !== lastContextGenerationRef.current ||
+      workspaceContextRetryVersion !== lastRecoveryRetryVersionRef.current;
+    lastRefreshNonceRef.current = refreshNonce;
+    lastConnectionStatusRef.current = connectionStatus;
+    lastContextGenerationRef.current = workspaceContextGeneration;
+    lastRecoveryRetryVersionRef.current = workspaceContextRetryVersion;
+
+    const state = store.getState();
+    const currentSnapshot = state.kanbanMulti.snapshots[workflowId];
+    const activeWorkflowHasSteps =
+      state.kanban.workflowId === workflowId && state.kanban.steps.length > 0;
+    if (!forceRefresh && (isBootHydratedSnapshot(currentSnapshot) || activeWorkflowHasSteps)) {
+      return;
+    }
+
+    const myGen = fetchGenRef.current + 1;
+    fetchGenRef.current = myGen;
+    const request = { workspaceId, generation: state.workspaceContextGeneration };
+    void fetchAndWriteSnapshot(
+      { id: workflowId, name: currentSnapshot?.workflowName ?? workflowId },
+      store,
+      fetchGenRef,
+      myGen,
+      request,
+      () => {},
+      () => {},
+    );
+
+    return () => {
+      if (fetchGenRef.current === myGen) fetchGenRef.current += 1;
+    };
+  }, [
+    connectionStatus,
+    refreshNonce,
+    store,
+    workspaceContextGeneration,
+    workspaceContextRetryVersion,
+    workflowId,
+    workspaceId,
+  ]);
 }
 
 // eslint-disable-next-line max-lines-per-function -- one hook owns snapshot refresh and generation cleanup

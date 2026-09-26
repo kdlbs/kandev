@@ -84,6 +84,7 @@ func (c *Controller) RecordAgentProfileRecentUse(
 // resulting settings with OS shell options.
 func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserSettingsRequest) (dto.UserSettingsResponse, error) {
 	settings, err := c.svc.UpdateUserSettings(ctx, &service.UpdateUserSettingsRequest{
+		SidebarLayoutState:                req.SidebarLayoutState,
 		WorkspaceID:                       req.WorkspaceID,
 		KanbanViewMode:                    req.KanbanViewMode,
 		StartupPage:                       req.StartupPage,
@@ -129,6 +130,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		SidebarTaskColorPatch:             req.SidebarTaskColorPatch,
 		TaskCreateLastUsed:                req.TaskCreateLastUsed,
 		JiraSavedViews:                    req.JiraSavedViews.ServiceValue(),
+		JiraDefaultViewID:                 req.JiraDefaultViewID,
 		JiraTaskPresets:                   req.JiraTaskPresets.ServiceValue(),
 		GitHubSavedPresets:                req.GitHubSavedPresets.ServiceValue(),
 		GitHubDefaultQueryPresets:         req.GitHubDefaultQueryPresets.ServiceValue(),

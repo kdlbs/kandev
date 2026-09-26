@@ -49,7 +49,15 @@ beforeEach(() => {
 describe("useAllWorkflowSnapshots signal-gated mapping", () => {
   it("preserves the signal-gated flag in refreshed workflow snapshots", async () => {
     mockFetchWorkflowSnapshot.mockResolvedValueOnce({
-      steps: [{ id: "step-1", name: "Review", position: 1, auto_advance_requires_signal: true }],
+      steps: [
+        {
+          id: "step-1",
+          name: "Review",
+          position: 1,
+          auto_advance_requires_signal: true,
+          session_target: { kind: "step", step_id: "step-source" },
+        },
+      ],
       tasks: [],
     });
 
@@ -58,6 +66,7 @@ describe("useAllWorkflowSnapshots signal-gated mapping", () => {
     await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
     expect(mockSetWorkflowSnapshot.mock.calls[0][1].steps[0]).toMatchObject({
       auto_advance_requires_signal: true,
+      session_target: { kind: "step", step_id: "step-source" },
     });
   });
 });

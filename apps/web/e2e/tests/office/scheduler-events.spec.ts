@@ -65,7 +65,11 @@ test.describe("Office reactive scheduler", () => {
     apiClient,
     officeApi,
     officeSeed,
+    testPage,
   }) => {
+    // Request the office fixture's page so its per-test reset clears runs and
+    // sessions left by earlier office specs in the same worker.
+    void testPage;
     test.setTimeout(90_000);
 
     // Create a task without an assignee, then attach the CEO.
@@ -94,7 +98,9 @@ test.describe("Office reactive scheduler", () => {
     apiClient,
     officeApi,
     officeSeed,
+    testPage,
   }) => {
+    void testPage;
     test.setTimeout(90_000);
 
     const task = await apiClient.createTask(

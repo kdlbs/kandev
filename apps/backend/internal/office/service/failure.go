@@ -15,14 +15,17 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // Inbox item kinds for office-agent-error-handling.
 const (
-	InboxKindAgentRunFailed           = "agent_run_failed"
-	InboxKindAgentPausedAfterFails    = "agent_paused_after_failures"
-	autoPauseReasonPrefix             = "Auto-paused:"
-	RunReasonManualResumeAfterFailure = "manual_resume_after_failure"
+	InboxKindAgentRunFailed        = "agent_run_failed"
+	InboxKindAgentPausedAfterFails = "agent_paused_after_failures"
+	autoPauseReasonPrefix          = "Auto-paused:"
+	// RunReasonManualResumeAfterFailure aliases shared's canonical
+	// declaration (AC-OFFICE-BACKPRESSURE-001.8) — see shared/runreasons.go.
+	RunReasonManualResumeAfterFailure = shared.RunReasonManualResumeAfterFailure
 )
 
 // officeLegacyTransientMaxRetries bounds how many times a classified-transient
@@ -747,11 +750,11 @@ func (s *Service) publishRunFailed(
 		"run_id":               run.ID,
 		"agent_profile_id":     run.AgentProfileID,
 		"task_id":              taskIDFromRunPayload(run.Payload),
-		"error_message":        errorMessage,
 		"consecutive_failures": count,
 		"threshold":            threshold,
 		"finished_at":          time.Now().UTC().Format(time.RFC3339),
 	}
+	data[runEventFieldErrorMessage] = errorMessage
 	_ = s.eb.Publish(ctx, "office.run.failed",
 		bus.NewEvent("office.run.failed", "office-failure", data))
 }

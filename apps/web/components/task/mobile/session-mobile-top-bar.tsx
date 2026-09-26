@@ -2,7 +2,13 @@
 
 import { memo } from "react";
 import Link from "@/components/routing/app-link";
-import { IconArrowLeft, IconMenu2, IconGitBranch, IconCheck } from "@tabler/icons-react";
+import {
+  IconArrowLeft,
+  IconChevronDown,
+  IconChevronRight,
+  IconGitBranch,
+  IconCheck,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
@@ -10,12 +16,21 @@ import { LineStat } from "@/components/diff-stat";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import type { FileInfo } from "@/lib/state/slices";
-import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
+import {
+  TaskTopBarPluginActions,
+  useHasTaskTopBarPluginActions,
+} from "@/components/task/task-top-bar-plugin-actions";
 import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { linkToTaskOverview } from "@/lib/links";
+import { AppNavSheet } from "@/components/navigation/app-nav-sheet";
 import { useTranslation } from "react-i18next";
+import {
+  RemoteRepositoryProviderIcon,
+  useRemoteRepositoryProviderLabel,
+} from "@/components/task-create-dialog-remote-repo-provider-tabs";
+import type { TaskTopbarRepository } from "../task-page-content-helpers";
 
 type SessionMobileTopBarProps = {
   taskId?: string | null;
@@ -23,10 +38,12 @@ type SessionMobileTopBarProps = {
   taskTitle?: string;
   /** `owner/repo` (or the repository name) of the task's primary repository. */
   repositoryLabel?: string | null;
+  topbarRepository?: TaskTopbarRepository | null;
   sessionId?: string | null;
   baseBranch?: string;
   worktreeBranch?: string | null;
-  onMenuClick: () => void;
+  onTaskPickerClick: () => void;
+  taskPickerOpen: boolean;
   showApproveButton?: boolean;
   onApprove?: () => void;
   isRemoteExecutor?: boolean;
@@ -46,17 +63,36 @@ function MobileTaskTitle({
   displayBranch,
   totalAdditions,
   totalDeletions,
+  onTaskPickerClick,
+  taskPickerOpen,
 }: {
   taskTitle?: string;
   repositoryLabel?: string | null;
   displayBranch?: string;
   totalAdditions: number;
   totalDeletions: number;
+  onTaskPickerClick: () => void;
+  taskPickerOpen: boolean;
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col min-w-0 flex-1">
-      <span className="text-sm font-medium truncate">{taskTitle ?? t("task:taskDetails")}</span>
+    <button
+      type="button"
+      className="flex h-11 min-w-11 flex-1 flex-col justify-center rounded-md text-left cursor-pointer hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+      onClick={(event) => {
+        event.currentTarget.focus();
+        onTaskPickerClick();
+      }}
+      aria-haspopup="dialog"
+      aria-expanded={taskPickerOpen}
+      aria-label={t("task:openTaskSwitcherFor", { title: taskTitle ?? t("task:taskDetails") })}
+      data-testid="mobile-task-picker-trigger"
+      data-legacy-testid="mobile-session-menu"
+    >
+      <span className="flex w-full min-w-0 items-center gap-1">
+        <span className="text-sm font-medium truncate">{taskTitle ?? t("task:taskDetails")}</span>
+        <IconChevronDown className="size-4 shrink-0" />
+      </span>
       {/* The phone bar has no breadcrumb, so the repository rides the same
           secondary line as the branch. It shrinks first: on a phone the branch
           and diff stats are the denser signal, and the full name stays in
@@ -83,7 +119,65 @@ function MobileTaskTitle({
           </>
         )}
       </div>
-    </div>
+    </button>
+  );
+}
+
+function MobileRepositoryLabel({ repository }: { repository: TaskTopbarRepository }) {
+  const { t } = useTranslation();
+  const providerLabel = useRemoteRepositoryProviderLabel(repository.provider);
+  const accessibleName = t("task:remoteRepositoryIdentity", {
+    provider: providerLabel,
+    repository: repository.fullName,
+  });
+  const icon = (
+    <span
+      data-testid="mobile-task-repository-provider-icon"
+      aria-hidden="true"
+      className="flex shrink-0 items-center"
+    >
+      <RemoteRepositoryProviderIcon provider={repository.provider} />
+    </span>
+  );
+  const name = (
+    <span data-testid="mobile-task-repository-name" aria-hidden="true" className="min-w-0 truncate">
+      {repository.displayName}
+    </span>
+  );
+  const className =
+    "flex h-11 min-h-11 min-w-11 max-w-[38%] shrink items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground";
+  const content = (
+    <span className="flex min-w-0 items-center gap-1">
+      {icon}
+      {name}
+    </span>
+  );
+
+  if (repository.browserUrl) {
+    return (
+      <a
+        href={repository.browserUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={accessibleName}
+        title={repository.fullName}
+        data-testid="mobile-task-repository-link"
+        className={`${className} cursor-pointer hover:bg-muted hover:text-foreground`}
+      >
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <span
+      title={repository.fullName}
+      data-testid="mobile-task-repository-label"
+      className={`${className} cursor-default`}
+    >
+      {content}
+      <span className="sr-only">{accessibleName}</span>
+    </span>
   );
 }
 
@@ -183,7 +277,7 @@ type MobileTopBarActionsProps = {
   taskTitle?: string;
   isArchived?: boolean;
   onTaskUnarchived?: (taskId: string) => void;
-  onMenuClick: () => void;
+  onTaskPickerClick: () => void;
 };
 
 function MobileTopBarActions({
@@ -202,22 +296,25 @@ function MobileTopBarActions({
   taskTitle,
   isArchived,
   onTaskUnarchived,
-  onMenuClick,
+  onTaskPickerClick,
 }: MobileTopBarActionsProps) {
-  const { t } = useTranslation();
+  const hasPluginActions = useHasTaskTopBarPluginActions();
+  const pluginActions =
+    !isArchived && hasPluginActions ? (
+      <TaskTopBarPluginActions
+        sessionId={sessionId ?? null}
+        taskId={taskId ?? null}
+        taskTitle={taskTitle}
+        workspaceId={workspaceId ?? null}
+        presentation="mobile"
+      />
+    ) : undefined;
+
   return (
-    <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
+    <div className="flex shrink-0 items-center gap-1" data-testid="mobile-topbar-actions">
       <MRTopbarButton compact mobile />
       {isArchived && <TaskUnarchiveButton taskId={taskId} onUnarchived={onTaskUnarchived} mobile />}
       {!isArchived && <PortForwardButton sessionId={sessionId} />}
-      {!isArchived && (
-        <TaskTopBarPluginActions
-          sessionId={sessionId ?? null}
-          taskId={taskId ?? null}
-          taskTitle={taskTitle}
-          workspaceId={workspaceId ?? null}
-        />
-      )}
       {isRemoteExecutor && (
         <MobileRemoteExecutorIndicator
           taskId={taskId}
@@ -231,16 +328,7 @@ function MobileTopBarActions({
         />
       )}
       {showApproveButton && onApprove && <ApproveButton onApprove={onApprove} />}
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        className="h-11 w-11 cursor-pointer"
-        onClick={onMenuClick}
-        data-testid="mobile-session-menu"
-        aria-label={t("task:openTaskSwitcher")}
-      >
-        <IconMenu2 className="h-4 w-4" />
-      </Button>
+      <AppNavSheet onOpenTaskViews={onTaskPickerClick} pluginActions={pluginActions} />
     </div>
   );
 }
@@ -255,7 +343,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
     props.baseBranch,
   );
   return (
-    <header className="flex items-center justify-between px-2 py-2 bg-background">
+    <header className="flex items-center justify-between h-14 px-2 py-1 bg-background">
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <Button variant="ghost" size="icon-sm" asChild>
           <Link
@@ -265,12 +353,23 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
             <IconArrowLeft className="h-4 w-4" />
           </Link>
         </Button>
+        {props.topbarRepository && (
+          <>
+            <MobileRepositoryLabel repository={props.topbarRepository} />
+            <IconChevronRight
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-muted-foreground"
+            />
+          </>
+        )}
         <MobileTaskTitle
           taskTitle={props.taskTitle}
-          repositoryLabel={props.repositoryLabel}
+          repositoryLabel={props.topbarRepository ? null : props.repositoryLabel}
           displayBranch={displayBranch}
           totalAdditions={totalAdditions}
           totalDeletions={totalDeletions}
+          onTaskPickerClick={props.onTaskPickerClick}
+          taskPickerOpen={props.taskPickerOpen}
         />
       </div>
       <MobileTopBarActions
@@ -289,7 +388,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
         taskTitle={props.taskTitle}
         isArchived={props.isArchived}
         onTaskUnarchived={props.onTaskUnarchived}
-        onMenuClick={props.onMenuClick}
+        onTaskPickerClick={props.onTaskPickerClick}
       />
     </header>
   );

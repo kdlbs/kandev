@@ -582,6 +582,12 @@ func (s *Service) markRoutingSuccess(ctx context.Context, run *models.Run) {
 // uses are otherwise unrelated to each other.
 const runEventFieldAgentID = "agent_id"
 
+// runEventFieldErrorMessage is the run-event/activity payload key for the
+// underlying error text. Shared package-wide (event_subscribers.go,
+// scheduler_runs.go, scheduler_integration.go, failure.go) for the same
+// duplicate-literal reason as runEventFieldAgentID above.
+const runEventFieldErrorMessage = "error_message"
+
 // handleTasklessAgentCompleted attributes a taskless run completion,
 // finishes the run, and refreshes the per-agent, per-scope continuation
 // summary so the next fire has bridge context. The
@@ -693,8 +699,10 @@ func (s *Service) finishRunSession(
 // given agent and upserts it under run.ContinuationScope — the scope key
 // models.ContinuationScopeForRun computed once, at run-creation time, and
 // persisted onto the row (see runs/repository/sqlite.CreateRun). Errors
-// are logged at warn — the prior row stays intact (last-good wins) and
-// the run completion proceeds.
+// are logged at warn and recorded on the run's own event stream, naming
+// the scope that failed to write — the prior row stays intact (last-good
+// wins), the run's terminal state is not rolled back, and completion
+// proceeds either way.
 //
 // This deliberately reads the persisted field rather than recomputing it:
 // run here comes from resolveLifecycleRun's fresh DB fetch, which can
@@ -715,6 +723,7 @@ func (s *Service) refreshContinuationSummary(
 	if err != nil {
 		s.logger.Warn("continuation-summary load inputs failed",
 			zap.String("run_id", run.ID), zap.Error(err))
+		s.appendContinuationSummaryFailureEvent(ctx, run.ID, "continuation_summary.load_failed", scope, err)
 		return
 	}
 	body := summaryBuild(inputs)
@@ -728,6 +737,19 @@ func (s *Service) refreshContinuationSummary(
 	if upsertErr != nil {
 		s.logger.Warn("continuation-summary upsert failed",
 			zap.String("run_id", run.ID), zap.Error(upsertErr))
+		s.appendContinuationSummaryFailureEvent(ctx, run.ID, "continuation_summary.upsert_failed", scope, upsertErr)
+	}
+}
+
+func (s *Service) appendContinuationSummaryFailureEvent(
+	ctx context.Context, runID, eventType, scope string, cause error,
+) {
+	if err := s.appendRunEventStrict(ctx, runID, eventType, string(models.RunEventLevelWarn),
+		map[string]interface{}{"scope": scope, runEventFieldErrorMessage: cause.Error()}); err != nil {
+		s.logger.Warn("continuation-summary failure event append failed",
+			zap.String("run_id", runID),
+			zap.String("event_type", eventType),
+			zap.Error(err))
 	}
 }
 
@@ -827,9 +849,9 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	}
 	// Lifecycle: terminal "error" event for the run detail Events log.
 	s.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
-		"task_id":       data.TaskID,
-		"session_id":    data.SessionID,
-		"error_message": data.ErrorMessage,
+		"task_id":                 data.TaskID,
+		"session_id":              data.SessionID,
+		runEventFieldErrorMessage: data.ErrorMessage,
 	})
 	// Clear before routing can make the run claimable again. This prevents
 	// cleanup from this attempt from matching a relaunch that reuses its run ID.
@@ -879,9 +901,9 @@ func (s *Service) handleTasklessAgentFailed(
 		return s.handleTasklessAgentLookupError(ctx, data, err)
 	}
 	s.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
-		"session_id":     data.SessionID,
-		"run_session_id": data.RunSessionID,
-		"error_message":  data.ErrorMessage,
+		"session_id":              data.SessionID,
+		"run_session_id":          data.RunSessionID,
+		runEventFieldErrorMessage: data.ErrorMessage,
 	})
 	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 	if err := s.finishRunSession(ctx, data, models.RunSessionStateFailed, data.ErrorMessage); err != nil {
@@ -1287,8 +1309,7 @@ func (s *Service) queueTaskAssignedRun(
 	} else {
 		key = dedupkeys.AssignmentKey(taskID, agentProfileID, *assignmentGeneration)
 	}
-	_, err = s.QueueRun(ctx, agentProfileID, RunReasonTaskAssigned, payload, key)
-	return err
+	return s.QueueRunFromTaskBoundary(ctx, agentProfileID, RunReasonTaskAssigned, payload, key, taskID)
 }
 
 // handleTaskMoved keeps the legacy named-step activity fallback and queues

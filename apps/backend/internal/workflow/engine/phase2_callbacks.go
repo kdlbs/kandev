@@ -40,11 +40,16 @@ var ErrParticipantSeatUnfillable = errors.New("ensure_participant_seat: role unf
 
 // Target prefixes / sentinels recognised by QueueRunCallback.
 const (
-	TargetPrimary       = "primary"
-	TargetParticipant   = "participant_role:"
-	TargetAgentProfile  = "agent_profile_id:"
-	TargetWorkspaceCEO  = "workspace.ceo_agent"
-	TaskIDThis          = "this"
+	TargetPrimary      = "primary"
+	TargetParticipant  = "participant_role:"
+	TargetAgentProfile = "agent_profile_id:"
+	TargetWorkspaceCEO = "workspace.ceo_agent"
+	TaskIDThis         = "this"
+
+	// defaultQueueReasonR must stay equal to
+	// internal/office/shared.RunReasonQueueRun, which cannot be imported
+	// here (internal/office/shared imports this package). See that
+	// constant's doc comment and TestDefaultQueueReasonResolvesInWakeReasonRegistry.
 	defaultQueueReasonR = "queue_run"
 
 	// reasonTaskChildrenCompleted is the reason string the wave-identity
@@ -108,14 +113,16 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 	}
 	for _, agentID := range agentIDs {
 		req := QueueRunRequest{
-			AgentProfileID: agentID,
-			TaskID:         taskID,
-			WorkflowStepID: workflowStepID,
-			Reason:         reason,
-			IdempotencyKey: idempotencyKey(in, agentID, taskID),
-			Payload:        queueRunPayload(in, in.Action.QueueRun.Payload, taskID),
-			WaveKey:        waveKey,
-			WaveString:     waveString,
+			AgentProfileID:        agentID,
+			TaskID:                taskID,
+			CausingTaskID:         in.State.TaskID,
+			WorkflowStepID:        workflowStepID,
+			Reason:                reason,
+			IdempotencyKey:        idempotencyKey(in, agentID, taskID),
+			Payload:               queueRunPayload(in, in.Action.QueueRun.Payload, taskID),
+			CausingAgentProfileID: in.State.AgentProfileID,
+			WaveKey:               waveKey,
+			WaveString:            waveString,
 		}
 		if _, err := c.Adapter.QueueRun(ctx, req); err != nil {
 			return ActionResult{}, fmt.Errorf("queue_run for agent %s: %w", agentID, err)
@@ -579,14 +586,16 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 	var errs []error
 	for _, p := range seats {
 		req := QueueRunRequest{
-			AgentProfileID: p.AgentProfileID,
-			WaveKey:        waveKey,
-			WaveString:     waveString,
-			TaskID:         taskID,
-			WorkflowStepID: in.Step.ID,
-			Reason:         reason,
-			IdempotencyKey: idempotencyKey(in, p.AgentProfileID, taskID),
-			Payload:        queueRunPayload(in, cfg.Payload, taskID),
+			AgentProfileID:        p.AgentProfileID,
+			WaveKey:               waveKey,
+			WaveString:            waveString,
+			TaskID:                taskID,
+			CausingTaskID:         in.State.TaskID,
+			WorkflowStepID:        in.Step.ID,
+			Reason:                reason,
+			IdempotencyKey:        idempotencyKey(in, p.AgentProfileID, taskID),
+			Payload:               queueRunPayload(in, cfg.Payload, taskID),
+			CausingAgentProfileID: in.State.AgentProfileID,
 		}
 		// Merge note (local/integration): #3011 gave QueueRun a second return
 		// value; #2907's fan-out collects errors rather than aborting (AC-C1,

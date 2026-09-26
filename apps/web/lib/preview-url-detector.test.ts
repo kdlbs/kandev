@@ -237,6 +237,11 @@ describe("rewritePreviewUrlForProxy", () => {
     expect(rewritePreviewUrlForProxy(LOCALHOST_3000_URL, SESSION_ID)).toBe(proxyPath(3000, "/"));
   });
 
+  it("keeps an existing backend proxy URL unchanged", () => {
+    const proxiedUrl = proxyPath(3000, "/app?debug=true");
+    expect(rewritePreviewUrlForProxy(proxiedUrl, SESSION_ID)).toBe(proxiedUrl);
+  });
+
   it("preserves path and query string", () => {
     expect(rewritePreviewUrlForProxy("http://localhost:8080/api/test?debug=true", SESSION_ID)).toBe(
       proxyPath(8080, "/api/test?debug=true"),

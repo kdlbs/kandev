@@ -530,6 +530,7 @@ export function WorkspaceRepositoriesClient({
           are on. A second copy of all three read as the page repeating itself. */}
       <SettingsSection
         divided
+        framed={false}
         icon={<IconGitBranch className="h-5 w-5" />}
         title={t("workspaces:repositories")}
         description={

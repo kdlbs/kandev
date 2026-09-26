@@ -55,7 +55,9 @@ func TestDurableDeleteCleanupRemovesTaskAttachments(t *testing.T) {
 		TaskID: taskID, Trigger: models.TaskResourceCleanupTriggerCascadeDelete,
 		State: models.TaskResourceCleanupStateRunning,
 	}
-	if err := taskSvc.executeTaskResourceCleanupJob(ctx, job, &taskResourceCleanupSnapshot{}); err != nil {
+	if err := taskSvc.executeTaskResourceCleanupJob(ctx, job, &taskResourceCleanupSnapshot{
+		ArchiveSourceManifestCaptured: true,
+	}); err != nil {
 		t.Fatalf("executeTaskResourceCleanupJob: %v", err)
 	}
 	if _, err := repo.GetMessageAttachment(ctx, attachment.ID); !errors.Is(err, ErrAttachmentNotFound) {
@@ -100,6 +102,9 @@ func TestWorkspaceDeleteCleanupSnapshotsAttachments(t *testing.T) {
 	var snapshot taskResourceCleanupSnapshot
 	if err := json.Unmarshal([]byte(cleanup.cleanupJob.ResourceSnapshot), &snapshot); err != nil {
 		t.Fatalf("decode cleanup snapshot: %v", err)
+	}
+	if snapshot.WorkspaceID != taskResult.Task.WorkspaceID {
+		t.Fatalf("snapshot workspace ID = %q, want %q", snapshot.WorkspaceID, taskResult.Task.WorkspaceID)
 	}
 	if len(snapshot.Attachments) != 1 ||
 		snapshot.Attachments[0].ID != attachment.ID ||

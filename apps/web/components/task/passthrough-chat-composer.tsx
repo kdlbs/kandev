@@ -31,6 +31,7 @@ import type { TaskPlanCommentRef } from "@/lib/types/http";
 import { isMessageSendError, MessageSendError } from "@/lib/chat/message-send-error";
 import { t as translate } from "@/lib/i18n";
 import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
+import { PreviewFeedbackCollectionSurface } from "@/components/task/inspector/preview-feedback-collection";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -80,6 +81,18 @@ export function PassthroughComposerPanel({
       }}
     >
       <PlanCommentMigrationNotice {...panelState.planCommentMigration} />
+      {panelState.previewFeedbackState && (
+        <PreviewFeedbackCollectionSurface
+          taskId={taskId}
+          collection={panelState.previewFeedbackState}
+          open={panelState.previewFeedbackOpen ?? false}
+          onOpenChange={panelState.setPreviewFeedbackOpen ?? (() => undefined)}
+          showTrigger={Boolean(
+            panelState.previewFeedback.length > 0 &&
+            (!panelState.resolvedSessionId || panelState.isCompleted),
+          )}
+        />
+      )}
       <ChatInputContainer
         ref={refHandle}
         onSubmit={onSubmit}
