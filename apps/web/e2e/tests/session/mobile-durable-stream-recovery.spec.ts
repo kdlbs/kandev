@@ -10,11 +10,15 @@ async function seedUncertainDeliverySession(apiClient: ApiClient, seedData: Seed
   const task = await apiClient.createTask(seedData.workspaceId, "Mobile durable recovery", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
+    agent_profile_id: seedData.agentProfileId,
+    repository_ids: [seedData.repositoryId],
   });
   const sessionId = `mobile-durable-recovery-${task.id}`;
   await apiClient.seedTaskSession(task.id, {
     state: "FAILED",
     sessionId,
+    agentProfileId: seedData.agentProfileId,
+    repositoryId: seedData.repositoryId,
     completedAt: new Date().toISOString(),
     metadata: {
       last_agent_error: {
@@ -24,6 +28,14 @@ async function seedUncertainDeliverySession(apiClient: ApiClient, seedData: Seed
       },
     },
   });
+  await expect
+    .poll(async () => {
+      const { sessions } = await apiClient.listTaskSessions(task.id);
+      const session = sessions.find((item) => item.id === sessionId);
+      const error = session?.metadata?.last_agent_error as { code?: string } | undefined;
+      return error?.code ?? "";
+    })
+    .toBe("DURABLE_DELIVERY_UNCERTAIN");
   return { task, sessionId };
 }
 
