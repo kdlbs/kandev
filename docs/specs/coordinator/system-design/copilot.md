@@ -240,7 +240,21 @@ editing the stored user message.
   profile whatever the session's `config_mode` metadata says, then the
   automation and office branches follow as today. The conversation route never
   sets `config_mode`; a test sets it on a conversation session and asserts the
-  coordinator mode and six-tool profile still resolve. Quick Chat code does not
+  coordinator mode and six-tool profile still resolve. Because the task is now
+  read before the `config_mode` check, the order in both resolvers is exactly:
+  (1) `GetTask`; an error fails the start for every session, config-mode ones
+  included (a deliberate change: today a config-mode session never reads the
+  task, and after this it is refused on a task-read error instead of
+  launching); (2) a readable task with origin `coordinator` takes the
+  coordinator branch; (3) no row: the `CoordinatorLookup` check of
+  [Fail closed](#fail-closed) runs, and a match or a lookup error fails the
+  start; (4) otherwise a config-mode session returns config mode and config
+  profile exactly as today, whether or not the row was found; (5) the
+  automation, office and Kanban branches follow as today. Tests: a config-mode
+  session whose `GetTask` errors fails with no instance; a config-mode session
+  with no task row and no coordinator match, and one with a readable
+  non-coordinator task, each still resolve config mode and the configuration
+  profile. Quick Chat code does not
   set the mode. In `internal/mcp/server/server.go`, `normalizeMode`,
   `surfaceForMode`, `modeForProfile` and `Server.SetMode`, and `Legacy` in
   `internal/mcp/profile/profile.go`, gain the coordinator case; plugin tool
@@ -268,22 +282,47 @@ editing the stored user message.
   logger)` stay unchanged. The dependencies reach the service first: a new
   file `internal/backendapp/coordinator_conversation.go`, owned by this work
   package, defines `wireCoordinatorConversation(p routeParams)`, called from
-  the existing `if p.features.Coordinator` block in `registerRoutes`
-  (`internal/backendapp/helpers.go`) on the line before
-  `registerCoordinatorRoutes(p)`, the only edit to that file. It calls
+  the existing `if p.features.Coordinator` block in `registerSecondaryRoutes`
+  (`internal/backendapp/helpers.go`, called from `registerRoutes`) on the
+  line before `registerCoordinatorRoutes(p)`. It calls
   `svc.SetConversationDeps` with the task service (create, delete, archive)
-  and the orchestrator service (`EnsureSession`), `svc.SetConversationHooks`
-  with the archive and delete hooks, and hands `svc` as the
-  `CoordinatorLookup` to the executor (through an orchestrator setter that
-  forwards to `Executor`) and to each `mcpscope.Resolver` that scopes agent
-  MCP dispatch. `registerCoordinatorConversation` then reads the dependencies
-  from `svc`, registers the conversation route and returns the startup
-  cleanup hook; when the dependencies were not set it logs an error and
-  registers nothing, so the route is 404 rather than half-built. A resolver or
-  executor that never received the lookup resolves a coordinator-origin task
-  to no coordinator and refuses it ([Fail closed](#fail-closed)), so a missed
-  wiring site denies instead of granting. With the flag off none of this
-  runs.
+  and the orchestrator service (`EnsureSession`) and `svc.SetConversationHooks`
+  with the archive and delete hooks. `registerCoordinatorConversation` then
+  reads the dependencies from `svc`, registers the conversation route and
+  returns the startup cleanup hook; when the dependencies were not set it
+  logs an error and registers nothing, so the route is 404 rather than
+  half-built.
+- **Lookup wiring.** The `CoordinatorLookup` is NOT handed over by
+  `wireCoordinatorConversation`: the resolvers and the executor are built,
+  and startup recovery runs, before routes register. It is set at
+  construction from `services.Coordinator`, which `provideServices` builds
+  first (`initCoordinatorWiring`, nil with the flag off). `mcpscope.Resolver`
+  gains a `coordinators CoordinatorLookup` field and a
+  `SetCoordinatorLookup(CoordinatorLookup)` setter; `NewResolver`'s signature
+  is unchanged. The executor gains the same setter, reached through
+  `orchestrator.Service.SetCoordinatorLookup`, which forwards to `Executor`.
+  Each call is guarded by `services.Coordinator != nil`, so a nil
+  `*coordinator.Service` is never stored as a non-nil interface. The call
+  sites, and so the edits outside the new file, are exactly:
+  (1) `startAgentInfrastructure` in `internal/backendapp/main.go`: on the
+  resolver built there (`mcpScopeResolver`, whose `Scope` and
+  `ScopePrincipal` go to `provideLifecycleManager`), right after
+  `mcpscope.NewResolver`, and on `orchestratorSvc` right after
+  `provideOrchestrator`, before `orchestratorSvc.Start` runs startup
+  recovery; (2) `registerMCPAndDebugRoutes` in `internal/backendapp/helpers.go`:
+  on the resolver built there, right after `mcpscope.NewResolver` and before
+  `SetMCPPrincipalScoper`, since that scoper is the one installed last and so
+  the one that scopes in-session dispatch; (3) the one call line in
+  `registerSecondaryRoutes` above. The resolver in `buildHandoffDependencies`
+  (`internal/backendapp/handoff_wiring.go`) gets no lookup: it serves only
+  `ScopeOverridingIdentity` for the Office handoff's workspace check and never
+  resolves a principal surface. A resolver or executor that never received
+  the lookup resolves a coordinator-origin task to no coordinator and refuses
+  it ([Fail closed](#fail-closed)), so a missed wiring site denies instead of
+  granting. With the flag off no lookup is set, and a coordinator-origin task
+  is refused everywhere. A test builds each of the two resolvers with a
+  lookup and asserts a coordinator conversation task resolves to
+  `SurfaceCoordinator` and its coordinator; without the lookup it is refused.
 
 ## Tool surface
 
@@ -333,9 +372,20 @@ resolvers (`resolveTaskSessionMCPMode`, `resolveTaskSessionMCPProfile` in
 an agentctl instance for a task session calls them before the instance
 starts: first launch and prepare (`executor_execute.go`), resume and
 re-created executions (`executor_resume.go`) and interaction launches
-(`executor_interaction.go`); the promotion of a workspace-only execution
-reuses the mode that prepare resolved, carried on `WorkspaceInfo.McpMode`
-([Permission policy](#permission-policy)). For a coordinator-origin task the
+(`executor_interaction.go`). Promotion of a workspace-only execution is one
+of those paths, not a separate one: the agent is started by an executor
+launch or resume call that resolves the mode again through these resolvers
+and hands it to `configureExistingWorkspace` before `LaunchAgent` promotes
+the execution (`executor_execute.go`), so every fail-closed check runs again
+at promotion. Nothing carries prepare's decision forward; a coordinator
+whose flag, row or profile went away between prepare and promotion gets no
+agent. A test prepares a conversation session, then turns the lookup off
+(and, separately, makes the agent profile missing) and asserts the
+promoting launch errors and no agent subprocess starts.
+`WorkspaceInfo.McpMode` ([Permission policy](#permission-policy)) only sets
+the mode of the agentctl instance that the lifecycle builds on its own
+without an agent (workspace-only restore); it starts nothing. For a
+coordinator-origin task the
 branch returns an error, and the caller starts nothing, when the executor has
 no `CoordinatorLookup` (the flag is off, so none was wired), when the lookup
 finds no coordinator whose current `conversation_task_id` is the task, when
@@ -369,11 +419,23 @@ the messages built from them.
 
 - A new `McpMode` field on `lifecycle.WorkspaceInfo`
   (`internal/agent/runtime/lifecycle/types.go`, built by the task service in
-  `internal/task/service/service_turns.go`) carries the coordinator mode to every agentctl instance of the task, not
-  only its first launch: the prepare path (`IntentPrepare`/`NoAgentLaunch`,
-  used by the conversation route's session-ensure) and the promotion path (a
-  workspace-only execution later promoted to a full launch) both set it
-  before agentctl starts. agentctl itself does not consult its own
+  `internal/task/service/service_turns.go`) carries the coordinator mode to
+  the agentctl instances the lifecycle builds from `WorkspaceInfo` alone
+  (workspace-only restore and admission through
+  `GetWorkspaceInfoForSession`), which never pass through the executor
+  resolvers. Its only source is the task row: `GetWorkspaceInfoForSession`
+  reads the task by `session.TaskID` through the task repository and sets
+  `McpMode = mcpmode.Coordinator` when `task.Origin ==
+  models.TaskOriginCoordinator`, and leaves it empty (today's default) for
+  any other origin. A task-read error returns the error, as a session-read
+  error does today; a missing row leaves it empty, which is safe because
+  such an instance starts no agent and the agent-starting call goes through
+  the executor resolvers ([Fail closed](#fail-closed)), which refuse it. The
+  lifecycle passes `WorkspaceInfo.McpMode` into the instance it creates, and
+  the executor paths (first launch, prepare, resume, interaction and the
+  launch that promotes a workspace-only execution) pass the mode their
+  resolvers returned. A test asserts `GetWorkspaceInfoForSession` returns
+  `coordinator` for a conversation session and empty for a Kanban one. agentctl itself does not consult its own
   `cfg.AutoApprovePermissions` when its mode is `Coordinator`; the mode, not
   the CLI's local config, decides.
 - In the coordinator mode `AutoApprovePermissionsOverride=false` is applied on

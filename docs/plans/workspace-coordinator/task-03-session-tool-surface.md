@@ -98,10 +98,14 @@ Deciding proposals is task 07. Backend only. On the critical path.
   the coordinator's current profiles); coordinator delete additionally
   removes every conversation task of the coordinator (current and archived).
 - Every resolution site uses task 01's constants: `principalSurface`,
-  `CoordinatorLookup`, the coordinator branches in
+  the `CoordinatorLookup` interface (new here), the coordinator branches in
   `Executor.resolveTaskSessionMCPMode` and `resolveTaskSessionMCPProfile`
-  (decided before the session `config_mode` check, so a coordinator-origin
-  task never takes config mode), the mode cases in
+  (in the five-step order of
+  [copilot#principal-and-mode](../../specs/coordinator/system-design/copilot.md#principal-and-mode):
+  `GetTask` first, a read error failing every session including config-mode
+  ones; coordinator origin next, so a coordinator-origin task never takes
+  config mode; then the no-row lookup; then config mode as today), the mode
+  cases in
   `internal/mcp/server/server.go` and `Legacy` in
   `internal/mcp/profile/profile.go`, plugin tools skipped.
 - `Coordinator` added to `mcpmode.instanceModes` (`IsInstanceMode`,
@@ -115,9 +119,17 @@ Deciding proposals is task 07. Backend only. On the critical path.
   [copilot#principal-and-mode](../../specs/coordinator/system-design/copilot.md#principal-and-mode)
   (Wiring): new `internal/backendapp/coordinator_conversation.go` with
   `wireCoordinatorConversation(p routeParams)`, one call line in the existing
-  `if p.features.Coordinator` block of `helpers.go`, `svc.SetConversationDeps`,
-  and the lookup handed to the executor and the MCP scope resolvers; the hook
-  call site and `registerCoordinatorConversation`'s signature unchanged.
+  `if p.features.Coordinator` block of `registerSecondaryRoutes` in
+  `helpers.go`, `svc.SetConversationDeps` and `svc.SetConversationHooks`; the
+  hook call site and `registerCoordinatorConversation`'s signature unchanged.
+  The `CoordinatorLookup` is set at construction instead (Lookup wiring):
+  `mcpscope.Resolver.SetCoordinatorLookup` and
+  `orchestrator.Service.SetCoordinatorLookup` (forwarding to `Executor`),
+  each guarded by `services.Coordinator != nil`, called in
+  `startAgentInfrastructure` (`main.go`: its resolver after `NewResolver`,
+  the orchestrator after `provideOrchestrator` and before startup recovery)
+  and in `registerMCPAndDebugRoutes` (`helpers.go`: its resolver before
+  `SetMCPPrincipalScoper`); the `handoff_wiring.go` resolver gets none.
 - `registerCoordinatorTools` with exactly the six tools of
   `AC-COORDINATOR-COPILOT-003.1`, reusing their existing handlers unchanged;
   `propose_task_kandev` (open-proposal cap under a per-coordinator lock)
@@ -130,13 +142,17 @@ Deciding proposals is task 07. Backend only. On the critical path.
   absent, so the nil-task `Legacy` fallback never serves a coordinator task
   while the flag is on;
   exact-name auto-approval; `AutoApprovePermissionsOverride=false` on every
-  lifecycle path. A new `McpMode` field on `lifecycle.WorkspaceInfo`
-  (`internal/agent/runtime/lifecycle/types.go`, built in
-  `internal/task/service/service_turns.go`) carries the coordinator
-  mode to every agentctl instance of the task, not only its first launch: the
-  prepare path (`IntentPrepare`/`NoAgentLaunch`) and the promotion path (a
-  workspace-only execution later promoted to a full launch) both set it
-  before agentctl starts; agentctl does not consult its own
+  lifecycle path. Promotion of a workspace-only execution goes through an
+  executor launch or resume, so the resolvers and every fail-closed check run
+  again there; nothing carries prepare's decision forward. A new `McpMode`
+  field on `lifecycle.WorkspaceInfo`
+  (`internal/agent/runtime/lifecycle/types.go`), set by
+  `GetWorkspaceInfoForSession` (`internal/task/service/service_turns.go`)
+  from the task row alone (`coordinator` when the origin is `coordinator`,
+  empty otherwise; task-read error returns the error; missing row leaves it
+  empty), carries the mode to the agentctl instances the lifecycle builds
+  without the executor (workspace-only restore, admission), which start no
+  agent; agentctl does not consult its own
   `cfg.AutoApprovePermissions` in this mode.
 - `autoResumeEligibility` returns `coordinator_message_only`;
   `IsRestorableQuickChatTask` excludes the origin; `message.add` needs
@@ -212,6 +228,18 @@ Required Go tests:
   instance, and a lookup error fails it too;
 - `handleSetMcpMode` accepts `coordinator` (200) and an unknown mode's 400
   lists `coordinator`;
+- a config-mode session whose `GetTask` errors fails with no instance; a
+  config-mode session with no task row and no coordinator match, and one with
+  a readable non-coordinator task, still resolve config mode and the
+  configuration profile;
+- each of the two lookup-wired resolvers (`main.go`, `registerMCPAndDebugRoutes`)
+  resolves a coordinator conversation task to `SurfaceCoordinator` and its
+  coordinator, and refuses it when built without the lookup;
+- a prepared conversation session whose lookup is then removed, and
+  separately whose agent profile then goes missing, gets an error from the
+  promoting launch and no agent subprocess;
+- `GetWorkspaceInfoForSession` returns `McpMode` `coordinator` for a
+  conversation session and empty for a Kanban session;
 - two racing opens against the new `conversation_task_id` conditional-UPDATE
   return the same task and one session, and the losing task is deleted, on
   SQLite and PostgreSQL (`KANDEV_TEST_POSTGRES_DSN`), matching task 01's and
@@ -290,7 +318,10 @@ Required Go tests:
 - `apps/backend/internal/common/mcpmode/mode.go` (`instanceModes`)
 - `apps/backend/internal/agentctl/server/api/server.go` (`handleSetMcpMode`)
 - `apps/backend/internal/coordinator/no_turn_start_test.go`
-- `apps/backend/internal/backendapp/coordinator_conversation.go` (`wireCoordinatorConversation`) and its one call line in `helpers.go`
+- `apps/backend/internal/backendapp/coordinator_conversation.go` (`wireCoordinatorConversation`) and its one call line in `helpers.go` `registerSecondaryRoutes`
+- `apps/backend/internal/backendapp/main.go` (`startAgentInfrastructure`: resolver and orchestrator `SetCoordinatorLookup`) and `helpers.go` `registerMCPAndDebugRoutes` (resolver `SetCoordinatorLookup`)
+- `apps/backend/internal/mcp/scope/scope.go` (`SetCoordinatorLookup`), `apps/backend/internal/orchestrator/` (`Service.SetCoordinatorLookup` forwarding to `Executor`)
+- `apps/backend/internal/task/service/service_turns.go` and `apps/backend/internal/agent/runtime/lifecycle/types.go` (`WorkspaceInfo.McpMode`)
 - `apps/backend/internal/orchestrator/task_operations.go`
 - `apps/backend/internal/orchestrator/executor/executor_execute.go` (`resolveTaskSessionMCPMode`, `resolveTaskSessionMCPProfile`)
 - `apps/backend/internal/task/repository/sqlite/task.go` (`ListCoordinatorOriginTasks`, the expiry predicates)
