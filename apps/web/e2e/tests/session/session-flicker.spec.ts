@@ -3,7 +3,6 @@ import type { Page } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { waitForStableActiveSession } from "../../helpers/session-store";
 import { dwell } from "../../helpers/causal-waits";
@@ -85,13 +84,9 @@ async function createTaskWithTwoSessions(
     )
     .toBe(true);
 
-  const kanban = new KanbanPage(testPage);
-  await kanban.goto();
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 10_000 });
-  await card.click();
-  await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+  // The task API is authoritative here. Direct navigation avoids a race with
+  // the kanban snapshot refresh after the first agent session ends.
+  await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({

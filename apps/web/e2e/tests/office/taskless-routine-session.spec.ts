@@ -54,6 +54,7 @@ test.describe("Office taskless routine sessions", () => {
     officeApi,
     apiClient,
     officeSeed,
+    resetOfficeWorkspace,
   }) => {
     // A taskless launch has two asynchronous schedulers in front of the mock
     // agent (the wakeup dispatcher and the Office run scheduler). Under the
@@ -61,6 +62,9 @@ test.describe("Office taskless routine sessions", () => {
     // cycles before the runtime is admitted. Keep the test bounded, but allow
     // that startup window to complete without relying on Playwright retries.
     test.setTimeout(720_000);
+    // This API-only test does not request testPage, so reset the worker-shared
+    // Office workspace explicitly before it fires a routine.
+    await resetOfficeWorkspace();
     // The worker resets the status before each test, but the status write and
     // scheduler claim are asynchronous. Do not fire a routine while the
     // previous run still holds the agent in a transient working state.

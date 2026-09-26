@@ -458,9 +458,9 @@ test.describe("Task creation from GitHub URL", () => {
     // Switch to Remote tab and paste the PR URL.
     await openRemoteAndPasteURL(testPage, "https://github.com/test-owner/test-repo/pull/99");
 
-    // PR-info fetch resolves asynchronously; downstream the submit-button
-    // becomes enabled once branches + agent profile are ready. The terminal
-    // assertion later confirms the PR head branch is actually checked out.
+    // PR-info fetch resolves asynchronously; the submit button becomes enabled
+    // once branches and the agent profile are ready. The terminal assertion
+    // later confirms that the PR head branch is checked out.
 
     // Fill in title and description
     await testPage.getByTestId("task-title-input").fill("PR Task Local");
@@ -528,6 +528,11 @@ test.describe("Task creation from GitHub URL", () => {
     // Create the PR branch locally and switch back to main
     execSync("git checkout -b feature/pr-branch", { cwd: repoDir, env: gitEnv });
     execSync('git commit --allow-empty -m "pr branch commit"', { cwd: repoDir, env: gitEnv });
+    const prHeadSHA = execSync("git rev-parse HEAD", {
+      cwd: repoDir,
+      env: gitEnv,
+      encoding: "utf8",
+    }).trim();
     execSync("git push origin feature/pr-branch:refs/pull/77/head", {
       cwd: repoDir,
       env: gitEnv,
@@ -536,13 +541,18 @@ test.describe("Task creation from GitHub URL", () => {
 
     // Register the repo with a unique provider name to avoid collisions with
     // other tests that also register repos as test-owner/test-repo.
-    await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
-      name: "pr-owner/pr-wt-repo",
-      provider: "github",
-      provider_owner: "pr-owner",
-      provider_name: "pr-wt-repo",
-      pull_before_worktree: false,
-    });
+    const createdRepository = await apiClient.createRepository(
+      seedData.workspaceId,
+      repoDir,
+      "main",
+      {
+        name: "pr-owner/pr-wt-repo",
+        provider: "github",
+        provider_owner: "pr-owner",
+        provider_name: "pr-wt-repo",
+        pull_before_worktree: false,
+      },
+    );
 
     // Seed mock GitHub branches and PR
     await apiClient.mockGitHubAddBranches("pr-owner", "pr-wt-repo", [
@@ -582,9 +592,9 @@ test.describe("Task creation from GitHub URL", () => {
     // Switch to Remote tab and paste the PR URL.
     await openRemoteAndPasteURL(testPage, "https://github.com/pr-owner/pr-wt-repo/pull/77");
 
-    // PR-info fetch resolves asynchronously; downstream the submit-button
-    // becomes enabled once branches + agent profile are ready. The terminal
-    // assertion later confirms the PR head branch is actually checked out.
+    // PR-info fetch resolves asynchronously; the submit button becomes enabled
+    // once branches and the agent profile are ready. The worktree assertion
+    // later confirms that checkout uses the PR head commit.
 
     // Fill in title and description
     await testPage.getByTestId("task-title-input").fill("PR Worktree Task");
@@ -614,10 +624,38 @@ test.describe("Task creation from GitHub URL", () => {
 
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
 
-    // Verify the worktree checked out the PR branch directly.
-    await expect(session.terminal).toBeVisible({ timeout: 15_000 });
-    await session.typeInTerminal("git branch --show-current");
-    await session.expectTerminalHasText("feature/pr-branch");
+    // Verify that the ready worktree points at the PR commit. The fixture has
+    // a local branch with the PR name, so the worktree manager adds a unique
+    // suffix to avoid reusing that branch.
+    const taskId = new URL(testPage.url()).pathname.split("/").filter(Boolean).at(-1);
+    if (!taskId) throw new Error("task route did not expose a task id");
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(taskId))?.status ?? null, {
+        timeout: 15_000,
+        message: "worktree task environment did not become ready",
+      })
+      .toBe("ready");
+
+    const taskEnvironment = await apiClient.getTaskEnvironment(taskId);
+    const worktree = taskEnvironment?.repos?.find(
+      (repo) => repo.repository_id === createdRepository.id,
+    );
+    if (!worktree?.worktree_path || !worktree.worktree_branch) {
+      throw new Error("PR worktree path or branch was not recorded");
+    }
+    expect(worktree.worktree_branch).toMatch(/^feature\/pr-branch-/);
+    const currentBranch = execSync("git branch --show-current", {
+      cwd: worktree.worktree_path,
+      env: gitEnv,
+      encoding: "utf8",
+    }).trim();
+    expect(currentBranch).toBe(worktree.worktree_branch);
+    const checkedOutSHA = execSync("git rev-parse HEAD", {
+      cwd: worktree.worktree_path,
+      env: gitEnv,
+      encoding: "utf8",
+    }).trim();
+    expect(checkedOutSHA).toBe(prHeadSHA);
   });
 
   test("shows a launch error when the PR branch has no remote snapshot", async ({

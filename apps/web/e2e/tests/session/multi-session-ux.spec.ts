@@ -642,13 +642,9 @@ test.describe("Multi-session UX", () => {
         .toBe(true);
     }
 
-    // Navigate to task 1
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    const card1 = kanban.taskCardByTitle("Task Switch A");
-    await expect(card1).toBeVisible({ timeout: 10_000 });
-    await card1.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // The task API is authoritative here. Open the task directly so this test
+    // covers session switching instead of Kanban card projection timing.
+    await testPage.goto(`/t/${task1.id}`);
 
     const session = new SessionPage(testPage);
 

@@ -2778,6 +2778,7 @@ export class ApiClient {
   async getTask(taskId: string): Promise<{
     id: string;
     workspace_id?: string;
+    archived_at?: string | null;
     workflow_id?: string;
     title: string;
     description?: string;

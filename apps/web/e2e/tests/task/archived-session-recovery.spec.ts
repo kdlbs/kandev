@@ -139,6 +139,19 @@ test.describe("archived session recovery", () => {
       );
       await testPage.getByTestId("task-unarchive-button").click();
       await unarchiveResponse;
+      await expect
+        .poll(async () => (await apiClient.getTask(fixture.task.id)).archived_at, {
+          timeout: 30_000,
+          message: "Waiting for the backend to publish the unarchived task state",
+        })
+        .toBeFalsy();
+
+      // This test covers the auto-start preference. A separate task-detail E2E
+      // test verifies that the Unarchive button disappears without navigation.
+      // Reload after the backend confirms the change so a missed task.updated
+      // event cannot make this preference assertion depend on stale page state.
+      await testPage.reload();
+      await session.waitForLoad();
       await expect(testPage.getByTestId("task-unarchive-button")).toHaveCount(0);
       await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
       expect(

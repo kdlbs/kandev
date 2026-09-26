@@ -77,8 +77,8 @@ test.describe("PR watcher dockview layout stability", () => {
    *   5. Switch to PR task 3 via sidebar → should have default layout
    *
    * Setup:
-   *   Review step with auto_start_agent on_enter — all 3 tasks get primary
-   *   sessions immediately, so sidebar navigation takes the fast (synchronous) path.
+   *   The watcher creates PR tasks. The test prepares their sessions without
+   *   launching agents because agent startup is outside this layout test.
    */
   test("layout remains correct when switching between PR watcher tasks with plan mode", async ({
     testPage,
@@ -86,10 +86,6 @@ test.describe("PR watcher dockview layout stability", () => {
     seedData,
     backend,
   }) => {
-    // The review watcher auto-starts a mock agent for each of the 3 PR tasks,
-    // so 3 git checkouts + agent boots run concurrently up front. Under CI shard
-    // contention that inherent workload, plus three subsequent session
-    // navigations, can outlast the default budget — give the whole flow headroom.
     test.setTimeout(180_000);
 
     // --- Register the GitHub repo so the PR watcher can resolve it to a real
@@ -103,9 +99,8 @@ test.describe("PR watcher dockview layout stability", () => {
       provider_name: "testrepo",
     });
 
-    // Create the PR head branches in the local seed repo so the executor's
-    // git checkout for auto-started review tasks succeeds (in production these
-    // branches would have been fetched during clone).
+    // Create PR head branches so the sequential session preparation can check
+    // out each PR branch (in production these branches are fetched during clone).
     const gitEnv = makeGitEnv(backend.tmpDir);
     for (const branch of ["fix/auth", "feat/dashboard", "docs/update"]) {
       execSync(`git branch -f ${branch} main`, { cwd: repoDir, env: gitEnv });
@@ -118,15 +113,6 @@ test.describe("PR watcher dockview layout stability", () => {
     );
 
     const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 0);
-
-    // Configure auto-start so the review watcher immediately launches mock agents
-    // for all 3 PR tasks. By the time the test reaches the sidebar navigation
-    // steps, tasks 2 and 3 already have a primarySessionId in kanbanMulti.snapshots
-    // → handleSelectTask takes the fast (synchronous) path instead of the slow
-    // HTTP + WS round-trip that times out in CI.
-    await apiClient.updateWorkflowStep(reviewStep.id, {
-      events: { on_enter: [{ type: "auto_start_agent" }] },
-    });
 
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
@@ -211,6 +197,15 @@ test.describe("PR watcher dockview layout stability", () => {
     await waitForReviewTasksInBackend(apiClient, seedData.workspaceId, reviewStep.id, prTaskTitles);
     await waitForReviewTaskCards(testPage, kanban, reviewStep.id, prTaskTitles);
 
+    // Prepare each session in sequence. This gives sidebar navigation a primary
+    // session while avoiding concurrent worktree setup in a layout-only test.
+    const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+    for (const title of prTaskTitles) {
+      const task = tasks.find((candidate) => candidate.title === title);
+      if (!task) throw new Error(`PR watcher did not create task: ${title}`);
+      await apiClient.ensureTaskSession(task.id);
+    }
+
     // --- Click PR task 1 to enter session view ---
     await kanban.taskCardInColumn(prTask1Title, reviewStep.id).click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
@@ -222,11 +217,8 @@ test.describe("PR watcher dockview layout stability", () => {
     await expect(session.chat).toBeVisible({ timeout: 10_000 });
     await expect(session.sidebar).toBeVisible();
 
-    // Wait for the mock agent to complete and the layout to be stable before toggling
-    // plan mode. Without this, an in-flight layout restore could swallow the panel add.
-    // Use `waitForChatIdle` (vs. raw `idleInput().waitFor`) so the helper's
-    // reload-and-retry recovery covers the rare case where the WS-driven idle
-    // signal misses its window under shard pressure.
+    // Wait for the prepared session and layout to settle before toggling plan
+    // mode. Without this, an in-flight layout restore could swallow the panel add.
     await session.waitForChatIdle({ timeout: 30_000 });
 
     // --- Toggle plan mode on task 1 ---
@@ -237,9 +229,8 @@ test.describe("PR watcher dockview layout stability", () => {
 
     // --- Switch to PR task 2 via sidebar ---
     await session.clickTaskInSidebar(prTask2Title);
-    // With auto_start_agent configured, task 2 already has a primarySessionId in
-    // kanbanMulti.snapshots → handleSelectTask takes the synchronous fast path
-    // and setActiveSession is called immediately.
+    // The prepared primary session lets sidebar navigation use the fast path
+    // as it does for any task that already has a session.
     await expect(
       testPage
         .getByRole("navigation", { name: "breadcrumb" })
@@ -260,7 +251,7 @@ test.describe("PR watcher dockview layout stability", () => {
 
     // --- Switch to PR task 3 via sidebar ---
     await session.clickTaskInSidebar(prTask3Title);
-    // Same fast-path navigation as task 2
+    // The prepared primary session also makes this a fast-path navigation.
     await expect(
       testPage
         .getByRole("navigation", { name: "breadcrumb" })

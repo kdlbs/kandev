@@ -5,6 +5,7 @@ import { ApiClient } from "../helpers/api-client";
 
 type OfficeFixtures = {
   officeApi: OfficeApiClient;
+  resetOfficeWorkspace: () => Promise<void>;
   officeSeed: {
     workspaceId: string;
     agentId: string;
@@ -53,6 +54,27 @@ export const test = base.extend<{ testPage: Page }, OfficeFixtures>({
     { scope: "worker" },
   ],
 
+  // Office tests share a worker-scoped workspace. Expose its reset so API-only
+  // tests can request the same task/session isolation as tests that use a page.
+  resetOfficeWorkspace: async ({ backend, apiClient, officeSeed, seedData }, use) => {
+    await use(() =>
+      runWithBackendRecovery(backend, async () => {
+        if (officeSeed.workspaceId !== seedData.workspaceId) {
+          await apiClient.e2eReset(officeSeed.workspaceId, [
+            seedData.workflowId,
+            officeSeed.workflowId,
+          ]);
+        }
+        await apiClient.saveUserSettings({
+          workspace_id: officeSeed.workspaceId,
+          workflow_filter_id: seedData.workflowId,
+          keyboard_shortcuts: {},
+          enable_preview_on_click: false,
+        });
+      }),
+    );
+  },
+
   // Override testPage to set the active workspace to officeSeed.workspaceId
   // so that office UI pages render with the seeded office data.
   //
@@ -60,31 +82,43 @@ export const test = base.extend<{ testPage: Page }, OfficeFixtures>({
   // but onboarding allocates its OWN workspace ID (officeSeed.workspaceId),
   // so per-test office task / session leftovers leak across tests unless we
   // reset the office workspace here as well.
-  testPage: async ({ testPage: basePage, backend, apiClient, officeSeed, seedData }, use) => {
-    await runWithBackendRecovery(backend, async () => {
-      if (officeSeed.workspaceId !== seedData.workspaceId) {
-        await apiClient.e2eReset(officeSeed.workspaceId, [
-          seedData.workflowId,
-          officeSeed.workflowId,
-        ]);
-      }
-      await apiClient.saveUserSettings({
-        workspace_id: officeSeed.workspaceId,
-        workflow_filter_id: seedData.workflowId,
-        keyboard_shortcuts: {},
-        enable_preview_on_click: false,
-      });
-    });
+  testPage: async ({ testPage: basePage, resetOfficeWorkspace }, use) => {
+    await resetOfficeWorkspace();
     await use(basePage);
   },
 });
 
-// Tests in this suite deliberately exercise status transitions. Reset the
-// worker-shared CEO before every test so a previous paused/stopped/working
-// state cannot make the scheduler silently reject the next assignment.
-test.beforeEach(async ({ backend, officeApi, officeSeed }) => {
+// Office uses one worker-scoped workspace. Finalize every active seeded run so
+// a previous test cannot hold runtime capacity for a later test's agent.
+async function finishActiveOfficeRuns(
+  apiClient: ApiClient,
+  officeApi: OfficeApiClient,
+  workspaceId: string,
+): Promise<void> {
+  const result = await officeApi.listRuns(workspaceId);
+  const runs = Array.isArray(result.runs)
+    ? (result.runs as Array<{ id?: string; status?: string }>)
+    : [];
+
+  for (const run of runs) {
+    if (run.id && (run.status === "queued" || run.status === "claimed")) {
+      await apiClient.updateRunStatus(run.id, { status: "finished" });
+    }
+  }
+}
+
+// Tests deliberately exercise status transitions. Clear prior runs before
+// restoring the worker-shared CEO to idle for the next assignment.
+test.beforeEach(async ({ backend, apiClient, officeApi, officeSeed }) => {
+  await runWithBackendRecovery(backend, async () => {
+    await finishActiveOfficeRuns(apiClient, officeApi, officeSeed.workspaceId);
+    await officeApi.updateAgentStatus(officeSeed.agentId, "idle");
+  });
+});
+
+test.afterEach(async ({ backend, apiClient, officeApi, officeSeed }) => {
   await runWithBackendRecovery(backend, () =>
-    officeApi.updateAgentStatus(officeSeed.agentId, "idle"),
+    finishActiveOfficeRuns(apiClient, officeApi, officeSeed.workspaceId),
   );
 });
 
