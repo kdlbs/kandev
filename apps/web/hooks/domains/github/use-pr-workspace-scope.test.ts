@@ -1,5 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { setWebSocketClient } from "@/lib/ws/connection";
+import type { WebSocketClient } from "@/lib/ws/client";
 
 const mocks = vi.hoisted(() => ({
   workspaceId: "ws-1" as string | null,
@@ -17,17 +19,19 @@ vi.mock("@/components/state-provider", () => ({
     }),
 }));
 
-vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => ({ request: mocks.request }),
-}));
-
 import { useActiveTaskPRsWithFiles } from "./use-active-task-pr-files";
 import { usePRCommits } from "./use-pr-commits";
 import { usePRDiff } from "./use-pr-diff";
 import type { TaskPR } from "@/lib/types/github";
 
+beforeEach(() => {
+  mocks.request.mockReset();
+  setWebSocketClient({ request: mocks.request } as unknown as WebSocketClient);
+});
+
 afterEach(() => {
   cleanup();
+  setWebSocketClient(null);
   mocks.workspaceId = "ws-1";
   mocks.activeTaskId = "task-1";
   mocks.prs = [];
@@ -144,6 +148,26 @@ describe("PR workspace request scope", () => {
 });
 
 describe("PR file refresh stability", () => {
+  it("fetches PR files when the WebSocket client becomes available after mount", async () => {
+    mocks.prs = [taskPR()];
+    mocks.request.mockResolvedValue({ files: [{ filename: "ready.ts" }] });
+    setWebSocketClient(null);
+
+    const { result } = renderHook(() => useActiveTaskPRsWithFiles());
+
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(result.current.filesByPRKey).toEqual({});
+
+    await act(async () => {
+      setWebSocketClient({ request: mocks.request } as unknown as WebSocketClient);
+    });
+
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(Object.values(result.current.filesByPRKey).flat()).toEqual([{ filename: "ready.ts" }]),
+    );
+  });
+
   it("discards a superseded timestamp response that resolves last", async () => {
     mocks.prs = [taskPR()];
     let resolveSecond: ((value: { files: Array<{ filename: string }> }) => void) | undefined;

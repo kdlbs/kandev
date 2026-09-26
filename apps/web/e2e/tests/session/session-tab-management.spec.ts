@@ -64,7 +64,6 @@ async function createTaskWithTwoSessions(
   // the session route so this setup does not depend on the board projection
   // catching up with the task creation.
   await testPage.goto(`/t/${task.id}`);
-
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
