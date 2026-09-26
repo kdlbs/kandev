@@ -61,6 +61,15 @@ TS_MEMBER = re.compile(
     r"(?P<tail>[:(<=>,;]|$)"
 )
 TS_DECORATOR = re.compile(r"@[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*")
+TS_SIGNATURE_TOKEN = re.compile(
+    r"(?P<comment>//[^\r\n]*|/\*[\s\S]*?\*/)|"
+    r"(?P<string>`(?:\\.|[^`\\])*`|'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\")|"
+    r"(?P<identifier>[A-Za-z_$][\w$]*)|(?P<number>\d+(?:\.\d+)?)|"
+    r"(?P<operator>\.\.\.|===|!==|>>>|=>|\?\.|\?\?|&&|\|\||==|!=|<=|>=|"
+    r"<<|>>|\*\*|\+\+|--|\+=|-=|\*=|/=|%=|\?\?=|&&=|\|\|=)|"
+    r"(?P<space>\s+)|(?P<punct>.)",
+    re.DOTALL,
+)
 
 
 @dataclass(frozen=True)
@@ -379,7 +388,11 @@ def _canonical_typescript_key(key: str) -> str:
 
 
 def _typescript_declaration(
-    code: str, scope: str | None, raw_code: str | None = None, top_level: bool = True
+    code: str,
+    scope: str | None,
+    raw_code: str | None = None,
+    top_level: bool = True,
+    signature: str | None = None,
 ) -> str | None:
     if scope:
         member = TS_MEMBER.match(raw_code if raw_code is not None else code)
@@ -388,13 +401,66 @@ def _typescript_declaration(
         kind = "method" if member.group("tail").startswith(("(", "<")) else "property"
         key = _canonical_typescript_key(member.group("key"))
         qualified_key = key if key.startswith("[") else f".{key}"
-        return f"{kind}:{scope}{qualified_key}"
+        declaration = f"{kind}:{scope}{qualified_key}"
+        if kind == "method" and signature is not None:
+            return f"{declaration}[signature={signature}]"
+        return declaration
     if not top_level:
         return None
     declaration = TS_DECLARATION.match(code)
     if declaration:
-        return f"{declaration.group(1)}:{declaration.group(2)}"
+        identity = f"{declaration.group(1)}:{declaration.group(2)}"
+        if declaration.group(1) == "function" and signature is not None:
+            return f"{identity}[signature={signature}]"
+        return identity
     return None
+
+
+def _typescript_call_signature(source: str, masked: str, start: int) -> str | None:
+    """Normalize a function or method's generic and parameter signature."""
+
+    angle_depth = 0
+    open_paren: int | None = None
+    for index in range(start, len(masked)):
+        char = masked[index]
+        if char == "<":
+            angle_depth += 1
+        elif char == ">" and angle_depth:
+            angle_depth -= 1
+        elif char == "(" and angle_depth == 0:
+            open_paren = index
+            break
+        elif char in ";{}" and angle_depth == 0:
+            return None
+
+    if open_paren is None:
+        return None
+
+    paren_depth = 0
+    close_paren: int | None = None
+    for index in range(open_paren, len(masked)):
+        if masked[index] == "(":
+            paren_depth += 1
+        elif masked[index] == ")":
+            paren_depth -= 1
+            if paren_depth == 0:
+                close_paren = index
+                break
+    if close_paren is None:
+        return None
+
+    tokens: list[str] = []
+    for match in TS_SIGNATURE_TOKEN.finditer(source[start : close_paren + 1]):
+        if match.lastgroup in {"comment", "space"}:
+            continue
+        token = match.group()
+        if match.lastgroup == "string" and token.startswith(("'", '"')):
+            try:
+                token = json.dumps(ast.literal_eval(token), ensure_ascii=False)
+            except (SyntaxError, ValueError):
+                pass
+        tokens.append(token)
+    return " ".join(tokens)
 
 
 def _typescript_findings(
@@ -414,7 +480,21 @@ def _typescript_findings(
         code = masked[target_index:line_end]
         raw_code = source[target_index:line_end]
         scope, top_level = _typescript_scope(masked, target_index, source)
-        declaration = _typescript_declaration(code, scope, raw_code, top_level)
+        signature_start: int | None = None
+        if scope:
+            member = TS_MEMBER.match(raw_code)
+            if member and member.group("tail").startswith(("(", "<")):
+                signature_start = target_index + member.end("key")
+        elif top_level:
+            top_level_declaration = TS_DECLARATION.match(code)
+            if top_level_declaration and top_level_declaration.group(1) == "function":
+                signature_start = target_index + top_level_declaration.end()
+        signature = (
+            _typescript_call_signature(source, masked, signature_start)
+            if signature_start is not None
+            else None
+        )
+        declaration = _typescript_declaration(code, scope, raw_code, top_level, signature)
         if declaration:
             findings.append((marker_line, declaration, TYPESCRIPT_MARKER))
     return findings
@@ -438,17 +518,34 @@ def find_declarations(path: str, source: str) -> list[tuple[int, str, str]]:
 
 def scan(path: str, source: str) -> list[Finding]:
     findings: list[Finding] = []
-    occurrences: dict[str, int] = {}
-    for line, declaration, marker in find_declarations(path, source):
-        occurrences[declaration] = occurrences.get(declaration, 0) + 1
-        identity_declaration = f"{declaration}#{occurrences[declaration]}"
+    occurrences: dict[tuple[str, str], int] = {}
+    declarations = find_declarations(path, source)
+    declaration_counts: dict[tuple[str, str], int] = {}
+    for _, declaration, marker in declarations:
+        key = (declaration, marker)
+        declaration_counts[key] = declaration_counts.get(key, 0) + 1
+    for line, declaration, marker in declarations:
+        key = (declaration, marker)
+        occurrences[key] = occurrences.get(key, 0) + 1
+        identity_declaration = f"{declaration}#{occurrences[key]}"
+        is_ambiguous = declaration_counts[key] > 1
+        identity: dict[str, object] = {
+            "path": path,
+            "declaration": identity_declaration,
+            "marker": marker,
+        }
+        if is_ambiguous:
+            identity["ambiguous"] = True
         findings.append(
             Finding.create(
                 RULE_ID,
                 path,
                 line,
-                {"path": path, "declaration": identity_declaration, "marker": marker},
-                (
+                identity,
+                f"ambiguous repeated deprecation identity {identity_declaration} ({marker}); "
+                "distinguish or remove the duplicate before registering it"
+                if is_ambiguous
+                else (
                     f"deprecated declaration {identity_declaration} ({marker}) is unregistered; "
                     "add a matching compatibility-ledger entry with locator.path, "
                     "locator.declaration, and locator.marker"

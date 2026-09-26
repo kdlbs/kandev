@@ -116,10 +116,25 @@ def validate_ledger(
         registration_counts[identity] = registration_counts.get(identity, 0) + 1
 
     findings_by_declaration: dict[tuple[str, str, str], Finding] = {}
+    ambiguous_declarations: set[tuple[str, str, str]] = set()
     for finding in findings:
         identity = finding.identity_dict()
         declaration = identity.get("declaration")
         marker = identity.get("marker")
+        if identity.get("ambiguous") is True:
+            if isinstance(declaration, str) and isinstance(marker, str):
+                ambiguous_identity = (finding.path, declaration.rsplit("#", 1)[0], marker)
+                if ambiguous_identity not in ambiguous_declarations:
+                    ambiguous_declarations.add(ambiguous_identity)
+                    diagnostics.append(
+                        diagnostic(
+                            label,
+                            "ambiguous repeated deprecation identity cannot be registered: "
+                            f"{finding.path} {ambiguous_identity[1]} ({marker}); "
+                            "distinguish or remove the duplicate declaration",
+                        )
+                    )
+            continue
         if isinstance(declaration, str) and isinstance(marker, str):
             findings_by_declaration[(finding.path, declaration, marker)] = finding
 

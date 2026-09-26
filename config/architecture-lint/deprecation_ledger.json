@@ -29,7 +29,7 @@
     },
     {
       "path": "apps/web/lib/agent-permissions.ts",
-      "declaration": "function:profileToPermissionsMap#1",
+      "declaration": "function:profileToPermissionsMap[signature=( profile : PermissionProfileInput , permissionSettings : Record < string , PermissionSetting > , )]#1",
       "marker": "@deprecated"
     },
     {
@@ -39,7 +39,7 @@
     },
     {
       "path": "apps/web/lib/api/domains/office-api.ts",
-      "declaration": "function:getInboxCount#1",
+      "declaration": "function:getInboxCount[signature=( workspaceId : string , options ? : ApiRequestOptions )]#1",
       "marker": "@deprecated"
     },
     {
@@ -74,7 +74,7 @@
     },
     {
       "path": "apps/web/lib/utils/time.ts",
-      "declaration": "function:timeAgo#1",
+      "declaration": "function:timeAgo[signature=( dateStr : string )]#1",
       "marker": "@deprecated"
     }
   ]

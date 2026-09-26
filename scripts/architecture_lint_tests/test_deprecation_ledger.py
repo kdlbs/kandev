@@ -20,7 +20,7 @@ class DeprecationLedgerTest(ArchitectureFixture):
 
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("ARCH-DEPRECATION-LEDGER", result.stdout)
-        self.assertIn("function:oldApi#1", result.stdout)
+        self.assertIn("function:oldApi[signature=", result.stdout)
         self.assertIn("add a matching compatibility-ledger entry", result.stdout)
 
         repeated = self.run_cli("--all")
@@ -42,7 +42,7 @@ class DeprecationLedgerTest(ArchitectureFixture):
                     "id": "old-api",
                     "locator": {
                         "path": path,
-                        "declaration": "function:oldApi#1",
+                        "declaration": "function:oldApi[signature=( )]#1",
                         "marker": "@deprecated",
                     },
                     "reason": "Existing callers still use the old API.",
@@ -72,7 +72,7 @@ class DeprecationLedgerTest(ArchitectureFixture):
             "id": "old-api",
             "locator": {
                 "path": path,
-                "declaration": "function:oldApi#1",
+                "declaration": "function:oldApi[signature=( )]#1",
                 "marker": "@deprecated",
             },
             "reason": "Existing callers still use the old API.",
@@ -341,7 +341,11 @@ class DeprecationLedgerTest(ArchitectureFixture):
         )
         self.write_baseline(
             deprecation_ledger=[
-                {"path": path, "declaration": "function:oldApi#1", "marker": "@deprecated"}
+                {
+                    "path": path,
+                    "declaration": "function:oldApi[signature=( )]#1",
+                    "marker": "@deprecated",
+                }
             ]
         )
         self.track_all()
@@ -354,7 +358,11 @@ class DeprecationLedgerTest(ArchitectureFixture):
         path = "apps/web/lib/old-api.ts"
         self.write_baseline(
             deprecation_ledger=[
-                {"path": path, "declaration": "function:oldApi#1", "marker": "@deprecated"}
+                {
+                    "path": path,
+                    "declaration": "function:oldApi[signature=( )]#1",
+                    "marker": "@deprecated",
+                }
             ]
         )
         self.track_all()
@@ -377,7 +385,11 @@ class DeprecationLedgerTest(ArchitectureFixture):
         self.git("commit", "-m", "baseline")
         self.write_baseline(
             deprecation_ledger=[
-                {"path": path, "declaration": "function:oldApi#1", "marker": "@deprecated"}
+                {
+                    "path": path,
+                    "declaration": "function:oldApi[signature=( )]#1",
+                    "marker": "@deprecated",
+                }
             ]
         )
         self.track_all()
@@ -430,7 +442,7 @@ class DeprecationLedgerTest(ArchitectureFixture):
 
         self.assertEqual(
             find_declarations("apps/web/lib/old-api.mts", source),
-            [(1, "function:Old", "@deprecated")],
+            [(1, "function:Old[signature=( )]", "@deprecated")],
         )
 
     def test_tsx_apostrophe_in_jsx_text_does_not_hide_later_deprecations(self) -> None:
@@ -442,7 +454,7 @@ class DeprecationLedgerTest(ArchitectureFixture):
 
         self.assertEqual(
             find_declarations("apps/web/lib/retry-label.tsx", source),
-            [(2, "function:oldApi", "@deprecated")],
+            [(2, "function:oldApi[signature=( )]", "@deprecated")],
         )
 
     def test_multiline_jsdoc_uses_tag_line_and_member_identity(self) -> None:
@@ -516,7 +528,7 @@ class DeprecationLedgerTest(ArchitectureFixture):
             findings,
             [
                 (1, "class:OldClass", "@deprecated"),
-                (5, "method:Service.oldMethod", "@deprecated"),
+                (5, "method:Service.oldMethod[signature=( )]", "@deprecated"),
             ],
         )
 
@@ -554,7 +566,7 @@ class DeprecationLedgerTest(ArchitectureFixture):
             [
                 (2, 'property:Keys["old-key"]', "@deprecated"),
                 (4, "property:Keys[4]", "@deprecated"),
-                (6, "method:Keys[Symbol.iterator]", "@deprecated"),
+                (6, "method:Keys[Symbol.iterator][signature=( )]", "@deprecated"),
             ],
         )
 
@@ -596,7 +608,161 @@ class DeprecationLedgerTest(ArchitectureFixture):
 
         findings = scan("apps/web/lib/old-api.ts", source)
 
-        self.assertEqual(
-            [finding.identity_dict()["declaration"] for finding in findings],
-            ["function:oldApi#1", "function:oldApi#2"],
+        declarations = [finding.identity_dict()["declaration"] for finding in findings]
+        self.assertEqual(len(declarations), 2)
+        self.assertEqual(len(set(declarations)), 2)
+        self.assertTrue(all(declaration.endswith("#1") for declaration in declarations))
+        self.assertTrue(all(declaration.startswith("function:oldApi[signature=") for declaration in declarations))
+
+    def test_overload_identities_survive_reordering_and_signature_formatting(self) -> None:
+        source = """\
+        /** @deprecated Use currentApi instead. */
+        export function oldApi(value: 'ready'): void;
+        /** @deprecated Use currentApi instead. */
+        export function oldApi(value: number): void;
+        """
+        reordered_and_reformatted = """\
+        /** @deprecated Use currentApi instead. */
+        export function oldApi(
+          value : number
+        ) : void;
+        /** @deprecated Use currentApi instead. */
+        export function oldApi(value: "ready"): void;
+        """
+
+        original = {
+            finding.identity_dict()["declaration"]
+            for finding in scan("apps/web/lib/old-api.ts", source)
+        }
+        reformatted = {
+            finding.identity_dict()["declaration"]
+            for finding in scan("apps/web/lib/old-api.ts", reordered_and_reformatted)
+        }
+
+        self.assertEqual(len(original), 2)
+        self.assertTrue(all(declaration.endswith("#1") for declaration in original))
+        self.assertEqual(reformatted, original)
+
+    def test_overloaded_methods_keep_their_container_in_the_identity(self) -> None:
+        source = """\
+        export interface Service {
+          /** @deprecated Use currentApi instead. */
+          oldApi(value: string): void;
+          /** @deprecated Use currentApi instead. */
+          oldApi(value: number): void;
+        }
+        export interface Worker {
+          /** @deprecated Use currentApi instead. */
+          oldApi(value: string): void;
+        }
+        """
+
+        declarations = [
+            finding.identity_dict()["declaration"]
+            for finding in scan("apps/web/lib/old-api.ts", source)
+        ]
+
+        self.assertEqual(len(declarations), 3)
+        self.assertEqual(len(set(declarations)), 3)
+        self.assertTrue(all(declaration.endswith("#1") for declaration in declarations))
+        self.assertTrue(any(declaration.startswith("method:Service.oldApi[") for declaration in declarations))
+        self.assertTrue(any(declaration.startswith("method:Worker.oldApi[") for declaration in declarations))
+
+    def test_removed_overload_does_not_transfer_its_registration(self) -> None:
+        path = "apps/web/lib/old-api.ts"
+        original_source = """
+            /** @deprecated Use currentApi instead. */
+            export function oldApi(value: string): void;
+            /** @deprecated Use currentApi instead. */
+            export function oldApi(value: number): void;
+        """
+        self.write(
+            path,
+            original_source,
         )
+        first_declaration = scan(path, original_source)[0].identity_dict()["declaration"]
+        self.write_ledger(
+            [
+                {
+                    "id": "old-api-string-overload",
+                    "locator": {
+                        "path": path,
+                        "declaration": first_declaration,
+                        "marker": "@deprecated",
+                    },
+                    "reason": "Existing callers still use the string overload.",
+                    "owner": "web maintainers",
+                    "introduced_on": "2026-01-15",
+                    "removal_condition": "All callers use currentApi.",
+                    "target_removal_version": "2.0.0",
+                }
+            ]
+        )
+        self.write(
+            path,
+            """
+            /** @deprecated Use currentApi instead. */
+            export function oldApi(value: number): void;
+            """,
+        )
+        self.track_all()
+
+        result = self.run_cli("--all")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("old-api-string-overload: locator declaration does not match", result.stdout)
+
+    def test_identical_overload_signatures_are_reported_as_ambiguous(self) -> None:
+        path = "apps/web/lib/old-api.ts"
+        source = """
+            /** @deprecated Use currentApi instead. */
+            export function oldApi(value: string): void;
+            /** @deprecated Use currentApi instead. */
+            export function oldApi(value: string): void;
+        """
+        self.write(
+            path,
+            source,
+        )
+        declaration = scan(path, source)[0].identity_dict()["declaration"]
+        self.write_ledger(
+            [
+                {
+                    "id": "old-api-duplicate-overload",
+                    "locator": {
+                        "path": path,
+                        "declaration": declaration,
+                        "marker": "@deprecated",
+                    },
+                    "reason": "Existing callers still use oldApi.",
+                    "owner": "web maintainers",
+                    "introduced_on": "2026-01-15",
+                    "removal_condition": "All callers use currentApi.",
+                    "target_removal_version": "2.0.0",
+                }
+            ]
+        )
+        self.track_all()
+
+        result = self.run_cli("--all")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("ambiguous repeated deprecation identity", result.stdout)
+
+    def test_duplicate_go_annotations_on_one_field_are_reported_as_ambiguous(self) -> None:
+        self.write(
+            "apps/backend/internal/example/payload.go",
+            """
+            package example
+            type Payload struct {
+              // Deprecated: use Current.
+              Old string // Deprecated: retained for old clients.
+            }
+            """,
+        )
+        self.track_all()
+
+        result = self.run_cli("--all")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("ambiguous repeated deprecation identity", result.stdout)

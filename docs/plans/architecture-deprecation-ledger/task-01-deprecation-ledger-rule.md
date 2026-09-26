@@ -16,9 +16,9 @@ New canonical production Go and TypeScript deprecation annotations require a mat
 
 ## Acceptance
 
-- `ARCH-DEPRECATION-LEDGER` detects Go `Deprecated:` declaration comments and TypeScript JSDoc `@deprecated` declarations with stable `(path, declaration, marker)` identities.
+- `ARCH-DEPRECATION-LEDGER` detects Go `Deprecated:` declaration comments and TypeScript JSDoc `@deprecated` declarations with stable `(path, declaration, marker)` identities; TypeScript function and method overload identities include their normalized generic and parameter signatures.
 - A valid matching ledger registration passes; a missing or mismatched registration fails with deterministic actionable diagnostics.
-- Tests cover grouped Go declarations, embedded fields, nested and decorated TypeScript declarations, non-identifier member keys, baseline bootstrap/shrink behavior, repeat declarations, and generated/test/fixture/third-party/string/prose exclusions while preserving existing ledger date, version, staleness, and marker checks.
+- Tests cover grouped Go declarations, embedded fields, nested and decorated TypeScript declarations, non-identifier member keys, overload identity stability under reordering and formatting, stale registrations after overload removal, ambiguous duplicate signatures, baseline bootstrap/shrink behavior, and generated/test/fixture/third-party/string/prose exclusions while preserving existing ledger date, version, staleness, and marker checks.
 - The initial baseline contains exactly the current unregistered production declarations on the refreshed main head.
 
 ## Scope and exclusions
@@ -46,14 +46,14 @@ git diff --check
 
 ## Results
 
-Implemented and verified on refreshed main `c735b678863ba64e31bd78cd1a6e3c845be3b4e9`. Review regressions cover grouped and embedded Go declarations, nested and decorated TypeScript declarations, string/numeric/computed member keys, local-variable exclusions, and apostrophes in JSX text.
+Implemented and verified on refreshed main `c735b678863ba64e31bd78cd1a6e3c845be3b4e9`. Review regressions cover grouped and embedded Go declarations, nested and decorated TypeScript declarations, string/numeric/computed member keys, local-variable exclusions, and apostrophes in JSX text. A follow-up identity regression also proves distinct TS overloads keep identities when reordered or reformatted, stale registrations fail when the referenced overload is removed, and indistinguishable repeated signatures are diagnosed.
 
 - The initial baseline contains exactly 15 unregistered declarations: 4 Go and 11 TypeScript.
 - The two existing compatibility-ledger entries are unchanged.
-- `python3 scripts/lint-architecture.test.py` — passed, 90 tests.
-- `make lint-architecture` — passed.
-- `python3 scripts/lint-architecture.py --all --baseline-base-ref origin/main --allow-missing-base-baseline` — passed.
-- `python3 scripts/list-docs.py validate` — passed; 310 decisions and 1185 specifications validated.
-- `python3 scripts/lint-spec-files.py --all` — passed.
+- `python3 scripts/lint-architecture.test.py` — passed, 95 tests after identity hardening.
+- `make lint-architecture` — passed after identity hardening.
+- `python3 scripts/lint-architecture.py --all --baseline-base-ref origin/main --allow-missing-base-baseline` — passed after identity hardening.
+- `python3 scripts/list-docs.py validate` — passed after identity docs updates; 310 decisions and 1185 specifications validated.
+- `python3 scripts/lint-spec-files.py --all` — passed after identity docs updates.
 - `python3 scripts/lint-harness-files.test.py` — passed, 19 tests; `make lint-harness` passed for all 199 harness files.
 - `git diff --check` — passed.

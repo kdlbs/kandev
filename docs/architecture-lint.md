@@ -94,10 +94,17 @@ kind and qualified symbol name followed by an occurrence number such as `#1`. Go
 such as `type:Old`, `field:Wrapper.Old`, and `method:Service.Close`; each name in a grouped
 declaration has its own identity. TypeScript member identifiers use forms such as
 `property:Options.config.old`, while non-identifier keys use canonical brackets such as
-`property:Keys["old-key"]`, `property:Keys[4]`, or `method:Keys[Symbol.iterator]`. It does not
-contain the line number or explanatory comment text. The marker is exactly `Deprecated:` or
-`@deprecated`. This keeps comment wording, quote style, and line movement from changing the
-exemption while distinguishing repeated declarations in one file.
+`property:Keys["old-key"]`, `property:Keys[4]`, or
+`method:Keys[Symbol.iterator][signature=( )]`. TypeScript functions and methods also include their
+normalized generic and parameter signature, for example
+`method:Service.oldApi[signature=( value : string )]#1`. This gives overloads distinct identities
+independent of declaration order. Whitespace and comments in a signature do not affect its
+identity, and single- and double-quoted string literal types use the same canonical form.
+
+The identity does not contain line numbers or explanatory comment text. The marker is exactly
+`Deprecated:` or `@deprecated`. If multiple annotations in one file have the same path, declaration,
+and marker identity, the linter reports the ambiguity and rejects ledger registration. This keeps
+an occurrence number from silently selecting one of two indistinguishable annotations.
 
 Generated headers and generated path/file names, test and fixture paths/files, and third-party
 `vendor`, `third_party`, or `node_modules` paths are excluded. Ordinary comments and strings are
