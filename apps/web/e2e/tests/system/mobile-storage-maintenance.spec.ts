@@ -179,7 +179,10 @@ test.describe("Mobile storage maintenance", () => {
     await expect(testPage.getByRole("dialog")).toContainText("recursively");
     await testPage.reload();
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
-    await testPage.getByRole("button", { name: "More information about Quarantine" }).click();
+    await testPage
+      .getByTestId("storage-quarantine-card")
+      .getByRole("button", { name: "More information about Quarantine" })
+      .click();
     await expect(testPage.getByRole("dialog")).toContainText("recoverable holding area");
     await expect
       .poll(() =>

@@ -18,6 +18,7 @@ const DEFAULT_ORDER = [
   "docker-image-layers",
   "docker-build-cache",
   "docker-unused-images",
+  "docker-networks",
 ];
 
 function resourceTriggers(page: Page) {
@@ -218,6 +219,7 @@ test.describe("Storage analysis bars", () => {
         "docker-image-layers",
         "docker-build-cache",
         "docker-unused-images",
+        "docker-networks",
       ]);
     await expectResourceExpanded(testPage, "system-temporary");
     await expectResourceExpanded(testPage, "workspaces");

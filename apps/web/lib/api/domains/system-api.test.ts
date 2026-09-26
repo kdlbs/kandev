@@ -409,6 +409,13 @@ const storageSettings = {
     unused_images_enabled: false,
     unused_images_hours: 168,
   },
+  docker_networks: {
+    enabled: false,
+    stale_hours: 168,
+    quarantine_hours: 24,
+    orphan_grace_hours: 1,
+    probe_enabled: true,
+  },
 };
 
 describe("storage maintenance", () => {

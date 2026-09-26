@@ -314,6 +314,15 @@ export interface StorageMaintenanceSettings {
   temporary_artifacts?: StorageResourceSettings;
   go_cache: StorageGoCacheSettings;
   docker: StorageDockerSettings;
+  docker_networks: StorageDockerNetworkSettings;
+}
+
+export interface StorageDockerNetworkSettings {
+  enabled: boolean;
+  stale_hours: number;
+  quarantine_hours: number;
+  orphan_grace_hours: number;
+  probe_enabled: boolean;
 }
 
 export interface StorageCapabilities {
@@ -353,6 +362,20 @@ export interface StorageDockerSummary {
   managed_container_count: number;
   managed_container_bytes: number;
   warnings?: string[];
+}
+
+export interface StorageDockerNetworkSummary {
+  available?: boolean;
+  classified?: Record<string, number>;
+  candidates?: Array<{
+    network_id: string;
+    network_name: string;
+    class: string;
+    first_seen_at?: string;
+    reason: string;
+  }>;
+  warnings?: string[];
+  warning?: string;
 }
 
 export type StorageQuarantineSummary =
@@ -433,6 +456,7 @@ export interface StorageSummary {
   temporary_artifacts: StorageTemporaryArtifactsSummary;
   system_temporary?: StorageSystemTemporarySummary;
   docker: StorageDockerSummary;
+  docker_networks?: StorageDockerNetworkSummary;
   database?: StorageFootprintMeasurement;
   database_backups?: StorageFootprintMeasurement;
 }
@@ -444,6 +468,7 @@ export type StorageSummaryPartial = {
   temporary_artifacts?: StorageTemporaryArtifactsSummary | null;
   system_temporary?: StorageSystemTemporarySummary | null;
   docker?: StorageDockerSummary | null;
+  docker_networks?: StorageDockerNetworkSummary | null;
   database?: StorageFootprintMeasurement | null;
   database_backups?: StorageFootprintMeasurement | null;
 };

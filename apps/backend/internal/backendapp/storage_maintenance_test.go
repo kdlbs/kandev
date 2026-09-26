@@ -248,7 +248,7 @@ func TestStorageOverviewReportsProgressForEachSource(t *testing.T) {
 	docker := dockerstore.NewProvider(
 		&overviewDockerClient{}, overviewContainerInventory{}, settings,
 	)
-	events := make(chan storagepkg.OverviewProgress, 16)
+	events := make(chan storagepkg.OverviewProgress, 20)
 	overview := &storageOverview{
 		settings:   settings,
 		quarantine: failingQuarantineSummarizer{err: errors.New("quarantine unavailable")},
@@ -281,6 +281,7 @@ func TestStorageOverviewReportsProgressForEachSource(t *testing.T) {
 		storagepkg.StorageSourceTemporaryArtifacts,
 		storagepkg.StorageSourceSystemTemporary,
 		storagepkg.StorageSourceDocker,
+		storagepkg.StorageSourceDockerNetworks,
 		storagepkg.StorageSourceDatabase,
 		storagepkg.StorageSourceDatabaseBackups,
 	} {
@@ -340,7 +341,7 @@ func TestStorageCleanupProvidersIncludeWorkspaceDependencyCleanup(t *testing.T) 
 	workspaceFactory := func(storagepkg.StorageMaintenanceSettings) *workspaces.Provider {
 		return workspaces.New(workspaces.Config{TasksRoot: filepath.Join(home, "tasks"), Store: store})
 	}
-	providers := storageCleanupProviders(settings, workspaceFactory, nil, nil, nil, nil)
+	providers := storageCleanupProviders(settings, workspaceFactory, nil, nil, nil, nil, nil)
 	for _, provider := range providers {
 		if provider.Name() == workspaceDependenciesProviderName {
 			return
@@ -351,7 +352,7 @@ func TestStorageCleanupProvidersIncludeWorkspaceDependencyCleanup(t *testing.T) 
 
 func TestStorageCleanupProvidersIncludeArchivedManagedBranches(t *testing.T) {
 	const providerName = "archived_managed_branches"
-	providers := storageCleanupProviders(nil, nil, nil, nil, nil, nil)
+	providers := storageCleanupProviders(nil, nil, nil, nil, nil, nil, nil)
 	for _, provider := range providers {
 		if provider.Name() == providerName {
 			return
@@ -399,7 +400,7 @@ func TestWorkspaceDependencyCleanupProviderIsDefaultOff(t *testing.T) {
 		return workspaces.New(workspaces.Config{TasksRoot: filepath.Join(home, "tasks"), Store: store})
 	}
 	var dependencyProvider storagepkg.CleanupProvider
-	for _, provider := range storageCleanupProviders(settings, workspaceFactory, nil, nil, nil, nil) {
+	for _, provider := range storageCleanupProviders(settings, workspaceFactory, nil, nil, nil, nil, nil) {
 		if provider.Name() == workspaceDependenciesProviderName {
 			dependencyProvider = provider
 			break
@@ -942,9 +943,9 @@ func TestQuarantineCleanupProviderPurgesEligibleEntries(t *testing.T) {
 }
 
 func TestStorageCleanupProvidersIncludesQuarantineProvider(t *testing.T) {
-	providers := storageCleanupProviders(nil, nil, nil, nil, &recordingQuarantinePurger{}, nil)
-	if len(providers) != 8 {
-		t.Fatalf("provider count = %d, want 8", len(providers))
+	providers := storageCleanupProviders(nil, nil, nil, nil, nil, &recordingQuarantinePurger{}, nil)
+	if len(providers) != 9 {
+		t.Fatalf("provider count = %d, want 9", len(providers))
 	}
 	if providers[0].Name() != "quarantine" {
 		t.Fatalf("first provider = %q, want quarantine", providers[0].Name())

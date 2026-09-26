@@ -25,6 +25,7 @@ import (
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/storage/databasestore"
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
+	"github.com/kandev/kandev/internal/system/storage/docknet"
 	"github.com/kandev/kandev/internal/system/storage/filescan"
 	"github.com/kandev/kandev/internal/system/storage/gocache"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
@@ -199,11 +200,15 @@ func prepareStorageDependencies(
 	workspaceFactory := newWorkspaceFactory(cfg, store, inventory, worktreeMgr, scanner)
 	dockerClient := &lazyStorageDocker{provider: lifecycleMgr.DockerClientProvider(), activity: coordinator}
 	dockerProvider := dockerstore.NewProvider(dockerClient, &containerInventory{reader: pool.Reader()}, settings)
+	dockerNetworks := docknet.NewProvider(docknet.ProviderConfig{
+		Docker: dockerClient, Oracle: &networkTaskOracle{reader: pool.Reader()},
+		Ledger: docknet.NewLedger(docknet.LedgerConfig{Store: store}), Settings: settings,
+	})
 	overview := &storageOverview{
 		settings: settings, quarantine: store, workspaceFactory: workspaceFactory, goCache: goCache,
 		docker: dockerProvider, dockerClient: dockerClient, dockerHost: cfg.Docker.Host,
 		homeDir: cfg.ResolvedHomeDir(), tempArtifacts: tempProvider, database: database,
-		systemTemporary: systemTemporary,
+		systemTemporary: systemTemporary, dockerNetworks: dockerNetworks,
 	}
 	cachedOverview := newStorageOverviewCache(overview, eventBus, log, logError)
 	quarantine := &workspaceQuarantineController{
@@ -215,7 +220,9 @@ func prepareStorageDependencies(
 		coordinator: coordinator, goCache: goCache, workspaceFactory: workspaceFactory,
 		cachedOverview: cachedOverview,
 		quarantine:     quarantine,
-		providers:      storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, worktreeMgr, tempProvider),
+		providers: storageCleanupProviders(
+			settings, workspaceFactory, goCache, dockerProvider, dockerNetworks, quarantine, worktreeMgr, tempProvider,
+		),
 	}, nil
 }
 
@@ -354,6 +361,7 @@ type storageOverview struct {
 	database         *databasestore.Provider
 	goCacheAnalyze   func(context.Context) (gocache.Analysis, error)
 	docker           *dockerstore.Provider
+	dockerNetworks   *docknet.Provider
 	tempArtifacts    *tempartifacts.Provider
 	systemTemporary  *tempstore.Provider
 	dockerClient     *lazyStorageDocker
@@ -393,6 +401,7 @@ func (o *storageOverview) summary(
 		quarantineSummary storagepkg.QuarantineSummary
 		quarantineErr     error
 		dockerSummary     dockerstore.Analysis
+		dockerNetworks    docknet.Analysis
 		tempSummary       tempartifacts.Analysis
 		tempErr           error
 		databaseSummary   databasestore.Measurement
@@ -403,7 +412,7 @@ func (o *storageOverview) summary(
 		systemTempErr     error
 	)
 	var measurements sync.WaitGroup
-	measurements.Add(6)
+	measurements.Add(7)
 	workspaceAnalyze := o.workspaceAnalyze
 	if workspaceAnalyze == nil {
 		workspaceAnalyze = func(ctx context.Context, settings storagepkg.StorageMaintenanceSettings) (workspaces.Analysis, error) {
@@ -437,6 +446,14 @@ func (o *storageOverview) summary(
 		reporter.start(storagepkg.StorageSourceDocker)
 		dockerSummary = o.docker.Analyze(ctx)
 		reporter.complete(storagepkg.StorageSourceDocker, dockerSummaryMap(dockerSummary), nil)
+	}()
+	go func() {
+		defer measurements.Done()
+		reporter.start(storagepkg.StorageSourceDockerNetworks)
+		if o.dockerNetworks != nil {
+			dockerNetworks = o.dockerNetworks.Analyze(ctx)
+		}
+		reporter.complete(storagepkg.StorageSourceDockerNetworks, dockerNetworksSummaryMap(dockerNetworks), nil)
 	}()
 	go func() {
 		defer measurements.Done()
@@ -490,7 +507,7 @@ func (o *storageOverview) summary(
 	}
 	return summaryFromMeasurements(
 		workspaceSummary, workspaceErr, goCacheSummary, goCacheErr,
-		quarantineSummary, quarantineErr, tempSummary, tempErr, dockerSummary,
+		quarantineSummary, quarantineErr, tempSummary, tempErr, dockerSummary, dockerNetworks,
 		databaseSummary, databaseErr, backupSummary, backupErr,
 		systemTempSummary, systemTempErr,
 	), nil
@@ -506,6 +523,7 @@ func summaryFromMeasurements(
 	tempSummary tempartifacts.Analysis,
 	tempErr error,
 	dockerSummary dockerstore.Analysis,
+	dockerNetworks docknet.Analysis,
 	databaseSummary databasestore.Measurement,
 	databaseErr error,
 	backupSummary databasestore.Measurement,
@@ -520,8 +538,12 @@ func summaryFromMeasurements(
 		TemporaryArtifacts: summaryValue(tempSummary, tempErr),
 		SystemTemporary:    summaryValue(systemTempSummary, systemTempErr),
 		Docker:             dockerSummaryMap(dockerSummary),
-		Database:           databaseMeasurementValue(databaseSummary, databaseErr),
-		DatabaseBackups:    databaseMeasurementValue(backupSummary, backupErr),
+		DockerNetworks: map[string]any{
+			"available": dockerNetworks.Available, "classified": dockerNetworks.Classified,
+			"candidates": dockerNetworks.Candidates, "warnings": dockerNetworks.Warnings,
+		},
+		Database:        databaseMeasurementValue(databaseSummary, databaseErr),
+		DatabaseBackups: databaseMeasurementValue(backupSummary, backupErr),
 	}
 }
 
@@ -652,6 +674,13 @@ func dockerSummaryMap(summary dockerstore.Analysis) map[string]any {
 		"unused_image_bytes": summary.UnusedImageBytes, "warnings": summary.Warnings,
 		"managed_container_count": summary.ManagedContainerCount,
 		"managed_container_bytes": summary.ManagedContainerBytes,
+	}
+}
+
+func dockerNetworksSummaryMap(summary docknet.Analysis) map[string]any {
+	return map[string]any{
+		"available": summary.Available, "classified": summary.Classified,
+		"candidates": summary.Candidates, "warnings": summary.Warnings,
 	}
 }
 
@@ -867,6 +896,7 @@ func storageCleanupProviders(
 	workspaceFactory workspaceFactory,
 	goCache *gocache.Provider,
 	docker *dockerstore.Provider,
+	dockerNetworks *docknet.Provider,
 	quarantine quarantinePurger,
 	archivedBranches archivedBranchMaintainer,
 	temporary ...storagepkg.CleanupProvider,
@@ -880,8 +910,15 @@ func storageCleanupProviders(
 		dockerContainerCleanupAdapter(settings, docker),
 		dockerBuildCacheCleanupAdapter(settings, docker),
 		dockerImageCleanupAdapter(settings, docker),
+		dockerNetworkCleanupAdapter(dockerNetworks),
 	}
 	return append(providers, temporary...)
+}
+
+func dockerNetworkCleanupAdapter(provider *docknet.Provider) storagepkg.CleanupProvider {
+	return namedCleanupProvider{name: docknet.ProviderName, cleanup: func(ctx context.Context) (map[string]any, error) {
+		return provider.Cleanup(ctx)
+	}}
 }
 
 func workspaceDependencyCleanupAdapter(
