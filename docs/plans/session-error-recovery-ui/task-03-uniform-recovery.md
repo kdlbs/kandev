@@ -416,3 +416,19 @@ E2E cases passed without retries (the latter includes the case that retried in
 CI). All 22 preview component tests and targeted ESLint passed. No GitLab code
 was changed because its reported retry did not reproduce in the full local
 spec. Current-head CI and review verification remain pending after delivery.
+
+### GitLab badge fixture race found under CPU pressure
+
+Three full GitLab chip-spec repetitions on two CPUs with one worker and zero
+retries reproduced the per-MR badge failure three times (21 other cases passed).
+Read-only observation of the disposable test database showed MR 410 changing
+from open to merged after an automation merge attempt. The mock required an
+approval but advertised can_be_merged with no detailed merge-readiness verdict;
+enabling auto-merge therefore allowed the fixture to merge during the UI check.
+
+The fixture now supplies detailed_merge_status=not_approved, consistent with its
+pending approval. Production readiness logic and UI behavior are unchanged.
+The same constrained command then passed all 24 cases across three full-spec
+repetitions without retries. Targeted lint passed. This supersedes the initial
+normal-run conclusion above; the retry was a reproducible fixture defect.
+Current-head CI and renewed reviews remain pending after delivery.

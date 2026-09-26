@@ -424,6 +424,8 @@ function mrSeed(iid: number, title: string) {
     body: "",
     draft: false,
     merge_status: "can_be_merged",
+    // Pending approval keeps enabled auto-merge armed without merging the fixture.
+    detailed_merge_status: "not_approved",
     has_conflicts: false,
     additions: 1,
     deletions: 1,
