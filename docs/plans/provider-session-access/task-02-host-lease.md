@@ -37,6 +37,8 @@ enable redemption merely because its Host protocol compiles.
   redemption; no provider mutation.
 - Uncached GitHub App token mint, transient plugin-only delivery, provider
   revoke on release/invalidation, and bounded pending-revocation receipt.
+- Durable one-shot pre-mint intent; ambiguous provider response or Host crash
+  leaves an unknown-mint receipt and cannot trigger an automatic second mint.
 - GitLab PAT/unsupported-provider fail-closure and lifecycle revocation hooks.
 
 ## Out of scope
@@ -51,6 +53,9 @@ Plugin provider calls and task MCP provider-action tools.
   with no shared cache or PAT fallback.
 - Provider revocation success and failure are distinguished; grant/session
   revocation fences new redemption immediately.
+- Tests cover concurrent/replayed redemption, crash after pre-mint intent,
+  ambiguous mint response, and conservative unknown-mint expiry without
+  exposing a bearer or claiming confirmed revocation.
 
 ## Verification
 

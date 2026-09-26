@@ -93,7 +93,11 @@ returns no action-success result and never calls the provider mutation API.
 
 Redemption is one-shot and requires the same live approval, grant generation,
 managed session, target digest, provider connection generation, and unexpired
-lease. The Host creates a distinct credential for that lease and returns it
+lease. A durable mint intent is claimed before the provider call; concurrent
+redemption or restart cannot mint a second token for the same lease. A timeout
+or crash around the provider response records an unknown mint with a
+conservative expiry bound and never retries the mint blindly. The Host creates
+a distinct credential for that lease and returns it
 only on the gRPC response to the installed plugin. It never puts the token in
 an agent tool response, task MCP, log, audit, persistence row, or environment.
 The plugin keeps it in memory only long enough for direct provider requests

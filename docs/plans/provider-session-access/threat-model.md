@@ -35,10 +35,17 @@ approval generations, connection generation, operation, PR/head, and source
 run. **Lease expiry only fences future redemption.** GitHub installation
 tokens expire one hour after creation unless successfully revoked by GitHub;
 the Host cannot shorten that provider-enforced lifetime. At redemption the
-Host must durably record only non-secret principal, repository, permission,
-lease and provider-expiry metadata before exporting the bearer. A write
-failure must prevent export and attempt revocation of the freshly minted
-token. The token remains transient in Host memory for exact-token revocation
+Host first durably records a one-shot `mint_started` intent for the exact lease
+before contacting GitHub. Concurrent redemption or restart must not issue a
+second mint for that lease. A timeout or crash after the provider may have
+minted but before the Host receives the response leaves an `unknown_mint`
+receipt, conservatively bounded by one hour from the attempt plus clock skew;
+the Host has no token bytes with which to revoke that possible bearer.
+After a successful response the Host must durably record only non-secret
+principal, repository, permission, lease and provider-expiry metadata before
+exporting the bearer. A write failure must prevent export and attempt
+revocation of the freshly minted token. The token remains transient in Host
+memory for exact-token revocation
 on release/invalidation. A successful provider `DELETE /installation/token`
 response is the only confirmed provider invalidation. Failure, timeout, or
 Host crash leaves a non-secret `revocation_pending` / expiry-bounded residual
@@ -57,7 +64,7 @@ and [token revocation](https://docs.github.com/en/rest/apps/installations#revoke
 | Untrusted prompt asks for a different PR/run or repo | Host derives live link and exact target; plugin repeats provider checks | An already exported bearer is still repo scoped, not PR/run scoped. |
 | Fork PR points to attacker-controlled head | Verify base repo, fork head repo/ref/SHA and source run; mint for canonical base only | Compromised plugin code could use Actions write elsewhere in that base repo. |
 | Wrong plugin, task, session, workspace or stale H6 approval | Connection-bound installation plus exact managed-session/grant-generation admission on issue and redeem | No bearer is issued on a denial. |
-| Replay, concurrent request or ambiguous mint | Durable idempotency/one-shot redemption; unknown mint outcome fails closed and records uncertainty | A provider token created during an ambiguous mint may exist until provider expiry; no second mint to reconcile it. |
+| Replay, concurrent request or ambiguous mint | Persist `mint_started` before provider call; durable idempotency/one-shot redemption; unknown outcome fails closed and records uncertainty | A provider token created during an ambiguous mint may exist until provider expiry; no second mint to reconcile it. |
 | Lease/grant expires or is revoked after export | Fence new issuance/redemption, request exact-token provider revocation, audit result | Failed revocation or Host crash leaves bearer usable until GitHub expiry. |
 | Plugin process leaks bearer | Process-local handling, no persistence/log/output, restricted plugin admission and runtime privileges | GitHub bearer itself has no PR/run/session caveat; leaked token can perform other Actions-write operations in the repository. |
 | Token cache shares bearer between leases | Fresh mint outside shared cache, per-token revocation state | Provider mint rate/cost rises; revocation is isolated per lease. |
