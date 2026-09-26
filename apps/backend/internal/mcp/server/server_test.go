@@ -1038,10 +1038,10 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// Baseline 36 tools plus the five compact settings tools and the audited
-	// cross-workspace transfer tool.
+	// Config mode includes its existing tools, five compact settings tools, and
+	// the audited cross-workspace transfer tool.
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
-	assert.Equal(t, 42, len(tools))
+	assert.Equal(t, 43, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
