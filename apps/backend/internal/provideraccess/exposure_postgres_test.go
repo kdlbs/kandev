@@ -26,12 +26,7 @@ func TestPostgresExposureAdmissionWaitsForGrantRevocationLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt := ExposureReceipt{
-		LeaseID: lease.ID, GrantID: grant.ID, Provider: "github",
-		ProviderPrincipalID: "installation:42", RepositoryID: grant.RepositoryID,
-		PermissionProfile: "github_actions_rerun",
-		ProviderExpiresAt: time.Now().UTC().Add(45 * time.Minute),
-	}
+	receipt := testExposureReceipt(grant, lease)
 	holder, err := store.db.BeginTxx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)

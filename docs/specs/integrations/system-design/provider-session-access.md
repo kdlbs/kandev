@@ -85,6 +85,15 @@ The persisted lease lifetime is capped at five minutes even when its grant
 lasts longer. Reading a lease for inspection does not authorize redemption;
 final exposure admission locks the grant and lease rows in the same order as
 revocation and rechecks their live generation and expiry before bearer export.
+It compares the Host-verified grant scope, managed task/session, target digest,
+approval revision and provider connection generation inside that transaction.
+The Host must derive those expected values from current authoritative records;
+plugin request fields and `GetActiveLease` inspection output do not prove
+them. A mismatch or a revocation that wins the lock race denies export and
+requires revocation of the minted in-memory token. After a successful
+admission commit, a later revocation must find the exposure receipt and revoke
+the exact token through the Host's transient token registry. The current
+storage package does not implement that runtime lifecycle.
 The plugin owns the provider action ledger: its idempotency key includes grant
 generation, repository, PR/MR head, operation class, and source run/check
 identity. For GitHub CI recovery, it validates a completed failed

@@ -84,7 +84,9 @@ exposure after failed provider revocation, lease expiry and store reopen.
 Storage now caps leases at five minutes and serializes final exposure
 admission with grant/lease revocation. A losing admission path invokes an
 exact-token revocation callback before a caller could export a bearer; its
-failure is redacted. The active-lease read is inspection only. SQLite race
+failure is redacted. Final admission also transactionally compares the full
+Host-verified grant/lease identity, including session, target, approval and
+connection generations. The active-lease read is inspection only. SQLite race
 tests and an isolated PostgreSQL 16 row-lock regression cover these cases.
 Administrator API, Host admission, automatic audit wiring and PostgreSQL
 coverage beyond the row-lock regression remain pending. No credential issuance

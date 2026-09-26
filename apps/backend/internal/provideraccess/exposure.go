@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
 	"strings"
 	"time"
 )
 
 // ExposureReceipt records only the provider authority that has left the Host.
 // It never contains token bytes or information sufficient to recreate a token.
+// Expected is Host-verified input; a plugin-supplied identity is not authority.
 type ExposureReceipt struct {
 	LeaseID             string
 	GrantID             string
@@ -18,6 +20,19 @@ type ExposureReceipt struct {
 	RepositoryID        string
 	PermissionProfile   string
 	ProviderExpiresAt   time.Time
+	Expected            FinalLeaseIdentity
+}
+
+// FinalLeaseIdentity is the exact non-secret identity checked under the grant
+// and lease row locks before a future caller can export a provider bearer.
+type FinalLeaseIdentity struct {
+	GrantGeneration      int64
+	Scope                GrantScope
+	ManagedTaskID        string
+	SessionID            string
+	TargetDigest         string
+	ApprovalRevision     uint64
+	ConnectionGeneration string
 }
 
 // ExposureState separates a fenced lease from a bearer revoked by the provider.
@@ -60,6 +75,10 @@ func (s *Store) recordExposureReceipt(ctx context.Context, receipt ExposureRecei
 	if err := validateExposureReceipt(receipt); err != nil {
 		return err
 	}
+	key, err := scopeKey(receipt.Expected.Scope)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -68,9 +87,9 @@ func (s *Store) recordExposureReceipt(ctx context.Context, receipt ExposureRecei
 	defer func() { _ = tx.Rollback() }()
 	// The no-op writes acquire the same grant-then-lease row locks as revocation.
 	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE provider_access_grants
-  SET updated_at = updated_at WHERE id = ? AND provider = ? AND repository_id = ?
+  SET updated_at = updated_at WHERE id = ? AND scope_key = ? AND generation = ?
   AND revoked_at IS NULL AND expires_at > ?`),
-		receipt.GrantID, receipt.Provider, receipt.RepositoryID, now.Unix())
+		receipt.GrantID, key, receipt.Expected.GrantGeneration, now.Unix())
 	if err != nil {
 		return err
 	}
@@ -83,7 +102,13 @@ func (s *Store) recordExposureReceipt(ctx context.Context, receipt ExposureRecei
 	}
 	result, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE provider_access_leases
   SET created_at = created_at WHERE id = ? AND grant_id = ?
-  AND revoked_at IS NULL AND expires_at > ?`), receipt.LeaseID, receipt.GrantID, now.Unix())
+  AND grant_generation = ? AND scope_key = ? AND managed_task_id = ?
+  AND session_id = ? AND target_digest = ? AND approval_revision = ?
+  AND connection_generation = ? AND revoked_at IS NULL AND expires_at > ?`),
+		receipt.LeaseID, receipt.GrantID, receipt.Expected.GrantGeneration, key,
+		receipt.Expected.ManagedTaskID, receipt.Expected.SessionID,
+		receipt.Expected.TargetDigest, int64(receipt.Expected.ApprovalRevision),
+		receipt.Expected.ConnectionGeneration, now.Unix())
 	if err != nil {
 		return err
 	}
@@ -120,13 +145,20 @@ func (s *Store) recordExposureReceipt(ctx context.Context, receipt ExposureRecei
 
 func validateExposureReceipt(receipt ExposureReceipt) error {
 	for _, value := range []string{receipt.LeaseID, receipt.GrantID, receipt.ProviderPrincipalID,
-		receipt.RepositoryID} {
+		receipt.RepositoryID, receipt.Expected.ManagedTaskID, receipt.Expected.SessionID,
+		receipt.Expected.TargetDigest, receipt.Expected.ConnectionGeneration} {
 		if value == "" || value != strings.TrimSpace(value) {
 			return errors.New("complete provider exposure identity is required")
 		}
 	}
 	if receipt.Provider != "github" || receipt.PermissionProfile != "github_actions_rerun" {
 		return errors.New("unsupported provider exposure profile")
+	}
+	if receipt.Expected.GrantGeneration <= 0 || receipt.Expected.ApprovalRevision == 0 ||
+		receipt.Expected.ApprovalRevision > math.MaxInt64 ||
+		receipt.Provider != receipt.Expected.Scope.Provider ||
+		receipt.RepositoryID != receipt.Expected.Scope.RepositoryID {
+		return ErrGrantUnavailable
 	}
 	now := time.Now().UTC()
 	if !receipt.ProviderExpiresAt.After(now) || receipt.ProviderExpiresAt.After(now.Add(time.Hour+time.Minute)) {
