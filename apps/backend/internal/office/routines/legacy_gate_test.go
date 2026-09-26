@@ -45,6 +45,7 @@ func seedLegacyUnlinkedTaskCreatedRun(t *testing.T, db *sqlx.DB, id, routineID, 
 	}
 }
 
+// newLegacyGateLightweightRoutine creates an active taskless routine for a gate test.
 func newLegacyGateLightweightRoutine(t *testing.T, svc *routines.RoutineService, name string, policy models.RoutineConcurrencyPolicy) *models.Routine {
 	t.Helper()
 	routine := &models.Routine{
@@ -61,6 +62,7 @@ func newLegacyGateLightweightRoutine(t *testing.T, svc *routines.RoutineService,
 	return routine
 }
 
+// queryRunStatus reads a run's status and whether its completion timestamp is set.
 func queryRunStatus(t *testing.T, db *sqlx.DB, runID string) (status string, completedAtSet bool) {
 	t.Helper()
 	var completedAt *time.Time
@@ -72,6 +74,7 @@ func queryRunStatus(t *testing.T, db *sqlx.DB, runID string) (status string, com
 	return status, completedAt != nil
 }
 
+// countCoalescedInto counts runs that point at the supplied run as their coalescing target.
 func countCoalescedInto(t *testing.T, db *sqlx.DB, runID string) int {
 	t.Helper()
 	var n int
@@ -248,12 +251,8 @@ func TestBetaLegacyLightweightGate(t *testing.T) {
 	})
 }
 
-// testLegacyGateUnblocksLightweightFires fires a lightweight routine
-// three times against a seeded legacy fossil row and asserts every fire
-// reaches lightweight materialisation ("done"), never "coalesced" or
-// "skipped". When expectLegacyClosed is true, the fix must have closed
-// the fossil row to "failed" (with completed_at set) and no new run may
-// have coalesced into it.
+// testLegacyGateUnblocksLightweightFires verifies that a legacy row does not
+// block later fires and closes when expectLegacyClosed is true.
 func testLegacyGateUnblocksLightweightFires(t *testing.T, policy models.RoutineConcurrencyPolicy, expectLegacyClosed bool) {
 	svc, db := newTestRoutineServiceWithDB(t)
 	ctx := context.Background()
