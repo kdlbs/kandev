@@ -25,6 +25,7 @@ test.describe("Commit file navigation", () => {
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
     const profile = await createStandardProfile(apiClient, "Commit File Navigation Profile");
     await apiClient.createTaskWithAgent(
@@ -82,6 +83,9 @@ test.describe("Commit file navigation", () => {
     await expect(detail.getByTestId("commit-file-index").locator("ol")).toBeHidden();
     await indexToggle.click();
     await expect(detail.getByTestId("commit-file-index-entry")).toHaveCount(2);
+    await prCapture.screenshot("commit-file-navigation-desktop-detail", {
+      caption: "Commit detail with a collapsible file index",
+    });
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
@@ -97,6 +101,9 @@ test.describe("Commit file navigation", () => {
     expect((await inlineStatus.boundingBox())?.width).toBe(
       (await dirtyStatus.boundingBox())?.width,
     );
+    await prCapture.screenshot("commit-file-navigation-desktop-inline", {
+      caption: "Expanded commit files reuse the changes tree styling",
+    });
     await inlineFile.click();
 
     const selectedHeader = detail.locator(

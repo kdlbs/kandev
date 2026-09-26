@@ -45,6 +45,7 @@ test.describe("Mobile commit file navigation", () => {
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
     const profile = await createStandardProfile(apiClient, "Mobile Commit File Navigation Profile");
     await apiClient.createTaskWithAgent(
@@ -97,6 +98,9 @@ test.describe("Mobile commit file navigation", () => {
     await expect(inlineFile).toHaveAttribute("aria-label", filePath);
     await expectTouchControl(inlineFile);
     await expectTouchControl(row.getByTestId(`commit-open-${sha.slice(0, 7)}`));
+    await prCapture.screenshot("commit-file-navigation-mobile-inline", {
+      caption: "Touch-sized commit row and expanded file tree",
+    });
     await inlineFile.tap();
     const detail = testPage.getByTestId("commit-detail-content");
     await expect(detail).toBeVisible({ timeout: 15_000 });
@@ -117,5 +121,8 @@ test.describe("Mobile commit file navigation", () => {
     );
     expect(noDocumentOverflow).toBe(true);
     await expect(testPage.getByTestId("mobile-diff-sheet-close")).toBeVisible();
+    await prCapture.screenshot("commit-file-navigation-mobile-detail", {
+      caption: "Mobile commit detail sheet with file index",
+    });
   });
 });
