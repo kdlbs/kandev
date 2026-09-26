@@ -14,6 +14,409 @@
       "target_removal_date": "2027-02-01"
     },
     {
+      "id": "office-run-contract-alias-const-actorkindagent",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:ActorKindAgent#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.ActorKindAgent; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-actorkindsystem",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:ActorKindSystem#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.ActorKindSystem; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-actorkinduser",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:ActorKindUser#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.ActorKindUser; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-priorityclassevent",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:PriorityClassEvent#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.PriorityClassEvent; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-priorityclasshuman",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:PriorityClassHuman#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.PriorityClassHuman; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-priorityclassperiodic",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:PriorityClassPeriodic#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.PriorityClassPeriodic; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-priorityclassrecovery",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:PriorityClassRecovery#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.PriorityClassRecovery; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-routingblockedactionrequired",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RoutingBlockedActionRequired#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RoutingBlockedActionRequired; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-routingblockedwaitingforcapacity",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RoutingBlockedWaitingForCapacity#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RoutingBlockedWaitingForCapacity; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runeventlevelerror",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunEventLevelError#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunEventLevelError; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runeventlevelinfo",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunEventLevelInfo#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunEventLevelInfo; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runeventlevelwarn",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunEventLevelWarn#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunEventLevelWarn; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runeventtypeadapterinvoke",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunEventTypeAdapterInvoke#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunEventTypeAdapterInvoke; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runeventtypecomplete",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunEventTypeComplete#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunEventTypeComplete; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runeventtypeerror",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunEventTypeError#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunEventTypeError; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runeventtypeinit",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunEventTypeInit#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunEventTypeInit; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runeventtyperuntimeaction",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunEventTypeRuntimeAction#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunEventTypeRuntimeAction; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runeventtyperuntimedenied",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunEventTypeRuntimeDenied#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunEventTypeRuntimeDenied; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runeventtypestep",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunEventTypeStep#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunEventTypeStep; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runstatusclaimed",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunStatusClaimed#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunStatusClaimed; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runstatusfailed",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunStatusFailed#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunStatusFailed; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runstatusfinished",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunStatusFinished#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunStatusFinished; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-const-runstatusqueued",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RunStatusQueued#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunStatusQueued; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-type-actorkind",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "type:ActorKind#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.ActorKind; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-type-priorityclass",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "type:PriorityClass#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.PriorityClass; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-type-routingblockedstatus",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "type:RoutingBlockedStatus#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RoutingBlockedStatus; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-type-run",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "type:Run#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.Run; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-type-runevent",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "type:RunEvent#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunEvent; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-type-runeventlevel",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "type:RunEventLevel#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunEventLevel; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-type-runeventtype",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "type:RunEventType#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunEventType; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "office-run-contract-alias-type-runstatus",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "type:RunStatus#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RunStatus; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
       "id": "passthrough-stdin-writes-legacy-view",
       "locator": {
         "path": "apps/backend/internal/agent/agents/passthrough_payload.go",
