@@ -19,7 +19,7 @@ import {
   loadRichOutputMotionState,
 } from "./rich-output-motion-actions";
 import { DEFAULT_SETTINGS_MENU_MODE } from "@/lib/settings/settings-menu-mode";
-import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
+import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/lib/layout/app-sidebar-geometry";
 import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { buildSidebarViewActions } from "./sidebar-view-actions";
 import { buildThreadViewActions } from "./thread-view-actions";

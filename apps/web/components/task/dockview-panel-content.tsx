@@ -16,7 +16,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { panelPortalManager, setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { BrowserPanel } from "./browser-panel";
-import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
+import type { CommitDetailTarget, OpenDiffOptions } from "@/lib/state/diff-target-types";
 import { ChangesPanel } from "./changes-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
 import { FileEditorPanel } from "./file-editor-panel";

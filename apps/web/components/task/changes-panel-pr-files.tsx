@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import type { PRChangedFile } from "./changes-panel-timeline";
-import type { OpenDiffOptions } from "./changes-diff-target";
+import type { OpenDiffOptions } from "@/lib/state/diff-target-types";
 
 type PRFilesSectionContentProps = {
   files: PRChangedFile[];

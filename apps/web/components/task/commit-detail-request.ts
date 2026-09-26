@@ -4,7 +4,7 @@ import type { FileInfo } from "@/lib/state/store";
 import type { PRCommitDetail } from "@/lib/types/github";
 import { normalizeFileChangeStatus } from "@/lib/utils/file-change-status";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import type { CommitDetailTarget } from "./changes-diff-target";
+import type { CommitDetailTarget } from "@/lib/state/diff-target-types";
 import { requestCommitDiff, type CommitDiffResponse } from "./commit-diff-request";
 
 export type CommitDetailRequestResult =

@@ -8,7 +8,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { useMultiSelect } from "@/hooks/use-multi-select";
 import { FileRow } from "./changes-panel-file-row";
 import type { ChangedFile } from "./changes-panel-helpers";
-import type { OpenDiffOptions } from "./changes-diff-target";
+import type { OpenDiffOptions } from "@/lib/state/diff-target-types";
 
 type TreeNode = {
   name: string;

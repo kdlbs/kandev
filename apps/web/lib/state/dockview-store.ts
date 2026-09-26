@@ -36,7 +36,7 @@ import {
   materializeReusableChatPanel,
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
-import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
+import type { ChangeLayer, CommitDetailTarget } from "@/lib/state/diff-target-types";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
 import { performEnvSwitch, replaceStaleSessionPanels } from "./dockview-env-switch";
 import {
@@ -215,7 +215,7 @@ type DockviewStore = {
       source?: string;
       repositoryName?: string;
       prKey?: string;
-      changeLayer?: import("@/components/task/changes-diff-target").ChangeLayer;
+      changeLayer?: ChangeLayer;
     },
   ) => void;
   addCommitDetailPanel: (
